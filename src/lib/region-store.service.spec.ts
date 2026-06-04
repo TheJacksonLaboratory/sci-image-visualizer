@@ -1,0 +1,334 @@
+import { TestBed } from '@angular/core/testing';
+
+import { RegionStore } from './region-store.service';
+import { VisualizerStore } from './visualizer-store.service';
+import { Region, Rectangle, Polygon } from './models/region';
+import { IImageInfo } from './contracts/image.contract';
+
+function rectRegion(x: number, y: number, w: number, h: number): Region {
+  const r = new Region();
+  const rect = new Rectangle();
+  rect.x = x; rect.y = y; rect.width = w; rect.height = h;
+  r.bounds = rect;
+  return r;
+}
+
+function polyRegion(xs: number[], ys: number[], closed = true): Region {
+  const r = new Region();
+  const p = new Polygon();
+  p.npoints = xs.length;
+  p.xpoints = xs.slice();
+  p.ypoints = ys.slice();
+  p.coordinates = xs.map((x, i) => [x, ys[i]]);
+  p.closed = closed;
+  r.bounds = p;
+  return r;
+}
+
+function imageInfo(url: string): IImageInfo {
+  const info = ({} as IImageInfo);
+  info.urls = [url];
+  return info;
+}
+
+describe('RegionStore', () => {
+  let store: RegionStore;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ providers: [RegionStore, VisualizerStore] });
+    store = TestBed.inject(RegionStore);
+  });
+
+  describe('addRegion', () => {
+    it('mints an id, selects the new region, and emits the full list', () => {
+      const emitted: Region[][] = [];
+      const selected: number[][] = [];
+      store.getRegionUpdateEvent().subscribe(rs => emitted.push(rs as Region[]));
+      store.getSelectedShapeIndices$().subscribe(s => selected.push(s));
+
+      const id = store.addRegion(rectRegion(0, 0, 10, 10));
+
+      expect(id).toBeGreaterThan(0);
+      expect(store.getRegions().length).toBe(1);
+      expect(emitted[emitted.length - 1].length).toBe(1);
+      expect(selected[selected.length - 1]).toEqual([0]);
+    });
+
+    it('assigns distinct ids across calls', () => {
+      const a = store.addRegion(rectRegion(0, 0, 1, 1));
+      const b = store.addRegion(rectRegion(2, 2, 1, 1));
+      expect(a).not.toBe(b);
+    });
+  });
+
+  describe('setRegions', () => {
+    it('replaces the current regions', () => {
+      store.setRegions([rectRegion(0, 0, 1, 1), rectRegion(2, 2, 1, 1)]);
+      expect(store.getRegions().length).toBe(2);
+      store.setRegions([rectRegion(5, 5, 1, 1)]);
+      expect(store.getRegions().length).toBe(1);
+    });
+
+    it('append de-dupes by identical geometry', () => {
+      store.setRegions([rectRegion(0, 0, 10, 10)]);
+      store.setRegions([rectRegion(0, 0, 10, 10)], undefined, undefined, undefined, true);
+      expect(store.getRegions().length).toBe(1);
+      store.setRegions([rectRegion(3, 3, 10, 10)], undefined, undefined, undefined, true);
+      expect(store.getRegions().length).toBe(2);
+    });
+
+    it('does not store transient regions when isRegionSaveOn is false', () => {
+      const emitted: Region[][] = [];
+      store.getRegionUpdateEvent().subscribe(rs => emitted.push(rs as Region[]));
+      store.setRegions([rectRegion(0, 0, 1, 1)], undefined, false);
+      expect(store.getRegions().length).toBe(0);
+      expect(emitted[emitted.length - 1].length).toBe(1); // emitted transiently
+    });
+  });
+
+  describe('vertex edits', () => {
+    let id: number;
+    beforeEach(() => {
+      id = store.addRegion(polyRegion([0, 10, 10, 0], [0, 0, 10, 10]));
+    });
+
+    it('moveVertex updates a single vertex', () => {
+      store.moveVertex(id, 1, 99, 88);
+      const poly = store.getRegions()[0].bounds as Polygon;
+      expect(poly.xpoints[1]).toBe(99);
+      expect(poly.ypoints[1]).toBe(88);
+      expect(poly.coordinates[1]).toEqual([99, 88]);
+    });
+
+    it('addVertex inserts after the segment index and bumps npoints', () => {
+      store.addVertex(id, 0, 5, -1);
+      const poly = store.getRegions()[0].bounds as Polygon;
+      expect(poly.xpoints).toEqual([0, 5, 10, 10, 0]);
+      expect(poly.npoints).toBe(5);
+      expect(poly.coordinates.length).toBe(5);
+    });
+
+    it('deleteVertex removes a vertex', () => {
+      store.deleteVertex(id, 0);
+      const poly = store.getRegions()[0].bounds as Polygon;
+      expect(poly.xpoints.length).toBe(3);
+      expect(poly.npoints).toBe(3);
+    });
+
+    it('deleteVertex refuses to drop a closed polygon below 3 vertices', () => {
+      const triId = store.addRegion(polyRegion([0, 10, 5], [0, 0, 10]));
+      store.deleteVertex(triId, 0);
+      const poly = store.getRegions().find(r => r.id === triId)!.bounds as Polygon;
+      expect(poly.xpoints.length).toBe(3);
+    });
+
+    it('vertex edits are no-ops on rectangles', () => {
+      const rectId = store.addRegion(rectRegion(0, 0, 10, 10));
+      store.moveVertex(rectId, 0, 5, 5);
+      const b = store.getRegions().find(r => r.id === rectId)!.bounds as Rectangle;
+      expect(b.x).toBe(0);
+    });
+  });
+
+  describe('setBezier', () => {
+    it('toggles the bezier flag on a polygon without moving anchors', () => {
+      const id = store.addRegion(polyRegion([0, 10, 5], [0, 0, 10]));
+      store.setBezier(id, true);
+      let poly = store.getRegions()[0].bounds as Polygon;
+      expect(poly.bezier).toBe(true);
+      expect(poly.xpoints).toEqual([0, 10, 5]); // anchors untouched
+      store.setBezier(id, false);
+      poly = store.getRegions()[0].bounds as Polygon;
+      expect(poly.bezier).toBe(false);
+    });
+
+    it('converts a rectangle to a 4-anchor closed polygon when smoothing', () => {
+      const id = store.addRegion(rectRegion(0, 0, 10, 20));
+      store.setBezier(id, true);
+      const b = store.getRegions()[0].bounds as Polygon;
+      expect(b).toBeInstanceOf(Polygon);
+      expect(b.bezier).toBe(true);
+      expect(b.closed).toBe(true);
+      expect(b.xpoints.length).toBe(4);
+    });
+
+    it('bezier=false on a rectangle is a no-op', () => {
+      const id = store.addRegion(rectRegion(0, 0, 10, 10));
+      store.setBezier(id, false);
+      expect(store.getRegions()[0].bounds).toBeInstanceOf(Rectangle);
+    });
+
+    it('seeds editable handles when bezier is turned on and clears them when off', () => {
+      const id = store.addRegion(polyRegion([0, 10, 5], [0, 0, 10]));
+      store.setBezier(id, true);
+      let poly = store.getRegions()[0].bounds as Polygon;
+      expect(poly.handlesIn?.length).toBe(3);
+      expect(poly.handlesOut?.length).toBe(3);
+      store.setBezier(id, false);
+      poly = store.getRegions()[0].bounds as Polygon;
+      expect(poly.handlesIn).toBeUndefined();
+      expect(poly.handlesOut).toBeUndefined();
+    });
+
+    it('moveBezierHandle stores the handle relative to its anchor', () => {
+      const id = store.addRegion(polyRegion([10, 30, 20], [10, 10, 30]));
+      store.setBezier(id, true);
+      store.moveBezierHandle(id, 0, 'out', 14, 7); // anchor 0 is (10,10)
+      const poly = store.getRegions()[0].bounds as Polygon;
+      expect(poly.handlesOut![0]).toEqual([4, -3]); // offset = handle - anchor
+    });
+  });
+
+  describe('moveRegion', () => {
+    it('translates a rectangle', () => {
+      const id = store.addRegion(rectRegion(1, 2, 10, 10));
+      store.moveRegion(id, 5, -1);
+      const b = store.getRegions()[0].bounds as Rectangle;
+      expect(b.x).toBe(6);
+      expect(b.y).toBe(1);
+    });
+
+    it('translates every polygon vertex', () => {
+      const id = store.addRegion(polyRegion([0, 10, 5], [0, 0, 10]));
+      store.moveRegion(id, 2, 3);
+      const poly = store.getRegions()[0].bounds as Polygon;
+      expect(poly.xpoints).toEqual([2, 12, 7]);
+      expect(poly.ypoints).toEqual([3, 3, 13]);
+    });
+  });
+
+  describe('selection', () => {
+    it('survives an edit and prunes ids on removal', () => {
+      const a = store.addRegion(rectRegion(0, 0, 1, 1));
+      const b = store.addRegion(rectRegion(2, 2, 1, 1));
+      store.setSelectedShapeIndices([1]); // select b
+
+      let latest: number[] = [];
+      store.getSelectedShapeIndices$().subscribe(s => latest = s);
+      expect(latest).toEqual([1]);
+
+      store.removeRegion(a); // shifts b from index 1 -> 0
+      expect(latest).toEqual([0]); // selection follows b by id
+      expect(store.getRegions()[0].id).toBe(b);
+    });
+
+    it('deleteActiveShape removes the selection and clears it', () => {
+      store.addRegion(rectRegion(0, 0, 1, 1));
+      store.addRegion(rectRegion(2, 2, 1, 1));
+      store.setSelectedShapeIndices([0]);
+      store.deleteActiveShape();
+      expect(store.getRegions().length).toBe(1);
+      let latest: number[] = [-1];
+      store.getSelectedShapeIndices$().subscribe(s => latest = s);
+      expect(latest).toEqual([]);
+    });
+
+    it('deleteActiveShape removes every selected region when multi-selected', () => {
+      ['s0', 's1', 's2', 's3'].forEach((name, i) => {
+        const r = rectRegion(i, i, 1, 1);
+        r.name = name;
+        store.addRegion(r);
+      });
+      store.setSelectedShapeIndices([0, 2]); // out of order on purpose
+      store.deleteActiveShape();
+      expect(store.getRegions().map(r => r.name)).toEqual(['s1', 's3']);
+      expect(store.getSelectedShapeIndices()).toEqual([]);
+    });
+  });
+
+  describe('batching', () => {
+    it('emits once per batch, not per edit', () => {
+      const id = store.addRegion(polyRegion([0, 10, 10, 0], [0, 0, 10, 10]));
+      let emits = 0;
+      store.getRegionUpdateEvent().subscribe(() => emits++);
+
+      store.beginBatch();
+      store.moveVertex(id, 0, 1, 1);
+      store.moveVertex(id, 0, 2, 2);
+      store.moveVertex(id, 0, 3, 3);
+      expect(emits).toBe(0);
+      store.endBatch();
+      expect(emits).toBe(1);
+
+      const poly = store.getRegions()[0].bounds as Polygon;
+      expect(poly.xpoints[0]).toBe(3); // last write wins
+    });
+  });
+
+  describe('per-image cache', () => {
+    it('snapshots and restores regions across image switches', () => {
+      store.setActiveImage(imageInfo('a.tif'));
+      store.addRegion(rectRegion(0, 0, 1, 1));
+      store.addRegion(rectRegion(2, 2, 1, 1));
+      expect(store.getRegions().length).toBe(2);
+
+      store.setActiveImage(imageInfo('b.tif'));
+      expect(store.getRegions().length).toBe(0); // fresh image
+      store.addRegion(rectRegion(9, 9, 1, 1));
+
+      store.setActiveImage(imageInfo('a.tif'));
+      expect(store.getRegions().length).toBe(2); // restored
+
+      store.setActiveImage(imageInfo('b.tif'));
+      expect(store.getRegions().length).toBe(1);
+    });
+
+    it('is idempotent for the same image (keeps regions on replot)', () => {
+      store.setActiveImage(imageInfo('a.tif'));
+      store.addRegion(rectRegion(0, 0, 1, 1));
+      store.setActiveImage(imageInfo('a.tif'));
+      expect(store.getRegions().length).toBe(1);
+    });
+
+    it('keys by URL so the same basename in different folders does not collide', () => {
+      const a = ({} as IImageInfo); a.urls = ['s3://bkt/folderA/img.tif']; a.fileName = 'img.tif';
+      const b = ({} as IImageInfo); b.urls = ['s3://bkt/folderB/img.tif']; b.fileName = 'img.tif';
+
+      store.setActiveImage(a);
+      const ra = rectRegion(0, 0, 1, 1); ra.name = 'A-only'; store.addRegion(ra);
+      store.setActiveImage(b);
+      const rb = rectRegion(2, 2, 1, 1); rb.name = 'B-only'; store.addRegion(rb);
+
+      store.setActiveImage(a);
+      expect(store.getRegions().map(r => r.name)).toEqual(['A-only']);
+    });
+
+    it('falls back to fileName as the key when no URL is present', () => {
+      const a = ({} as IImageInfo); a.fileName = 'only-name.tif';
+      store.setActiveImage(a);
+      store.addRegion(rectRegion(0, 0, 1, 1));
+      store.setActiveImage(imageInfo('b.tif'));
+      expect(store.getRegions().length).toBe(0);
+      store.setActiveImage(a);
+      expect(store.getRegions().length).toBe(1);
+    });
+
+    it('clearRegionsByImageKey wipes the cache', () => {
+      store.setActiveImage(imageInfo('a.tif'));
+      store.addRegion(rectRegion(0, 0, 1, 1));
+      store.clearRegionsByImageKey();
+      store.setActiveImage(imageInfo('a.tif'));
+      expect(store.getRegions().length).toBe(0);
+    });
+  });
+
+  describe('getRegionPolygons', () => {
+    it('returns closed polygons and excludes open polylines', () => {
+      store.addRegion(polyRegion([0, 10, 5], [0, 0, 10], true));
+      store.addRegion(polyRegion([0, 10], [0, 10], false)); // open polyline
+      const polys = store.getRegionPolygons();
+      expect(polys.length).toBe(1);
+      expect(polys[0].closed).toBe(true);
+    });
+  });
+
+  describe('classification colours', () => {
+    it('applies a stored class colour to a region by label', () => {
+      store.setClassificationColor('Tumor', '#123456');
+      const r = polyRegion([0, 10, 5], [0, 0, 10]);
+      r.label = 'Tumor';
+      store.addRegion(r);
+      expect(store.getRegions()[0].color).toBe('#123456');
+    });
+  });
+});

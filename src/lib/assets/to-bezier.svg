@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Convert-to-bezier tool icon: a smooth curve through two anchor points with control handles. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 44" width="44" height="44" fill="#000000">
+  <!-- smooth cubic curve between the two anchors -->
+  <path d="M 7,34 C 7,16 37,28 37,10" fill="none" stroke="#000000" stroke-width="2.4"
+        stroke-linecap="round"/>
+  <!-- control handles -->
+  <line x1="7" y1="34" x2="7" y2="22" stroke="#000000" stroke-width="1.4"/>
+  <line x1="37" y1="10" x2="37" y2="22" stroke="#000000" stroke-width="1.4"/>
+  <circle cx="7" cy="22" r="2.2"/>
+  <circle cx="37" cy="22" r="2.2"/>
+  <!-- anchor points -->
+  <rect x="4" y="31" width="6" height="6" rx="1"/>
+  <rect x="34" y="7" width="6" height="6" rx="1"/>
+</svg>

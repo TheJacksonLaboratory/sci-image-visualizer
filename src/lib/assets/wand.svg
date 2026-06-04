@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 100 100"
+   fill="black"
+   fill-rule="evenodd"
+   version="1.1"
+   id="svg4"
+   sodipodi:docname="wand.svg"
+   inkscape:version="1.4.3 (0d15f75, 2025-12-25)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs4" />
+  <sodipodi:namedview
+     id="namedview4"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="8.74"
+     inkscape:cx="50"
+     inkscape:cy="49.942792"
+     inkscape:window-width="1024"
+     inkscape:window-height="1186"
+     inkscape:window-x="3560"
+     inkscape:window-y="131"
+     inkscape:window-maximized="0"
+     inkscape:current-layer="svg4" />
+  <!-- Wand handle: thin diagonal stick from lower-left to upper-right -->
+  <polygon
+     points="12,92 78,26 74,22 8,88 "
+     id="polygon1"
+     transform="matrix(1.0375192,0.05799445,0.25179496,0.91871864,-17.85351,5.6289793)" />
+  <!-- 4-pointed star at the wand tip -->
+  <polygon
+     points="62,34 76,30 80,6 84,30 98,34 84,38 80,62 76,38 "
+     id="polygon2"
+     transform="matrix(1.3082889,0,0,1.0245178,-38.907958,-1.4056881)" />
+  <!-- Small sparkle to the upper-left -->
+  <polygon
+     points="46,30 36,32 34,42 32,32 22,30 32,28 34,18 36,28 "
+     id="polygon3"
+     transform="translate(-9.610984,-6.7505721)" />
+  <!-- Small sparkle to the lower-right -->
+  <polygon
+     points="62,80 70,82 62,84 60,92 58,84 50,82 58,80 60,72 "
+     id="polygon4"
+     transform="translate(0,-1.6018307)" />
+</svg>

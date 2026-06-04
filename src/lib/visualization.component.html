@@ -1,0 +1,104 @@
+<!-- Toolbar dock: docked across the top by default; drag the handle to detach
+     it into a floating, movable window (frees the top row for the image). -->
+<div class="toolbar-dock" [class.floating]="toolbarFloating"
+     [style.left.px]="toolbarFloating ? toolbarPos.x : null"
+     [style.top.px]="toolbarFloating ? toolbarPos.y : null">
+  <div class="toolbar-drag-handle" (mousedown)="onToolbarDragStart($event)"
+       pTooltip="Drag to float the toolbar" tooltipPosition="bottom">
+    <i class="pi pi-bars"></i>
+  </div>
+<plotting-toolbar
+  [imageInfo]="imageInfo"
+  [plotTypeOptions]="plotTypeOptions"
+  [selectedPlotType]="selectedPlotType"
+  [isoRange]="isoRange"
+  [reversescale]="reversescale"
+  [colormapsOptions]="colormapsOptions"
+  [selectedColormap]="selectedColormap"
+  [maxIndex]="maxIndex"
+  [zIndex]="zIndex"
+  [isHeatmap]="isHeatmap"
+  [activeDragMode]="activeDragMode"
+  [activeSurface3dMode]="activeSurface3dMode"
+  [wandSensitivity]="wandSensitivity"
+  [vertexEraserRadius]="vertexEraserRadius"
+  [stackOptions]="stackOptions"
+  (selectPlotType)="onSelectPlotType($event)"
+  (addProfileLine)="addProfileLine()"
+  (isoRangeChange)="onIsoRangeChange($event)"
+  (toggleReverseScale)="toggleReverseScale()"
+  (selectColormap)="selectColormap($event)"
+  (selectStackOption)="selectStackOption($event)"
+  (zScrub)="onZScrub($event)"
+  (zSlide)="onZSlide($event)"
+  (zIndexInput)="zIndex = $event; updateZIndex()"
+  (reloadAndPlot)="reloadAndPlot()"
+  (downloadImage)="downloadImage()"
+  (autoscaleImage)="autoscaleImage()"
+  (toggleDragMode)="toggleDragMode($event)"
+  (zoomIn)="zoomIn()"
+  (zoomOut)="zoomOut()"
+  (toggleSurface3dMode)="toggleSurface3dMode($event)"
+  (resetSurfaceCamera)="resetSurfaceCamera()"
+  (deleteRegion)="deleteRegion()"
+  (toBezierRegion)="toBezierRegion()"
+  (toPolygonRegion)="toPolygonRegion()"
+  (wandSensitivityChange)="onWandSensitivityChange($event)"
+  (vertexEraserRadiusChange)="onVertexEraserRadiusChange($event)">
+  <!-- Host-projected custom toolbar buttons, forwarded into the toolbar. -->
+  <ng-content></ng-content>
+</plotting-toolbar>
+  <p-button *ngIf="toolbarFloating" class="toolbar-dock-btn" icon="pi pi-thumbtack" size="small" [text]="true"
+            pTooltip="Dock to top" tooltipPosition="bottom" (onClick)="dockToolbar()">
+  </p-button>
+</div>
+
+<p-contextMenu #cm [model]="contextMenuItems" appendTo="body"></p-contextMenu>
+<div class="w-full h-full relative" id="plot">
+  <div *ngIf="imgLoading || stackLoading" id="overlay">
+    <ng-container *ngIf="imgLoading && cacheProgress !== null && cacheProgress < 100; else spinnerLoading">
+      <!-- Stage-aware message comes from CacheProgressService updating
+           imageLoadingMessage$ ("Caching image..." during the GCS download,
+           then "Generating preview..." during per-slice thumbnail gen). Once the
+           download hits 100% the remaining work (server preview/tile generation)
+           has no determinate progress, so fall through to the spinner template
+           rather than parking a full bar under "Loading image...". -->
+      <p-progressBar class="progress" [value]="cacheProgress"></p-progressBar>
+      <span class="text-loading">{{loadingMessage}}</span>
+    </ng-container>
+    <ng-template #spinnerLoading>
+      <div *ngIf="imgLoading" class="spinner"></div>
+      <span *ngIf="imgLoading && !zoom" class="text-loading">{{loadingMessage}}</span>
+      <span *ngIf="imgLoading && zoom" class="zoom-text-loading">{{loadingMessage}}</span>
+    </ng-template>
+    <p-progressBar class="progress" *ngIf="stackLoading" [value]="loadingPercentage"></p-progressBar>
+    <span *ngIf="stackLoading" class="text-loading">Loading frames...</span>
+    <p-button *ngIf="stackLoading || imgLoading" class="cancel-loading " label="Cancel"
+              (onClick)="cancelLoading()">
+    </p-button>
+  </div>
+  <!-- Translucent "sharpening" overlay shown after the small-tier preview is
+       on screen while the large-tier render is still loading in the
+       background. Lets the user see the blurry image underneath but makes
+       it clear something is still loading so they don't mistake the
+       low-res render for the final image. -->
+  <div *ngIf="sharpening && !imgLoading && !stackLoading" id="sharpening-overlay">
+    <div class="spinner"></div>
+    <span class="text-loading">Sharpening preview...</span>
+  </div>
+
+</div>
+
+<!-- Floating, draggable intensity-profile inset. Shown in LINE mode; the chart
+     updates live as the line ROI on the image is moved. Kept OUTSIDE #plot and
+     positioned fixed so it floats over the whole page (not clipped to the
+     diagram/canvas area). -->
+<div *ngIf="hasProfiles" class="intensity-panel"
+     [style.left.px]="profilePanelPos.x" [style.top.px]="profilePanelPos.y">
+  <div class="intensity-panel-header" (mousedown)="onProfilePanelDragStart($event)">
+    <span>Intensity profile</span>
+    <i class="pi pi-arrows-alt"></i>
+  </div>
+  <div [id]="intensityInsetDiv" class="intensity-panel-plot"></div>
+</div>
+

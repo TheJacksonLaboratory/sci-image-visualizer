@@ -1,0 +1,464 @@
+<p-toolbar>
+  <div class="p-toolbar-group-start flex-wrap align-items-center gap-1">
+
+    <!-- Host-provided custom toolbar buttons, shown first (e.g. app-specific
+         actions the visualization view itself doesn't own). -->
+    <ng-content></ng-content>
+
+    <!-- Plot type: available for any image (grayscale or RGB). -->
+    <ng-container *ngIf="imageInfo">
+      <span class="toolbar-separator"></span>
+      <p-dropdown [options]="plotTypeOptions" optionLabel="label" optionValue="type"
+                  [(ngModel)]="selectedPlotType" appendTo="body"
+                  pTooltip="Select plot type" tooltipPosition="bottom"
+                  [style]="{'min-width': '11rem'}"
+                  (onChange)="selectPlotType.emit($event.value)">
+      </p-dropdown>
+      <ng-container *ngIf="isIsosurfaceMode">
+        <span class="flex align-items-center mx-1 toolbar-text">Iso</span>
+        <p-slider [(ngModel)]="isoRange" [range]="true"
+                  [min]="isoValueMin" [max]="isoValueMax" [step]="isoValueStep"
+                  (onChange)="isoRangeChange.emit($event.values)"
+                  pTooltip="Isosurface band (0–255), mapped onto the volume's
+                  actual intensity range. Surfaces are drawn for voxels whose
+                  intensity falls in the selected band — narrow it to isolate
+                  features, widen it to see the whole structure."
+                  [escape]="false" tooltipPosition="bottom"
+                  styleClass="wand-sensitivity-slider"></p-slider>
+        <span class="flex align-items-center mx-1 toolbar-text wand-sensitivity-value">
+          {{ isoRange[0] }}–{{ isoRange[1] }}</span>
+      </ng-container>
+      <!-- Intensity tools (Heatmap / Image mode): add another colored line ROI.
+           Each added line gets the next bright palette colour and its own inset
+           trace; select a line on the image and use the trash tool to remove it
+           (and its trace). The lines are Region-based but excluded from the
+           Regions tab and exports. -->
+      <ng-container *ngIf="isIntensityCapable">
+        <span class="toolbar-separator"></span>
+        <p-button size="small" [text]="true"
+                  pTooltip="Add an intensity line (new colour). Click a line to select it,
+                  then use the trash tool to remove it."
+                  [escape]="false" tooltipPosition="bottom"
+                  (onClick)="addProfileLine.emit()">
+          <img src="assets/plotting/spline-chart.svg" class="toolbar-icon-dark" style="width: 1rem"/>
+        </p-button>
+      </ng-container>
+    </ng-container>
+    <!-- Colormap / LUT controls: only meaningful for grayscale images. -->
+    <ng-container *ngIf="imageInfo?.isGrayscale">
+      <p-button pRipple size="small"
+                [text]="!reversescale"
+                pTooltip="Toggle between normal and reverse color scale"
+                tooltipPosition="bottom"
+                (onClick)="toggleReverseScale.emit()">
+        <img src="assets/plotting/invert.svg"
+             [class]="reversescale ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+             style="width: 1rem"/>
+      </p-button>
+      <p-treeSelect [options]="colormapsOptions" [(ngModel)]="selectedColormap"
+                    [selectionMode]="'single'" placeholder="LUT"
+                    pTooltip="Color Lookup Tables" [scrollHeight]="'500px'"
+                    [labelStyle]="{'color': 'var(--primary-color)'}"
+                    [containerStyle]="{'border-color': 'var(--primary-color)'}"
+                    (onNodeSelect)="selectColormap.emit($event.node)">
+        <ng-template let-node pTemplate="default">
+          <div class="flex align-items-center gap-2">
+            <img *ngIf="!node.children" [src]="node.data?.src" class="colormap" />
+            <div>{{ node.label }}</div>
+          </div>
+        </ng-template>
+      </p-treeSelect>
+    </ng-container>
+
+    <!-- Stack controls -->
+    <ng-container *ngIf="imageInfo?.isStack">
+      <span class="toolbar-separator"></span>
+      <!-- Image view: scrub z-slices live (the renderer swaps slices in place). -->
+      <ng-container *ngIf="isImageView">
+        <span class="flex align-items-center mx-1 toolbar-text">Slice</span>
+        <p-slider [(ngModel)]="zIndex" [min]="0" [max]="maxIndex"
+                  (onChange)="zScrub.emit($event.value)" (onSlideEnd)="zSlide.emit($event.value)"
+                  pTooltip="Slice through the stack" tooltipPosition="bottom"
+                  [style]="{'width':'8rem'}" styleClass="wand-sensitivity-slider"></p-slider>
+        <span class="flex align-items-center mx-1 toolbar-text">{{zIndex}} of {{maxIndex}}</span>
+      </ng-container>
+      <!-- Heatmap view: single-image (high-def zoom) vs stack (frame slider). -->
+      <ng-container *ngIf="!isImageView">
+      <p-button icon="pi pi-image" size="small"
+                [text]="imageInfo?.showStack"
+                pTooltip="Single image mode: enables high-def zoom" tooltipPosition="bottom"
+                (onClick)="selectStackOption.emit(stackOptions[0])">
+      </p-button>
+      <p-button icon="pi pi-images" size="small"
+                [text]="!imageInfo?.showStack"
+                pTooltip="Stack mode, enables slicing through image frames" tooltipPosition="bottom"
+                (onClick)="selectStackOption.emit(stackOptions[1])">
+      </p-button>
+      <ng-container *ngIf="!imageInfo?.showStack">
+        <span class="flex align-items-center mx-1 toolbar-text">Slice</span>
+        <div class="p-inputgroup" style="width: auto">
+          <p-inputNumber styleClass="w-3rem toolbar-input"
+					pTooltip="View image in stack (&#x23CE;)"
+					[(ngModel)]="zIndex" [min]="0" [max]="maxIndex"
+           (onInput)="zIndexInput.emit(zIndex)" (keydown.enter)="reloadAndPlot.emit()"/>
+          <p-button icon="pi pi-refresh" size="small" [text]="true" (onClick)="reloadAndPlot.emit()"
+                    pTooltip="Plot this slice" tooltipPosition="bottom">
+          </p-button>
+        </div>
+        <span class="flex align-items-center mx-1 toolbar-text">of {{maxIndex}}</span>
+        </ng-container>
+      </ng-container>
+    </ng-container>
+
+    <span class="toolbar-separator"></span>
+
+    <!-- Image actions -->
+    <p-button icon="pi pi-download" size="small" [text]="true"
+              pTooltip="Download image as PNG" tooltipPosition="bottom"
+              (onClick)="downloadImage.emit()">
+    </p-button>
+    <p-button *ngIf="isHeatmap" icon="pi pi-window-maximize" size="small" [text]="true"
+              pTooltip="Fit to view" tooltipPosition="bottom"
+              (onClick)="autoscaleImage.emit()">
+    </p-button>
+
+    <span *ngIf="isHeatmap" class="toolbar-separator"></span>
+
+    <!-- Plotly rubber-band drag-zoom. On OpenSeadragon the box-zoom below covers
+         this, and a bare drag pans natively, so it's hidden in the image view. -->
+    <p-button *ngIf="isHeatmap && !isImageView" icon="pi pi-search" size="small"
+              [text]="activeDragMode !== 'zoom'"
+              pTooltip="Zoom drag" tooltipPosition="bottom"
+              (onClick)="toggleDragMode.emit('zoom')">
+    </p-button>
+    <p-button *ngIf="isHeatmap" size="small"
+              [text]="activeDragMode !== 'zoomToBox'"
+              pTooltip="Zoom box (<kbd>b</kbd>)" [escape]="false" tooltipPosition="bottom"
+              (onClick)="toggleDragMode.emit('zoomToBox')">
+      <img src="assets/plotting/zoom-box.svg"
+           [class]="activeDragMode === 'zoomToBox' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+           style="width: 1rem"/>
+    </p-button>
+    <p-button *ngIf="isHeatmap" icon="pi pi-arrows-alt" size="small"
+              [text]="activeDragMode !== 'pan'"
+              pTooltip="Pan the image (<kbd>p</kbd>)" [escape]="false" tooltipPosition="bottom"
+              (onClick)="toggleDragMode.emit('pan')">
+    </p-button>
+    <p-button *ngIf="isHeatmap" icon="pi pi-search-plus" size="small" [text]="true"
+              pTooltip="Zoom in (<kbd>+</kbd>)" [escape]="false" tooltipPosition="bottom"
+              (onClick)="zoomIn.emit()">
+    </p-button>
+    <p-button *ngIf="isHeatmap" icon="pi pi-search-minus" size="small" [text]="true"
+              pTooltip="Zoom out (<kbd>-</kbd>)" [escape]="false" tooltipPosition="bottom"
+              (onClick)="zoomOut.emit()">
+    </p-button>
+
+    <!-- Surface 3D controls -->
+    <ng-container *ngIf="!isHeatmap">
+      <span class="toolbar-separator"></span>
+      <p-button icon="pi pi-search" size="small"
+                [text]="activeSurface3dMode !== 'zoom'"
+                pTooltip="Zoom" tooltipPosition="bottom"
+                (onClick)="toggleSurface3dMode.emit('zoom')">
+      </p-button>
+      <p-button icon="pi pi-arrows-alt" size="small"
+                [text]="activeSurface3dMode !== 'pan'"
+                pTooltip="Pan" tooltipPosition="bottom"
+                (onClick)="toggleSurface3dMode.emit('pan')">
+      </p-button>
+      <p-button icon="pi pi-globe" size="small"
+                [text]="activeSurface3dMode !== 'orbit'"
+                pTooltip="Orbital rotation" tooltipPosition="bottom"
+                (onClick)="toggleSurface3dMode.emit('orbit')">
+      </p-button>
+      <p-button icon="pi pi-sync" size="small"
+                [text]="activeSurface3dMode !== 'turntable'"
+                pTooltip="Turntable rotation" tooltipPosition="bottom"
+                (onClick)="toggleSurface3dMode.emit('turntable')">
+      </p-button>
+      <p-button icon="pi pi-home" size="small" [text]="true"
+                pTooltip="Reset camera to default" tooltipPosition="bottom"
+                (onClick)="resetSurfaceCamera.emit()">
+      </p-button>
+    </ng-container>
+
+    <ng-container *ngIf="isHeatmap">
+      <span class="toolbar-separator"></span>
+
+      <!-- Region drawing tools -->
+      <p-button icon="pi pi-arrow-up-right" size="small"
+                [text]="activeDragMode !== 'select'"
+                pTooltip="Selection mode (<kbd>s</kbd>)"
+                [escape]="false" tooltipPosition="bottom"
+                (onClick)="toggleDragMode.emit('select')">
+      </p-button>
+      <p-button icon="pi pi-stop" size="small"
+                [text]="activeDragMode !== 'drawrect'"
+                pTooltip="Draw a rectangular region (<kbd>r</kbd>)" [escape]="false"
+                tooltipPosition="bottom"
+                (onClick)="toggleDragMode.emit('drawrect')">
+      </p-button>
+      <p-button size="small"
+                [text]="activeDragMode !== 'drawopenpath'"
+                pTooltip="Draw a polyline (<kbd>l</kbd>)" [escape]="false"
+                tooltipPosition="bottom"
+                (onClick)="toggleDragMode.emit('drawopenpath')">
+        <img src="assets/plotting/polyline.svg"
+             [class]="activeDragMode === 'drawopenpath' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+             style="width: 1rem"/>
+      </p-button>
+      <p-button icon="pi pi-pencil" size="small"
+                [text]="activeDragMode !== 'drawclosedpath'"
+                pTooltip="Draw a freeform region (<kbd>f</kbd>)" [escape]="false"
+                tooltipPosition="bottom"
+                (onClick)="toggleDragMode.emit('drawclosedpath')">
+      </p-button>
+
+      <!-- Vertex editing — Image view (OpenSeadragon) only. -->
+      <ng-container *ngIf="isImageView">
+        <p-button size="small"
+                  [text]="activeDragMode !== 'drawpolygon'"
+                  pTooltip="Polygon: click to place each vertex; click the first point to close"
+                  [escape]="false" tooltipPosition="bottom"
+                  (onClick)="toggleDragMode.emit('drawpolygon')">
+          <img src="assets/plotting/polygon-vertices.svg"
+               [class]="activeDragMode === 'drawpolygon' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+               style="width: 1rem"/>
+        </p-button>
+        <p-button size="small"
+                  [text]="activeDragMode !== 'addpoint'"
+                  pTooltip="Add a vertex: click an edge of the selected polygon"
+                  [escape]="false" tooltipPosition="bottom"
+                  (onClick)="toggleDragMode.emit('addpoint')">
+          <img src="assets/plotting/vertex-add.svg"
+               [class]="activeDragMode === 'addpoint' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+               style="width: 1rem"/>
+        </p-button>
+        <p-button size="small"
+                  [text]="activeDragMode !== 'deletepoint'"
+                  pTooltip="Delete a vertex: click a vertex of the selected polygon"
+                  [escape]="false" tooltipPosition="bottom"
+                  (onClick)="toggleDragMode.emit('deletepoint')">
+          <img src="assets/plotting/vertex-delete.svg"
+               [class]="activeDragMode === 'deletepoint' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+               style="width: 1rem"/>
+        </p-button>
+        <p-button size="small"
+                  [text]="activeDragMode !== 'move'"
+                  pTooltip="Move the selected region"
+                  [escape]="false" tooltipPosition="bottom"
+                  (onClick)="toggleDragMode.emit('move')">
+          <img src="assets/plotting/region-move.svg"
+               [class]="activeDragMode === 'move' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+               style="width: 1rem"/>
+        </p-button>
+        <p-button size="small" [text]="true"
+                  pTooltip="Convert the selected region to a smooth Bézier curve"
+                  [escape]="false" tooltipPosition="bottom"
+                  (onClick)="toBezierRegion.emit()">
+          <img src="assets/plotting/to-bezier.svg" class="toolbar-icon-dark" style="width: 1rem"/>
+        </p-button>
+        <p-button size="small" [text]="true"
+                  pTooltip="Convert the selected region back to a straight-edged polygon"
+                  [escape]="false" tooltipPosition="bottom"
+                  (onClick)="toPolygonRegion.emit()">
+          <img src="assets/plotting/to-polygon.svg" class="toolbar-icon-dark" style="width: 1rem"/>
+        </p-button>
+      </ng-container>
+
+      <p-button size="small"
+                [text]="activeDragMode !== 'wand'"
+                pTooltip="Wand: click and drag to grow a region by similar pixel values (<kbd>w</kbd>).
+                <br>Hold <kbd>Shift</kbd> while clicking or dragging on a region to erase pixels from it."
+                [escape]="false" tooltipPosition="bottom"
+                (onClick)="toggleDragMode.emit('wand')">
+        <img src="assets/plotting/wand.svg"
+             [class]="activeDragMode === 'wand' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+             style="width: 1rem"/>
+      </p-button>
+      <ng-container *ngIf="activeDragMode === 'wand'">
+        <span class="flex align-items-center mx-1 toolbar-text">Sens.</span>
+        <p-slider [(ngModel)]="wandSensitivity"
+                  [min]="wandSensitivityMin" [max]="wandSensitivityMax" [step]="wandSensitivityStep"
+                  (onChange)="wandSensitivityChange.emit($event.value)"
+                  pTooltip="Higher = stricter (smaller selection); lower = looser.
+                  Takes effect from the next click/drag tick."
+                  [escape]="false" tooltipPosition="bottom"
+                  styleClass="wand-sensitivity-slider"></p-slider>
+        <span class="flex align-items-center mx-1 toolbar-text wand-sensitivity-value">
+          {{ wandSensitivity.toFixed(1) }}</span>
+      </ng-container>
+      <p-button icon="pi pi-eraser" size="small"
+                [text]="activeDragMode !== 'eraseVertex'"
+                pTooltip="Vertex eraser (<kbd>e</kbd>): click or drag to remove polygon vertices inside
+                the cursor circle from any region."
+                [escape]="false" tooltipPosition="bottom"
+                (onClick)="toggleDragMode.emit('eraseVertex')">
+      </p-button>
+      <ng-container *ngIf="activeDragMode === 'eraseVertex'">
+        <span class="flex align-items-center mx-1 toolbar-text">Radius</span>
+        <p-slider [(ngModel)]="vertexEraserRadius"
+                  [min]="vertexEraserRadiusMin" [max]="vertexEraserRadiusMax" [step]="vertexEraserRadiusStep"
+                  (onChange)="vertexEraserRadiusChange.emit($event.value)"
+                  pTooltip="Eraser radius in image pixels.
+                  Vertices within this distance of the cursor are removed."
+                  [escape]="false" tooltipPosition="bottom"
+                  styleClass="wand-sensitivity-slider"></p-slider>
+        <span class="flex align-items-center mx-1 toolbar-text wand-sensitivity-value">
+          {{ vertexEraserRadius }}</span>
+      </ng-container>
+      <p-button icon="pi pi-trash" size="small" [text]="true"
+                pTooltip="Delete selected region (<kbd>Del</kbd>)"
+                [escape]="false" tooltipPosition="bottom"
+                (onClick)="deleteRegion.emit()">
+      </p-button>
+    </ng-container>
+
+    <span class="toolbar-separator"></span>
+
+    <!-- Help -->
+    <p-button icon="pi pi-question-circle" size="small" [text]="true"
+              pTooltip="Help" tooltipPosition="bottom"
+              (onClick)="showHelp()">
+    </p-button>
+
+  </div>
+</p-toolbar>
+<p-dialog header="Plotting help" [(visible)]="displayHelpDialog" [modal]="true" [style]="{width: '50vw'}"
+          [maximizable]="true" [draggable]="false" [resizable]="false">
+  <p>Click a file in the left-hand tree to display it. By default it opens in the
+    <b>Image</b> view — a natively tiled, deeply zoomable raster (OpenSeadragon) with a
+    navigator minimap and a physical-units scale bar. <b>Click the image to zoom</b> toward
+    the clicked point; scroll to zoom and drag to pan.
+  </p>
+  <p>
+    The <b>plot-type dropdown</b> switches how the file is visualized:
+    <b>Image</b>, <b>Heatmap</b>, <b>Contour</b>, <b>Scatter (regions)</b>,
+    <b>Surface (3D)</b>, <b>Scatter 3D</b>, and <b>Isosurface (3D)</b>. Scalar and 3D types
+    require a grayscale image (the 3D volume types also require a z-stack). The non-image
+    views render with Plotly and support "real zooming" (a downscaled overview that
+    re-fetches higher resolution as you zoom in).
+  </p>
+  <p>
+    The <b>colormap / LUT</b> controls (grayscale images only) include a "<b>reverse</b>"
+    <img src="assets/plotting/invert.svg" width="15" height="15"> toggle and a dropdown of
+    colormaps (default: inverted greys). When a stack is open, the <b>image mode</b> and
+    z-slice can be changed. Regions are edited in the right-panel "<b>Regions</b>" tab.
+    Drag the <i class="pi pi-bars"></i> handle to detach this toolbar into a floating window.
+  </p>
+
+  <h3>Plot-type controls</h3>
+  <ul>
+    <li>"<b>Intensity profile lines</b>" <img src="assets/plotting/spline-chart.svg" width="15" height="15">
+      (Heatmap &amp; Image): adds a coloured line ROI; a floating inset chart plots intensity
+      along each line, updates live as you drag the line, and re-samples at the current zoom
+      resolution. Each added line gets its own colour; select a line and use the trash tool
+      <i class="pi pi-trash"></i> to remove it (and its trace).</li>
+    <li>"<b>Isosurface band</b>" slider (Isosurface): sets the intensity band the surfaces are
+      drawn for, mapped onto the volume's real intensity range.</li>
+    <li>"<b>3D camera</b>" (Surface / Scatter 3D / Isosurface): zoom <i class="pi pi-search"></i>,
+      pan <i class="pi pi-arrows-alt"></i>, orbit <i class="pi pi-globe"></i>,
+      turntable <i class="pi pi-sync"></i>, and reset camera <i class="pi pi-home"></i>;
+      scroll to zoom the 3D scene.</li>
+  </ul>
+  <p>
+  The other controls include the tool bar, where by default not tool is selected (all greyed-out), and
+    which allows
+  </p>
+    <ul>
+      <li>"<b>image download</b>" <i class="pi pi-download"></i>: download the image as a 'png'.
+      </li>
+      <li>"<b>autoscale</b>" <i class="pi pi-window-maximize"></i>:
+        resets the image to its original dimension. If in stack mode, it will reset the image mode
+        to single image mode.
+      </li>
+      <li>
+        "<b>zoom drag</b>" <i class="pi pi-search"></i>:
+        activate zoom mode to perform a zoom selection on the image. If in single-image mode, or any image
+        that is not a stack, the mouse selection will trigger a high-def zoom, creating a cache of the image
+        the first time (longer loading); then the next zooming events will be faster than the
+        first one.
+      </li>
+      <li>
+        "<b>zoom box</b>" <img src="assets/plotting/zoom-box.svg" width="15" height="15">:
+        activate zoom box mode to select an area to zoom into.
+      </li>
+      <li>
+        "<b>panning</b>" <i class="pi pi-arrows-alt"></i>: activate
+        panning image mode to perform a panning selection; dragging and releasing the mouse on a zoomed
+        image will trigger a new zoom event on the new area of the image selected.
+      </li>
+      <li>
+        "<b>zoom-in</b>" <i class="pi pi-search-plus"></i>: triggers the
+        zoom-in event where the zoom selection is automatically set.
+      </li>
+      <li>
+        "<b>zoom-out</b>" <i class="pi pi-search-minus"></i>: triggers
+        the zoom-out event where the zoom selection is automatically set. The last zoom selection will
+        stop at the original image dimensions.
+      </li>
+      <li>
+        "<b>freeform region creation</b>" <i class="pi pi-pencil"></i>:
+        activates the freeform region mode which enables creation of a closed freeform
+				polygon using the mouse, by click and dragging the left-mouse button.
+      </li>
+      <li>
+        "<b>polyline drawing</b>" <img src="assets/plotting/polyline.svg" width="14" height="14">:
+        activates polyline mode which enables drawing of an open (non-closed) polyline using the
+        mouse, by clicking and dragging the left-mouse button. Polylines can be edited and
+        exported to GeoJSON as a <code>LineString</code> feature.
+      </li>
+      <li>
+        "<b>rectangular region creation</b>" <i class="pi pi-stop"></i>:
+        activates the rectangular region mode which enables creation of a rectangular
+        selection using the mouse, by clicking and dragging the left-mouse button.
+      </li>
+      <li>
+        "<b>wand</b>" <img src="assets/plotting/wand.svg" width="15" height="15">:
+        click on the image to grow a region from pixels with similar values around the click point.
+        Hold <kbd>Ctrl</kbd> (or <kbd>Cmd</kbd>) for an exact-match flood fill. Drag the mouse to
+        keep extending the selection while moving. Hold <kbd>Shift</kbd> while clicking or
+        dragging on an existing region to <b>erase</b> pixels from it. Use the <b>Sens.</b> slider
+        that appears in the toolbar to make the wand stricter (higher = smaller selection) or
+        looser. Subsequent clicks keep extending the same region; clicking inside an existing
+        region adopts it, and growing into another region merges them.
+      </li>
+      <li>
+        "<b>vertex eraser</b>" <i class="pi pi-eraser"></i>:
+        click or click-and-drag to remove polygon vertices that fall inside the cursor circle from
+        any region. Use the <b>Radius</b> slider to set the eraser size in image pixels. Polygons
+        reduced below 3 vertices (or polylines below 2) are deleted entirely.
+      </li>
+      <li>
+        "<b>selection</b>" <i class="pi pi-arrow-up-right"></i>:
+        a neutral mode that turns off whatever drawing tool was active (wand, vertex eraser,
+        rectangle, etc.). Use it when you want to step out of editing without picking another tool.
+      </li>
+      <li>
+        "<b>active region deletion</b>" <i class="pi pi-trash"></i>:
+        deletes the selected region. This can also be done from the Regions tab.
+      </li>
+    </ul>
+
+  <h3>Keyboard shortcuts</h3>
+  <table class="shortcuts-table">
+    <tr><td><kbd>+</kbd> / <kbd>=</kbd></td><td>Zoom in</td></tr>
+    <tr><td><kbd>-</kbd></td><td>Zoom out</td></tr>
+    <tr><td><kbd>b</kbd></td><td>Toggle zoom box mode</td></tr>
+    <tr><td><kbd>p</kbd></td><td>Toggle pan mode</td></tr>
+    <tr><td><kbd>f</kbd></td><td>Toggle freeform region drawing</td></tr>
+    <tr><td><kbd>l</kbd></td><td>Toggle polyline drawing</td></tr>
+    <tr><td><kbd>r</kbd></td><td>Toggle rectangular region drawing</td></tr>
+    <tr><td><kbd>w</kbd></td><td>Toggle wand tool</td></tr>
+    <tr><td>Wand + <kbd>Shift</kbd></td><td>Erase pixels from the active region</td></tr>
+    <tr><td>Wand + <kbd>Ctrl</kbd>/<kbd>Cmd</kbd></td><td>Exact-match flood fill (no smoothing)</td></tr>
+    <tr><td><kbd>e</kbd></td><td>Toggle vertex eraser</td></tr>
+    <tr><td><kbd>s</kbd></td><td>Selection mode (deactivates drawing tools)</td></tr>
+    <tr><td><kbd>Del</kbd> / <kbd>⌫</kbd></td><td>Delete selected region</td></tr>
+  </table>
+
+  <ng-template pTemplate="footer">
+    <p-button icon="pi pi-check" (click)="displayHelpDialog=false" label="Ok" styleClass="p-button-text">
+    </p-button>
+  </ng-template>
+</p-dialog>
