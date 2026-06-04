@@ -222,13 +222,14 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     this.intensityProfileSub = this.plotService.getIntensityProfile$().subscribe((profiles) => {
       this.latestProfiles = profiles;
       this.hasProfiles = profiles.length > 0;
-      // The panel div is behind *ngIf="hasProfiles". A bare setTimeout(0) fires
-      // BEFORE Angular materializes the *ngIf (change detection runs after the
-      // timeout callback), so on the first profile the renderer drew into a div
-      // that didn't exist yet — the inset only appeared on the second click.
-      // Run change detection synchronously so the div exists, then render.
+      // The panel div is behind *ngIf="hasProfiles". detectChanges() materializes
+      // it synchronously (the subscription may fire outside Angular's zone — e.g.
+      // from an OSD drag — so CD wouldn't run on its own). Then render on the next
+      // animation frame, AFTER the browser lays the panel out: a synchronous draw
+      // hits a zero-size container on first create and Plotly keeps that size, so
+      // the inset stays blank and live updates redraw into the same zero box.
       this.cdr.detectChanges();
-      this.renderIntensityInset();
+      requestAnimationFrame(() => this.renderIntensityInset());
     });
     // When the OSD view settles at a new zoom/pan, re-sample the intensity lines
     // from a crop of the visible region so the inset reflects the zoom-level
