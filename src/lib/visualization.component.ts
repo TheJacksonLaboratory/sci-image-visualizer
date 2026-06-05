@@ -63,6 +63,8 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   colormapsOptions!: any;
   reversescale = false;
   selectedColormap!: any;
+  /** Channels & Histogram dialog visibility (opened from the toolbar). */
+  showChannelHistogram = false;
   stackOptions = [
     { name: 'Single image', val: 'false' },
     { name: 'Stack', val: 'true' },
@@ -697,6 +699,11 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     if (!colormapNode.children) {
       this.plotService.setColormap(colormapNode);
     }
+  }
+
+  /** Open the Channels & Histogram dialog (toolbar button). */
+  openChannelHistogram() {
+    this.showChannelHistogram = true;
   }
 
   /**

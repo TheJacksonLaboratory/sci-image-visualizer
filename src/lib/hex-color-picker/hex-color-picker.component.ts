@@ -96,12 +96,24 @@ export class HexColorPickerComponent implements OnDestroy {
 
   private appendDropdownToBody() {
     const dropdown = this.dropdownRef?.nativeElement;
-    if (dropdown) {
-      const rect = this.swatchBtn.nativeElement.getBoundingClientRect();
-      this.renderer.appendChild(document.body, dropdown);
-      this.renderer.setStyle(dropdown, 'top', rect.bottom + 4 + 'px');
-      this.renderer.setStyle(dropdown, 'left', rect.right - HexColorPickerComponent.DROPDOWN_WIDTH + 'px');
-    }
+    if (!dropdown) return;
+    const rect = this.swatchBtn.nativeElement.getBoundingClientRect();
+    this.renderer.appendChild(document.body, dropdown);
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const w = HexColorPickerComponent.DROPDOWN_WIDTH;
+    // Horizontal: open toward the side with room. When the swatch is on the left
+    // half of the viewport, anchor the panel's LEFT edge to it (extend right) so
+    // it isn't truncated by the left edge; otherwise anchor its RIGHT edge
+    // (extend left). Clamp within the viewport either way.
+    let left = rect.left <= vw / 2 ? rect.left : rect.right - w;
+    left = Math.max(4, Math.min(left, vw - w - 4));
+    // Vertical: below the swatch, flipping above if it would overflow the bottom.
+    const h = dropdown.offsetHeight || 0;
+    let top = rect.bottom + 4;
+    if (h && top + h > vh - 4) top = Math.max(4, rect.top - 4 - h);
+    this.renderer.setStyle(dropdown, 'left', left + 'px');
+    this.renderer.setStyle(dropdown, 'top', top + 'px');
   }
 
   private removeDropdownFromBody() {

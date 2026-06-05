@@ -10,7 +10,7 @@ import { Buffer } from 'buffer';
 import { IImageInfo, IImageMetadata } from '../../contracts/image.contract';
 import { TileAccessPort, TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
 import { ImageStatePort, IMAGE_STATE_PORT } from '../../contracts/ports/image-state.port';
-import { BehaviorSubject, Observable, Subject, Subscription } from 'rxjs';
+import { BehaviorSubject, Observable, Subject, Subscription, combineLatest } from 'rxjs';
 import { MessageService } from 'primeng/api';
 import { ShapeSelection } from '../../models/shape';
 import { CONFIG, CONFIG_SURFACE, PlotUtilities } from '../../plot.utilities';
@@ -29,6 +29,7 @@ import {
   TraceBuildInput,
 } from './plotly-trace-builders';
 import { IVisualizer, IntensityProfile, IIsosurfaceControls, IIntensityControls } from '../../contracts/visualizer.contract';
+import { IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { ViewerCapabilities, ViewerFeature, capabilitiesOf } from '../../contracts/capabilities.contract';
 import { IRegionOverlay } from '../../contracts/region-overlay.contract';
 import { PlotlyRegionOverlay } from './plotly-region-overlay';
@@ -160,6 +161,7 @@ export class PlotlyService implements IVisualizer {
   /** Live (per-frame, non-coalesced) region edits — so the inset tracks an OSD
    *  line ROI live during a drag (OSD batches regionUpdate$ until release). */
   private regionLiveEditSubscription?: Subscription;
+  private channelSub?: Subscription;
 
   private wandHost!: WandToolHost;
   private eraserHost!: VertexEraserToolHost;
@@ -217,6 +219,15 @@ export class PlotlyService implements IVisualizer {
     this.filenameSubscription = this.state.getFilename$().subscribe(filename => {
       this.fileName = filename;
     });
+    // Live brightness/contrast from the Channels & Histogram pane: restyle the
+    // heatmap's display window (zmin/zmax) and reverse/invert when the channel
+    // state changes. (Gamma is applied by the OSD image view; the Plotly heatmap
+    // window covers the common contrast case.)
+    this.channelSub = combineLatest([
+      this.store.getChannelStates(),
+      this.store.getReverseScale(),
+      this.store.getInvert(),
+    ]).subscribe(([channels, rev, inv]) => this.applyChannelDisplay(channels, rev, inv));
     // Profile lines are store regions; any region change (add/drag/delete, on
     // either backend) should refresh the inset traces. The live-edit stream
     // fires per frame during a drag (OSD coalesces regionUpdate$ until release),
@@ -1971,6 +1982,56 @@ export class PlotlyService implements IVisualizer {
     if (this.regionLiveEditSubscription) {
       this.regionLiveEditSubscription.unsubscribe();
     }
+    if (this.channelSub) {
+      this.channelSub.unsubscribe();
+    }
+  }
+
+  /** Live-apply the channel display window (zmin/zmax) + reverse/invert to the
+   *  heatmap. No-op when no Plotly plot is mounted (OSD owns the div). */
+  private applyChannelDisplay(channels: any[], rev: boolean, inv: boolean): void {
+    if (!this.plotDiv) return;
+    const ch = channels?.[0];
+    const update: any = { reversescale: rev !== inv };
+    if (ch) {
+      update.zmin = ch.min;
+      update.zmax = ch.max;
+      update.zauto = false;
+    }
+    try {
+      Plotly.restyle(this.plotDiv, update);
+    } catch {
+      /* not a heatmap, or OSD owns the div */
+    }
+  }
+
+  /** Binned intensity histogram for a channel from the cached source frames
+   *  (raw, pre-LUT). Grayscale cells are numbers; RGB cells are [r,g,b]. */
+  getHistogram(channelIndex: number, _bins: number): IHistogram | null {
+    const frames = this.cachedImageFrames;
+    if (!frames?.length) return null;
+    const frame = frames[this.activeFrameIndex()] ?? frames[0];
+    if (!frame?.length) return null;
+    const counts = new Array(256).fill(0);
+    for (const row of frame) {
+      if (!row) continue;
+      for (const cell of row) {
+        let v: number;
+        if (Array.isArray(cell)) {
+          v = channelIndex >= 0 && channelIndex < cell.length
+            ? cell[channelIndex]
+            : Math.round(0.299 * cell[0] + 0.587 * cell[1] + 0.114 * cell[2]);
+        } else {
+          v = cell;
+        }
+        v = v | 0;
+        if (v < 0) v = 0; else if (v > 255) v = 255;
+        counts[v]++;
+      }
+    }
+    let mx = 0;
+    for (const c of counts) if (c > mx) mx = c;
+    return { bins: Array.from({ length: 256 }, (_, i) => i), counts, max: mx };
   }
 
   importRegions(geoJsonStr: string): Region[] {

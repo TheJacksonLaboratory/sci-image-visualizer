@@ -7,6 +7,7 @@ import { Region } from '../models/region';
 import { PlotType, PlotTypeDescriptor } from './plot-type';
 import { ViewerCapabilities } from './capabilities.contract';
 import { IRegionOverlay } from './region-overlay.contract';
+import { IHistogram } from './channel-histogram-api.contract';
 
 /**
  * Backend-neutral visualization contract. Plotly is one implementation;
@@ -181,6 +182,10 @@ export interface IVisualizer extends IDataRenderer, IRegionStore, IToolControlle
   /** Intensity (line-ROI) controls when the backend renders the LINE plot type,
    *  else null. */
   getIntensityControls(): IIntensityControls | null;
+  /** Binned intensity histogram for a channel from the currently-displayed
+   *  pixels, or null when none are available. Feeds the Channels & Histogram
+   *  pane. */
+  getHistogram(channelIndex: number, bins: number): IHistogram | null;
   unsubscribe(): void;
 }
 

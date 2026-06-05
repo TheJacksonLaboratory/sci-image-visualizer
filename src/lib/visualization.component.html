@@ -12,9 +12,6 @@
   [plotTypeOptions]="plotTypeOptions"
   [selectedPlotType]="selectedPlotType"
   [isoRange]="isoRange"
-  [reversescale]="reversescale"
-  [colormapsOptions]="colormapsOptions"
-  [selectedColormap]="selectedColormap"
   [maxIndex]="maxIndex"
   [zIndex]="zIndex"
   [isHeatmap]="isHeatmap"
@@ -26,8 +23,7 @@
   (selectPlotType)="onSelectPlotType($event)"
   (addProfileLine)="addProfileLine()"
   (isoRangeChange)="onIsoRangeChange($event)"
-  (toggleReverseScale)="toggleReverseScale()"
-  (selectColormap)="selectColormap($event)"
+  (openChannelHistogram)="openChannelHistogram()"
   (selectStackOption)="selectStackOption($event)"
   (zScrub)="onZScrub($event)"
   (zSlide)="onZSlide($event)"
@@ -101,4 +97,7 @@
   </div>
   <div [id]="intensityInsetDiv" class="intensity-panel-plot"></div>
 </div>
+
+<!-- Channels & Histogram: non-modal floating dialog opened from the toolbar. -->
+<channel-histogram [(visible)]="showChannelHistogram"></channel-histogram>
 

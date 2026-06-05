@@ -1,5 +1,4 @@
 import { Component, EventEmitter, Input, Output } from '@angular/core';
-import { TreeNode } from 'primeng/api';
 
 import { IImageInfo } from '../contracts/image.contract';
 import { PlotType, PlotTypeDescriptor } from '../contracts/plot-type';
@@ -30,9 +29,6 @@ export class ToolbarComponent {
   /** Isosurface band as a 0–255 slider position (mapped onto the volume's real
    *  intensity range by the renderer). Defaults to the full range. */
   @Input() isoRange: number[] = [0, 255];
-  @Input() reversescale = false;
-  @Input() colormapsOptions: any;
-  @Input() selectedColormap: any;
   @Input() maxIndex = 0;
   @Input() zIndex = 0;
   /** True for any 2D (non Surface-3D) plot type. */
@@ -50,8 +46,8 @@ export class ToolbarComponent {
   // PrimeNG slider/inputNumber change events carry optional values, mirrored by
   // the host handlers (which accept `| undefined`).
   @Output() isoRangeChange = new EventEmitter<number[] | undefined>();
-  @Output() toggleReverseScale = new EventEmitter<void>();
-  @Output() selectColormap = new EventEmitter<TreeNode>();
+  /** Open the Channels & Histogram dialog (brightness/contrast, colormap, …). */
+  @Output() openChannelHistogram = new EventEmitter<void>();
   @Output() selectStackOption = new EventEmitter<{ name: string; val: string }>();
   @Output() zScrub = new EventEmitter<number | undefined>();
   @Output() zSlide = new EventEmitter<number | undefined>();

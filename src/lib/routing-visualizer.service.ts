@@ -13,6 +13,8 @@ import { IVisualizer, PixelData, IntensityProfile, IIsosurfaceControls, IIntensi
 import { ViewerCapabilities } from './contracts/capabilities.contract';
 import { IRegionOverlay } from './contracts/region-overlay.contract';
 import { IRegionEditorApi } from './contracts/region-editor-api.contract';
+import { IChannelHistogramApi, IChannelState, IHistogram } from './contracts/channel-histogram-api.contract';
+import { VisualizerStore } from './visualizer-store.service';
 
 /**
  * Backend selector. Routes per plot type:
@@ -39,8 +41,36 @@ function isProfileRegion(r: any): boolean {
   return r?.kind === 'profile';
 }
 
+/** Saturation-based auto-window: pick [min,max] so ~`saturation` of pixels clip
+ *  at each end of the histogram. A dominant first/last bin (unscanned padding /
+ *  clipped background) is dropped so it doesn't skew the range. */
+function autoWindowFromHistogram(h: IHistogram, saturation: number): [number, number] {
+  const counts = h.counts.slice();
+  const n = counts.length;
+  if (n === 0) return [0, 255];
+  if (n > 2 && counts[0] > counts[1]) counts[0] = 0;
+  if (n > 2 && counts[n - 1] > counts[n - 2]) counts[n - 1] = 0;
+  let total = 0;
+  for (const c of counts) total += c;
+  if (total <= 0) return [0, 255];
+  const target = total * Math.max(0, Math.min(0.5, saturation));
+  let acc = 0;
+  let min = h.bins[0];
+  for (let i = 0; i < n; i++) {
+    acc += counts[i];
+    if (acc > target) { min = h.bins[i]; break; }
+  }
+  acc = 0;
+  let max = h.bins[n - 1];
+  for (let i = n - 1; i >= 0; i--) {
+    acc += counts[i];
+    if (acc > target) { max = h.bins[i]; break; }
+  }
+  return [min, max];
+}
+
 @Injectable({ providedIn: 'root' })
-export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi {
+export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, IChannelHistogramApi {
 
   /** Environment kill switch for the Image plot type (default on). Never flipped
    *  by load failures — those are handled per-image by `osdFellBack`. */
@@ -56,6 +86,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi {
 
   constructor(private plotly: PlotlyService,
               private osd: OpenSeadragonVisualizerService,
+              private store: VisualizerStore,
               @Inject(VIZ_CONFIG) config: VizConfig) {
     this.useOsdForImage = config.useOsdForImage !== false;
   }
@@ -241,6 +272,35 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi {
   setReverseScale(reverscale: any): void { this.plotly.setReverseScale(reverscale); }
   setImageMeta(imageMeta: IImageMetadata[]): void { this.plotly.setImageMeta(imageMeta); }
   getImageMeta(): Observable<IImageMetadata[]> { return this.plotly.getImageMeta(); }
+
+  // ── IChannelHistogramApi: Channels & Histogram pane surface ───────────
+  // Channel/grayscale/invert state lives in the shared VisualizerStore; both
+  // backends subscribe and recolor live, so setters just write the store. The
+  // histogram comes from whichever backend is on screen (its native pixels).
+  getHistogram(channelIndex: number, bins: number): IHistogram | null {
+    return this.renderer().getHistogram(channelIndex, bins);
+  }
+  getChannels$(): Observable<IChannelState[]> { return this.store.getChannelStates(); }
+  setChannelState(index: number, partial: Partial<IChannelState>): void {
+    this.store.setChannelState(index, partial);
+  }
+  resetContrast(indices: number[]): void {
+    for (const i of indices) this.store.setChannelState(i, { min: 0, max: 255 });
+  }
+  /** Auto-window each channel by saturating `saturation` (0..1) of pixels at each
+   *  end of its histogram (skipping outlier first/last bins). */
+  autoContrast(indices: number[], saturation: number): void {
+    for (const i of indices) {
+      const h = this.renderer().getHistogram(i, 256);
+      if (!h) continue;
+      const [min, max] = autoWindowFromHistogram(h, saturation);
+      if (max > min) this.store.setChannelState(i, { min, max });
+    }
+  }
+  getGrayscale$(): Observable<boolean> { return this.store.getGrayscale(); }
+  setGrayscale(on: boolean): void { this.store.setGrayscale(on); }
+  getInvert$(): Observable<boolean> { return this.store.getInvert(); }
+  setInvert(on: boolean): void { this.store.setInvert(on); }
 
   /**
    * The active backend's region overlay. Falls back to Plotly's when OSD is

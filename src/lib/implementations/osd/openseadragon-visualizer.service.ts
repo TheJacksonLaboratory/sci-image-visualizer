@@ -25,6 +25,7 @@ import { VertexEraserToolService, VertexEraserToolHost } from '../../toolbar/ver
 import { ZoomToBoxToolService, ZoomToBoxToolHost } from '../../toolbar/zoom-to-box-tool.service';
 import { WandOptions } from '../../toolbar/wand.service';
 import { buildColormapLut, Rgb } from '../../contracts/colormap-lut';
+import { IChannelState, IHistogram } from '../../contracts/channel-histogram-api.contract';
 
 /** One pyramid level from `GET /tiles/info`. */
 interface TileLevel { res: number; width: number; height: number; }
@@ -105,6 +106,16 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
    *  no windowing (identity 0..255), e.g. RGB images or before it resolves. */
   private imageWindow: [number, number] | null = null;
   private colormapSub: Subscription | null = null;
+  /** Latest per-channel display state (window/gamma/visibility) from the store,
+   *  read synchronously by recolorTile. Channel 0 drives grayscale windowing;
+   *  R/G/B (indices 0-2) drive RGB per-channel windowing. */
+  private channelStates: IChannelState[] = [];
+  /** Inverted background (white = zero): inverts the display value before the
+   *  LUT (grayscale) / per channel (RGB). */
+  private invertBg = false;
+  /** 256-bin intensity histogram per z-slice, accumulated while sampling tiles
+   *  in computeImageWindow; feeds the Channels & Histogram pane (grayscale). */
+  private sliceHistograms = new Map<number, IHistogram>();
   /** Bearer token for OSD's own tile fetches (HttpClient calls get it via the
    *  interceptor; OSD's loader does not, so we pass it as an ajax header). */
   private authHeaders: Record<string, string> = {};
@@ -201,29 +212,37 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     // Colormap/reverse live in the shared VisualizerStore — the single source
     // of truth for both backends. Rebuild the LUT and re-run the pixel pipeline
     // whenever either changes, so OSD recolors in lock-step with Plotly.
-    this.colormapSub = combineLatest([this.session.getColormap(), this.session.getReverseScale()]).subscribe(
-      ([cm, rev]) => {
-        this.colorLut = buildColormapLut(cm?.data?.value, !!rev);
-        // Already-loaded tiles need a re-run; new tiles run the pipeline on load.
-        // requestInvalidate(true) restores each tile to its original (grayscale)
-        // data before re-running recolorTile, so a colormap change always maps
-        // intensity->LUT afresh rather than compounding the previous colors.
-        if (this.viewer && this.isGrayscaleImage) {
-          try {
-            (this.viewer as any).world.requestInvalidate(true);
-          } catch {
-            /* no-op */
-          }
-          // Re-run the recolor pipeline on the overview navigator too, so the
-          // minimap updates in lock-step with the main image.
-          try {
-            (this.viewer as any).navigator?.world?.requestInvalidate(true);
-          } catch {
-            /* no-op */
-          }
+    // Colormap/reverse + per-channel window/gamma/visibility + invert all live in
+    // the shared VisualizerStore. Rebuild the LUT and re-run the pixel pipeline
+    // whenever any of them changes, so the Channels & Histogram pane updates the
+    // image live and OSD stays in lock-step with Plotly.
+    this.colormapSub = combineLatest([
+      this.session.getColormap(),
+      this.session.getReverseScale(),
+      this.session.getChannelStates(),
+      this.session.getInvert(),
+    ]).subscribe(([cm, rev, channels, invert]) => {
+      this.colorLut = buildColormapLut(cm?.data?.value, !!rev);
+      this.channelStates = channels;
+      this.invertBg = !!invert;
+      // requestInvalidate(true) restores each tile to its original data before
+      // re-running recolorTile, so a change always maps afresh (no compounding).
+      // RGB now recolors too (per-channel window/visibility), so don't gate on
+      // grayscale.
+      if (this.viewer) {
+        try {
+          (this.viewer as any).world.requestInvalidate(true);
+        } catch {
+          /* no-op */
         }
-      },
-    );
+        // Re-run on the overview navigator too, so the minimap tracks the image.
+        try {
+          (this.viewer as any).navigator?.world?.requestInvalidate(true);
+        } catch {
+          /* no-op */
+        }
+      }
+    });
   }
 
   /**
@@ -256,13 +275,20 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       const t = d.tileSize;
       const cols = Math.max(1, Math.ceil(d.width / t));
       const rows = Math.max(1, Math.ceil(d.height / t));
-      if (cols * rows > 64) return; // huge image — skip rather than flood the network
+      if (cols * rows > 64) {
+        // Too big to sample full-res for the auto window, but still build an
+        // approximate histogram from the coarsest overview so the Channels &
+        // Histogram pane shows a distribution for whole-slide images.
+        await this.sampleHistogramAtCoarsest(d, infoB64, z, t);
+        return;
+      }
       const coords: Array<[number, number]> = [];
       for (let row = 0; row < rows; row++) {
         for (let col = 0; col < cols; col++) coords.push([col, row]);
       }
       let min = 255;
       let max = 0;
+      const counts = new Array(256).fill(0); // 256-bin intensity histogram
       await Promise.all(
         coords.map(async ([col, row]) => {
           const url = `${this.api}tile?info=${infoB64}&res=${res}&col=${col}&row=${row}&z=${z}&tileSize=${t}`;
@@ -285,18 +311,31 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
                   : data[i + 1] >= data[i + 2] ? data[i + 1] : data[i + 2];
               if (v < min) min = v;
               if (v > max) max = v;
+              counts[v]++;
             }
           } catch {
             /* skip this tile */
           }
         }),
       );
+      // Cache the histogram for the Channels & Histogram pane.
+      this.sliceHistograms.set(z, {
+        bins: Array.from({ length: 256 }, (_, i) => i),
+        counts,
+        max: counts.reduce((m, c) => (c > m ? c : m), 0),
+      });
       // Only keep a window that actually narrows the range; a full 0..255 image
       // maps identically anyway, so skip it to avoid pointless re-invalidation.
       if (max > min && (min > 0 || max < 255)) {
         this.sliceWindows.set(z, [min, max]);
         if (z === this.currentZ) this.imageWindow = [min, max];
-        if (this.viewer && this.colorLut) {
+        // Seed the Intensity channel's display window from the auto-range so the
+        // pane reflects what's on screen — but only while it's untouched (still
+        // full 0..255), so we never clobber the user's manual window.
+        const ch0 = this.session.currentChannelStates()[0];
+        if (ch0 && ch0.min === 0 && ch0.max === 255) {
+          this.session.setChannelState(0, { min, max });
+        } else if (this.viewer && this.colorLut) {
           try {
             (this.viewer as any).world.requestInvalidate(true);
           } catch {
@@ -312,6 +351,61 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     } catch {
       this.sliceWindows.set(z, null); // fall back to identity 0..255
       if (z === this.currentZ) this.imageWindow = null;
+    }
+  }
+
+  /** Build an approximate intensity histogram from the coarsest pyramid level
+   *  (a handful of tiles) for whole-slide images too large to sample at full
+   *  resolution. Caches it per slice so the Channels & Histogram pane has a
+   *  distribution to show. Fire-and-forget. */
+  private async sampleHistogramAtCoarsest(
+    d: TileDescriptor, infoB64: string, z: number, tileSize: number,
+  ): Promise<void> {
+    try {
+      const res = Math.max(0, (d.levels?.length ?? 1) - 1); // coarsest backend res
+      const lvl = d.levels?.[res];
+      const cols = Math.max(1, Math.ceil((lvl?.width ?? d.width) / tileSize));
+      const rows = Math.max(1, Math.ceil((lvl?.height ?? d.height) / tileSize));
+      if (cols * rows > 36) return; // coarsest is normally 1 tile; guard anyway
+      const counts = new Array(256).fill(0);
+      const coords: Array<[number, number]> = [];
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) coords.push([col, row]);
+      }
+      await Promise.all(
+        coords.map(async ([col, row]) => {
+          const url = `${this.api}tile?info=${infoB64}&res=${res}&col=${col}&row=${row}&z=${z}&tileSize=${tileSize}`;
+          try {
+            const blob = await firstValueFrom(this.http.get(url, { responseType: 'blob' }).pipe(timeout(20000)));
+            const bmp = await createImageBitmap(blob);
+            const c = document.createElement('canvas');
+            c.width = bmp.width;
+            c.height = bmp.height;
+            const ctx = c.getContext('2d', { willReadFrequently: true });
+            if (!ctx) return;
+            ctx.drawImage(bmp, 0, 0);
+            bmp.close?.();
+            const data = ctx.getImageData(0, 0, c.width, c.height).data;
+            for (let i = 0; i < data.length; i += 4) {
+              if (data[i + 3] === 0) continue;
+              const v =
+                data[i] >= data[i + 1]
+                  ? data[i] >= data[i + 2] ? data[i] : data[i + 2]
+                  : data[i + 1] >= data[i + 2] ? data[i + 1] : data[i + 2];
+              counts[v]++;
+            }
+          } catch {
+            /* skip this tile */
+          }
+        }),
+      );
+      this.sliceHistograms.set(z, {
+        bins: Array.from({ length: 256 }, (_, i) => i),
+        counts,
+        max: counts.reduce((m, c) => (c > m ? c : m), 0),
+      });
+    } catch {
+      /* leave the histogram unset */
     }
   }
 
@@ -915,6 +1009,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
   private resetSliceCache(): void {
     this.sliceItems.clear();
     this.sliceWindows.clear();
+    this.sliceHistograms.clear();
     this.sliceLru = [];
     this.slicesLoading.clear();
     this.bgLoadingZ = null;
@@ -1233,9 +1328,11 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
    * built. Handler is async — OSD awaits it (raiseEventAwaiting).
    */
   private async recolorTile(event: any): Promise<void> {
-    const lut = this.colorLut;
-    if (!lut || !this.isGrayscaleImage) {
-      return;
+    const gray = this.isGrayscaleImage;
+    if (gray) {
+      if (!this.colorLut) return;
+    } else if (!this.rgbNeedsRecolor()) {
+      return; // RGB at default (all visible, full window, γ=1, no invert) → passthrough
     }
 
     // Read the tile's pixels. Prefer the rendering context, but some tile caches
@@ -1284,40 +1381,82 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
 
     const d = img.data;
     let changed = false;
-    // Per-image auto-range (window/level), mirroring the heatmap's auto-stretch:
-    // map the raw value through [min,max] before the LUT so low-range images
-    // (label masks 0,1,2; un-normalized DICOM) spread across the colormap
-    // instead of collapsing onto a single flat LUT entry. A per-image window
-    // (not per-tile) keeps it seamless across tiles. Null → identity 0..255.
-    // Per-slice window: a tile carries its z in its URL, so a cached slice keeps
-    // its own auto-range even when the world is re-invalidated (colormap change).
-    const tz = this.tileZ(event);
-    const win = tz != null && this.sliceWindows.has(tz) ? this.sliceWindows.get(tz)! : this.imageWindow;
-    const wMin = win ? win[0] : 0;
-    const wSpan = win && win[1] > win[0] ? win[1] - win[0] : 0;
-    for (let i = 0; i < d.length; i += 4) {
-      if (d[i + 3] === 0) continue; // leave transparent padding alone
-      // Intensity from the brightest channel, not just red: a single-channel
-      // grayscale tile has r==g==b (so this == r), but a multi-channel
-      // "grayscale" image (channelCount > 1) renders its signal into green/blue
-      // with red == 0 — reading red alone would map every pixel to lut[0]
-      // (a flat white/blue canvas).
-      const raw =
-        d[i] >= d[i + 1] ? (d[i] >= d[i + 2] ? d[i] : d[i + 2]) : d[i + 1] >= d[i + 2] ? d[i + 1] : d[i + 2];
-      let v = raw;
-      if (wSpan) {
-        v = Math.round((255 * (raw - wMin)) / wSpan);
-        v = v < 0 ? 0 : v > 255 ? 255 : v;
+    if (gray) {
+      // Grayscale: map intensity through the channel's display window + gamma,
+      // optionally invert, then the colormap LUT. The window comes from the
+      // single "Intensity" channel (channel 0), seeded from the auto-range by
+      // computeImageWindow and editable in the Channels & Histogram pane.
+      const lut = this.colorLut!;
+      const ch = this.channelStates[0];
+      const wMin = ch ? ch.min : 0;
+      const wSpan = ch && ch.max > ch.min ? ch.max - ch.min : 255;
+      const invGamma = ch && ch.gamma > 0 ? 1 / ch.gamma : 1;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i + 3] === 0) continue; // leave transparent padding alone
+        // Intensity from the brightest channel, not just red: a multi-channel
+        // "grayscale" tile may render its signal into green/blue with red == 0.
+        const raw =
+          d[i] >= d[i + 1] ? (d[i] >= d[i + 2] ? d[i] : d[i + 2]) : d[i + 1] >= d[i + 2] ? d[i + 1] : d[i + 2];
+        let t = (raw - wMin) / wSpan;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        if (invGamma !== 1) t = Math.pow(t, invGamma);
+        let v = Math.round(t * 255);
+        if (this.invertBg) v = 255 - v;
+        const c = lut[v];
+        d[i] = c[0];
+        d[i + 1] = c[1];
+        d[i + 2] = c[2];
+        changed = true;
       }
-      const c = lut[v];
-      d[i] = c[0];
-      d[i + 1] = c[1];
-      d[i + 2] = c[2];
-      changed = true;
+    } else {
+      // RGB: per-channel display window + gamma + visibility (+ invert), no LUT.
+      const r = this.channelStates[0], g = this.channelStates[1], b = this.channelStates[2];
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i + 3] === 0) continue;
+        d[i] = this.applyChannelWindow(d[i], r);
+        d[i + 1] = this.applyChannelWindow(d[i + 1], g);
+        d[i + 2] = this.applyChannelWindow(d[i + 2], b);
+        changed = true;
+      }
     }
     if (!changed || !ctx) return; // nothing opaque — don't blank the tile
     ctx.putImageData(img, 0, 0);
     await event.setData(ctx, 'context2d');
+  }
+
+  /** Apply one RGB channel's display window + gamma + visibility (+ invert) to a
+   *  raw 0..255 sample. Hidden channels collapse to zero. */
+  private applyChannelWindow(val: number, c?: IChannelState): number {
+    if (c) {
+      if (!c.visible) return this.invertBg ? 255 : 0;
+      const span = c.max > c.min ? c.max - c.min : 0;
+      if (span) {
+        let t = (val - c.min) / span;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        if (c.gamma > 0 && c.gamma !== 1) t = Math.pow(t, 1 / c.gamma);
+        val = Math.round(t * 255);
+      }
+    }
+    return this.invertBg ? 255 - val : val;
+  }
+
+  /** True when any RGB channel is windowed/hidden/gamma'd or the background is
+   *  inverted — i.e. the tile needs recoloring (otherwise it passes through). */
+  private rgbNeedsRecolor(): boolean {
+    if (this.invertBg) return true;
+    for (let k = 0; k < 3; k++) {
+      const c = this.channelStates[k];
+      if (c && (!c.visible || c.min !== 0 || c.max !== 255 || c.gamma !== 1)) return true;
+    }
+    return false;
+  }
+
+  /** Histogram for the Channels & Histogram pane. Grayscale: the cached
+   *  intensity histogram of the current slice (sampled by computeImageWindow).
+   *  RGB or unsampled: null (the pane shows "no histogram"). */
+  getHistogram(_channelIndex: number, _bins: number): IHistogram | null {
+    if (!this.isGrayscaleImage) return null;
+    return this.sliceHistograms.get(this.currentZ) ?? null;
   }
 
   /** The z-slice a tile belongs to, parsed from its URL (getTileUrl encodes

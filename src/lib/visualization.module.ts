@@ -18,11 +18,13 @@ import { PaginatorModule } from 'primeng/paginator';
 import { OverlayPanelModule } from 'primeng/overlaypanel';
 import { ConfirmDialogModule } from 'primeng/confirmdialog';
 import { InputTextModule } from 'primeng/inputtext';
+import { CheckboxModule } from 'primeng/checkbox';
 
 import { VisualizationComponent } from './visualization.component';
 import { ToolbarComponent } from './toolbar/toolbar.component';
 import { RegionEditorComponent } from './region-editor/region-editor.component';
 import { HexColorPickerComponent } from './hex-color-picker/hex-color-picker.component';
+import { ChannelHistogramComponent } from './channel-histogram/channel-histogram.component';
 
 /**
  * Self-contained plotting UI: the {@link VisualizationComponent} (plot surface
@@ -41,6 +43,7 @@ import { HexColorPickerComponent } from './hex-color-picker/hex-color-picker.com
     ToolbarComponent,
     RegionEditorComponent,
     HexColorPickerComponent,
+    ChannelHistogramComponent,
   ],
   imports: [
     CommonModule,
@@ -61,7 +64,8 @@ import { HexColorPickerComponent } from './hex-color-picker/hex-color-picker.com
     OverlayPanelModule,
     ConfirmDialogModule,
     InputTextModule,
+    CheckboxModule,
   ],
-  exports: [VisualizationComponent, RegionEditorComponent, HexColorPickerComponent],
+  exports: [VisualizationComponent, RegionEditorComponent, HexColorPickerComponent, ChannelHistogramComponent],
 })
 export class VisualizationModule {}

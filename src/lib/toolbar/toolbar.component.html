@@ -44,31 +44,14 @@
         </p-button>
       </ng-container>
     </ng-container>
-    <!-- Colormap / LUT controls: only meaningful for grayscale images. -->
-    <ng-container *ngIf="imageInfo?.isGrayscale">
-      <p-button pRipple size="small"
-                [text]="!reversescale"
-                pTooltip="Toggle between normal and reverse color scale"
-                tooltipPosition="bottom"
-                (onClick)="toggleReverseScale.emit()">
-        <img src="assets/plotting/invert.svg"
-             [class]="reversescale ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
-             style="width: 1rem"/>
-      </p-button>
-      <p-treeSelect [options]="colormapsOptions" [(ngModel)]="selectedColormap"
-                    [selectionMode]="'single'" placeholder="LUT"
-                    pTooltip="Color Lookup Tables" [scrollHeight]="'500px'"
-                    [labelStyle]="{'color': 'var(--primary-color)'}"
-                    [containerStyle]="{'border-color': 'var(--primary-color)'}"
-                    (onNodeSelect)="selectColormap.emit($event.node)">
-        <ng-template let-node pTemplate="default">
-          <div class="flex align-items-center gap-2">
-            <img *ngIf="!node.children" [src]="node.data?.src" class="colormap" />
-            <div>{{ node.label }}</div>
-          </div>
-        </ng-template>
-      </p-treeSelect>
-    </ng-container>
+    <!-- Channels & Histogram: brightness/contrast, gamma, per-channel display,
+         colormap/reverse/invert — opens the floating dialog. -->
+    <p-button pRipple size="small" [text]="true"
+              pTooltip="Channels &amp; Histogram (brightness/contrast, colormap)"
+              tooltipPosition="bottom"
+              (onClick)="openChannelHistogram.emit()">
+      <img src="assets/plotting/invert.svg" class="toolbar-icon-dark" style="width: 1rem"/>
+    </p-button>
 
     <!-- Stack controls -->
     <ng-container *ngIf="imageInfo?.isStack">
