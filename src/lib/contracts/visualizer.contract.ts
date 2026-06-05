@@ -32,10 +32,13 @@ export interface PixelData {
 
 /** Intensity sampled along a line ROI (PlotType.LINE over image data). */
 export interface IntensityProfile {
-  /** Distance along the line, in data units. */
+  /** Distance along the line. In microns when the image carries a physical
+   *  pixel size (mpp); otherwise in image pixels. See {@link unit}. */
   positions: number[];
   /** Sampled intensity (grayscale value or RGB luminance). */
   values: number[];
+  /** Unit of {@link positions}: 'µm' when scaled by the image's mpp, else 'px'. */
+  unit?: 'µm' | 'px';
   /** Stable id of the line ROI this profile came from (multi-line support). */
   id?: number;
   /** Colour of the line ROI — the inset trace is drawn in the same colour. */

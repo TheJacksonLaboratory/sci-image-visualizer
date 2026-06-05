@@ -730,9 +730,13 @@ export class PlotlyService implements IVisualizer {
       name: `Line ${i + 1}`,
       hoverinfo: 'x+y',
     }));
+    // X axis is in microns when the image carries a physical pixel size (mpp),
+    // otherwise in pixels — driven by the unit the sampler tagged on the profile.
+    const unit = (profiles ?? []).find(p => p.unit)?.unit ?? 'px';
+    const xTitle = unit === 'µm' ? 'Position (µm)' : 'Position (px)';
     Plotly.react(el, traces as any, {
-      margin: { t: 6, r: 8, b: 26, l: 40 },
-      xaxis: { title: '', zeroline: false, color: '#ddd' },
+      margin: { t: 6, r: 8, b: 38, l: 40 },
+      xaxis: { title: xTitle, zeroline: false, color: '#ddd' },
       yaxis: { title: 'Intensity', zeroline: false, color: '#ddd' },
       showlegend: false,
       paper_bgcolor: 'rgba(25,25,25,0.9)',
@@ -907,7 +911,14 @@ export class PlotlyService implements IVisualizer {
     const [ox, oy] = this.cachedFrameOrigin;
     const x0 = +line.x0, y0 = +line.y0, x1 = +line.x1, y1 = +line.y1;
     const dxData = x1 - x0, dyData = y1 - y0;
-    const lenData = Math.hypot(dxData, dyData);
+    // Scale the along-line distance by the physical pixel size (microns/pixel)
+    // when the image carries one — anisotropic mppX/mppY are applied per axis so
+    // diagonal lines measure the true physical length. Falls back to pixels.
+    const { mppX, mppY } = this.currentMpp();
+    const useMicrons = mppX != null;
+    const lenData = useMicrons
+      ? Math.hypot(dxData * mppX, dyData * (mppY ?? mppX))
+      : Math.hypot(dxData, dyData);
     const lenPx = Math.hypot(dxData / rx, dyData / ry);
     const n = Math.max(2, Math.round(lenPx));
     const h = frame.length;
@@ -928,7 +939,20 @@ export class PlotlyService implements IVisualizer {
       positions.push(t * lenData);
       values.push(v);
     }
-    return { positions, values };
+    return { positions, values, unit: useMicrons ? 'µm' : 'px' };
+  }
+
+  /** Physical pixel size (microns/pixel) for the current image, if known.
+   *  mpp is constant across frames/channels, so the first metadata entry that
+   *  carries a positive mppX wins. Returns nulls when the image is unscaled. */
+  private currentMpp(): { mppX: number | null; mppY: number | null } {
+    const meta = this.imageInfo?.imageMeta;
+    const m = Array.isArray(meta)
+      ? (meta.find(e => e && (e.mppX ?? 0) > 0) ?? meta[0])
+      : undefined;
+    const mppX = m && (m.mppX ?? 0) > 0 ? (m.mppX as number) : null;
+    const mppY = m && (m.mppY ?? 0) > 0 ? (m.mppY as number) : null;
+    return { mppX, mppY };
   }
 
   /**
