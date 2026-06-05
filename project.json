@@ -5,6 +5,22 @@
   "sourceRoot": "libs/jax-image-visualization/src",
   "prefix": "jax",
   "targets": {
+    "build": {
+      "executor": "@angular-devkit/build-angular:ng-packagr",
+      "outputs": ["{workspaceRoot}/dist/libs/jax-image-visualization"],
+      "options": {
+        "project": "libs/jax-image-visualization/ng-package.json"
+      },
+      "configurations": {
+        "production": {
+          "tsConfig": "libs/jax-image-visualization/tsconfig.lib.prod.json"
+        },
+        "development": {
+          "tsConfig": "libs/jax-image-visualization/tsconfig.lib.json"
+        }
+      },
+      "defaultConfiguration": "production"
+    },
     "lint": {
       "executor": "@nrwl/linter:eslint",
       "options": {

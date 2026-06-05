@@ -1,0 +1,20 @@
+{
+  "name": "@jax-image/visualization",
+  "version": "0.0.1",
+  "sideEffects": false,
+  "peerDependencies": {
+    "@angular/common": "^17.3.0",
+    "@angular/core": "^17.3.0",
+    "@angular/forms": "^17.3.0",
+    "rxjs": "^7.8.0",
+    "primeng": "^17.18.0",
+    "openseadragon": "^6.0.2",
+    "plotly.js-dist-min": "^3.0.1",
+    "image-js": "^0.35.6",
+    "file-saver": "^2.0.5",
+    "buffer": "^5.7.1"
+  },
+  "dependencies": {
+    "tslib": "^2.3.0"
+  }
+}

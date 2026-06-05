@@ -44,7 +44,7 @@ import { RegionStore } from '../../region-store.service';
 export { PlotType } from '../../contracts/plot-type';
 
 
-window.Buffer = Buffer;
+(window as any).Buffer = Buffer;
 
 @Injectable({
   providedIn: 'root'

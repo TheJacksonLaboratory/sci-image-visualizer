@@ -25,3 +25,11 @@ export { ShapeSelection } from './lib/models/shape';
 // ── Angular module + composition-root service ────────────────────────────
 export { VisualizationModule } from './lib/visualization.module';
 export { RoutingVisualizerService } from './lib/routing-visualizer.service';
+
+// ── Public components (exported by VisualizationModule) ───────────────────
+// ng-packagr requires module-exported components to be reachable from the
+// entry point so consumers get their types; these are the embeddable elements
+// (`<visualization>`, `<region-editor>`, `<hex-color-picker>`).
+export { VisualizationComponent } from './lib/visualization.component';
+export { RegionEditorComponent } from './lib/region-editor/region-editor.component';
+export { HexColorPickerComponent } from './lib/hex-color-picker/hex-color-picker.component';
