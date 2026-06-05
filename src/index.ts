@@ -11,6 +11,7 @@ export * from './lib/contracts/visualizer.contract';
 export * from './lib/contracts/region-editor-api.contract';
 export * from './lib/contracts/ports/image-state.port';
 export * from './lib/contracts/ports/tile-access.port';
+export * from './lib/contracts/ports/region-io.port';
 export * from './lib/contracts/viz-config';
 export * from './lib/contracts/image.contract';
 export * from './lib/contracts/plot-type';

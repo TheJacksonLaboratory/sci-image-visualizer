@@ -13,18 +13,31 @@ import { ContextMenuModule } from 'primeng/contextmenu';
 import { ProgressBarModule } from 'primeng/progressbar';
 import { TooltipModule } from 'primeng/tooltip';
 import { RippleModule } from 'primeng/ripple';
+import { TableModule } from 'primeng/table';
+import { PaginatorModule } from 'primeng/paginator';
+import { OverlayPanelModule } from 'primeng/overlaypanel';
+import { ConfirmDialogModule } from 'primeng/confirmdialog';
+import { InputTextModule } from 'primeng/inputtext';
 
 import { VisualizationComponent } from './visualization.component';
 import { ToolbarComponent } from './toolbar/toolbar.component';
+import { RegionEditorComponent } from './region-editor/region-editor.component';
+import { HexColorPickerComponent } from './shared/hex-color-picker/hex-color-picker.component';
 
 /**
  * Self-contained plotting UI: the {@link VisualizationComponent} (plot surface
- * + render orchestration) and its {@link ToolbarComponent}. Consumers embed
- * `<visualization>` and need know nothing about the toolbar or the rendering
- * backends. The diagram host imports this module and renders `<visualization>`.
+ * + render orchestration), its {@link ToolbarComponent}, and the
+ * {@link RegionEditorComponent} (the Regions tab table/editor). Consumers embed
+ * `<visualization>` / `<region-editor>` and need know nothing about the toolbar,
+ * the rendering backends, or region file I/O (supplied via the REGION_IO_PORT).
  */
 @NgModule({
-  declarations: [VisualizationComponent, ToolbarComponent],
+  declarations: [
+    VisualizationComponent,
+    ToolbarComponent,
+    RegionEditorComponent,
+    HexColorPickerComponent,
+  ],
   imports: [
     CommonModule,
     FormsModule,
@@ -39,7 +52,12 @@ import { ToolbarComponent } from './toolbar/toolbar.component';
     ProgressBarModule,
     TooltipModule,
     RippleModule,
+    TableModule,
+    PaginatorModule,
+    OverlayPanelModule,
+    ConfirmDialogModule,
+    InputTextModule,
   ],
-  exports: [VisualizationComponent],
+  exports: [VisualizationComponent, RegionEditorComponent],
 })
 export class VisualizationModule {}

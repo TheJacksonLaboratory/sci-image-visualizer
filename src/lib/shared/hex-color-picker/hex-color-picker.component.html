@@ -1,0 +1,76 @@
+<div class="hex-picker-wrapper">
+  <button #swatchBtn type="button" class="hex-picker-swatch" [style.background]="color"
+          (click)="toggle()" [title]="color">
+  </button>
+  <div #dropdown class="hex-picker-dropdown" [hidden]="!open">
+    <!-- Hexagon grid -->
+    <div class="hex-grid">
+      <div *ngFor="let row of colorRows;"
+           class="hex-row">
+        <button *ngFor="let c of row"
+                type="button"
+                class="hex-cell"
+                [style.background]="c"
+                [class.hex-selected]="c === color"
+                [title]="c"
+                [attr.aria-label]="'Select color ' + c"
+                (click)="selectAndClose(c)">
+        </button>
+      </div>
+    </div>
+
+    <!-- Hex input + native picker -->
+    <div class="hex-picker-footer">
+      <input type="text" class="hex-input" [value]="color"
+             (change)="onHexInput($any($event.target).value)"
+             maxlength="7" spellcheck="false">
+      <input type="color" class="native-picker" [value]="color"
+             (input)="selectColor($any($event.target).value)"
+             title="Open system color picker">
+    </div>
+
+    <!-- HSL sliders -->
+    <div class="slider-section">
+      <div class="slider-row">
+        <label>H</label>
+        <input type="range" min="0" max="360" [ngModel]="hue"
+               (ngModelChange)="hue=$event; onHslChange()"
+               class="slider slider-hue" [style.background]="hueGradient">
+        <span class="slider-value">{{hue}}</span>
+      </div>
+      <div class="slider-row">
+        <label>S</label>
+        <input type="range" min="0" max="100" [ngModel]="saturation"
+               (ngModelChange)="saturation=$event; onHslChange()"
+               class="slider slider-sat" [style.background]="satGradient">
+        <span class="slider-value">{{saturation}}</span>
+      </div>
+      <div class="slider-row">
+        <label>L</label>
+        <input type="range" min="0" max="100" [ngModel]="lightness"
+               (ngModelChange)="lightness=$event; onHslChange()"
+               class="slider slider-light" [style.background]="lightGradient">
+        <span class="slider-value">{{lightness}}</span>
+      </div>
+    </div>
+
+    <!-- RGB inputs -->
+    <div class="rgb-section">
+      <div class="rgb-field">
+        <label>R</label>
+        <input type="number" min="0" max="255" [ngModel]="red"
+               (ngModelChange)="red=$event; onRgbChange()">
+      </div>
+      <div class="rgb-field">
+        <label>G</label>
+        <input type="number" min="0" max="255" [ngModel]="green"
+               (ngModelChange)="green=$event; onRgbChange()">
+      </div>
+      <div class="rgb-field">
+        <label>B</label>
+        <input type="number" min="0" max="255" [ngModel]="blue"
+               (ngModelChange)="blue=$event; onRgbChange()">
+      </div>
+    </div>
+  </div>
+</div>

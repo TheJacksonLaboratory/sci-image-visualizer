@@ -1,0 +1,457 @@
+
+<p-toolbar styleClass="region-toolbar">
+  <div class="p-toolbar-group-start align-items-center flex-wrap gap-1">
+    <p-button icon="pi pi-tag" size="small"
+              [text]="!showShapeLabel"
+              pTooltip="Show region labels. Showing labels on many regions makes the diagram slower."
+              tooltipPosition="bottom"
+              (onClick)="showShapeLabel = !showShapeLabel; changeShowShapeLabel(showShapeLabel)">
+    </p-button>
+    <div class="flex align-items-center mx-1"
+         pTooltip="Change region fill color" tooltipPosition="bottom">
+      <hex-color-picker [color]="fillColor && fillColor.length === 7
+                && fillColor.charAt(0) === '#' ? fillColor : '#000000'"
+                        (colorChange)="changeFillColor({value: $event})">
+      </hex-color-picker>
+    </div>
+    <span class="toolbar-separator"></span>
+    <!-- New regions are now created from the diagram toolbar
+         (rectangle, polyline, freeform, wand). -->
+    <p-button icon="pi pi-upload" size="small" [text]="true" styleClass="mr-2"
+              pTooltip="Import ROIs from geojson format"
+              tooltipPosition="bottom"
+              (click)="roiFileInput.click()">
+    </p-button>
+    <input #roiFileInput type="file" accept=".geojson,.json" hidden
+           (change)="importRois($event); roiFileInput.value = ''"/>
+    <p-button size="small" [text]="true" styleClass="mr-2"
+              pTooltip="Export ROIs to geojson format"
+              tooltipPosition="bottom" icon="pi pi-download"
+              (click)="exportRois()">
+    </p-button>
+    <p-button icon="pi pi-save" size="small" [text]="true" styleClass="mr-2"
+              pTooltip="Save regions (as geojson alongside the image)"
+              tooltipPosition="bottom"
+              (click)="persistRegions()"
+              [disabled]="!regions || !regions.length">
+    </p-button>
+    <p-button label="x512" size="small" [text]="true" styleClass="mr-2"
+              pTooltip="Round all rectangle regions
+                    to width and height that are multiple of 512" tooltipPosition="bottom"
+              (click)="roundRectangleLengths()">
+    </p-button>
+    <p-button icon="pi pi-tags" size="small" [text]="true" styleClass="mr-2"
+              pTooltip="Edit labels on selected rows"
+              tooltipPosition="bottom"
+              (click)="(!selectedRegions || !selectedRegions.length)? op.hide() : op.toggle($event)"
+              [disabled]="!selectedRegions || !selectedRegions.length">
+    </p-button>
+    <p-button icon="pi pi-palette" size="small" [text]="true" styleClass="mr-2"
+              pTooltip="Edit classification colours"
+              tooltipPosition="bottom"
+              (click)="openColorDialog()">
+    </p-button>
+    <p-overlayPanel #op>
+      <div class="flex flex-column gap-3 w-25rem">
+        <div>
+          <span class="font-medium text-900 block mb-2">Edit label</span>
+          <div class="p-inputgroup">
+            <input type="text" pInputText placeholder="Enter new label" [(ngModel)]="labelToEdit"/>
+            <button pButton type="button" label="Save" icon="pi pi-check" (click)="saveEditedLabel()">
+            </button>
+          </div>
+        </div>
+      </div>
+    </p-overlayPanel>
+    <p-button icon="pi pi-trash" size="small" [text]="true" styleClass="mr-2"
+              (click)="deleteSelectedRegions()"
+              pTooltip="Delete selected regions" tooltipPosition="bottom"
+              [disabled]="!selectedRegions || !selectedRegions.length"></p-button>
+    <p-button icon="pi pi-times-circle" size="small" [text]="true" styleClass="mr-2"
+              (click)="clearAllRegions()"
+              pTooltip="Delete all regions" tooltipPosition="bottom"
+              [disabled]="!regions || !regions.length"></p-button>
+    <p-button icon="pi pi-question" size="small" [text]="true"
+              (click)="showHelp()" pTooltip="Help" tooltipPosition="bottom"></p-button>
+  </div>
+</p-toolbar>
+
+<div class="region-editor-content">
+    <p-table #dt [value]="regions.slice(paginatorFirst, paginatorFirst + paginatorRows)"
+             [tableStyle]="{'width': '100%'}" [(selection)]="selectedRegions"
+             selectionMode="multiple" [metaKeySelection]="metaKey"
+             (onRowSelect)="onSelectionChanged()" (onRowUnselect)="onSelectionChanged()"
+             [resizableColumns]="true"
+             [rowHover]="true" dataKey="id" styleClass="p-datatable-sm region-editor-table"
+             [scrollable]="true" scrollHeight="100%">
+      <ng-template pTemplate="header">
+        <tr>
+          <!-- Chevron and trash columns: just enough for the icon. -->
+          <th style="width:2rem"></th>
+          <!-- Class column: shrinks to fit "legend" by default, grows with longer labels. -->
+          <th class="class-col-header" pResizableColumn>Class <p-sortIcon field="label"></p-sortIcon></th>
+          <!-- Coordinates column: fixed-ish width, ellipsis on overflow. -->
+          <th class="coords-col-header" pResizableColumn>Coordinates</th>
+          <th style="width:2rem"></th>
+        </tr>
+      </ng-template>
+      <ng-template pTemplate="body" let-region let-expanded="expanded" let-shapeIdx="rowIndex">
+        <tr [pSelectableRow]="region" [pSelectableRowIndex]="shapeIdx">
+          <td>
+            <button type="button" pButton pRipple [pRowToggler]="region"
+                    class="p-button-sm p-button-text p-button-rounded p-button-plain"
+                    [icon]="expanded ? 'pi pi-chevron-down' : 'pi pi-chevron-right'"></button>
+          </td>
+          <td class="class-cell">
+            <ng-container *ngIf="!isEditingLabel(region); else editLabelTpl">
+              <span class="class-cell-display">
+                {{region.label}}
+                <i class="pi pi-pencil icon-hover mx-2"
+                   pTooltip="Edit label" tooltipPosition="bottom"
+                   (click)="startEditLabel(region, $event)"></i>
+              </span>
+            </ng-container>
+            <ng-template #editLabelTpl>
+              <span class="p-input-icon-right class-cell-edit">
+                <i class="pi pi-times icon-hover"
+                   pTooltip="Close" tooltipPosition="bottom"
+                   (click)="stopEditLabel(region, false, $event)"></i>
+                <input type="text" pInputText class="p-inputtext-sm w-full"
+                       [(ngModel)]="region.label"
+                       (click)="$event.stopPropagation()"
+                       (keydown.enter)="stopEditLabel(region, true, $event)"
+                       (keydown.escape)="stopEditLabel(region, false, $event)"/>
+              </span>
+            </ng-template>
+          </td>
+          <td class="coords-cell" [pTooltip]="truncateForTooltip(region.toString())"
+              tooltipPosition="bottom">
+            {{region.toString()}}
+          </td>
+          <td>
+            <button pButton pRipple icon="pi pi-trash"
+							class="p-button-sm p-button-rounded p-button-text p-button-warning"
+                    (click)="deleteRegion(paginatorFirst + shapeIdx)"></button>
+          </td>
+        </tr>
+      </ng-template>
+      <ng-template pTemplate="rowexpansion" let-region>
+        <tr>
+          <!--   if rectangle  -->
+          <td *ngIf="isRectangle(region)" colspan="4">
+            <div class="p-3">
+              <p-table [value]="[region.bounds]" styleClass="p-datatable-sm">
+                <ng-template pTemplate="header">
+                  <tr>
+                    <th style="width:25%">X</th>
+                    <th style="width:25%">Y</th>
+                    <th style="width:25%">Width</th>
+                    <th style="width:25%">Height</th>
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="body" let-rectinfo>
+                  <tr>
+                    <td pEditableColumn>
+                      <p-cellEditor>
+                        <ng-template pTemplate="input">
+                          <p-inputNumber [(ngModel)]="rectinfo.x"
+                                         (onInput)="xRectUpdate(region, $event)"
+                                         (keydown)="disableArrowKeys($event)">
+                          </p-inputNumber>
+                        </ng-template>
+                        <ng-template pTemplate="output">
+                          {{rectinfo.x}}
+                        </ng-template>
+                      </p-cellEditor>
+                    </td>
+                    <td pEditableColumn>
+                      <p-cellEditor>
+                        <ng-template pTemplate="input">
+                          <p-inputNumber [(ngModel)]="rectinfo.y"
+                                         (onInput)="yRectUpdate(region, $event)"
+                                         (keydown)="disableArrowKeys($event)">
+                          </p-inputNumber>
+                        </ng-template>
+                        <ng-template pTemplate="output">
+                          {{rectinfo.y}}
+                        </ng-template>
+                      </p-cellEditor>
+                    </td>
+                    <td pEditableColumn>
+                      <p-cellEditor>
+                        <ng-template pTemplate="input">
+                          <p-inputNumber [(ngModel)]="rectinfo.width"
+                                         (onInput)="widthRectUpdate(region, $event)"
+                                         (keydown)="disableArrowKeys($event)">
+                          </p-inputNumber>
+                        </ng-template>
+                        <ng-template pTemplate="output">
+                          {{rectinfo.width}}
+                        </ng-template>
+                      </p-cellEditor>
+                    </td>
+                    <td pEditableColumn>
+                      <p-cellEditor>
+                        <ng-template pTemplate="input">
+                          <p-inputNumber [(ngModel)]="rectinfo.height"
+                                         (onInput)="heightRectUpdate(region, $event)"
+                                         (keydown)="disableArrowKeys($event)">
+                          </p-inputNumber>
+                        </ng-template>
+                        <ng-template pTemplate="output">
+                          {{rectinfo.height}}
+                        </ng-template>
+                      </p-cellEditor>
+                    </td>
+                  </tr>
+                </ng-template>
+              </p-table>
+              <div class="region-area mt-2" *ngIf="regionArea(region)">Area: {{ regionArea(region) }}</div>
+            </div>
+          </td>
+          <!--   if polygon       -->
+          <td *ngIf="!isRectangle(region)" colspan="4">
+            <div class="p-3">
+              <p-table [value]="region.bounds.coordinates" dataKey="id" styleClass="p-datatable-sm"
+                       [paginator]="true"
+                       [rows]="10"
+                       [rowsPerPageOptions]="[10, 50, 100]"
+                       paginatorDropdownAppendTo="body">
+                <ng-template pTemplate="paginatorright">
+                  <p-button pRipple icon="pi pi-plus" size="small"
+                          class="flex-initial flex align-items-center justify-content-center
+                          border-round" pTooltip="Add new point coordinate" [text]="true" styleClass="mr-2"
+                          tooltipPosition="bottom" (click)="addCoordinate(region)"></p-button>
+                </ng-template>
+                <ng-template pTemplate="header">
+                  <tr>
+                    <th style="width:40%">X</th>
+                    <th style="width:40%">Y</th>
+                    <th style="width:20%"></th>
+                  </tr>
+                </ng-template>
+                <ng-template pTemplate="body" let-coordinate let-ri="rowIndex">
+                  <tr>
+                    <td pEditableColumn>
+                      <p-cellEditor>
+                        <ng-template pTemplate="input">
+                          <p-inputNumber [(ngModel)]="coordinate[0]"
+                                         (onInput)="xCoordinateUpdate(region, ri, $event)"
+                                         (keydown)="disableArrowKeys($event)">
+                          </p-inputNumber>
+                        </ng-template>
+                        <ng-template pTemplate="output">
+                          {{coordinate[0]}}
+                        </ng-template>
+                      </p-cellEditor>
+                    </td>
+                    <td pEditableColumn>
+                      <p-cellEditor>
+                        <ng-template pTemplate="input">
+                          <p-inputNumber [(ngModel)]="coordinate[1]"
+                                         (onInput)="yCoordinateUpdate(region, ri, $event)"
+                                         (keydown)="disableArrowKeys($event)">
+                          </p-inputNumber>
+                        </ng-template>
+                        <ng-template pTemplate="output">
+                          {{coordinate[1]}}
+                        </ng-template>
+                      </p-cellEditor>
+                    </td>
+                    <td>
+                      <div class="flex align-items-center justify-content-center gap-2">
+                        <button pButton pRipple icon="pi pi-trash" class="p-button-rounded p-button-text
+                                p-button-warning" (click)="deleteCoordinate(region, ri)">
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                </ng-template>
+              </p-table>
+              <div class="region-area mt-2" *ngIf="regionArea(region)">Area: {{ regionArea(region) }}</div>
+            </div>
+          </td>
+        </tr>
+
+      </ng-template>
+    </p-table>
+</div>
+
+<p-paginator *ngIf="regions.length > 0"
+             [rows]="paginatorRows" [totalRecords]="regions.length"
+             [first]="paginatorFirst"
+             [rowsPerPageOptions]="rowsPerPageOptions"
+             [showCurrentPageReport]="true"
+             currentPageReportTemplate="{first} to {last} of {totalRecords}"
+             (onPageChange)="onPageChange($event)"
+             styleClass="region-editor-paginator">
+</p-paginator>
+
+<!-- Live-edit mode: no Save/Cancel — every edit commits immediately to the
+     active image's region cache. -->
+
+
+<p-confirmDialog #cd [style]="{width: '24rem', height: '14rem'}" key="positionDialog"
+                 [baseZIndex]="10000" rejectButtonStyleClass="p-button-outlined">
+  <ng-template pTemplate="footer">
+    <button type="button" pButton icon="pi pi-check" label="Yes" (click)="cd.accept()"></button>
+    <button type="button" class="p-button-outlined" pButton icon="pi pi-times" label="No"
+            (click)="cd.reject()"></button>
+  </ng-template>
+</p-confirmDialog>
+
+<p-dialog header="Save Regions As" [(visible)]="showSaveAsDialog" [modal]="true"
+          [style]="{width: '30rem'}" [draggable]="false" [resizable]="false">
+  <div class="flex flex-column gap-3 pt-2">
+    <label for="geojson-filename" class="font-medium">GeoJSON filename</label>
+    <input id="geojson-filename" type="text" pInputText
+           [(ngModel)]="saveAsFilename"
+           (ngModelChange)="checkSaveAsFileExists()"
+           class="w-full" />
+    <small *ngIf="saveAsFileExists" class="p-error">
+      <i class="pi pi-exclamation-triangle mr-1"></i>
+      This file already exists and will be overwritten.
+    </small>
+  </div>
+  <ng-template pTemplate="footer">
+    <p-button label="Cancel" icon="pi pi-times" [text]="true"
+              (onClick)="showSaveAsDialog = false"></p-button>
+    <p-button label="Save" icon="pi pi-save"
+              [disabled]="!saveAsFilename || !saveAsFilename.trim()"
+              (onClick)="confirmSaveAs()"></p-button>
+  </ng-template>
+</p-dialog>
+
+<p-dialog header="Export Regions" [(visible)]="showExportDialog" [modal]="true"
+          [style]="{width: '30rem'}" [draggable]="false" [resizable]="false">
+  <div class="flex flex-column gap-3 pt-2">
+    <label for="export-filename" class="font-medium">GeoJSON filename</label>
+    <input id="export-filename" type="text" pInputText
+           [(ngModel)]="exportFilename"
+           class="w-full" />
+  </div>
+  <ng-template pTemplate="footer">
+    <p-button label="Cancel" icon="pi pi-times" [text]="true"
+              (onClick)="showExportDialog = false"></p-button>
+    <p-button label="Export" icon="pi pi-download"
+              [disabled]="!exportFilename || !exportFilename.trim()"
+              (onClick)="confirmExport()"></p-button>
+  </ng-template>
+</p-dialog>
+
+<p-dialog header="Classification Colours" [(visible)]="showColorDialog" [modal]="true"
+          [style]="{width: '28rem'}" [draggable]="false" [resizable]="false">
+  <div class="flex flex-column gap-3 pt-2">
+    <div *ngFor="let entry of classificationColors; let i = index"
+         class="flex align-items-center gap-3">
+      <span class="font-medium flex-1">{{ entry.label }}</span>
+      <hex-color-picker [color]="entry.color"
+                        (colorChange)="classificationColors[i].color = $event">
+      </hex-color-picker>
+    </div>
+    <p *ngIf="classificationColors.length === 0" class="text-color-secondary m-0">
+      No classifications found in the region table.
+    </p>
+  </div>
+  <ng-template pTemplate="footer">
+    <p-button label="Cancel" icon="pi pi-times" [text]="true" (onClick)="showColorDialog = false">
+    </p-button>
+    <p-button label="Apply" icon="pi pi-check" (onClick)="applyClassificationColors()">
+    </p-button>
+  </ng-template>
+</p-dialog>
+
+<p-dialog header="Region editor help" [(visible)]="displayHelpDialog" [style]="{width: '50vw'}"
+          [maximizable]="true">
+  <p>
+    The Regions tab lists every region drawn on the currently displayed image.
+    Regions are tracked <b>per image</b>: switching to another image hides
+    these and shows that image's regions; switching back restores them.
+    Edits in the table apply <b>live</b> to the diagram — there is no save or
+    cancel.
+  </p>
+
+  <h3>Creating regions</h3>
+  <p>
+    Use the diagram toolbar tools to draw new regions:
+    <i class="pi pi-stop"></i> rectangle,
+    <object data="assets/icons/polyline.svg" width="14" height="14"></object> polyline,
+    <i class="pi pi-pencil"></i> freeform path, or
+    <object data="assets/icons/wand.svg" width="14" height="14"></object> wand.
+    Anything you draw appears immediately in the table, with the class name
+    "<b>legend</b>" by default.
+  </p>
+
+  <h3>Editing</h3>
+  <ul>
+    <li>Click the "<i class="pi pi-chevron-right"></i>" toggle to expand a row.
+      For rectangles you can click the <b>x</b>, <b>y</b>, <b>width</b>, or
+      <b>height</b> cells to edit them inline. For polygons, click any
+      <b>X</b> or <b>Y</b> coordinate cell to edit it directly.</li>
+    <li>For polygons, click the <i class="pi pi-plus"></i> button on the
+      right-hand side of the coordinates paginator to append a new point
+      coordinate.</li>
+    <li>Click the <b>Class</b> cell to rename the region's class label.</li>
+    <li>Long coordinate strings are truncated with "…"; hover the cell to
+      see the full value.</li>
+    <li>Use "<b>x512</b>" to round all rectangle widths/heights to the
+      nearest multiple of 512.</li>
+  </ul>
+
+  <h3>Selecting rows</h3>
+  <ul>
+    <li>Click a row's <b>Class</b> or <b>Coordinates</b> cell to select it.
+      The corresponding region is highlighted in the diagram (Plotly shows its
+      edit handles; the OpenSeadragon image view highlights it and shows its
+      handles in select mode).</li>
+    <li><kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+click to add or remove a row from the
+      selection. <kbd>Shift</kbd>+click to extend the selection in a range.</li>
+    <li>Selecting a region in the diagram highlights the matching row in the
+      table.</li>
+    <li>Clicks on the chevron, the trash icon, or the active class-edit input
+      do not change the selection — that's standard PrimeNG behaviour.</li>
+  </ul>
+
+  <h3>Bulk actions on the selected rows</h3>
+  <ul>
+    <li><i class="pi pi-tags"></i> Edit the label on every selected row at once.</li>
+    <li><i class="pi pi-trash"></i> Delete every selected region — both from
+      the table and the diagram.</li>
+    <li><i class="pi pi-times-circle"></i> Delete every region on this image.</li>
+  </ul>
+
+  <h3>Classification colours</h3>
+  <ul>
+    <li><i class="pi pi-palette"></i> Edit the colour of <b>every classification</b>
+      present in the table from one dialog — no selection required. Each class gets
+      a colour swatch; applying recolours all regions of that class and remembers
+      the colour for future regions with the same label.</li>
+  </ul>
+
+  <h3>Per-row actions</h3>
+  <ul>
+    <li><i class="pi pi-trash"></i> at the end of a row deletes that one region.</li>
+  </ul>
+
+  <h3>Display options</h3>
+  <ul>
+    <li><i class="pi pi-tag"></i> Toggle showing class labels on every
+      region in the diagram (slower with many regions).</li>
+    <li>The colour swatch sets the <b>fill colour</b> applied to the active
+      region in the diagram.</li>
+  </ul>
+
+  <h3>Import / export</h3>
+  <ul>
+    <li><i class="pi pi-upload"></i> Import regions from a GeoJSON file.</li>
+    <li><i class="pi pi-download"></i> Export the current image's regions to
+      a GeoJSON file. (The per-image cache is in-memory only — exporting is
+      how you persist regions across sessions.)</li>
+  </ul>
+
+  <ng-template pTemplate="footer">
+    <p-button icon="pi pi-check" (click)="displayHelpDialog=false" label="Ok" styleClass="p-button-text">
+    </p-button>
+  </ng-template>
+</p-dialog>
+

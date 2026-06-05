@@ -1,0 +1,285 @@
+/* =====================================================================
+ * Region Editor — layout
+ * ---------------------------------------------------------------------
+ * Goal: the table body scrolls internally while the caption/header stay
+ * pinned at the top and the paginator stays pinned at the bottom of the
+ * component, regardless of how many rows the user chooses to display
+ * (10 / 25 / 50 …).
+ *
+ * Strategy: build an unbroken flex-column chain from :host all the way
+ * down to the PrimeNG scroll wrapper, so that the wrapper — and ONLY
+ * the wrapper — receives the leftover vertical space and becomes the
+ * scroll container.
+ * ===================================================================== */
+
+/* Component host: the outermost flex column.
+ * - height:100%      → fill the slot the parent (.right-panel-content) gives us.
+ * - min-height:0     → allow this flex item to shrink below its content size,
+ *                      which is what enables an inner element to scroll instead
+ *                      of pushing the host taller.
+ * - overflow:hidden  → the host itself must never scroll; the table wrapper does.
+ */
+:host {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Wrapper around <p-table>. Sits between :host and the paginator and takes
+ * all remaining vertical space so the table can fill it. overflow:hidden
+ * guarantees this div is not the scroller — the inner PrimeNG wrapper is. */
+.region-editor-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+::ng-deep .region-editor-content .p-3 {
+  padding: 0 !important;
+}
+/* <p-table> is an Angular component host element which defaults to
+ * `display: inline`. That breaks the flex chain (an inline element can't
+ * be a flex container for its children), so we promote it to a flex column
+ * that fills its parent. */
+::ng-deep .region-editor-content > p-table {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* The .p-datatable element PrimeNG renders inside <p-table>. Same idea:
+ * make it a flex column so its children (header + scroll wrapper) can be
+ * sized independently. */
+::ng-deep .region-editor-content .p-datatable.region-editor-table {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* The caption / header band must keep its natural height and never be
+ * squeezed when there are many rows. */
+::ng-deep .region-editor-content .p-datatable.region-editor-table > .p-datatable-header {
+  flex: 0 0 auto;
+}
+
+/* The actual scroll container.
+ *
+ * PrimeNG renders a different class name depending on the version
+ * (`p-datatable-wrapper` in v15, `p-datatable-table-container` in v17,
+ * `p-scroller-viewport` when virtual scrolling is used), so we target all
+ * of them.
+ *
+ * - flex: 1 1 0     → basis 0 means flex sizes this element from the
+ *                     remaining space, NOT from the intrinsic <table>
+ *                     height. Without basis 0 the element would start at
+ *                     content size and refuse to shrink → no scroll.
+ * - height/max-height:100% → required for `scrollHeight="100%"` on the
+ *                     <p-table> input to resolve to a real number.
+ * - overflow:auto   → produces the vertical scrollbar when rows overflow.
+ */
+::ng-deep .region-editor-content .p-datatable.region-editor-table > .p-datatable-wrapper,
+::ng-deep .region-editor-content .p-datatable.region-editor-table > .p-datatable-table-container,
+::ng-deep .region-editor-content .p-datatable.region-editor-table .p-scroller-viewport {
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  overflow: auto;
+}
+
+/* Paginator pinned at the bottom of :host.
+ * NOTE: PrimeNG's `styleClass` input lands on the inner `.p-paginator`
+ * div, NOT on the <p-paginator> host element. So to size the host itself
+ * we must select the host element directly here.
+ *
+ * - display:block   → <p-paginator> defaults to `inline`; flex-shrink only
+ *                     works on block-level flex items.
+ * - flex:0 0 auto   → never grow, never shrink — keep natural height so it
+ *                     stays visible even with 50 rows above.
+ */
+:host > p-paginator {
+  display: block;
+  flex: 0 0 auto;
+  border-top: 1px solid var(--surface-border);
+  padding: 0.25rem 0;
+}
+
+/* Tighten toolbar padding to match diagram view */
+::ng-deep region-editor .p-toolbar.region-toolbar {
+  padding: 0.25rem 0.5rem;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+}
+
+::ng-deep region-editor .p-toolbar.region-toolbar .p-button.p-button-icon-only {
+  width: auto;
+  padding: 0.25rem 0.5rem;
+}
+
+::ng-deep region-editor .p-toolbar.region-toolbar .p-button {
+  padding: 0.25rem 0.5rem;
+}
+/* =====================================================================
+ * Visual styling (independent of the layout rules above)
+ * ===================================================================== */
+
+/* Recolours a black SVG icon to PrimeNG's primary blue using a filter
+ * chain. Used for inline <object>/<img> toolbar icons that don't accept
+ * a `color` CSS property. */
+.toolbar-icon-dark {
+  filter: brightness(0) invert(47%) sepia(98%) saturate(567%) hue-rotate(181deg) brightness(103%) contrast(98%);
+}
+
+/* Thin vertical divider used between groups of toolbar buttons in the
+ * table caption. */
+.toolbar-separator {
+  border-left: 1px solid var(--surface-border);
+  height: 1.5rem;
+  margin: 0 0.25rem;
+  align-self: center;
+}
+
+/* Class column: never wrap. The column shrinks to fit "Class" / "legend"
+ * by default and grows just enough to fit longer custom labels. */
+.class-col-header,
+.class-cell {
+  white-space: nowrap;
+}
+/* Pencil/cross icons inside the Class cell. `icon-hover` mirrors the
+ * pattern used in the Output Folder field: dimmed by default, primary
+ * colour on hover, and a pointer cursor so it's obviously clickable. */
+.class-cell .icon-hover {
+  cursor: pointer;
+  color: var(--text-color-secondary);
+  transition: color 0.15s ease;
+}
+.class-cell .icon-hover:hover {
+  color: var(--primary-color);
+}
+
+/* When the cell is in edit mode the input should fill the available
+ * column width so the user can see what they're typing. */
+.class-cell .class-cell-edit {
+  display: inline-block;
+  width: 100%;
+}
+
+/* Coordinates column header: capped width so the column doesn't blow out
+ * the table when coordinate strings are long. */
+.coords-col-header {
+  width: 14rem;
+  max-width: 14rem;
+}
+
+/* Coordinates cell: same fixed width as the header, with ellipsis on
+ * overflow. The full value is shown via the [pTooltip] in the template. */
+.coords-cell {
+  width: 14rem;
+  max-width: 14rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Compact icon-only / rounded buttons in body cells so row height matches
+ * the `p-datatable-sm` density. Without this the buttons are 2rem tall
+ * and force every row to be taller than the surrounding text rows. */
+::ng-deep .p-datatable-sm .p-datatable-tbody > tr > td .p-button.p-button-rounded,
+::ng-deep .p-datatable-sm .p-datatable-tbody > tr > td .p-button.p-button-icon-only {
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+}
+
+/* Shrink the icon glyph inside those compact buttons proportionally. */
+::ng-deep .p-datatable-sm .p-datatable-tbody > tr > td .p-button.p-button-rounded .p-button-icon,
+::ng-deep .p-datatable-sm .p-datatable-tbody > tr > td .p-button.p-button-icon-only .p-button-icon {
+  font-size: 0.75rem;
+}
+
+/* In-cell editor inputs (label edit, coordinate edit). PrimeNG's default
+ * input padding makes the active row taller than its neighbours; tighten
+ * it so editing doesn't visually "jump" the row. */
+::ng-deep .p-datatable-sm .p-datatable-tbody > tr > td .p-inputtext {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+}
+
+/* Sub-table (coordinates) paginator: compact size and non-clipped dropdown.
+ * The sub-table lives inside an expanded row of the outer table, so we
+ * target .p-datatable-sm (the sub-table's styleClass) specifically. */
+::ng-deep .p-datatable-sm .p-paginator {
+  padding: 0.15rem 0.25rem !important;
+  min-height: unset !important;
+}
+
+::ng-deep .p-datatable-sm .p-paginator,
+::ng-deep .p-datatable-sm .p-paginator * {
+  font-size: 0.75rem !important;
+}
+
+::ng-deep .p-datatable-sm .p-paginator .p-paginator-element {
+  min-width: 1.5rem !important;
+  height: 1.5rem !important;
+}
+
+::ng-deep .p-datatable-sm .p-paginator .p-paginator-current {
+  font-size: 0.75rem !important;
+  height: 1.5rem !important;
+  min-width: unset !important;
+}
+
+::ng-deep .p-datatable-sm .p-paginator .p-dropdown {
+  height: 1.5rem !important;
+}
+
+::ng-deep .p-datatable-sm .p-paginator .p-dropdown .p-dropdown-label {
+  padding: 0.1rem 0.25rem !important;
+  line-height: 1.2 !important;
+}
+
+::ng-deep .p-datatable-sm .p-paginator .p-dropdown .p-dropdown-trigger {
+  width: 1.25rem !important;
+}
+
+/* Dropdown panel items (appended to body) — make them compact too */
+::ng-deep .p-paginator-rpp-options .p-dropdown-panel .p-dropdown-items .p-dropdown-item {
+  padding: 0.25rem 0.5rem !important;
+  font-size: 0.75rem !important;
+}
+
+
+
+/* Physical area readout under a region's coordinate detail. */
+.region-area {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--primary-color, #3399ff);
+}
+
+// Toolbar separator + keyboard-key styling (previously inherited from the
+// diagram component's stylesheet, now removed).
+.toolbar-separator {
+  border-left: 1px solid var(--surface-border);
+  height: 1.5rem;
+  margin: 0 0.25rem;
+  align-self: center;
+}
+
+kbd {
+  background: #e8e8e8;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: monospace;
+  font-size: 0.85em;
+}
