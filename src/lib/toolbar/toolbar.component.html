@@ -78,8 +78,8 @@
         <span class="flex align-items-center mx-1 toolbar-text">Slice</span>
         <p-slider [(ngModel)]="zIndex" [min]="0" [max]="maxIndex"
                   (onChange)="zScrub.emit($event.value)" (onSlideEnd)="zSlide.emit($event.value)"
-                  pTooltip="Slice through the stack" tooltipPosition="bottom"
-                  [style]="{'width':'8rem'}" styleClass="wand-sensitivity-slider"></p-slider>
+                  pTooltip="Slice through the stack (← / → keys)" tooltipPosition="bottom"
+                  [style]="{'width':'16rem'}" styleClass="wand-sensitivity-slider"></p-slider>
         <span class="flex align-items-center mx-1 toolbar-text">{{zIndex}} of {{maxIndex}}</span>
       </ng-container>
       <!-- Heatmap view: single-image (high-def zoom) vs stack (frame slider). -->

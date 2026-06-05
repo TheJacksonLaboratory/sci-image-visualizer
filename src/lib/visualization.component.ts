@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, AfterViewInit, EventEmitter, Inject, NgZone, OnDestroy, OnInit, Output, ViewChild } from '@angular/core';
+import { ChangeDetectorRef, Component, AfterViewInit, EventEmitter, HostListener, Inject, NgZone, OnDestroy, OnInit, Output, ViewChild } from '@angular/core';
 
 import { Subject, Subscription } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
@@ -768,6 +768,32 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
       this.zScrubTimer = undefined;
       this.plotService.setZIndex(this.zIndex);
     }, 120);
+  }
+
+  /**
+   * Keyboard stack navigation: ←/→ step the z-slice in the Image view, the same
+   * way the slider does. Only active for a loaded stack in Image view, and
+   * ignored while a form field is focused so typing isn't hijacked. Up/Down are
+   * left to OpenSeadragon (panning).
+   */
+  @HostListener('window:keydown', ['$event'])
+  onKeydown(e: KeyboardEvent): void {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    if (!this.imageInfo?.isStack || !this.isImageView) return;
+    const t = e.target as HTMLElement | null;
+    if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+    // The slice slider handles arrows natively when focused (also a +1 step) —
+    // skip here so we don't double-step it.
+    if (t && (t.getAttribute('role') === 'slider' || t.closest('.p-slider'))) return;
+    e.preventDefault();
+    this.stepSlice(e.key === 'ArrowRight' ? 1 : -1);
+  }
+
+  /** Move the displayed slice by `delta`, clamped to the stack bounds. */
+  stepSlice(delta: number): void {
+    const next = Math.min(this.maxIndex, Math.max(0, this.zIndex + delta));
+    if (next === this.zIndex) return;
+    this.onZSlide(next);
   }
 
   reloadAndPlot() {
