@@ -19,6 +19,7 @@ import { OsdScaleBar } from './osd-scale-bar';
 import { IRegionOverlay, RegionToolMode } from '../../contracts/region-overlay.contract';
 import { ICoordinateTransform } from '../../contracts/coordinate-transform.contract';
 import { OsdCoordinateTransform } from './osd-coordinate-transform';
+import { elementToImage, imageRectToViewport } from './osd-coords';
 import { CachedImageData, WandToolService, WandToolHost } from '../../toolbar/wand-tool.service';
 import { VertexEraserToolService, VertexEraserToolHost } from '../../toolbar/vertex-eraser-tool.service';
 import { ZoomToBoxToolService, ZoomToBoxToolHost } from '../../toolbar/zoom-to-box-tool.service';
@@ -117,6 +118,42 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
 
   private prefetchTimer: any = null;
 
+  // ── Stack-slice cache ────────────────────────────────────────────────
+  // Scrubbing the z-slider used to viewer.open() a fresh tile source per slice,
+  // which destroys the current tiled image (and its decoded+recolored tiles), so
+  // revisiting a slice re-fetched everything. Instead we keep each visited slice
+  // as its own tiled image in the world and just toggle opacity — a revisited
+  // slice is instant (no network, no re-decode, no re-recolor). Bounded by an LRU
+  // so deep stacks don't grow without limit.
+  /** z-slice → its TiledImage in the viewer world. */
+  private sliceItems = new Map<number, any>();
+  /** z-slice → its grayscale intensity window (so cached slices recolor with
+   *  their own window even after a colormap change re-invalidates the world). */
+  private sliceWindows = new Map<number, [number, number] | null>();
+  /** Most-recently-shown z last; drives LRU eviction. */
+  private sliceLru: number[] = [];
+  /** z-slices whose tiled image is being added (dedupe rapid scrubbing). */
+  private slicesLoading = new Set<number>();
+  /** Bumped whenever the loaded image changes; in-flight background slice adds
+   *  captured under an older token are dropped (cancelled image switch). */
+  private sliceLoadToken = 0;
+  /** The slice the background loader is currently waiting on (its tiles are still
+   *  streaming). addTiledImage 'success' fires on add, not on tile load, so we
+   *  gate the next slice on getFullyLoaded() to avoid flooding the connection. */
+  private bgLoadingZ: number | null = null;
+  /** When bgLoadingZ started loading — a fallback so a slow/stuck slice can't
+   *  stall the whole background pass forever. */
+  private bgLoadingSince = 0;
+  /** Slices the background loader has already attempted (so it doesn't retry a
+   *  failed/slow one in a tight loop). */
+  private bgAttempted = new Set<number>();
+  /** Max cached slice tiled images kept resident before LRU eviction. Set per
+   *  image to cover the whole stack (capped) so background preloading doesn't
+   *  evict what it just loaded. */
+  private maxCachedSlices = 8;
+  /** Upper bound on resident slices, regardless of stack depth (memory guard). */
+  private readonly MAX_CACHED_SLICES_CAP = 64;
+
   constructor(
     private http: HttpClient,
     @Inject(TILE_ACCESS_PORT) private tiles: TileAccessPort,
@@ -208,7 +245,11 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
    * up. Failures leave it null (identity 0..255).
    */
   private async computeImageWindow(d: TileDescriptor, infoB64: string, z: number): Promise<void> {
-    this.imageWindow = null;
+    // Window is per-slice: recolorTile looks it up by the tile's z, so cached
+    // slices stay correctly windowed even when a colormap change re-invalidates
+    // the whole world. `imageWindow` mirrors the current slice as a fallback.
+    this.sliceWindows.set(z, null);
+    if (z === this.currentZ) this.imageWindow = null;
     if (!this.isGrayscaleImage) return; // RGB images render untouched
     try {
       const res = 0; // full resolution — preserves raw tile values (no averaging)
@@ -253,7 +294,8 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       // Only keep a window that actually narrows the range; a full 0..255 image
       // maps identically anyway, so skip it to avoid pointless re-invalidation.
       if (max > min && (min > 0 || max < 255)) {
-        this.imageWindow = [min, max];
+        this.sliceWindows.set(z, [min, max]);
+        if (z === this.currentZ) this.imageWindow = [min, max];
         if (this.viewer && this.colorLut) {
           try {
             (this.viewer as any).world.requestInvalidate(true);
@@ -268,7 +310,8 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
         }
       }
     } catch {
-      this.imageWindow = null; // fall back to identity 0..255
+      this.sliceWindows.set(z, null); // fall back to identity 0..255
+      if (z === this.currentZ) this.imageWindow = null;
     }
   }
 
@@ -282,6 +325,11 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
    */
   async load(imageInfo: IImageInfo, zIndex: number): Promise<OsdLoaded> {
     const filename = imageInfo?.fileName;
+    // A different image was selected — stop the previous stack's background
+    // loading immediately rather than letting it finish behind the new image.
+    if (filename && this.currentFileName && filename !== this.currentFileName) {
+      this.cancelBackgroundLoad();
+    }
     const infoB64 = this.tiles.getSelectedInfoB64();
     if (!infoB64) return { descriptor: null, infoB64: '', z: zIndex || 0, filename };
 
@@ -359,6 +407,9 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     // tiles paint unwindowed until then.
     this.computeImageWindow(d, loaded.infoB64, loaded.z);
     this.destroyViewer();
+    // Keep the whole stack resident (capped) so the background loader fills every
+    // slice without evicting itself; single images need only the one.
+    this.maxCachedSlices = (d.z ?? 1) > 1 ? Math.min(this.MAX_CACHED_SLICES_CAP, d.z ?? 1) : 1;
 
     const tileSource = this.buildTileSource(d, loaded.infoB64, loaded.z);
     this.viewer = (OpenSeadragon as any)({
@@ -394,7 +445,11 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       // evicted instead of accumulating. Large whole-slide tiles — doubled when
       // the colormap pipeline keeps a recolored copy — make an unbounded cache
       // costly. Tunable; lower = less memory, more re-fetch on pan-back.
-      maxImageCacheCount: 150,
+      // Stacks keep many slices resident (the whole stack is background-loaded),
+      // so they get a much larger tile budget — otherwise switching slices evicts
+      // each other's tiles and scrubbing back re-fetches. Scaled to the resident
+      // slice count; single images keep the lean default.
+      maxImageCacheCount: (d.z ?? 1) > 1 ? Math.min(2400, Math.max(600, this.maxCachedSlices * 40)) : 150,
     });
 
     return new Promise<boolean>((resolve) => {
@@ -418,6 +473,13 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
         this.coordTransform = new OsdCoordinateTransform(this.viewer as any);
         this.scaleBar = new OsdScaleBar(this.viewer as any, d.mppX ?? 0);
         this.buildToolHosts();
+        // Seed the slice cache with the just-opened slice (world item 0), so
+        // scrubbing back to it later is an instant opacity toggle, not a re-open.
+        const firstItem = (this.viewer as any).world?.getItemAt?.(0);
+        if (firstItem) {
+          this.sliceItems.set(this.currentZ, firstItem);
+          this.touchSliceLru(this.currentZ);
+        }
         // The wand samples the *rendered viewport*, so its pixel matrix is only
         // valid for the current view — drop it whenever the viewport changes.
         this.viewer!.addHandler('viewport-change', () => {
@@ -519,67 +581,113 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     return ts;
   }
 
-  /** Build a tile URL for an explicit (level, x, y, z) — used by prefetch. */
-  private tileUrl(infoB64: string, level: number, x: number, y: number, z: number): string {
-    const d = this.descriptor!;
-    const res = d.levels.length - 1 - level;
-    return `${this.api}tile?info=${infoB64}&res=${res}&col=${x}&row=${y}&z=${z}&tileSize=${d.tileSize}`;
-  }
-
   /**
-   * Warm the tile cache for the adjacent z-slices (z±1) over the *current
-   * viewport*, so scrubbing the stack loads near-instantly. Fire-and-forget;
-   * 404s/errors are ignored. Debounced via schedulePrefetch.
-   *
-   * Yields to the current view: while the visible slice isn't fully loaded yet,
-   * it reschedules instead of fetching, so the on-screen tiles (which OSD loads
-   * lowest-resolution-first, viewport-only, thanks to immediateRender:false)
-   * always win the connection over background neighbor-slice prefetch.
+   * Background-load the whole stack: add each not-yet-cached slice as a hidden,
+   * preloaded tiled image, one at a time, working outward from the current
+   * slice. This fills the in-world cache for every slice so scrubbing gets
+   * progressively smoother as the stack finishes loading — and it never blocks
+   * the visible slice: it yields while the current view is still streaming
+   * tiles, and only one slice is in flight at a time so the on-screen tiles
+   * always win the connection.
    */
-  private prefetchNeighborSlices(): void {
-    const viewer: any = this.viewer;
-    if (!viewer || !this.descriptor || !this.infoB64) return;
+  private loadNextBackgroundSlice(): void {
+    this.prefetchTimer = null;
+    if (!this.viewer || !this.descriptor || !this.infoB64) return;
     const sliceCount = this.descriptor.z ?? 1;
-    if (sliceCount <= 1) return; // not a stack — nothing to prefetch
-    const item = viewer.world?.getItemAt?.(0);
-    if (!item) return;
-    if (typeof item.getFullyLoaded === 'function' && !item.getFullyLoaded()) {
-      // Current view still loading — defer so we don't compete with it.
+    if (sliceCount <= 1) return; // not a stack — nothing to preload
+    // Yield to the visible slice while it's still streaming tiles.
+    const current = this.sliceItems.get(this.currentZ);
+    if (current && typeof current.getFullyLoaded === 'function' && !current.getFullyLoaded()) {
       this.schedulePrefetch();
       return;
     }
-    const drawn: any[] = item.getTilesToDraw?.() ?? [];
-    const tiles = drawn.map((i) => i?.tile).filter(Boolean);
-    if (!tiles.length) return;
-    const neighbors = [this.currentZ - 1, this.currentZ + 1].filter((z) => z >= 0 && z < sliceCount);
-    const seen = new Set<string>();
-    for (const z of neighbors) {
-      for (const t of tiles) {
-        const url = this.tileUrl(this.infoB64, t.level, t.x, t.y, z);
-        if (seen.has(url)) continue;
-        seen.add(url);
-        // Warm the browser + server cache; we don't use the body.
-        fetch(url, { headers: this.authHeaders, credentials: 'include' }).catch(() => {
-          /* ignore */
-        });
+    // Gate on the in-flight slice's TILES finishing — addTiledImage's success
+    // fires on add, not on tile load, so without this we'd add the whole stack at
+    // once and flood the connection. A time fallback prevents a stuck slice from
+    // stalling the pass.
+    if (this.bgLoadingZ != null) {
+      const item = this.sliceItems.get(this.bgLoadingZ);
+      const adding = this.slicesLoading.has(this.bgLoadingZ);
+      const tilesLoading = !!item && typeof item.getFullyLoaded === 'function' && !item.getFullyLoaded();
+      const timedOut = Date.now() - this.bgLoadingSince > 8000;
+      if ((adding || tilesLoading) && !timedOut) {
+        this.schedulePrefetch();
+        return;
+      }
+      this.bgLoadingZ = null; // that slice's tiles are in (or gave up) — advance
+    }
+    const next = this.nearestUncachedSlice(sliceCount);
+    if (next == null) return; // whole stack cached — done
+    this.bgLoadingZ = next;
+    this.bgLoadingSince = Date.now();
+    this.bgAttempted.add(next);
+    this.addSlice(next); // hidden + preload (added with opacity 0; not revealed)
+    this.schedulePrefetch(); // poll until its tiles load, then advance
+  }
+
+  /** The not-yet-cached slice closest to the current one (load nearest first),
+   *  skipping any already attempted so a failed/slow one isn't retried in a loop. */
+  private nearestUncachedSlice(sliceCount: number): number | null {
+    for (let d = 0; d < sliceCount; d++) {
+      const candidates = d === 0 ? [this.currentZ] : [this.currentZ - d, this.currentZ + d];
+      for (const z of candidates) {
+        if (
+          z >= 0 && z < sliceCount &&
+          !this.sliceItems.has(z) && !this.slicesLoading.has(z) && !this.bgAttempted.has(z)
+        ) {
+          return z;
+        }
       }
     }
+    return null;
   }
 
-  /** Debounce prefetch so a burst of viewport events fires it once. */
+  /** Debounce so a burst of viewport/slice events coalesces, then advance the
+   *  background stack loader by one slice. */
   private schedulePrefetch(): void {
     if (this.prefetchTimer) clearTimeout(this.prefetchTimer);
-    this.prefetchTimer = setTimeout(() => {
-      this.prefetchTimer = null;
-      this.prefetchNeighborSlices();
-    }, 400);
+    this.prefetchTimer = setTimeout(() => this.loadNextBackgroundSlice(), 200);
   }
 
-  private destroyViewer(): void {
+  /**
+   * Stop background stack preloading and invalidate any in-flight slice add.
+   * Called when a different image is selected so the previous stack stops
+   * loading immediately instead of finishing in the background.
+   */
+  private cancelBackgroundLoad(): void {
     if (this.prefetchTimer) {
       clearTimeout(this.prefetchTimer);
       this.prefetchTimer = null;
     }
+    this.slicesLoading.clear();
+    this.bgLoadingZ = null;
+    this.bgAttempted.clear();
+    this.sliceLoadToken++; // drop pending addTiledImage callbacks from the old image
+    // Abort in-flight background tiles immediately by dropping the hidden
+    // preloaded slices (removeItem cancels their pending tile loads). Keep the
+    // visible slice so the current view doesn't blank before the next plot.
+    this.dropHiddenSlices();
+  }
+
+  /** Remove every cached slice except the currently displayed one, aborting their
+   *  in-flight tile requests. Used to stop background loading promptly. */
+  private dropHiddenSlices(): void {
+    if (!this.viewer) return;
+    for (const [z, item] of [...this.sliceItems]) {
+      if (z === this.currentZ) continue;
+      this.sliceItems.delete(z);
+      this.sliceWindows.delete(z);
+      try {
+        (this.viewer as any).world.removeItem(item);
+      } catch {
+        /* already gone */
+      }
+    }
+    this.sliceLru = this.sliceItems.has(this.currentZ) ? [this.currentZ] : [];
+  }
+
+  private destroyViewer(): void {
+    this.cancelBackgroundLoad();
     // Tear down any active tool overlays (shared singletons).
     this.wandTool.setMode(false);
     this.eraserTool.setMode(false);
@@ -596,6 +704,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       this.viewer = null;
     }
     this.coordTransform = null;
+    this.resetSliceCache();
   }
 
   /** This backend's region renderer (the SVG overlay), once a plot is mounted. */
@@ -672,37 +781,144 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
   }
 
   /**
-   * Swap the displayed z-slice live. Rebuilds the tile source for the new z and
-   * re-opens it on the existing viewer (no full re-mount), so the region
-   * overlay, coordinate transform, scale bar and colormap pipeline all persist —
-   * the x/y geometry is identical across slices. New tiles recolor on load.
+   * Swap the displayed z-slice live. Slices are kept as separate tiled images in
+   * the world, so switching is just an opacity toggle: a previously-visited slice
+   * shows instantly (its decoded + recolored tiles are still resident), and a
+   * never-seen slice is added once. The region overlay, coordinate transform,
+   * scale bar, colormap pipeline and current zoom/pan all persist — the x/y
+   * geometry is identical across slices.
    */
   setZIndex(zIndex: number): void {
     const z = zIndex || 0;
     if (z === this.currentZ) return;
-    this.currentZ = z;
     if (!this.viewer || !this.descriptor || !this.infoB64) return;
+    this.currentZ = z;
     this.viewportPixels = null; // wand readback is slice-specific
-    const ts = this.buildTileSource(this.descriptor, this.infoB64, z);
-    const vp: any = (this.viewer as any).viewport;
-    // Keep the current zoom/pan across slices — scrubbing a zoomed-in stack
-    // should stay on the same ROI rather than snapping back to full view.
-    const bounds = vp?.getBounds ? vp.getBounds() : null;
-    try {
-      (this.viewer as any).addOnceHandler('open', () => {
-        if (bounds) {
-          try {
-            vp.fitBounds(bounds, true);
-          } catch {
-            /* viewport gone */
-          }
-        }
-        this.schedulePrefetch(); // warm the new current slice's neighbors
-      });
-      (this.viewer as any).open(ts);
-    } catch (err) {
-      console.warn('[OSD] failed to swap z-slice', err);
+    const cached = this.sliceItems.get(z);
+    if (cached && this.sliceInWorld(cached)) {
+      // Instant: reveal the cached slice, hide the others — no fetch/decode.
+      this.showOnlySlice(z);
+      this.touchSliceLru(z);
+      this.schedulePrefetch();
+      return;
     }
+    if (this.slicesLoading.has(z)) return; // already being added; success reveals it
+    this.addSlice(z);
+  }
+
+  /** Add a never-seen slice as a hidden tiled image, then reveal it once loaded.
+   *  Keeps the current viewport (no goHome) since all slices share x/y geometry. */
+  private addSlice(z: number): void {
+    if (!this.viewer || !this.descriptor || !this.infoB64) return;
+    this.slicesLoading.add(z);
+    // Tag this add to the current image; if the user switches images before it
+    // resolves, the stale callback is dropped (the add belongs to the old stack).
+    const token = this.sliceLoadToken;
+    const ts = this.buildTileSource(this.descriptor, this.infoB64, z);
+    try {
+      // addTiledImage lives on the Viewer (it queues the add into the world),
+      // not on World itself.
+      (this.viewer as any).addTiledImage({
+        tileSource: ts,
+        x: 0,
+        y: 0,
+        width: 1, // match the primary image's normalized placement
+        opacity: 0,
+        // Load tiles even though it's hidden — this is what lets the background
+        // loader fill every slice's cache so scrubbing gets progressively smoother.
+        preload: true,
+        success: (e: any) => {
+          const item = e?.item;
+          if (token !== this.sliceLoadToken) {
+            // Image switched while this was adding — drop the orphan so it stops
+            // loading instead of streaming tiles for the abandoned stack.
+            if (item) {
+              try {
+                (this.viewer as any)?.world?.removeItem(item);
+              } catch {
+                /* old viewer already destroyed */
+              }
+            }
+            return;
+          }
+          this.slicesLoading.delete(z);
+          if (!item) return;
+          this.sliceItems.set(z, item);
+          this.touchSliceLru(z);
+          this.computeImageWindow(this.descriptor!, this.infoB64, z);
+          // Only reveal if the user is still on this slice (fast scrubbing may
+          // have moved on — leave it cached/hidden for a later revisit).
+          if (z === this.currentZ) {
+            this.showOnlySlice(z);
+            this.schedulePrefetch();
+          }
+          this.evictSliceLru();
+        },
+        error: () => {
+          if (token === this.sliceLoadToken) this.slicesLoading.delete(z);
+        },
+      });
+    } catch (err) {
+      this.slicesLoading.delete(z);
+      console.warn('[OSD] failed to add z-slice', err);
+    }
+  }
+
+  /** Show the given slice (opacity 1) and hide all other cached slices. */
+  private showOnlySlice(z: number): void {
+    for (const [zz, item] of this.sliceItems) {
+      try {
+        item.setOpacity(zz === z ? 1 : 0);
+      } catch {
+        /* item gone */
+      }
+    }
+  }
+
+  /** Is the tiled image still in the world (not evicted)? */
+  private sliceInWorld(item: any): boolean {
+    try {
+      return (this.viewer as any).world.getIndexOfItem(item) >= 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Mark z as most-recently-used. */
+  private touchSliceLru(z: number): void {
+    const i = this.sliceLru.indexOf(z);
+    if (i >= 0) this.sliceLru.splice(i, 1);
+    this.sliceLru.push(z);
+  }
+
+  /** Drop the least-recently-used cached slices beyond the cap (never the
+   *  current one), removing their tiled images so memory stays bounded. */
+  private evictSliceLru(): void {
+    while (this.sliceLru.length > this.maxCachedSlices) {
+      const idx = this.sliceLru.findIndex((z) => z !== this.currentZ);
+      if (idx < 0) break;
+      const z = this.sliceLru.splice(idx, 1)[0];
+      const item = this.sliceItems.get(z);
+      this.sliceItems.delete(z);
+      this.sliceWindows.delete(z);
+      if (item) {
+        try {
+          (this.viewer as any).world.removeItem(item);
+        } catch {
+          /* already gone */
+        }
+      }
+    }
+  }
+
+  /** Clear the slice cache (on teardown / image switch). */
+  private resetSliceCache(): void {
+    this.sliceItems.clear();
+    this.sliceWindows.clear();
+    this.sliceLru = [];
+    this.slicesLoading.clear();
+    this.bgLoadingZ = null;
+    this.bgAttempted.clear();
   }
   setStackLoading(stackLoading: boolean): void {
     this.stackLoading$.next(stackLoading);
@@ -936,13 +1152,9 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
   /** Host for the (shared) zoom-to-box tool: convert overlay pixels to image
    *  coords via the viewport, and fit the viewport to the chosen rectangle. */
   private zoomBoxHost(): ZoomToBoxToolHost {
-    const osd = OpenSeadragon as any;
     return {
       getPlotDiv: () => this.plotDiv,
-      pixelToData: (px: number, py: number) => {
-        const img = this.viewer!.viewport.viewerElementToImageCoordinates(new osd.Point(px, py));
-        return { x: img.x, y: img.y };
-      },
+      pixelToData: (px: number, py: number) => elementToImage(this.viewer, px, py),
       applyZoomToBox: (coords: number[]) => this.applyZoomToBox(coords),
     };
   }
@@ -957,8 +1169,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     const y = Math.min(c, d);
     const h = Math.abs(c - d);
     if (w <= 0 || h <= 0) return;
-    const osd = OpenSeadragon as any;
-    const rect = this.viewer.viewport.imageToViewportRectangle(new osd.Rect(x, y, w, h));
+    const rect = imageRectToViewport(this.viewer, x, y, w, h);
     this.viewer.viewport.fitBounds(rect, false);
   }
 
@@ -1078,7 +1289,10 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     // (label masks 0,1,2; un-normalized DICOM) spread across the colormap
     // instead of collapsing onto a single flat LUT entry. A per-image window
     // (not per-tile) keeps it seamless across tiles. Null → identity 0..255.
-    const win = this.imageWindow;
+    // Per-slice window: a tile carries its z in its URL, so a cached slice keeps
+    // its own auto-range even when the world is re-invalidated (colormap change).
+    const tz = this.tileZ(event);
+    const win = tz != null && this.sliceWindows.has(tz) ? this.sliceWindows.get(tz)! : this.imageWindow;
     const wMin = win ? win[0] : 0;
     const wSpan = win && win[1] > win[0] ? win[1] - win[0] : 0;
     for (let i = 0; i < d.length; i += 4) {
@@ -1104,6 +1318,15 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     if (!changed || !ctx) return; // nothing opaque — don't blank the tile
     ctx.putImageData(img, 0, 0);
     await event.setData(ctx, 'context2d');
+  }
+
+  /** The z-slice a tile belongs to, parsed from its URL (getTileUrl encodes
+   *  `&z=`). Lets recolorTile pick the right per-slice window for cached slices. */
+  private tileZ(event: any): number | null {
+    const url: unknown = event?.tile?.getUrl?.() ?? event?.tile?.url;
+    if (typeof url !== 'string') return null;
+    const m = /[?&]z=(\d+)/.exec(url);
+    return m ? +m[1] : null;
   }
 
   /** True if any pixel in the RGBA buffer is non-transparent. */

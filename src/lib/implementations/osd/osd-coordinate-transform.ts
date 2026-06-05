@@ -1,5 +1,5 @@
-import * as OpenSeadragon from 'openseadragon';
 import { ICoordinateTransform } from '../../contracts/coordinate-transform.contract';
+import { elementToImage, imageToElement } from './osd-coords';
 
 /**
  * OpenSeadragon implementation of {@link ICoordinateTransform}. "Data coords"
@@ -9,8 +9,6 @@ import { ICoordinateTransform } from '../../contracts/coordinate-transform.contr
  */
 export class OsdCoordinateTransform implements ICoordinateTransform {
 
-  private readonly osd: any = OpenSeadragon as any;
-
   constructor(private viewer: any) {}
 
   isReady(): boolean {
@@ -19,15 +17,12 @@ export class OsdCoordinateTransform implements ICoordinateTransform {
 
   clientToData(clientX: number, clientY: number): { x: number; y: number } {
     const rect = this.viewer.canvas.getBoundingClientRect();
-    const pt = new this.osd.Point(clientX - rect.left, clientY - rect.top);
-    const img = this.viewer.viewport.viewerElementToImageCoordinates(pt);
-    return { x: img.x, y: img.y };
+    return elementToImage(this.viewer, clientX - rect.left, clientY - rect.top);
   }
 
   dataLengthToScreen(dataLength: number): number {
-    const vp = this.viewer.viewport;
-    const a = vp.imageToViewerElementCoordinates(new this.osd.Point(0, 0));
-    const b = vp.imageToViewerElementCoordinates(new this.osd.Point(dataLength, 0));
+    const a = imageToElement(this.viewer, 0, 0);
+    const b = imageToElement(this.viewer, dataLength, 0);
     return Math.abs(b.x - a.x);
   }
 }

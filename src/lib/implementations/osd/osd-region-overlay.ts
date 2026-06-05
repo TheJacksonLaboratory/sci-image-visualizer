@@ -6,6 +6,7 @@ import { resolveHandles } from '../../models/bezier';
 import { IRegionStore } from '../../contracts/visualizer.contract';
 import { IRegionEditApi } from '../../contracts/region-store.contract';
 import { IRegionOverlay, RegionToolMode } from '../../contracts/region-overlay.contract';
+import { elementToImage, imageToElement } from './osd-coords';
 
 /**
  * The shared region store as the overlay needs it: the cross-backend
@@ -159,12 +160,11 @@ export class OsdRegionOverlay implements IRegionOverlay {
   // ── coordinate helpers ───────────────────────────────────────────────
   /** Image-pixel point -> element pixel point. */
   private toPx(imgX: number, imgY: number): { x: number; y: number } {
-    const p = this.viewer.viewport.imageToViewerElementCoordinates(new this.osd.Point(imgX, imgY));
-    return { x: p.x, y: p.y };
+    return imageToElement(this.viewer, imgX, imgY);
   }
   /** Element pixel point (from a MouseTracker event) -> image-pixel point. */
   private toImage(pos: any): { x: number; y: number } {
-    const p = this.viewer.viewport.viewerElementToImageCoordinates(pos);
+    const p = elementToImage(this.viewer, pos.x, pos.y);
     return { x: Math.round(p.x), y: Math.round(p.y) };
   }
 
