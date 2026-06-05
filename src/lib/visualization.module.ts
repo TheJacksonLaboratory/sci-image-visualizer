@@ -22,7 +22,7 @@ import { InputTextModule } from 'primeng/inputtext';
 import { VisualizationComponent } from './visualization.component';
 import { ToolbarComponent } from './toolbar/toolbar.component';
 import { RegionEditorComponent } from './region-editor/region-editor.component';
-import { HexColorPickerComponent } from './shared/hex-color-picker/hex-color-picker.component';
+import { HexColorPickerComponent } from './hex-color-picker/hex-color-picker.component';
 
 /**
  * Self-contained plotting UI: the {@link VisualizationComponent} (plot surface
@@ -30,6 +30,10 @@ import { HexColorPickerComponent } from './shared/hex-color-picker/hex-color-pic
  * {@link RegionEditorComponent} (the Regions tab table/editor). Consumers embed
  * `<visualization>` / `<region-editor>` and need know nothing about the toolbar,
  * the rendering backends, or region file I/O (supplied via the REGION_IO_PORT).
+ *
+ * Also exports {@link HexColorPickerComponent} (`<hex-color-picker>`) as a
+ * standalone reusable picker (`[color]` in, `(colorChange)` out) so consuming
+ * apps can use it on its own, the same way as the visualizer and region editor.
  */
 @NgModule({
   declarations: [
@@ -58,6 +62,6 @@ import { HexColorPickerComponent } from './shared/hex-color-picker/hex-color-pic
     ConfirmDialogModule,
     InputTextModule,
   ],
-  exports: [VisualizationComponent, RegionEditorComponent],
+  exports: [VisualizationComponent, RegionEditorComponent, HexColorPickerComponent],
 })
 export class VisualizationModule {}

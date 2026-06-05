@@ -10,7 +10,7 @@ import { ConfirmationService, MessageService } from 'primeng/api';
 import { Polygon, Rectangle, Region } from '../models/region';
 import { ShapeSelection } from '../models/shape';
 import { NO_ERRORS_SCHEMA } from '@angular/core';
-import { HexColorPickerComponent } from '../shared/hex-color-picker/hex-color-picker.component';
+import { HexColorPickerComponent } from '../hex-color-picker/hex-color-picker.component';
 import { REGION_IO_PORT, RegionIoPort } from '../contracts/ports/region-io.port';
 
 jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
@@ -199,11 +199,6 @@ describe('RegionEditorComponent', () => {
     component.changeShapeColor({ value: '#00FF00' });
     expect(component.regions[0].color).toBe('#00FF00');
     expect(component.regions[1].color).toBe('#0000FF');
-  });
-
-  it('should change fill color', () => {
-    component.changeFillColor({ value: '#FF000080' });
-    expect(component.fillColor).toBe('#FF000080');
   });
 
   it('live-edit: every region change immediately calls plotService.setRegions with isRegionSaveOn=true', () => {

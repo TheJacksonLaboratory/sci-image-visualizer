@@ -7,13 +7,6 @@
               tooltipPosition="bottom"
               (onClick)="showShapeLabel = !showShapeLabel; changeShowShapeLabel(showShapeLabel)">
     </p-button>
-    <div class="flex align-items-center mx-1"
-         pTooltip="Change region fill color" tooltipPosition="bottom">
-      <hex-color-picker [color]="fillColor && fillColor.length === 7
-                && fillColor.charAt(0) === '#' ? fillColor : '#000000'"
-                        (colorChange)="changeFillColor({value: $event})">
-      </hex-color-picker>
-    </div>
     <span class="toolbar-separator"></span>
     <!-- New regions are now created from the diagram toolbar
          (rectangle, polyline, freeform, wand). -->

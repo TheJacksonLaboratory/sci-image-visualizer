@@ -537,10 +537,6 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     }
     this.setRegionsFromEditor(this.fillColor);
   }
-  changeFillColor(event: any) {
-    this.fillColor = event.value;
-    this.setRegionsFromEditor(this.fillColor);
-  }
 
   truncateForTooltip(value: string): string {
     if (!value) return '';
