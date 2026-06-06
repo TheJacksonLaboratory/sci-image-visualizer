@@ -1723,6 +1723,12 @@ export class PlotlyService implements IVisualizer {
     }
   }
 
+  /** Export the heatmap as a PNG (the rendered plot already reflects the active
+   *  colormap/window). The full-res tile composite is OSD's job. */
+  public exportComposite(): void {
+    this.downloadImage();
+  }
+
   public downloadImage() {
     if (this.plotDiv) {
       (Plotly as any).downloadImage(this.plotDiv, { format: 'png', filename: this.fileName || 'image' });

@@ -26,6 +26,7 @@ import { ZoomToBoxToolService, ZoomToBoxToolHost } from '../../toolbar/zoom-to-b
 import { WandOptions } from '../../toolbar/wand.service';
 import { buildColormapLut, Rgb } from '../../contracts/colormap-lut';
 import { IChannelState, IHistogram } from '../../contracts/channel-histogram-api.contract';
+import { saveAs } from 'file-saver';
 
 /** One pyramid level from `GET /tiles/info`. */
 interface TileLevel { res: number; width: number; height: number; }
@@ -115,7 +116,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
   private invertBg = false;
   /** 256-bin intensity histogram per z-slice, accumulated while sampling tiles
    *  in computeImageWindow; feeds the Channels & Histogram pane (grayscale). */
-  private sliceHistograms = new Map<number, IHistogram>();
+  private sliceHistograms = new Map<number, IHistogram[]>();
   /** Bearer token for OSD's own tile fetches (HttpClient calls get it via the
    *  interceptor; OSD's loader does not, so we pass it as an ajax header). */
   private authHeaders: Record<string, string> = {};
@@ -269,18 +270,23 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     // the whole world. `imageWindow` mirrors the current slice as a fallback.
     this.sliceWindows.set(z, null);
     if (z === this.currentZ) this.imageWindow = null;
-    if (!this.isGrayscaleImage) return; // RGB images render untouched
+    const gray = this.isGrayscaleImage;
     try {
-      const res = 0; // full resolution — preserves raw tile values (no averaging)
       const t = d.tileSize;
-      const cols = Math.max(1, Math.ceil(d.width / t));
-      const rows = Math.max(1, Math.ceil(d.height / t));
+      // Sample full-resolution when the grid is small (accurate for the grayscale
+      // auto-window); otherwise sample the coarsest overview just for histograms
+      // (whole-slide images). RGB only needs the histograms, not an auto-window.
+      let res = 0;
+      let cols = Math.max(1, Math.ceil(d.width / t));
+      let rows = Math.max(1, Math.ceil(d.height / t));
+      let fullRes = true;
       if (cols * rows > 64) {
-        // Too big to sample full-res for the auto window, but still build an
-        // approximate histogram from the coarsest overview so the Channels &
-        // Histogram pane shows a distribution for whole-slide images.
-        await this.sampleHistogramAtCoarsest(d, infoB64, z, t);
-        return;
+        res = Math.max(0, (d.levels?.length ?? 1) - 1);
+        const lvl = d.levels?.[res];
+        cols = Math.max(1, Math.ceil((lvl?.width ?? d.width) / t));
+        rows = Math.max(1, Math.ceil((lvl?.height ?? d.height) / t));
+        fullRes = false;
+        if (cols * rows > 36) return; // even the coarsest is too big — give up
       }
       const coords: Array<[number, number]> = [];
       for (let row = 0; row < rows; row++) {
@@ -288,7 +294,9 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       }
       let min = 255;
       let max = 0;
-      const counts = new Array(256).fill(0); // 256-bin intensity histogram
+      const cR = new Array(256).fill(0);
+      const cG = gray ? null : new Array(256).fill(0);
+      const cB = gray ? null : new Array(256).fill(0);
       await Promise.all(
         coords.map(async ([col, row]) => {
           const url = `${this.api}tile?info=${infoB64}&res=${res}&col=${col}&row=${row}&z=${z}&tileSize=${t}`;
@@ -305,33 +313,38 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
             const data = ctx.getImageData(0, 0, c.width, c.height).data;
             for (let i = 0; i < data.length; i += 4) {
               if (data[i + 3] === 0) continue; // skip transparent padding
-              const v =
-                data[i] >= data[i + 1]
-                  ? data[i] >= data[i + 2] ? data[i] : data[i + 2]
-                  : data[i + 1] >= data[i + 2] ? data[i + 1] : data[i + 2];
-              if (v < min) min = v;
-              if (v > max) max = v;
-              counts[v]++;
+              if (gray) {
+                const v =
+                  data[i] >= data[i + 1]
+                    ? data[i] >= data[i + 2] ? data[i] : data[i + 2]
+                    : data[i + 1] >= data[i + 2] ? data[i + 1] : data[i + 2];
+                if (v < min) min = v;
+                if (v > max) max = v;
+                cR[v]++;
+              } else {
+                cR[data[i]]++;
+                cG![data[i + 1]]++;
+                cB![data[i + 2]]++;
+              }
             }
           } catch {
             /* skip this tile */
           }
         }),
       );
-      // Cache the histogram for the Channels & Histogram pane.
-      this.sliceHistograms.set(z, {
+      const mk = (counts: number[]): IHistogram => ({
         bins: Array.from({ length: 256 }, (_, i) => i),
         counts,
         max: counts.reduce((m, c) => (c > m ? c : m), 0),
       });
-      // Only keep a window that actually narrows the range; a full 0..255 image
-      // maps identically anyway, so skip it to avoid pointless re-invalidation.
-      if (max > min && (min > 0 || max < 255)) {
+      // Cache per-channel histograms: grayscale → [intensity]; RGB → [R, G, B].
+      this.sliceHistograms.set(z, gray ? [mk(cR)] : [mk(cR), mk(cG!), mk(cB!)]);
+      // Grayscale auto-window — only from full-res samples (coarsest averaging is
+      // inaccurate). Seed the Intensity channel while it's still at full range so
+      // we never clobber the user's manual window.
+      if (gray && fullRes && max > min && (min > 0 || max < 255)) {
         this.sliceWindows.set(z, [min, max]);
         if (z === this.currentZ) this.imageWindow = [min, max];
-        // Seed the Intensity channel's display window from the auto-range so the
-        // pane reflects what's on screen — but only while it's untouched (still
-        // full 0..255), so we never clobber the user's manual window.
         const ch0 = this.session.currentChannelStates()[0];
         if (ch0 && ch0.min === 0 && ch0.max === 255) {
           this.session.setChannelState(0, { min, max });
@@ -351,61 +364,6 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     } catch {
       this.sliceWindows.set(z, null); // fall back to identity 0..255
       if (z === this.currentZ) this.imageWindow = null;
-    }
-  }
-
-  /** Build an approximate intensity histogram from the coarsest pyramid level
-   *  (a handful of tiles) for whole-slide images too large to sample at full
-   *  resolution. Caches it per slice so the Channels & Histogram pane has a
-   *  distribution to show. Fire-and-forget. */
-  private async sampleHistogramAtCoarsest(
-    d: TileDescriptor, infoB64: string, z: number, tileSize: number,
-  ): Promise<void> {
-    try {
-      const res = Math.max(0, (d.levels?.length ?? 1) - 1); // coarsest backend res
-      const lvl = d.levels?.[res];
-      const cols = Math.max(1, Math.ceil((lvl?.width ?? d.width) / tileSize));
-      const rows = Math.max(1, Math.ceil((lvl?.height ?? d.height) / tileSize));
-      if (cols * rows > 36) return; // coarsest is normally 1 tile; guard anyway
-      const counts = new Array(256).fill(0);
-      const coords: Array<[number, number]> = [];
-      for (let row = 0; row < rows; row++) {
-        for (let col = 0; col < cols; col++) coords.push([col, row]);
-      }
-      await Promise.all(
-        coords.map(async ([col, row]) => {
-          const url = `${this.api}tile?info=${infoB64}&res=${res}&col=${col}&row=${row}&z=${z}&tileSize=${tileSize}`;
-          try {
-            const blob = await firstValueFrom(this.http.get(url, { responseType: 'blob' }).pipe(timeout(20000)));
-            const bmp = await createImageBitmap(blob);
-            const c = document.createElement('canvas');
-            c.width = bmp.width;
-            c.height = bmp.height;
-            const ctx = c.getContext('2d', { willReadFrequently: true });
-            if (!ctx) return;
-            ctx.drawImage(bmp, 0, 0);
-            bmp.close?.();
-            const data = ctx.getImageData(0, 0, c.width, c.height).data;
-            for (let i = 0; i < data.length; i += 4) {
-              if (data[i + 3] === 0) continue;
-              const v =
-                data[i] >= data[i + 1]
-                  ? data[i] >= data[i + 2] ? data[i] : data[i + 2]
-                  : data[i + 1] >= data[i + 2] ? data[i + 1] : data[i + 2];
-              counts[v]++;
-            }
-          } catch {
-            /* skip this tile */
-          }
-        }),
-      );
-      this.sliceHistograms.set(z, {
-        bins: Array.from({ length: 256 }, (_, i) => i),
-        counts,
-        max: counts.reduce((m, c) => (c > m ? c : m), 0),
-      });
-    } catch {
-      /* leave the histogram unset */
     }
   }
 
@@ -1048,7 +1006,9 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     return { width, height, channels: 4, data: img.data };
   }
   downloadImage(): void {
-    this.notImplemented('downloadImage');
+    // The toolbar download and the Channels & Histogram export both produce the
+    // composited PNG.
+    void this.exportComposite();
   }
 
   setPlotType(_plotType: PlotType): void {
@@ -1379,22 +1339,31 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       img = ctx.getImageData(0, 0, c.width, c.height);
     }
 
-    const d = img.data;
+    if (!this.applyDisplayToRgba(img.data) || !ctx) return; // nothing opaque
+    ctx.putImageData(img, 0, 0);
+    await event.setData(ctx, 'context2d');
+  }
+
+  /**
+   * Apply the current display pipeline to an RGBA buffer in place; returns
+   * whether any opaque pixel was written. Shared by tile recoloring and the
+   * composite export so they stay identical.
+   *  - Grayscale: intensity → window + gamma + invert → colormap LUT.
+   *  - RGB/multichannel: additive pseudo-colour merge — each visible channel's
+   *    windowed intensity is tinted by its assigned colour and summed (Fiji
+   *    "Merge Channels"). Defaults (R=red, G=green, B=blue) are the identity.
+   */
+  private applyDisplayToRgba(d: Uint8ClampedArray): boolean {
     let changed = false;
-    if (gray) {
-      // Grayscale: map intensity through the channel's display window + gamma,
-      // optionally invert, then the colormap LUT. The window comes from the
-      // single "Intensity" channel (channel 0), seeded from the auto-range by
-      // computeImageWindow and editable in the Channels & Histogram pane.
-      const lut = this.colorLut!;
+    if (this.isGrayscaleImage) {
+      const lut = this.colorLut;
+      if (!lut) return false;
       const ch = this.channelStates[0];
       const wMin = ch ? ch.min : 0;
       const wSpan = ch && ch.max > ch.min ? ch.max - ch.min : 255;
       const invGamma = ch && ch.gamma > 0 ? 1 / ch.gamma : 1;
       for (let i = 0; i < d.length; i += 4) {
-        if (d[i + 3] === 0) continue; // leave transparent padding alone
-        // Intensity from the brightest channel, not just red: a multi-channel
-        // "grayscale" tile may render its signal into green/blue with red == 0.
+        if (d[i + 3] === 0) continue;
         const raw =
           d[i] >= d[i + 1] ? (d[i] >= d[i + 2] ? d[i] : d[i + 2]) : d[i + 1] >= d[i + 2] ? d[i + 1] : d[i + 2];
         let t = (raw - wMin) / wSpan;
@@ -1409,54 +1378,130 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
         changed = true;
       }
     } else {
-      // RGB: per-channel display window + gamma + visibility (+ invert), no LUT.
-      const r = this.channelStates[0], g = this.channelStates[1], b = this.channelStates[2];
+      const chans = [this.channelStates[0], this.channelStates[1], this.channelStates[2]];
+      const tints = chans.map((c) => this.tint01(c));
       for (let i = 0; i < d.length; i += 4) {
         if (d[i + 3] === 0) continue;
-        d[i] = this.applyChannelWindow(d[i], r);
-        d[i + 1] = this.applyChannelWindow(d[i + 1], g);
-        d[i + 2] = this.applyChannelWindow(d[i + 2], b);
+        let oR = 0, oG = 0, oB = 0;
+        for (let k = 0; k < 3; k++) {
+          const c = chans[k];
+          if (c && !c.visible) continue;
+          const v = this.channelIntensity(d[i + k], c);
+          const tint = tints[k];
+          oR += v * tint[0];
+          oG += v * tint[1];
+          oB += v * tint[2];
+        }
+        if (oR > 255) oR = 255;
+        if (oG > 255) oG = 255;
+        if (oB > 255) oB = 255;
+        if (this.invertBg) { oR = 255 - oR; oG = 255 - oG; oB = 255 - oB; }
+        d[i] = oR;
+        d[i + 1] = oG;
+        d[i + 2] = oB;
         changed = true;
       }
     }
-    if (!changed || !ctx) return; // nothing opaque — don't blank the tile
-    ctx.putImageData(img, 0, 0);
-    await event.setData(ctx, 'context2d');
+    return changed;
   }
 
-  /** Apply one RGB channel's display window + gamma + visibility (+ invert) to a
-   *  raw 0..255 sample. Hidden channels collapse to zero. */
-  private applyChannelWindow(val: number, c?: IChannelState): number {
-    if (c) {
-      if (!c.visible) return this.invertBg ? 255 : 0;
-      const span = c.max > c.min ? c.max - c.min : 0;
-      if (span) {
-        let t = (val - c.min) / span;
-        t = t < 0 ? 0 : t > 1 ? 1 : t;
-        if (c.gamma > 0 && c.gamma !== 1) t = Math.pow(t, 1 / c.gamma);
-        val = Math.round(t * 255);
-      }
-    }
-    return this.invertBg ? 255 - val : val;
+  /** Windowed + gamma intensity (0..255) for a channel, ignoring tint/invert. */
+  private channelIntensity(val: number, c?: IChannelState): number {
+    if (!c) return val;
+    const span = c.max > c.min ? c.max - c.min : 0;
+    if (!span) return 0;
+    let t = (val - c.min) / span;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    if (c.gamma > 0 && c.gamma !== 1) t = Math.pow(t, 1 / c.gamma);
+    return t * 255;
   }
 
-  /** True when any RGB channel is windowed/hidden/gamma'd or the background is
-   *  inverted — i.e. the tile needs recoloring (otherwise it passes through). */
+  /** A channel's pseudo-colour tint as [r,g,b] in 0..1 (default white). */
+  private tint01(c?: IChannelState): [number, number, number] {
+    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(c?.color ?? '');
+    return m ? [parseInt(m[1], 16) / 255, parseInt(m[2], 16) / 255, parseInt(m[3], 16) / 255] : [1, 1, 1];
+  }
+
+  /** True when any RGB channel is windowed/hidden/gamma'd/re-tinted or the
+   *  background is inverted — otherwise the tile passes through unchanged. */
   private rgbNeedsRecolor(): boolean {
     if (this.invertBg) return true;
+    const defaults = ['#ff0000', '#00ff00', '#0000ff'];
     for (let k = 0; k < 3; k++) {
       const c = this.channelStates[k];
-      if (c && (!c.visible || c.min !== 0 || c.max !== 255 || c.gamma !== 1)) return true;
+      if (
+        c && (!c.visible || c.min !== 0 || c.max !== 255 || c.gamma !== 1 ||
+          (c.color || '').toLowerCase() !== defaults[k])
+      ) {
+        return true;
+      }
     }
     return false;
   }
 
-  /** Histogram for the Channels & Histogram pane. Grayscale: the cached
-   *  intensity histogram of the current slice (sampled by computeImageWindow).
-   *  RGB or unsampled: null (the pane shows "no histogram"). */
-  getHistogram(_channelIndex: number, _bins: number): IHistogram | null {
-    if (!this.isGrayscaleImage) return null;
-    return this.sliceHistograms.get(this.currentZ) ?? null;
+  /** Per-channel histogram for the Channels & Histogram pane, from the current
+   *  slice's sampled tiles (grayscale → channel 0; RGB → R/G/B). Null until the
+   *  async sampling resolves or if it was skipped. */
+  getHistogram(channelIndex: number, _bins: number): IHistogram | null {
+    return this.sliceHistograms.get(this.currentZ)?.[channelIndex] ?? null;
+  }
+
+  /**
+   * Export the current slice as a publication-ready PNG composited with the
+   * active display settings (window / gamma / colormap or per-channel pseudo-
+   * colours / invert). Picks the largest pyramid level under a pixel cap (the
+   * coarser overview for huge whole-slides), fetches that level's tile grid,
+   * stitches it into one canvas, runs the shared display pipeline, and saves it.
+   */
+  async exportComposite(): Promise<void> {
+    const desc = this.descriptor;
+    const levels = desc?.levels ?? [];
+    if (!desc || !this.infoB64 || !levels.length) return;
+    const CAP = 32_000_000; // ~32 MP — bounds memory for whole-slide images
+    let res = levels.length - 1; // coarsest fallback
+    for (let i = 0; i < levels.length; i++) {
+      if (levels[i].width * levels[i].height <= CAP) { res = i; break; }
+    }
+    const lw = levels[res].width;
+    const lh = levels[res].height;
+    const t = desc.tileSize;
+    const cols = Math.max(1, Math.ceil(lw / t));
+    const rows = Math.max(1, Math.ceil(lh / t));
+    const canvas = document.createElement('canvas');
+    canvas.width = lw;
+    canvas.height = lh;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+    const z = this.currentZ;
+    const jobs: Promise<void>[] = [];
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        const url = `${this.api}tile?info=${this.infoB64}&res=${res}&col=${col}&row=${row}&z=${z}&tileSize=${t}`;
+        jobs.push(
+          (async () => {
+            try {
+              const blob = await firstValueFrom(this.http.get(url, { responseType: 'blob' }).pipe(timeout(30000)));
+              const bmp = await createImageBitmap(blob);
+              ctx.drawImage(bmp, col * t, row * t);
+              bmp.close?.();
+            } catch {
+              /* skip a failed tile */
+            }
+          })(),
+        );
+      }
+    }
+    await Promise.all(jobs);
+    try {
+      const imageData = ctx.getImageData(0, 0, lw, lh);
+      if (this.applyDisplayToRgba(imageData.data)) ctx.putImageData(imageData, 0, 0);
+    } catch {
+      /* keep the un-recolored composite if readback fails */
+    }
+    const stem = (this.currentFileName || 'image').replace(/\.[^.]+$/, '');
+    canvas.toBlob((blob) => {
+      if (blob) saveAs(blob, `${stem}_composite.png`);
+    }, 'image/png');
   }
 
   /** The z-slice a tile belongs to, parsed from its URL (getTileUrl encodes

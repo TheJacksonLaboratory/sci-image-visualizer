@@ -23,6 +23,33 @@
   flex: 0 0 auto;
 }
 
+// Pseudo-colour preset palette (Fiji LUTs) for the selected channel.
+.ch-presets {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0.25rem 0;
+
+  .ch-presets-lbl {
+    font-size: 0.8rem;
+    margin-right: 0.25rem;
+  }
+  .ch-preset {
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: 1px solid rgba(0, 0, 0, 0.3);
+    border-radius: 2px;
+    cursor: pointer;
+  }
+}
+
+.ch-export {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.25rem;
+}
+
 .ch-hist-head {
   display: flex;
   align-items: center;

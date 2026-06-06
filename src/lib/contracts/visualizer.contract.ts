@@ -186,6 +186,9 @@ export interface IVisualizer extends IDataRenderer, IRegionStore, IToolControlle
    *  pixels, or null when none are available. Feeds the Channels & Histogram
    *  pane. */
   getHistogram(channelIndex: number, bins: number): IHistogram | null;
+  /** Export the displayed image, composited with the current display settings,
+   *  as a publication-ready PNG download. */
+  exportComposite(): void;
   unsubscribe(): void;
 }
 

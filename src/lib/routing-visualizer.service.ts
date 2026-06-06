@@ -166,6 +166,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   getCurrentImage(): Promise<Image | null> { return this.renderer().getCurrentImage(); }
   getDisplayedPixelData(): PixelData | null { return this.renderer().getDisplayedPixelData(); }
   downloadImage(): void { this.renderer().downloadImage(); }
+  exportComposite(): void { this.renderer().exportComposite(); }
 
   setPlotType(plotType: PlotType): void {
     this.currentPlotType = plotType;

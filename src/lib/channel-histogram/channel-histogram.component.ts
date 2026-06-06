@@ -6,7 +6,7 @@ import { TreeNode } from 'primeng/api';
 import * as Plotly from 'plotly.js-dist-min';
 
 import {
-  CHANNEL_HISTOGRAM_API, IChannelHistogramApi, IChannelState,
+  CHANNEL_HISTOGRAM_API, IChannelHistogramApi, IChannelState, LUT_COLORS,
 } from '../contracts/channel-histogram-api.contract';
 
 /**
@@ -29,6 +29,7 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
   @Output() visibleChange = new EventEmitter<boolean>();
 
   readonly histogramDiv = 'channel-histogram-plot';
+  readonly lutColors = LUT_COLORS;
 
   channels: IChannelState[] = [];
   selected: IChannelState | null = null;
@@ -45,6 +46,12 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
   private resizeObserver?: ResizeObserver;
 
   constructor(@Inject(CHANNEL_HISTOGRAM_API) private api: IChannelHistogramApi) {}
+
+  /** Per-channel pseudo-colour only applies when there's more than one channel
+   *  (RGB / fluorescence). A single grayscale channel uses the colormap instead. */
+  get multichannel(): boolean {
+    return this.channels.length > 1;
+  }
 
   ngOnInit(): void {
     this.colormapOptions = this.api.getColormapOptions();
@@ -150,6 +157,16 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
   toggleLog(value: boolean): void {
     this.logScale = value;
     this.renderHistogram();
+  }
+
+  /** Quick-assign a preset LUT colour to a channel (Fiji palette). */
+  setPreset(ch: IChannelState, color: string): void {
+    this.onColorChange(ch, color);
+  }
+
+  /** Export the displayed composite as a publication-ready PNG. */
+  exportComposite(): void {
+    this.api.exportComposite();
   }
 
   // ── auto / reset ─────────────────────────────────────────────────────

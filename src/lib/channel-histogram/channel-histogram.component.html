@@ -11,7 +11,7 @@
     <!-- Channels -->
     <p-table [value]="channels" selectionMode="single" [(selection)]="selected"
              dataKey="index" (onRowSelect)="selectChannel($event.data)"
-             styleClass="ch-table p-datatable-sm" [scrollable]="true" scrollHeight="7rem">
+             styleClass="ch-table p-datatable-sm" [scrollable]="true" scrollHeight="13rem">
       <ng-template pTemplate="header">
         <tr>
           <th style="width: 2.5rem"></th>
@@ -22,7 +22,7 @@
       <ng-template pTemplate="body" let-ch>
         <tr [pSelectableRow]="ch">
           <td>
-            <hex-color-picker [color]="ch.color"
+            <hex-color-picker *ngIf="multichannel" [color]="ch.color"
                               (colorChange)="onColorChange(ch, $event)"></hex-color-picker>
           </td>
           <td>{{ ch.name }}</td>
@@ -33,6 +33,15 @@
         </tr>
       </ng-template>
     </p-table>
+
+    <!-- Pseudo-color presets for the selected channel (multichannel only;
+         grayscale uses the colormap below). -->
+    <div class="ch-presets" *ngIf="multichannel && selected">
+      <span class="ch-presets-lbl">{{ selected.name }} LUT</span>
+      <button *ngFor="let p of lutColors" type="button" class="ch-preset"
+              [style.background]="p.color" [pTooltip]="p.name" tooltipPosition="top"
+              (click)="setPreset(selected, p.color)"></button>
+    </div>
 
     <!-- Histogram -->
     <div class="ch-hist-head">
@@ -72,9 +81,12 @@
       </div>
     </div>
 
-    <!-- LUT / colormap controls -->
+    <!-- LUT / colormap controls. The colormap maps single-channel intensity →
+         colour, so it only applies to grayscale; RGB/multichannel use the
+         per-channel pseudo-colour presets above. -->
     <div class="ch-display">
-      <p-treeSelect [options]="colormapOptions" [(ngModel)]="selectedColormap"
+      <p-treeSelect *ngIf="!multichannel"
+                    [options]="colormapOptions" [(ngModel)]="selectedColormap"
                     [selectionMode]="'single'" placeholder="Colormap" [scrollHeight]="'300px'"
                     pTooltip="Color Lookup Tables" tooltipPosition="bottom"
                     (onNodeSelect)="onColormap($event.node)">
@@ -87,6 +99,12 @@
       </p-treeSelect>
       <p-checkbox [binary]="true" [(ngModel)]="invert"
                   (onChange)="onInvert($event.checked)" label="Invert"></p-checkbox>
+    </div>
+
+    <!-- Publication-ready export of the composited image -->
+    <div class="ch-export">
+      <p-button label="Export composite (PNG)" icon="pi pi-download" size="small"
+                (onClick)="exportComposite()"></p-button>
     </div>
 
   </div>

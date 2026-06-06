@@ -19,6 +19,18 @@ export interface IChannelState {
   visible: boolean;
 }
 
+/** The standard LUT pseudo-colours (mirrors Fiji's Merge Channels palette) for
+ *  quick per-channel assignment. */
+export const LUT_COLORS: ReadonlyArray<{ name: string; color: string }> = [
+  { name: 'Red', color: '#ff0000' },
+  { name: 'Green', color: '#00ff00' },
+  { name: 'Blue', color: '#0000ff' },
+  { name: 'Gray', color: '#ffffff' },
+  { name: 'Cyan', color: '#00ffff' },
+  { name: 'Magenta', color: '#ff00ff' },
+  { name: 'Yellow', color: '#ffff00' },
+];
+
 /** A binned intensity histogram for one channel. */
 export interface IHistogram {
   /** Left edge of each bin (0..255 space), length = bin count. */
@@ -69,6 +81,10 @@ export interface IChannelHistogramApi {
 
   // ── image ─────────────────────────────────────────────────────────────
   getImageMeta(): Observable<IImageMetadata[]>;
+
+  /** Export the displayed image — composited with the current per-channel
+   *  pseudo-colours / window / colormap — as a publication-ready PNG download. */
+  exportComposite(): void;
 }
 
 export const CHANNEL_HISTOGRAM_API = new InjectionToken<IChannelHistogramApi>('CHANNEL_HISTOGRAM_API');

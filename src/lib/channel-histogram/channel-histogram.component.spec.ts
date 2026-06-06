@@ -36,6 +36,7 @@ describe('ChannelHistogramComponent', () => {
       getInvert$: jest.fn(() => of(false)),
       setInvert: jest.fn(),
       getImageMeta: jest.fn(() => of([])),
+      exportComposite: jest.fn(),
     } as unknown as jest.Mocked<IChannelHistogramApi>;
 
     await TestBed.configureTestingModule({
@@ -73,5 +74,12 @@ describe('ChannelHistogramComponent', () => {
   it('should toggle invert through the API', () => {
     component.onInvert(true);
     expect(api.setInvert).toHaveBeenCalledWith(true);
+  });
+
+  it('should assign a preset LUT colour and export through the API', () => {
+    component.setPreset(channels[0], '#00ffff');
+    expect(api.setChannelState).toHaveBeenCalledWith(0, { color: '#00ffff' });
+    component.exportComposite();
+    expect(api.exportComposite).toHaveBeenCalled();
   });
 });
