@@ -38,6 +38,11 @@ interface TileDescriptor {
   tileSize: number;
   z: number;
   channels: number;
+  /** True only for genuine multi-channel composites (indexed/LUT-bearing
+   *  fluorescence stacks) the client should split into per-channel layers. The
+   *  server sets it; an RGB photo read as separated planes has channels>1 but
+   *  multichannel=false, so it stays a single composite tile source. */
+  multichannel?: boolean;
   /** Real Bio-Formats resolution levels at the front of `levels`; the remaining
    *  levels are synthetic composited overviews (no per-channel tiles). */
   realLevels?: number;
@@ -551,10 +556,13 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     // (channelCount) diverges from rgbChannels for stacks, which left grayscale
     // stacks un-recolored even though the colormap selector was shown.
     this.isGrayscaleImage = !!imageInfo?.isGrayscale;
-    // Multichannel fluorescence: channelCount > 1 while rgbChannels === 1 (so it
-    // reads as "grayscale"). These composite client-side from per-channel tiles.
+    // Multichannel fluorescence (indexed/LUT-bearing stacks) composite client-side
+    // from per-channel tiles. Trust the server's explicit `multichannel` flag — the
+    // old `channels>1 && grayscale` heuristic also matched RGB photos Bio-Formats
+    // reads as separated planes (channels>1, rgbChannels==1), splitting them into N
+    // per-channel TiledImages that flooded the tile endpoint and hung on load.
     this.realLevels = d.realLevels ?? d.levels.length;
-    this.isMultiChannel = (d.channels ?? 1) > 1 && this.isGrayscaleImage;
+    this.isMultiChannel = !!d.multichannel;
     this.channelImages = [];
     // Auto-range grayscale tiles to the image's actual intensity span (like the
     // heatmap), sampling the coarsest tile level so the window matches the raw
