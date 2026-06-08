@@ -8,6 +8,17 @@
  * structurally, so the host keeps passing its own instances unchanged.
  */
 
+/** Per-channel metadata from the server descriptor (issue #76). */
+export interface IChannelInfo {
+  name: string;
+  /** Suggested display tint as "#RRGGBB". */
+  color: string;
+  /** Embedded 256-entry display LUT as "#RRGGBB" (intensity→color), or
+   *  null/undefined when the file has no palette for this channel. */
+  lut?: string[] | null;
+  bitDepth?: number;
+}
+
 /** Per-series image metadata (physical size + dimensions). */
 export interface IImageMetadata {
   channelCount: number;
@@ -18,6 +29,8 @@ export interface IImageMetadata {
   /** Physical pixel size in µm; null/undefined when the format reports none. */
   mppX?: number | null;
   mppY?: number | null;
+  /** Per-channel name/color/LUT for multichannel (non-RGB) images, when known. */
+  channelInfo?: IChannelInfo[] | null;
 }
 
 /** The image currently being visualized. Field optionality mirrors the host's

@@ -38,6 +38,9 @@ interface TileDescriptor {
   tileSize: number;
   z: number;
   channels: number;
+  /** Real Bio-Formats resolution levels at the front of `levels`; the remaining
+   *  levels are synthetic composited overviews (no per-channel tiles). */
+  realLevels?: number;
   levels: TileLevel[];
   /** Physical pixel size in µm (0 when the format doesn't report it). */
   mppX?: number;
@@ -111,6 +114,17 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
    *  read synchronously by recolorTile. Channel 0 drives grayscale windowing;
    *  R/G/B (indices 0-2) drive RGB per-channel windowing. */
   private channelStates: IChannelState[] = [];
+  /** True for multichannel fluorescence (channelCount > 1, not RGB): tiles are
+   *  composited client-side from per-channel single-band fetches (see
+   *  recolorMultiChannelTile) rather than recolored in place. */
+  private isMultiChannel = false;
+  /** Count of real Bio-Formats resolution levels (per-channel tiles exist only
+   *  here). For multichannel images the tile source is built from these alone so
+   *  every displayed tile supports a per-channel fetch. */
+  private realLevels = 0;
+  /** One OpenSeadragon TiledImage per channel for the current slice
+   *  (multichannel only), additively composited by OSD. Index = channel. */
+  private channelImages: any[] = [];
   /** Inverted background (white = zero): inverts the display value before the
    *  LUT (grayscale) / per channel (RGB). */
   private invertBg = false;
@@ -226,6 +240,17 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       this.colorLut = buildColormapLut(cm?.data?.value, !!rev);
       this.channelStates = channels;
       this.invertBg = !!invert;
+      // Multichannel: each channel is its own TiledImage — visibility is the
+      // image's opacity (window/gamma/colour are applied by recolorChannelTile
+      // on the invalidate below).
+      if (this.isMultiChannel) {
+        for (let c = 0; c < this.channelImages.length; c++) {
+          const it = this.channelImages[c];
+          if (it) {
+            try { it.setOpacity(channels[c]?.visible === false ? 0 : 1); } catch { /* gone */ }
+          }
+        }
+      }
       // requestInvalidate(true) restores each tile to its original data before
       // re-running recolorTile, so a change always maps afresh (no compounding).
       // RGB now recolors too (per-channel window/visibility), so don't gate on
@@ -244,6 +269,79 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
         }
       }
     });
+  }
+
+  /**
+   * Per-channel intensity histograms for multichannel images: sample each
+   * channel's single-band tiles at the real full-resolution level and bin the
+   * luminance. Populates sliceHistograms[z] so the Channels & Histogram pane
+   * (which retries getHistogram on load) can draw each channel. Fire-and-forget.
+   */
+  private async computeMultiChannelHistograms(d: TileDescriptor, infoB64: string, z: number): Promise<void> {
+    try {
+      const t = d.tileSize;
+      // Sample the COARSEST real level (per-channel tiles exist only at real
+      // resolutions; the coarsest is small enough to bin even for whole-slides).
+      const res = Math.max(0, this.realLevels - 1);
+      const lvl = d.levels?.[res];
+      const lw = lvl?.width ?? d.width;
+      const lh = lvl?.height ?? d.height;
+      const cols = Math.max(1, Math.ceil(lw / t));
+      const rows = Math.max(1, Math.ceil(lh / t));
+      if (cols * rows > 64) return; // even the coarsest real level is too big
+      const nCh = this.channelStates.length || (d.channels ?? 1);
+      if (nCh < 1) return;
+      const counts: number[][] = Array.from({ length: nCh }, () => new Array(256).fill(0));
+      const jobs: Array<Promise<void>> = [];
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          for (let c = 0; c < nCh; c++) {
+            const url = `${this.api}tile?info=${infoB64}&res=${res}&col=${col}&row=${row}&z=${z}&tileSize=${t}&channel=${c}`;
+            jobs.push(
+              (async () => {
+                try {
+                  const blob = await firstValueFrom(
+                    this.http.get(url, { responseType: 'blob' }).pipe(timeout(20000)),
+                  );
+                  const bmp = await createImageBitmap(blob);
+                  const cv = document.createElement('canvas');
+                  cv.width = bmp.width;
+                  cv.height = bmp.height;
+                  const ctx = cv.getContext('2d', { willReadFrequently: true });
+                  if (!ctx) return;
+                  ctx.drawImage(bmp, 0, 0);
+                  bmp.close?.();
+                  const data = ctx.getImageData(0, 0, cv.width, cv.height).data;
+                  const cc = counts[c];
+                  for (let i = 0; i < data.length; i += 4) {
+                    if (data[i + 3] === 0) continue;
+                    const v =
+                      data[i] >= data[i + 1]
+                        ? data[i] >= data[i + 2] ? data[i] : data[i + 2]
+                        : data[i + 1] >= data[i + 2] ? data[i + 1] : data[i + 2];
+                    cc[v]++;
+                  }
+                } catch {
+                  /* skip this tile */
+                }
+              })(),
+            );
+          }
+        }
+      }
+      await Promise.all(jobs);
+      const mk = (counts: number[]): IHistogram => ({
+        bins: Array.from({ length: 256 }, (_, i) => i),
+        counts,
+        max: counts.reduce((m, c) => (c > m ? c : m), 0),
+      });
+      this.sliceHistograms.set(z, counts.map(mk));
+      // Nudge the channel-states stream so the pane re-reads getHistogram now,
+      // in case its bounded retry window already lapsed.
+      this.session.setChannelStates(this.session.currentChannelStates());
+    } catch {
+      /* leave histograms unset (pane shows empty) */
+    }
   }
 
   /**
@@ -453,17 +551,32 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     // (channelCount) diverges from rgbChannels for stacks, which left grayscale
     // stacks un-recolored even though the colormap selector was shown.
     this.isGrayscaleImage = !!imageInfo?.isGrayscale;
+    // Multichannel fluorescence: channelCount > 1 while rgbChannels === 1 (so it
+    // reads as "grayscale"). These composite client-side from per-channel tiles.
+    this.realLevels = d.realLevels ?? d.levels.length;
+    this.isMultiChannel = (d.channels ?? 1) > 1 && this.isGrayscaleImage;
+    this.channelImages = [];
     // Auto-range grayscale tiles to the image's actual intensity span (like the
     // heatmap), sampling the coarsest tile level so the window matches the raw
     // tile values. Fire-and-forget: it re-invalidates once the window is known;
-    // tiles paint unwindowed until then.
-    this.computeImageWindow(d, loaded.infoB64, loaded.z);
+    // tiles paint unwindowed until then. (Multichannel windows are per-channel,
+    // defaulting to full range; the user auto/edits each channel.)
+    if (this.isMultiChannel) {
+      this.computeMultiChannelHistograms(d, loaded.infoB64, loaded.z);
+    } else {
+      this.computeImageWindow(d, loaded.infoB64, loaded.z);
+    }
     this.destroyViewer();
     // Keep the whole stack resident (capped) so the background loader fills every
     // slice without evicting itself; single images need only the one.
     this.maxCachedSlices = (d.z ?? 1) > 1 ? Math.min(this.MAX_CACHED_SLICES_CAP, d.z ?? 1) : 1;
 
-    const tileSource = this.buildTileSource(d, loaded.infoB64, loaded.z);
+    // Multichannel opens on channel 0; the open handler swaps in one additively
+    // composited TiledImage per channel (mountChannelImages). Single/RGB/grayscale
+    // open their composite source as before.
+    const tileSource = this.buildTileSource(
+      d, loaded.infoB64, loaded.z, this.isMultiChannel ? 0 : undefined,
+    );
     this.viewer = (OpenSeadragon as any)({
       id: plotDiv,
       // Use the 2D canvas drawer, not WebGL: creating/destroying a viewer on
@@ -525,12 +638,23 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
         this.coordTransform = new OsdCoordinateTransform(this.viewer as any);
         this.scaleBar = new OsdScaleBar(this.viewer as any, d.mppX ?? 0);
         this.buildToolHosts();
-        // Seed the slice cache with the just-opened slice (world item 0), so
-        // scrubbing back to it later is an instant opacity toggle, not a re-open.
-        const firstItem = (this.viewer as any).world?.getItemAt?.(0);
-        if (firstItem) {
-          this.sliceItems.set(this.currentZ, firstItem);
-          this.touchSliceLru(this.currentZ);
+        if (this.isMultiChannel) {
+          // Drop the single opened (channel-0) image and mount one additively
+          // composited TiledImage per channel for this slice. The per-slice
+          // opacity/LRU cache and background loader are bypassed for multichannel.
+          try {
+            const it0 = (this.viewer as any).world?.getItemAt?.(0);
+            if (it0) (this.viewer as any).world.removeItem(it0);
+          } catch { /* nothing to remove */ }
+          this.mountChannelImages(this.currentZ);
+        } else {
+          // Seed the slice cache with the just-opened slice (world item 0), so
+          // scrubbing back to it later is an instant opacity toggle, not a re-open.
+          const firstItem = (this.viewer as any).world?.getItemAt?.(0);
+          if (firstItem) {
+            this.sliceItems.set(this.currentZ, firstItem);
+            this.touchSliceLru(this.currentZ);
+          }
         }
         // The wand samples the *rendered viewport*, so its pixel matrix is only
         // valid for the current view — drop it whenever the viewport changes.
@@ -548,7 +672,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
         // colormap/LUT instead of staying grayscale.
         const nav = (this.viewer as any).navigator;
         nav?.addHandler('tile-invalidated', (event: any) => this.recolorTile(event));
-        if (this.isGrayscaleImage && this.colorLut) {
+        if ((this.isGrayscaleImage && this.colorLut) || this.isMultiChannel) {
           try {
             (this.viewer as any).world.requestInvalidate(true);
           } catch {
@@ -604,8 +728,14 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
    * `res = (levels-1) - osdLevel`. Overriding getLevelScale/getNumTiles lets us
    * honour Bio-Formats' actual per-level dimensions (not assume power-of-two).
    */
-  private buildTileSource(d: TileDescriptor, infoB64: string, z: number): any {
-    const n = d.levels.length;
+  private buildTileSource(d: TileDescriptor, infoB64: string, z: number, channel?: number): any {
+    // Multichannel images composite from per-channel tiles, which only exist at
+    // real Bio-Formats resolutions — so drive OSD off the real levels alone and
+    // skip the synthetic (server-composited) overviews. Every displayed tile is
+    // then per-channel-fetchable at any zoom.
+    const levels = this.isMultiChannel ? d.levels.slice(0, this.realLevels) : d.levels;
+    const chParam = channel == null ? '' : `&channel=${channel}`;
+    const n = levels.length;
     const t = d.tileSize;
     const base = this.api;
 
@@ -625,12 +755,47 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       maxLevel: n - 1,
     });
     ts.getLevelScale = (level: number) => {
-      const lvl = d.levels[resForLevel(level)];
+      const lvl = levels[resForLevel(level)];
       return lvl ? lvl.width / d.width : 1;
     };
     ts.getTileUrl = (level: number, x: number, y: number) =>
-      `${base}tile?info=${infoB64}&res=${resForLevel(level)}&col=${x}&row=${y}&z=${z}&tileSize=${t}`;
+      `${base}tile?info=${infoB64}&res=${resForLevel(level)}&col=${x}&row=${y}&z=${z}&tileSize=${t}${chParam}`;
     return ts;
+  }
+
+  /**
+   * Mount one OpenSeadragon TiledImage per channel for slice {@code z}, additively
+   * composited (compositeOperation 'lighter' = Fiji "Composite"). Each image's
+   * single-band tiles are tinted in place by recolorChannelTile; visibility is the
+   * image's opacity. OSD composites them in its drawer — no per-tile cross-fetch,
+   * so no seams. Replaces any previously mounted channel images.
+   */
+  private mountChannelImages(z: number): void {
+    if (!this.viewer || !this.descriptor || !this.infoB64) return;
+    const v: any = this.viewer;
+    // Drop any existing channel images first.
+    for (const img of this.channelImages) {
+      try { v.world.removeItem(img); } catch { /* gone */ }
+    }
+    this.channelImages = [];
+    const states = this.channelStates;
+    const n = Math.max(1, states.length || (this.descriptor.channels ?? 1));
+    for (let c = 0; c < n; c++) {
+      const visible = states[c]?.visible !== false;
+      try {
+        v.addTiledImage({
+          tileSource: this.buildTileSource(this.descriptor, this.infoB64, z, c),
+          x: 0, y: 0, width: 1,
+          opacity: visible ? 1 : 0,
+          compositeOperation: 'lighter',
+          success: (e: any) => {
+            if (e?.item) this.channelImages[c] = e.item;
+          },
+        });
+      } catch (err) {
+        console.warn('[OSD] failed to add channel image', c, err);
+      }
+    }
   }
 
   /**
@@ -697,6 +862,9 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
   /** Debounce so a burst of viewport/slice events coalesces, then advance the
    *  background stack loader by one slice. */
   private schedulePrefetch(): void {
+    // Multichannel uses per-channel TiledImages, not the per-slice composite
+    // cache the background loader fills — skip it.
+    if (this.isMultiChannel) return;
     if (this.prefetchTimer) clearTimeout(this.prefetchTimer);
     this.prefetchTimer = setTimeout(() => this.loadNextBackgroundSlice(), 200);
   }
@@ -865,6 +1033,13 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     if (!this.viewer || !this.descriptor || !this.infoB64) return;
     this.currentZ = z;
     this.viewportPixels = null; // wand readback is slice-specific
+    if (this.isMultiChannel) {
+      // Multichannel doesn't use the per-slice opacity cache; re-mount the N
+      // channel images for the new slice (their tile URLs carry &z=).
+      this.mountChannelImages(z);
+      this.computeMultiChannelHistograms(this.descriptor, this.infoB64, z);
+      return;
+    }
     const cached = this.sliceItems.get(z);
     if (cached && this.sliceInWorld(cached)) {
       // Instant: reveal the cached slice, hide the others — no fetch/decode.
@@ -1307,6 +1482,10 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
    * built. Handler is async — OSD awaits it (raiseEventAwaiting).
    */
   private async recolorTile(event: any): Promise<void> {
+    if (this.isMultiChannel) {
+      await this.recolorChannelTile(event);
+      return;
+    }
     const gray = this.isGrayscaleImage;
     if (gray) {
       if (!this.colorLut) return;
@@ -1359,6 +1538,58 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     }
 
     if (!this.applyDisplayToRgba(img.data) || !ctx) return; // nothing opaque
+    ctx.putImageData(img, 0, 0);
+    await event.setData(ctx, 'context2d');
+  }
+
+  /**
+   * Tint a single channel's tile in place. Each channel is its own OpenSeadragon
+   * TiledImage (a single-band grayscale tile); OSD composites the N images
+   * additively ('lighter') in its drawer — so this just maps the tile's intensity
+   * through the channel's window/gamma and its pseudo-colour. Synchronous (no
+   * cross-tile fetch) → no race, no seams. Channel is parsed from the tile URL.
+   */
+  private async recolorChannelTile(event: any): Promise<void> {
+    const tile = event?.tile;
+    const url: string = (tile && (typeof tile.getUrl === 'function' ? tile.getUrl() : tile.url)) || '';
+    const m = /[?&]channel=(\d+)/.exec(url);
+    const ch = m ? parseInt(m[1], 10) : 0;
+    const st = this.channelStates[ch];
+
+    let ctx: CanvasRenderingContext2D | null = null;
+    try { ctx = await event.getData('context2d'); } catch { /* fallback below */ }
+    let img: ImageData | null = null;
+    if (ctx && ctx.canvas && ctx.canvas.width && ctx.canvas.height) {
+      try { img = ctx.getImageData(0, 0, ctx.canvas.width, ctx.canvas.height); } catch { img = null; }
+    }
+    if (!img || !this.hasOpaque(img.data)) {
+      let src: any = null;
+      try { src = await event.getData('imageBitmap'); } catch { /* none */ }
+      if (!src || !src.width) { try { src = await event.getData('image'); } catch { /* none */ } }
+      if (!src || !src.width) return;
+      const c = document.createElement('canvas');
+      c.width = src.width; c.height = src.height;
+      ctx = c.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return;
+      ctx.drawImage(src, 0, 0);
+      img = ctx.getImageData(0, 0, c.width, c.height);
+    }
+    if (!ctx) return;
+
+    const tint = this.tint01(st);
+    const d = img.data;
+    let changed = false;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] === 0) continue;
+      const r = d[i], g = d[i + 1], b = d[i + 2];
+      const lum = r >= g ? (r >= b ? r : b) : g >= b ? g : b; // single-band → max
+      const v = this.channelIntensity(lum, st);
+      d[i] = v * tint[0];
+      d[i + 1] = v * tint[1];
+      d[i + 2] = v * tint[2];
+      changed = true;
+    }
+    if (!changed) return;
     ctx.putImageData(img, 0, 0);
     await event.setData(ctx, 'context2d');
   }

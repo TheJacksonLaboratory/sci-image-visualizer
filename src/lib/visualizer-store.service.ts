@@ -144,17 +144,32 @@ export class VisualizerStore {
     }
   }
 
-  /** Channels for an image: R/G/B for RGB (rgbChannels ≥ 3), else a single
-   *  "Intensity" channel. (Server-composited N-channel images render as their
-   *  composite for now — Phase 3 wires true per-channel tiles.) */
+  /** Channels for an image:
+   *   - RGB (rgbChannels ≥ 3) → Red/Green/Blue;
+   *   - multichannel fluorescence (channelCount > 1) → one channel per band,
+   *     named/tinted from the server `channelInfo` when present, else a palette;
+   *   - otherwise a single grayscale "Intensity" channel. */
   private deriveChannels(meta: IImageMetadata[]): IChannelState[] {
     const base = { min: 0, max: 255, gamma: 1, visible: true };
-    if ((meta?.[0]?.rgbChannels ?? 1) >= 3) {
+    const m = meta?.[0];
+    if ((m?.rgbChannels ?? 1) >= 3) {
       return [
         { index: 0, name: 'Red', color: '#ff0000', ...base },
         { index: 1, name: 'Green', color: '#00ff00', ...base },
         { index: 2, name: 'Blue', color: '#0000ff', ...base },
       ];
+    }
+    const count = m?.channelCount ?? 1;
+    if (count > 1) {
+      const info = m?.channelInfo;
+      // Fallback tints (Fiji-ish) when the server doesn't supply a color.
+      const palette = ['#ff0000', '#00ff00', '#0000ff', '#ffffff', '#00ffff', '#ff00ff', '#ffff00'];
+      return Array.from({ length: count }, (_, i) => ({
+        index: i,
+        name: info?.[i]?.name || `Channel ${i + 1}`,
+        color: info?.[i]?.color || palette[i % palette.length],
+        ...base,
+      }));
     }
     return [{ index: 0, name: 'Intensity', color: '#ffffff', ...base }];
   }
