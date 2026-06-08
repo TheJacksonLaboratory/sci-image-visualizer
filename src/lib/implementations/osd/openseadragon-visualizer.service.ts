@@ -804,7 +804,26 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     this.destroyViewer();
   }
   relayout(_trueImageSize?: number[]): void {
-    this.viewer?.viewport.goHome(true);
+    const vp = this.viewer?.viewport;
+    if (!vp) return;
+    // Keep the user's current view across a container/split resize instead of
+    // snapping home. Viewport bounds are image-relative (image width = 1), so
+    // they're independent of the container's pixel size — capture the visible
+    // region now and re-fit it once the new size has settled. OSD's autoResize
+    // fires asynchronously and the angular-split transition animates the width
+    // over a few hundred ms, so restore on the next frame and again after the
+    // transition completes.
+    const bounds = vp.getBounds(true);
+    const restore = () => {
+      try {
+        this.viewer?.viewport.fitBounds(bounds, true);
+        this.viewer?.viewport.applyConstraints(true);
+      } catch {
+        /* viewer torn down */
+      }
+    };
+    requestAnimationFrame(restore);
+    setTimeout(restore, 350);
   }
   resetAxes(): void {
     this.viewer?.viewport.goHome();
