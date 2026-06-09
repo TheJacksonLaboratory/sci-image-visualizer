@@ -19,7 +19,7 @@ import { OsdScaleBar } from './osd-scale-bar';
 import { IRegionOverlay, RegionToolMode } from '../../contracts/region-overlay.contract';
 import { ICoordinateTransform } from '../../contracts/coordinate-transform.contract';
 import { OsdCoordinateTransform } from './osd-coordinate-transform';
-import { elementToImage, imageRectToViewport } from './osd-coords';
+import { elementToImage, imageRectToViewport, viewportRectToImage } from './osd-coords';
 import { CachedImageData, WandToolService, WandToolHost } from '../../toolbar/wand-tool.service';
 import { VertexEraserToolService, VertexEraserToolHost } from '../../toolbar/vertex-eraser-tool.service';
 import { ZoomToBoxToolService, ZoomToBoxToolHost } from '../../toolbar/zoom-to-box-tool.service';
@@ -27,6 +27,37 @@ import { WandOptions } from '../../toolbar/wand.service';
 import { buildColormapLut, Rgb } from '../../contracts/colormap-lut';
 import { IChannelState, IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { saveAs } from 'file-saver';
+
+/**
+ * Quiet OpenSeadragon's "[Viewport.*] is not accurate with multi-image" advisories.
+ * A multichannel image is composited from one TiledImage per channel — a legitimate
+ * multi-image world — and OSD logs that advisory (at error level) from its own
+ * navigator/overview rendering on every animation frame, flooding the console. Our
+ * own image<->viewport conversions already route through world item 0 (see
+ * osd-coords), so the remaining advisories are OSD-internal and only affect the
+ * minimap's box accuracy (cosmetic). This wraps OSD's logger in a Proxy that drops
+ * only that one message string and forwards every other log untouched. Idempotent.
+ */
+function silenceOsdMultiImageAdvisory(): void {
+  const osd: any = OpenSeadragon as any;
+  if (osd.__multiImageFilterInstalled) return;
+  const base: any = (osd.console && typeof osd.console.error === 'function')
+    ? osd.console
+    : (typeof console !== 'undefined' ? console : null);
+  if (!base) return;
+  const isAdvisory = (a: unknown) =>
+    typeof a === 'string' && a.indexOf('not accurate with multi-image') !== -1;
+  osd.console = new Proxy(base, {
+    get(target: any, prop: string) {
+      const orig = target[prop];
+      if ((prop === 'error' || prop === 'warn') && typeof orig === 'function') {
+        return (...args: any[]) => { if (isAdvisory(args[0])) return; orig.apply(target, args); };
+      }
+      return typeof orig === 'function' ? orig.bind(target) : orig;
+    },
+  });
+  osd.__multiImageFilterInstalled = true;
+}
 
 /** One pyramid level from `GET /tiles/info`. */
 interface TileLevel { res: number; width: number; height: number; }
@@ -585,6 +616,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     const tileSource = this.buildTileSource(
       d, loaded.infoB64, loaded.z, this.isMultiChannel ? 0 : undefined,
     );
+    silenceOsdMultiImageAdvisory();
     this.viewer = (OpenSeadragon as any)({
       id: plotDiv,
       // Use the 2D canvas drawer, not WebGL: creating/destroying a viewer on
@@ -1239,7 +1271,10 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     const vp: any = this.viewer?.viewport;
     if (!vp || !this.descriptor) return;
     try {
-      const r = vp.viewportToImageRectangle(vp.getBounds(true));
+      // Route through world item 0 (osd-coords): vp.viewportToImageRectangle is
+      // inaccurate and warns when the world holds multiple images (per-channel
+      // multichannel layers), which fed the intensity inset a wrong ROI.
+      const r = viewportRectToImage(this.viewer, vp.getBounds(true));
       const iw = this.descriptor.width, ih = this.descriptor.height;
       const x = Math.max(0, Math.min(iw, r.x));
       const y = Math.max(0, Math.min(ih, r.y));
@@ -1462,12 +1497,13 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       matrix[y] = row;
     }
 
-    // Image-coord span the readback covers (CSS px in, image coords out).
-    const osd = OpenSeadragon as any;
+    // Image-coord span the readback covers (CSS px in, image coords out). Route
+    // through world item 0 (osd-coords) so it stays accurate — and quiet — when
+    // the world holds multiple images (per-channel multichannel layers).
     const elW = canvas.clientWidth || w;
     const elH = canvas.clientHeight || h;
-    const tl = vp.viewerElementToImageCoordinates(new osd.Point(0, 0));
-    const br = vp.viewerElementToImageCoordinates(new osd.Point(elW, elH));
+    const tl = elementToImage(this.viewer, 0, 0);
+    const br = elementToImage(this.viewer, elW, elH);
     const ratioX = (br.x - tl.x) / w; // image px per readback px
     const ratioY = (br.y - tl.y) / h;
 

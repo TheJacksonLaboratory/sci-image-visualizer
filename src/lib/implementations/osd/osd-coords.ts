@@ -48,3 +48,11 @@ export function imageRectToViewport(viewer: any, x: number, y: number, w: number
   const item = refItem(viewer);
   return item ? item.imageToViewportRectangle(rect) : viewer.viewport.imageToViewportRectangle(rect);
 }
+
+/** Viewport rectangle -> image (data) rectangle. Routes through world item 0 so
+ *  it stays accurate when the world holds multiple images (stack slices /
+ *  per-channel layers); falls back to the viewport when the world is empty. */
+export function viewportRectToImage(viewer: any, vpRect: any): any {
+  const item = refItem(viewer);
+  return item ? item.viewportToImageRectangle(vpRect) : viewer.viewport.viewportToImageRectangle(vpRect);
+}
