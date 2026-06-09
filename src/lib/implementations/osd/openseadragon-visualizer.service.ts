@@ -623,8 +623,8 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       const fitTiles = coarseTiles * Math.max(1, d.channels ?? 1);
       if (fitTiles > this.MAX_MULTICHANNEL_FIT_TILES) {
         this.isMultiChannel = false;
-        console.info(
-          `[OSD] multichannel composite too large for per-channel rendering: ` +
+        console.warn(
+          '[OSD] multichannel composite too large for per-channel rendering: ' +
           `${coarseW}x${coarseH} tiles x ${d.channels} channels = ${fitTiles} at the coarsest ` +
           `real level (> ${this.MAX_MULTICHANNEL_FIT_TILES}); rendering server-composited for speed.`,
         );
