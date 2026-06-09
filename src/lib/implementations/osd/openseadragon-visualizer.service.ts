@@ -215,6 +215,11 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
   private maxCachedSlices = 8;
   /** Upper bound on resident slices, regardless of stack depth (memory guard). */
   private readonly MAX_CACHED_SLICES_CAP = 64;
+  /** True when the server had to append synthetic overview levels because the real
+   *  Bio-Formats pyramid is too coarse for an overview (realLevels < levels.length).
+   *  Such images only have full-res real tiles, so per-channel rendering and
+   *  background slice preloading are both disabled (they'd flood full-res tiles). */
+  private noOverviewPyramid = false;
 
   constructor(
     private http: HttpClient,
@@ -593,17 +598,15 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     // reads as separated planes (channels>1, rgbChannels==1), splitting them into N
     // per-channel TiledImages that flooded the tile endpoint and hung on load.
     this.realLevels = d.realLevels ?? d.levels.length;
+    // The server appends synthetic overview levels only when the real Bio-Formats
+    // pyramid is too coarse for an overview, so `realLevels < levels.length` means
+    // there is no real level small enough to fit the view — every real tile is
+    // full resolution. Such images are too expensive to (a) split per-channel or
+    // (b) background-preload across stack slices: either floods full-res tile reads
+    // (blowing OSD's 30s timeout) and starves the visible slice (black screen).
+    this.noOverviewPyramid = this.realLevels < d.levels.length;
     this.isMultiChannel = !!d.multichannel;
-    // Per-channel rendering can only use the REAL Bio-Formats resolution levels —
-    // the synthetic overview levels are server-composited and ignore &channel. The
-    // server appends synthetic levels only when the real pyramid is too coarse for
-    // an overview, so `realLevels < levels.length` means there is no real level
-    // small enough to fit the view: per-channel would force OSD to demand full-res
-    // per-channel tiles even when zoomed out, and a big composite's full-res reads
-    // blow OSD's 30s tile timeout. Fall back to the single composite tile source
-    // (which keeps the fast synthetic overviews) so the image still loads — at the
-    // cost of live per-channel controls for that image.
-    if (this.isMultiChannel && this.realLevels < d.levels.length) {
+    if (this.isMultiChannel && this.noOverviewPyramid) {
       this.isMultiChannel = false;
       console.info(
         `[OSD] multichannel composite has no overview-scale real level ` +
@@ -814,6 +817,19 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       const lvl = levels[resForLevel(level)];
       return lvl ? lvl.width / d.width : 1;
     };
+    // Drive the tile COUNT off each level's own (independently-rounded) dimensions,
+    // not OSD's default `ceil(scale * fullDimension / tileSize)`. Synthetic AND real
+    // Bio-Formats levels aren't exact proportional scales of the full image, so
+    // `scale * fullHeight` can round up to one more row (or column) than the level
+    // actually has — OSD then requests an out-of-range tile that the server 400s
+    // ("Tile (col,row) out of range"). Using the level's real w/h matches the
+    // server's own bounds check exactly.
+    const Point = (OpenSeadragon as any).Point;
+    ts.getNumTiles = (level: number) => {
+      const lvl = levels[resForLevel(level)];
+      if (!lvl) return new Point(0, 0);
+      return new Point(Math.ceil(lvl.width / t), Math.ceil(lvl.height / t));
+    };
     ts.getTileUrl = (level: number, x: number, y: number) =>
       `${base}tile?info=${infoB64}&res=${resForLevel(level)}&col=${x}&row=${y}&z=${z}&tileSize=${t}${chParam}`;
     return ts;
@@ -918,9 +934,14 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
   /** Debounce so a burst of viewport/slice events coalesces, then advance the
    *  background stack loader by one slice. */
   private schedulePrefetch(): void {
-    // Multichannel uses per-channel TiledImages, not the per-slice composite
-    // cache the background loader fills — skip it.
-    if (this.isMultiChannel) return;
+    // Skip the per-slice background loader for:
+    //  - multichannel (uses per-channel TiledImages, not the per-slice cache); and
+    //  - no-overview images, whose slices only exist at full resolution — preloading
+    //    every slice floods full-res tile reads (each can exceed OSD's 30s timeout),
+    //    starves the visible slice (black view), and churns the cache (the
+    //    "[CacheRecord] … object no longer usable" DOMException). On these, z-scrub
+    //    loads slices on demand instead.
+    if (this.isMultiChannel || this.noOverviewPyramid) return;
     if (this.prefetchTimer) clearTimeout(this.prefetchTimer);
     this.prefetchTimer = setTimeout(() => this.loadNextBackgroundSlice(), 200);
   }
@@ -1599,7 +1620,10 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
 
     if (!this.applyDisplayToRgba(img.data) || !ctx) return; // nothing opaque
     ctx.putImageData(img, 0, 0);
-    await event.setData(ctx, 'context2d');
+    // The tile's cache can be evicted between the awaits above and here (slice
+    // change / invalidation), making setData throw a DOMException on a dead
+    // canvas. Swallow it — the tile is gone, so there's nothing to recolor.
+    try { await event.setData(ctx, 'context2d'); } catch { /* tile evicted */ }
   }
 
   /**
@@ -1651,7 +1675,8 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     }
     if (!changed) return;
     ctx.putImageData(img, 0, 0);
-    await event.setData(ctx, 'context2d');
+    // See recolorTile: the tile cache can die between the awaits and here.
+    try { await event.setData(ctx, 'context2d'); } catch { /* tile evicted */ }
   }
 
   /**
