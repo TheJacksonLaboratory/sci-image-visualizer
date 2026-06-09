@@ -594,6 +594,22 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     // per-channel TiledImages that flooded the tile endpoint and hung on load.
     this.realLevels = d.realLevels ?? d.levels.length;
     this.isMultiChannel = !!d.multichannel;
+    // Per-channel rendering can only use the REAL Bio-Formats resolution levels —
+    // the synthetic overview levels are server-composited and ignore &channel. The
+    // server appends synthetic levels only when the real pyramid is too coarse for
+    // an overview, so `realLevels < levels.length` means there is no real level
+    // small enough to fit the view: per-channel would force OSD to demand full-res
+    // per-channel tiles even when zoomed out, and a big composite's full-res reads
+    // blow OSD's 30s tile timeout. Fall back to the single composite tile source
+    // (which keeps the fast synthetic overviews) so the image still loads — at the
+    // cost of live per-channel controls for that image.
+    if (this.isMultiChannel && this.realLevels < d.levels.length) {
+      this.isMultiChannel = false;
+      console.info(
+        `[OSD] multichannel composite has no overview-scale real level ` +
+        `(realLevels=${this.realLevels} of ${d.levels.length}); rendering server-composited for speed.`,
+      );
+    }
     this.channelImages = [];
     // Auto-range grayscale tiles to the image's actual intensity span (like the
     // heatmap), sampling the coarsest tile level so the window matches the raw
