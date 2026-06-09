@@ -766,6 +766,15 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
         // Tell listeners (the intensity inset) the visible image region whenever
         // the view settles, so they can re-sample at the current zoom resolution.
         this.viewer!.addHandler('animation-finish', () => this.emitViewportChange());
+        // Chrome compositor bug: after an OSD zoom the docked toolbar (a sibling of
+        // #plot in the <visualization> host) is left laid-out-but-unpainted and
+        // vanishes — confirmed via DevTools (DOM intact, region simply not painted).
+        // CSS (z-index / isolation / contain) and DOM-reparenting don't fix it; a
+        // repaint reliably does. Nudge it each animation frame (so it never visibly
+        // drops) and on settle. The synchronous display toggle re-rasters with no
+        // visible gone-frame and no layout shift.
+        this.viewer!.addHandler('animation', () => this.nudgeToolbarRepaint());
+        this.viewer!.addHandler('animation-finish', () => this.nudgeToolbarRepaint());
         this.schedulePrefetch();
         // Force fit-to-view as the split/flex layout settles. A tall
         // non-pyramidal image can otherwise open zoomed-in (image width filling
@@ -1600,6 +1609,21 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
   /** The element the on-canvas tool overlays attach to (OSD is mounted here). */
   private getOverlayContainer(): HTMLElement | null {
     return this.plotDiv ? document.getElementById(this.plotDiv) : null;
+  }
+
+  /** Force the docked toolbar to repaint after an OSD zoom. Chrome leaves it
+   *  laid-out-but-unpainted (the canvas's compositing churn strands the toolbar's
+   *  raster). A synchronous display toggle re-rasters it with no visible gone-frame
+   *  and no layout shift. Located via the DOM since this service doesn't own the
+   *  toolbar; a no-op when there's no toolbar (e.g. embedded without one). */
+  private nudgeToolbarRepaint(): void {
+    const plotEl = this.plotDiv ? document.getElementById(this.plotDiv) : null;
+    const dock = plotEl?.closest('visualization')?.querySelector<HTMLElement>('.toolbar-dock');
+    if (!dock) return;
+    const prev = dock.style.display;
+    dock.style.display = 'none';
+    void dock.offsetHeight; // reflow so the toggle re-rasters on the next paint
+    dock.style.display = prev;
   }
 
   /** Host for the (shared) zoom-to-box tool: convert overlay pixels to image
