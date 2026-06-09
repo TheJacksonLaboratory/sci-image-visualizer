@@ -941,11 +941,17 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     try { v.navigator?.world?.requestInvalidate(true); } catch { /* no-op */ }
   }
 
-  /** Invalidate (restore + re-recolor) just the channel images of one cached slice. */
+  /** Invalidate (restore + re-recolor) just the channel images of one cached slice.
+   *  A shared timestamp batches the per-image invalidations into one processing
+   *  pass (OSD dedupes tiles already stamped at >= tStamp). */
   private invalidateSlice(z: number): void {
-    for (const it of this.channelSliceItems.get(z) ?? []) {
+    const group = this.channelSliceItems.get(z) ?? [];
+    if (!group.length) return;
+    const osd: any = OpenSeadragon;
+    const tStamp = typeof osd.now === 'function' ? osd.now() : Date.now();
+    for (const it of group) {
       if (it && typeof it.requestInvalidate === 'function') {
-        try { it.requestInvalidate(true); } catch { /* gone */ }
+        try { it.requestInvalidate(true, false, tStamp); } catch { /* gone */ }
       }
     }
   }
@@ -1778,17 +1784,20 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     }
     if (!ctx) return;
 
-    const tint = this.tint01(st);
+    // Precompute lum(0..255) → tinted RGB once, then map each pixel by lookup —
+    // the channel tile is single-band, so this turns ~262k per-pixel
+    // channelIntensity() (with Math.pow for gamma) calls into 256 — the difference
+    // between a snappy and a sluggish slider on a 4-channel stack.
+    const { r: rL, g: gL, b: bL } = this.channelRgbLut(st);
     const d = img.data;
     let changed = false;
     for (let i = 0; i < d.length; i += 4) {
       if (d[i + 3] === 0) continue;
       const r = d[i], g = d[i + 1], b = d[i + 2];
       const lum = r >= g ? (r >= b ? r : b) : g >= b ? g : b; // single-band → max
-      const v = this.channelIntensity(lum, st);
-      d[i] = v * tint[0];
-      d[i + 1] = v * tint[1];
-      d[i + 2] = v * tint[2];
+      d[i] = rL[lum];
+      d[i + 1] = gL[lum];
+      d[i + 2] = bL[lum];
       changed = true;
     }
     if (!changed) return;
@@ -1856,6 +1865,23 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       }
     }
     return changed;
+  }
+
+  /** Precomputed lum(0..255) → tinted-RGB lookup for a channel's window/gamma/colour.
+   *  Building it costs 256 channelIntensity() calls; using it makes a full-tile
+   *  recolor ~262k array lookups instead of ~262k Math.pow() calls. */
+  private channelRgbLut(st?: IChannelState): { r: Uint8ClampedArray; g: Uint8ClampedArray; b: Uint8ClampedArray } {
+    const r = new Uint8ClampedArray(256);
+    const g = new Uint8ClampedArray(256);
+    const b = new Uint8ClampedArray(256);
+    const [tr, tg, tb] = this.tint01(st);
+    for (let lum = 0; lum < 256; lum++) {
+      const v = this.channelIntensity(lum, st);
+      r[lum] = v * tr;
+      g[lum] = v * tg;
+      b[lum] = v * tb;
+    }
+    return { r, g, b };
   }
 
   /** Windowed + gamma intensity (0..255) for a channel, ignoring tint/invert. */
