@@ -164,6 +164,11 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
    *  z-scrub is an instant opacity toggle (no white-flicker) once a slice is
    *  cached. Only the active slice's visible channels have opacity > 0. */
   private channelSliceItems = new Map<number, any[]>();
+  /** Cached multichannel slices whose tiles were tinted before the latest display
+   *  change (min/max/gamma/colour/visibility). A display change re-tints only the
+   *  visible slice (invalidating the whole world floods OSD); these are re-tinted
+   *  lazily when next revealed by z-scrub. */
+  private staleSlices = new Set<number>();
   /** Inverted background (white = zero): inverts the display value before the
    *  LUT (grayscale) / per channel (RGB). */
   private invertBg = false;
@@ -305,19 +310,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       // re-running recolorTile, so a change always maps afresh (no compounding).
       // RGB now recolors too (per-channel window/visibility), so don't gate on
       // grayscale.
-      if (this.viewer) {
-        try {
-          (this.viewer as any).world.requestInvalidate(true);
-        } catch {
-          /* no-op */
-        }
-        // Re-run on the overview navigator too, so the minimap tracks the image.
-        try {
-          (this.viewer as any).navigator?.world?.requestInvalidate(true);
-        } catch {
-          /* no-op */
-        }
-      }
+      this.invalidateDisplay();
     });
   }
 
@@ -880,6 +873,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       if (token !== this.sliceLoadToken) return; // image switched mid-add
       this.slicesLoading.delete(z);
       this.channelSliceItems.set(z, group);
+      this.staleSlices.delete(z); // freshly tinted at the current display state
       this.touchSliceLru(z);
       if (z === this.currentZ) {
         this.revealChannelSlice(z); // tiles may still be decoding; opacity is set now
@@ -923,6 +917,36 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
         const visible = this.channelStates[c]?.visible !== false;
         try { it.setOpacity(active && visible ? 1 : 0); } catch { /* gone */ }
       });
+    }
+  }
+
+  /** Re-apply the display pipeline (window/gamma/colour/invert) after a state change.
+   *  Multichannel invalidates ONLY the visible slice's channel images — invalidating
+   *  the whole world would re-process every hidden/preloaded slice's tiles (hundreds),
+   *  flooding OSD with "[CacheRecord] … InvalidStateError" and wasting work on tiles
+   *  that aren't on screen. The other cached slices are marked stale and re-tinted
+   *  lazily when revealed. Composite/grayscale invalidate the world as before. */
+  private invalidateDisplay(): void {
+    const v: any = this.viewer;
+    if (!v) return;
+    if (this.isMultiChannel) {
+      this.invalidateSlice(this.currentZ);
+      this.staleSlices.clear();
+      for (const z of this.channelSliceItems.keys()) {
+        if (z !== this.currentZ) this.staleSlices.add(z);
+      }
+      return;
+    }
+    try { v.world.requestInvalidate(true); } catch { /* no-op */ }
+    try { v.navigator?.world?.requestInvalidate(true); } catch { /* no-op */ }
+  }
+
+  /** Invalidate (restore + re-recolor) just the channel images of one cached slice. */
+  private invalidateSlice(z: number): void {
+    for (const it of this.channelSliceItems.get(z) ?? []) {
+      if (it && typeof it.requestInvalidate === 'function') {
+        try { it.requestInvalidate(true); } catch { /* gone */ }
+      }
     }
   }
 
@@ -1173,6 +1197,10 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       const group = this.channelSliceItems.get(z);
       if (group && group.length && group.some((it) => it && this.sliceInWorld(it))) {
         this.revealChannelSlice(z);
+        // If a display change happened while this slice was cached, its tiles hold
+        // a stale tint — re-apply now (it's the visible slice, so the brief restore
+        // flash is acceptable, like a fresh load).
+        if (this.staleSlices.delete(z)) this.invalidateSlice(z);
         this.touchSliceLru(z);
         this.schedulePrefetch();
       } else if (!this.slicesLoading.has(z)) {
@@ -1326,6 +1354,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
   private resetSliceCache(): void {
     this.sliceItems.clear();
     this.channelSliceItems.clear();
+    this.staleSlices.clear();
     this.sliceWindows.clear();
     this.sliceHistograms.clear();
     this.sliceLru = [];
