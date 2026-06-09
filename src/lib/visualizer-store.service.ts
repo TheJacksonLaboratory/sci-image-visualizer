@@ -44,6 +44,9 @@ export class VisualizerStore {
   // metadata on load (1 "Intensity" channel for grayscale; R/G/B for RGB). The
   // Channels & Histogram pane edits these and both backends recolor live.
   private readonly channelStates$ = new BehaviorSubject<IChannelState[]>([]);
+  // The derived defaults (full window, gamma 1, default tint) for the current
+  // image, kept so "Reset" can restore a channel's window/gamma/colour.
+  private defaultChannelStates: IChannelState[] = [];
   // Grayscale display (ignore the channel tints) and inverted background — both
   // global display flags, like the colormap.
   private readonly grayscale$ = new BehaviorSubject<boolean>(false);
@@ -139,6 +142,9 @@ export class VisualizerStore {
     // Re-derive channels only when their structure changes (count), so a re-plot
     // of the same image doesn't clobber the user's window/gamma edits.
     const next = this.deriveChannels(imageMeta);
+    // Always refresh the reset baseline to the current image's derived defaults
+    // (names/colours can differ even at the same channel count).
+    this.defaultChannelStates = next.map((c) => ({ ...c }));
     if (next.length !== this.channelStates$.value.length) {
       this.channelStates$.next(next);
     }
@@ -191,6 +197,18 @@ export class VisualizerStore {
   /** Replace all channel states (used by auto/reset). */
   setChannelStates(states: IChannelState[]): void {
     this.channelStates$.next(states);
+  }
+  /** Reset one channel's display window, gamma AND colour to the values derived
+   *  for the current image (full 0..255 range, gamma 1, the channel's default
+   *  tint). Falls back to neutral defaults if no baseline was captured. */
+  resetChannelState(index: number): void {
+    const def = this.defaultChannelStates.find((c) => c.index === index);
+    this.setChannelState(index, {
+      min: def?.min ?? 0,
+      max: def?.max ?? 255,
+      gamma: def?.gamma ?? 1,
+      color: def?.color ?? '#ffffff',
+    });
   }
 
   getGrayscale(): Observable<boolean> {

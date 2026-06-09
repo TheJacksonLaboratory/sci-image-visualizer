@@ -60,7 +60,8 @@ export interface IChannelHistogramApi {
   /** Auto-window the given channels by saturating `saturation` (0..1) of pixels
    *  at each end of their histogram. */
   autoContrast(indices: number[], saturation: number): void;
-  /** Reset the given channels to the full display range (0..255). */
+  /** Reset the given channels to their derived defaults: full display range
+   *  (0..255), gamma 1, and the channel's default tint colour. */
   resetContrast(indices: number[]): void;
 
   // ── histogram ─────────────────────────────────────────────────────────

@@ -286,7 +286,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.store.setChannelState(index, partial);
   }
   resetContrast(indices: number[]): void {
-    for (const i of indices) this.store.setChannelState(i, { min: 0, max: 255 });
+    // Full reset: window (0..255), gamma (1) AND the channel's default tint.
+    for (const i of indices) this.store.resetChannelState(i);
   }
   /** Auto-window each channel by saturating `saturation` (0..1) of pixels at each
    *  end of its histogram (skipping outlier first/last bins). */
