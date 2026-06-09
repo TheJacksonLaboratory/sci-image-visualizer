@@ -110,6 +110,10 @@ export class PlotlyService implements IVisualizer {
    *  image; a crop's top-left when zoomed (so the intensity profile samples the
    *  zoom-level pixels at the right offset/resolution). */
   private cachedFrameOrigin: [number, number] = [0, 0];
+  /** Last visible image-pixel rectangle from the active backend's viewport (set by
+   *  the OSD viewport-change hook via refreshSamplingForRoi). New profile lines are
+   *  placed within it so they land on-screen when zoomed in; null → use full image. */
+  private lastVisibleRoi: { x: number; y: number; width: number; height: number } | null = null;
 
   /** events */
   private onRelayoutEvent: any;
@@ -776,12 +780,31 @@ export class PlotlyService implements IVisualizer {
   public addProfileLine(): Region | null {
     if (!this.trueImgSize) return null;
     const count = this.getProfileRegions().length;
-    const x0 = this.trueImgSize[0], x1 = this.trueImgSize[1];
-    const top = this.trueImgSize[2], bottom = this.trueImgSize[3];
-    const height = bottom - top;
-    const midY = (top + bottom) / 2;
-    // Stagger across the band so successive lines stay visually distinct.
-    const y = Math.min(bottom, Math.max(top, midY + count * height * 0.12));
+    const imgX0 = this.trueImgSize[0], imgX1 = this.trueImgSize[1];
+    const imgTop = this.trueImgSize[2], imgBottom = this.trueImgSize[3];
+
+    // Place the line within the currently VISIBLE image area, so when zoomed in it
+    // lands on-screen instead of spanning the whole (mostly off-screen) image, at
+    // 2/3 of the visible width and horizontally centred. Falls back to the full
+    // image when no viewport ROI is known (Plotly heatmap) or a stale ROI no longer
+    // overlaps the image.
+    const roi = this.lastVisibleRoi;
+    const overlaps = !!roi && roi.width > 0 && roi.height > 0
+      && roi.x < imgX1 && roi.x + roi.width > imgX0
+      && roi.y < imgBottom && roi.y + roi.height > imgTop;
+    const x0v = overlaps ? Math.max(imgX0, roi!.x) : imgX0;
+    const x1v = overlaps ? Math.min(imgX1, roi!.x + roi!.width) : imgX1;
+    const topV = overlaps ? Math.max(imgTop, roi!.y) : imgTop;
+    const bottomV = overlaps ? Math.min(imgBottom, roi!.y + roi!.height) : imgBottom;
+
+    const cx = (x0v + x1v) / 2;
+    const half = ((x1v - x0v) * (2 / 3)) / 2; // line spans 2/3 of the visible width
+    const x0 = cx - half, x1 = cx + half;
+
+    const bandH = bottomV - topV;
+    const midY = (topV + bottomV) / 2;
+    // Stagger successive lines across the visible band so they stay distinct.
+    const y = Math.min(bottomV, Math.max(topV, midY + count * bandH * 0.12));
 
     const poly = new Polygon();
     poly.npoints = 2;
@@ -884,6 +907,8 @@ export class PlotlyService implements IVisualizer {
   public refreshSamplingForRoi(x: number, y: number, width: number, height: number,
                                zIndex: number): void {
     if (width <= 0 || height <= 0) return;
+    // Remember the visible region so a new profile line is placed inside it.
+    this.lastVisibleRoi = { x, y, width, height };
     const roi = new Rectangle();
     roi.x = Math.round(x); roi.y = Math.round(y);
     roi.width = Math.round(width); roi.height = Math.round(height);
