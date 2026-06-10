@@ -1866,19 +1866,33 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       const wMin = ch ? ch.min : 0;
       const wSpan = ch && ch.max > ch.min ? ch.max - ch.min : 255;
       const invGamma = ch && ch.gamma > 0 ? 1 / ch.gamma : 1;
-      for (let i = 0; i < d.length; i += 4) {
-        if (d[i + 3] === 0) continue;
-        const raw =
-          d[i] >= d[i + 1] ? (d[i] >= d[i + 2] ? d[i] : d[i + 2]) : d[i + 1] >= d[i + 2] ? d[i + 1] : d[i + 2];
+      // Precompute raw(0..255) -> final RGB once (256 window+gamma+invert+colormap
+      // evaluations) and map each pixel by table lookup. The previous code ran a
+      // Math.pow PER PIXEL (~262k/tile) on every invalidation, so dragging the
+      // window/gamma sliders re-decoded and re-mapped every tile with hundreds of
+      // thousands of pow() calls each — which made the sliders crawl on large
+      // grayscale stacks. (Mirrors the RGB path's channelRgbLut.)
+      const rL = new Uint8ClampedArray(256);
+      const gL = new Uint8ClampedArray(256);
+      const bL = new Uint8ClampedArray(256);
+      for (let raw = 0; raw < 256; raw++) {
         let t = (raw - wMin) / wSpan;
         t = t < 0 ? 0 : t > 1 ? 1 : t;
         if (invGamma !== 1) t = Math.pow(t, invGamma);
         let v = Math.round(t * 255);
         if (this.invertBg) v = 255 - v;
         const c = lut[v];
-        d[i] = c[0];
-        d[i + 1] = c[1];
-        d[i + 2] = c[2];
+        rL[raw] = c[0];
+        gL[raw] = c[1];
+        bL[raw] = c[2];
+      }
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i + 3] === 0) continue;
+        const raw =
+          d[i] >= d[i + 1] ? (d[i] >= d[i + 2] ? d[i] : d[i + 2]) : d[i + 1] >= d[i + 2] ? d[i + 1] : d[i + 2];
+        d[i] = rL[raw];
+        d[i + 1] = gL[raw];
+        d[i + 2] = bL[raw];
         changed = true;
       }
     } else {
