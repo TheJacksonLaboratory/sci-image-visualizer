@@ -185,6 +185,13 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
    *  getHistogram$ and cached for the session; never sampled from canvas tiles
    *  (those are 8-bit), so it carries the true 16-bit distribution. */
   private nativeHistograms = new Map<string, IHistogram>();
+  /** Per-app-load cache-buster for the `/histogram` fetch. The server marks the
+   *  response `Cache-Control: max-age=86400`, so the browser would otherwise
+   *  serve a stale histogram for 24h after a backend change (a hard refresh
+   *  can't bust a post-load XHR). A token that's stable within a session but new
+   *  on each full load keeps the in-session dedup (via `nativeHistograms`) while
+   *  always reflecting the live backend after a reload. */
+  private readonly histCacheBuster = Date.now();
   /** Bearer token for OSD's own tile fetches (HttpClient calls get it via the
    *  interceptor; OSD's loader does not, so we pass it as an ajax header). */
   private authHeaders: Record<string, string> = {};
@@ -1987,7 +1994,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
   private async fetchNativeHistogram(
     channel: number, z: number, bins: number, key: string,
   ): Promise<IHistogram | null> {
-    const url = `${this.api}histogram?info=${this.infoB64}&channel=${channel}&z=${z}&bins=${bins}`;
+    const url = `${this.api}histogram?info=${this.infoB64}&channel=${channel}&z=${z}&bins=${bins}&_=${this.histCacheBuster}`;
     try {
       // HttpClient calls get auth via the Angular interceptor (unlike OSD's own
       // ajax tile loader, which needs authHeaders) — mirror the other fetches.
