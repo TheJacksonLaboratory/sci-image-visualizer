@@ -47,6 +47,7 @@
 .ch-export {
   display: flex;
   justify-content: flex-end;
+  gap: 0.5rem;
   margin-top: 0.25rem;
 }
 
@@ -89,6 +90,16 @@
     p-inputnumber {
       flex: 1 1 0;
       min-width: 0;
+    }
+    // Fixed-width activity slot at the row end — always reserved so toggling the
+    // spinner never shifts the slider/value layout.
+    .ch-busy {
+      flex: 0 0 1rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #4fa3ff;
+      font-size: 0.8rem;
     }
   }
 

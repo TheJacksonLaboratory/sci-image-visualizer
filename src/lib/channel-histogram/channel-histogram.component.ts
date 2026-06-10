@@ -42,6 +42,12 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
    *  Drives the plot, the native window labels, and the export-button gate. */
   hist: IHistogram | null = null;
   private histSub?: Subscription;
+  /** Which window control is being adjusted right now — drives a small
+   *  non-blocking activity spinner next to that slider, since the image recolor
+   *  isn't instant on large stacks. Cleared a short moment after movement stops
+   *  (the recolor isn't directly observable, so this is a trailing heuristic). */
+  activeAdjust: 'min' | 'max' | 'gamma' | null = null;
+  private adjustTimer?: ReturnType<typeof setTimeout>;
 
   colormapOptions: any;
   selectedColormap: any;
@@ -79,6 +85,7 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.subs.unsubscribe();
     this.histSub?.unsubscribe();
+    clearTimeout(this.adjustTimer);
     this.teardownResize();
     try { Plotly.purge(this.histogramDiv); } catch { /* never rendered */ }
   }
@@ -127,6 +134,7 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
     const min = this.toDisp(value);
     const max = Math.max(min, this.selected.max);
     this.api.setChannelState(this.selected.index, { min, max });
+    this.markBusy('min');
     this.updateMarkers();
   }
   onMaxChange(value: any): void {
@@ -134,6 +142,7 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
     const max = this.toDisp(value);
     const min = Math.min(max, this.selected.min);
     this.api.setChannelState(this.selected.index, { min, max });
+    this.markBusy('max');
     this.updateMarkers();
   }
   onGammaChange(value: any): void {
@@ -141,6 +150,16 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
     const g = Number(value);
     if (isNaN(g)) return;
     this.api.setChannelState(this.selected.index, { gamma: g });
+    this.markBusy('gamma');
+  }
+
+  /** Flag a control as actively adjusting so its spinner shows; auto-clears a
+   *  short moment after the last change (kept alive while the user keeps
+   *  dragging, since each change resets the timer). */
+  private markBusy(which: 'min' | 'max' | 'gamma'): void {
+    this.activeAdjust = which;
+    clearTimeout(this.adjustTimer);
+    this.adjustTimer = setTimeout(() => { this.activeAdjust = null; }, 500);
   }
   onVisibleToggle(ch: IChannelState, value: boolean): void {
     this.api.setChannelState(ch.index, { visible: value });
