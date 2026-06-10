@@ -65,14 +65,21 @@ Gate:
 
 ## Step 1 — Zero-risk hygiene
 
-- [ ] Delete dead `notImplemented()` + `warned` set (`osd:285`)
-- [ ] Router display options read `VisualizerStore` directly (kill the double-hop via Plotly);
-      fix the misleading "display options → Plotly" comment; update the Step-0 pinning test
-- [ ] Rename OSD's injected `session` → `store` (match Plotly)
-- [ ] The 6 fire-and-forget empty catches log `console.warn` with tags
+- [x] Delete dead `notImplemented()` + `warned` set (`osd:285`)
+- [x] Router display options read `VisualizerStore` directly — **refined during execution**:
+      only the pure READS (`getColormap`, `getColormapOptions`, `getReverseScale`,
+      `getImageMeta`, `setImageMeta`) re-point to the store. `setColormap`/`setReverseScale`
+      stay routed through Plotly because its implementations carry render glue beyond the store
+      write (a live `Plotly.restyle` of colorscale/reversescale on the mounted heatmap) — a
+      blind re-point would have broken the heatmap's live recolor. Comment fixed; Step-0
+      pinning test updated to the new behavior in the same commit
+- [x] Rename OSD's injected `session` → `store` (match Plotly)
+- [x] The 6 fire-and-forget empty catches log `console.warn` with tags
       (`[viz:histogram]`, `[viz:window]`, `[viz:export]`); still swallow — never throw
-- [ ] Gate: _STD_; manual smoke: colormap change recolors both backends (the double-hop fix
-      touches the colormap path)
+- Gate:
+  - [x] _STD_ (297/297 tests, lint 0 errors, ng-packagr + jit-ui AOT green)
+  - [ ] Manual smoke: colormap change recolors both backends (Image/OSD view AND Heatmap view)
+        — requires a signed-in session; **pending user verification**
 
 ## Step 2 — Extract `osd/tile-client.ts`
 

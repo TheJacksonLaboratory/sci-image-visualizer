@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { of } from 'rxjs';
+import { firstValueFrom, of } from 'rxjs';
 
 import { RoutingVisualizerService } from './routing-visualizer.service';
 import { PlotlyService } from './implementations/plotly/plotly.service';
@@ -179,13 +179,18 @@ describe('RoutingVisualizerService (characterization)', () => {
     expect(plotly.getHistogram).not.toHaveBeenCalled();
   });
 
-  // Pins the CURRENT double-hop (router → plotly → store). Step 1 of the
-  // refactoring plan re-points this to the store directly — update then.
-  it('display options currently route through the Plotly backend', () => {
-    router.getColormap();
+  // Updated by refactoring-plan Step 1: reads come straight from the shared
+  // store (the old router→plotly→store double-hop is gone); the SETTERS still
+  // route through Plotly because they carry a live restyle side effect.
+  it('display-option reads come from the store; setters route through Plotly (restyle glue)', async () => {
+    store.setColormap('Greens'); // direct store write — what reads must surface
+    await expect(firstValueFrom(router.getColormap())).resolves.toBe('Greens');
+    expect(plotly.getColormap).not.toHaveBeenCalled();
+
     router.setColormap('Reds');
-    expect(plotly.getColormap).toHaveBeenCalled();
+    router.setReverseScale(true);
     expect(plotly.setColormap).toHaveBeenCalledWith('Reds');
+    expect(plotly.setReverseScale).toHaveBeenCalledWith(true);
   });
 
   // ── region-overlay fallback ───────────────────────────────────────────

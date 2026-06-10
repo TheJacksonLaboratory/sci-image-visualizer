@@ -265,14 +265,19 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   setVertexEraserRadius(radius: number): void { this.renderer().setVertexEraserRadius(radius); }
   setZoomToBoxMode(active: boolean): void { this.renderer().setZoomToBoxMode(active); }
 
-  // ── display options → Plotly ─────────────────────────────────────────
-  getColormap(): Observable<any> { return this.plotly.getColormap(); }
+  // ── display options ──────────────────────────────────────────────────
+  // State lives in the shared VisualizerStore — reads go straight to it.
+  // The two SETTERS still route through Plotly because its implementations
+  // carry render glue beyond the store write (a live Plotly.restyle of
+  // colorscale/reversescale on the mounted heatmap); OSD recolors via its own
+  // store subscription either way.
+  getColormap(): Observable<any> { return this.store.getColormap(); }
   setColormap(colormap: any): void { this.plotly.setColormap(colormap); }
-  getColormapOptions(): any { return this.plotly.getColormapOptions(); }
-  getReverseScale(): Observable<boolean> { return this.plotly.getReverseScale(); }
+  getColormapOptions(): any { return this.store.getColormapOptions(); }
+  getReverseScale(): Observable<boolean> { return this.store.getReverseScale(); }
   setReverseScale(reverscale: any): void { this.plotly.setReverseScale(reverscale); }
-  setImageMeta(imageMeta: IImageMetadata[]): void { this.plotly.setImageMeta(imageMeta); }
-  getImageMeta(): Observable<IImageMetadata[]> { return this.plotly.getImageMeta(); }
+  setImageMeta(imageMeta: IImageMetadata[]): void { this.store.setImageMeta(imageMeta); }
+  getImageMeta(): Observable<IImageMetadata[]> { return this.store.getImageMeta(); }
 
   // ── IChannelHistogramApi: Channels & Histogram pane surface ───────────
   // Channel/grayscale/invert state lives in the shared VisualizerStore; both

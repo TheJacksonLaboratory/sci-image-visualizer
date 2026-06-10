@@ -262,7 +262,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     private wandTool: WandToolService,
     private eraserTool: VertexEraserToolService,
     private zoomToBoxTool: ZoomToBoxToolService,
-    private session: VisualizerStore,
+    private store: VisualizerStore,
     private regionStore: RegionStore,
     @Inject(VIZ_CONFIG) config: VizConfig,
   ) {
@@ -280,14 +280,6 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
   // RegionStore; the IRegionStore methods below delegate to it.
   private readonly intensityProfile$ = new Subject<IntensityProfile[]>();
   // Image metadata and classification colours live in the shared VisualizerStore.
-
-  private warned = new Set<string>();
-  private notImplemented(method: string): void {
-    if (!this.warned.has(method)) {
-      this.warned.add(method);
-      console.warn(`[OpenSeadragonVisualizerService] ${method}() is a stub — not implemented yet.`);
-    }
-  }
 
   /**
    * Subscribe to the shared VisualizerStore colormap/reverse so OSD recolors in
@@ -308,10 +300,10 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     // whenever any of them changes, so the Channels & Histogram pane updates the
     // image live and OSD stays in lock-step with Plotly.
     this.colormapSub = combineLatest([
-      this.session.getColormap(),
-      this.session.getReverseScale(),
-      this.session.getChannelStates(),
-      this.session.getInvert(),
+      this.store.getColormap(),
+      this.store.getReverseScale(),
+      this.store.getChannelStates(),
+      this.store.getInvert(),
     ]).subscribe(([cm, rev, channels, invert]) => {
       this.colorLut = buildColormapLut(cm?.data?.value, !!rev);
       this.channelStates = channels;
@@ -381,8 +373,9 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
                         : data[i + 1] >= data[i + 2] ? data[i + 1] : data[i + 2];
                     cc[v]++;
                   }
-                } catch {
-                  /* skip this tile */
+                } catch (err) {
+                  // Skip this tile — the histogram is just missing its counts.
+                  console.warn('[viz:histogram] channel tile sample failed, skipping', url, err);
                 }
               })(),
             );
@@ -398,9 +391,10 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       this.sliceHistograms.set(z, counts.map(mk));
       // Nudge the channel-states stream so the pane re-reads getHistogram now,
       // in case its bounded retry window already lapsed.
-      this.session.setChannelStates(this.session.currentChannelStates());
-    } catch {
-      /* leave histograms unset (pane shows empty) */
+      this.store.setChannelStates(this.store.currentChannelStates());
+    } catch (err) {
+      // Leave histograms unset (the pane shows empty) — but say why.
+      console.warn('[viz:histogram] multichannel histogram sampling failed', err);
     }
   }
 
@@ -485,8 +479,9 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
                 cB![data[i + 2]]++;
               }
             }
-          } catch {
-            /* skip this tile */
+          } catch (err) {
+            // Skip this tile — window/histogram just lose its samples.
+            console.warn('[viz:window] tile sample failed, skipping', url, err);
           }
         }),
       );
@@ -503,9 +498,9 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       if (gray && fullRes && max > min && (min > 0 || max < 255)) {
         this.sliceWindows.set(z, [min, max]);
         if (z === this.currentZ) this.imageWindow = [min, max];
-        const ch0 = this.session.currentChannelStates()[0];
+        const ch0 = this.store.currentChannelStates()[0];
         if (ch0 && ch0.min === 0 && ch0.max === 255) {
-          this.session.setChannelState(0, { min, max });
+          this.store.setChannelState(0, { min, max });
         } else if (this.viewer && this.colorLut) {
           try {
             (this.viewer as any).world.requestInvalidate(true);
@@ -519,7 +514,8 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
           }
         }
       }
-    } catch {
+    } catch (err) {
+      console.warn('[viz:window] per-image window compute failed — using identity 0..255', err);
       this.sliceWindows.set(z, null); // fall back to identity 0..255
       if (z === this.currentZ) this.imageWindow = null;
     }
@@ -1532,10 +1528,10 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     return this.regionStore.getFillColor();
   }
   getClassificationColors(): Map<string, string> {
-    return this.session.getClassificationColors();
+    return this.store.getClassificationColors();
   }
   setClassificationColor(label: string, color: string): void {
-    this.session.setClassificationColor(label, color);
+    this.store.setClassificationColor(label, color);
   }
 
   plotPreviousShapes(): void {
@@ -2111,8 +2107,9 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
               const bmp = await createImageBitmap(blob);
               ctx.drawImage(bmp, col * t, row * t);
               bmp.close?.();
-            } catch {
-              /* skip a failed tile */
+            } catch (err) {
+              // Skip a failed tile — the exported composite has a gap there.
+              console.warn('[viz:export] composite tile fetch failed, skipping', url, err);
             }
           })(),
         );
@@ -2122,8 +2119,9 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     try {
       const imageData = ctx.getImageData(0, 0, lw, lh);
       if (this.applyDisplayToRgba(imageData.data)) ctx.putImageData(imageData, 0, 0);
-    } catch {
-      /* keep the un-recolored composite if readback fails */
+    } catch (err) {
+      // Keep the un-recolored composite if readback fails — but say why.
+      console.warn('[viz:export] composite recolor readback failed — exporting raw tiles', err);
     }
     const stem = (this.currentFileName || 'image').replace(/\.[^.]+$/, '');
     canvas.toBlob((blob) => {
@@ -2153,25 +2151,25 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
   // stay in lock-step; OSD applies the colormap to grayscale tiles via the LUT
   // (see the constructor sub).
   getColormap(): Observable<any> {
-    return this.session.getColormap();
+    return this.store.getColormap();
   }
   setColormap(colormap: any): void {
-    this.session.setColormap(colormap);
+    this.store.setColormap(colormap);
   }
   getColormapOptions(): any {
-    return this.session.getColormapOptions();
+    return this.store.getColormapOptions();
   }
   getReverseScale(): Observable<boolean> {
-    return this.session.getReverseScale();
+    return this.store.getReverseScale();
   }
   setReverseScale(reverscale: any): void {
-    this.session.setReverseScale(reverscale);
+    this.store.setReverseScale(reverscale);
   }
   setImageMeta(imageMeta: IImageMetadata[]): void {
-    this.session.setImageMeta(imageMeta);
+    this.store.setImageMeta(imageMeta);
   }
   getImageMeta(): Observable<IImageMetadata[]> {
-    return this.session.getImageMeta();
+    return this.store.getImageMeta();
   }
 
   // ── IVisualizer ──────────────────────────────────────────────────────
