@@ -20,6 +20,7 @@ import { IRegionOverlay, RegionToolMode } from '../../contracts/region-overlay.c
 import { ICoordinateTransform } from '../../contracts/coordinate-transform.contract';
 import { OsdCoordinateTransform } from './osd-coordinate-transform';
 import { elementToImage, imageRectToViewport, viewportRectToImage } from './osd-coords';
+import { buildTileUrl, fetchTileBitmap, fetchTileRgba } from './tile-client';
 import { CachedImageData, WandToolService, WandToolHost } from '../../toolbar/wand-tool.service';
 import { VertexEraserToolService, VertexEraserToolHost } from '../../toolbar/vertex-eraser-tool.service';
 import { ZoomToBoxToolService, ZoomToBoxToolHost } from '../../toolbar/zoom-to-box-tool.service';
@@ -348,22 +349,13 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       for (let row = 0; row < rows; row++) {
         for (let col = 0; col < cols; col++) {
           for (let c = 0; c < nCh; c++) {
-            const url = `${this.api}tile?info=${infoB64}&res=${res}&col=${col}&row=${row}&z=${z}&tileSize=${t}&channel=${c}`;
+            const url = buildTileUrl(this.api, infoB64, { res, col, row, z, tileSize: t, channel: c });
             jobs.push(
               (async () => {
                 try {
-                  const blob = await firstValueFrom(
-                    this.http.get(url, { responseType: 'blob' }).pipe(timeout(20000)),
-                  );
-                  const bmp = await createImageBitmap(blob);
-                  const cv = document.createElement('canvas');
-                  cv.width = bmp.width;
-                  cv.height = bmp.height;
-                  const ctx = cv.getContext('2d', { willReadFrequently: true });
-                  if (!ctx) return;
-                  ctx.drawImage(bmp, 0, 0);
-                  bmp.close?.();
-                  const data = ctx.getImageData(0, 0, cv.width, cv.height).data;
+                  const img = await fetchTileRgba(this.http, url, 20000);
+                  if (!img) return;
+                  const data = img.data;
                   const cc = counts[c];
                   for (let i = 0; i < data.length; i += 4) {
                     if (data[i + 3] === 0) continue;
@@ -451,18 +443,11 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       const cB = gray ? null : new Array(256).fill(0);
       await Promise.all(
         coords.map(async ([col, row]) => {
-          const url = `${this.api}tile?info=${infoB64}&res=${res}&col=${col}&row=${row}&z=${z}&tileSize=${t}`;
+          const url = buildTileUrl(this.api, infoB64, { res, col, row, z, tileSize: t });
           try {
-            const blob = await firstValueFrom(this.http.get(url, { responseType: 'blob' }).pipe(timeout(20000)));
-            const bmp = await createImageBitmap(blob);
-            const c = document.createElement('canvas');
-            c.width = bmp.width;
-            c.height = bmp.height;
-            const ctx = c.getContext('2d', { willReadFrequently: true });
-            if (!ctx) return;
-            ctx.drawImage(bmp, 0, 0);
-            bmp.close?.();
-            const data = ctx.getImageData(0, 0, c.width, c.height).data;
+            const img = await fetchTileRgba(this.http, url, 20000);
+            if (!img) return;
+            const data = img.data;
             for (let i = 0; i < data.length; i += 4) {
               if (data[i + 3] === 0) continue; // skip transparent padding
               if (gray) {
@@ -832,7 +817,6 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     // skip the synthetic (server-composited) overviews. Every displayed tile is
     // then per-channel-fetchable at any zoom.
     const levels = this.isMultiChannel ? d.levels.slice(0, this.realLevels) : d.levels;
-    const chParam = channel == null ? '' : `&channel=${channel}`;
     const n = levels.length;
     const t = d.tileSize;
     const base = this.api;
@@ -870,7 +854,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       return new Point(Math.ceil(lvl.width / t), Math.ceil(lvl.height / t));
     };
     ts.getTileUrl = (level: number, x: number, y: number) =>
-      `${base}tile?info=${infoB64}&res=${resForLevel(level)}&col=${x}&row=${y}&z=${z}&tileSize=${t}${chParam}`;
+      buildTileUrl(base, infoB64, { res: resForLevel(level), col: x, row: y, z, tileSize: t, channel });
     return ts;
   }
 
@@ -2099,12 +2083,11 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     const jobs: Promise<void>[] = [];
     for (let row = 0; row < rows; row++) {
       for (let col = 0; col < cols; col++) {
-        const url = `${this.api}tile?info=${this.infoB64}&res=${res}&col=${col}&row=${row}&z=${z}&tileSize=${t}`;
+        const url = buildTileUrl(this.api, this.infoB64, { res, col, row, z, tileSize: t });
         jobs.push(
           (async () => {
             try {
-              const blob = await firstValueFrom(this.http.get(url, { responseType: 'blob' }).pipe(timeout(30000)));
-              const bmp = await createImageBitmap(blob);
+              const bmp = await fetchTileBitmap(this.http, url, 30000);
               ctx.drawImage(bmp, col * t, row * t);
               bmp.close?.();
             } catch (err) {

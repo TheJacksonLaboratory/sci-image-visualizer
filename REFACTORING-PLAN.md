@@ -78,19 +78,28 @@ Gate:
       (`[viz:histogram]`, `[viz:window]`, `[viz:export]`); still swallow — never throw
 - Gate:
   - [x] _STD_ (297/297 tests, lint 0 errors, ng-packagr + jit-ui AOT green)
-  - [ ] Manual smoke: colormap change recolors both backends (Image/OSD view AND Heatmap view)
-        — requires a signed-in session; **pending user verification**
+  - [x] Manual smoke: colormap change recolors both backends (Image/OSD view AND Heatmap view)
+        — verified by user 2026-06-10
 
 ## Step 2 — Extract `osd/tile-client.ts`
 
-- [ ] `buildTileUrl(api, infoB64, {res, col, row, z, tileSize, channel?})` — single source for the
-      4 inline URL constructions (`:359, :460, :877, :2106`)
-- [ ] `fetchTileRgba(http, url, timeoutMs)` — single fetch-blob→bitmap→canvas→`getImageData`
-      pipeline replacing the 3 copies (`:359-383, :460-491, :2106-2118`)
-- [ ] Unit tests for `buildTileUrl` (param ordering, optional channel) and `fetchTileRgba`
-      (mocked blob; null on failure)
-- [ ] Mechanical substitution only — no behavior/timeout changes
-- [ ] Gate: _STD_ + _BROWSER_ (tile path touched)
+- [x] `buildTileUrl(api, infoB64, {res, col, row, z, tileSize, channel?})` — single source for the
+      4 inline URL constructions (`channel == null` omits the param; channel 0 is included,
+      matching the old `chParam` semantics)
+- [x] Fetch/decode pipeline extracted — **refined during execution**: split into
+      `fetchTileBitmap` (export stitches bitmaps onto a shared canvas — it never did a per-tile
+      `getImageData`) and `fetchTileRgba` (the two histogram/window samplers). Helpers
+      **propagate** errors instead of returning null so every call site keeps its Step-1
+      tagged catch and its own skip/fallback semantics unchanged
+- [x] Unit tests (`tile-client.spec.ts`): URL param ordering, channel 0 vs null/undefined,
+      blob→pixels decode + bitmap close, failure propagation
+- [x] Mechanical substitution only — same URLs, same timeouts (20s samplers / 30s export),
+      same catch behavior; dead `chParam` local removed
+- Gate:
+  - [x] _STD_ (303/303 tests / 24 suites, lint 0 errors, ng-packagr + jit-ui AOT green)
+  - [ ] _BROWSER_ (tile path touched) — **pending user verification**: RGB image renders +
+        regions; grayscale stack z-scrub + colormap; 16-bit stack histogram/window/exports;
+        multichannel composite
 
 ## Step 3 — Extract `osd/slice-cache.ts` (highest value, highest care)
 
