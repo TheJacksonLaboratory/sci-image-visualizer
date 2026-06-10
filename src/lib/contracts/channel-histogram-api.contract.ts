@@ -31,14 +31,29 @@ export const LUT_COLORS: ReadonlyArray<{ name: string; color: string }> = [
   { name: 'Yellow', color: '#ffff00' },
 ];
 
-/** A binned intensity histogram for one channel. */
+/** A binned intensity histogram for one channel.
+ *
+ * The 8-bit client path (RGB / 8-bit grayscale, sampled from displayed tiles)
+ * leaves the native fields undefined and `bins` span 0..255. The native path
+ * (>8-bit images, from the server `/histogram` endpoint) fills `bitDepth`,
+ * `rangeMin`/`rangeMax` (the pixel-type span the bins cover) and
+ * `observedMin`/`observedMax` (the actual extremes seen), so the dialog can
+ * label the window/axis in native units. */
 export interface IHistogram {
-  /** Left edge of each bin (0..255 space), length = bin count. */
+  /** Left edge of each bin (0..255 for the 8-bit path, native units otherwise). */
   bins: number[];
   /** Pixel count per bin, length = bin count. */
   counts: number[];
   /** Largest bin count, for y-axis scaling. */
   max: number;
+  /** Native bit depth (8, 16, …) — present only on the native server path. */
+  bitDepth?: number;
+  /** Pixel-type range the bins span (e.g. 0..65535), native path only. */
+  rangeMin?: number;
+  rangeMax?: number;
+  /** Actual min/max pixel observed (auto-contrast seed), native path only. */
+  observedMin?: number;
+  observedMax?: number;
 }
 
 /**
@@ -66,8 +81,12 @@ export interface IChannelHistogramApi {
 
   // ── histogram ─────────────────────────────────────────────────────────
   /** Binned histogram for a channel from the displayed pixels, or null when no
-   *  image/pixels are available. */
+   *  image/pixels are available. Synchronous 8-bit path (used by auto-contrast). */
   getHistogram(channelIndex: number, bins: number): IHistogram | null;
+  /** Histogram for a channel as an async stream: emits the **native** bit-depth
+   *  histogram (from the server) for >8-bit images, else the 8-bit client
+   *  histogram. The dialog uses this so 16-bit stacks get a true distribution. */
+  getHistogram$(channelIndex: number, bins: number): Observable<IHistogram | null>;
 
   // ── display options (moved out of the toolbar) ────────────────────────
   getColormap(): Observable<any>;
@@ -86,6 +105,12 @@ export interface IChannelHistogramApi {
   /** Export the displayed image — composited with the current per-channel
    *  pseudo-colours / window / colormap — as a publication-ready PNG download. */
   exportComposite(): void;
+
+  /** Export the underlying image data — all (or the visible) channels at native
+   *  bit depth — as a data-preserving multi-band TIFF download. Server-side, so
+   *  it keeps true 16-bit values (the PNG composite is an 8-bit figure). Only
+   *  meaningful for >8-bit images; a no-op on backends that can't provide it. */
+  exportData(): void;
 }
 
 export const CHANNEL_HISTOGRAM_API = new InjectionToken<IChannelHistogramApi>('CHANNEL_HISTOGRAM_API');

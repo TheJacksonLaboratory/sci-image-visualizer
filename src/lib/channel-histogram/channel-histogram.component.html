@@ -53,18 +53,21 @@
 
     <!-- Display window / gamma -->
     <div class="ch-sliders" *ngIf="selected">
+      <!-- Window endpoints are shown/edited in NATIVE units (0..255 for 8-bit,
+           the channel's observed native range for 16-bit). One-way bound to the
+           native getters; the handlers map back to the 8-bit display window. -->
       <div class="ch-row">
         <span class="ch-lbl">Min</span>
-        <p-slider [(ngModel)]="selected.min" [min]="0" [max]="255"
+        <p-slider [ngModel]="minNative" [min]="sliderMin" [max]="sliderMax" [step]="sliderStep"
                   (onChange)="onMinChange($event.value)" styleClass="ch-slider"></p-slider>
-        <p-inputNumber [(ngModel)]="selected.min" [min]="0" [max]="255" [showButtons]="false"
+        <p-inputNumber [ngModel]="minNative" [min]="sliderMin" [max]="sliderMax" [showButtons]="false"
                        (onInput)="onMinChange($event.value)" styleClass="ch-num"></p-inputNumber>
       </div>
       <div class="ch-row">
         <span class="ch-lbl">Max</span>
-        <p-slider [(ngModel)]="selected.max" [min]="0" [max]="255"
+        <p-slider [ngModel]="maxNative" [min]="sliderMin" [max]="sliderMax" [step]="sliderStep"
                   (onChange)="onMaxChange($event.value)" styleClass="ch-slider"></p-slider>
-        <p-inputNumber [(ngModel)]="selected.max" [min]="0" [max]="255" [showButtons]="false"
+        <p-inputNumber [ngModel]="maxNative" [min]="sliderMin" [max]="sliderMax" [showButtons]="false"
                        (onInput)="onMaxChange($event.value)" styleClass="ch-num"></p-inputNumber>
       </div>
       <div class="ch-row">
@@ -101,10 +104,14 @@
                   (onChange)="onInvert($event.checked)" label="Invert"></p-checkbox>
     </div>
 
-    <!-- Publication-ready export of the composited image -->
+    <!-- Exports: an 8-bit publication composite (always), plus a true-16-bit
+         data-preserving TIFF when the image carries >8-bit pixels. -->
     <div class="ch-export">
       <p-button label="Export composite (PNG)" icon="pi pi-download" size="small"
                 (onClick)="exportComposite()"></p-button>
+      <p-button *ngIf="is16bit" label="Export 16-bit TIFF" icon="pi pi-download" size="small"
+                [outlined]="true" pTooltip="Data-preserving multi-band TIFF (visible channels, native bit depth)"
+                tooltipPosition="top" (onClick)="exportData()"></p-button>
     </div>
 
   </div>

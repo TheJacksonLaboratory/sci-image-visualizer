@@ -186,9 +186,15 @@ export interface IVisualizer extends IDataRenderer, IRegionStore, IToolControlle
    *  pixels, or null when none are available. Feeds the Channels & Histogram
    *  pane. */
   getHistogram(channelIndex: number, bins: number): IHistogram | null;
+  /** Async histogram stream — native bit depth for >8-bit images (server), else
+   *  the 8-bit client histogram. */
+  getHistogram$(channelIndex: number, bins: number): Observable<IHistogram | null>;
   /** Export the displayed image, composited with the current display settings,
    *  as a publication-ready PNG download. */
   exportComposite(): void;
+  /** Export the underlying image data as a data-preserving multi-band TIFF
+   *  (native bit depth). No-op on backends that can't provide it. */
+  exportData(): void;
   unsubscribe(): void;
 }
 

@@ -17,6 +17,10 @@ export interface IChannelInfo {
    *  null/undefined when the file has no palette for this channel. */
   lut?: string[] | null;
   bitDepth?: number;
+  /** Pixel-type minimum (e.g. 0 for unsigned). Native-unit floor of the window. */
+  minAllowed?: number;
+  /** Pixel-type maximum (e.g. 65535 for unsigned 16-bit). Native-unit ceiling. */
+  maxAllowed?: number;
 }
 
 /** Per-series image metadata (physical size + dimensions). */

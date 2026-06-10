@@ -281,6 +281,11 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   getHistogram(channelIndex: number, bins: number): IHistogram | null {
     return this.renderer().getHistogram(channelIndex, bins);
   }
+  getHistogram$(channelIndex: number, bins: number): Observable<IHistogram | null> {
+    return this.renderer().getHistogram$(channelIndex, bins);
+  }
+  /** Export the underlying data (16-bit multi-band TIFF) via the active backend. */
+  exportData(): void { this.renderer().exportData(); }
   getChannels$(): Observable<IChannelState[]> { return this.store.getChannelStates(); }
   setChannelState(index: number, partial: Partial<IChannelState>): void {
     this.store.setChannelState(index, partial);

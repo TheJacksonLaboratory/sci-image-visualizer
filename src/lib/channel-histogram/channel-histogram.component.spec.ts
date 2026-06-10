@@ -26,6 +26,7 @@ describe('ChannelHistogramComponent', () => {
       autoContrast: jest.fn(),
       resetContrast: jest.fn(),
       getHistogram: jest.fn(() => ({ bins: [0, 1], counts: [3, 7], max: 7 })),
+      getHistogram$: jest.fn(() => of({ bins: [0, 1], counts: [3, 7], max: 7 })),
       getColormap: jest.fn(() => of({ label: 'Greys Inv' })),
       setColormap: jest.fn(),
       getColormapOptions: jest.fn(() => []),
@@ -37,6 +38,7 @@ describe('ChannelHistogramComponent', () => {
       setInvert: jest.fn(),
       getImageMeta: jest.fn(() => of([])),
       exportComposite: jest.fn(),
+      exportData: jest.fn(),
     } as unknown as jest.Mocked<IChannelHistogramApi>;
 
     await TestBed.configureTestingModule({
@@ -81,5 +83,16 @@ describe('ChannelHistogramComponent', () => {
     expect(api.setChannelState).toHaveBeenCalledWith(0, { color: '#00ffff' });
     component.exportComposite();
     expect(api.exportComposite).toHaveBeenCalled();
+  });
+
+  it('should route a 16-bit data export through the API', () => {
+    component.exportData();
+    expect(api.exportData).toHaveBeenCalled();
+  });
+
+  it('maps an 8-bit window edit identically (native==display for 8-bit)', () => {
+    // No native histogram → obsRange is 0..255, so native units == display units.
+    component.onMaxChange(128);
+    expect(api.setChannelState).toHaveBeenCalledWith(0, { min: 0, max: 128 });
   });
 });

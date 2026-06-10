@@ -10,7 +10,7 @@ import { Buffer } from 'buffer';
 import { IImageInfo, IImageMetadata } from '../../contracts/image.contract';
 import { TileAccessPort, TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
 import { ImageStatePort, IMAGE_STATE_PORT } from '../../contracts/ports/image-state.port';
-import { BehaviorSubject, Observable, Subject, Subscription, combineLatest } from 'rxjs';
+import { BehaviorSubject, Observable, Subject, Subscription, combineLatest, of } from 'rxjs';
 import { MessageService } from 'primeng/api';
 import { ShapeSelection } from '../../models/shape';
 import { CONFIG, CONFIG_SURFACE, PlotUtilities } from '../../plot.utilities';
@@ -2063,6 +2063,19 @@ export class PlotlyService implements IVisualizer {
     let mx = 0;
     for (const c of counts) if (c > mx) mx = c;
     return { bins: Array.from({ length: 256 }, (_, i) => i), counts, max: mx };
+  }
+
+  /** Async histogram stream — Plotly renders heatmap frame data (already in
+   *  memory, 8-bit luminance), so this just wraps the synchronous 8-bit
+   *  histogram. Native 16-bit histograms only apply to the OSD tile path. */
+  getHistogram$(channelIndex: number, bins: number): Observable<IHistogram | null> {
+    return of(this.getHistogram(channelIndex, bins));
+  }
+
+  /** Data export (16-bit TIFF) is an OSD-tile-path feature backed by the server.
+   *  Plotly renders heatmaps from frame data, so there's nothing to export here. */
+  exportData(): void {
+    console.warn('[plotly] 16-bit data export is not available for the heatmap backend.');
   }
 
   importRegions(geoJsonStr: string): Region[] {

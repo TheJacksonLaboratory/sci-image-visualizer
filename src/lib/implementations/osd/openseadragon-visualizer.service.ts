@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, Observable, Subject, Subscription, combineLatest, firstValueFrom } from 'rxjs';
+import { BehaviorSubject, Observable, Subject, Subscription, combineLatest, firstValueFrom, from, of } from 'rxjs';
 import { timeout } from 'rxjs/operators';
 import { Image } from 'image-js';
 import * as OpenSeadragon from 'openseadragon';
@@ -77,6 +77,11 @@ interface TileDescriptor {
   /** Real Bio-Formats resolution levels at the front of `levels`; the remaining
    *  levels are synthetic composited overviews (no per-channel tiles). */
   realLevels?: number;
+  /** Per-channel metadata (name/color/bitDepth/min-maxAllowed) for native 16-bit
+   *  windowing + histogram; null for plain 8-bit/RGB sources. */
+  channelInfo?: Array<{
+    name?: string; color?: string; bitDepth?: number; minAllowed?: number; maxAllowed?: number;
+  }> | null;
   levels: TileLevel[];
   /** Physical pixel size in µm (0 when the format doesn't report it). */
   mppX?: number;
@@ -175,6 +180,11 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
   /** 256-bin intensity histogram per z-slice, accumulated while sampling tiles
    *  in computeImageWindow; feeds the Channels & Histogram pane (grayscale). */
   private sliceHistograms = new Map<number, IHistogram[]>();
+  /** Native-bit-depth histograms from the server `/histogram` endpoint, keyed by
+   *  `${z}|${channel}` (only for >8-bit images). Fetched on demand by
+   *  getHistogram$ and cached for the session; never sampled from canvas tiles
+   *  (those are 8-bit), so it carries the true 16-bit distribution. */
+  private nativeHistograms = new Map<string, IHistogram>();
   /** Bearer token for OSD's own tile fetches (HttpClient calls get it via the
    *  interceptor; OSD's loader does not, so we pass it as an ajax header). */
   private authHeaders: Record<string, string> = {};
@@ -1372,6 +1382,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     this.staleSlices.clear();
     this.sliceWindows.clear();
     this.sliceHistograms.clear();
+    this.nativeHistograms.clear();
     this.sliceLru = [];
     this.slicesLoading.clear();
     this.bgLoadingZ = null;
@@ -1947,6 +1958,98 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
    *  async sampling resolves or if it was skipped. */
   getHistogram(channelIndex: number, _bins: number): IHistogram | null {
     return this.sliceHistograms.get(this.currentZ)?.[channelIndex] ?? null;
+  }
+
+  /** Native bit depth of a channel from the tile descriptor (8 when unknown). */
+  private channelBitDepth(channelIndex: number): number {
+    return this.descriptor?.channelInfo?.[channelIndex]?.bitDepth ?? 8;
+  }
+
+  /**
+   * Async histogram for the Channels & Histogram pane. For >8-bit images it
+   * fetches the **native** distribution from the server `/histogram` endpoint
+   * (the 8-bit canvas tiles can't carry 16-bit values) and caches it per
+   * slice+channel; for 8-bit/RGB it returns the existing client-sampled 8-bit
+   * histogram. Read-only — it never touches the tile/display pipeline.
+   */
+  getHistogram$(channelIndex: number, bins: number): Observable<IHistogram | null> {
+    if (this.channelBitDepth(channelIndex) <= 8 || !this.infoB64) {
+      return of(this.getHistogram(channelIndex, bins));
+    }
+    const z = this.currentZ;
+    const key = `${z}|${channelIndex}`;
+    const cached = this.nativeHistograms.get(key);
+    if (cached) return of(cached);
+    return from(this.fetchNativeHistogram(channelIndex, z, bins, key));
+  }
+
+  /** Fetch + cache one channel's native histogram from `GET /histogram`. */
+  private async fetchNativeHistogram(
+    channel: number, z: number, bins: number, key: string,
+  ): Promise<IHistogram | null> {
+    const url = `${this.api}histogram?info=${this.infoB64}&channel=${channel}&z=${z}&bins=${bins}`;
+    try {
+      // HttpClient calls get auth via the Angular interceptor (unlike OSD's own
+      // ajax tile loader, which needs authHeaders) — mirror the other fetches.
+      const hi = await firstValueFrom(
+        this.http
+          .get<{
+            bitDepth: number; rangeMin: number; rangeMax: number;
+            observedMin: number; observedMax: number; binWidth: number; counts: number[];
+          }>(url)
+          .pipe(timeout(45000)),
+      );
+      if (!hi || !hi.counts) return null;
+      const out: IHistogram = {
+        // Native bin left-edges: rangeMin + i*binWidth.
+        bins: hi.counts.map((_, i) => hi.rangeMin + i * hi.binWidth),
+        counts: hi.counts,
+        max: hi.counts.reduce((m, c) => (c > m ? c : m), 0),
+        bitDepth: hi.bitDepth,
+        rangeMin: hi.rangeMin,
+        rangeMax: hi.rangeMax,
+        observedMin: hi.observedMin,
+        observedMax: hi.observedMax,
+      };
+      this.nativeHistograms.set(key, out);
+      return out;
+    } catch (err) {
+      // 202 (still caching) or a transient error → null; the pane retries.
+      console.warn('[OSD] native histogram fetch failed', err);
+      return null;
+    }
+  }
+
+  /**
+   * Export the underlying image data as a data-preserving multi-band TIFF at
+   * native bit depth via `GET /export/tiff` (the server reads the raw 16-bit
+   * planes — the client never sees them). Sends only the visible channels; the
+   * existing 8-bit composite PNG export is unaffected.
+   */
+  async exportData(): Promise<void> {
+    if (!this.infoB64) return;
+    const visible = this.channelStates.filter((c) => c.visible).map((c) => c.index);
+    const all = this.channelStates.length;
+    // Omit `channels` when every channel is visible (server default = all).
+    const chParam =
+      visible.length && visible.length < all ? `&channels=${visible.join(',')}` : '';
+    const url = `${this.api}export/tiff?info=${this.infoB64}&z=${this.currentZ}${chParam}`;
+    const stem = (this.currentFileName || 'image').replace(/\.[^.]+$/, '');
+    try {
+      const resp = await firstValueFrom(
+        this.http
+          .get(url, { observe: 'response', responseType: 'blob' })
+          .pipe(timeout(600000)), // large exports stream slowly; generous deadline
+      );
+      if (resp.status === 202) {
+        console.warn('[OSD] 16-bit export: file still caching — try again shortly.');
+        return;
+      }
+      const blob = resp.body;
+      if (blob) saveAs(blob, `${stem}_16bit.ome.tif`);
+    } catch (err) {
+      console.warn('[OSD] 16-bit TIFF export failed', err);
+    }
   }
 
   /**
