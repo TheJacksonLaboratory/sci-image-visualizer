@@ -57,6 +57,48 @@ function mockBackend(): any {
     getRegionOverlay: jest.fn().mockReturnValue({ kind: 'overlay' }),
     getSurface3dControls: jest.fn().mockReturnValue({ kind: '3d' }),
     unsubscribe: jest.fn(),
+    // ── remaining IVisualizer surface (for delegation coverage) ──
+    getTrueImageSize: jest.fn().mockReturnValue({ width: 0, height: 0 }),
+    getCurrentImage: jest.fn().mockResolvedValue(null),
+    getDisplayedPixelData: jest.fn().mockReturnValue(null),
+    downloadImage: jest.fn(),
+    setPlotType: jest.fn(),
+    setSurfaceDragMode: jest.fn(),
+    resetSurfaceCamera: jest.fn(),
+    getPlotTypeDescriptors: jest.fn().mockReturnValue([]),
+    setStackLoading: jest.fn(),
+    isStackLoading: jest.fn().mockReturnValue(of(false)),
+    getStackLoadingProgress: jest.fn().mockReturnValue(of(0)),
+    getAutoscaleEvent: jest.fn().mockReturnValue(of(null)),
+    getIntensityProfile$: jest.fn().mockReturnValue(of([])),
+    renderIntensityInset: jest.fn(),
+    getRegionUpdateEvent: jest.fn().mockReturnValue(of([])),
+    selectRegion: jest.fn(),
+    deleteActiveShape: jest.fn(),
+    getShowShapeLabel: jest.fn().mockReturnValue(false),
+    getShapeColor: jest.fn().mockReturnValue('#000000'),
+    getFillColor: jest.fn().mockReturnValue('#000000'),
+    getClassificationColors: jest.fn().mockReturnValue(new Map()),
+    setClassificationColor: jest.fn(),
+    plotPreviousShapes: jest.fn(),
+    setPreviousShapes: jest.fn(),
+    getPreviousShapes: jest.fn().mockReturnValue([]),
+    importRegions: jest.fn().mockReturnValue([]),
+    exportRegions: jest.fn(),
+    getGeoJsonString: jest.fn().mockReturnValue('{}'),
+    setWandMode: jest.fn(),
+    setWandOptions: jest.fn(),
+    clearActiveWandRegion: jest.fn(),
+    setVertexEraserMode: jest.fn(),
+    setVertexEraserRadius: jest.fn(),
+    setZoomToBoxMode: jest.fn(),
+    getIsosurfaceControls: jest.fn().mockReturnValue(null),
+    getIntensityControls: jest.fn().mockReturnValue(null),
+    ensureIntensitySampling: jest.fn().mockResolvedValue(undefined),
+    refreshIntensitySamplingForRoi: jest.fn(),
+    getViewportChange$: jest.fn().mockReturnValue(of({ x: 0, y: 0, width: 0, height: 0 })),
+    setNavigatorVisible: jest.fn(),
+    setImageSmoothingEnabled: jest.fn(),
   };
 }
 
@@ -276,5 +318,154 @@ describe('RoutingVisualizerService (characterization)', () => {
     const after = store.currentChannelStates()[0];
     expect(after.min).toBe(10);
     expect(after.max).toBe(200);
+  });
+
+  // ── render/viewport/region/tool delegation → active renderer ──────────
+  // Before any plot, renderer() is the Plotly default.
+  it.each<[string, any[]]>([
+    ['relayout', [[10, 20]]],
+    ['resetAxes', []],
+    ['autoscale', []],
+    ['zoomIn', []],
+    ['zoomOut', []],
+    ['setDragMode', ['pan']],
+    ['setShowStack', [true]],
+    ['setZIndex', [3]],
+    ['getTrueImageSize', []],
+    ['getCurrentImage', []],
+    ['getDisplayedPixelData', []],
+    ['downloadImage', []],
+    ['exportComposite', []],
+    ['exportData', []],
+    ['getRegions', []],
+    ['getRegionPolygons', []],
+    ['getRegionUpdateEvent', []],
+    ['setSelectedShapeIndices', [[0, 1]]],
+    ['selectRegion', [{ id: 1 }]],
+    ['getSelectedShapeIndices$', []],
+    ['deleteActiveShape', []],
+    ['getShowShapeLabel', []],
+    ['getShapeColor', []],
+    ['getFillColor', []],
+    ['getClassificationColors', []],
+    ['setClassificationColor', ['tumour', '#fff']],
+    ['plotPreviousShapes', []],
+    ['setPreviousShapes', [[]]],
+    ['getPreviousShapes', []],
+    ['importRegions', ['{}']],
+    ['exportRegions', [[]]],
+    ['getGeoJsonString', [[]]],
+    ['setWandMode', [true, { sensitivity: 2 }]],
+    ['setWandOptions', [{ sensitivity: 2 }]],
+    ['clearActiveWandRegion', []],
+    ['setVertexEraserMode', [true]],
+    ['setVertexEraserRadius', [5]],
+    ['setZoomToBoxMode', [true]],
+    ['getHistogram', [0, 256]],
+    ['getHistogram$', [0, 256]],
+    ['setRegions', [[], true, false, '#fff', false]],
+  ])('routes %s to the active renderer (Plotly before any plot)', (method, args) => {
+    (router as any)[method](...args);
+    expect(plotly[method]).toHaveBeenCalledWith(...args);
+    expect(osd[method]).not.toHaveBeenCalled();
+  });
+
+  it('switches delegation to OSD once an IMAGE plot makes it the active renderer', async () => {
+    await router.plot('div', {}, IMAGE_INFO, 600, PlotType.IMAGE);
+    router.zoomIn();
+    router.setDragMode('pan');
+    router.setZIndex(2);
+    expect(osd.zoomIn).toHaveBeenCalled();
+    expect(osd.setDragMode).toHaveBeenCalledWith('pan');
+    expect(osd.setZIndex).toHaveBeenCalledWith(2);
+  });
+
+  // ── methods pinned to a specific backend, regardless of the renderer ──
+  it.each<[string, any[]]>([
+    ['setSurfaceDragMode', ['orbit']],
+    ['resetSurfaceCamera', []],
+    ['getPlotTypeDescriptors', []],
+    ['setStackLoading', [true]],
+    ['isStackLoading', []],
+    ['getStackLoadingProgress', []],
+    ['getAutoscaleEvent', []],
+    ['getIntensityProfile$', []],
+    ['renderIntensityInset', ['div', []]],
+    ['setColormap', ['Reds']],
+    ['setReverseScale', [true]],
+    ['getIsosurfaceControls', []],
+    ['getSurface3dControls', []],
+    ['getIntensityControls', []],
+    ['ensureIntensitySampling', [IMAGE_INFO, 0]],
+    ['refreshIntensitySamplingForRoi', [0, 0, 10, 10, 0]],
+  ])('routes %s to Plotly (the full-featured backend)', (method, args) => {
+    (router as any)[method](...args);
+    expect(plotly[method]).toHaveBeenCalledWith(...args);
+  });
+
+  it('setPlotType records the type and delegates to Plotly', () => {
+    router.setPlotType(PlotType.HEATMAP);
+    expect(plotly.setPlotType).toHaveBeenCalledWith(PlotType.HEATMAP);
+  });
+
+  it('getViewportChange$ comes from OpenSeadragon (the only backend that emits it)', () => {
+    router.getViewportChange$();
+    expect(osd.getViewportChange$).toHaveBeenCalled();
+    expect(plotly.getViewportChange$).not.toHaveBeenCalled();
+  });
+
+  it.each<[string, any[]]>([
+    ['setNavigatorVisible', [false]],
+    ['setImageSmoothingEnabled', [false]],
+  ])('%s is applied to BOTH backends (set before the first render)', (method, args) => {
+    (router as any)[method](...args);
+    expect(osd[method]).toHaveBeenCalledWith(...args);
+    expect(plotly[method]).toHaveBeenCalledWith(...args);
+  });
+
+  it('unsubscribe tears down both backends', () => {
+    router.unsubscribe();
+    expect(plotly.unsubscribe).toHaveBeenCalled();
+    expect(osd.unsubscribe).toHaveBeenCalled();
+  });
+
+  it('getIsosurfaceControls / getIntensityControls are Plotly-owned', () => {
+    router.getIsosurfaceControls();
+    router.getIntensityControls();
+    expect(plotly.getIsosurfaceControls).toHaveBeenCalled();
+    expect(plotly.getIntensityControls).toHaveBeenCalled();
+  });
+
+  // ── display + channel state read/write the shared store ───────────────
+  it('reverse-scale and image-meta reads come from the store', async () => {
+    store.setReverseScale(true);
+    await expect(firstValueFrom(router.getReverseScale())).resolves.toBe(true);
+    const meta: any = [{ channelCount: 1, rgbChannels: 1, x: 4, y: 4, z: 1 }];
+    router.setImageMeta(meta);
+    await expect(firstValueFrom(router.getImageMeta())).resolves.toEqual(meta);
+  });
+
+  it('grayscale and invert toggles round-trip through the store', async () => {
+    router.setGrayscale(true);
+    router.setInvert(true);
+    await expect(firstValueFrom(router.getGrayscale$())).resolves.toBe(true);
+    await expect(firstValueFrom(router.getInvert$())).resolves.toBe(true);
+  });
+
+  it('resetContrast restores a channel to its default window (0..255, gamma 1)', () => {
+    seedChannel();
+    router.setChannelState(0, { min: 30, max: 90, gamma: 2 });
+    router.resetContrast([0]);
+    const after = store.currentChannelStates()[0];
+    expect(after.min).toBe(0);
+    expect(after.max).toBe(255);
+    expect(after.gamma).toBe(1);
+  });
+
+  it('getChannels$ surfaces the store channel states', async () => {
+    seedChannel();
+    const chans = await firstValueFrom(router.getChannels$());
+    expect(chans).toHaveLength(1);
+    expect(chans[0].name).toBe('Intensity');
   });
 });

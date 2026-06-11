@@ -331,4 +331,99 @@ describe('RegionStore', () => {
       expect(store.getRegions()[0].color).toBe('#123456');
     });
   });
+
+  describe('colour / label + previous-shapes accessors', () => {
+    it('round-trips the show-label, shape-colour and fill-colour toggles', () => {
+      store.setShowShapeLabel(true);
+      store.setShapeColor('#abcdef');
+      store.setFillColor('#fedcba');
+      expect(store.getShowShapeLabel()).toBe(true);
+      expect(store.getShapeColor()).toBe('#abcdef');
+      expect(store.getFillColor()).toBe('#fedcba');
+    });
+
+    it('exposes classification colours from the shared store', () => {
+      store.setClassificationColor('Tumor', '#112233');
+      expect(store.getClassificationColors().get('Tumor')).toBe('#112233');
+    });
+
+    it('buffers and replays the previous-shapes snapshot without touching stored regions', () => {
+      store.setPreviousShapes([polyRegion([0, 1, 2], [0, 1, 2])]);
+      expect(store.getPreviousShapes().length).toBe(1);
+
+      const replayed: Region[][] = [];
+      store.getRegionUpdateEvent().subscribe(rs => replayed.push(rs as Region[]));
+      store.plotPreviousShapes();
+      expect(replayed[replayed.length - 1].length).toBe(1);
+      expect(store.getRegions().length).toBe(0); // stored state untouched
+    });
+  });
+
+  describe('GeoJSON round-trip helpers', () => {
+    it('serialises regions to a GeoJSON string and parses them back', () => {
+      const json = store.getGeoJsonString([polyRegion([0, 10, 5], [0, 0, 10])]);
+      expect(typeof json).toBe('string');
+      expect(store.importRegions(json).length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('updateBounds clones the incoming bounds (no aliasing)', () => {
+    it('deep-clones a Bézier polygon including its handles', () => {
+      const id = store.addRegion(polyRegion([0, 10, 5], [0, 0, 10]));
+      const poly = new Polygon();
+      poly.npoints = 3; poly.xpoints = [1, 2, 3]; poly.ypoints = [4, 5, 6];
+      poly.coordinates = [[1, 4], [2, 5], [3, 6]];
+      poly.closed = true; poly.bezier = true;
+      poly.handlesIn = [[0, 0], [0, 0], [0, 0]];
+      poly.handlesOut = [[1, 1], [1, 1], [1, 1]];
+      store.updateBounds(id, poly);
+
+      const stored = store.getRegions()[0].bounds as Polygon;
+      expect(stored).not.toBe(poly);               // cloned, not aliased
+      expect(stored.xpoints).toEqual([1, 2, 3]);
+      expect(stored.handlesOut).toEqual([[1, 1], [1, 1], [1, 1]]);
+      expect(stored.handlesOut).not.toBe(poly.handlesOut);
+    });
+
+    it('clones a Rectangle bounds', () => {
+      const id = store.addRegion(rectRegion(0, 0, 5, 5));
+      const rect = new Rectangle(); rect.x = 1; rect.y = 2; rect.width = 3; rect.height = 4;
+      store.updateBounds(id, rect);
+      const stored = store.getRegions()[0].bounds as Rectangle;
+      expect(stored).not.toBe(rect);
+      expect([stored.x, stored.y, stored.width, stored.height]).toEqual([1, 2, 3, 4]);
+    });
+
+    it('is a no-op for an unknown id', () => {
+      store.updateBounds(9999, rectRegion(0, 0, 1, 1).bounds as Rectangle);
+      expect(store.getRegions().length).toBe(0);
+    });
+  });
+
+  describe('setRegions(append) de-duplicates by geometry equality', () => {
+    it('rejects an appended polygon with identical coordinates, keeps a different one', () => {
+      store.setRegions([polyRegion([0, 10, 5], [0, 0, 10])], true, true);
+      expect(store.getRegions().length).toBe(1);
+
+      // same coordinates → deduped
+      store.setRegions([polyRegion([0, 10, 5], [0, 0, 10])], true, true, undefined, true);
+      expect(store.getRegions().length).toBe(1);
+
+      // different coordinates → appended
+      store.setRegions([polyRegion([0, 20, 5], [0, 0, 20])], true, true, undefined, true);
+      expect(store.getRegions().length).toBe(2);
+    });
+
+    it('treats a closed and an open polygon with the same points as different', () => {
+      store.setRegions([polyRegion([0, 10, 5], [0, 0, 10], true)], true, true);
+      store.setRegions([polyRegion([0, 10, 5], [0, 0, 10], false)], true, true, undefined, true);
+      expect(store.getRegions().length).toBe(2); // closed !== open
+    });
+
+    it('de-dupes equal rectangles on append', () => {
+      store.setRegions([rectRegion(0, 0, 10, 10)], true, true);
+      store.setRegions([rectRegion(0, 0, 10, 10)], true, true, undefined, true);
+      expect(store.getRegions().length).toBe(1);
+    });
+  });
 });
