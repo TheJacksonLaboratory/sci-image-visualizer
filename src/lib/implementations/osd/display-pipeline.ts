@@ -60,6 +60,8 @@ export class DisplayPipeline {
       }
       for (let i = 0; i < d.length; i += 4) {
         if (d[i + 3] === 0) continue;
+        // maxRgb (contracts/intensity) inlined on purpose: this loop runs
+        // ~262k times per tile on every recolor.
         const raw =
           d[i] >= d[i + 1] ? (d[i] >= d[i + 2] ? d[i] : d[i + 2]) : d[i + 1] >= d[i + 2] ? d[i + 1] : d[i + 2];
         d[i] = rL[raw];

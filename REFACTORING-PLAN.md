@@ -147,19 +147,36 @@ Gate:
   - [x] Pixel math pinned **stronger than the planned PNG-byte-size check**: the fixture tests
         assert exact output values for window/gamma/invert/tint (e.g. γ=2 at 128 → 181), which
         a byte-size comparison could never verify
-  - [ ] _BROWSER_ (recolor + histogram touched) — **pending user verification**: grayscale
+  - [x] _BROWSER_ (recolor + histogram touched) — verified by user 2026-06-10: grayscale
         window/gamma/invert recolor live; multichannel tint/visibility; histogram appears for
-        grayscale/RGB/multichannel/16-bit; composite PNG looks unchanged at same settings
+        grayscale/RGB/multichannel/16-bit; composite PNG looks unchanged at same settings.
+        (The zmap.tif tiling-edge report during this gate was diagnosed as the PRE-EXISTING
+        server per-tile normalization seam — fixed in jit-service c7db313, per-image window)
 
 ## Step 5 — Cross-backend de-duplication
 
-- [ ] One `luminance()`/max-of-RGB helper (in `models/` or `contracts/colormap-lut.ts`)
-      replacing the 3 copies (Plotly `:2054`, trace-builders `:64-69`, OSD recolor path)
-- [ ] One shared `bin8BitHistogram(...)` used by both backends' `getHistogram`
-- [ ] `ToolHostBinder` helper for wand/eraser/zoom-box host wiring (Plotly `:194-218`,
-      OSD `buildToolHosts` `:1606-1625`)
-- [ ] (Optional) `RegionStoreDelegate` base for the ×2 IRegionStore boilerplate
-- [ ] Gate: _STD_; both backends' existing specs green; wand works on both backends in browser
+- [x] Shared scalar helpers in `contracts/intensity.ts` — **refined during execution**: the
+      review's "luminance ×3" conflated two DIFFERENT projections that must stay separate:
+      `bt601Luminance` (Plotly frame cells — was duplicated in plotly.service + trace-builders)
+      and `maxRgb` (OSD tile path — was the same ternary idiom ×3 in the sampler + pipeline).
+      The display-pipeline's per-pixel hot loop keeps its inline copy on purpose (262k
+      calls/tile; annotated, pointing at the helper)
+- [x] Shared `histogram256(counts)` replacing the two IHistogram constructions (Plotly
+      `getHistogram` tail + the sampler's `mkHistogram`). A fully shared binning loop was NOT
+      extracted — the two backends bin from genuinely different data shapes (number[][] frame
+      cells vs RGBA byte buffers); only the construction was true duplication
+- [x] `ToolHostBinder` — **dropped after inspection**: the two host blocks share only shape;
+      every leaf closure is backend-specific (readbackViewport vs frame cache, currentZ vs
+      activeFrameIndex…). A binder would hide eight closures behind a factory without deleting
+      a single duplicated line. Same verdict for the optional `RegionStoreDelegate` (one-line
+      delegations, and Plotly's setRegions carries shape-sync logic the base couldn't share)
+- [x] +3 unit tests (`contracts/intensity.spec.ts`): BT.601 weights, maxRgb orderings,
+      histogram256 shape
+- Gate:
+  - [x] _STD_ (346/346 tests / 28 suites, lint 0 errors, ng-packagr + jit-ui AOT green);
+        both backends' existing specs green unchanged
+  - [ ] _BROWSER_ (light) — **pending user verification**: heatmap histogram still renders
+        (Plotly getHistogram touched); OSD histograms still render
 
 ## Step 6 — Contract tightening (before npm publication — SOW D7)
 

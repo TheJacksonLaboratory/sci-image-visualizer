@@ -30,6 +30,7 @@ import {
 } from './plotly-trace-builders';
 import { IVisualizer, IntensityProfile, IIsosurfaceControls, IIntensityControls } from '../../contracts/visualizer.contract';
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
+import { bt601Luminance, histogram256 } from '../../contracts/intensity';
 import { ViewerCapabilities, ViewerFeature, capabilitiesOf } from '../../contracts/capabilities.contract';
 import { IRegionOverlay } from '../../contracts/region-overlay.contract';
 import { PlotlyRegionOverlay } from './plotly-region-overlay';
@@ -2051,7 +2052,7 @@ export class PlotlyService implements IVisualizer {
         if (Array.isArray(cell)) {
           v = channelIndex >= 0 && channelIndex < cell.length
             ? cell[channelIndex]
-            : Math.round(0.299 * cell[0] + 0.587 * cell[1] + 0.114 * cell[2]);
+            : Math.round(bt601Luminance(cell[0], cell[1], cell[2]));
         } else {
           v = cell;
         }
@@ -2060,9 +2061,7 @@ export class PlotlyService implements IVisualizer {
         counts[v]++;
       }
     }
-    let mx = 0;
-    for (const c of counts) if (c > mx) mx = c;
-    return { bins: Array.from({ length: 256 }, (_, i) => i), counts, max: mx };
+    return histogram256(counts);
   }
 
   /** Async histogram stream — Plotly renders heatmap frame data (already in

@@ -1,4 +1,5 @@
 import { PlotType } from '../../contracts/plot-type';
+import { bt601Luminance } from '../../contracts/intensity';
 
 /**
  * Pluggable Plotly trace builders for the plot types added on top of the
@@ -60,10 +61,10 @@ export interface PlotlyPlotTypeImpl {
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
-/** ITU-R BT.601 luminance for an `[r, g, b]` pixel. */
+/** Scalar value of a frame cell: `[r, g, b]` → BT.601 luminance, scalar as-is. */
 function luminance(cell: any): number {
   if (Array.isArray(cell)) {
-    return 0.299 * cell[0] + 0.587 * cell[1] + 0.114 * cell[2];
+    return bt601Luminance(cell[0], cell[1], cell[2]);
   }
   return cell as number;
 }

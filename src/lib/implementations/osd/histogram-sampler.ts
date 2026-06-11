@@ -4,6 +4,7 @@ import { timeout } from 'rxjs/operators';
 
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { buildTileUrl, fetchTileRgba } from './tile-client';
+import { histogram256, maxRgb } from '../../contracts/intensity';
 
 /**
  * Histogram + auto-window sampling for the OSD backend (refactoring plan,
@@ -102,11 +103,7 @@ export class HistogramSampler {
                   const cc = counts[c];
                   for (let i = 0; i < data.length; i += 4) {
                     if (data[i + 3] === 0) continue;
-                    const v =
-                      data[i] >= data[i + 1]
-                        ? data[i] >= data[i + 2] ? data[i] : data[i + 2]
-                        : data[i + 1] >= data[i + 2] ? data[i + 1] : data[i + 2];
-                    cc[v]++;
+                    cc[maxRgb(data[i], data[i + 1], data[i + 2])]++;
                   }
                 } catch (err) {
                   // Skip this tile — the histogram is just missing its counts.
@@ -118,7 +115,7 @@ export class HistogramSampler {
         }
       }
       await Promise.all(jobs);
-      this.sliceHistograms.set(z, counts.map((c) => mkHistogram(c)));
+      this.sliceHistograms.set(z, counts.map((c) => histogram256(c)));
       this.host.onChannelHistogramsSampled();
     } catch (err) {
       // Leave histograms unset (the pane shows empty) — but say why.
@@ -177,10 +174,7 @@ export class HistogramSampler {
             for (let i = 0; i < data.length; i += 4) {
               if (data[i + 3] === 0) continue; // skip transparent padding
               if (gray) {
-                const v =
-                  data[i] >= data[i + 1]
-                    ? data[i] >= data[i + 2] ? data[i] : data[i + 2]
-                    : data[i + 1] >= data[i + 2] ? data[i + 1] : data[i + 2];
+                const v = maxRgb(data[i], data[i + 1], data[i + 2]);
                 if (v < min) min = v;
                 if (v > max) max = v;
                 cR[v]++;
@@ -198,7 +192,7 @@ export class HistogramSampler {
       );
       // Cache per-channel histograms: grayscale → [intensity]; RGB → [R, G, B].
       this.sliceHistograms.set(
-        z, gray ? [mkHistogram(cR)] : [mkHistogram(cR), mkHistogram(cG!), mkHistogram(cB!)],
+        z, gray ? [histogram256(cR)] : [histogram256(cR), histogram256(cG!), histogram256(cB!)],
       );
       // Grayscale auto-window — only from full-res samples (coarsest averaging
       // is inaccurate); the host seeds the channel or re-invalidates.
@@ -258,13 +252,4 @@ export class HistogramSampler {
       return null;
     }
   }
-}
-
-/** Wrap raw bin counts as an IHistogram (0..255 left edges). */
-function mkHistogram(counts: number[]): IHistogram {
-  return {
-    bins: Array.from({ length: 256 }, (_, i) => i),
-    counts,
-    max: counts.reduce((m, c) => (c > m ? c : m), 0),
-  };
 }
