@@ -21,6 +21,7 @@ import { ICoordinateTransform } from '../../contracts/coordinate-transform.contr
 import { OsdCoordinateTransform } from './osd-coordinate-transform';
 import { elementToImage, imageRectToViewport, viewportRectToImage } from './osd-coords';
 import { buildTileUrl, fetchTileBitmap, fetchTileRgba } from './tile-client';
+import { SliceCache } from './slice-cache';
 import { CachedImageData, WandToolService, WandToolHost } from '../../toolbar/wand-tool.service';
 import { VertexEraserToolService, VertexEraserToolHost } from '../../toolbar/vertex-eraser-tool.service';
 import { ZoomToBoxToolService, ZoomToBoxToolHost } from '../../toolbar/zoom-to-box-tool.service';
@@ -146,11 +147,6 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
   private colorLut: Rgb[] | null = null;
   /** Only grayscale images get a colormap (RGB tiles pass through untouched). */
   private isGrayscaleImage = false;
-  /** Per-image intensity window [min,max] used to auto-range grayscale tiles
-   *  before the LUT lookup, mirroring the heatmap's auto-stretch. Computed once
-   *  per image from the coarsest overview tile (see computeImageWindow). Null =
-   *  no windowing (identity 0..255), e.g. RGB images or before it resolves. */
-  private imageWindow: [number, number] | null = null;
   private colormapSub: Subscription | null = null;
   /** Latest per-channel display state (window/gamma/visibility) from the store,
    *  read synchronously by recolorTile. Channel 0 drives grayscale windowing;
@@ -164,17 +160,6 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
    *  here). For multichannel images the tile source is built from these alone so
    *  every displayed tile supports a per-channel fetch. */
   private realLevels = 0;
-  /** Multichannel per-slice cache: z → the N channel TiledImages for that slice
-   *  (additively composited by OSD; index = channel). Parallels `sliceItems` for
-   *  the composite path, so the same background loader / LRU pre-fills both and
-   *  z-scrub is an instant opacity toggle (no white-flicker) once a slice is
-   *  cached. Only the active slice's visible channels have opacity > 0. */
-  private channelSliceItems = new Map<number, any[]>();
-  /** Cached multichannel slices whose tiles were tinted before the latest display
-   *  change (min/max/gamma/colour/visibility). A display change re-tints only the
-   *  visible slice (invalidating the whole world floods OSD); these are re-tinted
-   *  lazily when next revealed by z-scrub. */
-  private staleSlices = new Set<number>();
   /** Inverted background (white = zero): inverts the display value before the
    *  LUT (grayscale) / per channel (RGB). */
   private invertBg = false;
@@ -204,58 +189,29 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
    *  expiry the render pipeline gives up and the router falls back to Plotly. */
   private readonly tilesInfoTimeoutMs = 600000; // 10 min
 
-  private prefetchTimer: any = null;
-
-  // ── Stack-slice cache ────────────────────────────────────────────────
-  // Scrubbing the z-slider used to viewer.open() a fresh tile source per slice,
-  // which destroys the current tiled image (and its decoded+recolored tiles), so
-  // revisiting a slice re-fetched everything. Instead we keep each visited slice
-  // as its own tiled image in the world and just toggle opacity — a revisited
-  // slice is instant (no network, no re-decode, no re-recolor). Bounded by an LRU
-  // so deep stacks don't grow without limit.
-  /** z-slice → its TiledImage in the viewer world. */
-  private sliceItems = new Map<number, any>();
-  /** z-slice → its grayscale intensity window (so cached slices recolor with
-   *  their own window even after a colormap change re-invalidates the world). */
-  private sliceWindows = new Map<number, [number, number] | null>();
-  /** Most-recently-shown z last; drives LRU eviction. */
-  private sliceLru: number[] = [];
-  /** z-slices whose tiled image is being added (dedupe rapid scrubbing). */
-  private slicesLoading = new Set<number>();
-  /** Bumped whenever the loaded image changes; in-flight background slice adds
-   *  captured under an older token are dropped (cancelled image switch). */
-  private sliceLoadToken = 0;
-  /** The slice the background loader is currently waiting on (its tiles are still
-   *  streaming). addTiledImage 'success' fires on add, not on tile load, so we
-   *  gate the next slice on getFullyLoaded() to avoid flooding the connection. */
-  private bgLoadingZ: number | null = null;
-  /** When bgLoadingZ started loading — a fallback so a slow/stuck slice can't
-   *  stall the whole background pass forever. */
-  private bgLoadingSince = 0;
-  /** Slices the background loader has already attempted (so it doesn't retry a
-   *  failed/slow one in a tight loop). */
-  private bgAttempted = new Set<number>();
-  /** Max cached slice tiled images kept resident before LRU eviction. Set per
-   *  image to cover the whole stack (capped) so background preloading doesn't
-   *  evict what it just loaded. */
-  private maxCachedSlices = 8;
-  /** Upper bound on resident slices, regardless of stack depth (memory guard). */
-  private readonly MAX_CACHED_SLICES_CAP = 64;
   /** Per-channel fit-view tile budget (tiles at the coarsest real level × channels).
    *  Above it, a multichannel image renders server-composited instead of per-channel
    *  — its full-res reads (it has no overview pyramid) would be too many × N channels.
    *  64 (e.g. a 4x4 single-FOV z-stack × 4ch) stays per-channel; a whole-slide
    *  (hundreds–thousands) falls back. */
   private readonly MAX_MULTICHANNEL_FIT_TILES = 256;
-  /** Fit-view tile budget (tiles at the coarsest real level) above which background
-   *  slice preloading is skipped: a huge no-pyramid stack would preload every slice
-   *  at full resolution and flood/timeout. Normal stacks stay below it and KEEP the
-   *  flicker-free pre-cache; pyramidal stacks have a tiny coarsest real level so they
-   *  always keep it too. */
-  private readonly MAX_PREFETCH_FIT_TILES = 256;
-  /** True only for stacks too large to background-preload (see MAX_PREFETCH_FIT_TILES).
-   *  Most stacks are false → pre-caching stays on (no white-flicker on z-scrub). */
-  private skipSlicePrefetch = false;
+
+  /** Stack-slice cache + background preloader (see SliceCache — refactoring
+   *  plan Step 3). The host accessors are live closures, so the cache always
+   *  reads the service's current viewer/descriptor/z — exactly the fields the
+   *  moved code used to read directly. */
+  private readonly cache = new SliceCache({
+    viewer: () => this.viewer,
+    hasImage: () => !!(this.viewer && this.descriptor && this.infoB64),
+    sliceCount: () => this.descriptor?.z ?? 1,
+    currentZ: () => this.currentZ,
+    isMultiChannel: () => this.isMultiChannel,
+    channelCount: () => Math.max(1, this.channelStates.length || (this.descriptor?.channels ?? 1)),
+    channelVisible: (c: number) => this.channelStates[c]?.visible !== false,
+    buildTileSource: (z: number, channel?: number) =>
+      this.buildTileSource(this.descriptor!, this.infoB64, z, channel),
+    onCompositeSliceAdded: (z: number) => this.computeImageWindow(this.descriptor!, this.infoB64, z),
+  });
 
   constructor(
     private http: HttpClient,
@@ -314,7 +270,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       // on the invalidate below). Re-applying the current slice's reveal picks up
       // the new per-channel visibility (cached slices stay hidden).
       if (this.isMultiChannel) {
-        this.revealChannelSlice(this.currentZ);
+        this.cache.revealChannelSlice(this.currentZ);
       }
       // requestInvalidate(true) restores each tile to its original data before
       // re-running recolorTile, so a change always maps afresh (no compounding).
@@ -409,11 +365,6 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
    * up. Failures leave it null (identity 0..255).
    */
   private async computeImageWindow(d: TileDescriptor, infoB64: string, z: number): Promise<void> {
-    // Window is per-slice: recolorTile looks it up by the tile's z, so cached
-    // slices stay correctly windowed even when a colormap change re-invalidates
-    // the whole world. `imageWindow` mirrors the current slice as a fallback.
-    this.sliceWindows.set(z, null);
-    if (z === this.currentZ) this.imageWindow = null;
     const gray = this.isGrayscaleImage;
     try {
       const t = d.tileSize;
@@ -481,8 +432,6 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       // inaccurate). Seed the Intensity channel while it's still at full range so
       // we never clobber the user's manual window.
       if (gray && fullRes && max > min && (min > 0 || max < 255)) {
-        this.sliceWindows.set(z, [min, max]);
-        if (z === this.currentZ) this.imageWindow = [min, max];
         const ch0 = this.store.currentChannelStates()[0];
         if (ch0 && ch0.min === 0 && ch0.max === 255) {
           this.store.setChannelState(0, { min, max });
@@ -501,8 +450,6 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       }
     } catch (err) {
       console.warn('[viz:window] per-image window compute failed — using identity 0..255', err);
-      this.sliceWindows.set(z, null); // fall back to identity 0..255
-      if (z === this.currentZ) this.imageWindow = null;
     }
   }
 
@@ -519,7 +466,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     // A different image was selected — stop the previous stack's background
     // loading immediately rather than letting it finish behind the new image.
     if (filename && this.currentFileName && filename !== this.currentFileName) {
-      this.cancelBackgroundLoad();
+      this.cache.cancelBackgroundLoad();
     }
     const infoB64 = this.tiles.getSelectedInfoB64();
     if (!infoB64) return { descriptor: null, infoB64: '', z: zIndex || 0, filename };
@@ -606,10 +553,6 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     const coarseW = coarse ? Math.ceil(coarse.width / d.tileSize) : 1;
     const coarseH = coarse ? Math.ceil(coarse.height / d.tileSize) : 1;
     const coarseTiles = coarseW * coarseH;
-    // Skip the per-slice background pre-cache only for stacks too large to preload at
-    // that level (would flood full-res reads). Normal stacks stay below the budget and
-    // KEEP the flicker-free pre-cache.
-    this.skipSlicePrefetch = coarseTiles > this.MAX_PREFETCH_FIT_TILES;
     this.isMultiChannel = !!d.multichannel;
     if (this.isMultiChannel) {
       // Per-channel rendering can only use the REAL levels, so OSD requests the
@@ -628,7 +571,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
         );
       }
     }
-    this.channelSliceItems.clear();
+    this.cache.clearChannelGroups();
     // Auto-range grayscale tiles to the image's actual intensity span (like the
     // heatmap), sampling the coarsest tile level so the window matches the raw
     // tile values. Fire-and-forget: it re-invalidates once the window is known;
@@ -640,9 +583,10 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       this.computeImageWindow(d, loaded.infoB64, loaded.z);
     }
     this.destroyViewer();
-    // Keep the whole stack resident (capped) so the background loader fills every
-    // slice without evicting itself; single images need only the one.
-    this.maxCachedSlices = (d.z ?? 1) > 1 ? Math.min(this.MAX_CACHED_SLICES_CAP, d.z ?? 1) : 1;
+    // Size the slice cache for this image: LRU cap to hold the whole stack
+    // (capped) and skip background preloading for stacks too large to preload
+    // (would flood full-res reads). Normal stacks keep the flicker-free pre-cache.
+    this.cache.configure(d.z ?? 1, coarseTiles);
 
     // Multichannel opens on channel 0; the open handler swaps in this slice's
     // per-channel group (addChannelSlice) and the background loader pre-fills the
@@ -688,7 +632,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       // so they get a much larger tile budget — otherwise switching slices evicts
       // each other's tiles and scrubbing back re-fetches. Scaled to the resident
       // slice count; single images keep the lean default.
-      maxImageCacheCount: (d.z ?? 1) > 1 ? Math.min(2400, Math.max(600, this.maxCachedSlices * 40)) : 150,
+      maxImageCacheCount: (d.z ?? 1) > 1 ? Math.min(2400, Math.max(600, this.cache.maxSlices() * 40)) : 150,
     });
 
     return new Promise<boolean>((resolve) => {
@@ -720,15 +664,12 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
             const it0 = (this.viewer as any).world?.getItemAt?.(0);
             if (it0) (this.viewer as any).world.removeItem(it0);
           } catch { /* nothing to remove */ }
-          this.addChannelSlice(this.currentZ);
+          this.cache.addChannelSlice(this.currentZ);
         } else {
           // Seed the slice cache with the just-opened slice (world item 0), so
           // scrubbing back to it later is an instant opacity toggle, not a re-open.
           const firstItem = (this.viewer as any).world?.getItemAt?.(0);
-          if (firstItem) {
-            this.sliceItems.set(this.currentZ, firstItem);
-            this.touchSliceLru(this.currentZ);
-          }
+          if (firstItem) this.cache.seedComposite(this.currentZ, firstItem);
         }
         // The wand samples the *rendered viewport*, so its pixel matrix is only
         // valid for the current view — drop it whenever the viewport changes.
@@ -760,7 +701,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
         }
         // Prefetch adjacent z-slices once the view settles (and on each settle,
         // so it tracks the current viewport as the user pans/zooms).
-        this.viewer!.addHandler('animation-finish', () => this.schedulePrefetch());
+        this.viewer!.addHandler('animation-finish', () => this.cache.schedulePrefetch());
         // Tell listeners (the intensity inset) the visible image region whenever
         // the view settles, so they can re-sample at the current zoom resolution.
         this.viewer!.addHandler('animation-finish', () => this.emitViewportChange());
@@ -773,7 +714,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
         // visible gone-frame and no layout shift.
         this.viewer!.addHandler('animation', () => this.nudgeToolbarRepaint());
         this.viewer!.addHandler('animation-finish', () => this.nudgeToolbarRepaint());
-        this.schedulePrefetch();
+        this.cache.schedulePrefetch();
         // Force fit-to-view as the split/flex layout settles. A tall
         // non-pyramidal image can otherwise open zoomed-in (image width filling
         // the viewer), making OSD demand slow full-res res=0 tiles for the
@@ -858,74 +799,6 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     return ts;
   }
 
-  /**
-   * Add slice {@code z}'s channel group: one additively-composited ('lighter' =
-   * Fiji "Composite") TiledImage per channel, hidden (opacity 0) until revealed.
-   * Each is preloaded so the background loader can pre-fill every slice. Tiles are
-   * tinted in place by recolorChannelTile. Cached in `channelSliceItems` so a
-   * revisit is an instant opacity toggle (revealChannelSlice) — no re-fetch, no
-   * white-flicker. Mirrors addSlice for the composite path.
-   */
-  private addChannelSlice(z: number): void {
-    if (!this.viewer || !this.descriptor || !this.infoB64) return;
-    if (this.channelSliceItems.has(z) || this.slicesLoading.has(z)) return;
-    this.slicesLoading.add(z);
-    const token = this.sliceLoadToken;
-    const n = Math.max(1, this.channelStates.length || (this.descriptor.channels ?? 1));
-    const group: any[] = new Array(n);
-    let settled = 0;
-    const onSettled = () => {
-      if (++settled < n) return;
-      if (token !== this.sliceLoadToken) return; // image switched mid-add
-      this.slicesLoading.delete(z);
-      this.channelSliceItems.set(z, group);
-      this.staleSlices.delete(z); // freshly tinted at the current display state
-      this.touchSliceLru(z);
-      if (z === this.currentZ) {
-        this.revealChannelSlice(z); // tiles may still be decoding; opacity is set now
-        this.schedulePrefetch();
-      }
-      this.evictSliceLru();
-    };
-    for (let c = 0; c < n; c++) {
-      try {
-        (this.viewer as any).addTiledImage({
-          tileSource: this.buildTileSource(this.descriptor, this.infoB64, z, c),
-          x: 0, y: 0, width: 1,
-          opacity: 0, // revealed by revealChannelSlice once the group is in
-          compositeOperation: 'lighter',
-          preload: true,
-          success: (e: any) => {
-            const item = e?.item;
-            if (token !== this.sliceLoadToken) {
-              if (item) { try { (this.viewer as any)?.world?.removeItem(item); } catch { /* gone */ } }
-              return;
-            }
-            if (item) group[c] = item;
-            onSettled();
-          },
-          error: () => onSettled(),
-        });
-      } catch (err) {
-        console.warn('[OSD] failed to add channel slice image', z, c, err);
-        onSettled();
-      }
-    }
-  }
-
-  /** Reveal slice {@code z}'s channel group (each visible channel → opacity 1) and
-   *  hide every other cached slice's group. Instant; no fetch/decode. */
-  private revealChannelSlice(z: number): void {
-    for (const [zz, group] of this.channelSliceItems) {
-      const active = zz === z;
-      group.forEach((it, c) => {
-        if (!it) return;
-        const visible = this.channelStates[c]?.visible !== false;
-        try { it.setOpacity(active && visible ? 1 : 0); } catch { /* gone */ }
-      });
-    }
-  }
-
   /** Re-apply the display pipeline (window/gamma/colour/invert) after a state change.
    *  Multichannel invalidates ONLY the visible slice's channel images — invalidating
    *  the whole world would re-process every hidden/preloaded slice's tiles (hundreds),
@@ -936,147 +809,15 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     const v: any = this.viewer;
     if (!v) return;
     if (this.isMultiChannel) {
-      this.invalidateSlice(this.currentZ);
-      this.staleSlices.clear();
-      for (const z of this.channelSliceItems.keys()) {
-        if (z !== this.currentZ) this.staleSlices.add(z);
-      }
+      this.cache.invalidateChannelDisplay(this.currentZ);
       return;
     }
     try { v.world.requestInvalidate(true); } catch { /* no-op */ }
     try { v.navigator?.world?.requestInvalidate(true); } catch { /* no-op */ }
   }
 
-  /** Invalidate (restore + re-recolor) just the channel images of one cached slice.
-   *  A shared timestamp batches the per-image invalidations into one processing
-   *  pass (OSD dedupes tiles already stamped at >= tStamp). */
-  private invalidateSlice(z: number): void {
-    const group = this.channelSliceItems.get(z) ?? [];
-    if (!group.length) return;
-    const osd: any = OpenSeadragon;
-    const tStamp = typeof osd.now === 'function' ? osd.now() : Date.now();
-    for (const it of group) {
-      if (it && typeof it.requestInvalidate === 'function') {
-        try { it.requestInvalidate(true, false, tStamp); } catch { /* gone */ }
-      }
-    }
-  }
-
-  /**
-   * Background-load the whole stack: add each not-yet-cached slice as a hidden,
-   * preloaded tiled image, one at a time, working outward from the current
-   * slice. This fills the in-world cache for every slice so scrubbing gets
-   * progressively smoother as the stack finishes loading — and it never blocks
-   * the visible slice: it yields while the current view is still streaming
-   * tiles, and only one slice is in flight at a time so the on-screen tiles
-   * always win the connection.
-   */
-  private loadNextBackgroundSlice(): void {
-    this.prefetchTimer = null;
-    if (!this.viewer || !this.descriptor || !this.infoB64) return;
-    const sliceCount = this.descriptor.z ?? 1;
-    if (sliceCount <= 1) return; // not a stack — nothing to preload
-    // Yield to the visible slice while it's still streaming tiles.
-    if (this.sliceTilesLoading(this.currentZ)) {
-      this.schedulePrefetch();
-      return;
-    }
-    // Gate on the in-flight slice's TILES finishing — addTiledImage's success
-    // fires on add, not on tile load, so without this we'd add the whole stack at
-    // once and flood the connection. A time fallback prevents a stuck slice from
-    // stalling the pass.
-    if (this.bgLoadingZ != null) {
-      const adding = this.slicesLoading.has(this.bgLoadingZ);
-      const tilesLoading = this.sliceTilesLoading(this.bgLoadingZ);
-      const timedOut = Date.now() - this.bgLoadingSince > 8000;
-      if ((adding || tilesLoading) && !timedOut) {
-        this.schedulePrefetch();
-        return;
-      }
-      this.bgLoadingZ = null; // that slice's tiles are in (or gave up) — advance
-    }
-    const next = this.nearestUncachedSlice(sliceCount);
-    if (next == null) return; // whole stack cached — done
-    this.bgLoadingZ = next;
-    this.bgLoadingSince = Date.now();
-    this.bgAttempted.add(next);
-    this.addSlice(next); // hidden + preload (added with opacity 0; not revealed)
-    this.schedulePrefetch(); // poll until its tiles load, then advance
-  }
-
-  /** The not-yet-cached slice closest to the current one (load nearest first),
-   *  skipping any already attempted so a failed/slow one isn't retried in a loop. */
-  private nearestUncachedSlice(sliceCount: number): number | null {
-    for (let d = 0; d < sliceCount; d++) {
-      const candidates = d === 0 ? [this.currentZ] : [this.currentZ - d, this.currentZ + d];
-      for (const z of candidates) {
-        if (
-          z >= 0 && z < sliceCount &&
-          !this.sliceCacheHas(z) && !this.slicesLoading.has(z) && !this.bgAttempted.has(z)
-        ) {
-          return z;
-        }
-      }
-    }
-    return null;
-  }
-
-  /** Debounce so a burst of viewport/slice events coalesces, then advance the
-   *  background stack loader by one slice. */
-  private schedulePrefetch(): void {
-    // Skip the per-slice background loader only for stacks too large to preload
-    // (skipSlicePrefetch): their slices only exist at full resolution, so preloading
-    // every one floods full-res reads (each can exceed OSD's 30s timeout), starves
-    // the visible slice (black view), and churns the cache (the "[CacheRecord] …
-    // object no longer usable" DOMException). Both composite and multichannel stacks
-    // otherwise keep the pre-cache so z-scrub doesn't white-flicker — addSlice routes
-    // to the right cache (single image vs per-channel group).
-    if (this.skipSlicePrefetch) return;
-    if (this.prefetchTimer) clearTimeout(this.prefetchTimer);
-    this.prefetchTimer = setTimeout(() => this.loadNextBackgroundSlice(), 200);
-  }
-
-  /**
-   * Stop background stack preloading and invalidate any in-flight slice add.
-   * Called when a different image is selected so the previous stack stops
-   * loading immediately instead of finishing in the background.
-   */
-  private cancelBackgroundLoad(): void {
-    if (this.prefetchTimer) {
-      clearTimeout(this.prefetchTimer);
-      this.prefetchTimer = null;
-    }
-    this.slicesLoading.clear();
-    this.bgLoadingZ = null;
-    this.bgAttempted.clear();
-    this.sliceLoadToken++; // drop pending addTiledImage callbacks from the old image
-    // Abort in-flight background tiles immediately by dropping the hidden
-    // preloaded slices (removeItem cancels their pending tile loads). Keep the
-    // visible slice so the current view doesn't blank before the next plot.
-    this.dropHiddenSlices();
-  }
-
-  /** Remove every cached slice except the currently displayed one, aborting their
-   *  in-flight tile requests. Used to stop background loading promptly. */
-  private dropHiddenSlices(): void {
-    if (!this.viewer) return;
-    const v: any = this.viewer;
-    for (const [z, item] of [...this.sliceItems]) {
-      if (z === this.currentZ) continue;
-      this.sliceItems.delete(z);
-      this.sliceWindows.delete(z);
-      try { v.world.removeItem(item); } catch { /* already gone */ }
-    }
-    for (const [z, group] of [...this.channelSliceItems]) {
-      if (z === this.currentZ) continue;
-      this.channelSliceItems.delete(z);
-      for (const it of group) { if (it) { try { v.world.removeItem(it); } catch { /* gone */ } } }
-    }
-    this.sliceLru = this.sliceCacheHas(this.currentZ) ? [this.currentZ] : [];
-  }
-
   private destroyViewer(): void {
-    this.cancelBackgroundLoad();
+    this.cache.cancelBackgroundLoad();
     // Tear down any active tool overlays (shared singletons).
     this.wandTool.setMode(false);
     this.eraserTool.setMode(false);
@@ -1093,7 +834,9 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       this.viewer = null;
     }
     this.coordTransform = null;
-    this.resetSliceCache();
+    this.cache.reset();
+    this.sliceHistograms.clear();
+    this.nativeHistograms.clear();
   }
 
   /** This backend's region renderer (the SVG overlay), once a plot is mounted. */
@@ -1202,179 +945,12 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     if (!this.viewer || !this.descriptor || !this.infoB64) return;
     this.currentZ = z;
     this.viewportPixels = null; // wand readback is slice-specific
+    this.cache.showSlice(z);
     if (this.isMultiChannel) {
-      // Per-channel slice cache: reveal the cached group instantly, or load it (the
-      // current slice stays visible until the new group is in — no white-flicker),
-      // then background-prefetch neighbours.
-      const group = this.channelSliceItems.get(z);
-      if (group && group.length && group.some((it) => it && this.sliceInWorld(it))) {
-        this.revealChannelSlice(z);
-        // If a display change happened while this slice was cached, its tiles hold
-        // a stale tint — re-apply now (it's the visible slice, so the brief restore
-        // flash is acceptable, like a fresh load).
-        if (this.staleSlices.delete(z)) this.invalidateSlice(z);
-        this.touchSliceLru(z);
-        this.schedulePrefetch();
-      } else if (!this.slicesLoading.has(z)) {
-        this.addChannelSlice(z);
-      }
       this.computeMultiChannelHistograms(this.descriptor, this.infoB64, z);
-      return;
-    }
-    const cached = this.sliceItems.get(z);
-    if (cached && this.sliceInWorld(cached)) {
-      // Instant: reveal the cached slice, hide the others — no fetch/decode.
-      this.showOnlySlice(z);
-      this.touchSliceLru(z);
-      this.schedulePrefetch();
-      return;
-    }
-    if (this.slicesLoading.has(z)) return; // already being added; success reveals it
-    this.addSlice(z);
-  }
-
-  /** Add a never-seen slice as a hidden tiled image, then reveal it once loaded.
-   *  Keeps the current viewport (no goHome) since all slices share x/y geometry. */
-  private addSlice(z: number): void {
-    if (!this.viewer || !this.descriptor || !this.infoB64) return;
-    if (this.isMultiChannel) { this.addChannelSlice(z); return; }
-    this.slicesLoading.add(z);
-    // Tag this add to the current image; if the user switches images before it
-    // resolves, the stale callback is dropped (the add belongs to the old stack).
-    const token = this.sliceLoadToken;
-    const ts = this.buildTileSource(this.descriptor, this.infoB64, z);
-    try {
-      // addTiledImage lives on the Viewer (it queues the add into the world),
-      // not on World itself.
-      (this.viewer as any).addTiledImage({
-        tileSource: ts,
-        x: 0,
-        y: 0,
-        width: 1, // match the primary image's normalized placement
-        opacity: 0,
-        // Load tiles even though it's hidden — this is what lets the background
-        // loader fill every slice's cache so scrubbing gets progressively smoother.
-        preload: true,
-        success: (e: any) => {
-          const item = e?.item;
-          if (token !== this.sliceLoadToken) {
-            // Image switched while this was adding — drop the orphan so it stops
-            // loading instead of streaming tiles for the abandoned stack.
-            if (item) {
-              try {
-                (this.viewer as any)?.world?.removeItem(item);
-              } catch {
-                /* old viewer already destroyed */
-              }
-            }
-            return;
-          }
-          this.slicesLoading.delete(z);
-          if (!item) return;
-          this.sliceItems.set(z, item);
-          this.touchSliceLru(z);
-          this.computeImageWindow(this.descriptor!, this.infoB64, z);
-          // Only reveal if the user is still on this slice (fast scrubbing may
-          // have moved on — leave it cached/hidden for a later revisit).
-          if (z === this.currentZ) {
-            this.showOnlySlice(z);
-            this.schedulePrefetch();
-          }
-          this.evictSliceLru();
-        },
-        error: () => {
-          if (token === this.sliceLoadToken) this.slicesLoading.delete(z);
-        },
-      });
-    } catch (err) {
-      this.slicesLoading.delete(z);
-      console.warn('[OSD] failed to add z-slice', err);
     }
   }
 
-  /** Show the given slice (opacity 1) and hide all other cached slices. */
-  private showOnlySlice(z: number): void {
-    for (const [zz, item] of this.sliceItems) {
-      try {
-        item.setOpacity(zz === z ? 1 : 0);
-      } catch {
-        /* item gone */
-      }
-    }
-  }
-
-  /** Whether slice z is in the active cache (composite single image, or the
-   *  multichannel per-channel group). */
-  private sliceCacheHas(z: number): boolean {
-    return this.isMultiChannel ? this.channelSliceItems.has(z) : this.sliceItems.has(z);
-  }
-  /** The cached TiledImage(s) for slice z (0–1 for composite, N for multichannel). */
-  private sliceGroup(z: number): any[] {
-    if (this.isMultiChannel) return this.channelSliceItems.get(z) ?? [];
-    const it = this.sliceItems.get(z);
-    return it ? [it] : [];
-  }
-  /** Whether slice z's tiles are still streaming (any cached image not fully loaded). */
-  private sliceTilesLoading(z: number): boolean {
-    const g = this.sliceGroup(z);
-    if (!g.length) return false;
-    return g.some((it) => it && typeof it.getFullyLoaded === 'function' && !it.getFullyLoaded());
-  }
-  /** Remove slice z's cached image(s) from the world and the active cache. */
-  private removeCachedSlice(z: number): void {
-    const v: any = this.viewer;
-    if (this.isMultiChannel) {
-      const group = this.channelSliceItems.get(z);
-      this.channelSliceItems.delete(z);
-      if (group && v) for (const it of group) { if (it) { try { v.world.removeItem(it); } catch { /* gone */ } } }
-    } else {
-      const item = this.sliceItems.get(z);
-      this.sliceItems.delete(z);
-      this.sliceWindows.delete(z);
-      if (item && v) { try { v.world.removeItem(item); } catch { /* gone */ } }
-    }
-  }
-
-  /** Is the tiled image still in the world (not evicted)? */
-  private sliceInWorld(item: any): boolean {
-    try {
-      return (this.viewer as any).world.getIndexOfItem(item) >= 0;
-    } catch {
-      return false;
-    }
-  }
-
-  /** Mark z as most-recently-used. */
-  private touchSliceLru(z: number): void {
-    const i = this.sliceLru.indexOf(z);
-    if (i >= 0) this.sliceLru.splice(i, 1);
-    this.sliceLru.push(z);
-  }
-
-  /** Drop the least-recently-used cached slices beyond the cap (never the
-   *  current one), removing their tiled images so memory stays bounded. */
-  private evictSliceLru(): void {
-    while (this.sliceLru.length > this.maxCachedSlices) {
-      const idx = this.sliceLru.findIndex((z) => z !== this.currentZ);
-      if (idx < 0) break;
-      const z = this.sliceLru.splice(idx, 1)[0];
-      this.removeCachedSlice(z);
-    }
-  }
-
-  /** Clear the slice cache (on teardown / image switch). */
-  private resetSliceCache(): void {
-    this.sliceItems.clear();
-    this.channelSliceItems.clear();
-    this.staleSlices.clear();
-    this.sliceWindows.clear();
-    this.sliceHistograms.clear();
-    this.nativeHistograms.clear();
-    this.sliceLru = [];
-    this.slicesLoading.clear();
-    this.bgLoadingZ = null;
-    this.bgAttempted.clear();
-  }
   setStackLoading(stackLoading: boolean): void {
     this.stackLoading$.next(stackLoading);
   }
@@ -2110,15 +1686,6 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     canvas.toBlob((blob) => {
       if (blob) saveAs(blob, `${stem}_composite.png`);
     }, 'image/png');
-  }
-
-  /** The z-slice a tile belongs to, parsed from its URL (getTileUrl encodes
-   *  `&z=`). Lets recolorTile pick the right per-slice window for cached slices. */
-  private tileZ(event: any): number | null {
-    const url: unknown = event?.tile?.getUrl?.() ?? event?.tile?.url;
-    if (typeof url !== 'string') return null;
-    const m = /[?&]z=(\d+)/.exec(url);
-    return m ? +m[1] : null;
   }
 
   /** True if any pixel in the RGBA buffer is non-transparent. */

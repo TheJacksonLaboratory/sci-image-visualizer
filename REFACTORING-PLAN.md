@@ -97,21 +97,35 @@ Gate:
       same catch behavior; dead `chParam` local removed
 - Gate:
   - [x] _STD_ (303/303 tests / 24 suites, lint 0 errors, ng-packagr + jit-ui AOT green)
-  - [ ] _BROWSER_ (tile path touched) — **pending user verification**: RGB image renders +
+  - [x] _BROWSER_ (tile path touched) — verified by user 2026-06-10: RGB image renders +
         regions; grayscale stack z-scrub + colormap; 16-bit stack histogram/window/exports;
         multichannel composite
 
 ## Step 3 — Extract `osd/slice-cache.ts` (highest value, highest care)
 
-- [ ] Move the 16 cache fields + `addSlice`/`addChannelSlice`/reveal/`loadNextBackgroundSlice`/
-      LRU/eviction/token logic into a `SliceCache` class owning its own state
-- [ ] Narrow interface consumed by the service: `reveal(z)`, `prefetch()`, `invalidate(z)`,
-      `reset()`, viewer/tile-source callbacks injected
-- [ ] **Pure move**: identical logic, identical order of operations; no tuning
-- [ ] New unit tests: LRU eviction order, load-token cancellation drops stale adds,
-      background-loader gating (in-flight + timeout), dedupe of rapid scrubs — with a fake viewer
-- [ ] Gate: _STD_ + _BROWSER_ with **explicit z-scrub emphasis** (revisit cached slices = instant,
-      no white flicker; background preload still fills the stack; image switch cancels cleanly)
+- [x] Cache fields + `addSlice`/`addChannelSlice`/reveal/`loadNextBackgroundSlice`/LRU/eviction/
+      token logic moved into `SliceCache` owning its own state (service 2,183 → 1,731 lines;
+      cache 487 lines). **Refinement found during the move**: `sliceWindows`, `imageWindow` and
+      `tileZ()` were provably dead (write-only / never called — grep-verified) and were deleted
+      rather than dragged into the new class
+- [x] Narrow surface: `configure(stackDepth, coarseFitTiles)`, `maxSlices()`,
+      `clearChannelGroups()`, `seedComposite(z, item)`, `showSlice(z)`, `addChannelSlice(z)`,
+      `revealChannelSlice(z)`, `invalidateChannelDisplay(z)`, `schedulePrefetch()`,
+      `cancelBackgroundLoad()`, `reset()` — host callbacks (`SliceCacheHost`) are live closures
+      over the service's viewer/descriptor/z, so the cache reads exactly what the moved code read
+- [x] **Pure move**: identical logic and order of operations (configure() consolidates the two
+      old assignment sites for `skipSlicePrefetch`/`maxCachedSlices` at the post-destroyViewer
+      point; nothing reads either flag in between — verified)
+- [x] +13 unit tests with a fake viewer: hidden+preload add → reveal-if-current,
+      cache-don't-reveal after scrub-away, instant revisit, rapid-scrub dedupe, token
+      cancellation drops orphans, LRU eviction (never the current slice), prefetch
+      nearest-first / yields-while-streaming / gates-on-in-flight / budget skip, multichannel
+      per-channel reveal + stale re-tint, reset
+- Gate:
+  - [x] _STD_ (316/316 tests / 25 suites, lint 0 errors, ng-packagr + jit-ui AOT green)
+  - [ ] _BROWSER_ with **explicit z-scrub emphasis** — **pending user verification**:
+        revisit cached slices = instant, no white flicker; background preload fills the stack;
+        image switch cancels cleanly; multichannel z-scrub + per-channel visibility
 
 ## Step 4 — Extract `osd/display-pipeline.ts` + `osd/histogram-sampler.ts`
 
