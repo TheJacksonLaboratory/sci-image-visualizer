@@ -123,20 +123,33 @@ Gate:
       per-channel reveal + stale re-tint, reset
 - Gate:
   - [x] _STD_ (316/316 tests / 25 suites, lint 0 errors, ng-packagr + jit-ui AOT green)
-  - [ ] _BROWSER_ with **explicit z-scrub emphasis** — **pending user verification**:
+  - [x] _BROWSER_ with **explicit z-scrub emphasis** — verified by user 2026-06-10:
         revisit cached slices = instant, no white flicker; background preload fills the stack;
         image switch cancels cleanly; multichannel z-scrub + per-channel visibility
 
 ## Step 4 — Extract `osd/display-pipeline.ts` + `osd/histogram-sampler.ts`
 
-- [ ] `DisplayPipeline`: `applyDisplayToRgba`, `channelRgbLut`, `channelIntensity`, `tint01`,
-      `rgbNeedsRecolor`, grayscale LUT build — fed by `(channelStates, colorLut, invertBg,
-      isGrayscale, imageWindow)`; unit tests on small `Uint8ClampedArray` fixtures
-      (window endpoints, gamma, invert, additive tint clamp)
-- [ ] `HistogramSampler`: `computeImageWindow`, `computeMultiChannelHistograms`,
-      native-histogram fetch + cache — built on Step 2's tile client
-- [ ] Gate: _STD_ + _BROWSER_ (recolor + histogram touched); pixel-identical spot check:
-      same window/gamma settings produce the same composite PNG byte size ±0 on a test image
+- [x] `DisplayPipeline` (149 lines, stateless): `applyToRgba`, `channelRgbLut`,
+      `channelIntensity`, `tint01`, `rgbNeedsRecolor` — reads display state through live host
+      closures (`isGrayscale/colorLut/channelStates/invertBg`); the tile-event plumbing
+      (`recolorTile`/`recolorChannelTile`) stays in the service and calls it. +15 fixture tests
+      (window endpoints/midpoint/clamp, exact gamma value, invert, transparent skip, RGB
+      identity-at-defaults, hidden channel, additive clamp, recolor gate table, LUT tables)
+- [x] `HistogramSampler` (268 lines, owns `sliceHistograms`/`nativeHistograms`/cache-buster):
+      `computeImageWindow`, `computeMultiChannelHistograms`, `native$` fetch+cache, `get`,
+      `clear` — on Step 2's tile client; store/viewer side effects stay in the service via two
+      host callbacks (`onChannelHistogramsSampled` nudge, `onGrayWindowSampled` seed/invalidate).
+      +12 tests (binning, auto-window span reporting, RGB histograms, per-tile failure
+      tolerance, per-channel binning + nudge, too-big bail, native mapping/caching/failure,
+      clear). Service: 1,731 → 1,421 lines (2,183 at campaign start)
+- Gate:
+  - [x] _STD_ (343/343 tests / 27 suites, lint 0 errors, ng-packagr + jit-ui AOT green)
+  - [x] Pixel math pinned **stronger than the planned PNG-byte-size check**: the fixture tests
+        assert exact output values for window/gamma/invert/tint (e.g. γ=2 at 128 → 181), which
+        a byte-size comparison could never verify
+  - [ ] _BROWSER_ (recolor + histogram touched) — **pending user verification**: grayscale
+        window/gamma/invert recolor live; multichannel tint/visibility; histogram appears for
+        grayscale/RGB/multichannel/16-bit; composite PNG looks unchanged at same settings
 
 ## Step 5 — Cross-backend de-duplication
 
