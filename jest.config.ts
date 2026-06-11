@@ -10,6 +10,9 @@ export default {
     },
   },
   coverageDirectory: '../../coverage/libs/jax-image-visualization',
+  // text-summary: compact totals in the CI log; json-summary: parsed for the
+  // GitHub job summary table; lcov: HTML + machine-readable report.
+  coverageReporters: ['text-summary', 'json-summary', 'lcov'],
   transform: {
     '^.+\\.(ts|mjs|js|html)$': 'jest-preset-angular',
   },
