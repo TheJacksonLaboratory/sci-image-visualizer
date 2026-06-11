@@ -204,10 +204,37 @@ Gate:
 
 ## Step 7 — Slim `visualization.component.ts` (optional)
 
-- [ ] Extract two-pass render orchestration + retry into a `RenderOrchestrator` service
-- [ ] Move z-scrub debounce out of the component
-- [ ] New `visualization.component.spec.ts` for the remaining UI shell
-- [ ] Gate: _STD_ + _BROWSER_
+- [x] Two-pass render sequencing + large-tier retry extracted into
+      `render-orchestrator.ts` (`RenderOrchestrator` + `TwoPassRenderHost`). The component
+      keeps the UI flags (`stackLoading`/`sharpening`/`running`), the load+plot phase (div,
+      screen height, plot type, newer-click guard), the ROI import and the failure toast —
+      supplied through five host callbacks; the orchestrator owns the five completion paths
+      and the retry delay. Component 1,128 → 1,054 lines
+- [x] Z-scrub debounce moved into `SliceScrubber` (same file): `scrub` (120ms coalesce) /
+      `commit` (slide-end, drops pending) / `cancel` (teardown)
+- [x] New `visualization.component.spec.ts` — the component's first spec (direct
+      instantiation, no TestBed mount): scrub debouncing, immediate commit, keyboard
+      slice-step clamping, dialog/toolbar flags. Plus `render-orchestrator.spec.ts`: all five
+      completion paths (single ok/fail, two-pass happy, small-fail fallback, double-large-fail)
+      with callback ordering pinned, retry timing at the exact delay boundary, scrubber
+      coalesce/commit/cancel. +14 tests
+- Gate:
+  - [x] _STD_ (362/362 tests / 30 suites, lint 0 errors, ng-packagr + jit-ui AOT green)
+  - [ ] _BROWSER_ — **pending user verification**: image loads with the blurry→sharp two-pass
+        (sharpening spinner shows then clears); z-slider drag scrubs smoothly; arrow keys step
+        slices; a stack and a single image both finish loading (overlay never sticks)
+
+---
+
+## Campaign complete
+
+All seven steps executed and gated. Scoreboard vs the 2026-06-10 review: OSD service
+2,183 → 1,421 lines across 5 focused modules (tile-client, slice-cache, display-pipeline,
+histogram-sampler + the coordinator); visualization component 1,128 → 1,054 with its
+orchestration extracted and tested; tests 251 → 362 (+111) with the previously untested
+router/OSD/component cores now covered; contract typed, capability-gated and
+selector-prefixed for the `@jax-data-science` npm publication (SOW D7); plus the
+out-of-campaign jit-service per-image-window fix that killed the 16-bit tiling seams.
 
 ---
 

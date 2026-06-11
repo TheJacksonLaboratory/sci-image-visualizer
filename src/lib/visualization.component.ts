@@ -10,6 +10,7 @@ import { ImageStatePort, IMAGE_STATE_PORT } from './contracts/ports/image-state.
 import { Polygon } from './models/region';
 import { RoutingVisualizerService } from './routing-visualizer.service';
 import { VisualizerStore } from './visualizer-store.service';
+import { RenderOrchestrator, SliceScrubber } from './render-orchestrator';
 import { PlotType, PlotTypeDescriptor } from './contracts/plot-type';
 import { ViewerFeature } from './contracts/capabilities.contract';
 import { IntensityProfile } from './contracts/visualizer.contract';
@@ -131,7 +132,8 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   private keydownListener?: (e: KeyboardEvent) => void;
   private wheelListener?: (e: WheelEvent) => void;
 
-  private zScrubTimer?: any;
+  /** Debounced z-slice scrubbing (see SliceScrubber — refactoring plan Step 7). */
+  private readonly scrubber = new SliceScrubber((z) => this.plotService.setZIndex(z));
 
   constructor(
     @Inject(IMAGE_STATE_PORT) private state: ImageStatePort,
@@ -289,55 +291,16 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
               // One URL per slice (0-indexed), so the last reachable index is
               // length-1 — earlier `length-2` dropped the final slice.
               this.maxIndex = urls.length > 1 ? urls.length - 1 : 0;
-              // Multi-tier rendering. When the file has small-tier URLs, we
-              // render the small tier first so the user gets a fast blurry
-              // preview, release the loading overlay, then sharpen by
-              // re-rendering with the canonical large-tier URLs in the
-              // background. Without small URLs we keep the original single-
-              // pass behavior.
-              // Multi-tier (blurry small → sharp large) is a 2D-image preview
-              // optimisation. 3D plot types (surface, scatter3d, isosurface) load
-              // the whole stack regardless, and the large pass updates in place via
-              // Plotly.react — which doesn't rebuild a 3D gl-mesh isosurface, so the
-              // sharpen step blanked the scene. Render those single-pass.
+              // Multi-tier rendering (small blurry tier first, then sharpen in
+              // place) — sequencing lives in RenderOrchestrator; this component
+              // supplies the phase render and owns the UI flags via callbacks.
+              // 3D plot types render single-pass: the in-place large pass doesn't
+              // rebuild a 3D gl-mesh isosurface, so the sharpen step blanked it.
               const hasSmallTier =
                 this.isHeatmap &&
                 (imgInfo.smallUrls?.length ?? 0) === urls.length &&
                 (imgInfo.smallUrls?.length ?? 0) > 0;
               const smallImgInfo = hasSmallTier ? { ...imgInfo, urls: imgInfo.smallUrls as string[] } : null;
-
-              // inPlace=true updates the existing render instead of rebuilding
-              // it, so the canvas doesn't blank during the small→large swap.
-              // First (small) pass always builds fresh; large pass updates in
-              // place on top of the small render.
-              const renderPhase = (phaseInfo: typeof imgInfo, inPlace = false) =>
-                this.plotService.load(phaseInfo, this.zIndex).then((loadedImage) => {
-                  // check if the latest file selected is what has been loaded
-                  // (guards against a newer click reaching us mid-render)
-                  if (phaseInfo.fileName !== loadedImage.filename) return null;
-                  return this.plotService.plot(
-                    this.plotDivName,
-                    loadedImage,
-                    phaseInfo,
-                    screenHeight,
-                    this.plotType,
-                    inPlace,
-                  );
-                });
-
-              // Retry the large-tier render once after a brief delay before
-              // giving up. The /api/preview request can hit a transient 503
-              // or land in a lock-contention window where the response
-              // arrives after the dev server proxy gives up. One retry costs
-              // little and rescues the common case where the second attempt
-              // sees fresh pre-gen-cached PNGs.
-              const renderLargeWithRetry = () =>
-                renderPhase(imgInfo, true).catch((err) => {
-                  console.warn('Large-tier preview failed on first try, retrying in 1s', err);
-                  return new Promise<void>((resolve) => setTimeout(resolve, 1000)).then(() =>
-                    renderPhase(imgInfo, true),
-                  );
-                });
 
               const applyRoi = () => {
                 if (imgInfo.roiJsonStr) {
@@ -349,80 +312,52 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
                   this.plotService.setPreviousShapes(shapes);
                 }
               };
-
-              const finalize = (logTag: string) => {
+              const releaseOverlay = () => {
                 if (imgInfo.isStack && imgInfo.showStack) this.stackLoading = false;
                 this.state.setImageLoading(false);
-                this.running = false;
-                applyRoi();
-                console.log(logTag);
               };
 
-              if (smallImgInfo) {
-                let smallReleasedOverlay = false;
-                renderPhase(smallImgInfo)
-                  .then(
-                    () => {
-                      // Small tier is on screen — drop the full overlay so the
-                      // user can see the blurry preview, but keep a translucent
-                      // spinner on top of it (this.sharpening=true) so they don't
-                      // mistake the low-res render for the final image.
-                      if (imgInfo.isStack && imgInfo.showStack) this.stackLoading = false;
-                      this.state.setImageLoading(false);
-                      this.sharpening = true;
-                      smallReleasedOverlay = true;
-                      console.log('multi-tier: small tier rendered, starting large');
-                    },
-                    (err) => {
-                      // Small-tier render failed (older backend without tier
-                      // support, transient error, etc.). Log and continue with
-                      // large only; the overlay stays up until large finishes.
-                      console.warn('Small-tier preview failed, falling back to large', err);
-                    },
-                  )
-                  .then(() => renderLargeWithRetry())
-                  .then(
-                    () => {
-                      this.sharpening = false;
-                      if (smallReleasedOverlay) {
-                        // Overlay already gone; just clean up running state and ROI.
-                        this.running = false;
-                        applyRoi();
-                        console.log('multi-tier: large tier rendered, sharpening complete');
-                      } else {
-                        finalize('finished plotting (large only after small fallback)');
-                      }
-                    },
-                    (err) => {
-                      // Both attempts of the large-tier render failed. The small
-                      // tier is still on screen as a fallback. Surface a toast
-                      // so the user knows the sharper version isn't coming —
-                      // they can re-click to retry or move on.
-                      this.sharpening = false;
-                      console.error('Large-tier preview failed after retry', err);
-                      const msg = err?.error?.message || err?.message || err?.statusText || String(err);
-                      this.messageService.add({
-                        key: 'center-toast',
-                        severity: 'warn',
-                        summary: 'Preview not sharpened',
-                        detail: `The full-resolution preview did not load (${msg}). The low-resolution preview is still shown. Try clicking the image again.`,
-                      });
-                      // Don't call finalize() — overlay was already dismissed by
-                      // the small-tier render; we just need to release running
-                      // state so the next click can proceed.
-                      this.running = false;
-                      applyRoi();
-                    },
-                  );
-              } else {
-                renderPhase(imgInfo).then(
-                  () => finalize('finished plotting'),
-                  (err) => {
-                    console.error('Preview failed', err);
-                    finalize('plotting aborted');
-                  },
-                );
-              }
+              new RenderOrchestrator({
+                // inPlace=true updates the existing render instead of rebuilding
+                // it, so the canvas doesn't blank during the small→large swap.
+                renderPhase: (phaseInfo, inPlace) =>
+                  this.plotService.load(phaseInfo, this.zIndex).then((loadedImage) => {
+                    // Guard against a newer click reaching us mid-render.
+                    if (phaseInfo.fileName !== loadedImage.filename) return null;
+                    return this.plotService.plot(
+                      this.plotDivName, loadedImage, phaseInfo, screenHeight, this.plotType, inPlace,
+                    );
+                  }),
+                smallShown: () => {
+                  // Small tier on screen — drop the full overlay but keep a
+                  // translucent spinner so the blurry render isn't mistaken for
+                  // the final image.
+                  releaseOverlay();
+                  this.sharpening = true;
+                },
+                sharpenSettled: () => {
+                  this.sharpening = false;
+                },
+                finished: (viaSmall, logTag) => {
+                  if (!viaSmall) releaseOverlay();
+                  this.running = false;
+                  applyRoi();
+                  console.log(logTag);
+                },
+                sharpenFailed: (err: any) => {
+                  // The small tier stays on screen as the fallback — tell the
+                  // user the sharper version isn't coming.
+                  const msg = err?.error?.message || err?.message || err?.statusText || String(err);
+                  this.messageService.add({
+                    key: 'center-toast',
+                    severity: 'warn',
+                    summary: 'Preview not sharpened',
+                    detail: `The full-resolution preview did not load (${msg}). The low-resolution preview is still shown. Try clicking the image again.`,
+                  });
+                  this.running = false;
+                  applyRoi();
+                },
+              }).render(imgInfo, smallImgInfo);
             }
           }
         }
@@ -616,10 +551,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   }
 
   ngOnDestroy() {
-    if (this.zScrubTimer) {
-      clearTimeout(this.zScrubTimer);
-      this.zScrubTimer = undefined;
-    }
+    this.scrubber.cancel();
     if (this.plotContextMenuListener) {
       window.removeEventListener('contextmenu', this.plotContextMenuListener, true);
     }
@@ -751,12 +683,8 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
    */
   onZSlide(z: number | undefined) {
     if (z === undefined) return;
-    if (this.zScrubTimer) {
-      clearTimeout(this.zScrubTimer);
-      this.zScrubTimer = undefined;
-    }
     this.zIndex = z;
-    this.plotService.setZIndex(z);
+    this.scrubber.commit(z);
     // Keep the intensity inset in sync with the displayed slice (Image/OSD mode,
     // where the profile sampler is fed from the loaded preview frames).
     if (this.hasProfiles && this.isImageView && this.imageInfo) {
@@ -772,11 +700,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   onZScrub(z: number | undefined) {
     if (z === undefined) return;
     this.zIndex = z;
-    if (this.zScrubTimer) clearTimeout(this.zScrubTimer);
-    this.zScrubTimer = setTimeout(() => {
-      this.zScrubTimer = undefined;
-      this.plotService.setZIndex(this.zIndex);
-    }, 120);
+    this.scrubber.scrub(z);
   }
 
   /**
