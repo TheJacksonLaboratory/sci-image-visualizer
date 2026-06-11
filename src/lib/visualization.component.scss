@@ -8,6 +8,10 @@
 #plot {
   flex: 1;
   min-height: 0;
+  // Guard against utility classes re-imposing height:100% (the docked-toolbar
+  // clipping bug): the flex row above (toolbar) plus height:100% pushed the
+  // plot's bottom strip out of the overflow:hidden host.
+  height: auto !important;
 }
 
 // ── Toolbar dock ──────────────────────────────────────────────────────
