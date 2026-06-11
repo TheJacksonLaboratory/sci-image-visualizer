@@ -1,6 +1,7 @@
 import { InjectionToken } from '@angular/core';
 import { Observable } from 'rxjs';
 import { IImageMetadata } from './image.contract';
+import { ColormapNode } from './display-types';
 
 /**
  * Display state for one image channel in the Channels & Histogram pane.
@@ -89,9 +90,9 @@ export interface IChannelHistogramApi {
   getHistogram$(channelIndex: number, bins: number): Observable<IHistogram | null>;
 
   // ── display options (moved out of the toolbar) ────────────────────────
-  getColormap(): Observable<any>;
-  setColormap(colormap: any): void;
-  getColormapOptions(): any;
+  getColormap(): Observable<ColormapNode | null>;
+  setColormap(colormap: ColormapNode): void;
+  getColormapOptions(): ColormapNode[];
   getReverseScale(): Observable<boolean>;
   setReverseScale(reverse: boolean): void;
   getGrayscale$(): Observable<boolean>;

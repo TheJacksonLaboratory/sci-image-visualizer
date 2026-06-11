@@ -79,6 +79,11 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     await expect(service.getCurrentImage()).resolves.toBeNull();
   });
 
+  it('capability-gated 3D controls are null (OSD renders the image type only)', () => {
+    expect(service.getSurface3dControls()).toBeNull();
+    expect(service.getIsosurfaceControls()).toBeNull();
+  });
+
   it('getRegionOverlay is null until a viewer is mounted', () => {
     expect(service.getRegionOverlay()).toBeNull();
   });

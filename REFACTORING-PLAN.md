@@ -175,22 +175,32 @@ Gate:
 - Gate:
   - [x] _STD_ (346/346 tests / 28 suites, lint 0 errors, ng-packagr + jit-ui AOT green);
         both backends' existing specs green unchanged
-  - [ ] _BROWSER_ (light) — **pending user verification**: heatmap histogram still renders
+  - [x] _BROWSER_ (light) — verified by user 2026-06-10: heatmap histogram still renders
         (Plotly getHistogram touched); OSD histograms still render
 
 ## Step 6 — Contract tightening (before npm publication — SOW D7)
 
-- [ ] New capability-gated `getSurface3dControls(): ISurface3dControls | null`
-      (drag mode + camera) mirroring `getIsosurfaceControls()`; Plotly implements, OSD returns null
-- [ ] `@deprecated` JSDoc on `reloadAndPlot`/`resetAxes`/`autoscale`/`setSurfaceDragMode`/
-      `resetSurfaceCamera` on `IVisualizer` (kept for one release; consumers steered to
-      capability gates)
-- [ ] Type the publication-critical `any`s: `ColormapNode` tree, `WandOptions`,
-      `plot()`'s `imageLoaded`
-- [ ] Standardize component selector prefix (`jaxviz-*`) with old selectors kept as aliases
-      for one release
-- [ ] Gate: _STD_; host app compiles with **zero** changes (deprecations warn, nothing breaks);
-      barrel surface reviewed against SOW D6/D7
+- [x] Capability-gated `getSurface3dControls(): ISurface3dControls | null` (drag mode + camera)
+      mirroring `getIsosurfaceControls()`; Plotly implements, OSD returns null, router always
+      answers from Plotly (3D renders there)
+- [x] `@deprecated` JSDoc on `reloadAndPlot`/`resetAxes`/`autoscale`/`setSurfaceDragMode`/
+      `resetSurfaceCamera` (kept working for one release; docs steer to the capability gates)
+- [x] Publication-critical `any`s typed via new `contracts/display-types.ts` (barrel-exported):
+      `ColormapNode`/`ColormapValue` (all-optional so PrimeNG `TreeNode`s stay structurally
+      assignable — typed both `IDisplayOptions` and `IChannelHistogramApi` colormap methods),
+      `IWandOptions`/`WandType` (canonical shapes moved out of `toolbar/wand.service`, which
+      re-exports them for internal back-compat), and `plot()`'s `imageLoaded: any → unknown`
+      (documented as the opaque backend handle; method-param bivariance keeps implementations
+      compiling)
+- [x] Selector prefix standardized: `jaxviz-*` canonical with the unprefixed originals kept as
+      comma aliases for one release (`jaxviz-visualization, visualization`, …; toolbar too)
+- Gate:
+  - [x] _STD_ (348/348 tests / 28 suites — +2 for the new control gate; lint 0 errors;
+        ng-packagr green with the new public types; jit-ui AOT green)
+  - [x] Host app compiles with **zero** changes (`git status apps/` empty after the build)
+  - [x] Barrel surface reviewed: + `display-types` (ColormapNode/ColormapValue/IWandOptions/
+        WandType) and `ISurface3dControls` via visualizer.contract; `intensity.ts` and the OSD
+        internals deliberately NOT exported
 
 ## Step 7 — Slim `visualization.component.ts` (optional)
 

@@ -5,7 +5,9 @@ import {
 } from '@angular/core';
 
 @Component({
-  selector: 'hex-color-picker',
+  // Canonical prefixed selector first; the unprefixed original is kept as an
+  // alias for one release (pre-publication back-compat).
+  selector: 'jaxviz-hex-color-picker, hex-color-picker',
   templateUrl: './hex-color-picker.component.html',
   styleUrls: ['./hex-color-picker.component.scss'],
 })

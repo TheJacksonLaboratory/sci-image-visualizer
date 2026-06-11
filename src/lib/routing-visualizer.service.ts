@@ -9,7 +9,7 @@ import { Region } from './models/region';
 import { PlotlyService } from './implementations/plotly/plotly.service';
 import { OpenSeadragonVisualizerService } from './implementations/osd/openseadragon-visualizer.service';
 import { PlotType, PlotTypeDescriptor } from './contracts/plot-type';
-import { IVisualizer, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls } from './contracts/visualizer.contract';
+import { IVisualizer, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls } from './contracts/visualizer.contract';
 import { ViewerCapabilities } from './contracts/capabilities.contract';
 import { IRegionOverlay } from './contracts/region-overlay.contract';
 import { IRegionEditorApi } from './contracts/region-editor-api.contract';
@@ -331,6 +331,10 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
    * plot type renders on Plotly (OSD only handles the image type).
    */
   getIsosurfaceControls(): IIsosurfaceControls | null { return this.plotly.getIsosurfaceControls(); }
+
+  /** 3D scene controls — always Plotly's, since the 3D plot types render on
+   *  Plotly (OSD only handles the image type). */
+  getSurface3dControls(): ISurface3dControls | null { return this.plotly.getSurface3dControls(); }
 
   /** Intensity (line-ROI) controls — always Plotly's, since the line profiles
    *  render their inset on Plotly regardless of which backend draws the image. */

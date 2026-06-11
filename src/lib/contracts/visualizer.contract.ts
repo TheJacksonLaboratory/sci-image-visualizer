@@ -8,6 +8,7 @@ import { PlotType, PlotTypeDescriptor } from './plot-type';
 import { ViewerCapabilities } from './capabilities.contract';
 import { IRegionOverlay } from './region-overlay.contract';
 import { IHistogram } from './channel-histogram-api.contract';
+import { ColormapNode, IWandOptions } from './display-types';
 
 /**
  * Backend-neutral visualization contract. Plotly is one implementation;
@@ -52,12 +53,20 @@ export interface IntensityProfile {
  */
 export interface IDataRenderer {
   load(imageInfo: IImageInfo, zIndex: number): Promise<any>;
-  plot(plotDiv: string, imageLoaded: any, imageInfo: IImageInfo, screenHeight: number,
+  /** `imageLoaded` is the backend-specific handle returned by `load()` —
+   *  treat it as opaque and pass it straight through. */
+  plot(plotDiv: string, imageLoaded: unknown, imageInfo: IImageInfo, screenHeight: number,
        plotType: PlotType, inPlace?: boolean): Promise<boolean>;
+  /** @deprecated Plotly-specific re-render; the OSD backend no-ops it. The host
+   *  re-drives `plot()` from its image stream instead. */
   reloadAndPlot(): void;
   reset(): void;
   relayout(trueImageSize?: number[]): void;
+  /** @deprecated Plotly-specific (axis reset); the OSD backend no-ops it. Gate
+   *  on {@link ViewerCapabilities} before calling. */
   resetAxes(): void;
+  /** @deprecated Plotly-specific (autoscale); the OSD backend no-ops it. Gate
+   *  on {@link ViewerCapabilities} before calling. */
   autoscale(): void;
   zoomIn(): void;
   zoomOut(): void;
@@ -75,7 +84,10 @@ export interface IDataRenderer {
   downloadImage(): void;
 
   setPlotType(plotType: PlotType): void;
+  /** @deprecated Use `getSurface3dControls()` — 3D scene controls only exist on
+   *  a backend that renders 3D plot types; this method silently no-ops on OSD. */
   setSurfaceDragMode(mode: string): void;
+  /** @deprecated Use `getSurface3dControls()` — see {@link setSurfaceDragMode}. */
   resetSurfaceCamera(): void;
 
   getAutoscaleEvent(): Observable<any>;
@@ -127,8 +139,8 @@ export interface IRegionStore {
 
 /** On-canvas tool modes (wand, vertex eraser, zoom-to-box). */
 export interface IToolController {
-  setWandMode(active: boolean, options?: any): void;
-  setWandOptions(options: any): void;
+  setWandMode(active: boolean, options?: IWandOptions): void;
+  setWandOptions(options: IWandOptions): void;
   clearActiveWandRegion(): void;
   setVertexEraserMode(active: boolean): void;
   setVertexEraserRadius(radius: number): void;
@@ -148,6 +160,20 @@ export interface IIsosurfaceControls {
 }
 
 /**
+ * Controls specific to the 3D plot types (SURFACE / SCATTER3D / ISOSURFACE
+ * scenes). Capability-gated like {@link IIsosurfaceControls}: only a backend
+ * that renders 3D scenes exposes it, via `IVisualizer.getSurface3dControls()` —
+ * the deprecated top-level `setSurfaceDragMode`/`resetSurfaceCamera` silently
+ * no-op on 2D-only backends.
+ */
+export interface ISurface3dControls {
+  /** Switch the 3D scene interaction mode (orbit / turntable / pan / zoom). */
+  setSurfaceDragMode(mode: string): void;
+  /** Reset the 3D scene camera to its default eye position. */
+  resetSurfaceCamera(): void;
+}
+
+/**
  * Controls specific to the LINE (intensity-profile) plot type. Capability-gated
  * like {@link IIsosurfaceControls}: only a backend that renders the line-ROI /
  * inset exposes it, via `IVisualizer.getIntensityControls()`.
@@ -161,9 +187,9 @@ export interface IIntensityControls {
 
 /** Display options (colormap/LUT, reverse scale, image metadata). */
 export interface IDisplayOptions {
-  getColormap(): Observable<any>;
-  setColormap(colormap: any): void;
-  getColormapOptions(): any;
+  getColormap(): Observable<ColormapNode | null>;
+  setColormap(colormap: ColormapNode): void;
+  getColormapOptions(): ColormapNode[];
   getReverseScale(): Observable<boolean>;
   setReverseScale(reverscale: any): void;
   setImageMeta(imageMeta: IImageMetadata[]): void;
@@ -182,6 +208,10 @@ export interface IVisualizer extends IDataRenderer, IRegionStore, IToolControlle
   /** Intensity (line-ROI) controls when the backend renders the LINE plot type,
    *  else null. */
   getIntensityControls(): IIntensityControls | null;
+  /** 3D scene controls when this backend renders 3D plot types, else null —
+   *  the capability-gated replacement for the deprecated top-level
+   *  `setSurfaceDragMode`/`resetSurfaceCamera`. */
+  getSurface3dControls(): ISurface3dControls | null;
   /** Binned intensity histogram for a channel from the currently-displayed
    *  pixels, or null when none are available. Feeds the Channels & Histogram
    *  pane. */

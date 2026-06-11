@@ -16,7 +16,9 @@ import { IntensityProfile } from './contracts/visualizer.contract';
 import { RegionToolMode } from './contracts/region-overlay.contract';
 
 @Component({
-  selector: 'visualization',
+  // Canonical prefixed selector first; the unprefixed original is kept as an
+  // alias for one release (pre-publication back-compat).
+  selector: 'jaxviz-visualization, visualization',
   templateUrl: './visualization.component.html',
   styleUrls: ['./visualization.component.scss'],
 })

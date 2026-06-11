@@ -12,7 +12,7 @@ import { TileAccessPort, TILE_ACCESS_PORT } from '../../contracts/ports/tile-acc
 import { VizConfig, VIZ_CONFIG } from '../../contracts/viz-config';
 import { Region } from '../../models/region';
 import { PlotType, PLOT_TYPE_DESCRIPTORS, PlotTypeDescriptor } from '../../contracts/plot-type';
-import { IVisualizer, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls } from '../../contracts/visualizer.contract';
+import { IVisualizer, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls } from '../../contracts/visualizer.contract';
 import { ViewerCapabilities, ViewerFeature, capabilitiesOf } from '../../contracts/capabilities.contract';
 import { OsdRegionOverlay } from './osd-region-overlay';
 import { OsdScaleBar } from './osd-scale-bar';
@@ -703,6 +703,11 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
 
   /** OSD renders only the image type — no isosurface, so no controls. */
   getIsosurfaceControls(): IIsosurfaceControls | null {
+    return null;
+  }
+
+  /** OSD renders only the image type — no 3D scenes, so no controls. */
+  getSurface3dControls(): ISurface3dControls | null {
     return null;
   }
 

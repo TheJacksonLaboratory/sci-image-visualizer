@@ -1305,6 +1305,14 @@ export class PlotlyService implements IVisualizer {
     return this.zIndex.value || 0;
   }
 
+  /** Capability-gated 3D scene controls (Plotly renders the 3D plot types). */
+  getSurface3dControls() {
+    return {
+      setSurfaceDragMode: (mode: string) => this.setSurfaceDragMode(mode),
+      resetSurfaceCamera: () => this.resetSurfaceCamera(),
+    };
+  }
+
   public setSurfaceDragMode(mode: string) {
     if (this.plotDiv) {
       Plotly.relayout(this.plotDiv, { 'scene.dragmode': mode } as any);

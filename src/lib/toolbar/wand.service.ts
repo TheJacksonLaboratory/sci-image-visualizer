@@ -1,19 +1,12 @@
 import { Injectable } from '@angular/core';
 import { Polygon } from '../models/region';
 
-export type WandType = 'GRAY' | 'RGB' | 'LAB_DISTANCE';
+import { IWandOptions, WandType } from '../contracts/display-types';
 
-export interface WandOptions {
-  type?: WandType;
-  /** Gaussian sigma applied to the patch before thresholding. */
-  sigma?: number;
-  /** Higher = stricter (smaller selection) for GRAY/RGB; higher = looser for LAB_DISTANCE — matches QuPath. */
-  sensitivity?: number;
-  /** Square patch size in pixels (must be odd). */
-  patchSize?: number;
-  /** When true, skip blur/threshold and flood-fill at exact-match (Cmd/Ctrl-click in QuPath). */
-  simpleMode?: boolean;
-}
+// Canonical wand option/type shapes moved to contracts/display-types (public
+// API surface); re-exported here so existing internal imports keep working.
+export type { WandType };
+export type WandOptions = IWandOptions;
 
 export interface WandImage {
   /**

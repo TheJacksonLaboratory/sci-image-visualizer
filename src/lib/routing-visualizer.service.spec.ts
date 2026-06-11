@@ -55,6 +55,7 @@ function mockBackend(): any {
     getSelectedShapeIndices$: jest.fn().mockReturnValue(of([])),
     setSelectedShapeIndices: jest.fn(),
     getRegionOverlay: jest.fn().mockReturnValue({ kind: 'overlay' }),
+    getSurface3dControls: jest.fn().mockReturnValue({ kind: '3d' }),
     unsubscribe: jest.fn(),
   };
 }
@@ -191,6 +192,11 @@ describe('RoutingVisualizerService (characterization)', () => {
     router.setReverseScale(true);
     expect(plotly.setColormap).toHaveBeenCalledWith('Reds');
     expect(plotly.setReverseScale).toHaveBeenCalledWith(true);
+  });
+
+  it('3D scene controls always come from Plotly (capability-gated)', () => {
+    expect(router.getSurface3dControls()).toEqual({ kind: '3d' });
+    expect(plotly.getSurface3dControls).toHaveBeenCalled();
   });
 
   // ── region-overlay fallback ───────────────────────────────────────────

@@ -16,7 +16,9 @@ import { PlotType, PlotTypeDescriptor } from '../contracts/plot-type';
  * handlers in the host avoids duplicating that logic.
  */
 @Component({
-  selector: 'plotting-toolbar',
+  // Canonical prefixed selector first; the unprefixed original is kept as an
+  // alias for one release (pre-publication back-compat).
+  selector: 'jaxviz-toolbar, plotting-toolbar',
   templateUrl: './toolbar.component.html',
   styleUrls: ['./toolbar.component.scss'],
 })

@@ -10,7 +10,9 @@ import { IRegionEditorApi, REGION_EDITOR_API } from '../contracts/region-editor-
 import { RegionIoPort, REGION_IO_PORT } from '../contracts/ports/region-io.port';
 
 @Component({
-  selector: 'region-editor',
+  // Canonical prefixed selector first; the unprefixed original is kept as an
+  // alias for one release (pre-publication back-compat).
+  selector: 'jaxviz-region-editor, region-editor',
   templateUrl: './region-editor.component.html',
   styleUrls: ['./region-editor.component.scss'],
 })

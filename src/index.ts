@@ -18,6 +18,7 @@ export * from './lib/contracts/image.contract';
 export * from './lib/contracts/plot-type';
 export * from './lib/contracts/capabilities.contract';
 export * from './lib/contracts/region-overlay.contract';
+export * from './lib/contracts/display-types';
 
 // ── Neutral data models ──────────────────────────────────────────────────
 export * from './lib/models/region';
