@@ -25,6 +25,10 @@ import { ToolbarComponent } from './toolbar/toolbar.component';
 import { RegionEditorComponent } from './region-editor/region-editor.component';
 import { HexColorPickerComponent } from './hex-color-picker/hex-color-picker.component';
 import { ChannelHistogramComponent } from './channel-histogram/channel-histogram.component';
+import { RoutingVisualizerService } from './routing-visualizer.service';
+import { VISUALIZER } from './contracts/visualizer.contract';
+import { REGION_EDITOR_API } from './contracts/region-editor-api.contract';
+import { CHANNEL_HISTOGRAM_API } from './contracts/channel-histogram-api.contract';
 
 /**
  * Self-contained plotting UI: the {@link VisualizationComponent} (plot surface
@@ -67,5 +71,18 @@ import { ChannelHistogramComponent } from './channel-histogram/channel-histogram
     CheckboxModule,
   ],
   exports: [VisualizationComponent, RegionEditorComponent, HexColorPickerComponent, ChannelHistogramComponent],
+  providers: [
+    // Internal backend wiring. All three host-facing contracts are served by the
+    // RoutingVisualizerService (the Plotly/OpenSeadragon selector), so consumers
+    // depend only on the tokens and never the concrete router. Owned by the
+    // library so importing VisualizationModule is enough — the host supplies only
+    // the *ports* (IMAGE_STATE_PORT / TILE_ACCESS_PORT / REGION_IO_PORT) and
+    // VIZ_CONFIG, which are app-specific. A consumer needing an isolated instance
+    // (e.g. a modal that mustn't share region/image state) re-provides this same
+    // set at component scope, which shadows these defaults for its subtree.
+    { provide: VISUALIZER, useExisting: RoutingVisualizerService },
+    { provide: REGION_EDITOR_API, useExisting: RoutingVisualizerService },
+    { provide: CHANNEL_HISTOGRAM_API, useExisting: RoutingVisualizerService },
+  ],
 })
 export class VisualizationModule {}

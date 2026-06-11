@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, AfterViewInit, EventEmitter, HostListener, Inject, NgZone, OnDestroy, OnInit, Output, ViewChild } from '@angular/core';
+import { ChangeDetectorRef, Component, AfterViewInit, EventEmitter, HostListener, Inject, Input, NgZone, OnDestroy, OnInit, Output, ViewChild } from '@angular/core';
 
 import { Subject, Subscription } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
@@ -8,13 +8,19 @@ import { ContextMenu } from 'primeng/contextmenu';
 import { IImageInfo } from './contracts/image.contract';
 import { ImageStatePort, IMAGE_STATE_PORT } from './contracts/ports/image-state.port';
 import { Polygon } from './models/region';
-import { RoutingVisualizerService } from './routing-visualizer.service';
 import { VisualizerStore } from './visualizer-store.service';
 import { RenderOrchestrator, SliceScrubber } from './render-orchestrator';
 import { PlotType, PlotTypeDescriptor } from './contracts/plot-type';
 import { ViewerFeature } from './contracts/capabilities.contract';
-import { IntensityProfile } from './contracts/visualizer.contract';
+import { IntensityProfile, IVisualizer, VISUALIZER } from './contracts/visualizer.contract';
 import { RegionToolMode } from './contracts/region-overlay.contract';
+import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from './contracts/toolbar-config';
+
+/** Per-instance plot-div id source. The mount element's id must be unique so two
+ *  live viewers (e.g. the main diagram + a modal preview) don't collide on the
+ *  same DOM id — `getElementById` would otherwise return whichever came first.
+ *  Styling hangs off the `.viz-plot` class instead of the id. */
+let plotInstanceSeq = 0;
 
 @Component({
   // Canonical prefixed selector first; the unprefixed original is kept as an
@@ -28,6 +34,18 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   isStackEvent = new EventEmitter(false);
   @Output()
   isGrayscaleEvent = new EventEmitter(false);
+
+  /** Which toolbar groups to show. A partial override merges over the full set,
+   *  so `{ specialTools: false }` hides only that group. Defaults to everything. */
+  @Input()
+  set toolbarTools(v: ToolbarToolVisibility | undefined) {
+    this._toolbarTools = { ...ALL_TOOLBAR_TOOLS, ...(v ?? {}) };
+  }
+  get toolbarTools(): Required<ToolbarToolVisibility> { return this._toolbarTools; }
+  private _toolbarTools: Required<ToolbarToolVisibility> = ALL_TOOLBAR_TOOLS;
+
+  /** Image-smoothing state for the toolbar's pixel/smooth toggle (OSD only). */
+  imageSmoothingEnabled = true;
   loadingMessage = 'Loading image...';
   zoom = false;
   fileName: string | undefined;
@@ -73,7 +91,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     { name: 'Stack', val: 'true' },
   ];
   selectedStackOption: { name: string; val: string } | undefined = this.stackOptions[0];
-  plotDivName = 'plot';
+  readonly plotDivName = `viz-plot-${plotInstanceSeq++}`;
   plotType = PlotType.IMAGE;
   isHeatmap = true;
   activeSurface3dMode = 'turntable';
@@ -137,7 +155,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
 
   constructor(
     @Inject(IMAGE_STATE_PORT) private state: ImageStatePort,
-    public plotService: RoutingVisualizerService,
+    @Inject(VISUALIZER) public plotService: IVisualizer,
     public messageService: MessageService,
     private ngZone: NgZone,
     private cdr: ChangeDetectorRef,
@@ -279,7 +297,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
           const urls = imgInfo.urls;
           if (!this.running) {
             // image size — measure the plot div directly so the toolbar height is excluded
-            const plotDiv: HTMLElement | null = document.getElementById('plot');
+            const plotDiv: HTMLElement | null = document.getElementById(this.plotDivName);
             const screenHeight = plotDiv?.offsetHeight || 500;
             if (urls) {
               this.plotService.reset();
@@ -383,7 +401,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
 
   ngAfterViewInit() {
     this.plotContextMenuListener = (event: MouseEvent) => {
-      const plotEl = document.getElementById('plot');
+      const plotEl = document.getElementById(this.plotDivName);
       if (!plotEl?.contains(event.target as Node)) return;
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -425,7 +443,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     window.addEventListener('keydown', this.keydownListener);
 
     this.wheelListener = (event: WheelEvent) => {
-      const plotEl = document.getElementById('plot');
+      const plotEl = document.getElementById(this.plotDivName);
       if (!plotEl?.contains(event.target as Node)) return;
       // The Image view handles scroll-zoom natively (it respects the scroll
       // delta). Intercepting here would fire a fixed zoom step per wheel
@@ -526,7 +544,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     // Park the floating inset near the plot's top-right when the first line is
     // added (it's position:fixed, so use viewport coords from the plot rect).
     if (!this.hasProfiles) {
-      const rect = document.getElementById('plot')?.getBoundingClientRect();
+      const rect = document.getElementById(this.plotDivName)?.getBoundingClientRect();
       this.profilePanelPos = rect
         ? { x: Math.max(10, rect.right - 300), y: rect.top + 10 }
         : { x: 20, y: 70 };
@@ -758,6 +776,12 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
 
   autoscaleImage() {
     this.plotService.autoscale();
+  }
+
+  /** Toolbar pixel/smooth toggle: flip smoothing and apply to the active backend. */
+  onToggleImageSmoothing(): void {
+    this.imageSmoothingEnabled = !this.imageSmoothingEnabled;
+    this.plotService.setImageSmoothingEnabled(this.imageSmoothingEnabled);
   }
 
   resetAxes() {

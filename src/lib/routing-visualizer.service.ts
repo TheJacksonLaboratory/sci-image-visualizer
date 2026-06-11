@@ -160,6 +160,19 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   zoomIn(): void { this.renderer().zoomIn(); }
   zoomOut(): void { this.renderer().zoomOut(); }
   setDragMode(mode: string | false): void { this.renderer().setDragMode(mode); }
+  // Set on both backends (not just the active renderer): consumers call this
+  // before the first render, when `renderer()` is still the Plotly default, so
+  // OSD must receive the flag to honour it at viewer creation.
+  setNavigatorVisible(visible: boolean): void {
+    this.osd.setNavigatorVisible(visible);
+    this.plotly.setNavigatorVisible(visible);
+  }
+  // Set on both backends (see setNavigatorVisible): consumers may set it before
+  // the first render, when the active renderer is still Plotly.
+  setImageSmoothingEnabled(enabled: boolean): void {
+    this.osd.setImageSmoothingEnabled(enabled);
+    this.plotly.setImageSmoothingEnabled(enabled);
+  }
   setShowStack(showstack: boolean): void { this.renderer().setShowStack(showstack); }
   setZIndex(zIndex: number): void { this.renderer().setZIndex(zIndex); }
   getTrueImageSize(): { width: number; height: number } | null { return this.renderer().getTrueImageSize(); }
@@ -343,7 +356,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   /** Load pixel frames for intensity sampling when OpenSeadragon owns the image
    *  (it doesn't feed Plotly's frame cache). No-op needed when Plotly renders. */
   ensureIntensitySampling(imageInfo: IImageInfo, zIndex: number): Promise<void> {
-    return this.plotly.ensureSamplingFrames(imageInfo, zIndex);
+    return this.plotly.ensureIntensitySampling(imageInfo, zIndex);
   }
 
   /** Visible-region changes from the OpenSeadragon viewer (image-pixel coords),
@@ -356,7 +369,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   /** Re-sample the intensity profiles from a fresh crop of the given image-pixel
    *  ROI at display resolution (sampling always lives in Plotly). */
   refreshIntensitySamplingForRoi(x: number, y: number, width: number, height: number, zIndex: number): void {
-    this.plotly.refreshSamplingForRoi(x, y, width, height, zIndex);
+    this.plotly.refreshIntensitySamplingForRoi(x, y, width, height, zIndex);
   }
 
   unsubscribe(): void {

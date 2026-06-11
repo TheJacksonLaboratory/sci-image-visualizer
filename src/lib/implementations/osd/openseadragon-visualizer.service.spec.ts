@@ -4,6 +4,7 @@ import { firstValueFrom } from 'rxjs';
 
 import { OpenSeadragonVisualizerService } from './openseadragon-visualizer.service';
 import { VIZ_PORT_STUBS } from '../../testing/viz-port-stubs';
+import { TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
 
 /**
  * CHARACTERIZATION TESTS (refactoring plan, Step 0) — instantiation beachhead.
@@ -44,6 +45,43 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     const loaded = await service.load({ fileName: 'x.tif' } as any, 0);
     expect(loaded.descriptor).toBeNull();
     expect(loaded.infoB64).toBe('');
+  });
+
+  it('load() simple (tiled:false) skips the tile server and returns the URL + a one-level descriptor', async () => {
+    const port = TestBed.inject(TILE_ACCESS_PORT);
+    const infoSpy = jest.spyOn(port, 'getSelectedInfoB64');
+    const loaded = await service.load({
+      fileName: 'pipe.png',
+      tiled: false,
+      isGrayscale: false,
+      urls: ['blob:abc', 'blob:def'],
+      trueImageSize: [10, 20],
+      imageMeta: [{ rgbChannels: 3, channelCount: 3, x: 10, y: 20, z: 1, mppX: 0.5 }],
+    } as any, 1);
+    // No tile-server consultation at all (the afterEach http.verify() also
+    // asserts no /tiles/info request was issued).
+    expect(infoSpy).not.toHaveBeenCalled();
+    expect(loaded.simple).toBe(true);
+    expect(loaded.url).toBe('blob:def');          // urls[zIndex=1]
+    expect(loaded.infoB64).toBe('');
+    expect(loaded.descriptor).toMatchObject({
+      width: 10, height: 20, z: 1, realLevels: 1, channels: 3, multichannel: false, mppX: 0.5,
+    });
+    expect(loaded.descriptor!.levels).toHaveLength(1);
+  });
+
+  it('load() simple infers a single channel for a grayscale image and falls back to urls[0]', async () => {
+    const loaded = await service.load({
+      fileName: 'g.png',
+      tiled: false,
+      isGrayscale: true,
+      urls: ['blob:gray'],
+      trueImageSize: [4, 4],
+      imageMeta: [],                              // no meta → channels from isGrayscale
+    } as any, 0);
+    expect(loaded.simple).toBe(true);
+    expect(loaded.url).toBe('blob:gray');
+    expect(loaded.descriptor!.channels).toBe(1);
   });
 
   it('getHistogram returns null before any slice has been sampled', () => {

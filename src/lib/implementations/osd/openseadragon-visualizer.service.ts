@@ -100,6 +100,12 @@ interface OsdLoaded {
   /** Mirrors the loaded image's filename — the diagram's render pipeline
    *  guards on `loaded.filename === phaseInfo.fileName` before calling plot(). */
   filename: string | undefined;
+  /** Simple (non-tiled) image: `plot()` opens {@link url} directly via OSD's
+   *  single-image source — no tile pyramid, no server. Set when the image
+   *  carries `tiled === false` (see {@link IImageInfo.tiled}). */
+  simple?: boolean;
+  /** The directly-loadable image URL (`blob:`/`data:`/`http`) for simple mode. */
+  url?: string;
 }
 
 /**
@@ -168,6 +174,14 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
   /** Bearer token for OSD's own tile fetches (HttpClient calls get it via the
    *  interceptor; OSD's loader does not, so we pass it as an ajax header). */
   private authHeaders: Record<string, string> = {};
+  /** Whether the overview navigator (minimap) is shown. Read at viewer creation;
+   *  a consumer that doesn't want it (e.g. a small embedded preview) sets it off
+   *  via {@link setNavigatorVisible} before the first render. */
+  private navigatorVisible = true;
+  /** Image smoothing (bilinear). `false` → nearest-neighbour, so zoomed-in pixels
+   *  render as crisp blocks (pixel inspection). Read at viewer creation; toggled
+   *  via {@link setImageSmoothingEnabled}. */
+  private smoothingEnabled = true;
 
   /** Overall deadline for the /tiles/info poll loop. An uncached whole-slide
    *  image (e.g. .ndpi) is cached server-side first (GCS->PVC), which can take
@@ -326,6 +340,12 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     if (filename && this.currentFileName && filename !== this.currentFileName) {
       this.cache.cancelBackgroundLoad();
     }
+    // Simple (in-memory / non-tiled) image: skip the tile server entirely — no
+    // getSelectedInfoB64, no /tiles/info poll. `urls[zIndex]` is a complete image
+    // OSD opens via its single-image source (see plot()).
+    if (imageInfo?.tiled === false) {
+      return this.loadSimple(imageInfo, zIndex);
+    }
     const infoB64 = this.tiles.getSelectedInfoB64();
     if (!infoB64) return { descriptor: null, infoB64: '', z: zIndex || 0, filename };
 
@@ -368,6 +388,36 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     }
   }
 
+  /** Build the `plot()` payload for a simple (non-tiled) in-memory image: a
+   *  single-level descriptor sized from `trueImageSize`, plus the directly-
+   *  loadable URL. No server poll and no auth (a blob:/data: URL ignores headers). */
+  private loadSimple(imageInfo: IImageInfo, zIndex: number): OsdLoaded {
+    const [width, height] = imageInfo.trueImageSize ?? [0, 0];
+    const meta = imageInfo.imageMeta?.[0];
+    const z = zIndex || 0;
+    const descriptor: TileDescriptor = {
+      width,
+      height,
+      tileSize: 0,            // unused: simple mode never calls buildTileSource
+      z: 1,                   // single frame
+      channels: meta?.rgbChannels ?? (imageInfo.isGrayscale ? 1 : 3),
+      multichannel: false,
+      realLevels: 1,
+      levels: [{ res: 0, width, height }],
+      mppX: meta?.mppX ?? 0,
+      mppY: meta?.mppY ?? 0,
+    };
+    this.authHeaders = {};
+    return {
+      descriptor,
+      infoB64: '',
+      z,
+      filename: imageInfo?.fileName,
+      simple: true,
+      url: imageInfo.urls?.[z] ?? imageInfo.urls?.[0],
+    };
+  }
+
   /** Mount the viewer with a custom tile source pointing at `GET /tile`. */
   plot(
     plotDiv: string,
@@ -397,61 +447,73 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     // (channelCount) diverges from rgbChannels for stacks, which left grayscale
     // stacks un-recolored even though the colormap selector was shown.
     this.isGrayscaleImage = !!imageInfo?.isGrayscale;
-    // Multichannel fluorescence (indexed/LUT-bearing stacks) composite client-side
-    // from per-channel tiles. Trust the server's explicit `multichannel` flag — the
-    // old `channels>1 && grayscale` heuristic also matched RGB photos Bio-Formats
-    // reads as separated planes (channels>1, rgbChannels==1), splitting them into N
-    // per-channel TiledImages that flooded the tile endpoint and hung on load.
-    this.realLevels = d.realLevels ?? d.levels.length;
-    // Tiles to cover the whole image at the coarsest REAL Bio-Formats level (the
-    // smallest level that has real, per-channel-fetchable tiles — synthetic overview
-    // levels are server-composited only). A pyramidal image's coarsest real level is
-    // tiny (few tiles); a flat/no-pyramid image's is the full-res grid (many tiles).
-    const coarse = d.levels[this.realLevels - 1] ?? d.levels[d.levels.length - 1];
-    const coarseW = coarse ? Math.ceil(coarse.width / d.tileSize) : 1;
-    const coarseH = coarse ? Math.ceil(coarse.height / d.tileSize) : 1;
-    const coarseTiles = coarseW * coarseH;
-    this.isMultiChannel = !!d.multichannel;
-    if (this.isMultiChannel) {
-      // Per-channel rendering can only use the REAL levels, so OSD requests the
-      // coarsest real level's whole tile grid × N channels at fit. When that's large
-      // (a whole-slide), it's too many (often slow, pyramid-less) full-res reads —
-      // fall back to the single server-composited source (which keeps the fast
-      // synthetic overviews). A small single-FOV z-stack stays per-channel. Size in
-      // BYTES isn't the signal — tile count is.
-      const fitTiles = coarseTiles * Math.max(1, d.channels ?? 1);
-      if (fitTiles > this.MAX_MULTICHANNEL_FIT_TILES) {
-        this.isMultiChannel = false;
-        console.warn(
-          '[OSD] multichannel composite too large for per-channel rendering: ' +
-          `${coarseW}x${coarseH} tiles x ${d.channels} channels = ${fitTiles} at the coarsest ` +
-          `real level (> ${this.MAX_MULTICHANNEL_FIT_TILES}); rendering server-composited for speed.`,
-        );
-      }
-    }
-    this.cache.clearChannelGroups();
-    // Auto-range grayscale tiles to the image's actual intensity span (like the
-    // heatmap), sampling the coarsest tile level so the window matches the raw
-    // tile values. Fire-and-forget: it re-invalidates once the window is known;
-    // tiles paint unwindowed until then. (Multichannel windows are per-channel,
-    // defaulting to full range; the user auto/edits each channel.)
-    if (this.isMultiChannel) {
-      this.sampler.computeMultiChannelHistograms(d, loaded.infoB64, loaded.z);
+    // Simple (non-tiled, in-memory) image: no pyramid, no per-channel tiles, and
+    // no server-side intensity sampling — OSD's single-image source decodes
+    // urls[z] directly. Skip the whole tiled-setup path below.
+    const simple = !!loaded.simple;
+    if (simple) {
+      this.realLevels = 1;
+      this.isMultiChannel = false;
+      this.cache.clearChannelGroups();
+      this.destroyViewer();
     } else {
-      this.sampler.computeImageWindow(d, loaded.infoB64, loaded.z);
+      // Multichannel fluorescence (indexed/LUT-bearing stacks) composite client-side
+      // from per-channel tiles. Trust the server's explicit `multichannel` flag — the
+      // old `channels>1 && grayscale` heuristic also matched RGB photos Bio-Formats
+      // reads as separated planes (channels>1, rgbChannels==1), splitting them into N
+      // per-channel TiledImages that flooded the tile endpoint and hung on load.
+      this.realLevels = d.realLevels ?? d.levels.length;
+      // Tiles to cover the whole image at the coarsest REAL Bio-Formats level (the
+      // smallest level that has real, per-channel-fetchable tiles — synthetic overview
+      // levels are server-composited only). A pyramidal image's coarsest real level is
+      // tiny (few tiles); a flat/no-pyramid image's is the full-res grid (many tiles).
+      const coarse = d.levels[this.realLevels - 1] ?? d.levels[d.levels.length - 1];
+      const coarseW = coarse ? Math.ceil(coarse.width / d.tileSize) : 1;
+      const coarseH = coarse ? Math.ceil(coarse.height / d.tileSize) : 1;
+      const coarseTiles = coarseW * coarseH;
+      this.isMultiChannel = !!d.multichannel;
+      if (this.isMultiChannel) {
+        // Per-channel rendering can only use the REAL levels, so OSD requests the
+        // coarsest real level's whole tile grid × N channels at fit. When that's large
+        // (a whole-slide), it's too many (often slow, pyramid-less) full-res reads —
+        // fall back to the single server-composited source (which keeps the fast
+        // synthetic overviews). A small single-FOV z-stack stays per-channel. Size in
+        // BYTES isn't the signal — tile count is.
+        const fitTiles = coarseTiles * Math.max(1, d.channels ?? 1);
+        if (fitTiles > this.MAX_MULTICHANNEL_FIT_TILES) {
+          this.isMultiChannel = false;
+          console.warn(
+            '[OSD] multichannel composite too large for per-channel rendering: ' +
+            `${coarseW}x${coarseH} tiles x ${d.channels} channels = ${fitTiles} at the coarsest ` +
+            `real level (> ${this.MAX_MULTICHANNEL_FIT_TILES}); rendering server-composited for speed.`,
+          );
+        }
+      }
+      this.cache.clearChannelGroups();
+      // Auto-range grayscale tiles to the image's actual intensity span (like the
+      // heatmap), sampling the coarsest tile level so the window matches the raw
+      // tile values. Fire-and-forget: it re-invalidates once the window is known;
+      // tiles paint unwindowed until then. (Multichannel windows are per-channel,
+      // defaulting to full range; the user auto/edits each channel.)
+      if (this.isMultiChannel) {
+        this.sampler.computeMultiChannelHistograms(d, loaded.infoB64, loaded.z);
+      } else {
+        this.sampler.computeImageWindow(d, loaded.infoB64, loaded.z);
+      }
+      this.destroyViewer();
+      // Size the slice cache for this image: LRU cap to hold the whole stack
+      // (capped) and skip background preloading for stacks too large to preload
+      // (would flood full-res reads). Normal stacks keep the flicker-free pre-cache.
+      this.cache.configure(d.z ?? 1, coarseTiles);
     }
-    this.destroyViewer();
-    // Size the slice cache for this image: LRU cap to hold the whole stack
-    // (capped) and skip background preloading for stacks too large to preload
-    // (would flood full-res reads). Normal stacks keep the flicker-free pre-cache.
-    this.cache.configure(d.z ?? 1, coarseTiles);
 
-    // Multichannel opens on channel 0; the open handler swaps in this slice's
-    // per-channel group (addChannelSlice) and the background loader pre-fills the
-    // rest. Single/RGB/grayscale open their composite source as before.
-    const tileSource = this.buildTileSource(
-      d, loaded.infoB64, loaded.z, this.isMultiChannel ? 0 : undefined,
-    );
+    // Simple mode: OSD's single-image source decodes the URL (blob:/data:/http)
+    // directly — no pyramid, no server. Tiled mode: the custom server-backed tile
+    // source (multichannel opens on channel 0; the open handler then swaps in this
+    // slice's per-channel group and the background loader pre-fills the rest).
+    const tileSource = simple
+      ? { type: 'image', url: loaded.url }
+      : this.buildTileSource(d, loaded.infoB64, loaded.z, this.isMultiChannel ? 0 : undefined);
     silenceOsdMultiImageAdvisory();
     this.viewer = (OpenSeadragon as any)({
       id: plotDiv,
@@ -462,7 +524,9 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       drawer: 'canvas',
       showNavigationControl: false, // avoids needing the icon-image assets
       // Overview thumbnail with the current-viewport rectangle, bottom-right.
-      showNavigator: true,
+      showNavigator: this.navigatorVisible,
+      // Nearest-neighbour when off → crisp pixels on zoom-in (pixel inspection).
+      imageSmoothingEnabled: this.smoothingEnabled,
       navigatorPosition: 'BOTTOM_RIGHT',
       navigatorSizeRatio: 0.16,
       navigatorAutoFade: false,
@@ -514,7 +578,10 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
         this.coordTransform = new OsdCoordinateTransform(this.viewer as any);
         this.scaleBar = new OsdScaleBar(this.viewer as any, d.mppX ?? 0);
         this.buildToolHosts();
-        if (this.isMultiChannel) {
+        // Simple mode is a single, self-contained image — no slice cache to seed.
+        if (simple) {
+          /* nothing to cache: one frame, no pyramid */
+        } else if (this.isMultiChannel) {
           // Drop the single opened (channel-0) image and add this slice's channel
           // group to the per-slice cache. The shared background loader / LRU then
           // pre-fills the other slices' channel groups so z-scrub is flicker-free.
@@ -558,8 +625,9 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
           }
         }
         // Prefetch adjacent z-slices once the view settles (and on each settle,
-        // so it tracks the current viewport as the user pans/zooms).
-        this.viewer!.addHandler('animation-finish', () => this.cache.schedulePrefetch());
+        // so it tracks the current viewport as the user pans/zooms). Simple mode
+        // has a single frame, so there's nothing to prefetch.
+        if (!simple) this.viewer!.addHandler('animation-finish', () => this.cache.schedulePrefetch());
         // Tell listeners (the intensity inset) the visible image region whenever
         // the view settles, so they can re-sample at the current zoom resolution.
         this.viewer!.addHandler('animation-finish', () => this.emitViewportChange());
@@ -572,7 +640,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
         // visible gone-frame and no layout shift.
         this.viewer!.addHandler('animation', () => this.nudgeToolbarRepaint());
         this.viewer!.addHandler('animation-finish', () => this.nudgeToolbarRepaint());
-        this.cache.schedulePrefetch();
+        if (!simple) this.cache.schedulePrefetch();
         // Force fit-to-view as the split/flex layout settles. A tall
         // non-pyramidal image can otherwise open zoomed-in (image width filling
         // the viewer), making OSD demand slow full-res res=0 tiles for the
@@ -583,6 +651,11 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
         const refit = () => {
           try {
             this.viewer?.viewport.goHome(true);
+            // The navigator was sized in the Viewer constructor — BEFORE the
+            // layout settled — so its element can carry a stale (even
+            // wrong-aspect) size that floats the visible minimap above the
+            // corner. Re-size it from the settled container.
+            this.resizeNavigator();
           } catch {
             /* torn down */
           }
@@ -590,6 +663,8 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
         requestAnimationFrame(refit);
         setTimeout(refit, 150);
         setTimeout(refit, 400);
+        // Keep the navigator sized to the container as the panel resizes.
+        this.viewer!.addHandler('resize', () => this.resizeNavigator());
         done(true);
       });
       this.viewer!.addOnceHandler('open-failed', (e: any) => {
@@ -793,6 +868,26 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     /* OSD navigates the stack via the z-slider -> setZIndex */
   }
 
+  /** Show/hide the overview navigator. Stored for the next viewer creation, and
+   *  applied live when a viewer is already mounted (hides/reveals its element —
+   *  the navigator instance itself only exists when created with showNavigator). */
+  setNavigatorVisible(visible: boolean): void {
+    this.navigatorVisible = visible;
+    const navEl: HTMLElement | undefined = (this.viewer as any)?.navigator?.element;
+    if (navEl) navEl.style.display = visible ? '' : 'none';
+  }
+
+  /** Toggle bilinear smoothing vs nearest-neighbour (crisp pixels). Stored for the
+   *  next viewer creation, and applied live (with a redraw) to a mounted viewer. */
+  setImageSmoothingEnabled(enabled: boolean): void {
+    this.smoothingEnabled = enabled;
+    const drawer: any = (this.viewer as any)?.drawer;
+    if (drawer?.setImageSmoothingEnabled) {
+      drawer.setImageSmoothingEnabled(enabled);
+      this.viewer?.forceRedraw();
+    }
+  }
+
   /**
    * Swap the displayed z-slice live. Slices are kept as separate tiled images in
    * the world, so switching is just an opacity toggle: a previously-visited slice
@@ -869,6 +964,19 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
    *  settles. The intensity inset re-samples this region at the zoom resolution. */
   getViewportChange$(): Observable<{ x: number; y: number; width: number; height: number }> {
     return this.viewportChange$.asObservable();
+  }
+
+  /** {@link IIntensitySampling} stub — intensity sampling lives in the Plotly
+   *  backend (it owns pixel readback). OSD feeds it only via getViewportChange$;
+   *  the sampling-cache priming itself is a no-op here. */
+  async ensureIntensitySampling(_imageInfo: IImageInfo, _zIndex: number): Promise<void> {
+    /* no-op: Plotly owns intensity sampling (see IIntensitySampling) */
+  }
+
+  /** {@link IIntensitySampling} stub — see {@link ensureIntensitySampling}. */
+  refreshIntensitySamplingForRoi(_x: number, _y: number, _width: number, _height: number,
+                                 _zIndex: number): void {
+    /* no-op: Plotly owns intensity sampling (see IIntensitySampling) */
   }
 
   /** Compute the current viewport's image-pixel rectangle (clamped to the image)
@@ -1045,6 +1153,64 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
   /** The element the on-canvas tool overlays attach to (OSD is mounted here). */
   private getOverlayContainer(): HTMLElement | null {
     return this.plotDiv ? document.getElementById(this.plotDiv) : null;
+  }
+
+  /** Size the navigator from the CURRENT container (navigatorSizeRatio of the
+   *  viewer element) and keep it pinned to the corner. OSD computes the size
+   *  once in the Viewer constructor — before the host flex layout settles —
+   *  and never corrects it, leaving a stale-size element whose visible minimap
+   *  floats above the bottom-right corner. */
+  private resizeNavigator(): void {
+    const v: any = this.viewer;
+    const nav = v?.navigator;
+    const el: HTMLElement | undefined = v?.element;
+    if (!nav?.element || !el?.clientWidth || !el?.clientHeight) return;
+    const w = Math.round(el.clientWidth * 0.16);
+    const h = Math.round(el.clientHeight * 0.16);
+    if (nav.element.style.width !== `${w}px` || nav.element.style.height !== `${h}px`) {
+      try {
+        nav.setWidth(w);
+        nav.setHeight(h);
+      } catch { /* navigator torn down */ }
+    }
+    // Normalize OSD's control-corner stack so the minimap sits flush in the
+    // corner, inset 12px to line up with the scale bar:
+    //  - the inline-block wrapper carries line-box struts and can retain stale
+    //    sizing → make it a tight block;
+    //  - anything else OSD left in the corner would stack below the navigator
+    //    and float it up → hide it;
+    //  - inset the corner itself (bottom/right 12px), keeping the element in
+    //    normal flow.
+    const wrapper = nav.element.parentElement as HTMLElement | null;
+    const corner = wrapper?.parentElement as HTMLElement | null;
+    if (wrapper && corner) {
+      wrapper.style.display = 'block';
+      wrapper.style.lineHeight = '0';
+      wrapper.style.fontSize = '0';
+      // The wrapper keeps the navigator's stale pre-settle height as an
+      // explicit size (the nav was 0.16x the UNSETTLED container at creation),
+      // leaving an empty band under the resized minimap — measured live:
+      // navH=87 inside wrapH=167. Force it to hug its content.
+      wrapper.style.height = 'auto';
+      wrapper.style.width = 'auto';
+      for (const child of Array.from(corner.children) as HTMLElement[]) {
+        if (child !== wrapper) child.style.display = 'none';
+      }
+      for (const child of Array.from(wrapper.children) as HTMLElement[]) {
+        if (child !== nav.element) child.style.display = 'none';
+      }
+      corner.style.bottom = '12px';
+      corner.style.right = '12px';
+    }
+    Object.assign(nav.element.style, { position: 'relative', top: '', left: '', bottom: '', right: '', margin: '0' });
+    // TODO(debug): remove after verification
+    const ner = nav.element.getBoundingClientRect();
+    const wr = wrapper?.getBoundingClientRect();
+    const cr = corner?.getBoundingClientRect();
+    const per = el.getBoundingClientRect();
+    console.warn(`[viz:nav] navBottom=${Math.round(ner.bottom)} wrapBottom=${Math.round(wr?.bottom ?? -1)} ` +
+      `cornerBottom=${Math.round(cr?.bottom ?? -1)} plotBottom=${Math.round(per.bottom)} ` +
+      `navH=${Math.round(ner.height)} wrapH=${Math.round(wr?.height ?? -1)} cornerH=${Math.round(cr?.height ?? -1)}`);
   }
 
   /** Force the docked toolbar to repaint after an OSD zoom. Chrome leaves it

@@ -71,6 +71,15 @@ export interface IDataRenderer {
   zoomIn(): void;
   zoomOut(): void;
   setDragMode(mode: string | false): void;
+  /** Show/hide the overview navigator (the minimap). OpenSeadragon only — Plotly
+   *  no-ops it (it has no navigator). Applied when the viewer is (re)created, and
+   *  toggled live when one is already mounted. */
+  setNavigatorVisible(visible: boolean): void;
+  /** Image smoothing (bilinear interpolation). `false` = nearest-neighbour, so
+   *  zooming past 1:1 shows crisp pixel blocks (pixel-level inspection).
+   *  OpenSeadragon only — Plotly no-ops it. Applied at viewer creation and live
+   *  (with a redraw) when one is mounted. */
+  setImageSmoothingEnabled(enabled: boolean): void;
 
   setShowStack(showstack: boolean): void;
   setZIndex(zIndex: number): void;
@@ -196,8 +205,31 @@ export interface IDisplayOptions {
   getImageMeta(): Observable<IImageMetadata[]>;
 }
 
+/**
+ * Intensity-profile sampling (PlotType.LINE). The sampling *source* lives in the
+ * Plotly backend (it owns pixel readback); OpenSeadragon contributes only the
+ * viewport-change signal that drives re-sampling at the current zoom. Each
+ * backend implements the part it owns and no-ops the rest — mirroring the
+ * deprecated no-op pattern on {@link IDataRenderer} — so the contract is uniform
+ * and a consumer can depend on `IVisualizer` alone (no concrete-type reach-in).
+ */
+export interface IIntensitySampling {
+  /** Populate the intensity-sampling cache for the current image/slice so the
+   *  line-ROI profiles have pixel data. Real on Plotly; no-op on OSD. */
+  ensureIntensitySampling(imageInfo: IImageInfo, zIndex: number): Promise<void>;
+  /** Re-sample the profiles from a fresh crop of the given image-pixel ROI at
+   *  display resolution. Real on Plotly; no-op on OSD. */
+  refreshIntensitySamplingForRoi(x: number, y: number, width: number, height: number,
+                                 zIndex: number): void;
+  /** Visible-region changes (image-pixel coords), emitted when the view settles,
+   *  so the inset can re-sample at the current zoom. Real on OSD; empty on Plotly
+   *  (its high-def zoom updates the sampling cache inline instead). */
+  getViewportChange$(): Observable<{ x: number; y: number; width: number; height: number }>;
+}
+
 /** Composite contract a visualization backend implements. */
-export interface IVisualizer extends IDataRenderer, IRegionStore, IToolController, IDisplayOptions {
+export interface IVisualizer extends IDataRenderer, IRegionStore, IToolController, IDisplayOptions,
+  IIntensitySampling {
   readonly capabilities: ViewerCapabilities;
   /** This backend's region renderer. May be null until a plot is mounted
    *  (OpenSeadragon). Drives region draw/select modes uniformly. */
@@ -229,9 +261,10 @@ export interface IVisualizer extends IDataRenderer, IRegionStore, IToolControlle
 }
 
 /**
- * DI token for the active visualization backend. Not wired into providers yet
- * — consumers still inject `PlotlyService` directly. Introduced so the
- * eventual router/factory (Plotly vs OpenSeadragon, per plot type) can be
- * registered centrally without touching consumer constructors.
+ * DI token for the active visualization backend. Bind it (`useExisting`) to the
+ * `RoutingVisualizerService`, which selects Plotly vs OpenSeadragon per plot
+ * type. Consumers — including this library's own `VisualizationComponent` —
+ * inject `IVisualizer` through this token rather than the concrete router, so
+ * the routing/fallback implementation can change without touching constructors.
  */
 export const VISUALIZER = new InjectionToken<IVisualizer>('VISUALIZER');

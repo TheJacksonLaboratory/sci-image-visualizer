@@ -5,7 +5,7 @@
   overflow: hidden;
 }
 
-#plot {
+.viz-plot {
   flex: 1;
   min-height: 0;
   // Guard against utility classes re-imposing height:100% (the docked-toolbar

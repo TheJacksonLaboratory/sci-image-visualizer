@@ -51,4 +51,12 @@ export interface IImageInfo {
   fileName: string;
   roiJsonStr?: string;
   imageMeta: IImageMetadata[];
+  /** How the OpenSeadragon backend should source this image.
+   *  - `true`/absent (default): server-tiled — OSD polls `/tiles/info` for a
+   *    pyramid and fetches tiles from the slide-crop server (whole-slide path).
+   *  - `false`: a self-contained, directly-loadable image — `urls[zIndex]` is a
+   *    complete image (e.g. a `blob:` URL built from a client-side pixel buffer),
+   *    opened via OSD's single-image source with no tile server. Lets in-memory
+   *    images (the processing pipeline) use the OSD viewer without a round-trip. */
+  tiled?: boolean;
 }

@@ -10,7 +10,7 @@ import { Buffer } from 'buffer';
 import { IImageInfo, IImageMetadata } from '../../contracts/image.contract';
 import { TileAccessPort, TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
 import { ImageStatePort, IMAGE_STATE_PORT } from '../../contracts/ports/image-state.port';
-import { BehaviorSubject, Observable, Subject, Subscription, combineLatest, of } from 'rxjs';
+import { BehaviorSubject, EMPTY, Observable, Subject, Subscription, combineLatest, of } from 'rxjs';
 import { MessageService } from 'primeng/api';
 import { ShapeSelection } from '../../models/shape';
 import { CONFIG, CONFIG_SURFACE, PlotUtilities } from '../../plot.utilities';
@@ -112,7 +112,7 @@ export class PlotlyService implements IVisualizer {
    *  zoom-level pixels at the right offset/resolution). */
   private cachedFrameOrigin: [number, number] = [0, 0];
   /** Last visible image-pixel rectangle from the active backend's viewport (set by
-   *  the OSD viewport-change hook via refreshSamplingForRoi). New profile lines are
+   *  the OSD viewport-change hook via refreshIntensitySamplingForRoi). New profile lines are
    *  placed within it so they land on-screen when zoomed in; null → use full image. */
   private lastVisibleRoi: { x: number; y: number; width: number; height: number } | null = null;
 
@@ -883,7 +883,7 @@ export class PlotlyService implements IVisualizer {
    * preview (the same pixels the heatmap would sample) so the line ROIs have
    * pixel data and a placement extent. Re-emits the profiles once loaded.
    */
-  public async ensureSamplingFrames(imageInfo: IImageInfo, zIndex: number): Promise<void> {
+  public async ensureIntensitySampling(imageInfo: IImageInfo, zIndex: number): Promise<void> {
     if (!imageInfo?.urls?.length) return;
     // Sample just the displayed slice (showStack off → single frame); `load`
     // also sets `this.trueImgSize`, which addProfileLine needs for placement.
@@ -899,14 +899,24 @@ export class PlotlyService implements IVisualizer {
   }
 
   /**
+   * {@link IIntensitySampling} stub — the viewport-change signal is OpenSeadragon's
+   * (it re-samples on OSD zoom/pan). Plotly's own high-def zoom updates the
+   * sampling cache inline, so it never emits here; returns EMPTY so a uniform
+   * `IVisualizer` consumer can subscribe regardless of the active backend.
+   */
+  public getViewportChange$(): Observable<{ x: number; y: number; width: number; height: number }> {
+    return EMPTY;
+  }
+
+  /**
    * Re-fetch the given image-pixel ROI at the display resolution and use it as
    * the intensity-sampling source, so the profile reflects the data at the
    * current zoom level. Shared by both backends: the OSD viewport-change hook
    * calls it on zoom/pan; Plotly's own high-def zoom (triggerZoom) updates the
    * same cache inline. `roi` is in full-image pixel coordinates.
    */
-  public refreshSamplingForRoi(x: number, y: number, width: number, height: number,
-                               zIndex: number): void {
+  public refreshIntensitySamplingForRoi(x: number, y: number, width: number, height: number,
+                                        zIndex: number): void {
     if (width <= 0 || height <= 0) return;
     // Remember the visible region so a new profile line is placed inside it.
     this.lastVisibleRoi = { x, y, width, height };
@@ -1779,6 +1789,18 @@ export class PlotlyService implements IVisualizer {
     if (this.plotDiv) {
       Plotly.relayout(this.plotDiv, { dragmode: mode } as any);
     }
+  }
+
+  /** {@link IDataRenderer} stub — Plotly has no overview navigator (it's an
+   *  OpenSeadragon feature), so toggling it is a no-op here. */
+  public setNavigatorVisible(_visible: boolean): void {
+    /* no-op: navigator is OpenSeadragon-only */
+  }
+
+  /** {@link IDataRenderer} stub — image smoothing is an OpenSeadragon canvas-drawer
+   *  setting; the Plotly image/heatmap traces don't expose it, so it's a no-op. */
+  public setImageSmoothingEnabled(_enabled: boolean): void {
+    /* no-op: smoothing toggle is OpenSeadragon-only */
   }
 
   public zoomIn() {

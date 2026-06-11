@@ -20,7 +20,10 @@
   [wandSensitivity]="wandSensitivity"
   [vertexEraserRadius]="vertexEraserRadius"
   [stackOptions]="stackOptions"
+  [tools]="toolbarTools"
+  [imageSmoothingEnabled]="imageSmoothingEnabled"
   (selectPlotType)="onSelectPlotType($event)"
+  (toggleImageSmoothing)="onToggleImageSmoothing()"
   (addProfileLine)="addProfileLine()"
   (isoRangeChange)="onIsoRangeChange($event)"
   (openChannelHistogram)="openChannelHistogram()"
@@ -53,8 +56,8 @@
 <!-- No `h-full` here: PrimeFlex's height:100% !important made #plot as tall as
      the whole host, so under the docked toolbar its bottom toolbar-height strip
      (incl. the OSD scale bar at bottom-left) was clipped by the host's
-     overflow:hidden. The component stylesheet sizes it (#plot { flex: 1 }). -->
-<div class="w-full relative" id="plot">
+     overflow:hidden. The component stylesheet sizes it (.viz-plot { flex: 1 }). -->
+<div class="w-full relative viz-plot" [id]="plotDivName">
   <div *ngIf="imgLoading || stackLoading" id="overlay">
     <ng-container *ngIf="imgLoading && cacheProgress !== null && cacheProgress < 100; else spinnerLoading">
       <!-- Stage-aware message comes from CacheProgressService updating

@@ -16,6 +16,7 @@ export * from './lib/contracts/channel-histogram-api.contract';
 export * from './lib/contracts/viz-config';
 export * from './lib/contracts/image.contract';
 export * from './lib/contracts/plot-type';
+export * from './lib/contracts/toolbar-config';
 export * from './lib/contracts/capabilities.contract';
 export * from './lib/contracts/region-overlay.contract';
 export * from './lib/contracts/display-types';
@@ -27,6 +28,9 @@ export { ShapeSelection } from './lib/models/shape';
 // ── Angular module + composition-root service ────────────────────────────
 export { VisualizationModule } from './lib/visualization.module';
 export { RoutingVisualizerService } from './lib/routing-visualizer.service';
+// Provider factory for an isolated, component-scoped viewer instance (e.g. a
+// modal that must not share the main viewer's region/image state).
+export { provideVisualization } from './lib/provide-visualization';
 
 // ── Public components (exported by VisualizationModule) ───────────────────
 // ng-packagr requires module-exported components to be reachable from the

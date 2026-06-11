@@ -6,7 +6,7 @@
     <ng-content></ng-content>
 
     <!-- Plot type: available for any image (grayscale or RGB). -->
-    <ng-container *ngIf="imageInfo">
+    <ng-container *ngIf="imageInfo && tools.specialTools">
       <span class="toolbar-separator"></span>
       <p-dropdown [options]="plotTypeOptions" optionLabel="label" optionValue="type"
                   [(ngModel)]="selectedPlotType" appendTo="body"
@@ -46,11 +46,19 @@
     </ng-container>
     <!-- Channels & Histogram: brightness/contrast, gamma, per-channel display,
          colormap/reverse/invert — opens the floating dialog. -->
-    <p-button pRipple size="small" [text]="true"
+    <p-button *ngIf="tools.specialTools" pRipple size="small" [text]="true"
               pTooltip="Channels &amp; Histogram (brightness/contrast, colormap)"
               tooltipPosition="bottom"
               (onClick)="openChannelHistogram.emit()">
       <img src="assets/plotting/invert.svg" class="toolbar-icon-dark" style="width: 1rem"/>
+    </p-button>
+
+    <!-- Pixel/smooth toggle: nearest-neighbour vs bilinear (Image view only —
+         it's an OpenSeadragon drawer setting). Highlighted when showing raw pixels. -->
+    <p-button *ngIf="tools.specialTools && isImageView" icon="pi pi-th-large" size="small"
+              [text]="imageSmoothingEnabled"
+              pTooltip="Show raw pixels (turn off image smoothing)" tooltipPosition="bottom"
+              (onClick)="toggleImageSmoothing.emit()">
     </p-button>
 
     <!-- Stack controls -->
@@ -93,48 +101,50 @@
       </ng-container>
     </ng-container>
 
-    <span class="toolbar-separator"></span>
+    <!-- Image actions (special tools) -->
+    <ng-container *ngIf="tools.specialTools">
+      <span class="toolbar-separator"></span>
+      <p-button icon="pi pi-download" size="small" [text]="true"
+                pTooltip="Download image as PNG" tooltipPosition="bottom"
+                (onClick)="downloadImage.emit()">
+      </p-button>
+      <p-button *ngIf="isHeatmap" icon="pi pi-window-maximize" size="small" [text]="true"
+                pTooltip="Fit to view" tooltipPosition="bottom"
+                (onClick)="autoscaleImage.emit()">
+      </p-button>
+    </ng-container>
 
-    <!-- Image actions -->
-    <p-button icon="pi pi-download" size="small" [text]="true"
-              pTooltip="Download image as PNG" tooltipPosition="bottom"
-              (onClick)="downloadImage.emit()">
-    </p-button>
-    <p-button *ngIf="isHeatmap" icon="pi pi-window-maximize" size="small" [text]="true"
-              pTooltip="Fit to view" tooltipPosition="bottom"
-              (onClick)="autoscaleImage.emit()">
-    </p-button>
-
-    <span *ngIf="isHeatmap" class="toolbar-separator"></span>
-
-    <!-- Plotly rubber-band drag-zoom. On OpenSeadragon the box-zoom below covers
-         this, and a bare drag pans natively, so it's hidden in the image view. -->
-    <p-button *ngIf="isHeatmap && !isImageView" icon="pi pi-search" size="small"
-              [text]="activeDragMode !== 'zoom'"
-              pTooltip="Zoom drag" tooltipPosition="bottom"
-              (onClick)="toggleDragMode.emit('zoom')">
-    </p-button>
-    <p-button *ngIf="isHeatmap" size="small"
-              [text]="activeDragMode !== 'zoomToBox'"
-              pTooltip="Zoom box (<kbd>b</kbd>)" [escape]="false" tooltipPosition="bottom"
-              (onClick)="toggleDragMode.emit('zoomToBox')">
-      <img src="assets/plotting/zoom-box.svg"
-           [class]="activeDragMode === 'zoomToBox' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
-           style="width: 1rem"/>
-    </p-button>
-    <p-button *ngIf="isHeatmap" icon="pi pi-arrows-alt" size="small"
-              [text]="activeDragMode !== 'pan'"
-              pTooltip="Pan the image (<kbd>p</kbd>)" [escape]="false" tooltipPosition="bottom"
-              (onClick)="toggleDragMode.emit('pan')">
-    </p-button>
-    <p-button *ngIf="isHeatmap" icon="pi pi-search-plus" size="small" [text]="true"
-              pTooltip="Zoom in (<kbd>+</kbd>)" [escape]="false" tooltipPosition="bottom"
-              (onClick)="zoomIn.emit()">
-    </p-button>
-    <p-button *ngIf="isHeatmap" icon="pi pi-search-minus" size="small" [text]="true"
-              pTooltip="Zoom out (<kbd>-</kbd>)" [escape]="false" tooltipPosition="bottom"
-              (onClick)="zoomOut.emit()">
-    </p-button>
+    <!-- Zoom tools. Plotly rubber-band drag-zoom: on OpenSeadragon the box-zoom
+         covers this and a bare drag pans natively, so it's hidden in image view. -->
+    <ng-container *ngIf="isHeatmap && tools.zoomTools">
+      <span class="toolbar-separator"></span>
+      <p-button *ngIf="!isImageView" icon="pi pi-search" size="small"
+                [text]="activeDragMode !== 'zoom'"
+                pTooltip="Zoom drag" tooltipPosition="bottom"
+                (onClick)="toggleDragMode.emit('zoom')">
+      </p-button>
+      <p-button size="small"
+                [text]="activeDragMode !== 'zoomToBox'"
+                pTooltip="Zoom box (<kbd>b</kbd>)" [escape]="false" tooltipPosition="bottom"
+                (onClick)="toggleDragMode.emit('zoomToBox')">
+        <img src="assets/plotting/zoom-box.svg"
+             [class]="activeDragMode === 'zoomToBox' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+             style="width: 1rem"/>
+      </p-button>
+      <p-button icon="pi pi-arrows-alt" size="small"
+                [text]="activeDragMode !== 'pan'"
+                pTooltip="Pan the image (<kbd>p</kbd>)" [escape]="false" tooltipPosition="bottom"
+                (onClick)="toggleDragMode.emit('pan')">
+      </p-button>
+      <p-button icon="pi pi-search-plus" size="small" [text]="true"
+                pTooltip="Zoom in (<kbd>+</kbd>)" [escape]="false" tooltipPosition="bottom"
+                (onClick)="zoomIn.emit()">
+      </p-button>
+      <p-button icon="pi pi-search-minus" size="small" [text]="true"
+                pTooltip="Zoom out (<kbd>-</kbd>)" [escape]="false" tooltipPosition="bottom"
+                (onClick)="zoomOut.emit()">
+      </p-button>
+    </ng-container>
 
     <!-- Surface 3D controls -->
     <ng-container *ngIf="!isHeatmap">
@@ -165,7 +175,7 @@
       </p-button>
     </ng-container>
 
-    <ng-container *ngIf="isHeatmap">
+    <ng-container *ngIf="isHeatmap && tools.regionTools">
       <span class="toolbar-separator"></span>
 
       <!-- Region drawing tools -->
@@ -297,13 +307,15 @@
       </p-button>
     </ng-container>
 
-    <span class="toolbar-separator"></span>
+    <ng-container *ngIf="tools.help">
+      <span class="toolbar-separator"></span>
 
-    <!-- Help -->
-    <p-button icon="pi pi-question-circle" size="small" [text]="true"
-              pTooltip="Help" tooltipPosition="bottom"
-              (onClick)="showHelp()">
-    </p-button>
+      <!-- Help -->
+      <p-button icon="pi pi-question-circle" size="small" [text]="true"
+                pTooltip="Help" tooltipPosition="bottom"
+                (onClick)="showHelp()">
+      </p-button>
+    </ng-container>
 
   </div>
 </p-toolbar>

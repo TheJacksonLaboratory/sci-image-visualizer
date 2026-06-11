@@ -2,6 +2,7 @@ import { Component, EventEmitter, Input, Output } from '@angular/core';
 
 import { IImageInfo } from '../contracts/image.contract';
 import { PlotType, PlotTypeDescriptor } from '../contracts/plot-type';
+import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from '../contracts/toolbar-config';
 
 /**
  * Presentational toolbar for the plotting viewport.
@@ -41,10 +42,18 @@ export class ToolbarComponent {
   @Input() vertexEraserRadius = 20;
   @Input() stackOptions: { name: string; val: string }[] =
     [{ name: 'Single image', val: 'false' }, { name: 'Stack', val: 'true' }];
+  /** Which toolbar groups to show. Defaults to the full toolbar; the host forwards
+   *  the consumer's choice (e.g. the pipeline shows only zoom + region tools). */
+  @Input() tools: Required<ToolbarToolVisibility> = ALL_TOOLBAR_TOOLS;
+  /** Current image-smoothing state (drives the pixel/smooth toggle button look).
+   *  `false` = nearest-neighbour (crisp pixels). */
+  @Input() imageSmoothingEnabled = true;
 
   @Output() selectPlotType = new EventEmitter<PlotType>();
   /** Intensity (LINE) mode: add another colored line ROI + inset trace. */
   @Output() addProfileLine = new EventEmitter<void>();
+  /** Toggle image smoothing (bilinear) vs nearest-neighbour (crisp pixels). */
+  @Output() toggleImageSmoothing = new EventEmitter<void>();
   // PrimeNG slider/inputNumber change events carry optional values, mirrored by
   // the host handlers (which accept `| undefined`).
   @Output() isoRangeChange = new EventEmitter<number[] | undefined>();
