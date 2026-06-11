@@ -220,7 +220,7 @@ Gate:
       coalesce/commit/cancel. +14 tests
 - Gate:
   - [x] _STD_ (362/362 tests / 30 suites, lint 0 errors, ng-packagr + jit-ui AOT green)
-  - [ ] _BROWSER_ — **pending user verification**: image loads with the blurry→sharp two-pass
+  - [x] _BROWSER_ — verified by user 2026-06-10: image loads with the blurry→sharp two-pass
         (sharpening spinner shows then clears); z-slider drag scrubs smoothly; arrow keys step
         slices; a stack and a single image both finish loading (overlay never sticks)
 
