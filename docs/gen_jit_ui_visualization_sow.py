@@ -274,6 +274,29 @@ h2("4.7 Phase 6 — Distribution + downstream consumer (Planned)")
 labeled("Goal", "Publish the library and prove reuse.")
 labeled("Acceptance", "The library is consumable as a versioned artifact and is rendered in a second frontend with no source copy.")
 
+h2("4.8 Test coverage")
+para(
+    "The library carries a Jest unit-test suite — 554 tests across 35 suites, all passing — run in CI with "
+    "coverage reporting and enforced minimum thresholds, so the build fails if coverage regresses below the "
+    "gate. Current coverage on the 'openseadragon' branch:"
+)
+table(
+    [
+        ["Lines", "71.2%", "4095 / 5749", "69%"],
+        ["Statements", "69.1%", "4664 / 6751", "67%"],
+        ["Functions", "62.1%", "757 / 1219", "60%"],
+        ["Branches", "52.9%", "1361 / 2571", "51%"],
+    ],
+    ["Metric", "Covered", "Covered / total", "CI gate (min)"],
+)
+para(
+    "Coverage concentrates on the backend-neutral logic the library owns: the region store and the on-canvas "
+    "tools (wand, brush, vertex-eraser, zoom-to-box), coordinate transforms, the OpenSeadragon tiled load and "
+    "slice cache, the display/recolor pipeline, the channel-histogram and region-editor components, and the "
+    "Plotly viewport/state methods. The lower branch figure reflects defensive backend/DOM guards that are "
+    "harder to exercise headlessly rather than untested features."
+)
+
 # ---------------- 5. DEPENDENCIES ----------------
 h1("5. Dependencies")
 bullet("jit-service tile/histogram/export endpoints (/tiles/info, /tile, /histogram, /export/tiff), including the per-channel tiles and the 16-bit histogram + TIFF export. These are deployed; future histogram/export changes require a jit-service redeploy.")
