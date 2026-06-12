@@ -301,7 +301,7 @@ para(
 
 # ---------------- 5. DEPENDENCIES ----------------
 h1("5. Dependencies")
-bullet("jit-service tile/histogram/export endpoints (/tiles/info, /tile, /histogram, /export/tiff), including the per-channel tiles and the 16-bit histogram + TIFF export. These are deployed; future histogram/export changes require a jit-service redeploy.")
+bullet("jit-service tile/histogram/export endpoints (/tiles/info, /tile, /histogram, /export/tiff), including the per-channel tiles and the 16-bit histogram + TIFF export. These are already deployed — the histogram and export endpoints are in place, so no jit-service redeploy is required.")
 bullet("Angular 17 + Nx 16 build toolchain and ng-packagr for the buildable library; Jest for unit tests.")
 bullet("Third-party rendering libraries: OpenSeadragon (tiled viewer), Plotly (scientific plots), image-js, file-saver.")
 bullet("Distribution channel decision (D7) depends on the JAX Data Science platform's package-hosting convention.")
