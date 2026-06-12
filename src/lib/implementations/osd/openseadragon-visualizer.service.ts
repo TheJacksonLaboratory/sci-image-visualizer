@@ -945,9 +945,19 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     return { width, height, channels: 4, data: img.data };
   }
   downloadImage(): void {
-    // The toolbar download and the Channels & Histogram export both produce the
-    // composited PNG.
-    void this.exportComposite();
+    // Snapshot the currently rendered OSD view as a PNG (WYSIWYG) — the parallel
+    // to Plotly's downloadImage. OSD uses the 2D canvas drawer and bakes the
+    // active display settings (window / gamma / colormap / per-channel colours /
+    // invert) into the tiles via the recolor pipeline, so the drawer canvas
+    // already reflects exactly what's on screen at the current zoom/pan. The
+    // full-resolution stitched export lives in exportComposite() (Channels &
+    // Histogram dialog).
+    const canvas: HTMLCanvasElement | undefined = (this.viewer as any)?.drawer?.canvas;
+    if (!canvas || !canvas.width || !canvas.height) return;
+    const stem = (this.currentFileName || 'image').replace(/\.[^.]+$/, '');
+    canvas.toBlob((blob) => {
+      if (blob) saveAs(blob, `${stem}.png`);
+    }, 'image/png');
   }
 
   setPlotType(_plotType: PlotType): void {

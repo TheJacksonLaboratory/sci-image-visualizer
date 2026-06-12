@@ -5,6 +5,9 @@ import { EMPTY, firstValueFrom } from 'rxjs';
 import { OpenSeadragonVisualizerService } from './openseadragon-visualizer.service';
 import { VIZ_PORT_STUBS } from '../../testing/viz-port-stubs';
 import { TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
+import { saveAs } from 'file-saver';
+
+jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
 
 /**
  * CHARACTERIZATION TESTS (refactoring plan, Step 0) — instantiation beachhead.
@@ -115,6 +118,28 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
 
   it('getCurrentImage resolves null (Plotly-only readback)', async () => {
     await expect(service.getCurrentImage()).resolves.toBeNull();
+  });
+
+  describe('downloadImage (current-view snapshot)', () => {
+    beforeEach(() => (saveAs as unknown as jest.Mock).mockClear());
+
+    it('no-ops without a viewer (nothing saved)', () => {
+      expect(() => service.downloadImage()).not.toThrow();
+      expect(saveAs).not.toHaveBeenCalled();
+    });
+
+    it('saves the rendered OSD canvas as <stem>.png', () => {
+      const blob = {} as Blob;
+      const canvas = { width: 120, height: 90, toBlob: (cb: (b: Blob) => void) => cb(blob) };
+      // Stand in a minimal viewer exposing the drawer canvas; destroy() lets the
+      // afterEach teardown (unsubscribe → destroyViewer) run cleanly.
+      (service as any).viewer = { drawer: { canvas }, destroy: jest.fn() };
+      (service as any).currentFileName = 'sample.tif';
+
+      service.downloadImage();
+
+      expect(saveAs).toHaveBeenCalledWith(blob, 'sample.png');
+    });
   });
 
   it('capability-gated 3D controls are null (OSD renders the image type only)', () => {
