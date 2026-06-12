@@ -26,6 +26,7 @@ import { DisplayPipeline } from './display-pipeline';
 import { HistogramSampler } from './histogram-sampler';
 import { CachedImageData, WandToolService, WandToolHost } from '../../toolbar/wand-tool.service';
 import { BrushToolService, BrushOptions } from '../../toolbar/brush-tool.service';
+import { SamToolService } from '../../toolbar/sam-tool.service';
 import { VertexEraserToolService, VertexEraserToolHost } from '../../toolbar/vertex-eraser-tool.service';
 import { ZoomToBoxToolService, ZoomToBoxToolHost } from '../../toolbar/zoom-to-box-tool.service';
 import { WandOptions } from '../../toolbar/wand.service';
@@ -235,6 +236,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     @Inject(TILE_ACCESS_PORT) private tiles: TileAccessPort,
     private wandTool: WandToolService,
     private brushTool: BrushToolService,
+    private samTool: SamToolService,
     private eraserTool: VertexEraserToolService,
     private zoomToBoxTool: ZoomToBoxToolService,
     private store: VisualizerStore,
@@ -1154,6 +1156,13 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     }
     this.zoomToBoxTool.setMode(active);
     if (!active) this.viewer?.setMouseNavEnabled(true);
+  }
+  /** Box-prompted SAM: segment the drawn rectangles. The SAM tool reuses the
+   *  wand host (viewport readback + coordinate transform + region store). */
+  segmentRectangles(): Promise<number> {
+    this.viewportPixels = null; // segment against the current viewport readback
+    this.samTool.bindHost(this.wandHost);
+    return this.samTool.segmentBoxes();
   }
 
   /** Build the wand/eraser host objects bound to this backend. Both tools run

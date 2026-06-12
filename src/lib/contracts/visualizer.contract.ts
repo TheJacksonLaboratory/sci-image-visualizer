@@ -157,6 +157,9 @@ export interface IToolController {
   setVertexEraserMode(active: boolean): void;
   setVertexEraserRadius(radius: number): void;
   setZoomToBoxMode(active: boolean): void;
+  /** Box-prompted SAM segmentation: segment every rectangle region into masks.
+   *  Returns the number of mask regions added. (jit-ui#90) */
+  segmentRectangles(): Promise<number>;
 }
 
 /**

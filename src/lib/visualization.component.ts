@@ -874,6 +874,11 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     this.plotService.deleteActiveShape();
   }
 
+  /** Box-prompted SAM segmentation of the drawn rectangles (jit-ui#90). */
+  segmentRegions() {
+    void this.plotService.segmentRectangles();
+  }
+
   /** Convert the selected region to a smooth bezier curve. */
   toBezierRegion() {
     this.plotService.getRegionOverlay()?.setSelectedBezier(true);

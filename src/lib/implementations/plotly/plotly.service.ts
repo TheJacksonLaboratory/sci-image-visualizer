@@ -17,6 +17,7 @@ import { CONFIG, CONFIG_SURFACE, PlotUtilities } from '../../plot.utilities';
 import { WandService, WandOptions } from '../../toolbar/wand.service';
 import { CachedImageData, WandToolService, WandToolHost } from '../../toolbar/wand-tool.service';
 import { BrushToolService, BrushOptions } from '../../toolbar/brush-tool.service';
+import { SamToolService } from '../../toolbar/sam-tool.service';
 import { VertexEraserToolService, VertexEraserToolHost } from '../../toolbar/vertex-eraser-tool.service';
 import { ZoomToBoxToolService } from '../../toolbar/zoom-to-box-tool.service';
 import {
@@ -184,6 +185,7 @@ export class PlotlyService implements IVisualizer {
               private wandService: WandService,
               private wandTool: WandToolService,
               private brushTool: BrushToolService,
+              private samTool: SamToolService,
               private vertexEraserTool: VertexEraserToolService,
               private zoomToBoxTool: ZoomToBoxToolService,
               private store: VisualizerStore,
@@ -1202,6 +1204,13 @@ export class PlotlyService implements IVisualizer {
 
   public setZoomToBoxMode(active: boolean) {
     this.zoomToBoxTool.setMode(active);
+  }
+
+  /** Box-prompted SAM: segment the drawn rectangles. The SAM tool reuses the
+   *  wand host (cached frame + coordinate transform + region store). */
+  public segmentRectangles(): Promise<number> {
+    this.samTool.bindHost(this.wandHost);
+    return this.samTool.segmentBoxes();
   }
 
   /**

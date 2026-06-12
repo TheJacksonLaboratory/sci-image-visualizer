@@ -330,6 +330,13 @@
                 [escape]="false" tooltipPosition="bottom"
                 (onClick)="deleteRegion.emit()">
       </p-button>
+      <!-- SAM: segment every drawn rectangle into a mask region (jit-ui#90). -->
+      <span class="toolbar-separator"></span>
+      <p-button label="Segment" icon="pi pi-bolt" size="small" [text]="true"
+                pTooltip="Segment the drawn rectangles with SAM"
+                tooltipPosition="bottom"
+                (onClick)="segmentRegions.emit()">
+      </p-button>
     </ng-container>
 
     <ng-container *ngIf="tools.help">

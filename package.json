@@ -12,7 +12,8 @@
     "plotly.js-dist-min": "^3.0.1",
     "image-js": "^0.35.6",
     "file-saver": "^2.0.5",
-    "buffer": "^5.7.1"
+    "buffer": "^5.7.1",
+    "onnxruntime-web": "^1.22.0"
   },
   "dependencies": {
     "tslib": "^2.3.0"

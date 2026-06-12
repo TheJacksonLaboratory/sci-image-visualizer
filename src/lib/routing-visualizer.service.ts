@@ -279,6 +279,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   setVertexEraserMode(active: boolean): void { this.renderer().setVertexEraserMode(active); }
   setVertexEraserRadius(radius: number): void { this.renderer().setVertexEraserRadius(radius); }
   setZoomToBoxMode(active: boolean): void { this.renderer().setZoomToBoxMode(active); }
+  segmentRectangles(): Promise<number> { return this.renderer().segmentRectangles(); }
 
   // ── display options ──────────────────────────────────────────────────
   // State lives in the shared VisualizerStore — reads go straight to it.

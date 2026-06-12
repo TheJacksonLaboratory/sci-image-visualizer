@@ -73,6 +73,8 @@ export class ToolbarComponent {
   @Output() toggleSurface3dMode = new EventEmitter<string>();
   @Output() resetSurfaceCamera = new EventEmitter<void>();
   @Output() deleteRegion = new EventEmitter<void>();
+  /** Run box-prompted SAM segmentation on the drawn rectangles (jit-ui#90). */
+  @Output() segmentRegions = new EventEmitter<void>();
   /** Convert the selected region to/from a bezier curve (toBezier / toPolygon). */
   @Output() toBezierRegion = new EventEmitter<void>();
   @Output() toPolygonRegion = new EventEmitter<void>();

@@ -20,6 +20,12 @@ export * from './lib/contracts/toolbar-config';
 export * from './lib/contracts/capabilities.contract';
 export * from './lib/contracts/region-overlay.contract';
 export * from './lib/contracts/display-types';
+export * from './lib/contracts/sam.contract';
+
+// ── SAM model registry (host configures hosted ONNX URLs once available) ──
+export {
+  SAM_MODELS, DEFAULT_SAM_MODEL_ID, getSamModel, isSamModelReady, setSamModelUrls,
+} from './lib/toolbar/sam-model-registry';
 
 // ── Neutral data models ──────────────────────────────────────────────────
 export * from './lib/models/region';

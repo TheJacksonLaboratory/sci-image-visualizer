@@ -39,6 +39,7 @@ function mockPlotService(): any {
     setBrushOptions: jest.fn(),
     setVertexEraserMode: jest.fn(),
     setVertexEraserRadius: jest.fn(),
+    segmentRectangles: jest.fn().mockResolvedValue(0),
     deleteActiveShape: jest.fn(),
     reloadAndPlot: jest.fn(),
     getRegions: jest.fn().mockReturnValue([]),
