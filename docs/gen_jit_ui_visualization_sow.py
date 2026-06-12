@@ -248,6 +248,12 @@ labeled("What", "Publish the library to npm under the @jax-data-science organiza
 labeled("Where", "libs/jax-image-visualization packaging config + a downstream consumer repo (TBD).")
 labeled("Status", "Planned.")
 
+h2("D8. Browser SAM annotation toolset (client-side, WebGPU)")
+labeled("What", "A set of in-browser, SAM-based annotation tools for 2D (and later 3D) datasets, running quantized models client-side via onnxruntime-web + WebGPU. The promptable box/point tool (issue #90) turns drawn rectangles into masks via a real Segment-Anything model; the automatic cellpose-SAM tool (already wired in the pipeline) covers segment-all-cells. Models are pluggable through a registry — micro-sam first (microscopy-finetuned, promptable), then SAM3 and pathoSAM as their quantized ONNX exports are published. The architecture (two-stage encoder/decoder, model registry, tool wiring, 2D→3D roadmap) and the micro-sam ONNX export + quantization recipe are documented in docs/sam-segmentation-design.md.")
+labeled("Where", "libs/jax-image-visualization (contracts/sam.contract.ts, toolbar/sam-*.ts, the segmentRectangles() path, the Segment toolbar button) + host wiring that points the registry at hosted ONNX (setSamModelUrls).")
+labeled("Status", "In progress — P0 (box-prompt 2D) is wired and unit-tested; it goes live once a promptable SAM ONNX pair is exported, quantized and hosted. Phasing: P0 box prompts (delivered, pending model hosting); P1 interactive point refinement + model picker; P2 automatic mode (AMG/AIS, unified with cellpose-SAM); P3 3D / z-stack propagation + cross-slice linking; P4 additional models (SAM3, pathoSAM).")
+labeled("Why not cellpose-SAM for prompts", "Cellpose-SAM keeps only SAM's ViT image encoder feeding a Cellpose flow head — the prompt encoder and mask decoder were removed — so it is not promptable and cannot take a box. It remains the automatic tool; the promptable tool uses a real SAM (micro-sam).")
+
 # ---------------- 4. PHASING ----------------
 h1("4. Phasing and acceptance criteria")
 para("Phases 0-4 are delivered on the 'openseadragon' branch; Phase 5 is in progress and Phase 6 is planned.")
