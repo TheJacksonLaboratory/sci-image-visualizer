@@ -8,6 +8,10 @@ import { VisualizerStore } from './visualizer-store.service';
  * keyboard slice stepping with clamping, and the dialog/toolbar flags.
  */
 
+function mockOverlay() {
+  return { setMode: jest.fn(), setSelectedBezier: jest.fn() };
+}
+
 function mockPlotService(): any {
   return {
     capabilities: { has: () => true },
@@ -16,6 +20,29 @@ function mockPlotService(): any {
     setZIndex: jest.fn(),
     setPlotType: jest.fn(),
     ensureIntensitySampling: jest.fn().mockResolvedValue(undefined),
+    // ── handler delegations exercised by the toolbar/region tests ──
+    setReverseScale: jest.fn(),
+    setColormap: jest.fn(),
+    setShowStack: jest.fn(),
+    setStackLoading: jest.fn(),
+    downloadImage: jest.fn(),
+    autoscale: jest.fn(),
+    resetAxes: jest.fn(),
+    zoomIn: jest.fn(),
+    zoomOut: jest.fn(),
+    setImageSmoothingEnabled: jest.fn(),
+    setDragMode: jest.fn(),
+    setZoomToBoxMode: jest.fn(),
+    setWandMode: jest.fn(),
+    setWandOptions: jest.fn(),
+    setVertexEraserMode: jest.fn(),
+    setVertexEraserRadius: jest.fn(),
+    deleteActiveShape: jest.fn(),
+    reloadAndPlot: jest.fn(),
+    getRegions: jest.fn().mockReturnValue([]),
+    getRegionPolygons: jest.fn().mockReturnValue([]),
+    getRegionOverlay: jest.fn().mockReturnValue(mockOverlay()),
+    getIsosurfaceControls: jest.fn().mockReturnValue({ setIsoRange: jest.fn() }),
   };
 }
 
@@ -27,7 +54,7 @@ describe('VisualizationComponent (UI shell)', () => {
     jest.useFakeTimers();
     plotService = mockPlotService();
     component = new VisualizationComponent(
-      { setDiagram: jest.fn() } as any,         // ImageStatePort (unused by these paths)
+      { setDiagram: jest.fn(), setImageLoading: jest.fn(), setImageInfo: jest.fn() } as any, // ImageStatePort
       plotService,
       { add: jest.fn() } as any,                // MessageService
       { run: (fn: () => void) => fn(), runOutsideAngular: (fn: () => void) => fn() } as any, // NgZone
@@ -83,5 +110,128 @@ describe('VisualizationComponent (UI shell)', () => {
     component.toolbarFloating = true;
     component.dockToolbar();
     expect(component.toolbarFloating).toBe(false);
+  });
+
+  describe('toolbar + region handler delegation', () => {
+    it('simple viewport actions delegate to the service', () => {
+      component.downloadImage();
+      component.autoscaleImage();
+      component.resetAxes();
+      component.zoomIn();
+      component.zoomOut();
+      component.deleteRegion();
+      expect(plotService.downloadImage).toHaveBeenCalled();
+      expect(plotService.autoscale).toHaveBeenCalled();
+      expect(plotService.resetAxes).toHaveBeenCalled();
+      expect(plotService.zoomIn).toHaveBeenCalled();
+      expect(plotService.zoomOut).toHaveBeenCalled();
+      expect(plotService.deleteActiveShape).toHaveBeenCalled();
+    });
+
+    it('toggleReverseScale flips state and pushes it to the service', () => {
+      component.toggleReverseScale();
+      expect(component.reversescale).toBe(true);
+      expect(plotService.setReverseScale).toHaveBeenCalledWith(true);
+      component.toggleReverseScale();
+      expect(plotService.setReverseScale).toHaveBeenLastCalledWith(false);
+    });
+
+    it('onToggleImageSmoothing flips state and applies it', () => {
+      expect(component.imageSmoothingEnabled).toBe(true);
+      component.onToggleImageSmoothing();
+      expect(component.imageSmoothingEnabled).toBe(false);
+      expect(plotService.setImageSmoothingEnabled).toHaveBeenCalledWith(false);
+    });
+
+    it('selectColormap applies a leaf node but ignores a parent (has children)', () => {
+      component.selectColormap({ label: 'Viridis' } as any);
+      expect(plotService.setColormap).toHaveBeenCalledTimes(1);
+      component.selectColormap({ label: 'group', children: [] } as any);
+      expect(plotService.setColormap).toHaveBeenCalledTimes(1); // parent ignored
+    });
+
+    it('hasRegions / getRegionPolygons read through the service', () => {
+      plotService.getRegions.mockReturnValue([{ id: 1 }]);
+      expect(component.hasRegions()).toBe(true);
+      component.getRegionPolygons();
+      expect(plotService.getRegionPolygons).toHaveBeenCalled();
+    });
+
+    it('onWandSensitivityChange updates state + service and guards bad values', () => {
+      component.onWandSensitivityChange(3.5);
+      expect(component.wandSensitivity).toBe(3.5);
+      expect(plotService.setWandOptions).toHaveBeenCalledWith({ sensitivity: 3.5 });
+      component.onWandSensitivityChange(undefined);
+      component.onWandSensitivityChange(NaN);
+      expect(plotService.setWandOptions).toHaveBeenCalledTimes(1); // bad values ignored
+    });
+
+    it('onVertexEraserRadiusChange updates state + service', () => {
+      component.onVertexEraserRadiusChange(7);
+      expect(component.vertexEraserRadius).toBe(7);
+      expect(plotService.setVertexEraserRadius).toHaveBeenCalledWith(7);
+    });
+
+    it('onIsoRangeChange updates the isosurface controls and guards short arrays', () => {
+      const controls = { setIsoRange: jest.fn() };
+      plotService.getIsosurfaceControls.mockReturnValue(controls);
+      component.onIsoRangeChange([10, 200]);
+      expect(controls.setIsoRange).toHaveBeenCalledWith(10, 200);
+      component.onIsoRangeChange([5]); // too short → ignored
+      component.onIsoRangeChange(undefined);
+      expect(controls.setIsoRange).toHaveBeenCalledTimes(1);
+    });
+
+    it('toggleDragMode arms a region tool via the overlay and toggles off on re-select', () => {
+      const overlay = mockOverlay();
+      plotService.getRegionOverlay.mockReturnValue(overlay);
+      component.toggleDragMode('drawrect');
+      expect(component.activeDragMode).toBe('drawrect');
+      expect(overlay.setMode).toHaveBeenLastCalledWith('drawrect');
+      component.toggleDragMode('drawrect'); // re-select → toggle off
+      expect(component.activeDragMode).toBeNull();
+      expect(overlay.setMode).toHaveBeenLastCalledWith('none');
+    });
+
+    it('toggleDragMode pan sets the viewport drag mode', () => {
+      component.toggleDragMode('pan');
+      expect(plotService.setDragMode).toHaveBeenCalledWith('pan');
+    });
+
+    it('toggleDragMode wand arms the wand with the current sensitivity', () => {
+      component.wandSensitivity = 2.5;
+      component.toggleDragMode('wand');
+      expect(plotService.setWandMode).toHaveBeenCalledWith(true, { sensitivity: 2.5 });
+    });
+
+    it('toggleDragMode eraseVertex also pushes the eraser radius', () => {
+      component.vertexEraserRadius = 12;
+      component.toggleDragMode('eraseVertex');
+      expect(plotService.setVertexEraserMode).toHaveBeenLastCalledWith(true);
+      expect(plotService.setVertexEraserRadius).toHaveBeenCalledWith(12);
+    });
+
+    it('toBezierRegion / toPolygonRegion drive the overlay bezier toggle', () => {
+      const overlay = mockOverlay();
+      plotService.getRegionOverlay.mockReturnValue(overlay);
+      component.toBezierRegion();
+      expect(overlay.setSelectedBezier).toHaveBeenLastCalledWith(true);
+      component.toPolygonRegion();
+      expect(overlay.setSelectedBezier).toHaveBeenLastCalledWith(false);
+    });
+
+    it('cancelLoading resets the loading flags and slice index', () => {
+      component.cancelLoading();
+      expect(plotService.setZIndex).toHaveBeenCalledWith(0);
+      expect(plotService.setStackLoading).toHaveBeenCalledWith(false);
+    });
+
+    it('updateZIndex clamps the index into range before pushing it', () => {
+      component.maxIndex = 5;
+      component.zIndex = 99;
+      component.updateZIndex();
+      expect(component.zIndex).toBe(5);
+      expect(plotService.setZIndex).toHaveBeenCalledWith(5);
+    });
   });
 });

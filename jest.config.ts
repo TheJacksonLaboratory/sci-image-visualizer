@@ -13,6 +13,18 @@ export default {
   // text-summary: compact totals in the CI log; json-summary: parsed for the
   // GitHub job summary table; lcov: HTML + machine-readable report.
   coverageReporters: ['text-summary', 'json-summary', 'lcov'],
+  // Ratchet gate: CI (which runs with --codeCoverage) fails if coverage drops
+  // below these floors. Set just under the current numbers (lines 67% /
+  // statements 65% / functions 57% / branches 48.5%) so normal fluctuation
+  // doesn't trip it; raise them as coverage climbs.
+  coverageThreshold: {
+    global: {
+      statements: 64,
+      branches: 47,
+      functions: 56,
+      lines: 66,
+    },
+  },
   transform: {
     '^.+\\.(ts|mjs|js|html)$': 'jest-preset-angular',
   },

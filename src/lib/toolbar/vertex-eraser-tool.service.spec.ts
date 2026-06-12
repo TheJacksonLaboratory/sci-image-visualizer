@@ -77,4 +77,43 @@ describe('VertexEraserToolService (neutral Region)', () => {
     canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 5, clientY: 5, button: 0 }));
     expect(committed).toBeNull();
   });
+
+  it('ignores non-left mouse buttons', () => {
+    const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+    canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 10, clientY: 0, button: 2 }));
+    expect(committed).toBeNull();
+  });
+
+  it('erases while dragging (mousedown then mousemove with the button held)', () => {
+    const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+    canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 5, clientY: 5, button: 0 })); // miss
+    canvas.dispatchEvent(new MouseEvent('mousemove', { clientX: 10, clientY: 0, buttons: 1 })); // hits (10,0)
+    expect(committed).not.toBeNull();
+    expect((committed![0].bounds as Polygon).xpoints.length).toBe(3);
+  });
+
+  it('a bare hover (no button) just redraws the cursor and commits nothing', () => {
+    const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+    expect(() => canvas.dispatchEvent(new MouseEvent('mousemove', { clientX: 10, clientY: 0, buttons: 0 })))
+      .not.toThrow();
+    expect(committed).toBeNull();
+  });
+
+  it('removes a region outright once it drops below three vertices', () => {
+    tool.setRadius(50); // large enough to catch every corner of the 10×10 square
+    const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+    canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 5, clientY: 5, button: 0 }));
+    expect(committed).not.toBeNull();
+    expect(committed!.length).toBe(0); // degenerate → region removed
+  });
+
+  it('setRadius ignores non-positive / non-finite values', () => {
+    tool.setRadius(0);
+    tool.setRadius(NaN);
+    tool.setRadius(-3);
+    // Still erases a single nearby vertex with the prior valid radius (2).
+    const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+    canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 10, clientY: 0, button: 0 }));
+    expect((committed![0].bounds as Polygon).xpoints.length).toBe(3);
+  });
 });
