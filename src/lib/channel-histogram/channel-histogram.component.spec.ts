@@ -121,7 +121,7 @@ describe('ChannelHistogramComponent', () => {
   });
 
   describe('histogram rendering (with the plot div present)', () => {
-    beforeEach(() => { document.body.innerHTML = `<div id="channel-histogram-plot"></div>`; });
+    beforeEach(() => { document.body.innerHTML = '<div id="channel-histogram-plot"></div>'; });
     afterEach(() => { document.body.innerHTML = ''; });
 
     it('selectChannel loads and renders the histogram via Plotly', () => {

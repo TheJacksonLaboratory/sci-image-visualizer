@@ -39,6 +39,7 @@ export class ToolbarComponent {
   @Input() activeDragMode: string | null = null;
   @Input() activeSurface3dMode = 'turntable';
   @Input() wandSensitivity = 2.0;
+  @Input() brushSize = 40;
   @Input() vertexEraserRadius = 20;
   @Input() stackOptions: { name: string; val: string }[] =
     [{ name: 'Single image', val: 'false' }, { name: 'Stack', val: 'true' }];
@@ -76,12 +77,16 @@ export class ToolbarComponent {
   @Output() toBezierRegion = new EventEmitter<void>();
   @Output() toPolygonRegion = new EventEmitter<void>();
   @Output() wandSensitivityChange = new EventEmitter<number | undefined>();
+  @Output() brushSizeChange = new EventEmitter<number | undefined>();
   @Output() vertexEraserRadiusChange = new EventEmitter<number | undefined>();
 
   /** Sliders' bounds — toolbar UI constants (the values are host-owned). */
   readonly wandSensitivityMin = 0.5;
   readonly wandSensitivityMax = 10.0;
   readonly wandSensitivityStep = 0.1;
+  readonly brushSizeMin = 5;
+  readonly brushSizeMax = 300;
+  readonly brushSizeStep = 5;
   readonly vertexEraserRadiusMin = 5;
   readonly vertexEraserRadiusMax = 300;
   readonly vertexEraserRadiusStep = 5;

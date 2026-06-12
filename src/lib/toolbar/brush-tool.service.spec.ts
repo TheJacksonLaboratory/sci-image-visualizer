@@ -1,21 +1,16 @@
-import { WandToolService, WandToolHost, CachedImageData } from './wand-tool.service';
+import { BrushToolService } from './brush-tool.service';
 import { WandService } from './wand.service';
+import { CachedImageData, WandToolHost } from './wand-tool.service';
 import { Region, Polygon } from '../models/region';
 
-/** Uniform grayscale matrix (data[y][x]); a flood fill from any interior point
- *  fills the whole patch, so the wand reliably produces a region. */
-function uniformGray(w: number, h: number, val = 100): number[][] {
-  return Array.from({ length: h }, () => Array.from({ length: w }, () => val));
+/** A cached-image frame of the given size. The brush ignores pixel values, so a
+ *  zero matrix is fine — only width/height/ratios/origin matter. */
+function cached(w = 60, h = 60): CachedImageData {
+  const frame = Array.from({ length: h }, () => new Array(w).fill(0));
+  return { frames: [frame], width: w, height: h, ratios: [1], isGrayscale: true, originX: 0, originY: 0 };
 }
 
-function cached(w = 20, h = 20): CachedImageData {
-  return {
-    frames: [uniformGray(w, h)], width: w, height: h, ratios: [1], isGrayscale: true, originX: 0, originY: 0,
-  };
-}
-
-/** Test host: identity client→data transform, an in-memory uniform image, and a
- *  mutable region list captured via setRegions. */
+/** Test host: identity client→data transform and a mutable region list. */
 function makeHost(opts: { regions?: Region[]; cached?: CachedImageData | null } = {}) {
   const container = document.createElement('div');
   document.body.appendChild(container);
@@ -39,7 +34,6 @@ function makeHost(opts: { regions?: Region[]; cached?: CachedImageData | null } 
   return { host, container, state, setRegions };
 }
 
-/** The overlay canvas the tool appended to `container`. */
 function cv(container: HTMLElement): HTMLCanvasElement {
   return container.querySelector('canvas') as HTMLCanvasElement;
 }
@@ -62,11 +56,11 @@ function mouse(type: string, clientX: number, clientY: number, extra: MouseEvent
   return new MouseEvent(type, { button: 0, buttons: 1, clientX, clientY, ...extra });
 }
 
-describe('WandToolService', () => {
-  let tool: WandToolService;
+describe('BrushToolService', () => {
+  let tool: BrushToolService;
 
   beforeEach(() => {
-    tool = new WandToolService(new WandService());
+    tool = new BrushToolService(new WandService());
   });
 
   afterEach(() => {
@@ -78,19 +72,19 @@ describe('WandToolService', () => {
     const { host, container } = makeHost();
     tool.bindHost(host);
 
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
+    tool.setMode(true, { size: 12 });
     expect(container.querySelector('canvas')).not.toBeNull();
 
     tool.setMode(false);
     expect(container.querySelector('canvas')).toBeNull();
   });
 
-  it('a left click grows a region from the clicked pixel and commits it', () => {
+  it('a left click paints a disc region and commits it', () => {
     const { host, container, state, setRegions } = makeHost();
     tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
+    tool.setMode(true, { size: 12 });
 
-    cv(container).dispatchEvent(mouse('mousedown', 10, 10));
+    cv(container).dispatchEvent(mouse('mousedown', 30, 30));
 
     expect(setRegions).toHaveBeenCalled();
     expect(state.regions).toHaveLength(1);
@@ -99,73 +93,102 @@ describe('WandToolService', () => {
     expect(state.regions[0].label).toBe('legend'); // default class label
   });
 
-  it('a drag (mousedown → mousemove) keeps extending the same region', () => {
+  it('the painted disc spans roughly the brush diameter', () => {
     const { host, container, state } = makeHost();
     tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
-    const canvas = cv(container);
+    tool.setMode(true, { size: 20 });
 
-    canvas.dispatchEvent(mouse('mousedown', 6, 6));
-    canvas.dispatchEvent(mouse('mousemove', 12, 12));
-    canvas.dispatchEvent(mouse('mouseup', 12, 12));
+    cv(container).dispatchEvent(mouse('mousedown', 30, 30));
 
-    // Still a single region (the stroke extended, not a second region).
-    expect(state.regions).toHaveLength(1);
+    const b = state.regions[0].bounds as Polygon;
+    const w = Math.max(...b.xpoints) - Math.min(...b.xpoints);
+    // ~20px diameter; allow generous slack for tracing/rounding.
+    expect(w).toBeGreaterThan(12);
+    expect(w).toBeLessThan(28);
   });
 
-  it('mousemove without a held button ends the drag (no further growth)', () => {
-    const { host, container, setRegions } = makeHost();
+  it('a drag keeps extending the same region', () => {
+    const { host, container, state } = makeHost();
     tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
+    tool.setMode(true, { size: 12 });
     const canvas = cv(container);
 
     canvas.dispatchEvent(mouse('mousedown', 10, 10));
-    const callsAfterDown = setRegions.mock.calls.length;
-    canvas.dispatchEvent(mouse('mousemove', 12, 12, { buttons: 0 })); // button released
-    expect(setRegions.mock.calls.length).toBe(callsAfterDown);
+    canvas.dispatchEvent(mouse('mousemove', 20, 20));
+    canvas.dispatchEvent(mouse('mousemove', 30, 30));
+    canvas.dispatchEvent(mouse('mouseup', 30, 30));
+
+    expect(state.regions).toHaveLength(1);
   });
 
-  it('a second click well outside the first stroke starts a new region', () => {
-    const { host, container, state } = makeHost({ cached: cached(60, 60) });
+  it('a second click far from the first stroke starts a new region', () => {
+    const { host, container, state } = makeHost();
     tool.bindHost(host);
-    tool.setMode(true, { patchSize: 5, simpleMode: true });
+    tool.setMode(true, { size: 8 });
     const canvas = cv(container);
 
-    canvas.dispatchEvent(mouse('mousedown', 8, 8));
-    canvas.dispatchEvent(mouse('mouseup', 8, 8));
-    canvas.dispatchEvent(mouse('mousedown', 50, 50)); // far away → fresh region
+    canvas.dispatchEvent(mouse('mousedown', 10, 10));
+    canvas.dispatchEvent(mouse('mouseup', 10, 10));
+    canvas.dispatchEvent(mouse('mousedown', 50, 50));
     expect(state.regions).toHaveLength(2);
+  });
+
+  it('shift-painting erases a disc from an existing region', () => {
+    const existing = boxRegion(5, 5, 55, 55, 7);
+    const { host, container, state, setRegions } = makeHost({ regions: [existing] });
+    tool.bindHost(host);
+    tool.setMode(true, { size: 16 });
+
+    // Shift-paint near a corner so the box loses area but isn't destroyed.
+    cv(container).dispatchEvent(mouse('mousedown', 6, 6, { shiftKey: true }));
+
+    expect(setRegions).toHaveBeenCalled();
+    expect(state.regions).toHaveLength(1);
+    expect(state.regions[0].id).toBe(7); // same region, edited in place
+  });
+
+  it('shift-painting empty space is a no-op (no region created just to erase)', () => {
+    const { host, container, setRegions } = makeHost();
+    tool.bindHost(host);
+    tool.setMode(true, { size: 12 });
+    cv(container).dispatchEvent(mouse('mousedown', 30, 30, { shiftKey: true }));
+    expect(setRegions).not.toHaveBeenCalled();
+  });
+
+  it('a click inside an existing closed polygon adopts and replaces it (same id)', () => {
+    const existing = boxRegion(10, 10, 50, 50, 42);
+    const { host, container, state, setRegions } = makeHost({ regions: [existing] });
+    tool.bindHost(host);
+    tool.setMode(true, { size: 10 });
+
+    cv(container).dispatchEvent(mouse('mousedown', 30, 30)); // inside the box
+
+    expect(setRegions).toHaveBeenCalled();
+    expect(state.regions).toHaveLength(1); // adopted, not added
+    expect(state.regions[0].id).toBe(42);  // kept the adopted id
   });
 
   it('ignores non-left buttons', () => {
     const { host, container, setRegions } = makeHost();
     tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
-    cv(container).dispatchEvent(mouse('mousedown', 10, 10, { button: 2 }));
-    expect(setRegions).not.toHaveBeenCalled();
-  });
-
-  it('shift-clicking empty space is a no-op (no region created just to erase)', () => {
-    const { host, container, setRegions } = makeHost();
-    tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
-    cv(container).dispatchEvent(mouse('mousedown', 10, 10, { shiftKey: true }));
+    tool.setMode(true, { size: 12 });
+    cv(container).dispatchEvent(mouse('mousedown', 30, 30, { button: 2 }));
     expect(setRegions).not.toHaveBeenCalled();
   });
 
   it('does nothing when there is no cached image data', () => {
     const { host, container, setRegions } = makeHost({ cached: null });
     tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
-    cv(container).dispatchEvent(mouse('mousedown', 10, 10));
+    tool.setMode(true, { size: 12 });
+    cv(container).dispatchEvent(mouse('mousedown', 30, 30));
     expect(setRegions).not.toHaveBeenCalled();
   });
 
   it('does nothing when the click is outside the image bounds', () => {
     const { host, container, setRegions } = makeHost();
     tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
-    cv(container).dispatchEvent(mouse('mousedown', 999, 999)); // outside 20×20
+    tool.setMode(true, { size: 12 });
+    cv(container).dispatchEvent(mouse('mousedown', 999, 999)); // outside 60×60
     expect(setRegions).not.toHaveBeenCalled();
   });
 
@@ -174,41 +197,28 @@ describe('WandToolService', () => {
     (host.getCoordinateTransform as any) = () =>
       ({ isReady: () => false, clientToData: () => ({ x: 0, y: 0 }), dataLengthToScreen: () => 1 });
     tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
-    cv(container).dispatchEvent(mouse('mousedown', 10, 10));
+    tool.setMode(true, { size: 12 });
+    cv(container).dispatchEvent(mouse('mousedown', 30, 30));
     expect(setRegions).not.toHaveBeenCalled();
   });
 
   it('clearActiveRegion resets the in-progress stroke', () => {
-    const { host, container, state } = makeHost({ cached: cached(60, 60) });
+    const { host, container, state } = makeHost();
     tool.bindHost(host);
-    tool.setMode(true, { patchSize: 5, simpleMode: true });
+    tool.setMode(true, { size: 8 });
     const canvas = cv(container);
 
-    canvas.dispatchEvent(mouse('mousedown', 8, 8));
+    canvas.dispatchEvent(mouse('mousedown', 10, 10));
     expect(state.regions).toHaveLength(1);
     tool.clearActiveRegion();
-    canvas.dispatchEvent(mouse('mousedown', 50, 50)); // empty space → a fresh region
+    canvas.dispatchEvent(mouse('mousedown', 50, 50)); // fresh region
     expect(state.regions).toHaveLength(2);
   });
 
-  it('setOptions merges live option updates without throwing', () => {
+  it('setSize updates the brush without throwing', () => {
     const { host } = makeHost();
     tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
-    expect(() => tool.setOptions({ sensitivity: 3 })).not.toThrow();
-  });
-
-  it('a click inside an existing closed polygon adopts and replaces it (same id)', () => {
-    const existing = boxRegion(4, 4, 16, 16, 42);
-    const { host, container, state, setRegions } = makeHost({ regions: [existing] });
-    tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
-
-    cv(container).dispatchEvent(mouse('mousedown', 10, 10)); // inside the box
-
-    expect(setRegions).toHaveBeenCalled();
-    expect(state.regions).toHaveLength(1);   // adopted, not added
-    expect(state.regions[0].id).toBe(42);    // kept the adopted id
+    tool.setMode(true, { size: 12 });
+    expect(() => tool.setSize(40)).not.toThrow();
   });
 });

@@ -35,6 +35,8 @@ function mockPlotService(): any {
     setZoomToBoxMode: jest.fn(),
     setWandMode: jest.fn(),
     setWandOptions: jest.fn(),
+    setBrushMode: jest.fn(),
+    setBrushOptions: jest.fn(),
     setVertexEraserMode: jest.fn(),
     setVertexEraserRadius: jest.fn(),
     deleteActiveShape: jest.fn(),

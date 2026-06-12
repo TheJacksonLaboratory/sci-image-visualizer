@@ -25,6 +25,7 @@ import { SliceCache } from './slice-cache';
 import { DisplayPipeline } from './display-pipeline';
 import { HistogramSampler } from './histogram-sampler';
 import { CachedImageData, WandToolService, WandToolHost } from '../../toolbar/wand-tool.service';
+import { BrushToolService, BrushOptions } from '../../toolbar/brush-tool.service';
 import { VertexEraserToolService, VertexEraserToolHost } from '../../toolbar/vertex-eraser-tool.service';
 import { ZoomToBoxToolService, ZoomToBoxToolHost } from '../../toolbar/zoom-to-box-tool.service';
 import { WandOptions } from '../../toolbar/wand.service';
@@ -233,6 +234,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     private http: HttpClient,
     @Inject(TILE_ACCESS_PORT) private tiles: TileAccessPort,
     private wandTool: WandToolService,
+    private brushTool: BrushToolService,
     private eraserTool: VertexEraserToolService,
     private zoomToBoxTool: ZoomToBoxToolService,
     private store: VisualizerStore,
@@ -754,6 +756,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     this.cache.cancelBackgroundLoad();
     // Tear down any active tool overlays (shared singletons).
     this.wandTool.setMode(false);
+    this.brushTool.setMode(false);
     this.eraserTool.setMode(false);
     if (this.overlay) {
       this.overlay.destroy();
@@ -1106,6 +1109,22 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
   }
   clearActiveWandRegion(): void {
     this.wandTool.clearActiveRegion();
+  }
+  setBrushMode(active: boolean, options?: any): void {
+    if (!active) {
+      this.brushTool.setMode(false);
+      return;
+    }
+    // Take the pointer from OSD so the drag paints instead of panning.
+    this.viewer?.setMouseNavEnabled(false);
+    // The brush works in the rendered-viewport coordinate frame — read it back
+    // lazily on first use, like the wand. It shares the wand's host.
+    this.viewportPixels = null;
+    this.brushTool.bindHost(this.wandHost);
+    this.brushTool.setMode(true, (options ?? {}) as BrushOptions);
+  }
+  setBrushOptions(options: any): void {
+    this.brushTool.setSize((options as BrushOptions)?.size ?? 0);
   }
   setVertexEraserMode(active: boolean): void {
     if (active) {

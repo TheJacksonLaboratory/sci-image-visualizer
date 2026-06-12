@@ -35,3 +35,9 @@ export interface IWandOptions {
    *  (Cmd/Ctrl-click in QuPath). */
   simpleMode?: boolean;
 }
+
+/** Options for the brush region tool (QuPath-style). */
+export interface IBrushOptions {
+  /** Brush diameter in matrix (image) pixels. */
+  size?: number;
+}

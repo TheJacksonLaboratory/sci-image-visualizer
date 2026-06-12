@@ -274,6 +274,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   setWandMode(active: boolean, options?: any): void { this.renderer().setWandMode(active, options); }
   setWandOptions(options: any): void { this.renderer().setWandOptions(options); }
   clearActiveWandRegion(): void { this.renderer().clearActiveWandRegion(); }
+  setBrushMode(active: boolean, options?: any): void { this.renderer().setBrushMode(active, options); }
+  setBrushOptions(options: any): void { this.renderer().setBrushOptions(options); }
   setVertexEraserMode(active: boolean): void { this.renderer().setVertexEraserMode(active); }
   setVertexEraserRadius(radius: number): void { this.renderer().setVertexEraserRadius(radius); }
   setZoomToBoxMode(active: boolean): void { this.renderer().setZoomToBoxMode(active); }

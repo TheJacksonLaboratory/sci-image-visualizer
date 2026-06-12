@@ -16,6 +16,7 @@ import { ShapeSelection } from '../../models/shape';
 import { CONFIG, CONFIG_SURFACE, PlotUtilities } from '../../plot.utilities';
 import { WandService, WandOptions } from '../../toolbar/wand.service';
 import { CachedImageData, WandToolService, WandToolHost } from '../../toolbar/wand-tool.service';
+import { BrushToolService, BrushOptions } from '../../toolbar/brush-tool.service';
 import { VertexEraserToolService, VertexEraserToolHost } from '../../toolbar/vertex-eraser-tool.service';
 import { ZoomToBoxToolService } from '../../toolbar/zoom-to-box-tool.service';
 import {
@@ -182,6 +183,7 @@ export class PlotlyService implements IVisualizer {
               public messageService: MessageService, private http: HttpClient,
               private wandService: WandService,
               private wandTool: WandToolService,
+              private brushTool: BrushToolService,
               private vertexEraserTool: VertexEraserToolService,
               private zoomToBoxTool: ZoomToBoxToolService,
               private store: VisualizerStore,
@@ -211,6 +213,8 @@ export class PlotlyService implements IVisualizer {
       getCachedImageRatio: () => this.cachedImageRatios[0] || 1,
     };
     this.wandTool.bindHost(this.wandHost);
+    // The brush reuses the wand host (same coordinate frame + region access).
+    this.brushTool.bindHost(this.wandHost);
     this.vertexEraserTool.bindHost(this.eraserHost);
     this.zoomToBoxTool.bindHost({
       getPlotDiv: () => this.plotDiv,
@@ -1175,6 +1179,16 @@ export class PlotlyService implements IVisualizer {
 
   public clearActiveWandRegion() {
     this.wandTool.clearActiveRegion();
+  }
+
+  public setBrushMode(active: boolean, options: BrushOptions = {}) {
+    // Re-bind to ourselves in case the OSD backend last used this singleton.
+    if (active) this.brushTool.bindHost(this.wandHost);
+    this.brushTool.setMode(active, options);
+  }
+
+  public setBrushOptions(options: BrushOptions) {
+    if (options.size != null) this.brushTool.setSize(options.size);
   }
 
   public setVertexEraserMode(active: boolean) {

@@ -8,7 +8,7 @@ import { PlotType, PlotTypeDescriptor } from './plot-type';
 import { ViewerCapabilities } from './capabilities.contract';
 import { IRegionOverlay } from './region-overlay.contract';
 import { IHistogram } from './channel-histogram-api.contract';
-import { ColormapNode, IWandOptions } from './display-types';
+import { ColormapNode, IWandOptions, IBrushOptions } from './display-types';
 
 /**
  * Backend-neutral visualization contract. Plotly is one implementation;
@@ -146,11 +146,14 @@ export interface IRegionStore {
   getGeoJsonString(regions: Region[]): string;
 }
 
-/** On-canvas tool modes (wand, vertex eraser, zoom-to-box). */
+/** On-canvas tool modes (wand, brush, vertex eraser, zoom-to-box). */
 export interface IToolController {
   setWandMode(active: boolean, options?: IWandOptions): void;
   setWandOptions(options: IWandOptions): void;
   clearActiveWandRegion(): void;
+  /** Brush region tool. `size` (matrix-pixel diameter) sizes the painted disc. */
+  setBrushMode(active: boolean, options?: IBrushOptions): void;
+  setBrushOptions(options: IBrushOptions): void;
   setVertexEraserMode(active: boolean): void;
   setVertexEraserRadius(radius: number): void;
   setZoomToBoxMode(active: boolean): void;

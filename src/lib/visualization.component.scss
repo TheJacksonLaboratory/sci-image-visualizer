@@ -240,6 +240,15 @@ kbd {
   filter: brightness(0) invert(47%) sepia(98%) saturate(567%) hue-rotate(181deg) brightness(103%) contrast(98%);
 }
 
+::ng-deep .brush-icon {
+  background: url('./assets/paintbrush.svg') no-repeat center center;
+  background-size: contain;
+  width: 1.25rem;
+  height: 1.25rem;
+  display: inline-block;
+  filter: brightness(0) invert(47%) sepia(98%) saturate(567%) hue-rotate(181deg) brightness(103%) contrast(98%);
+}
+
 
 ::ng-deep .polyline-icon {
   background: url('./assets/polyline.svg') no-repeat center center;

@@ -79,6 +79,8 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
 
   /** Wand sensitivity — higher = stricter (smaller selection). Matches QuPath default. */
   wandSensitivity = 2.0;
+  /** Brush diameter in image-pixel coordinates (drives the painted disc size). */
+  brushSize = 40;
   /** Vertex eraser radius in image-pixel coordinates. */
   vertexEraserRadius = 20;
 
@@ -811,6 +813,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     // On-canvas tool overlays.
     this.plotService.setZoomToBoxMode(active === 'zoomToBox');
     this.plotService.setWandMode(active === 'wand', { sensitivity: this.wandSensitivity });
+    this.plotService.setBrushMode(active === 'brush', { size: this.brushSize });
     this.plotService.setVertexEraserMode(active === 'eraseVertex');
     if (active === 'eraseVertex') {
       this.plotService.setVertexEraserRadius(this.vertexEraserRadius);
@@ -845,6 +848,12 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     if (value === undefined || !Number.isFinite(value)) return;
     this.wandSensitivity = value;
     this.plotService.setWandOptions({ sensitivity: value });
+  }
+
+  onBrushSizeChange(value: number | undefined) {
+    if (value === undefined || !Number.isFinite(value)) return;
+    this.brushSize = value;
+    this.plotService.setBrushOptions({ size: value });
   }
 
   onVertexEraserRadiusChange(value: number | undefined) {
@@ -945,6 +954,12 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
           icon: 'pi pi-pencil',
           styleClass: active === 'drawclosedpath' ? activeClass : '',
           command: () => this.toggleDragMode('drawclosedpath'),
+        },
+        {
+          label: 'Brush',
+          icon: 'brush-icon',
+          styleClass: active === 'brush' ? activeClass : '',
+          command: () => this.toggleDragMode('brush'),
         },
         {
           label: 'Polyline',
@@ -1073,6 +1088,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     this.plotService.setDragMode(false);
     this.plotService.setZoomToBoxMode(false);
     this.plotService.setWandMode(false);
+    this.plotService.setBrushMode(false);
     this.plotService.setVertexEraserMode(false);
   }
 }

@@ -1,87 +1,60 @@
 import { Injectable } from '@angular/core';
 
-import { WandImage, WandOptions, WandService } from './wand.service';
+import { WandService } from './wand.service';
+import { CachedImageData, WandToolHost } from './wand-tool.service';
 import { BBoxMask, masksOverlap, unionMasks } from '../models/geometry';
-import { IViewportHost, IRegionDataHost } from '../contracts/coordinate-transform.contract';
 import { Region, Polygon } from '../models/region';
 
-/**
- * The pixel data and frame state PlotlyService caches for sampling. Returned
- * by `WandToolHost.getCachedImageData()`.
- */
-export interface CachedImageData {
-  /** 2-D matrices, one per stack frame (length 1 for non-stack images). */
-  frames: any[];
-  /** Image-pixel width of each frame matrix. */
-  width: number;
-  /** Image-pixel height of each frame matrix. */
-  height: number;
-  /**
-   * Plot-data-coords-per-image-pixel along x (and y — they're the same
-   * for heatmap and image traces).
-   */
-  ratios: number[];
-  /** Whether each frame is a 2-D scalar matrix (true) or 3-channel RGB (false). */
-  isGrayscale: boolean;
-  /**
-   * Data-coords of matrix pixel (0,0). Lets the matrix be a *crop* of the data
-   * space rather than starting at the origin — e.g. the OSD backend samples the
-   * currently rendered viewport, so when zoomed in the matrix covers only the
-   * visible sub-region at screen resolution. Defaults to 0 (full-frame matrix,
-   * as Plotly provides). matrixIndex = (data - origin) / ratio.
-   */
-  originX?: number;
-  originY?: number;
+/** Brush parameters. `size` is the brush *diameter* in matrix (image) pixels. */
+export interface BrushOptions {
+  size?: number;
 }
 
+/** Default brush diameter (matrix pixels) if none is supplied. */
+const DEFAULT_BRUSH_SIZE = 40;
+
 /**
- * The collaboration interface the wand tool needs from PlotlyService.
- *
- * Keeping it explicit makes the dependency one-way: WandToolService never
- * imports PlotlyService directly. PlotlyService satisfies this interface
- * structurally and binds itself via `bindHost(this)`.
+ * The brush host is identical to the wand's — both need the cached-image
+ * coordinate frame, the overlay container, the coordinate transform, and
+ * read/write access to the shared region list. The brush ignores the wand's
+ * pixel values (it paints a geometric disc rather than flood-filling by colour),
+ * so reusing {@link WandToolHost} lets each backend bind the same host object.
  */
-export interface WandToolHost extends IViewportHost, IRegionDataHost {
-  /** Pixel data for sampling. null when no image is loaded yet. */
-  getCachedImageData(): CachedImageData | null;
-  /** Index of the currently visible frame in a stack (0 for non-stack). */
-  getActiveFrameIndex(): number;
-
-  /** Current image's filename — stamped onto new shapes for filtering. */
-  getFileName(): string | undefined;
-  /** Default stroke colour for new shapes. */
-  getShapeColor(): string;
-}
+export type BrushToolHost = WandToolHost;
 
 /**
- * The wand drawing tool. Owns its own canvas overlay, mouse handlers, and
- * stroke accumulator. Reads/writes the shape list via the WandToolHost
- * interface so it stays decoupled from PlotlyService internals.
+ * QuPath-style brush tool. Painting a stroke unions a disc of the configured
+ * size into the active region as the cursor drags; holding <kbd>Shift</kbd>
+ * subtracts instead (eraser brush), matching the wand's modifier. The stroke is
+ * accumulated as a bbox-relative mask (exactly like {@link WandToolService}) so
+ * the brush inherits the wand's adopt-existing-region and merge-on-touch
+ * behaviour, then the union boundary is traced back into a polygon Region.
  *
- * Lifecycle: PlotlyService injects this service, calls `bindHost(this)` once
- * during its own construction, then calls `setMode(true | false, options)` to
- * activate/deactivate the tool.
+ * No pixel sampling and no cursor indicator: the painted stroke itself shows the
+ * brush size. The overlay canvas only captures the pointer.
+ *
+ * Lifecycle mirrors the wand: a backend binds its host once, then toggles the
+ * tool with `setMode(true | false, options)`.
  */
 @Injectable({ providedIn: 'root' })
-export class WandToolService {
-  // ── Tool state ──────────────────────────────────────────────────────
-
-  private host!: WandToolHost;
+export class BrushToolService {
+  private host!: BrushToolHost;
   private overlay: HTMLCanvasElement | null = null;
   private active = false;
+
   /**
-   * Accumulated wand region. Every per-tick patch mask is OR'd into `mask`
-   * over a bbox that grows with the stroke, so the region keeps expanding
-   * as the user drags. The accumulator persists across mouseup/mousedown so
-   * that subsequent strokes extend the *same* region — matching QuPath's
-   * brush behaviour where the active annotation stays editable until the
-   * user switches tool.
+   * Accumulated brush region (bbox-relative mask). Persists across mouseup so a
+   * subsequent stroke extends the *same* region until the user switches tool —
+   * matching QuPath, and the wand.
    */
   private stroke: BBoxMask | null = null;
-  /** Id of the region this wand stroke is editing (null = a fresh region). */
+  /** Id of the region this stroke is editing (null = a fresh region). */
   private strokeRegionId: number | null = null;
+  /** Previous cursor position (matrix coords) within the current drag, so fast
+   *  drags paint a continuous stroke rather than disconnected dabs. */
+  private lastMatrix: { x: number; y: number } | null = null;
   private dragging = false;
-  private options: WandOptions = {};
+  private size = DEFAULT_BRUSH_SIZE;
 
   private readonly boundMouseDown: (e: MouseEvent) => void;
   private readonly boundMouseMove: (e: MouseEvent) => void;
@@ -94,16 +67,16 @@ export class WandToolService {
   }
 
   /** Wire the tool to its host. Must be called once before `setMode(true)`. */
-  bindHost(host: WandToolHost) {
+  bindHost(host: BrushToolHost) {
     this.host = host;
   }
 
   // ── Public API ──────────────────────────────────────────────────────
 
-  /** Toggle the wand on/off. */
-  setMode(active: boolean, options: WandOptions = {}) {
+  /** Toggle the brush on/off. */
+  setMode(active: boolean, options: BrushOptions = {}) {
     this.active = active;
-    this.options = options;
+    if (options.size != null) this.setSize(options.size);
     if (active) {
       this.createOverlay();
     } else {
@@ -111,12 +84,13 @@ export class WandToolService {
     }
   }
 
-  /** Merge new options (e.g. live sensitivity slider updates). */
-  setOptions(options: WandOptions) {
-    this.options = { ...this.options, ...options };
+  /** Live-update the brush size (matrix-pixel diameter). */
+  setSize(size: number) {
+    if (!Number.isFinite(size) || size <= 0) return;
+    this.size = size;
   }
 
-  /** Drop the active wand region so the next click starts a new one. */
+  /** Drop the active brush region so the next stroke starts a new one. */
   clearActiveRegion() {
     this.resetStroke();
   }
@@ -161,6 +135,7 @@ export class WandToolService {
   private onMouseDown(e: MouseEvent) {
     if (e.button !== 0) return;
     this.dragging = true;
+    this.lastMatrix = null; // first stamp of this drag is a single dab
     this.applyAtClient(e, true);
   }
 
@@ -174,33 +149,31 @@ export class WandToolService {
   }
 
   private onMouseUp(_: MouseEvent) {
-    // Stop accumulating from this drag, but keep the region alive so the
-    // next mousedown extends it instead of starting fresh.
+    // Stop accumulating from this drag, but keep the region alive so the next
+    // mousedown extends it. Clear lastMatrix so the next drag starts a dab.
     this.dragging = false;
+    this.lastMatrix = null;
   }
 
   private resetStroke() {
     this.stroke = null;
     this.strokeRegionId = null;
+    this.lastMatrix = null;
     this.dragging = false;
   }
 
   // ── Per-tick stroke logic ───────────────────────────────────────────
 
   /**
-   * Sample the cached image at the click location, OR (or AND-NOT) the
-   * wand's per-tick patch mask into the active region's bbox-relative mask,
-   * re-trace the boundary, and update the in-progress shape — matching
-   * QuPath's additive brush/wand behaviour. Shift = erase. Cmd/Ctrl =
-   * exact-match flood fill.
+   * Paint (or erase) a disc — or a swept line of discs since the previous
+   * tick — into the active region's accumulator mask, re-trace the boundary,
+   * and commit the updated Region. Shift = erase.
    */
-  private applyAtClient(e: MouseEvent, isStart = false) {
+  private applyAtClient(e: MouseEvent, isStart: boolean) {
     if (!this.overlay) return;
     const cached = this.host.getCachedImageData();
     if (!cached || cached.frames.length === 0) return;
 
-    // The current regions (neutral model). Mutated locally across this tick and
-    // committed once via host.setRegions().
     const regions = this.host.getRegions();
 
     const transform = this.host.getCoordinateTransform();
@@ -208,7 +181,7 @@ export class WandToolService {
     const { x: dataX, y: dataY } = transform.clientToData(e.clientX, e.clientY);
     if (!Number.isFinite(dataX) || !Number.isFinite(dataY)) return;
 
-    // Plot heatmap/image traces use ratios[0] for both dx and dy.
+    // Heatmap/image traces use ratios[0] for both dx and dy.
     const rx = cached.ratios[0] || 1;
     const ry = cached.ratios[0] || 1;
     const ox = cached.originX ?? 0;
@@ -218,136 +191,137 @@ export class WandToolService {
     if (matrixX < 0 || matrixX >= cached.width) return;
     if (matrixY < 0 || matrixY >= cached.height) return;
 
-    const frameIdx = this.host.getActiveFrameIndex();
-    const frame = cached.frames[frameIdx] ?? cached.frames[0];
-
-    const wandImage: WandImage = {
-      data: frame,
-      width: cached.width,
-      height: cached.height,
-      isGrayscale: cached.isGrayscale,
-    };
-    // Shift = erase (subtract pixels from an existing region).
-    // Cmd/Ctrl alone = simple flood fill (no smoothing/threshold).
     const erase = e.shiftKey;
-    const opts: WandOptions = {
-      ...this.options,
-      simpleMode: this.options.simpleMode || ((e.metaKey || e.ctrlKey) && !erase),
-    };
+    const radius = Math.max(0.5, this.size / 2);
 
-    // If this is the first tick of a new drag and the click is NOT inside the
-    // current accumulator and NOT inside any existing path-shape, drop the old
-    // stroke so a brand-new region starts here. Without this, the accumulator
-    // bbox grows to span both areas and `maskToPolygon` keeps only the largest
-    // connected blob — making the new click appear to do nothing.
+    // Start of a fresh drag that isn't inside the current accumulator: drop the
+    // old stroke so a brand-new region starts here (mirrors the wand).
     if (isStart && !erase && this.stroke && !this.pointInStroke(matrixX, matrixY)) {
-      // Will fall through to tryAdoptShapeAt below; if that also misses, a
-      // fresh stroke is created from the patch.
       this.stroke = null;
       this.strokeRegionId = null;
     }
 
-    const patch = this.wandService.computePatchMask(wandImage, matrixX, matrixY, opts);
-    if (!patch) return;
-
-    const W = patch.size;
-    const half = (W - 1) / 2;
-    const px0 = Math.round(matrixX) - half;
-    const py0 = Math.round(matrixY) - half;
-    const px1 = px0 + W;
-    const py1 = py0 + W;
-
-    // If there's no active wand region, see if the click landed on an
-    // existing path-shape — adopt it so this stroke extends (or erases
-    // from) it instead of creating a new region.
+    // If there's no active region, adopt an existing shape under the cursor so
+    // the stroke extends (or erases from) it instead of creating a new region.
     if (!this.stroke) {
       this.tryAdoptShapeAt(regions, matrixX, matrixY, rx, ry, cached);
     }
 
-    // Erasing requires an existing region. Shift-clicking empty space is a
-    // no-op — we don't create a region only to immediately delete from it.
-    if (erase && !this.stroke) return;
-
-    // Grow the region's accumulated mask only when adding. Erasing never
-    // expands the region beyond its current bbox.
-    if (!this.stroke) {
-      const bx = Math.max(0, px0);
-      const by = Math.max(0, py0);
-      const bx1 = Math.min(cached.width, px1);
-      const by1 = Math.min(cached.height, py1);
-      const bw = Math.max(0, bx1 - bx);
-      const bh = Math.max(0, by1 - by);
-      if (bw === 0 || bh === 0) return;
-      this.stroke = { bx, by, bw, bh, mask: new Uint8Array(bw * bh) };
-    } else if (!erase) {
-      const bx = Math.max(0, Math.min(this.stroke.bx, px0));
-      const by = Math.max(0, Math.min(this.stroke.by, py0));
-      const bx1 = Math.min(cached.width, Math.max(this.stroke.bx + this.stroke.bw, px1));
-      const by1 = Math.min(cached.height, Math.max(this.stroke.by + this.stroke.bh, py1));
-      const bw = bx1 - bx;
-      const bh = by1 - by;
-      if (bw !== this.stroke.bw || bh !== this.stroke.bh || bx !== this.stroke.bx || by !== this.stroke.by) {
-        // Reallocate the larger mask and copy the previous mask into it.
-        const next = new Uint8Array(bw * bh);
-        const dx = this.stroke.bx - bx;
-        const dy = this.stroke.by - by;
-        for (let row = 0; row < this.stroke.bh; row++) {
-          const srcOff = row * this.stroke.bw;
-          const dstOff = (row + dy) * bw + dx;
-          next.set(this.stroke.mask.subarray(srcOff, srcOff + this.stroke.bw), dstOff);
-        }
-        this.stroke = { bx, by, bw, bh, mask: next };
-      }
+    // Erasing requires an existing region — shift on empty space is a no-op.
+    if (erase && !this.stroke) {
+      this.lastMatrix = { x: matrixX, y: matrixY };
+      return;
     }
 
-    // Apply the patch: OR (add) or AND-NOT (erase).
-    const stroke = this.stroke;
-    for (let py = 0; py < W; py++) {
-      const iy = py0 + py;
-      const my = iy - stroke.by;
-      if (my < 0 || my >= stroke.bh) continue;
-      const srcRow = py * W;
-      const dstRow = my * stroke.bw;
-      for (let px = 0; px < W; px++) {
-        if (!patch.mask[srcRow + px]) continue;
-        const ix = px0 + px;
-        const mx = ix - stroke.bx;
-        if (mx < 0 || mx >= stroke.bw) continue;
-        if (erase) stroke.mask[dstRow + mx] = 0;
-        else stroke.mask[dstRow + mx] = 1;
+    // Stamp the disc, sweeping from the previous point for a continuous stroke.
+    if (isStart || !this.lastMatrix) {
+      this.stampDisc(matrixX, matrixY, radius, erase, cached);
+    } else {
+      const dx = matrixX - this.lastMatrix.x;
+      const dy = matrixY - this.lastMatrix.y;
+      const dist = Math.hypot(dx, dy);
+      const step = Math.max(1, radius / 2);
+      const n = Math.max(1, Math.ceil(dist / step));
+      for (let i = 1; i <= n; i++) {
+        const t = i / n;
+        this.stampDisc(this.lastMatrix.x + dx * t, this.lastMatrix.y + dy * t, radius, erase, cached);
       }
     }
+    this.lastMatrix = { x: matrixX, y: matrixY };
+
+    if (!this.stroke) return;
 
     if (!erase) {
-      // If the grown stroke now overlaps another path-shape, fold those
-      // shapes into this one and drop them — matching QuPath's
-      // merge-on-touch behaviour.
+      // Growing into another shape folds it into this stroke (merge-on-touch).
       this.mergeOverlappingShapes(regions, rx, ry, cached);
     }
 
-    // Trace the union boundary in image-pixel coords.
-    const stroke2 = this.stroke!;
+    const stroke = this.stroke;
     const poly = this.wandService.maskToPolygon(
-      stroke2.mask,
-      stroke2.bw,
-      stroke2.bh,
-      cached.width,
-      cached.height,
-      stroke2.bx,
-      stroke2.by,
+      stroke.mask, stroke.bw, stroke.bh, cached.width, cached.height, stroke.bx, stroke.by,
     );
-
     if (!poly) {
       // Erased to nothing — remove the shape entirely.
       if (erase) this.dropActiveShape(regions);
       return;
     }
 
-    // Convert from matrix coords back to plot data coords.
     const xPlot = poly.xpoints.map((x) => ox + x * rx);
     const yPlot = poly.ypoints.map((y) => oy + y * ry);
-
     this.commitStroke(regions, xPlot, yPlot);
+  }
+
+  /**
+   * OR (add) or AND-NOT (erase) a filled disc of `radius` matrix-pixels centred
+   * at (cx, cy) into the accumulator, growing its bbox to fit when adding.
+   */
+  private stampDisc(cx: number, cy: number, radius: number, erase: boolean, cached: CachedImageData) {
+    const px0 = Math.floor(cx - radius);
+    const py0 = Math.floor(cy - radius);
+    const px1 = Math.ceil(cx + radius) + 1;
+    const py1 = Math.ceil(cy + radius) + 1;
+
+    if (!erase) {
+      if (!this.ensureStrokeCovers(px0, py0, px1, py1, cached)) return;
+    }
+    const s = this.stroke;
+    if (!s) return; // erasing with no active region
+
+    const r2 = radius * radius;
+    const iy0 = Math.max(s.by, py0);
+    const iy1 = Math.min(s.by + s.bh, py1);
+    const ix0 = Math.max(s.bx, px0);
+    const ix1 = Math.min(s.bx + s.bw, px1);
+    for (let iy = iy0; iy < iy1; iy++) {
+      const dy = iy + 0.5 - cy;
+      const row = (iy - s.by) * s.bw;
+      for (let ix = ix0; ix < ix1; ix++) {
+        const dx = ix + 0.5 - cx;
+        if (dx * dx + dy * dy > r2) continue;
+        s.mask[row + (ix - s.bx)] = erase ? 0 : 1;
+      }
+    }
+  }
+
+  /**
+   * Ensure the accumulator's bbox covers [px0,py0,px1,py1) (clamped to the
+   * image), allocating/copying a larger mask when it must grow. Returns false if
+   * the requested box is empty after clamping.
+   */
+  private ensureStrokeCovers(
+    px0: number, py0: number, px1: number, py1: number, cached: CachedImageData,
+  ): boolean {
+    const bx = Math.max(0, px0);
+    const by = Math.max(0, py0);
+    const bx1 = Math.min(cached.width, px1);
+    const by1 = Math.min(cached.height, py1);
+    const bw = bx1 - bx;
+    const bh = by1 - by;
+    if (bw <= 0 || bh <= 0) return false;
+
+    if (!this.stroke) {
+      this.stroke = { bx, by, bw, bh, mask: new Uint8Array(bw * bh) };
+      return true;
+    }
+    const s = this.stroke;
+    const nbx = Math.min(s.bx, bx);
+    const nby = Math.min(s.by, by);
+    const nbx1 = Math.max(s.bx + s.bw, bx1);
+    const nby1 = Math.max(s.by + s.bh, by1);
+    const nbw = nbx1 - nbx;
+    const nbh = nby1 - nby;
+    if (nbw === s.bw && nbh === s.bh && nbx === s.bx && nby === s.by) return true;
+
+    const next = new Uint8Array(nbw * nbh);
+    const dx = s.bx - nbx;
+    const dy = s.by - nby;
+    for (let row = 0; row < s.bh; row++) {
+      const srcOff = row * s.bw;
+      const dstOff = (row + dy) * nbw + dx;
+      next.set(s.mask.subarray(srcOff, srcOff + s.bw), dstOff);
+    }
+    this.stroke = { bx: nbx, by: nby, bw: nbw, bh: nbh, mask: next };
+    return true;
   }
 
   /** True if (matrixX, matrixY) lies inside the current stroke accumulator. */
@@ -361,8 +335,8 @@ export class WandToolService {
   }
 
   /**
-   * Remove the region referenced by `strokeRegionId` from the region list and
-   * reset the active stroke — used when an erase stroke deletes every pixel.
+   * Remove the region referenced by `strokeRegionId` and reset the stroke —
+   * used when an erase stroke deletes every pixel.
    */
   private dropActiveShape(regions: Region[]) {
     if (this.strokeRegionId != null) {
@@ -387,9 +361,9 @@ export class WandToolService {
   }
 
   /**
-   * If (matrixX, matrixY) falls inside an existing region, rasterize it into
-   * the wand stroke accumulator so subsequent wand input extends it rather than
-   * starting a new region.
+   * If (matrixX, matrixY) falls inside an existing region, rasterize it into the
+   * stroke accumulator so subsequent brush input extends it rather than starting
+   * a new region.
    */
   private tryAdoptShapeAt(
     regions: Region[],
@@ -400,7 +374,6 @@ export class WandToolService {
     cached: CachedImageData,
   ): boolean {
     if (!regions || regions.length === 0) return false;
-
     // Most-recently-added regions are on top — check them first.
     for (let i = regions.length - 1; i >= 0; i--) {
       const verts = this.regionVerts(regions[i]);
@@ -424,10 +397,8 @@ export class WandToolService {
   }
 
   /**
-   * Iterate every region; if its rasterized mask overlaps the wand stroke mask
-   * by at least one pixel, OR it into the stroke and remove it from the list.
-   * Called every tick so chained merges resolve. If the wand has no region id
-   * yet, the merged region's id is adopted so the merged region replaces it.
+   * Fold every region whose rasterized mask overlaps the stroke mask into the
+   * stroke and remove it from the list, so brushing across regions merges them.
    */
   private mergeOverlappingShapes(regions: Region[], rx: number, ry: number, cached: CachedImageData) {
     if (!this.stroke) return;
@@ -460,11 +431,9 @@ export class WandToolService {
 
         const raster = this.wandService.rasterizePolygon(xs, ys, cached.width, cached.height);
         if (!raster) continue;
-
         if (!masksOverlap(this.stroke, raster)) continue;
 
         this.stroke = unionMasks(this.stroke, raster);
-
         if (this.strokeRegionId == null) {
           this.strokeRegionId = region.id ?? null;
         }
@@ -476,9 +445,9 @@ export class WandToolService {
   }
 
   /**
-   * Commit the in-progress polygon as a region — a new region on the first tick
-   * of a stroke, or an in-place replacement of the active region on later ticks
-   * — then ask the host to render. The store mints an id on the first commit,
+   * Commit the traced polygon as a region — a new region on the first tick of a
+   * stroke, or an in-place replacement of the active region on later ticks —
+   * then ask the host to render. The store mints an id on the first commit,
    * which we adopt so subsequent ticks replace the same region.
    */
   private commitStroke(regions: Region[], xPlot: number[], yPlot: number[]) {
@@ -498,12 +467,11 @@ export class WandToolService {
     region.bounds = poly;
     region.color = this.host.getShapeColor();
     if (existing) {
-      // Preserve identity + class label across the stroke's drag ticks.
       region.id = existing.id;
       region.name = existing.name;
     }
     // Default class/annotation name, matching the overlay-drawn regions and the
-    // Region Editor's "Add" actions so a wand region isn't left unlabeled.
+    // wand so a brush region isn't left unlabeled.
     region.label = existing?.label ?? 'legend';
 
     if (this.strokeRegionId == null) {
@@ -515,7 +483,6 @@ export class WandToolService {
     }
 
     this.host.setRegions(regions);
-    // The store assigns an id on the first commit — adopt it.
     this.strokeRegionId = region.id ?? this.strokeRegionId;
   }
 }

@@ -18,6 +18,7 @@
   [activeDragMode]="activeDragMode"
   [activeSurface3dMode]="activeSurface3dMode"
   [wandSensitivity]="wandSensitivity"
+  [brushSize]="brushSize"
   [vertexEraserRadius]="vertexEraserRadius"
   [stackOptions]="stackOptions"
   [tools]="toolbarTools"
@@ -43,6 +44,7 @@
   (toBezierRegion)="toBezierRegion()"
   (toPolygonRegion)="toPolygonRegion()"
   (wandSensitivityChange)="onWandSensitivityChange($event)"
+  (brushSizeChange)="onBrushSizeChange($event)"
   (vertexEraserRadiusChange)="onVertexEraserRadiusChange($event)">
   <!-- Host-projected custom toolbar buttons, forwarded into the toolbar. -->
   <ng-content></ng-content>

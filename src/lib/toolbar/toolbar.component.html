@@ -208,6 +208,29 @@
                 tooltipPosition="bottom"
                 (onClick)="toggleDragMode.emit('drawclosedpath')">
       </p-button>
+      <!-- Brush: paint a region by dragging a disc of the given size; the Size
+           slider appears while it's active. Hold Shift to erase (subtract). -->
+      <p-button size="small"
+                [text]="activeDragMode !== 'brush'"
+                pTooltip="Brush: click and drag to paint a region.
+                <br>Hold <kbd>Shift</kbd> while painting to erase from a region."
+                [escape]="false" tooltipPosition="bottom"
+                (onClick)="toggleDragMode.emit('brush')">
+        <img src="assets/plotting/paintbrush.svg"
+             [class]="activeDragMode === 'brush' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+             style="width: 1rem"/>
+      </p-button>
+      <ng-container *ngIf="activeDragMode === 'brush'">
+        <span class="flex align-items-center mx-1 toolbar-text">Size</span>
+        <p-slider [(ngModel)]="brushSize"
+                  [min]="brushSizeMin" [max]="brushSizeMax" [step]="brushSizeStep"
+                  (onChange)="brushSizeChange.emit($event.value)"
+                  pTooltip="Brush diameter in image pixels."
+                  [escape]="false" tooltipPosition="bottom"
+                  styleClass="wand-sensitivity-slider"></p-slider>
+        <span class="flex align-items-center mx-1 toolbar-text wand-sensitivity-value">
+          {{ brushSize }}</span>
+      </ng-container>
 
       <!-- Vertex editing — Image view (OpenSeadragon) only. -->
       <ng-container *ngIf="isImageView">
@@ -326,31 +349,22 @@
   <p>Click a file in the left-hand tree to display it. By default it opens in the
     <b>Image</b> view — a natively tiled, deeply zoomable raster (OpenSeadragon) with a
     navigator minimap and a physical-units scale bar. <b>Click the image to zoom</b> toward
-    the clicked point; scroll to zoom and drag to pan.
-  </p>
-  <p>
-    The <b>plot-type dropdown</b> switches how the file is visualized:
-    <b>Image</b>, <b>Heatmap</b>, <b>Contour</b>, <b>Scatter (regions)</b>,
-    <b>Surface (3D)</b>, <b>Scatter 3D</b>, and <b>Isosurface (3D)</b>. Scalar and 3D types
-    require a grayscale image (the 3D volume types also require a z-stack). The non-image
-    views render with Plotly and support "real zooming" (a downscaled overview that
-    re-fetches higher resolution as you zoom in).
-  </p>
-  <p>
-    The <b>colormap / LUT</b> controls (grayscale images only) include a "<b>reverse</b>"
-    <img src="assets/plotting/invert.svg" width="15" height="15"> toggle and a dropdown of
-    colormaps (default: inverted greys). When a stack is open, the <b>image mode</b> and
-    z-slice can be changed. Regions are edited in the right-panel "<b>Regions</b>" tab.
-    Drag the <i class="pi pi-bars"></i> handle to detach this toolbar into a floating window.
+    the clicked point; scroll to zoom and drag to pan. When a stack is open, a slice slider
+    (Image view) or image-mode toggle (other views) appears. Regions can also be edited from
+    the right-panel "<b>Regions</b>" tab. Drag the <i class="pi pi-bars"></i> handle to detach
+    this toolbar into a floating window.
   </p>
 
-  <h3>Plot-type controls</h3>
+  <h3>Plot-type dropdown</h3>
+  <p>
+    The <b>plot-type dropdown</b> switches how the file is visualized:
+    <b>Image</b>, <b>Contour</b>, <b>Scatter (regions)</b>, <b>Surface (3D)</b>,
+    <b>Scatter 3D</b>, and <b>Isosurface (3D)</b>. Scalar and 3D types require a grayscale
+    image (the 3D volume types also require a z-stack). The non-image views render with
+    Plotly and support "real zooming" (a downscaled overview that re-fetches higher
+    resolution as you zoom in).
+  </p>
   <ul>
-    <li>"<b>Intensity profile lines</b>" <img src="assets/plotting/spline-chart.svg" width="15" height="15">
-      (Heatmap &amp; Image): adds a coloured line ROI; a floating inset chart plots intensity
-      along each line, updates live as you drag the line, and re-samples at the current zoom
-      resolution. Each added line gets its own colour; select a line and use the trash tool
-      <i class="pi pi-trash"></i> to remove it (and its trace).</li>
     <li>"<b>Isosurface band</b>" slider (Isosurface): sets the intensity band the surfaces are
       drawn for, mapped onto the volume's real intensity range.</li>
     <li>"<b>3D camera</b>" (Surface / Scatter 3D / Isosurface): zoom <i class="pi pi-search"></i>,
@@ -358,84 +372,91 @@
       turntable <i class="pi pi-sync"></i>, and reset camera <i class="pi pi-home"></i>;
       scroll to zoom the 3D scene.</li>
   </ul>
-  <p>
-  The other controls include the tool bar, where by default not tool is selected (all greyed-out), and
-    which allows
-  </p>
-    <ul>
-      <li>"<b>image download</b>" <i class="pi pi-download"></i>: download the image as a 'png'.
-      </li>
-      <li>"<b>autoscale</b>" <i class="pi pi-window-maximize"></i>:
-        resets the image to its original dimension. If in stack mode, it will reset the image mode
-        to single image mode.
-      </li>
-      <li>
-        "<b>zoom drag</b>" <i class="pi pi-search"></i>:
-        activate zoom mode to perform a zoom selection on the image. If in single-image mode, or any image
-        that is not a stack, the mouse selection will trigger a high-def zoom, creating a cache of the image
-        the first time (longer loading); then the next zooming events will be faster than the
-        first one.
-      </li>
-      <li>
-        "<b>zoom box</b>" <img src="assets/plotting/zoom-box.svg" width="15" height="15">:
-        activate zoom box mode to select an area to zoom into.
-      </li>
-      <li>
-        "<b>panning</b>" <i class="pi pi-arrows-alt"></i>: activate
-        panning image mode to perform a panning selection; dragging and releasing the mouse on a zoomed
-        image will trigger a new zoom event on the new area of the image selected.
-      </li>
-      <li>
-        "<b>zoom-in</b>" <i class="pi pi-search-plus"></i>: triggers the
-        zoom-in event where the zoom selection is automatically set.
-      </li>
-      <li>
-        "<b>zoom-out</b>" <i class="pi pi-search-minus"></i>: triggers
-        the zoom-out event where the zoom selection is automatically set. The last zoom selection will
-        stop at the original image dimensions.
-      </li>
-      <li>
-        "<b>freeform region creation</b>" <i class="pi pi-pencil"></i>:
-        activates the freeform region mode which enables creation of a closed freeform
-				polygon using the mouse, by click and dragging the left-mouse button.
-      </li>
-      <li>
-        "<b>polyline drawing</b>" <img src="assets/plotting/polyline.svg" width="14" height="14">:
-        activates polyline mode which enables drawing of an open (non-closed) polyline using the
-        mouse, by clicking and dragging the left-mouse button. Polylines can be edited and
-        exported to GeoJSON as a <code>LineString</code> feature.
-      </li>
-      <li>
-        "<b>rectangular region creation</b>" <i class="pi pi-stop"></i>:
-        activates the rectangular region mode which enables creation of a rectangular
-        selection using the mouse, by clicking and dragging the left-mouse button.
-      </li>
-      <li>
-        "<b>wand</b>" <img src="assets/plotting/wand.svg" width="15" height="15">:
-        click on the image to grow a region from pixels with similar values around the click point.
-        Hold <kbd>Ctrl</kbd> (or <kbd>Cmd</kbd>) for an exact-match flood fill. Drag the mouse to
-        keep extending the selection while moving. Hold <kbd>Shift</kbd> while clicking or
-        dragging on an existing region to <b>erase</b> pixels from it. Use the <b>Sens.</b> slider
-        that appears in the toolbar to make the wand stricter (higher = smaller selection) or
-        looser. Subsequent clicks keep extending the same region; clicking inside an existing
-        region adopts it, and growing into another region merges them.
-      </li>
-      <li>
-        "<b>vertex eraser</b>" <i class="pi pi-eraser"></i>:
-        click or click-and-drag to remove polygon vertices that fall inside the cursor circle from
-        any region. Use the <b>Radius</b> slider to set the eraser size in image pixels. Polygons
-        reduced below 3 vertices (or polylines below 2) are deleted entirely.
-      </li>
-      <li>
-        "<b>selection</b>" <i class="pi pi-arrow-up-right"></i>:
-        a neutral mode that turns off whatever drawing tool was active (wand, vertex eraser,
-        rectangle, etc.). Use it when you want to step out of editing without picking another tool.
-      </li>
-      <li>
-        "<b>active region deletion</b>" <i class="pi pi-trash"></i>:
-        deletes the selected region. This can also be done from the Regions tab.
-      </li>
-    </ul>
+
+  <h3>Image manipulation tools</h3>
+  <ul>
+    <li>"<b>Intensity profile lines</b>" <img src="assets/plotting/spline-chart.svg" width="15" height="15">
+      (<i>work in progress — not yet stable</i>): adds a coloured line ROI; a floating inset
+      chart plots intensity along each line, updates live as you drag it, and re-samples at the
+      current zoom resolution. Each added line gets its own colour; select a line and use the
+      trash tool <i class="pi pi-trash"></i> to remove it (and its trace).</li>
+    <li>"<b>Channels &amp; Histogram</b>" <img src="assets/plotting/invert.svg" width="15" height="15">:
+      opens a floating dialog for brightness/contrast, gamma, and per-channel display, plus the
+      <b>colormap / LUT</b> controls (grayscale only) — a <b>reverse</b> toggle and a colormap
+      dropdown (default: inverted greys).</li>
+    <li>"<b>Smoothen</b>" <img src="assets/plotting/smooth.svg" width="15" height="15">
+      (Image view only): the image opens showing <b>raw pixels</b> (nearest-neighbour), so
+      zooming in renders crisp blocks for pixel inspection. Toggle this on for bilinear
+      smoothing; the icon turns white while smoothing is active.</li>
+  </ul>
+
+  <h3>Download &amp; view tools</h3>
+  <ul>
+    <li>"<b>Download</b>" <i class="pi pi-download"></i>: download the current image as a PNG.</li>
+    <li>"<b>Fit to view</b>" / autoscale <i class="pi pi-window-maximize"></i>: resets the image
+      to its original dimensions. In stack mode it also resets to single-image mode.</li>
+  </ul>
+
+  <h3>Zoom tools</h3>
+  <ul>
+    <li>"<b>Zoom box</b>" <img src="assets/plotting/zoom-box.svg" width="15" height="15">
+      (<kbd>b</kbd>): drag a box to select an area to zoom into.</li>
+    <li>"<b>Pan</b>" <i class="pi pi-arrows-alt"></i> (<kbd>p</kbd>): drag to pan the image.</li>
+    <li>"<b>Zoom in</b>" <i class="pi pi-search-plus"></i> (<kbd>+</kbd>): zoom in one step.</li>
+    <li>"<b>Zoom out</b>" <i class="pi pi-search-minus"></i> (<kbd>-</kbd>): zoom out one step,
+      stopping at the original image dimensions.</li>
+  </ul>
+
+  <h3>Region tools</h3>
+  <p>By default no tool is selected (all greyed-out); selecting a tool highlights it. The
+    vertex-editing tools (polygon, add/delete vertex, move, Bézier conversions) are available
+    in the <b>Image</b> view only.</p>
+  <ul>
+    <li>"<b>Selection</b>" <i class="pi pi-arrow-up-right"></i> (<kbd>s</kbd>): a neutral mode
+      that turns off whatever drawing tool was active (wand, vertex eraser, rectangle, etc.).
+      Use it to step out of editing without picking another tool.</li>
+    <li>"<b>Rectangular region</b>" <i class="pi pi-stop"></i> (<kbd>r</kbd>): click and drag to
+      create a rectangular region.</li>
+    <li>"<b>Polyline</b>" <img src="assets/plotting/polyline.svg" width="14" height="14">
+      (<kbd>l</kbd>): draw an open (non-closed) polyline by clicking and dragging. Polylines can
+      be edited and exported to GeoJSON as a <code>LineString</code> feature.</li>
+    <li>"<b>Freeform region</b>" <i class="pi pi-pencil"></i> (<kbd>f</kbd>): click and drag to
+      draw a closed freeform polygon.</li>
+    <li>"<b>Brush</b>" <img src="assets/plotting/paintbrush.svg" width="15" height="15">: click
+      and drag to paint a region with a circular brush — the painted stroke is the region.
+      A <b>Size</b> slider (brush diameter, in image pixels) appears in the toolbar while the
+      brush is active. Hold <kbd>Shift</kbd> while painting to <b>erase</b> (subtract) from a
+      region instead. Painting over an existing region extends it; brushing across two regions
+      merges them.</li>
+    <li>"<b>Polygon</b>" <img src="assets/plotting/polygon-vertices.svg" width="15" height="15">:
+      click to place each vertex; click the first point to close the polygon.</li>
+    <li>"<b>Add vertex</b>" <img src="assets/plotting/vertex-add.svg" width="15" height="15">:
+      click an edge of the selected polygon to insert a new vertex.</li>
+    <li>"<b>Delete vertex</b>" <img src="assets/plotting/vertex-delete.svg" width="15" height="15">:
+      click a vertex of the selected polygon to remove it.</li>
+    <li>"<b>Move region</b>" <img src="assets/plotting/region-move.svg" width="15" height="15">:
+      drag to move the selected region.</li>
+    <li>"<b>To Bézier</b>" <img src="assets/plotting/to-bezier.svg" width="15" height="15"> /
+      "<b>To polygon</b>" <img src="assets/plotting/to-polygon.svg" width="15" height="15">:
+      convert the selected region to a smooth Bézier curve, or back to a straight-edged polygon.</li>
+    <li>"<b>Wand</b>" <img src="assets/plotting/wand.svg" width="15" height="15"> (<kbd>w</kbd>):
+      click to grow a region from pixels with similar values around the click point. Hold
+      <kbd>Ctrl</kbd>/<kbd>Cmd</kbd> for an exact-match flood fill; drag to keep extending the
+      selection while moving; hold <kbd>Shift</kbd> while clicking or dragging on an existing
+      region to <b>erase</b> pixels from it. Use the <b>Sens.</b> slider that appears to make the
+      wand stricter (higher = smaller selection) or looser. Subsequent clicks keep extending the
+      same region; clicking inside an existing region adopts it, and growing into another region
+      merges them.</li>
+    <li>"<b>Vertex eraser</b>" <i class="pi pi-eraser"></i> (<kbd>e</kbd>): click or click-and-drag
+      to remove polygon vertices that fall inside the cursor circle from any region. Use the
+      <b>Radius</b> slider to set the eraser size in image pixels. Polygons reduced below 3
+      vertices (or polylines below 2) are deleted entirely.</li>
+    <li>"<b>Delete region</b>" <i class="pi pi-trash"></i> (<kbd>Del</kbd>): deletes the selected
+      region. This can also be done from the Regions tab.</li>
+  </ul>
+
+  <h3>Help</h3>
+  <p>"<b>Help</b>" <i class="pi pi-question-circle"></i>: opens this dialog.</p>
 
   <h3>Keyboard shortcuts</h3>
   <table class="shortcuts-table">
