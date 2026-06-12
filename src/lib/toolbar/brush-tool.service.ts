@@ -48,8 +48,13 @@ export class BrushToolService {
    * matching QuPath, and the wand.
    */
   private stroke: BBoxMask | null = null;
-  /** Id of the region this stroke is editing (null = a fresh region). */
+  /** Id of the region this stroke is editing (null = a fresh region). For an
+   *  erase that splits the region, this tracks the largest resulting piece. */
   private strokeRegionId: number | null = null;
+  /** Ids of the extra regions produced when an erase stroke splits a region
+   *  into disconnected pieces — reused across drag ticks so the split pieces
+   *  keep stable identities instead of being recreated each tick. */
+  private strokeExtraIds: number[] = [];
   /** Previous cursor position (matrix coords) within the current drag, so fast
    *  drags paint a continuous stroke rather than disconnected dabs. */
   private lastMatrix: { x: number; y: number } | null = null;
@@ -158,6 +163,7 @@ export class BrushToolService {
   private resetStroke() {
     this.stroke = null;
     this.strokeRegionId = null;
+    this.strokeExtraIds = [];
     this.lastMatrix = null;
     this.dragging = false;
   }
@@ -237,18 +243,22 @@ export class BrushToolService {
     }
 
     const stroke = this.stroke;
-    const poly = this.wandService.maskToPolygon(
+    // Trace every connected piece: an erase that cuts through the region splits
+    // it into two, and both must survive (the larger keeps the region identity).
+    const polys = this.wandService.maskToPolygons(
       stroke.mask, stroke.bw, stroke.bh, cached.width, cached.height, stroke.bx, stroke.by,
     );
-    if (!poly) {
-      // Erased to nothing — remove the shape entirely.
+    if (polys.length === 0) {
+      // Erased to nothing — remove the shape(s) entirely.
       if (erase) this.dropActiveShape(regions);
       return;
     }
 
-    const xPlot = poly.xpoints.map((x) => ox + x * rx);
-    const yPlot = poly.ypoints.map((y) => oy + y * ry);
-    this.commitStroke(regions, xPlot, yPlot);
+    const components = polys.map((poly) => ({
+      xPlot: poly.xpoints.map((x) => ox + x * rx),
+      yPlot: poly.ypoints.map((y) => oy + y * ry),
+    }));
+    this.commitComponents(regions, components);
   }
 
   /**
@@ -335,19 +345,20 @@ export class BrushToolService {
   }
 
   /**
-   * Remove the region referenced by `strokeRegionId` and reset the stroke —
-   * used when an erase stroke deletes every pixel.
+   * Remove the region(s) referenced by the stroke and reset it — used when an
+   * erase stroke deletes every pixel.
    */
   private dropActiveShape(regions: Region[]) {
-    if (this.strokeRegionId != null) {
-      const idx = regions.findIndex((r) => r.id === this.strokeRegionId);
-      if (idx >= 0) {
-        regions.splice(idx, 1);
-        this.host.setRegions(regions);
-      }
+    const ids = [this.strokeRegionId, ...this.strokeExtraIds].filter((id): id is number => id != null);
+    let changed = false;
+    for (const id of ids) {
+      const idx = regions.findIndex((r) => r.id === id);
+      if (idx >= 0) { regions.splice(idx, 1); changed = true; }
     }
+    if (changed) this.host.setRegions(regions);
     this.stroke = null;
     this.strokeRegionId = null;
+    this.strokeExtraIds = [];
   }
 
   /** A region's closed-polygon vertices (image/data coords), or null when it
@@ -445,22 +456,54 @@ export class BrushToolService {
   }
 
   /**
-   * Commit the traced polygon as a region — a new region on the first tick of a
-   * stroke, or an in-place replacement of the active region on later ticks —
-   * then ask the host to render. The store mints an id on the first commit,
-   * which we adopt so subsequent ticks replace the same region.
+   * Commit the stroke's connected pieces as regions — the largest keeps the
+   * stroke's region identity, additional pieces (from an erase that split the
+   * region) become their own regions tracked in `strokeExtraIds` so they keep
+   * stable identities across drag ticks. The store mints ids on commit, which
+   * we read back so subsequent ticks replace the same regions.
    */
-  private commitStroke(regions: Region[], xPlot: number[], yPlot: number[]) {
-    if (xPlot.length < 3) return;
+  private commitComponents(regions: Region[], components: { xPlot: number[]; yPlot: number[] }[]) {
+    const valid = components.filter((c) => c.xPlot.length >= 3);
+    if (valid.length === 0) return;
 
-    const existing = this.strokeRegionId != null
-      ? regions.find((r) => r.id === this.strokeRegionId) : null;
+    const prevExtraIds = this.strokeExtraIds;
+    // Drop previously-tracked extras that no longer have a matching piece (the
+    // component count shrank, e.g. an add stroke bridged a gap).
+    const reuseCount = Math.max(0, valid.length - 1);
+    for (let k = reuseCount; k < prevExtraIds.length; k++) {
+      const idx = regions.findIndex((r) => r.id === prevExtraIds[k]);
+      if (idx >= 0) regions.splice(idx, 1);
+    }
+
+    const primary = this.upsertComponent(regions, this.strokeRegionId, valid[0]);
+    const extras: Region[] = [];
+    for (let i = 1; i < valid.length; i++) {
+      extras.push(this.upsertComponent(regions, prevExtraIds[i - 1] ?? null, valid[i]));
+    }
+
+    this.host.setRegions(regions);
+    // Ids are minted during setRegions — read them back for the next tick.
+    this.strokeRegionId = primary.id ?? this.strokeRegionId;
+    this.strokeExtraIds = extras
+      .map((r) => r.id)
+      .filter((id): id is number => id != null);
+  }
+
+  /**
+   * Build a Region for one component and insert it into `regions`: replace the
+   * region with `id` in place if it exists, otherwise append a new one. Returns
+   * the Region instance (its id is minted later by the store when new).
+   */
+  private upsertComponent(
+    regions: Region[], id: number | null, c: { xPlot: number[]; yPlot: number[] },
+  ): Region {
+    const existing = id != null ? regions.find((r) => r.id === id) : null;
 
     const poly = new Polygon();
-    poly.npoints = xPlot.length;
-    poly.xpoints = xPlot;
-    poly.ypoints = yPlot;
-    poly.coordinates = xPlot.map((x, i) => [x, yPlot[i]]);
+    poly.npoints = c.xPlot.length;
+    poly.xpoints = c.xPlot;
+    poly.ypoints = c.yPlot;
+    poly.coordinates = c.xPlot.map((x, i) => [x, c.yPlot[i]]);
     poly.closed = true;
 
     const region = new Region();
@@ -474,15 +517,13 @@ export class BrushToolService {
     // wand so a brush region isn't left unlabeled.
     region.label = existing?.label ?? 'legend';
 
-    if (this.strokeRegionId == null) {
-      regions.push(region);
-    } else {
-      const idx = regions.findIndex((r) => r.id === this.strokeRegionId);
+    if (existing) {
+      const idx = regions.findIndex((r) => r.id === id);
       if (idx >= 0) regions[idx] = region;
       else regions.push(region);
+    } else {
+      regions.push(region);
     }
-
-    this.host.setRegions(regions);
-    this.strokeRegionId = region.id ?? this.strokeRegionId;
+    return region;
   }
 }

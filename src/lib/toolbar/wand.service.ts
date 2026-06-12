@@ -232,6 +232,83 @@ export class WandService {
     return poly;
   }
 
+  /**
+   * Trace EVERY 4-connected blob in `mask` (sized w*h) whose area is at least
+   * `minSize` pixels, returning one Polygon per blob in image-pixel coordinates
+   * (translated via originX/originY, clamped to imageWidth/imageHeight), ordered
+   * largest-first. Unlike {@link maskToPolygon} (largest blob only), this lets
+   * the brush eraser split a region in two when a stroke cuts through it rather
+   * than discarding the smaller piece.
+   */
+  public maskToPolygons(mask: Uint8Array, w: number, h: number,
+                        imageWidth: number, imageHeight: number,
+                        originX: number, originY: number, minSize = 4): Polygon[] {
+    // Label all 4-connected components, recording each one's pixel count.
+    const labels = new Int32Array(w * h);
+    const sizes: number[] = [0]; // sizes[label]; label 0 unused
+    let nextLabel = 0;
+    const queue: number[] = [];
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const idx = y * w + x;
+        if (!mask[idx] || labels[idx]) continue;
+        nextLabel++;
+        labels[idx] = nextLabel;
+        let size = 0;
+        queue.push(idx);
+        while (queue.length) {
+          const i = queue.pop() as number;
+          size++;
+          const px = i % w;
+          const py = (i - px) / w;
+          if (px > 0)     { const j = i - 1;
+            if (mask[j] && !labels[j]) { labels[j] = nextLabel; queue.push(j); } }
+          if (px < w - 1) { const j = i + 1;
+            if (mask[j] && !labels[j]) { labels[j] = nextLabel; queue.push(j); } }
+          if (py > 0)     { const j = i - w;
+            if (mask[j] && !labels[j]) { labels[j] = nextLabel; queue.push(j); } }
+          if (py < h - 1) { const j = i + w;
+            if (mask[j] && !labels[j]) { labels[j] = nextLabel; queue.push(j); } }
+        }
+        sizes[nextLabel] = size;
+      }
+    }
+
+    const wanted: number[] = [];
+    for (let lbl = 1; lbl <= nextLabel; lbl++) {
+      if (sizes[lbl] >= minSize) wanted.push(lbl);
+    }
+    wanted.sort((a, b) => sizes[b] - sizes[a]); // largest-first
+
+    const polys: Polygon[] = [];
+    const comp = new Uint8Array(w * h);
+    for (const lbl of wanted) {
+      comp.fill(0);
+      for (let i = 0; i < comp.length; i++) comp[i] = labels[i] === lbl ? 1 : 0;
+      const verts = this.mooreBoundary(comp, w, h);
+      if (!verts || verts.length < 3) continue;
+      const xpoints: number[] = [];
+      const ypoints: number[] = [];
+      const coordinates: number[][] = [];
+      for (const v of verts) {
+        const ix = Math.round(originX + v.x);
+        const iy = Math.round(originY + v.y);
+        const cx2 = Math.max(0, Math.min(imageWidth - 1, ix));
+        const cy2 = Math.max(0, Math.min(imageHeight - 1, iy));
+        xpoints.push(cx2);
+        ypoints.push(cy2);
+        coordinates.push([cx2, cy2]);
+      }
+      const poly = new Polygon();
+      poly.npoints = xpoints.length;
+      poly.xpoints = xpoints;
+      poly.ypoints = ypoints;
+      poly.coordinates = coordinates;
+      polys.push(poly);
+    }
+    return polys;
+  }
+
   // ── Patch extraction ────────────────────────────────────────────────
 
   private extractPatch(image: WandImage, cx: number, cy: number, W: number, type: WandType): Float32Array {

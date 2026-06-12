@@ -16,7 +16,13 @@ function makeHost(opts: { regions?: Region[]; cached?: CachedImageData | null } 
   document.body.appendChild(container);
   const state = { regions: opts.regions ?? ([] as Region[]) };
   const img: CachedImageData | null = opts.cached !== undefined ? opts.cached : cached();
-  const setRegions = jest.fn((r: Region[]) => { state.regions = r; });
+  // Mirror RegionStore.setRegions: mint an id for any region that lacks one, so
+  // the brush can read minted ids back and keep split pieces stable across ticks.
+  let nextId = 1 + Math.max(0, ...state.regions.map((r) => r.id ?? 0));
+  const setRegions = jest.fn((r: Region[]) => {
+    for (const reg of r) if (reg.id == null) reg.id = nextId++;
+    state.regions = r;
+  });
   const host: WandToolHost = {
     getOverlayContainer: () => container,
     getCachedImageData: () => img,
@@ -145,6 +151,37 @@ describe('BrushToolService', () => {
     expect(setRegions).toHaveBeenCalled();
     expect(state.regions).toHaveLength(1);
     expect(state.regions[0].id).toBe(7); // same region, edited in place
+  });
+
+  it('shift-painting a strip through a region splits it into two regions', () => {
+    // A wide, short bar; erasing a full-height disc at its centre cuts it in two.
+    const existing = boxRegion(5, 20, 55, 40, 7);
+    const { host, container, state } = makeHost({ regions: [existing] });
+    tool.bindHost(host);
+    tool.setMode(true, { size: 24 });
+
+    cv(container).dispatchEvent(mouse('mousedown', 30, 30, { shiftKey: true }));
+
+    expect(state.regions).toHaveLength(2);
+    // The larger piece keeps the original id; the other gets a fresh one.
+    const ids = state.regions.map((r) => r.id).sort();
+    expect(ids).toContain(7);
+    expect(state.regions.every((r) => r.label === 'legend')).toBe(true);
+  });
+
+  it('a split holds stable across drag ticks (no duplicate regions per tick)', () => {
+    const existing = boxRegion(5, 20, 55, 40, 7);
+    const { host, container, state } = makeHost({ regions: [existing] });
+    tool.bindHost(host);
+    tool.setMode(true, { size: 24 });
+    const canvas = cv(container);
+
+    canvas.dispatchEvent(mouse('mousedown', 30, 20, { shiftKey: true }));
+    canvas.dispatchEvent(mouse('mousemove', 30, 30, { shiftKey: true }));
+    canvas.dispatchEvent(mouse('mousemove', 30, 40, { shiftKey: true }));
+    canvas.dispatchEvent(mouse('mouseup', 30, 40, { shiftKey: true }));
+
+    expect(state.regions).toHaveLength(2); // still two, not one-per-tick
   });
 
   it('shift-painting empty space is a no-op (no region created just to erase)', () => {
