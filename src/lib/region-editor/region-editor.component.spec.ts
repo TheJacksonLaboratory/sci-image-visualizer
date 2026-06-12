@@ -951,3 +951,139 @@ describe('RegionEditorComponent export', () => {
     expect(component.showExportDialog).toBe(false);
   });
 });
+
+describe('RegionEditorComponent — coordinate + geometry editing', () => {
+  let component: RegionEditorComponent;
+  let api: any;
+
+  beforeEach(async () => {
+    let idc = 1;
+    api = MockService(RoutingVisualizerService, {
+      getShowShapeLabel: () => false,
+      getShapeColor: () => '#00FFFF',
+      getFillColor: () => 'rgba(0,0,0,0)',
+      getClassificationColors: () => new Map<string, string>(),
+      getRegionUpdateEvent: () => EMPTY,
+      getSelectedRegions$: () => EMPTY,
+      getImageMeta: () => EMPTY,
+      setSelectedRegions: jest.fn(),
+      getAnnotationRegions: () => [],
+      setAnnotationRegions: jest.fn((regions: Region[]) => {
+        for (const r of regions ?? []) if (r.id == null) r.id = idc++;
+      }),
+      importRegions: jest.fn(),
+      exportRegions: jest.fn(),
+    });
+
+    await TestBed.configureTestingModule({
+      declarations: [RegionEditorComponent, HexColorPickerComponent],
+      imports: [FormsModule],
+      providers: [
+        { provide: REGION_EDITOR_API, useValue: api },
+        { provide: MessageService, useValue: MockService(MessageService) },
+        { provide: ConfirmationService, useValue: MockService(ConfirmationService) },
+        {
+          provide: REGION_IO_PORT,
+          useValue: {
+            getSelectedFileName: () => undefined,
+            roiFileExists: () => of(false),
+            saveGeoJson: () => of(void 0),
+          } as RegionIoPort,
+        },
+      ],
+      schemas: [NO_ERRORS_SCHEMA],
+    }).compileComponents();
+
+    component = TestBed.createComponent(RegionEditorComponent).componentInstance;
+    component.ngOnInit();
+  });
+
+  function rect(): Region {
+    const r = new Region(); r.id = 1;
+    const b = new Rectangle(); b.x = 10; b.y = 20; b.width = 30; b.height = 40;
+    r.bounds = b; return r;
+  }
+  function poly(): Region {
+    const r = new Region(); r.id = 2;
+    const p = new Polygon();
+    p.xpoints = [0, 10, 10, 0]; p.ypoints = [0, 0, 10, 10];
+    p.coordinates = [[0, 0], [10, 0], [10, 10], [0, 10]]; p.npoints = 4; p.closed = true;
+    r.bounds = p; return r;
+  }
+
+  it('xRectUpdate / yRectUpdate set the rectangle origin and commit', () => {
+    const r = rect();
+    (component as any).regions = [r];
+    component.xRectUpdate(r, { value: 99 });
+    component.yRectUpdate(r, { value: 88 });
+    expect((r.bounds as Rectangle).x).toBe(99);
+    expect((r.bounds as Rectangle).y).toBe(88);
+    expect(api.setAnnotationRegions).toHaveBeenCalled();
+  });
+
+  it('widthRectUpdate recenters x by half the width delta', () => {
+    const r = rect();
+    (component as any).regions = [r];
+    (component as any).regionsCopy = [{ id: 1, bounds: { x: 10, y: 20, width: 30, height: 40 } }];
+    component.widthRectUpdate(r, { value: 50 }); // diff +20 → x = round(10 - 10) = 0
+    expect((r.bounds as Rectangle).width).toBe(50);
+    expect((r.bounds as Rectangle).x).toBe(0);
+  });
+
+  it('heightRectUpdate recenters y by half the height delta', () => {
+    const r = rect();
+    (component as any).regions = [r];
+    (component as any).regionsCopy = [{ id: 1, bounds: { x: 10, y: 20, width: 30, height: 40 } }];
+    component.heightRectUpdate(r, { value: 60 }); // diff +20 → y = round(20 - 10) = 10
+    expect((r.bounds as Rectangle).height).toBe(60);
+    expect((r.bounds as Rectangle).y).toBe(10);
+  });
+
+  it('widthRectUpdate ignores null/undefined values', () => {
+    const r = rect();
+    (component as any).regions = [r];
+    component.widthRectUpdate(r, { value: null });
+    expect((r.bounds as Rectangle).width).toBe(30); // unchanged
+  });
+
+  it('addCoordinate / x|yCoordinateUpdate / deleteCoordinate edit polygon points', () => {
+    const r = poly();
+    (component as any).regions = [r];
+    component.addCoordinate(r);
+    expect((r.bounds as Polygon).npoints).toBe(5);
+    component.xCoordinateUpdate(r, 4, { value: 7 });
+    component.yCoordinateUpdate(r, 4, { value: 8 });
+    expect((r.bounds as Polygon).xpoints[4]).toBe(7);
+    expect((r.bounds as Polygon).ypoints[4]).toBe(8);
+    component.deleteCoordinate(r, 4);
+    expect((r.bounds as Polygon).npoints).toBe(4);
+  });
+
+  it('regionArea reports px² for rect + polygon, blank when degenerate', () => {
+    expect(component.regionArea(rect())).toContain('px²'); // 30·40 = 1200
+    expect(component.regionArea(poly())).toContain('px²'); // shoelace = 100
+    const degenerate = rect(); (degenerate.bounds as Rectangle).width = 0;
+    expect(component.regionArea(degenerate)).toBe('');
+  });
+
+  it('regionArea reports physical units when mpp is known', () => {
+    (component as any).mppX = 2; (component as any).mppY = 2;
+    expect(component.regionArea(rect())).toContain('µm²'); // 1200·4 = 4800 µm²
+  });
+
+  it('isRectangle distinguishes rectangles from polygons', () => {
+    expect(component.isRectangle(rect())).toBe(true);
+    expect(component.isRectangle(poly())).toBe(false);
+  });
+
+  it('label-edit lifecycle tracks the editing set and commits on stop', () => {
+    const r = rect();
+    (component as any).regions = [r];
+    expect(component.isEditingLabel(r)).toBe(false);
+    component.startEditLabel(r);
+    expect(component.isEditingLabel(r)).toBe(true);
+    component.stopEditLabel(r, true); // commit
+    expect(component.isEditingLabel(r)).toBe(false);
+    expect(api.setAnnotationRegions).toHaveBeenCalled();
+  });
+});

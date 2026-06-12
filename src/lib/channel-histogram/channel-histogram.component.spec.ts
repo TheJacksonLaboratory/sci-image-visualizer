@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { NO_ERRORS_SCHEMA } from '@angular/core';
 import { of } from 'rxjs';
 
+import * as Plotly from 'plotly.js-dist-min';
 import { ChannelHistogramComponent } from './channel-histogram.component';
 import {
   CHANNEL_HISTOGRAM_API, IChannelHistogramApi, IChannelState,
@@ -94,5 +95,105 @@ describe('ChannelHistogramComponent', () => {
     // No native histogram → obsRange is 0..255, so native units == display units.
     component.onMaxChange(128);
     expect(api.setChannelState).toHaveBeenCalledWith(0, { min: 0, max: 128 });
+  });
+
+  it('onColormap applies a leaf node but ignores a parent', () => {
+    component.onColormap({ label: 'Viridis' } as any);
+    expect(api.setColormap).toHaveBeenCalledTimes(1);
+    component.onColormap({ label: 'group', children: [] } as any);
+    expect(api.setColormap).toHaveBeenCalledTimes(1);
+  });
+
+  it('onVisibleToggle writes channel visibility', () => {
+    component.onVisibleToggle(channels[0], false);
+    expect(api.setChannelState).toHaveBeenCalledWith(0, { visible: false });
+  });
+
+  it('onVisibleChange(false) emits and is reflected in state', () => {
+    const emit = jest.spyOn(component.visibleChange, 'emit');
+    component.onVisibleChange(false);
+    expect(component.visible).toBe(false);
+    expect(emit).toHaveBeenCalledWith(false);
+  });
+
+  it('multichannel is false for a single channel', () => {
+    expect(component.multichannel).toBe(false);
+  });
+
+  describe('histogram rendering (with the plot div present)', () => {
+    beforeEach(() => { document.body.innerHTML = `<div id="channel-histogram-plot"></div>`; });
+    afterEach(() => { document.body.innerHTML = ''; });
+
+    it('selectChannel loads and renders the histogram via Plotly', () => {
+      component.selectChannel(channels[0]);
+      expect(api.getHistogram$).toHaveBeenCalledWith(0, 256);
+      expect(component.hist).toEqual({ bins: [0, 1], counts: [3, 7], max: 7 });
+      expect(Plotly.react).toHaveBeenCalled();
+    });
+
+    it('purges the plot when no histogram is available (and not retrying)', () => {
+      (api.getHistogram$ as jest.Mock).mockReturnValue(of(null));
+      component.selectChannel(channels[0]); // visible=false → no retry loop → purge
+      expect(component.hist).toBeNull();
+      expect(Plotly.purge).toHaveBeenCalled();
+    });
+
+    it('toggleLog re-renders the histogram', () => {
+      component.selectChannel(channels[0]);
+      (Plotly.react as jest.Mock).mockClear();
+      component.toggleLog(true);
+      expect(component.logScale).toBe(true);
+      expect(Plotly.react).toHaveBeenCalled();
+    });
+
+    it('onColorChange on the selected channel updates the colour and re-renders', () => {
+      component.selectChannel(channels[0]);
+      (Plotly.react as jest.Mock).mockClear();
+      component.onColorChange(channels[0], '#ff0000');
+      expect(api.setChannelState).toHaveBeenCalledWith(0, { color: '#ff0000' });
+      expect(component.selected!.color).toBe('#ff0000');
+      expect(Plotly.react).toHaveBeenCalled();
+    });
+
+    it('a min edit moves the marker lines (relayout) once a histogram is drawn', () => {
+      component.selectChannel(channels[0]);
+      (Plotly.relayout as jest.Mock).mockClear();
+      component.onMinChange(50);
+      expect(Plotly.relayout).toHaveBeenCalled();
+    });
+  });
+
+  describe('16-bit native window mapping', () => {
+    beforeEach(() => {
+      component.hist = {
+        bins: [100, 300, 500, 700, 900], counts: [0, 5, 20, 5, 0], max: 20,
+        bitDepth: 16, observedMin: 100, observedMax: 900,
+      } as any;
+    });
+
+    it('reports 16-bit and an observed slider range', () => {
+      expect(component.is16bit).toBe(true);
+      expect(component.sliderMin).toBe(100);
+      expect(component.sliderMax).toBe(900);
+      expect(component.sliderStep).toBeGreaterThanOrEqual(1);
+    });
+
+    it('maps the 0..255 display window onto native units for the sliders', () => {
+      expect(component.minNative).toBe(100); // toNative(0)
+      expect(component.maxNative).toBe(900); // toNative(255)
+    });
+
+    it('auto() saturates the native distribution and writes a display window (not autoContrast)', () => {
+      component.auto();
+      expect(api.setChannelState).toHaveBeenCalled();
+      expect(api.autoContrast).not.toHaveBeenCalled();
+    });
+
+    it('a min edit maps native→display via the observed range', () => {
+      component.onMinChange(500); // mid of 100..900 → ~128/255
+      const lastCall = (api.setChannelState as jest.Mock).mock.calls.pop();
+      expect(lastCall[1].min).toBeGreaterThan(120);
+      expect(lastCall[1].min).toBeLessThan(135);
+    });
   });
 });
