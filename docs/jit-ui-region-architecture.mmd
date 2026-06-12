@@ -1,0 +1,126 @@
+---
+title: JAX Image Tools — region interfaces & region tools (jax-image-visualization)
+config:
+  layout: elk
+  htmlLabels: false
+  flowchart:
+    htmlLabels: false
+  themeVariables:
+    edgeLabelBackground: transparent
+---
+%% Companion to jit-ui-visualization-architecture.mmd. ELK layered (TB) layout
+%% keeps the graph vertical and legible. Needs a mermaid build with the ELK layout.
+flowchart TB
+
+subgraph UI["UI — toolbar &amp; components"]
+direction TB
+toolbar["plotting-toolbar (ToolbarComponent)<br/>emits toggleDragMode(mode)<br/>+ options: brush size · wand sensitivity · eraser radius"]
+viz["VisualizationComponent<br/>routes each mode to the overlay or a tool controller"]
+redit["region-editor (RegionEditorComponent)<br/>region table · class colours · per-region edits"]
+end
+
+subgraph CONTRACTS["Region interfaces (contracts)"]
+direction TB
+ioverlay["IRegionOverlay<br/>setMode(RegionToolMode) · redraw()<br/>setSelectedBezier() · destroy()"]
+mode["RegionToolMode (enum)<br/>none · select · drawrect<br/>drawclosedpath · drawopenpath<br/>drawpolygon · addpoint · deletepoint · move"]
+itool["IToolController (on-canvas tools)<br/>setWandMode · setBrushMode<br/>setVertexEraserMode · setZoomToBoxMode"]
+istore["IRegionStore<br/>getRegions · selection · getRegionUpdateEvent<br/>getShapeColor · getShowShapeLabel"]
+iedit["IRegionEditApi<br/>addRegion · removeRegion · updateBounds<br/>moveRegion · move/add/deleteVertex<br/>setBezier · moveBezierHandle · begin/endBatch"]
+ieditor["IRegionEditorApi<br/>annotation regions · selection<br/>classification colours · image meta (µm²)"]
+end
+
+subgraph OVERLAYS["Region overlays — IRegionOverlay impls (per backend)"]
+direction TB
+osdov["OsdRegionOverlay<br/>SVG layer over OpenSeadragon<br/>rect/polyline/freeform/polygon draw · vertex &amp; bezier edit"]
+plotov["PlotlyRegionOverlay<br/>native Plotly plot shapes + Plotly drag modes (thin)"]
+end
+
+subgraph HOSTSEAM["Tool / overlay ↔ backend seam (host interfaces)"]
+direction TB
+ict["ICoordinateTransform<br/>clientToData · dataLengthToScreen · isReady"]
+ivh["IViewportHost<br/>getOverlayContainer · getCoordinateTransform"]
+irdh["IRegionDataHost<br/>getRegions · setRegions"]
+whost["WandToolHost = BrushToolHost<br/>+ getCachedImageData · getActiveFrameIndex<br/>+ getFileName · getShapeColor"]
+ehost["VertexEraserToolHost<br/>+ invalidateWandRegion · getCachedImageRatio"]
+zhost["ZoomToBoxToolHost<br/>getPlotDiv · pixelToData · applyZoomToBox"]
+end
+
+subgraph TOOLS["Region tools — on-canvas overlay tools (shared singletons)"]
+direction TB
+wand["WandToolService<br/>flood-fill grow · Shift = erase · Cmd/Ctrl exact-match"]
+brush["BrushToolService<br/>paint a disc · Shift = erase · split region on cut"]
+eraser["VertexEraserToolService<br/>drop polygon vertices within radius"]
+zbox["ZoomToBoxToolService<br/>drag a box → fit viewport (viewport tool)"]
+wsvc["WandService — shared geometry<br/>computePatchMask · maskToPolygon(s)<br/>rasterizePolygon · pointInPolygon · dropVerticesWithinRadius"]
+end
+
+subgraph STATE["Shared state &amp; model"]
+direction TB
+rstore["RegionStore (service)<br/>implements IRegionStore + IRegionEditApi<br/>single source of truth · mints ids · class colours · emits updates"]
+region["Region<br/>id · name · label · color · bounds"]
+geom["bounds: Polygon / Rectangle<br/>xpoints/ypoints · closed · bezier handles"]
+end
+
+%% ---- toolbar → component routing ----
+toolbar -- "toggleDragMode(mode) + options" --> viz
+viz -- "region modes:<br/>select · draw* · polygon · add/deletepoint · move" --> ioverlay
+viz -- "on-canvas tools:<br/>wand · brush · eraseVertex · zoomToBox" --> itool
+ioverlay -. "drives" .-> mode
+redit -- uses --> ieditor
+
+%% ---- interface realizations ----
+osdov -. implements .-> ioverlay
+plotov -. implements .-> ioverlay
+rstore -. implements .-> istore
+rstore -. implements .-> iedit
+rstore -. backs .-> ieditor
+
+%% ---- IToolController activates + binds the singleton tools per backend ----
+itool -- "activate + bindHost (per backend)" --> TOOLS
+
+%% ---- host seam composition ----
+whost -. extends .-> ivh
+whost -. extends .-> irdh
+ehost -. extends .-> ivh
+ehost -. extends .-> irdh
+ivh -- exposes --> ict
+
+%% ---- tools bind a host + share geometry ----
+wand -- bindHost --> whost
+brush -- bindHost --> whost
+eraser -- bindHost --> ehost
+zbox -- bindHost --> zhost
+wand -- uses --> wsvc
+brush -- uses --> wsvc
+eraser -- uses --> wsvc
+
+%% ---- region read/write (one shared store) ----
+whost -- "getRegions / setRegions" --> rstore
+ehost -- "getRegions / setRegions" --> rstore
+osdov -- "render (IRegionStore) · edit (IRegionEditApi)" --> rstore
+plotov -- "render + edit" --> rstore
+rstore --> region
+region --> geom
+
+classDef ui fill:#dff5e0,stroke:#2c7,color:#111;
+classDef iface fill:#fff0cf,stroke:#9a7b2b,color:#111;
+classDef host fill:#ffe2bd,stroke:#9a6b2b,color:#111;
+classDef tool fill:#e6e0ff,stroke:#65459a,color:#111;
+classDef overlay fill:#dcebff,stroke:#345,color:#111;
+classDef store fill:#ffe2e2,stroke:#b05,color:#111;
+classDef model fill:#ededed,stroke:#555,color:#111;
+
+class toolbar,viz,redit ui;
+class ioverlay,mode,itool,istore,iedit,ieditor iface;
+class ict,ivh,irdh,whost,ehost,zhost host;
+class wand,brush,eraser,zbox,wsvc tool;
+class osdov,plotov overlay;
+class rstore store;
+class region,geom model;
+
+style UI fill:#eafaf0,stroke:#2c7,stroke-width:1.5px;
+style CONTRACTS fill:#fffaf0,stroke:#9a7b2b,stroke-width:2px;
+style HOSTSEAM fill:#fff6ec,stroke:#9a6b2b,stroke-width:1.5px;
+style TOOLS fill:#f3f0ff,stroke:#65459a,stroke-width:1.5px;
+style OVERLAYS fill:#eef4ff,stroke:#345,stroke-width:1.5px;
+style STATE fill:#fff0f0,stroke:#b05,stroke-width:1.5px;

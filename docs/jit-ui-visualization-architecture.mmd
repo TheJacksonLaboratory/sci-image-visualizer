@@ -1,0 +1,118 @@
+---
+title: JAX Image Tools — jit-ui visualization architecture (jax-image-visualization)
+config:
+  layout: elk
+  htmlLabels: false
+  flowchart:
+    htmlLabels: false
+  themeVariables:
+    edgeLabelBackground: transparent
+  elk:
+    nodePlacementStrategy: SIMPLE
+---
+%% ELK layout for clean orthogonal edge routing (matches the region diagram).
+%% Needs a mermaid build with the ELK layout.
+flowchart TB
+
+subgraph HOST["Host app (jit-ui)"]
+diag["Diagram component (host)<br/>embeds &lt;visualization&gt; (main viewer)"]
+adapters["Diagram viz adapters (host-provided)<br/>TileAccessAdapter ·
+  ImageStateAdapter<br/>RegionIoAdapter · VizConfig (tile server)"]
+pipe["Image processing pipeline (host)<br/>pipeline-preview embeds &lt;visualization&gt;<br/>own isolated chain via provideVisualization()"]
+pipeadapters["Pipeline viz adapters (host-provided)<br/>PipelineImageStateAdapter (in-memory) ·
+  PipelineTileAccessAdapter<br/>PipelineRegionIoAdapter · VizConfig (no tile server)"]
+end
+
+subgraph LIB["jax-image-visualization — Angular library (npm package)"]
+
+subgraph UI["UI components"]
+subgraph VIS["&lt;visualization&gt; · VisualizationComponent"]
+tb["plotting-toolbar<br/>(Toolbar)"]
+vz["Visualizer (#plot)<br/>active backend renders here"]
+orch["RenderOrchestrator (two-pass small→large + retry)<br/>SliceScrubber (z-scrub)"]
+end
+chist["&lt;channel-histogram&gt;<br/>dialog"]
+redit["&lt;region-editor&gt;"]
+end
+
+subgraph API["Public API — DI tokens (consumed) and ports (declared here, provided by host)"]
+tokens["API tokens<br/>VISUALIZER · CHANNEL_HISTOGRAM_API<br/>REGION_EDITOR_API"]
+ports["DI ports<br/>TILE_ACCESS_PORT · IMAGE_STATE_PORT<br/>REGION_IO_PORT · VIZ_CONFIG"]
+end
+
+rvs["RoutingVisualizerService<br/>implements the API tokens (useExisting)<br/>injects the ports ·
+routes by PlotType"]
+
+subgraph BE["Backends and shared state"]
+osd["OpenSeadragon backend (Image — tiled)<br/>thin coordinator"]
+plot["Plotly backend<br/>heatmap · contour · scatter · surface · 3D · isosurface"]
+vstore["VisualizerStore<br/>channels · window · gamma · colormap"]
+rstore["RegionStore<br/>regions · selection · class colors"]
+end
+
+subgraph INT["Backend internals — shared region overlay + tools (both backends) · OSD-only tiled-image collaborators"]
+tools["Region overlay — per backend impl<br/>OSD: SVG layer · Plotly: native plot shapes<br/>Shared on-canvas tools: wand · brush · vertex-eraser · zoom-to-box · bezier<br/>Shared math: contracts/intensity.ts"]
+tileclient["TileClient (OSD)<br/>URL · fetch · decode"]
+slicecache["SliceCache<br/>slices · LRU · prefetch"]
+displaypipe["DisplayPipeline<br/>recolor LUT · multi-channel"]
+histsampler["HistogramSampler<br/>native + 8-bit · scale bar"]
+end
+
+end
+
+subgraph SRV["Server (jit-service)"]
+svc["jit-service endpoints<br/>/preview · /previewsize (overview / untiled PNG)<br/>/tiles/info · /tile (per-channel tiles)<br/>/zoom/open-session · /zoom/region (display-res crop)<br/>/histogram · /export/tiff"]
+end
+
+%% ---- host <-> library ----
+diag -- embeds --> VIS
+pipe -- "embeds · own chain" --> VIS
+adapters -. "provide (useExisting)" .-> ports
+pipeadapters -. "provide (useExisting)" .-> ports
+VIS -- inject --> tokens
+chist --> tokens
+redit --> tokens
+
+%% ---- public API -> router ----
+tokens -- useExisting --> rvs
+ports -- injected --> rvs
+
+%% ---- router -> backends & stores ----
+rvs -- Image --> osd
+rvs -- "other plots" --> plot
+rvs --> vstore
+rvs --> rstore
+
+%% ---- backends -> internals ----
+osd --> tools
+plot --> tools
+osd -- delegates --> tileclient
+osd --> slicecache
+osd --> displaypipe
+osd --> histsampler
+
+%% ---- library -> server (image data) ----
+tileclient -- "/tiles/info · /tile (per-channel tiles)<br/>via TILE_ACCESS_PORT + VIZ_CONFIG base URL" --> svc
+osd -- "/preview (untiled / simple image)<br/>image URL via IMAGE_STATE_PORT" --> svc
+plot -- "/preview overview (URL via IMAGE_STATE_PORT)<br/>then TILE_ACCESS_PORT.zoomOnRegion → /zoom/region (hi-res re-fetch)" --> svc
+histsampler -- "/histogram (native + 8-bit)" --> svc
+
+classDef host fill:#dcebff,stroke:#345,color:#111;
+classDef ui fill:#dff5e0,stroke:#2c7,color:#111;
+classDef api fill:#fff0cf,stroke:#9a7b2b,color:#111;
+classDef router fill:#ffe2bd,stroke:#9a6b2b,color:#111;
+classDef backend fill:#ece0ff,stroke:#65459a,color:#111;
+classDef internal fill:#ededed,stroke:#555,color:#111;
+classDef server fill:#ffe2e2,stroke:#b05,color:#111;
+
+class diag,adapters,pipe,pipeadapters host;
+class tb,vz,orch,chist,redit ui;
+class tokens,ports api;
+class rvs router;
+class osd,plot,vstore,rstore backend;
+class tools,tileclient,slicecache,displaypipe,histsampler internal;
+class svc server;
+
+style LIB fill:#eafaf4,stroke:#1a9e6f,stroke-width:3px,color:#127a4f;
+style HOST fill:#eaf2ff,stroke:#7fb3ff,stroke-width:1.5px;
+style SRV fill:#ffeaea,stroke:#ff9a9a,stroke-width:1.5px;
