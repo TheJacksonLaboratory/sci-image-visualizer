@@ -45,9 +45,9 @@ export class ToolbarComponent {
   /** Which toolbar groups to show. Defaults to the full toolbar; the host forwards
    *  the consumer's choice (e.g. the pipeline shows only zoom + region tools). */
   @Input() tools: Required<ToolbarToolVisibility> = ALL_TOOLBAR_TOOLS;
-  /** Current image-smoothing state (drives the pixel/smooth toggle button look).
-   *  `false` = nearest-neighbour (crisp pixels). */
-  @Input() imageSmoothingEnabled = true;
+  /** Current image-smoothing state (drives the Smoothen toggle button look).
+   *  `false` = nearest-neighbour (crisp raw pixels), the default. */
+  @Input() imageSmoothingEnabled = false;
 
   @Output() selectPlotType = new EventEmitter<PlotType>();
   /** Intensity (LINE) mode: add another colored line ROI + inset trace. */

@@ -179,9 +179,10 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
    *  via {@link setNavigatorVisible} before the first render. */
   private navigatorVisible = true;
   /** Image smoothing (bilinear). `false` → nearest-neighbour, so zoomed-in pixels
-   *  render as crisp blocks (pixel inspection). Read at viewer creation; toggled
-   *  via {@link setImageSmoothingEnabled}. */
-  private smoothingEnabled = true;
+   *  render as crisp blocks (pixel inspection). Defaults to `false` so the image
+   *  opens showing raw pixels. Read at viewer creation; toggled via
+   *  {@link setImageSmoothingEnabled}. */
+  private smoothingEnabled = false;
 
   /** Overall deadline for the /tiles/info poll loop. An uncached whole-slide
    *  image (e.g. .ndpi) is cached server-side first (GCS->PVC), which can take

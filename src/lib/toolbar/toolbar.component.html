@@ -53,12 +53,14 @@
       <img src="assets/plotting/invert.svg" class="toolbar-icon-dark" style="width: 1rem"/>
     </p-button>
 
-    <!-- Pixel/smooth toggle: nearest-neighbour vs bilinear (Image view only —
-         it's an OpenSeadragon drawer setting). Highlighted when showing raw pixels. -->
-    <p-button *ngIf="tools.specialTools && isImageView" icon="pi pi-th-large" size="small"
-              [text]="imageSmoothingEnabled"
-              pTooltip="Show raw pixels (turn off image smoothing)" tooltipPosition="bottom"
+    <!-- Smoothen toggle: bilinear smoothing vs nearest-neighbour raw pixels (Image
+         view only — it's an OpenSeadragon drawer setting). Highlighted when smoothing on. -->
+    <p-button *ngIf="tools.specialTools && isImageView" size="small"
+              [text]="!imageSmoothingEnabled"
+              pTooltip="Smoothen (turn on image smoothing)" tooltipPosition="bottom"
               (onClick)="toggleImageSmoothing.emit()">
+      <img src="assets/plotting/smooth.svg" style="width: 1rem"
+           [class]="imageSmoothingEnabled ? 'toolbar-icon-active' : 'toolbar-icon-dark'"/>
     </p-button>
 
     <!-- Stack controls -->

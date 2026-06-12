@@ -44,8 +44,9 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   get toolbarTools(): Required<ToolbarToolVisibility> { return this._toolbarTools; }
   private _toolbarTools: Required<ToolbarToolVisibility> = ALL_TOOLBAR_TOOLS;
 
-  /** Image-smoothing state for the toolbar's pixel/smooth toggle (OSD only). */
-  imageSmoothingEnabled = true;
+  /** Image-smoothing state for the toolbar's Smoothen toggle (OSD only).
+   *  Defaults to `false` so OSD shows raw pixels (nearest-neighbour). */
+  imageSmoothingEnabled = false;
   loadingMessage = 'Loading image...';
   zoom = false;
   fileName: string | undefined;

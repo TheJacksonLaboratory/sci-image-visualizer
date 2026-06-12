@@ -137,10 +137,10 @@ describe('VisualizationComponent (UI shell)', () => {
     });
 
     it('onToggleImageSmoothing flips state and applies it', () => {
-      expect(component.imageSmoothingEnabled).toBe(true);
-      component.onToggleImageSmoothing();
       expect(component.imageSmoothingEnabled).toBe(false);
-      expect(plotService.setImageSmoothingEnabled).toHaveBeenCalledWith(false);
+      component.onToggleImageSmoothing();
+      expect(component.imageSmoothingEnabled).toBe(true);
+      expect(plotService.setImageSmoothingEnabled).toHaveBeenCalledWith(true);
     });
 
     it('selectColormap applies a leaf node but ignores a parent (has children)', () => {
