@@ -27,6 +27,7 @@ import { HistogramSampler } from './histogram-sampler';
 import { CachedImageData, WandToolService, WandToolHost } from '../../toolbar/wand-tool.service';
 import { BrushToolService, BrushOptions } from '../../toolbar/brush-tool.service';
 import { SamToolService } from '../../toolbar/sam-tool.service';
+import { SamPointToolService } from '../../toolbar/sam-point-tool.service';
 import { VertexEraserToolService, VertexEraserToolHost } from '../../toolbar/vertex-eraser-tool.service';
 import { ZoomToBoxToolService, ZoomToBoxToolHost } from '../../toolbar/zoom-to-box-tool.service';
 import { WandOptions } from '../../toolbar/wand.service';
@@ -237,6 +238,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     private wandTool: WandToolService,
     private brushTool: BrushToolService,
     private samTool: SamToolService,
+    private samPointTool: SamPointToolService,
     private eraserTool: VertexEraserToolService,
     private zoomToBoxTool: ZoomToBoxToolService,
     private store: VisualizerStore,
@@ -759,6 +761,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     // Tear down any active tool overlays (shared singletons).
     this.wandTool.setMode(false);
     this.brushTool.setMode(false);
+    this.samPointTool.setMode(false);
     this.eraserTool.setMode(false);
     if (this.overlay) {
       this.overlay.destroy();
@@ -1164,6 +1167,20 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     this.samTool.bindHost(this.wandHost);
     return this.samTool.segmentBoxes();
   }
+  setSamModel(id: string): void {
+    this.samTool.setModel(id);
+    this.samPointTool.setModel(id);
+  }
+  setSamPointMode(active: boolean): void {
+    if (active) {
+      this.viewer?.setMouseNavEnabled(false); // clicks add points, don't pan
+      this.viewportPixels = null;
+      this.samPointTool.bindHost(this.wandHost);
+    }
+    this.samPointTool.setMode(active);
+  }
+  commitSamPoints(): void { this.samPointTool.commit(); }
+  clearSamPoints(): void { this.samPointTool.clear(); }
 
   /** Build the wand/eraser host objects bound to this backend. Both tools run
    *  over OSD via the shared coordinate transform + a viewport pixel readback,

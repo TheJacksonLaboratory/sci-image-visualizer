@@ -18,6 +18,7 @@ import { WandService, WandOptions } from '../../toolbar/wand.service';
 import { CachedImageData, WandToolService, WandToolHost } from '../../toolbar/wand-tool.service';
 import { BrushToolService, BrushOptions } from '../../toolbar/brush-tool.service';
 import { SamToolService } from '../../toolbar/sam-tool.service';
+import { SamPointToolService } from '../../toolbar/sam-point-tool.service';
 import { VertexEraserToolService, VertexEraserToolHost } from '../../toolbar/vertex-eraser-tool.service';
 import { ZoomToBoxToolService } from '../../toolbar/zoom-to-box-tool.service';
 import {
@@ -186,6 +187,7 @@ export class PlotlyService implements IVisualizer {
               private wandTool: WandToolService,
               private brushTool: BrushToolService,
               private samTool: SamToolService,
+              private samPointTool: SamPointToolService,
               private vertexEraserTool: VertexEraserToolService,
               private zoomToBoxTool: ZoomToBoxToolService,
               private store: VisualizerStore,
@@ -1212,6 +1214,16 @@ export class PlotlyService implements IVisualizer {
     this.samTool.bindHost(this.wandHost);
     return this.samTool.segmentBoxes();
   }
+  public setSamModel(id: string): void {
+    this.samTool.setModel(id);
+    this.samPointTool.setModel(id);
+  }
+  public setSamPointMode(active: boolean): void {
+    if (active) this.samPointTool.bindHost(this.wandHost);
+    this.samPointTool.setMode(active);
+  }
+  public commitSamPoints(): void { this.samPointTool.commit(); }
+  public clearSamPoints(): void { this.samPointTool.clear(); }
 
   /**
    * Tool-host callback: apply the zoom-to-box selection. Stack mode does a

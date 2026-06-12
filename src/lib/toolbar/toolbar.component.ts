@@ -49,6 +49,9 @@ export class ToolbarComponent {
   /** Current image-smoothing state (drives the Smoothen toggle button look).
    *  `false` = nearest-neighbour (crisp raw pixels), the default. */
   @Input() imageSmoothingEnabled = false;
+  /** SAM model picker options + current selection (jit-ui#90 P1). */
+  @Input() samModels: { id: string; label: string }[] = [];
+  @Input() samModelId = '';
 
   @Output() selectPlotType = new EventEmitter<PlotType>();
   /** Intensity (LINE) mode: add another colored line ROI + inset trace. */
@@ -75,6 +78,8 @@ export class ToolbarComponent {
   @Output() deleteRegion = new EventEmitter<void>();
   /** Run box-prompted SAM segmentation on the drawn rectangles (jit-ui#90). */
   @Output() segmentRegions = new EventEmitter<void>();
+  /** SAM model picker (jit-ui#90 P1). */
+  @Output() samModelChange = new EventEmitter<string>();
   /** Convert the selected region to/from a bezier curve (toBezier / toPolygon). */
   @Output() toBezierRegion = new EventEmitter<void>();
   @Output() toPolygonRegion = new EventEmitter<void>();

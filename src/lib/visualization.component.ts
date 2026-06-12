@@ -13,6 +13,7 @@ import { RenderOrchestrator, SliceScrubber } from './render-orchestrator';
 import { PlotType, PlotTypeDescriptor } from './contracts/plot-type';
 import { ViewerFeature } from './contracts/capabilities.contract';
 import { IntensityProfile, IVisualizer, VISUALIZER } from './contracts/visualizer.contract';
+import { SAM_MODELS, DEFAULT_SAM_MODEL_ID } from './toolbar/sam-model-registry';
 import { RegionToolMode } from './contracts/region-overlay.contract';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from './contracts/toolbar-config';
 
@@ -81,6 +82,9 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   wandSensitivity = 2.0;
   /** Brush diameter in image-pixel coordinates (drives the painted disc size). */
   brushSize = 40;
+  /** SAM model picker options + current selection (jit-ui#90 P1). */
+  samModels = SAM_MODELS.map((m) => ({ id: m.id, label: m.label }));
+  samModelId = DEFAULT_SAM_MODEL_ID;
   /** Vertex eraser radius in image-pixel coordinates. */
   vertexEraserRadius = 20;
 
@@ -419,6 +423,12 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     this.keydownListener = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+      // SAM point mode: Enter commits the object, Esc clears the prompt.
+      if (this.activeDragMode === 'samPoint' && (event.key === 'Enter' || event.key === 'Escape')) {
+        this.ngZone.run(() =>
+          event.key === 'Enter' ? this.plotService.commitSamPoints() : this.plotService.clearSamPoints());
+        return;
+      }
       if (event.key === 'Delete' || event.key === 'Backspace' || event.key === 'd' || event.key === 'D') {
         this.ngZone.run(() => this.deleteRegion());
       } else if (event.key === '+' || event.key === '=') {
@@ -814,6 +824,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     this.plotService.setZoomToBoxMode(active === 'zoomToBox');
     this.plotService.setWandMode(active === 'wand', { sensitivity: this.wandSensitivity });
     this.plotService.setBrushMode(active === 'brush', { size: this.brushSize });
+    this.plotService.setSamPointMode(active === 'samPoint');
     this.plotService.setVertexEraserMode(active === 'eraseVertex');
     if (active === 'eraseVertex') {
       this.plotService.setVertexEraserRadius(this.vertexEraserRadius);
@@ -877,6 +888,12 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   /** Box-prompted SAM segmentation of the drawn rectangles (jit-ui#90). */
   segmentRegions() {
     void this.plotService.segmentRectangles();
+  }
+
+  /** Pick the SAM model the segment tools use (jit-ui#90 P1). */
+  onSamModelChange(id: string) {
+    this.samModelId = id;
+    this.plotService.setSamModel(id);
   }
 
   /** Convert the selected region to a smooth bezier curve. */
@@ -1094,6 +1111,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     this.plotService.setZoomToBoxMode(false);
     this.plotService.setWandMode(false);
     this.plotService.setBrushMode(false);
+    this.plotService.setSamPointMode(false);
     this.plotService.setVertexEraserMode(false);
   }
 }

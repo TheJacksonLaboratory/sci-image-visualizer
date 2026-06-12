@@ -160,6 +160,13 @@ export interface IToolController {
   /** Box-prompted SAM segmentation: segment every rectangle region into masks.
    *  Returns the number of mask regions added. (jit-ui#90) */
   segmentRectangles(): Promise<number>;
+  /** Choose the registered SAM model the segment tools use (jit-ui#90 P1). */
+  setSamModel(id: string): void;
+  /** Toggle the interactive SAM point-prompt tool (click = +point, Shift = -). */
+  setSamPointMode(active: boolean): void;
+  /** Finalise / discard the in-progress SAM point object. */
+  commitSamPoints(): void;
+  clearSamPoints(): void;
 }
 
 /**
