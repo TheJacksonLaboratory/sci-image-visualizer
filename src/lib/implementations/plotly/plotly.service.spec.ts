@@ -305,3 +305,86 @@ describe('PlotlyService region glue (Plotly-specific)', () => {
     expect(service.getShapes().map((s: any) => s.name)).toEqual(['s0']);
   });
 });
+
+describe('PlotlyService viewport + stack-state methods', () => {
+  let service: PlotlyService;
+  let relayout: jest.SpyInstance;
+  let restyle: jest.SpyInstance;
+  let purge: jest.SpyInstance;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule],
+      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+    });
+    service = TestBed.inject(PlotlyService);
+    (service as any).plotDiv = 'plot';
+    (service as any).imageInfo = { showStack: true, isGrayscale: true } as IImageInfo;
+    document.body.innerHTML = '<div id="plot"></div>';
+    relayout = jest.spyOn(Plotly, 'relayout').mockResolvedValue({} as any);
+    restyle = jest.spyOn(Plotly as any, 'restyle').mockResolvedValue({} as any);
+    purge = jest.spyOn(Plotly, 'purge').mockImplementation(() => undefined as any);
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('setDragMode relayouts the drag mode', () => {
+    service.setDragMode('pan');
+    expect(relayout).toHaveBeenCalledWith('plot', { dragmode: 'pan' });
+  });
+
+  it('autoscale relayouts to autorange and clears the zoom box', () => {
+    (service as any).zoomCoordinates = [1, 2, 3, 4];
+    service.autoscale();
+    expect((service as any).zoomCoordinates).toEqual([]);
+    expect(relayout).toHaveBeenCalledWith('plot', expect.objectContaining({ 'xaxis.autorange': true }));
+  });
+
+  it('purgePlot purges the plot div', () => {
+    service.purgePlot();
+    expect(purge).toHaveBeenCalledWith('plot');
+  });
+
+  it('setColormap restyles the colorscale and writes the store', () => {
+    service.setColormap({ data: { value: 'Viridis' } } as any);
+    expect(restyle).toHaveBeenCalledWith('plot', { colorscale: ['Viridis'] });
+  });
+
+  it('setReverseScale restyles reversescale', () => {
+    service.setReverseScale(true);
+    expect(restyle).toHaveBeenCalledWith('plot', { reversescale: true });
+  });
+
+  it('setShowStack(false) resets the slice index and relayouts', () => {
+    service.setShowStack(false);
+    expect((service as any).imageInfo.showStack).toBe(false);
+    expect(relayout).toHaveBeenCalledWith('plot', { showstack: false });
+  });
+
+  it('stack-loading flags round-trip through their subjects', () => {
+    const vals: boolean[] = [];
+    service.isStackLoading$().subscribe((v) => vals.push(v));
+    service.setStackLoading(true);
+    expect(vals[vals.length - 1]).toBe(true);
+  });
+
+  it('exposes the stack-progress and autoscale event streams', () => {
+    expect(service.getStackLoadingProgress$()).toBeDefined();
+    expect(service.getAutoscaleEvent()).toBeDefined();
+  });
+
+  it('navigator + smoothing toggles are safe no-ops on the Plotly backend', () => {
+    expect(() => {
+      service.setNavigatorVisible(false);
+      service.setImageSmoothingEnabled(false);
+    }).not.toThrow();
+  });
+
+  it('getViewportChange$ is an empty stream (OSD-only signal)', () => {
+    let completed = false;
+    let emitted = false;
+    service.getViewportChange$().subscribe({ next: () => (emitted = true), complete: () => (completed = true) });
+    expect(emitted).toBe(false);
+    expect(completed).toBe(true);
+  });
+});

@@ -14,15 +14,15 @@ export default {
   // GitHub job summary table; lcov: HTML + machine-readable report.
   coverageReporters: ['text-summary', 'json-summary', 'lcov'],
   // Ratchet gate: CI (which runs with --codeCoverage) fails if coverage drops
-  // below these floors. Set just under the current numbers (lines 69% /
-  // statements 67% / functions 60% / branches 51%) so normal fluctuation
+  // below these floors. Set just under the current numbers (lines 70% /
+  // statements 68% / functions 61% / branches 51.8%) so normal fluctuation
   // doesn't trip it; raise them as coverage climbs.
   coverageThreshold: {
     global: {
-      statements: 66,
-      branches: 50,
-      functions: 59,
-      lines: 68,
+      statements: 67,
+      branches: 51,
+      functions: 60,
+      lines: 69,
     },
   },
   transform: {

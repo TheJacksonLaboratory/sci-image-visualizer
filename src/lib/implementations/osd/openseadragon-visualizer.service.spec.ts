@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
-import { firstValueFrom } from 'rxjs';
+import { EMPTY, firstValueFrom } from 'rxjs';
 
 import { OpenSeadragonVisualizerService } from './openseadragon-visualizer.service';
 import { VIZ_PORT_STUBS } from '../../testing/viz-port-stubs';
@@ -128,5 +128,60 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
 
   it('getTrueImageSize is null before any descriptor is loaded', () => {
     expect(service.getTrueImageSize()).toBeNull();
+  });
+});
+
+describe('OpenSeadragonVisualizerService (tiled load via /tiles/info)', () => {
+  let service: OpenSeadragonVisualizerService;
+  let http: HttpTestingController;
+
+  const descriptor = {
+    width: 1024, height: 768, tileSize: 256, z: 1, channels: 1, realLevels: 1,
+    levels: [{ res: 0, width: 1024, height: 768 }],
+  };
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule],
+      providers: [
+        OpenSeadragonVisualizerService,
+        ...VIZ_PORT_STUBS,
+        // Override the tile-access stub so a "file is selected" — drives the
+        // server tile path instead of the no-image early return.
+        {
+          provide: TILE_ACCESS_PORT,
+          useValue: {
+            getSelectedInfoB64: () => 'INFO64',
+            getAuthHeaders: () => Promise.resolve({ Authorization: 'Bearer t' }),
+            zoomOnRegion: () => EMPTY,
+            selectDiagramDisplay: () => undefined,
+          },
+        },
+      ],
+    });
+    service = TestBed.inject(OpenSeadragonVisualizerService);
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => {
+    service.unsubscribe();
+    http.match((req) => req.url.includes('colormap-luts')).forEach((r) => r.flush({}));
+    http.verify();
+  });
+
+  it('polls GET /tiles/info with the selected file info and returns the descriptor', async () => {
+    const pending = service.load({ fileName: 'big.svs' } as any, 2);
+    // load() awaits getAuthHeaders() before issuing the request — let that
+    // microtask settle so the /tiles/info GET is registered.
+    await new Promise((r) => setTimeout(r, 0));
+    const req = http.expectOne((r) => r.url.includes('tiles/info') && r.url.includes('INFO64'));
+    expect(req.request.method).toBe('GET');
+    req.flush(descriptor);
+
+    const loaded = await pending;
+    expect(loaded.descriptor).toEqual(descriptor);
+    expect(loaded.infoB64).toBe('INFO64');
+    expect(loaded.z).toBe(2);
+    expect(loaded.simple).toBeUndefined(); // tiled path, not simple-image
   });
 });
