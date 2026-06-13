@@ -3,8 +3,9 @@ import { SamModelDef } from '../contracts/sam.contract';
 /**
  * Registry of promptable SAM models for the browser segment tool.
  *
- * micro-sam (microscopy-finetuned, promptable) is the first entry; SAM3 and
- * pathoSAM slot in here as their quantized ONNX exports are published. The
+ * micro-sam (microscopy-finetuned, promptable) and patho-sam (histopathology-
+ * finetuned) are entries; SAM3 slots in here once its quantized ONNX export and
+ * a `variant: 'sam3'` decoder path are published. The
  * automatic cellpose-SAM model is intentionally NOT here — it's not promptable
  * and lives in the processing-pipeline's cellpose engine as the automatic tool.
  *
@@ -31,6 +32,15 @@ export const SAM_MODELS: SamModelDef[] = [
   {
     id: 'microsam-vit-b-lm',
     label: 'micro-sam ViT-B',
+    encoderUrl: '',
+    decoderUrl: '',
+    variant: 'sam1',
+    inputSize: 1024,
+    microscopy: true,
+  },
+  {
+    id: 'patho-sam-vit-b',
+    label: 'patho-sam ViT-B',
     encoderUrl: '',
     decoderUrl: '',
     variant: 'sam1',

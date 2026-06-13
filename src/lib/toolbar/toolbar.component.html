@@ -384,19 +384,24 @@
         <div style="max-width: 24rem; line-height: 1.4">
           <div class="font-bold mb-1">SAM models</div>
           <p class="mt-0 mb-2">
-            Both are <b>micro-sam</b> checkpoints finetuned for light microscopy. They differ only
-            in the <i>image encoder</i> (the heavy once-per-image step) — box and point prompting
-            behave the same.
+            All are promptable Segment Anything models finetuned for biomedical images. They differ
+            in the <i>image encoder</i> (the heavy once-per-image step) and the training domain —
+            box and point prompting behave the same.
           </p>
           <div class="mb-2">
             <div class="font-bold">micro-sam ViT-T <span class="font-normal">(default)</span></div>
-            <div>TinyViT encoder, ~14&nbsp;MB, very fast, runs on WASM. Good mask quality —
-              best for quick interactive work and many/large objects.</div>
+            <div>Light-microscopy finetuned. TinyViT encoder, ~14&nbsp;MB, very fast, runs on WASM.
+              Good mask quality — best for quick interactive work and many/large objects.</div>
           </div>
           <div class="mb-2">
             <div class="font-bold">micro-sam ViT-B</div>
-            <div>ViT-Base encoder, ~172&nbsp;MB, slower, GPU-accelerated (WebGPU). Highest
-              accuracy — reach for it when ViT-T misses subtle or overlapping boundaries.</div>
+            <div>Light-microscopy finetuned. ViT-Base encoder, ~172&nbsp;MB, slower, GPU-accelerated
+              (WebGPU). Highest accuracy — when ViT-T misses subtle or overlapping boundaries.</div>
+          </div>
+          <div class="mb-2">
+            <div class="font-bold">patho-sam ViT-B</div>
+            <div>Histopathology finetuned (H&amp;E / stained tissue). ViT-Base encoder, GPU-accelerated.
+              Use it for pathology slides — it segments tissue/nuclei better than the microscopy models.</div>
           </div>
           <div class="text-sm" style="opacity: 0.75">
             The choice applies to both the box and point tools. Each tool loads its own encoder,
@@ -550,9 +555,10 @@
       <kbd>Enter</kbd> commits it.</li>
     <li>"<b>Model picker</b>" <i class="pi pi-chevron-down"></i>: the dropdown attached to the
       Segment button chooses the SAM model — <b>micro-sam ViT-T</b> (default; small, fast) or
-      <b>micro-sam ViT-B</b> (larger, highest accuracy). The choice applies to <i>both</i> the box
-      and point tools. The <i class="pi pi-info-circle"></i> info button next to it explains the
-      trade-off.</li>
+      <b>micro-sam ViT-B</b> (larger, highest accuracy) for light microscopy, or
+      <b>patho-sam ViT-B</b> for histopathology (H&amp;E / stained tissue). The choice applies to
+      <i>both</i> the box and point tools. The <i class="pi pi-info-circle"></i> info button next
+      to it explains the trade-off.</li>
     <li>"<b>Cellpose</b>" <i class="pi pi-table"></i>: draw rectangles, then click Cellpose to
       automatically segment every cell inside each rectangle (client-side cellpose-SAM) — one
       region per detected cell. No clicking on individual cells needed.</li>
