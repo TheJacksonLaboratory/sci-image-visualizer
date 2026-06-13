@@ -141,10 +141,14 @@ export class OsdRegionOverlay implements IRegionOverlay {
     }
   }
 
-  /** Modes where the selected polygon's vertex handles should be shown. */
-  private get isVertexEditMode(): boolean {
-    return this.mode === 'select' || this.mode === 'move'
-      || this.mode === 'addpoint' || this.mode === 'deletepoint';
+  /** Whether the selected region's vertices/handles should be drawn. Shown
+   *  whenever a region is selected — including `none` (display) mode and while
+   *  another tool (wand, brush, SAM…) is active — so a selection always reveals
+   *  its vertices. Suppressed only while actively drawing a brand-new shape,
+   *  where stray handles would be noise. */
+  private get showsSelectedVertices(): boolean {
+    return this.mode !== 'drawrect' && this.mode !== 'drawpolygon'
+      && this.mode !== 'drawclosedpath' && this.mode !== 'drawopenpath';
   }
 
   destroy(): void {
@@ -182,13 +186,13 @@ export class OsdRegionOverlay implements IRegionOverlay {
     // vertices. Bezier regions also get their cubic
     // control handles (tangent lines + control points), mirroring paper.js's
     // fullySelected rendering.
-    if (this.isVertexEditMode) {
+    if (this.showsSelectedVertices) {
       const sel = this.selectedRegionInfo();
-      if (sel && sel.region.bounds instanceof Polygon) {
-        const b = sel.region.bounds;
-        // Handles/vertices take the region's own colour (not the global shape
-        // colour) so they match the shape they belong to.
-        const color = sel.region.color || this.store.getShapeColor();
+      const b = sel?.region.bounds;
+      // Handles/vertices take the region's own colour (not the global shape
+      // colour) so they match the shape they belong to.
+      const color = sel ? sel.region.color || this.store.getShapeColor() : '';
+      if (b instanceof Polygon) {
         if (b.bezier) {
           this.drawBezierHandles(b, color);
         } else {
@@ -196,6 +200,16 @@ export class OsdRegionOverlay implements IRegionOverlay {
             const q = this.toPx(b.xpoints[i], b.ypoints[i]);
             this.svg.appendChild(this.vertexMarker(q.x, q.y, false, color));
           }
+        }
+      } else if (b instanceof Rectangle) {
+        // The four corners as grab/resize handles.
+        const corners: [number, number][] = [
+          [b.x, b.y], [b.x + b.width, b.y],
+          [b.x + b.width, b.y + b.height], [b.x, b.y + b.height],
+        ];
+        for (const [cx, cy] of corners) {
+          const q = this.toPx(cx, cy);
+          this.svg.appendChild(this.vertexMarker(q.x, q.y, false, color));
         }
       }
     }

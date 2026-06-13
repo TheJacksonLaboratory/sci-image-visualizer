@@ -148,6 +148,39 @@ describe('OsdRegionOverlay — vertex tools', () => {
     expect(markers.length).toBeGreaterThanOrEqual(3); // the three anchor handles
   });
 
+  it('shows the selected polygon\'s vertices in none (display) mode too', () => {
+    const r = triRegion();
+    r.color = '#00bcd4';
+    store.addRegion(r);          // selects it
+    overlay.setMode('none');     // no tool active — selection should still reveal vertices
+    const svg = (overlay as any).svg as SVGSVGElement;
+    const markers = Array.from(svg.querySelectorAll('circle'))
+      .filter(c => c.getAttribute('stroke') === '#00bcd4');
+    expect(markers.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('shows a selected rectangle\'s four corner handles', () => {
+    const r = rectRegion();
+    r.color = '#00bcd4';
+    store.addRegion(r);          // selects it
+    overlay.setMode('none');
+    const svg = (overlay as any).svg as SVGSVGElement;
+    const markers = Array.from(svg.querySelectorAll('circle'))
+      .filter(c => c.getAttribute('stroke') === '#00bcd4');
+    expect(markers.length).toBe(4);
+  });
+
+  it('hides vertices while drawing a brand-new shape', () => {
+    const r = triRegion();
+    r.color = '#00bcd4';
+    store.addRegion(r);
+    overlay.setMode('drawrect'); // mid-draw → no stray handles
+    const svg = (overlay as any).svg as SVGSVGElement;
+    const markers = Array.from(svg.querySelectorAll('circle'))
+      .filter(c => c.getAttribute('stroke') === '#00bcd4');
+    expect(markers.length).toBe(0);
+  });
+
   it('setSelectedBezier toggles the bezier flag on the selected region', () => {
     const id = store.addRegion(triRegion()); // addRegion selects it
     overlay.setSelectedBezier(true);
