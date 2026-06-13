@@ -47,8 +47,15 @@ export class SamToolService {
 
   /** Choose the registered model to use; invalidates any cached embedding. */
   setModel(id: string): void {
-    this.model = getSamModel(id);
+    const next = getSamModel(id);
+    if (next.id === this.model.id) return;
+    this.model = next;
     this.invalidateEmbedding();
+    // Drop the loaded session so the next run reloads the newly-picked model's
+    // ONNX pair — ensureSession() returns the cached session as-is, so without
+    // this a model switch would keep running the previous model.
+    this.session?.dispose();
+    this.session = null;
   }
 
   /** Drop the cached embedding (e.g. after the image/slice changes). */

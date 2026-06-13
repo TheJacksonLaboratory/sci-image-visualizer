@@ -115,4 +115,20 @@ describe('SamToolService', () => {
     expect(fresh.status$.value).toMatch(/not configured/i);
     expect(get()).toHaveLength(1); // nothing added
   });
+
+  it('disposes the cached session on a model switch so the new model reloads', () => {
+    // Two configured models to switch between.
+    setSamModelUrls('microsam-vit-t-lm', 'enc-t', 'dec-t');
+    setSamModelUrls('microsam-vit-b-lm', 'enc-b', 'dec-b');
+    tool.setModel('microsam-vit-t-lm');        // establish a known current model
+    const session = fakeSession();
+    const disposeSpy = jest.spyOn(session, 'dispose');
+    tool.useSession(session);                  // cache a session for the current model
+
+    tool.setModel('microsam-vit-t-lm');        // same id → keep the cached session
+    expect(disposeSpy).not.toHaveBeenCalled();
+
+    tool.setModel('microsam-vit-b-lm');        // switch → drop the stale session
+    expect(disposeSpy).toHaveBeenCalledTimes(1);
+  });
 });

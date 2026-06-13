@@ -46,9 +46,15 @@ export class SamPointToolService {
   bindHost(host: WandToolHost): void { this.host = host; }
 
   setModel(id: string): void {
-    this.model = getSamModel(id);
+    const next = getSamModel(id);
+    if (next.id === this.model.id) return;
+    this.model = next;
     this.embedding = null;
     this.embeddingKey = null;
+    // Drop the loaded session so the next run reloads the newly-picked model
+    // (ensureSession() returns the cached session as-is otherwise).
+    this.session?.dispose();
+    this.session = null;
   }
 
   /** Test seam: inject a fake/alternate session. */

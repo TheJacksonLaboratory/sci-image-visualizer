@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges } from '@angular/core';
 import { MenuItem } from 'primeng/api';
 
 import { IImageInfo } from '../contracts/image.contract';
@@ -24,7 +24,7 @@ import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from '../contracts/toolbar-c
   templateUrl: './toolbar.component.html',
   styleUrls: ['./toolbar.component.scss'],
 })
-export class ToolbarComponent {
+export class ToolbarComponent implements OnChanges {
   /** Current image (gates which control groups are shown). */
   @Input() imageInfo: IImageInfo | undefined;
   /** Plot types the active backend advertises. */
@@ -106,15 +106,26 @@ export class ToolbarComponent {
 
   displayHelpDialog = false;
 
-  /** Model picker for the Segment split-button's dropdown menu. The active
-   *  model (`samModelId`) is marked with a check; selecting an item emits
-   *  `samModelChange` (jit-ui#90 P1). */
-  get samMenuItems(): MenuItem[] {
-    return this.samModels.map((m) => ({
-      label: m.label,
-      icon: m.id === this.samModelId ? 'pi pi-check' : 'pi pi-fw',
-      command: () => this.samModelChange.emit(m.id),
-    }));
+  /** Model picker for the Segment button's dropdown menu. The active model
+   *  (`samModelId`) is marked with a check; selecting an item emits
+   *  `samModelChange` (jit-ui#90 P1).
+   *
+   *  Held as a stable array (rebuilt only when `samModels`/`samModelId` change),
+   *  NOT a getter: a getter returns a fresh array with new `command` closures on
+   *  every change-detection tick, which makes the bound `p-menu` overlay rebuild
+   *  its DOM mid-interaction and swallow the click on a menu item. */
+  samMenuItems: MenuItem[] = [];
+
+  /** Rebuild the SAM model menu when the model list or active selection
+   *  changes (keeps the array reference stable across other CD ticks). */
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['samModels'] || changes['samModelId']) {
+      this.samMenuItems = this.samModels.map((m) => ({
+        label: m.label,
+        icon: m.id === this.samModelId ? 'pi pi-check' : 'pi pi-fw',
+        command: () => this.samModelChange.emit(m.id),
+      }));
+    }
   }
 
   /** The Image plot type renders as a natively pan/zoom-able raster, so the
