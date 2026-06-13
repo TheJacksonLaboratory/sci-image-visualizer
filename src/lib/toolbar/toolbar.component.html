@@ -403,6 +403,12 @@
             <div>Histopathology finetuned (H&amp;E / stained tissue). ViT-Base encoder, GPU-accelerated.
               Use it for pathology slides — it segments tissue/nuclei better than the microscopy models.</div>
           </div>
+          <div class="mb-2">
+            <div class="font-bold">patho-sam ViT-B (int8)</div>
+            <div>Same model, int8-quantized — ~100&nbsp;MB vs ~180&nbsp;MB (smaller download). Runs on
+              WASM (slower encode than the fp16 version); masks are near-identical. Pick it on slow
+              connections.</div>
+          </div>
           <div class="text-sm" style="opacity: 0.75">
             The choice applies to both the box and point tools. Each tool loads its own encoder,
             so the first click after switching re-encodes once.

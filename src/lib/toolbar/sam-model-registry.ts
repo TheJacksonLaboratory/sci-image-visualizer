@@ -47,6 +47,19 @@ export const SAM_MODELS: SamModelDef[] = [
     inputSize: 1024,
     microscopy: true,
   },
+  {
+    id: 'patho-sam-vit-b-int8',
+    label: 'patho-sam ViT-B (int8)',
+    encoderUrl: '',
+    decoderUrl: '',
+    variant: 'sam1',
+    inputSize: 1024,
+    microscopy: true,
+    // int8 dynamic-quantized encoder (~100 MB vs ~180 MB fp16, IoU ~0.99 on the
+    // sanity test). onnxruntime-web's WebGPU EP doesn't support int8 matmul, so
+    // it runs on WASM — smaller download, slower encode than the fp16 entry.
+    encoderProviders: ['wasm'],
+  },
 ];
 
 /** Initial default model id (overridden at runtime once the host configures a
