@@ -14,6 +14,7 @@ import { PlotType, PlotTypeDescriptor } from './contracts/plot-type';
 import { ViewerFeature } from './contracts/capabilities.contract';
 import { IntensityProfile, IVisualizer, VISUALIZER } from './contracts/visualizer.contract';
 import { SAM_MODELS, DEFAULT_SAM_MODEL_ID } from './toolbar/sam-model-registry';
+import { SamToolService } from './toolbar/sam-tool.service';
 import { RegionToolMode } from './contracts/region-overlay.contract';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from './contracts/toolbar-config';
 
@@ -167,6 +168,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     private ngZone: NgZone,
     private cdr: ChangeDetectorRef,
     private session: VisualizerStore,
+    private samTool: SamToolService,
   ) {
     this.colormapsOptions = plotService.getColormapOptions();
     this.computePlotTypeOptions();
@@ -886,8 +888,28 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   }
 
   /** Box-prompted SAM segmentation of the drawn rectangles (jit-ui#90). */
-  segmentRegions() {
-    void this.plotService.segmentRectangles();
+  async segmentRegions() {
+    // Mirror the tool's status into a toast so the action isn't silent — the
+    // first run downloads the encoder (~170 MB) and inference can take a moment.
+    let last = '';
+    const sub = this.samTool.status$.subscribe((msg) => {
+      if (msg && msg !== last) { last = msg; this.messageService.add({ severity: 'info', summary: 'SAM', detail: msg }); }
+    });
+    this.messageService.add({
+      severity: 'info', summary: 'SAM',
+      detail: 'Segmenting… the first run downloads the model (~170 MB), please wait.',
+    });
+    try {
+      const n = await this.plotService.segmentRectangles();
+      this.messageService.add({
+        severity: n > 0 ? 'success' : 'warn', summary: 'SAM',
+        detail: this.samTool.status$.value || (n > 0 ? `Added ${n} region(s).` : 'No regions added.'),
+      });
+    } catch (e) {
+      this.messageService.add({ severity: 'error', summary: 'SAM failed', detail: String(e) });
+    } finally {
+      sub.unsubscribe();
+    }
   }
 
   /** Pick the SAM model the segment tools use (jit-ui#90 P1). */

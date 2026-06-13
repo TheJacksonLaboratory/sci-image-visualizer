@@ -1,3 +1,5 @@
+import { BehaviorSubject } from 'rxjs';
+
 import { VisualizationComponent } from './visualization.component';
 import { VisualizerStore } from './visualizer-store.service';
 
@@ -67,6 +69,7 @@ describe('VisualizationComponent (UI shell)', () => {
       { run: (fn: () => void) => fn(), runOutsideAngular: (fn: () => void) => fn() } as any, // NgZone
       { detectChanges: jest.fn(), markForCheck: jest.fn() } as any, // ChangeDetectorRef
       new VisualizerStore(),
+      { status$: new BehaviorSubject(''), busy$: new BehaviorSubject(false) } as any, // SamToolService
     );
   });
 
