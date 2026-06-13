@@ -9,6 +9,46 @@ import { buildDecoderPrompt, binarizeMask, bestMaskIndex } from './sam-prompt';
 const PIXEL_MEAN = [123.675, 116.28, 103.53];
 const PIXEL_STD = [58.395, 57.12, 57.375];
 
+const MODEL_CACHE = 'sam-onnx';
+
+/**
+ * Fetch an ONNX model as an ArrayBuffer, reporting download progress (0..1) and
+ * caching it in the Cache API so it isn't re-downloaded on later loads. On a
+ * cache hit, progress jumps to 1. Falls back to a plain fetch if streaming or
+ * the Cache API isn't available.
+ */
+async function fetchModel(url: string, onProgress?: (f: number) => void): Promise<ArrayBuffer> {
+  const cache = typeof caches !== 'undefined' ? await caches.open(MODEL_CACHE).catch(() => null) : null;
+  const hit = cache ? await cache.match(url) : null;
+  if (hit) { onProgress?.(1); return await hit.arrayBuffer(); }
+
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`fetch ${url} failed: HTTP ${resp.status}`);
+  const total = Number(resp.headers.get('content-length')) || 0;
+  if (!resp.body || !total) {
+    const buf = await resp.arrayBuffer();
+    onProgress?.(1);
+    if (cache) await cache.put(url, new Response(buf)).catch(() => undefined);
+    return buf;
+  }
+  const reader = resp.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    onProgress?.(received / total);
+  }
+  const out = new Uint8Array(received);
+  let off = 0;
+  for (const c of chunks) { out.set(c, off); off += c.length; }
+  if (cache) await cache.put(url, new Response(out.slice(), { headers: { 'content-length': String(received) } })).catch(() => undefined);
+  onProgress?.(1);
+  return out.buffer;
+}
+
 /**
  * onnxruntime-web implementation of {@link ISamSession} — the production SAM
  * runtime. Two ORT sessions: a heavy encoder (WebGPU preferred, WASM fallback)
@@ -26,16 +66,19 @@ export class OnnxSamSession implements ISamSession {
   private decoder: ort.InferenceSession | null = null;
   private model: SamModelDef | null = null;
 
-  async loadModel(model: SamModelDef): Promise<void> {
+  async loadModel(model: SamModelDef, onProgress?: (fraction: number) => void): Promise<void> {
     if (!model.encoderUrl || !model.decoderUrl) {
       throw new Error(`SAM model "${model.id}" has no ONNX URLs configured.`);
     }
     this.model = model;
     ort.env.wasm.wasmPaths = '/assets/ort/';
     const eps: string[] = this.hasWebGpu() ? ['webgpu', 'wasm'] : ['wasm'];
-    this.encoder = await ort.InferenceSession.create(model.encoderUrl, { executionProviders: eps });
-    // The decoder is light; WASM is fine and avoids a second WebGPU context.
-    this.decoder = await ort.InferenceSession.create(model.decoderUrl, { executionProviders: ['wasm'] });
+    // Fetch the (heavy) encoder ourselves so we can report download progress and
+    // cache it in the Cache API; the decoder is small so fetch it plainly.
+    const encBuf = await fetchModel(model.encoderUrl, onProgress);
+    const decBuf = await fetchModel(model.decoderUrl);
+    this.encoder = await ort.InferenceSession.create(encBuf, { executionProviders: eps });
+    this.decoder = await ort.InferenceSession.create(decBuf, { executionProviders: ['wasm'] });
   }
 
   isLoaded(): boolean {

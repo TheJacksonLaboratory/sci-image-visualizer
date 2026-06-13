@@ -69,7 +69,12 @@ describe('VisualizationComponent (UI shell)', () => {
       { run: (fn: () => void) => fn(), runOutsideAngular: (fn: () => void) => fn() } as any, // NgZone
       { detectChanges: jest.fn(), markForCheck: jest.fn() } as any, // ChangeDetectorRef
       new VisualizerStore(),
-      { status$: new BehaviorSubject(''), busy$: new BehaviorSubject(false) } as any, // SamToolService
+      // SamToolService
+      {
+        status$: new BehaviorSubject(''),
+        busy$: new BehaviorSubject(false),
+        progress$: new BehaviorSubject(-1),
+      } as any,
     );
   });
 

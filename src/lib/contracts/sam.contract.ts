@@ -62,7 +62,8 @@ export interface SamMaskResult {
  * per image, `decode` per prompt.
  */
 export interface ISamSession {
-  loadModel(model: SamModelDef): Promise<void>;
+  /** Load the model; `onProgress` reports encoder-download fraction (0..1). */
+  loadModel(model: SamModelDef, onProgress?: (fraction: number) => void): Promise<void>;
   isLoaded(): boolean;
   /** Run the encoder on an RGBA image; returns a cacheable embedding. */
   embed(image: { data: Uint8ClampedArray; width: number; height: number }): Promise<SamEmbedding>;

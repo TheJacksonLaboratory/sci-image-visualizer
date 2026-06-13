@@ -1,3 +1,15 @@
+<!-- SAM toast: live status + encoder-download progress bar (jit-ui#90). Sticky
+     while a segment runs; stays open until the bar reaches 100% and the run ends. -->
+<p-toast key="sam" position="bottom-right">
+  <ng-template let-message pTemplate="message">
+    <div style="flex: 1; min-width: 16rem">
+      <div class="font-bold mb-1">{{ message.summary }}</div>
+      <div>{{ samStatus || message.detail }}</div>
+      <p-progressBar *ngIf="samDownloading" [value]="samProgress" styleClass="mt-2"></p-progressBar>
+    </div>
+  </ng-template>
+</p-toast>
+
 <!-- Toolbar dock: docked across the top by default; drag the handle to detach
      it into a floating, movable window (frees the top row for the image). -->
 <div class="toolbar-dock" [class.floating]="toolbarFloating"

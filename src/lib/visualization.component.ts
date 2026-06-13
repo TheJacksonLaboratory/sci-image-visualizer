@@ -86,6 +86,10 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   /** SAM model picker options + current selection (jit-ui#90 P1). */
   samModels = SAM_MODELS.map((m) => ({ id: m.id, label: m.label }));
   samModelId = getDefaultSamModelId();
+  /** SAM download/segment toast state (bound by the `sam` p-toast template). */
+  samStatus = '';
+  samProgress = 0;          // 0..100, encoder download
+  samDownloading = false;
   /** Vertex eraser radius in image-pixel coordinates. */
   vertexEraserRadius = 20;
 
@@ -887,18 +891,22 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     this.plotService.deleteActiveShape();
   }
 
-  /** Box-prompted SAM segmentation of the drawn rectangles (jit-ui#90). */
+  /** Box-prompted SAM segmentation of the drawn rectangles (jit-ui#90). A sticky
+   *  `sam` toast shows live status + a download progress bar (first run pulls the
+   *  encoder, ~170 MB); it stays open until the run finishes (bar hits 100%). */
   async segmentRegions() {
-    // Mirror the tool's status into a toast so the action isn't silent — the
-    // first run downloads the encoder (~170 MB) and inference can take a moment.
-    let last = '';
-    const sub = this.samTool.status$.subscribe((msg) => {
-      if (msg && msg !== last) { last = msg; this.messageService.add({ severity: 'info', summary: 'SAM', detail: msg }); }
+    this.samStatus = 'Starting…';
+    this.samProgress = 0;
+    this.samDownloading = false;
+    const psub = this.samTool.progress$.subscribe((f) => {
+      this.samDownloading = f >= 0 && f < 1;
+      if (f >= 0) this.samProgress = Math.min(100, Math.round(f * 100));
+      this.cdr.detectChanges();
     });
-    this.messageService.add({
-      severity: 'info', summary: 'SAM',
-      detail: 'Segmenting… the first run downloads the model (~170 MB), please wait.',
+    const ssub = this.samTool.status$.subscribe((m) => {
+      if (m) { this.samStatus = m; this.cdr.detectChanges(); }
     });
+    this.messageService.add({ key: 'sam', sticky: true, severity: 'info', summary: 'SAM' });
     try {
       const n = await this.plotService.segmentRectangles();
       this.messageService.add({
@@ -908,7 +916,11 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     } catch (e) {
       this.messageService.add({ severity: 'error', summary: 'SAM failed', detail: String(e) });
     } finally {
-      sub.unsubscribe();
+      this.messageService.clear('sam');
+      psub.unsubscribe();
+      ssub.unsubscribe();
+      this.samDownloading = false;
+      this.samProgress = 0;
     }
   }
 

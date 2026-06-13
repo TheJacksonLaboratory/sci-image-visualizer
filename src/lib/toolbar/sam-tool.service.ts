@@ -35,6 +35,8 @@ export class SamToolService {
   /** Status text + busy flag for a spinner / toast in the host. */
   readonly status$ = new BehaviorSubject<string>('');
   readonly busy$ = new BehaviorSubject<boolean>(false);
+  /** Encoder-download progress: -1 = not downloading, 0..1 = downloading. */
+  readonly progress$ = new BehaviorSubject<number>(-1);
 
   constructor(private wandService: WandService) {}
 
@@ -145,6 +147,7 @@ export class SamToolService {
       return 0;
     } finally {
       this.busy$.next(false);
+      this.progress$.next(-1);
     }
   }
 
@@ -176,7 +179,8 @@ export class SamToolService {
     // initial bundle — only when segmentation actually runs.
     const { OnnxSamSession } = await import('./onnx-sam-session');
     const session = new OnnxSamSession();
-    await session.loadModel(this.model);
+    this.progress$.next(0);
+    await session.loadModel(this.model, (f) => this.progress$.next(f));
     this.session = session;
     return session;
   }
