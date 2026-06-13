@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 
 import { ToolbarModule } from 'primeng/toolbar';
 import { ButtonModule } from 'primeng/button';
-import { SplitButtonModule } from 'primeng/splitbutton';
+import { MenuModule } from 'primeng/menu';
 import { DropdownModule } from 'primeng/dropdown';
 import { SliderModule } from 'primeng/slider';
 import { TreeSelectModule } from 'primeng/treeselect';
@@ -56,7 +56,7 @@ import { CHANNEL_HISTOGRAM_API } from './contracts/channel-histogram-api.contrac
     FormsModule,
     ToolbarModule,
     ButtonModule,
-    SplitButtonModule,
+    MenuModule,
     DropdownModule,
     SliderModule,
     TreeSelectModule,

@@ -333,24 +333,32 @@
       <!-- SAM (jit-ui#90): box-prompt segment, interactive point prompts, and a
            model picker. -->
       <span class="toolbar-separator"></span>
-      <!-- Split-button: the main part runs box-prompt SAM segmentation; the
-           dropdown arrow opens the model picker (active model is check-marked). -->
-      <p-splitButton *ngIf="samModels.length; else segmentPlain"
-                     label="Segment" icon="pi pi-bolt" size="small" [text]="true"
-                     [model]="samMenuItems" appendTo="body"
-                     menuStyleClass="sam-model-menu"
-                     pTooltip="Segment the drawn rectangles with SAM (box prompt).
-                     <br>Use the arrow to pick the SAM model."
-                     [escape]="false" tooltipPosition="bottom"
-                     (onClick)="segmentRegions.emit()">
-      </p-splitButton>
-      <ng-template #segmentPlain>
-        <p-button label="Segment" icon="pi pi-bolt" size="small" [text]="true"
+      <!-- Two-part Segment button: the main part runs box-prompt SAM
+           segmentation; the down-arrow opens a model-picker menu (the active
+           model is check-marked). Falls back to a plain button with no models. -->
+      <span *ngIf="samModels.length; else segmentPlain" class="p-buttonset segment-split">
+        <p-button size="small" [text]="true"
                   pTooltip="Segment the drawn rectangles with SAM (box prompt)"
                   tooltipPosition="bottom"
                   (onClick)="segmentRegions.emit()">
+          <img src="assets/plotting/interactive-segmentation-cursor.svg"
+               class="toolbar-icon-dark" style="width: 1rem"/>
+        </p-button>
+        <p-button icon="pi pi-chevron-down" size="small" [text]="true"
+                  pTooltip="Pick the SAM model" tooltipPosition="bottom"
+                  (onClick)="samModelMenu.toggle($event)">
+        </p-button>
+      </span>
+      <ng-template #segmentPlain>
+        <p-button size="small" [text]="true"
+                  pTooltip="Segment the drawn rectangles with SAM (box prompt)"
+                  tooltipPosition="bottom"
+                  (onClick)="segmentRegions.emit()">
+          <img src="assets/plotting/interactive-segmentation-cursor.svg"
+               class="toolbar-icon-dark" style="width: 1rem"/>
         </p-button>
       </ng-template>
+      <p-menu #samModelMenu [model]="samMenuItems" [popup]="true" appendTo="body"></p-menu>
       <p-button label="Cellpose" icon="pi pi-table" size="small" [text]="true"
                 pTooltip="Auto-segment cells inside each drawn rectangle (cellpose-SAM, client-side)"
                 tooltipPosition="bottom"
