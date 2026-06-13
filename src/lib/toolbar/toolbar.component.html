@@ -375,6 +375,35 @@
         </p-button>
       </ng-template>
       <p-menu #samModelMenu [model]="samMenuItems" [popup]="true" appendTo="body"></p-menu>
+      <!-- Help: explains the ViT-T vs ViT-B trade-off behind the model picker. -->
+      <p-button *ngIf="samModels.length" icon="pi pi-info-circle" size="small" [text]="true"
+                pTooltip="About the SAM models" tooltipPosition="bottom"
+                (onClick)="samModelInfo.toggle($event)">
+      </p-button>
+      <p-overlayPanel #samModelInfo appendTo="body" styleClass="sam-model-info">
+        <div style="max-width: 24rem; line-height: 1.4">
+          <div class="font-bold mb-1">SAM models</div>
+          <p class="mt-0 mb-2">
+            Both are <b>micro-sam</b> checkpoints finetuned for light microscopy. They differ only
+            in the <i>image encoder</i> (the heavy once-per-image step) — box and point prompting
+            behave the same.
+          </p>
+          <div class="mb-2">
+            <div class="font-bold">micro-sam ViT-T <span class="font-normal">(default)</span></div>
+            <div>TinyViT encoder, ~14&nbsp;MB, very fast, runs on WASM. Good mask quality —
+              best for quick interactive work and many/large objects.</div>
+          </div>
+          <div class="mb-2">
+            <div class="font-bold">micro-sam ViT-B</div>
+            <div>ViT-Base encoder, ~172&nbsp;MB, slower, GPU-accelerated (WebGPU). Highest
+              accuracy — reach for it when ViT-T misses subtle or overlapping boundaries.</div>
+          </div>
+          <div class="text-sm" style="opacity: 0.75">
+            The choice applies to both the box and point tools. Each tool loads its own encoder,
+            so the first click after switching re-encodes once.
+          </div>
+        </div>
+      </p-overlayPanel>
       <p-button label="Cellpose" icon="pi pi-table" size="small" [text]="true"
                 pTooltip="Auto-segment cells inside each drawn rectangle (cellpose-SAM, client-side)"
                 tooltipPosition="bottom"
