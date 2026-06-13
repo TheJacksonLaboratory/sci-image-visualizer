@@ -1,4 +1,5 @@
 import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { MenuItem } from 'primeng/api';
 
 import { IImageInfo } from '../contracts/image.contract';
 import { PlotType, PlotTypeDescriptor } from '../contracts/plot-type';
@@ -104,6 +105,17 @@ export class ToolbarComponent {
   readonly isoValueStep = 1;
 
   displayHelpDialog = false;
+
+  /** Model picker for the Segment split-button's dropdown menu. The active
+   *  model (`samModelId`) is marked with a check; selecting an item emits
+   *  `samModelChange` (jit-ui#90 P1). */
+  get samMenuItems(): MenuItem[] {
+    return this.samModels.map((m) => ({
+      label: m.label,
+      icon: m.id === this.samModelId ? 'pi pi-check' : 'pi pi-fw',
+      command: () => this.samModelChange.emit(m.id),
+    }));
+  }
 
   /** The Image plot type renders as a natively pan/zoom-able raster, so the
    *  generic zoom/pan tools are hidden. */

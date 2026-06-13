@@ -333,11 +333,24 @@
       <!-- SAM (jit-ui#90): box-prompt segment, interactive point prompts, and a
            model picker. -->
       <span class="toolbar-separator"></span>
-      <p-button label="Segment" icon="pi pi-bolt" size="small" [text]="true"
-                pTooltip="Segment the drawn rectangles with SAM (box prompt)"
-                tooltipPosition="bottom"
-                (onClick)="segmentRegions.emit()">
-      </p-button>
+      <!-- Split-button: the main part runs box-prompt SAM segmentation; the
+           dropdown arrow opens the model picker (active model is check-marked). -->
+      <p-splitButton *ngIf="samModels.length; else segmentPlain"
+                     label="Segment" icon="pi pi-bolt" size="small" [text]="true"
+                     [model]="samMenuItems" appendTo="body"
+                     menuStyleClass="sam-model-menu"
+                     pTooltip="Segment the drawn rectangles with SAM (box prompt).
+                     <br>Use the arrow to pick the SAM model."
+                     [escape]="false" tooltipPosition="bottom"
+                     (onClick)="segmentRegions.emit()">
+      </p-splitButton>
+      <ng-template #segmentPlain>
+        <p-button label="Segment" icon="pi pi-bolt" size="small" [text]="true"
+                  pTooltip="Segment the drawn rectangles with SAM (box prompt)"
+                  tooltipPosition="bottom"
+                  (onClick)="segmentRegions.emit()">
+        </p-button>
+      </ng-template>
       <p-button label="Cellpose" icon="pi pi-table" size="small" [text]="true"
                 pTooltip="Auto-segment cells inside each drawn rectangle (cellpose-SAM, client-side)"
                 tooltipPosition="bottom"
@@ -350,13 +363,6 @@
                 [escape]="false" tooltipPosition="bottom"
                 (onClick)="toggleDragMode.emit('samPoint')">
       </p-button>
-      <p-dropdown *ngIf="samModels.length" [options]="samModels"
-                  optionLabel="label" optionValue="id" appendTo="body"
-                  [(ngModel)]="samModelId"
-                  pTooltip="SAM model" tooltipPosition="bottom"
-                  [style]="{'min-width': '9rem'}"
-                  (onChange)="samModelChange.emit($event.value)">
-      </p-dropdown>
     </ng-container>
 
     <ng-container *ngIf="tools.help">
