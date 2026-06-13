@@ -17,7 +17,7 @@ import { SamModelDef } from '../contracts/sam.contract';
 export const SAM_MODELS: SamModelDef[] = [
   {
     id: 'microsam-vit-t-lm',
-    label: 'micro-sam ViT-T (light microscopy)',
+    label: 'micro-sam ViT-T',
     encoderUrl: '',
     decoderUrl: '',
     variant: 'sam1',
@@ -30,7 +30,7 @@ export const SAM_MODELS: SamModelDef[] = [
   },
   {
     id: 'microsam-vit-b-lm',
-    label: 'micro-sam ViT-B (light microscopy)',
+    label: 'micro-sam ViT-B',
     encoderUrl: '',
     decoderUrl: '',
     variant: 'sam1',
