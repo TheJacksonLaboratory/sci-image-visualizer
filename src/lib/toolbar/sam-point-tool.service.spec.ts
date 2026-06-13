@@ -87,6 +87,23 @@ describe('SamPointToolService', () => {
     expect(get()[0].label).toBe('sam');
   });
 
+  it('signals busy + a status while a click is being segmented', async () => {
+    const { host, container } = makeHost();
+    tool.bindHost(host);
+    tool.setMode(true);
+    const busy: boolean[] = [];
+    tool.busy$.subscribe((b) => busy.push(b));
+    const statuses: string[] = [];
+    tool.status$.subscribe((s) => { if (s) statuses.push(s); });
+
+    cv(container).dispatchEvent(click(18, 18));
+    await flush();
+
+    expect(busy).toContain(true);             // went busy during the run…
+    expect(tool.busy$.value).toBe(false);     // …and settled when finished
+    expect(statuses.some((s) => /point|segment|encod|loading/i.test(s))).toBe(true);
+  });
+
   it('subsequent clicks refine the same region (not a new one)', async () => {
     const { host, get, container } = makeHost();
     tool.bindHost(host);

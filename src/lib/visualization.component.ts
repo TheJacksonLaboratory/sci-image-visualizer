@@ -15,6 +15,7 @@ import { ViewerFeature } from './contracts/capabilities.contract';
 import { IntensityProfile, IVisualizer, VISUALIZER } from './contracts/visualizer.contract';
 import { SAM_MODELS, getDefaultSamModelId, isSamModelReady } from './toolbar/sam-model-registry';
 import { SamToolService } from './toolbar/sam-tool.service';
+import { SamPointToolService } from './toolbar/sam-point-tool.service';
 import { CellSegmentToolService } from './toolbar/cell-segment-tool.service';
 import { RegionToolMode } from './contracts/region-overlay.contract';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from './contracts/toolbar-config';
@@ -93,6 +94,12 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   samStatus = '';
   samProgress = 0;          // 0..100, encoder download
   samDownloading = false;
+  samBusy = false;          // any SAM work in flight (drives the indeterminate spinner)
+  /** Whether the shared `sam` toast is currently shown (avoids stacking it on
+   *  every point click, which re-runs inference). */
+  private samToastShown = false;
+  /** Subscriptions to the point tool's live feeds (status/busy/download). */
+  private samPointSub = new Subscription();
   /** Vertex eraser radius in image-pixel coordinates. */
   vertexEraserRadius = 20;
 
@@ -177,6 +184,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     private session: VisualizerStore,
     private samTool: SamToolService,
     private cellSegmentTool: CellSegmentToolService,
+    private samPointTool: SamPointToolService,
   ) {
     this.colormapsOptions = plotService.getColormapOptions();
     this.computePlotTypeOptions();
@@ -222,6 +230,23 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     this.imageLoadingSubscription = this.state.isImageLoading$().subscribe((isImageLoading) => {
       this.imgLoading = isImageLoading;
     });
+    // Interactive point-prompt segmentation runs inside the renderer on each
+    // click; surface its live status + download progress in the shared `sam`
+    // toast so the user sees it working (the first click pulls the encoder).
+    this.samPointSub.add(this.samPointTool.progress$.subscribe((f) => {
+      this.samDownloading = f >= 0 && f < 1;
+      if (f >= 0) this.samProgress = Math.min(100, Math.round(f * 100));
+      this.cdr.detectChanges();
+    }));
+    this.samPointSub.add(this.samPointTool.status$.subscribe((m) => {
+      this.samStatus = m;
+      this.cdr.detectChanges();
+    }));
+    this.samPointSub.add(this.samPointTool.busy$.subscribe((busy) => {
+      this.samBusy = busy;
+      if (busy) this.showSamToast('SAM point segmentation');
+      this.cdr.detectChanges();
+    }));
     this.plotService.getStackLoadingProgress().subscribe((loadingProgress) => {
       this.loadingPercentage = loadingProgress;
     });
@@ -435,8 +460,11 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
       // SAM point mode: Enter commits the object, Esc clears the prompt.
       if (this.activeDragMode === 'samPoint' && (event.key === 'Enter' || event.key === 'Escape')) {
-        this.ngZone.run(() =>
-          event.key === 'Enter' ? this.plotService.commitSamPoints() : this.plotService.clearSamPoints());
+        this.ngZone.run(() => {
+          if (event.key === 'Enter') this.plotService.commitSamPoints();
+          else this.plotService.clearSamPoints();
+          this.hideSamToast(); // prompt resolved → dismiss the status toast
+        });
         return;
       }
       if (event.key === 'Delete' || event.key === 'Backspace' || event.key === 'd' || event.key === 'D') {
@@ -593,6 +621,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
 
   ngOnDestroy() {
     this.scrubber.cancel();
+    this.samPointSub.unsubscribe();
     if (this.plotContextMenuListener) {
       window.removeEventListener('contextmenu', this.plotContextMenuListener, true);
     }
@@ -835,6 +864,8 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     this.plotService.setWandMode(active === 'wand', { sensitivity: this.wandSensitivity });
     this.plotService.setBrushMode(active === 'brush', { size: this.brushSize });
     this.plotService.setSamPointMode(active === 'samPoint');
+    // Leaving point mode dismisses any lingering status toast.
+    if (active !== 'samPoint') this.hideSamToast();
     this.plotService.setVertexEraserMode(active === 'eraseVertex');
     if (active === 'eraseVertex') {
       this.plotService.setVertexEraserRadius(this.vertexEraserRadius);
@@ -921,6 +952,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     this.samStatus = 'Starting…';
     this.samProgress = 0;
     this.samDownloading = false;
+    this.samBusy = true;
     const psub = tool.progress$.subscribe((f) => {
       this.samDownloading = f >= 0 && f < 1;
       if (f >= 0) this.samProgress = Math.min(100, Math.round(f * 100));
@@ -929,7 +961,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     const ssub = tool.status$.subscribe((m) => {
       if (m) { this.samStatus = m; this.cdr.detectChanges(); }
     });
-    this.messageService.add({ key: 'sam', sticky: true, severity: 'info', summary: label });
+    this.showSamToast(label);
     try {
       const n = await op();
       this.messageService.add({
@@ -939,12 +971,28 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     } catch (e) {
       this.messageService.add({ severity: 'error', summary: `${label} failed`, detail: String(e) });
     } finally {
-      this.messageService.clear('sam');
       psub.unsubscribe();
       ssub.unsubscribe();
-      this.samDownloading = false;
-      this.samProgress = 0;
+      this.hideSamToast();
     }
+  }
+
+  /** Show the shared sticky `sam` toast once (idempotent — re-adding would stack
+   *  a new toast on every point click). */
+  private showSamToast(summary: string): void {
+    if (this.samToastShown) return;
+    this.samToastShown = true;
+    this.messageService.add({ key: 'sam', sticky: true, severity: 'info', summary });
+  }
+
+  /** Dismiss the shared `sam` toast and reset its progress/spinner state. */
+  private hideSamToast(): void {
+    this.samToastShown = false;
+    this.samBusy = false;
+    this.samDownloading = false;
+    this.samProgress = 0;
+    this.messageService.clear('sam');
+    this.cdr.detectChanges();
   }
 
   /** Pick the SAM model the segment tools use (jit-ui#90 P1). */

@@ -36,6 +36,8 @@ export class SamPointToolService {
 
   readonly status$ = new BehaviorSubject<string>('');
   readonly busy$ = new BehaviorSubject<boolean>(false);
+  /** Encoder-download progress (0..1) on the first click; -1 when not downloading. */
+  readonly progress$ = new BehaviorSubject<number>(-1);
 
   private readonly boundMouseDown: (e: MouseEvent) => void;
 
@@ -128,16 +130,13 @@ export class SamPointToolService {
     const label: 0 | 1 = e.shiftKey || e.altKey ? 0 : 1;
     this.points.push({ x: (dataX - ox) / rx, y: (dataY - oy) / ry, label });
 
-    let session: ISamSession;
-    try {
-      session = await this.ensureSession();
-    } catch (err) {
-      this.status$.next(err instanceof Error ? err.message : 'SAM model unavailable.');
-      return;
-    }
-
+    // Mark busy BEFORE ensureSession: the first click downloads the encoder
+    // (~14–172 MB) and builds the session, which is the longest wait — without
+    // this the UI showed nothing running until that finished.
     this.busy$.next(true);
     try {
+      this.status$.next('Loading SAM model…');
+      const session = await this.ensureSession();
       const key = [
         this.host.getFileName() ?? '', this.host.getActiveFrameIndex(),
         `${cached.width}x${cached.height}`, `${ox},${oy},${rx}`, this.model.id,
@@ -148,6 +147,7 @@ export class SamPointToolService {
         this.embedding = await session.embed({ data: rgba, width: cached.width, height: cached.height });
         this.embeddingKey = key;
       }
+      this.status$.next('Segmenting…');
       const prompt: SamPrompt = { points: this.points.slice() };
       const res = await session.decode(this.embedding, prompt);
       const polys = this.wandService.maskToPolygons(
@@ -161,9 +161,10 @@ export class SamPointToolService {
       );
       this.status$.next(`${this.points.length} point(s) — Enter to commit, Esc to clear.`);
     } catch (err) {
-      this.status$.next(err instanceof Error ? err.message : 'Segmentation failed.');
+      this.status$.next(err instanceof Error ? err.message : 'SAM model unavailable.');
     } finally {
       this.busy$.next(false);
+      this.progress$.next(-1);
     }
   }
 
@@ -205,7 +206,8 @@ export class SamPointToolService {
     }
     const { OnnxSamSession } = await import('./onnx-sam-session');
     const session = new OnnxSamSession();
-    await session.loadModel(this.model);
+    this.progress$.next(0);
+    await session.loadModel(this.model, (f) => this.progress$.next(f));
     this.session = session;
     return session;
   }

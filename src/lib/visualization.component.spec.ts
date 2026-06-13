@@ -66,7 +66,7 @@ describe('VisualizationComponent (UI shell)', () => {
     component = new VisualizationComponent(
       { setDiagram: jest.fn(), setImageLoading: jest.fn(), setImageInfo: jest.fn() } as any, // ImageStatePort
       plotService,
-      { add: jest.fn() } as any,                // MessageService
+      { add: jest.fn(), clear: jest.fn() } as any, // MessageService
       { run: (fn: () => void) => fn(), runOutsideAngular: (fn: () => void) => fn() } as any, // NgZone
       { detectChanges: jest.fn(), markForCheck: jest.fn() } as any, // ChangeDetectorRef
       new VisualizerStore(),
@@ -77,6 +77,12 @@ describe('VisualizationComponent (UI shell)', () => {
         progress$: new BehaviorSubject(-1),
       } as any,
       // CellSegmentToolService
+      {
+        status$: new BehaviorSubject(''),
+        busy$: new BehaviorSubject(false),
+        progress$: new BehaviorSubject(-1),
+      } as any,
+      // SamPointToolService
       {
         status$: new BehaviorSubject(''),
         busy$: new BehaviorSubject(false),
