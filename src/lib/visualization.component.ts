@@ -13,7 +13,7 @@ import { RenderOrchestrator, SliceScrubber } from './render-orchestrator';
 import { PlotType, PlotTypeDescriptor } from './contracts/plot-type';
 import { ViewerFeature } from './contracts/capabilities.contract';
 import { IntensityProfile, IVisualizer, VISUALIZER } from './contracts/visualizer.contract';
-import { SAM_MODELS, DEFAULT_SAM_MODEL_ID } from './toolbar/sam-model-registry';
+import { SAM_MODELS, getDefaultSamModelId } from './toolbar/sam-model-registry';
 import { SamToolService } from './toolbar/sam-tool.service';
 import { RegionToolMode } from './contracts/region-overlay.contract';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from './contracts/toolbar-config';
@@ -85,7 +85,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   brushSize = 40;
   /** SAM model picker options + current selection (jit-ui#90 P1). */
   samModels = SAM_MODELS.map((m) => ({ id: m.id, label: m.label }));
-  samModelId = DEFAULT_SAM_MODEL_ID;
+  samModelId = getDefaultSamModelId();
   /** Vertex eraser radius in image-pixel coordinates. */
   vertexEraserRadius = 20;
 

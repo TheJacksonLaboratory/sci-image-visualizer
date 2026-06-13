@@ -35,12 +35,29 @@ export const SAM_MODELS: SamModelDef[] = [
   },
 ];
 
-/** Default model the tool uses until the host picks another. */
+/** Initial default model id (overridden at runtime once the host configures a
+ *  hosted model via {@link setSamModelUrls}). */
 export const DEFAULT_SAM_MODEL_ID = SAM_MODELS[0].id;
 
-/** Look up a model by id; falls back to the default when id is unknown/absent. */
+/** The active default — updated when the host configures a model's ONNX URLs,
+ *  so the tool uses the model that's actually hosted (not just the first entry). */
+let activeDefaultId = DEFAULT_SAM_MODEL_ID;
+
+/** Look up a model by id; falls back to the active default when id is
+ *  unknown/absent. */
 export function getSamModel(id?: string): SamModelDef {
-  return SAM_MODELS.find((m) => m.id === id) ?? SAM_MODELS[0];
+  const wanted = id ?? activeDefaultId;
+  return SAM_MODELS.find((m) => m.id === wanted) ?? SAM_MODELS[0];
+}
+
+/** The active default model id (what the tools/picker use when unset). */
+export function getDefaultSamModelId(): string {
+  return activeDefaultId;
+}
+
+/** Set the active default model id (must be a registered model). */
+export function setDefaultSamModel(id: string): void {
+  if (SAM_MODELS.some((m) => m.id === id)) activeDefaultId = id;
 }
 
 /** True when a model has both ONNX URLs configured (i.e. it can actually run). */
@@ -58,5 +75,8 @@ export function setSamModelUrls(id: string, encoderUrl: string, decoderUrl: stri
   if (m) {
     m.encoderUrl = encoderUrl;
     m.decoderUrl = decoderUrl;
+    // The configured (hosted) model becomes the active default, so the tools
+    // use it rather than the first registry entry (which may be unhosted).
+    if (encoderUrl && decoderUrl) activeDefaultId = id;
   }
 }

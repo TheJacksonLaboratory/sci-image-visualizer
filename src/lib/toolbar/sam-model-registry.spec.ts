@@ -1,5 +1,6 @@
 import {
   SAM_MODELS, DEFAULT_SAM_MODEL_ID, getSamModel, isSamModelReady, setSamModelUrls,
+  getDefaultSamModelId, setDefaultSamModel,
 } from './sam-model-registry';
 
 describe('sam-model-registry', () => {
@@ -21,5 +22,16 @@ describe('sam-model-registry', () => {
     // reset so other suites see the unconfigured default
     setSamModelUrls(id, '', '');
     expect(isSamModelReady(getSamModel(id))).toBe(false);
+  });
+
+  it('configuring a model makes it the active default (so getSamModel() returns it)', () => {
+    expect(getDefaultSamModelId()).toBe(SAM_MODELS[0].id);
+    const second = SAM_MODELS[Math.min(1, SAM_MODELS.length - 1)].id;
+    setSamModelUrls(second, 'https://x/encoder.onnx', 'https://x/decoder.onnx');
+    expect(getDefaultSamModelId()).toBe(second);
+    expect(getSamModel().id).toBe(second);
+    // reset
+    setSamModelUrls(second, '', '');
+    setDefaultSamModel(SAM_MODELS[0].id);
   });
 });
