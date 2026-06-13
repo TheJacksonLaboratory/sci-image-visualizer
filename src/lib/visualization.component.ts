@@ -98,6 +98,12 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   /** Whether the shared `sam` toast is currently shown (avoids stacking it on
    *  every point click, which re-runs inference). */
   private samToastShown = false;
+  /** Per-instance toast key. MessageService is a global singleton, so two live
+   *  `<visualization>` instances (main viewer + pipeline-dialog preview) sharing
+   *  one key would each render the same message — a duplicate toast. A unique
+   *  key per instance scopes the toast to the component that raised it. */
+  private static nextToastId = 0;
+  readonly samToastKey = `sam-${VisualizationComponent.nextToastId++}`;
   /** Subscriptions to the point tool's live feeds (status/busy/download). */
   private samPointSub = new Subscription();
   /** Vertex eraser radius in image-pixel coordinates. */
@@ -982,7 +988,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   private showSamToast(summary: string): void {
     if (this.samToastShown) return;
     this.samToastShown = true;
-    this.messageService.add({ key: 'sam', sticky: true, severity: 'info', summary });
+    this.messageService.add({ key: this.samToastKey, sticky: true, severity: 'info', summary });
   }
 
   /** Dismiss the shared `sam` toast and reset its progress/spinner state. */
@@ -991,7 +997,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     this.samBusy = false;
     this.samDownloading = false;
     this.samProgress = 0;
-    this.messageService.clear('sam');
+    this.messageService.clear(this.samToastKey);
     this.cdr.detectChanges();
   }
 
