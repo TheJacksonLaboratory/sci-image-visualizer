@@ -74,6 +74,27 @@ micro-sam and patho-sam are distributed through micro-sam's model registry
 `variant: 'sam3'` decoder path, since SAM 2/3 differ in mask I/O). See
 `docs/sam-segmentation-design.md` for the design.
 
+## In progress / roadmap
+
+Work that is landed-but-unstable or planned (not yet available):
+
+- **Intensity profile tool** *(work in progress — not yet stable)* — coloured line
+  ROIs with a floating inset chart that plots intensity along each line and updates
+  live as the line is dragged. Usable today but the API/UX and multi-line/stack
+  behaviour are still settling.
+- **Example / test server + demos** *(planned)* — a small example server, bundled
+  with the library, that powers a set of runnable **demos** showcasing the
+  image-visualization use cases (tiled OSD viewing, Plotly plots, region tools,
+  and browser-side SAM/cellpose segmentation) against sample images — so the
+  library can be evaluated and developed standalone, outside jit-ui. Tracked in
+  the library-extraction SOW ([docs/JIT_UI_visualization_library_SOW.docx](docs/JIT_UI_visualization_library_SOW.docx)).
+- **SAM 3 model** *(planned)* — a `variant: 'sam3'` decoder path + export tooling
+  (SAM 2/3 use a different mask I/O than the current SAM-v1 path). See
+  [docs/sam-segmentation-design.md](docs/sam-segmentation-design.md).
+- **int8 patho-sam validation** — the `patho-sam-vit-b-int8` option is sanity-checked
+  (IoU ~0.99 vs fp16 on a synthetic prompt) but not yet validated on real H&E
+  slides, where int8 ViT attention can degrade on subtle boundaries.
+
 ## Documentation
 
 Design, architecture, and planning docs for the library:
