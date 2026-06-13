@@ -34,6 +34,12 @@ let plotInstanceSeq = 0;
   styleUrls: ['./visualization.component.scss'],
 })
 export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy {
+  /** Per-instance toast key. MessageService is a global singleton, so two live
+   *  `<visualization>` instances (main viewer + pipeline-dialog preview) sharing
+   *  one key would each render the same message — a duplicate toast. A unique
+   *  key per instance scopes the toast to the component that raised it. */
+  private static nextToastId = 0;
+
   @Output()
   isStackEvent = new EventEmitter(false);
   @Output()
@@ -45,7 +51,10 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   set toolbarTools(v: ToolbarToolVisibility | undefined) {
     this._toolbarTools = { ...ALL_TOOLBAR_TOOLS, ...(v ?? {}) };
   }
-  get toolbarTools(): Required<ToolbarToolVisibility> { return this._toolbarTools; }
+
+  get toolbarTools(): Required<ToolbarToolVisibility> {
+    return this._toolbarTools;
+  }
   private _toolbarTools: Required<ToolbarToolVisibility> = ALL_TOOLBAR_TOOLS;
 
   /** Image-smoothing state for the toolbar's Smoothen toggle (OSD only).
@@ -92,17 +101,13 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   samModelId = getDefaultSamModelId();
   /** SAM download/segment toast state (bound by the `sam` p-toast template). */
   samStatus = '';
-  samProgress = 0;          // 0..100, encoder download
+  samProgress = 0; // 0..100, encoder download
   samDownloading = false;
-  samBusy = false;          // any SAM work in flight (drives the indeterminate spinner)
+  samBusy = false; // any SAM work in flight (drives the indeterminate spinner)
   /** Whether the shared `sam` toast is currently shown (avoids stacking it on
    *  every point click, which re-runs inference). */
   private samToastShown = false;
-  /** Per-instance toast key. MessageService is a global singleton, so two live
-   *  `<visualization>` instances (main viewer + pipeline-dialog preview) sharing
-   *  one key would each render the same message — a duplicate toast. A unique
-   *  key per instance scopes the toast to the component that raised it. */
-  private static nextToastId = 0;
+
   readonly samToastKey = `sam-${VisualizationComponent.nextToastId++}`;
   /** Subscriptions to the point tool's live feeds (status/busy/download). */
   private samPointSub = new Subscription();
@@ -239,20 +244,26 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     // Interactive point-prompt segmentation runs inside the renderer on each
     // click; surface its live status + download progress in the shared `sam`
     // toast so the user sees it working (the first click pulls the encoder).
-    this.samPointSub.add(this.samPointTool.progress$.subscribe((f) => {
-      this.samDownloading = f >= 0 && f < 1;
-      if (f >= 0) this.samProgress = Math.min(100, Math.round(f * 100));
-      this.cdr.detectChanges();
-    }));
-    this.samPointSub.add(this.samPointTool.status$.subscribe((m) => {
-      this.samStatus = m;
-      this.cdr.detectChanges();
-    }));
-    this.samPointSub.add(this.samPointTool.busy$.subscribe((busy) => {
-      this.samBusy = busy;
-      if (busy) this.showSamToast('SAM point segmentation');
-      this.cdr.detectChanges();
-    }));
+    this.samPointSub.add(
+      this.samPointTool.progress$.subscribe((f) => {
+        this.samDownloading = f >= 0 && f < 1;
+        if (f >= 0) this.samProgress = Math.min(100, Math.round(f * 100));
+        this.cdr.detectChanges();
+      }),
+    );
+    this.samPointSub.add(
+      this.samPointTool.status$.subscribe((m) => {
+        this.samStatus = m;
+        this.cdr.detectChanges();
+      }),
+    );
+    this.samPointSub.add(
+      this.samPointTool.busy$.subscribe((busy) => {
+        this.samBusy = busy;
+        if (busy) this.showSamToast('SAM point segmentation');
+        this.cdr.detectChanges();
+      }),
+    );
     this.plotService.getStackLoadingProgress().subscribe((loadingProgress) => {
       this.loadingPercentage = loadingProgress;
     });
@@ -391,7 +402,12 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
                     // Guard against a newer click reaching us mid-render.
                     if (phaseInfo.fileName !== loadedImage.filename) return null;
                     return this.plotService.plot(
-                      this.plotDivName, loadedImage, phaseInfo, screenHeight, this.plotType, inPlace,
+                      this.plotDivName,
+                      loadedImage,
+                      phaseInfo,
+                      screenHeight,
+                      this.plotType,
+                      inPlace,
                     );
                   }),
                 smallShown: () => {
@@ -943,8 +959,9 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
    *  (jit-ui#90). Each box is cropped (browser slide-crop) then run through the
    *  cellpose-js model; the same sticky `sam` toast + progress bar is reused. */
   async segmentCellpose() {
-    await this.runSegmentWithToast('Cellpose', this.cellSegmentTool,
-      () => this.plotService.segmentRectanglesCellpose());
+    await this.runSegmentWithToast('Cellpose', this.cellSegmentTool, () =>
+      this.plotService.segmentRectanglesCellpose(),
+    );
   }
 
   /** Shared driver for the box-prompt segment tools: wires the tool's status +
@@ -965,13 +982,17 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
       this.cdr.detectChanges();
     });
     const ssub = tool.status$.subscribe((m) => {
-      if (m) { this.samStatus = m; this.cdr.detectChanges(); }
+      if (m) {
+        this.samStatus = m;
+        this.cdr.detectChanges();
+      }
     });
     this.showSamToast(label);
     try {
       const n = await op();
       this.messageService.add({
-        severity: n > 0 ? 'success' : 'warn', summary: label,
+        severity: n > 0 ? 'success' : 'warn',
+        summary: label,
         detail: tool.status$.value || (n > 0 ? `Added ${n} region(s).` : 'No regions added.'),
       });
     } catch (e) {
