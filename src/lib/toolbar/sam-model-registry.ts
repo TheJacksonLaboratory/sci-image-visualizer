@@ -23,6 +23,10 @@ export const SAM_MODELS: SamModelDef[] = [
     variant: 'sam1',
     inputSize: 1024,
     microscopy: true,
+    // TinyViT's fp16 attention overflows on the onnxruntime-web WebGPU EP and
+    // returns an empty mask ("No masks found"); it's numerically correct on
+    // WASM, and the encoder is tiny (~14 MB) so WASM is plenty fast.
+    encoderProviders: ['wasm'],
   },
   {
     id: 'microsam-vit-b-lm',

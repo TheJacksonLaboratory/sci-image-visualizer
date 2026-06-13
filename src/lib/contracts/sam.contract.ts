@@ -25,6 +25,12 @@ export interface SamModelDef {
   inputSize: number;
   /** True for microscopy-finetuned checkpoints (micro-sam, pathoSAM). */
   microscopy?: boolean;
+  /** Override the onnxruntime-web execution providers for the ENCODER session
+   *  (decoder is always WASM). Defaults to WebGPU-with-WASM-fallback. Set to
+   *  `['wasm']` for architectures whose fp16 attention overflows on the WebGPU
+   *  EP and returns an empty mask (e.g. micro-sam ViT-T's TinyViT encoder),
+   *  which run correctly — and fast, when small — on WASM. */
+  encoderProviders?: string[];
 }
 
 /** Cached encoder output for one image (reused across every prompt on it). */

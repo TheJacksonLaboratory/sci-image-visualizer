@@ -72,7 +72,10 @@ export class OnnxSamSession implements ISamSession {
     }
     this.model = model;
     ort.env.wasm.wasmPaths = '/assets/ort/';
-    const eps: string[] = this.hasWebGpu() ? ['webgpu', 'wasm'] : ['wasm'];
+    // Per-model override wins (e.g. TinyViT runs on WASM — its fp16 attention
+    // overflows on the WebGPU EP and yields an empty mask); otherwise prefer
+    // WebGPU with a WASM fallback.
+    const eps: string[] = model.encoderProviders ?? (this.hasWebGpu() ? ['webgpu', 'wasm'] : ['wasm']);
     // Fetch the (heavy) encoder ourselves so we can report download progress and
     // cache it in the Cache API; the decoder is small so fetch it plainly.
     const encBuf = await fetchModel(model.encoderUrl, onProgress);
