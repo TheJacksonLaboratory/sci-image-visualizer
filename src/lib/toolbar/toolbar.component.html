@@ -534,6 +534,30 @@
       region. This can also be done from the Regions tab.</li>
   </ul>
 
+  <h3>Segmentation tools (SAM &amp; cellpose)</h3>
+  <p>AI-assisted segmentation that runs entirely in the browser. The box and point
+    tools use a promptable <b>micro-sam</b> model; the cellpose tool auto-detects cells.
+    Generated regions inherit the color of the rectangle they came from. The first run
+    downloads the model (a progress toast is shown); it's then cached.</p>
+  <ul>
+    <li>"<b>Segment</b>" <img src="assets/plotting/interactive-segmentation-cursor.svg" width="15" height="15">
+      (box prompt): draw one or more <b>Rectangular regions</b> around the objects of interest,
+      then click Segment. Each rectangle is replaced by the SAM mask of the object inside it.</li>
+    <li>"<b>Point prompts</b>" <i class="pi pi-map-marker"></i>: click directly on an object to
+      segment it as a <b>new</b> region. Each click starts a fresh object — clicking another
+      object won't grow the previous one. <kbd>Shift</kbd>/<kbd>Alt</kbd>-click adds an
+      <i>exclude</i> point that refines the current object; <kbd>Esc</kbd> undoes it,
+      <kbd>Enter</kbd> commits it.</li>
+    <li>"<b>Model picker</b>" <i class="pi pi-chevron-down"></i>: the dropdown attached to the
+      Segment button chooses the SAM model — <b>micro-sam ViT-T</b> (default; small, fast) or
+      <b>micro-sam ViT-B</b> (larger, highest accuracy). The choice applies to <i>both</i> the box
+      and point tools. The <i class="pi pi-info-circle"></i> info button next to it explains the
+      trade-off.</li>
+    <li>"<b>Cellpose</b>" <i class="pi pi-table"></i>: draw rectangles, then click Cellpose to
+      automatically segment every cell inside each rectangle (client-side cellpose-SAM) — one
+      region per detected cell. No clicking on individual cells needed.</li>
+  </ul>
+
   <h3>Help</h3>
   <p>"<b>Help</b>" <i class="pi pi-question-circle"></i>: opens this dialog.</p>
 
@@ -551,6 +575,9 @@
     <tr><td>Wand + <kbd>Ctrl</kbd>/<kbd>Cmd</kbd></td><td>Exact-match flood fill (no smoothing)</td></tr>
     <tr><td><kbd>e</kbd></td><td>Toggle vertex eraser</td></tr>
     <tr><td><kbd>s</kbd></td><td>Selection mode (deactivates drawing tools)</td></tr>
+    <tr><td>Point prompt + <kbd>Shift</kbd>/<kbd>Alt</kbd></td><td>Add an exclude point (refine the current object)</td></tr>
+    <tr><td><kbd>Enter</kbd></td><td>Commit the current SAM point object</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>Undo the current SAM point object</td></tr>
     <tr><td><kbd>Del</kbd> / <kbd>⌫</kbd></td><td>Delete selected region</td></tr>
   </table>
 
