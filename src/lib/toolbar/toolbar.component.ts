@@ -78,6 +78,8 @@ export class ToolbarComponent {
   @Output() deleteRegion = new EventEmitter<void>();
   /** Run box-prompted SAM segmentation on the drawn rectangles (jit-ui#90). */
   @Output() segmentRegions = new EventEmitter<void>();
+  /** Run cellpose-SAM (auto) inside each drawn rectangle's crop (jit-ui#90). */
+  @Output() segmentCellpose = new EventEmitter<void>();
   /** SAM model picker (jit-ui#90 P1). */
   @Output() samModelChange = new EventEmitter<string>();
   /** Convert the selected region to/from a bezier curve (toBezier / toPolygon). */

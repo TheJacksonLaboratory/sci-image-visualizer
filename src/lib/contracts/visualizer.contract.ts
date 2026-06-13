@@ -160,6 +160,9 @@ export interface IToolController {
   /** Box-prompted SAM segmentation: segment every rectangle region into masks.
    *  Returns the number of mask regions added. (jit-ui#90) */
   segmentRectangles(): Promise<number>;
+  /** Cellpose-on-crop: client slide-crop each rectangle and segment cells in it
+   *  (cellpose-SAM via the host's CELL_SEGMENTER). Returns regions added. */
+  segmentRectanglesCellpose(): Promise<number>;
   /** Choose the registered SAM model the segment tools use (jit-ui#90 P1). */
   setSamModel(id: string): void;
   /** Toggle the interactive SAM point-prompt tool (click = +point, Shift = -). */

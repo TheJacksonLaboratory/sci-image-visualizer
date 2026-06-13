@@ -334,9 +334,14 @@
            model picker. -->
       <span class="toolbar-separator"></span>
       <p-button label="Segment" icon="pi pi-bolt" size="small" [text]="true"
-                pTooltip="Segment the drawn rectangles with SAM"
+                pTooltip="Segment the drawn rectangles with SAM (box prompt)"
                 tooltipPosition="bottom"
                 (onClick)="segmentRegions.emit()">
+      </p-button>
+      <p-button label="Cellpose" icon="pi pi-table" size="small" [text]="true"
+                pTooltip="Auto-segment cells inside each drawn rectangle (cellpose-SAM, client-side)"
+                tooltipPosition="bottom"
+                (onClick)="segmentCellpose.emit()">
       </p-button>
       <p-button icon="pi pi-map-marker" size="small"
                 [text]="activeDragMode !== 'samPoint'"

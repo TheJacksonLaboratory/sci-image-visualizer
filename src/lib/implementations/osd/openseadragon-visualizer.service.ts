@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@angular/core';
+import { Injectable, Inject, Optional } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, Observable, Subject, Subscription, combineLatest, firstValueFrom, of } from 'rxjs';
 import { timeout } from 'rxjs/operators';
@@ -28,6 +28,8 @@ import { CachedImageData, WandToolService, WandToolHost } from '../../toolbar/wa
 import { BrushToolService, BrushOptions } from '../../toolbar/brush-tool.service';
 import { SamToolService } from '../../toolbar/sam-tool.service';
 import { SamPointToolService } from '../../toolbar/sam-point-tool.service';
+import { CellSegmentToolService } from '../../toolbar/cell-segment-tool.service';
+import { ICellSegmenter, CELL_SEGMENTER } from '../../contracts/cell-segmenter.contract';
 import { VertexEraserToolService, VertexEraserToolHost } from '../../toolbar/vertex-eraser-tool.service';
 import { ZoomToBoxToolService, ZoomToBoxToolHost } from '../../toolbar/zoom-to-box-tool.service';
 import { WandOptions } from '../../toolbar/wand.service';
@@ -239,6 +241,8 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     private brushTool: BrushToolService,
     private samTool: SamToolService,
     private samPointTool: SamPointToolService,
+    private cellSegmentTool: CellSegmentToolService,
+    @Optional() @Inject(CELL_SEGMENTER) private cellSegmenter: ICellSegmenter | null,
     private eraserTool: VertexEraserToolService,
     private zoomToBoxTool: ZoomToBoxToolService,
     private store: VisualizerStore,
@@ -1166,6 +1170,12 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     this.viewportPixels = null; // segment against the current viewport readback
     this.samTool.bindHost(this.wandHost);
     return this.samTool.segmentBoxes();
+  }
+  segmentRectanglesCellpose(): Promise<number> {
+    if (!this.cellSegmenter) return Promise.resolve(0);
+    this.viewportPixels = null; // crop against the current viewport readback
+    this.cellSegmentTool.bindHost(this.wandHost);
+    return this.cellSegmentTool.segmentBoxes(this.cellSegmenter);
   }
   setSamModel(id: string): void {
     this.samTool.setModel(id);

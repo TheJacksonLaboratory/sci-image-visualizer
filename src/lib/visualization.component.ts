@@ -1,6 +1,6 @@
 import { ChangeDetectorRef, Component, AfterViewInit, EventEmitter, HostListener, Inject, Input, NgZone, OnDestroy, OnInit, Output, ViewChild } from '@angular/core';
 
-import { Subject, Subscription } from 'rxjs';
+import { BehaviorSubject, Subject, Subscription } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 
 import { MenuItem, MessageService, TreeNode } from 'primeng/api';
@@ -15,6 +15,7 @@ import { ViewerFeature } from './contracts/capabilities.contract';
 import { IntensityProfile, IVisualizer, VISUALIZER } from './contracts/visualizer.contract';
 import { SAM_MODELS, getDefaultSamModelId } from './toolbar/sam-model-registry';
 import { SamToolService } from './toolbar/sam-tool.service';
+import { CellSegmentToolService } from './toolbar/cell-segment-tool.service';
 import { RegionToolMode } from './contracts/region-overlay.contract';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from './contracts/toolbar-config';
 
@@ -173,6 +174,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     private cdr: ChangeDetectorRef,
     private session: VisualizerStore,
     private samTool: SamToolService,
+    private cellSegmentTool: CellSegmentToolService,
   ) {
     this.colormapsOptions = plotService.getColormapOptions();
     this.computePlotTypeOptions();
@@ -895,26 +897,45 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
    *  `sam` toast shows live status + a download progress bar (first run pulls the
    *  encoder, ~170 MB); it stays open until the run finishes (bar hits 100%). */
   async segmentRegions() {
+    await this.runSegmentWithToast('SAM', this.samTool, () => this.plotService.segmentRectangles());
+  }
+
+  /** Auto-segment cells inside each drawn rectangle with cellpose-SAM, client-side
+   *  (jit-ui#90). Each box is cropped (browser slide-crop) then run through the
+   *  cellpose-js model; the same sticky `sam` toast + progress bar is reused. */
+  async segmentCellpose() {
+    await this.runSegmentWithToast('Cellpose', this.cellSegmentTool,
+      () => this.plotService.segmentRectanglesCellpose());
+  }
+
+  /** Shared driver for the box-prompt segment tools: wires the tool's status +
+   *  download progress into the sticky `sam` toast, runs `op`, and reports the
+   *  region count. Keeps the toast open until the run settles (bar hits 100%). */
+  private async runSegmentWithToast(
+    label: string,
+    tool: { status$: BehaviorSubject<string>; progress$: BehaviorSubject<number> },
+    op: () => Promise<number>,
+  ) {
     this.samStatus = 'Starting…';
     this.samProgress = 0;
     this.samDownloading = false;
-    const psub = this.samTool.progress$.subscribe((f) => {
+    const psub = tool.progress$.subscribe((f) => {
       this.samDownloading = f >= 0 && f < 1;
       if (f >= 0) this.samProgress = Math.min(100, Math.round(f * 100));
       this.cdr.detectChanges();
     });
-    const ssub = this.samTool.status$.subscribe((m) => {
+    const ssub = tool.status$.subscribe((m) => {
       if (m) { this.samStatus = m; this.cdr.detectChanges(); }
     });
-    this.messageService.add({ key: 'sam', sticky: true, severity: 'info', summary: 'SAM' });
+    this.messageService.add({ key: 'sam', sticky: true, severity: 'info', summary: label });
     try {
-      const n = await this.plotService.segmentRectangles();
+      const n = await op();
       this.messageService.add({
-        severity: n > 0 ? 'success' : 'warn', summary: 'SAM',
-        detail: this.samTool.status$.value || (n > 0 ? `Added ${n} region(s).` : 'No regions added.'),
+        severity: n > 0 ? 'success' : 'warn', summary: label,
+        detail: tool.status$.value || (n > 0 ? `Added ${n} region(s).` : 'No regions added.'),
       });
     } catch (e) {
-      this.messageService.add({ severity: 'error', summary: 'SAM failed', detail: String(e) });
+      this.messageService.add({ severity: 'error', summary: `${label} failed`, detail: String(e) });
     } finally {
       this.messageService.clear('sam');
       psub.unsubscribe();

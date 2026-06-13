@@ -42,6 +42,7 @@ function mockPlotService(): any {
     setVertexEraserMode: jest.fn(),
     setVertexEraserRadius: jest.fn(),
     segmentRectangles: jest.fn().mockResolvedValue(0),
+    segmentRectanglesCellpose: jest.fn().mockResolvedValue(0),
     setSamModel: jest.fn(),
     setSamPointMode: jest.fn(),
     commitSamPoints: jest.fn(),
@@ -70,6 +71,12 @@ describe('VisualizationComponent (UI shell)', () => {
       { detectChanges: jest.fn(), markForCheck: jest.fn() } as any, // ChangeDetectorRef
       new VisualizerStore(),
       // SamToolService
+      {
+        status$: new BehaviorSubject(''),
+        busy$: new BehaviorSubject(false),
+        progress$: new BehaviorSubject(-1),
+      } as any,
+      // CellSegmentToolService
       {
         status$: new BehaviorSubject(''),
         busy$: new BehaviorSubject(false),

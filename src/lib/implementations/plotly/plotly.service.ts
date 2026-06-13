@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@angular/core';
+import { Injectable, Inject, Optional } from '@angular/core';
 
 import * as Plotly from 'plotly.js-dist-min';
 import { Image } from 'image-js';
@@ -19,6 +19,8 @@ import { CachedImageData, WandToolService, WandToolHost } from '../../toolbar/wa
 import { BrushToolService, BrushOptions } from '../../toolbar/brush-tool.service';
 import { SamToolService } from '../../toolbar/sam-tool.service';
 import { SamPointToolService } from '../../toolbar/sam-point-tool.service';
+import { CellSegmentToolService } from '../../toolbar/cell-segment-tool.service';
+import { ICellSegmenter, CELL_SEGMENTER } from '../../contracts/cell-segmenter.contract';
 import { VertexEraserToolService, VertexEraserToolHost } from '../../toolbar/vertex-eraser-tool.service';
 import { ZoomToBoxToolService } from '../../toolbar/zoom-to-box-tool.service';
 import {
@@ -188,6 +190,8 @@ export class PlotlyService implements IVisualizer {
               private brushTool: BrushToolService,
               private samTool: SamToolService,
               private samPointTool: SamPointToolService,
+              private cellSegmentTool: CellSegmentToolService,
+              @Optional() @Inject(CELL_SEGMENTER) private cellSegmenter: ICellSegmenter | null,
               private vertexEraserTool: VertexEraserToolService,
               private zoomToBoxTool: ZoomToBoxToolService,
               private store: VisualizerStore,
@@ -1213,6 +1217,11 @@ export class PlotlyService implements IVisualizer {
   public segmentRectangles(): Promise<number> {
     this.samTool.bindHost(this.wandHost);
     return this.samTool.segmentBoxes();
+  }
+  public segmentRectanglesCellpose(): Promise<number> {
+    if (!this.cellSegmenter) return Promise.resolve(0);
+    this.cellSegmentTool.bindHost(this.wandHost);
+    return this.cellSegmentTool.segmentBoxes(this.cellSegmenter);
   }
   public setSamModel(id: string): void {
     this.samTool.setModel(id);
