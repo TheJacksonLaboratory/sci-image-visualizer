@@ -75,7 +75,7 @@ export class CellSegmentToolService {
           // crop-pixel → frame-matrix (offset by crop origin) → data coords.
           const xData = poly.xpoints.map((x) => ox + (crop.matrixX0 + x) * rx);
           const yData = poly.ypoints.map((y) => oy + (crop.matrixY0 + y) * ry);
-          masks.push(this.makeRegion(xData, yData));
+          masks.push(this.makeRegion(xData, yData, rects[i].color)); // inherit the box's color
           added++;
         }
         consumed.add(rects[i]);
@@ -92,7 +92,7 @@ export class CellSegmentToolService {
     }
   }
 
-  private makeRegion(xData: number[], yData: number[]): Region {
+  private makeRegion(xData: number[], yData: number[], color?: string): Region {
     const poly = new Polygon();
     poly.npoints = xData.length;
     poly.xpoints = xData;
@@ -101,7 +101,8 @@ export class CellSegmentToolService {
     poly.closed = true;
     const region = new Region();
     region.bounds = poly;
-    region.color = this.host.getShapeColor();
+    // Inherit the source box's color; fall back to the host default.
+    region.color = color || this.host.getShapeColor();
     region.label = 'cell';
     return region;
   }

@@ -142,6 +142,7 @@ export class SamToolService {
         masks.push(this.makeRegion(
           poly.xpoints.map((x) => ox + x * rx),
           poly.ypoints.map((y) => oy + y * ry),
+          rects[i].color, // inherit the prompt rectangle's color
         ));
         consumed.add(rects[i]); // this rectangle is now represented by its mask
         added++;
@@ -162,7 +163,7 @@ export class SamToolService {
     }
   }
 
-  private makeRegion(xData: number[], yData: number[]): Region {
+  private makeRegion(xData: number[], yData: number[], color?: string): Region {
     const poly = new Polygon();
     poly.npoints = xData.length;
     poly.xpoints = xData;
@@ -172,7 +173,8 @@ export class SamToolService {
 
     const region = new Region();
     region.bounds = poly;
-    region.color = this.host.getShapeColor();
+    // Inherit the source prompt rectangle's color; fall back to the host default.
+    region.color = color || this.host.getShapeColor();
     // Default class/annotation name, matching the wand/brush + overlay-drawn regions.
     region.label = 'sam';
     return region;

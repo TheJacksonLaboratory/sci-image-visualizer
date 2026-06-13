@@ -65,6 +65,15 @@ describe('CellSegmentToolService', () => {
     expect(regs.every((r) => r.label === 'cell')).toBe(true);
   });
 
+  it('inherits the source box color for every cell region', async () => {
+    const rect = rectRegion(8, 8, 24, 24);
+    rect.color = '#00bcd4';                          // distinct, non-default
+    const { host, get } = makeHost([rect]);
+    tool.bindHost(host);
+    await tool.segmentBoxes(fakeSegmenter());
+    expect(get().every((r) => r.color === '#00bcd4')).toBe(true);
+  });
+
   it('no-ops with a status when no rectangles are drawn', async () => {
     const { host } = makeHost([]);
     tool.bindHost(host);

@@ -77,6 +77,17 @@ describe('SamToolService', () => {
     expect(mask.color).toBe('#ffffff');
   });
 
+  it('inherits the prompt rectangle color (not the host default)', async () => {
+    const rect = rectRegion(10, 10, 20, 20);
+    rect.color = '#ff8800';                         // a distinct, non-default color
+    const { host, get } = makeHost([rect]);
+    tool.bindHost(host);
+
+    await tool.segmentBoxes();
+
+    expect(get()[0].color).toBe('#ff8800');         // mask kept its source rect's color
+  });
+
   it('segments multiple rectangles in one pass', async () => {
     const { host, get } = makeHost([rectRegion(2, 2, 12, 12), rectRegion(22, 22, 14, 14)]);
     tool.bindHost(host);
