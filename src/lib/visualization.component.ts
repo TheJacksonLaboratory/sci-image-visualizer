@@ -13,7 +13,7 @@ import { RenderOrchestrator, SliceScrubber } from './render-orchestrator';
 import { PlotType, PlotTypeDescriptor } from './contracts/plot-type';
 import { ViewerFeature } from './contracts/capabilities.contract';
 import { IntensityProfile, IVisualizer, VISUALIZER } from './contracts/visualizer.contract';
-import { SAM_MODELS, getDefaultSamModelId } from './toolbar/sam-model-registry';
+import { SAM_MODELS, getDefaultSamModelId, isSamModelReady } from './toolbar/sam-model-registry';
 import { SamToolService } from './toolbar/sam-tool.service';
 import { CellSegmentToolService } from './toolbar/cell-segment-tool.service';
 import { RegionToolMode } from './contracts/region-overlay.contract';
@@ -84,8 +84,10 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   wandSensitivity = 2.0;
   /** Brush diameter in image-pixel coordinates (drives the painted disc size). */
   brushSize = 40;
-  /** SAM model picker options + current selection (jit-ui#90 P1). */
-  samModels = SAM_MODELS.map((m) => ({ id: m.id, label: m.label }));
+  /** SAM model picker options + current selection (jit-ui#90 P1). Only models
+   *  with a hosted ONNX pair (configured via setSamModelUrls at app init) are
+   *  offered, so the picker can't select a model that can't run. */
+  samModels = SAM_MODELS.filter(isSamModelReady).map((m) => ({ id: m.id, label: m.label }));
   samModelId = getDefaultSamModelId();
   /** SAM download/segment toast state (bound by the `sam` p-toast template). */
   samStatus = '';

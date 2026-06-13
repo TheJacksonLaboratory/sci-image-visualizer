@@ -26,6 +26,7 @@ export * from './lib/contracts/cell-segmenter.contract';
 // ── SAM model registry (host configures hosted ONNX URLs once available) ──
 export {
   SAM_MODELS, DEFAULT_SAM_MODEL_ID, getSamModel, isSamModelReady, setSamModelUrls,
+  setDefaultSamModel, getDefaultSamModelId,
 } from './lib/toolbar/sam-model-registry';
 
 // ── Neutral data models ──────────────────────────────────────────────────
