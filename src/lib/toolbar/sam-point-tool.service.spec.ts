@@ -104,7 +104,33 @@ describe('SamPointToolService', () => {
     expect(statuses.some((s) => /point|segment|encod|loading/i.test(s))).toBe(true);
   });
 
-  it('subsequent clicks refine the same region (not a new one)', async () => {
+  it('each positive click segments a NEW region (does not extend the previous one)', async () => {
+    const { host, get, container } = makeHost();
+    tool.bindHost(host);
+    tool.setMode(true);
+    cv(container).dispatchEvent(click(12, 12));       // fiber 1
+    await flush();
+    expect(get()).toHaveLength(1);
+    cv(container).dispatchEvent(click(24, 24));       // adjacent fiber 2 (positive)
+    await flush();
+    expect(get()).toHaveLength(2);                    // a new region, not a grown one
+    expect((tool as any).points).toHaveLength(1);     // prompt reset to the latest click only
+  });
+
+  it('clicking after the region is deleted starts fresh (no stale merged prompt)', async () => {
+    const { host, get, container } = makeHost();
+    tool.bindHost(host);
+    tool.setMode(true);
+    cv(container).dispatchEvent(click(12, 12));
+    await flush();
+    host.setRegions([]);                              // user deletes the segmented region
+    cv(container).dispatchEvent(click(24, 24));       // click another fiber
+    await flush();
+    expect(get()).toHaveLength(1);                    // one fresh region…
+    expect((tool as any).points).toHaveLength(1);     // …from a single fresh point
+  });
+
+  it('a Shift/Alt click refines the current object (not a new region)', async () => {
     const { host, get, container } = makeHost();
     tool.bindHost(host);
     tool.setMode(true);

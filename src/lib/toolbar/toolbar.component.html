@@ -368,8 +368,8 @@
       <ng-template #samPointBtn>
         <p-button icon="pi pi-map-marker" size="small"
                   [text]="activeDragMode !== 'samPoint'"
-                  pTooltip="SAM point prompts: click to add a point, Shift-click to subtract.
-                  <br>Enter commits the object, Esc clears."
+                  pTooltip="SAM point prompts: click a fiber to segment it as a new region;
+                  Shift/Alt-click to refine (exclude) the current one.<br>Esc undoes it."
                   [escape]="false" tooltipPosition="bottom"
                   (onClick)="toggleDragMode.emit('samPoint')">
         </p-button>

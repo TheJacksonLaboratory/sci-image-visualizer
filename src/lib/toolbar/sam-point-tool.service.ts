@@ -10,11 +10,13 @@ import { Region, Polygon } from '../models/region';
 
 /** Interactive SAM point-prompt tool (jit-ui#90, P1).
  *
- * Click to add a positive point, Shift/Alt-click to add a negative point; after
- * each click the decoder re-runs against the (cached) image embedding and the
- * in-progress mask is shown as a live region. `commit()` finalises it; `clear()`
- * (or Esc) discards the prompt. Mirrors the wand/brush on-canvas tool pattern
- * and reuses WandService.maskToPolygons + the shared region store.
+ * Each plain (positive) click segments the clicked object as its OWN new region
+ * — clicking a second fiber doesn't extend the first into it. Shift/Alt-click
+ * adds a negative (exclude) point that refines the CURRENT object, re-running
+ * the decoder against the (cached) image embedding and updating its live region.
+ * `commit()` (Enter) finalises early; `clear()` (Esc) discards the current
+ * prompt + its preview region. Mirrors the wand/brush on-canvas tool pattern and
+ * reuses WandService.maskToPolygons + the shared region store.
  *
  * Inference is behind {@link ISamSession} (lazy onnxruntime-web in production,
  * a fake in tests).
@@ -128,6 +130,17 @@ export class SamPointToolService {
     const oy = cached.originY ?? 0;
     // Shift or Alt = negative (exclude) point.
     const label: 0 | 1 = e.shiftKey || e.altKey ? 0 : 1;
+    // A plain positive click starts a NEW object: clicking another fiber must
+    // segment that fiber on its own, not accumulate with earlier points and
+    // grow the in-progress mask into the adjacent object (which would also
+    // overwrite a previously-segmented region). Only Shift/Alt (exclude) points
+    // refine the current object. This also clears any stale prompt left after a
+    // region was deleted, so the next click segments fresh instead of redrawing
+    // the old merged mask.
+    if (label === 1) {
+      this.points = [];
+      this.regionId = null;
+    }
     this.points.push({ x: (dataX - ox) / rx, y: (dataY - oy) / ry, label });
 
     // Mark busy BEFORE ensureSession: the first click downloads the encoder
@@ -159,7 +172,9 @@ export class SamPointToolService {
         poly.xpoints.map((x) => ox + x * rx),
         poly.ypoints.map((y) => oy + y * ry),
       );
-      this.status$.next(`${this.points.length} point(s) — Enter to commit, Esc to clear.`);
+      this.status$.next(
+        'Segmented — click another fiber for a new region, Shift-click to refine, Esc to undo.',
+      );
     } catch (err) {
       this.status$.next(err instanceof Error ? err.message : 'SAM model unavailable.');
     } finally {
