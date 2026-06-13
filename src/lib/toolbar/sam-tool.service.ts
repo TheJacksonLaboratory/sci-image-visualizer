@@ -112,7 +112,8 @@ export class SamToolService {
         this.embeddingKey = key;
       }
 
-      const out = regions.slice();
+      const masks: Region[] = [];
+      const consumed = new Set<Region>(); // prompt rectangles that produced a mask
       let added = 0;
       for (let i = 0; i < rects.length; i++) {
         this.status$.next(`Segmenting ${i + 1}/${rects.length}…`);
@@ -131,14 +132,17 @@ export class SamToolService {
         if (polys.length === 0) continue;
         // Keep the largest connected piece (maskToPolygons returns largest-first).
         const poly = polys[0];
-        const region = this.makeRegion(
+        masks.push(this.makeRegion(
           poly.xpoints.map((x) => ox + x * rx),
           poly.ypoints.map((y) => oy + y * ry),
-        );
-        out.push(region);
+        ));
+        consumed.add(rects[i]); // this rectangle is now represented by its mask
         added++;
       }
 
+      // Replace each segmented prompt rectangle with its mask region; keep any
+      // rectangle that produced no mask (so it can be retried) + other regions.
+      const out = regions.filter((r) => !consumed.has(r)).concat(masks);
       this.host.setRegions(out);
       this.status$.next(added > 0 ? `Added ${added} region(s).` : 'No masks found.');
       return added;

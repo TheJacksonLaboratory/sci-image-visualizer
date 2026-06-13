@@ -70,9 +70,9 @@ describe('SamToolService', () => {
 
     expect(added).toBe(1);
     const regs = get();
-    expect(regs).toHaveLength(2);                 // original rect + new mask region
-    const mask = regs[1];
-    expect(mask.bounds).toBeInstanceOf(Polygon);
+    expect(regs).toHaveLength(1);                 // prompt rectangle replaced by its mask
+    const mask = regs[0];
+    expect(mask.bounds).toBeInstanceOf(Polygon);  // not a Rectangle anymore
     expect(mask.label).toBe('sam');
     expect(mask.color).toBe('#ffffff');
   });
@@ -82,7 +82,8 @@ describe('SamToolService', () => {
     tool.bindHost(host);
     const added = await tool.segmentBoxes();
     expect(added).toBe(2);
-    expect(get()).toHaveLength(4);
+    expect(get()).toHaveLength(2);                // 2 rects replaced by 2 masks
+    expect(get().every((r) => r.bounds instanceof Polygon)).toBe(true);
   });
 
   it('is a no-op with a clear status when no rectangles are drawn', async () => {
