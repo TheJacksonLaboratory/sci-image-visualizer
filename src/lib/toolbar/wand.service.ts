@@ -309,6 +309,33 @@ export class WandService {
     return polys;
   }
 
+  /**
+   * Trace each instance in an integer label map (0 = background) into a Polygon
+   * — used to turn a cellpose-style segmentation into region outlines. Labels
+   * with area below `minSize` are skipped. Coords are translated via
+   * originX/originY and clamped to imageWidth/imageHeight.
+   */
+  public labelsToPolygons(labels: Uint32Array, w: number, h: number,
+                          imageWidth: number, imageHeight: number,
+                          originX: number, originY: number, minSize = 10): Polygon[] {
+    let maxLabel = 0;
+    for (let i = 0; i < labels.length; i++) if (labels[i] > maxLabel) maxLabel = labels[i];
+    const out: Polygon[] = [];
+    const bin = new Uint8Array(w * h);
+    for (let lbl = 1; lbl <= maxLabel; lbl++) {
+      let any = false;
+      for (let i = 0; i < labels.length; i++) {
+        const on = labels[i] === lbl; bin[i] = on ? 1 : 0; if (on) any = true;
+      }
+      if (!any) continue;
+      // Reuse the contour tracer; one label is usually a single blob.
+      for (const p of this.maskToPolygons(bin, w, h, imageWidth, imageHeight, originX, originY, minSize)) {
+        out.push(p);
+      }
+    }
+    return out;
+  }
+
   // ── Patch extraction ────────────────────────────────────────────────
 
   private extractPatch(image: WandImage, cx: number, cy: number, W: number, type: WandType): Float32Array {
