@@ -12,15 +12,95 @@ Tools). The annotation/segmentation tooling was added under
 
 ## Highlights
 
-- **Rendering backends** — OpenSeadragon (tiled) and Plotly, behind one
+- **Two rendering backends** — a tiled [OpenSeadragon](https://openseadragon.github.io/)
+  viewer and [Plotly](https://plotly.com/javascript/) plots — behind one
   `IVisualizer` contract; the host picks per image via `RoutingVisualizerService`.
+- **Plot types** — Image, Contour, Scatter (regions), Surface 3D, Scatter 3D, Isosurface.
 - **Region / annotation tools** — selection, rectangle, polyline, freeform,
-  polygon + vertex editing, move, Bézier↔polygon, **magic wand** (similar-pixel
-  flood with erase/merge), **brush** (paint/erase, QuPath-style), vertex eraser.
+  polygon + vertex editing, move, Bézier↔polygon, magic wand, brush, vertex eraser.
+- **Channels & histogram** — brightness/contrast/gamma, per-channel display,
+  colormaps / LUTs.
+- **Region editor** — a Regions panel to list, select, rename, classify, recolor,
+  import/export (GeoJSON), and delete regions.
 - **Browser-side segmentation** — promptable SAM (box + interactive points) and
-  automatic cellpose-SAM. No server round-trip.
-- A shared **region store** + GeoJSON-friendly model, channel/histogram controls,
-  scale bar, intensity profiles, and a configurable toolbar.
+  automatic cellpose-SAM, all client-side (see below).
+
+## Visualization
+
+Open an image and it renders through whichever backend best fits it; the
+`RoutingVisualizerService` switches backends per plot type and keeps the shared
+state (regions, channels, zoom) consistent across them.
+
+### OpenSeadragon — tiled image view
+The default **Image** view is a natively tiled, deeply zoomable raster powered by
+[OpenSeadragon](https://openseadragon.github.io/). It streams pyramid tiles (the
+host supplies them through the `TILE_ACCESS_PORT`, e.g. a `/tiles/info` + `/tile`
+service), so gigapixel slides pan and zoom smoothly without loading the whole
+image. It includes:
+
+- a **navigator minimap** and a physical-units **scale bar**;
+- **click-to-zoom** toward the clicked point, scroll-zoom, and drag-pan;
+- a **raw-pixel vs. smoothing** toggle — images open at nearest-neighbour so
+  zoomed-in pixels stay crisp for inspection; toggle **Smoothen** for bilinear;
+- **WYSIWYG PNG download** of the current view and a **fit-to-view / autoscale**
+  reset.
+
+### Plotly — plots & 3D
+Non-image plot types render with [Plotly](https://plotly.com/javascript/) and
+support "real zooming" — a downscaled overview that re-fetches higher-resolution
+data as you zoom in:
+
+- **Contour** and **Scatter (regions)** 2D plots;
+- **Surface 3D**, **Scatter 3D**, and **Isosurface** for z-stacks, with an
+  **isosurface band** slider and full **3D camera** controls (zoom, pan, orbit,
+  turntable, reset);
+- scalar/3D types expect a grayscale image (the volume types also need a z-stack).
+
+When a stack is open, a slice slider (Image view) or single-image/stack toggle
+(other views) navigates the z-dimension.
+
+### Intensity profiles *(work in progress)*
+A line-ROI tool draws coloured lines and plots intensity along each one in a live
+floating inset chart that re-samples at the current zoom. It works today but the
+API/UX are still stabilizing (see [In progress / roadmap](#in-progress--roadmap)).
+
+## Regions & annotation
+
+Regions are stored in a shared **region store** and use a GeoJSON-friendly model
+(rectangles, polygons, polylines, Bézier curves). Every tool writes to the same
+store, so regions persist across backend/plot-type switches and are editable from
+the Regions panel. The on-canvas tools:
+
+- **Selection** — neutral mode; deactivates any drawing tool.
+- **Rectangle**, **Polyline** (open `LineString`), **Freeform** (drag-to-draw
+  closed polygon), and **Polygon** (click vertices, click first to close).
+- **Vertex editing** — add vertex, delete vertex, and **move region**.
+- **Bézier ↔ polygon** — convert a region to a smooth Bézier curve or back.
+- **Magic wand** — grow a region from similar-valued pixels around the click;
+  `Ctrl`/`Cmd` for exact-match flood fill; drag to extend; `Shift` to erase;
+  a sensitivity slider tunes strictness. Growing into another region merges them.
+- **Brush** — paint/erase a region with a circular brush (QuPath-style); a size
+  slider sets the diameter, `Shift` erases, and erasing across a region can split it.
+- **Vertex eraser** — remove vertices within a radius from any region.
+- **Delete** the selected region.
+
+Wand- and brush-drawn regions default to the `legend` class; SAM/cellpose masks
+inherit the color of the rectangle they came from.
+
+## Channels, histogram & colormaps
+
+A floating **Channels & Histogram** dialog controls how intensities are mapped to
+display: **brightness / contrast / gamma**, **per-channel** display for
+multi-channel images, and — for grayscale — **colormap / LUT** selection with a
+**reverse** toggle (default: inverted greys). Changes apply live in both backends.
+
+## Region editor (Regions panel)
+
+The `<jaxviz-region-editor>` component is the Regions tab: a table of all regions
+where you can **select**, **rename**, assign a **classification / class name**,
+set **per-class colors**, toggle labels, **import / export ROIs** as GeoJSON
+(`REGION_IO_PORT`), and **delete**. Selecting a row highlights the region on the
+canvas (and vice-versa), so it pairs with the on-canvas tools above.
 
 ## Segmentation tools (SAM & cellpose)
 
@@ -156,9 +236,19 @@ Related (host side, in jit-ui):
 > Zhang, C. et al. *Faster Segment Anything: Towards Lightweight SAM for Mobile Applications.* arXiv:[2306.14289](https://arxiv.org/abs/2306.14289) (2023).
 > Code: [ChaoningZhang/MobileSAM](https://github.com/ChaoningZhang/MobileSAM).
 
-Runtime: [onnxruntime-web](https://github.com/microsoft/onnxruntime) (WebGPU/WASM
-ONNX inference). Please cite the relevant model papers when publishing results
-produced with these tools.
+**Rendering & runtime libraries**
+
+- **OpenSeadragon** — deep-zoom tiled image viewer.
+  [openseadragon.github.io](https://openseadragon.github.io/) ·
+  [GitHub](https://github.com/openseadragon/openseadragon).
+- **Plotly.js** — interactive 2D/3D plotting.
+  [plotly.com/javascript](https://plotly.com/javascript/) ·
+  [GitHub](https://github.com/plotly/plotly.js).
+- **onnxruntime-web** — WebGPU/WASM ONNX inference (the SAM & cellpose runtime).
+  [GitHub](https://github.com/microsoft/onnxruntime).
+
+Please cite the relevant model papers when publishing results produced with these
+tools.
 
 ## Usage (host integration, brief)
 
