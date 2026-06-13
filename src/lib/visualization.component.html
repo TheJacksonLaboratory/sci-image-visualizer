@@ -5,7 +5,7 @@
     <div style="flex: 1; min-width: 16rem">
       <div class="font-bold mb-1">{{ message.summary }}</div>
       <div>{{ samStatus || message.detail }}</div>
-      <p-progressBar *ngIf="samDownloading" [value]="samProgress" styleClass="mt-2"></p-progressBar>
+      <p-progressBar *ngIf="samDownloading" [value]="samProgress" styleClass="mt-2 sam-progress"></p-progressBar>
       <p-progressBar *ngIf="samBusy && !samDownloading" mode="indeterminate" styleClass="mt-2"
                      [style]="{ height: '4px' }"></p-progressBar>
     </div>

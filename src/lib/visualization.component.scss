@@ -355,3 +355,11 @@ kbd {
   flex: 1 1 auto;
   width: 100%;
 }
+
+/* SAM/cellpose model-download bar: kill PrimeNG's default `width 1s ease`
+ * transition on the fill so it tracks the real download percentage instantly.
+ * Otherwise the numeric label jumps to 100% while the animated fill lags behind
+ * (the label reads higher than the bar shows). */
+:host ::ng-deep .sam-progress .p-progressbar-value {
+  transition: none;
+}
