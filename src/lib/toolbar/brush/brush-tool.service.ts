@@ -35,6 +35,14 @@ export type BrushToolHost = WandToolHost;
  *
  * Lifecycle mirrors the wand: a backend binds its host once, then toggles the
  * tool with `setMode(true | false, options)`.
+ *
+ * Known limitation — no holes/donuts: brushing a ring that encloses an unpainted
+ * area yields a filled disc, not a donut. The boundary tracer
+ * ({@link WandService.maskToPolygons} via `mooreBoundary`) returns only each
+ * component's *outer* contour, and the neutral {@link Polygon} region model is a
+ * single ring with no interior rings — so an enclosed hole can't be represented
+ * and is filled in. Supporting donuts would require interior-ring support across
+ * the model, both renderers (even-odd fill), GeoJSON I/O, and hit-testing.
  */
 @Injectable({ providedIn: 'root' })
 export class BrushToolService {
