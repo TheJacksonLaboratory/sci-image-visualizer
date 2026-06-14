@@ -72,10 +72,16 @@ export class OnnxSamSession implements ISamSession {
     }
     this.model = model;
     ort.env.wasm.wasmPaths = '/assets/ort/';
-    // Per-model override wins (e.g. TinyViT runs on WASM — its fp16 attention
-    // overflows on the WebGPU EP and yields an empty mask); otherwise prefer
-    // WebGPU with a WASM fallback.
-    const eps: string[] = model.encoderProviders ?? (this.hasWebGpu() ? ['webgpu', 'wasm'] : ['wasm']);
+    // Run inference in ORT's Web Worker (proxy) so a heavy ViT-B encode never
+    // blocks — and freezes — the main thread; it also keeps the busy spinner
+    // animating (a blocked main thread can't repaint). WebGPU can't run in the
+    // proxy worker, so use the proxied WASM EP: reliable on every machine, and
+    // multi-threaded when the page is cross-origin-isolated.
+    ort.env.wasm.proxy = true;
+    if (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) {
+      ort.env.wasm.numThreads = Math.min(4, navigator.hardwareConcurrency);
+    }
+    const eps: string[] = model.encoderProviders ?? ['wasm'];
     // Fetch the (heavy) encoder ourselves so we can report download progress and
     // cache it in the Cache API; the decoder is small so fetch it plainly.
     const encBuf = await fetchModel(model.encoderUrl, onProgress);
@@ -163,9 +169,5 @@ export class OnnxSamSession implements ISamSession {
       }
     }
     return chw;
-  }
-
-  private hasWebGpu(): boolean {
-    return typeof navigator !== 'undefined' && 'gpu' in navigator;
   }
 }
