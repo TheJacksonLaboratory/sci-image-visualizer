@@ -325,6 +325,13 @@
         <span class="flex align-items-center mx-1 toolbar-text wand-sensitivity-value">
           {{ vertexEraserRadius }}</span>
       </ng-container>
+      <p-button icon="pi pi-undo" size="small" [text]="true"
+                [disabled]="!canUndo"
+                pTooltip="Undo the last region action (<kbd>Ctrl</kbd>+<kbd>Z</kbd>).
+                Up to 10 actions can be undone."
+                [escape]="false" tooltipPosition="bottom"
+                (onClick)="undoRegion.emit()">
+      </p-button>
       <p-button icon="pi pi-trash" size="small" [text]="true"
                 pTooltip="Delete selected region (<kbd>Del</kbd>)"
                 [escape]="false" tooltipPosition="bottom"
@@ -541,6 +548,9 @@
       to remove polygon vertices that fall inside the cursor circle from any region. Use the
       <b>Radius</b> slider to set the eraser size in image pixels. Polygons reduced below 3
       vertices (or polylines below 2) are deleted entirely.</li>
+    <li>"<b>Undo</b>" <i class="pi pi-undo"></i> (<kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Z</kbd>): reverts the
+      last region action (draw, delete, edit, wand/brush stroke, segmentation, …). Up to the last
+      <b>10</b> actions can be undone; the button greys out when there's nothing left to undo.</li>
     <li>"<b>Delete region</b>" <i class="pi pi-trash"></i> (<kbd>Del</kbd>): deletes the selected
       region. This can also be done from the Regions tab.</li>
   </ul>
@@ -591,6 +601,7 @@
     <tr><td><kbd>Enter</kbd></td><td>Commit the current SAM point object</td></tr>
     <tr><td><kbd>Esc</kbd></td><td>Undo the current SAM point object</td></tr>
     <tr><td><kbd>Del</kbd> / <kbd>⌫</kbd></td><td>Delete selected region</td></tr>
+    <tr><td><kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Z</kbd></td><td>Undo the last region action (up to 10)</td></tr>
   </table>
 
   <ng-template pTemplate="footer">

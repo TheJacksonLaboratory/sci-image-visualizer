@@ -255,6 +255,116 @@ describe('RegionStore', () => {
     });
   });
 
+  describe('undo (jit-ui#85)', () => {
+    // The store coalesces a burst of rapid commits into one undo entry via an
+    // idle timer (UNDO_COALESCE_MS). Fake timers let us close a burst
+    // deterministically between distinct "actions".
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => { jest.runOnlyPendingTimers(); jest.useRealTimers(); });
+
+    /** Advance past the coalescing window so the next edit opens a new entry. */
+    const settle = () => jest.advanceTimersByTime(500);
+
+    it('starts with nothing to undo', () => {
+      expect(store.canUndo()).toBe(false);
+    });
+
+    it('undoes a single add, restoring the prior (empty) state', () => {
+      store.addRegion(rectRegion(0, 0, 10, 10));
+      expect(store.getRegions().length).toBe(1);
+      expect(store.canUndo()).toBe(true);
+
+      store.undo();
+      expect(store.getRegions().length).toBe(0);
+      expect(store.canUndo()).toBe(false);
+    });
+
+    it('retains at most 10 steps, then greys out', () => {
+      // 12 distinct add actions -> only the last 10 are undoable.
+      for (let i = 0; i < 12; i++) { store.addRegion(rectRegion(i, i, 1, 1)); settle(); }
+      expect(store.getRegions().length).toBe(12);
+
+      // Undo the full retained depth (10): the two oldest adds can't be reverted.
+      for (let i = 0; i < 10; i++) {
+        expect(store.canUndo()).toBe(true);
+        store.undo();
+      }
+      expect(store.getRegions().length).toBe(2); // floored at the first two adds
+      expect(store.canUndo()).toBe(false);
+
+      store.undo(); // no-op
+      expect(store.getRegions().length).toBe(2);
+    });
+
+    it('emits canUndo state changes', () => {
+      const states: boolean[] = [];
+      store.getCanUndo$().subscribe(s => states.push(s));
+      expect(states).toEqual([false]);
+
+      store.addRegion(rectRegion(0, 0, 1, 1));
+      expect(states[states.length - 1]).toBe(true);
+
+      store.undo();
+      expect(states[states.length - 1]).toBe(false);
+    });
+
+    it('undoes a delete, bringing the region back', () => {
+      store.addRegion(rectRegion(0, 0, 1, 1)); settle();
+      store.setSelectedShapeIndices([0]);
+      store.deleteActiveShape();
+      expect(store.getRegions().length).toBe(0);
+
+      store.undo();
+      expect(store.getRegions().length).toBe(1);
+    });
+
+    it('coalesces a rapid burst (a drag) into a single undo entry', () => {
+      const id = store.addRegion(rectRegion(0, 0, 1, 1)); settle(); // entry 1
+      // Simulate a wand/brush drag: many commits within the coalescing window.
+      store.moveRegion(id, 1, 0);
+      store.moveRegion(id, 1, 0);
+      store.moveRegion(id, 1, 0);
+      const moved = store.getRegions()[0].bounds as Rectangle;
+      expect(moved.x).toBe(3);
+
+      store.undo(); // one undo reverts the whole drag, not just the last tick
+      expect((store.getRegions()[0].bounds as Rectangle).x).toBe(0);
+    });
+
+    it('does not alias the live region — an edit after undo is independent', () => {
+      const id = store.addRegion(polyRegion([0, 10, 5], [0, 0, 10])); settle();
+      store.moveVertex(id, 0, 99, 99); settle();
+      store.undo(); // restore pre-move vertices
+      const poly = store.getRegions()[0].bounds as Polygon;
+      expect(poly.xpoints[0]).toBe(0);
+
+      // Mutating again must not corrupt any retained snapshot.
+      store.moveVertex(id, 1, 50, 50); settle();
+      expect((store.getRegions()[0].bounds as Polygon).xpoints[1]).toBe(50);
+    });
+
+    it('resetUndoHistory clears the stack', () => {
+      store.addRegion(rectRegion(0, 0, 1, 1));
+      expect(store.canUndo()).toBe(true);
+      store.resetUndoHistory();
+      expect(store.canUndo()).toBe(false);
+    });
+
+    it('clears undo history on image switch', () => {
+      store.setActiveImage(imageInfo('a.tif')); settle();
+      store.addRegion(rectRegion(0, 0, 1, 1)); settle();
+      expect(store.canUndo()).toBe(true);
+
+      store.setActiveImage(imageInfo('b.tif'));
+      expect(store.canUndo()).toBe(false);
+    });
+
+    it('a transient (isRegionSaveOn=false) display records no history', () => {
+      store.setRegions([rectRegion(0, 0, 1, 1)], undefined, false);
+      expect(store.canUndo()).toBe(false);
+    });
+  });
+
   describe('per-image cache', () => {
     it('snapshots and restores regions across image switches', () => {
       store.setActiveImage(imageInfo('a.tif'));

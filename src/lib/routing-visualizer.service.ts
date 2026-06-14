@@ -226,6 +226,12 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   plotPreviousShapes(): void { this.renderer().plotPreviousShapes(); }
   setPreviousShapes(shapes: any[]): void { this.renderer().setPreviousShapes(shapes); }
   getPreviousShapes(): any[] { return this.renderer().getPreviousShapes(); }
+  // Undo state is owned by the shared RegionStore (same instance for both
+  // backends), so routing through the active renderer is safe and stable.
+  undo(): void { this.renderer().undo(); }
+  canUndo(): boolean { return this.renderer().canUndo(); }
+  getCanUndo$(): Observable<boolean> { return this.renderer().getCanUndo$(); }
+  resetUndoHistory(): void { this.renderer().resetUndoHistory(); }
   importRegions(geoJsonStr: string): Region[] { return this.renderer().importRegions(geoJsonStr); }
   exportRegions(regions: Region[]): void { this.renderer().exportRegions(regions); }
   getGeoJsonString(regions: Region[]): string { return this.renderer().getGeoJsonString(regions); }

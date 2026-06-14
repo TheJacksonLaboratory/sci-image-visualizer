@@ -32,6 +32,9 @@ import { IRegionEditApi } from '../contracts/region-store.contract';
 @Injectable({ providedIn: 'root' })
 export class RegionStore implements IRegionStore, IRegionEditApi {
 
+  private static readonly UNDO_LIMIT = 10;
+  private static readonly UNDO_COALESCE_MS = 250;
+
   /** Per-image region cache. `regions` is always a snapshot of the entry for
    *  `currentImageKey`. */
   private regionsByImageKey = new Map<string, Region[]>();
@@ -40,6 +43,26 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   private regions: Region[] = [];
   /** Last saved snapshot, restorable via plotPreviousShapes(). */
   private previousRegions: Region[] = [];
+
+  /**
+   * Undo history (jit-ui#85): up to {@link UNDO_LIMIT} snapshots of the region
+   * set, each a deep clone captured immediately *before* a region-editing
+   * action. {@link undo} pops the newest and restores it, so it can be invoked
+   * up to {@link UNDO_LIMIT} times in a row before the history empties.
+   *
+   * A continuous gesture (a wand/brush/vertex drag commits to the store many
+   * times) is coalesced into a single entry: the first commit of a burst
+   * captures the pre-burst state and every commit within
+   * {@link UNDO_COALESCE_MS} of the previous one is folded into it. Undo never
+   * crosses an image load/switch — {@link resetUndoHistory} clears it.
+   */
+  private undoStack: Region[][] = [];
+  /** True while a coalescing burst is open (further commits fold into it). */
+  private undoBurstOpen = false;
+  private undoBurstTimer: ReturnType<typeof setTimeout> | null = null;
+  /** True while restoring a snapshot, so the restore records no new history. */
+  private restoringUndo = false;
+  private readonly canUndo$ = new BehaviorSubject<boolean>(false);
 
   /** Monotonic id source — ids never repeat within the service lifetime, so
    *  selection stays correct across delete/add cycles even when names collide. */
@@ -89,6 +112,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
 
     this.isRegionSavedOn = isRegionSaveOn;
     if (isRegionSaveOn) {
+      this.recordUndoSnapshot();
       this.showShapeLabel = showRegionLabel;
       this.fillColor = fillColor;
       if (append) {
@@ -177,6 +201,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   /** Delete the currently selected regions and clear the selection. */
   deleteActiveShape(): void {
     if (this.selectedIds.length === 0) return;
+    this.recordUndoSnapshot();
     const ids = new Set(this.selectedIds);
     this.regions = this.regions.filter(r => !ids.has(r.id));
     this.selectedIds = [];
@@ -208,6 +233,99 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   setPreviousShapes(shapes: any[]): void { this.previousRegions = (shapes as Region[]).slice(); }
   getPreviousShapes(): any[] { return this.previousRegions.slice(); }
 
+  // ── IRegionStore: undo (jit-ui#85) ─────────────────────────────────────
+
+  /** Emits whether an undo step is currently available — drives the toolbar
+   *  Undo button's enabled state (greyed out when false). */
+  getCanUndo$(): Observable<boolean> {
+    return this.canUndo$.asObservable();
+  }
+
+  /** Synchronous read of {@link getCanUndo$} — true when at least one region
+   *  action can be undone. */
+  canUndo(): boolean {
+    return this.undoStack.length > 0;
+  }
+
+  /**
+   * Undo the most recent region action, restoring the region set to its state
+   * just before that action. Up to {@link UNDO_LIMIT} steps are retained, so
+   * this can be called up to {@link UNDO_LIMIT} times in a row before the
+   * history empties. No-op when nothing is left to undo.
+   */
+  undo(): void {
+    if (this.undoStack.length === 0) return;
+    const snapshot = this.undoStack.pop() as Region[];
+    // Close any open coalescing burst so the next edit starts a fresh entry,
+    // and flag the restore so it doesn't record itself back into the history.
+    this.closeUndoBurst();
+    this.restoringUndo = true;
+    this.regions = snapshot;                       // already a detached deep clone
+    // Drop any selected ids the restored set no longer contains.
+    this.selectedIds = this.selectedIds.filter(id => this.indexOfId(id) >= 0);
+    this.syncCache();
+    this.emitSelection();
+    this.restoringUndo = false;
+    this.canUndo$.next(this.undoStack.length > 0);
+    // Notify the live + coalesced streams so whichever backend is on screen
+    // re-renders from the restored store state.
+    this.regionLiveEdit$.next(this.regions.slice());
+    this.regionUpdate$.next(this.getRegions());
+  }
+
+  /** Discard the undo history (e.g. on image load/switch — undo never crosses
+   *  images). */
+  resetUndoHistory(): void {
+    this.undoStack = [];
+    this.closeUndoBurst();
+    if (this.canUndo$.value) this.canUndo$.next(false);
+  }
+
+  /**
+   * Capture the pre-action region set into the bounded undo history. Called at
+   * the top of every mutating operation, *before* it changes `regions`, so the
+   * snapshot is the state to return to. Rapid commits from one gesture coalesce
+   * into a single entry (see {@link undoStack}).
+   */
+  private recordUndoSnapshot(): void {
+    if (this.restoringUndo) return;
+    const startsBurst = !this.undoBurstOpen;
+    this.armUndoBurst();
+    if (!startsBurst) return;                      // mid-burst — keep first snapshot
+    this.undoStack.push(this.cloneRegions(this.regions));
+    if (this.undoStack.length > RegionStore.UNDO_LIMIT) this.undoStack.shift();
+    if (!this.canUndo$.value) this.canUndo$.next(true);
+  }
+
+  /** (Re)arm the idle timer that closes the current coalescing burst. */
+  private armUndoBurst(): void {
+    this.undoBurstOpen = true;
+    if (this.undoBurstTimer) clearTimeout(this.undoBurstTimer);
+    this.undoBurstTimer = setTimeout(() => {
+      this.undoBurstOpen = false;
+      this.undoBurstTimer = null;
+    }, RegionStore.UNDO_COALESCE_MS);
+  }
+
+  private closeUndoBurst(): void {
+    this.undoBurstOpen = false;
+    if (this.undoBurstTimer) { clearTimeout(this.undoBurstTimer); this.undoBurstTimer = null; }
+  }
+
+  private cloneRegions(regions: Region[]): Region[] {
+    return regions.map(r => this.cloneRegion(r));
+  }
+
+  /** Deep clone a region so an in-place geometry edit can't mutate a stored
+   *  history snapshot (bounds are cloned via {@link cloneBounds}). */
+  private cloneRegion(r: Region): Region {
+    const c = new Region();
+    Object.assign(c, r);
+    c.bounds = r.bounds ? this.cloneBounds(r.bounds) : r.bounds;
+    if (Array.isArray(r.tileCoordinates)) c.tileCoordinates = r.tileCoordinates.slice();
+    return c;
+  }
+
   // ── IRegionStore: GeoJSON I/O (neutral helpers) ────────────────────────
 
   importRegions(geoJsonStr: string): Region[] {
@@ -223,6 +341,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   // ── IRegionEditApi: structural edits ───────────────────────────────────
 
   addRegion(region: Region): number {
+    this.recordUndoSnapshot();
     if (region.id == null) region.id = this.nextId++;
     if (region.name == null) region.name = `shape${region.id}`;
     this.applyClassificationColors([region]);
@@ -237,6 +356,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   removeRegion(id: number): void {
     const idx = this.indexOfId(id);
     if (idx < 0) return;
+    this.recordUndoSnapshot();
     this.regions.splice(idx, 1);
     this.selectedIds = this.selectedIds.filter(s => s !== id);
     this.syncCache();
@@ -247,6 +367,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   updateBounds(id: number, bounds: Rectangle | Polygon): void {
     const r = this.findById(id);
     if (!r) return;
+    this.recordUndoSnapshot();
     r.bounds = this.cloneBounds(bounds);
     this.syncCache();
     this.emit();
@@ -255,6 +376,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   moveRegion(id: number, dx: number, dy: number): void {
     const r = this.findById(id);
     if (!r || !r.bounds) return;
+    this.recordUndoSnapshot();
     const b = r.bounds;
     if (b instanceof Rectangle) {
       b.x += dx;
@@ -273,6 +395,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   moveVertex(id: number, index: number, x: number, y: number): void {
     const poly = this.polygonOf(id);
     if (!poly || index < 0 || index >= poly.xpoints.length) return;
+    this.recordUndoSnapshot();
     poly.xpoints[index] = x;
     poly.ypoints[index] = y;
     poly.coordinates[index] = [x, y];
@@ -283,6 +406,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   addVertex(id: number, segIndex: number, x: number, y: number): void {
     const poly = this.polygonOf(id);
     if (!poly) return;
+    this.recordUndoSnapshot();
     // Insert after segIndex (the start vertex of the edge). Clamp to range.
     const at = Math.max(0, Math.min(segIndex + 1, poly.xpoints.length));
     poly.xpoints.splice(at, 0, x);
@@ -310,6 +434,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     if (!poly || index < 0 || index >= poly.xpoints.length) return;
     const min = poly.closed === false ? 2 : 3;
     if (poly.xpoints.length <= min) return; // refuse to degenerate the polygon
+    this.recordUndoSnapshot();
     poly.xpoints.splice(index, 1);
     poly.ypoints.splice(index, 1);
     poly.coordinates = poly.xpoints.map((xx, i) => [xx, poly.ypoints[i]]);
@@ -327,8 +452,10 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     if (!r || !r.bounds) return;
     if (r.bounds instanceof Polygon) {
       if (r.bounds.bezier === bezier) return;
+      this.recordUndoSnapshot();
       this.applyBezier(r.bounds, bezier);
     } else if (r.bounds instanceof Rectangle && bezier) {
+      this.recordUndoSnapshot();
       // Smoothing a rectangle: convert it to a 4-anchor closed polygon first.
       const b = r.bounds;
       const xs = [b.x, b.x + b.width, b.x + b.width, b.x];
@@ -365,6 +492,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   moveBezierHandle(id: number, index: number, side: 'in' | 'out', x: number, y: number): void {
     const poly = this.polygonOf(id);
     if (!poly || !poly.bezier || index < 0 || index >= poly.xpoints.length) return;
+    this.recordUndoSnapshot();
     if (!poly.handlesIn || !poly.handlesOut) {
       const off = defaultHandleOffsets(poly.xpoints, poly.ypoints, poly.closed !== false);
       poly.handlesIn = off.in;
@@ -405,6 +533,8 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
       : [];
     this.previousRegions = this.regions.slice();
     this.selectedIds = [];
+    // Undo never crosses an image switch.
+    this.resetUndoHistory();
     this.emitSelection();
     this.regionUpdate$.next(this.getRegions());
   }
@@ -415,6 +545,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.currentImageKey = undefined;
     this.regions = [];
     this.selectedIds = [];
+    this.resetUndoHistory();
   }
 
   // ── internals ──────────────────────────────────────────────────────────

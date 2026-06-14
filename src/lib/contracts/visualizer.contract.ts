@@ -141,6 +141,19 @@ export interface IRegionStore {
   setPreviousShapes(shapes: any[]): void;
   getPreviousShapes(): any[];
 
+  /** Undo the most recent region action (jit-ui#85). Restores the region set to
+   *  the state before that action; up to a small fixed depth (10) is retained,
+   *  so it can be invoked up to 10 times in a row. No-op when nothing is left to
+   *  undo. */
+  undo(): void;
+  /** Synchronous read of {@link getCanUndo$}. */
+  canUndo(): boolean;
+  /** Emits whether an undo step is currently available — drives the toolbar
+   *  Undo button's enabled (greyed-out) state. */
+  getCanUndo$(): Observable<boolean>;
+  /** Clear the undo history (e.g. on image load/switch). */
+  resetUndoHistory(): void;
+
   importRegions(geoJsonStr: string): Region[];
   exportRegions(regions: Region[]): void;
   getGeoJsonString(regions: Region[]): string;

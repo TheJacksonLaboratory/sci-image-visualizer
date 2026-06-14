@@ -90,6 +90,10 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
 
   activeDragMode: string | null = null;
 
+  /** Whether a region action is available to undo (jit-ui#85). Mirrors the
+   *  shared RegionStore's history depth; drives the toolbar Undo button. */
+  canUndoRegion = false;
+
   /** Wand sensitivity — higher = stricter (smaller selection). Matches QuPath default. */
   wandSensitivity = 2.0;
   /** Brush diameter in image-pixel coordinates (drives the painted disc size). */
@@ -241,6 +245,15 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     this.imageLoadingSubscription = this.state.isImageLoading$().subscribe((isImageLoading) => {
       this.imgLoading = isImageLoading;
     });
+    // Undo availability (jit-ui#85): the shared RegionStore emits whenever its
+    // history depth changes; greys out the toolbar Undo button accordingly.
+    this.plotService
+      .getCanUndo$()
+      .pipe(takeUntil(this.unsub))
+      .subscribe((canUndo) => {
+        this.canUndoRegion = canUndo;
+        this.cdr.detectChanges();
+      });
     // Interactive point-prompt segmentation runs inside the renderer on each
     // click; surface its live status + download progress in the shared `sam`
     // toast so the user sees it working (the first click pulls the encoder).
@@ -388,6 +401,9 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
                   );
                   this.plotService.setPreviousShapes(shapes);
                 }
+                // Loading an image's saved ROIs is not a user edit — start the
+                // undo history fresh so the first undo can't wipe them (jit-ui#85).
+                this.plotService.resetUndoHistory();
               };
               const releaseOverlay = () => {
                 if (imgInfo.isStack && imgInfo.showStack) this.stackLoading = false;
@@ -487,6 +503,12 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
           else this.plotService.clearSamPoints();
           this.hideSamToast(); // prompt resolved → dismiss the status toast
         });
+        return;
+      }
+      // Ctrl/Cmd+Z — undo the last region action (jit-ui#85).
+      if ((event.ctrlKey || event.metaKey) && (event.key === 'z' || event.key === 'Z') && !event.shiftKey) {
+        event.preventDefault();
+        this.ngZone.run(() => this.undoRegion());
         return;
       }
       if (event.key === 'Delete' || event.key === 'Backspace' || event.key === 'd' || event.key === 'D') {
@@ -946,6 +968,11 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
 
   deleteRegion() {
     this.plotService.deleteActiveShape();
+  }
+
+  /** Undo the most recent region action (jit-ui#85). Up to 10 steps back. */
+  undoRegion() {
+    this.plotService.undo();
   }
 
   /** Box-prompted SAM segmentation of the drawn rectangles (jit-ui#90). A sticky

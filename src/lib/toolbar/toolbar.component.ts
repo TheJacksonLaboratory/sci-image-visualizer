@@ -42,6 +42,9 @@ export class ToolbarComponent implements OnChanges {
   @Input() wandSensitivity = 2.0;
   @Input() brushSize = 40;
   @Input() vertexEraserRadius = 20;
+  /** Whether a region action is available to undo (jit-ui#85). Greys out the
+   *  Undo button when false (nothing done yet, or all steps already undone). */
+  @Input() canUndo = false;
   @Input() stackOptions: { name: string; val: string }[] =
     [{ name: 'Single image', val: 'false' }, { name: 'Stack', val: 'true' }];
   /** Which toolbar groups to show. Defaults to the full toolbar; the host forwards
@@ -77,6 +80,8 @@ export class ToolbarComponent implements OnChanges {
   @Output() toggleSurface3dMode = new EventEmitter<string>();
   @Output() resetSurfaceCamera = new EventEmitter<void>();
   @Output() deleteRegion = new EventEmitter<void>();
+  /** Undo the last region action (jit-ui#85). */
+  @Output() undoRegion = new EventEmitter<void>();
   /** Run box-prompted SAM segmentation on the drawn rectangles (jit-ui#90). */
   @Output() segmentRegions = new EventEmitter<void>();
   /** Run cellpose-SAM (auto) inside each drawn rectangle's crop (jit-ui#90). */
