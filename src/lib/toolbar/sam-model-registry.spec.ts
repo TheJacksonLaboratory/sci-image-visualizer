@@ -14,14 +14,21 @@ describe('sam-model-registry', () => {
     expect(getSamModel().id).toBe(SAM_MODELS[0].id);
   });
 
-  it('models are not "ready" until both ONNX URLs are configured', () => {
+  it('ships hosted ONNX URLs by default, and a model is "ready" only with both URLs', () => {
     const id = SAM_MODELS[0].id;
-    expect(isSamModelReady(getSamModel(id))).toBe(false);
-    setSamModelUrls(id, 'https://x/encoder.onnx', 'https://x/decoder.onnx');
+    // Snapshot the baked-in URLs as strings (setSamModelUrls mutates the entry).
+    const enc = getSamModel(id).encoderUrl;
+    const dec = getSamModel(id).decoderUrl;
+    // URLs are baked in, so models are ready out of the box.
     expect(isSamModelReady(getSamModel(id))).toBe(true);
-    // reset so other suites see the unconfigured default
+    expect(enc).toMatch(/^https?:\/\//);
+    expect(dec).toMatch(/^https?:\/\//);
+    // Clearing a URL (host opting out) marks it not ready…
     setSamModelUrls(id, '', '');
     expect(isSamModelReady(getSamModel(id))).toBe(false);
+    // …and re-pointing it makes it ready again.
+    setSamModelUrls(id, enc, dec);
+    expect(isSamModelReady(getSamModel(id))).toBe(true);
   });
 
   it('configuring a model makes it the active default (so getSamModel() returns it)', () => {
