@@ -77,6 +77,11 @@ export class OsdRegionOverlay implements IRegionOverlay {
     orig: any;
   } | null = null;
   private editDragged = false;
+  /** Rubber-band (marquee) multi-select in 'select' mode: press on empty space
+   *  and drag to select every region the band intersects. Image coords. */
+  private bandStart: { x: number; y: number } | null = null;
+  private bandCurrent: { x: number; y: number } | null = null;
+  private bandDragged = false;
 
   private readonly redrawHandler = () => this.redraw();
 
@@ -214,6 +219,11 @@ export class OsdRegionOverlay implements IRegionOverlay {
       }
     }
 
+    // Rubber-band (marquee) selection preview.
+    if (this.mode === 'select' && this.bandStart && this.bandCurrent) {
+      this.svg.appendChild(this.selectionBand(this.bandStart, this.bandCurrent));
+    }
+
     // In-progress drawing preview.
     if (this.mode === 'drawrect' && this.rectStart && this.rectCurrent) {
       this.svg.appendChild(this.rectPreview(this.rectStart, this.rectCurrent));
@@ -306,6 +316,20 @@ export class OsdRegionOverlay implements IRegionOverlay {
       g.appendChild(text);
       return g;
     }
+    return el;
+  }
+
+  /** Marquee rectangle for rubber-band multi-select (dashed outline + faint fill). */
+  private selectionBand(a: { x: number; y: number }, b: { x: number; y: number }): SVGElement {
+    const corners = [
+      { x: a.x, y: a.y }, { x: b.x, y: a.y }, { x: b.x, y: b.y }, { x: a.x, y: b.y },
+    ];
+    const el = document.createElementNS(SVGNS, 'polygon');
+    el.setAttribute('points', corners.map(p => { const q = this.toPx(p.x, p.y); return `${q.x},${q.y}`; }).join(' '));
+    el.setAttribute('fill', 'rgba(120,170,255,0.15)');
+    el.setAttribute('stroke', '#4a90e2');
+    el.setAttribute('stroke-dasharray', '4 3');
+    el.setAttribute('stroke-width', '1');
     return el;
   }
 
@@ -458,7 +482,14 @@ export class OsdRegionOverlay implements IRegionOverlay {
       const ez = this.editZoneAt(e.position);
       if (ez) {
         this.startEdit('bounds', ez.zone, -1, this.store.getRegions()[ez.index], this.toImage(e.position));
+        return;
       }
+      // Press on empty space / a non-selected region: begin a rubber-band
+      // multi-select. A plain click (no drag) falls through to onClick, which
+      // single-selects or clears.
+      this.bandStart = this.toImage(e.position);
+      this.bandCurrent = this.bandStart;
+      this.bandDragged = false;
     }
   }
 
@@ -494,6 +525,12 @@ export class OsdRegionOverlay implements IRegionOverlay {
     if (this.edit) {
       this.editDragged = true;
       this.applyEdit(this.toImage(e.position));
+      return;
+    }
+    if (this.bandStart) {
+      this.bandCurrent = this.toImage(e.position);
+      this.bandDragged = true;
+      this.redraw();
     }
   }
 
@@ -520,15 +557,34 @@ export class OsdRegionOverlay implements IRegionOverlay {
     if (this.edit) {
       this.store.endBatch();
       this.edit = null;
+      return;
+    }
+    // Finish a rubber-band selection: select every region the band intersects.
+    if (this.bandStart) {
+      const start = this.bandStart;
+      const end = this.bandCurrent ?? start;
+      this.bandStart = this.bandCurrent = null;
+      const x0 = Math.min(start.x, end.x), y0 = Math.min(start.y, end.y);
+      const x1 = Math.max(start.x, end.x), y1 = Math.max(start.y, end.y);
+      // Only a real drag selects; a click-sized band falls through to onClick.
+      if (this.bandDragged && (x1 - x0 > 2 || y1 - y0 > 2)) {
+        this.store.setSelectedShapeIndices(this.regionsInRect(x0, y0, x1, y1));
+      }
+      this.redraw();
     }
   }
 
   private onClick(e: any): void {
     if (this.mode === 'select') {
-      // A move/resize/vertex drag also ends with a click event — don't treat it
-      // as a re-selection.
+      // A move/resize/vertex drag or a rubber-band drag also ends with a click
+      // event — don't treat it as a re-selection.
       if (this.editDragged) { this.editDragged = false; return; }
-      this.selectAt(this.toImage(e.position));
+      if (this.bandDragged) { this.bandDragged = false; return; }
+      // Shift (or Cmd/Ctrl) toggles the clicked region in/out of the current
+      // selection; a plain click replaces it.
+      const oe = e.originalEvent;
+      const additive = !!oe && (oe.shiftKey || oe.metaKey || oe.ctrlKey);
+      this.selectAt(this.toImage(e.position), additive);
       return;
     }
     if (this.mode === 'drawpolygon') {
@@ -783,9 +839,47 @@ export class OsdRegionOverlay implements IRegionOverlay {
     this.redraw();
   }
 
-  private selectAt(pt: { x: number; y: number }): void {
+  private selectAt(pt: { x: number; y: number }, additive = false): void {
     const idx = this.regionIndexAt(pt);
+    if (additive) {
+      // Shift-click on empty space keeps the current selection.
+      if (idx < 0) return;
+      // `this.selected` mirrors the store's current selection (kept in sync via
+      // the subscription), so it's the source of truth without a sync getter.
+      const cur = this.selected.slice();
+      const at = cur.indexOf(idx);
+      if (at >= 0) cur.splice(at, 1); // toggle off
+      else cur.push(idx);             // toggle on
+      this.store.setSelectedShapeIndices(cur);
+      return;
+    }
     this.store.setSelectedShapeIndices(idx >= 0 ? [idx] : []);
+  }
+
+  /** Indices of every region whose bounding box intersects the image-space
+   *  rectangle [x0,y0]–[x1,y1] (rubber-band multi-select). */
+  private regionsInRect(x0: number, y0: number, x1: number, y1: number): number[] {
+    const out: number[] = [];
+    this.store.getRegions().forEach((r, i) => {
+      const bb = this.regionBBox(r);
+      if (bb && bb.x0 <= x1 && bb.x1 >= x0 && bb.y0 <= y1 && bb.y1 >= y0) out.push(i);
+    });
+    return out;
+  }
+
+  /** Axis-aligned bounding box of a region in image coords, or null if empty. */
+  private regionBBox(r: Region): { x0: number; y0: number; x1: number; y1: number } | null {
+    const b = r.bounds;
+    if (b instanceof Rectangle) {
+      return { x0: b.x, y0: b.y, x1: b.x + b.width, y1: b.y + b.height };
+    }
+    if (b instanceof Polygon && b.xpoints.length) {
+      return {
+        x0: Math.min(...b.xpoints), y0: Math.min(...b.ypoints),
+        x1: Math.max(...b.xpoints), y1: Math.max(...b.ypoints),
+      };
+    }
+    return null;
   }
 
   /** Index of the topmost region under a point, or -1. */

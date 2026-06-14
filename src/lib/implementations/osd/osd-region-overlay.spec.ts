@@ -58,6 +58,14 @@ function rectRegion(): Region {
   return r;
 }
 
+function rectRegionAt(x: number, y: number, w: number, h: number): Region {
+  const r = new Region();
+  const rect = new Rectangle();
+  rect.x = x; rect.y = y; rect.width = w; rect.height = h;
+  r.bounds = rect;
+  return r;
+}
+
 describe('OsdRegionOverlay — vertex tools', () => {
   let store: RegionStore;
   let overlay: OsdRegionOverlay;
@@ -179,6 +187,42 @@ describe('OsdRegionOverlay — vertex tools', () => {
     const markers = Array.from(svg.querySelectorAll('circle'))
       .filter(c => c.getAttribute('stroke') === '#00bcd4');
     expect(markers.length).toBe(0);
+  });
+
+  it('plain click selects a single region (replacing the selection)', () => {
+    store.addRegion(rectRegionAt(0, 0, 10, 10));       // index 0
+    store.addRegion(rectRegionAt(100, 100, 10, 10));   // index 1 (selected)
+    overlay.setMode('select');
+    handlers().clickHandler({ position: { x: 5, y: 5 } }); // click region 0, no modifier
+    expect(store.getSelectedShapeIndices()).toEqual([0]);
+  });
+
+  it('shift-click adds another region to the selection (multi-select)', () => {
+    store.addRegion(rectRegionAt(0, 0, 10, 10));       // index 0
+    store.addRegion(rectRegionAt(100, 100, 10, 10));   // index 1 (selected)
+    overlay.setMode('select');
+    handlers().clickHandler({ position: { x: 5, y: 5 }, originalEvent: { shiftKey: true } });
+    expect(store.getSelectedShapeIndices().slice().sort()).toEqual([0, 1]);
+  });
+
+  it('shift-click again toggles a region back out of the selection', () => {
+    store.addRegion(rectRegionAt(0, 0, 10, 10));       // index 0 (selected)
+    overlay.setMode('select');
+    const h = handlers();
+    h.clickHandler({ position: { x: 105, y: 105 }, originalEvent: { shiftKey: true } }); // empty → no-op
+    h.clickHandler({ position: { x: 5, y: 5 }, originalEvent: { shiftKey: true } });     // toggle 0 off
+    expect(store.getSelectedShapeIndices()).toEqual([]);
+  });
+
+  it('rubber-band drag selects every region it intersects', () => {
+    store.addRegion(rectRegionAt(0, 0, 10, 10));       // index 0
+    store.addRegion(rectRegionAt(100, 100, 10, 10));   // index 1 (selected)
+    overlay.setMode('select');
+    const h = handlers();
+    h.pressHandler({ position: { x: 50, y: 50 } });    // press empty space
+    h.dragHandler({ position: { x: -1, y: -1 } });     // drag a band over region 0 only
+    h.releaseHandler({ position: { x: -1, y: -1 } });
+    expect(store.getSelectedShapeIndices()).toEqual([0]);
   });
 
   it('setSelectedBezier toggles the bezier flag on the selected region', () => {
