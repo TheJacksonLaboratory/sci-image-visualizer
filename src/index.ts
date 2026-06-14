@@ -22,7 +22,7 @@ export * from './lib/contracts/region-overlay.contract';
 export * from './lib/contracts/display-types';
 export * from './lib/contracts/sam.contract';
 export * from './lib/contracts/cell-segmenter.contract';
-export { CellposeSegmenterService } from './lib/toolbar/cellpose-segmenter.service';
+export { CellposeSegmenterService } from './lib/toolbar/segmentation/cellpose-segmenter.service';
 
 // ── Generic client-side image utilities (shared with the host's pipeline) ──
 export { ProcessingImage } from './lib/processing/processing-image';
@@ -33,7 +33,7 @@ export { ImageConverterService } from './lib/processing/image-converter.service'
 export {
   SAM_MODELS, DEFAULT_SAM_MODEL_ID, getSamModel, isSamModelReady, setSamModelUrls,
   setDefaultSamModel, getDefaultSamModelId,
-} from './lib/toolbar/sam-model-registry';
+} from './lib/toolbar/segmentation/sam-model-registry';
 
 // ── Neutral data models ──────────────────────────────────────────────────
 export * from './lib/models/region';

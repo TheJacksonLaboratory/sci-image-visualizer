@@ -1,12 +1,12 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
 
-import { WandService } from './wand.service';
-import { WandToolHost } from './wand-tool.service';
+import { WandService } from '../wand/wand.service';
+import { WandToolHost } from '../wand/wand-tool.service';
 import { frameToRgba } from './sam-prompt';
 import { getSamModel, isSamModelReady } from './sam-model-registry';
-import { ISamSession, SamEmbedding, SamModelDef, SamPrompt } from '../contracts/sam.contract';
-import { Region, Polygon } from '../models/region';
+import { ISamSession, SamEmbedding, SamModelDef, SamPrompt } from '../../contracts/sam.contract';
+import { Region, Polygon } from '../../models/region';
 
 /** Interactive SAM point-prompt tool (jit-ui#90, P1).
  *

@@ -14,7 +14,7 @@ import { ViewerCapabilities } from './contracts/capabilities.contract';
 import { IRegionOverlay } from './contracts/region-overlay.contract';
 import { IRegionEditorApi } from './contracts/region-editor-api.contract';
 import { IChannelHistogramApi, IChannelState, IHistogram } from './contracts/channel-histogram-api.contract';
-import { VisualizerStore } from './visualizer-store.service';
+import { VisualizerStore } from './store/visualizer-store.service';
 
 /**
  * Backend selector. Routes per plot type:

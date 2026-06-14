@@ -1,4 +1,4 @@
-import { CachedImageData } from './wand-tool.service';
+import { CachedImageData } from '../wand/wand-tool.service';
 
 /** A client-side crop of the loaded image — the browser equivalent of the JIT
  *  server slide-crop, taken from the pixels already in the viewer. */

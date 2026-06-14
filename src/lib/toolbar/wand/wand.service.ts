@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
-import { Polygon } from '../models/region';
+import { Polygon } from '../../models/region';
 
-import { IWandOptions, WandType } from '../contracts/display-types';
+import { IWandOptions, WandType } from '../../contracts/display-types';
 
 // Canonical wand option/type shapes moved to contracts/display-types (public
 // API surface); re-exported here so existing internal imports keep working.

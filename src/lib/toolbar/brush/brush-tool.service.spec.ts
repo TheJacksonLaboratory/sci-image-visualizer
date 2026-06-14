@@ -1,7 +1,7 @@
 import { BrushToolService } from './brush-tool.service';
-import { WandService } from './wand.service';
-import { CachedImageData, WandToolHost } from './wand-tool.service';
-import { Region, Polygon } from '../models/region';
+import { WandService } from '../wand/wand.service';
+import { CachedImageData, WandToolHost } from '../wand/wand-tool.service';
+import { Region, Polygon } from '../../models/region';
 
 /** A cached-image frame of the given size. The brush ignores pixel values, so a
  *  zero matrix is fine — only width/height/ratios/origin matter. */

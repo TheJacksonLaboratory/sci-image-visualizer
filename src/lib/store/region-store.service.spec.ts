@@ -2,8 +2,8 @@ import { TestBed } from '@angular/core/testing';
 
 import { RegionStore } from './region-store.service';
 import { VisualizerStore } from './visualizer-store.service';
-import { Region, Rectangle, Polygon } from './models/region';
-import { IImageInfo } from './contracts/image.contract';
+import { Region, Rectangle, Polygon } from '../models/region';
+import { IImageInfo } from '../contracts/image.contract';
 
 function rectRegion(x: number, y: number, w: number, h: number): Region {
   const r = new Region();

@@ -1,6 +1,6 @@
 import { WandToolService, WandToolHost, CachedImageData } from './wand-tool.service';
 import { WandService } from './wand.service';
-import { Region, Polygon } from '../models/region';
+import { Region, Polygon } from '../../models/region';
 
 /** Uniform grayscale matrix (data[y][x]); a flood fill from any interior point
  *  fills the whole patch, so the wand reliably produces a region. */

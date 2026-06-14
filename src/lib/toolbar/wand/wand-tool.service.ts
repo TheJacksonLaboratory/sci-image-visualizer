@@ -1,9 +1,9 @@
 import { Injectable } from '@angular/core';
 
 import { WandImage, WandOptions, WandService } from './wand.service';
-import { BBoxMask, masksOverlap, unionMasks } from '../models/geometry';
-import { IViewportHost, IRegionDataHost } from '../contracts/coordinate-transform.contract';
-import { Region, Polygon } from '../models/region';
+import { BBoxMask, masksOverlap, unionMasks } from '../../models/geometry';
+import { IViewportHost, IRegionDataHost } from '../../contracts/coordinate-transform.contract';
+import { Region, Polygon } from '../../models/region';
 
 /**
  * The pixel data and frame state PlotlyService caches for sampling. Returned

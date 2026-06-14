@@ -1,4 +1,4 @@
-import { SamModelDef } from '../contracts/sam.contract';
+import { SamModelDef } from '../../contracts/sam.contract';
 
 /**
  * Registry of promptable SAM models for the browser segment tool.

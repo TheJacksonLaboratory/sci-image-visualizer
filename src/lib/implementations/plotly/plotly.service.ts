@@ -14,15 +14,15 @@ import { BehaviorSubject, EMPTY, Observable, Subject, Subscription, combineLates
 import { MessageService } from 'primeng/api';
 import { ShapeSelection } from '../../models/shape';
 import { CONFIG, CONFIG_SURFACE, PlotUtilities } from '../../plot.utilities';
-import { WandService, WandOptions } from '../../toolbar/wand.service';
-import { CachedImageData, WandToolService, WandToolHost } from '../../toolbar/wand-tool.service';
-import { BrushToolService, BrushOptions } from '../../toolbar/brush-tool.service';
-import { SamToolService } from '../../toolbar/sam-tool.service';
-import { SamPointToolService } from '../../toolbar/sam-point-tool.service';
-import { CellSegmentToolService } from '../../toolbar/cell-segment-tool.service';
+import { WandService, WandOptions } from '../../toolbar/wand/wand.service';
+import { CachedImageData, WandToolService, WandToolHost } from '../../toolbar/wand/wand-tool.service';
+import { BrushToolService, BrushOptions } from '../../toolbar/brush/brush-tool.service';
+import { SamToolService } from '../../toolbar/segmentation/sam-tool.service';
+import { SamPointToolService } from '../../toolbar/segmentation/sam-point-tool.service';
+import { CellSegmentToolService } from '../../toolbar/segmentation/cell-segment-tool.service';
 import { ICellSegmenter, CELL_SEGMENTER } from '../../contracts/cell-segmenter.contract';
-import { VertexEraserToolService, VertexEraserToolHost } from '../../toolbar/vertex-eraser-tool.service';
-import { ZoomToBoxToolService } from '../../toolbar/zoom-to-box-tool.service';
+import { VertexEraserToolService, VertexEraserToolHost } from '../../toolbar/vertex-eraser/vertex-eraser-tool.service';
+import { ZoomToBoxToolService } from '../../toolbar/zoom-to-box/zoom-to-box-tool.service';
 import {
   parseSvgPathPolygon,
   verticesToSvgPath,
@@ -41,8 +41,8 @@ import { IRegionOverlay } from '../../contracts/region-overlay.contract';
 import { PlotlyRegionOverlay } from './plotly-region-overlay';
 import { ICoordinateTransform } from '../../contracts/coordinate-transform.contract';
 import { PlotlyCoordinateTransform } from './plotly-coordinate-transform';
-import { VisualizerStore } from '../../visualizer-store.service';
-import { RegionStore } from '../../region-store.service';
+import { VisualizerStore } from '../../store/visualizer-store.service';
+import { RegionStore } from '../../store/region-store.service';
 
 // Re-exported so existing consumers can keep importing PlotType from this
 // module while it physically lives in the backend-neutral contracts/ dir.

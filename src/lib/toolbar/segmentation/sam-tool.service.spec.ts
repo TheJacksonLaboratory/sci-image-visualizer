@@ -1,8 +1,8 @@
 import { SamToolService } from './sam-tool.service';
-import { WandService } from './wand.service';
-import { CachedImageData, WandToolHost } from './wand-tool.service';
-import { ISamSession, SamEmbedding, SamPrompt } from '../contracts/sam.contract';
-import { Region, Rectangle, Polygon } from '../models/region';
+import { WandService } from '../wand/wand.service';
+import { CachedImageData, WandToolHost } from '../wand/wand-tool.service';
+import { ISamSession, SamEmbedding, SamPrompt } from '../../contracts/sam.contract';
+import { Region, Rectangle, Polygon } from '../../models/region';
 import { setSamModelUrls, getSamModel, DEFAULT_SAM_MODEL_ID } from './sam-model-registry';
 
 const W = 40, H = 40;

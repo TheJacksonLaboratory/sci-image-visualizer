@@ -1,6 +1,6 @@
 import { OsdRegionOverlay } from './osd-region-overlay';
-import { RegionStore } from '../../region-store.service';
-import { VisualizerStore } from '../../visualizer-store.service';
+import { RegionStore } from '../../store/region-store.service';
+import { VisualizerStore } from '../../store/visualizer-store.service';
 import { Region, Rectangle, Polygon } from '../../models/region';
 
 /**

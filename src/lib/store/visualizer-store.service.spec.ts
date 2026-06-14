@@ -1,5 +1,5 @@
 import { VisualizerStore } from './visualizer-store.service';
-import { IChannelState } from './contracts/channel-histogram-api.contract';
+import { IChannelState } from '../contracts/channel-histogram-api.contract';
 
 /**
  * Pins the "Reset" baseline behaviour of the Channels & Histogram pane: resetting

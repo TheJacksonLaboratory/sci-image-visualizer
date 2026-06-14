@@ -1,11 +1,11 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
 
-import { WandService } from './wand.service';
-import { WandToolHost } from './wand-tool.service';
-import { cropImageRegion } from './slide-crop';
-import { ICellSegmenter } from '../contracts/cell-segmenter.contract';
-import { Region, Polygon, Rectangle } from '../models/region';
+import { WandService } from '../wand/wand.service';
+import { WandToolHost } from '../wand/wand-tool.service';
+import { cropImageRegion } from '../crop/slide-crop';
+import { ICellSegmenter } from '../../contracts/cell-segmenter.contract';
+import { Region, Polygon, Rectangle } from '../../models/region';
 
 /**
  * Automatic cell segmentation inside drawn boxes (jit-ui#90). For each rectangle

@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 
-import type { ICellSegmenter, CellSegmentation } from '../contracts/cell-segmenter.contract';
+import type { ICellSegmenter, CellSegmentation } from '../../contracts/cell-segmenter.contract';
 import type { Cellpose } from 'cellpose-js';
 
 /** Hosted cellpose-SAM ONNX (CPSAM, fp16). Override via {@link setModelUrl}. */

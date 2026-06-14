@@ -1,6 +1,6 @@
 import {
   ISamSession, SamEmbedding, SamMaskResult, SamModelDef, SamPrompt,
-} from '../contracts/sam.contract';
+} from '../../contracts/sam.contract';
 
 /**
  * onnxruntime-web implementation of {@link ISamSession} — the production SAM

@@ -1,13 +1,13 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable, Subject } from 'rxjs';
 
-import { IImageInfo } from './contracts/image.contract';
-import { Region, Rectangle, Polygon } from './models/region';
-import { PlotUtilities } from './plot.utilities';
+import { IImageInfo } from '../contracts/image.contract';
+import { Region, Rectangle, Polygon } from '../models/region';
+import { PlotUtilities } from '../plot.utilities';
 import { VisualizerStore } from './visualizer-store.service';
-import { defaultHandleOffsets } from './models/bezier';
-import { IRegionStore } from './contracts/visualizer.contract';
-import { IRegionEditApi } from './contracts/region-store.contract';
+import { defaultHandleOffsets } from '../models/bezier';
+import { IRegionStore } from '../contracts/visualizer.contract';
+import { IRegionEditApi } from '../contracts/region-store.contract';
 
 /**
  * Backend-neutral region store — the single source of truth for region state.

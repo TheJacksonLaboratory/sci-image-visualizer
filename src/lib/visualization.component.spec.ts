@@ -1,7 +1,7 @@
 import { BehaviorSubject } from 'rxjs';
 
 import { VisualizationComponent } from './visualization.component';
-import { VisualizerStore } from './visualizer-store.service';
+import { VisualizerStore } from './store/visualizer-store.service';
 
 /**
  * UI-shell tests for VisualizationComponent (refactoring plan, Step 7) —

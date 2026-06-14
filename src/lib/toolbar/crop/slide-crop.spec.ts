@@ -1,5 +1,5 @@
-import { cropImageRegion } from './slide-crop';
-import { CachedImageData } from './wand-tool.service';
+import { cropImageRegion } from '../crop/slide-crop';
+import { CachedImageData } from '../wand/wand-tool.service';
 
 function grayCached(w: number, h: number): CachedImageData {
   // frame[y][x] = y*w + x (distinct values to verify the crop window)

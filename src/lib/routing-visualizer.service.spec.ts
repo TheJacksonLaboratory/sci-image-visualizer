@@ -4,7 +4,7 @@ import { firstValueFrom, of } from 'rxjs';
 import { RoutingVisualizerService } from './routing-visualizer.service';
 import { PlotlyService } from './implementations/plotly/plotly.service';
 import { OpenSeadragonVisualizerService } from './implementations/osd/openseadragon-visualizer.service';
-import { VisualizerStore } from './visualizer-store.service';
+import { VisualizerStore } from './store/visualizer-store.service';
 import { VIZ_CONFIG } from './contracts/viz-config';
 import { PlotType } from './contracts/plot-type';
 import { IChannelState, IHistogram } from './contracts/channel-histogram-api.contract';

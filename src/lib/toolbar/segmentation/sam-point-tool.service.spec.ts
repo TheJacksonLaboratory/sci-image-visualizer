@@ -1,8 +1,8 @@
 import { SamPointToolService } from './sam-point-tool.service';
-import { WandService } from './wand.service';
-import { CachedImageData, WandToolHost } from './wand-tool.service';
-import { ISamSession, SamEmbedding } from '../contracts/sam.contract';
-import { Region } from '../models/region';
+import { WandService } from '../wand/wand.service';
+import { CachedImageData, WandToolHost } from '../wand/wand-tool.service';
+import { ISamSession, SamEmbedding } from '../../contracts/sam.contract';
+import { Region } from '../../models/region';
 
 const W = 40, H = 40;
 const flush = () => new Promise((r) => setTimeout(r, 0));

@@ -1,5 +1,5 @@
-import { CachedImageData } from './wand-tool.service';
-import { SamPrompt } from '../contracts/sam.contract';
+import { CachedImageData } from '../wand/wand-tool.service';
+import { SamPrompt } from '../../contracts/sam.contract';
 
 /**
  * Pure helpers for SAM inference — no DOM, no ORT, no `this` — so they're unit

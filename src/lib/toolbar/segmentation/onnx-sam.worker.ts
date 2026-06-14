@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import * as ort from 'onnxruntime-web';
 
-import type { SamPrompt } from '../contracts/sam.contract';
+import type { SamPrompt } from '../../contracts/sam.contract';
 
 // SAM decoder helpers, inlined so this worker stays DOM-free (importing them
 // from sam-prompt.ts would pull in wand-tool.service, which uses DOM types that

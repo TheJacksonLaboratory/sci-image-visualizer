@@ -1,8 +1,8 @@
 import { Injectable } from '@angular/core';
 
-import { WandService } from './wand.service';
-import { IViewportHost, IRegionDataHost } from '../contracts/coordinate-transform.contract';
-import { Region, Polygon } from '../models/region';
+import { WandService } from '../wand/wand.service';
+import { IViewportHost, IRegionDataHost } from '../../contracts/coordinate-transform.contract';
+import { Region, Polygon } from '../../models/region';
 
 /**
  * Collaboration interface the vertex eraser needs from its host backend.

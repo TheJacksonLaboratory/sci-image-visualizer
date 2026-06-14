@@ -1,6 +1,6 @@
 import { InjectionToken, inject } from '@angular/core';
 
-import { CellposeSegmenterService } from '../toolbar/cellpose-segmenter.service';
+import { CellposeSegmenterService } from '../toolbar/segmentation/cellpose-segmenter.service';
 
 /**
  * Result of an automatic cell segmenter: a per-pixel instance label map for the

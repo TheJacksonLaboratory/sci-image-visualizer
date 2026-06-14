@@ -1,5 +1,5 @@
 import { frameToRgba, buildDecoderPrompt, binarizeMask, bestMaskIndex } from './sam-prompt';
-import { CachedImageData } from './wand-tool.service';
+import { CachedImageData } from '../wand/wand-tool.service';
 
 describe('sam-prompt helpers', () => {
   describe('buildDecoderPrompt', () => {

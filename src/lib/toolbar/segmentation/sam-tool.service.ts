@@ -1,12 +1,12 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
 
-import { WandService } from './wand.service';
-import { WandToolHost } from './wand-tool.service';
+import { WandService } from '../wand/wand.service';
+import { WandToolHost } from '../wand/wand-tool.service';
 import { frameToRgba } from './sam-prompt';
 import { getSamModel, isSamModelReady } from './sam-model-registry';
-import { ISamSession, SamEmbedding, SamModelDef } from '../contracts/sam.contract';
-import { Region, Polygon, Rectangle } from '../models/region';
+import { ISamSession, SamEmbedding, SamModelDef } from '../../contracts/sam.contract';
+import { Region, Polygon, Rectangle } from '../../models/region';
 
 /** The SAM tool binds to the same host the wand/brush use, so each backend
  *  reuses its existing pixel readback + coordinate transform + region store. */

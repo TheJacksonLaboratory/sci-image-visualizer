@@ -2,9 +2,9 @@ import { Injectable, Optional } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, Observable } from 'rxjs';
 
-import { IImageMetadata } from './contracts/image.contract';
-import { IChannelState } from './contracts/channel-histogram-api.contract';
-import { COLORMAP_OPTIONS } from './plot.utilities';
+import { IImageMetadata } from '../contracts/image.contract';
+import { IChannelState } from '../contracts/channel-histogram-api.contract';
+import { COLORMAP_OPTIONS } from '../plot.utilities';
 
 /**
  * Backend-neutral store for the **visualization session** — the state that
