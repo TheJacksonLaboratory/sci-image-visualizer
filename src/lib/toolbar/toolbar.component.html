@@ -325,19 +325,21 @@
         <span class="flex align-items-center mx-1 toolbar-text wand-sensitivity-value">
           {{ vertexEraserRadius }}</span>
       </ng-container>
-      <p-button icon="pi pi-undo" size="small" [text]="true"
+      <p-button size="small" [text]="true"
                 [disabled]="!canUndo"
                 pTooltip="Undo the last region action (<kbd>Ctrl</kbd>+<kbd>Z</kbd>).
                 Up to 10 actions can be undone."
                 [escape]="false" tooltipPosition="bottom"
                 (onClick)="undoRegion.emit()">
+        <img src="assets/plotting/undo.svg" class="toolbar-icon-dark" style="width: 1rem"/>
       </p-button>
-      <p-button icon="pi pi-replay" size="small" [text]="true"
+      <p-button size="small" [text]="true"
                 [disabled]="!canRedo"
                 pTooltip="Redo the last undone region action
                 (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd>)."
                 [escape]="false" tooltipPosition="bottom"
                 (onClick)="redoRegion.emit()">
+        <img src="assets/plotting/redo.svg" class="toolbar-icon-dark" style="width: 1rem"/>
       </p-button>
       <p-button icon="pi pi-trash" size="small" [text]="true"
                 pTooltip="Delete selected region (<kbd>Del</kbd>)"
@@ -555,10 +557,11 @@
       to remove polygon vertices that fall inside the cursor circle from any region. Use the
       <b>Radius</b> slider to set the eraser size in image pixels. Polygons reduced below 3
       vertices (or polylines below 2) are deleted entirely.</li>
-    <li>"<b>Undo</b>" <i class="pi pi-undo"></i> (<kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Z</kbd>): reverts the
+    <li>"<b>Undo</b>" <img src="assets/plotting/undo.svg" width="15" height="15">
+      (<kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Z</kbd>): reverts the
       last region action (draw, delete, edit, wand/brush stroke, segmentation, …). Up to the last
       <b>10</b> actions can be undone; the button greys out when there's nothing left to undo.</li>
-    <li>"<b>Redo</b>" <i class="pi pi-replay"></i>
+    <li>"<b>Redo</b>" <img src="assets/plotting/redo.svg" width="15" height="15">
       (<kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> or <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Y</kbd>):
       re-applies the most recently undone action. Performing a new region action clears what can be redone.</li>
     <li>"<b>Delete region</b>" <i class="pi pi-trash"></i> (<kbd>Del</kbd>): deletes the selected
