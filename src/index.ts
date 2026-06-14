@@ -24,6 +24,11 @@ export * from './lib/contracts/sam.contract';
 export * from './lib/contracts/cell-segmenter.contract';
 export { CellposeSegmenterService } from './lib/toolbar/cellpose-segmenter.service';
 
+// ── Generic client-side image utilities (shared with the host's pipeline) ──
+export { ProcessingImage } from './lib/processing/processing-image';
+export { cropImage, CropImageOptions } from './lib/processing/image-crop';
+export { ImageConverterService } from './lib/processing/image-converter.service';
+
 // ── SAM model registry (host configures hosted ONNX URLs once available) ──
 export {
   SAM_MODELS, DEFAULT_SAM_MODEL_ID, getSamModel, isSamModelReady, setSamModelUrls,
