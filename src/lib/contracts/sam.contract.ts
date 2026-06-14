@@ -44,6 +44,11 @@ export interface SamEmbedding {
   /** Image (matrix) size the embedding was computed for. */
   imageWidth: number;
   imageHeight: number;
+  /** Opaque handle to the embedding cached inside the inference Web Worker, when
+   *  the session runs off-thread. `decode` passes it back so the worker reuses
+   *  the cached tensor instead of round-tripping the (multi-MB) embedding data;
+   *  `data` is then an empty placeholder. Absent for in-process/fake sessions. */
+  token?: number;
 }
 
 /** A prompt for one object, in image (matrix) pixel coordinates. */
