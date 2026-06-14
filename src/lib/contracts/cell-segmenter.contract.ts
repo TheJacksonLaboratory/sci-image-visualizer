@@ -21,11 +21,19 @@ export interface CellSegmentation {
  * box), but a host can override the token to supply a different implementation
  * (e.g. a server-side segmenter) (jit-ui#90).
  */
+/** Progress/status callbacks for a segmentation run (all optional). */
+export interface CellSegmentProgress {
+  /** Model-download progress, 0..1 (first run only). */
+  onProgress?: (fraction: number) => void;
+  /** Human-readable phase, e.g. 'Running inference (tile 3/8)…'. */
+  onStatus?: (status: string) => void;
+}
+
 export interface ICellSegmenter {
   /** Segment all cells in an RGBA image into an instance label map. */
   segmentCells(
     image: { data: Uint8ClampedArray; width: number; height: number },
-    onProgress?: (fraction: number) => void,
+    progress?: CellSegmentProgress,
   ): Promise<CellSegmentation>;
 }
 

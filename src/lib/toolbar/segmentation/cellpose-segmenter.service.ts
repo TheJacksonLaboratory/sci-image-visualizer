@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 
-import type { ICellSegmenter, CellSegmentation } from '../../contracts/cell-segmenter.contract';
+import type { ICellSegmenter, CellSegmentation, CellSegmentProgress } from '../../contracts/cell-segmenter.contract';
 import type { Cellpose } from 'cellpose-js';
 
 /** Hosted cellpose-SAM ONNX (CPSAM, fp16). Override via {@link setModelUrl}. */
@@ -32,22 +32,45 @@ export class CellposeSegmenterService implements ICellSegmenter {
 
   async segmentCells(
     image: { data: Uint8ClampedArray; width: number; height: number },
-    onProgress?: (fraction: number) => void,
+    progress?: CellSegmentProgress,
   ): Promise<CellSegmentation> {
-    const cp = await this.getModel((loaded, total) => { if (total) onProgress?.(loaded / total); });
-    const out = await cp.segment({
-      data: image.data, width: image.width, height: image.height, channels: 4,
-    });
+    let announcedDownload = false;
+    const cp = await this.getModel(
+      (loaded, total) => {
+        if (total) progress?.onProgress?.(loaded / total);
+        if (loaded > 0 && !announcedDownload) {
+          announcedDownload = true;
+          progress?.onStatus?.('Downloading Cellpose-SAM model…');
+        }
+      },
+      (status) => progress?.onStatus?.(status),
+    );
+    progress?.onStatus?.('Preprocessing image…');
+    const out = await cp.segment(
+      { data: image.data, width: image.width, height: image.height, channels: 4 },
+      {
+        // cellpose-js runs inference in its worker (these fire between tiles) and
+        // averaging/dynamics on the main thread; surface both so the toast shows
+        // real progress instead of looking stuck.
+        onTileProgress: (done, total) => progress?.onStatus?.(
+          done < total ? `Running inference (tile ${done}/${total})…` : 'Computing flow dynamics…',
+        ),
+      },
+    );
     return { labels: out.masks, width: out.width, height: out.height, count: out.count };
   }
 
   /**
    * The shared Cellpose instance, lazily created on first use and reused
    * thereafter (deduped across concurrent callers). Exposed so a host pipeline
-   * engine can run richer `segment()` options on the same instance. The progress
-   * callback reports raw downloaded/total bytes (`total` is null when unknown).
+   * engine can run richer `segment()` options on the same instance. `onProgress`
+   * reports raw downloaded/total bytes (`total` is null when unknown); `onStatus`
+   * reports worker-init phase strings.
    */
-  getModel(onProgress?: (loaded: number, total: number | null) => void): Promise<Cellpose> {
+  getModel(
+    onProgress?: (loaded: number, total: number | null) => void,
+    onStatus?: (status: string) => void,
+  ): Promise<Cellpose> {
     if (this.instance) return Promise.resolve(this.instance);
     if (!this.loading) {
       this.loading = (async () => {
@@ -57,6 +80,7 @@ export class CellposeSegmenterService implements ICellSegmenter {
         const cp = await Cellpose.fromPretrained(this.modelUrl, {
           preload: true,
           onProgress: ({ loaded, total }) => onProgress?.(loaded, total),
+          onStatus: (s) => onStatus?.(s),
         });
         this.instance = cp;
         return cp;

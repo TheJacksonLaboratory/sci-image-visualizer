@@ -74,6 +74,24 @@ describe('CellSegmentToolService', () => {
     expect(get().every((r) => r.color === '#00bcd4')).toBe(true);
   });
 
+  it('surfaces the segmenter\'s phase status (so the toast is meaningful)', async () => {
+    const statuses: string[] = [];
+    tool.status$.subscribe((s) => { if (s) statuses.push(s); });
+    const seg: ICellSegmenter = {
+      segmentCells: async (img, progress) => {
+        progress?.onStatus?.('Running inference (tile 1/2)…');
+        progress?.onStatus?.('Computing flow dynamics…');
+        return { labels: new Uint32Array(img.width * img.height), width: img.width, height: img.height, count: 0 };
+      },
+    };
+    const { host } = makeHost([rectRegion(8, 8, 24, 24)]);
+    tool.bindHost(host);
+    await tool.segmentBoxes(seg);
+    expect(statuses).toContain('Running inference (tile 1/2)…');
+    expect(statuses).toContain('Computing flow dynamics…');
+    expect(statuses.some((s) => /tracing/i.test(s))).toBe(true); // our own phase
+  });
+
   it('no-ops with a status when no rectangles are drawn', async () => {
     const { host } = makeHost([]);
     tool.bindHost(host);

@@ -7,6 +7,10 @@ import { cropImageRegion } from '../crop/slide-crop';
 import { ICellSegmenter } from '../../contracts/cell-segmenter.contract';
 import { Region, Polygon, Rectangle } from '../../models/region';
 
+/** Yield to the event loop (a macrotask) so the toast can repaint the latest
+ *  status / animate the spinner before the next main-thread-blocking step. */
+const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
 /**
  * Automatic cell segmentation inside drawn boxes (jit-ui#90). For each rectangle
  * it client slide-crops the box from the loaded image, runs an automatic
@@ -58,15 +62,20 @@ export class CellSegmentToolService {
       let added = 0;
       for (let i = 0; i < rects.length; i++) {
         const b = rects[i].bounds as Rectangle;
-        this.status$.next(`Cellpose ${i + 1}/${rects.length}…`);
+        // Prefix each phase with the box index when there's more than one.
+        const prefix = rects.length > 1 ? `Box ${i + 1}/${rects.length}: ` : '';
+        this.status$.next(`${prefix}Cropping…`);
+        await tick(); // let the status paint before the (main-thread) crop
         const crop = cropImageRegion(
           cached, frameIdx, { x0: b.x, y0: b.y, x1: b.x + b.width, y1: b.y + b.height },
         );
         if (!crop) continue;
         const seg = await segmenter.segmentCells(
           { data: crop.data, width: crop.width, height: crop.height },
-          (f) => this.progress$.next(f),
+          { onProgress: (f) => this.progress$.next(f), onStatus: (s) => this.status$.next(prefix + s) },
         );
+        this.status$.next(`${prefix}Tracing cells…`);
+        await tick(); // paint before the (main-thread) contour tracing
         const polys = this.wandService.labelsToPolygons(
           seg.labels, seg.width, seg.height, seg.width, seg.height, 0, 0,
         );
