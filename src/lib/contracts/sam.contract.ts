@@ -31,6 +31,12 @@ export interface SamModelDef {
    *  EP and returns an empty mask (e.g. micro-sam ViT-T's TinyViT encoder),
    *  which run correctly — and fast, when small — on WASM. */
   encoderProviders?: string[];
+  /** Run inference in-process on the main thread instead of the SAM Web Worker.
+   *  Only valid for small WASM-only models (e.g. micro-sam ViT-T) where the
+   *  worker's spawn + second-ORT-runtime + message overhead outweighs its
+   *  off-thread benefit. WebGPU models ignore this (they must stay in the
+   *  worker to avoid freezing the tab). */
+  inProcess?: boolean;
 }
 
 /** Cached encoder output for one image (reused across every prompt on it). */

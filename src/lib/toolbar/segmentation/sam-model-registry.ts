@@ -29,6 +29,10 @@ export const SAM_MODELS: SamModelDef[] = [
     // returns an empty mask ("No masks found"); it's numerically correct on
     // WASM, and the encoder is tiny (~14 MB) so WASM is plenty fast.
     encoderProviders: ['wasm'],
+    // Small enough to run in-process on the main thread — avoids the Web
+    // Worker's spawn / second-ORT-runtime / round-trip overhead, which made it
+    // noticeably slower to load and segment.
+    inProcess: true,
   },
   {
     id: 'microsam-vit-b-lm',
