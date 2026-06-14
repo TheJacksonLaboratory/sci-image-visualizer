@@ -13,7 +13,11 @@
     "image-js": "^0.35.6",
     "file-saver": "^2.0.5",
     "buffer": "^5.7.1",
-    "onnxruntime-web": "^1.22.0"
+    "onnxruntime-web": "^1.22.0",
+    "cellpose-js": "^0.2.0"
+  },
+  "peerDependenciesMeta": {
+    "cellpose-js": { "optional": true }
   },
   "dependencies": {
     "tslib": "^2.3.0"

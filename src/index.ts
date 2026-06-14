@@ -22,6 +22,7 @@ export * from './lib/contracts/region-overlay.contract';
 export * from './lib/contracts/display-types';
 export * from './lib/contracts/sam.contract';
 export * from './lib/contracts/cell-segmenter.contract';
+export { CellposeSegmenterService } from './lib/toolbar/cellpose-segmenter.service';
 
 // ── SAM model registry (host configures hosted ONNX URLs once available) ──
 export {
