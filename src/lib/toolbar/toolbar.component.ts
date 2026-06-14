@@ -45,6 +45,9 @@ export class ToolbarComponent implements OnChanges {
   /** Whether a region action is available to undo (jit-ui#85). Greys out the
    *  Undo button when false (nothing done yet, or all steps already undone). */
   @Input() canUndo = false;
+  /** Whether an undone region action is available to redo (jit-ui#85). Greys
+   *  out the Redo button when false. */
+  @Input() canRedo = false;
   @Input() stackOptions: { name: string; val: string }[] =
     [{ name: 'Single image', val: 'false' }, { name: 'Stack', val: 'true' }];
   /** Which toolbar groups to show. Defaults to the full toolbar; the host forwards
@@ -82,6 +85,8 @@ export class ToolbarComponent implements OnChanges {
   @Output() deleteRegion = new EventEmitter<void>();
   /** Undo the last region action (jit-ui#85). */
   @Output() undoRegion = new EventEmitter<void>();
+  /** Redo the last undone region action (jit-ui#85). */
+  @Output() redoRegion = new EventEmitter<void>();
   /** Run box-prompted SAM segmentation on the drawn rectangles (jit-ui#90). */
   @Output() segmentRegions = new EventEmitter<void>();
   /** Run cellpose-SAM (auto) inside each drawn rectangle's crop (jit-ui#90). */

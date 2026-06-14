@@ -1604,8 +1604,11 @@ export class PlotlyService implements IVisualizer {
   // Undo (jit-ui#85): region history lives in the shared RegionStore, so the
   // active backend's overlay re-renders off its regionUpdate$ on restore.
   public undo(): void { this.regionStore.undo(); }
+  public redo(): void { this.regionStore.redo(); }
   public canUndo(): boolean { return this.regionStore.canUndo(); }
+  public canRedo(): boolean { return this.regionStore.canRedo(); }
   public getCanUndo$(): Observable<boolean> { return this.regionStore.getCanUndo$(); }
+  public getCanRedo$(): Observable<boolean> { return this.regionStore.getCanRedo$(); }
   public resetUndoHistory(): void { this.regionStore.resetUndoHistory(); }
 
   private getHeatmapLayout(xRange: number[], yRange: number[]): any {

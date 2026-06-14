@@ -93,6 +93,8 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   /** Whether a region action is available to undo (jit-ui#85). Mirrors the
    *  shared RegionStore's history depth; drives the toolbar Undo button. */
   canUndoRegion = false;
+  /** Whether an undone region action is available to redo (jit-ui#85). */
+  canRedoRegion = false;
 
   /** Wand sensitivity — higher = stricter (smaller selection). Matches QuPath default. */
   wandSensitivity = 2.0;
@@ -252,6 +254,13 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
       .pipe(takeUntil(this.unsub))
       .subscribe((canUndo) => {
         this.canUndoRegion = canUndo;
+        this.cdr.detectChanges();
+      });
+    this.plotService
+      .getCanRedo$()
+      .pipe(takeUntil(this.unsub))
+      .subscribe((canRedo) => {
+        this.canRedoRegion = canRedo;
         this.cdr.detectChanges();
       });
     // Interactive point-prompt segmentation runs inside the renderer on each
@@ -505,11 +514,20 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
         });
         return;
       }
-      // Ctrl/Cmd+Z — undo the last region action (jit-ui#85).
-      if ((event.ctrlKey || event.metaKey) && (event.key === 'z' || event.key === 'Z') && !event.shiftKey) {
-        event.preventDefault();
-        this.ngZone.run(() => this.undoRegion());
-        return;
+      // Region history (jit-ui#85): Ctrl/Cmd+Z undoes; Ctrl/Cmd+Shift+Z or
+      // Ctrl/Cmd+Y redoes.
+      if (event.ctrlKey || event.metaKey) {
+        const k = event.key.toLowerCase();
+        if (k === 'z' && !event.shiftKey) {
+          event.preventDefault();
+          this.ngZone.run(() => this.undoRegion());
+          return;
+        }
+        if ((k === 'z' && event.shiftKey) || k === 'y') {
+          event.preventDefault();
+          this.ngZone.run(() => this.redoRegion());
+          return;
+        }
       }
       if (event.key === 'Delete' || event.key === 'Backspace' || event.key === 'd' || event.key === 'D') {
         this.ngZone.run(() => this.deleteRegion());
@@ -973,6 +991,11 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   /** Undo the most recent region action (jit-ui#85). Up to 10 steps back. */
   undoRegion() {
     this.plotService.undo();
+  }
+
+  /** Redo the most recently undone region action (jit-ui#85). */
+  redoRegion() {
+    this.plotService.redo();
   }
 
   /** Box-prompted SAM segmentation of the drawn rectangles (jit-ui#90). A sticky

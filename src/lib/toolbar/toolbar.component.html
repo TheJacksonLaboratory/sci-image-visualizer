@@ -332,6 +332,13 @@
                 [escape]="false" tooltipPosition="bottom"
                 (onClick)="undoRegion.emit()">
       </p-button>
+      <p-button icon="pi pi-replay" size="small" [text]="true"
+                [disabled]="!canRedo"
+                pTooltip="Redo the last undone region action
+                (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd>)."
+                [escape]="false" tooltipPosition="bottom"
+                (onClick)="redoRegion.emit()">
+      </p-button>
       <p-button icon="pi pi-trash" size="small" [text]="true"
                 pTooltip="Delete selected region (<kbd>Del</kbd>)"
                 [escape]="false" tooltipPosition="bottom"
@@ -551,6 +558,9 @@
     <li>"<b>Undo</b>" <i class="pi pi-undo"></i> (<kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Z</kbd>): reverts the
       last region action (draw, delete, edit, wand/brush stroke, segmentation, …). Up to the last
       <b>10</b> actions can be undone; the button greys out when there's nothing left to undo.</li>
+    <li>"<b>Redo</b>" <i class="pi pi-replay"></i>
+      (<kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> or <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Y</kbd>):
+      re-applies the most recently undone action. Performing a new region action clears what can be redone.</li>
     <li>"<b>Delete region</b>" <i class="pi pi-trash"></i> (<kbd>Del</kbd>): deletes the selected
       region. This can also be done from the Regions tab.</li>
   </ul>
@@ -602,6 +612,7 @@
     <tr><td><kbd>Esc</kbd></td><td>Undo the current SAM point object</td></tr>
     <tr><td><kbd>Del</kbd> / <kbd>⌫</kbd></td><td>Delete selected region</td></tr>
     <tr><td><kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Z</kbd></td><td>Undo the last region action (up to 10)</td></tr>
+    <tr><td><kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>Redo the last undone region action</td></tr>
   </table>
 
   <ng-template pTemplate="footer">

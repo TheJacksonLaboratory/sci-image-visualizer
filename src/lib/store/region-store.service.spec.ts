@@ -363,6 +363,70 @@ describe('RegionStore', () => {
       store.setRegions([rectRegion(0, 0, 1, 1)], undefined, false);
       expect(store.canUndo()).toBe(false);
     });
+
+    it('redo re-applies an undone action', () => {
+      store.addRegion(rectRegion(0, 0, 1, 1)); settle();
+      expect(store.canRedo()).toBe(false);
+
+      store.undo();
+      expect(store.getRegions().length).toBe(0);
+      expect(store.canRedo()).toBe(true);
+
+      store.redo();
+      expect(store.getRegions().length).toBe(1);
+      expect(store.canRedo()).toBe(false);
+      expect(store.canUndo()).toBe(true);
+    });
+
+    it('redoes the full undone chain in order', () => {
+      store.addRegion(rectRegion(0, 0, 1, 1)); settle();
+      store.addRegion(rectRegion(2, 2, 1, 1)); settle();
+      store.addRegion(rectRegion(4, 4, 1, 1)); settle();
+
+      store.undo(); store.undo();
+      expect(store.getRegions().length).toBe(1);
+
+      store.redo();
+      expect(store.getRegions().length).toBe(2);
+      store.redo();
+      expect(store.getRegions().length).toBe(3);
+      expect(store.canRedo()).toBe(false);
+
+      store.redo(); // no-op
+      expect(store.getRegions().length).toBe(3);
+    });
+
+    it('a new action after undo clears the redo future', () => {
+      store.addRegion(rectRegion(0, 0, 1, 1)); settle();
+      store.addRegion(rectRegion(2, 2, 1, 1)); settle();
+      store.undo();
+      expect(store.canRedo()).toBe(true);
+
+      store.addRegion(rectRegion(9, 9, 1, 1)); settle(); // diverge
+      expect(store.canRedo()).toBe(false);
+      store.redo(); // no-op — the old redo future is gone
+      expect(store.getRegions().map(r => (r.bounds as Rectangle).x)).toEqual([0, 9]);
+    });
+
+    it('resetUndoHistory clears redo too', () => {
+      store.addRegion(rectRegion(0, 0, 1, 1)); settle();
+      store.undo();
+      expect(store.canRedo()).toBe(true);
+      store.resetUndoHistory();
+      expect(store.canRedo()).toBe(false);
+    });
+
+    it('emits canRedo state changes', () => {
+      const states: boolean[] = [];
+      store.getCanRedo$().subscribe(s => states.push(s));
+      expect(states).toEqual([false]);
+
+      store.addRegion(rectRegion(0, 0, 1, 1));
+      store.undo();
+      expect(states[states.length - 1]).toBe(true);
+      store.redo();
+      expect(states[states.length - 1]).toBe(false);
+    });
   });
 
   describe('per-image cache', () => {

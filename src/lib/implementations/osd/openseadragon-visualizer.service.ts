@@ -1098,8 +1098,11 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
   }
 
   undo(): void { this.regionStore.undo(); }
+  redo(): void { this.regionStore.redo(); }
   canUndo(): boolean { return this.regionStore.canUndo(); }
+  canRedo(): boolean { return this.regionStore.canRedo(); }
   getCanUndo$(): Observable<boolean> { return this.regionStore.getCanUndo$(); }
+  getCanRedo$(): Observable<boolean> { return this.regionStore.getCanRedo$(); }
   resetUndoHistory(): void { this.regionStore.resetUndoHistory(); }
 
   importRegions(geoJsonStr: string): Region[] {

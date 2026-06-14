@@ -45,24 +45,28 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   private previousRegions: Region[] = [];
 
   /**
-   * Undo history (jit-ui#85): up to {@link UNDO_LIMIT} snapshots of the region
-   * set, each a deep clone captured immediately *before* a region-editing
-   * action. {@link undo} pops the newest and restores it, so it can be invoked
-   * up to {@link UNDO_LIMIT} times in a row before the history empties.
+   * Undo/redo history (jit-ui#85): up to {@link UNDO_LIMIT} snapshots of the
+   * region set, each a deep clone captured immediately *before* a
+   * region-editing action. {@link undo} pops the newest off `undoStack`, pushes
+   * the current state onto `redoStack`, and restores it — so it can be invoked
+   * up to {@link UNDO_LIMIT} times in a row. {@link redo} is the mirror. Any new
+   * region action clears `redoStack` (the redo future is no longer reachable).
    *
    * A continuous gesture (a wand/brush/vertex drag commits to the store many
    * times) is coalesced into a single entry: the first commit of a burst
    * captures the pre-burst state and every commit within
-   * {@link UNDO_COALESCE_MS} of the previous one is folded into it. Undo never
-   * crosses an image load/switch — {@link resetUndoHistory} clears it.
+   * {@link UNDO_COALESCE_MS} of the previous one is folded into it. History
+   * never crosses an image load/switch — {@link resetUndoHistory} clears it.
    */
   private undoStack: Region[][] = [];
+  private redoStack: Region[][] = [];
   /** True while a coalescing burst is open (further commits fold into it). */
   private undoBurstOpen = false;
   private undoBurstTimer: ReturnType<typeof setTimeout> | null = null;
   /** True while restoring a snapshot, so the restore records no new history. */
   private restoringUndo = false;
   private readonly canUndo$ = new BehaviorSubject<boolean>(false);
+  private readonly canRedo$ = new BehaviorSubject<boolean>(false);
 
   /** Monotonic id source — ids never repeat within the service lifetime, so
    *  selection stays correct across delete/add cycles even when names collide. */
@@ -233,12 +237,18 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   setPreviousShapes(shapes: any[]): void { this.previousRegions = (shapes as Region[]).slice(); }
   getPreviousShapes(): any[] { return this.previousRegions.slice(); }
 
-  // ── IRegionStore: undo (jit-ui#85) ─────────────────────────────────────
+  // ── IRegionStore: undo / redo (jit-ui#85) ──────────────────────────────
 
   /** Emits whether an undo step is currently available — drives the toolbar
    *  Undo button's enabled state (greyed out when false). */
   getCanUndo$(): Observable<boolean> {
     return this.canUndo$.asObservable();
+  }
+
+  /** Emits whether a redo step is currently available — drives the toolbar
+   *  Redo button's enabled state. */
+  getCanRedo$(): Observable<boolean> {
+    return this.canRedo$.asObservable();
   }
 
   /** Synchronous read of {@link getCanUndo$} — true when at least one region
@@ -247,45 +257,79 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     return this.undoStack.length > 0;
   }
 
+  /** Synchronous read of {@link getCanRedo$} — true when an undone action can
+   *  be re-applied. */
+  canRedo(): boolean {
+    return this.redoStack.length > 0;
+  }
+
   /**
    * Undo the most recent region action, restoring the region set to its state
-   * just before that action. Up to {@link UNDO_LIMIT} steps are retained, so
-   * this can be called up to {@link UNDO_LIMIT} times in a row before the
-   * history empties. No-op when nothing is left to undo.
+   * just before that action and pushing the current state onto the redo stack.
+   * Up to {@link UNDO_LIMIT} steps are retained, so this can be called up to
+   * {@link UNDO_LIMIT} times in a row before the history empties. No-op when
+   * nothing is left to undo.
    */
   undo(): void {
     if (this.undoStack.length === 0) return;
     const snapshot = this.undoStack.pop() as Region[];
+    // Stash the current (post-action) state so redo can re-apply it.
+    this.redoStack.push(this.cloneRegions(this.regions));
+    if (this.redoStack.length > RegionStore.UNDO_LIMIT) this.redoStack.shift();
+    this.restoreSnapshot(snapshot);
+  }
+
+  /**
+   * Redo the action most recently undone, restoring the region set to the state
+   * it had before that undo and pushing the current state back onto the undo
+   * stack. No-op when there's nothing to redo (the redo stack is cleared by any
+   * fresh region action).
+   */
+  redo(): void {
+    if (this.redoStack.length === 0) return;
+    const snapshot = this.redoStack.pop() as Region[];
+    this.undoStack.push(this.cloneRegions(this.regions));
+    if (this.undoStack.length > RegionStore.UNDO_LIMIT) this.undoStack.shift();
+    this.restoreSnapshot(snapshot);
+  }
+
+  /** Discard the undo/redo history (e.g. on image load/switch — history never
+   *  crosses images). */
+  resetUndoHistory(): void {
+    this.undoStack = [];
+    this.redoStack = [];
+    this.closeUndoBurst();
+    if (this.canUndo$.value) this.canUndo$.next(false);
+    if (this.canRedo$.value) this.canRedo$.next(false);
+  }
+
+  /** Make `snapshot` the live region set and notify both backends. Shared by
+   *  {@link undo} and {@link redo}; the snapshot is already a detached deep
+   *  clone, so it becomes the live array directly. */
+  private restoreSnapshot(snapshot: Region[]): void {
     // Close any open coalescing burst so the next edit starts a fresh entry,
     // and flag the restore so it doesn't record itself back into the history.
     this.closeUndoBurst();
     this.restoringUndo = true;
-    this.regions = snapshot;                       // already a detached deep clone
+    this.regions = snapshot;
     // Drop any selected ids the restored set no longer contains.
     this.selectedIds = this.selectedIds.filter(id => this.indexOfId(id) >= 0);
     this.syncCache();
     this.emitSelection();
     this.restoringUndo = false;
-    this.canUndo$.next(this.undoStack.length > 0);
+    this.emitUndoState();
     // Notify the live + coalesced streams so whichever backend is on screen
     // re-renders from the restored store state.
     this.regionLiveEdit$.next(this.regions.slice());
     this.regionUpdate$.next(this.getRegions());
   }
 
-  /** Discard the undo history (e.g. on image load/switch — undo never crosses
-   *  images). */
-  resetUndoHistory(): void {
-    this.undoStack = [];
-    this.closeUndoBurst();
-    if (this.canUndo$.value) this.canUndo$.next(false);
-  }
-
   /**
    * Capture the pre-action region set into the bounded undo history. Called at
    * the top of every mutating operation, *before* it changes `regions`, so the
    * snapshot is the state to return to. Rapid commits from one gesture coalesce
-   * into a single entry (see {@link undoStack}).
+   * into a single entry (see {@link undoStack}). A fresh action also abandons
+   * any redo future.
    */
   private recordUndoSnapshot(): void {
     if (this.restoringUndo) return;
@@ -294,7 +338,16 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     if (!startsBurst) return;                      // mid-burst — keep first snapshot
     this.undoStack.push(this.cloneRegions(this.regions));
     if (this.undoStack.length > RegionStore.UNDO_LIMIT) this.undoStack.shift();
-    if (!this.canUndo$.value) this.canUndo$.next(true);
+    this.redoStack = [];                           // a new edit invalidates redo
+    this.emitUndoState();
+  }
+
+  /** Push the current can-undo / can-redo availability to subscribers. */
+  private emitUndoState(): void {
+    const canUndo = this.undoStack.length > 0;
+    const canRedo = this.redoStack.length > 0;
+    if (this.canUndo$.value !== canUndo) this.canUndo$.next(canUndo);
+    if (this.canRedo$.value !== canRedo) this.canRedo$.next(canRedo);
   }
 
   /** (Re)arm the idle timer that closes the current coalescing burst. */

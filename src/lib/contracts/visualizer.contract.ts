@@ -146,12 +146,20 @@ export interface IRegionStore {
    *  so it can be invoked up to 10 times in a row. No-op when nothing is left to
    *  undo. */
   undo(): void;
+  /** Re-apply the most recently undone region action. No-op when there's
+   *  nothing to redo (any fresh region action clears the redo future). */
+  redo(): void;
   /** Synchronous read of {@link getCanUndo$}. */
   canUndo(): boolean;
+  /** Synchronous read of {@link getCanRedo$}. */
+  canRedo(): boolean;
   /** Emits whether an undo step is currently available — drives the toolbar
    *  Undo button's enabled (greyed-out) state. */
   getCanUndo$(): Observable<boolean>;
-  /** Clear the undo history (e.g. on image load/switch). */
+  /** Emits whether a redo step is currently available — drives the toolbar
+   *  Redo button's enabled (greyed-out) state. */
+  getCanRedo$(): Observable<boolean>;
+  /** Clear the undo/redo history (e.g. on image load/switch). */
   resetUndoHistory(): void;
 
   importRegions(geoJsonStr: string): Region[];
