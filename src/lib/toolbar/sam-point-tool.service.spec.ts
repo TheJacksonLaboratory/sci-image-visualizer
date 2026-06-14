@@ -104,6 +104,26 @@ describe('SamPointToolService', () => {
     expect(statuses.some((s) => /point|segment|encod|loading/i.test(s))).toBe(true);
   });
 
+  it('ignores clicks while a previous one is still running (no concurrent encodes)', async () => {
+    const session = fakeSession();
+    let resolveEmbed!: (v: SamEmbedding) => void;
+    const embedSpy = jest.spyOn(session, 'embed')
+      .mockReturnValue(new Promise<SamEmbedding>((r) => { resolveEmbed = r; }));
+    tool.useSession(session);
+    const { host, container } = makeHost();
+    tool.bindHost(host);
+    tool.setMode(true);
+
+    cv(container).dispatchEvent(click(18, 18));  // first click: busy, embed pending
+    await flush();
+    cv(container).dispatchEvent(click(20, 20));  // second click while busy → ignored
+    await flush();
+    expect(embedSpy).toHaveBeenCalledTimes(1);
+
+    resolveEmbed({ data: new Float32Array(1), dims: [1, 1, 1, 1], scale: 1, imageWidth: W, imageHeight: H });
+    await flush();
+  });
+
   it('each positive click segments a NEW region (does not extend the previous one)', async () => {
     const { host, get, container } = makeHost();
     tool.bindHost(host);

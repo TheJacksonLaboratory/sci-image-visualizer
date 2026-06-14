@@ -117,6 +117,13 @@ export class SamPointToolService {
 
   private async onMouseDown(e: MouseEvent): Promise<void> {
     if (e.button !== 0 || !this.overlay) return;
+    // Re-entrancy guard: ignore clicks while a previous prompt is still
+    // downloading the model / encoding / decoding. Without it, clicking again
+    // during the slow first run (e.g. a ~172 MB ViT-B encode on WebGPU) launches
+    // concurrent downloads + GPU encodes that can overwhelm the GPU and freeze
+    // the tab. Each click is fast once the embedding is cached, so this only
+    // drops clicks made while genuinely busy.
+    if (this.busy$.value) return;
     const cached = this.host.getCachedImageData();
     if (!cached || cached.frames.length === 0) return;
     const transform = this.host.getCoordinateTransform();

@@ -75,6 +75,10 @@ export class SamToolService {
    */
   async segmentBoxes(): Promise<number> {
     if (!this.host) return 0;
+    // Re-entrancy guard: a second Segment press while the first run is still
+    // downloading/encoding would launch a concurrent model download + GPU
+    // encode (and can freeze the tab on a heavy WebGPU ViT-B). Ignore it.
+    if (this.busy$.value) return 0;
     const cached = this.host.getCachedImageData();
     if (!cached || cached.frames.length === 0) {
       this.status$.next('No image loaded.');
