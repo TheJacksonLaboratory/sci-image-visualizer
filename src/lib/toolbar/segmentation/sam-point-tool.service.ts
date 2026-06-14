@@ -26,6 +26,8 @@ export class SamPointToolService {
   private host!: WandToolHost;
   private overlay: HTMLCanvasElement | null = null;
   private session: ISamSession | null = null;
+  /** In-flight session load — dedupes a warm-up preload against the first click. */
+  private sessionLoad: Promise<ISamSession> | null = null;
   private model: SamModelDef = getSamModel();
 
   private embedding: SamEmbedding | null = null;
@@ -59,14 +61,28 @@ export class SamPointToolService {
     // (ensureSession() returns the cached session as-is otherwise).
     this.session?.dispose();
     this.session = null;
+    this.sessionLoad = null;
   }
 
   /** Test seam: inject a fake/alternate session. */
   useSession(session: ISamSession): void { this.session = session; }
 
   setMode(active: boolean): void {
-    if (active) this.createOverlay();
-    else this.destroyOverlay();
+    if (active) {
+      this.createOverlay();
+      // Warm up the model in the background as soon as the tool is armed, so the
+      // first click doesn't pay the (download +) session-build cost on its path.
+      this.preload();
+    } else {
+      this.destroyOverlay();
+    }
+  }
+
+  /** Eagerly load the model in the background (fire-and-forget). Safe to call
+   *  repeatedly — it dedupes against an in-flight load and an existing session. */
+  preload(): void {
+    if (this.session || !isSamModelReady(this.model)) return;
+    void this.ensureSession().catch(() => undefined);
   }
 
   /** Finalise the current object: keep its region, start fresh next click. */
@@ -218,19 +234,27 @@ export class SamPointToolService {
     this.regionId = region.id ?? this.regionId;
   }
 
-  private async ensureSession(): Promise<ISamSession> {
-    if (this.session) return this.session;
+  private ensureSession(): Promise<ISamSession> {
+    if (this.session) return Promise.resolve(this.session);
+    if (this.sessionLoad) return this.sessionLoad;
     if (!isSamModelReady(this.model)) {
-      throw new Error(
+      return Promise.reject(new Error(
         `SAM model "${this.model.id}" is not configured yet (no ONNX URLs). ` +
         'Host it and call setSamModelUrls(), then retry.',
-      );
+      ));
     }
-    const { OnnxSamSession } = await import('./onnx-sam-session');
-    const session = new OnnxSamSession();
-    this.progress$.next(0);
-    await session.loadModel(this.model, (f) => this.progress$.next(f));
-    this.session = session;
-    return session;
+    this.sessionLoad = (async () => {
+      try {
+        const { OnnxSamSession } = await import('./onnx-sam-session');
+        const session = new OnnxSamSession();
+        this.progress$.next(0);
+        await session.loadModel(this.model, (f) => this.progress$.next(f));
+        this.session = session;
+        return session;
+      } finally {
+        this.sessionLoad = null;
+      }
+    })();
+    return this.sessionLoad;
   }
 }
