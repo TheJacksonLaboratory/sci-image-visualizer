@@ -264,4 +264,44 @@ describe('OsdRegionOverlay — vertex tools', () => {
     const poly = store.getRegions().find(r => r.id === id)!.bounds as Polygon;
     expect(poly.xpoints[0]).toBe(3); // last drag position wins
   });
+
+  // ── Holes / donuts (jit-ui#85) ────────────────────────────────────────
+
+  /** A 0–20 square exterior with a 7–13 square hole — a donut. */
+  function donutRegion(): Region {
+    const r = new Region();
+    const p = new Polygon();
+    p.xpoints = [0, 20, 20, 0];
+    p.ypoints = [0, 0, 20, 20];
+    p.npoints = 4;
+    p.coordinates = p.xpoints.map((x, i) => [x, p.ypoints[i]]);
+    p.closed = true;
+    p.holes = [[[7, 7], [13, 7], [13, 13], [7, 13]]];
+    r.bounds = p;
+    return r;
+  }
+
+  it('move mode translates the hole with the exterior (no donut fill)', () => {
+    const id = store.addRegion(donutRegion()); // addRegion selects it
+    overlay.setMode('move');
+    const h = handlers();
+    h.pressHandler({ position: { x: 2, y: 2 } });   // press in the solid ring
+    h.dragHandler({ position: { x: 102, y: 2 } });  // +100 in x
+    h.releaseHandler({ position: { x: 102, y: 2 } });
+
+    const poly = store.getRegions().find(r => r.id === id)!.bounds as Polygon;
+    expect(poly.holes?.length).toBe(1);
+    expect(poly.holes![0]).toEqual([[107, 7], [113, 7], [113, 13], [107, 13]]);
+  });
+
+  it('clicking inside the hole does not select the donut; the solid ring does', () => {
+    store.addRegion(donutRegion());
+    store.setSelectedShapeIndices([]); // start unselected
+    overlay.setMode('select');
+    const h = handlers();
+    h.clickHandler({ position: { x: 10, y: 10 } }); // dead centre = in the hole
+    expect(store.getSelectedShapeIndices()).toEqual([]);
+    h.clickHandler({ position: { x: 2, y: 2 } });   // solid ring
+    expect(store.getSelectedShapeIndices()).toEqual([0]);
+  });
 });

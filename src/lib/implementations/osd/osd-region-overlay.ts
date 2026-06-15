@@ -794,6 +794,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
         bezier: b.bezier,
         inOff: b.handlesIn?.map(o => o.slice()),
         outOff: b.handlesOut?.map(o => o.slice()),
+        holes: b.holes?.map(ring => ring.map(pt => pt.slice())),
       };
     }
     return { kind: 'rect', x: 0, y: 0, w: 0, h: 0 };
@@ -858,6 +859,11 @@ export class OsdRegionOverlay implements IRegionOverlay {
       poly.bezier = o.bezier;
       if (o.inOff) poly.handlesIn = o.inOff.map((off: number[]) => off.slice());
       if (o.outOff) poly.handlesOut = o.outOff.map((off: number[]) => off.slice());
+      // Translate interior rings (holes) with the exterior (jit-ui#85).
+      if (o.holes) {
+        poly.holes = o.holes.map((ring: number[][]) =>
+          ring.map(([x, y]: number[]) => [Math.round(x + dx), Math.round(y + dy)]));
+      }
       this.store.updateBounds(this.edit.id, poly);
     }
     this.redraw();
@@ -923,14 +929,24 @@ export class OsdRegionOverlay implements IRegionOverlay {
     if (b instanceof Polygon) {
       const xs = b.xpoints, ys = b.ypoints, n = xs.length;
       if (b.closed !== false) {
-        // Closed (area) path: standard point-in-polygon.
-        let inside = false;
-        for (let i = 0, j = n - 1; i < n; j = i++) {
-          const intersect = ((ys[i] > pt.y) !== (ys[j] > pt.y))
-            && (pt.x < ((xs[j] - xs[i]) * (pt.y - ys[i])) / (ys[j] - ys[i]) + xs[i]);
-          if (intersect) inside = !inside;
+        // Closed (area) path: standard point-in-polygon on the exterior, minus
+        // any interior ring (hole) — clicking inside the hole misses the donut.
+        const inRing = (rxs: number[], rys: number[]): boolean => {
+          let hit = false;
+          for (let i = 0, j = rxs.length - 1; i < rxs.length; j = i++) {
+            const intersect = ((rys[i] > pt.y) !== (rys[j] > pt.y))
+              && (pt.x < ((rxs[j] - rxs[i]) * (pt.y - rys[i])) / (rys[j] - rys[i]) + rxs[i]);
+            if (intersect) hit = !hit;
+          }
+          return hit;
+        };
+        if (!inRing(xs, ys)) return false;
+        if (b.holes) {
+          for (const ring of b.holes) {
+            if (inRing(ring.map(p => p[0]), ring.map(p => p[1]))) return false;
+          }
         }
-        return inside;
+        return true;
       }
       // Open polyline: no interior — select when the click lands near the line.
       // Tolerance is in screen pixels so it stays clickable at any zoom.
