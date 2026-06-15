@@ -153,6 +153,23 @@ describe('BrushToolService', () => {
     expect(state.regions[0].id).toBe(7); // same region, edited in place
   });
 
+  it('shift-erasing the centre of a region leaves a hole (donut) — jit-ui#85', () => {
+    // Erase a disc well inside a solid box: the box keeps its exterior but gains
+    // an interior ring (the committed region must carry holes, not fill them).
+    const existing = boxRegion(5, 5, 55, 55, 7);
+    const { host, container, state } = makeHost({ regions: [existing] });
+    tool.bindHost(host);
+    tool.setMode(true, { size: 16 });
+
+    cv(container).dispatchEvent(mouse('mousedown', 30, 30, { shiftKey: true })); // dead centre
+
+    expect(state.regions).toHaveLength(1);
+    expect(state.regions[0].id).toBe(7);
+    const b = state.regions[0].bounds as Polygon;
+    expect(b.holes?.length).toBe(1);
+    expect(b.holes![0].length).toBeGreaterThanOrEqual(4);
+  });
+
   it('shift-painting a strip through a region splits it into two regions', () => {
     // A wide, short bar; erasing a full-height disc at its centre cuts it in two.
     const existing = boxRegion(5, 20, 55, 40, 7);

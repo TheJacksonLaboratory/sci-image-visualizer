@@ -264,6 +264,9 @@ export class BrushToolService {
     const components = polys.map((poly) => ({
       xPlot: poly.xpoints.map((x) => ox + x * rx),
       yPlot: poly.ypoints.map((y) => oy + y * ry),
+      // Carry traced interior rings (holes) back to plot coords so the donut
+      // survives the commit (jit-ui#85).
+      holes: poly.holes?.map((ring) => ring.map(([x, y]) => [ox + x * rx, oy + y * ry])),
     }));
     this.commitComponents(regions, components);
   }
@@ -482,7 +485,10 @@ export class BrushToolService {
    * stable identities across drag ticks. The store mints ids on commit, which
    * we read back so subsequent ticks replace the same regions.
    */
-  private commitComponents(regions: Region[], components: { xPlot: number[]; yPlot: number[] }[]) {
+  private commitComponents(
+    regions: Region[],
+    components: { xPlot: number[]; yPlot: number[]; holes?: number[][][] }[],
+  ) {
     const valid = components.filter((c) => c.xPlot.length >= 3);
     if (valid.length === 0) return;
 
@@ -515,7 +521,8 @@ export class BrushToolService {
    * the Region instance (its id is minted later by the store when new).
    */
   private upsertComponent(
-    regions: Region[], id: number | null, c: { xPlot: number[]; yPlot: number[] },
+    regions: Region[], id: number | null,
+    c: { xPlot: number[]; yPlot: number[]; holes?: number[][][] },
   ): Region {
     const existing = id != null ? regions.find((r) => r.id === id) : null;
 
@@ -525,6 +532,7 @@ export class BrushToolService {
     poly.ypoints = c.yPlot;
     poly.coordinates = c.xPlot.map((x, i) => [x, c.yPlot[i]]);
     poly.closed = true;
+    if (c.holes && c.holes.length) poly.holes = c.holes;
 
     const region = new Region();
     region.bounds = poly;
