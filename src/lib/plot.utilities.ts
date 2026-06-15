@@ -1,4 +1,4 @@
-import { Polygon, Rectangle, Region } from './models/region';
+import { Polygon, Rectangle, Region, MultiPolygon } from './models/region';
 import { ShapeSelection } from './models/shape';
 import { resolveHandles, bezierCurveFromHandles } from './models/bezier';
 import { saveAs } from 'file-saver';
@@ -406,6 +406,17 @@ export class PlotUtilities {
       if (!coordinates) {
         throw new Error('Invalid GeoJson file: must contain the \'coordinates\' key.');
       }
+      // Multi-part region: GeoJSON MultiPolygon → one Polygon per part, each
+      // with its own holes (jit-ui#85).
+      if (feature.geometry.type === 'MultiPolygon') {
+        const mp = new MultiPolygon();
+        mp.polygons = (coordinates as number[][][][])
+          .map(rings => this.polygonFromRings(rings))
+          .filter(p => p.xpoints.length >= 3);
+        region.bounds = mp;
+        regions.push(region);
+        continue;
+      }
       // Open polyline: LineString geometry
       if (feature.geometry.type === 'LineString') {
         const polygon = new Polygon();
@@ -550,6 +561,31 @@ export class PlotUtilities {
             geometry: { type: 'LineString', coordinates: geomCoords }
           });
         }
+      } else if (roi.bounds instanceof MultiPolygon) {
+        // Multi-part region → GeoJSON MultiPolygon: one ring-set per part
+        // (exterior + holes), each ring closed (jit-ui#85).
+        const colorRgb = [
+          this.hexToRgb(roi?.color)[0],
+          this.hexToRgb(roi?.color)[1],
+          this.hexToRgb(roi?.color)[2]
+        ];
+        const coordinates = roi.bounds.polygons
+          .filter(part => part.xpoints.length >= 3)
+          .map(part => {
+            const ext = part.xpoints.map((x, i) => [x, part.ypoints[i]]);
+            const rings: number[][][] = [[...ext, ext[0]]];
+            if (part.holes) {
+              for (const hole of part.holes) {
+                if (hole.length >= 3) rings.push([...hole, hole[0]]);
+              }
+            }
+            return rings;
+          });
+        features.push({
+          type: 'Feature',
+          properties: { classification: { name: roi.label ? roi.label : roi.name, color: colorRgb } },
+          geometry: { type: 'MultiPolygon', coordinates }
+        });
       }
     }
     const geoJsonData = {
@@ -565,6 +601,29 @@ export class PlotUtilities {
    * (`number[][]` per ring, no repeated closing point). Degenerate rings (< 3
    * distinct points) are dropped. jit-ui#85.
    */
+  /**
+   * Build a closed {@link Polygon} from a GeoJSON ring set: `rings[0]` is the
+   * exterior (closing point dropped), `rings[1..]` are interior holes. jit-ui#85.
+   */
+  private polygonFromRings(rings: number[][][]): Polygon {
+    const poly = new Polygon();
+    const ext = rings?.[0] ?? [];
+    const last = ext.length - 1;
+    const closed = ext.length > 1 && ext[0][0] === ext[last][0] && ext[0][1] === ext[last][1];
+    const n = closed ? last : ext.length;
+    poly.xpoints = []; poly.ypoints = []; poly.coordinates = [];
+    for (let i = 0; i < n; i++) {
+      poly.xpoints.push(ext[i][0]);
+      poly.ypoints.push(ext[i][1]);
+      poly.coordinates.push([ext[i][0], ext[i][1]]);
+    }
+    poly.npoints = poly.xpoints.length;
+    poly.closed = true;
+    const holes = this.ringsToHoles(rings.slice(1));
+    if (holes.length) poly.holes = holes;
+    return poly;
+  }
+
   private ringsToHoles(rings: number[][][]): number[][][] {
     const holes: number[][][] = [];
     for (const ringIn of rings || []) {

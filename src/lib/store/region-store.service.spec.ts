@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 
 import { RegionStore } from './region-store.service';
 import { VisualizerStore } from './visualizer-store.service';
-import { Region, Rectangle, Polygon } from '../models/region';
+import { Region, Rectangle, Polygon, MultiPolygon } from '../models/region';
 import { IImageInfo } from '../contracts/image.contract';
 
 function rectRegion(x: number, y: number, w: number, h: number): Region {
@@ -557,6 +557,54 @@ describe('RegionStore', () => {
         jest.runOnlyPendingTimers();
         jest.useRealTimers();
       }
+    });
+  });
+
+  describe('MultiPolygon (jit-ui#85)', () => {
+    /** Two disjoint 10×10 squares: part A at x0–10, part B at x20–30. */
+    const multi = () => {
+      const r = new Region();
+      const mp = new MultiPolygon();
+      mp.polygons = [polyRegion([0, 10, 10, 0], [0, 0, 10, 10]).bounds as Polygon,
+                     polyRegion([20, 30, 30, 20], [0, 0, 10, 10]).bounds as Polygon];
+      r.bounds = mp;
+      return r;
+    };
+
+    it('stores and returns both parts', () => {
+      store.addRegion(multi());
+      expect((store.getRegions()[0].bounds as MultiPolygon).polygons.length).toBe(2);
+    });
+
+    it('moveRegion translates every part (and would translate their holes)', () => {
+      const id = store.addRegion(multi());
+      store.moveRegion(id, 100, 5);
+      const mp = store.getRegions()[0].bounds as MultiPolygon;
+      expect(mp.polygons[0].xpoints).toEqual([100, 110, 110, 100]);
+      expect(mp.polygons[1].xpoints).toEqual([120, 130, 130, 120]);
+      expect(mp.polygons[0].ypoints).toEqual([5, 5, 15, 15]);
+    });
+
+    it('undo restores a moved MultiPolygon without aliasing', () => {
+      jest.useFakeTimers();
+      try {
+        const id = store.addRegion(multi());
+        jest.advanceTimersByTime(500);
+        store.moveRegion(id, 100, 0);
+        jest.advanceTimersByTime(500);
+        store.undo();
+        expect((store.getRegions()[0].bounds as MultiPolygon).polygons[0].xpoints)
+          .toEqual([0, 10, 10, 0]);
+      } finally {
+        jest.runOnlyPendingTimers();
+        jest.useRealTimers();
+      }
+    });
+
+    it('append dedupe treats an identical MultiPolygon as a duplicate', () => {
+      store.setRegions([multi()]);
+      store.setRegions([multi()], undefined, undefined, undefined, true);
+      expect(store.getRegions().length).toBe(1);
     });
   });
 

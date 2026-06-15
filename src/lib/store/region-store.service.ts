@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable, Subject } from 'rxjs';
 
 import { IImageInfo } from '../contracts/image.contract';
-import { Region, Rectangle, Polygon } from '../models/region';
+import { Region, Rectangle, Polygon, MultiPolygon } from '../models/region';
 import { PlotUtilities } from '../plot.utilities';
 import { VisualizerStore } from './visualizer-store.service';
 import { defaultHandleOffsets } from '../models/bezier';
@@ -417,7 +417,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.emit();
   }
 
-  updateBounds(id: number, bounds: Rectangle | Polygon): void {
+  updateBounds(id: number, bounds: Rectangle | Polygon | MultiPolygon): void {
     const r = this.findById(id);
     if (!r) return;
     this.recordUndoSnapshot();
@@ -435,14 +435,21 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
       b.x += dx;
       b.y += dy;
     } else if (b instanceof Polygon) {
-      b.xpoints = b.xpoints.map(x => x + dx);
-      b.ypoints = b.ypoints.map(y => y + dy);
-      b.coordinates = b.xpoints.map((x, i) => [x, b.ypoints[i]]);
-      // Translate interior rings (holes) with the exterior (jit-ui#85).
-      if (b.holes) b.holes = b.holes.map(ring => ring.map(([x, y]) => [x + dx, y + dy]));
+      this.translatePolygon(b, dx, dy);
+    } else if (b instanceof MultiPolygon) {
+      // Translate every part (and its holes) together (jit-ui#85).
+      for (const part of b.polygons) this.translatePolygon(part, dx, dy);
     }
     this.syncCache();
     this.emit();
+  }
+
+  /** Translate a polygon's vertices and any holes in place by (dx, dy). */
+  private translatePolygon(p: Polygon, dx: number, dy: number): void {
+    p.xpoints = p.xpoints.map(x => x + dx);
+    p.ypoints = p.ypoints.map(y => y + dy);
+    p.coordinates = p.xpoints.map((x, i) => [x, p.ypoints[i]]);
+    if (p.holes) p.holes = p.holes.map(ring => ring.map(([x, y]) => [x + dx, y + dy]));
   }
 
   // ── IRegionEditApi: vertex edits (polygons only) ───────────────────────
@@ -717,23 +724,32 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     return r && r.bounds instanceof Polygon ? r.bounds : undefined;
   }
 
-  private cloneBounds(bounds: Rectangle | Polygon): Rectangle | Polygon {
+  private clonePolygon(p: Polygon): Polygon {
+    const poly = new Polygon();
+    poly.npoints = p.npoints;
+    poly.xpoints = p.xpoints.slice();
+    poly.ypoints = p.ypoints.slice();
+    poly.coordinates = p.coordinates.map(c => c.slice());
+    poly.closed = p.closed;
+    poly.bezier = p.bezier;
+    if (p.handlesIn) poly.handlesIn = p.handlesIn.map(o => o.slice());
+    if (p.handlesOut) poly.handlesOut = p.handlesOut.map(o => o.slice());
+    if (p.holes) poly.holes = p.holes.map(ring => ring.map(pt => pt.slice()));
+    return poly;
+  }
+
+  private cloneBounds(bounds: Rectangle | Polygon | MultiPolygon): Rectangle | Polygon | MultiPolygon {
     if (bounds instanceof Rectangle) {
       const rect = new Rectangle();
       rect.x = bounds.x; rect.y = bounds.y; rect.width = bounds.width; rect.height = bounds.height;
       return rect;
     }
-    const poly = new Polygon();
-    poly.npoints = bounds.npoints;
-    poly.xpoints = bounds.xpoints.slice();
-    poly.ypoints = bounds.ypoints.slice();
-    poly.coordinates = bounds.coordinates.map(c => c.slice());
-    poly.closed = bounds.closed;
-    poly.bezier = bounds.bezier;
-    if (bounds.handlesIn) poly.handlesIn = bounds.handlesIn.map(o => o.slice());
-    if (bounds.handlesOut) poly.handlesOut = bounds.handlesOut.map(o => o.slice());
-    if (bounds.holes) poly.holes = bounds.holes.map(ring => ring.map(pt => pt.slice()));
-    return poly;
+    if (bounds instanceof MultiPolygon) {
+      const mp = new MultiPolygon();
+      mp.polygons = bounds.polygons.map(p => this.clonePolygon(p));
+      return mp;
+    }
+    return this.clonePolygon(bounds);
   }
 
   private regionsEqual(a: Region, b: Region): boolean {
@@ -741,15 +757,26 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     if (ba instanceof Rectangle && bb instanceof Rectangle) {
       return ba.x === bb.x && ba.y === bb.y && ba.width === bb.width && ba.height === bb.height;
     }
-    if (ba instanceof Polygon && bb instanceof Polygon) {
-      if ((ba.closed !== false) !== (bb.closed !== false)) return false;
-      if (ba.xpoints.length !== bb.xpoints.length) return false;
-      for (let i = 0; i < ba.xpoints.length; i++) {
-        if (ba.xpoints[i] !== bb.xpoints[i] || ba.ypoints[i] !== bb.ypoints[i]) return false;
+    if (ba instanceof MultiPolygon && bb instanceof MultiPolygon) {
+      if (ba.polygons.length !== bb.polygons.length) return false;
+      for (let i = 0; i < ba.polygons.length; i++) {
+        if (!this.polygonsEqual(ba.polygons[i], bb.polygons[i])) return false;
       }
-      return this.holesEqual(ba.holes, bb.holes);
+      return true;
+    }
+    if (ba instanceof Polygon && bb instanceof Polygon) {
+      return this.polygonsEqual(ba, bb);
     }
     return false;
+  }
+
+  private polygonsEqual(pa: Polygon, pb: Polygon): boolean {
+    if ((pa.closed !== false) !== (pb.closed !== false)) return false;
+    if (pa.xpoints.length !== pb.xpoints.length) return false;
+    for (let i = 0; i < pa.xpoints.length; i++) {
+      if (pa.xpoints[i] !== pb.xpoints[i] || pa.ypoints[i] !== pb.ypoints[i]) return false;
+    }
+    return this.holesEqual(pa.holes, pb.holes);
   }
 
   /** Compare two polygons' interior-ring (hole) sets for the dedupe path. */

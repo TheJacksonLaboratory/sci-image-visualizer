@@ -1,4 +1,4 @@
-import { Polygon, Rectangle, Region } from './models/region';
+import { Polygon, Rectangle, Region, MultiPolygon } from './models/region';
 import { PlotUtilities } from './plot.utilities';
 import { ShapeSelection } from './models/shape';
 
@@ -376,6 +376,38 @@ describe('PlotUtilities', () => {
     const back = plotUtilities.importROIsFromGeoJson(geoJson)[0].bounds as Polygon;
     expect(back).toBeInstanceOf(Polygon);
     expect(back.holes?.length).toBe(1);
+  });
+
+  it('MultiPolygon round-trips through GeoJSON (jit-ui#85)', () => {
+    const part = (x0: number, holes?: number[][][]) => {
+      const p = new Polygon();
+      p.xpoints = [x0, x0 + 10, x0 + 10, x0];
+      p.ypoints = [0, 0, 10, 10];
+      p.npoints = 4;
+      p.coordinates = p.xpoints.map((x, i) => [x, p.ypoints[i]]);
+      p.closed = true;
+      if (holes) p.holes = holes;
+      return p;
+    };
+    const region = new Region();
+    region.label = 'legend';
+    region.color = '#00ffff';
+    const mp = new MultiPolygon();
+    mp.polygons = [part(0, [[[2, 2], [5, 2], [5, 5], [2, 5]]]), part(20)];
+    region.bounds = mp;
+
+    const json = plotUtilities.exportROIsToGeoJson([region]);
+    const feature = JSON.parse(json).features[0];
+    expect(feature.geometry.type).toBe('MultiPolygon');
+    expect(feature.geometry.coordinates.length).toBe(2);          // two parts
+    expect(feature.geometry.coordinates[0].length).toBe(2);       // part A: exterior + hole
+
+    const back = plotUtilities.importROIsFromGeoJson(json)[0].bounds as MultiPolygon;
+    expect(back).toBeInstanceOf(MultiPolygon);
+    expect(back.polygons.length).toBe(2);
+    expect(back.polygons[0].xpoints).toEqual([0, 10, 10, 0]);
+    expect(back.polygons[0].holes?.length).toBe(1);
+    expect(back.polygons[1].xpoints).toEqual([20, 30, 30, 20]);
   });
 
   it('test rgbToHex', () => {

@@ -8,7 +8,7 @@ export class Region {
    *  not break PrimeNG row selection. */
   id!: number;
   name!: string;
-  bounds?: Rectangle | Polygon | null = null;
+  bounds?: Rectangle | Polygon | MultiPolygon | null = null;
   /** profile = an intensity-profile line ROI; rendered/dragged like a region but
    *  excluded from the Regions tab and exports. Use `isProfile()` to test it —
    *  it's the canonical marker that separates intensity lines (owned by the
@@ -178,6 +178,21 @@ export class Polygon {
    * exterior is smoothed.
    */
   holes?: number[][][];
+}
+
+/**
+ * A region whose geometry is several disjoint parts — e.g. the result of merging
+ * two non-touching regions, or the inverse of a blob (jit-ui#85). Each part is a
+ * closed {@link Polygon} that may carry its own holes, so a MultiPolygon
+ * represents "sparse bits, some with donut holes" as a single region. Maps 1:1
+ * onto a GeoJSON `MultiPolygon` (and QuPath's geometry).
+ *
+ * A single-part MultiPolygon is equivalent to that Polygon; callers should
+ * prefer a plain {@link Polygon} for one connected part.
+ */
+export class MultiPolygon {
+  /** One or more disjoint closed polygons (each may have holes). */
+  polygons: Polygon[] = [];
 }
 
 export type Bounds = Rectangle | Polygon | {

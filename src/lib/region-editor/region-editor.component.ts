@@ -4,7 +4,7 @@ import { saveAs } from 'file-saver';
 import { Subject, Subscription } from 'rxjs';
 import { debounceTime, switchMap } from 'rxjs/operators';
 
-import { Polygon, Rectangle, Region } from '../models/region';
+import { Polygon, Rectangle, Region, MultiPolygon } from '../models/region';
 import { IImageMetadata } from '../contracts/image.contract';
 import { ConfirmationService, MessageService } from 'primeng/api';
 import { IRegionEditorApi, REGION_EDITOR_API } from '../contracts/region-editor-api.contract';
@@ -506,17 +506,22 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   private areaInPixels(region: Region): number {
     const b = region.bounds;
     if (b instanceof Rectangle) return Math.abs(b.width * b.height);
-    if (b instanceof Polygon) {
-      if ((b.xpoints?.length ?? 0) < 3) return 0;
-      let a = this.ringArea(b.xpoints, b.ypoints);
-      if (b.holes) {
-        for (const ring of b.holes) {
-          a -= this.ringArea(ring.map(p => p[0]), ring.map(p => p[1]));
-        }
-      }
-      return Math.max(0, a);
+    if (b instanceof Polygon) return this.polygonArea(b);
+    // Multi-part region: sum each part's (exterior − holes) area (jit-ui#85).
+    if (b instanceof MultiPolygon) {
+      return b.polygons.reduce((sum, p) => sum + this.polygonArea(p), 0);
     }
     return 0;
+  }
+
+  /** Polygon area: exterior shoelace minus each interior ring (hole). */
+  private polygonArea(p: Polygon): number {
+    if ((p.xpoints?.length ?? 0) < 3) return 0;
+    let a = this.ringArea(p.xpoints, p.ypoints);
+    if (p.holes) {
+      for (const ring of p.holes) a -= this.ringArea(ring.map(pt => pt[0]), ring.map(pt => pt[1]));
+    }
+    return Math.max(0, a);
   }
 
   /** Absolute shoelace area of a single ring. */

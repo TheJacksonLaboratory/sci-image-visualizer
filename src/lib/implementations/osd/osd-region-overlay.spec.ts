@@ -1,7 +1,7 @@
 import { OsdRegionOverlay } from './osd-region-overlay';
 import { RegionStore } from '../../store/region-store.service';
 import { VisualizerStore } from '../../store/visualizer-store.service';
-import { Region, Rectangle, Polygon } from '../../models/region';
+import { Region, Rectangle, Polygon, MultiPolygon } from '../../models/region';
 
 /**
  * Mock OpenSeadragon with an *identity* viewport (image coords == element
@@ -292,6 +292,52 @@ describe('OsdRegionOverlay — vertex tools', () => {
     const poly = store.getRegions().find(r => r.id === id)!.bounds as Polygon;
     expect(poly.holes?.length).toBe(1);
     expect(poly.holes![0]).toEqual([[107, 7], [113, 7], [113, 13], [107, 13]]);
+  });
+
+  /** Two disjoint 10×10 squares: part A at x0–10, part B at x20–30. */
+  function multiRegion(): Region {
+    const part = (x0: number) => {
+      const p = new Polygon();
+      p.xpoints = [x0, x0 + 10, x0 + 10, x0];
+      p.ypoints = [0, 0, 10, 10];
+      p.npoints = 4;
+      p.coordinates = p.xpoints.map((x, i) => [x, p.ypoints[i]]);
+      p.closed = true;
+      return p;
+    };
+    const r = new Region();
+    const mp = new MultiPolygon();
+    mp.polygons = [part(0), part(20)];
+    r.bounds = mp;
+    return r;
+  }
+
+  it('renders a multi-part region as one even-odd path with a subpath per part', () => {
+    const viewer = fakeViewer();
+    const o = new OsdRegionOverlay(viewer, store);
+    try {
+      store.addRegion(multiRegion());
+      const paths = (viewer.canvas as HTMLElement).querySelectorAll('path');
+      expect(paths.length).toBe(1);
+      expect(paths[0].getAttribute('fill-rule')).toBe('evenodd');
+      expect((paths[0].getAttribute('d')!.match(/M/g) || []).length).toBe(2); // one per part
+    } finally {
+      o.destroy();
+    }
+  });
+
+  it('selects either part of a multi-part region but not the gap between them', () => {
+    store.addRegion(multiRegion());
+    store.setSelectedShapeIndices([]);
+    overlay.setMode('select');
+    const h = handlers();
+    h.clickHandler({ position: { x: 5, y: 5 } });   // inside part A
+    expect(store.getSelectedShapeIndices()).toEqual([0]);
+    store.setSelectedShapeIndices([]);
+    h.clickHandler({ position: { x: 15, y: 5 } });  // in the gap → nothing
+    expect(store.getSelectedShapeIndices()).toEqual([]);
+    h.clickHandler({ position: { x: 25, y: 5 } });  // inside part B
+    expect(store.getSelectedShapeIndices()).toEqual([0]);
   });
 
   it('shows the hole vertices (not just the exterior) when a donut is selected', () => {

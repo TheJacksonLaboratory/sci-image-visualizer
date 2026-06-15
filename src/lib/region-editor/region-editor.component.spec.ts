@@ -7,7 +7,7 @@ import { RoutingVisualizerService } from '../routing-visualizer.service';
 import { REGION_EDITOR_API } from '../contracts/region-editor-api.contract';
 import { MockService } from 'ng-mocks';
 import { ConfirmationService, MessageService } from 'primeng/api';
-import { Polygon, Rectangle, Region } from '../models/region';
+import { Polygon, Rectangle, Region, MultiPolygon } from '../models/region';
 import { ShapeSelection } from '../models/shape';
 import { NO_ERRORS_SCHEMA } from '@angular/core';
 import { HexColorPickerComponent } from '../hex-color-picker/hex-color-picker.component';
@@ -1088,6 +1088,23 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
     (component as any).mppX = mppX;
     (component as any).mppY = mppY;
     expect(component.regionArea(rect())).toContain('µm²'); // would have been px² before
+  });
+
+  it('regionArea sums MultiPolygon parts (minus their holes) — jit-ui#85', () => {
+    const sq = (x0: number, w: number) => {
+      const p = new Polygon();
+      p.xpoints = [x0, x0 + w, x0 + w, x0];
+      p.ypoints = [0, 0, w, w];
+      p.npoints = 4;
+      p.coordinates = p.xpoints.map((x, i) => [x, p.ypoints[i]]);
+      p.closed = true;
+      return p;
+    };
+    const r = new Region();
+    const mp = new MultiPolygon();
+    mp.polygons = [sq(0, 10), sq(20, 5)]; // 100 + 25
+    r.bounds = mp;
+    expect(component.regionArea(r)).toBe('125 px²');
   });
 
   it('regionArea subtracts hole area (donut, not filled circle) — jit-ui#85', () => {

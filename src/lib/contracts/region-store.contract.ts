@@ -1,4 +1,4 @@
-import { Rectangle, Polygon } from '../models/region';
+import { Rectangle, Polygon, MultiPolygon } from '../models/region';
 import { Region } from '../models/region';
 
 /**
@@ -25,7 +25,7 @@ export interface IRegionEditApi {
   removeRegion(id: number): void;
 
   /** Replace a region's geometry wholesale (e.g. after a rectangle resize). */
-  updateBounds(id: number, bounds: Rectangle | Polygon): void;
+  updateBounds(id: number, bounds: Rectangle | Polygon | MultiPolygon): void;
 
   /** Translate the whole region by (dx, dy) image pixels. */
   moveRegion(id: number, dx: number, dy: number): void;

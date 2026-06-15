@@ -1,7 +1,7 @@
 import * as OpenSeadragon from 'openseadragon';
 import { Subscription } from 'rxjs';
 
-import { Region, Rectangle, Polygon } from '../../models/region';
+import { Region, Rectangle, Polygon, MultiPolygon } from '../../models/region';
 import { resolveHandles } from '../../models/bezier';
 import { IRegionStore } from '../../contracts/visualizer.contract';
 import { IRegionEditApi } from '../../contracts/region-store.contract';
@@ -273,8 +273,29 @@ export class OsdRegionOverlay implements IRegionOverlay {
     const bounds = region.bounds;
     let pts: { x: number; y: number }[] | null = null;
     let closed = true;
+    let el: SVGElement | null = null;
 
-    if (bounds instanceof Rectangle) {
+    if (bounds instanceof MultiPolygon) {
+      // Multi-part region (jit-ui#85): one even-odd <path> with every part's
+      // exterior plus its holes. All parts' vertices drive the label bbox.
+      const parts = bounds.polygons.filter((p) => (p.xpoints?.length ?? 0) >= 3);
+      if (parts.length === 0) return null;
+      pts = [];
+      let d = '';
+      for (const part of parts) {
+        const ext = part.xpoints.map((x, i) => ({ x, y: part.ypoints[i] }));
+        pts.push(...ext);
+        d += (d ? ' ' : '') + this.straightPathD(ext, true);
+        if (part.holes) {
+          for (const ring of part.holes) {
+            d += ' ' + this.straightPathD(ring.map(([x, y]) => ({ x, y })), true);
+          }
+        }
+      }
+      el = document.createElementNS(SVGNS, 'path');
+      el.setAttribute('d', d);
+      el.setAttribute('fill-rule', 'evenodd');
+    } else if (bounds instanceof Rectangle) {
       pts = [
         { x: bounds.x, y: bounds.y },
         { x: bounds.x + bounds.width, y: bounds.y },
@@ -288,29 +309,30 @@ export class OsdRegionOverlay implements IRegionOverlay {
     }
     if (!pts || pts.length === 0) return null;
 
-    // Bezier regions render as a true cubic-bezier path through the anchors
-    // (paper.js-equivalent smooth curve); everything else as a straight
-    // polygon/polyline.
-    const isBezier = bounds instanceof Polygon && bounds.bezier && pts.length >= 2;
-    // Interior rings (holes) — punch through with even-odd fill (jit-ui#85).
-    const holes = (closed && bounds instanceof Polygon && bounds.holes?.length)
-      ? bounds.holes : null;
-    let el: SVGElement;
-    if (isBezier || holes) {
-      el = document.createElementNS(SVGNS, 'path');
-      // Exterior subpath (smooth for bezier, straight otherwise) followed by a
-      // straight subpath per hole.
-      let d = isBezier ? this.bezierPathD(bounds as Polygon) : this.straightPathD(pts, closed);
-      if (holes) {
-        for (const ring of holes) {
-          d += ' ' + this.straightPathD(ring.map(([x, y]) => ({ x, y })), true);
+    if (!el) {
+      // Bezier regions render as a true cubic-bezier path through the anchors
+      // (paper.js-equivalent smooth curve); everything else as a straight
+      // polygon/polyline.
+      const isBezier = bounds instanceof Polygon && bounds.bezier && pts.length >= 2;
+      // Interior rings (holes) — punch through with even-odd fill (jit-ui#85).
+      const holes = (closed && bounds instanceof Polygon && bounds.holes?.length)
+        ? bounds.holes : null;
+      if (isBezier || holes) {
+        el = document.createElementNS(SVGNS, 'path');
+        // Exterior subpath (smooth for bezier, straight otherwise) followed by a
+        // straight subpath per hole.
+        let d = isBezier ? this.bezierPathD(bounds as Polygon) : this.straightPathD(pts, closed);
+        if (holes) {
+          for (const ring of holes) {
+            d += ' ' + this.straightPathD(ring.map(([x, y]) => ({ x, y })), true);
+          }
+          el.setAttribute('fill-rule', 'evenodd');
         }
-        el.setAttribute('fill-rule', 'evenodd');
+        el.setAttribute('d', d);
+      } else {
+        el = document.createElementNS(SVGNS, closed ? 'polygon' : 'polyline');
+        el.setAttribute('points', pts.map(p => { const q = this.toPx(p.x, p.y); return `${q.x},${q.y}`; }).join(' '));
       }
-      el.setAttribute('d', d);
-    } else {
-      el = document.createElementNS(SVGNS, closed ? 'polygon' : 'polyline');
-      el.setAttribute('points', pts.map(p => { const q = this.toPx(p.x, p.y); return `${q.x},${q.y}`; }).join(' '));
     }
     el.setAttribute('fill', selected ? this.rgba(color, 0.2) : 'none');
     el.setAttribute('stroke', color);
@@ -710,7 +732,8 @@ export class OsdRegionOverlay implements IRegionOverlay {
         Math.min(a.x, c.x), Math.min(a.y, c.y), Math.max(a.x, c.x), Math.max(a.y, c.y));
       return zone ? { zone, index } : null;
     }
-    if (b instanceof Polygon) {
+    if (b instanceof Polygon || b instanceof MultiPolygon) {
+      // Polygons + multi-part regions support whole-region move (no resize zones).
       return this.containsPoint(region, this.toImage(position)) ? { zone: 'move', index } : null;
     }
     return null;
@@ -834,6 +857,15 @@ export class OsdRegionOverlay implements IRegionOverlay {
         holes: b.holes?.map(ring => ring.map(pt => pt.slice())),
       };
     }
+    if (b instanceof MultiPolygon) {
+      return {
+        kind: 'multi',
+        polygons: b.polygons.map((p) => ({
+          xs: p.xpoints.slice(), ys: p.ypoints.slice(), closed: p.closed !== false,
+          holes: p.holes?.map(ring => ring.map(pt => pt.slice())),
+        })),
+      };
+    }
     return { kind: 'rect', x: 0, y: 0, w: 0, h: 0 };
   }
 
@@ -887,6 +919,25 @@ export class OsdRegionOverlay implements IRegionOverlay {
       rect.width = Math.round(Math.abs(x1 - x0));
       rect.height = Math.round(Math.abs(y1 - y0));
       this.store.updateBounds(this.edit.id, rect);
+    } else if (o.kind === 'multi') {
+      // Multi-part region: translate every part (and its holes) by the delta.
+      const mp = new MultiPolygon();
+      mp.polygons = o.polygons.map((pp: any) => {
+        const xs = pp.xs.map((x: number) => Math.round(x + dx));
+        const ys = pp.ys.map((y: number) => Math.round(y + dy));
+        const poly = new Polygon();
+        poly.npoints = xs.length;
+        poly.xpoints = xs;
+        poly.ypoints = ys;
+        poly.coordinates = xs.map((x: number, i: number) => [x, ys[i]]);
+        poly.closed = pp.closed;
+        if (pp.holes) {
+          poly.holes = pp.holes.map((ring: number[][]) =>
+            ring.map(([x, y]: number[]) => [Math.round(x + dx), Math.round(y + dy)]));
+        }
+        return poly;
+      });
+      this.store.updateBounds(this.edit.id, mp);
     } else {
       // Polygon: translate every vertex (the only polygon edit zone is 'move').
       // Bezier flag + handle offsets are relative, so they carry over unchanged.
@@ -951,6 +1002,18 @@ export class OsdRegionOverlay implements IRegionOverlay {
         x1: Math.max(...b.xpoints), y1: Math.max(...b.ypoints),
       };
     }
+    if (b instanceof MultiPolygon) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const p of b.polygons) {
+        for (let i = 0; i < p.xpoints.length; i++) {
+          if (p.xpoints[i] < x0) x0 = p.xpoints[i];
+          if (p.xpoints[i] > x1) x1 = p.xpoints[i];
+          if (p.ypoints[i] < y0) y0 = p.ypoints[i];
+          if (p.ypoints[i] > y1) y1 = p.ypoints[i];
+        }
+      }
+      return x1 >= x0 ? { x0, y0, x1, y1 } : null;
+    }
     return null;
   }
 
@@ -968,31 +1031,15 @@ export class OsdRegionOverlay implements IRegionOverlay {
     if (b instanceof Rectangle) {
       return pt.x >= b.x && pt.x <= b.x + b.width && pt.y >= b.y && pt.y <= b.y + b.height;
     }
+    // Multi-part region: inside any part (exterior minus that part's holes).
+    if (b instanceof MultiPolygon) {
+      return b.polygons.some((p) => this.closedPolygonContains(p, pt));
+    }
     if (b instanceof Polygon) {
-      const xs = b.xpoints, ys = b.ypoints, n = xs.length;
-      if (b.closed !== false) {
-        // Closed (area) path: standard point-in-polygon on the exterior, minus
-        // any interior ring (hole) — clicking inside the hole misses the donut.
-        const inRing = (rxs: number[], rys: number[]): boolean => {
-          let hit = false;
-          for (let i = 0, j = rxs.length - 1; i < rxs.length; j = i++) {
-            const intersect = ((rys[i] > pt.y) !== (rys[j] > pt.y))
-              && (pt.x < ((rxs[j] - rxs[i]) * (pt.y - rys[i])) / (rys[j] - rys[i]) + rxs[i]);
-            if (intersect) hit = !hit;
-          }
-          return hit;
-        };
-        if (!inRing(xs, ys)) return false;
-        if (b.holes) {
-          for (const ring of b.holes) {
-            if (inRing(ring.map(p => p[0]), ring.map(p => p[1]))) return false;
-          }
-        }
-        return true;
-      }
+      if (b.closed !== false) return this.closedPolygonContains(b, pt);
       // Open polyline: no interior — select when the click lands near the line.
       // Tolerance is in screen pixels so it stays clickable at any zoom.
-      const tolPx = 6;
+      const xs = b.xpoints, ys = b.ypoints, n = xs.length, tolPx = 6;
       const here = this.toPx(pt.x, pt.y);
       for (let i = 0; i + 1 < n; i++) {
         const a = this.toPx(xs[i], ys[i]);
@@ -1002,6 +1049,27 @@ export class OsdRegionOverlay implements IRegionOverlay {
       return false;
     }
     return false;
+  }
+
+  /** Point-in-closed-polygon (image coords) honouring interior rings (holes):
+   *  inside the exterior AND outside every hole (even-odd). */
+  private closedPolygonContains(b: Polygon, pt: { x: number; y: number }): boolean {
+    const inRing = (rxs: number[], rys: number[]): boolean => {
+      let hit = false;
+      for (let i = 0, j = rxs.length - 1; i < rxs.length; j = i++) {
+        const intersect = ((rys[i] > pt.y) !== (rys[j] > pt.y))
+          && (pt.x < ((rxs[j] - rxs[i]) * (pt.y - rys[i])) / (rys[j] - rys[i]) + rxs[i]);
+        if (intersect) hit = !hit;
+      }
+      return hit;
+    };
+    if (!inRing(b.xpoints, b.ypoints)) return false;
+    if (b.holes) {
+      for (const ring of b.holes) {
+        if (inRing(ring.map(p => p[0]), ring.map(p => p[1]))) return false;
+      }
+    }
+    return true;
   }
 
   /** Shortest distance from point p to segment a–b, all in screen pixels. */
