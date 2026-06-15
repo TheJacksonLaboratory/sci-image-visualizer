@@ -199,7 +199,29 @@ export class VertexEraserToolService {
       const ys = b.ypoints.map(y => y / rx);
 
       const result = this.wandService.dropVerticesWithinRadius(xs, ys, cmx, cmy, this.radius);
-      if (result.removed === 0) continue;
+
+      // Erase vertices on interior rings (a donut's inner outline) too, and drop
+      // a hole that degenerates below a triangle (jit-ui#85).
+      let holesChanged = false;
+      let newHoles: number[][][] | undefined;
+      if (b.holes) {
+        newHoles = [];
+        for (const ring of b.holes) {
+          const hr = this.wandService.dropVerticesWithinRadius(
+            ring.map(p => p[0] / rx), ring.map(p => p[1] / rx), cmx, cmy, this.radius);
+          if (hr.removed === 0) {
+            newHoles.push(ring); // untouched — keep as-is
+          } else {
+            holesChanged = true;
+            if (hr.xpoints.length >= 3) {
+              newHoles.push(hr.xpoints.map((x, k) => [x * rx, hr.ypoints[k] * rx]));
+            } // else: hole collapsed — drop it
+          }
+        }
+        if (newHoles.length === 0) newHoles = undefined;
+      }
+
+      if (result.removed === 0 && !holesChanged) continue;
 
       anyChange = true;
       const minVerts = closed ? 3 : 2;
@@ -220,6 +242,7 @@ export class VertexEraserToolService {
       poly.coordinates = xPlot.map((x, k) => [x, yPlot[k]]);
       poly.closed = closed;
       poly.bezier = b.bezier;
+      if (newHoles && newHoles.length) poly.holes = newHoles;
 
       const nr = new Region();
       nr.id = region.id;

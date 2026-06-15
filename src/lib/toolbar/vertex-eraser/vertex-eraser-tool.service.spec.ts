@@ -72,6 +72,52 @@ describe('VertexEraserToolService (neutral Region)', () => {
     expect(invalidated).toBe(1); // wand stroke invalidated after the edit
   });
 
+  /** A 0–40 square exterior with a hole ring (defaults to a 10–20 square). */
+  function donutRegion(hole: number[][] = [[10, 10], [20, 10], [20, 20], [10, 20]]): Region {
+    const r = new Region();
+    r.id = 2;
+    const p = new Polygon();
+    p.xpoints = [0, 40, 40, 0];
+    p.ypoints = [0, 0, 40, 40];
+    p.npoints = 4;
+    p.coordinates = p.xpoints.map((x, i) => [x, p.ypoints[i]]);
+    p.closed = true;
+    p.holes = [hole];
+    r.bounds = p;
+    return r;
+  }
+
+  it('erases a vertex on the inner ring (donut), leaving the exterior intact', () => {
+    regions = [donutRegion()];
+    const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+    canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 10, clientY: 10, button: 0 }));
+
+    const poly = committed![0].bounds as Polygon;
+    expect(poly.xpoints.length).toBe(4);   // exterior untouched
+    expect(poly.holes!.length).toBe(1);
+    expect(poly.holes![0].length).toBe(3); // one hole vertex removed
+  });
+
+  it('keeps the hole when erasing an exterior vertex (no donut fill)', () => {
+    regions = [donutRegion()];
+    const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+    canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 0, clientY: 0, button: 0 }));
+
+    const poly = committed![0].bounds as Polygon;
+    expect(poly.xpoints.length).toBe(3);   // exterior vertex removed
+    expect(poly.holes!.length).toBe(1);    // hole preserved
+  });
+
+  it('drops a hole that erasing reduces below a triangle', () => {
+    regions = [donutRegion([[10, 10], [12, 10], [11, 12]])]; // 3-vertex hole, all near (11,11)
+    const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+    canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 11, clientY: 11, button: 0 }));
+
+    const poly = committed![0].bounds as Polygon;
+    expect(poly.xpoints.length).toBe(4);   // exterior intact
+    expect(poly.holes).toBeUndefined();    // collapsed hole removed
+  });
+
   it('does not commit when the click misses every vertex', () => {
     const canvas = container.querySelector('canvas') as HTMLCanvasElement;
     canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 5, clientY: 5, button: 0 }));
