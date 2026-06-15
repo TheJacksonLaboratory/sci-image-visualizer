@@ -2,6 +2,17 @@ import { BehaviorSubject } from 'rxjs';
 
 import { VisualizationComponent } from './visualization.component';
 import { VisualizerStore } from './store/visualizer-store.service';
+import { RegionOpsService } from './region-ops.service';
+import { WandService } from './toolbar/wand/wand.service';
+import { Region, Rectangle, Polygon, MultiPolygon } from './models/region';
+
+function rectRegion(x: number, y: number, w: number, h: number): Region {
+  const r = new Region();
+  const b = new Rectangle();
+  b.x = x; b.y = y; b.width = w; b.height = h;
+  r.bounds = b;
+  return r;
+}
 
 /**
  * UI-shell tests for VisualizationComponent (refactoring plan, Step 7) —
@@ -88,6 +99,7 @@ describe('VisualizationComponent (UI shell)', () => {
         busy$: new BehaviorSubject(false),
         progress$: new BehaviorSubject(-1),
       } as any,
+      new RegionOpsService(new WandService()), // RegionOpsService
     );
   });
 
@@ -96,6 +108,71 @@ describe('VisualizationComponent (UI shell)', () => {
   it('constructs and reads the plot-type descriptors through the service', () => {
     expect(component).toBeTruthy();
     expect(plotService.getPlotTypeDescriptors).toHaveBeenCalled();
+  });
+
+  describe('region set-operations (jit-ui#85)', () => {
+    /** Make the mock store stateful so replaceRegions can read back results. */
+    function statefulRegions(initial: Region[]) {
+      let regions = initial.slice();
+      plotService.getRegions = jest.fn(() => regions.slice());
+      plotService.setRegions = jest.fn((rs: Region[]) => {
+        regions = rs.map((r, i) => { if (r.id == null) r.id = 100 + i; return r; });
+      });
+      plotService.setSelectedShapeIndices = jest.fn();
+      return () => regions;
+    }
+
+    it('canMerge / canUngroup / hasEligibleSelection reflect the selection', () => {
+      statefulRegions([rectRegion(0, 0, 10, 10), rectRegion(50, 50, 10, 10)]);
+      (component as any).selectedIndices = [0, 1];
+      expect(component.canMergeRegions).toBe(true);
+      expect(component.hasEligibleSelection).toBe(true);
+      expect(component.canUngroupRegions).toBe(false);
+
+      (component as any).selectedIndices = [0];
+      expect(component.canMergeRegions).toBe(false); // needs ≥2
+      expect(component.hasEligibleSelection).toBe(true);
+    });
+
+    it('mergeRegions commits one merged region and selects it', () => {
+      const read = statefulRegions([rectRegion(0, 0, 20, 20), rectRegion(10, 10, 20, 20)]);
+      (component as any).selectedIndices = [0, 1];
+      component.mergeRegions();
+      expect(plotService.setRegions).toHaveBeenCalled();
+      expect(read().length).toBe(1);                       // two → one
+      expect(read()[0].bounds).toBeInstanceOf(Polygon);    // overlapping → connected
+      expect(plotService.setSelectedShapeIndices).toHaveBeenCalled();
+    });
+
+    it('mergeRegions of disjoint rectangles yields a MultiPolygon', () => {
+      const read = statefulRegions([rectRegion(0, 0, 10, 10), rectRegion(50, 50, 10, 10)]);
+      (component as any).selectedIndices = [0, 1];
+      component.mergeRegions();
+      expect(read()[0].bounds).toBeInstanceOf(MultiPolygon);
+    });
+
+    it('ungroupRegions splits a multi-part region back into parts', () => {
+      const read = statefulRegions([rectRegion(0, 0, 10, 10), rectRegion(50, 50, 10, 10)]);
+      (component as any).selectedIndices = [0, 1];
+      component.mergeRegions();          // → one MultiPolygon
+      (component as any).selectedIndices = [0];
+      component.ungroupRegions();
+      expect(read().length).toBe(2);     // split back into two regions
+    });
+
+    it('simplifyRegions replaces the selection and closes the dialog', () => {
+      const read = statefulRegions([
+        (() => { const r = new Region(); const p = new Polygon();
+          p.xpoints = [0, 50, 100, 100, 0]; p.ypoints = [0, 1, 0, 100, 100];
+          p.npoints = 5; p.coordinates = p.xpoints.map((x, i) => [x, p.ypoints[i]]); p.closed = true;
+          r.bounds = p; return r; })(),
+      ]);
+      (component as any).selectedIndices = [0];
+      component.displaySimplifyDialog = true;
+      component.simplifyRegions(2);
+      expect((read()[0].bounds as Polygon).xpoints.length).toBe(4); // bump removed
+      expect(component.displaySimplifyDialog).toBe(false);
+    });
   });
 
   it('onZScrub debounces slice swaps while dragging (last value wins)', () => {

@@ -7,7 +7,8 @@ import { MenuItem, MessageService, TreeNode } from 'primeng/api';
 import { ContextMenu } from 'primeng/contextmenu';
 import { IImageInfo } from './contracts/image.contract';
 import { ImageStatePort, IMAGE_STATE_PORT } from './contracts/ports/image-state.port';
-import { Polygon } from './models/region';
+import { Polygon, Rectangle, MultiPolygon, Region } from './models/region';
+import { RegionOpsService } from './region-ops.service';
 import { VisualizerStore } from './store/visualizer-store.service';
 import { RenderOrchestrator, SliceScrubber } from './render-orchestrator';
 import { PlotType, PlotTypeDescriptor } from './contracts/plot-type';
@@ -95,6 +96,13 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   canUndoRegion = false;
   /** Whether an undone region action is available to redo (jit-ui#85). */
   canRedoRegion = false;
+
+  /** Custom-threshold Simplify dialog (jit-ui#85). */
+  displaySimplifyDialog = false;
+  simplifyThreshold = 3;
+  /** Current region selection (array indices) — mirrored from the store so the
+   *  context-menu region actions can read it synchronously (jit-ui#85). */
+  private selectedIndices: number[] = [];
 
   /** Wand sensitivity — higher = stricter (smaller selection). Matches QuPath default. */
   wandSensitivity = 2.0;
@@ -202,6 +210,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     private samTool: SamToolService,
     private cellSegmentTool: CellSegmentToolService,
     private samPointTool: SamPointToolService,
+    private regionOps: RegionOpsService,
   ) {
     this.colormapsOptions = plotService.getColormapOptions();
     this.computePlotTypeOptions();
@@ -262,6 +271,14 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
       .subscribe((canRedo) => {
         this.canRedoRegion = canRedo;
         this.cdr.detectChanges();
+      });
+    // Mirror the region selection so the right-click action group (jit-ui#85)
+    // can read it synchronously when the menu is built.
+    this.plotService
+      .getSelectedShapeIndices$()
+      .pipe(takeUntil(this.unsub))
+      .subscribe((indices) => {
+        this.selectedIndices = indices || [];
       });
     // Interactive point-prompt segmentation runs inside the renderer on each
     // click; surface its live status + download progress in the shared `sam`
@@ -998,6 +1015,115 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     this.plotService.redo();
   }
 
+  // ── Region set-operations on the current selection (jit-ui#85) ──────────
+
+  /** The currently-selected regions (live store instances). */
+  private get selectedRegions(): Region[] {
+    const all = this.plotService.getRegions();
+    return this.selectedIndices
+      .map((i) => all[i])
+      .filter((r): r is Region => !!r);
+  }
+
+  /** Regions eligible for set-ops: closed areas (rect / closed polygon /
+   *  multi-polygon), excluding intensity-profile lines. */
+  private opEligible(regions: Region[]): Region[] {
+    return regions.filter((r) => r.kind !== 'profile' && (
+      r.bounds instanceof Rectangle ||
+      r.bounds instanceof MultiPolygon ||
+      (r.bounds instanceof Polygon && r.bounds.closed !== false)
+    ));
+  }
+
+  /** Image pixel dimensions for the raster ops; falls back to the selection's
+   *  extent when the image size isn't known (keeps clamping sane). */
+  private opImageDims(regions: Region[]): { w: number; h: number } {
+    let [w, h] = this.imageInfo?.trueImageSize ?? [0, 0];
+    if (!(w > 0) || !(h > 0)) {
+      let maxX = 0, maxY = 0;
+      const scan = (xs: number[], ys: number[]) => {
+        for (const x of xs) maxX = Math.max(maxX, x);
+        for (const y of ys) maxY = Math.max(maxY, y);
+      };
+      for (const r of regions) {
+        const b = r.bounds;
+        if (b instanceof Rectangle) scan([b.x + b.width], [b.y + b.height]);
+        else if (b instanceof Polygon) scan(b.xpoints, b.ypoints);
+        else if (b instanceof MultiPolygon) for (const p of b.polygons) scan(p.xpoints, p.ypoints);
+      }
+      w = Math.max(w, Math.ceil(maxX) + 2);
+      h = Math.max(h, Math.ceil(maxY) + 2);
+    }
+    return { w, h };
+  }
+
+  /** True when ≥2 eligible regions are selected (Merge available). */
+  get canMergeRegions(): boolean { return this.opEligible(this.selectedRegions).length >= 2; }
+  /** True when any selected region is multi-part (Ungroup available). */
+  get canUngroupRegions(): boolean { return this.selectedRegions.some((r) => this.regionOps.canUngroup(r)); }
+  /** True when ≥1 eligible region is selected (Inverse / Simplify available). */
+  get hasEligibleSelection(): boolean { return this.opEligible(this.selectedRegions).length >= 1; }
+
+  /** Merge the selected regions into a single (possibly multi-part) region. */
+  mergeRegions(): void {
+    const sel = this.opEligible(this.selectedRegions);
+    if (sel.length < 2) return;
+    const { w, h } = this.opImageDims(sel);
+    const merged = this.regionOps.merge(sel, w, h);
+    if (merged) this.replaceRegions(sel, [merged]);
+  }
+
+  /** Split each selected multi-part region into one region per part. */
+  ungroupRegions(): void {
+    const sel = this.selectedRegions.filter((r) => this.regionOps.canUngroup(r));
+    if (sel.length === 0) return;
+    const results: Region[] = [];
+    for (const r of sel) results.push(...this.regionOps.ungroup(r));
+    this.replaceRegions(sel, results);
+  }
+
+  /** Replace the selection with its inverse inside the image rectangle. */
+  inverseRegions(): void {
+    const sel = this.opEligible(this.selectedRegions);
+    if (sel.length === 0) return;
+    const { w, h } = this.opImageDims(sel);
+    const inv = this.regionOps.inverse(sel, w, h);
+    if (!inv) {
+      this.messageService.add({
+        severity: 'warn', summary: 'Inverse',
+        detail: 'Could not invert (the image is too large or unscaled).',
+      });
+      return;
+    }
+    this.replaceRegions(sel, [inv]);
+  }
+
+  /** Douglas–Peucker simplify each selected region by `thresholdPx`. */
+  simplifyRegions(thresholdPx: number): void {
+    const sel = this.opEligible(this.selectedRegions);
+    if (sel.length === 0) return;
+    this.replaceRegions(sel, sel.map((r) => this.regionOps.simplify(r, thresholdPx)));
+    this.displaySimplifyDialog = false;
+  }
+
+  /** Open the custom-threshold simplify dialog. */
+  openSimplifyDialog(): void { this.displaySimplifyDialog = true; }
+
+  /**
+   * Commit a set-op: drop the `remove` regions, append `add`, and select the
+   * results. Goes through setRegions so it's undo-tracked and re-rendered;
+   * profile lines and unselected regions are preserved.
+   */
+  private replaceRegions(remove: Region[], add: Region[]): void {
+    if (add.length === 0) return;
+    const removeSet = new Set(remove);
+    const kept = this.plotService.getRegions().filter((r) => !removeSet.has(r));
+    this.plotService.setRegions([...kept, ...add]); // mints ids on `add`, records undo
+    const stored = this.plotService.getRegions();
+    const sel = add.map((r) => stored.indexOf(r)).filter((i) => i >= 0);
+    this.plotService.setSelectedShapeIndices(sel);
+  }
+
   /** Box-prompted SAM segmentation of the drawn rectangles (jit-ui#90). A sticky
    *  `sam` toast shows live status + a download progress bar (first run pulls the
    *  encoder, ~170 MB); it stays open until the run finishes (bar hits 100%). */
@@ -1088,10 +1214,66 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     this.plotService.getRegionOverlay()?.setSelectedBezier(false);
   }
 
+  /**
+   * Immediate region actions on the current selection (jit-ui#85): merge,
+   * ungroup, inverse, simplify, the Bézier conversions, and delete — the
+   * one-shot geometry transforms, grouped apart from the tool/mode toggles and
+   * shown only when something is selected. Each item is gated on what the
+   * selection supports.
+   */
+  private buildRegionActionItems(): MenuItem[] {
+    const selAll = this.selectedRegions;
+    if (selAll.length === 0) return [];
+    const eligible = this.opEligible(selAll);
+    const items: MenuItem[] = [];
+
+    if (eligible.length >= 2) {
+      items.push({ label: 'Merge / group', icon: 'pi pi-link', command: () => this.mergeRegions() });
+    }
+    if (selAll.some((r) => this.regionOps.canUngroup(r))) {
+      items.push({ label: 'Ungroup', icon: 'pi pi-sitemap', command: () => this.ungroupRegions() });
+    }
+    if (eligible.length >= 1) {
+      items.push(
+        { label: 'Inverse', icon: 'pi pi-clone', command: () => this.inverseRegions() },
+        {
+          label: 'Simplify', icon: 'pi pi-chart-line',
+          items: [
+            { label: 'Light (1 px)', command: () => this.simplifyRegions(1) },
+            { label: 'Medium (3 px)', command: () => this.simplifyRegions(3) },
+            { label: 'Strong (8 px)', command: () => this.simplifyRegions(8) },
+            { separator: true },
+            { label: 'Custom…', command: () => this.openSimplifyDialog() },
+          ],
+        },
+      );
+    }
+    // Bézier conversions are vertex-level edits — Image (OpenSeadragon) view
+    // only — gated on the selection's current form.
+    if (this.selectedPlotType === PlotType.IMAGE) {
+      const hasStraight = selAll.some((r) =>
+        (r.bounds instanceof Polygon && !r.bounds.bezier) || r.bounds instanceof Rectangle);
+      const hasBezier = selAll.some((r) => r.bounds instanceof Polygon && r.bounds.bezier);
+      if (hasStraight) {
+        items.push({ label: 'Convert to Bézier', icon: 'to-bezier-icon', command: () => this.toBezierRegion() });
+      }
+      if (hasBezier) {
+        items.push({ label: 'Convert to polygon', icon: 'to-polygon-icon', command: () => this.toPolygonRegion() });
+      }
+    }
+    items.push({ label: 'Delete region', icon: 'pi pi-trash', command: () => this.deleteRegion() });
+    return items;
+  }
+
   private buildContextMenuItems(): MenuItem[] {
     const active = this.activeDragMode;
     const activeClass = 'context-menu-active';
     const items: MenuItem[] = [];
+    // Selected-region actions lead the menu (separated from the tool toggles).
+    if (this.isHeatmap) {
+      const actions = this.buildRegionActionItems();
+      if (actions.length) items.push(...actions, { separator: true });
+    }
     if (this.isHeatmap) {
       items.push(
         { label: 'Autoscale', icon: 'pi pi-window-maximize', command: () => this.autoscaleImage() },
@@ -1225,11 +1407,10 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
             styleClass: active === 'move' ? activeClass : '',
             command: () => this.toggleDragMode('move'),
           },
-          { label: 'Convert to Bézier', icon: 'to-bezier-icon', command: () => this.toBezierRegion() },
-          { label: 'Convert to polygon', icon: 'to-polygon-icon', command: () => this.toPolygonRegion() },
         );
       }
-      items.push({ label: 'Delete region', icon: 'pi pi-trash', command: () => this.deleteRegion() });
+      // Bézier conversions + Delete are immediate selection *actions*, now in the
+      // "Selected region(s)" group at the top (see buildRegionActionItems).
     }
     return items;
   }

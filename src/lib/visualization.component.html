@@ -133,3 +133,18 @@
 <!-- Channels & Histogram: non-modal floating dialog opened from the toolbar. -->
 <channel-histogram [(visible)]="showChannelHistogram"></channel-histogram>
 
+<!-- Simplify (Douglas–Peucker): custom px-threshold picker for the selected
+     region(s), opened from the right-click "Simplify ▸ Custom…" action. -->
+<p-dialog header="Simplify region(s)" [(visible)]="displaySimplifyDialog" [modal]="true"
+          [style]="{width: '22rem'}" [draggable]="false" [resizable]="false">
+  <div class="flex flex-column gap-2">
+    <span>Altitude threshold: <b>{{ simplifyThreshold }} px</b></span>
+    <p-slider [(ngModel)]="simplifyThreshold" [min]="1" [max]="20" [step]="1"></p-slider>
+    <small>Vertices within this distance of the line between their neighbours are removed.</small>
+  </div>
+  <ng-template pTemplate="footer">
+    <p-button label="Cancel" [text]="true" (onClick)="displaySimplifyDialog = false"></p-button>
+    <p-button label="Apply" icon="pi pi-check" (onClick)="simplifyRegions(simplifyThreshold)"></p-button>
+  </ng-template>
+</p-dialog>
+
