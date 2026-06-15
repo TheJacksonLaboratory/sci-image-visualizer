@@ -294,6 +294,20 @@ describe('OsdRegionOverlay — vertex tools', () => {
     expect(poly.holes![0]).toEqual([[107, 7], [113, 7], [113, 13], [107, 13]]);
   });
 
+  it('shows the hole vertices (not just the exterior) when a donut is selected', () => {
+    const viewer = fakeViewer();
+    const o = new OsdRegionOverlay(viewer, store);
+    try {
+      o.setMode('select');
+      store.addRegion(donutRegion()); // addRegion selects it
+      // 4 exterior vertices + 4 hole vertices = 8 markers.
+      const circles = (viewer.canvas as HTMLElement).querySelectorAll('circle');
+      expect(circles.length).toBe(8);
+    } finally {
+      o.destroy();
+    }
+  });
+
   it('clicking inside the hole does not select the donut; the solid ring does', () => {
     store.addRegion(donutRegion());
     store.setSelectedShapeIndices([]); // start unselected

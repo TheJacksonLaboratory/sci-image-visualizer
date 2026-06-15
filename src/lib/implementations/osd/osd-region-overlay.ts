@@ -205,6 +205,16 @@ export class OsdRegionOverlay implements IRegionOverlay {
             const q = this.toPx(b.xpoints[i], b.ypoints[i]);
             this.svg.appendChild(this.vertexMarker(q.x, q.y, false, color));
           }
+          // Interior-ring (hole) vertices too, so a donut's inner outline shows
+          // its vertices when selected (jit-ui#85).
+          if (b.holes) {
+            for (const ring of b.holes) {
+              for (const [hx, hy] of ring) {
+                const q = this.toPx(hx, hy);
+                this.svg.appendChild(this.vertexMarker(q.x, q.y, false, color));
+              }
+            }
+          }
         }
       } else if (b instanceof Rectangle) {
         // The four corners as grab/resize handles.
