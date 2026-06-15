@@ -308,6 +308,20 @@ describe('OsdRegionOverlay — vertex tools', () => {
     }
   });
 
+  it('select: dragging a hole vertex moves just that vertex', () => {
+    const id = store.addRegion(donutRegion()); // hole [[7,7],[13,7],[13,13],[7,13]]
+    overlay.setMode('select');
+    const h = handlers();
+    h.pressHandler({ position: { x: 7, y: 7 } });   // grab hole vertex 0
+    h.dragHandler({ position: { x: 9, y: 8 } });
+    h.releaseHandler({ position: { x: 9, y: 8 } });
+
+    const poly = store.getRegions().find(r => r.id === id)!.bounds as Polygon;
+    expect(poly.holes![0][0]).toEqual([9, 8]);
+    expect(poly.holes![0][1]).toEqual([13, 7]);     // sibling hole vertex untouched
+    expect(poly.xpoints).toEqual([0, 20, 20, 0]);   // exterior untouched
+  });
+
   it('clicking inside the hole does not select the donut; the solid ring does', () => {
     store.addRegion(donutRegion());
     store.setSelectedShapeIndices([]); // start unselected

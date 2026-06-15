@@ -71,6 +71,9 @@ export class OsdRegionOverlay implements IRegionOverlay {
     kind: 'bounds' | 'vertex' | 'handle';
     zone: EditZone;
     vertexIndex: number;
+    /** Which ring the dragged vertex belongs to: -1 = exterior, else a hole
+     *  index into `Polygon.holes` (jit-ui#85). */
+    ring: number;
     handleSide: 'in' | 'out';
     id: number;
     startImg: { x: number; y: number };
@@ -508,7 +511,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
       const vh = this.hitVertex(e.position);
       if (vh) {
         const region = this.store.getRegions()[this.selected[this.selected.length - 1]];
-        this.startEdit('vertex', 'move', vh.index, region, this.toImage(e.position));
+        this.startEdit('vertex', 'move', vh.index, region, this.toImage(e.position), 'out', vh.ring);
         return;
       }
       // Otherwise start a move/resize when pressing the selected region's
@@ -531,9 +534,9 @@ export class OsdRegionOverlay implements IRegionOverlay {
    *  batch so the live drag emits once on release. */
   private startEdit(kind: 'bounds' | 'vertex' | 'handle', zone: EditZone, vertexIndex: number,
                     region: Region, startImg: { x: number; y: number },
-                    handleSide: 'in' | 'out' = 'out'): void {
+                    handleSide: 'in' | 'out' = 'out', ring = -1): void {
     this.edit = {
-      kind, zone, vertexIndex, handleSide, id: region.id,
+      kind, zone, vertexIndex, ring, handleSide, id: region.id,
       startImg, orig: kind === 'bounds' ? this.snapshot(region) : null,
     };
     this.editDragged = false;
@@ -717,14 +720,26 @@ export class OsdRegionOverlay implements IRegionOverlay {
 
   /** The vertex of the selected polygon under the cursor (screen-pixel
    *  tolerance), or null. Rectangles have no editable vertices. */
-  private hitVertex(position: { x: number; y: number }): { id: number; index: number } | null {
+  private hitVertex(position: { x: number; y: number }): { id: number; ring: number; index: number } | null {
     const sel = this.selectedRegionInfo();
     if (!sel || !(sel.region.bounds instanceof Polygon)) return null;
     const b = sel.region.bounds;
     for (let i = 0; i < b.xpoints.length; i++) {
       const q = this.toPx(b.xpoints[i], b.ypoints[i]);
       if (Math.hypot(position.x - q.x, position.y - q.y) <= EDIT_TOL) {
-        return { id: sel.region.id, index: i };
+        return { id: sel.region.id, ring: -1, index: i };
+      }
+    }
+    // Interior-ring (hole) vertices are draggable too (jit-ui#85).
+    if (b.holes) {
+      for (let h = 0; h < b.holes.length; h++) {
+        const ring = b.holes[h];
+        for (let i = 0; i < ring.length; i++) {
+          const q = this.toPx(ring[i][0], ring[i][1]);
+          if (Math.hypot(position.x - q.x, position.y - q.y) <= EDIT_TOL) {
+            return { id: sel.region.id, ring: h, index: i };
+          }
+        }
       }
     }
     return null;
@@ -819,8 +834,13 @@ export class OsdRegionOverlay implements IRegionOverlay {
     if (!this.edit) return;
 
     if (this.edit.kind === 'vertex') {
-      // Drag a single polygon vertex to the cursor (absolute — idempotent).
-      this.store.moveVertex(this.edit.id, this.edit.vertexIndex, curImg.x, curImg.y);
+      // Drag a single vertex to the cursor (absolute — idempotent). Route to the
+      // exterior or the matching interior ring (hole) — jit-ui#85.
+      if (this.edit.ring < 0) {
+        this.store.moveVertex(this.edit.id, this.edit.vertexIndex, curImg.x, curImg.y);
+      } else {
+        this.store.moveHoleVertex(this.edit.id, this.edit.ring, this.edit.vertexIndex, curImg.x, curImg.y);
+      }
       this.redraw();
       return;
     }

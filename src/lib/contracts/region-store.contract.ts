@@ -33,6 +33,10 @@ export interface IRegionEditApi {
   /** Move a single polygon vertex to (x, y). No-op for rectangles. */
   moveVertex(id: number, index: number, x: number, y: number): void;
 
+  /** Move a single vertex on interior ring `holeIndex` (a hole) to (x, y).
+   *  No-op for rectangles, or an out-of-range hole/vertex index (jit-ui#85). */
+  moveHoleVertex(id: number, holeIndex: number, index: number, x: number, y: number): void;
+
   /** Insert a vertex at (x, y) immediately after `segIndex` (the start vertex
    *  of the edge the point lies on). No-op for rectangles. */
   addVertex(id: number, segIndex: number, x: number, y: number): void;

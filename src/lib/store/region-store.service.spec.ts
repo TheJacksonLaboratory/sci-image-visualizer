@@ -500,6 +500,22 @@ describe('RegionStore', () => {
       expect(b.holes![0]).toEqual([[105, 5], [110, 5], [110, 10], [105, 10]]);
     });
 
+    it('moveHoleVertex moves a single hole vertex, leaving others + exterior intact', () => {
+      const id = store.addRegion(holedPoly()); // hole [[5,5],[10,5],[10,10],[5,10]]
+      store.moveHoleVertex(id, 0, 1, 99, 88);
+      const b = store.getRegions()[0].bounds as Polygon;
+      expect(b.holes![0][1]).toEqual([99, 88]);
+      expect(b.holes![0][0]).toEqual([5, 5]);     // sibling untouched
+      expect(b.xpoints).toEqual([0, 20, 20, 0]);  // exterior untouched
+    });
+
+    it('moveHoleVertex is a no-op for an out-of-range hole or vertex index', () => {
+      const id = store.addRegion(holedPoly());
+      store.moveHoleVertex(id, 5, 0, 1, 1); // bad hole index
+      store.moveHoleVertex(id, 0, 99, 1, 1); // bad vertex index
+      expect((store.getRegions()[0].bounds as Polygon).holes![0][0]).toEqual([5, 5]);
+    });
+
     it('append dedupe distinguishes the same exterior with different holes', () => {
       store.setRegions([holedPoly()]);
       store.setRegions([holedPoly()], undefined, undefined, undefined, true); // identical → deduped

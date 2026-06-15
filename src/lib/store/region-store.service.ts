@@ -458,6 +458,18 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.emit();
   }
 
+  /** Move a vertex on a polygon's interior ring (hole) — jit-ui#85. */
+  moveHoleVertex(id: number, holeIndex: number, index: number, x: number, y: number): void {
+    const poly = this.polygonOf(id);
+    if (!poly || !poly.holes || holeIndex < 0 || holeIndex >= poly.holes.length) return;
+    const ring = poly.holes[holeIndex];
+    if (index < 0 || index >= ring.length) return;
+    this.recordUndoSnapshot();
+    ring[index] = [x, y];
+    this.syncCache();
+    this.emit();
+  }
+
   addVertex(id: number, segIndex: number, x: number, y: number): void {
     const poly = this.polygonOf(id);
     if (!poly) return;
