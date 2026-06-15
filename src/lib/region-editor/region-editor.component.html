@@ -92,8 +92,8 @@
           <td class="class-cell">
             <ng-container *ngIf="!isEditingLabel(region); else editLabelTpl">
               <span class="class-cell-display">
-                {{region.label}}
-                <i class="pi pi-pencil icon-hover mx-2"
+                <span class="class-name" [pTooltip]="region.label" tooltipPosition="bottom">{{region.label}}</span>
+                <i class="pi pi-pencil icon-hover ml-2"
                    pTooltip="Edit label" tooltipPosition="bottom"
                    (click)="startEditLabel(region, $event)"></i>
               </span>

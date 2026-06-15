@@ -148,11 +148,30 @@
   align-self: center;
 }
 
-/* Class column: never wrap. The column shrinks to fit "Class" / "legend"
- * by default and grows just enough to fit longer custom labels. */
+/* Class column: auto-sizes to the longest *visible* class name (the table's
+ * auto layout grows the column to its widest cell), but capped at `max-width`
+ * so one long label can't blow out the table — past the cap the name truncates
+ * with an ellipsis (full value on hover). `pResizableColumn` on the header lets
+ * the user drag it wider/narrower; the name fills whatever width the column has. */
 .class-col-header,
 .class-cell {
   white-space: nowrap;
+  max-width: 16rem;
+}
+/* Label + pencil on one row; the label truncates, the pencil stays put. */
+.class-cell .class-cell-display {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.class-cell .class-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.class-cell .icon-hover {
+  flex: 0 0 auto;
 }
 /* Pencil/cross icons inside the Class cell. `icon-hover` mirrors the
  * pattern used in the Output Folder field: dimmed by default, primary
@@ -171,23 +190,6 @@
 .class-cell .class-cell-edit {
   display: inline-block;
   width: 100%;
-}
-
-/* Coordinates column header: capped width so the column doesn't blow out
- * the table when coordinate strings are long. */
-.coords-col-header {
-  width: 14rem;
-  max-width: 14rem;
-}
-
-/* Coordinates cell: same fixed width as the header, with ellipsis on
- * overflow. The full value is shown via the [pTooltip] in the template. */
-.coords-cell {
-  width: 14rem;
-  max-width: 14rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* Compact icon-only / rounded buttons in body cells so row height matches
