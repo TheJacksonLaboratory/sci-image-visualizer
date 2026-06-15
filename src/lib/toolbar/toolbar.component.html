@@ -516,7 +516,8 @@
   <h3>Region tools</h3>
   <p>By default no tool is selected (all greyed-out); selecting a tool highlights it. The
     vertex-editing tools (polygon, add/delete vertex, move, Bézier conversions) are available
-    in the <b>Image</b> view only.</p>
+    in the <b>Image</b> view only. On a <b>donut</b> (a region with a hole), the inner-ring
+    vertices are editable too — drag, add, and delete them just like the outer ring.</p>
   <ul>
     <li>"<b>Selection</b>" <i class="pi pi-arrow-up-right"></i> (<kbd>s</kbd>): a neutral mode
       that turns off whatever drawing tool was active (wand, vertex eraser, rectangle, etc.).
@@ -533,7 +534,8 @@
       A <b>Size</b> slider (brush diameter, in image pixels) appears in the toolbar while the
       brush is active. Hold <kbd>Shift</kbd> while painting to <b>erase</b> (subtract) from a
       region instead. Painting over an existing region extends it; brushing across two regions
-      merges them.</li>
+      merges them. Painting a closed ring (or shift-erasing an interior pocket) leaves the
+      enclosed area empty — a <b>donut</b> (Image view).</li>
     <li>"<b>Polygon</b>" <img src="assets/plotting/polygon-vertices.svg" width="15" height="15">:
       click to place each vertex; click the first point to close the polygon.</li>
     <li>"<b>Add vertex</b>" <img src="assets/plotting/vertex-add.svg" width="15" height="15">:
@@ -554,9 +556,10 @@
       same region; clicking inside an existing region adopts it, and growing into another region
       merges them.</li>
     <li>"<b>Vertex eraser</b>" <i class="pi pi-eraser"></i> (<kbd>e</kbd>): click or click-and-drag
-      to remove polygon vertices that fall inside the cursor circle from any region. Use the
-      <b>Radius</b> slider to set the eraser size in image pixels. Polygons reduced below 3
-      vertices (or polylines below 2) are deleted entirely.</li>
+      to remove polygon vertices that fall inside the cursor circle from any region, including a
+      region's inner rings (donut holes). Use the <b>Radius</b> slider to set the eraser size in
+      image pixels. Polygons reduced below 3 vertices (or polylines below 2) are deleted entirely;
+      a hole reduced below 3 vertices is removed.</li>
     <li>"<b>Undo</b>" <img src="assets/plotting/undo.svg" width="15" height="15">
       (<kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Z</kbd>): reverts the
       last region action (draw, delete, edit, wand/brush stroke, segmentation, …). Up to the last
@@ -566,6 +569,24 @@
       re-applies the most recently undone action. Performing a new region action clears what can be redone.</li>
     <li>"<b>Delete region</b>" <i class="pi pi-trash"></i> (<kbd>Del</kbd>): deletes the selected
       region. This can also be done from the Regions tab.</li>
+  </ul>
+
+  <h3>Region actions (right-click the image)</h3>
+  <p>Right-click a region — or the current multi-selection — to open the
+    "<b>Selected region(s)</b>" group at the top of the context menu. These act immediately on
+    the selection (they're not drawing modes) and are fully undo/redo-able:</p>
+  <ul>
+    <li>"<b>Merge / group</b>": combine 2+ selected regions into one. If the pieces don't touch,
+      the result is a single multi-part region (sparse "bits").</li>
+    <li>"<b>Ungroup</b>": split a multi-part region back into one region per piece.</li>
+    <li>"<b>Inverse</b>": replace the selection with everything <i>outside</i> it — the image
+      rectangle with the selected regions punched out as holes. Works at any image size.</li>
+    <li>"<b>Simplify</b>": reduce a region's vertex count (Douglas–Peucker) by an altitude
+      threshold in pixels — pick <b>Light</b> (1&nbsp;px), <b>Medium</b> (3&nbsp;px),
+      <b>Strong</b> (8&nbsp;px), or <b>Custom…</b> for a slider. Applies to the exterior and any
+      holes (and every part of a multi-part region).</li>
+    <li>The Bézier conversions and Delete also live in this group (the right-click equivalents of
+      the toolbar / vertex tools above).</li>
   </ul>
 
   <h3>Segmentation tools (SAM &amp; cellpose)</h3>
