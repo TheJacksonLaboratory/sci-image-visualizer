@@ -322,6 +322,30 @@ describe('OsdRegionOverlay — vertex tools', () => {
     expect(poly.xpoints).toEqual([0, 20, 20, 0]);   // exterior untouched
   });
 
+  it('addpoint: clicking a hole edge inserts a vertex on that ring', () => {
+    const id = store.addRegion(donutRegion()); // hole [[7,7],[13,7],[13,13],[7,13]]
+    overlay.setMode('addpoint');
+    handlers().clickHandler({ position: { x: 10, y: 7 } }); // midpoint of hole edge 0
+
+    const ring = (store.getRegions().find(r => r.id === id)!.bounds as Polygon).holes![0];
+    expect(ring.length).toBe(5);
+    expect(ring[1]).toEqual([10, 7]);
+    // Exterior unchanged.
+    expect((store.getRegions().find(r => r.id === id)!.bounds as Polygon).xpoints.length).toBe(4);
+  });
+
+  it('deletepoint: clicking a hole vertex removes it from that ring', () => {
+    const r = donutRegion();
+    (r.bounds as Polygon).holes = [[[7, 7], [13, 7], [13, 13], [7, 13], [9, 9]]]; // 5-vertex hole
+    const id = store.addRegion(r);
+    overlay.setMode('deletepoint');
+    handlers().clickHandler({ position: { x: 7, y: 7 } }); // hole vertex 0
+
+    const ring = (store.getRegions().find(r2 => r2.id === id)!.bounds as Polygon).holes![0];
+    expect(ring.length).toBe(4);
+    expect(ring[0]).toEqual([13, 7]);
+  });
+
   it('clicking inside the hole does not select the donut; the solid ring does', () => {
     store.addRegion(donutRegion());
     store.setSelectedShapeIndices([]); // start unselected

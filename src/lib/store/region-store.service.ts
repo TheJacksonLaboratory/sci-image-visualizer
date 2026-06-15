@@ -470,6 +470,38 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.emit();
   }
 
+  /** Insert a vertex on a polygon's interior ring (hole), after `segIndex`
+   *  (the edge's start vertex). No-op for an out-of-range hole — jit-ui#85. */
+  addHoleVertex(id: number, holeIndex: number, segIndex: number, x: number, y: number): void {
+    const poly = this.polygonOf(id);
+    if (!poly || !poly.holes || holeIndex < 0 || holeIndex >= poly.holes.length) return;
+    const ring = poly.holes[holeIndex];
+    this.recordUndoSnapshot();
+    const at = Math.max(0, Math.min(segIndex + 1, ring.length));
+    ring.splice(at, 0, [x, y]);
+    this.syncCache();
+    this.emit();
+  }
+
+  /** Delete the vertex at `index` on a polygon's interior ring (hole). Removing
+   *  it below 3 vertices drops the whole hole (a ring with < 3 points bounds no
+   *  area) — jit-ui#85. */
+  deleteHoleVertex(id: number, holeIndex: number, index: number): void {
+    const poly = this.polygonOf(id);
+    if (!poly || !poly.holes || holeIndex < 0 || holeIndex >= poly.holes.length) return;
+    const ring = poly.holes[holeIndex];
+    if (index < 0 || index >= ring.length) return;
+    this.recordUndoSnapshot();
+    if (ring.length <= 3) {
+      poly.holes.splice(holeIndex, 1);
+      if (poly.holes.length === 0) poly.holes = undefined;
+    } else {
+      ring.splice(index, 1);
+    }
+    this.syncCache();
+    this.emit();
+  }
+
   addVertex(id: number, segIndex: number, x: number, y: number): void {
     const poly = this.polygonOf(id);
     if (!poly) return;

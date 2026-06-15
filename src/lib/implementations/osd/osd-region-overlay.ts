@@ -629,16 +629,22 @@ export class OsdRegionOverlay implements IRegionOverlay {
       return;
     }
     if (this.mode === 'addpoint') {
-      // Insert a vertex on the clicked edge of the selected polygon.
+      // Insert a vertex on the clicked edge — exterior or an interior ring.
       const sel = this.selectedRegionInfo();
       const edge = sel ? this.hitEdge(e.position, sel.region) : null;
-      if (sel && edge) this.store.addVertex(sel.region.id, edge.segIndex, edge.x, edge.y);
+      if (sel && edge) {
+        if (edge.ring < 0) this.store.addVertex(sel.region.id, edge.segIndex, edge.x, edge.y);
+        else this.store.addHoleVertex(sel.region.id, edge.ring, edge.segIndex, edge.x, edge.y);
+      }
       return;
     }
     if (this.mode === 'deletepoint') {
-      // Remove the clicked vertex of the selected polygon.
+      // Remove the clicked vertex — exterior or an interior ring (jit-ui#85).
       const vh = this.hitVertex(e.position);
-      if (vh) this.store.deleteVertex(vh.id, vh.index);
+      if (vh) {
+        if (vh.ring < 0) this.store.deleteVertex(vh.id, vh.index);
+        else this.store.deleteHoleVertex(vh.id, vh.ring, vh.index);
+      }
       return;
     }
   }
@@ -772,23 +778,29 @@ export class OsdRegionOverlay implements IRegionOverlay {
   /** The edge of `region`'s polygon nearest the cursor (within tolerance), with
    *  the clicked point in image coords as the insertion position, or null. */
   private hitEdge(position: { x: number; y: number }, region: Region):
-    { segIndex: number; x: number; y: number } | null {
+    { ring: number; segIndex: number; x: number; y: number } | null {
     if (!(region.bounds instanceof Polygon)) return null;
     const b = region.bounds;
-    const n = b.xpoints.length;
-    const segCount = b.closed !== false ? n : n - 1; // closed wraps the last->first edge
-    let best = -1;
-    let bestDist = Infinity;
-    for (let i = 0; i < segCount; i++) {
-      const j = (i + 1) % n;
-      const a = this.toPx(b.xpoints[i], b.ypoints[i]);
-      const c = this.toPx(b.xpoints[j], b.ypoints[j]);
-      const d = this.distToSegmentPx(position, a, c);
-      if (d < bestDist) { bestDist = d; best = i; }
+    let best = -1, bestRing = -1, bestDist = Infinity;
+    // Nearest edge across the exterior (ring -1) and every interior ring (hole).
+    const scan = (xs: number[], ys: number[], ring: number, closed: boolean) => {
+      const n = xs.length;
+      const segCount = closed ? n : n - 1; // closed wraps the last->first edge
+      for (let i = 0; i < segCount; i++) {
+        const j = (i + 1) % n;
+        const a = this.toPx(xs[i], ys[i]);
+        const c = this.toPx(xs[j], ys[j]);
+        const d = this.distToSegmentPx(position, a, c);
+        if (d < bestDist) { bestDist = d; best = i; bestRing = ring; }
+      }
+    };
+    scan(b.xpoints, b.ypoints, -1, b.closed !== false);
+    if (b.holes) {
+      b.holes.forEach((r, h) => scan(r.map(p => p[0]), r.map(p => p[1]), h, true));
     }
     if (best < 0 || bestDist > EDIT_TOL) return null;
     const img = this.toImage(position);
-    return { segIndex: best, x: img.x, y: img.y };
+    return { ring: bestRing, segIndex: best, x: img.x, y: img.y };
   }
 
   /** Classify a screen point against a screen-space rectangle into a zone. */

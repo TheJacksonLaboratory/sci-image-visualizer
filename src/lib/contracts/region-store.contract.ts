@@ -37,6 +37,13 @@ export interface IRegionEditApi {
    *  No-op for rectangles, or an out-of-range hole/vertex index (jit-ui#85). */
   moveHoleVertex(id: number, holeIndex: number, index: number, x: number, y: number): void;
 
+  /** Insert a vertex on interior ring `holeIndex` after `segIndex` (jit-ui#85). */
+  addHoleVertex(id: number, holeIndex: number, segIndex: number, x: number, y: number): void;
+
+  /** Delete the vertex at `index` on interior ring `holeIndex`; dropping the
+   *  ring below 3 vertices removes the whole hole (jit-ui#85). */
+  deleteHoleVertex(id: number, holeIndex: number, index: number): void;
+
   /** Insert a vertex at (x, y) immediately after `segIndex` (the start vertex
    *  of the edge the point lies on). No-op for rectangles. */
   addVertex(id: number, segIndex: number, x: number, y: number): void;

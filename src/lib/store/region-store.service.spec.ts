@@ -516,6 +516,23 @@ describe('RegionStore', () => {
       expect((store.getRegions()[0].bounds as Polygon).holes![0][0]).toEqual([5, 5]);
     });
 
+    it('addHoleVertex inserts after the segment index', () => {
+      const id = store.addRegion(holedPoly()); // hole [[5,5],[10,5],[10,10],[5,10]]
+      store.addHoleVertex(id, 0, 0, 7, 5); // after vertex 0
+      const ring = (store.getRegions()[0].bounds as Polygon).holes![0];
+      expect(ring.length).toBe(5);
+      expect(ring[1]).toEqual([7, 5]);
+    });
+
+    it('deleteHoleVertex removes a vertex, and drops the hole below 3', () => {
+      const id = store.addRegion(holedPoly()); // 4-vertex hole
+      store.deleteHoleVertex(id, 0, 0);
+      expect((store.getRegions()[0].bounds as Polygon).holes![0].length).toBe(3);
+      // Below 3 → the whole hole is removed, and the last hole clears `holes`.
+      store.deleteHoleVertex(id, 0, 0);
+      expect((store.getRegions()[0].bounds as Polygon).holes).toBeUndefined();
+    });
+
     it('append dedupe distinguishes the same exterior with different holes', () => {
       store.setRegions([holedPoly()]);
       store.setRegions([holedPoly()], undefined, undefined, undefined, true); // identical → deduped
