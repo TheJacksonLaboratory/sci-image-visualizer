@@ -134,6 +134,13 @@ describe('VisualizationComponent (UI shell)', () => {
       expect(component.hasEligibleSelection).toBe(true);
     });
 
+    it('selectAllRegions selects every non-profile region', () => {
+      const profile = new Region(); profile.kind = 'profile'; profile.bounds = new Rectangle();
+      statefulRegions([rectRegion(0, 0, 10, 10), profile, rectRegion(50, 50, 10, 10)]);
+      component.selectAllRegions();
+      expect(plotService.setSelectedShapeIndices).toHaveBeenCalledWith([0, 2]); // profile (1) excluded
+    });
+
     it('mergeRegions commits one merged region and selects it', () => {
       const read = statefulRegions([rectRegion(0, 0, 20, 20), rectRegion(10, 10, 20, 20)]);
       (component as any).selectedIndices = [0, 1];

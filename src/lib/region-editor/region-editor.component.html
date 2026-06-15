@@ -33,6 +33,11 @@
                     to width and height that are multiple of 512" tooltipPosition="bottom"
               (click)="roundRectangleLengths()">
     </p-button>
+    <p-button icon="pi pi-check-square" size="small" [text]="true" styleClass="mr-2"
+              pTooltip="Select all regions" tooltipPosition="bottom"
+              (click)="selectAllRegions()"
+              [disabled]="!regions || !regions.length">
+    </p-button>
     <p-button icon="pi pi-tags" size="small" [text]="true" styleClass="mr-2"
               pTooltip="Edit labels on selected rows"
               tooltipPosition="bottom"
@@ -265,6 +270,8 @@
 
   <h3>Bulk actions on the selected rows</h3>
   <ul>
+    <li><i class="pi pi-check-square"></i> Select every region in the table at once (also a
+      right-click action on the image).</li>
     <li><i class="pi pi-tags"></i> Edit the label on every selected row at once.</li>
     <li><i class="pi pi-trash"></i> Delete every selected region — both from
       the table and the diagram.</li>

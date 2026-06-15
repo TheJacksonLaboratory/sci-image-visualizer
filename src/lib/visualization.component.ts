@@ -1064,6 +1064,14 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   /** True when ≥1 eligible region is selected (Inverse / Simplify available). */
   get hasEligibleSelection(): boolean { return this.opEligible(this.selectedRegions).length >= 1; }
 
+  /** Select every region on the image (excludes intensity-profile lines). */
+  selectAllRegions(): void {
+    const all = this.plotService.getRegions();
+    const indices: number[] = [];
+    all.forEach((r, i) => { if (r.kind !== 'profile') indices.push(i); });
+    this.plotService.setSelectedShapeIndices(indices);
+  }
+
   /** Merge the selected regions into a single (possibly multi-part) region. */
   mergeRegions(): void {
     const sel = this.opEligible(this.selectedRegions);
@@ -1222,10 +1230,21 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
    * selection supports.
    */
   private buildRegionActionItems(): MenuItem[] {
-    const selAll = this.selectedRegions;
-    if (selAll.length === 0) return [];
-    const eligible = this.opEligible(selAll);
+    const all = this.plotService.getRegions();
+    const selectable = all.filter((r) => r.kind !== 'profile');
+    if (selectable.length === 0) return [];
     const items: MenuItem[] = [];
+
+    // Select all — available whenever the image has regions, regardless of the
+    // current selection.
+    items.push({
+      label: 'Select all regions', icon: 'pi pi-check-square',
+      command: () => this.selectAllRegions(),
+    });
+
+    const selAll = this.selectedRegions;
+    if (selAll.length === 0) return items;
+    const eligible = this.opEligible(selAll);
 
     if (eligible.length >= 2) {
       items.push({ label: 'Merge / group', icon: 'pi pi-link', command: () => this.mergeRegions() });

@@ -1090,6 +1090,15 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
     expect(component.regionArea(rect())).toContain('µm²'); // would have been px² before
   });
 
+  it('selectAllRegions selects every row and syncs the plot', () => {
+    (component as any).regions = [poly(), rect()];
+    const spy = api.setSelectedRegions as jest.Mock;
+    spy.mockClear();
+    component.selectAllRegions();
+    expect(component.selectedRegions.length).toBe(2);
+    expect(spy).toHaveBeenCalled();
+  });
+
   it('changeRegionColor sets the region colour and commits live — jit-ui#85', () => {
     const r = poly();
     (component as any).regions = [r];

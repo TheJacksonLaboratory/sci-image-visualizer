@@ -339,6 +339,12 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.paginatorRows = event.rows ?? this.paginatorRows;
   }
 
+  /** Select every region in the table (and highlight them on the diagram). */
+  selectAllRegions() {
+    this.selectedRegions = [...this.regions];
+    this.onSelectionChanged();
+  }
+
   deleteSelectedRegions() {
     if (this.selectedRegions && this.selectedRegions.length > 0) {
       // Filter by id — object identity isn't reliable across re-parses,
