@@ -228,6 +228,16 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this._updatingFromEditor = false;
   }
 
+  /** Set one region's outline colour from the per-row picker and commit live.
+   *  Remembers it as the label's colour so same-class regions added later match
+   *  (jit-ui#85 — the Region Editor's per-region Color column). */
+  changeRegionColor(region: Region, color: string): void {
+    if (!color || region.color === color) return;
+    region.color = color;
+    if (region.label) this.labelColors.set(region.label, color);
+    this.setRegionsFromEditor();
+  }
+
   addRectangle() {
     const region = new Region();
     region.bounds = new Rectangle();

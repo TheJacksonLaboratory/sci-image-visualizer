@@ -79,22 +79,16 @@
              [scrollable]="true" scrollHeight="100%">
       <ng-template pTemplate="header">
         <tr>
-          <!-- Chevron and trash columns: just enough for the icon. -->
-          <th style="width:2rem"></th>
           <!-- Class column: shrinks to fit "legend" by default, grows with longer labels. -->
           <th class="class-col-header" pResizableColumn>Class <p-sortIcon field="label"></p-sortIcon></th>
-          <!-- Coordinates column: fixed-ish width, ellipsis on overflow. -->
-          <th class="coords-col-header" pResizableColumn>Coordinates</th>
+          <th class="color-col-header" style="width:5rem">Color</th>
+          <th class="surface-col-header" pResizableColumn>Surface</th>
+          <!-- Trash column: just enough for the icon. -->
           <th style="width:2rem"></th>
         </tr>
       </ng-template>
-      <ng-template pTemplate="body" let-region let-expanded="expanded" let-shapeIdx="rowIndex">
+      <ng-template pTemplate="body" let-region let-shapeIdx="rowIndex">
         <tr [pSelectableRow]="region" [pSelectableRowIndex]="shapeIdx">
-          <td>
-            <button type="button" pButton pRipple [pRowToggler]="region"
-                    class="p-button-sm p-button-text p-button-rounded p-button-plain"
-                    [icon]="expanded ? 'pi pi-chevron-down' : 'pi pi-chevron-right'"></button>
-          </td>
           <td class="class-cell">
             <ng-container *ngIf="!isEditingLabel(region); else editLabelTpl">
               <span class="class-cell-display">
@@ -117,155 +111,20 @@
               </span>
             </ng-template>
           </td>
-          <td class="coords-cell" [pTooltip]="truncateForTooltip(region.toString())"
-              tooltipPosition="bottom">
-            {{region.toString()}}
+          <!-- Per-region outline colour (existing picker). Stop propagation so
+               opening the picker doesn't toggle row selection. -->
+          <td class="color-cell" (click)="$event.stopPropagation()">
+            <hex-color-picker [color]="region.color"
+                              (colorChange)="changeRegionColor(region, $event)"></hex-color-picker>
           </td>
+          <!-- Surface area (µm²/mm² when the image is scaled, else px²). -->
+          <td class="surface-cell">{{ regionArea(region) || '—' }}</td>
           <td>
             <button pButton pRipple icon="pi pi-trash"
 							class="p-button-sm p-button-rounded p-button-text p-button-warning"
                     (click)="deleteRegion(paginatorFirst + shapeIdx)"></button>
           </td>
         </tr>
-      </ng-template>
-      <ng-template pTemplate="rowexpansion" let-region>
-        <tr>
-          <!--   if rectangle  -->
-          <td *ngIf="isRectangle(region)" colspan="4">
-            <div class="p-3">
-              <p-table [value]="[region.bounds]" styleClass="p-datatable-sm">
-                <ng-template pTemplate="header">
-                  <tr>
-                    <th style="width:25%">X</th>
-                    <th style="width:25%">Y</th>
-                    <th style="width:25%">Width</th>
-                    <th style="width:25%">Height</th>
-                  </tr>
-                </ng-template>
-                <ng-template pTemplate="body" let-rectinfo>
-                  <tr>
-                    <td pEditableColumn>
-                      <p-cellEditor>
-                        <ng-template pTemplate="input">
-                          <p-inputNumber [(ngModel)]="rectinfo.x"
-                                         (onInput)="xRectUpdate(region, $event)"
-                                         (keydown)="disableArrowKeys($event)">
-                          </p-inputNumber>
-                        </ng-template>
-                        <ng-template pTemplate="output">
-                          {{rectinfo.x}}
-                        </ng-template>
-                      </p-cellEditor>
-                    </td>
-                    <td pEditableColumn>
-                      <p-cellEditor>
-                        <ng-template pTemplate="input">
-                          <p-inputNumber [(ngModel)]="rectinfo.y"
-                                         (onInput)="yRectUpdate(region, $event)"
-                                         (keydown)="disableArrowKeys($event)">
-                          </p-inputNumber>
-                        </ng-template>
-                        <ng-template pTemplate="output">
-                          {{rectinfo.y}}
-                        </ng-template>
-                      </p-cellEditor>
-                    </td>
-                    <td pEditableColumn>
-                      <p-cellEditor>
-                        <ng-template pTemplate="input">
-                          <p-inputNumber [(ngModel)]="rectinfo.width"
-                                         (onInput)="widthRectUpdate(region, $event)"
-                                         (keydown)="disableArrowKeys($event)">
-                          </p-inputNumber>
-                        </ng-template>
-                        <ng-template pTemplate="output">
-                          {{rectinfo.width}}
-                        </ng-template>
-                      </p-cellEditor>
-                    </td>
-                    <td pEditableColumn>
-                      <p-cellEditor>
-                        <ng-template pTemplate="input">
-                          <p-inputNumber [(ngModel)]="rectinfo.height"
-                                         (onInput)="heightRectUpdate(region, $event)"
-                                         (keydown)="disableArrowKeys($event)">
-                          </p-inputNumber>
-                        </ng-template>
-                        <ng-template pTemplate="output">
-                          {{rectinfo.height}}
-                        </ng-template>
-                      </p-cellEditor>
-                    </td>
-                  </tr>
-                </ng-template>
-              </p-table>
-              <div class="region-area mt-2" *ngIf="regionArea(region)">Area: {{ regionArea(region) }}</div>
-            </div>
-          </td>
-          <!--   if polygon       -->
-          <td *ngIf="!isRectangle(region)" colspan="4">
-            <div class="p-3">
-              <p-table [value]="region.bounds.coordinates" dataKey="id" styleClass="p-datatable-sm"
-                       [paginator]="true"
-                       [rows]="10"
-                       [rowsPerPageOptions]="[10, 50, 100]"
-                       paginatorDropdownAppendTo="body">
-                <ng-template pTemplate="paginatorright">
-                  <p-button pRipple icon="pi pi-plus" size="small"
-                          class="flex-initial flex align-items-center justify-content-center
-                          border-round" pTooltip="Add new point coordinate" [text]="true" styleClass="mr-2"
-                          tooltipPosition="bottom" (click)="addCoordinate(region)"></p-button>
-                </ng-template>
-                <ng-template pTemplate="header">
-                  <tr>
-                    <th style="width:40%">X</th>
-                    <th style="width:40%">Y</th>
-                    <th style="width:20%"></th>
-                  </tr>
-                </ng-template>
-                <ng-template pTemplate="body" let-coordinate let-ri="rowIndex">
-                  <tr>
-                    <td pEditableColumn>
-                      <p-cellEditor>
-                        <ng-template pTemplate="input">
-                          <p-inputNumber [(ngModel)]="coordinate[0]"
-                                         (onInput)="xCoordinateUpdate(region, ri, $event)"
-                                         (keydown)="disableArrowKeys($event)">
-                          </p-inputNumber>
-                        </ng-template>
-                        <ng-template pTemplate="output">
-                          {{coordinate[0]}}
-                        </ng-template>
-                      </p-cellEditor>
-                    </td>
-                    <td pEditableColumn>
-                      <p-cellEditor>
-                        <ng-template pTemplate="input">
-                          <p-inputNumber [(ngModel)]="coordinate[1]"
-                                         (onInput)="yCoordinateUpdate(region, ri, $event)"
-                                         (keydown)="disableArrowKeys($event)">
-                          </p-inputNumber>
-                        </ng-template>
-                        <ng-template pTemplate="output">
-                          {{coordinate[1]}}
-                        </ng-template>
-                      </p-cellEditor>
-                    </td>
-                    <td>
-                      <div class="flex align-items-center justify-content-center gap-2">
-                        <button pButton pRipple icon="pi pi-trash" class="p-button-rounded p-button-text
-                                p-button-warning" (click)="deleteCoordinate(region, ri)">
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                </ng-template>
-              </p-table>
-              <div class="region-area mt-2" *ngIf="regionArea(region)">Area: {{ regionArea(region) }}</div>
-            </div>
-          </td>
-        </tr>
-
       </ng-template>
     </p-table>
 </div>
@@ -375,34 +234,33 @@
     "<b>legend</b>" by default.
   </p>
 
-  <h3>Editing</h3>
+  <h3>The table columns</h3>
   <ul>
-    <li>Click the "<i class="pi pi-chevron-right"></i>" toggle to expand a row.
-      For rectangles you can click the <b>x</b>, <b>y</b>, <b>width</b>, or
-      <b>height</b> cells to edit them inline. For polygons, click any
-      <b>X</b> or <b>Y</b> coordinate cell to edit it directly.</li>
-    <li>For polygons, click the <i class="pi pi-plus"></i> button on the
-      right-hand side of the coordinates paginator to append a new point
-      coordinate.</li>
-    <li>Click the <b>Class</b> cell to rename the region's class label.</li>
-    <li>Long coordinate strings are truncated with "…"; hover the cell to
-      see the full value.</li>
+    <li><b>Class</b> — the region's class label. Click the
+      <i class="pi pi-pencil"></i> to rename it inline.</li>
+    <li><b>Color</b> — the region's outline colour. Pick a colour to recolour
+      that region live on the diagram.</li>
+    <li><b>Surface</b> — the region's area, in µm²/mm² when the image carries a
+      physical pixel size, otherwise in px². Holes (donuts) and multi-part
+      regions are accounted for.</li>
+    <li>The trash icon at the end of a row deletes that one region.</li>
     <li>Use "<b>x512</b>" to round all rectangle widths/heights to the
       nearest multiple of 512.</li>
   </ul>
+  <p>Region geometry is edited on the diagram itself (drag vertices, the vertex
+    tools, brush/wand, and the right-click region actions), not in this table.</p>
 
   <h3>Selecting rows</h3>
   <ul>
-    <li>Click a row's <b>Class</b> or <b>Coordinates</b> cell to select it.
-      The corresponding region is highlighted in the diagram (Plotly shows its
-      edit handles; the OpenSeadragon image view highlights it and shows its
-      handles in select mode).</li>
+    <li>Click a row to select it. The corresponding region is highlighted in the
+      diagram (Plotly shows its edit handles; the OpenSeadragon image view
+      highlights it and shows its handles in select mode).</li>
     <li><kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+click to add or remove a row from the
       selection. <kbd>Shift</kbd>+click to extend the selection in a range.</li>
     <li>Selecting a region in the diagram highlights the matching row in the
       table.</li>
-    <li>Clicks on the chevron, the trash icon, or the active class-edit input
-      do not change the selection — that's standard PrimeNG behaviour.</li>
+    <li>Clicks on the colour picker, the trash icon, or the active class-edit
+      input do not change the selection — that's standard PrimeNG behaviour.</li>
   </ul>
 
   <h3>Bulk actions on the selected rows</h3>

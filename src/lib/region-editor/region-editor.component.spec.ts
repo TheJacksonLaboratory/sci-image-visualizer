@@ -1090,6 +1090,25 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
     expect(component.regionArea(rect())).toContain('µm²'); // would have been px² before
   });
 
+  it('changeRegionColor sets the region colour and commits live — jit-ui#85', () => {
+    const r = poly();
+    (component as any).regions = [r];
+    const spy = api.setAnnotationRegions as jest.Mock;
+    spy.mockClear();
+    component.changeRegionColor(r, '#abcdef');
+    expect(r.color).toBe('#abcdef');
+    expect(spy).toHaveBeenCalled();
+  });
+
+  it('changeRegionColor is a no-op when the colour is unchanged', () => {
+    const r = poly(); r.color = '#123456';
+    (component as any).regions = [r];
+    const spy = api.setAnnotationRegions as jest.Mock;
+    spy.mockClear();
+    component.changeRegionColor(r, '#123456');
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it('regionArea sums MultiPolygon parts (minus their holes) — jit-ui#85', () => {
     const sq = (x0: number, w: number) => {
       const p = new Polygon();
