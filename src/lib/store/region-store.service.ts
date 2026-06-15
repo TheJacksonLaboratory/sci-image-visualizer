@@ -438,6 +438,8 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
       b.xpoints = b.xpoints.map(x => x + dx);
       b.ypoints = b.ypoints.map(y => y + dy);
       b.coordinates = b.xpoints.map((x, i) => [x, b.ypoints[i]]);
+      // Translate interior rings (holes) with the exterior (jit-ui#85).
+      if (b.holes) b.holes = b.holes.map(ring => ring.map(([x, y]) => [x + dx, y + dy]));
     }
     this.syncCache();
     this.emit();
@@ -686,6 +688,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     poly.bezier = bounds.bezier;
     if (bounds.handlesIn) poly.handlesIn = bounds.handlesIn.map(o => o.slice());
     if (bounds.handlesOut) poly.handlesOut = bounds.handlesOut.map(o => o.slice());
+    if (bounds.holes) poly.holes = bounds.holes.map(ring => ring.map(pt => pt.slice()));
     return poly;
   }
 
@@ -700,8 +703,22 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
       for (let i = 0; i < ba.xpoints.length; i++) {
         if (ba.xpoints[i] !== bb.xpoints[i] || ba.ypoints[i] !== bb.ypoints[i]) return false;
       }
-      return true;
+      return this.holesEqual(ba.holes, bb.holes);
     }
     return false;
+  }
+
+  /** Compare two polygons' interior-ring (hole) sets for the dedupe path. */
+  private holesEqual(a: number[][][] | undefined, b: number[][][] | undefined): boolean {
+    const na = a?.length ?? 0, nb = b?.length ?? 0;
+    if (na !== nb) return false;
+    for (let h = 0; h < na; h++) {
+      const ra = (a as number[][][])[h], rb = (b as number[][][])[h];
+      if (ra.length !== rb.length) return false;
+      for (let i = 0; i < ra.length; i++) {
+        if (ra[i][0] !== rb[i][0] || ra[i][1] !== rb[i][1]) return false;
+      }
+    }
+    return true;
   }
 }

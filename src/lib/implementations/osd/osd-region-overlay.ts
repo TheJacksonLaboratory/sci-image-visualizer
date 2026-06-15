@@ -279,10 +279,22 @@ export class OsdRegionOverlay implements IRegionOverlay {
     // (paper.js-equivalent smooth curve); everything else as a straight
     // polygon/polyline.
     const isBezier = bounds instanceof Polygon && bounds.bezier && pts.length >= 2;
+    // Interior rings (holes) — punch through with even-odd fill (jit-ui#85).
+    const holes = (closed && bounds instanceof Polygon && bounds.holes?.length)
+      ? bounds.holes : null;
     let el: SVGElement;
-    if (isBezier) {
+    if (isBezier || holes) {
       el = document.createElementNS(SVGNS, 'path');
-      el.setAttribute('d', this.bezierPathD(bounds as Polygon));
+      // Exterior subpath (smooth for bezier, straight otherwise) followed by a
+      // straight subpath per hole.
+      let d = isBezier ? this.bezierPathD(bounds as Polygon) : this.straightPathD(pts, closed);
+      if (holes) {
+        for (const ring of holes) {
+          d += ' ' + this.straightPathD(ring.map(([x, y]) => ({ x, y })), true);
+        }
+        el.setAttribute('fill-rule', 'evenodd');
+      }
+      el.setAttribute('d', d);
     } else {
       el = document.createElementNS(SVGNS, closed ? 'polygon' : 'polyline');
       el.setAttribute('points', pts.map(p => { const q = this.toPx(p.x, p.y); return `${q.x},${q.y}`; }).join(' '));
@@ -354,6 +366,18 @@ export class OsdRegionOverlay implements IRegionOverlay {
     el.setAttribute('stroke-dasharray', '4 3');
     el.setAttribute('stroke-width', '2');
     return el;
+  }
+
+  /** SVG path `d` (element-pixel coords) for a straight-edged ring/polyline. */
+  private straightPathD(pts: { x: number; y: number }[], closed: boolean): string {
+    if (pts.length < 2) return '';
+    let d = '';
+    pts.forEach((p, i) => {
+      const q = this.toPx(p.x, p.y);
+      d += (i === 0 ? 'M ' : ' L ') + `${q.x},${q.y}`;
+    });
+    if (closed) d += ' Z';
+    return d;
   }
 
   /** SVG path `d` (element-pixel coords) for the smooth cubic bezier through a

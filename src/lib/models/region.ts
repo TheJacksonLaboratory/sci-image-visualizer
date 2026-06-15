@@ -165,6 +165,19 @@ export class Polygon {
    */
   handlesIn?: number[][];
   handlesOut?: number[][];
+
+  /**
+   * Interior rings (holes) — jit-ui#85. Each ring is a list of `[x, y]`
+   * image-pixel pairs in the SAME closed-polygon convention as the exterior
+   * (`coordinates`): no repeated closing point. Present only on closed polygons.
+   * A point inside the exterior **and** inside any hole is OUTSIDE the region
+   * (even-odd rule). Absent/empty == a solid polygon (the prior behaviour), so
+   * every existing region is unaffected.
+   *
+   * Bézier holes are out of scope: holes stay straight rings even when the
+   * exterior is smoothed.
+   */
+  holes?: number[][][];
 }
 
 export type Bounds = Rectangle | Polygon | {

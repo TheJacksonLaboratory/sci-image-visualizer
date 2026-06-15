@@ -36,13 +36,12 @@ export type BrushToolHost = WandToolHost;
  * Lifecycle mirrors the wand: a backend binds its host once, then toggles the
  * tool with `setMode(true | false, options)`.
  *
- * Known limitation — no holes/donuts: brushing a ring that encloses an unpainted
- * area yields a filled disc, not a donut. The boundary tracer
- * ({@link WandService.maskToPolygons} via `mooreBoundary`) returns only each
- * component's *outer* contour, and the neutral {@link Polygon} region model is a
- * single ring with no interior rings — so an enclosed hole can't be represented
- * and is filled in. Supporting donuts would require interior-ring support across
- * the model, both renderers (even-odd fill), GeoJSON I/O, and hit-testing.
+ * Holes / donuts (jit-ui#85): brushing a ring that encloses an unpainted area
+ * keeps the enclosed hole — {@link WandService.maskToPolygons} traces interior
+ * rings into {@link Polygon.holes}, which adopt/merge preserve (the re-rasterize
+ * punches the holes back out). The OpenSeadragon overlay renders them with
+ * even-odd fill and GeoJSON round-trips them as extra Polygon rings. The Plotly
+ * (Heatmap) backend currently renders the filled exterior only.
  */
 @Injectable({ providedIn: 'root' })
 export class BrushToolService {
@@ -371,12 +370,22 @@ export class BrushToolService {
 
   /** A region's closed-polygon vertices (image/data coords), or null when it
    *  isn't a fillable closed polygon (rectangles, open polylines). */
-  private regionVerts(region: Region): { xpoints: number[]; ypoints: number[] } | null {
+  private regionVerts(
+    region: Region,
+  ): { xpoints: number[]; ypoints: number[]; holes?: number[][][] } | null {
     const b = region?.bounds;
     if (b instanceof Polygon && b.closed !== false && b.xpoints.length >= 3) {
-      return { xpoints: b.xpoints, ypoints: b.ypoints };
+      return { xpoints: b.xpoints, ypoints: b.ypoints, holes: b.holes };
     }
     return null;
+  }
+
+  /** Convert a region's hole rings from image/data coords into matrix coords so
+   *  they line up with the stroke accumulator (jit-ui#85). */
+  private holesToMatrix(
+    holes: number[][][] | undefined, ox: number, oy: number, rx: number, ry: number,
+  ): number[][][] | undefined {
+    return holes?.map((ring) => ring.map(([x, y]) => [(x - ox) / rx, (y - oy) / ry]));
   }
 
   /**
@@ -402,10 +411,12 @@ export class BrushToolService {
       const oy = cached.originY ?? 0;
       const xs = verts.xpoints.map((x) => (x - ox) / rx);
       const ys = verts.ypoints.map((y) => (y - oy) / ry);
+      const holes = this.holesToMatrix(verts.holes, ox, oy, rx, ry);
 
-      if (!this.wandService.pointInPolygon(matrixX, matrixY, xs, ys)) continue;
+      // Clicking inside a hole must NOT adopt the donut (it's empty there).
+      if (!this.wandService.pointInPolygonWithHoles(matrixX, matrixY, xs, ys, holes)) continue;
 
-      const raster = this.wandService.rasterizePolygon(xs, ys, cached.width, cached.height);
+      const raster = this.wandService.rasterizePolygon(xs, ys, cached.width, cached.height, holes);
       if (!raster) continue;
 
       this.stroke = raster;
@@ -448,7 +459,8 @@ export class BrushToolService {
         const wx1 = wx0 + this.stroke.bw, wy1 = wy0 + this.stroke.bh;
         if (maxX < wx0 || minX > wx1 || maxY < wy0 || minY > wy1) continue;
 
-        const raster = this.wandService.rasterizePolygon(xs, ys, cached.width, cached.height);
+        const holes = this.holesToMatrix(verts.holes, ox, oy, rx, ry);
+        const raster = this.wandService.rasterizePolygon(xs, ys, cached.width, cached.height, holes);
         if (!raster) continue;
         if (!masksOverlap(this.stroke, raster)) continue;
 

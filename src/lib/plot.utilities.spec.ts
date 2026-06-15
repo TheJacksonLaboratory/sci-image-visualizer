@@ -329,6 +329,55 @@ describe('PlotUtilities', () => {
     expect(back.handlesOut![0]).toEqual([8, 3]);
   });
 
+  it('polygon with a hole round-trips through GeoJSON (extra ring) — jit-ui#85', () => {
+    const region = new Region();
+    region.name = 'shape0';
+    region.label = 'legend';
+    region.color = '#00ffff';
+    const poly = new Polygon();
+    poly.closed = true;
+    poly.npoints = 4;
+    poly.xpoints = [0, 30, 30, 0];
+    poly.ypoints = [0, 0, 30, 30];
+    poly.coordinates = [[0, 0], [30, 0], [30, 30], [0, 30]];
+    poly.holes = [[[10, 10], [20, 10], [20, 20], [10, 20]]];
+    region.bounds = poly;
+
+    const json = plotUtilities.exportROIsToGeoJson([region]);
+    const feature = JSON.parse(json).features[0];
+    // GeoJSON Polygon: exterior ring + one interior (hole) ring.
+    expect(feature.geometry.type).toBe('Polygon');
+    expect(feature.geometry.coordinates.length).toBe(2);
+    expect(feature.geometry.coordinates[1][0]).toEqual([10, 10]); // hole closed ring
+
+    const back = plotUtilities.importROIsFromGeoJson(json)[0].bounds as Polygon;
+    expect(back).toBeInstanceOf(Polygon);
+    expect(back.holes?.length).toBe(1);
+    expect(back.holes![0]).toEqual([[10, 10], [20, 10], [20, 20], [10, 20]]);
+  });
+
+  it('a square with a hole is not collapsed to a rectangle on import — jit-ui#85', () => {
+    // Exterior is a 5-point closed square (the rectangle-detection shape), but
+    // the extra hole ring must keep it a Polygon.
+    const geoJson = JSON.stringify({
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        properties: { classification: { name: 'legend', color: [0, 255, 255] } },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [
+            [[0, 0], [30, 0], [30, 30], [0, 30], [0, 0]],
+            [[10, 10], [20, 10], [20, 20], [10, 20], [10, 10]],
+          ],
+        },
+      }],
+    });
+    const back = plotUtilities.importROIsFromGeoJson(geoJson)[0].bounds as Polygon;
+    expect(back).toBeInstanceOf(Polygon);
+    expect(back.holes?.length).toBe(1);
+  });
+
   it('test rgbToHex', () => {
     const result = plotUtilities.rgbToHex(255, 0, 0);
     expect(result).toBe('#ff0000');

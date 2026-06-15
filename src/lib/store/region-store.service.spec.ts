@@ -486,6 +486,47 @@ describe('RegionStore', () => {
     });
   });
 
+  describe('holes (jit-ui#85)', () => {
+    const holedPoly = () => {
+      const r = polyRegion([0, 20, 20, 0], [0, 0, 20, 20]);
+      (r.bounds as Polygon).holes = [[[5, 5], [10, 5], [10, 10], [5, 10]]];
+      return r;
+    };
+
+    it('moveRegion translates holes with the exterior', () => {
+      const id = store.addRegion(holedPoly());
+      store.moveRegion(id, 100, 0);
+      const b = store.getRegions()[0].bounds as Polygon;
+      expect(b.holes![0]).toEqual([[105, 5], [110, 5], [110, 10], [105, 10]]);
+    });
+
+    it('append dedupe distinguishes the same exterior with different holes', () => {
+      store.setRegions([holedPoly()]);
+      store.setRegions([holedPoly()], undefined, undefined, undefined, true); // identical → deduped
+      expect(store.getRegions().length).toBe(1);
+      // Same exterior, no holes → a different region → appended.
+      store.setRegions([polyRegion([0, 20, 20, 0], [0, 0, 20, 20])],
+        undefined, undefined, undefined, true);
+      expect(store.getRegions().length).toBe(2);
+    });
+
+    it('undo restores holes without aliasing the live region', () => {
+      jest.useFakeTimers();
+      try {
+        const id = store.addRegion(holedPoly());
+        jest.advanceTimersByTime(500);
+        store.moveRegion(id, 100, 0);
+        jest.advanceTimersByTime(500);
+        store.undo();
+        const b = store.getRegions()[0].bounds as Polygon;
+        expect(b.holes![0][0]).toEqual([5, 5]);
+      } finally {
+        jest.runOnlyPendingTimers();
+        jest.useRealTimers();
+      }
+    });
+  });
+
   describe('getRegionPolygons', () => {
     it('returns closed polygons and excludes open polylines', () => {
       store.addRegion(polyRegion([0, 10, 5], [0, 0, 10], true));

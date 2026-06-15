@@ -420,8 +420,10 @@ export class PlotUtilities {
           polygon.coordinates.push([coordinates[i][0], coordinates[i][1]]);
         }
         region.bounds = polygon;
-      // Polygon: check if it encodes a rectangle
-      } else if (coordinates[0].length === 5
+      // Polygon: check if it encodes a rectangle (single ring only — a polygon
+      // with holes must never be collapsed to a rectangle).
+      } else if (coordinates.length === 1
+        && coordinates[0].length === 5
         && JSON.stringify(coordinates[0][0]) === JSON.stringify(coordinates[0][4])
         && coordinates[0][0][0] === coordinates[0][3][0]
         && coordinates[0][0][1] === coordinates[0][1][1]
@@ -445,6 +447,9 @@ export class PlotUtilities {
           polygon.ypoints.push(coordinates[0][i][1]);
           polygon.coordinates.push([coordinates[0][i][0], coordinates[0][i][1]]);
         }
+        // Extra rings are interior holes (GeoJSON Polygon convention) — jit-ui#85.
+        const holes = this.ringsToHoles(coordinates.slice(1));
+        if (holes.length) polygon.holes = holes;
         region.bounds = polygon;
       }
       regions.push(region);
@@ -525,10 +530,18 @@ export class PlotUtilities {
           // start, so only the straight-polygon path needs the first point
           // repeated.
           const ring = isBezier ? geomCoords : [...geomCoords, geomCoords[0]];
+          // Interior rings (holes) follow the exterior as extra GeoJSON rings —
+          // standard Polygon-with-holes, which QuPath round-trips (jit-ui#85).
+          const rings: number[][][] = [ring];
+          if (roi.bounds.holes) {
+            for (const hole of roi.bounds.holes) {
+              if (hole.length >= 3) rings.push([...hole, hole[0]]);
+            }
+          }
           features.push({
             type: 'Feature',
             properties,
-            geometry: { type: 'Polygon', coordinates: [ring] }
+            geometry: { type: 'Polygon', coordinates: rings }
           });
         } else {
           features.push({
@@ -545,6 +558,25 @@ export class PlotUtilities {
     };
 
     return JSON.stringify(geoJsonData);
+  }
+
+  /**
+   * Convert GeoJSON interior rings into the neutral hole representation
+   * (`number[][]` per ring, no repeated closing point). Degenerate rings (< 3
+   * distinct points) are dropped. jit-ui#85.
+   */
+  private ringsToHoles(rings: number[][][]): number[][][] {
+    const holes: number[][][] = [];
+    for (const ringIn of rings || []) {
+      if (!ringIn || ringIn.length < 3) continue;
+      const last = ringIn.length - 1;
+      const closed = ringIn[0][0] === ringIn[last][0] && ringIn[0][1] === ringIn[last][1];
+      const n = closed ? last : ringIn.length;
+      const ring: number[][] = [];
+      for (let i = 0; i < n; i++) ring.push([ringIn[i][0], ringIn[i][1]]);
+      if (ring.length >= 3) holes.push(ring);
+    }
+    return holes;
   }
 
   public rgbToHex(r: number, g: number, b: number): string {

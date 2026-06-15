@@ -159,7 +159,8 @@ export class WandService {
    * null if the polygon is degenerate or fully outside the image.
    */
   public rasterizePolygon(xpoints: number[], ypoints: number[],
-                          imageWidth: number, imageHeight: number)
+                          imageWidth: number, imageHeight: number,
+                          holes?: number[][][])
     : { bx: number; by: number; bw: number; bh: number; mask: Uint8Array } | null {
 
     const n = xpoints.length;
@@ -181,25 +182,52 @@ export class WandService {
     if (bw <= 0 || bh <= 0) return null;
 
     const mask = new Uint8Array(bw * bh);
-    // Scanline polygon fill — sample each row at its pixel centre.
-    for (let py = 0; py < bh; py++) {
-      const y = by + py + 0.5;
-      const xs: number[] = [];
-      for (let i = 0, j = n - 1; i < n; j = i++) {
-        const yi = ypoints[i], yj = ypoints[j];
-        if ((yi <= y && yj > y) || (yj <= y && yi > y)) {
-          const t = (y - yi) / (yj - yi);
-          xs.push(xpoints[i] + t * (xpoints[j] - xpoints[i]));
+    // Scanline ring fill — sample each row at its pixel centre, writing `value`
+    // (1 to fill the exterior, 0 to punch a hole back out).
+    const fillRing = (rx: number[], ry: number[], value: number) => {
+      const m = rx.length;
+      if (m < 3) return;
+      for (let py = 0; py < bh; py++) {
+        const y = by + py + 0.5;
+        const xs: number[] = [];
+        for (let i = 0, j = m - 1; i < m; j = i++) {
+          const yi = ry[i], yj = ry[j];
+          if ((yi <= y && yj > y) || (yj <= y && yi > y)) {
+            const t = (y - yi) / (yj - yi);
+            xs.push(rx[i] + t * (rx[j] - rx[i]));
+          }
+        }
+        xs.sort((a, b) => a - b);
+        for (let k = 0; k + 1 < xs.length; k += 2) {
+          const xStart = Math.max(0, Math.ceil(xs[k] - bx));
+          const xEnd = Math.min(bw - 1, Math.floor(xs[k + 1] - bx));
+          for (let x = xStart; x <= xEnd; x++) mask[py * bw + x] = value;
         }
       }
-      xs.sort((a, b) => a - b);
-      for (let k = 0; k + 1 < xs.length; k += 2) {
-        const xStart = Math.max(0, Math.ceil(xs[k] - bx));
-        const xEnd = Math.min(bw - 1, Math.floor(xs[k + 1] - bx));
-        for (let x = xStart; x <= xEnd; x++) mask[py * bw + x] = 1;
+    };
+    fillRing(xpoints, ypoints, 1);
+    if (holes) {
+      for (const ring of holes) {
+        fillRing(ring.map(p => p[0]), ring.map(p => p[1]), 0);
       }
     }
     return { bx, by, bw, bh, mask };
+  }
+
+  /**
+   * Point-in-region test that honours interior rings (holes): inside the
+   * exterior AND outside every hole (even-odd). Coordinates must share the
+   * polygon's frame. With no holes this is exactly {@link pointInPolygon}.
+   */
+  public pointInPolygonWithHoles(px: number, py: number, xpoints: number[], ypoints: number[],
+                                 holes?: number[][][]): boolean {
+    if (!this.pointInPolygon(px, py, xpoints, ypoints)) return false;
+    if (holes) {
+      for (const ring of holes) {
+        if (this.pointInPolygon(px, py, ring.map(p => p[0]), ring.map(p => p[1]))) return false;
+      }
+    }
+    return true;
   }
 
   /**
@@ -242,7 +270,8 @@ export class WandService {
    */
   public maskToPolygons(mask: Uint8Array, w: number, h: number,
                         imageWidth: number, imageHeight: number,
-                        originX: number, originY: number, minSize = 4): Polygon[] {
+                        originX: number, originY: number, minSize = 4,
+                        minHoleSize = minSize): Polygon[] {
     // Label all 4-connected components, recording each one's pixel count.
     const labels = new Int32Array(w * h);
     const sizes: number[] = [0]; // sizes[label]; label 0 unused
@@ -280,6 +309,10 @@ export class WandService {
     }
     wanted.sort((a, b) => sizes[b] - sizes[a]); // largest-first
 
+    // Interior rings (holes) per foreground label — jit-ui#85.
+    const holesByLabel = this.detectHoles(
+      mask, labels, w, h, originX, originY, imageWidth, imageHeight, minHoleSize);
+
     const polys: Polygon[] = [];
     const comp = new Uint8Array(w * h);
     for (const lbl of wanted) {
@@ -304,9 +337,94 @@ export class WandService {
       poly.xpoints = xpoints;
       poly.ypoints = ypoints;
       poly.coordinates = coordinates;
+      const holes = holesByLabel.get(lbl);
+      if (holes && holes.length) poly.holes = holes;
       polys.push(poly);
     }
     return polys;
+  }
+
+  /**
+   * Find interior rings (holes) of each foreground component in `mask`: a
+   * 4-connected run of background (0) pixels that is fully enclosed — i.e. not
+   * reachable from the grid border through background — is a hole, attributed to
+   * the foreground component that borders it most. Returns `fgLabel → rings`,
+   * each ring a list of `[x, y]` image-pixel pairs (same convention as a
+   * polygon's `coordinates`). Holes smaller than `minHoleSize` are dropped.
+   */
+  private detectHoles(mask: Uint8Array, fgLabels: Int32Array, w: number, h: number,
+                      originX: number, originY: number, imageWidth: number, imageHeight: number,
+                      minHoleSize: number): Map<number, number[][][]> {
+    const result = new Map<number, number[][][]>();
+
+    // 1. Flood-fill background reachable from the grid border ("outside").
+    const outside = new Uint8Array(w * h);
+    const stack: number[] = [];
+    const seed = (idx: number) => {
+      if (!mask[idx] && !outside[idx]) { outside[idx] = 1; stack.push(idx); }
+    };
+    for (let x = 0; x < w; x++) { seed(x); seed((h - 1) * w + x); }
+    for (let y = 0; y < h; y++) { seed(y * w); seed(y * w + w - 1); }
+    while (stack.length) {
+      const i = stack.pop() as number;
+      const px = i % w, py = (i - px) / w;
+      if (px > 0) seed(i - 1);
+      if (px < w - 1) seed(i + 1);
+      if (py > 0) seed(i - w);
+      if (py < h - 1) seed(i + w);
+    }
+
+    // 2. Remaining unvisited background pixels are enclosed holes. BFS each,
+    //    tally the bordering foreground label, and trace its boundary.
+    const visited = new Uint8Array(w * h);
+    const holeMask = new Uint8Array(w * h);
+    const queue: number[] = [];
+    for (let start = 0; start < mask.length; start++) {
+      if (mask[start] || outside[start] || visited[start]) continue;
+      let size = 0;
+      const owners = new Map<number, number>();
+      const pixels: number[] = [];
+      visited[start] = 1;
+      queue.length = 0;
+      queue.push(start);
+      while (queue.length) {
+        const i = queue.pop() as number;
+        size++;
+        pixels.push(i);
+        const px = i % w, py = (i - px) / w;
+        const visit = (j: number) => {
+          if (mask[j]) {
+            const lbl = fgLabels[j];
+            if (lbl) owners.set(lbl, (owners.get(lbl) ?? 0) + 1);
+          } else if (!outside[j] && !visited[j]) {
+            visited[j] = 1;
+            queue.push(j);
+          }
+        };
+        if (px > 0) visit(i - 1);
+        if (px < w - 1) visit(i + 1);
+        if (py > 0) visit(i - w);
+        if (py < h - 1) visit(i + w);
+      }
+      if (size < minHoleSize || owners.size === 0) continue;
+      let owner = 0, best = -1;
+      owners.forEach((cnt, lbl) => { if (cnt > best) { best = cnt; owner = lbl; } });
+
+      holeMask.fill(0);
+      for (const i of pixels) holeMask[i] = 1;
+      const verts = this.mooreBoundary(holeMask, w, h);
+      if (!verts || verts.length < 3) continue;
+      const ring: number[][] = [];
+      for (const v of verts) {
+        const ix = Math.max(0, Math.min(imageWidth - 1, Math.round(originX + v.x)));
+        const iy = Math.max(0, Math.min(imageHeight - 1, Math.round(originY + v.y)));
+        ring.push([ix, iy]);
+      }
+      const list = result.get(owner) ?? [];
+      list.push(ring);
+      result.set(owner, list);
+    }
+    return result;
   }
 
   /**

@@ -287,6 +287,59 @@ describe('WandService', () => {
     expect(r!.by).toBe(0);
   });
 
+  // ── Holes / donuts (jit-ui#85) ────────────────────────────────────────
+
+  /** A solid w×h square mask with a rectangular hole punched in the centre. */
+  const donutMask = (w: number, h: number, hx0: number, hy0: number, hx1: number, hy1: number) => {
+    const mask = new Uint8Array(w * h);
+    mask.fill(1);
+    for (let y = hy0; y < hy1; y++) for (let x = hx0; x < hx1; x++) mask[y * w + x] = 0;
+    return mask;
+  };
+
+  it('maskToPolygons traces an enclosed hole as an interior ring', () => {
+    const mask = donutMask(20, 20, 7, 7, 13, 13);
+    const polys = service.maskToPolygons(mask, 20, 20, 20, 20, 0, 0, 4, 4);
+    expect(polys.length).toBe(1);
+    expect(polys[0].holes?.length).toBe(1);
+    expect(polys[0].holes![0].length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('maskToPolygons drops a hole smaller than minHoleSize', () => {
+    const mask = donutMask(20, 20, 9, 9, 11, 11); // 2×2 = 4px hole
+    const polys = service.maskToPolygons(mask, 20, 20, 20, 20, 0, 0, 4, 50);
+    expect(polys.length).toBe(1);
+    expect(polys[0].holes).toBeUndefined();
+  });
+
+  it('a background indentation open to the border is NOT a hole', () => {
+    // Square with a notch cut from the right edge — open to the outside.
+    const w = 20, h = 20;
+    const mask = new Uint8Array(w * h);
+    mask.fill(1);
+    for (let y = 8; y < 12; y++) for (let x = 15; x < 20; x++) mask[y * w + x] = 0;
+    const polys = service.maskToPolygons(mask, w, h, w, h, 0, 0, 4, 4);
+    expect(polys[0].holes).toBeUndefined();
+  });
+
+  it('pointInPolygonWithHoles is false inside a hole, true in the solid ring', () => {
+    const xs = [0, 19, 19, 0], ys = [0, 0, 19, 19];
+    const holes = [[[7, 7], [12, 7], [12, 12], [7, 12]]];
+    expect(service.pointInPolygonWithHoles(10, 10, xs, ys, holes)).toBe(false); // in hole
+    expect(service.pointInPolygonWithHoles(2, 2, xs, ys, holes)).toBe(true);    // solid ring
+    expect(service.pointInPolygonWithHoles(50, 50, xs, ys, holes)).toBe(false); // outside
+  });
+
+  it('rasterizePolygon punches holes back out', () => {
+    const xs = [0, 19, 19, 0], ys = [0, 0, 19, 19];
+    const holes = [[[7, 7], [12, 7], [12, 12], [7, 12]]];
+    const r = service.rasterizePolygon(xs, ys, 20, 20, holes);
+    expect(r).not.toBeNull();
+    const at = (x: number, y: number) => r!.mask[(y - r!.by) * r!.bw + (x - r!.bx)];
+    expect(at(10, 10)).toBe(0); // inside the hole
+    expect(at(2, 2)).toBe(1);   // solid ring
+  });
+
   it('returns coordinates as a 2-D array matching xpoints/ypoints', () => {
     const img = makeGrayImage(60, 60, () => 128);
     const poly = service.computeRegion(img, 30, 30, { simpleMode: true, patchSize: 21 });
