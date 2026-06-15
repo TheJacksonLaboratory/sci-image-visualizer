@@ -94,8 +94,23 @@ describe('RegionOpsService', () => {
       expect(hasHole).toBe(true);
     });
 
-    it('refuses an oversized image (memory guard)', () => {
-      expect(ops.inverse([rect(0, 0, 10, 10)], 100000, 100000)).toBeNull();
+    it('works on a gigapixel image (no full-image allocation)', () => {
+      // Old behaviour bailed out here; the vector inverse must handle it.
+      const inv = ops.inverse([rect(100, 100, 50, 50)], 100000, 100000)!;
+      expect(inv).not.toBeNull();
+      // Exterior is the image rectangle; the blob is a hole.
+      const b = inv.bounds as Polygon;
+      expect(b).toBeInstanceOf(Polygon);
+      expect(Math.max(...b.xpoints)).toBe(100000);
+      expect(b.holes?.length).toBe(1);
+    });
+
+    it('turns a donut\'s hole into a solid island in the inverse', () => {
+      const donut = poly([0, 40, 40, 0], [0, 0, 40, 40], [[[10, 10], [30, 10], [30, 30], [10, 30]]]);
+      const inv = ops.inverse([donut], 100, 100)!;
+      // image-rect part (with the donut outer as a hole) + the donut hole as an island.
+      expect(inv.bounds).toBeInstanceOf(MultiPolygon);
+      expect((inv.bounds as MultiPolygon).polygons.length).toBe(2);
     });
   });
 

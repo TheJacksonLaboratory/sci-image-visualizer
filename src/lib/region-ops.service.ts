@@ -19,10 +19,6 @@ import { WandService } from './toolbar/wand/wand.service';
  */
 @Injectable({ providedIn: 'root' })
 export class RegionOpsService {
-  /** Inverse rasterises the whole image rectangle; cap the mask so a gigapixel
-   *  slide can't allocate an absurd buffer. ~64 MB at 1 byte/px. */
-  private static readonly MAX_INVERSE_PIXELS = 64_000_000;
-
   constructor(private wand: WandService) {}
 
   /**
@@ -42,27 +38,52 @@ export class RegionOpsService {
   /**
    * Replace `regions` with their inverse inside the image rectangle: the image
    * minus the selection's union (the former regions become holes). Returns null
-   * for a degenerate / oversized image (see {@link MAX_INVERSE_PIXELS}).
+   * for a degenerate image or an empty selection.
+   *
+   * Done *vectorially* so it scales to gigapixel images: the selection is
+   * unioned first (raster, bounded by the ROIs' extent — never the whole image),
+   * then the result is the image rectangle as the exterior with each union
+   * component's outline punched out as a hole. A component's own hole (a donut)
+   * becomes a solid island part. Only the image's corner coordinates are used —
+   * no full-image buffer is ever allocated.
    */
   inverse(regions: Region[], imageWidth: number, imageHeight: number): Region | null {
     if (imageWidth <= 0 || imageHeight <= 0) return null;
-    if (imageWidth * imageHeight > RegionOpsService.MAX_INVERSE_PIXELS) return null;
-    const full = new Uint8Array(imageWidth * imageHeight).fill(1);
-    const mask = this.unionMask(regions, imageWidth, imageHeight);
-    if (mask) {
-      for (let y = 0; y < mask.bh; y++) {
-        const gy = mask.by + y;
-        if (gy < 0 || gy >= imageHeight) continue;
-        for (let x = 0; x < mask.bw; x++) {
-          if (!mask.mask[y * mask.bw + x]) continue;
-          const gx = mask.bx + x;
-          if (gx >= 0 && gx < imageWidth) full[gy * imageWidth + gx] = 0;
+    const merged = this.merge(regions, imageWidth, imageHeight);
+    if (!merged) return null;
+    const comps: Polygon[] = merged.bounds instanceof MultiPolygon
+      ? merged.bounds.polygons
+      : merged.bounds instanceof Polygon ? [merged.bounds] : [];
+    if (comps.length === 0) return null;
+
+    // Image rectangle exterior with every component outline as a hole.
+    const rect = this.ringPolygon(
+      [0, imageWidth, imageWidth, 0], [0, 0, imageHeight, imageHeight]);
+    rect.holes = comps.map((c) => c.xpoints.map((x, i) => [x, c.ypoints[i]]));
+
+    // Each component's own hole (donut interior) is *outside* the region, so it
+    // stays solid in the inverse — emit it as its own island part.
+    const parts: Polygon[] = [rect];
+    for (const c of comps) {
+      if (c.holes) {
+        for (const ring of c.holes) {
+          parts.push(this.ringPolygon(ring.map((p) => p[0]), ring.map((p) => p[1])));
         }
       }
     }
-    const polys = this.wand.maskToPolygons(
-      full, imageWidth, imageHeight, imageWidth, imageHeight, 0, 0, 1, 1);
-    return this.regionFromParts(polys, regions[0]);
+    const bounds = parts.length === 1 ? parts[0] : Object.assign(new MultiPolygon(), { polygons: parts });
+    return this.makeRegion(bounds, regions[0]);
+  }
+
+  /** A closed straight-edged Polygon from parallel coord arrays. */
+  private ringPolygon(xs: number[], ys: number[]): Polygon {
+    const p = new Polygon();
+    p.xpoints = xs.slice();
+    p.ypoints = ys.slice();
+    p.npoints = xs.length;
+    p.coordinates = xs.map((x, i) => [x, ys[i]]);
+    p.closed = true;
+    return p;
   }
 
   /**

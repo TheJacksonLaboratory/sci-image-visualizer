@@ -1091,7 +1091,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     if (!inv) {
       this.messageService.add({
         severity: 'warn', summary: 'Inverse',
-        detail: 'Could not invert (the image is too large or unscaled).',
+        detail: 'Nothing to invert — select one or more closed regions first.',
       });
       return;
     }
