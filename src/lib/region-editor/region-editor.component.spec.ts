@@ -1071,6 +1071,12 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
     expect(component.regionArea(rect())).toContain('µm²'); // 1200·4 = 4800 µm²
   });
 
+  it('regionArea subtracts hole area (donut, not filled circle) — jit-ui#85', () => {
+    const donut = poly(); // 10×10 exterior = 100
+    (donut.bounds as Polygon).holes = [[[3, 3], [7, 3], [7, 7], [3, 7]]]; // 4×4 hole = 16
+    expect(component.regionArea(donut)).toBe('84 px²'); // 100 − 16
+  });
+
   it('isRectangle distinguishes rectangles from polygons', () => {
     expect(component.isRectangle(rect())).toBe(true);
     expect(component.isRectangle(poly())).toBe(false);

@@ -478,18 +478,32 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     return `${this.fmtArea(px)} px²`;
   }
 
-  /** Pixel area: width·height for rectangles, shoelace formula for polygons. */
+  /** Pixel area: width·height for rectangles, shoelace formula for polygons.
+   *  Interior rings (holes) are subtracted, so a donut reports the annulus area,
+   *  not the filled exterior (jit-ui#85). */
   private areaInPixels(region: Region): number {
     const b = region.bounds;
     if (b instanceof Rectangle) return Math.abs(b.width * b.height);
     if (b instanceof Polygon) {
-      const xs = b.xpoints, ys = b.ypoints, n = xs?.length ?? 0;
-      if (n < 3) return 0;
-      let a = 0;
-      for (let i = 0, j = n - 1; i < n; j = i++) a += (xs[j] + xs[i]) * (ys[j] - ys[i]);
-      return Math.abs(a / 2);
+      if ((b.xpoints?.length ?? 0) < 3) return 0;
+      let a = this.ringArea(b.xpoints, b.ypoints);
+      if (b.holes) {
+        for (const ring of b.holes) {
+          a -= this.ringArea(ring.map(p => p[0]), ring.map(p => p[1]));
+        }
+      }
+      return Math.max(0, a);
     }
     return 0;
+  }
+
+  /** Absolute shoelace area of a single ring. */
+  private ringArea(xs: number[], ys: number[]): number {
+    const n = xs?.length ?? 0;
+    if (n < 3) return 0;
+    let a = 0;
+    for (let i = 0, j = n - 1; i < n; j = i++) a += (xs[j] + xs[i]) * (ys[j] - ys[i]);
+    return Math.abs(a / 2);
   }
 
   private fmtArea(n: number): string {
