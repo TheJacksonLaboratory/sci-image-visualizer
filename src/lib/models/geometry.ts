@@ -156,3 +156,58 @@ export function unionMasks(a: BBoxMask, b: BBoxMask): BBoxMask {
   }
   return { bx: ux0, by: uy0, bw: ubw, bh: ubh, mask: umask };
 }
+
+// ── Ring simplification (Douglas–Peucker) ───────────────────────────────
+
+/** Perpendicular distance from (px,py) to the segment (ax,ay)–(bx,by). */
+function perpDistance(px: number, py: number,
+                      ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  if (len2 === 0) return Math.hypot(px - ax, py - ay);
+  let t = ((px - ax) * dx + (py - ay) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+/**
+ * Simplify a closed ring with the Douglas–Peucker algorithm (jit-ui#85):
+ * drop every vertex that lies within `epsilon` pixels (the "altitude
+ * threshold") of the line between its kept neighbours. Anchored at vertex 0
+ * (the ring is closed by appending it). Rings of ≤ 3 vertices, or a
+ * non-positive epsilon, are returned unchanged. Output keeps the closed-ring
+ * convention (no repeated closing point).
+ */
+export function simplifyRing(xs: number[], ys: number[], epsilon: number)
+  : { xs: number[]; ys: number[] } {
+  const n = xs.length;
+  if (n <= 3 || !(epsilon > 0)) return { xs: xs.slice(), ys: ys.slice() };
+
+  // Close the ring so both endpoints of the DP run are vertex 0.
+  const px = [...xs, xs[0]];
+  const py = [...ys, ys[0]];
+  const m = px.length;
+  const keep = new Array<boolean>(m).fill(false);
+  keep[0] = true;
+  keep[m - 1] = true;
+
+  const stack: Array<[number, number]> = [[0, m - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop() as [number, number];
+    let maxD = -1, idx = -1;
+    for (let i = a + 1; i < b; i++) {
+      const d = perpDistance(px[i], py[i], px[a], py[a], px[b], py[b]);
+      if (d > maxD) { maxD = d; idx = i; }
+    }
+    if (maxD > epsilon && idx > a) {
+      keep[idx] = true;
+      stack.push([a, idx], [idx, b]);
+    }
+  }
+
+  const outX: number[] = [], outY: number[] = [];
+  for (let i = 0; i < m - 1; i++) {      // drop the duplicated closing vertex
+    if (keep[i]) { outX.push(px[i]); outY.push(py[i]); }
+  }
+  return { xs: outX, ys: outY };
+}

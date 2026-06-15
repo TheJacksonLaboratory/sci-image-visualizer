@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 
 import { Region, Rectangle, Polygon, MultiPolygon } from './models/region';
-import { BBoxMask, unionMasks } from './models/geometry';
+import { BBoxMask, unionMasks, simplifyRing } from './models/geometry';
 import { WandService } from './toolbar/wand/wand.service';
 
 /**
@@ -83,6 +83,53 @@ export class RegionOpsService {
   /** True when ungrouping `region` would actually split it (≥2 parts). */
   canUngroup(region: Region): boolean {
     return region.bounds instanceof MultiPolygon && region.bounds.polygons.length > 1;
+  }
+
+  /**
+   * Simplify a region's outline(s) with Douglas–Peucker — drop vertices within
+   * `altitudePx` pixels of the line between their kept neighbours. Applies to
+   * the exterior and every hole, of a polygon or each part of a MultiPolygon; a
+   * ring that would degenerate below a triangle is left at its previous detail
+   * (the part/hole is kept, not dropped). Rectangles and open polylines are
+   * returned unchanged. Result is always a straight-edged polygon (any Bézier
+   * smoothing is dropped, since the anchor set changes).
+   */
+  simplify(region: Region, altitudePx: number): Region {
+    const b = region.bounds;
+    if (!(altitudePx > 0)) return region;
+    if (b instanceof Polygon && b.closed !== false) {
+      return this.makeRegion(this.simplifyPolygon(b, altitudePx), region);
+    }
+    if (b instanceof MultiPolygon) {
+      const mp = new MultiPolygon();
+      mp.polygons = b.polygons.map((p) => this.simplifyPolygon(p, altitudePx));
+      return this.makeRegion(mp, region);
+    }
+    return region;
+  }
+
+  /** Douglas–Peucker the exterior + each hole of one polygon. A ring that
+   *  collapses below 3 vertices keeps its original points (never degenerates). */
+  private simplifyPolygon(p: Polygon, eps: number): Polygon {
+    const keepOrSrc = (xs: number[], ys: number[]): { xs: number[]; ys: number[] } => {
+      const s = simplifyRing(xs, ys, eps);
+      return s.xs.length >= 3 ? s : { xs: xs.slice(), ys: ys.slice() };
+    };
+    const ext = keepOrSrc(p.xpoints, p.ypoints);
+    const poly = new Polygon();
+    poly.npoints = ext.xs.length;
+    poly.xpoints = ext.xs;
+    poly.ypoints = ext.ys;
+    poly.coordinates = ext.xs.map((x, i) => [x, ext.ys[i]]);
+    poly.closed = true;
+    if (p.holes) {
+      const holes = p.holes.map((ring) => {
+        const s = keepOrSrc(ring.map((q) => q[0]), ring.map((q) => q[1]));
+        return s.xs.map((x, i) => [x, s.ys[i]]);
+      });
+      if (holes.length) poly.holes = holes;
+    }
+    return poly;
   }
 
   // ── internals ──────────────────────────────────────────────────────────

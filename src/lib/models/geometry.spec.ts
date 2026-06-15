@@ -4,6 +4,7 @@ import {
   parseSvgPathPolygon,
   polygonToSvgPath,
   shapesEqual,
+  simplifyRing,
   unionMasks,
   verticesToSvgPath,
 } from './geometry';
@@ -145,6 +146,29 @@ describe('geometry helpers', () => {
       expect(at(6, 6)).toBe(1);
       // a corner outside both should be 0.
       expect(at(6, 0)).toBe(0);
+    });
+  });
+
+  describe('simplifyRing (jit-ui#85)', () => {
+    it('drops a near-collinear vertex within the epsilon threshold', () => {
+      // A square with a tiny bump (50,1) on the top edge — within 2px of the edge.
+      const xs = [0, 50, 100, 100, 0];
+      const ys = [0, 1, 0, 100, 100];
+      const s = simplifyRing(xs, ys, 2);
+      expect(s.xs.length).toBe(4); // the (50,1) bump is removed
+      expect(s.xs).not.toContain(50);
+    });
+
+    it('keeps a vertex whose deviation exceeds epsilon', () => {
+      const xs = [0, 50, 100, 100, 0];
+      const ys = [0, 30, 0, 100, 100]; // a 30px spike — well above epsilon
+      const s = simplifyRing(xs, ys, 2);
+      expect(s.xs.length).toBe(5); // nothing dropped
+    });
+
+    it('leaves a triangle (≤3 vertices) and a non-positive epsilon unchanged', () => {
+      expect(simplifyRing([0, 10, 5], [0, 0, 10], 5).xs.length).toBe(3);
+      expect(simplifyRing([0, 50, 100, 100, 0], [0, 1, 0, 100, 100], 0).xs.length).toBe(5);
     });
   });
 });

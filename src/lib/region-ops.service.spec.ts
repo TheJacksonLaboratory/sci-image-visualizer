@@ -119,6 +119,44 @@ describe('RegionOpsService', () => {
     });
   });
 
+  describe('simplify', () => {
+    it('drops near-collinear vertices on a polygon by the altitude threshold', () => {
+      const r = poly([0, 50, 100, 100, 0], [0, 1, 0, 100, 100]); // (50,1) bump
+      const s = ops.simplify(r, 2);
+      expect((s.bounds as Polygon).xpoints.length).toBe(4);
+    });
+
+    it('simplifies the exterior and each hole of a donut', () => {
+      const r = poly(
+        [0, 50, 100, 100, 0], [0, 1, 0, 100, 100],
+        [[[10, 10], [30, 11], [50, 10], [50, 50], [10, 50]]], // (30,11) bump on the hole
+      );
+      const s = ops.simplify(r, 2);
+      const b = s.bounds as Polygon;
+      expect(b.xpoints.length).toBe(4);       // exterior bump removed
+      expect(b.holes![0].length).toBe(4);     // hole bump removed (5 → 4)
+    });
+
+    it('simplifies every part of a MultiPolygon', () => {
+      const bumpy = (x0: number) =>
+        poly([x0, x0 + 50, x0 + 100, x0 + 100, x0], [0, 1, 0, 100, 100]).bounds as Polygon;
+      const r = new Region();
+      const mp = new MultiPolygon();
+      mp.polygons = [bumpy(0), bumpy(200)];
+      r.bounds = mp;
+      const s = ops.simplify(r, 2);
+      const parts = (s.bounds as MultiPolygon).polygons;
+      expect(parts.map(p => p.xpoints.length)).toEqual([4, 4]);
+    });
+
+    it('leaves rectangles and non-positive thresholds unchanged', () => {
+      const rectR = rect(0, 0, 10, 10);
+      expect(ops.simplify(rectR, 5)).toBe(rectR);
+      const polyR = poly([0, 50, 100, 100, 0], [0, 1, 0, 100, 100]);
+      expect(ops.simplify(polyR, 0)).toBe(polyR);
+    });
+  });
+
   describe('round-trip', () => {
     it('merge then ungroup recovers the same number of disjoint parts', () => {
       const merged = ops.merge(
