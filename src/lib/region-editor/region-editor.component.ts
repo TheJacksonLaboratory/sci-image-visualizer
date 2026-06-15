@@ -35,7 +35,8 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   fillColor!: string;
   displayHelpDialog = false;
   showColorDialog = false;
-  classificationColors: { label: string; color: string }[] = [];
+  /** Colour chosen in the "edit colour of selected regions" dialog. */
+  selectedColor = '#00FFFF';
   labelColors: Map<string, string> = new Map();
   selectedLabelColor = '';
   labelToEdit = '';
@@ -608,30 +609,21 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.displayHelpDialog = true;
   }
 
+  /** Open the colour picker for the currently-selected region(s), seeded with
+   *  the first selected region's colour. */
   openColorDialog() {
-    // Edit the colours of every classification present in the region table — no
-    // selection required.
-    const uniqueLabels = [
-      ...new Set(this.regions.filter((r) => r.label).map((r) => r.label as string)),
-    ];
-    this.classificationColors = uniqueLabels.map((label) => ({
-      label,
-      color: this.labelColors.get(label) ?? this.shapeColor,
-    }));
+    if (!this.selectedRegions?.length) return;
+    this.selectedColor = this.selectedRegions[0].color ?? this.shapeColor;
     this.showColorDialog = true;
   }
 
-  applyClassificationColors() {
-    for (const entry of this.classificationColors) {
-      this.labelColors.set(entry.label, entry.color);
-      this.regionApi.setClassificationColor(entry.label, entry.color);
-      for (const region of this.regions) {
-        if (region.label === entry.label) {
-          region.color = entry.color;
-        }
-      }
+  /** Apply the chosen colour to every selected region's outline and commit live. */
+  applyColorToSelected() {
+    for (const region of this.selectedRegions ?? []) {
+      region.color = this.selectedColor;
+      if (region.label) this.labelColors.set(region.label, this.selectedColor);
     }
-    this.setRegionsFromEditor(this.fillColor);
+    this.setRegionsFromEditor();
     this.showColorDialog = false;
   }
 

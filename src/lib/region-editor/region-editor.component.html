@@ -45,9 +45,10 @@
               [disabled]="!selectedRegions || !selectedRegions.length">
     </p-button>
     <p-button icon="pi pi-palette" size="small" [text]="true" styleClass="mr-2"
-              pTooltip="Edit classification colours"
+              pTooltip="Edit colour of selected regions"
               tooltipPosition="bottom"
-              (click)="openColorDialog()">
+              (click)="openColorDialog()"
+              [disabled]="!selectedRegions || !selectedRegions.length">
     </p-button>
     <p-overlayPanel #op>
       <div class="flex flex-column gap-3 w-25rem">
@@ -196,24 +197,18 @@
   </ng-template>
 </p-dialog>
 
-<p-dialog header="Classification Colours" [(visible)]="showColorDialog" [modal]="true"
-          [style]="{width: '28rem'}" [draggable]="false" [resizable]="false">
+<p-dialog header="Region colour" [(visible)]="showColorDialog" [modal]="true"
+          [style]="{width: '20rem'}" [draggable]="false" [resizable]="false">
   <div class="flex flex-column gap-3 pt-2">
-    <div *ngFor="let entry of classificationColors; let i = index"
-         class="flex align-items-center gap-3">
-      <span class="font-medium flex-1">{{ entry.label }}</span>
-      <hex-color-picker [color]="entry.color"
-                        (colorChange)="classificationColors[i].color = $event">
-      </hex-color-picker>
-    </div>
-    <p *ngIf="classificationColors.length === 0" class="text-color-secondary m-0">
-      No classifications found in the region table.
-    </p>
+    <span>Outline colour for the
+      <b>{{ selectedRegions?.length || 0 }}</b> selected region(s):</span>
+    <hex-color-picker [color]="selectedColor"
+                      (colorChange)="selectedColor = $event"></hex-color-picker>
   </div>
   <ng-template pTemplate="footer">
     <p-button label="Cancel" icon="pi pi-times" [text]="true" (onClick)="showColorDialog = false">
     </p-button>
-    <p-button label="Apply" icon="pi pi-check" (onClick)="applyClassificationColors()">
+    <p-button label="Apply" icon="pi pi-check" (onClick)="applyColorToSelected()">
     </p-button>
   </ng-template>
 </p-dialog>
@@ -280,12 +275,11 @@
 
   <h3>Colours</h3>
   <ul>
-    <li><b>Per region</b> — the <b>Color</b> column sets one region's outline
+    <li><b>One region</b> — the <b>Color</b> column sets a single region's outline
       colour (see "The table columns" above).</li>
-    <li><i class="pi pi-palette"></i> <b>Per classification</b> — edit the colour
-      of <b>every classification</b> present in the table from one dialog (no
-      selection required). Applying recolours all regions of that class and
-      remembers the colour for future regions with the same label.</li>
+    <li><i class="pi pi-palette"></i> <b>Selected regions</b> — select one or more
+      rows, then use the palette button to set the outline colour of <b>all the
+      selected regions</b> at once.</li>
   </ul>
 
   <h3>Region actions (right-click the diagram)</h3>

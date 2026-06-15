@@ -1090,6 +1090,28 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
     expect(component.regionArea(rect())).toContain('µm²'); // would have been px² before
   });
 
+  it('applyColorToSelected recolours every selected region and commits', () => {
+    const a = poly(); const b = rect();
+    (component as any).regions = [a, b];
+    component.selectedRegions = [a, b];
+    const spy = api.setAnnotationRegions as jest.Mock;
+    spy.mockClear();
+    component.selectedColor = '#abcdef';
+    component.applyColorToSelected();
+    expect(a.color).toBe('#abcdef');
+    expect(b.color).toBe('#abcdef');
+    expect(spy).toHaveBeenCalled();
+    expect(component.showColorDialog).toBe(false);
+  });
+
+  it('openColorDialog seeds the picker from the first selected region', () => {
+    const a = poly(); a.color = '#112233';
+    component.selectedRegions = [a];
+    component.openColorDialog();
+    expect(component.selectedColor).toBe('#112233');
+    expect(component.showColorDialog).toBe(true);
+  });
+
   it('selectAllRegions selects every row and syncs the plot', () => {
     (component as any).regions = [poly(), rect()];
     const spy = api.setSelectedRegions as jest.Mock;
