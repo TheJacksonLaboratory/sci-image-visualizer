@@ -5,6 +5,7 @@ import { Subject, Subscription } from 'rxjs';
 import { debounceTime, switchMap } from 'rxjs/operators';
 
 import { Polygon, Rectangle, Region } from '../models/region';
+import { IImageMetadata } from '../contracts/image.contract';
 import { ConfirmationService, MessageService } from 'primeng/api';
 import { IRegionEditorApi, REGION_EDITOR_API } from '../contracts/region-editor-api.contract';
 import { RegionIoPort, REGION_IO_PORT } from '../contracts/ports/region-io.port';
@@ -133,10 +134,15 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       error: () => { this.saveAsFileExists = false; },
     });
 
-    // Physical pixel size of the active image (for region areas in µm²).
+    // Physical pixel size of the active image (for region areas in µm²/mm²).
+    // Mirror PlotlyService.currentMpp: the calibration may sit on any channel
+    // entry, not necessarily [0], so pick the first entry with a positive mppX
+    // rather than reading [0] blindly. Fall back to square pixels (mppY = mppX)
+    // when only one axis is reported.
     this._metaSub = this.regionApi.getImageMeta().subscribe((meta) => {
-      this.mppX = meta?.[0]?.mppX ?? undefined;
-      this.mppY = meta?.[0]?.mppY ?? undefined;
+      const { mppX, mppY } = this.pickMpp(meta);
+      this.mppX = mppX;
+      this.mppY = mppY;
     });
 
     this._selectedIdxSub = this.regionApi.getSelectedRegions$().subscribe((selected) => {
@@ -476,6 +482,22 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       return um2 >= 1e6 ? `${this.fmtArea(um2 / 1e6)} mm²` : `${this.fmtArea(um2)} µm²`;
     }
     return `${this.fmtArea(px)} px²`;
+  }
+
+  /**
+   * Choose the physical pixel size (µm/pixel) for area display from the image
+   * meta. The calibration may sit on any channel entry — not necessarily [0] —
+   * so pick the first entry with a positive mppX (mirrors
+   * PlotlyService.currentMpp). Falls back to square pixels (mppY = mppX) when
+   * only one axis is reported, so a scaled image shows µm²/mm² rather than px².
+   */
+  private pickMpp(meta: IImageMetadata[] | undefined): { mppX?: number; mppY?: number } {
+    const m = Array.isArray(meta)
+      ? (meta.find((e) => e && (e.mppX ?? 0) > 0) ?? meta[0])
+      : undefined;
+    const mx = m && (m.mppX ?? 0) > 0 ? (m.mppX as number) : undefined;
+    const my = m && (m.mppY ?? 0) > 0 ? (m.mppY as number) : undefined;
+    return { mppX: mx, mppY: my ?? mx };
   }
 
   /** Pixel area: width·height for rectangles, shoelace formula for polygons.
