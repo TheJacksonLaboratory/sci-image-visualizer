@@ -453,6 +453,10 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     this.descriptor = d;
     this.infoB64 = loaded.infoB64;
     this.currentZ = loaded.z;
+    // The descriptor's physical pixel size (server Bio-Formats `/tiles/info`) is
+    // authoritative — push it into the shared meta so the Region Editor reports
+    // areas in µm²/mm², matching the scale bar built from `d.mppX` below.
+    this.store.setPhysicalPixelSize(d.mppX, d.mppY);
     // Use the SAME grayscale flag the colormap dropdown / Plotly use
     // (imageInfo.isGrayscale ← rgbChannels === 1). The descriptor's `channels`
     // (channelCount) diverges from rgbChannels for stacks, which left grayscale

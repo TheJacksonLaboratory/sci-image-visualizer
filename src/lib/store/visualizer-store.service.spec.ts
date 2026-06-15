@@ -59,3 +59,37 @@ describe('VisualizerStore.resetChannelState', () => {
     });
   });
 });
+
+describe('VisualizerStore.setPhysicalPixelSize', () => {
+  function latestMeta(store: VisualizerStore): any[] {
+    let meta: any[] = [];
+    store.getImageMeta().subscribe((m) => (meta = m));
+    return meta;
+  }
+
+  it('patches mpp onto the current meta and re-emits (for unscaled file-info)', () => {
+    const store = new VisualizerStore();
+    store.setImageMeta([{ channelCount: 1, rgbChannels: 1 }] as any);
+    store.setPhysicalPixelSize(0.5, 0.5);
+    const meta = latestMeta(store);
+    expect(meta[0].mppX).toBe(0.5);
+    expect(meta[0].mppY).toBe(0.5);
+    expect(meta[0].channelCount).toBe(1); // existing fields preserved
+  });
+
+  it('does not change the derived channel count (no clobber)', () => {
+    const store = new VisualizerStore();
+    store.setImageMeta([{ channelCount: 3, rgbChannels: 1 }] as any);
+    store.setChannelState(0, { color: '#123456' });
+    store.setPhysicalPixelSize(0.5, 0.5);
+    expect(store.currentChannelStates()[0].color).toBe('#123456'); // edits survive
+    expect(store.currentChannelStates().length).toBe(3);
+  });
+
+  it('is a no-op when neither axis is positive', () => {
+    const store = new VisualizerStore();
+    store.setImageMeta([{ channelCount: 1, rgbChannels: 1 }] as any);
+    store.setPhysicalPixelSize(0, undefined);
+    expect(latestMeta(store)[0].mppX).toBeUndefined();
+  });
+});

@@ -137,6 +137,24 @@ export class VisualizerStore {
   getImageMeta(): Observable<IImageMetadata[]> {
     return this.imageMeta$.asObservable();
   }
+
+  /**
+   * Patch the physical pixel size (µm/pixel) onto the current image meta and
+   * re-emit, without touching the derived channels. The OSD tile descriptor
+   * (from the server's Bio-Formats `/tiles/info`) is authoritative for scaled
+   * images — `imageInfo.imageMeta` often carries no mpp — so the renderer feeds
+   * it here once the descriptor loads, letting area/scale consumers (the Region
+   * Editor) show µm²/mm² instead of px². No-op when neither axis is positive.
+   */
+  setPhysicalPixelSize(mppX?: number, mppY?: number): void {
+    const hasX = (mppX ?? 0) > 0, hasY = (mppY ?? 0) > 0;
+    if (!hasX && !hasY) return;
+    const cur = this.imageMeta$.value;
+    const meta = (cur && cur.length ? cur : [{} as IImageMetadata]).map((e) => ({ ...e }));
+    if (hasX) meta[0].mppX = mppX;
+    if (hasY) meta[0].mppY = mppY;
+    this.imageMeta$.next(meta);
+  }
   setImageMeta(imageMeta: IImageMetadata[]): void {
     this.imageMeta$.next(imageMeta);
     // Re-derive channels only when their structure changes (count), so a re-plot
