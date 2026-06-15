@@ -228,7 +228,7 @@
     Use the diagram toolbar tools to draw new regions:
     <i class="pi pi-stop"></i> rectangle,
     <object data="assets/icons/polyline.svg" width="14" height="14"></object> polyline,
-    <i class="pi pi-pencil"></i> freeform path, or
+    <i class="pi pi-pencil"></i> freeform path, brush, or
     <object data="assets/icons/wand.svg" width="14" height="14"></object> wand.
     Anything you draw appears immediately in the table, with the class name
     "<b>legend</b>" by default.
@@ -271,25 +271,34 @@
     <li><i class="pi pi-times-circle"></i> Delete every region on this image.</li>
   </ul>
 
-  <h3>Classification colours</h3>
+  <h3>Colours</h3>
   <ul>
-    <li><i class="pi pi-palette"></i> Edit the colour of <b>every classification</b>
-      present in the table from one dialog — no selection required. Each class gets
-      a colour swatch; applying recolours all regions of that class and remembers
-      the colour for future regions with the same label.</li>
+    <li><b>Per region</b> — the <b>Color</b> column sets one region's outline
+      colour (see "The table columns" above).</li>
+    <li><i class="pi pi-palette"></i> <b>Per classification</b> — edit the colour
+      of <b>every classification</b> present in the table from one dialog (no
+      selection required). Applying recolours all regions of that class and
+      remembers the colour for future regions with the same label.</li>
   </ul>
 
-  <h3>Per-row actions</h3>
+  <h3>Region actions (right-click the diagram)</h3>
+  <p>Right-click a region — or the current multi-selection — on the diagram for
+    the "Selected region(s)" actions:</p>
   <ul>
-    <li><i class="pi pi-trash"></i> at the end of a row deletes that one region.</li>
+    <li><b>Merge / group</b> — combine 2+ selected regions into one (it may end
+      up multi-part if the pieces don't touch).</li>
+    <li><b>Ungroup</b> — split a multi-part region back into separate regions.</li>
+    <li><b>Inverse</b> — replace the selection with everything outside it (the
+      regions become holes in the image rectangle).</li>
+    <li><b>Simplify</b> — reduce the vertex count (Douglas–Peucker) by a pixel
+      threshold; pick a preset or a custom value.</li>
+    <li><b>Convert to Bézier / to polygon</b> and <b>Delete</b>.</li>
   </ul>
 
   <h3>Display options</h3>
   <ul>
     <li><i class="pi pi-tag"></i> Toggle showing class labels on every
       region in the diagram (slower with many regions).</li>
-    <li>The colour swatch sets the <b>fill colour</b> applied to the active
-      region in the diagram.</li>
   </ul>
 
   <h3>Import / export</h3>
