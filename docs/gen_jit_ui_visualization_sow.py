@@ -1,6 +1,5 @@
-"""Generate JIT_UI_visualization_library_SOW.docx — sub-SOW for the jit-ui
-visualization rework and its extraction into the jax-image-visualization library
-(master SOW §2.2). Mirrors the style of gen_jit_service_modernization_sow.py."""
+"""Generate JIT_UI_visualization_library_SOW.docx — SOW for the jit-ui
+visualization rework and its extraction into the jax-image-visualization library."""
 import os
 from docx import Document
 from docx.shared import Pt, Inches
@@ -13,6 +12,9 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 OUT_PATH = os.path.join(_HERE, "JIT_UI_visualization_library_SOW.docx")
 ARCH_IMG = os.path.join(_HERE, "img", "jit-ui-visualization-architecture.png")
 REGION_IMG = os.path.join(_HERE, "img", "jit-ui-region-architecture.png")
+# Section 9 "Current visuals" — product screenshots, sized by width to the page.
+VIS_DIR = os.path.join(_HERE, "img", "sow-visuals")
+VIS_WIDTH = Inches(6.5)
 # Both diagrams are tall (portrait) ELK layouts. Each gets its own page (page
 # breaks around it) and is sized by height to fill that page — leaving just room
 # for the caption under it.
@@ -81,7 +83,7 @@ r.font.size = Pt(20)
 
 subtitle = doc.add_paragraph()
 subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
-r = subtitle.add_run("Statement of Work — Sub-SOW of §2.2")
+r = subtitle.add_run("Statement of Work")
 r.italic = True
 r.font.size = Pt(14)
 
@@ -98,8 +100,7 @@ labeled("Status", "Substantially delivered on the jit-ui 'openseadragon' branch;
 labeled("Owner", "Baha Elkassaby")
 labeled("Date", date.today().isoformat())
 labeled("Scope", "jit-ui (Angular 17 / Nx) — the visualization layer and the new buildable library 'jax-image-visualization'; backed by jit-service tile/histogram/export endpoints")
-labeled("Master SOW", "JIT_updates_integration_JDS_SOW §2.2 (Extract a UI plotting library from jit-ui)")
-labeled("Realized library name", "jax-image-visualization (Nx buildable library; supersedes the master SOW's placeholder name 'jit-plotting')")
+labeled("Realized library name", "jax-image-visualization (Nx buildable library)")
 labeled("Distribution", "npm under the @jax-data-science organization scope (Nx publishable library); package name TBD among image-visualization, jax-image-visualization, or jit-image-visualization")
 
 doc.add_paragraph()
@@ -108,8 +109,7 @@ doc.add_paragraph()
 h1("1. Executive summary")
 para(
     "This SOW covers the rework of the jit-ui visualization layer and its extraction into a standalone, "
-    "backend-neutral Angular library, jax-image-visualization. It realizes master SOW §2.2 (\"Extract a UI "
-    "plotting library from jit-ui\"), whose original placeholder name was jit-plotting."
+    "backend-neutral Angular library, jax-image-visualization."
 )
 para(
     "The visualization layer was redesigned around a single backend-neutral contract with two pluggable "
@@ -342,8 +342,43 @@ num("First downstream consumer — which JAX Data Science frontend proves reuse,
 
 # ---------------- 8. CHANGELOG ----------------
 h1("8. Changelog")
-labeled(date.today().isoformat(), "Initial draft. Captures the delivered visualization rework (contract + dual backends, regions/tools, plot-type framework, Channels and Histogram incl. 16-bit) and the in-progress library extraction (D6) and planned distribution (D7). Realizes master SOW §2.2.")
+labeled(date.today().isoformat(), "Initial draft. Captures the delivered visualization rework (contract + dual backends, regions/tools, plot-type framework, Channels and Histogram incl. 16-bit) and the in-progress library extraction (D6) and planned distribution (D7).")
 labeled(date.today().isoformat(), "Distribution decided: npm under the @jax-data-science org scope (Nx publishable). Package name to be chosen among image-visualization / jax-image-visualization / jit-image-visualization. Updated D7 and the open questions accordingly.")
+
+# ---------------- 9. CURRENT VISUALS ----------------
+h1("9. Current visuals")
+
+
+def visual(images, caption):
+    """Embed one or more screenshots (centered, width-fit) followed by an italic caption."""
+    for img in images:
+        doc.add_picture(os.path.join(VIS_DIR, img), width=VIS_WIDTH)
+        doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    cap = doc.add_paragraph()
+    cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    cap.add_run(caption).italic = True
+
+
+visual(
+    ["fig3-multichannel-fluorescence.png"],
+    "Figure 3 — Multi fluorescence image with 4 channels.",
+)
+visual(
+    ["fig4-region-polygon.png", "fig4-region-bezier.png", "fig4-region-classes.png"],
+    "Figure 4 — Region overlay with Bézier curve/Polygon shapes",
+)
+visual(
+    ["fig5-openseadragon-tiling.png"],
+    "Figure 5 — Large image visualization using OpenSeaDragon & tiling",
+)
+visual(
+    ["fig6-ct-stack.png", "fig6-ct-isosurface.png"],
+    "Figure 6 — CT 3d dataset (nii), as an image stack and an isosurface",
+)
+visual(
+    ["fig7-plotly-contour.png"],
+    "Figure 7 — Plotly Contour plotting",
+)
 
 doc.save(OUT_PATH)
 print(f"Wrote {OUT_PATH}")
