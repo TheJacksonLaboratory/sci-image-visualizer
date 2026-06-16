@@ -1420,12 +1420,6 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
             styleClass: active === 'deletepoint' ? activeClass : '',
             command: () => this.toggleDragMode('deletepoint'),
           },
-          {
-            label: 'Move region',
-            icon: 'region-move-icon',
-            styleClass: active === 'move' ? activeClass : '',
-            command: () => this.toggleDragMode('move'),
-          },
         );
       }
       // Bézier conversions + Delete are immediate selection *actions*, now in the

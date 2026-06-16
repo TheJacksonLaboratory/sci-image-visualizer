@@ -261,15 +261,6 @@
                [class]="activeDragMode === 'deletepoint' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
                style="width: 1rem"/>
         </p-button>
-        <p-button size="small"
-                  [text]="activeDragMode !== 'move'"
-                  pTooltip="Move the selected region"
-                  [escape]="false" tooltipPosition="bottom"
-                  (onClick)="toggleDragMode.emit('move')">
-          <img src="assets/plotting/region-move.svg"
-               [class]="activeDragMode === 'move' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
-               style="width: 1rem"/>
-        </p-button>
         <p-button size="small" [text]="true"
                   pTooltip="Convert the selected region to a smooth Bézier curve"
                   [escape]="false" tooltipPosition="bottom"
