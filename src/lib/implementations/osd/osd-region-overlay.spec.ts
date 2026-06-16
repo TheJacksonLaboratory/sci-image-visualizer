@@ -28,6 +28,7 @@ function fakeViewer() {
       viewerElementToImageCoordinates: (pos: any) => ({ x: pos.x, y: pos.y }),
     },
     setMouseNavEnabled: () => { /* noop */ },
+    gestureSettingsMouse: { dragToPan: true, clickToZoom: true, dblClickToZoom: true, flickEnabled: true },
     addHandler: () => { /* noop */ },
     removeHandler: () => { /* noop */ },
   };

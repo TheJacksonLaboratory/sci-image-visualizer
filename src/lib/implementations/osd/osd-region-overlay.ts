@@ -124,11 +124,21 @@ export class OsdRegionOverlay implements IRegionOverlay {
   setMode(mode: RegionToolMode): void {
     this.mode = mode;
     this.resetInProgress();
-    // Any active region tool takes over the pointer — OSD pan/zoom is disabled
-    // so dragging draws (and clicks select) instead of panning. With no tool,
-    // OSD navigates normally.
-    this.viewer.setMouseNavEnabled(mode === 'none');
-    this.tracker.setTracking(mode !== 'none');
+    // Any active region tool takes over click/drag so dragging draws (and clicks
+    // select) instead of panning. We toggle only the conflicting OSD gestures —
+    // NOT setMouseNavEnabled(false), which would disable the whole mouse tracker
+    // and kill scroll-to-zoom. Scroll-to-zoom therefore stays live while a tool
+    // is active. With no tool, OSD navigates normally. (jit-ui#94)
+    const toolActive = mode !== 'none';
+    const g = this.viewer.gestureSettingsMouse;
+    if (g) {
+      g.dragToPan = !toolActive;
+      g.clickToZoom = !toolActive;
+      g.dblClickToZoom = !toolActive;
+      g.flickEnabled = !toolActive;
+      // scrollToZoom & pinchToZoom stay enabled in both states.
+    }
+    this.tracker.setTracking(toolActive);
     this.updateCursor(false);
     this.redraw();
   }
