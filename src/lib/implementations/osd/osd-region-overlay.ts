@@ -28,6 +28,8 @@ const ZONE_CURSOR: Record<EditZone, string> = {
 };
 /** Screen-pixel tolerance for grabbing an edge/corner handle. */
 const EDIT_TOL = 8;
+/** Wheel zoom step per scroll tick — mirrors the viewer's `zoomPerScroll`. */
+const ZOOM_PER_SCROLL = 1.1;
 
 /**
  * OpenSeadragon implementation of {@link IRegionOverlay}.
@@ -100,6 +102,9 @@ export class OsdRegionOverlay implements IRegionOverlay {
     this.viewer.addHandler('animation', this.redrawHandler);
     this.viewer.addHandler('resize', this.redrawHandler);
     this.viewer.addHandler('rotate', this.redrawHandler);
+    // Keep wheel-zoom alive while a tool has mouse-nav disabled (see handler).
+    (this.viewer.element as HTMLElement | undefined)
+      ?.addEventListener('wheel', this.wheelZoomHandler, { passive: false });
 
     this.tracker = new this.osd.MouseTracker({
       element: this.viewer.canvas,
@@ -133,6 +138,27 @@ export class OsdRegionOverlay implements IRegionOverlay {
     this.redraw();
   }
 
+  /** Drive OSD zoom from the wheel while any tool owns the pointer.
+   *
+   * OSD's native scroll-zoom is part of mouse-nav, so `setMouseNavEnabled(false)`
+   * (used by every region tool and by the wand/brush/eraser/SAM tools) disables
+   * it. The covering-canvas tools also sit above the OSD canvas and swallow the
+   * wheel outright. This listener is bound once to the viewer element — an
+   * ancestor of both the OSD canvas and the tool overlays — and forwards the
+   * wheel to a cursor-centred zoom whenever mouse-nav is off. When nav is on (no
+   * tool active) it does nothing and OSD zooms natively. (jit-ui#94) */
+  private readonly wheelZoomHandler = (e: WheelEvent) => {
+    const vp = this.viewer?.viewport;
+    const el = this.viewer?.element as HTMLElement | undefined;
+    // Nav on → no tool active → let OSD handle scroll-zoom natively.
+    if (!vp || !el || e.deltaY === 0 || this.viewer.isMouseNavEnabled()) return;
+    e.preventDefault();
+    const rect = el.getBoundingClientRect();
+    const refPoint = vp.pointFromPixel(new this.osd.Point(e.clientX - rect.left, e.clientY - rect.top));
+    vp.zoomBy(e.deltaY < 0 ? ZOOM_PER_SCROLL : 1 / ZOOM_PER_SCROLL, refPoint);
+    vp.applyConstraints();
+  };
+
   /** Cursor feedback per mode (crosshair while drawing; pointer over a region
    *  in select mode). */
   private updateCursor(overRegion: boolean): void {
@@ -161,6 +187,8 @@ export class OsdRegionOverlay implements IRegionOverlay {
 
   destroy(): void {
     this.subs.unsubscribe();
+    (this.viewer.element as HTMLElement | undefined)
+      ?.removeEventListener('wheel', this.wheelZoomHandler);
     this.viewer.removeHandler('update-viewport', this.redrawHandler);
     this.viewer.removeHandler('animation', this.redrawHandler);
     this.viewer.removeHandler('resize', this.redrawHandler);
