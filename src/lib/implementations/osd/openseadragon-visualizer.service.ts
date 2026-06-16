@@ -1127,23 +1127,6 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     return this.regionStore.getGeoJsonString(regions);
   }
 
-  /** Hand pointer ownership to (or back from) a region tool.
-   *
-   * We deliberately do NOT call `setMouseNavEnabled(false)` — that disables
-   * OSD's entire mouse tracker, which kills scroll-to-zoom along with pan/click.
-   * Instead we turn off only the gestures that fight the tool (drag-to-pan,
-   * click/double-click-to-zoom, flick) and leave scroll-to-zoom (and pinch) on,
-   * so the user can still wheel-zoom while drawing or selecting. (jit-ui#94) */
-  private setToolPointerActive(active: boolean): void {
-    const g = (this.viewer as any)?.gestureSettingsMouse;
-    if (!g) return;
-    g.dragToPan = !active;
-    g.clickToZoom = !active;
-    g.dblClickToZoom = !active;
-    g.flickEnabled = !active;
-    // scrollToZoom & pinchToZoom stay enabled in both states.
-  }
-
   // ── IToolController ──────────────────────────────────────────────────
   // Wand + vertex eraser run over OSD via ICoordinateTransform. They share the
   // singleton tool services with Plotly, so we re-bind to our hosts on activate.
@@ -1152,9 +1135,9 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       this.wandTool.setMode(false);
       return;
     }
-    // Take click/drag from OSD so the drag draws instead of panning, but keep
-    // scroll-to-zoom live. (Restored when the overlay returns to 'none'.)
-    this.setToolPointerActive(true);
+    // Take the pointer from OSD so the drag draws instead of panning. (Nav is
+    // re-enabled when the region overlay returns to 'none' on tool switch.)
+    this.viewer?.setMouseNavEnabled(false);
     // The wand samples the rendered viewport — read back lazily on first use.
     this.viewportPixels = null;
     this.wandTool.bindHost(this.wandHost);
@@ -1171,9 +1154,8 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       this.brushTool.setMode(false);
       return;
     }
-    // Take click/drag from OSD so the drag paints instead of panning; scroll
-    // still zooms.
-    this.setToolPointerActive(true);
+    // Take the pointer from OSD so the drag paints instead of panning.
+    this.viewer?.setMouseNavEnabled(false);
     // The brush works in the rendered-viewport coordinate frame — read it back
     // lazily on first use, like the wand. It shares the wand's host.
     this.viewportPixels = null;
@@ -1185,7 +1167,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
   }
   setVertexEraserMode(active: boolean): void {
     if (active) {
-      this.setToolPointerActive(true); // tool takes click/drag; scroll still zooms
+      this.viewer?.setMouseNavEnabled(false); // tool takes the pointer
       this.viewportPixels = null;
       this.eraserTool.bindHost(this.eraserHost);
     }
@@ -1196,11 +1178,11 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
   }
   setZoomToBoxMode(active: boolean): void {
     if (active) {
-      this.setToolPointerActive(true); // the box drag must not pan; scroll still zooms
+      this.viewer?.setMouseNavEnabled(false); // the box drag must not pan
       this.zoomToBoxTool.bindHost(this.zoomBoxHost());
     }
     this.zoomToBoxTool.setMode(active);
-    if (!active) this.setToolPointerActive(false);
+    if (!active) this.viewer?.setMouseNavEnabled(true);
   }
   /** Box-prompted SAM: segment the drawn rectangles. The SAM tool reuses the
    *  wand host (viewport readback + coordinate transform + region store). */
@@ -1221,7 +1203,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
   }
   setSamPointMode(active: boolean): void {
     if (active) {
-      this.setToolPointerActive(true); // clicks add points, don't pan; scroll still zooms
+      this.viewer?.setMouseNavEnabled(false); // clicks add points, don't pan
       this.viewportPixels = null;
       this.samPointTool.bindHost(this.wandHost);
     }
