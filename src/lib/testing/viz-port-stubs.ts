@@ -39,5 +39,5 @@ export const VIZ_PORT_STUBS = [
       setDiagram: () => {},
     },
   },
-  { provide: VIZ_CONFIG, useValue: { useOsdForImage: true, slideCropServer: '' } },
+  { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
 ];

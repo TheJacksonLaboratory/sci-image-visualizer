@@ -5,8 +5,6 @@ import { InjectionToken } from '@angular/core';
  * via DI so the library never imports the app's `environment`.
  */
 export interface VizConfig {
-  /** Use OpenSeadragon for the Image plot type (kill switch; default true). */
-  useOsdForImage: boolean;
   /** Base URL of the tile/crop server (`/tile`, `/tiles/info`, zoom). */
   slideCropServer: string;
   /**

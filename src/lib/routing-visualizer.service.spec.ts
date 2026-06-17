@@ -118,17 +118,17 @@ describe('RoutingVisualizerService (characterization)', () => {
   let osd: any;
   let store: VisualizerStore;
 
-  function setup(useOsdForImage = true): void {
+  function setup(): void {
     plotly = mockBackend();
     osd = mockBackend();
-    TestBed.resetTestingModule(); // allow per-test re-setup (e.g. the kill-switch case)
+    TestBed.resetTestingModule();
     TestBed.configureTestingModule({
       providers: [
         RoutingVisualizerService,
         VisualizerStore,
         { provide: PlotlyService, useValue: plotly },
         { provide: OpenSeadragonVisualizerService, useValue: osd },
-        { provide: VIZ_CONFIG, useValue: { useOsdForImage, slideCropServer: '' } },
+        { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
       ],
     });
     router = TestBed.inject(RoutingVisualizerService);
@@ -156,13 +156,6 @@ describe('RoutingVisualizerService (characterization)', () => {
   it('always applies the per-image region cache through Plotly (setActiveImage), whichever backend renders', async () => {
     await router.plot('div', {}, IMAGE_INFO, 600, PlotType.IMAGE);
     expect(plotly.setActiveImage).toHaveBeenCalledWith(IMAGE_INFO);
-  });
-
-  it('kill switch: useOsdForImage=false sends IMAGE to Plotly', async () => {
-    setup(false);
-    await router.plot('div', {}, IMAGE_INFO, 600, PlotType.IMAGE);
-    expect(plotly.plot).toHaveBeenCalled();
-    expect(osd.plot).not.toHaveBeenCalled();
   });
 
   // ── teardown on backend switch ────────────────────────────────────────

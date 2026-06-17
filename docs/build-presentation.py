@@ -196,7 +196,7 @@ def slide_ports(prs, n, total):
         ("REGION_IO_PORT",
          "Selected filename, ROI-file existence check, GeoJSON save — bridges region import/export persistence."),
         ("VIZ_CONFIG",
-         "Backend base URL (slideCropServer) and feature flags (e.g. useOsdForImage)."),
+         "Backend base URL (slideCropServer) and optional UI hints (e.g. regionEditorWidthSelector)."),
     ]
     y = 1.7
     for name, desc in ports:

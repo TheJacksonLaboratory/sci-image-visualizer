@@ -30,7 +30,7 @@ import { CHANNEL_HISTOGRAM_API } from './contracts/channel-histogram-api.contrac
  *     { provide: IMAGE_STATE_PORT, useClass: MyImageStateAdapter },
  *     { provide: TILE_ACCESS_PORT, useClass: MyTileAccessAdapter },
  *     { provide: REGION_IO_PORT,   useClass: MyRegionIoAdapter },
- *     { provide: VIZ_CONFIG,       useValue: { useOsdForImage: true, slideCropServer: '' } },
+ *     { provide: VIZ_CONFIG,       useValue: { slideCropServer: '' } },
  *   ],
  * })
  * ```

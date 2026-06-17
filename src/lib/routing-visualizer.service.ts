@@ -1,10 +1,9 @@
-import { Injectable, Inject } from '@angular/core';
+import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Image } from 'image-js';
 
 import { IImageInfo, IImageMetadata } from './contracts/image.contract';
-import { VizConfig, VIZ_CONFIG } from './contracts/viz-config';
 import { Region } from './models/region';
 import { PlotlyService } from './implementations/plotly/plotly.service';
 import { OpenSeadragonVisualizerService } from './implementations/osd/openseadragon-visualizer.service';
@@ -30,9 +29,8 @@ import { VisualizerStore } from './store/visualizer-store.service';
  * shared store) so both backends stay in sync; OSD reads them to drive its own
  * overlay and tile recoloring.
  *
- * `environment.useOsdForImage` acts as a kill switch (default true): when off,
- * the Image type also forwards to Plotly. A failed OSD load flips it off for
- * the session so the image still renders.
+ * The Image type renders through OpenSeadragon; a failed OSD load falls back to
+ * Plotly for that image only (see `osdFellBack`) so it still renders.
  */
 /** Intensity-profile line ROIs are owned by the intensity tool, not the editor.
  *  Package-internal predicate (property-based so it also matches plain objects
@@ -72,9 +70,6 @@ function autoWindowFromHistogram(h: IHistogram, saturation: number): [number, nu
 @Injectable({ providedIn: 'root' })
 export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, IChannelHistogramApi {
 
-  /** Environment kill switch for the Image plot type (default on). Never flipped
-   *  by load failures — those are handled per-image by `osdFellBack`. */
-  private useOsdForImage: boolean;
   private currentPlotType: PlotType = PlotType.IMAGE;
   private lastRendered: IVisualizer | null = null;
   /** OSD failed for the *current* render cycle (e.g. a fresh file still caching
@@ -86,19 +81,16 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
 
   constructor(private plotly: PlotlyService,
               private osd: OpenSeadragonVisualizerService,
-              private store: VisualizerStore,
-              @Inject(VIZ_CONFIG) config: VizConfig) {
-    this.useOsdForImage = config.useOsdForImage !== false;
-  }
+              private store: VisualizerStore) {}
 
   private isImageType(t: PlotType): boolean {
     return t === PlotType.IMAGE;
   }
 
-  /** Backend to attempt for the image plot type this render (OSD unless the
-   *  kill switch is off or OSD already fell back this cycle). */
+  /** Backend to attempt for the image plot type this render (OSD unless OSD
+   *  already fell back this cycle). */
   private imageBackend(): IVisualizer {
-    return (this.useOsdForImage && this.isImageType(this.currentPlotType) && !this.osdFellBack)
+    return (this.isImageType(this.currentPlotType) && !this.osdFellBack)
       ? this.osd : this.plotly;
   }
 

@@ -180,7 +180,7 @@ table([
     ["TILE_ACCESS_PORT", "TileAccessAdapter (host)", "Selected image's base64 FileInfo, bearer auth headers, ROI-zoom and diagram-display selection. The OpenSeadragon backend uses it (with the VIZ_CONFIG base URL) to fetch tiles, histograms and exports from jit-service."],
     ["IMAGE_STATE_PORT", "ImageStateAdapter (host)", "Current image info, filename, loading and cache-progress, zoom flag and panel width (read + write). Bridges the viewer to the app's image/loading state so the right overlays and progress show."],
     ["REGION_IO_PORT", "RegionIoAdapter (host)", "Selected filename, ROI-file existence check and GeoJSON save. Bridges region import/export persistence to the app's storage."],
-    ["VIZ_CONFIG", "useValue (environment)", "Backend base URL (slideCropServer) and feature flags (e.g. useOsdForImage)."],
+    ["VIZ_CONFIG", "useValue (environment)", "Backend base URL (slideCropServer) and optional UI hints (e.g. regionEditorWidthSelector)."],
 ], header=["Token / port", "Provided by", "Responsibility"])
 para(
     "Because every host touch-point is one of these adapters, the library imports nothing from jit-ui. A "
