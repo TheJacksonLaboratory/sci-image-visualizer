@@ -208,9 +208,13 @@ export class WandToolService {
     const { x: dataX, y: dataY } = transform.clientToData(e.clientX, e.clientY);
     if (!Number.isFinite(dataX) || !Number.isFinite(dataY)) return;
 
-    // Plot heatmap/image traces use ratios[0] for both dx and dy.
+    // ratios = [xRatio, yRatio] from both backends. Use the X ratio for the
+    // column and the Y ratio for the row: they differ when the pixel aspect
+    // isn't 1:1 (e.g. a non-square OSD viewport), and reusing ratios[0] for
+    // both would distort the sampled region vertically. Fall back to the X
+    // ratio if only one was supplied.
     const rx = cached.ratios[0] || 1;
-    const ry = cached.ratios[0] || 1;
+    const ry = cached.ratios[1] || cached.ratios[0] || 1;
     const ox = cached.originX ?? 0;
     const oy = cached.originY ?? 0;
     const matrixX = (dataX - ox) / rx;
