@@ -135,23 +135,6 @@ describe('RegionEditorComponent', () => {
     expect(component.isRectangle(region)).toBe(false);
   });
 
-  it('should add a coordinate to a polygon', () => {
-    component.addPolygon();
-    const poly = component.regions[0].bounds as Polygon;
-    expect(poly.npoints).toBe(3);
-    component.addCoordinate(component.regions[0]);
-    expect(poly.npoints).toBe(4);
-    expect(poly.coordinates.length).toBe(4);
-  });
-
-  it('should delete a coordinate from a polygon', () => {
-    component.addPolygon();
-    const poly = component.regions[0].bounds as Polygon;
-    component.deleteCoordinate(component.regions[0], 1);
-    expect(poly.npoints).toBe(2);
-    expect(poly.coordinates.length).toBe(2);
-  });
-
   it('should round rectangle lengths to multiples of 512', () => {
     component.addRectangle();
     const rect = component.regions[0].bounds as Rectangle;
@@ -388,35 +371,6 @@ describe('RegionEditorComponent with shapes', () => {
       expect(component.editingLabelRegions.size).toBe(0);
     });
   });
-
-  describe('truncateForTooltip', () => {
-    it('returns an empty string for empty / falsy input', () => {
-      expect(component.truncateForTooltip('')).toBe('');
-      expect(component.truncateForTooltip(undefined as unknown as string)).toBe('');
-      expect(component.truncateForTooltip(null as unknown as string)).toBe('');
-    });
-
-    it('returns the value unchanged when shorter than the limit', () => {
-      const short = 'x:1, y:2';
-      expect(component.truncateForTooltip(short)).toBe(short);
-    });
-
-    it('returns the value unchanged at exactly the limit (100 chars)', () => {
-      const exact = 'a'.repeat(100);
-      expect(component.truncateForTooltip(exact)).toBe(exact);
-      expect(component.truncateForTooltip(exact).endsWith('…')).toBe(false);
-    });
-
-    it('truncates and appends an ellipsis when longer than the limit', () => {
-      const long = 'a'.repeat(250);
-      const result = component.truncateForTooltip(long);
-
-      expect(result.length).toBe(101); // 100 chars + ellipsis
-      expect(result.endsWith('…')).toBe(true);
-      expect(result.slice(0, 100)).toBe('a'.repeat(100));
-    });
-  });
-
 
   beforeEach(async () => {
     const mockVisualizer = MockService(RoutingVisualizerService, {
@@ -1044,19 +998,6 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
     (component as any).regions = [r];
     component.widthRectUpdate(r, { value: null });
     expect((r.bounds as Rectangle).width).toBe(30); // unchanged
-  });
-
-  it('addCoordinate / x|yCoordinateUpdate / deleteCoordinate edit polygon points', () => {
-    const r = poly();
-    (component as any).regions = [r];
-    component.addCoordinate(r);
-    expect((r.bounds as Polygon).npoints).toBe(5);
-    component.xCoordinateUpdate(r, 4, { value: 7 });
-    component.yCoordinateUpdate(r, 4, { value: 8 });
-    expect((r.bounds as Polygon).xpoints[4]).toBe(7);
-    expect((r.bounds as Polygon).ypoints[4]).toBe(8);
-    component.deleteCoordinate(r, 4);
-    expect((r.bounds as Polygon).npoints).toBe(4);
   });
 
   it('regionArea reports px² for rect + polygon, blank when degenerate', () => {

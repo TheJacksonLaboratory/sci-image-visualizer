@@ -18,11 +18,6 @@ import { RegionIoPort, REGION_IO_PORT } from '../contracts/ports/region-io.port'
   styleUrls: ['./region-editor.component.scss'],
 })
 export class RegionEditorComponent implements OnInit, OnDestroy {
-  /** Maximum number of characters shown in the coordinates tooltip
-   *  before it is truncated with an ellipsis. Keeps the tooltip readable
-   *  for freeform polygons that may contain hundreds of points. */
-  private static readonly TOOLTIP_MAX_LEN = 100;
-
   protected readonly Array = Array;
 
   @ViewChild('op') overlayPanel!: OverlayPanel;
@@ -423,45 +418,6 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       this.paginatorFirst = maxFirst;
     }
   }
-  addCoordinate(region: Region) {
-    const polygon = region.bounds;
-    if (polygon && polygon instanceof Polygon) {
-      polygon.coordinates.push([0, 0]);
-      polygon.xpoints.push(0);
-      polygon.ypoints.push(0);
-      polygon.npoints += 1;
-      this.setRegionsFromEditor();
-    }
-  }
-  xCoordinateUpdate(region: Region, coordIdx: number, event: any) {
-    const bounds = region.bounds;
-    if (bounds instanceof Polygon) {
-      bounds.coordinates[coordIdx][0] = event.value;
-      bounds.xpoints[coordIdx] = event.value;
-      this.setRegionsFromEditor();
-    }
-  }
-  yCoordinateUpdate(region: Region, coordIdx: number, event: any) {
-    const bounds = region.bounds;
-    if (bounds instanceof Polygon) {
-      bounds.coordinates[coordIdx][1] = event.value;
-      bounds.ypoints[coordIdx] = event.value;
-      this.setRegionsFromEditor();
-    }
-  }
-  deleteCoordinate(region: Region, ri: number) {
-    let coordinates: any[];
-    const bounds = region.bounds;
-    if (bounds instanceof Polygon) {
-      coordinates = bounds.coordinates;
-      coordinates.splice(ri, 1);
-      bounds.xpoints.splice(ri, 1);
-      bounds.ypoints.splice(ri, 1);
-      bounds.npoints = coordinates.length;
-      this.setRegionsFromEditor();
-    }
-  }
-
   changeShowShapeLabel(showLabel: boolean) {
     this.setRegionsFromEditor();
   }
@@ -596,13 +552,6 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       }
     }
     this.setRegionsFromEditor(this.fillColor);
-  }
-
-  truncateForTooltip(value: string): string {
-    if (!value) return '';
-    return value.length > RegionEditorComponent.TOOLTIP_MAX_LEN
-      ? value.slice(0, RegionEditorComponent.TOOLTIP_MAX_LEN) + '…'
-      : value;
   }
 
   showHelp() {
