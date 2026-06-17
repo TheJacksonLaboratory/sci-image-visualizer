@@ -224,11 +224,7 @@ export class PlotlyService implements IVisualizer {
     // The brush reuses the wand host (same coordinate frame + region access).
     this.brushTool.bindHost(this.wandHost);
     this.vertexEraserTool.bindHost(this.eraserHost);
-    this.zoomToBoxTool.bindHost({
-      getPlotDiv: () => this.plotDiv,
-      pixelToData: (px, py) => this.zoomBoxPixelToData(px, py),
-      applyZoomToBox: (coords) => this.applyZoomToBox(coords),
-    });
+    this.bindZoomToBoxHost();
 
     this.imageCachedSubscription = this.state.isImageCached$().subscribe(imageCached => {
       this.imageCached = imageCached;
@@ -1209,7 +1205,21 @@ export class PlotlyService implements IVisualizer {
   }
 
   public setZoomToBoxMode(active: boolean) {
+    // The zoom-to-box tool is a root singleton shared with the OSD backend,
+    // which rebinds it to its own host on activation. Rebind to ours when we
+    // activate so a prior OSD zoom-to-box doesn't leave the singleton pointing
+    // at OSD's coordinate/zoom handlers (which would break box-zoom on heatmaps).
+    if (active) this.bindZoomToBoxHost();
     this.zoomToBoxTool.setMode(active);
+  }
+
+  /** Bind the shared zoom-to-box tool to this (Plotly) backend's host. */
+  private bindZoomToBoxHost() {
+    this.zoomToBoxTool.bindHost({
+      getPlotDiv: () => this.plotDiv,
+      pixelToData: (px, py) => this.zoomBoxPixelToData(px, py),
+      applyZoomToBox: (coords) => this.applyZoomToBox(coords),
+    });
   }
 
   /** Box-prompted SAM: segment the drawn rectangles. The SAM tool reuses the
