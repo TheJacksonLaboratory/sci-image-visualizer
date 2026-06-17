@@ -43,7 +43,7 @@
            Each added line gets the next bright palette colour and its own inset
            trace; select a line on the image and use the trash tool to remove it
            (and its trace). The lines are Region-based but excluded from the
-           Regions tab and exports. -->
+           Region Editor and exports. -->
       <ng-container *ngIf="isIntensityCapable">
         <span class="toolbar-separator"></span>
         <p-button size="small" [text]="true"
@@ -458,8 +458,10 @@
     <b>Image</b> view — a natively tiled, deeply zoomable raster (OpenSeadragon) with a
     navigator minimap and a physical-units scale bar. <b>Click the image to zoom</b> toward
     the clicked point; scroll to zoom and drag to pan. When a stack is open, a slice slider
-    (Image view) or image-mode toggle (other views) appears. Regions can also be edited from
-    the right-panel "<b>Regions</b>" tab. Drag the <i class="pi pi-bars"></i> handle to detach
+    (Image view) or image-mode toggle (other views) appears. Regions can also be edited in the
+    <b>Region Editor</b>, opened with the
+    <img src="assets/plotting/region-editor.svg" width="14" height="14" alt="Region Editor"/>
+    toolbar button as a floating dialog. Drag the <i class="pi pi-bars"></i> handle to detach
     this toolbar into a floating window.
   </p>
 
@@ -483,6 +485,10 @@
 
   <h3>Image manipulation tools</h3>
   <ul>
+    <li>"<b>Region Editor</b>" <img src="assets/plotting/region-editor.svg" width="15" height="15">:
+      opens the Region Editor as a floating, draggable dialog — a per-image table of every region
+      (class, colour, area) with bulk select/label/colour/delete and GeoJSON import/export. It stays
+      in sync with the image, so you can keep it open while drawing.</li>
     <li>"<b>Intensity profile lines</b>" <img src="assets/plotting/spline-chart.svg" width="15" height="15">
       (<i>work in progress — not yet stable</i>): adds a coloured line ROI; a floating inset
       chart plots intensity along each line, updates live as you drag it, and re-samples at the
@@ -570,7 +576,7 @@
       (<kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> or <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Y</kbd>):
       re-applies the most recently undone action. Performing a new region action clears what can be redone.</li>
     <li>"<b>Delete region</b>" <i class="pi pi-trash"></i> (<kbd>Del</kbd>): deletes the selected
-      region. This can also be done from the Regions tab.</li>
+      region. This can also be done from the Region Editor.</li>
   </ul>
 
   <h3>Region actions (right-click the image)</h3>
@@ -579,7 +585,7 @@
     the selection (they're not drawing modes) and are fully undo/redo-able:</p>
   <ul>
     <li>"<b>Select all regions</b>" <i class="pi pi-check-square"></i>: select every region on
-      the image (also in the Regions tab toolbar).</li>
+      the image (also in the Region Editor toolbar).</li>
     <li>"<b>Merge / group</b>": combine 2+ selected regions into one. If the pieces don't touch,
       the result is a single multi-part region (sparse "bits").</li>
     <li>"<b>Ungroup</b>": split a multi-part region back into one region per piece.</li>

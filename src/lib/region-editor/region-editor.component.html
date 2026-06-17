@@ -216,7 +216,11 @@
 <p-dialog header="Region editor help" [(visible)]="displayHelpDialog" [style]="{width: '50vw'}"
           [maximizable]="true" [draggable]="true" appendTo="body">
   <p>
-    The Regions tab lists every region drawn on the currently displayed image.
+    The Region Editor lists every region drawn on the currently displayed image.
+    Open it with the
+    <img src="assets/plotting/region-editor.svg" width="14" height="14" alt="Region Editor"/>
+    button in the diagram toolbar: it opens as a floating dialog you can drag,
+    resize, and leave open while you draw on the image.
     Regions are tracked <b>per image</b>: switching to another image hides
     these and shows that image's regions; switching back restores them.
     Edits in the table apply <b>live</b> to the diagram — there is no save or
