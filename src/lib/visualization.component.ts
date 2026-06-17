@@ -1321,19 +1321,23 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
       items.push(
         { label: 'Autoscale', icon: 'pi pi-window-maximize', command: () => this.autoscaleImage() },
         { separator: true },
-        {
+      );
+      // 'Zoom selection' is Plotly's rubber-band zoom; it doesn't apply to the
+      // OpenSeadragon-backed Image view (use 'Zoom to box' there instead).
+      if (!this.isImageView) {
+        items.push({
           label: 'Zoom selection',
           icon: 'pi pi-search',
           styleClass: active === 'zoom' ? activeClass : '',
           command: () => this.toggleDragMode('zoom'),
-        },
-        {
-          label: 'Zoom to box',
-          icon: 'zoom-box-off-icon',
-          styleClass: active === 'zoomToBox' ? activeClass : '',
-          command: () => this.toggleDragMode('zoomToBox'),
-        },
-      );
+        });
+      }
+      items.push({
+        label: 'Zoom to box',
+        icon: 'zoom-box-off-icon',
+        styleClass: active === 'zoomToBox' ? activeClass : '',
+        command: () => this.toggleDragMode('zoomToBox'),
+      });
     }
     if (this.isHeatmap) {
       items.push({
@@ -1379,7 +1383,13 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
         { label: 'Zoom out', icon: 'pi pi-search-minus', command: () => this.zoomOut() },
         { separator: true },
         {
-          label: 'Freeform region',
+          label: 'Select',
+          icon: 'pi pi-arrow-up-right',
+          styleClass: active === 'select' ? activeClass : '',
+          command: () => this.toggleDragMode('select'),
+        },
+        {
+          label: 'Freeform',
           icon: 'pi pi-pencil',
           styleClass: active === 'drawclosedpath' ? activeClass : '',
           command: () => this.toggleDragMode('drawclosedpath'),
@@ -1397,7 +1407,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
           command: () => this.toggleDragMode('drawopenpath'),
         },
         {
-          label: 'Rectangular region',
+          label: 'Rectangle',
           icon: 'pi pi-stop',
           styleClass: active === 'drawrect' ? activeClass : '',
           command: () => this.toggleDragMode('drawrect'),
@@ -1413,12 +1423,6 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
           icon: 'pi pi-eraser',
           styleClass: active === 'eraseVertex' ? activeClass : '',
           command: () => this.toggleDragMode('eraseVertex'),
-        },
-        {
-          label: 'Select',
-          icon: 'pi pi-arrow-up-right',
-          styleClass: active === 'select' ? activeClass : '',
-          command: () => this.toggleDragMode('select'),
         },
       );
       // Vertex editing runs on the OpenSeadragon overlay, which
