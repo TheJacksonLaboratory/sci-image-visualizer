@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, AfterViewInit, EventEmitter, HostListener, Inject, Input, NgZone, OnDestroy, OnInit, Output, ViewChild } from '@angular/core';
+import { ChangeDetectorRef, Component, AfterViewInit, EventEmitter, HostListener, Inject, Input, NgZone, OnDestroy, OnInit, Optional, Output, ViewChild } from '@angular/core';
 
 import { BehaviorSubject, Subject, Subscription } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
@@ -20,6 +20,7 @@ import { SamPointToolService } from './toolbar/segmentation/sam-point-tool.servi
 import { CellSegmentToolService } from './toolbar/segmentation/cell-segment-tool.service';
 import { RegionToolMode } from './contracts/region-overlay.contract';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from './contracts/toolbar-config';
+import { VIZ_CONFIG, VizConfig } from './contracts/viz-config';
 
 /** Per-instance plot-div id source. The mount element's id must be unique so two
  *  live viewers (e.g. the main diagram + a modal preview) don't collide on the
@@ -133,6 +134,12 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   selectedColormap!: any;
   /** Channels & Histogram dialog visibility (opened from the toolbar). */
   showChannelHistogram = false;
+  /** Region Editor dialog visibility (opened from the toolbar). */
+  showRegionEditor = false;
+  /** Region Editor dialog width. On open it is set to the configured host
+   *  element's current width, or — when no selector is configured / the element
+   *  isn't found — to a quarter of the page (see openRegionEditor). */
+  regionEditorWidth = '25vw';
   stackOptions = [
     { name: 'Single image', val: 'false' },
     { name: 'Stack', val: 'true' },
@@ -211,6 +218,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     private cellSegmentTool: CellSegmentToolService,
     private samPointTool: SamPointToolService,
     private regionOps: RegionOpsService,
+    @Optional() @Inject(VIZ_CONFIG) private vizConfig?: VizConfig,
   ) {
     this.colormapsOptions = plotService.getColormapOptions();
     this.computePlotTypeOptions();
@@ -787,6 +795,22 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   /** Open the Channels & Histogram dialog (toolbar button). */
   openChannelHistogram() {
     this.showChannelHistogram = true;
+  }
+
+  /** Open the Region Editor dialog (toolbar button). The editor stays linked to
+   *  this plotting instance through the root RegionStore singleton, so it works
+   *  the same as the former right-panel Regions tab. */
+  openRegionEditor() {
+    // Size the dialog to match the host's configured element (e.g. the app's
+    // right panel) at open time. Measured once — it intentionally does not
+    // track later browser/split resizes. Falls back to a quarter of the page
+    // when no selector is configured or the element isn't present.
+    const selector = this.vizConfig?.regionEditorWidthSelector;
+    const width = selector
+      ? document.querySelector<HTMLElement>(selector)?.getBoundingClientRect().width
+      : undefined;
+    this.regionEditorWidth = width && width > 0 ? `${Math.round(width)}px` : '25vw';
+    this.showRegionEditor = true;
   }
 
   /**

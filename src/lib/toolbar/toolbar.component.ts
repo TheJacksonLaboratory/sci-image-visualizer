@@ -70,6 +70,7 @@ export class ToolbarComponent implements OnChanges {
   @Output() isoRangeChange = new EventEmitter<number[] | undefined>();
   /** Open the Channels & Histogram dialog (brightness/contrast, colormap, …). */
   @Output() openChannelHistogram = new EventEmitter<void>();
+  @Output() openRegionEditor = new EventEmitter<void>();
   @Output() selectStackOption = new EventEmitter<{ name: string; val: string }>();
   @Output() zScrub = new EventEmitter<number | undefined>();
   @Output() zSlide = new EventEmitter<number | undefined>();

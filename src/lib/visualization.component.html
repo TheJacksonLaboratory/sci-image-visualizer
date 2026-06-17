@@ -46,6 +46,7 @@
   (addProfileLine)="addProfileLine()"
   (isoRangeChange)="onIsoRangeChange($event)"
   (openChannelHistogram)="openChannelHistogram()"
+  (openRegionEditor)="openRegionEditor()"
   (selectStackOption)="selectStackOption($event)"
   (zScrub)="onZScrub($event)"
   (zSlide)="onZSlide($event)"
@@ -132,6 +133,19 @@
 
 <!-- Channels & Histogram: non-modal floating dialog opened from the toolbar. -->
 <channel-histogram [(visible)]="showChannelHistogram"></channel-histogram>
+
+<!-- Region Editor: non-modal, draggable, resizable floating dialog opened from
+     the toolbar (formerly the right-panel Regions tab). Modeless so regions can
+     still be drawn/selected on the plot while it's open; stays linked to this
+     plotting instance via the root RegionStore singleton. Opens over the right
+     side of the view. -->
+<p-dialog header="Region Editor" [(visible)]="showRegionEditor"
+          [modal]="false" [resizable]="true" [draggable]="true"
+          [maximizable]="true" appendTo="body" position="right"
+          [style]="{ width: regionEditorWidth, height: '70vh' }"
+          [contentStyle]="{ overflow: 'auto' }">
+  <region-editor></region-editor>
+</p-dialog>
 
 <!-- Simplify (Douglas–Peucker): custom px-threshold picker for the selected
      region(s), opened from the right-click "Simplify ▸ Custom…" action. -->
