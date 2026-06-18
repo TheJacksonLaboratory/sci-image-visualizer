@@ -197,13 +197,17 @@
   </ng-template>
 </p-dialog>
 
-<p-dialog header="Region colour" [(visible)]="showColorDialog" [modal]="true" appendTo="body"
-          [style]="{width: '20rem'}" [draggable]="false" [resizable]="false">
+<p-dialog header="Region colour" [(visible)]="showColorDialog" [modal]="false" appendTo="body"
+          [style]="{width: '24rem'}" [draggable]="true" [resizable]="false">
   <div class="flex flex-column gap-3 pt-2">
-    <span>Outline colour for the
+    <span>Outline colour per class for the
       <b>{{ selectedRegions?.length || 0 }}</b> selected region(s):</span>
-    <hex-color-picker [color]="selectedColor"
-                      (colorChange)="selectedColor = $event"></hex-color-picker>
+    <div *ngFor="let edit of classColorEdits; let i = index"
+         class="flex align-items-center gap-3">
+      <span class="font-medium flex-1">{{ edit.label || 'Unclassified' }}</span>
+      <hex-color-picker [color]="edit.color"
+                        (colorChange)="classColorEdits[i].color = $event"></hex-color-picker>
+    </div>
   </div>
   <ng-template pTemplate="footer">
     <p-button label="Cancel" icon="pi pi-times" [text]="true" (onClick)="showColorDialog = false">
@@ -282,8 +286,9 @@
     <li><b>One region</b> — the <b>Color</b> column sets a single region's outline
       colour (see "The table columns" above).</li>
     <li><i class="pi pi-palette"></i> <b>Selected regions</b> — select one or more
-      rows, then use the palette button to set the outline colour of <b>all the
-      selected regions</b> at once.</li>
+      rows, then use the palette button to set the outline colour <b>per class</b>:
+      the dialog shows one colour picker for each class present in the selection,
+      and applying recolours the selected regions of that class at once.</li>
   </ul>
 
   <h3>Region actions (right-click the diagram)</h3>

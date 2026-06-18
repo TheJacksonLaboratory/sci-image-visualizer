@@ -1031,26 +1031,49 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
     expect(component.regionArea(rect())).toContain('µm²'); // would have been px² before
   });
 
-  it('applyColorToSelected recolours every selected region and commits', () => {
-    const a = poly(); const b = rect();
-    (component as any).regions = [a, b];
-    component.selectedRegions = [a, b];
+  it('applyColorToSelected recolours each selected region by its class and commits', () => {
+    const a = poly(); a.label = 'Tumor';
+    const b = poly(); b.label = 'Tumor';
+    const c = rect(); c.label = 'Stroma';
+    (component as any).regions = [a, b, c];
+    component.selectedRegions = [a, b, c];
     const spy = api.setAnnotationRegions as jest.Mock;
     spy.mockClear();
-    component.selectedColor = '#abcdef';
+    component.classColorEdits = [
+      { label: 'Tumor', color: '#abcdef' },
+      { label: 'Stroma', color: '#123456' },
+    ];
     component.applyColorToSelected();
     expect(a.color).toBe('#abcdef');
     expect(b.color).toBe('#abcdef');
+    expect(c.color).toBe('#123456');
+    expect(component.labelColors.get('Tumor')).toBe('#abcdef');
+    expect(component.labelColors.get('Stroma')).toBe('#123456');
     expect(spy).toHaveBeenCalled();
     expect(component.showColorDialog).toBe(false);
   });
 
-  it('openColorDialog seeds the picker from the first selected region', () => {
-    const a = poly(); a.color = '#112233';
+  it('openColorDialog builds one colour editor per unique class in the selection', () => {
+    const a = poly(); a.label = 'Tumor'; a.color = '#112233';
+    const b = poly(); b.label = 'Tumor'; b.color = '#999999';
+    const c = poly(); c.label = 'Stroma'; c.color = '#445566';
+    const d = poly(); d.label = ''; d.color = '#778899';
+    component.selectedRegions = [a, b, c, d];
+    component.openColorDialog();
+    expect(component.classColorEdits).toEqual([
+      { label: 'Tumor', color: '#112233' },
+      { label: 'Stroma', color: '#445566' },
+      { label: '', color: '#778899' },
+    ]);
+    expect(component.showColorDialog).toBe(true);
+  });
+
+  it('openColorDialog seeds a class picker from the persisted label colour', () => {
+    const a = poly(); a.label = 'Tumor'; a.color = '#112233';
+    component.labelColors.set('Tumor', '#abcdef');
     component.selectedRegions = [a];
     component.openColorDialog();
-    expect(component.selectedColor).toBe('#112233');
-    expect(component.showColorDialog).toBe(true);
+    expect(component.classColorEdits).toEqual([{ label: 'Tumor', color: '#abcdef' }]);
   });
 
   it('selectAllRegions selects every row and syncs the plot', () => {

@@ -30,8 +30,10 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   fillColor!: string;
   displayHelpDialog = false;
   showColorDialog = false;
-  /** Colour chosen in the "edit colour of selected regions" dialog. */
-  selectedColor = '#00FFFF';
+  /** One colour editor per unique class among the selected regions, shown in the
+   *  "edit colour of selected regions" dialog. Unclassified regions (no label)
+   *  are grouped under a single entry with an empty `label`. */
+  classColorEdits: { label: string; color: string }[] = [];
   labelColors: Map<string, string> = new Map();
   selectedLabelColor = '';
   labelToEdit = '';
@@ -558,19 +560,36 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.displayHelpDialog = true;
   }
 
-  /** Open the colour picker for the currently-selected region(s), seeded with
-   *  the first selected region's colour. */
+  /** Open the colour dialog for the currently-selected region(s), building one
+   *  colour picker per unique class in the selection. Each picker is seeded with
+   *  the class's current colour (the label→colour map, falling back to the first
+   *  selected region of that class). */
   openColorDialog() {
     if (!this.selectedRegions?.length) return;
-    this.selectedColor = this.selectedRegions[0].color ?? this.shapeColor;
+    const seedByLabel = new Map<string, string>();
+    for (const region of this.selectedRegions) {
+      const label = region.label?.trim() ?? '';
+      if (seedByLabel.has(label)) continue;
+      seedByLabel.set(
+        label,
+        (label ? this.labelColors.get(label) : undefined) ?? region.color ?? this.shapeColor,
+      );
+    }
+    this.classColorEdits = [...seedByLabel].map(([label, color]) => ({ label, color }));
     this.showColorDialog = true;
   }
 
-  /** Apply the chosen colour to every selected region's outline and commit live. */
+  /** Apply each class's chosen colour to the selected regions of that class and
+   *  commit live. Remembers the colour per class so same-class regions added
+   *  later match. */
   applyColorToSelected() {
+    const colorByLabel = new Map(this.classColorEdits.map((e) => [e.label, e.color]));
     for (const region of this.selectedRegions ?? []) {
-      region.color = this.selectedColor;
-      if (region.label) this.labelColors.set(region.label, this.selectedColor);
+      const label = region.label?.trim() ?? '';
+      const color = colorByLabel.get(label);
+      if (!color) continue;
+      region.color = color;
+      if (label) this.labelColors.set(label, color);
     }
     this.setRegionsFromEditor();
     this.showColorDialog = false;
