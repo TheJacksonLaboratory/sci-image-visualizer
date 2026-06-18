@@ -353,13 +353,43 @@ table([
      "Semantic versioning + a documented breaking-change policy as part of D8; keep the public surface small and contract-first."],
 ], header=["Risk", "Likelihood", "Impact", "Mitigation"])
 
+para("The paragraphs below expand each row.", italic=True)
+labeled("Residual host coupling (Medium / Medium)",
+        "The library must import nothing from jit-ui, but a stray import, hardcoded path or environment reference "
+        "can survive the move and still compile inside the monorepo — only breaking when the package is consumed "
+        "elsewhere. The dependency-boundary lint rule turns such a leak into a CI failure; the DI ports keep every "
+        "app-specific behaviour injected rather than imported; and library-owned data interfaces (IImageInfo / "
+        "IImageMetadata) replace the host's concrete models. Boundary risk, mitigated by mechanical enforcement.")
+labeled("ng-packagr / AOT constraints (Medium / Low)",
+        "Angular library builds (ng-packagr, partial / Ivy compilation) are stricter than app builds; NG3001 fires "
+        "when the public API references a symbol that is not exported from the barrel — code that compiles as part "
+        "of the app but fails the library target. Impact is low because these are deterministic, well-understood "
+        "errors with known fixes, and were already hit and resolved during extraction; keeping the public surface in "
+        "src/index.ts and building the library in CI on every change catches regressions early.")
+labeled("OpenSeadragon tiling / recolor performance (Medium / Medium)",
+        "The client-side recolor pipeline (grayscale colormap LUT plus per-channel window/gamma) runs across "
+        "tiles × channels × slices, and a naive display change could invalidate far more than the visible region "
+        "— worst on the large multi-channel stacks the tool exists for. It degrades responsiveness, not data. A "
+        "precomputed recolor LUT (done) turns recolouring into a lookup; per-window-change invalidation can be scoped "
+        "to the visible slice; and per-channel tile counts are bounded to cap memory and work.")
+labeled("16-bit display fidelity (Low / Low)",
+        "Canvas and the viewer's tiles are 8-bit, so 16-bit images are shown as an 8-bit approximation — a concern "
+        "only if mistaken for full precision. It is inherent and bounded, and never alters the data: the "
+        "native-bit-depth histogram and windowing read true 16-bit values (computed server-side, since 8-bit tiles "
+        "cannot carry them) and the multi-band 16-bit TIFF export preserves them. The display approximation is documented.")
+labeled("Versioning / breaking changes (Medium / Medium)",
+        "Once published (D8) and consumed by a second frontend, any change to the public API can break those "
+        "consumers — and the larger the exposed surface, the more ways to break them. Semantic versioning plus a "
+        "documented breaking-change policy let consumers pin versions and anticipate majors, and keeping the surface "
+        "small and contract-first (IVisualizer + the DI tokens) minimises both the chance and the blast radius of a break.")
+
 # ---------------- 7. OPEN QUESTIONS ----------------
 h1("7. Open questions")
 num("npm publishing under @jax-data-science — confirm public npm vs a private/internal registry, plus the Nx publishable-library release setup.")
 num("Package name within the @jax-data-science scope — image-visualization, jax-image-visualization, or jit-image-visualization (i.e. @jax-data-science/<name>)?")
 num("Theming / customization API — how do downstream consumers override colours, tools, and the tile-source backend?")
 num("Which residual components (if any) are too jit-ui-coupled to move yet, and what is the deferral plan?")
-num("First downstream consumer — which JAX Data Science frontend proves reuse, and on what timeline?")
+num("First external consumer — jit-ui already consumes the library in-repo (the main server-backed viewer and the serverless pipeline preview), but it is the origin host using the workspace package. The open question is the first separate JAX Data Science frontend to consume the published package — proving cross-app reuse — and on what timeline.")
 
 # ---------------- 8. FUTURE WORK & INVESTIGATIONS ----------------
 h1("8. Future work & investigations")

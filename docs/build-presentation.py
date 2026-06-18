@@ -444,7 +444,7 @@ def slide_distribution(prs, n, total):
         "Public npm vs a private/internal registry — confirm the Nx publishable-library release setup.",
         "Theming / customization API — how do consumers override colours, tools, and the tile-source backend?",
         "Which residual components (if any) are too jit-ui-coupled to move yet — and the deferral plan.",
-        "First downstream consumer — which JAX Data Science frontend proves reuse, and on what timeline?",
+        "First external consumer — jit-ui already uses the library in-repo; which separate frontend consumes the published package (proving reuse), and when?",
     ], size=16)
     add_footer(slide, n, total)
 
