@@ -430,6 +430,28 @@ def slide_future_work(prs, n, total):
     add_footer(slide, n, total)
 
 
+def slide_mcp_server(prs, n, total):
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    add_title(slide, "Future work \u2014 Image-visualization MCP server",
+              subtitle="Drive the live viewer from a Claude / MCP client \u2014 a control bridge, not a renderer (jit-ui#97)")
+    # Control-flow strip.
+    panel(slide, 0.6, 1.55, 12.1, 0.8)
+    flow = slide.shapes.add_textbox(Inches(0.8), Inches(1.72), Inches(11.7), Inches(0.5))
+    set_text(flow.text_frame,
+             "Claude / MCP client  \u2192  jax-image-viz-mcp (Node, MCP stdio/SSE)  \u2192  \u2026  \u2192  "
+             "RoutingVisualizerService  (live browser tab)",
+             size=13, bold=True, color=COLOR_HEADER, align=PP_ALIGN.CENTER)
+    body = slide.shapes.add_textbox(Inches(0.6), Inches(2.6), Inches(12.1), Inches(4.0))
+    add_bullets(body.text_frame, [
+        "Not a stateless plot generator \u2014 this is a stateful, browser-resident viewer (OpenSeadragon + Plotly). \u201cControl the plotting\u201d means driving the live UI, not rendering a file.",
+        "The control surface already exists \u2014 the whole UI runs through one backend-neutral IVisualizer contract (~80 methods); the server exposes that, it doesn't invent a new API.",
+        "Tools generated from one command catalogue \u2014 viz.loadImage, viz.setPlotType, viz.setColormap, viz.setRegionsGeoJson, viz.segmentRectangles[Cellpose], viz.getScreenshotPng\u2026 \u2014 capability-gated so Claude is never offered a no-op tool.",
+        "MVP: getState + 5 commands (load \u2192 setPlotType \u2192 setColormap \u2192 setRegionsGeoJson \u2192 getScreenshot) proves the transport / handshake / serializable boundary before expanding the catalogue.",
+        "Security: the channel sits behind oauth2-proxy + Auth0 with a viewerId handshake; ships dev/flagged first, hardened before any controlled deployment.",
+    ], size=13)
+    add_footer(slide, n, total)
+
+
 def slide_close(prs, n, total):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     t = slide.shapes.add_textbox(Inches(0.8), Inches(2.4), Inches(12.0), Inches(1.6))
@@ -462,6 +484,7 @@ def build():
         slide_dedicated_repo,
         slide_distribution,
         slide_future_work,
+        slide_mcp_server,
         slide_close,
     ]
     total = len(slide_makers)

@@ -143,7 +143,6 @@ _cap = doc.add_paragraph()
 _cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
 _cr = _cap.add_run("Figure 1 — jit-ui visualization architecture (jax-image-visualization).")
 _cr.italic = True
-doc.add_page_break()
 bullet("Host app: the diagram component embeds the <visualization> component, which wraps the plotting-toolbar (Toolbar) and the visualizer (#plot, where the active backend renders). The Channels and Histogram dialog and the region editor are sibling embeddable components.")
 bullet("Public API: IVisualizer (composed of IDataRenderer, IRegionStore, IToolController and IDisplayOptions, plus a ViewerCapabilities descriptor), IChannelHistogramApi (CHANNEL_HISTOGRAM_API) and IRegionEditorApi — plus the DI ports TILE_ACCESS_PORT, IMAGE_STATE_PORT, REGION_IO_PORT and VIZ_CONFIG. Components consume the tokens; the host provides the ports (see 1.2).")
 bullet("Router: RoutingVisualizerService implements the three API tokens (the host binds them useExisting), injects the ports, and routes the Image plot type to OpenSeadragon and the scientific plot types to Plotly.")
@@ -166,7 +165,6 @@ _cap2 = doc.add_paragraph()
 _cap2.alignment = WD_ALIGN_PARAGRAPH.CENTER
 _cr2 = _cap2.add_run("Figure 2 — region interfaces and region tools (jax-image-visualization).")
 _cr2.italic = True
-doc.add_page_break()
 
 h2("1.2 Host integration: DI ports and adapters")
 para(
@@ -358,8 +356,7 @@ num("Image-visualization MCP server — a Model Context Protocol (MCP) server th
     "IVisualizer behind an opt-in entry point, a WebSocket the host opens, and a separate Node MCP "
     "server package mapping one tool per command — with an optional headless (Playwright) variant "
     "for automation and the stateless plot-generator approach explicitly declined. Builds on the "
-    "stable library contract (D7). Full design: docs/mcp-control-design.md; statement of work: "
-    "JIT_image_visualization_MCP_server_SOW.docx.")
+    "stable library contract (D7). Full design: docs/mcp-control-design.md.")
 num("More segmentation models — extend the segmentation toolset (D6) with additional fine-tuned "
     "Cellpose-SAM variants for other tissue/cell domains and further promptable models (e.g. SAM3) "
     "as their quantized ONNX exports are published. New models drop into the existing pluggable "
