@@ -209,6 +209,39 @@ def slide_ports(prs, n, total):
     add_footer(slide, n, total)
 
 
+def slide_consume(prs, n, total):
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    add_title(slide, "Consuming the library \u2014 two modes",
+              subtitle="Same <visualization> + 4 DI ports; IImageInfo.tiled selects how pixels are sourced")
+    col_y, col_h = 1.7, 4.3
+    panel(slide, 0.6, col_y, 6.0, col_h)
+    ha = slide.shapes.add_textbox(Inches(0.85), Inches(col_y + 0.18), Inches(5.5), Inches(0.4))
+    set_text(ha.text_frame, "Mode A \u2014 server-backed", size=18, bold=True, color=COLOR_HEADER)
+    ba = slide.shapes.add_textbox(Inches(0.85), Inches(col_y + 0.8), Inches(5.5), Inches(col_h - 1.0))
+    add_bullets(ba.text_frame, [
+        "Host runs a jit-service-like backend; IMAGE_STATE_PORT emits IImageInfo with tiled: true + urls[] (/preview).",
+        "OSD tiles via /tiles/info + /tile off VIZ_CONFIG.slideCropServer; TILE_ACCESS_PORT supplies the info blob, auth, and /zoom/region hi-def re-fetch.",
+        "Endpoints: /preview, /tiles/info, /tile (+ /zoom/region, /histogram, /export/tiff for 16-bit).",
+        "For whole-slide, deep-zoom, multi-channel 16-bit. (jit-ui uses this.)",
+    ], size=13)
+    panel(slide, 6.9, col_y, 5.8, col_h)
+    hb = slide.shapes.add_textbox(Inches(7.15), Inches(col_y + 0.18), Inches(5.3), Inches(0.4))
+    set_text(hb.text_frame, "Mode B \u2014 serverless", size=18, bold=True, color=COLOR_HEADER)
+    bb = slide.shapes.add_textbox(Inches(7.15), Inches(col_y + 0.8), Inches(5.3), Inches(col_h - 1.0))
+    add_bullets(bb.text_frame, [
+        "No backend: host turns in-memory pixels into a blob:/data: URL; IMAGE_STATE_PORT emits tiled: false + urls: [thatUrl].",
+        "OSD loads that single image directly \u2014 no /tiles/info, /tile, or slideCropServer. The other ports are no-ops.",
+        "Host builds ~no server code \u2014 just the image-state adapter + stubs.",
+        "For viewport-sized, decoded images (e.g. the pipeline preview). Trade-off: no deep tiles / hi-def re-fetch / 16-bit.",
+    ], size=13)
+    note = slide.shapes.add_textbox(Inches(0.6), Inches(6.25), Inches(12.1), Inches(0.5))
+    set_text(note.text_frame,
+             "Switch: IImageInfo.tiled === false \u2192 direct single-image load (B); otherwise OSD tiles via the server (A). "
+             "Same regions / tools / Channels either way.",
+             size=12, color=COLOR_SECONDARY)
+    add_footer(slide, n, total)
+
+
 def slide_scope(prs, n, total):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     add_title(slide, "Scope")
@@ -475,6 +508,7 @@ def build():
         slide_summary,
         slide_architecture,
         slide_ports,
+        slide_consume,
         slide_scope,
         slide_deliverables,
         slide_visuals_a,

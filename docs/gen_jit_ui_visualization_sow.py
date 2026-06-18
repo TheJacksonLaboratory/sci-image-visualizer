@@ -187,6 +187,28 @@ para(
     "implementation) — with no library source changes."
 )
 
+h2("1.3 Consuming the library: server-backed and serverless")
+para(
+    "An external app embeds <visualization> (and optionally <region-editor> / <channel-histogram>) and "
+    "provides the four DI ports plus VIZ_CONFIG; the library imports nothing from the host. One field on the "
+    "image descriptor the host streams from IMAGE_STATE_PORT — IImageInfo.tiled — selects how pixels are "
+    "sourced, so the same component supports two consumption modes with no library changes."
+)
+para("Mode A — server-backed (a jit-service-like backend that returns URLs).", bold=True)
+bullet("The host's IMAGE_STATE_PORT emits IImageInfo with tiled: true (the default) and urls[zIndex] pointing at the backend's downscaled overview (/preview); optionally smallUrls[] (fast placeholder) and mppX/Y (scale bar).")
+bullet("OpenSeadragon drives its tile pipeline: it polls /tiles/info and fetches /tile off VIZ_CONFIG.slideCropServer, using the base64 info from TILE_ACCESS_PORT.getSelectedInfoB64() and TILE_ACCESS_PORT.getAuthHeaders(); Plotly's high-resolution re-fetch on zoom goes through TILE_ACCESS_PORT.zoomOnRegion() (/zoom/region). Region persistence goes through REGION_IO_PORT.saveGeoJson().")
+bullet("The host builds a backend exposing (at minimum) /preview, /tiles/info, /tile — plus /zoom/region, /histogram and /export/tiff for Plotly hi-def zoom and true 16-bit. Endpoint shapes are the host's choice; the library only consumes the URL string and the port methods. This is the path for whole-slide / deeply-zoomable / multi-channel 16-bit imagery. (jit-ui uses this mode.)")
+para("Mode B — serverless (in-memory pixels, no backend).", bold=True)
+bullet("The host turns already-decoded pixels (canvas / ImageData) into a blob: or data: URL and emits IImageInfo with tiled: false and urls: [thatUrl], sized to the image's own pixels.")
+bullet("Because tiled is false, OpenSeadragon opens that single self-contained image directly — no /tiles/info, no /tile, no slideCropServer. The remaining ports are no-ops (TILE_ACCESS_PORT returns null/EMPTY/{}, REGION_IO_PORT returns false/void), and VIZ_CONFIG.slideCropServer is empty.")
+bullet("The host builds essentially no server code — just an IMAGE_STATE_PORT adapter that emits the blob/data URL with tiled: false, plus stub adapters. This is the path for viewport-sized, already-decoded images (e.g. the in-app image-processing-pipeline preview). Trade-off: no deep tiled zoom, no server-side hi-def re-fetch, and 8-bit display fidelity.")
+para(
+    "The decision is a single switch on the streamed descriptor — IImageInfo.tiled === false routes to the "
+    "direct single-image load (Mode B); otherwise OpenSeadragon tiles via the server (Mode A). Both modes use "
+    "the same component, regions/tools, and Channels and Histogram machinery. D7's example server + examples "
+    "ship a runnable reference for each path."
+)
+
 # ---------------- 2. SCOPE ----------------
 h1("2. Scope")
 h2("2.1 In scope")
