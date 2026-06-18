@@ -45,7 +45,7 @@ COLOR_SECONDARY = RGBColor(0x6E, 0x6E, 0x6E)
 COLOR_CHIP_BG = RGBColor(0xEE, 0xF1, 0xF7)
 
 STATUS_COLOR = {
-    "Delivered": COLOR_DELIVERED,
+    "Implemented": COLOR_DELIVERED,
     "In progress": COLOR_INPROGRESS,
     "Planned": COLOR_PLANNED,
 }
@@ -141,7 +141,7 @@ def slide_title(prs, total):
     set_text(m.text_frame,
              "Companion deck for JIT_UI_visualization_library_SOW   ·   "
              "library: jax-image-visualization\n"
-             "Status: substantially delivered and merged to master (PR #79); "
+             "Status: substantially implemented and merged to master (PR #79); "
              "library extraction in progress, distribution pending.",
              size=14, color=COLOR_SECONDARY)
 
@@ -157,7 +157,7 @@ def slide_summary(prs, n, total):
         "Plotly — the scientific plot types (heatmap, contour, scatter, surface, scatter-3D, isosurface).",
         "A backend-neutral region model + on-canvas tools that work identically on either backend.",
         "A Channels and Histogram tool: per-channel brightness/contrast, Fiji-style pseudo-colour, true 16-bit.",
-        "Extracted into the Nx buildable library jax-image-visualization — the host reaches everything app-specific through DI ports, so the package carries no host coupling.",
+        "Extracted into the Nx library jax-image-visualization — app-specifics come via DI ports, so it imports nothing from jit-ui.",
     ], size=18)
     add_footer(slide, n, total)
 
@@ -169,9 +169,9 @@ def slide_architecture(prs, n, total):
     # Left: bullets. Right: the architecture diagram.
     left = slide.shapes.add_textbox(Inches(0.6), Inches(1.7), Inches(6.0), Inches(4.8))
     add_bullets(left.text_frame, [
-        "Public API: IVisualizer (IDataRenderer + IRegionStore + IToolController + IDisplayOptions + ViewerCapabilities), IChannelHistogramApi, IRegionEditorApi.",
-        "RoutingVisualizerService implements the API tokens and routes Image → OpenSeadragon, everything else → Plotly.",
-        "Both backends read one shared VisualizerStore (display / channel / colormap) and one RegionStore (regions, selection, class colours).",
+        "Public API: one IVisualizer contract, plus Channels-Histogram and Region-Editor APIs.",
+        "Router: Image → OpenSeadragon, every other plot type → Plotly.",
+        "Both backends share one display/colormap store and one region store.",
         "Capability gating: consumers call only what the active backend advertises.",
     ], size=15)
     arch = IMG / "jit-ui-visualization-architecture.png"
@@ -220,7 +220,7 @@ def slide_consume(prs, n, total):
     ba = slide.shapes.add_textbox(Inches(0.85), Inches(col_y + 0.8), Inches(5.5), Inches(col_h - 1.0))
     add_bullets(ba.text_frame, [
         "Host runs a jit-service-like backend; IMAGE_STATE_PORT emits IImageInfo with tiled: true + urls[] (/preview).",
-        "OSD tiles via /tiles/info + /tile off VIZ_CONFIG.slideCropServer; TILE_ACCESS_PORT supplies the info blob, auth, and /zoom/region hi-def re-fetch.",
+        "OSD tiles via /tiles/info + /tile off slideCropServer; TILE_ACCESS_PORT supplies the info blob, auth, and hi-def re-fetch.",
         "Endpoints: /preview, /tiles/info, /tile (+ /zoom/region, /histogram, /export/tiff for 16-bit).",
         "For whole-slide, deep-zoom, multi-channel 16-bit. (jit-ui uses this.)",
     ], size=13)
@@ -229,7 +229,7 @@ def slide_consume(prs, n, total):
     set_text(hb.text_frame, "Mode B \u2014 serverless", size=18, bold=True, color=COLOR_HEADER)
     bb = slide.shapes.add_textbox(Inches(7.15), Inches(col_y + 0.8), Inches(5.3), Inches(col_h - 1.0))
     add_bullets(bb.text_frame, [
-        "No backend: host turns in-memory pixels into a blob:/data: URL; IMAGE_STATE_PORT emits tiled: false + urls: [thatUrl].",
+        "No backend: host turns in-memory pixels into a blob/data URL; IMAGE_STATE_PORT emits tiled: false + that URL.",
         "OSD loads that single image directly \u2014 no /tiles/info, /tile, or slideCropServer. The other ports are no-ops.",
         "Host builds ~no server code \u2014 just the image-state adapter + stubs.",
         "For viewport-sized, decoded images (e.g. the pipeline preview). Trade-off: no deep tiles / hi-def re-fetch / 16-bit.",
@@ -295,16 +295,16 @@ def _deliverable_col(slide, x, y, w, items):
 def slide_deliverables(prs, n, total):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     add_title(slide, "Deliverables",
-              subtitle="'Delivered' = implemented, verified and merged to master")
+              subtitle="'Implemented' = built, verified and merged to master")
     _deliverable_col(slide, 0.6, 1.7, 6.0, [
-        ("D1", "Backend-neutral contract & router", "Delivered"),
-        ("D2", "OpenSeadragon backend + server tiles", "Delivered"),
-        ("D3", "Regions, on-canvas tools, GeoJSON I/O", "Delivered"),
-        ("D4", "Plot-type framework (Plotly, profiles)", "Delivered"),
+        ("D1", "Backend-neutral contract & router", "Implemented"),
+        ("D2", "OpenSeadragon backend + server tiles", "Implemented"),
+        ("D3", "Regions, on-canvas tools, GeoJSON I/O", "Implemented"),
+        ("D4", "Plot-type framework (Plotly, profiles)", "Implemented"),
     ])
     _deliverable_col(slide, 6.9, 1.7, 5.8, [
-        ("D5", "Channels & Histogram + true 16-bit", "Delivered"),
-        ("D6", "Browser SAM segmentation (box/point/Cellpose-SAM)", "Delivered"),
+        ("D5", "Channels & Histogram + true 16-bit", "Implemented"),
+        ("D6", "Browser SAM segmentation (box/point/Cellpose-SAM)", "Implemented"),
         ("D7", "Extraction into the Nx library", "In progress"),
         ("D8", "Distribution & downstream adoption", "Planned"),
     ])
@@ -346,14 +346,14 @@ def slide_visuals_b(prs, n, total):
 def slide_phasing(prs, n, total):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     add_title(slide, "Phasing & test coverage",
-              subtitle="Phases 0–4 delivered · Phase 5 in progress · Phase 6 planned")
+              subtitle="Phases 0–4 implemented · Phase 5 in progress · Phase 6 planned")
     left = slide.shapes.add_textbox(Inches(0.6), Inches(1.7), Inches(7.2), Inches(4.6))
     add_bullets(left.text_frame, [
-        "Phase 0 — Contract & router  [Delivered]",
-        "Phase 1 — OpenSeadragon image backend  [Delivered]",
-        "Phase 2 — Regions & tools  [Delivered]",
-        "Phase 3 — Plot-type framework  [Delivered]",
-        "Phase 4 — Channels & Histogram + 16-bit  [Delivered]",
+        "Phase 0 — Contract & router  [Implemented]",
+        "Phase 1 — OpenSeadragon image backend  [Implemented]",
+        "Phase 2 — Regions & tools  [Implemented]",
+        "Phase 3 — Plot-type framework  [Implemented]",
+        "Phase 4 — Channels & Histogram + 16-bit  [Implemented]",
         "Phase 5 — Library extraction hardening + examples  [In progress]",
         "Phase 6 — Distribution + downstream consumer  [Planned]",
     ], size=16)
@@ -424,12 +424,12 @@ def slide_dedicated_repo(prs, n, total):
 
     body = slide.shapes.add_textbox(Inches(0.6), Inches(3.2), Inches(12.1), Inches(3.6))
     add_bullets(body.text_frame, [
-        "Scale & identity — at ~20.6k LOC the viz lib is ~3.8× all three jds-ui-toolkit libs combined (components 2,963 + api-clients 2,146 + themes 380 ≈ 5,500) and ~7× the largest, components. It would dominate and reshape a toolkit built for small, shared UI pieces.",
-        "Heavy, specialized dependencies — OpenSeadragon, Plotly, image-js, onnxruntime-web (in-browser SAM/Cellpose segmentation), and optional cellpose-js. These large WebGL/WASM deps inflate install size, CI time, and the dependency surface for consumers that only want a button or a theme.",
-        "Independent release cadence — fast-moving features (OSD, regions, segmentation) need their own semver + breaking-change policy; a shared repo forces lock-step releases or per-package publishing that churns consumers of tiny libs.",
-        "External contributors / OSS readiness — a dedicated repo exposes only the publishable library (its own LICENSE, README, CHANGELOG, scoped issues/PRs, narrow access). A shared monorepo would expose unrelated internal libs (api-clients, internal components) — wider IP/security surface and CODEOWNERS complexity.",
-        "Focused CI & lean clones — build/test scoped to one package, no cross-package graph to configure; large doc/image assets (this deck alone is ~15 MB) stay out of every toolkit clone.",
-        "Clear ownership & decoupled consumption — consumers depend on a pinned, published npm package, not a workspace path. Monorepos pay off for tightly-coupled, co-released packages; this is a standalone, contract-first, reusable library with a different audience.",
+        "Scale — ~3.8× all toolkit libs combined, ~7× its largest. It would dominate a toolkit built for small, shared UI pieces.",
+        "Heavy deps — OpenSeadragon, Plotly, image-js, onnxruntime-web. Bloat install size and CI for consumers that just want a button or a theme.",
+        "Own release cadence — fast-moving features need their own semver; a shared repo forces lock-step releases.",
+        "External contributors / OSS — a dedicated repo exposes only the library (own LICENSE, issues, scoped access); a monorepo would expose unrelated internal libs.",
+        "Focused CI & lean clones — scoped build/test; keeps large doc/image assets out of every toolkit clone.",
+        "Clear ownership — consumers depend on a pinned npm package, not a workspace path. Monorepos suit tightly-coupled, co-released packages; this is standalone.",
     ], size=13)
     add_footer(slide, n, total)
 
@@ -455,10 +455,9 @@ def slide_future_work(prs, n, total):
               subtitle="Exploratory — not part of the committed deliverables (§3)")
     body = slide.shapes.add_textbox(Inches(0.6), Inches(1.7), Inches(12.1), Inches(4.8))
     add_bullets(body.text_frame, [
-        "More segmentation models (extends D6) — additional fine-tuned Cellpose-SAM variants for other tissue/cell domains, and further promptable models (e.g. SAM3). They drop into the existing pluggable registry, so adding one is largely export-and-host.",
-        "3D / z-stack segmentation — propagate SAM masks across slices with cross-slice linking, so a 2D prompt extends through a volume.",
-        "Image-visualization MCP server — expose the viewer as Model Context Protocol tools/resources so an LLM client can drive it programmatically (open an image, switch plot type, pan/zoom to a region, toggle channels/colormap, create/select/edit regions, read back the current view or region geometry).",
-        "Goal of the MCP server: agentic / natural-language control (e.g. “zoom to the largest region and export it as GeoJSON”) and headless automation. Builds on the stable library contract (D7); transport, scope, and security/auth boundaries TBD.",
+        "More segmentation models (extends D6) — more fine-tuned Cellpose-SAM variants and other promptable models (e.g. SAM3); they drop into the existing registry (export-and-host).",
+        "3D / z-stack segmentation — propagate SAM masks across slices, so a 2D prompt extends through a volume.",
+        "Image-visualization MCP server: see next slide.",
     ], size=15)
     add_footer(slide, n, total)
 
@@ -476,11 +475,12 @@ def slide_mcp_server(prs, n, total):
              size=13, bold=True, color=COLOR_HEADER, align=PP_ALIGN.CENTER)
     body = slide.shapes.add_textbox(Inches(0.6), Inches(2.6), Inches(12.1), Inches(4.0))
     add_bullets(body.text_frame, [
-        "Not a stateless plot generator \u2014 this is a stateful, browser-resident viewer (OpenSeadragon + Plotly). \u201cControl the plotting\u201d means driving the live UI, not rendering a file.",
-        "The control surface already exists \u2014 the whole UI runs through one backend-neutral IVisualizer contract (~80 methods); the server exposes that, it doesn't invent a new API.",
-        "Tools generated from one command catalogue \u2014 viz.loadImage, viz.setPlotType, viz.setColormap, viz.setRegionsGeoJson, viz.segmentRectangles[Cellpose], viz.getScreenshotPng\u2026 \u2014 capability-gated so Claude is never offered a no-op tool.",
-        "MVP: getState + 5 commands (load \u2192 setPlotType \u2192 setColormap \u2192 setRegionsGeoJson \u2192 getScreenshot) proves the transport / handshake / serializable boundary before expanding the catalogue.",
-        "Security: the channel sits behind oauth2-proxy + Auth0 with a viewerId handshake; ships dev/flagged first, hardened before any controlled deployment.",
+        "Expose the viewer as MCP tools so an LLM client can drive it \u2014 load, plot type, zoom, channels, regions, read-back.",
+        "Goal: agentic / natural-language control (e.g. \u201czoom to the largest region and export as GeoJSON\u201d) and headless automation. Builds on D7.",
+        "Control surface already exists \u2014 the UI runs through one IVisualizer contract (~80 methods); the server just exposes it.",
+        "Tools generated from one command catalogue (viz.loadImage, viz.setPlotType, viz.setRegionsGeoJson, viz.getScreenshotPng\u2026), capability-gated so Claude never sees a no-op tool.",
+        "MVP: getState + 5 commands (load \u2192 plot type \u2192 colormap \u2192 regions \u2192 screenshot) proves the bridge before expanding the catalogue.",
+        "Security: oauth2-proxy + Auth0 with a viewerId handshake; ships dev/flagged first, hardened before any deployment.",
     ], size=13)
     add_footer(slide, n, total)
 

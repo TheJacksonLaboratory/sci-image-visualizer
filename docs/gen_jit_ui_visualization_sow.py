@@ -96,7 +96,7 @@ r.font.size = Pt(11)
 doc.add_paragraph()
 
 labeled("Document", "JIT_UI_visualization_library_SOW")
-labeled("Status", "Substantially delivered and merged to jit-ui master (via the 'openseadragon' branch, PR #79); library extraction in progress, distribution pending")
+labeled("Status", "Substantially implemented and merged to jit-ui master (via the 'openseadragon' branch, PR #79); library extraction in progress, distribution pending")
 labeled("Owner", "Baha Elkassaby")
 labeled("Date", date.today().isoformat())
 labeled("Scope", "jit-ui (Angular 17 / Nx) — the visualization layer and the new buildable library 'jax-image-visualization'; backed by jit-service tile/histogram/export endpoints")
@@ -125,7 +125,7 @@ para(
     "'openseadragon' branch) and the supporting jit-service endpoints are deployed. The remaining work is finishing the "
     "library extraction (clean ports/DI boundaries so the package carries no host coupling) and deciding "
     "and executing distribution so other JAX Data Science frontends can consume it. Each deliverable in §3 "
-    "carries an explicit status (Delivered / In progress / Planned)."
+    "carries an explicit status (Implemented / In progress / Planned)."
 )
 
 h2("1.1 Current architecture")
@@ -229,39 +229,39 @@ bullet("Replacing Plotly or OpenSeadragon with a different rendering engine.")
 # ---------------- 3. DELIVERABLES ----------------
 h1("3. Deliverables")
 para(
-    "Each deliverable identifies what is built, where it lives, and its current status. 'Delivered' means it "
-    "is implemented, verified, and merged to jit-ui master."
+    "Each deliverable identifies what is built, where it lives, and its current status. 'Implemented' means it "
+    "is built, verified, and merged to jit-ui master."
 )
 
 h2("D1. Backend-neutral visualization contract and router")
 labeled("What", "A single IVisualizer contract composed of role interfaces (data renderer/viewport, region store, on-canvas tools, display options), with a capability descriptor so consumers gate on advertised features rather than backend identity. A RoutingVisualizerService routes the Image plot type to OpenSeadragon and every other plot type to Plotly, keeping shared state (regions, display options) in one place so both backends stay in sync.")
 labeled("Where", "libs/jax-image-visualization/src/lib/contracts/visualizer.contract.ts, capabilities.contract.ts, routing-visualizer.service.ts, visualizer-store.service.ts.")
-labeled("Status", "Delivered.")
+labeled("Status", "Implemented.")
 
 h2("D2. OpenSeadragon image backend + server tile integration")
 labeled("What", "A natively-tiled, deeply zoomable raster backend for the Image plot type, backed by the jit-service tile endpoints, with a navigator minimap, a physical-units scale bar, click-to-zoom, a stack-slice cache with LRU eviction and background preloading for flicker-free z-scrubbing, and a client-side recolor pipeline (tile-invalidated) that applies the grayscale colormap LUT and per-channel display settings.")
 labeled("Where", "libs/jax-image-visualization/src/lib/implementations/osd/* (visualizer service, region overlay, scale bar, coordinate transform).")
-labeled("Status", "Delivered.")
+labeled("Status", "Implemented.")
 
 h2("D3. Backend-neutral regions, on-canvas tools, and GeoJSON I/O")
 labeled("What", "A backend-neutral Region model and a shared region store both backends render from; region create/edit/select/delete; rectangle, freehand and polyline drawing; magic-wand, vertex-eraser and zoom-to-box tools implemented against a shared coordinate-transform abstraction; bezier regions; QuPath-compatible GeoJSON import/export; and a region editor that edits classification colours for every class from one dialog.")
 labeled("Where", "libs/jax-image-visualization/src/lib/models/region.ts, region-store.service.ts, toolbar/* (wand, vertex-eraser, zoom-to-box), region-editor/*, and the per-backend overlays.")
-labeled("Status", "Delivered.")
+labeled("Status", "Implemented.")
 
 h2("D4. Plot-type framework (Plotly backends, capability gating, intensity profiles)")
 labeled("What", "A plot-type selector exposing Image (OpenSeadragon), Heatmap, Contour, Scatter, Surface (3D), Scatter 3D and Isosurface (3D), with scalar/3D types gated to the images that support them; isosurface rendering of grayscale z-stacks with an intensity-band slider; and intensity-profile line ROIs with a live, zoom-aware inset chart.")
 labeled("Where", "libs/jax-image-visualization/src/lib/contracts/plot-type.ts, implementations/plotly/* (service + intensity profile), capability gating in capabilities.contract.ts.")
-labeled("Status", "Delivered.")
+labeled("Status", "Implemented.")
 
 h2("D5. Channels and Histogram tool, incl. true 16-bit support and exports")
 labeled("What", "A non-modal dialog for per-channel brightness/contrast (display window), gamma, and visibility, with a live per-channel histogram; Fiji-style per-channel pseudo-colour assignment and additive compositing; a publication composite PNG export; and true 16-bit support: a native-bit-depth histogram and native window units computed server-side from the raw pixels (the 8-bit display tiles cannot carry 16-bit values), plus a data-preserving multi-band 16-bit TIFF export of the visible channels. A non-blocking activity indicator and a precomputed recolor LUT keep the controls responsive on large stacks.")
 labeled("Where", "libs/jax-image-visualization/src/lib/channel-histogram/*, contracts/channel-histogram-api.contract.ts, and the per-channel/16-bit paths in the OpenSeadragon and Plotly services. Backed by jit-service /histogram and /export/tiff.")
-labeled("Status", "Delivered (frontend). Backed by deployed jit-service endpoints.")
+labeled("Status", "Implemented (frontend). Backed by deployed jit-service endpoints.")
 
 h2("D6. Browser SAM segmentation toolset (client-side, ONNX / WebGPU + WASM)")
 labeled("What", "In-browser, SAM-based segmentation tools for 2D datasets, running quantized models client-side via onnxruntime-web (WebGPU with a WASM fallback; some models pinned to WASM). Three tools: a promptable box tool that turns drawn rectangles into masks via a real Segment-Anything model (issue #90), an interactive point tool for click-to-segment refinement with a model picker, and an automatic Cellpose-SAM tool. Cellpose-SAM is not itself a promptable model — it pairs SAM's ViT image encoder with a Cellpose flow head and drops SAM's prompt encoder/mask decoder, so it cannot take a box or point directly. We make it effectively box-promptable with a browser-based slide-cropper engine (toolbar/crop/slide-crop.ts), the client-side equivalent of the jit-service slide-crop: it crops the user-drawn rectangle out of the loaded image frame and feeds only that region to Cellpose-SAM, then offsets the returned cell masks back onto the full frame — so the user's box scopes the automatic segmentation to an area of interest. The promptable SAM models are pluggable through a registry that ships hosted ONNX pairs as defaults — micro-sam ViT-T and ViT-B (microscopy-finetuned, promptable) and patho-sam ViT-B (fp16 and int8). The architecture (two-stage encoder/decoder, model registry, tool wiring) and the ONNX export + quantization recipe are documented in docs/sam-segmentation-design.md.")
 labeled("Where", "libs/jax-image-visualization/src/lib/toolbar/segmentation/* (sam-tool, sam-point-tool, cell-segment-tool, cellpose-segmenter, sam-model-registry, the ONNX session + worker), the browser slide-cropper at toolbar/crop/slide-crop.ts (crops the prompt rectangle that feeds Cellpose-SAM), and the Segment toolbar buttons. The registry ships hosted ONNX defaults, so no host wiring is required; setSamModelUrls() can repoint a model.")
-labeled("Status", "Delivered (2D): box-prompt, point-prompt and automatic Cellpose-SAM are wired, unit-tested, and run client-side against hosted ONNX models shipped as registry defaults (micro-sam ViT-T / ViT-B, patho-sam ViT-B + int8) — no host wiring required.")
+labeled("Status", "Implemented (2D): box-prompt, point-prompt and automatic Cellpose-SAM are wired, unit-tested, and run client-side against hosted ONNX models shipped as registry defaults (micro-sam ViT-T / ViT-B, patho-sam ViT-B + int8) — no host wiring required.")
 labeled("Future work", "Additional fine-tuned Cellpose-SAM variants and further promptable models (e.g. SAM3) as their quantized ONNX exports are published, plus 3D / z-stack mask propagation with cross-slice linking. See §8.")
 
 h2("D7. Extraction into the jax-image-visualization Nx buildable library")
@@ -277,21 +277,21 @@ labeled("Status", "Planned.")
 
 # ---------------- 4. PHASING ----------------
 h1("4. Phasing and acceptance criteria")
-para("Phases 0-4 are delivered and merged to master; Phase 5 is in progress and Phase 6 is planned.")
+para("Phases 0-4 are implemented and merged to master; Phase 5 is in progress and Phase 6 is planned.")
 
-h2("4.1 Phase 0 — Contract and router (Delivered)")
+h2("4.1 Phase 0 — Contract and router (Implemented)")
 labeled("Acceptance", "Image renders through OpenSeadragon and the other plot types through Plotly, behind one IVisualizer contract; region state and display options stay in sync across a backend switch.")
 
-h2("4.2 Phase 1 — OpenSeadragon image backend (Delivered)")
+h2("4.2 Phase 1 — OpenSeadragon image backend (Implemented)")
 labeled("Acceptance", "A whole-slide / z-stack image tiles, zooms, and scrubs through OpenSeadragon with a navigator and scale bar; cached slices scrub without re-fetch.")
 
-h2("4.3 Phase 2 — Regions and tools (Delivered)")
+h2("4.3 Phase 2 — Regions and tools (Implemented)")
 labeled("Acceptance", "Create/edit/select/delete, the wand, vertex eraser and zoom-to-box, and QuPath GeoJSON round-trip all work on both backends from the shared region store.")
 
-h2("4.4 Phase 3 — Plot-type framework (Delivered)")
+h2("4.4 Phase 3 — Plot-type framework (Implemented)")
 labeled("Acceptance", "The plot-type selector switches types with correct capability gating; isosurface and intensity-profile inset render for grayscale stacks.")
 
-h2("4.5 Phase 4 — Channels and Histogram + 16-bit (Delivered)")
+h2("4.5 Phase 4 — Channels and Histogram + 16-bit (Implemented)")
 labeled("Acceptance", "Per-channel window/gamma/pseudo-colour recolor live; composite PNG export works; on a 16-bit stack the histogram and window read in native units and the 16-bit TIFF export downloads a data-preserving multi-band file.")
 
 h2("4.6 Phase 5 — Library extraction hardening (In progress)")
@@ -388,9 +388,9 @@ num("3D / z-stack segmentation — propagate SAM masks across slices with cross-
 
 # ---------------- 9. CHANGELOG ----------------
 h1("9. Changelog")
-labeled(date.today().isoformat(), "Initial draft. Captures the delivered visualization rework (contract + dual backends, regions/tools, plot-type framework, Channels and Histogram incl. 16-bit) and the in-progress library extraction (D7) and planned distribution (D8).")
+labeled(date.today().isoformat(), "Initial draft. Captures the implemented visualization rework (contract + dual backends, regions/tools, plot-type framework, Channels and Histogram incl. 16-bit) and the in-progress library extraction (D7) and planned distribution (D8).")
 labeled(date.today().isoformat(), "Distribution decided: npm under the @jax-data-science org scope (Nx publishable). Package name to be chosen among image-visualization / jax-image-visualization / jit-image-visualization. Updated the distribution deliverable and the open questions accordingly.")
-labeled(date.today().isoformat(), "Merged to master: the 'openseadragon' branch landed on jit-ui master via PR #79; statuses updated from 'on the openseadragon branch' to 'merged to master'. Renumbered deliverables so the delivered browser SAM segmentation toolset (box/point/Cellpose-SAM) is D6 (extraction → D7, distribution → D8); added future-work items: more fine-tuned Cellpose-SAM / promptable models, 3D propagation, and an image-visualization MCP server (§8).")
+labeled(date.today().isoformat(), "Merged to master: the 'openseadragon' branch landed on jit-ui master via PR #79; statuses updated from 'on the openseadragon branch' to 'merged to master'. Renumbered deliverables so the implemented browser SAM segmentation toolset (box/point/Cellpose-SAM) is D6 (extraction → D7, distribution → D8); added future-work items: more fine-tuned Cellpose-SAM / promptable models, 3D propagation, and an image-visualization MCP server (§8).")
 labeled(date.today().isoformat(), "Investigated the image-visualization MCP server (jit-ui#97): expanded the §8 future-work item with the investigation outcome (live-control bridge over the existing IVisualizer surface; headless variant; stateless generator declined) and linked the dedicated design doc (docs/mcp-control-design.md) and SOW (JIT_image_visualization_MCP_server_SOW.docx).")
 
 # ---------------- 10. CURRENT VISUALS ----------------
