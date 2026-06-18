@@ -141,7 +141,7 @@ def slide_title(prs, total):
     set_text(m.text_frame,
              "Companion deck for JIT_UI_visualization_library_SOW   ·   "
              "library: jax-image-visualization\n"
-             "Status: substantially delivered on the 'openseadragon' branch; "
+             "Status: substantially delivered and merged to master (PR #79); "
              "library extraction in progress, distribution pending.",
              size=14, color=COLOR_SECONDARY)
 
@@ -223,6 +223,7 @@ def slide_scope(prs, n, total):
         "Plotly scientific plot types + plot-type router.",
         "Region model, tools (wand / vertex-eraser / zoom-to-box / bezier), QuPath GeoJSON I/O.",
         "Channels and Histogram tool incl. true 16-bit + exports.",
+        "In-browser SAM segmentation: box / point prompts + automatic Cellpose-SAM (ONNX, pluggable model registry).",
         "Extraction into the Nx buildable library.",
     ], size=13)
     panel(slide, 6.9, col_y, 5.8, col_h)
@@ -261,7 +262,7 @@ def _deliverable_col(slide, x, y, w, items):
 def slide_deliverables(prs, n, total):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     add_title(slide, "Deliverables",
-              subtitle="'Delivered' = implemented and verified on the 'openseadragon' branch")
+              subtitle="'Delivered' = implemented, verified and merged to master")
     _deliverable_col(slide, 0.6, 1.7, 6.0, [
         ("D1", "Backend-neutral contract & router", "Delivered"),
         ("D2", "OpenSeadragon backend + server tiles", "Delivered"),
@@ -270,9 +271,9 @@ def slide_deliverables(prs, n, total):
     ])
     _deliverable_col(slide, 6.9, 1.7, 5.8, [
         ("D5", "Channels & Histogram + true 16-bit", "Delivered"),
-        ("D6", "Extraction into the Nx library", "In progress"),
-        ("D7", "Distribution & downstream adoption", "Planned"),
-        ("D8", "Browser SAM annotation toolset (WebGPU)", "In progress"),
+        ("D6", "Browser SAM segmentation (box/point/Cellpose-SAM)", "Delivered"),
+        ("D7", "Extraction into the Nx library", "In progress"),
+        ("D8", "Distribution & downstream adoption", "Planned"),
     ])
     add_footer(slide, n, total)
 
@@ -328,8 +329,8 @@ def slide_phasing(prs, n, total):
     set_text(h.text_frame, "Test coverage", size=18, bold=True, color=COLOR_HEADER)
     cov = slide.shapes.add_textbox(Inches(8.35), Inches(2.45), Inches(4.1), Inches(2.6))
     add_bullets(cov.text_frame, [
-        "Jest suite in CI with enforced minimum thresholds.",
-        "Lines 71% · Statements 69% · Functions 62% · Branches 53%.",
+        "Jest suite — 682 tests / 43 suites, all passing — in CI with enforced minimum thresholds.",
+        "Lines 73% · Statements 71% · Functions 63% · Branches 56%.",
         "Build fails if coverage regresses below the gate.",
     ], size=13)
     add_footer(slide, n, total)
@@ -344,8 +345,59 @@ def slide_risks(prs, n, total):
         "ng-packagr / AOT constraints (NG3001, partial compilation) → keep the public API in the barrel; build the library in CI on every change.",
         "OpenSeadragon tiling/recolor perf on large grayscale stacks → precomputed recolor LUT (done); bound per-channel tile counts.",
         "16-bit display fidelity limited (viewer tiles are 8-bit) → precision preserved in the native histogram and the 16-bit TIFF export.",
-        "Versioning / breaking changes destabilize consumers → semantic versioning + documented breaking-change policy (D7); small contract-first surface.",
+        "Versioning / breaking changes destabilize consumers → semantic versioning + documented breaking-change policy (D8); small contract-first surface.",
     ], size=16)
+    add_footer(slide, n, total)
+
+
+def _stat_panel(slide, x, y, w, h, *, label, big, sub, big_color):
+    """A rounded callout: small label, big number, small sub-caption."""
+    panel(slide, x, y, w, h)
+    tb = slide.shapes.add_textbox(Inches(x + 0.15), Inches(y + 0.12),
+                                  Inches(w - 0.3), Inches(h - 0.2))
+    tf = tb.text_frame
+    _enable_wrap(tf)
+    tf.text = ""
+    rows = [(label, 12, False, COLOR_SECONDARY),
+            (big, 32, True, big_color),
+            (sub, 11, False, COLOR_SECONDARY)]
+    for i, (text, size, bold, color) in enumerate(rows):
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.alignment = PP_ALIGN.CENTER
+        run = p.add_run()
+        run.text = text
+        run.font.size = Pt(size)
+        run.font.bold = bold
+        run.font.color.rgb = color
+
+
+def slide_dedicated_repo(prs, n, total):
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    add_title(slide, "Recommendation: a dedicated repo, not the jds-ui-toolkit monorepo",
+              subtitle="jax-image-visualization differs from the toolkit's libs in scale, dependencies, and audience")
+
+    # The size mismatch, up top — three stat callouts.
+    w = 3.95
+    gap = 0.35
+    _stat_panel(slide, 0.6, 1.55, w, 1.4,
+                label="jax-image-visualization",
+                big="≈20,600", sub="lines (src, excl. tests)", big_color=COLOR_ACCENT)
+    _stat_panel(slide, 0.6 + (w + gap), 1.55, w, 1.4,
+                label="jds-ui-toolkit — all libs",
+                big="≈5,500", sub="components 2,963 · api-clients 2,146 · themes 380", big_color=COLOR_SECONDARY)
+    _stat_panel(slide, 0.6 + 2 * (w + gap), 1.55, w, 1.4,
+                label="relative size",
+                big="≈3.8×", sub="the whole toolkit  ·  ~7× components (its largest)", big_color=COLOR_OSD)
+
+    body = slide.shapes.add_textbox(Inches(0.6), Inches(3.2), Inches(12.1), Inches(3.6))
+    add_bullets(body.text_frame, [
+        "Scale & identity — at ~20.6k LOC the viz lib is ~3.8× all three jds-ui-toolkit libs combined (components 2,963 + api-clients 2,146 + themes 380 ≈ 5,500) and ~7× the largest, components. It would dominate and reshape a toolkit built for small, shared UI pieces.",
+        "Heavy, specialized dependencies — OpenSeadragon, Plotly, image-js, onnxruntime-web (in-browser SAM/Cellpose segmentation), and optional cellpose-js. These large WebGL/WASM deps inflate install size, CI time, and the dependency surface for consumers that only want a button or a theme.",
+        "Independent release cadence — fast-moving features (OSD, regions, segmentation) need their own semver + breaking-change policy; a shared repo forces lock-step releases or per-package publishing that churns consumers of tiny libs.",
+        "External contributors / OSS readiness — a dedicated repo exposes only the publishable library (its own LICENSE, README, CHANGELOG, scoped issues/PRs, narrow access). A shared monorepo would expose unrelated internal libs (api-clients, internal components) — wider IP/security surface and CODEOWNERS complexity.",
+        "Focused CI & lean clones — build/test scoped to one package, no cross-package graph to configure; large doc/image assets (this deck alone is ~15 MB) stay out of every toolkit clone.",
+        "Clear ownership & decoupled consumption — consumers depend on a pinned, published npm package, not a workspace path. Monorepos pay off for tightly-coupled, co-released packages; this is a standalone, contract-first, reusable library with a different audience.",
+    ], size=13)
     add_footer(slide, n, total)
 
 
@@ -364,6 +416,20 @@ def slide_distribution(prs, n, total):
     add_footer(slide, n, total)
 
 
+def slide_future_work(prs, n, total):
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    add_title(slide, "Future work & investigations",
+              subtitle="Exploratory — not part of the committed deliverables (§3)")
+    body = slide.shapes.add_textbox(Inches(0.6), Inches(1.7), Inches(12.1), Inches(4.8))
+    add_bullets(body.text_frame, [
+        "More segmentation models (extends D6) — additional fine-tuned Cellpose-SAM variants for other tissue/cell domains, and further promptable models (e.g. SAM3). They drop into the existing pluggable registry, so adding one is largely export-and-host.",
+        "3D / z-stack segmentation — propagate SAM masks across slices with cross-slice linking, so a 2D prompt extends through a volume.",
+        "Image-visualization MCP server — expose the viewer as Model Context Protocol tools/resources so an LLM client can drive it programmatically (open an image, switch plot type, pan/zoom to a region, toggle channels/colormap, create/select/edit regions, read back the current view or region geometry).",
+        "Goal of the MCP server: agentic / natural-language control (e.g. “zoom to the largest region and export it as GeoJSON”) and headless automation. Builds on the stable library contract (D7); transport, scope, and security/auth boundaries TBD.",
+    ], size=15)
+    add_footer(slide, n, total)
+
+
 def slide_close(prs, n, total):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     t = slide.shapes.add_textbox(Inches(0.8), Inches(2.4), Inches(12.0), Inches(1.6))
@@ -371,7 +437,7 @@ def slide_close(prs, n, total):
              size=40, bold=True, color=COLOR_HEADER)
     s = slide.shapes.add_textbox(Inches(0.8), Inches(4.0), Inches(12.0), Inches(1.4))
     add_bullets(s.text_frame, [
-        "Source: jit-ui 'openseadragon' branch — libs/jax-image-visualization/.",
+        "Source: jit-ui master (merged via PR #79) — libs/jax-image-visualization/.",
         "Detailed SOW: JIT_UI_visualization_library_SOW (gen_jit_ui_visualization_sow.py).",
         "Next: finish the extraction (Phase 5), then publish and prove reuse in a second frontend (Phase 6).",
     ], size=16, color=COLOR_BODY)
@@ -393,7 +459,9 @@ def build():
         slide_visuals_b,
         slide_phasing,
         slide_risks,
+        slide_dedicated_repo,
         slide_distribution,
+        slide_future_work,
         slide_close,
     ]
     total = len(slide_makers)
