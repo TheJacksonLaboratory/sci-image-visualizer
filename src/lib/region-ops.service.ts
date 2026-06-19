@@ -87,6 +87,50 @@ export class RegionOpsService {
   }
 
   /**
+   * Largest raster (in pixels) a region set-op will allocate on the main thread.
+   * Selections whose clipped bbox exceeds this are rasterized at a proportional
+   * downscale (then the traced geometry is scaled back), so merge/inverse stay
+   * responsive on gigapixel slides. ~16 MP keeps the synchronous contour trace
+   * well under a second; the downscale only affects boundary fidelity of very
+   * large-extent selections (small selections keep full resolution).
+   */
+  private static readonly MAX_OP_PIXELS = 16_000_000;
+
+  /** Downscale factor (≤ 1) keeping the selection's clipped bbox within
+   *  {@link MAX_OP_PIXELS}; 1 when it already fits. */
+  private opRasterScale(regions: Region[], W: number, H: number): number {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const scan = (xs: number[], ys: number[]) => {
+      for (const x of xs) { if (x < minX) minX = x; if (x > maxX) maxX = x; }
+      for (const y of ys) { if (y < minY) minY = y; if (y > maxY) maxY = y; }
+    };
+    for (const r of regions || []) {
+      const b = r?.bounds;
+      if (b instanceof Rectangle) scan([b.x, b.x + b.width], [b.y, b.y + b.height]);
+      else if (b instanceof Polygon) scan(b.xpoints, b.ypoints);
+      else if (b instanceof MultiPolygon) for (const p of b.polygons) scan(p.xpoints, p.ypoints);
+    }
+    if (!Number.isFinite(minX)) return 1;
+    const bw = Math.min(W, maxX) - Math.max(0, minX);
+    const bh = Math.min(H, maxY) - Math.max(0, minY);
+    const area = bw * bh;
+    if (!(area > RegionOpsService.MAX_OP_PIXELS)) return 1;
+    return Math.sqrt(RegionOpsService.MAX_OP_PIXELS / area);
+  }
+
+  /** A copy of `p` with every coordinate (and hole coordinate) multiplied by `s`. */
+  private scalePolygon(p: Polygon, s: number): Polygon {
+    const poly = new Polygon();
+    poly.xpoints = p.xpoints.map((x) => x * s);
+    poly.ypoints = p.ypoints.map((y) => y * s);
+    poly.npoints = poly.xpoints.length;
+    poly.closed = p.closed;
+    poly.coordinates = poly.xpoints.map((x, i) => [x, poly.ypoints[i]]);
+    if (p.holes) poly.holes = p.holes.map((ring) => ring.map(([x, y]) => [x * s, y * s]));
+    return poly;
+  }
+
+  /**
    * Replace `regions` with their inverse inside the image rectangle: the image
    * minus the selection's union (the former regions become holes). Returns null
    * for a degenerate image or an empty selection.
