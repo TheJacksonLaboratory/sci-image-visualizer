@@ -10,7 +10,6 @@ import { ConfirmationService, MessageService } from 'primeng/api';
 import { IRegionEditorApi, REGION_EDITOR_API } from '../contracts/region-editor-api.contract';
 import { RegionIoPort, REGION_IO_PORT } from '../contracts/ports/region-io.port';
 import { regionToParts, scaleParts, maskScaleFor } from './mask-raster';
-import { createMaskWorker as spawnMaskWorker } from './mask-worker';
 
 @Component({
   // Canonical prefixed selector first; the unprefixed original is kept as an
@@ -714,32 +713,38 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.maskEncoding = false;
     this.maskProgress = 0;
 
-    const worker = this.createMaskWorker();
-    this.maskWorker = worker;
-    worker.onmessage = ({ data }: MessageEvent) => {
-      switch (data?.type) {
-        case 'progress':
-          this.maskProgress = data.total ? Math.round((data.done / data.total) * 100) : 0;
-          break;
-        case 'encoding':
-          this.maskEncoding = true;
-          break;
-        case 'done':
-          this.finishMask(new Blob([data.png], { type: 'image/png' }));
-          break;
-        case 'error':
-          this.maskError(data.error || 'The mask could not be generated.');
-          break;
-      }
-    };
-    worker.onerror = () => this.maskError('The mask worker failed.');
-    worker.postMessage({
+    const payload = {
       width, height,
       originalWidth: size.width, originalHeight: size.height, scale,
       mode: this.maskMode,
       sourceName: this.regionIo.getSelectedFileName(),
       regions,
-    });
+    };
+    // createMaskWorker() is async (the worker module is imported dynamically so
+    // its import.meta never reaches the CommonJS test compile). Wire up once it
+    // resolves — unless the user cancelled while it was loading.
+    this.createMaskWorker().then((worker) => {
+      if (!this.maskBusy) { worker.terminate(); return; }
+      this.maskWorker = worker;
+      worker.onmessage = ({ data }: MessageEvent) => {
+        switch (data?.type) {
+          case 'progress':
+            this.maskProgress = data.total ? Math.round((data.done / data.total) * 100) : 0;
+            break;
+          case 'encoding':
+            this.maskEncoding = true;
+            break;
+          case 'done':
+            this.finishMask(new Blob([data.png], { type: 'image/png' }));
+            break;
+          case 'error':
+            this.maskError(data.error || 'The mask could not be generated.');
+            break;
+        }
+      };
+      worker.onerror = () => this.maskError('The mask worker failed.');
+      worker.postMessage(payload);
+    }).catch(() => this.maskError('The mask worker failed to start.'));
   }
 
   /** Cancel an in-progress mask export: terminate the worker and reset state. */
@@ -750,9 +755,12 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.maskProgress = 0;
   }
 
-  /** Worker factory — overridable in tests so the worker URL isn't constructed. */
-  protected createMaskWorker(): Worker {
-    return spawnMaskWorker();
+  /** Worker factory — async so the worker module (and its `import.meta.url`,
+   *  which the CommonJS test compile rejects) is loaded via a dynamic import,
+   *  exactly like the segmentation worker. Overridable in tests. */
+  protected async createMaskWorker(): Promise<Worker> {
+    const { createMaskWorker } = await import('./mask-worker');
+    return createMaskWorker();
   }
 
   private finishMask(blob: Blob) {

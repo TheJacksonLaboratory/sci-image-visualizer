@@ -644,21 +644,27 @@ describe('RegionEditorComponent persist / save-as', () => {
     expect(component.showSaveMaskDialog).toBe(false);
   });
 
-  it('confirmSaveMask runs the worker off-thread with the chosen mode, then downloads on completion', () => {
+  // createMaskWorker() is async (dynamic import), so the worker is wired up on a
+  // microtask — flush before asserting postMessage/onmessage-driven behavior.
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it('confirmSaveMask runs the worker off-thread with the chosen mode, then downloads on completion', async () => {
     (saveAs as unknown as jest.Mock).mockClear();
     const worker = new FakeMaskWorker();
-    (component as any).createMaskWorker = () => worker;
+    (component as any).createMaskWorker = () => Promise.resolve(worker);
 
     component.openSaveMaskDialog();
     component.maskMode = 'multiclass';
     component.confirmSaveMask();
+    expect(component.maskBusy).toBe(true); // busy set synchronously
+
+    await flush(); // worker resolves + wires up
 
     // Worker started with the image size + serialized regions; UI shows progress.
     expect(mockVisualizer.getMaskImageSize).toHaveBeenCalled();
     expect(worker.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({ width: 8, height: 8, mode: 'multiclass' }),
     );
-    expect(component.maskBusy).toBe(true);
     expect(saveAs).not.toHaveBeenCalled(); // nothing downloaded yet — non-blocking
 
     // Progress + completion messages drive the UI and the download.
@@ -672,24 +678,26 @@ describe('RegionEditorComponent persist / save-as', () => {
     expect(saveAs).toHaveBeenCalledWith(expect.any(Blob), 'slide_001_mask.png');
   });
 
-  it('cancelSaveMask terminates the worker and clears the busy state', () => {
+  it('cancelSaveMask before the worker resolves terminates it and clears the busy state', async () => {
     const worker = new FakeMaskWorker();
-    (component as any).createMaskWorker = () => worker;
+    (component as any).createMaskWorker = () => Promise.resolve(worker);
     component.openSaveMaskDialog();
     component.confirmSaveMask();
     expect(component.maskBusy).toBe(true);
 
     component.cancelSaveMask();
-
-    expect(worker.terminate).toHaveBeenCalled();
     expect(component.maskBusy).toBe(false);
+
+    await flush(); // worker resolves into a cancelled state → terminated, not wired
+    expect(worker.terminate).toHaveBeenCalled();
+    expect(worker.postMessage).not.toHaveBeenCalled();
   });
 
   it('confirmSaveMask shows an error and does not start the worker when no image size is known', () => {
     (saveAs as unknown as jest.Mock).mockClear();
     (mockVisualizer.getMaskImageSize as jest.Mock).mockReturnValueOnce(null);
     const worker = new FakeMaskWorker();
-    (component as any).createMaskWorker = () => worker;
+    (component as any).createMaskWorker = () => Promise.resolve(worker);
     component.openSaveMaskDialog();
 
     component.confirmSaveMask();
@@ -702,11 +710,12 @@ describe('RegionEditorComponent persist / save-as', () => {
     expect(saveAs).not.toHaveBeenCalled();
   });
 
-  it('confirmSaveMask surfaces a worker error as a toast', () => {
+  it('confirmSaveMask surfaces a worker error as a toast', async () => {
     const worker = new FakeMaskWorker();
-    (component as any).createMaskWorker = () => worker;
+    (component as any).createMaskWorker = () => Promise.resolve(worker);
     component.openSaveMaskDialog();
     component.confirmSaveMask();
+    await flush();
 
     worker.emit({ type: 'error', error: 'boom' });
 
