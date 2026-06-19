@@ -216,6 +216,30 @@ describe('RoutingVisualizerService (characterization)', () => {
     expect(plotly.exportData).toHaveBeenCalled();
   });
 
+  it('getMaskImageSize reports the active renderer image size (jit-ui#95)', () => {
+    jest.spyOn(plotly, 'getTrueImageSize').mockReturnValue({ width: 8, height: 6 });
+    expect(router.getMaskImageSize()).toEqual({ width: 8, height: 6 });
+  });
+
+  it('getMaskImageSize returns null when the image size is unknown', () => {
+    jest.spyOn(plotly, 'getTrueImageSize').mockReturnValue(null);
+    router.setImageMeta([]);
+    expect(router.getMaskImageSize()).toBeNull();
+  });
+
+  it('getMaskImageSize falls back to image metadata when the renderer size is non-finite (jit-ui#95)', () => {
+    // Plotly bounds can produce NaN before a plot is laid out.
+    jest.spyOn(plotly, 'getTrueImageSize').mockReturnValue({ width: NaN, height: NaN });
+    router.setImageMeta([{ channelCount: 1, rgbChannels: 1, x: 1024, y: 768, z: 1 }]);
+    expect(router.getMaskImageSize()).toEqual({ width: 1024, height: 768 });
+  });
+
+  it('getMaskImageSize returns null when neither renderer nor metadata give a valid size', () => {
+    jest.spyOn(plotly, 'getTrueImageSize').mockReturnValue({ width: NaN, height: NaN });
+    router.setImageMeta([]);
+    expect(router.getMaskImageSize()).toBeNull();
+  });
+
   it('delegates histogram to OSD once OSD is the active renderer', async () => {
     await router.plot('div', {}, IMAGE_INFO, 600, PlotType.IMAGE);
     router.getHistogram(1, 256);

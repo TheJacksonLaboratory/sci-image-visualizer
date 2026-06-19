@@ -52,6 +52,15 @@ export interface IRegionEditorApi {
   // ── import / export ────────────────────────────────────────────────────
   importRegions(geoJsonStr: string): Region[];
   getGeoJsonString(regions: Region[]): string;
+  /**
+   * Full-resolution image size (image-pixel dimensions) used to size an exported
+   * region mask. Backend-neutral: prefers the active renderer's reported size
+   * and falls back to the image metadata. Returns null when no size is known.
+   *
+   * The mask itself is rasterized off the main thread (see the Region Editor's
+   * mask worker) from the region geometry and this size.
+   */
+  getMaskImageSize(): { width: number; height: number } | null;
 }
 
 /** DI token the Region Editor injects instead of the concrete service. */

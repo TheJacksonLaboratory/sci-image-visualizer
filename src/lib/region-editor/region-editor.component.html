@@ -28,6 +28,12 @@
               (click)="persistRegions()"
               [disabled]="!regions || !regions.length">
     </p-button>
+    <p-button icon="pi pi-image" size="small" [text]="true" styleClass="mr-2"
+              pTooltip="Save mask (PNG) of the regions"
+              tooltipPosition="bottom"
+              (click)="openSaveMaskDialog()"
+              [disabled]="!regions || !regions.length">
+    </p-button>
     <p-button label="x512" size="small" [text]="true" styleClass="mr-2"
               pTooltip="Round all rectangle regions
                     to width and height that are multiple of 512" tooltipPosition="bottom"
@@ -159,8 +165,10 @@
 </p-confirmDialog>
 
 <p-dialog header="Save Regions As" [(visible)]="showSaveAsDialog" [modal]="true" appendTo="body"
-          [style]="{width: '30rem'}" [draggable]="false" [resizable]="false">
-  <div class="flex flex-column gap-3 pt-2">
+          [style]="{width: '30rem'}" [draggable]="false" [resizable]="false"
+          [closable]="!saveAsBusy" [closeOnEscape]="!saveAsBusy">
+  <!-- Idle: filename + overwrite warning. -->
+  <div *ngIf="!saveAsBusy" class="flex flex-column gap-3 pt-2">
     <label for="geojson-filename" class="font-medium">GeoJSON filename</label>
     <input id="geojson-filename" type="text" pInputText
            [(ngModel)]="saveAsFilename"
@@ -171,12 +179,21 @@
       This file already exists and will be overwritten.
     </small>
   </div>
+
+  <!-- Busy: progress while regions serialize + upload. -->
+  <div *ngIf="saveAsBusy" class="flex flex-column gap-3 pt-2">
+    <span>Saving regions…</span>
+    <p-progressBar mode="indeterminate" [style]="{height: '0.75rem'}"></p-progressBar>
+  </div>
+
   <ng-template pTemplate="footer">
-    <p-button label="Cancel" icon="pi pi-times" [text]="true"
+    <p-button *ngIf="!saveAsBusy" label="Cancel" icon="pi pi-times" [text]="true"
               (onClick)="showSaveAsDialog = false"></p-button>
-    <p-button label="Save" icon="pi pi-save"
+    <p-button *ngIf="!saveAsBusy" label="Save" icon="pi pi-save"
               [disabled]="!saveAsFilename || !saveAsFilename.trim()"
               (onClick)="confirmSaveAs()"></p-button>
+    <p-button *ngIf="saveAsBusy" label="Cancel" icon="pi pi-times" [text]="true"
+              (onClick)="cancelSaveAs()"></p-button>
   </ng-template>
 </p-dialog>
 
@@ -194,6 +211,47 @@
     <p-button label="Export" icon="pi pi-download"
               [disabled]="!exportFilename || !exportFilename.trim()"
               (onClick)="confirmExport()"></p-button>
+  </ng-template>
+</p-dialog>
+
+<p-dialog header="Save Mask" [(visible)]="showSaveMaskDialog" [modal]="true" appendTo="body"
+          [style]="{width: '30rem'}" [draggable]="false" [resizable]="false"
+          [closable]="!maskBusy" [closeOnEscape]="!maskBusy">
+  <!-- Idle: filename + mask-type form. -->
+  <div *ngIf="!maskBusy" class="flex flex-column gap-3 pt-2">
+    <label for="mask-filename" class="font-medium">Mask filename</label>
+    <input id="mask-filename" type="text" pInputText
+           [(ngModel)]="saveMaskFilename"
+           class="w-full" />
+    <span class="font-medium">Mask type</span>
+    <div class="flex align-items-center gap-2">
+      <p-radioButton inputId="mask-binary" name="maskMode" value="binary"
+                     [(ngModel)]="maskMode"></p-radioButton>
+      <label for="mask-binary">Binary <span class="text-color-secondary">(regions 1, background 0)</span></label>
+    </div>
+    <div class="flex align-items-center gap-2">
+      <p-radioButton inputId="mask-multiclass" name="maskMode" value="multiclass"
+                     [(ngModel)]="maskMode"></p-radioButton>
+      <label for="mask-multiclass">Multi-class <span class="text-color-secondary">(unique id per region, background 0)</span></label>
+    </div>
+  </div>
+
+  <!-- Busy: progress while the worker rasterizes + encodes the PNG. -->
+  <div *ngIf="maskBusy" class="flex flex-column gap-3 pt-2">
+    <span>{{ maskEncoding ? 'Encoding PNG…' : 'Rasterizing regions…' }}</span>
+    <p-progressBar [mode]="maskEncoding ? 'indeterminate' : 'determinate'"
+                   [value]="maskProgress"
+                   [style]="{height: '0.75rem'}"></p-progressBar>
+  </div>
+
+  <ng-template pTemplate="footer">
+    <p-button *ngIf="!maskBusy" label="Cancel" icon="pi pi-times" [text]="true"
+              (onClick)="showSaveMaskDialog = false"></p-button>
+    <p-button *ngIf="!maskBusy" label="Save" icon="pi pi-download"
+              [disabled]="!saveMaskFilename || !saveMaskFilename.trim()"
+              (onClick)="confirmSaveMask()"></p-button>
+    <p-button *ngIf="maskBusy" label="Cancel" icon="pi pi-times" [text]="true"
+              (onClick)="cancelSaveMask()"></p-button>
   </ng-template>
 </p-dialog>
 

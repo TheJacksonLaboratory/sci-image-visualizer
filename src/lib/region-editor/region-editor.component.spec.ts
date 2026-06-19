@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { FormsModule } from '@angular/forms';
-import { EMPTY, of, throwError } from 'rxjs';
+import { EMPTY, NEVER, of, throwError } from 'rxjs';
 
 import { RegionEditorComponent } from './region-editor.component';
 import { RoutingVisualizerService } from '../routing-visualizer.service';
@@ -15,6 +15,20 @@ import { REGION_IO_PORT, RegionIoPort } from '../contracts/ports/region-io.port'
 
 jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
 import { saveAs } from 'file-saver';
+
+// The real factory uses `import.meta.url` (ESM-only), which ts-jest's CommonJS
+// compile rejects — mock it; tests drive a FakeMaskWorker via createMaskWorker.
+jest.mock('./mask-worker', () => ({ createMaskWorker: jest.fn() }));
+
+/** Stand-in for the mask Web Worker — lets tests drive onmessage/onerror and
+ *  assert postMessage/terminate without constructing a real worker URL. */
+class FakeMaskWorker {
+  onmessage: ((e: { data: any }) => void) | null = null;
+  onerror: ((e: any) => void) | null = null;
+  postMessage = jest.fn();
+  terminate = jest.fn();
+  emit(data: any) { this.onmessage?.({ data }); }
+}
 
 describe('RegionEditorComponent', () => {
   let component: RegionEditorComponent;
@@ -542,6 +556,7 @@ describe('RegionEditorComponent persist / save-as', () => {
       getAnnotationRegions: () => [],
       setAnnotationRegions: jest.fn(),
       getGeoJsonString: jest.fn(() => '{"type":"FeatureCollection","features":[]}'),
+      getMaskImageSize: jest.fn(() => ({ width: 8, height: 8 })),
     });
 
     mockRegionIo = {
@@ -603,6 +618,97 @@ describe('RegionEditorComponent persist / save-as', () => {
     expect(component.showSaveAsDialog).toBe(false);
   });
 
+  // --- save mask (rasterize regions → PNG, jit-ui#95) ---
+
+  it('opens the save-mask dialog with a basename_mask.png default and binary mode', () => {
+    component.openSaveMaskDialog();
+
+    expect(component.showSaveMaskDialog).toBe(true);
+    expect(component.saveMaskFilename).toBe('slide_001_mask.png');
+    expect(component.maskMode).toBe('binary');
+  });
+
+  it('does not open the save-mask dialog when there are no regions', () => {
+    component.regions = [];
+
+    component.openSaveMaskDialog();
+
+    expect(component.showSaveMaskDialog).toBe(false);
+  });
+
+  it('confirmSaveMask runs the worker off-thread with the chosen mode, then downloads on completion', () => {
+    (saveAs as unknown as jest.Mock).mockClear();
+    const worker = new FakeMaskWorker();
+    (component as any).createMaskWorker = () => worker;
+
+    component.openSaveMaskDialog();
+    component.maskMode = 'multiclass';
+    component.confirmSaveMask();
+
+    // Worker started with the image size + serialized regions; UI shows progress.
+    expect(mockVisualizer.getMaskImageSize).toHaveBeenCalled();
+    expect(worker.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ width: 8, height: 8, mode: 'multiclass' }),
+    );
+    expect(component.maskBusy).toBe(true);
+    expect(saveAs).not.toHaveBeenCalled(); // nothing downloaded yet — non-blocking
+
+    // Progress + completion messages drive the UI and the download.
+    worker.emit({ type: 'progress', done: 1, total: 2 });
+    expect(component.maskProgress).toBe(50);
+    worker.emit({ type: 'done', png: new Uint8Array([1, 2, 3]) });
+
+    expect(component.maskBusy).toBe(false);
+    expect(component.showSaveMaskDialog).toBe(false);
+    expect(worker.terminate).toHaveBeenCalled();
+    expect(saveAs).toHaveBeenCalledWith(expect.any(Blob), 'slide_001_mask.png');
+  });
+
+  it('cancelSaveMask terminates the worker and clears the busy state', () => {
+    const worker = new FakeMaskWorker();
+    (component as any).createMaskWorker = () => worker;
+    component.openSaveMaskDialog();
+    component.confirmSaveMask();
+    expect(component.maskBusy).toBe(true);
+
+    component.cancelSaveMask();
+
+    expect(worker.terminate).toHaveBeenCalled();
+    expect(component.maskBusy).toBe(false);
+  });
+
+  it('confirmSaveMask shows an error and does not start the worker when no image size is known', () => {
+    (saveAs as unknown as jest.Mock).mockClear();
+    (mockVisualizer.getMaskImageSize as jest.Mock).mockReturnValueOnce(null);
+    const worker = new FakeMaskWorker();
+    (component as any).createMaskWorker = () => worker;
+    component.openSaveMaskDialog();
+
+    component.confirmSaveMask();
+
+    expect(worker.postMessage).not.toHaveBeenCalled();
+    expect(component.maskBusy).toBe(false);
+    expect(mockMessageService.add).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'error', summary: 'Could not create mask' }),
+    );
+    expect(saveAs).not.toHaveBeenCalled();
+  });
+
+  it('confirmSaveMask surfaces a worker error as a toast', () => {
+    const worker = new FakeMaskWorker();
+    (component as any).createMaskWorker = () => worker;
+    component.openSaveMaskDialog();
+    component.confirmSaveMask();
+
+    worker.emit({ type: 'error', error: 'boom' });
+
+    expect(component.maskBusy).toBe(false);
+    expect(worker.terminate).toHaveBeenCalled();
+    expect(mockMessageService.add).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'error', summary: 'Could not create mask', detail: 'boom' }),
+    );
+  });
+
   // --- checkSaveAsFileExists (debounced existence check) ---
 
   it('should update saveAsFileExists to true when file exists', fakeAsync(() => {
@@ -656,14 +762,16 @@ describe('RegionEditorComponent persist / save-as', () => {
 
   // --- confirmSaveAs (save action) ---
 
-  it('should save directly when file does not exist', () => {
+  it('should save directly when file does not exist', fakeAsync(() => {
     component.saveAsFilename = 'new_regions.geojson';
     component.saveAsFileExists = false;
     component.showSaveAsDialog = true;
 
     component.confirmSaveAs();
+    tick(); // flush the deferred serialize + upload
 
     expect(component.showSaveAsDialog).toBe(false);
+    expect(component.saveAsBusy).toBe(false);
     expect(mockRegionIo.saveGeoJson).toHaveBeenCalledWith(
       '{"type":"FeatureCollection","features":[]}',
       'new_regions.geojson',
@@ -671,7 +779,7 @@ describe('RegionEditorComponent persist / save-as', () => {
     expect(mockMessageService.add).toHaveBeenCalledWith(
       expect.objectContaining({ severity: 'success', detail: 'Saved as new_regions.geojson' }),
     );
-  });
+  }));
 
   it('should show overwrite confirmation when file exists', () => {
     component.saveAsFilename = 'existing.geojson';
@@ -680,7 +788,8 @@ describe('RegionEditorComponent persist / save-as', () => {
 
     component.confirmSaveAs();
 
-    expect(component.showSaveAsDialog).toBe(false);
+    // The Save-As dialog stays open (behind the confirm dialog) until the user decides.
+    expect(component.showSaveAsDialog).toBe(true);
     expect(mockConfirmationService.confirm).toHaveBeenCalledWith(
       expect.objectContaining({
         message: '"existing.geojson" already exists. Do you want to overwrite it?',
@@ -690,14 +799,14 @@ describe('RegionEditorComponent persist / save-as', () => {
     expect(mockRegionIo.saveGeoJson).not.toHaveBeenCalled();
   });
 
-  it('should save after user accepts overwrite confirmation', () => {
+  it('should save after user accepts overwrite confirmation', fakeAsync(() => {
     component.saveAsFilename = 'existing.geojson';
     component.saveAsFileExists = true;
 
     component.confirmSaveAs();
-
     const confirmCall = (mockConfirmationService.confirm as jest.Mock).mock.calls[0][0];
     confirmCall.accept();
+    tick();
 
     expect(mockRegionIo.saveGeoJson).toHaveBeenCalledWith(
       '{"type":"FeatureCollection","features":[]}',
@@ -706,9 +815,9 @@ describe('RegionEditorComponent persist / save-as', () => {
     expect(mockMessageService.add).toHaveBeenCalledWith(
       expect.objectContaining({ severity: 'success' }),
     );
-  });
+  }));
 
-  it('should show error toast when save fails', () => {
+  it('should show error toast when save fails', fakeAsync(() => {
     (mockRegionIo.saveGeoJson as jest.Mock).mockReturnValue(
       throwError(() => new Error('Server error')),
     );
@@ -716,7 +825,9 @@ describe('RegionEditorComponent persist / save-as', () => {
     component.saveAsFileExists = false;
 
     component.confirmSaveAs();
+    tick();
 
+    expect(component.saveAsBusy).toBe(false);
     expect(mockMessageService.add).toHaveBeenCalledWith(
       expect.objectContaining({
         severity: 'error',
@@ -724,7 +835,20 @@ describe('RegionEditorComponent persist / save-as', () => {
         detail: 'Server error',
       }),
     );
-  });
+  }));
+
+  it('cancelSaveAs aborts an in-flight upload and clears the busy state', fakeAsync(() => {
+    (mockRegionIo.saveGeoJson as jest.Mock).mockReturnValue(NEVER); // never completes
+    component.saveAsFilename = 'regions.geojson';
+    component.saveAsFileExists = false;
+
+    component.confirmSaveAs();
+    tick();
+    expect(component.saveAsBusy).toBe(true);
+
+    component.cancelSaveAs();
+    expect(component.saveAsBusy).toBe(false);
+  }));
 
   it('should not save when filename is empty', () => {
     component.saveAsFilename = '   ';
@@ -743,17 +867,18 @@ describe('RegionEditorComponent persist / save-as', () => {
     expect(mockRegionIo.saveGeoJson).not.toHaveBeenCalled();
   });
 
-  it('should pass custom filename to saveGeoJson', () => {
+  it('should pass custom filename to saveGeoJson', fakeAsync(() => {
     component.saveAsFilename = 'my_custom_name.geojson';
     component.saveAsFileExists = false;
 
     component.confirmSaveAs();
+    tick();
 
     expect(mockRegionIo.saveGeoJson).toHaveBeenCalledWith(
       expect.any(String),
       'my_custom_name.geojson',
     );
-  });
+  }));
 
   it('should trigger initial existence check when dialog opens', fakeAsync(() => {
     (mockRegionIo.roiFileExists as jest.Mock).mockReturnValue(of(true));
@@ -796,6 +921,7 @@ describe('RegionEditorComponent export', () => {
       getAnnotationRegions: () => [],
       setAnnotationRegions: jest.fn(),
       getGeoJsonString: jest.fn(() => '{"type":"FeatureCollection","features":[]}'),
+      getMaskImageSize: jest.fn(() => ({ width: 8, height: 8 })),
     });
 
     mockRegionIo = {

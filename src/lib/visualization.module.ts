@@ -21,6 +21,7 @@ import { OverlayPanelModule } from 'primeng/overlaypanel';
 import { ConfirmDialogModule } from 'primeng/confirmdialog';
 import { InputTextModule } from 'primeng/inputtext';
 import { CheckboxModule } from 'primeng/checkbox';
+import { RadioButtonModule } from 'primeng/radiobutton';
 
 import { VisualizationComponent } from './visualization.component';
 import { ToolbarComponent } from './toolbar/toolbar.component';
@@ -73,6 +74,7 @@ import { CHANNEL_HISTOGRAM_API } from './contracts/channel-histogram-api.contrac
     ConfirmDialogModule,
     InputTextModule,
     CheckboxModule,
+    RadioButtonModule,
   ],
   exports: [VisualizationComponent, RegionEditorComponent, HexColorPickerComponent, ChannelHistogramComponent],
   providers: [

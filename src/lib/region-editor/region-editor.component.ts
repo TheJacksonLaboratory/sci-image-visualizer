@@ -9,6 +9,8 @@ import { IImageMetadata } from '../contracts/image.contract';
 import { ConfirmationService, MessageService } from 'primeng/api';
 import { IRegionEditorApi, REGION_EDITOR_API } from '../contracts/region-editor-api.contract';
 import { RegionIoPort, REGION_IO_PORT } from '../contracts/ports/region-io.port';
+import { regionToParts, scaleParts, maskScaleFor } from './mask-raster';
+import { createMaskWorker as spawnMaskWorker } from './mask-worker';
 
 @Component({
   // Canonical prefixed selector first; the unprefixed original is kept as an
@@ -47,10 +49,28 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   showSaveAsDialog = false;
   saveAsFilename = '';
   saveAsFileExists = false;
+  /** True while a GeoJSON persist is serializing/uploading — drives the dialog's
+   *  progress bar and Cancel button (parity with the Save-mask dialog). */
+  saveAsBusy = false;
   private _saveAsCheck$ = new Subject<string>();
+  private _saveAsSub?: Subscription;
 
   showExportDialog = false;
   exportFilename = '';
+
+  showSaveMaskDialog = false;
+  saveMaskFilename = '';
+  /** Mask type chosen in the Save-mask dialog: a binary foreground/background
+   *  mask, or a multi-class mask with a distinct id per region. */
+  maskMode: 'binary' | 'multiclass' = 'binary';
+  /** True while the mask worker is rasterizing/encoding — drives the progress
+   *  bar and the Cancel button in the dialog. */
+  maskBusy = false;
+  /** 0–100 rasterization progress; switches to indeterminate during encoding. */
+  maskProgress = 0;
+  maskEncoding = false;
+  private maskWorker?: Worker;
+  private pendingMaskFilename = '';
 
   /**
    * PrimeNG p-table multi-selection mode toggle. When true, single-click
@@ -168,6 +188,8 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this._regionSub.unsubscribe();
     this._selectedIdxSub.unsubscribe();
     this._metaSub.unsubscribe();
+    this._saveAsSub?.unsubscribe();
+    this.teardownMaskWorker();
   }
 
   /**
@@ -638,6 +660,118 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     saveAs(blob, filename);
   }
 
+  /** Open the "Save mask" dialog, seeded with `<image-stem>_mask.png`. */
+  openSaveMaskDialog() {
+    if (!this.regions.length) return;
+    const name = this.regionIo.getSelectedFileName();
+    const stem = name ? name.substring(0, name.lastIndexOf('.')) : 'regions';
+    this.saveMaskFilename = `${stem}_mask.png`;
+    this.maskMode = 'binary';
+    this.showSaveMaskDialog = true;
+  }
+
+  /**
+   * Rasterize the regions to the chosen mask type and download as a PNG. The
+   * heavy work (full-res rasterize + PNG encode) runs in a Web Worker so the UI
+   * never freezes on large/whole-slide images and the job can be cancelled
+   * (jit-ui#95). The dialog stays open showing a progress bar until done.
+   */
+  confirmSaveMask() {
+    const filename = this.saveMaskFilename.trim();
+    if (!filename || !this.regions.length || this.maskBusy) return;
+
+    const size = this.regionApi.getMaskImageSize();
+    if (!size) {
+      this.maskError('No image size is available, so the mask cannot be sized.');
+      return;
+    }
+
+    // Whole-slide images exceed the browser's typed-array/memory limits, so cap
+    // the mask to a safe pixel budget and scale the geometry to match.
+    const scale = maskScaleFor(size.width, size.height);
+    const width = Math.max(1, Math.round(size.width * scale));
+    const height = Math.max(1, Math.round(size.height * scale));
+    if (scale < 1) {
+      this.messageService.add({
+        key: 'app-toast',
+        severity: 'info',
+        summary: 'Mask downscaled',
+        detail: `Image too large for a full-resolution mask; saving at ${width}×${height}.`,
+      });
+    }
+    const regions = this.regions.map((r) => scaleParts(regionToParts(r), scale));
+
+    this.pendingMaskFilename = filename;
+    this.maskBusy = true;
+    this.maskEncoding = false;
+    this.maskProgress = 0;
+
+    const worker = this.createMaskWorker();
+    this.maskWorker = worker;
+    worker.onmessage = ({ data }: MessageEvent) => {
+      switch (data?.type) {
+        case 'progress':
+          this.maskProgress = data.total ? Math.round((data.done / data.total) * 100) : 0;
+          break;
+        case 'encoding':
+          this.maskEncoding = true;
+          break;
+        case 'done':
+          this.finishMask(new Blob([data.png], { type: 'image/png' }));
+          break;
+        case 'error':
+          this.maskError(data.error || 'The mask could not be generated.');
+          break;
+      }
+    };
+    worker.onerror = () => this.maskError('The mask worker failed.');
+    worker.postMessage({
+      width, height,
+      originalWidth: size.width, originalHeight: size.height, scale,
+      mode: this.maskMode,
+      sourceName: this.regionIo.getSelectedFileName(),
+      regions,
+    });
+  }
+
+  /** Cancel an in-progress mask export: terminate the worker and reset state. */
+  cancelSaveMask() {
+    this.teardownMaskWorker();
+    this.maskBusy = false;
+    this.maskEncoding = false;
+    this.maskProgress = 0;
+  }
+
+  /** Worker factory — overridable in tests so the worker URL isn't constructed. */
+  protected createMaskWorker(): Worker {
+    return spawnMaskWorker();
+  }
+
+  private finishMask(blob: Blob) {
+    this.teardownMaskWorker();
+    this.maskBusy = false;
+    this.maskEncoding = false;
+    this.showSaveMaskDialog = false;
+    saveAs(blob, this.pendingMaskFilename);
+  }
+
+  private maskError(detail: string) {
+    this.teardownMaskWorker();
+    this.maskBusy = false;
+    this.maskEncoding = false;
+    this.messageService.add({
+      key: 'app-toast',
+      severity: 'error',
+      summary: 'Could not create mask',
+      detail,
+    });
+  }
+
+  private teardownMaskWorker() {
+    this.maskWorker?.terminate();
+    this.maskWorker = undefined;
+  }
+
   persistRegions() {
     const name = this.regionIo.getSelectedFileName();
     if (!name || !this.regions.length) return;
@@ -659,30 +793,49 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     if (!filename) return;
 
     const doSave = () => {
-      this.showSaveAsDialog = false;
-      const geoJsonStr = this.regionApi.getGeoJsonString(this.regions);
-      this.regionIo.saveGeoJson(geoJsonStr, filename).subscribe({
-        next: () => {
-          this.messageService.add({
-            key: 'app-toast',
-            severity: 'success',
-            summary: 'Regions saved',
-            detail: `Saved as ${filename}`,
-          });
-        },
-        error: (err) => {
+      // Keep the dialog open showing an (indeterminate) progress bar while the
+      // regions serialize and upload, then close on success. Defer one tick so
+      // the bar paints before a large synchronous GeoJSON serialize.
+      this.saveAsBusy = true;
+      setTimeout(() => {
+        let geoJsonStr: string;
+        try {
+          geoJsonStr = this.regionApi.getGeoJsonString(this.regions);
+        } catch (err) {
+          this.saveAsBusy = false;
           this.messageService.add({
             key: 'app-toast',
             severity: 'error',
             summary: 'Error saving regions',
-            detail: `${err.message || err}`,
+            detail: `${(err as Error)?.message ?? err}`,
           });
-        },
+          return;
+        }
+        this._saveAsSub = this.regionIo.saveGeoJson(geoJsonStr, filename).subscribe({
+          next: () => {
+            this.saveAsBusy = false;
+            this.showSaveAsDialog = false;
+            this.messageService.add({
+              key: 'app-toast',
+              severity: 'success',
+              summary: 'Regions saved',
+              detail: `Saved as ${filename}`,
+            });
+          },
+          error: (err) => {
+            this.saveAsBusy = false;
+            this.messageService.add({
+              key: 'app-toast',
+              severity: 'error',
+              summary: 'Error saving regions',
+              detail: `${err.message || err}`,
+            });
+          },
+        });
       });
     };
 
     if (this.saveAsFileExists) {
-      this.showSaveAsDialog = false;
       this.confirmationService.confirm({
         message: `"${filename}" already exists. Do you want to overwrite it?`,
         header: 'Confirm Overwrite',
@@ -692,5 +845,12 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     } else {
       doSave();
     }
+  }
+
+  /** Cancel an in-progress GeoJSON persist: abort the upload and reset state. */
+  cancelSaveAs() {
+    this._saveAsSub?.unsubscribe();
+    this._saveAsSub = undefined;
+    this.saveAsBusy = false;
   }
 }

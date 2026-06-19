@@ -19,6 +19,16 @@ import { WandService } from './toolbar/wand/wand.service';
  */
 @Injectable({ providedIn: 'root' })
 export class RegionOpsService {
+  /**
+   * Largest raster (in pixels) a region set-op will allocate on the main thread.
+   * Selections whose clipped bbox exceeds this are rasterized at a proportional
+   * downscale (then the traced geometry is scaled back), so merge/inverse stay
+   * responsive on gigapixel slides. ~16 MP keeps the synchronous contour trace
+   * well under a second; the downscale only affects boundary fidelity of very
+   * large-extent selections (small selections keep full resolution).
+   */
+  private static readonly MAX_OP_PIXELS = 16_000_000;
+
   constructor(private wand: WandService) {}
 
   /**
@@ -28,11 +38,52 @@ export class RegionOpsService {
    * only open polylines were selected).
    */
   merge(regions: Region[], imageWidth: number, imageHeight: number): Region | null {
-    const mask = this.unionMask(regions, imageWidth, imageHeight);
+    // The raster is bounded by the selection's bbox, not the image — but on a
+    // whole-slide image a large-extent selection still spans billions of pixels,
+    // which freezes (or overflows the typed-array limit) on the main thread.
+    // Rasterize at a capped resolution and scale the traced polygons back up.
+    const scale = this.opRasterScale(regions, imageWidth, imageHeight);
+    const mask = this.unionMask(regions, imageWidth, imageHeight, scale);
     if (!mask) return null;
-    const polys = this.wand.maskToPolygons(
-      mask.mask, mask.bw, mask.bh, imageWidth, imageHeight, mask.bx, mask.by, 1, 1);
+    const sw = Math.max(1, Math.round(imageWidth * scale));
+    const sh = Math.max(1, Math.round(imageHeight * scale));
+    let polys = this.wand.maskToPolygons(mask.mask, mask.bw, mask.bh, sw, sh, mask.bx, mask.by, 1, 1);
+    if (scale !== 1) polys = polys.map((p) => this.scalePolygon(p, 1 / scale));
     return this.regionFromParts(polys, regions[0]);
+  }
+
+  /** Downscale factor (≤ 1) keeping the selection's clipped bbox within
+   *  {@link MAX_OP_PIXELS}; 1 when it already fits. */
+  private opRasterScale(regions: Region[], W: number, H: number): number {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const scan = (xs: number[], ys: number[]) => {
+      for (const x of xs) { if (x < minX) minX = x; if (x > maxX) maxX = x; }
+      for (const y of ys) { if (y < minY) minY = y; if (y > maxY) maxY = y; }
+    };
+    for (const r of regions || []) {
+      const b = r?.bounds;
+      if (b instanceof Rectangle) scan([b.x, b.x + b.width], [b.y, b.y + b.height]);
+      else if (b instanceof Polygon) scan(b.xpoints, b.ypoints);
+      else if (b instanceof MultiPolygon) for (const p of b.polygons) scan(p.xpoints, p.ypoints);
+    }
+    if (!Number.isFinite(minX)) return 1;
+    const bw = Math.min(W, maxX) - Math.max(0, minX);
+    const bh = Math.min(H, maxY) - Math.max(0, minY);
+    const area = bw * bh;
+    if (!(area > RegionOpsService.MAX_OP_PIXELS)) return 1;
+    return Math.sqrt(RegionOpsService.MAX_OP_PIXELS / area);
+  }
+
+  /** A copy of `p` with every coordinate (and hole coordinate) multiplied by `s`. */
+  private scalePolygon(p: Polygon, s: number): Polygon {
+    const poly = new Polygon();
+    poly.xpoints = p.xpoints.map((x) => x * s);
+    poly.ypoints = p.ypoints.map((y) => y * s);
+    poly.npoints = poly.xpoints.length;
+    poly.closed = p.closed;
+    poly.coordinates = poly.xpoints.map((x, i) => [x, poly.ypoints[i]]);
+    if (p.holes) poly.holes = p.holes.map((ring) => ring.map(([x, y]) => [x * s, y * s]));
+    return poly;
   }
 
   /**
@@ -155,11 +206,13 @@ export class RegionOpsService {
 
   // ── internals ──────────────────────────────────────────────────────────
 
-  /** Union of every region's filled mask (exterior minus holes), or null. */
-  private unionMask(regions: Region[], W: number, H: number): BBoxMask | null {
+  /** Union of every region's filled mask (exterior minus holes), or null.
+   *  `scale` (≤ 1) downscales the raster for large selections; coordinates and
+   *  the clip bounds are scaled to match. */
+  private unionMask(regions: Region[], W: number, H: number, scale = 1): BBoxMask | null {
     let acc: BBoxMask | null = null;
     for (const region of regions || []) {
-      const m = this.rasterizeRegion(region, W, H);
+      const m = this.rasterizeRegion(region, W, H, scale);
       if (!m) continue;
       acc = acc ? unionMasks(acc, m) : m;
     }
@@ -167,23 +220,29 @@ export class RegionOpsService {
   }
 
   /** Rasterise any region (rect / closed polygon / multi-polygon, holes punched
-   *  out) into a bbox mask. Null for open polylines or degenerate geometry. */
-  private rasterizeRegion(region: Region, W: number, H: number): BBoxMask | null {
+   *  out) into a bbox mask. Null for open polylines or degenerate geometry.
+   *  `scale` (≤ 1) shrinks the coordinates and clip bounds for a downscaled raster. */
+  private rasterizeRegion(region: Region, W: number, H: number, scale = 1): BBoxMask | null {
+    const sw = scale === 1 ? W : Math.max(1, Math.round(W * scale));
+    const sh = scale === 1 ? H : Math.max(1, Math.round(H * scale));
+    const sc = (arr: number[]) => (scale === 1 ? arr : arr.map((v) => v * scale));
+    const scHoles = (holes?: number[][][]) =>
+      !holes || scale === 1 ? holes : holes.map((ring) => ring.map(([x, y]) => [x * scale, y * scale]));
     const b = region?.bounds;
     if (b instanceof Rectangle) {
       const xs = [b.x, b.x + b.width, b.x + b.width, b.x];
       const ys = [b.y, b.y, b.y + b.height, b.y + b.height];
-      return this.wand.rasterizePolygon(xs, ys, W, H);
+      return this.wand.rasterizePolygon(sc(xs), sc(ys), sw, sh);
     }
     if (b instanceof Polygon) {
       if (b.closed === false || b.xpoints.length < 3) return null;
-      return this.wand.rasterizePolygon(b.xpoints, b.ypoints, W, H, b.holes);
+      return this.wand.rasterizePolygon(sc(b.xpoints), sc(b.ypoints), sw, sh, scHoles(b.holes));
     }
     if (b instanceof MultiPolygon) {
       let acc: BBoxMask | null = null;
       for (const part of b.polygons) {
         if (part.xpoints.length < 3) continue;
-        const m = this.wand.rasterizePolygon(part.xpoints, part.ypoints, W, H, part.holes);
+        const m = this.wand.rasterizePolygon(sc(part.xpoints), sc(part.ypoints), sw, sh, scHoles(part.holes));
         if (m) acc = acc ? unionMasks(acc, m) : m;
       }
       return acc;
