@@ -247,8 +247,26 @@ separate, additive feature from the lossy geometric Merge. §2.
 
 - **Refactor surface** — adding `MultiPolygon` touches every `instanceof` site;
   do the audit in §2 first and land Phase 1 behind the holes flag.
-- **Raster fidelity / memory** — inverse allocates a full-image mask; fine as a
-  one-shot, but cap very large images or fall back to the viewport.
+- **Raster fidelity / memory** — merge/inverse rasterize the selection (bounded
+  by its bbox, not the whole image) and trace contours. **Mitigated (jit-ui#85):**
+  `RegionOpsService.MAX_OP_PIXELS` (16 MP) caps the working raster — a selection
+  whose clipped bbox exceeds it is rasterized at a proportional downscale and the
+  traced polygons are scaled back to full image coordinates. Without this, a
+  large-extent selection on a whole-slide image (e.g. a region spanning a
+  119040×90112 NDPI) allocates a multi-GB `Uint8Array` (typed-array length error)
+  and freezes the tab.
+  - **Trade-off:** the cap is deliberately low so the op stays a sub-second,
+    synchronous, undo-tracked main-thread call (a worker would complicate the
+    undo flow). Selections within 16 MP keep **full resolution** (`scale === 1`,
+    byte-identical to the original path); only very large-extent selections are
+    downscaled, which **coarsens their boundary** (error ≈ a few full-res px) and
+    can drop sub-pixel holes. Acceptable for selection set-ops; raise
+    `MAX_OP_PIXELS` to trade responsiveness for fidelity, or move the op to a
+    worker for exact full-res geometry without blocking.
+  - The mask export (jit-ui#95) has the analogous cap `MAX_MASK_PIXELS` (100 MP)
+    in `region-editor/mask-raster.ts`, but runs in a Web Worker and records the
+    original resolution + scale in the PNG metadata, so it is non-blocking and
+    traceable rather than fidelity-capped on the main thread.
 - **Plotly even-odd multi-subpath fill** — same open risk as the holes plan;
   spike before committing the Plotly path; OSD is the primary Image-view backend.
 - **Ungroup ≠ inverse-of-merge** — connectivity split won't recover overlapped

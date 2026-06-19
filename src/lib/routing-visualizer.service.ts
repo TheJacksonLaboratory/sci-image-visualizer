@@ -231,6 +231,27 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   exportRegions(regions: Region[]): void { this.renderer().exportRegions(regions); }
   getGeoJsonString(regions: Region[]): string { return this.renderer().getGeoJsonString(regions); }
 
+  /** Authoritative full-resolution image size for mask export. Prefers the
+   *  active renderer's reported size, falling back to the image metadata (x/y
+   *  are the full-res pixel dimensions used across the app). Rejects non-finite
+   *  or non-positive sizes — the Plotly bounds can yield NaN before a plot is
+   *  fully laid out, which would otherwise crash mask creation. */
+  getMaskImageSize(): { width: number; height: number } | null {
+    const valid = (s: { width: number; height: number } | null | undefined) =>
+      s && Number.isFinite(s.width) && Number.isFinite(s.height) &&
+      s.width >= 1 && s.height >= 1
+        ? { width: Math.round(s.width), height: Math.round(s.height) }
+        : null;
+
+    const fromRenderer = valid(this.getTrueImageSize());
+    if (fromRenderer) return fromRenderer;
+
+    let meta: IImageMetadata[] = [];
+    this.getImageMeta().subscribe((m) => (meta = m)).unsubscribe();
+    const m0 = meta?.[0];
+    return m0 ? valid({ width: m0.x, height: m0.y }) : null;
+  }
+
   // ── IRegionEditorApi: annotation-only surface for the Region Editor ───
   // Intensity-profile lines (kind='profile') belong to the intensity tool, not
   // the editor. These methods give external consumers an annotation-only view

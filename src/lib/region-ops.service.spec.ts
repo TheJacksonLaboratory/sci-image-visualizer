@@ -79,6 +79,15 @@ describe('RegionOpsService', () => {
     it('returns null when nothing rasterises', () => {
       expect(ops.merge([poly([0, 10], [0, 10])], 100, 100)).toBeNull(); // 2-pt = degenerate
     });
+
+    it('merges a gigapixel-extent selection at capped resolution — jit-ui#85', () => {
+      // Two overlapping ~120k² rectangles: a ~3.24e10-px union bbox. The cap
+      // keeps the raster ≤64 MP; without it this throws/freezes.
+      const merged = ops.merge(
+        [rect(0, 0, 120000, 120000), rect(60000, 60000, 120000, 120000)], 200000, 200000)!;
+      expect(merged).not.toBeNull();
+      expect(merged.bounds).toBeInstanceOf(Polygon); // overlapping → one connected part
+    });
   });
 
   describe('inverse', () => {
@@ -102,6 +111,18 @@ describe('RegionOpsService', () => {
       const b = inv.bounds as Polygon;
       expect(b).toBeInstanceOf(Polygon);
       expect(Math.max(...b.xpoints)).toBe(100000);
+      expect(b.holes?.length).toBe(1);
+    });
+
+    it('handles a gigapixel-EXTENT selection at capped resolution (no freeze) — jit-ui#85', () => {
+      // The selection's own bbox spans ~2.25e10 px. Without the raster cap this
+      // allocates a multi-GB Uint8Array (RangeError) and freezes the tab.
+      const huge = rect(0, 0, 150000, 150000);
+      const inv = ops.inverse([huge], 200000, 200000)!;
+      expect(inv).not.toBeNull();
+      const b = inv.bounds as Polygon;
+      expect(b).toBeInstanceOf(Polygon);
+      expect(Math.max(...b.xpoints)).toBe(200000); // exterior is the full image rect
       expect(b.holes?.length).toBe(1);
     });
 
