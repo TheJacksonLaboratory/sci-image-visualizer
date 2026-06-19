@@ -90,8 +90,10 @@ export interface LabelMask {
  * - `'binary'` — every region pixel is 255 (standard 8-bit black/white mask:
  *   `> 0` = foreground; also directly viewable).
  * - `'multiclass'` — each region gets a distinct 1-based id (its index + 1).
- *   Stays 8-bit for ≤255 regions; promotes to a 16-bit mask beyond that so ids
- *   never collide (up to 65535 regions).
+ *   Stays 8-bit for ≤255 regions; promotes to 16-bit beyond that. Ids are
+ *   distinct up to the 16-bit ceiling (65535 regions); a selection larger than
+ *   that exceeds the PNG's representable range and ids wrap (not a realistic
+ *   hand-annotation case, but called out so the limit is explicit).
  *
  * Later regions paint over earlier ones where they overlap. `onProgress` is
  * called after each region (1-based) so a caller can drive a progress bar.

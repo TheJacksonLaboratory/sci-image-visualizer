@@ -628,6 +628,14 @@ describe('RegionEditorComponent persist / save-as', () => {
     expect(component.maskMode).toBe('binary');
   });
 
+  it('keeps the whole name as the mask stem when the filename has no extension — jit-ui#100', () => {
+    (mockRegionIo.getSelectedFileName as jest.Mock).mockReturnValue('slide001');
+
+    component.openSaveMaskDialog();
+
+    expect(component.saveMaskFilename).toBe('slide001_mask.png'); // not "_mask.png"
+  });
+
   it('does not open the save-mask dialog when there are no regions', () => {
     component.regions = [];
 
@@ -848,6 +856,30 @@ describe('RegionEditorComponent persist / save-as', () => {
 
     component.cancelSaveAs();
     expect(component.saveAsBusy).toBe(false);
+  }));
+
+  it('cancelSaveAs before the deferred timer fires aborts the save entirely — jit-ui#100', fakeAsync(() => {
+    component.saveAsFilename = 'regions.geojson';
+    component.saveAsFileExists = false;
+
+    component.confirmSaveAs();
+    // Cancel BEFORE the setTimeout callback runs.
+    component.cancelSaveAs();
+    tick();
+
+    expect(mockRegionIo.saveGeoJson).not.toHaveBeenCalled();
+    expect(component.saveAsBusy).toBe(false);
+  }));
+
+  it('ngOnDestroy clears a pending save timer so it never uploads after teardown — jit-ui#100', fakeAsync(() => {
+    component.saveAsFilename = 'regions.geojson';
+    component.saveAsFileExists = false;
+
+    component.confirmSaveAs();
+    component.ngOnDestroy();
+    tick();
+
+    expect(mockRegionIo.saveGeoJson).not.toHaveBeenCalled();
   }));
 
   it('should not save when filename is empty', () => {

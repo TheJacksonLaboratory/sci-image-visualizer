@@ -82,7 +82,7 @@ describe('RegionOpsService', () => {
 
     it('merges a gigapixel-extent selection at capped resolution — jit-ui#85', () => {
       // Two overlapping ~120k² rectangles: a ~3.24e10-px union bbox. The cap
-      // keeps the raster ≤64 MP; without it this throws/freezes.
+      // keeps the raster ≤16 MP (MAX_OP_PIXELS); without it this throws/freezes.
       const merged = ops.merge(
         [rect(0, 0, 120000, 120000), rect(60000, 60000, 120000, 120000)], 200000, 200000)!;
       expect(merged).not.toBeNull();

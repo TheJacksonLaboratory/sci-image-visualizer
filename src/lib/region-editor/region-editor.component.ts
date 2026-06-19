@@ -54,6 +54,9 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   saveAsBusy = false;
   private _saveAsCheck$ = new Subject<string>();
   private _saveAsSub?: Subscription;
+  /** Handle for the deferred-serialize timer so Cancel/destroy can abort it
+   *  before it fires (otherwise the upload would still start). */
+  private _saveAsTimer?: ReturnType<typeof setTimeout>;
 
   showExportDialog = false;
   exportFilename = '';
@@ -188,6 +191,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this._regionSub.unsubscribe();
     this._selectedIdxSub.unsubscribe();
     this._metaSub.unsubscribe();
+    if (this._saveAsTimer !== undefined) clearTimeout(this._saveAsTimer);
     this._saveAsSub?.unsubscribe();
     this.teardownMaskWorker();
   }
@@ -664,7 +668,11 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   openSaveMaskDialog() {
     if (!this.regions.length) return;
     const name = this.regionIo.getSelectedFileName();
-    const stem = name ? name.substring(0, name.lastIndexOf('.')) : 'regions';
+    // Strip the extension only when there is one; an extension-less name keeps
+    // its whole stem (a leading-dot dotfile is treated as having no extension)
+    // so we never produce a bare "_mask.png".
+    const dot = name ? name.lastIndexOf('.') : -1;
+    const stem = name ? (dot > 0 ? name.substring(0, dot) : name) : 'regions';
     this.saveMaskFilename = `${stem}_mask.png`;
     this.maskMode = 'binary';
     this.showSaveMaskDialog = true;
@@ -797,7 +805,8 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       // regions serialize and upload, then close on success. Defer one tick so
       // the bar paints before a large synchronous GeoJSON serialize.
       this.saveAsBusy = true;
-      setTimeout(() => {
+      this._saveAsTimer = setTimeout(() => {
+        this._saveAsTimer = undefined;
         let geoJsonStr: string;
         try {
           geoJsonStr = this.regionApi.getGeoJsonString(this.regions);
@@ -847,8 +856,13 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     }
   }
 
-  /** Cancel an in-progress GeoJSON persist: abort the upload and reset state. */
+  /** Cancel an in-progress GeoJSON persist: abort the deferred serialize and/or
+   *  the in-flight upload, and reset state. */
   cancelSaveAs() {
+    if (this._saveAsTimer !== undefined) {
+      clearTimeout(this._saveAsTimer);
+      this._saveAsTimer = undefined;
+    }
     this._saveAsSub?.unsubscribe();
     this._saveAsSub = undefined;
     this.saveAsBusy = false;
