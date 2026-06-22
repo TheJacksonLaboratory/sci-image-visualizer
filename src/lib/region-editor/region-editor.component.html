@@ -3,7 +3,7 @@
   <div class="p-toolbar-group-start align-items-center flex-wrap gap-1">
     <p-button icon="pi pi-tag" size="small"
               [text]="!showShapeLabel"
-              pTooltip="Show region labels. Showing labels on many regions makes the diagram slower."
+              pTooltip="Show region labels."
               tooltipPosition="bottom"
               (onClick)="showShapeLabel = !showShapeLabel; changeShowShapeLabel(showShapeLabel)">
     </p-button>
@@ -11,28 +11,35 @@
     <!-- New regions are now created from the diagram toolbar
          (rectangle, polyline, freeform, wand). -->
     <p-button icon="pi pi-upload" size="small" [text]="true" styleClass="mr-2"
-              pTooltip="Import ROIs from geojson format"
+              pTooltip="Upload and display regions from geojson file."
               tooltipPosition="bottom"
               (click)="roiFileInput.click()">
     </p-button>
     <input #roiFileInput type="file" accept=".geojson,.json" hidden
            (change)="importRois($event); roiFileInput.value = ''"/>
     <p-button size="small" [text]="true" styleClass="mr-2"
-              pTooltip="Export ROIs to geojson format"
+              pTooltip="Download regions as geojson file."
               tooltipPosition="bottom" icon="pi pi-download"
               (click)="exportRois()">
     </p-button>
     <p-button icon="pi pi-save" size="small" [text]="true" styleClass="mr-2"
-              pTooltip="Save regions (as geojson alongside the image)"
+              pTooltip="Save regions to server."
               tooltipPosition="bottom"
               (click)="persistRegions()"
               [disabled]="!regions || !regions.length">
     </p-button>
-    <p-button icon="pi pi-image" size="small" [text]="true" styleClass="mr-2"
-              pTooltip="Save mask (PNG) of the regions"
+    <p-button size="small" [text]="true" styleClass="mr-2"
+              pTooltip="Download mask of the regions as PNG"
               tooltipPosition="bottom"
               (click)="openSaveMaskDialog()"
               [disabled]="!regions || !regions.length">
+      <!-- References the file so Inkscape edits to mask.svg show up directly
+           (the lib's assets/** are served at assets/plotting/). The
+           toolbar-icon-dark filter recolours the black SVG to the theme blue,
+           same as region-editor.svg and the other SVG toolbar icons. -->
+      <img src="assets/plotting/mask.svg" class="toolbar-icon-dark"
+           style="width: 1rem; height: 1rem; vertical-align: middle;"
+           alt="Download mask"/>
     </p-button>
     <p-button label="x512" size="small" [text]="true" styleClass="mr-2"
               pTooltip="Round all rectangle regions
@@ -247,7 +254,7 @@
   <ng-template pTemplate="footer">
     <p-button *ngIf="!maskBusy" label="Cancel" icon="pi pi-times" [text]="true"
               (onClick)="showSaveMaskDialog = false"></p-button>
-    <p-button *ngIf="!maskBusy" label="Save" icon="pi pi-download"
+    <p-button *ngIf="!maskBusy" label="Download" icon="pi pi-download"
               [disabled]="!saveMaskFilename || !saveMaskFilename.trim()"
               (onClick)="confirmSaveMask()"></p-button>
     <p-button *ngIf="maskBusy" label="Cancel" icon="pi pi-times" [text]="true"
