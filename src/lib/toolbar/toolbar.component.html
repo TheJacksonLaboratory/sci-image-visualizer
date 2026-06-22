@@ -359,7 +359,7 @@
                   pTooltip="Segment the drawn rectangles with SAM (box prompt)"
                   tooltipPosition="bottom"
                   (onClick)="segmentRegions.emit()">
-          <img src="assets/plotting/interactive-segmentation-cursor.svg"
+          <img src="assets/plotting/picture-segmentation.svg"
                class="toolbar-icon-dark" style="width: 1rem"/>
         </p-button>
         <ng-container [ngTemplateOutlet]="samPointBtn"></ng-container>
@@ -375,7 +375,7 @@
                     pTooltip="Segment the drawn rectangles with SAM (box prompt)"
                     tooltipPosition="bottom"
                     (onClick)="segmentRegions.emit()">
-            <img src="assets/plotting/interactive-segmentation-cursor.svg"
+            <img src="assets/plotting/picture-segmentation.svg"
                  class="toolbar-icon-dark" style="width: 1rem"/>
           </p-button>
           <ng-container [ngTemplateOutlet]="samPointBtn"></ng-container>
@@ -384,12 +384,13 @@
       <!-- Point-prompt tool — shared between the models / no-models layouts so it
            always sits just left of the model dropdown. -->
       <ng-template #samPointBtn>
-        <p-button icon="pi pi-map-marker" size="small"
+        <p-button size="small"
                   [text]="activeDragMode !== 'samPoint'"
                   pTooltip="SAM point prompts: click a fiber to segment it as a new region;
                   Shift/Alt-click to refine (exclude) the current one.<br>Esc undoes it."
                   [escape]="false" tooltipPosition="bottom"
                   (onClick)="toggleDragMode.emit('samPoint')">
+          <img src="assets/plotting/click.svg" class="toolbar-icon-dark" style="width: 1rem"/>
         </p-button>
       </ng-template>
       <p-menu #samModelMenu [model]="samMenuItems" [popup]="true" appendTo="body"></p-menu>
@@ -433,10 +434,11 @@
           </div>
         </div>
       </p-overlayPanel>
-      <p-button label="Cellpose" icon="pi pi-table" size="small" [text]="true"
+      <p-button size="small" [text]="true"
                 pTooltip="Auto-segment cells inside each drawn rectangle (cellpose-SAM, client-side)"
                 tooltipPosition="bottom"
                 (onClick)="segmentCellpose.emit()">
+        <img src="assets/plotting/cells.svg" class="toolbar-icon-dark" style="width: 1rem"/>
       </p-button>
     </ng-container>
 
@@ -605,10 +607,10 @@
     Generated regions inherit the color of the rectangle they came from. The first run
     downloads the model (a progress toast is shown); it's then cached.</p>
   <ul>
-    <li>"<b>Segment</b>" <img src="assets/plotting/interactive-segmentation-cursor.svg" width="15" height="15">
+    <li>"<b>Segment</b>" <img src="assets/plotting/picture-segmentation.svg" width="15" height="15">
       (box prompt): draw one or more <b>Rectangular regions</b> around the objects of interest,
       then click Segment. Each rectangle is replaced by the SAM mask of the object inside it.</li>
-    <li>"<b>Point prompts</b>" <i class="pi pi-map-marker"></i>: click directly on an object to
+    <li>"<b>Point prompts</b>" <img src="assets/plotting/click.svg" width="15" height="15">: click directly on an object to
       segment it as a <b>new</b> region. Each click starts a fresh object — clicking another
       object won't grow the previous one. <kbd>Shift</kbd>/<kbd>Alt</kbd>-click adds an
       <i>exclude</i> point that refines the current object; <kbd>Esc</kbd> undoes it,
@@ -619,7 +621,7 @@
       <b>patho-sam ViT-B</b> for histopathology (H&amp;E / stained tissue). The choice applies to
       <i>both</i> the box and point tools. The <i class="pi pi-info-circle"></i> info button next
       to it explains the trade-off.</li>
-    <li>"<b>Cellpose</b>" <i class="pi pi-table"></i>: draw rectangles, then click Cellpose to
+    <li>"<b>Cellpose</b>" <img src="assets/plotting/cells.svg" width="15" height="15">: draw rectangles, then click Cellpose to
       automatically segment every cell inside each rectangle (client-side cellpose-SAM) — one
       region per detected cell. No clicking on individual cells needed.</li>
   </ul>
