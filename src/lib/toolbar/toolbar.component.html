@@ -28,17 +28,6 @@
         <span class="flex align-items-center mx-1 toolbar-text wand-sensitivity-value">
           {{ isoRange[0] }}–{{ isoRange[1] }}</span>
       </ng-container>
-      <!-- Region Editor: opens the editor as a floating dialog (formerly the
-           right-panel Regions tab). Sits just left of the intensity-profile
-           tool. -->
-      <ng-container *ngIf="tools.regionTools">
-        <span class="toolbar-separator"></span>
-        <p-button size="small" [text]="true"
-                  pTooltip="Open the Region Editor" tooltipPosition="bottom"
-                  (onClick)="openRegionEditor.emit()">
-          <img src="assets/plotting/region-editor.svg" class="toolbar-icon-dark" style="width: 1rem"/>
-        </p-button>
-      </ng-container>
       <!-- Intensity tools (Heatmap / Image mode): add another colored line ROI.
            Each added line gets the next bright palette colour and its own inset
            trace; select a line on the image and use the trash tool to remove it
@@ -190,7 +179,14 @@
 
     <ng-container *ngIf="isHeatmap && tools.regionTools">
       <span class="toolbar-separator"></span>
-
+      <!-- Region Editor: opens the editor as a floating dialog (formerly the
+           right-panel Regions tab). Sits just left of the intensity-profile
+           tool. -->
+      <p-button size="small" [text]="true"
+                pTooltip="Open the Region Editor" tooltipPosition="bottom"
+                (onClick)="openRegionEditor.emit()">
+        <img src="assets/plotting/region-editor.svg" class="toolbar-icon-dark" style="width: 1rem"/>
+      </p-button>
       <!-- Region drawing tools -->
       <p-button icon="pi pi-arrow-up-right" size="small"
                 [text]="activeDragMode !== 'select'"
