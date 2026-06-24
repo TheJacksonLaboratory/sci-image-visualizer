@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Inject, Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Image } from 'image-js';
@@ -14,6 +14,8 @@ import { IRegionOverlay } from './contracts/region-overlay.contract';
 import { IRegionEditorApi } from './contracts/region-editor-api.contract';
 import { IChannelHistogramApi, IChannelState, IHistogram } from './contracts/channel-histogram-api.contract';
 import { VisualizerStore } from './store/visualizer-store.service';
+import { NapariVisualizerService } from './implementations/napari-js/napari-visualizer.service';
+import { VIZ_CONFIG, VizConfig } from './contracts/viz-config';
 
 /**
  * Backend selector. Routes per plot type:
@@ -78,10 +80,15 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
    *  re-select once the file is cached — retries OSD. (Was a permanent flag,
    *  which left the whole session stuck on Plotly after one slow load.) */
   private osdFellBack = false;
+  /** napari-js failed for the current render cycle → fall back to OSD (then Plotly).
+   *  Reset by reset() at the start of every cycle, like {@link osdFellBack}. */
+  private napariFellBack = false;
 
   constructor(private plotly: PlotlyService,
               private osd: OpenSeadragonVisualizerService,
-              private store: VisualizerStore) {}
+              private napari: NapariVisualizerService,
+              private store: VisualizerStore,
+              @Inject(VIZ_CONFIG) private config: VizConfig) {}
 
   private isImageType(t: PlotType): boolean {
     return t === PlotType.IMAGE;
@@ -90,8 +97,12 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   /** Backend to attempt for the image plot type this render (OSD unless OSD
    *  already fell back this cycle). */
   private imageBackend(): IVisualizer {
-    return (this.isImageType(this.currentPlotType) && !this.osdFellBack)
-      ? this.osd : this.plotly;
+    if (this.isImageType(this.currentPlotType)) {
+      // Opt-in WebGPU napari-js backend (jit-ui#102), with OSD then Plotly as fallbacks.
+      if (this.config.useNapariRenderer && !this.napariFellBack) return this.napari;
+      if (!this.osdFellBack) return this.osd;
+    }
+    return this.plotly;
   }
 
   /** Backend currently on screen — what ongoing zoom/tool/region ops act on. */
@@ -105,20 +116,32 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
 
   // ── render / viewport → active renderer ──────────────────────────────
   async load(imageInfo: IImageInfo, zIndex: number): Promise<any> {
-    if (this.imageBackend() === this.osd) {
+    const backend = this.imageBackend();
+    if (backend === this.napari) {
       try {
-        return await this.osd.load(imageInfo, zIndex);
+        return await this.napari.load(imageInfo, zIndex);
       } catch (err) {
-        // OSD couldn't load (e.g. the file is still caching past the deadline,
-        // or the tile endpoint errored). Fall back to Plotly for THIS image so
-        // it still renders. Not permanent — reset() re-enables OSD for the next
-        // file / a re-select once the file is cached.
-        console.warn('[visualizer] OpenSeadragon load failed — falling back to Plotly for this image.', err);
-        this.osdFellBack = true;
-        return this.plotly.load(imageInfo, zIndex);
+        // napari-js couldn't load → fall back to OSD (then Plotly) for THIS image.
+        console.warn('[visualizer] napari-js load failed — falling back to OpenSeadragon.', err);
+        this.napariFellBack = true;
+        return this.loadViaOsdThenPlotly(imageInfo, zIndex);
       }
     }
+    if (backend === this.osd) {
+      return this.loadViaOsdThenPlotly(imageInfo, zIndex);
+    }
     return this.plotly.load(imageInfo, zIndex);
+  }
+
+  /** Try OSD; on failure fall back to Plotly for this image (not permanent — see reset()). */
+  private async loadViaOsdThenPlotly(imageInfo: IImageInfo, zIndex: number): Promise<any> {
+    try {
+      return await this.osd.load(imageInfo, zIndex);
+    } catch (err) {
+      console.warn('[visualizer] OpenSeadragon load failed — falling back to Plotly for this image.', err);
+      this.osdFellBack = true;
+      return this.plotly.load(imageInfo, zIndex);
+    }
   }
   plot(plotDiv: string, imageLoaded: any, imageInfo: IImageInfo, screenHeight: number,
        plotType: PlotType, inPlace?: boolean): Promise<boolean> {
@@ -141,9 +164,10 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   }
   reloadAndPlot(): void { this.plotly.reloadAndPlot(); }
   reset(): void {
-    // Start of a render cycle: re-enable an OSD attempt (clears a prior
+    // Start of a render cycle: re-enable napari-js/OSD attempts (clear any prior
     // per-image fallback) and tear down whatever's on screen.
     this.osdFellBack = false;
+    this.napariFellBack = false;
     this.renderer().reset();
   }
   relayout(trueImageSize?: number[]): void { this.renderer().relayout(trueImageSize); }

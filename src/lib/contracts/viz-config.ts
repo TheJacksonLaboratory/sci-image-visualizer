@@ -15,6 +15,13 @@ export interface VizConfig {
    * the page width (25vw).
    */
   regionEditorWidthSelector?: string;
+  /**
+   * Opt in to the experimental WebGPU **napari-js** backend for the IMAGE plot type
+   * (jit-ui#102). When `true`, the router renders images through napari-js with OpenSeadragon
+   * as the fallback; when absent/false, OpenSeadragon remains the default. Other plot types
+   * are unaffected.
+   */
+  useNapariRenderer?: boolean;
 }
 
 export const VIZ_CONFIG = new InjectionToken<VizConfig>('VIZ_CONFIG');

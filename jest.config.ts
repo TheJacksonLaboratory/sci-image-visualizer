@@ -29,6 +29,11 @@ export default {
     '^.+\\.(ts|mjs|js|html)$': 'jest-preset-angular',
   },
   transformIgnorePatterns: ['node_modules/(?!.*\\.mjs$)'],
+  // napari-js ships ESM-only and needs a real WebGPU device, so unit tests use a stub
+  // (the real package + types are used by ng-packagr / nx build). See testing/napari-js-stub.ts.
+  moduleNameMapper: {
+    '^napari-js$': '<rootDir>/src/lib/testing/napari-js-stub.ts',
+  },
   snapshotSerializers: [
     'jest-preset-angular/build/serializers/no-ng-attributes',
     'jest-preset-angular/build/serializers/ng-snapshot',

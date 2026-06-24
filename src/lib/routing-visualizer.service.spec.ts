@@ -4,6 +4,7 @@ import { firstValueFrom, of } from 'rxjs';
 import { RoutingVisualizerService } from './routing-visualizer.service';
 import { PlotlyService } from './implementations/plotly/plotly.service';
 import { OpenSeadragonVisualizerService } from './implementations/osd/openseadragon-visualizer.service';
+import { NapariVisualizerService } from './implementations/napari-js/napari-visualizer.service';
 import { VisualizerStore } from './store/visualizer-store.service';
 import { VIZ_CONFIG } from './contracts/viz-config';
 import { PlotType } from './contracts/plot-type';
@@ -129,6 +130,7 @@ describe('RoutingVisualizerService (characterization)', () => {
         VisualizerStore,
         { provide: PlotlyService, useValue: plotly },
         { provide: OpenSeadragonVisualizerService, useValue: osd },
+        { provide: NapariVisualizerService, useValue: mockBackend() },
         { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
       ],
     });

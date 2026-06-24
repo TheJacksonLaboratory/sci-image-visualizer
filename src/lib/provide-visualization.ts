@@ -3,6 +3,7 @@ import { Provider } from '@angular/core';
 import { RoutingVisualizerService } from './routing-visualizer.service';
 import { PlotlyService } from './implementations/plotly/plotly.service';
 import { OpenSeadragonVisualizerService } from './implementations/osd/openseadragon-visualizer.service';
+import { NapariVisualizerService } from './implementations/napari-js/napari-visualizer.service';
 import { VisualizerStore } from './store/visualizer-store.service';
 import { RegionStore } from './store/region-store.service';
 import { WandToolService } from './toolbar/wand/wand-tool.service';
@@ -49,6 +50,7 @@ export function provideVisualization(): Provider[] {
     RoutingVisualizerService,
     PlotlyService,
     OpenSeadragonVisualizerService,
+    NapariVisualizerService,
     VisualizerStore,
     RegionStore,
     WandToolService,
