@@ -180,8 +180,7 @@
     <ng-container *ngIf="isHeatmap && tools.regionTools">
       <span class="toolbar-separator"></span>
       <!-- Region Editor: opens the editor as a floating dialog (formerly the
-           right-panel Regions tab). Sits just left of the intensity-profile
-           tool. -->
+           right-panel Regions tab). Sits with the region drawing tools. -->
       <p-button size="small" [text]="true"
                 pTooltip="Open the Region Editor" tooltipPosition="bottom"
                 (onClick)="openRegionEditor.emit()">
