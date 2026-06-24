@@ -145,9 +145,31 @@ export class ToolbarComponent implements OnChanges {
     return this.selectedPlotType === PlotType.IMAGE;
   }
 
-  /** ISOSURFACE shows the isovalue range slider. */
+  /** Plot types that scrub a z-stack live (the renderer swaps the slice in place): the OSD
+   *  Image view and the napari-js WebGPU image (jit-ui#102). Drives the per-slice slider. */
+  get showsLiveSliceScrubber(): boolean {
+    return (
+      this.selectedPlotType === PlotType.IMAGE ||
+      this.selectedPlotType === PlotType.NAPARI_IMAGE
+    );
+  }
+
+  /** Any napari-js WebGPU plot type. The single-image/stack toggle + slice-number field are
+   *  Plotly-only stack controls, so they're hidden for napari (jit-ui#102). */
+  get isNapariMode(): boolean {
+    return (
+      this.selectedPlotType === PlotType.NAPARI_IMAGE ||
+      this.selectedPlotType === PlotType.NAPARI_VOLUME ||
+      this.selectedPlotType === PlotType.NAPARI_ISOSURFACE
+    );
+  }
+
+  /** ISOSURFACE (Plotly or napari-js WebGPU) shows the isovalue range slider. */
   get isIsosurfaceMode(): boolean {
-    return this.selectedPlotType === PlotType.ISOSURFACE;
+    return (
+      this.selectedPlotType === PlotType.ISOSURFACE ||
+      this.selectedPlotType === PlotType.NAPARI_ISOSURFACE
+    );
   }
 
   /** Intensity profile lines are Region-based and available in the Heatmap and

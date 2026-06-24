@@ -67,7 +67,7 @@
     <ng-container *ngIf="imageInfo?.isStack">
       <span class="toolbar-separator"></span>
       <!-- Image view: scrub z-slices live (the renderer swaps slices in place). -->
-      <ng-container *ngIf="isImageView">
+      <ng-container *ngIf="showsLiveSliceScrubber">
         <span class="flex align-items-center mx-1 toolbar-text">Slice</span>
         <p-slider [(ngModel)]="zIndex" [min]="0" [max]="maxIndex"
                   (onChange)="zScrub.emit($event.value)" (onSlideEnd)="zSlide.emit($event.value)"
@@ -75,8 +75,9 @@
                   [style]="{'width':'16rem'}" styleClass="wand-sensitivity-slider"></p-slider>
         <span class="flex align-items-center mx-1 toolbar-text">{{zIndex}} of {{maxIndex}}</span>
       </ng-container>
-      <!-- Heatmap view: single-image (high-def zoom) vs stack (frame slider). -->
-      <ng-container *ngIf="!isImageView">
+      <!-- Heatmap view: single-image (high-def zoom) vs stack (frame slider). Plotly-only —
+           hidden for napari, which has no single/stack toggle or per-frame fetch. -->
+      <ng-container *ngIf="!showsLiveSliceScrubber && !isNapariMode">
       <p-button icon="pi pi-image" size="small"
                 [text]="imageInfo?.showStack"
                 pTooltip="Single image mode: enables high-def zoom" tooltipPosition="bottom"

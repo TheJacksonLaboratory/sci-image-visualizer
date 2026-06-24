@@ -32,6 +32,9 @@ import { RegionStore } from '../../store/region-store.service';
 interface NapariLoaded {
   imageInfo: IImageInfo;
   z: number;
+  /** Must match `IImageInfo.fileName` — the render orchestrator drops the result if the
+   *  handle's `filename` doesn't match the requested image (guards against stale clicks). */
+  filename: string;
 }
 
 const VOLUME_MAX_SLICE = 256; // downsample volume slices for a tractable 3D preview
@@ -60,6 +63,8 @@ export class NapariVisualizerService implements IVisualizer {
     ViewerFeature.Isosurface,
   ]);
 
+  private readonly api: string;
+
   private viewer: Viewer | null = null;
   private canvas: HTMLCanvasElement | null = null;
   private host: HTMLElement | null = null;
@@ -86,12 +91,31 @@ export class NapariVisualizerService implements IVisualizer {
     @Inject(TILE_ACCESS_PORT) private readonly tiles: TileAccessPort,
     private readonly store: VisualizerStore,
     private readonly regionStore: RegionStore,
-    @Inject(VIZ_CONFIG) _config: VizConfig,
-  ) {}
+    @Inject(VIZ_CONFIG) config: VizConfig,
+  ) {
+    this.api = config.slideCropServer;
+  }
+
+  /**
+   * Fetch one rendered slice as an `ImageBitmap` from the proven slide-crop endpoint
+   * (`/tile?info=…&res=0&col=0&row=0&z=…&tileSize=512`) — the same single-tile-per-slice URL
+   * the OSD backend's slice loader uses, confirmed to return composited slices for stacks.
+   */
+  private async fetchSlice(z: number): Promise<ImageBitmap> {
+    const infoB64 = this.tiles.getSelectedInfoB64();
+    if (!infoB64) throw new Error('[napari-js] no selected image info (getSelectedInfoB64 null)');
+    const url = `${this.api}tile?info=${infoB64}&res=0&col=0&row=0&z=${z}&tileSize=512`;
+    const headers = await this.tiles
+      .getAuthHeaders()
+      .catch(() => ({}) as Record<string, string>);
+    const resp = await fetch(url, { headers });
+    if (!resp.ok) throw new Error(`[napari-js] slice fetch failed: ${resp.status}`);
+    return createImageBitmap(await resp.blob());
+  }
 
   // ── IDataRenderer: load / render / viewport ───────────────────────────────
   async load(imageInfo: IImageInfo, zIndex: number): Promise<NapariLoaded> {
-    this.loaded = { imageInfo, z: zIndex };
+    this.loaded = { imageInfo, z: zIndex, filename: imageInfo.fileName };
     return this.loaded;
   }
 
@@ -141,16 +165,11 @@ export class NapariVisualizerService implements IVisualizer {
           });
         }
       } else {
-        const url = info?.urls?.[z] ?? info?.urls?.[0];
-        if (!url) {
-          console.warn('[napari-js] no image URL to render for this image');
-        } else {
-          const bitmap = await this.fetchBitmap(url);
-          this.imageW = bitmap.width;
-          this.imageH = bitmap.height;
-          viewer.addImage(bitmap, { colormap: info?.isGrayscale ? 'gray' : undefined });
-          this.fitCameraSoon();
-        }
+        const bitmap = await this.fetchSlice(z);
+        this.imageW = bitmap.width;
+        this.imageH = bitmap.height;
+        viewer.addImage(bitmap);
+        this.fitCameraSoon();
       }
       this.scheduleReadback();
       return true;
@@ -160,27 +179,19 @@ export class NapariVisualizerService implements IVisualizer {
     }
   }
 
-  private async fetchBitmap(url: string): Promise<ImageBitmap> {
-    const headers = await this.tiles.getAuthHeaders().catch(() => ({}) as Record<string, string>);
-    const resp = await fetch(url, { headers });
-    if (!resp.ok) throw new Error(`image fetch failed: ${resp.status} ${url}`);
-    return createImageBitmap(await resp.blob());
-  }
-
-  /** Assemble a downsampled uint8 volume from the per-slice image URLs (luminance). */
+  /** Assemble a downsampled uint8 volume (luminance) from the per-slice tile endpoint. */
   private async assembleVolume(
     info: IImageInfo | undefined,
   ): Promise<{ data: Uint8Array; width: number; height: number; depth: number } | null> {
-    const urls = info?.urls ?? [];
-    if (urls.length === 0) {
-      console.warn('[napari-js] no slice URLs to assemble a volume');
+    const depth = info?.imageMeta?.[0]?.z || info?.urls?.length || 1;
+    if (depth < 1) {
+      console.warn('[napari-js] no slices to assemble a volume');
       return null;
     }
-    const first = await this.fetchBitmap(urls[0]);
+    const first = await this.fetchSlice(0);
     const scale = Math.min(1, VOLUME_MAX_SLICE / Math.max(first.width, first.height, 1));
     const width = Math.max(1, Math.round(first.width * scale));
     const height = Math.max(1, Math.round(first.height * scale));
-    const depth = urls.length;
     const data = new Uint8Array(width * height * depth);
 
     let canvas: HTMLCanvasElement | OffscreenCanvas;
@@ -197,10 +208,14 @@ export class NapariVisualizerService implements IVisualizer {
       | null;
     if (!ctx) throw new Error('napari-js volume assembly: 2D context unavailable');
 
+    // Fetch all slices concurrently (the browser caps real parallelism), then read luminance
+    // sequentially through the single 2D context.
+    const bitmaps = await Promise.all(
+      Array.from({ length: depth }, (_, z) => (z === 0 ? Promise.resolve(first) : this.fetchSlice(z))),
+    );
     for (let z = 0; z < depth; z++) {
-      const bmp = z === 0 ? first : await this.fetchBitmap(urls[z]);
       ctx.clearRect(0, 0, width, height);
-      ctx.drawImage(bmp, 0, 0, width, height);
+      ctx.drawImage(bitmaps[z], 0, 0, width, height);
       const rgba = ctx.getImageData(0, 0, width, height).data;
       const base = z * width * height;
       for (let i = 0; i < width * height; i++) {
@@ -281,9 +296,24 @@ export class NapariVisualizerService implements IVisualizer {
   }
 
   setZIndex(zIndex: number): void {
-    if (this.viewer) this.viewer.dims.z = zIndex;
     if (this.loaded) this.loaded.z = zIndex;
-    this.scheduleReadback();
+    const v = this.viewer;
+    if (!v) return;
+    if (this.currentPlotType === PlotType.NAPARI_IMAGE) {
+      // The 2D image is a single bitmap per slice — re-fetch and swap it.
+      void this.fetchSlice(zIndex)
+        .then((bmp) => {
+          v.layers.clear();
+          v.addImage(bmp);
+          this.imageW = bmp.width;
+          this.imageH = bmp.height;
+          this.scheduleReadback();
+        })
+        .catch((err) => console.error('[napari-js] setZIndex slice failed:', err));
+    } else {
+      v.dims.z = zIndex;
+      this.scheduleReadback();
+    }
   }
 
   setStackLoading(stackLoading: boolean): void {
@@ -333,9 +363,11 @@ export class NapariVisualizerService implements IVisualizer {
     this.currentPlotType = plotType;
   }
 
-  /** @deprecated 3D not yet rendered by this backend. */
-  setSurfaceDragMode(_mode: string): void {
-    /* no-op */
+  /** Map a Plotly-style 3D drag mode onto napari-js's camera drag mode. */
+  setSurfaceDragMode(mode: string): void {
+    if (!this.viewer) return;
+    const m = mode === 'pan' ? 'pan' : mode === 'zoom' ? 'zoom' : 'rotate'; // orbit/turntable → rotate
+    this.viewer.setCameraDragMode(m);
   }
 
   /** @deprecated 3D not yet rendered by this backend. */
@@ -549,7 +581,7 @@ export class NapariVisualizerService implements IVisualizer {
   getSurface3dControls(): ISurface3dControls | null {
     if (!this.volumeLayer) return null;
     return {
-      setSurfaceDragMode: (): void => undefined,
+      setSurfaceDragMode: (mode: string): void => this.setSurfaceDragMode(mode),
       resetSurfaceCamera: (): void => this.resetSurfaceCamera(),
     };
   }

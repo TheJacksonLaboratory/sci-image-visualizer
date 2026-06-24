@@ -41,6 +41,7 @@ export class Viewer {
     return { contrastLimits: [0, 255], rendering: 'mip', isoThreshold: 0.5 };
   }
   requestRender(): void {}
+  setCameraDragMode(): void {}
   visibleWorldRect(): { x: number; y: number; width: number; height: number } {
     return { x: 0, y: 0, width: 0, height: 0 };
   }

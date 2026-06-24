@@ -218,8 +218,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.currentPlotType = plotType;
     this.plotly.setPlotType(plotType);
   }
-  setSurfaceDragMode(mode: string): void { this.plotly.setSurfaceDragMode(mode); }
-  resetSurfaceCamera(): void { this.plotly.resetSurfaceCamera(); }
+  setSurfaceDragMode(mode: string): void { this.renderer().setSurfaceDragMode(mode); }
+  resetSurfaceCamera(): void { this.renderer().resetSurfaceCamera(); }
   getPlotTypeDescriptors(): PlotTypeDescriptor[] {
     // Plotly enumerates the full PLOT_TYPE_DESCRIPTORS map, which already includes the
     // napari-js WebGPU types (jit-ui#102) — so this single source covers them (no duplicates).

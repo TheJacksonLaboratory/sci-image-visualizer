@@ -1485,7 +1485,14 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     if (is3d) {
       this.activeSurface3dMode = 'turntable';
     }
-    if (descriptor?.requiresStack) {
+    // napari-js volume/isosurface assemble their own 3D texture from the slice endpoint, so
+    // they take the normal re-plot path — NOT Plotly's stack-frame loader (whose "Loading
+    // frames" overlay would never clear, since Plotly isn't the active backend) (jit-ui#102).
+    const isNapari =
+      type === PlotType.NAPARI_IMAGE ||
+      type === PlotType.NAPARI_VOLUME ||
+      type === PlotType.NAPARI_ISOSURFACE;
+    if (descriptor?.requiresStack && !isNapari) {
       // Volume types (isosurface, scatter3d) need the whole z-stack loaded as a
       // 3D array, and they always render on Plotly. Drive the stack reload
       // directly through the image-info stream rather than the active renderer's
