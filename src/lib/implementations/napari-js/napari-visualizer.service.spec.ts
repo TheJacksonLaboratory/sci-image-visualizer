@@ -65,10 +65,23 @@ describe('NapariVisualizerService', () => {
     return pending;
   }
 
-  it('constructs and advertises image-display capabilities', () => {
+  it('advertises image + 3D capabilities and the napari plot types', () => {
     expect(service).toBeTruthy();
     expect(service.capabilities.has(ViewerFeature.ImageDisplay)).toBe(true);
-    expect(service.getPlotTypeDescriptors().map((d) => d.type)).toEqual([PlotType.IMAGE]);
+    expect(service.capabilities.has(ViewerFeature.Surface3D)).toBe(true);
+    expect(service.capabilities.has(ViewerFeature.Isosurface)).toBe(true);
+    expect(service.getPlotTypeDescriptors().map((d) => d.type)).toEqual([
+      PlotType.NAPARI_IMAGE,
+      PlotType.NAPARI_VOLUME,
+      PlotType.NAPARI_ISOSURFACE,
+    ]);
+  });
+
+  it('exposes no 3D controls until a volume is mounted', () => {
+    expect(service.getSurface3dControls()).toBeNull();
+    expect(service.getIsosurfaceControls()).toBeNull();
+    service.setPlotType(PlotType.NAPARI_ISOSURFACE);
+    expect(service.getSurface3dControls()).toBeNull(); // still no volume mounted
   });
 
   it('load() fetches /tiles/info for a tiled image', async () => {

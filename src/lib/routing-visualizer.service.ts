@@ -94,9 +94,23 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     return t === PlotType.IMAGE;
   }
 
+  /** The explicit WebGPU napari-js plot types (jit-ui#102) — always route to napari-js. */
+  private isNapariType(t: PlotType): boolean {
+    return (
+      t === PlotType.NAPARI_IMAGE ||
+      t === PlotType.NAPARI_VOLUME ||
+      t === PlotType.NAPARI_ISOSURFACE
+    );
+  }
+
   /** Backend to attempt for the image plot type this render (OSD unless OSD
    *  already fell back this cycle). */
   private imageBackend(): IVisualizer {
+    // Explicit napari-js plot types (the user picked one in the dropdown) → napari-js,
+    // falling back to Plotly only if it fails to load.
+    if (this.isNapariType(this.currentPlotType)) {
+      return this.napariFellBack ? this.plotly : this.napari;
+    }
     if (this.isImageType(this.currentPlotType)) {
       // Opt-in WebGPU napari-js backend (jit-ui#102), with OSD then Plotly as fallbacks.
       if (this.config.useNapariRenderer && !this.napariFellBack) return this.napari;
@@ -206,7 +220,11 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   }
   setSurfaceDragMode(mode: string): void { this.plotly.setSurfaceDragMode(mode); }
   resetSurfaceCamera(): void { this.plotly.resetSurfaceCamera(); }
-  getPlotTypeDescriptors(): PlotTypeDescriptor[] { return this.plotly.getPlotTypeDescriptors(); }
+  getPlotTypeDescriptors(): PlotTypeDescriptor[] {
+    // Plotly enumerates the full PLOT_TYPE_DESCRIPTORS map, which already includes the
+    // napari-js WebGPU types (jit-ui#102) — so this single source covers them (no duplicates).
+    return this.plotly.getPlotTypeDescriptors();
+  }
 
   // ── long-lived observables + stack flags → Plotly (stable subscriptions) ──
   setStackLoading(b: boolean): void { this.plotly.setStackLoading(b); }
@@ -400,11 +418,11 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
    * Isosurface controls when available — always Plotly's, since the isosurface
    * plot type renders on Plotly (OSD only handles the image type).
    */
-  getIsosurfaceControls(): IIsosurfaceControls | null { return this.plotly.getIsosurfaceControls(); }
+  getIsosurfaceControls(): IIsosurfaceControls | null { return this.renderer().getIsosurfaceControls(); }
 
   /** 3D scene controls — always Plotly's, since the 3D plot types render on
    *  Plotly (OSD only handles the image type). */
-  getSurface3dControls(): ISurface3dControls | null { return this.plotly.getSurface3dControls(); }
+  getSurface3dControls(): ISurface3dControls | null { return this.renderer().getSurface3dControls(); }
 
   /** Intensity (line-ROI) controls — always Plotly's, since the line profiles
    *  render their inset on Plotly regardless of which backend draws the image. */

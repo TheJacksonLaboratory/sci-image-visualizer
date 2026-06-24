@@ -14,16 +14,31 @@ interface StubDims {
   z: number;
 }
 
+interface StubCamera3D {
+  frame(width: number, height: number, depth: number): void;
+}
+
+/** A mutable stand-in for napari-js VolumeLayer (the props the adapter sets). */
+export interface VolumeLayer {
+  contrastLimits: [number, number];
+  rendering: 'mip' | 'translucent' | 'iso';
+  isoThreshold: number;
+}
+
 /** Minimal Viewer matching the surface NapariVisualizerService touches. */
 export class Viewer {
   readonly ready: Promise<void> = Promise.resolve();
   readonly camera: StubCamera = { zoom: 1, fit: () => undefined };
+  readonly camera3d: StubCamera3D = { frame: () => undefined };
   readonly dims: StubDims = { z: 0 };
 
   constructor(_options: { canvas: HTMLCanvasElement }) {}
 
   addImage(): unknown {
     return {};
+  }
+  addVolume(): VolumeLayer {
+    return { contrastLimits: [0, 255], rendering: 'mip', isoThreshold: 0.5 };
   }
   requestRender(): void {}
   visibleWorldRect(): { x: number; y: number; width: number; height: number } {

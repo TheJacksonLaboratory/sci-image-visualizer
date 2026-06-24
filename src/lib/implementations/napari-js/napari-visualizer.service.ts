@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, BehaviorSubject, Subject, firstValueFrom, of } from 'rxjs';
 import { Image } from 'image-js';
 import { Viewer } from 'napari-js';
+import type { VolumeLayer } from 'napari-js';
 
 import { IImageInfo, IImageMetadata } from '../../contracts/image.contract';
 import { Region } from '../../models/region';
@@ -28,6 +29,7 @@ import { TILE_ACCESS_PORT, TileAccessPort } from '../../contracts/ports/tile-acc
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
 import { buildNapariTiledSource, ServerTileDescriptor } from './napari-tile-source';
+import { loadVolumeFromStack } from './napari-volume-source';
 
 /** Opaque handle returned by {@link NapariVisualizerService.load} and passed back to plot(). */
 interface NapariLoaded {
@@ -55,6 +57,8 @@ export class NapariVisualizerService implements IVisualizer {
     ViewerFeature.ImageDisplay,
     ViewerFeature.StackSlider,
     ViewerFeature.PixelReadback,
+    ViewerFeature.Surface3D,
+    ViewerFeature.Isosurface,
   ]);
 
   private readonly api: string;
@@ -64,6 +68,9 @@ export class NapariVisualizerService implements IVisualizer {
   private host: HTMLElement | null = null;
   private loaded: NapariLoaded | null = null;
   private lastPixels: PixelData | null = null;
+  private currentPlotType: PlotType = PlotType.NAPARI_IMAGE;
+  private volumeLayer: VolumeLayer | null = null;
+  private volumeDims: { width: number; height: number; depth: number } | null = null;
 
   private readonly stackLoading$ = new BehaviorSubject<boolean>(false);
   private readonly stackLoadingProgress$ = new BehaviorSubject<number>(0);
@@ -109,13 +116,14 @@ export class NapariVisualizerService implements IVisualizer {
     imageLoaded: unknown,
     _imageInfo: IImageInfo,
     screenHeight: number,
-    _plotType: PlotType,
+    plotType: PlotType,
     _inPlace?: boolean,
   ): Promise<boolean> {
     const host = document.getElementById(plotDiv);
     if (!host) return false;
     this.reset();
     this.host = host;
+    this.currentPlotType = plotType;
 
     const canvas = document.createElement('canvas');
     canvas.style.width = '100%';
@@ -128,7 +136,23 @@ export class NapariVisualizerService implements IVisualizer {
     await viewer.ready;
 
     const loaded = imageLoaded as NapariLoaded;
-    if (loaded?.kind === 'tiled' && loaded.descriptor && loaded.infoB64) {
+    const isVolume =
+      plotType === PlotType.NAPARI_VOLUME || plotType === PlotType.NAPARI_ISOSURFACE;
+
+    if (isVolume && loaded?.kind === 'tiled' && loaded.descriptor && loaded.infoB64) {
+      // 3D: assemble a coarse volume from the z-stack and raymarch it (MIP or iso).
+      const vol = await loadVolumeFromStack(loaded.descriptor, {
+        apiBase: this.api,
+        infoB64: loaded.infoB64,
+        authHeaders: () => this.tiles.getAuthHeaders(),
+      });
+      this.volumeDims = { width: vol.width, height: vol.height, depth: vol.depth };
+      this.volumeLayer = viewer.addVolume(vol.data, vol.width, vol.height, vol.depth, {
+        colormap: 'magma',
+        rendering: plotType === PlotType.NAPARI_ISOSURFACE ? 'iso' : 'mip',
+      });
+    } else if (loaded?.kind === 'tiled' && loaded.descriptor && loaded.infoB64) {
+      // 2D: tiled image.
       const source = buildNapariTiledSource(loaded.descriptor, {
         apiBase: this.api,
         infoB64: loaded.infoB64,
@@ -156,6 +180,8 @@ export class NapariVisualizerService implements IVisualizer {
     if (this.canvas && this.host?.contains(this.canvas)) this.host.removeChild(this.canvas);
     this.canvas = null;
     this.lastPixels = null;
+    this.volumeLayer = null;
+    this.volumeDims = null;
   }
 
   relayout(_trueImageSize?: number[]): void {
@@ -255,8 +281,8 @@ export class NapariVisualizerService implements IVisualizer {
     void this.exportComposite();
   }
 
-  setPlotType(_plotType: PlotType): void {
-    /* napari-js backend renders the image type only */
+  setPlotType(plotType: PlotType): void {
+    this.currentPlotType = plotType;
   }
 
   /** @deprecated 3D not yet rendered by this backend. */
@@ -274,7 +300,12 @@ export class NapariVisualizerService implements IVisualizer {
   }
 
   getPlotTypeDescriptors(): PlotTypeDescriptor[] {
-    return [PLOT_TYPE_DESCRIPTORS[PlotType.IMAGE]!];
+    // The WebGPU napari-js options, offered alongside (not replacing) the OSD/Plotly types.
+    return [
+      PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_IMAGE]!,
+      PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_VOLUME]!,
+      PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_ISOSURFACE]!,
+    ];
   }
 
   getIntensityProfile$(): Observable<IntensityProfile[]> {
@@ -453,13 +484,31 @@ export class NapariVisualizerService implements IVisualizer {
     return null;
   }
   getIsosurfaceControls(): IIsosurfaceControls | null {
-    return null;
+    if (!this.volumeLayer) return null;
+    return {
+      setIsoRange: (isoMin: number, isoMax: number): void => {
+        const vol = this.volumeLayer;
+        if (!vol) return;
+        // Map the [isoMin,isoMax] band (0–255) onto the volume's contrast window + iso mode.
+        vol.contrastLimits = [isoMin, isoMax];
+        vol.rendering = 'iso';
+        vol.isoThreshold = 0.5;
+      },
+    };
   }
   getIntensityControls(): IIntensityControls | null {
     return null;
   }
   getSurface3dControls(): ISurface3dControls | null {
-    return null;
+    if (!this.volumeLayer) return null;
+    return {
+      // napari-js uses a single orbit camera, so the drag mode is fixed; only reset is meaningful.
+      setSurfaceDragMode: (): void => undefined,
+      resetSurfaceCamera: (): void => {
+        const d = this.volumeDims;
+        if (this.viewer && d) this.viewer.camera3d.frame(d.width, d.height, d.depth);
+      },
+    };
   }
   getHistogram(_channelIndex: number, _bins: number): IHistogram | null {
     // TODO(jit-ui#102): per-channel native histogram from the source tiles.

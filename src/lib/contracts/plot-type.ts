@@ -22,6 +22,10 @@ export enum PlotType {
   LINE = 'line',
   SCATTER3D = 'scatter3d',
   ISOSURFACE = 'isosurface',
+  /** WebGPU napari-js renderings (jit-ui#102), selectable alongside the OSD/Plotly types. */
+  NAPARI_IMAGE = 'napari-image',
+  NAPARI_VOLUME = 'napari-volume',
+  NAPARI_ISOSURFACE = 'napari-isosurface',
 }
 
 /** How many spatial dimensions a plot type renders in. */
@@ -67,6 +71,10 @@ export const PLOT_TYPE_DESCRIPTORS: Partial<Record<PlotType, PlotTypeDescriptor>
   [PlotType.SURFACE]:    { type: PlotType.SURFACE,    label: 'Surface (3D)',       dimensions: '3d', source: 'image', requiresGrayscale: true },
   [PlotType.SCATTER3D]:  { type: PlotType.SCATTER3D,  label: 'Scatter 3D',         dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
   [PlotType.ISOSURFACE]: { type: PlotType.ISOSURFACE, label: 'Isosurface (3D)',    dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
+  // WebGPU napari-js renderings (jit-ui#102).
+  [PlotType.NAPARI_IMAGE]:      { type: PlotType.NAPARI_IMAGE,      label: 'Image (napari · WebGPU)',      dimensions: '2d', source: 'image' },
+  [PlotType.NAPARI_VOLUME]:     { type: PlotType.NAPARI_VOLUME,     label: 'Volume (napari · WebGPU)',     dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
+  [PlotType.NAPARI_ISOSURFACE]: { type: PlotType.NAPARI_ISOSURFACE, label: 'Isosurface (napari · WebGPU)', dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
 };
 
 export function getPlotTypeDescriptor(type: PlotType): PlotTypeDescriptor | undefined {
