@@ -965,6 +965,26 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     const img = ctx.getImageData(0, 0, width, height);
     return { width, height, channels: 4, data: img.data };
   }
+
+  /**
+   * Image-pixel rectangle the drawer canvas (what {@link getDisplayedPixelData}
+   * reads) currently covers. Unlike {@link emitViewportChange}, this is NOT
+   * clamped to the image bounds: the canvas maps 1:1 to the viewport rectangle,
+   * so leaving it unclamped keeps `canvasPx -> imagePx` an exact affine map
+   * (clamping would skew coordinates near the image edges). Routed through world
+   * item 0 (see {@link viewportRectToImage}) for multi-layer accuracy.
+   */
+  getDisplayedSourceRect(): { x: number; y: number; width: number; height: number } | null {
+    const vp: any = this.viewer?.viewport;
+    if (!vp || !this.descriptor) return null;
+    try {
+      const r = viewportRectToImage(this.viewer, vp.getBounds(true));
+      return { x: r.x, y: r.y, width: r.width, height: r.height };
+    } catch {
+      return null;
+    }
+  }
+
   downloadImage(): void {
     // Snapshot the currently rendered OSD view as a PNG (WYSIWYG) — the parallel
     // to Plotly's downloadImage. OSD uses the 2D canvas drawer and bakes the

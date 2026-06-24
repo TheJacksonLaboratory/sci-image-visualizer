@@ -1813,6 +1813,33 @@ export class PlotlyService implements IVisualizer {
     }
   }
 
+  /**
+   * Region of the original image that the displayed `z` grid covers, in
+   * full-image pixel coords. On a server zoom (`triggerZoom`) the trace `z` is
+   * replaced with the high-def crop and the axes are relaid out to the crop's
+   * original-image bounds (`imageSize`), so the live axis ranges ARE that
+   * rectangle; when the whole image is in view the ranges span `trueImgSize`.
+   * Reading the ranges therefore yields the crop origin + extent without
+   * tracking zoom state separately. Falls back to the full image, then `null`.
+   */
+  public getDisplayedSourceRect(): { x: number; y: number; width: number; height: number } | null {
+    const gd: any = this.plotDiv ? document.getElementById(this.plotDiv) : null;
+    const xr: number[] | undefined = gd?._fullLayout?.xaxis?.range;
+    const yr: number[] | undefined = gd?._fullLayout?.yaxis?.range;
+    if (xr && yr) {
+      const x0 = Math.min(xr[0], xr[1]);
+      const y0 = Math.min(yr[0], yr[1]); // y axis is reversed for image layouts
+      return { x: x0, y: y0, width: Math.abs(xr[1] - xr[0]), height: Math.abs(yr[1] - yr[0]) };
+    }
+    if (!this.trueImgSize) return null;
+    return {
+      x: this.trueImgSize[0],
+      y: this.trueImgSize[2],
+      width: this.trueImgSize[1] - this.trueImgSize[0],
+      height: this.trueImgSize[3] - this.trueImgSize[2],
+    };
+  }
+
   public reset() {
     if (this.plotDiv) {
       Plotly.newPlot(this.plotDiv, [],

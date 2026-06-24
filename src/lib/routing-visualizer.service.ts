@@ -170,6 +170,9 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   getTrueImageSize(): { width: number; height: number } | null { return this.renderer().getTrueImageSize(); }
   getCurrentImage(): Promise<Image | null> { return this.renderer().getCurrentImage(); }
   getDisplayedPixelData(): PixelData | null { return this.renderer().getDisplayedPixelData(); }
+  getDisplayedSourceRect(): { x: number; y: number; width: number; height: number } | null {
+    return this.renderer().getDisplayedSourceRect();
+  }
   downloadImage(): void { this.renderer().downloadImage(); }
   exportComposite(): void { this.renderer().exportComposite(); }
 
