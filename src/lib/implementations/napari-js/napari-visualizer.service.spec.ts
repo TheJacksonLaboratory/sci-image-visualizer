@@ -12,7 +12,7 @@ import { ViewerFeature } from '../../contracts/capabilities.contract';
 import { IImageInfo } from '../../contracts/image.contract';
 
 const imageInfo = (over: Partial<IImageInfo> = {}): IImageInfo =>
-  ({ urls: ['u0'], tiled: true, isStack: false, ...over }) as unknown as IImageInfo;
+  ({ urls: ['u0', 'u1'], isGrayscale: true, isStack: true, ...over }) as unknown as IImageInfo;
 
 const tilesPort = {
   getSelectedInfoB64: () => 'INFO',
@@ -21,8 +21,6 @@ const tilesPort = {
   getAuthHeaders: () => Promise.resolve<Record<string, string>>({}),
 };
 
-const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
-
 describe('NapariVisualizerService', () => {
   let service: NapariVisualizerService;
   let http: HttpTestingController;
@@ -30,6 +28,14 @@ describe('NapariVisualizerService', () => {
   let store: VisualizerStore;
 
   beforeEach(() => {
+    // The render path fetches image URLs via the global fetch + createImageBitmap (no WebGPU).
+    (globalThis as { fetch: unknown }).fetch = jest
+      .fn()
+      .mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob()) });
+    (globalThis as { createImageBitmap: unknown }).createImageBitmap = jest
+      .fn()
+      .mockResolvedValue({ width: 64, height: 48, close: () => undefined });
+
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule],
       providers: [
@@ -50,21 +56,6 @@ describe('NapariVisualizerService', () => {
 
   afterEach(() => http.verify());
 
-  /** Drive a tiled load() through the awaited auth-headers microtask + flush /tiles/info. */
-  async function loadTiled(width = 512, height = 512): Promise<unknown> {
-    const pending = service.load(imageInfo(), 0);
-    await tick();
-    http.expectOne((r) => r.url.includes('tiles/info')).flush({
-      width,
-      height,
-      tileSize: 256,
-      z: 1,
-      channels: 4,
-      levels: [{ res: 0, width, height }],
-    });
-    return pending;
-  }
-
   it('advertises image + 3D capabilities and the napari plot types', () => {
     expect(service).toBeTruthy();
     expect(service.capabilities.has(ViewerFeature.ImageDisplay)).toBe(true);
@@ -77,23 +68,10 @@ describe('NapariVisualizerService', () => {
     ]);
   });
 
-  it('exposes no 3D controls until a volume is mounted', () => {
-    expect(service.getSurface3dControls()).toBeNull();
-    expect(service.getIsosurfaceControls()).toBeNull();
-    service.setPlotType(PlotType.NAPARI_ISOSURFACE);
-    expect(service.getSurface3dControls()).toBeNull(); // still no volume mounted
-  });
-
-  it('load() fetches /tiles/info for a tiled image', async () => {
-    const loaded = (await loadTiled(1024, 1024)) as { kind: string };
-    expect(loaded.kind).toBe('tiled');
-    expect(service.getTrueImageSize()).toEqual({ width: 1024, height: 1024 });
-  });
-
-  it('load() takes the simple path for non-tiled images (no HTTP)', async () => {
-    const loaded = await service.load(imageInfo({ tiled: false }), 0);
-    expect(loaded.kind).toBe('simple');
-    expect(loaded.url).toBe('u0');
+  it('load() returns an opaque handle without fetching', async () => {
+    const loaded = await service.load(imageInfo(), 1);
+    expect(loaded.z).toBe(1);
+    expect(loaded.imageInfo.urls.length).toBe(2);
   });
 
   it('delegates region operations to the shared RegionStore', () => {
@@ -131,29 +109,32 @@ describe('NapariVisualizerService', () => {
     expect(await service.segmentRectanglesCellpose()).toBe(0);
   });
 
-  it('capability-gated controls return null and 3D/intensity are stubbed', () => {
+  it('exposes no 3D controls until a volume is mounted', () => {
+    expect(service.getSurface3dControls()).toBeNull();
     expect(service.getIsosurfaceControls()).toBeNull();
     expect(service.getIntensityControls()).toBeNull();
-    expect(service.getSurface3dControls()).toBeNull();
     expect(service.getRegionOverlay()).toBeNull();
     expect(service.getHistogram(0, 256)).toBeNull();
   });
 
-  it('mounts a viewer and reports a displayed source rect on plot()', async () => {
+  it('renders a 2D image from urls[z] on plot()', async () => {
     const div = document.createElement('div');
     div.id = 'plot-host';
     document.body.appendChild(div);
 
-    const loaded = await loadTiled(512, 512);
-
-    const ok = await service.plot('plot-host', loaded, imageInfo(), 600, PlotType.IMAGE);
+    const loaded = await service.load(imageInfo(), 0);
+    const ok = await service.plot('plot-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE);
     expect(ok).toBe(true);
+    expect(service.getTrueImageSize()).toEqual({ width: 64, height: 48 });
     service.zoomIn();
     service.zoomOut();
-    service.setZIndex(0);
     expect(service.getDisplayedSourceRect()).not.toBeNull();
-    expect(service.getTrueImageSize()).toEqual({ width: 512, height: 512 });
     service.unsubscribe();
     document.body.removeChild(div);
+  });
+
+  it('plot() returns false when the target element is missing', async () => {
+    const loaded = await service.load(imageInfo(), 0);
+    expect(await service.plot('nope', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE)).toBe(false);
   });
 });

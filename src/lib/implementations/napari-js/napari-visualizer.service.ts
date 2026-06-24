@@ -1,6 +1,5 @@
 import { Inject, Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
-import { Observable, BehaviorSubject, Subject, firstValueFrom, of } from 'rxjs';
+import { Observable, BehaviorSubject, Subject, of } from 'rxjs';
 import { Image } from 'image-js';
 import { Viewer } from 'napari-js';
 import type { VolumeLayer } from 'napari-js';
@@ -28,28 +27,28 @@ import { VIZ_CONFIG, VizConfig } from '../../contracts/viz-config';
 import { TILE_ACCESS_PORT, TileAccessPort } from '../../contracts/ports/tile-access.port';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
-import { buildNapariTiledSource, ServerTileDescriptor } from './napari-tile-source';
-import { loadVolumeFromStack } from './napari-volume-source';
 
-/** Opaque handle returned by {@link NapariVisualizerService.load} and passed back to plot(). */
+/** Opaque handle from {@link NapariVisualizerService.load}, passed back to plot(). */
 interface NapariLoaded {
-  kind: 'tiled' | 'simple';
-  descriptor?: ServerTileDescriptor;
-  infoB64?: string;
-  url?: string;
+  imageInfo: IImageInfo;
   z: number;
 }
 
+const VOLUME_MAX_SLICE = 256; // downsample volume slices for a tractable 3D preview
+
 /**
  * A WebGPU image backend built on the published `napari-js` library — the POC engine for
- * jit-ui#102 ("a browser-based napari shipped as a JS library … swap image plotting with
- * OpenSeadragon"). Renders the IMAGE plot type on WebGPU; region state and display options
- * delegate to the shared {@link RegionStore} / {@link VisualizerStore} (exactly as the OSD
- * backend does), so both backends stay in sync and can be swapped live.
+ * jit-ui#102 (a browser-based napari shipped as a JS library, swapping image plotting with
+ * OpenSeadragon and 3D slicing/isosurfaces with Plotly).
  *
- * Scope (POC, opt-in via `VizConfig.useNapariRenderer`): renders server-composited tiles via
- * napari-js. Follow-ups (jit-ui#102): on-canvas tools, region overlay rendering, per-channel
- * GPU recolouring + native histograms, and TIFF export — currently delegated, no-op, or null.
+ * Render strategy: rather than re-implement the server's tile/pyramid protocol (which OSD
+ * already handles), this backend renders the **complete per-slice image URLs the app already
+ * produces** (`IImageInfo.urls`) — `urls[z]` for the 2D image, and the full `urls` stack
+ * assembled into a downsampled volume for the 3D types. Region state and display options
+ * delegate to the shared {@link RegionStore} / {@link VisualizerStore}, exactly as OSD does.
+ *
+ * Follow-ups (jit-ui#102): native-resolution pyramidal tiling, on-canvas tools, region
+ * overlay rendering, per-channel histograms, TIFF export.
  */
 @Injectable({ providedIn: 'root' })
 export class NapariVisualizerService implements IVisualizer {
@@ -61,8 +60,6 @@ export class NapariVisualizerService implements IVisualizer {
     ViewerFeature.Isosurface,
   ]);
 
-  private readonly api: string;
-
   private viewer: Viewer | null = null;
   private canvas: HTMLCanvasElement | null = null;
   private host: HTMLElement | null = null;
@@ -71,6 +68,8 @@ export class NapariVisualizerService implements IVisualizer {
   private currentPlotType: PlotType = PlotType.NAPARI_IMAGE;
   private volumeLayer: VolumeLayer | null = null;
   private volumeDims: { width: number; height: number; depth: number } | null = null;
+  private imageW = 0;
+  private imageH = 0;
 
   private readonly stackLoading$ = new BehaviorSubject<boolean>(false);
   private readonly stackLoadingProgress$ = new BehaviorSubject<number>(0);
@@ -84,89 +83,147 @@ export class NapariVisualizerService implements IVisualizer {
   }>();
 
   constructor(
-    private readonly http: HttpClient,
     @Inject(TILE_ACCESS_PORT) private readonly tiles: TileAccessPort,
     private readonly store: VisualizerStore,
     private readonly regionStore: RegionStore,
-    @Inject(VIZ_CONFIG) config: VizConfig,
-  ) {
-    this.api = config.slideCropServer;
-  }
+    @Inject(VIZ_CONFIG) _config: VizConfig,
+  ) {}
 
   // ── IDataRenderer: load / render / viewport ───────────────────────────────
   async load(imageInfo: IImageInfo, zIndex: number): Promise<NapariLoaded> {
-    const infoB64 = this.tiles.getSelectedInfoB64();
-    if (imageInfo.tiled !== false && infoB64) {
-      const headers = await this.tiles.getAuthHeaders();
-      const descriptor = await firstValueFrom(
-        this.http.get<ServerTileDescriptor>(
-          `${this.api}tiles/info?info=${encodeURIComponent(infoB64)}`,
-          { headers },
-        ),
-      );
-      this.loaded = { kind: 'tiled', descriptor, infoB64, z: zIndex };
-    } else {
-      this.loaded = { kind: 'simple', url: imageInfo.urls?.[zIndex], z: zIndex };
-    }
+    this.loaded = { imageInfo, z: zIndex };
     return this.loaded;
   }
 
   async plot(
     plotDiv: string,
     imageLoaded: unknown,
-    _imageInfo: IImageInfo,
+    imageInfo: IImageInfo,
     screenHeight: number,
     plotType: PlotType,
     _inPlace?: boolean,
   ): Promise<boolean> {
     const host = document.getElementById(plotDiv);
-    if (!host) return false;
+    if (!host) {
+      console.error(`[napari-js] plot target #${plotDiv} not found`);
+      return false;
+    }
     this.reset();
     this.host = host;
     this.currentPlotType = plotType;
 
     const canvas = document.createElement('canvas');
+    canvas.style.display = 'block';
     canvas.style.width = '100%';
     canvas.style.height = screenHeight ? `${screenHeight}px` : '100%';
     host.appendChild(canvas);
     this.canvas = canvas;
 
-    const viewer = new Viewer({ canvas });
-    this.viewer = viewer;
-    await viewer.ready;
+    const info = (imageLoaded as NapariLoaded)?.imageInfo ?? imageInfo;
+    const z = (imageLoaded as NapariLoaded)?.z ?? 0;
 
-    const loaded = imageLoaded as NapariLoaded;
-    const isVolume =
-      plotType === PlotType.NAPARI_VOLUME || plotType === PlotType.NAPARI_ISOSURFACE;
+    try {
+      const viewer = new Viewer({ canvas, background: { r: 0.07, g: 0.07, b: 0.09, a: 1 } });
+      this.viewer = viewer;
+      await viewer.ready;
 
-    if (isVolume && loaded?.kind === 'tiled' && loaded.descriptor && loaded.infoB64) {
-      // 3D: assemble a coarse volume from the z-stack and raymarch it (MIP or iso).
-      const vol = await loadVolumeFromStack(loaded.descriptor, {
-        apiBase: this.api,
-        infoB64: loaded.infoB64,
-        authHeaders: () => this.tiles.getAuthHeaders(),
-      });
-      this.volumeDims = { width: vol.width, height: vol.height, depth: vol.depth };
-      this.volumeLayer = viewer.addVolume(vol.data, vol.width, vol.height, vol.depth, {
-        colormap: 'magma',
-        rendering: plotType === PlotType.NAPARI_ISOSURFACE ? 'iso' : 'mip',
-      });
-    } else if (loaded?.kind === 'tiled' && loaded.descriptor && loaded.infoB64) {
-      // 2D: tiled image.
-      const source = buildNapariTiledSource(loaded.descriptor, {
-        apiBase: this.api,
-        infoB64: loaded.infoB64,
-        authHeaders: () => this.tiles.getAuthHeaders(),
-      });
-      viewer.addImage(source);
-      viewer.dims.z = loaded.z ?? 0;
-    } else if (loaded?.url) {
-      const bitmap = await createImageBitmap(await (await fetch(loaded.url)).blob());
-      viewer.addImage(bitmap);
+      const isVolume =
+        plotType === PlotType.NAPARI_VOLUME || plotType === PlotType.NAPARI_ISOSURFACE;
+      if (isVolume) {
+        const vol = await this.assembleVolume(info);
+        if (vol) {
+          this.imageW = vol.width;
+          this.imageH = vol.height;
+          this.volumeDims = vol;
+          this.volumeLayer = viewer.addVolume(vol.data, vol.width, vol.height, vol.depth, {
+            colormap: 'magma',
+            rendering: plotType === PlotType.NAPARI_ISOSURFACE ? 'iso' : 'mip',
+          });
+        }
+      } else {
+        const url = info?.urls?.[z] ?? info?.urls?.[0];
+        if (!url) {
+          console.warn('[napari-js] no image URL to render for this image');
+        } else {
+          const bitmap = await this.fetchBitmap(url);
+          this.imageW = bitmap.width;
+          this.imageH = bitmap.height;
+          viewer.addImage(bitmap, { colormap: info?.isGrayscale ? 'gray' : undefined });
+          this.fitCameraSoon();
+        }
+      }
+      this.scheduleReadback();
+      return true;
+    } catch (err) {
+      console.error('[napari-js] plot failed:', err);
+      return false;
     }
+  }
 
-    this.scheduleReadback();
-    return true;
+  private async fetchBitmap(url: string): Promise<ImageBitmap> {
+    const headers = await this.tiles.getAuthHeaders().catch(() => ({}) as Record<string, string>);
+    const resp = await fetch(url, { headers });
+    if (!resp.ok) throw new Error(`image fetch failed: ${resp.status} ${url}`);
+    return createImageBitmap(await resp.blob());
+  }
+
+  /** Assemble a downsampled uint8 volume from the per-slice image URLs (luminance). */
+  private async assembleVolume(
+    info: IImageInfo | undefined,
+  ): Promise<{ data: Uint8Array; width: number; height: number; depth: number } | null> {
+    const urls = info?.urls ?? [];
+    if (urls.length === 0) {
+      console.warn('[napari-js] no slice URLs to assemble a volume');
+      return null;
+    }
+    const first = await this.fetchBitmap(urls[0]);
+    const scale = Math.min(1, VOLUME_MAX_SLICE / Math.max(first.width, first.height, 1));
+    const width = Math.max(1, Math.round(first.width * scale));
+    const height = Math.max(1, Math.round(first.height * scale));
+    const depth = urls.length;
+    const data = new Uint8Array(width * height * depth);
+
+    let canvas: HTMLCanvasElement | OffscreenCanvas;
+    if (typeof OffscreenCanvas !== 'undefined') {
+      canvas = new OffscreenCanvas(width, height);
+    } else {
+      canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+    }
+    const ctx = canvas.getContext('2d') as
+      | CanvasRenderingContext2D
+      | OffscreenCanvasRenderingContext2D
+      | null;
+    if (!ctx) throw new Error('napari-js volume assembly: 2D context unavailable');
+
+    for (let z = 0; z < depth; z++) {
+      const bmp = z === 0 ? first : await this.fetchBitmap(urls[z]);
+      ctx.clearRect(0, 0, width, height);
+      ctx.drawImage(bmp, 0, 0, width, height);
+      const rgba = ctx.getImageData(0, 0, width, height).data;
+      const base = z * width * height;
+      for (let i = 0; i < width * height; i++) {
+        data[base + i] =
+          (rgba[i * 4] * 0.299 + rgba[i * 4 + 1] * 0.587 + rgba[i * 4 + 2] * 0.114) | 0;
+      }
+    }
+    return { data, width, height, depth };
+  }
+
+  private fitCameraSoon(): void {
+    const run = (): void => {
+      if (this.viewer && this.canvas && this.imageW > 0 && this.imageH > 0) {
+        this.viewer.camera.fit(
+          this.imageW,
+          this.imageH,
+          this.canvas.clientWidth || this.imageW,
+          this.canvas.clientHeight || this.imageH,
+        );
+      }
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+    else run();
   }
 
   /** @deprecated Plotly-specific; host re-drives plot() from its image stream. */
@@ -185,26 +242,18 @@ export class NapariVisualizerService implements IVisualizer {
   }
 
   relayout(_trueImageSize?: number[]): void {
-    // napari-js auto-resizes via ResizeObserver; just nudge a redraw.
     this.viewer?.requestRender();
   }
 
   /** @deprecated Plotly-specific axis reset. */
   resetAxes(): void {
-    this.fitToView();
+    this.fitCameraSoon();
   }
 
   /** @deprecated Plotly-specific autoscale. */
   autoscale(): void {
-    this.fitToView();
+    this.fitCameraSoon();
     this.autoscaleEvent$.next(undefined);
-  }
-
-  private fitToView(): void {
-    const v = this.viewer;
-    const size = this.getTrueImageSize();
-    if (!v || !size || !this.canvas) return;
-    v.camera.fit(size.width, size.height, this.canvas.clientWidth, this.canvas.clientHeight);
   }
 
   zoomIn(): void {
@@ -250,8 +299,7 @@ export class NapariVisualizerService implements IVisualizer {
   }
 
   getTrueImageSize(): { width: number; height: number } | null {
-    const d = this.loaded?.descriptor;
-    return d ? { width: d.width, height: d.height } : null;
+    return this.imageW > 0 && this.imageH > 0 ? { width: this.imageW, height: this.imageH } : null;
   }
 
   getCurrentImage(): Promise<Image | null> {
@@ -292,7 +340,8 @@ export class NapariVisualizerService implements IVisualizer {
 
   /** @deprecated 3D not yet rendered by this backend. */
   resetSurfaceCamera(): void {
-    /* no-op */
+    const d = this.volumeDims;
+    if (this.viewer && d) this.viewer.camera3d.frame(d.width, d.height, d.depth);
   }
 
   getAutoscaleEvent(): Observable<unknown> {
@@ -319,7 +368,6 @@ export class NapariVisualizerService implements IVisualizer {
   private scheduleReadback(): void {
     const v = this.viewer;
     if (!v) return;
-    // Async GPU readback cached for the synchronous getDisplayedPixelData() contract.
     const run = (): void => {
       void v
         .readDisplayedPixels()
@@ -489,7 +537,6 @@ export class NapariVisualizerService implements IVisualizer {
       setIsoRange: (isoMin: number, isoMax: number): void => {
         const vol = this.volumeLayer;
         if (!vol) return;
-        // Map the [isoMin,isoMax] band (0–255) onto the volume's contrast window + iso mode.
         vol.contrastLimits = [isoMin, isoMax];
         vol.rendering = 'iso';
         vol.isoThreshold = 0.5;
@@ -502,16 +549,12 @@ export class NapariVisualizerService implements IVisualizer {
   getSurface3dControls(): ISurface3dControls | null {
     if (!this.volumeLayer) return null;
     return {
-      // napari-js uses a single orbit camera, so the drag mode is fixed; only reset is meaningful.
       setSurfaceDragMode: (): void => undefined,
-      resetSurfaceCamera: (): void => {
-        const d = this.volumeDims;
-        if (this.viewer && d) this.viewer.camera3d.frame(d.width, d.height, d.depth);
-      },
+      resetSurfaceCamera: (): void => this.resetSurfaceCamera(),
     };
   }
   getHistogram(_channelIndex: number, _bins: number): IHistogram | null {
-    // TODO(jit-ui#102): per-channel native histogram from the source tiles.
+    // TODO(jit-ui#102): per-channel native histogram from the source.
     return null;
   }
   getHistogram$(_channelIndex: number, _bins: number): Observable<IHistogram | null> {
