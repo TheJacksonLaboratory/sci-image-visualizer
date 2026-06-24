@@ -42,6 +42,10 @@ export class Viewer {
   }
   requestRender(): void {}
   setCameraDragMode(): void {}
+  setControlsEnabled(): void {}
+  get controlsActive(): boolean {
+    return true;
+  }
   visibleWorldRect(): { x: number; y: number; width: number; height: number } {
     return { x: 0, y: 0, width: 0, height: 0 };
   }

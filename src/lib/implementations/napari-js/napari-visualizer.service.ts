@@ -38,6 +38,44 @@ interface NapariLoaded {
 }
 
 const VOLUME_MAX_SLICE = 256; // downsample volume slices for a tractable 3D preview
+const TILE_SIZE = 512; // server tile edge (matches the OSD backend)
+/** Max tiles stitched for one displayed slice (512px tiles → up to ~6144² at full res). Beyond
+ *  this we step to a coarser pyramid level so a large image stays tractable. */
+const MAX_STITCH_TILES = 144;
+/** WebGPU default `maxTextureDimension2D` — a stitched slice's longest side must fit a texture. */
+const MAX_TEXTURE_DIM = 8192;
+/** How long to poll `/tiles/info` (202 while the server caches the source) before falling back to
+ *  a single tile. Generous like the OSD backend — a cold whole-slide can take minutes to cache. */
+const DESCRIPTOR_TIMEOUT_MS = 120000;
+
+/** One pyramid level from `GET /tiles/info` (res 0 = full resolution). */
+interface TileLevel {
+  res: number;
+  width: number;
+  height: number;
+}
+
+/** Subset of the `/tiles/info` descriptor this backend reads (tile grid, channels, scale). */
+interface TileDescriptor {
+  width: number;
+  height: number;
+  tileSize: number;
+  z: number;
+  channels: number;
+  multichannel?: boolean;
+  /** Real Bio-Formats levels at the front of `levels`; per-channel tiles exist only there. */
+  realLevels?: number;
+  channelInfo?: Array<{
+    name?: string;
+    color?: string;
+    bitDepth?: number;
+    minAllowed?: number;
+    maxAllowed?: number;
+  }> | null;
+  levels: TileLevel[];
+  mppX?: number;
+  mppY?: number;
+}
 
 /**
  * A WebGPU image backend built on the published `napari-js` library — the POC engine for
@@ -75,6 +113,11 @@ export class NapariVisualizerService implements IVisualizer {
   private volumeDims: { width: number; height: number; depth: number } | null = null;
   private imageW = 0;
   private imageH = 0;
+  /** Monotonic slice-request id so a slow out-of-order slice fetch can't clobber a newer one. */
+  private sliceReq = 0;
+  /** Cached `/tiles/info` pyramid descriptor + the infoB64 it was fetched for. */
+  private descriptor: TileDescriptor | null = null;
+  private descriptorKey: string | null = null;
 
   private readonly stackLoading$ = new BehaviorSubject<boolean>(false);
   private readonly stackLoadingProgress$ = new BehaviorSubject<number>(0);
@@ -97,20 +140,136 @@ export class NapariVisualizerService implements IVisualizer {
   }
 
   /**
-   * Fetch one rendered slice as an `ImageBitmap` from the proven slide-crop endpoint
-   * (`/tile?info=…&res=0&col=0&row=0&z=…&tileSize=512`) — the same single-tile-per-slice URL
-   * the OSD backend's slice loader uses, confirmed to return composited slices for stacks.
+   * Fetch + cache the server pyramid descriptor (`GET /tiles/info`): the REAL per-level tile grid,
+   * tile size, channel metadata and physical pixel size. The backend returns 202 while the source
+   * is still caching, so we poll briefly. Cached per `infoB64`; returns null if it never becomes
+   * ready (callers fall back to a single-tile fetch). This is the authoritative grid — guessing
+   * level dims from `trueImageSize` overshoots the real grid and the server 400s out-of-range tiles.
    */
-  private async fetchSlice(z: number): Promise<ImageBitmap> {
+  private async ensureDescriptor(): Promise<TileDescriptor | null> {
     const infoB64 = this.tiles.getSelectedInfoB64();
-    if (!infoB64) throw new Error('[napari-js] no selected image info (getSelectedInfoB64 null)');
-    const url = `${this.api}tile?info=${infoB64}&res=0&col=0&row=0&z=${z}&tileSize=512`;
+    if (!infoB64) return null;
+    if (this.descriptor && this.descriptorKey === infoB64) return this.descriptor;
     const headers = await this.tiles
       .getAuthHeaders()
       .catch(() => ({}) as Record<string, string>);
-    const resp = await fetch(url, { headers });
-    if (!resp.ok) throw new Error(`[napari-js] slice fetch failed: ${resp.status}`);
-    return createImageBitmap(await resp.blob());
+    const url = `${this.api}tiles/info?info=${infoB64}`;
+    const deadline = Date.now() + DESCRIPTOR_TIMEOUT_MS;
+    for (;;) {
+      try {
+        const resp = await fetch(url, { headers });
+        if (resp.status === 200) {
+          const body = (await resp.json()) as TileDescriptor;
+          if (body?.levels?.length) {
+            this.descriptor = body;
+            this.descriptorKey = infoB64;
+            return body;
+          }
+        }
+        // 202 (still caching) or empty body → re-poll until the deadline.
+      } catch (err) {
+        console.warn('[napari-js] tiles/info poll retry', err);
+      }
+      if (Date.now() > deadline) {
+        console.warn('[napari-js] tiles/info not ready; falling back to single-tile fetch');
+        return null;
+      }
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+  }
+
+  /**
+   * Fetch a COMPLETE rendered slice as an `ImageBitmap` by stitching the server's REAL tile grid
+   * (from `/tiles/info`) — not just the top-left tile, which only ever showed a large image's
+   * corner. Picks the finest pyramid level whose grid fits `budgetTiles` and whose longest side is
+   * within the GPU texture limit, fetches that grid concurrently, and stitches it into one canvas.
+   *
+   * `channel` selects a single band as grayscale (real levels only); omit for the server composite.
+   * `budgetTiles` caps the grid: the 2D view uses the full budget for detail; the 3D volume passes
+   * 1 for a cheap overview tile per slice (it downsamples to {@link VOLUME_MAX_SLICE}). Falls back
+   * to a single `col=0,row=0` tile when no descriptor is available (small/simple images, volumes).
+   */
+  private async fetchSlice(
+    z: number,
+    channel?: number,
+    budgetTiles: number = MAX_STITCH_TILES,
+  ): Promise<ImageBitmap> {
+    const infoB64 = this.tiles.getSelectedInfoB64();
+    if (!infoB64) throw new Error('[napari-js] no selected image info (getSelectedInfoB64 null)');
+    const headers = await this.tiles
+      .getAuthHeaders()
+      .catch(() => ({}) as Record<string, string>);
+    const desc = await this.ensureDescriptor();
+
+    const ch = channel == null ? '' : `&channel=${channel}`;
+    const fetchTile = async (
+      res: number,
+      col: number,
+      row: number,
+      t: number,
+    ): Promise<ImageBitmap> => {
+      const url = `${this.api}tile?info=${infoB64}&res=${res}&col=${col}&row=${row}&z=${z}&tileSize=${t}${ch}`;
+      const resp = await fetch(url, { headers });
+      if (!resp.ok) {
+        throw new Error(`[napari-js] slice fetch failed: ${resp.status} (${col}/${row} res ${res})`);
+      }
+      return createImageBitmap(await resp.blob());
+    };
+
+    // No descriptor → single top-left tile (legacy fallback; correct for small/simple images).
+    if (!desc || !desc.levels?.length) return fetchTile(0, 0, 0, TILE_SIZE);
+
+    const t = desc.tileSize || TILE_SIZE;
+    // Per-channel tiles exist only at REAL Bio-Formats levels; the composite exists at all levels.
+    const maxLevel = channel == null ? desc.levels.length : desc.realLevels ?? desc.levels.length;
+    const usable = desc.levels.slice(0, Math.max(1, maxLevel));
+    // Finest level (res 0 = full) whose grid fits the tile budget and the GPU texture limit.
+    let chosen = usable[0];
+    for (const lvl of usable) {
+      chosen = lvl;
+      const cols = Math.max(1, Math.ceil(lvl.width / t));
+      const rows = Math.max(1, Math.ceil(lvl.height / t));
+      if (cols * rows <= budgetTiles && Math.max(lvl.width, lvl.height) <= MAX_TEXTURE_DIM) break;
+    }
+    const cols = Math.max(1, Math.ceil(chosen.width / t));
+    const rows = Math.max(1, Math.ceil(chosen.height / t));
+    if (chosen !== usable[0] && budgetTiles === MAX_STITCH_TILES) {
+      console.warn(
+        `[napari-js] full resolution exceeds the ${budgetTiles}-tile/${MAX_TEXTURE_DIM}px budget; ` +
+          `displaying overview level res ${chosen.res} (${chosen.width}×${chosen.height}).`,
+      );
+    }
+
+    if (cols === 1 && rows === 1) return fetchTile(chosen.res, 0, 0, t);
+
+    // Fetch the whole grid concurrently, then stitch into one level-sized canvas. Edge tiles are
+    // narrower/shorter; drawImage places each at its grid offset so partial tiles line up.
+    const jobs: Array<Promise<{ col: number; row: number; bmp: ImageBitmap }>> = [];
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        jobs.push(fetchTile(chosen.res, col, row, t).then((bmp) => ({ col, row, bmp })));
+      }
+    }
+    const tiles = await Promise.all(jobs);
+
+    let canvas: HTMLCanvasElement | OffscreenCanvas;
+    if (typeof OffscreenCanvas !== 'undefined') {
+      canvas = new OffscreenCanvas(chosen.width, chosen.height);
+    } else {
+      canvas = document.createElement('canvas');
+      canvas.width = chosen.width;
+      canvas.height = chosen.height;
+    }
+    const ctx = canvas.getContext('2d') as
+      | CanvasRenderingContext2D
+      | OffscreenCanvasRenderingContext2D
+      | null;
+    if (!ctx) throw new Error('[napari-js] slice stitch: 2D context unavailable');
+    for (const { col, row, bmp } of tiles) {
+      ctx.drawImage(bmp, col * t, row * t);
+      bmp.close?.();
+    }
+    return createImageBitmap(canvas as unknown as ImageBitmapSource);
   }
 
   // ── IDataRenderer: load / render / viewport ───────────────────────────────
@@ -188,7 +347,9 @@ export class NapariVisualizerService implements IVisualizer {
       console.warn('[napari-js] no slices to assemble a volume');
       return null;
     }
-    const first = await this.fetchSlice(0);
+    // One cheap coarse tile per slice (budget 1) — the volume is downsampled to VOLUME_MAX_SLICE
+    // regardless, so stitching the full-res grid per slice would be wasted fetches.
+    const first = await this.fetchSlice(0, undefined, 1);
     const scale = Math.min(1, VOLUME_MAX_SLICE / Math.max(first.width, first.height, 1));
     const width = Math.max(1, Math.round(first.width * scale));
     const height = Math.max(1, Math.round(first.height * scale));
@@ -211,7 +372,9 @@ export class NapariVisualizerService implements IVisualizer {
     // Fetch all slices concurrently (the browser caps real parallelism), then read luminance
     // sequentially through the single 2D context.
     const bitmaps = await Promise.all(
-      Array.from({ length: depth }, (_, z) => (z === 0 ? Promise.resolve(first) : this.fetchSlice(z))),
+      Array.from({ length: depth }, (_, z) =>
+        z === 0 ? Promise.resolve(first) : this.fetchSlice(z, undefined, 1),
+      ),
     );
     for (let z = 0; z < depth; z++) {
       ctx.clearRect(0, 0, width, height);
@@ -299,21 +462,30 @@ export class NapariVisualizerService implements IVisualizer {
     if (this.loaded) this.loaded.z = zIndex;
     const v = this.viewer;
     if (!v) return;
-    if (this.currentPlotType === PlotType.NAPARI_IMAGE) {
-      // The 2D image is a single bitmap per slice — re-fetch and swap it.
-      void this.fetchSlice(zIndex)
-        .then((bmp) => {
-          v.layers.clear();
-          v.addImage(bmp);
-          this.imageW = bmp.width;
-          this.imageH = bmp.height;
-          this.scheduleReadback();
-        })
-        .catch((err) => console.error('[napari-js] setZIndex slice failed:', err));
-    } else {
+    // Volume / isosurface: step the volume's z plane in place.
+    if (this.volumeLayer) {
       v.dims.z = zIndex;
       this.scheduleReadback();
+      return;
     }
+    // 2D image: re-fetch the slice and swap it in. Branch on the presence of a volume layer (not
+    // on currentPlotType) so a stale/missing plot type can't silently drop us to the no-op path.
+    // Guard against out-of-order resolutions while scrubbing — a slow older slice must not clobber
+    // a newer one.
+    const req = ++this.sliceReq;
+    void this.fetchSlice(zIndex)
+      .then((bmp) => {
+        if (req !== this.sliceReq || this.viewer !== v) {
+          bmp.close?.();
+          return;
+        }
+        v.layers.clear();
+        v.addImage(bmp);
+        this.imageW = bmp.width;
+        this.imageH = bmp.height;
+        this.scheduleReadback();
+      })
+      .catch((err) => console.error('[napari-js] setZIndex slice failed:', err));
   }
 
   setStackLoading(stackLoading: boolean): void {

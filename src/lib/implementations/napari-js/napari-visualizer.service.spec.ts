@@ -28,10 +28,28 @@ describe('NapariVisualizerService', () => {
   let store: VisualizerStore;
 
   beforeEach(() => {
-    // The render path fetches image URLs via the global fetch + createImageBitmap (no WebGPU).
-    (globalThis as { fetch: unknown }).fetch = jest
-      .fn()
-      .mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob()) });
+    // The render path polls /tiles/info (descriptor JSON) then fetches /tile blobs, both via the
+    // global fetch (no WebGPU). A single-level 64×48 pyramid keeps the stitch on the single-tile
+    // path. createImageBitmap is stubbed since jsdom can't decode.
+    (globalThis as { fetch: unknown }).fetch = jest.fn().mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('tiles/info')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              width: 64,
+              height: 48,
+              tileSize: 512,
+              z: 1,
+              channels: 1,
+              realLevels: 1,
+              levels: [{ res: 0, width: 64, height: 48 }],
+            }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) });
+    });
     (globalThis as { createImageBitmap: unknown }).createImageBitmap = jest
       .fn()
       .mockResolvedValue({ width: 64, height: 48, close: () => undefined });
