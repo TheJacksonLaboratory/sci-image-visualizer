@@ -93,11 +93,11 @@ export interface IDataRenderer {
   /**
    * The region of the original, full-resolution image that the pixels returned
    * by {@link getDisplayedPixelData} currently cover — `{ x, y, width, height }`
-   * in full-image pixel coordinates. When the user has zoomed/panned into a
-   * sub-area, this is the crop's origin + extent (not `0,0` and not the full
-   * image); when the whole image is in view it is the full image. Lets a
-   * consumer map a coordinate drawn on the displayed (cropped) pixels back to
-   * the original image via `origin + displayedPx * (extent / displayedDim)`.
+   * in full-image pixel coordinates. When zoomed/panned into a sub-area this is
+   * the crop's origin + extent; when zoomed out/panned beyond the edges, the
+   * rectangle may extend outside the image bounds (matching the pixel readback
+   * canvas). Lets a consumer map displayed-pixel coordinates back to the original
+   * image via `origin + displayedPx * (extent / displayedDim)`. 
    *
    * Returns `null` when the viewport isn't laid out yet or the backend can't
    * report it — callers should then fall back to the full-image scale (treat
