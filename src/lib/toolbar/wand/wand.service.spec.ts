@@ -278,13 +278,27 @@ describe('WandService', () => {
     expect(service.pointInPolygon(0, 0, xs, ys)).toBe(false);
   });
 
-  it('rasterizePolygon clamps a polygon partly outside the image', () => {
+  it('rasterizePolygon keeps a polygon partly outside the window (no viewport clip)', () => {
+    // jit-ui#102: the mask must span the polygon's FULL extent (bx/by may be negative) so the
+    // wand/brush don't lose a region's off-screen part when extending it after a pan/zoom.
     const xs = [-5, 5, 5, -5];
     const ys = [-5, -5, 5, 5];
     const r = service.rasterizePolygon(xs, ys, 50, 50);
     expect(r).not.toBeNull();
+    expect(r!.bx).toBe(-5);
+    expect(r!.by).toBe(-5);
+  });
+
+  it('rasterizePolygon falls back to the window for a polygon that is huge at this zoom', () => {
+    // Memory guard: beyond 4096² it clamps to the window rather than allocate a giant mask.
+    const xs = [-1, 9000, 9000, -1];
+    const ys = [-1, -1, 9000, 9000];
+    const r = service.rasterizePolygon(xs, ys, 50, 50);
+    expect(r).not.toBeNull();
     expect(r!.bx).toBe(0);
     expect(r!.by).toBe(0);
+    expect(r!.bw).toBeLessThanOrEqual(50);
+    expect(r!.bh).toBeLessThanOrEqual(50);
   });
 
   // ── Holes / donuts (jit-ui#85) ────────────────────────────────────────

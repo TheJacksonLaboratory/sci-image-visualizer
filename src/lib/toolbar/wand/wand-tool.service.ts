@@ -284,10 +284,12 @@ export class WandToolService {
       if (bw === 0 || bh === 0) return;
       this.stroke = { bx, by, bw, bh, mask: new Uint8Array(bw * bh) };
     } else if (!erase) {
-      const bx = Math.max(0, Math.min(this.stroke.bx, px0));
-      const by = Math.max(0, Math.min(this.stroke.by, py0));
-      const bx1 = Math.min(cached.width, Math.max(this.stroke.bx + this.stroke.bw, px1));
-      const by1 = Math.min(cached.height, Math.max(this.stroke.by + this.stroke.bh, py1));
+      // Don't clamp the accumulator to the viewport: an adopted region may extend off-screen, and
+      // clamping here would discard its off-screen part when the stroke grows (jit-ui#102).
+      const bx = Math.min(this.stroke.bx, px0);
+      const by = Math.min(this.stroke.by, py0);
+      const bx1 = Math.max(this.stroke.bx + this.stroke.bw, px1);
+      const by1 = Math.max(this.stroke.by + this.stroke.bh, py1);
       const bw = bx1 - bx;
       const bh = by1 - by;
       if (bw !== this.stroke.bw || bh !== this.stroke.bh || bx !== this.stroke.bx || by !== this.stroke.by) {

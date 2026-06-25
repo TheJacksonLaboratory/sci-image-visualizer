@@ -173,10 +173,21 @@ export class WandService {
       if (ypoints[i] < minY) minY = ypoints[i];
       if (ypoints[i] > maxY) maxY = ypoints[i];
     }
-    const bx = Math.max(0, Math.floor(minX));
-    const by = Math.max(0, Math.floor(minY));
-    const bx1 = Math.min(imageWidth, Math.ceil(maxX) + 1);
-    const by1 = Math.min(imageHeight, Math.ceil(maxY) + 1);
+    // Rasterize the polygon's FULL extent (not clamped to the viewport), so a region that's
+    // partially off the visible/zoomed area keeps its off-screen part when the wand/brush extends
+    // it — the coords here are viewport-matrix units and may be negative or exceed the viewport
+    // (jit-ui#102). Memory guard: a region that's enormous at the current zoom would allocate a
+    // giant mask, so only then fall back to the viewport window (rare; accepts the clip).
+    let bx = Math.floor(minX);
+    let by = Math.floor(minY);
+    let bx1 = Math.ceil(maxX) + 1;
+    let by1 = Math.ceil(maxY) + 1;
+    if ((bx1 - bx) * (by1 - by) > 4096 * 4096) {
+      bx = Math.max(0, bx);
+      by = Math.max(0, by);
+      bx1 = Math.min(imageWidth, bx1);
+      by1 = Math.min(imageHeight, by1);
+    }
     const bw = bx1 - bx;
     const bh = by1 - by;
     if (bw <= 0 || bh <= 0) return null;
@@ -236,21 +247,21 @@ export class WandService {
    * clamped to (imageWidth, imageHeight).
    */
   public maskToPolygon(mask: Uint8Array, w: number, h: number,
-                       imageWidth: number, imageHeight: number,
+                       _imageWidth: number, _imageHeight: number,
                        originX: number, originY: number): Polygon | null {
     const verticesLocal = this.traceContour(mask, w, h);
     if (!verticesLocal || verticesLocal.length < 3) return null;
     const xpoints: number[] = [];
     const ypoints: number[] = [];
     const coordinates: number[][] = [];
+    // No viewport clamp: the trace coords (origin + local) are the region's true coords and may
+    // lie outside the currently-visible window when it was panned/zoomed (jit-ui#102).
     for (const v of verticesLocal) {
       const ix = Math.round(originX + v.x);
       const iy = Math.round(originY + v.y);
-      const cx2 = Math.max(0, Math.min(imageWidth - 1, ix));
-      const cy2 = Math.max(0, Math.min(imageHeight - 1, iy));
-      xpoints.push(cx2);
-      ypoints.push(cy2);
-      coordinates.push([cx2, cy2]);
+      xpoints.push(ix);
+      ypoints.push(iy);
+      coordinates.push([ix, iy]);
     }
     const poly = new Polygon();
     poly.npoints = xpoints.length;
@@ -323,14 +334,13 @@ export class WandService {
       const xpoints: number[] = [];
       const ypoints: number[] = [];
       const coordinates: number[][] = [];
+      // No viewport clamp (jit-ui#102): keep the region's true coords even off the visible window.
       for (const v of verts) {
         const ix = Math.round(originX + v.x);
         const iy = Math.round(originY + v.y);
-        const cx2 = Math.max(0, Math.min(imageWidth - 1, ix));
-        const cy2 = Math.max(0, Math.min(imageHeight - 1, iy));
-        xpoints.push(cx2);
-        ypoints.push(cy2);
-        coordinates.push([cx2, cy2]);
+        xpoints.push(ix);
+        ypoints.push(iy);
+        coordinates.push([ix, iy]);
       }
       const poly = new Polygon();
       poly.npoints = xpoints.length;
