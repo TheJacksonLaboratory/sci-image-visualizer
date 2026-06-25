@@ -29,6 +29,7 @@ import { VIZ_CONFIG, VizConfig } from '../../contracts/viz-config';
 import { TILE_ACCESS_PORT, TileAccessPort } from '../../contracts/ports/tile-access.port';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
+import { NapariScaleBar } from './napari-scale-bar';
 
 /** Opaque handle from {@link NapariVisualizerService.load}, passed back to plot(). */
 interface NapariLoaded {
@@ -140,6 +141,8 @@ export class NapariVisualizerService implements IVisualizer {
   private currentReverse = false;
   /** Latest invert toggle from the store (flips intensity before the colormap, like OSD). */
   private invertEnabled = false;
+  /** Physical scale bar overlay for the 2D image (null when 3D or the image has no µm/pixel). */
+  private scaleBar: NapariScaleBar | null = null;
 
   private readonly stackLoading$ = new BehaviorSubject<boolean>(false);
   private readonly stackLoadingProgress$ = new BehaviorSubject<number>(0);
@@ -378,6 +381,7 @@ export class NapariVisualizerService implements IVisualizer {
         await this.renderImage(z);
         this.fitCameraSoon();
         this.subscribeDisplayState();
+        this.installScaleBar();
       }
       this.scheduleReadback();
       return true;
@@ -583,6 +587,17 @@ export class NapariVisualizerService implements IVisualizer {
     this.viewer.requestRender();
   }
 
+  /** (Re)install the physical scale bar over the 2D image, sized from the image's µm/pixel
+   *  (`/tiles/info` mppX, falling back to the image metadata). No-op without a physical size. */
+  private installScaleBar(): void {
+    this.scaleBar?.destroy();
+    this.scaleBar = null;
+    const mppX = this.descriptor?.mppX || this.loaded?.imageInfo.imageMeta?.[0]?.mppX || 0;
+    if (this.viewer && this.host && mppX > 0) {
+      this.scaleBar = new NapariScaleBar(this.host, this.viewer.camera, mppX);
+    }
+  }
+
   /** Convert a napari-js `Histogram` (bin count + min/max) to the pane's `IHistogram` (bin edges). */
   private toIHistogram(h: { counts: Uint32Array; bins: number; min: number; max: number }): IHistogram {
     const span = h.max - h.min || 1;
@@ -665,6 +680,8 @@ export class NapariVisualizerService implements IVisualizer {
   reset(): void {
     this.displaySub?.unsubscribe();
     this.displaySub = null;
+    this.scaleBar?.destroy();
+    this.scaleBar = null;
     this.channelLayers.clear();
     this.viewer?.dispose();
     this.viewer = null;
