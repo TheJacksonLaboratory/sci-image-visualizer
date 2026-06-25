@@ -1,6 +1,7 @@
 import { Inject, Injectable, Optional } from '@angular/core';
-import { Observable, BehaviorSubject, Subject, Subscription, combineLatest, of } from 'rxjs';
+import { Observable, BehaviorSubject, Subject, Subscription, combineLatest, from, of } from 'rxjs';
 import { Image } from 'image-js';
+import { saveAs } from 'file-saver';
 import { Viewer, Colormap } from 'napari-js';
 import type { VolumeLayer, ImageLayer } from 'napari-js';
 
@@ -193,6 +194,10 @@ export class NapariVisualizerService implements IVisualizer {
   /** Cached CachedImageData built from the last readback (rebuilt when lastPixels changes). */
   private cachedImage: CachedImageData | null = null;
   private cachedImageSource: PixelData | null = null;
+  /** Image smoothing (bilinear) vs nearest-neighbour (crisp pixels, the default). */
+  private imageSmoothing = false;
+  /** Native-bit-depth histograms from `/histogram`, keyed `${z}|${channel}` (>8-bit images). */
+  private readonly nativeHistograms = new Map<string, IHistogram>();
 
   private readonly stackLoading$ = new BehaviorSubject<boolean>(false);
   private readonly stackLoadingProgress$ = new BehaviorSubject<number>(0);
@@ -585,6 +590,7 @@ export class NapariVisualizerService implements IVisualizer {
             visible: st?.visible ?? true,
             invert: this.invertEnabled,
             blending: 'additive',
+            interpolation: this.imageSmoothing ? 'linear' : 'nearest',
             scale,
           },
         );
@@ -600,12 +606,17 @@ export class NapariVisualizerService implements IVisualizer {
           contrastLimits: [st?.min ?? 0, st?.max ?? 255],
           gamma: st?.gamma ?? 1,
           invert: this.invertEnabled,
+          interpolation: this.imageSmoothing ? 'linear' : 'nearest',
           scale,
         },
       );
       this.channelLayers.set(0, layer);
     } else {
-      v.addImage(bitmap as ImageBitmap, { scale });
+      const layer = v.addImage(bitmap as ImageBitmap, {
+        scale,
+        interpolation: this.imageSmoothing ? 'linear' : 'nearest',
+      });
+      this.channelLayers.set(0, layer);
     }
     this.imageW = fullW;
     this.imageH = fullH;
@@ -755,6 +766,7 @@ export class NapariVisualizerService implements IVisualizer {
     this.regionOverlay = null;
     this.cachedImage = null;
     this.cachedImageSource = null;
+    this.nativeHistograms.clear();
     this.channelLayers.clear();
     this.viewer?.dispose();
     this.viewer = null;
@@ -798,8 +810,12 @@ export class NapariVisualizerService implements IVisualizer {
     /* napari-js has no minimap; no-op */
   }
 
-  setImageSmoothingEnabled(_enabled: boolean): void {
-    // TODO(jit-ui#102): map to ImageLayer.interpolation once layers are exposed per-plot.
+  setImageSmoothingEnabled(enabled: boolean): void {
+    this.imageSmoothing = enabled;
+    // Apply live to the rendered image layers; baked into addImage on the next render too.
+    const interpolation = enabled ? 'linear' : 'nearest';
+    for (const layer of this.channelLayers.values()) layer.interpolation = interpolation;
+    this.viewer?.requestRender();
   }
 
   setShowStack(_showstack: boolean): void {
@@ -916,8 +932,17 @@ export class NapariVisualizerService implements IVisualizer {
         .readDisplayedPixels()
         .then((px) => {
           this.lastPixels = px;
+          // Emit the visible image region (full-res coords), clamped to the image bounds — so the
+          // intensity inset / consumers sample the actual viewport, not always the whole image.
           const size = this.getTrueImageSize();
-          if (size) this.viewportChange$.next({ x: 0, y: 0, width: size.width, height: size.height });
+          const rect = v.visibleWorldRect();
+          if (size && rect) {
+            const x = Math.max(0, Math.min(size.width, rect.x));
+            const y = Math.max(0, Math.min(size.height, rect.y));
+            const width = Math.max(1, Math.min(size.width - x, rect.width));
+            const height = Math.max(1, Math.min(size.height - y, rect.height));
+            this.viewportChange$.next({ x, y, width, height });
+          }
         })
         .catch(() => undefined);
     };
@@ -1274,7 +1299,61 @@ export class NapariVisualizerService implements IVisualizer {
     return null;
   }
   getHistogram$(channelIndex: number, bins: number): Observable<IHistogram | null> {
+    // >8-bit channels: fetch the true native distribution from the server (the displayed pixels
+    // are 8-bit, so the client histogram would be clipped). 8-bit channels use the client path.
+    const bitDepth = this.descriptor?.channelInfo?.[channelIndex]?.bitDepth ?? 8;
+    if (bitDepth > 8) {
+      const z = this.loaded?.z ?? 0;
+      const key = `${z}|${channelIndex}`;
+      const cached = this.nativeHistograms.get(key);
+      if (cached) return of(cached);
+      return from(this.fetchNativeHistogram(channelIndex, bins, z, key));
+    }
     return of(this.getHistogram(channelIndex, bins));
+  }
+
+  /** Fetch + cache one channel's native-bit-depth histogram from `GET /histogram` (>8-bit). */
+  private async fetchNativeHistogram(
+    channel: number,
+    bins: number,
+    z: number,
+    key: string,
+  ): Promise<IHistogram | null> {
+    const infoB64 = this.tiles.getSelectedInfoB64();
+    if (!infoB64) return null;
+    const headers = await this.tiles
+      .getAuthHeaders()
+      .catch(() => ({}) as Record<string, string>);
+    const url = `${this.api}histogram?info=${infoB64}&channel=${channel}&z=${z}&bins=${bins}`;
+    try {
+      const resp = await fetch(url, { headers });
+      if (!resp.ok) return null; // 202 (still caching) or transient → null; the pane retries
+      const hi = (await resp.json()) as {
+        bitDepth: number;
+        rangeMin: number;
+        rangeMax: number;
+        observedMin: number;
+        observedMax: number;
+        binWidth: number;
+        counts: number[];
+      };
+      if (!hi?.counts) return null;
+      const out: IHistogram = {
+        bins: hi.counts.map((_, i) => hi.rangeMin + i * hi.binWidth),
+        counts: hi.counts,
+        max: hi.counts.reduce((m, c) => (c > m ? c : m), 0),
+        bitDepth: hi.bitDepth,
+        rangeMin: hi.rangeMin,
+        rangeMax: hi.rangeMax,
+        observedMin: hi.observedMin,
+        observedMax: hi.observedMax,
+      };
+      this.nativeHistograms.set(key, out);
+      return out;
+    } catch (err) {
+      console.warn('[napari-js] native histogram fetch failed', err);
+      return null;
+    }
   }
 
   /** Per-channel histogram of the displayed RGB composite (R/G/B byte), from the last readback. */
@@ -1304,8 +1383,33 @@ export class NapariVisualizerService implements IVisualizer {
       URL.revokeObjectURL(url);
     });
   }
-  exportData(): void {
-    // TODO(jit-ui#102): native-bit-depth TIFF export via the server /export/tiff endpoint.
+  /** Native-bit-depth (16/32-bit) multi-band TIFF export via the server `/export/tiff` endpoint —
+   *  the displayed PNG is an 8-bit figure, this preserves the true pixel values. Visible channels
+   *  only (omitted when all are visible → server default). Mirrors the OSD backend. */
+  async exportData(): Promise<void> {
+    const infoB64 = this.tiles.getSelectedInfoB64();
+    if (!infoB64) return;
+    const states = this.store.currentChannelStates();
+    const visible = states.filter((c) => c.visible).map((c) => c.index);
+    const chParam =
+      visible.length && visible.length < states.length ? `&channels=${visible.join(',')}` : '';
+    const z = this.loaded?.z ?? 0;
+    const url = `${this.api}export/tiff?info=${infoB64}&z=${z}${chParam}`;
+    const stem = (this.loaded?.filename || 'image').replace(/\.[^.]+$/, '');
+    const headers = await this.tiles
+      .getAuthHeaders()
+      .catch(() => ({}) as Record<string, string>);
+    try {
+      const resp = await fetch(url, { headers });
+      if (resp.status === 202) {
+        console.warn('[napari-js] 16-bit export: file still caching — try again shortly.');
+        return;
+      }
+      if (!resp.ok) throw new Error(`status ${resp.status}`);
+      saveAs(await resp.blob(), `${stem}_16bit.ome.tif`);
+    } catch (err) {
+      console.warn('[napari-js] 16-bit TIFF export failed', err);
+    }
   }
   unsubscribe(): void {
     this.reset();

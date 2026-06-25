@@ -49,9 +49,10 @@ export class NapariRegionOverlay implements IRegionOverlay {
   /** In-progress manipulation (select/move modes): dragging a body, a polygon vertex, or a
    *  rectangle corner. `anchor` is the fixed opposite corner for a rectangle resize. */
   private edit: {
-    kind: 'body' | 'vertex' | 'corner' | 'bezier';
+    kind: 'body' | 'vertex' | 'corner' | 'bezier' | 'holevertex';
     id: number;
     vertexIndex?: number;
+    holeIndex?: number;
     side?: 'in' | 'out';
     anchor?: [number, number];
     last: [number, number];
@@ -297,6 +298,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
     | { kind: 'corner'; anchor: [number, number] }
     | { kind: 'vertex'; vertexIndex: number }
     | { kind: 'bezier'; vertexIndex: number; side: 'in' | 'out' }
+    | { kind: 'holevertex'; holeIndex: number; vertexIndex: number }
     | null {
     const b = region.bounds;
     if (!b) return null;
@@ -331,6 +333,16 @@ export class NapariRegionOverlay implements IRegionOverlay {
           return { kind: 'vertex', vertexIndex: i };
         }
       }
+      // Hole (donut) ring vertices.
+      const holes = p.holes ?? [];
+      for (let hi = 0; hi < holes.length; hi++) {
+        const ring = holes[hi];
+        for (let vi = 0; vi < ring.length; vi++) {
+          if (this.screenDist(clientX, clientY, ring[vi][0], ring[vi][1]) <= HANDLE_HIT_PX) {
+            return { kind: 'holevertex', holeIndex: hi, vertexIndex: vi };
+          }
+        }
+      }
     }
     return null;
   }
@@ -354,6 +366,12 @@ export class NapariRegionOverlay implements IRegionOverlay {
       this.store.updateBounds(this.edit.id, rect);
     } else if (this.edit.kind === 'bezier' && this.edit.vertexIndex != null && this.edit.side) {
       this.store.moveBezierHandle(this.edit.id, this.edit.vertexIndex, this.edit.side, ix, iy);
+    } else if (
+      this.edit.kind === 'holevertex' &&
+      this.edit.holeIndex != null &&
+      this.edit.vertexIndex != null
+    ) {
+      this.store.moveHoleVertex(this.edit.id, this.edit.holeIndex, this.edit.vertexIndex, ix, iy);
     }
   }
 
@@ -470,9 +488,42 @@ export class NapariRegionOverlay implements IRegionOverlay {
       const isSel = this.selected.includes(i);
       const el = this.buildRegionEl(region, isSel);
       if (el) this.svg.appendChild(el);
+      this.drawLabel(region);
       if (isSel) this.drawHandles(region);
     });
     this.drawDraft();
+  }
+
+  /** Draw a region's classification label at its top-left, when labels are enabled (matches OSD). */
+  private drawLabel(region: Region): void {
+    if (!this.store.getShowShapeLabel() || region.isProfile?.()) return;
+    const label = region.label;
+    const b = region.bounds;
+    if (!label || !b) return;
+    let ix: number;
+    let iy: number;
+    if ('width' in b && 'x' in b) {
+      ix = (b as Rectangle).x;
+      iy = (b as Rectangle).y;
+    } else if ('npoints' in b) {
+      const p = b as Polygon;
+      ix = p.xpoints.reduce((m, x) => Math.min(m, x), Infinity);
+      iy = p.ypoints.reduce((m, y) => Math.min(m, y), Infinity);
+    } else {
+      return;
+    }
+    const [lx, ly] = this.toLocal(ix, iy);
+    const text = document.createElementNS(SVG_NS, 'text');
+    text.setAttribute('x', `${lx}`);
+    text.setAttribute('y', `${ly - 4}`);
+    text.setAttribute('fill', '#fff');
+    text.setAttribute('stroke', '#000');
+    text.setAttribute('stroke-width', '3');
+    text.setAttribute('paint-order', 'stroke');
+    text.setAttribute('font', '12px sans-serif');
+    text.setAttribute('pointer-events', 'none');
+    text.textContent = label;
+    this.svg.appendChild(text);
   }
 
   /** Draw grab handles for the selected region: rectangle corners or polygon vertices. */
@@ -502,6 +553,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
       const p = b as Polygon;
       const isBezier = p.bezier && p.handlesIn?.length === p.npoints && p.handlesOut?.length === p.npoints;
       for (let i = 0; i < p.npoints; i++) handle(p.xpoints[i], p.ypoints[i]);
+      for (const ring of p.holes ?? []) for (const [hx, hy] of ring) handle(hx, hy);
       // Bezier regions also expose their tangent control points (circles) joined to the anchor
       // by a thin line, matching the OSD overlay's editable bezier handles.
       if (isBezier) {
