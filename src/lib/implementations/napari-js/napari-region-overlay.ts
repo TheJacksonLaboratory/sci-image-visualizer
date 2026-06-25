@@ -9,6 +9,10 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 const FREEHAND_STEP = 2;
 /** Click-distance (screen px) within which a polygon click snaps closed onto the first vertex. */
 const CLOSE_SNAP_PX = 10;
+/** Screen-px hit radius for grabbing a vertex / rectangle corner handle. */
+const HANDLE_HIT_PX = 9;
+/** Rendered handle size (screen px). */
+const HANDLE_SIZE = 7;
 
 /** The slice of the napari Viewer the overlay needs (coord transforms + control gating). */
 interface OverlayViewer {
@@ -41,6 +45,16 @@ export class NapariRegionOverlay implements IRegionOverlay {
   private draftRect: { x0: number; y0: number; x1: number; y1: number } | null = null;
   private draftPath: Array<[number, number]> | null = null; // freehand or click polygon
   private drawing = false; // pointer is down for rect / freehand
+
+  /** In-progress manipulation (select/move modes): dragging a body, a polygon vertex, or a
+   *  rectangle corner. `anchor` is the fixed opposite corner for a rectangle resize. */
+  private edit: {
+    kind: 'body' | 'vertex' | 'corner';
+    id: number;
+    vertexIndex?: number;
+    anchor?: [number, number];
+    last: [number, number];
+  } | null = null;
 
   constructor(
     private readonly host: HTMLElement,
@@ -91,8 +105,9 @@ export class NapariRegionOverlay implements IRegionOverlay {
     this.redraw();
   }
 
-  setSelectedBezier(_bezier: boolean): void {
-    // 5b: bezier conversion of the selected polygon.
+  setSelectedBezier(bezier: boolean): void {
+    const sel = this.selectedRegion();
+    if (sel?.id != null) this.store.setBezier(sel.id, bezier);
   }
 
   destroy(): void {
@@ -134,15 +149,24 @@ export class NapariRegionOverlay implements IRegionOverlay {
       this.svg.setPointerCapture(e.pointerId);
     } else if (this.mode === 'drawpolygon') {
       this.handlePolygonClick(ix, iy, e.clientX, e.clientY);
-    } else if (this.mode === 'select') {
-      this.handleSelectClick(ix, iy);
+    } else if (this.mode === 'select' || this.mode === 'move') {
+      this.beginManipulation(ix, iy, e);
+    } else if (this.mode === 'addpoint') {
+      this.handleAddPoint(ix, iy);
+    } else if (this.mode === 'deletepoint') {
+      this.handleDeletePoint(ix, iy);
     }
     this.redraw();
   };
 
   private readonly onPointerMove = (e: PointerEvent): void => {
-    if (!this.drawing) return;
     const [ix, iy] = this.toImage(e.clientX, e.clientY);
+    if (this.edit) {
+      this.applyManipulation(ix, iy);
+      this.redraw();
+      return;
+    }
+    if (!this.drawing) return;
     if (this.draftRect) {
       this.draftRect.x1 = ix;
       this.draftRect.y1 = iy;
@@ -156,6 +180,17 @@ export class NapariRegionOverlay implements IRegionOverlay {
   };
 
   private readonly onPointerUp = (e: PointerEvent): void => {
+    if (this.edit) {
+      this.store.endBatch();
+      this.edit = null;
+      try {
+        this.svg.releasePointerCapture(e.pointerId);
+      } catch {
+        /* already released */
+      }
+      this.redraw();
+      return;
+    }
     if (!this.drawing) return;
     this.drawing = false;
     try {
@@ -209,16 +244,152 @@ export class NapariRegionOverlay implements IRegionOverlay {
     this.redraw();
   };
 
-  private handleSelectClick(ix: number, iy: number): void {
+  /** The currently-selected region (single selection), or null. */
+  private selectedRegion(): Region | null {
     const regions = this.store.getRegions();
-    // Topmost first (last drawn renders on top).
+    const i = this.selected[0];
+    return i != null && i >= 0 && i < regions.length ? regions[i] : null;
+  }
+
+  /** Screen distance (px) between a client point and an image coord. */
+  private screenDist(clientX: number, clientY: number, imgX: number, imgY: number): number {
+    const [lx, ly] = this.toLocal(imgX, imgY);
+    const r = this.svg.getBoundingClientRect();
+    return Math.hypot(clientX - r.left - lx, clientY - r.top - ly);
+  }
+
+  /**
+   * Start a select/move interaction: grab a handle (rectangle corner) or vertex of the already-
+   * selected region first; otherwise select the topmost region under the cursor and drag its body.
+   */
+  private beginManipulation(ix: number, iy: number, e: PointerEvent): void {
+    const sel = this.selectedRegion();
+    if (sel?.bounds) {
+      const grab = this.hitHandle(sel, e.clientX, e.clientY);
+      if (grab) {
+        this.store.beginBatch();
+        this.edit = { ...grab, id: sel.id, last: [ix, iy] };
+        this.svg.setPointerCapture(e.pointerId);
+        return;
+      }
+    }
+    // Hit-test bodies, topmost first (last drawn renders on top).
+    const regions = this.store.getRegions();
     for (let i = regions.length - 1; i >= 0; i--) {
       if (this.hitTest(regions[i], ix, iy)) {
         this.store.selectRegion(regions[i]);
+        this.store.beginBatch();
+        this.edit = { kind: 'body', id: regions[i].id, last: [ix, iy] };
+        this.svg.setPointerCapture(e.pointerId);
         return;
       }
     }
     this.store.setSelectedShapeIndices([]);
+  }
+
+  /** Test whether a client point grabs a rectangle corner or a polygon vertex of `region`. */
+  private hitHandle(
+    region: Region,
+    clientX: number,
+    clientY: number,
+  ): { kind: 'corner'; anchor: [number, number] } | { kind: 'vertex'; vertexIndex: number } | null {
+    const b = region.bounds;
+    if (!b) return null;
+    if ('width' in b && 'x' in b) {
+      const r = b as Rectangle;
+      const corners: Array<[number, number, [number, number]]> = [
+        [r.x, r.y, [r.x + r.width, r.y + r.height]],
+        [r.x + r.width, r.y, [r.x, r.y + r.height]],
+        [r.x, r.y + r.height, [r.x + r.width, r.y]],
+        [r.x + r.width, r.y + r.height, [r.x, r.y]],
+      ];
+      for (const [cx, cy, anchor] of corners) {
+        if (this.screenDist(clientX, clientY, cx, cy) <= HANDLE_HIT_PX) return { kind: 'corner', anchor };
+      }
+    } else if ('npoints' in b) {
+      const p = b as Polygon;
+      for (let i = 0; i < p.npoints; i++) {
+        if (this.screenDist(clientX, clientY, p.xpoints[i], p.ypoints[i]) <= HANDLE_HIT_PX) {
+          return { kind: 'vertex', vertexIndex: i };
+        }
+      }
+    }
+    return null;
+  }
+
+  /** Apply the live drag for the active manipulation (image coords `ix,iy`). */
+  private applyManipulation(ix: number, iy: number): void {
+    if (!this.edit) return;
+    if (this.edit.kind === 'body') {
+      const [lx, ly] = this.edit.last;
+      this.store.moveRegion(this.edit.id, ix - lx, iy - ly);
+      this.edit.last = [ix, iy];
+    } else if (this.edit.kind === 'vertex' && this.edit.vertexIndex != null) {
+      this.store.moveVertex(this.edit.id, this.edit.vertexIndex, ix, iy);
+    } else if (this.edit.kind === 'corner' && this.edit.anchor) {
+      const [ax, ay] = this.edit.anchor;
+      const rect = new Rectangle();
+      rect.x = Math.min(ax, ix);
+      rect.y = Math.min(ay, iy);
+      rect.width = Math.abs(ix - ax);
+      rect.height = Math.abs(iy - ay);
+      this.store.updateBounds(this.edit.id, rect);
+    }
+  }
+
+  /** addpoint mode: insert a vertex on the selected polygon's nearest edge at the click. */
+  private handleAddPoint(ix: number, iy: number): void {
+    const sel = this.selectedRegion();
+    const b = sel?.bounds;
+    if (!sel || !b || !('npoints' in b)) return;
+    const p = b as Polygon;
+    let bestSeg = 0;
+    let bestD = Infinity;
+    const segs = p.closed === false ? p.npoints - 1 : p.npoints;
+    for (let s = 0; s < segs; s++) {
+      const j = (s + 1) % p.npoints;
+      const d = this.pointSegDist(ix, iy, p.xpoints[s], p.ypoints[s], p.xpoints[j], p.ypoints[j]);
+      if (d < bestD) {
+        bestD = d;
+        bestSeg = s;
+      }
+    }
+    this.store.addVertex(sel.id, bestSeg, ix, iy);
+  }
+
+  /** deletepoint mode: remove the selected polygon's vertex nearest the click. */
+  private handleDeletePoint(ix: number, iy: number): void {
+    const sel = this.selectedRegion();
+    const b = sel?.bounds;
+    if (!sel || !b || !('npoints' in b)) return;
+    const p = b as Polygon;
+    let best = -1;
+    let bestD = Infinity;
+    for (let i = 0; i < p.npoints; i++) {
+      const d = Math.hypot(p.xpoints[i] - ix, p.ypoints[i] - iy);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    if (best >= 0) this.store.deleteVertex(sel.id, best);
+  }
+
+  /** Distance from point (px,py) to segment (ax,ay)-(bx,by), in image units. */
+  private pointSegDist(
+    px: number,
+    py: number,
+    ax: number,
+    ay: number,
+    bx: number,
+    by: number,
+  ): number {
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len2 = dx * dx + dy * dy || 1;
+    let t = ((px - ax) * dx + (py - ay) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
   }
 
   // ── shape commit ──────────────────────────────────────────────────────────
@@ -276,10 +447,41 @@ export class NapariRegionOverlay implements IRegionOverlay {
     const regions = this.store.getRegions();
     regions.forEach((region, i) => {
       if (region.isProfile?.()) return;
-      const el = this.buildRegionEl(region, this.selected.includes(i));
+      const isSel = this.selected.includes(i);
+      const el = this.buildRegionEl(region, isSel);
       if (el) this.svg.appendChild(el);
+      if (isSel) this.drawHandles(region);
     });
     this.drawDraft();
+  }
+
+  /** Draw grab handles for the selected region: rectangle corners or polygon vertices. */
+  private drawHandles(region: Region): void {
+    const b = region.bounds;
+    if (!b) return;
+    const stroke = region.color || this.store.getShapeColor() || '#00ffff';
+    const handle = (imgX: number, imgY: number): void => {
+      const [lx, ly] = this.toLocal(imgX, imgY);
+      const el = document.createElementNS(SVG_NS, 'rect');
+      el.setAttribute('x', `${lx - HANDLE_SIZE / 2}`);
+      el.setAttribute('y', `${ly - HANDLE_SIZE / 2}`);
+      el.setAttribute('width', `${HANDLE_SIZE}`);
+      el.setAttribute('height', `${HANDLE_SIZE}`);
+      el.setAttribute('fill', '#fff');
+      el.setAttribute('stroke', stroke);
+      el.setAttribute('stroke-width', '1.5');
+      this.svg.appendChild(el);
+    };
+    if ('width' in b && 'x' in b) {
+      const r = b as Rectangle;
+      handle(r.x, r.y);
+      handle(r.x + r.width, r.y);
+      handle(r.x, r.y + r.height);
+      handle(r.x + r.width, r.y + r.height);
+    } else if ('npoints' in b) {
+      const p = b as Polygon;
+      for (let i = 0; i < p.npoints; i++) handle(p.xpoints[i], p.ypoints[i]);
+    }
   }
 
   private buildRegionEl(region: Region, isSelected: boolean): SVGElement | null {
