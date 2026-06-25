@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@angular/core';
+import { Inject, Injectable, Optional } from '@angular/core';
 import { Observable, BehaviorSubject, Subject, Subscription, combineLatest, of } from 'rxjs';
 import { Image } from 'image-js';
 import { Viewer, Colormap } from 'napari-js';
@@ -45,6 +45,10 @@ import {
   ZoomToBoxToolService,
   ZoomToBoxToolHost,
 } from '../../toolbar/zoom-to-box/zoom-to-box-tool.service';
+import { SamToolService } from '../../toolbar/segmentation/sam-tool.service';
+import { SamPointToolService } from '../../toolbar/segmentation/sam-point-tool.service';
+import { CellSegmentToolService } from '../../toolbar/segmentation/cell-segment-tool.service';
+import { ICellSegmenter, CELL_SEGMENTER } from '../../contracts/cell-segmenter.contract';
 
 /** ICoordinateTransform over the napari camera: pointer client coords ↔ image/world coords. */
 class NapariCoordinateTransform implements ICoordinateTransform {
@@ -209,6 +213,10 @@ export class NapariVisualizerService implements IVisualizer {
     private readonly brushTool: BrushToolService,
     private readonly eraserTool: VertexEraserToolService,
     private readonly zoomToBoxTool: ZoomToBoxToolService,
+    private readonly samTool: SamToolService,
+    private readonly samPointTool: SamPointToolService,
+    private readonly cellSegmentTool: CellSegmentToolService,
+    @Optional() @Inject(CELL_SEGMENTER) private readonly cellSegmenter: ICellSegmenter | null,
     @Inject(VIZ_CONFIG) config: VizConfig,
   ) {
     this.api = config.slideCropServer;
@@ -1146,17 +1154,39 @@ export class NapariVisualizerService implements IVisualizer {
     }
     this.zoomToBoxTool.setMode(active);
   }
-  // SAM / cellpose: 5c-2 (server round-trips through the same wand host).
+  // SAM / cellpose — server round-trips that read the drawn rectangles + displayed pixels through
+  // the same wand host (rectangles from the RegionStore, image from the readback).
   segmentRectangles(): Promise<number> {
-    return Promise.resolve(0);
+    if (!this.viewer || !this.wandHost) return Promise.resolve(0);
+    this.cachedImageSource = null;
+    this.samTool.bindHost(this.wandHost);
+    return this.samTool.segmentBoxes();
   }
   segmentRectanglesCellpose(): Promise<number> {
-    return Promise.resolve(0);
+    if (!this.viewer || !this.wandHost || !this.cellSegmenter) return Promise.resolve(0);
+    this.cachedImageSource = null;
+    this.cellSegmentTool.bindHost(this.wandHost);
+    return this.cellSegmentTool.segmentBoxes(this.cellSegmenter);
   }
-  setSamModel(_id: string): void {}
-  setSamPointMode(_active: boolean): void {}
-  commitSamPoints(): void {}
-  clearSamPoints(): void {}
+  setSamModel(id: string): void {
+    this.samTool.setModel(id);
+    this.samPointTool.setModel(id);
+  }
+  setSamPointMode(active: boolean): void {
+    if (!this.viewer) return;
+    if (active) {
+      this.viewer?.setControlsEnabled(false);
+      this.cachedImageSource = null;
+      if (this.wandHost) this.samPointTool.bindHost(this.wandHost);
+    }
+    this.samPointTool.setMode(active);
+  }
+  commitSamPoints(): void {
+    this.samPointTool.commit();
+  }
+  clearSamPoints(): void {
+    this.samPointTool.clear();
+  }
 
   // ── IDisplayOptions: delegate to the shared VisualizerStore ───────────────
   getColormap(): Observable<ColormapNode | null> {
