@@ -2,7 +2,7 @@ import { Inject, Injectable, Optional } from '@angular/core';
 import { Observable, BehaviorSubject, Subject, Subscription, combineLatest, from, of } from 'rxjs';
 import { Image } from 'image-js';
 import { saveAs } from 'file-saver';
-import { Viewer, Colormap } from 'napari-js';
+import { Viewer, Colormap, histogramScalar } from 'napari-js';
 import type { VolumeLayer, ImageLayer } from 'napari-js';
 
 import { IImageInfo, IImageMetadata } from '../../contracts/image.contract';
@@ -163,6 +163,8 @@ export class NapariVisualizerService implements IVisualizer {
   private currentPlotType: PlotType = PlotType.NAPARI_IMAGE;
   private volumeLayer: VolumeLayer | null = null;
   private volumeDims: { width: number; height: number; depth: number } | null = null;
+  /** Assembled uint8 volume data, kept for the volume intensity histogram. */
+  private volumeData: Uint8Array | null = null;
   private imageW = 0;
   private imageH = 0;
   /** Monotonic slice-request id so a slow out-of-order slice fetch can't clobber a newer one. */
@@ -436,10 +438,13 @@ export class NapariVisualizerService implements IVisualizer {
           this.imageW = vol.width;
           this.imageH = vol.height;
           this.volumeDims = vol;
+          this.volumeData = vol.data;
           this.volumeLayer = viewer.addVolume(vol.data, vol.width, vol.height, vol.depth, {
-            colormap: 'magma',
+            colormap: this.grayscaleColormap(),
             rendering: plotType === PlotType.NAPARI_ISOSURFACE ? 'iso' : 'mip',
           });
+          // Color LUT for the volume/isosurface is driven by the store colormap (+reverse).
+          this.subscribeVolumeDisplayState();
         }
       } else {
         await this.renderImage(z);
@@ -639,6 +644,23 @@ export class NapariVisualizerService implements IVisualizer {
     });
   }
 
+  /** Subscribe the store colormap (+reverse) → the volume/isosurface color LUT (transfer function),
+   *  mirroring the grayscale image's colormap control. Replaces any prior subscription. */
+  private subscribeVolumeDisplayState(): void {
+    this.displaySub?.unsubscribe();
+    this.displaySub = combineLatest([
+      this.store.getColormap(),
+      this.store.getReverseScale(),
+    ]).subscribe(([colormap, reverse]) => {
+      this.currentColormap = (colormap as ColormapNode) ?? null;
+      this.currentReverse = reverse;
+      if (this.volumeLayer) {
+        this.volumeLayer.colormap = this.grayscaleColormap();
+        this.viewer?.requestRender();
+      }
+    });
+  }
+
   /** Apply the current channel states / colormap to the live layers. */
   private applyDisplayState(channels: IChannelState[]): void {
     if (!this.viewer) return;
@@ -775,6 +797,7 @@ export class NapariVisualizerService implements IVisualizer {
     this.lastPixels = null;
     this.volumeLayer = null;
     this.volumeDims = null;
+    this.volumeData = null;
   }
 
   relayout(_trueImageSize?: number[]): void {
@@ -1288,6 +1311,8 @@ export class NapariVisualizerService implements IVisualizer {
   getHistogram(channelIndex: number, bins: number): IHistogram | null {
     const v = this.viewer;
     if (!v) return null;
+    // Volume / isosurface: intensity histogram of the assembled (downsampled) uint8 volume.
+    if (this.volumeData) return this.toIHistogram(histogramScalar(this.volumeData, bins, 0, 255));
     // Grayscale/multichannel: native per-channel histogram straight from the in-memory scalar
     // layer (no GPU readback). RGB: bin the displayed pixels' R/G/B byte (8-bit client path).
     const layer = this.channelLayers.get(this.imageMode === 'grayscale' ? 0 : channelIndex);
