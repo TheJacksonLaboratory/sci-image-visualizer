@@ -46,24 +46,16 @@ host wiring (`RoutingVisualizerService`, toolbar `toggleDragMode`).
   native >8-bit `getHistogram$`.
 - ndpi/large-image FIX: layers scaled into FULL-RESOLUTION world coords so pre-saved regions align.
 - Volume/isosurface: color LUT (store colormap, reactive) + intensity histogram.
-
-## IN PROGRESS
-- **Bézier holes (full model support)** — user chose the full-model option (editable hole béziers,
-  not just render-time smoothing). The `Polygon` model currently documents holes as "stay straight
-  even when exterior is smoothed". Plan:
-  1. `models/region.ts` Polygon: add `holeHandlesIn?: number[][][]`, `holeHandlesOut?: number[][][]`
-     (parallel to `holes`).
-  2. `store/region-store.service.ts` `applyBezier()`: seed hole handles via the same Catmull-Rom
-     `defaultHandleOffsets` per hole ring when bezier on; clear when off. Add a
-     `moveHoleBezierHandle(id, holeIndex, index, side, x, y)`; keep handles in sync in
-     `addHoleVertex`/`deleteHoleVertex`; copy in the deep-clone (~line 735).
-  3. Both overlays (`osd-region-overlay.ts` + `napari-region-overlay.ts`): render holes as bezier
-     when hole handles present; draw + hit-test + drag hole bezier control points.
-  4. GeoJSON (`region-store` import/export): persist hole handles + flatten hole curves (mirror the
-     exterior, which keeps "anchors + handles + flag in properties" and flattened geometry).
-  5. `models/region.ts` `getShape`/`toString`: exterior path is currently emitted as straight `L`
-     segments (curve sampling lives elsewhere) — verify hole path parity.
-  - This is a SHARED change (fixes OSD's donut→bezier bug too, which the user reported).
+- OSD-parity gap-fills: interpolation/smoothing, getViewportChange$ clamp, native >8-bit
+  getHistogram$, TIFF exportData, region labels, donut hole-vertex editing.
+- **Bézier holes (full model support)** — DONE. Polygon `holeHandlesIn/Out`; store seeds/edits
+  (`moveHoleBezierHandle`) + clone; both overlays render holes as cubic bezier (shared ring path);
+  napari draws+drag-edits hole control handles; GeoJSON round-trips hole anchors+handles and
+  exports flattened hole curves. Fixes OSD's donut→bezier bug too. (Minor follow-up: OSD hole
+  bezier-handle DRAG editing — OSD renders the curve; napari has full edit.)
+- **Wand/brush off-screen FIX** — the stroke mask + rasterization no longer clamp to the viewport
+  (with a 4096² memory guard), so extending a region that was panned/zoomed partly off-screen keeps
+  its off-screen part. Shared services → OSD + napari + Plotly.
 
 ## TODO / BACKLOG
 - **Dynamic pyramidal tiling on zoom** (task 6): currently a single downscaled level is shown and
