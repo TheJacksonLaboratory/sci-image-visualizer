@@ -54,6 +54,20 @@ describe('NapariVisualizerService', () => {
       .fn()
       .mockResolvedValue({ width: 64, height: 48, close: () => undefined });
 
+    // jsdom has no canvas 2d context — the channel readback (drawImage + getImageData) needs one.
+    jest
+      .spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockImplementation(
+        () =>
+          ({
+            drawImage: () => undefined,
+            clearRect: () => undefined,
+            getImageData: (_x: number, _y: number, w: number, h: number) => ({
+              data: new Uint8ClampedArray(Math.max(1, w) * Math.max(1, h) * 4),
+            }),
+          }) as unknown as CanvasRenderingContext2D,
+      );
+
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule],
       providers: [
@@ -154,5 +168,45 @@ describe('NapariVisualizerService', () => {
   it('plot() returns false when the target element is missing', async () => {
     const loaded = await service.load(imageInfo(), 0);
     expect(await service.plot('nope', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE)).toBe(false);
+  });
+
+  it('composites multiple channels and serves per-channel histograms (multichannel)', async () => {
+    // A 3-channel multichannel descriptor → one additive tinted layer per channel.
+    (globalThis.fetch as unknown as jest.Mock).mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('tiles/info')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              width: 64,
+              height: 48,
+              tileSize: 512,
+              z: 1,
+              channels: 3,
+              multichannel: true,
+              realLevels: 1,
+              channelInfo: [{ color: '#ff0000' }, { color: '#00ff00' }, { color: '#0000ff' }],
+              levels: [{ res: 0, width: 64, height: 48 }],
+            }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) });
+    });
+
+    const div = document.createElement('div');
+    div.id = 'mc-host';
+    document.body.appendChild(div);
+
+    const loaded = await service.load(imageInfo(), 0);
+    const ok = await service.plot('mc-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE);
+    expect(ok).toBe(true);
+    // Per-channel native histogram now resolves from the in-memory scalar layers.
+    const hist = service.getHistogram(1, 256);
+    expect(hist).not.toBeNull();
+    expect(hist?.counts.length).toBe(256);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
   });
 });

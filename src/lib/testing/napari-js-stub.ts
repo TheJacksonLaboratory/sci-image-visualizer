@@ -25,20 +25,52 @@ export interface VolumeLayer {
   isoThreshold: number;
 }
 
+/** A mutable stand-in for napari-js ImageLayer (the per-channel display props the adapter sets). */
+export interface ImageLayer {
+  colormap: unknown;
+  contrastLimits: [number, number];
+  gamma: number;
+  visible: boolean;
+  invert: boolean;
+  blending: string;
+}
+
+/** Stand-in for napari-js Colormap (constructed for per-channel tints / grayscale LUTs). */
+export class Colormap {
+  constructor(
+    readonly name: string,
+    readonly stops: unknown[] = [],
+  ) {}
+  sample(): [number, number, number] {
+    return [0, 0, 0];
+  }
+}
+
 /** Minimal Viewer matching the surface NapariVisualizerService touches. */
 export class Viewer {
   readonly ready: Promise<void> = Promise.resolve();
   readonly camera: StubCamera = { zoom: 1, fit: () => undefined };
   readonly camera3d: StubCamera3D = { frame: () => undefined };
   readonly dims: StubDims = { z: 0 };
+  readonly layers = { clear: (): void => undefined };
 
   constructor(_options: { canvas: HTMLCanvasElement }) {}
 
-  addImage(): unknown {
-    return {};
+  addImage(): ImageLayer {
+    return {
+      colormap: 'gray',
+      contrastLimits: [0, 255],
+      gamma: 1,
+      visible: true,
+      invert: false,
+      blending: 'translucent',
+    };
   }
   addVolume(): VolumeLayer {
     return { contrastLimits: [0, 255], rendering: 'mip', isoThreshold: 0.5 };
+  }
+  layerHistogram(): { counts: Uint32Array; bins: number; min: number; max: number } | null {
+    return { counts: new Uint32Array(256), bins: 256, min: 0, max: 255 };
   }
   requestRender(): void {}
   setCameraDragMode(): void {}

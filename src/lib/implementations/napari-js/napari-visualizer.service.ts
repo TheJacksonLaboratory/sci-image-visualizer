@@ -1,11 +1,13 @@
 import { Inject, Injectable } from '@angular/core';
-import { Observable, BehaviorSubject, Subject, of } from 'rxjs';
+import { Observable, BehaviorSubject, Subject, Subscription, combineLatest, of } from 'rxjs';
 import { Image } from 'image-js';
-import { Viewer } from 'napari-js';
-import type { VolumeLayer } from 'napari-js';
+import { Viewer, Colormap } from 'napari-js';
+import type { VolumeLayer, ImageLayer } from 'napari-js';
 
 import { IImageInfo, IImageMetadata } from '../../contracts/image.contract';
 import { Region } from '../../models/region';
+import { IChannelState } from '../../contracts/channel-histogram-api.contract';
+import { buildColormapLut, Rgb } from '../../contracts/colormap-lut';
 import { PlotType, PlotTypeDescriptor, PLOT_TYPE_DESCRIPTORS } from '../../contracts/plot-type';
 import {
   IVisualizer,
@@ -47,6 +49,14 @@ const MAX_TEXTURE_DIM = 8192;
 /** How long to poll `/tiles/info` (202 while the server caches the source) before falling back to
  *  a single tile. Generous like the OSD backend — a cold whole-slide can take minutes to cache. */
 const DESCRIPTOR_TIMEOUT_MS = 120000;
+
+/** Default per-channel tints (Fiji-style) when the store/descriptor offers no colour. */
+const DEFAULT_TINTS = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ffffff'];
+
+/** Default tint for a channel index, cycling the Fiji palette. */
+function tintFor(channel: number): string {
+  return DEFAULT_TINTS[channel % DEFAULT_TINTS.length];
+}
 
 /** One pyramid level from `GET /tiles/info` (res 0 = full resolution). */
 interface TileLevel {
@@ -118,6 +128,18 @@ export class NapariVisualizerService implements IVisualizer {
   /** Cached `/tiles/info` pyramid descriptor + the infoB64 it was fetched for. */
   private descriptor: TileDescriptor | null = null;
   private descriptorKey: string | null = null;
+
+  /** How the current 2D image is composited (drives histogram + state application). */
+  private imageMode: 'grayscale' | 'multichannel' | 'rgb' = 'rgb';
+  /** Per-channel scalar layers for the multichannel/grayscale modes, keyed by channel index. */
+  private readonly channelLayers = new Map<number, ImageLayer>();
+  /** Live subscription applying channel-state / colormap changes to the layers. */
+  private displaySub: Subscription | null = null;
+  /** Latest grayscale colormap selection from the store (applied to the single gray layer). */
+  private currentColormap: ColormapNode | null = null;
+  private currentReverse = false;
+  /** Latest invert toggle from the store (flips intensity before the colormap, like OSD). */
+  private invertEnabled = false;
 
   private readonly stackLoading$ = new BehaviorSubject<boolean>(false);
   private readonly stackLoadingProgress$ = new BehaviorSubject<number>(0);
@@ -269,6 +291,35 @@ export class NapariVisualizerService implements IVisualizer {
       ctx.drawImage(bmp, col * t, row * t);
       bmp.close?.();
     }
+
+    // Safety net: if the chosen level still exceeds the GPU texture limit (e.g. a multichannel
+    // image whose coarsest REAL level is huge — overview levels are composite-only), downscale the
+    // stitched canvas to fit so the WebGPU texture upload can't fail.
+    const longest = Math.max(chosen.width, chosen.height);
+    if (longest > MAX_TEXTURE_DIM) {
+      const scale = MAX_TEXTURE_DIM / longest;
+      const outW = Math.max(1, Math.floor(chosen.width * scale));
+      const outH = Math.max(1, Math.floor(chosen.height * scale));
+      console.warn(
+        `[napari-js] stitched level ${chosen.width}×${chosen.height} exceeds the ` +
+          `${MAX_TEXTURE_DIM}px texture limit; downscaling to ${outW}×${outH}.`,
+      );
+      let out: HTMLCanvasElement | OffscreenCanvas;
+      if (typeof OffscreenCanvas !== 'undefined') {
+        out = new OffscreenCanvas(outW, outH);
+      } else {
+        out = document.createElement('canvas');
+        out.width = outW;
+        out.height = outH;
+      }
+      const octx = out.getContext('2d') as
+        | CanvasRenderingContext2D
+        | OffscreenCanvasRenderingContext2D
+        | null;
+      if (!octx) throw new Error('[napari-js] slice downscale: 2D context unavailable');
+      octx.drawImage(canvas as unknown as CanvasImageSource, 0, 0, outW, outH);
+      return createImageBitmap(out as unknown as ImageBitmapSource);
+    }
     return createImageBitmap(canvas as unknown as ImageBitmapSource);
   }
 
@@ -324,11 +375,9 @@ export class NapariVisualizerService implements IVisualizer {
           });
         }
       } else {
-        const bitmap = await this.fetchSlice(z);
-        this.imageW = bitmap.width;
-        this.imageH = bitmap.height;
-        viewer.addImage(bitmap);
+        await this.renderImage(z);
         this.fitCameraSoon();
+        this.subscribeDisplayState();
       }
       this.scheduleReadback();
       return true;
@@ -336,6 +385,210 @@ export class NapariVisualizerService implements IVisualizer {
       console.error('[napari-js] plot failed:', err);
       return false;
     }
+  }
+
+  // ── Channels: per-channel composite, LUT, native histograms (jit-ui#102) ──────────────────
+
+  /** Build a napari `Colormap` from a 0..255 RGB LUT (256 stops, t = i/255). */
+  private colormapFromLut(name: string, lut: Rgb[]): Colormap {
+    const stops = lut.map((c, i) => ({
+      t: i / (lut.length - 1),
+      color: [c[0] / 255, c[1] / 255, c[2] / 255] as [number, number, number],
+    }));
+    return new Colormap(name, stops);
+  }
+
+  /** A black→tint ramp for a channel's hex colour (additive multichannel compositing). */
+  private tintColormap(hex: string): Colormap {
+    const h = (hex || '#ffffff').replace('#', '');
+    const full = h.length === 3 ? h[0] + h[0] + h[1] + h[1] + h[2] + h[2] : h;
+    const r = parseInt(full.slice(0, 2), 16) || 0;
+    const g = parseInt(full.slice(2, 4), 16) || 0;
+    const b = parseInt(full.slice(4, 6), 16) || 0;
+    return new Colormap(`tint-${full}`, [
+      { t: 0, color: [0, 0, 0] },
+      { t: 1, color: [r / 255, g / 255, b / 255] },
+    ]);
+  }
+
+  /** The grayscale display colormap from the store selection (+reverse), defaulting to gray. */
+  private grayscaleColormap(): Colormap | string {
+    const value = (this.currentColormap as { data?: { value?: unknown } } | null)?.data?.value;
+    const lut = value != null ? buildColormapLut(value, this.currentReverse) : null;
+    if (lut) return this.colormapFromLut('gray-cmap', lut);
+    return this.currentReverse
+      ? this.colormapFromLut('gray-rev', [[255, 255, 255], [0, 0, 0]] as Rgb[])
+      : 'gray';
+  }
+
+  /** Fetch a stitched slice and read it back as a single-channel uint8 plane. `channel` selects a
+   *  band (multichannel); omit it for the grayscale composite (all overview levels available, so a
+   *  large image picks a fitting downscaled level rather than only the full-res real level). */
+  private async fetchChannelData(
+    z: number,
+    channel?: number,
+  ): Promise<{ data: Uint8Array; width: number; height: number }> {
+    const bmp = await this.fetchSlice(z, channel);
+    const w = bmp.width;
+    const h = bmp.height;
+    let canvas: HTMLCanvasElement | OffscreenCanvas;
+    if (typeof OffscreenCanvas !== 'undefined') {
+      canvas = new OffscreenCanvas(w, h);
+    } else {
+      canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+    }
+    const ctx = canvas.getContext('2d') as
+      | CanvasRenderingContext2D
+      | OffscreenCanvasRenderingContext2D
+      | null;
+    if (!ctx) throw new Error('[napari-js] channel readback: 2D context unavailable');
+    ctx.drawImage(bmp, 0, 0);
+    bmp.close?.();
+    const rgba = ctx.getImageData(0, 0, w, h).data;
+    const data = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) data[i] = rgba[i * 4]; // server bands are grayscale (R=G=B)
+    return { data, width: w, height: h };
+  }
+
+  /**
+   * Render the 2D image for slice `z` in one of three modes, mirroring the OSD display pipeline:
+   *  - **multichannel** (fluorescence): one additive scalar `ImageLayer` per channel, each tinted
+   *    by its channel colour and windowed by the shared channel state — true client-side compositing.
+   *  - **grayscale**: a single scalar layer coloured by the store colormap (+reverse).
+   *  - **rgb**: the server-composited bitmap as-is.
+   */
+  private async renderImage(z: number, token?: number): Promise<void> {
+    const v = this.viewer;
+    if (!v) return;
+    const desc = await this.ensureDescriptor();
+    const states = this.store.currentChannelStates();
+    const channelCount = desc?.channels ?? (states.length || 1);
+    const multichannel = !!desc?.multichannel && channelCount > 1;
+
+    // 1) Fetch all pixel data BEFORE touching the viewer, so a superseded scrub can bail without
+    //    having torn down the visible layers (avoids flicker / out-of-order layer state).
+    let mode: 'grayscale' | 'multichannel' | 'rgb';
+    let planes: Array<{ data: Uint8Array; width: number; height: number }> = [];
+    let bitmap: ImageBitmap | null = null;
+    if (multichannel) {
+      mode = 'multichannel';
+      planes = await Promise.all(
+        Array.from({ length: channelCount }, (_, c) => this.fetchChannelData(z, c)),
+      );
+    } else if (channelCount === 1) {
+      mode = 'grayscale';
+      // Composite fetch (no channel) → all overview levels usable, so a large grayscale image
+      // selects a fitting downscaled level instead of the full-res real level (texture limit).
+      planes = [await this.fetchChannelData(z)];
+    } else {
+      mode = 'rgb';
+      bitmap = await this.fetchSlice(z);
+    }
+
+    // 2) Commit — unless a newer scrub superseded us or the viewer was torn down.
+    if ((token != null && token !== this.sliceReq) || this.viewer !== v) {
+      bitmap?.close?.();
+      return;
+    }
+
+    this.imageMode = mode;
+    v.layers.clear();
+    this.channelLayers.clear();
+    if (mode === 'multichannel') {
+      planes.forEach((d, c) => {
+        const st = states.find((s) => s.index === c);
+        const color = st?.color ?? desc?.channelInfo?.[c]?.color ?? tintFor(c);
+        const layer = v.addImage(
+          { kind: 'typed', width: d.width, height: d.height, channels: 1, dtype: 'uint8', data: d.data },
+          {
+            name: st?.name ?? `ch${c}`,
+            colormap: this.tintColormap(color),
+            contrastLimits: [st?.min ?? 0, st?.max ?? 255],
+            gamma: st?.gamma ?? 1,
+            visible: st?.visible ?? true,
+            invert: this.invertEnabled,
+            blending: 'additive',
+          },
+        );
+        this.channelLayers.set(c, layer);
+      });
+      this.imageW = planes[0]?.width ?? 0;
+      this.imageH = planes[0]?.height ?? 0;
+    } else if (mode === 'grayscale') {
+      const d = planes[0];
+      const st = states[0];
+      const layer = v.addImage(
+        { kind: 'typed', width: d.width, height: d.height, channels: 1, dtype: 'uint8', data: d.data },
+        {
+          colormap: this.grayscaleColormap(),
+          contrastLimits: [st?.min ?? 0, st?.max ?? 255],
+          gamma: st?.gamma ?? 1,
+          invert: this.invertEnabled,
+        },
+      );
+      this.channelLayers.set(0, layer);
+      this.imageW = d.width;
+      this.imageH = d.height;
+    } else {
+      v.addImage(bitmap as ImageBitmap);
+      this.imageW = (bitmap as ImageBitmap).width;
+      this.imageH = (bitmap as ImageBitmap).height;
+    }
+  }
+
+  /** Subscribe channel states + grayscale colormap → live-apply to the rendered layers (no
+   *  re-fetch; only z changes re-fetch). Replaces any prior subscription. */
+  private subscribeDisplayState(): void {
+    this.displaySub?.unsubscribe();
+    this.displaySub = combineLatest([
+      this.store.getChannelStates(),
+      this.store.getColormap(),
+      this.store.getReverseScale(),
+      this.store.getInvert(),
+    ]).subscribe(([channels, colormap, reverse, invert]) => {
+      this.currentColormap = (colormap as ColormapNode) ?? null;
+      this.currentReverse = reverse;
+      this.invertEnabled = invert;
+      this.applyDisplayState(channels);
+    });
+  }
+
+  /** Apply the current channel states / colormap to the live layers. */
+  private applyDisplayState(channels: IChannelState[]): void {
+    if (!this.viewer) return;
+    if (this.imageMode === 'multichannel') {
+      for (const [c, layer] of this.channelLayers) {
+        const st = channels.find((s) => s.index === c);
+        if (!st) continue;
+        layer.colormap = this.tintColormap(st.color);
+        layer.contrastLimits = [st.min, st.max];
+        layer.gamma = st.gamma;
+        layer.visible = st.visible;
+        layer.invert = this.invertEnabled;
+      }
+    } else if (this.imageMode === 'grayscale') {
+      const layer = this.channelLayers.get(0);
+      const st = channels[0];
+      if (layer) {
+        layer.colormap = this.grayscaleColormap();
+        layer.invert = this.invertEnabled;
+        if (st) {
+          layer.contrastLimits = [st.min, st.max];
+          layer.gamma = st.gamma;
+        }
+      }
+    }
+    this.viewer.requestRender();
+  }
+
+  /** Convert a napari-js `Histogram` (bin count + min/max) to the pane's `IHistogram` (bin edges). */
+  private toIHistogram(h: { counts: Uint32Array; bins: number; min: number; max: number }): IHistogram {
+    const span = h.max - h.min || 1;
+    const bins = Array.from({ length: h.bins }, (_, i) => h.min + (i * span) / h.bins);
+    const counts = Array.from(h.counts);
+    return { bins, counts, max: counts.reduce((m, c) => (c > m ? c : m), 0) };
   }
 
   /** Assemble a downsampled uint8 volume (luminance) from the per-slice tile endpoint. */
@@ -410,6 +663,9 @@ export class NapariVisualizerService implements IVisualizer {
   }
 
   reset(): void {
+    this.displaySub?.unsubscribe();
+    this.displaySub = null;
+    this.channelLayers.clear();
     this.viewer?.dispose();
     this.viewer = null;
     if (this.canvas && this.host?.contains(this.canvas)) this.host.removeChild(this.canvas);
@@ -468,22 +724,13 @@ export class NapariVisualizerService implements IVisualizer {
       this.scheduleReadback();
       return;
     }
-    // 2D image: re-fetch the slice and swap it in. Branch on the presence of a volume layer (not
-    // on currentPlotType) so a stale/missing plot type can't silently drop us to the no-op path.
-    // Guard against out-of-order resolutions while scrubbing — a slow older slice must not clobber
-    // a newer one.
+    // 2D image: re-render the slice (re-fetches per-channel / composite). Branch on the presence
+    // of a volume layer (not currentPlotType, which could be stale and silently no-op the swap).
+    // The token lets renderImage drop a superseded scrub so a slow older slice can't clobber a newer one.
     const req = ++this.sliceReq;
-    void this.fetchSlice(zIndex)
-      .then((bmp) => {
-        if (req !== this.sliceReq || this.viewer !== v) {
-          bmp.close?.();
-          return;
-        }
-        v.layers.clear();
-        v.addImage(bmp);
-        this.imageW = bmp.width;
-        this.imageH = bmp.height;
-        this.scheduleReadback();
+    void this.renderImage(zIndex, req)
+      .then(() => {
+        if (req === this.sliceReq) this.scheduleReadback();
       })
       .catch((err) => console.error('[napari-js] setZIndex slice failed:', err));
   }
@@ -757,12 +1004,37 @@ export class NapariVisualizerService implements IVisualizer {
       resetSurfaceCamera: (): void => this.resetSurfaceCamera(),
     };
   }
-  getHistogram(_channelIndex: number, _bins: number): IHistogram | null {
-    // TODO(jit-ui#102): per-channel native histogram from the source.
+  getHistogram(channelIndex: number, bins: number): IHistogram | null {
+    const v = this.viewer;
+    if (!v) return null;
+    // Grayscale/multichannel: native per-channel histogram straight from the in-memory scalar
+    // layer (no GPU readback). RGB: bin the displayed pixels' R/G/B byte (8-bit client path).
+    const layer = this.channelLayers.get(this.imageMode === 'grayscale' ? 0 : channelIndex);
+    if (layer) {
+      const h = v.layerHistogram(layer, bins);
+      if (h) return this.toIHistogram(h);
+    }
+    if (this.imageMode === 'rgb') return this.rgbHistogram(channelIndex, bins);
     return null;
   }
-  getHistogram$(_channelIndex: number, _bins: number): Observable<IHistogram | null> {
-    return of(null);
+  getHistogram$(channelIndex: number, bins: number): Observable<IHistogram | null> {
+    return of(this.getHistogram(channelIndex, bins));
+  }
+
+  /** Per-channel histogram of the displayed RGB composite (R/G/B byte), from the last readback. */
+  private rgbHistogram(channelIndex: number, bins: number): IHistogram | null {
+    const px = this.lastPixels;
+    if (!px) return null;
+    const band = Math.max(0, Math.min(2, channelIndex));
+    const n = Math.max(1, Math.min(256, Math.floor(bins) || 256));
+    const counts = new Array(n).fill(0);
+    const data = px.data;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] === 0) continue; // skip transparent padding
+      counts[Math.min(n - 1, (data[i + band] * n) >> 8)]++;
+    }
+    const binsArr = Array.from({ length: n }, (_, i) => (i * 256) / n);
+    return { bins: binsArr, counts, max: counts.reduce((m, c) => (c > m ? c : m), 0) };
   }
   exportComposite(): void {
     const v = this.viewer;
