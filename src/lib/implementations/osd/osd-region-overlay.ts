@@ -351,9 +351,18 @@ export class OsdRegionOverlay implements IRegionOverlay {
         // straight subpath per hole.
         let d = isBezier ? this.bezierPathD(bounds as Polygon) : this.straightPathD(pts, closed);
         if (holes) {
-          for (const ring of holes) {
-            d += ' ' + this.straightPathD(ring.map(([x, y]) => ({ x, y })), true);
-          }
+          const poly = bounds as Polygon;
+          holes.forEach((ring, hi) => {
+            const xs = ring.map((p) => p[0]);
+            const ys = ring.map((p) => p[1]);
+            // When the donut is a bezier, smooth its holes too (jit-ui#102) — using stored hole
+            // handles when present, else the Catmull-Rom default (via resolveHandles).
+            d +=
+              ' ' +
+              (isBezier
+                ? this.ringBezierPathD(xs, ys, poly.holeHandlesIn?.[hi], poly.holeHandlesOut?.[hi], true)
+                : this.straightPathD(ring.map(([x, y]) => ({ x, y })), true));
+          });
           el.setAttribute('fill-rule', 'evenodd');
         }
         el.setAttribute('d', d);
@@ -446,12 +455,18 @@ export class OsdRegionOverlay implements IRegionOverlay {
   /** SVG path `d` (element-pixel coords) for the smooth cubic bezier through a
    *  polygon's anchors — the paper.js-equivalent curve. */
   private bezierPathD(poly: Polygon): string {
-    const xs = poly.xpoints;
-    const ys = poly.ypoints;
+    const closed = poly.closed !== false;
+    return this.ringBezierPathD(poly.xpoints, poly.ypoints, poly.handlesIn, poly.handlesOut, closed);
+  }
+
+  /** SVG cubic-bezier path `d` (element px) for any ring (exterior or hole). Uses the stored
+   *  per-vertex handle offsets when present, else the Catmull-Rom default (resolveHandles). */
+  private ringBezierPathD(
+    xs: number[], ys: number[], inOff: number[][] | undefined, outOff: number[][] | undefined, closed: boolean,
+  ): string {
     const n = Math.min(xs.length, ys.length);
     if (n < 2) return '';
-    const closed = poly.closed !== false;
-    const h = resolveHandles(xs, ys, closed, poly.handlesIn, poly.handlesOut);
+    const h = resolveHandles(xs, ys, closed, inOff, outOff);
     const px = (x: number, y: number) => { const q = this.toPx(x, y); return `${q.x},${q.y}`; };
     let d = `M ${px(xs[0], ys[0])}`;
     const segs = closed ? n : n - 1;

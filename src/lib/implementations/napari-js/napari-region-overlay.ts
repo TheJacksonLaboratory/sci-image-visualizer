@@ -49,7 +49,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
   /** In-progress manipulation (select/move modes): dragging a body, a polygon vertex, or a
    *  rectangle corner. `anchor` is the fixed opposite corner for a rectangle resize. */
   private edit: {
-    kind: 'body' | 'vertex' | 'corner' | 'bezier' | 'holevertex';
+    kind: 'body' | 'vertex' | 'corner' | 'bezier' | 'holevertex' | 'holebezier';
     id: number;
     vertexIndex?: number;
     holeIndex?: number;
@@ -299,6 +299,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
     | { kind: 'vertex'; vertexIndex: number }
     | { kind: 'bezier'; vertexIndex: number; side: 'in' | 'out' }
     | { kind: 'holevertex'; holeIndex: number; vertexIndex: number }
+    | { kind: 'holebezier'; holeIndex: number; vertexIndex: number; side: 'in' | 'out' }
     | null {
     const b = region.bounds;
     if (!b) return null;
@@ -333,10 +334,23 @@ export class NapariRegionOverlay implements IRegionOverlay {
           return { kind: 'vertex', vertexIndex: i };
         }
       }
-      // Hole (donut) ring vertices.
+      // Hole (donut) ring: bezier control points first, then the vertices.
       const holes = p.holes ?? [];
+      const holeBezier = !!(p.bezier && p.holeHandlesIn && p.holeHandlesOut);
       for (let hi = 0; hi < holes.length; hi++) {
         const ring = holes[hi];
+        if (holeBezier && p.holeHandlesIn![hi] && p.holeHandlesOut![hi]) {
+          for (let vi = 0; vi < ring.length; vi++) {
+            const out = p.holeHandlesOut![hi][vi] ?? [0, 0];
+            const inn = p.holeHandlesIn![hi][vi] ?? [0, 0];
+            if (this.screenDist(clientX, clientY, ring[vi][0] + out[0], ring[vi][1] + out[1]) <= HANDLE_HIT_PX) {
+              return { kind: 'holebezier', holeIndex: hi, vertexIndex: vi, side: 'out' };
+            }
+            if (this.screenDist(clientX, clientY, ring[vi][0] + inn[0], ring[vi][1] + inn[1]) <= HANDLE_HIT_PX) {
+              return { kind: 'holebezier', holeIndex: hi, vertexIndex: vi, side: 'in' };
+            }
+          }
+        }
         for (let vi = 0; vi < ring.length; vi++) {
           if (this.screenDist(clientX, clientY, ring[vi][0], ring[vi][1]) <= HANDLE_HIT_PX) {
             return { kind: 'holevertex', holeIndex: hi, vertexIndex: vi };
@@ -372,6 +386,20 @@ export class NapariRegionOverlay implements IRegionOverlay {
       this.edit.vertexIndex != null
     ) {
       this.store.moveHoleVertex(this.edit.id, this.edit.holeIndex, this.edit.vertexIndex, ix, iy);
+    } else if (
+      this.edit.kind === 'holebezier' &&
+      this.edit.holeIndex != null &&
+      this.edit.vertexIndex != null &&
+      this.edit.side
+    ) {
+      this.store.moveHoleBezierHandle(
+        this.edit.id,
+        this.edit.holeIndex,
+        this.edit.vertexIndex,
+        this.edit.side,
+        ix,
+        iy,
+      );
     }
   }
 
@@ -564,6 +592,18 @@ export class NapariRegionOverlay implements IRegionOverlay {
           this.drawBezierHandle(p.xpoints[i], p.ypoints[i], hIn[i], stroke);
         }
       }
+      // Donut hole bezier control handles.
+      if (p.bezier && p.holeHandlesIn && p.holeHandlesOut) {
+        (p.holes ?? []).forEach((ring, hi) => {
+          const hIn = p.holeHandlesIn![hi];
+          const hOut = p.holeHandlesOut![hi];
+          if (!hIn || !hOut) return;
+          ring.forEach(([hx, hy], vi) => {
+            this.drawBezierHandle(hx, hy, hOut[vi], stroke);
+            this.drawBezierHandle(hx, hy, hIn[vi], stroke);
+          });
+        });
+      }
     }
   }
 
@@ -632,14 +672,23 @@ export class NapariRegionOverlay implements IRegionOverlay {
     return null;
   }
 
-  /** Path data for a polygon: the exterior ring (bezier or straight) plus any holes as straight
-   *  sub-paths (rendered with even-odd fill so they read as cut-outs). */
+  /** Path data for a polygon: the exterior ring (bezier or straight) plus any holes (bezier when
+   *  the donut carries hole handles, else straight) as sub-paths — even-odd fill cuts them out. */
   private polygonPathData(p: Polygon, isBezier: boolean): string {
-    let d = isBezier ? this.bezierPath(p) : this.straightPath(p.xpoints, p.ypoints, p.closed !== false);
-    for (const ring of p.holes ?? []) {
-      if (ring.length < 3) continue;
-      d += ' ' + this.straightPath(ring.map((pt) => pt[0]), ring.map((pt) => pt[1]), true);
-    }
+    let d = isBezier
+      ? this.ringBezierPath(p.xpoints, p.ypoints, p.handlesIn!, p.handlesOut!, p.closed !== false)
+      : this.straightPath(p.xpoints, p.ypoints, p.closed !== false);
+    const holeBezier = !!(p.bezier && p.holeHandlesIn && p.holeHandlesOut);
+    (p.holes ?? []).forEach((ring, hi) => {
+      if (ring.length < 3) return;
+      const xs = ring.map((pt) => pt[0]);
+      const ys = ring.map((pt) => pt[1]);
+      if (holeBezier && p.holeHandlesIn![hi] && p.holeHandlesOut![hi]) {
+        d += ' ' + this.ringBezierPath(xs, ys, p.holeHandlesIn![hi], p.holeHandlesOut![hi], true);
+      } else {
+        d += ' ' + this.straightPath(xs, ys, true);
+      }
+    });
     return d;
   }
 
@@ -653,20 +702,25 @@ export class NapariRegionOverlay implements IRegionOverlay {
     return closed ? d + ' Z' : d;
   }
 
-  /** SVG path data for a bezier polygon: anchors joined by cubic segments whose control points
-   *  are `anchor + handleOut` (leaving) and `nextAnchor + handleIn` (arriving), in image space. */
-  private bezierPath(p: Polygon): string {
-    const hIn = p.handlesIn as number[][];
-    const hOut = p.handlesOut as number[][];
-    const n = p.npoints;
-    const anchor = (i: number): [number, number] => this.toLocal(p.xpoints[i], p.ypoints[i]);
+  /** SVG cubic-bezier path data for any ring (exterior or hole): anchors joined by cubic segments
+   *  whose control points are `anchor + handleOut` (leaving) and `nextAnchor + handleIn` (arriving),
+   *  in image space. Used for both the exterior and (donut) hole rings. */
+  private ringBezierPath(
+    xs: number[],
+    ys: number[],
+    hIn: number[][],
+    hOut: number[][],
+    closed: boolean,
+  ): string {
+    const n = xs.length;
+    const anchor = (i: number): [number, number] => this.toLocal(xs[i], ys[i]);
     const ctrlOut = (i: number): [number, number] =>
-      this.toLocal(p.xpoints[i] + hOut[i][0], p.ypoints[i] + hOut[i][1]);
+      this.toLocal(xs[i] + (hOut[i]?.[0] ?? 0), ys[i] + (hOut[i]?.[1] ?? 0));
     const ctrlIn = (i: number): [number, number] =>
-      this.toLocal(p.xpoints[i] + hIn[i][0], p.ypoints[i] + hIn[i][1]);
+      this.toLocal(xs[i] + (hIn[i]?.[0] ?? 0), ys[i] + (hIn[i]?.[1] ?? 0));
     const [sx, sy] = anchor(0);
     let d = `M ${sx},${sy}`;
-    const segments = p.closed === false ? n - 1 : n;
+    const segments = closed ? n : n - 1;
     for (let s = 0; s < segments; s++) {
       const i = s;
       const j = (s + 1) % n;
@@ -675,7 +729,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
       const [ex, ey] = anchor(j);
       d += ` C ${c1x},${c1y} ${c2x},${c2y} ${ex},${ey}`;
     }
-    if (p.closed !== false) d += ' Z';
+    if (closed) d += ' Z';
     return d;
   }
 

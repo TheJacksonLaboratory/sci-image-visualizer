@@ -173,11 +173,18 @@ export class Polygon {
    * A point inside the exterior **and** inside any hole is OUTSIDE the region
    * (even-odd rule). Absent/empty == a solid polygon (the prior behaviour), so
    * every existing region is unaffected.
-   *
-   * Bézier holes are out of scope: holes stay straight rings even when the
-   * exterior is smoothed.
    */
   holes?: number[][][];
+
+  /**
+   * Per-hole bézier control-point offsets, parallel to {@link holes} (one entry per ring, each a
+   * list of `[dx, dy]` per ring vertex, **relative** to the vertex). Present only when `bezier` is
+   * on for a donut — seeded from the Catmull-Rom default and individually editable, exactly like
+   * the exterior {@link handlesIn}/{@link handlesOut}. So a donut smoothed to a bézier curves its
+   * holes too (jit-ui#102).
+   */
+  holeHandlesIn?: number[][][];
+  holeHandlesOut?: number[][][];
 }
 
 /**

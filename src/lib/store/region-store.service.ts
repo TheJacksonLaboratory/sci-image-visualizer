@@ -486,6 +486,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.recordUndoSnapshot();
     const at = Math.max(0, Math.min(segIndex + 1, ring.length));
     ring.splice(at, 0, [x, y]);
+    if (poly.bezier) this.seedHoleHandles(poly); // keep hole handles aligned to the ring
     this.syncCache();
     this.emit();
   }
@@ -505,6 +506,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     } else {
       ring.splice(index, 1);
     }
+    if (poly.bezier) this.seedHoleHandles(poly); // keep hole handles aligned to the ring(s)
     this.syncCache();
     this.emit();
   }
@@ -589,10 +591,59 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
       const off = defaultHandleOffsets(poly.xpoints, poly.ypoints, poly.closed !== false);
       poly.handlesIn = off.in;
       poly.handlesOut = off.out;
+      this.seedHoleHandles(poly); // smooth the holes too (donut → bezier curves the holes)
     } else {
       poly.handlesIn = undefined;
       poly.handlesOut = undefined;
+      poly.holeHandlesIn = undefined;
+      poly.holeHandlesOut = undefined;
     }
+  }
+
+  /** (Re)seed per-hole bezier handles from the Catmull-Rom default, parallel to `poly.holes`. */
+  private seedHoleHandles(poly: Polygon): void {
+    if (!poly.holes || !poly.holes.length) {
+      poly.holeHandlesIn = undefined;
+      poly.holeHandlesOut = undefined;
+      return;
+    }
+    const ins: number[][][] = [];
+    const outs: number[][][] = [];
+    for (const ring of poly.holes) {
+      const off = defaultHandleOffsets(
+        ring.map((p) => p[0]),
+        ring.map((p) => p[1]),
+        true,
+      );
+      ins.push(off.in);
+      outs.push(off.out);
+    }
+    poly.holeHandlesIn = ins;
+    poly.holeHandlesOut = outs;
+  }
+
+  /** Drag a bezier control point on a hole ring vertex (donut bezier editing). */
+  moveHoleBezierHandle(
+    id: number,
+    holeIndex: number,
+    index: number,
+    side: 'in' | 'out',
+    x: number,
+    y: number,
+  ): void {
+    const poly = this.polygonOf(id);
+    if (!poly || !poly.bezier || !poly.holes || holeIndex < 0 || holeIndex >= poly.holes.length) {
+      return;
+    }
+    const ring = poly.holes[holeIndex];
+    if (index < 0 || index >= ring.length) return;
+    this.recordUndoSnapshot();
+    if (!poly.holeHandlesIn || !poly.holeHandlesOut) this.seedHoleHandles(poly);
+    const offset = [x - ring[index][0], y - ring[index][1]];
+    if (side === 'in') poly.holeHandlesIn![holeIndex][index] = offset;
+    else poly.holeHandlesOut![holeIndex][index] = offset;
+    this.syncCache();
+    this.emit();
   }
 
   moveBezierHandle(id: number, index: number, side: 'in' | 'out', x: number, y: number): void {
@@ -735,6 +786,8 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     if (p.handlesIn) poly.handlesIn = p.handlesIn.map(o => o.slice());
     if (p.handlesOut) poly.handlesOut = p.handlesOut.map(o => o.slice());
     if (p.holes) poly.holes = p.holes.map(ring => ring.map(pt => pt.slice()));
+    if (p.holeHandlesIn) poly.holeHandlesIn = p.holeHandlesIn.map(r => r.map(o => o.slice()));
+    if (p.holeHandlesOut) poly.holeHandlesOut = p.holeHandlesOut.map(r => r.map(o => o.slice()));
     return poly;
   }
 

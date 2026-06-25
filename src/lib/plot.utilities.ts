@@ -397,6 +397,10 @@ export class PlotUtilities {
         // to the smooth Catmull-Rom default at render time).
         if (feature.properties.bezierHandlesIn) polygon.handlesIn = feature.properties.bezierHandlesIn;
         if (feature.properties.bezierHandlesOut) polygon.handlesOut = feature.properties.bezierHandlesOut;
+        // Restore donut holes + their editable bezier handles (jit-ui#102).
+        if (feature.properties.holes) polygon.holes = feature.properties.holes;
+        if (feature.properties.holeHandlesIn) polygon.holeHandlesIn = feature.properties.holeHandlesIn;
+        if (feature.properties.holeHandlesOut) polygon.holeHandlesOut = feature.properties.holeHandlesOut;
         region.bounds = polygon;
         regions.push(region);
         continue;
@@ -535,6 +539,10 @@ export class PlotUtilities {
           // round-trips a hand-edited curve, not just the smooth default.
           if (roi.bounds.handlesIn) properties.bezierHandlesIn = roi.bounds.handlesIn;
           if (roi.bounds.handlesOut) properties.bezierHandlesOut = roi.bounds.handlesOut;
+          // Donut bezier: the hole anchors + their editable handles round-trip too (jit-ui#102).
+          if (roi.bounds.holes) properties.holes = roi.bounds.holes;
+          if (roi.bounds.holeHandlesIn) properties.holeHandlesIn = roi.bounds.holeHandlesIn;
+          if (roi.bounds.holeHandlesOut) properties.holeHandlesOut = roi.bounds.holeHandlesOut;
         }
         if (closed) {
           // Close the ring. The flattened bezier curve already returns to its
@@ -542,12 +550,26 @@ export class PlotUtilities {
           // repeated.
           const ring = isBezier ? geomCoords : [...geomCoords, geomCoords[0]];
           // Interior rings (holes) follow the exterior as extra GeoJSON rings —
-          // standard Polygon-with-holes, which QuPath round-trips (jit-ui#85).
+          // standard Polygon-with-holes, which QuPath round-trips (jit-ui#85). For a bezier donut,
+          // the hole geometry is the flattened smooth curve too (jit-ui#102).
           const rings: number[][][] = [ring];
           if (roi.bounds.holes) {
-            for (const hole of roi.bounds.holes) {
-              if (hole.length >= 3) rings.push([...hole, hole[0]]);
-            }
+            roi.bounds.holes.forEach((hole, hi) => {
+              if (hole.length < 3) return;
+              if (isBezier) {
+                const hxs = hole.map((p) => p[0]);
+                const hys = hole.map((p) => p[1]);
+                const hh = resolveHandles(
+                  hxs, hys, true,
+                  (roi.bounds as Polygon).holeHandlesIn?.[hi],
+                  (roi.bounds as Polygon).holeHandlesOut?.[hi],
+                );
+                const c = bezierCurveFromHandles(hxs, hys, hh, true);
+                rings.push(c.xs.map((x, i) => [x, c.ys[i]]));
+              } else {
+                rings.push([...hole, hole[0]]);
+              }
+            });
           }
           features.push({
             type: 'Feature',
