@@ -145,6 +145,15 @@ export class ToolbarComponent implements OnChanges {
     return this.selectedPlotType === PlotType.IMAGE;
   }
 
+  /** Backends with a vertex-editing region overlay: OSD Image and napari-js WebGPU image
+   *  (jit-ui#102). Gates the polygon / add-vertex / delete-vertex / Bézier-convert tools. */
+  get supportsRegionVertexTools(): boolean {
+    return (
+      this.selectedPlotType === PlotType.IMAGE ||
+      this.selectedPlotType === PlotType.NAPARI_IMAGE
+    );
+  }
+
   /** Plot types that scrub a z-stack live (the renderer swaps the slice in place): the OSD
    *  Image view and the napari-js WebGPU image (jit-ui#102). Drives the per-slice slider. */
   get showsLiveSliceScrubber(): boolean {

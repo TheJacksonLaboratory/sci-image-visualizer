@@ -239,8 +239,8 @@
           {{ brushSize }}</span>
       </ng-container>
 
-      <!-- Vertex editing — Image view (OpenSeadragon) only. -->
-      <ng-container *ngIf="isImageView">
+      <!-- Vertex editing — backends with a vertex-editing overlay (OSD + napari-js image). -->
+      <ng-container *ngIf="supportsRegionVertexTools">
         <p-button size="small"
                   [text]="activeDragMode !== 'drawpolygon'"
                   pTooltip="Polygon: click to place each vertex; click the first point to close"

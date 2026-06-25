@@ -49,9 +49,10 @@ export class NapariRegionOverlay implements IRegionOverlay {
   /** In-progress manipulation (select/move modes): dragging a body, a polygon vertex, or a
    *  rectangle corner. `anchor` is the fixed opposite corner for a rectangle resize. */
   private edit: {
-    kind: 'body' | 'vertex' | 'corner';
+    kind: 'body' | 'vertex' | 'corner' | 'bezier';
     id: number;
     vertexIndex?: number;
+    side?: 'in' | 'out';
     anchor?: [number, number];
     last: [number, number];
   } | null = null;
@@ -292,7 +293,11 @@ export class NapariRegionOverlay implements IRegionOverlay {
     region: Region,
     clientX: number,
     clientY: number,
-  ): { kind: 'corner'; anchor: [number, number] } | { kind: 'vertex'; vertexIndex: number } | null {
+  ):
+    | { kind: 'corner'; anchor: [number, number] }
+    | { kind: 'vertex'; vertexIndex: number }
+    | { kind: 'bezier'; vertexIndex: number; side: 'in' | 'out' }
+    | null {
     const b = region.bounds;
     if (!b) return null;
     if ('width' in b && 'x' in b) {
@@ -308,6 +313,19 @@ export class NapariRegionOverlay implements IRegionOverlay {
       }
     } else if ('npoints' in b) {
       const p = b as Polygon;
+      // Bezier control points first (they sit off the anchors), so they're grabbable.
+      if (p.bezier && p.handlesIn?.length === p.npoints && p.handlesOut?.length === p.npoints) {
+        for (let i = 0; i < p.npoints; i++) {
+          const out = p.handlesOut[i];
+          const inn = p.handlesIn[i];
+          if (this.screenDist(clientX, clientY, p.xpoints[i] + out[0], p.ypoints[i] + out[1]) <= HANDLE_HIT_PX) {
+            return { kind: 'bezier', vertexIndex: i, side: 'out' };
+          }
+          if (this.screenDist(clientX, clientY, p.xpoints[i] + inn[0], p.ypoints[i] + inn[1]) <= HANDLE_HIT_PX) {
+            return { kind: 'bezier', vertexIndex: i, side: 'in' };
+          }
+        }
+      }
       for (let i = 0; i < p.npoints; i++) {
         if (this.screenDist(clientX, clientY, p.xpoints[i], p.ypoints[i]) <= HANDLE_HIT_PX) {
           return { kind: 'vertex', vertexIndex: i };
@@ -334,6 +352,8 @@ export class NapariRegionOverlay implements IRegionOverlay {
       rect.width = Math.abs(ix - ax);
       rect.height = Math.abs(iy - ay);
       this.store.updateBounds(this.edit.id, rect);
+    } else if (this.edit.kind === 'bezier' && this.edit.vertexIndex != null && this.edit.side) {
+      this.store.moveBezierHandle(this.edit.id, this.edit.vertexIndex, this.edit.side, ix, iy);
     }
   }
 
@@ -480,8 +500,44 @@ export class NapariRegionOverlay implements IRegionOverlay {
       handle(r.x + r.width, r.y + r.height);
     } else if ('npoints' in b) {
       const p = b as Polygon;
+      const isBezier = p.bezier && p.handlesIn?.length === p.npoints && p.handlesOut?.length === p.npoints;
       for (let i = 0; i < p.npoints; i++) handle(p.xpoints[i], p.ypoints[i]);
+      // Bezier regions also expose their tangent control points (circles) joined to the anchor
+      // by a thin line, matching the OSD overlay's editable bezier handles.
+      if (isBezier) {
+        const hIn = p.handlesIn as number[][];
+        const hOut = p.handlesOut as number[][];
+        for (let i = 0; i < p.npoints; i++) {
+          this.drawBezierHandle(p.xpoints[i], p.ypoints[i], hOut[i], stroke);
+          this.drawBezierHandle(p.xpoints[i], p.ypoints[i], hIn[i], stroke);
+        }
+      }
     }
+  }
+
+  /** Draw one bezier control point (anchor + handle offset) as a small circle connected to its
+   *  anchor by a tangent line. `handle` is the [dx,dy] offset from the anchor in image space. */
+  private drawBezierHandle(ax: number, ay: number, handle: number[], stroke: string): void {
+    if (!handle || (handle[0] === 0 && handle[1] === 0)) return;
+    const [alx, aly] = this.toLocal(ax, ay);
+    const [hlx, hly] = this.toLocal(ax + handle[0], ay + handle[1]);
+    const line = document.createElementNS(SVG_NS, 'line');
+    line.setAttribute('x1', `${alx}`);
+    line.setAttribute('y1', `${aly}`);
+    line.setAttribute('x2', `${hlx}`);
+    line.setAttribute('y2', `${hly}`);
+    line.setAttribute('stroke', stroke);
+    line.setAttribute('stroke-width', '1');
+    line.setAttribute('stroke-opacity', '0.7');
+    this.svg.appendChild(line);
+    const dot = document.createElementNS(SVG_NS, 'circle');
+    dot.setAttribute('cx', `${hlx}`);
+    dot.setAttribute('cy', `${hly}`);
+    dot.setAttribute('r', `${HANDLE_SIZE / 2}`);
+    dot.setAttribute('fill', stroke);
+    dot.setAttribute('stroke', '#fff');
+    dot.setAttribute('stroke-width', '1');
+    this.svg.appendChild(dot);
   }
 
   private buildRegionEl(region: Region, isSelected: boolean): SVGElement | null {
