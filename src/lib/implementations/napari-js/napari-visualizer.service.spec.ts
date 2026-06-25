@@ -128,7 +128,7 @@ describe('NapariVisualizerService', () => {
     expect(await firstValueFrom(service.getReverseScale())).toBe(true);
   });
 
-  it('tool controls are safe no-ops in the POC backend', async () => {
+  it('tool controls are safe no-ops before a plot is mounted', async () => {
     expect(() => {
       service.setWandMode(true);
       service.setBrushMode(false);

@@ -31,6 +31,41 @@ import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
 import { NapariScaleBar } from './napari-scale-bar';
 import { NapariRegionOverlay } from './napari-region-overlay';
+import {
+  ICoordinateTransform,
+} from '../../contracts/coordinate-transform.contract';
+import { WandToolService, WandToolHost, CachedImageData } from '../../toolbar/wand/wand-tool.service';
+import { WandOptions } from '../../toolbar/wand/wand.service';
+import { BrushToolService, BrushOptions } from '../../toolbar/brush/brush-tool.service';
+import {
+  VertexEraserToolService,
+  VertexEraserToolHost,
+} from '../../toolbar/vertex-eraser/vertex-eraser-tool.service';
+import {
+  ZoomToBoxToolService,
+  ZoomToBoxToolHost,
+} from '../../toolbar/zoom-to-box/zoom-to-box-tool.service';
+
+/** ICoordinateTransform over the napari camera: pointer client coords ↔ image/world coords. */
+class NapariCoordinateTransform implements ICoordinateTransform {
+  constructor(
+    private readonly viewer: {
+      canvasToWorld(clientX: number, clientY: number): [number, number];
+      readonly camera: { zoom: number };
+    },
+    private readonly ready: () => boolean,
+  ) {}
+  clientToData(clientX: number, clientY: number): { x: number; y: number } {
+    const [x, y] = this.viewer.canvasToWorld(clientX, clientY);
+    return { x, y };
+  }
+  dataLengthToScreen(dataLength: number): number {
+    return dataLength * this.viewer.camera.zoom; // CSS px per world unit
+  }
+  isReady(): boolean {
+    return this.ready();
+  }
+}
 
 /** Opaque handle from {@link NapariVisualizerService.load}, passed back to plot(). */
 interface NapariLoaded {
@@ -146,6 +181,14 @@ export class NapariVisualizerService implements IVisualizer {
   private scaleBar: NapariScaleBar | null = null;
   /** SVG region-drawing overlay for the 2D image (null until a 2D image is plotted). */
   private regionOverlay: NapariRegionOverlay | null = null;
+  /** Pixel-tool plumbing: the plot div id, coord transform, and bound tool hosts. */
+  private plotDivId = '';
+  private coordTransform: ICoordinateTransform | null = null;
+  private wandHost: WandToolHost | null = null;
+  private eraserHost: VertexEraserToolHost | null = null;
+  /** Cached CachedImageData built from the last readback (rebuilt when lastPixels changes). */
+  private cachedImage: CachedImageData | null = null;
+  private cachedImageSource: PixelData | null = null;
 
   private readonly stackLoading$ = new BehaviorSubject<boolean>(false);
   private readonly stackLoadingProgress$ = new BehaviorSubject<number>(0);
@@ -162,6 +205,10 @@ export class NapariVisualizerService implements IVisualizer {
     @Inject(TILE_ACCESS_PORT) private readonly tiles: TileAccessPort,
     private readonly store: VisualizerStore,
     private readonly regionStore: RegionStore,
+    private readonly wandTool: WandToolService,
+    private readonly brushTool: BrushToolService,
+    private readonly eraserTool: VertexEraserToolService,
+    private readonly zoomToBoxTool: ZoomToBoxToolService,
     @Inject(VIZ_CONFIG) config: VizConfig,
   ) {
     this.api = config.slideCropServer;
@@ -350,6 +397,7 @@ export class NapariVisualizerService implements IVisualizer {
     }
     this.reset();
     this.host = host;
+    this.plotDivId = plotDiv;
     this.currentPlotType = plotType;
 
     const canvas = document.createElement('canvas');
@@ -386,6 +434,7 @@ export class NapariVisualizerService implements IVisualizer {
         this.subscribeDisplayState();
         this.installScaleBar();
         this.regionOverlay = new NapariRegionOverlay(host, viewer, this.regionStore);
+        this.buildToolHosts();
       }
       this.scheduleReadback();
       return true;
@@ -688,6 +737,8 @@ export class NapariVisualizerService implements IVisualizer {
     this.scaleBar = null;
     this.regionOverlay?.destroy();
     this.regionOverlay = null;
+    this.cachedImage = null;
+    this.cachedImageSource = null;
     this.channelLayers.clear();
     this.viewer?.dispose();
     this.viewer = null;
@@ -944,15 +995,158 @@ export class NapariVisualizerService implements IVisualizer {
     return this.regionStore.getGeoJsonString(regions);
   }
 
-  // ── IToolController: POC stubs (on-canvas tools are a jit-ui#102 follow-up) ─
-  setWandMode(_active: boolean, _options?: IWandOptions): void {}
-  setWandOptions(_options: IWandOptions): void {}
-  clearActiveWandRegion(): void {}
-  setBrushMode(_active: boolean, _options?: IBrushOptions): void {}
-  setBrushOptions(_options: IBrushOptions): void {}
-  setVertexEraserMode(_active: boolean): void {}
-  setVertexEraserRadius(_radius: number): void {}
-  setZoomToBoxMode(_active: boolean): void {}
+  // ── Pixel tools: reuse the shared, backend-agnostic tool services with a napari host ───────
+
+  /** Build the coordinate transform + tool hosts for the current viewer (called from plot()). The
+   *  pixel tools read displayed pixels synchronously from the last readback and convert pointer
+   *  coords via the napari camera, exactly mirroring the OSD host. */
+  private buildToolHosts(): void {
+    if (!this.viewer) return;
+    this.coordTransform = new NapariCoordinateTransform(
+      this.viewer,
+      () => !!this.viewer && this.imageW > 0,
+    );
+    const regions = this.regionStore;
+    this.wandHost = {
+      getRegions: () => regions.getRegions(),
+      setRegions: (r) => regions.setRegions(r),
+      getCachedImageData: () => this.cachedImageData(),
+      getActiveFrameIndex: () => this.loaded?.z ?? 0,
+      getOverlayContainer: () => this.host,
+      getCoordinateTransform: () => this.coordTransform as ICoordinateTransform,
+      getFileName: () => this.loaded?.filename,
+      getShapeColor: () => regions.getShapeColor(),
+    };
+    this.eraserHost = {
+      getRegions: () => regions.getRegions(),
+      setRegions: (r) => regions.setRegions(r),
+      invalidateWandRegion: () => this.wandTool.clearActiveRegion(),
+      getOverlayContainer: () => this.host,
+      getCoordinateTransform: () => this.coordTransform as ICoordinateTransform,
+      getCachedImageRatio: () => this.cachedImageData()?.ratios[0] ?? 1,
+    };
+  }
+
+  private zoomBoxHost(): ZoomToBoxToolHost {
+    return {
+      getPlotDiv: () => this.plotDivId,
+      pixelToData: (px, py) => {
+        const rect = this.host?.getBoundingClientRect();
+        if (!this.viewer || !rect) return { x: 0, y: 0 };
+        const [x, y] = this.viewer.canvasToWorld(rect.left + px, rect.top + py);
+        return { x, y };
+      },
+      applyZoomToBox: (coords) => this.applyZoomToBox(coords),
+    };
+  }
+
+  /** Zoom/pan the camera to fit a data-space rectangle `[xMin, xMax, yMax, yMin]`. */
+  private applyZoomToBox(coordinates: number[]): void {
+    const v = this.viewer;
+    if (!v || !this.canvas || coordinates.length < 4) return;
+    const [xMin, xMax, yA, yB] = coordinates;
+    const x0 = Math.min(xMin, xMax);
+    const x1 = Math.max(xMin, xMax);
+    const y0 = Math.min(yA, yB);
+    const y1 = Math.max(yA, yB);
+    const w = Math.max(1, x1 - x0);
+    const h = Math.max(1, y1 - y0);
+    const vw = this.canvas.clientWidth || w;
+    const vh = this.canvas.clientHeight || h;
+    v.camera.center = [(x0 + x1) / 2, (y0 + y1) / 2];
+    v.camera.zoom = Math.min(vw / w, vh / h);
+    v.requestRender();
+  }
+
+  /** Build CachedImageData from the most recent readback (RGBA device pixels → [y][x]=[r,g,b]),
+   *  with ratios/origin mapping image coords ↔ readback pixels. Cached until the readback changes. */
+  private cachedImageData(): CachedImageData | null {
+    const px = this.lastPixels;
+    if (!px || !this.viewer) return null;
+    if (this.cachedImage && this.cachedImageSource === px) return this.cachedImage;
+    const w = px.width;
+    const h = px.height;
+    const data = px.data;
+    const matrix: number[][][] = new Array(h);
+    for (let y = 0; y < h; y++) {
+      const row: number[][] = new Array(w);
+      const base = y * w * 4;
+      for (let x = 0; x < w; x++) {
+        const o = base + x * 4;
+        row[x] = [data[o], data[o + 1], data[o + 2]];
+      }
+      matrix[y] = row;
+    }
+    const rect = this.viewer.visibleWorldRect();
+    this.cachedImage = {
+      frames: [matrix],
+      width: w,
+      height: h,
+      ratios: [rect.width / w, rect.height / h],
+      isGrayscale: false,
+      originX: rect.x,
+      originY: rect.y,
+    };
+    this.cachedImageSource = px;
+    return this.cachedImage;
+  }
+
+  // ── IToolController ────────────────────────────────────────────────────────
+  // Control gating: a tool that ACTIVATES disables the camera controls; deactivation is a no-op
+  // because the host always calls the region overlay's setMode FIRST in each toggle (which sets
+  // the baseline enabled/disabled), so re-enabling here would fight a freshly-activated draw mode.
+  setWandMode(active: boolean, options?: IWandOptions): void {
+    if (!this.viewer) return; // no plot yet → nothing to drive
+    if (!active) {
+      this.wandTool.setMode(false);
+      return;
+    }
+    this.viewer?.setControlsEnabled(false);
+    this.cachedImageSource = null;
+    if (this.wandHost) this.wandTool.bindHost(this.wandHost);
+    this.wandTool.setMode(true, (options ?? {}) as unknown as WandOptions);
+  }
+  setWandOptions(options: IWandOptions): void {
+    this.wandTool.setOptions((options ?? {}) as unknown as WandOptions);
+  }
+  clearActiveWandRegion(): void {
+    this.wandTool.clearActiveRegion();
+  }
+  setBrushMode(active: boolean, options?: IBrushOptions): void {
+    if (!this.viewer) return;
+    if (!active) {
+      this.brushTool.setMode(false);
+      return;
+    }
+    this.viewer?.setControlsEnabled(false);
+    this.cachedImageSource = null;
+    if (this.wandHost) this.brushTool.bindHost(this.wandHost);
+    this.brushTool.setMode(true, (options ?? {}) as unknown as BrushOptions);
+  }
+  setBrushOptions(options: IBrushOptions): void {
+    if (options?.size != null) this.brushTool.setSize(options.size);
+  }
+  setVertexEraserMode(active: boolean): void {
+    if (!this.viewer) return;
+    if (active) {
+      this.viewer?.setControlsEnabled(false);
+      this.cachedImageSource = null;
+      if (this.eraserHost) this.eraserTool.bindHost(this.eraserHost);
+    }
+    this.eraserTool.setMode(active);
+  }
+  setVertexEraserRadius(radius: number): void {
+    this.eraserTool.setRadius(radius);
+  }
+  setZoomToBoxMode(active: boolean): void {
+    if (!this.viewer) return;
+    if (active) {
+      this.viewer?.setControlsEnabled(false);
+      this.zoomToBoxTool.bindHost(this.zoomBoxHost());
+    }
+    this.zoomToBoxTool.setMode(active);
+  }
+  // SAM / cellpose: 5c-2 (server round-trips through the same wand host).
   segmentRectangles(): Promise<number> {
     return Promise.resolve(0);
   }
