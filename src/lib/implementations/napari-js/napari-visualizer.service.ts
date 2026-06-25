@@ -30,6 +30,7 @@ import { TILE_ACCESS_PORT, TileAccessPort } from '../../contracts/ports/tile-acc
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
 import { NapariScaleBar } from './napari-scale-bar';
+import { NapariRegionOverlay } from './napari-region-overlay';
 
 /** Opaque handle from {@link NapariVisualizerService.load}, passed back to plot(). */
 interface NapariLoaded {
@@ -143,6 +144,8 @@ export class NapariVisualizerService implements IVisualizer {
   private invertEnabled = false;
   /** Physical scale bar overlay for the 2D image (null when 3D or the image has no µm/pixel). */
   private scaleBar: NapariScaleBar | null = null;
+  /** SVG region-drawing overlay for the 2D image (null until a 2D image is plotted). */
+  private regionOverlay: NapariRegionOverlay | null = null;
 
   private readonly stackLoading$ = new BehaviorSubject<boolean>(false);
   private readonly stackLoadingProgress$ = new BehaviorSubject<number>(0);
@@ -382,6 +385,7 @@ export class NapariVisualizerService implements IVisualizer {
         this.fitCameraSoon();
         this.subscribeDisplayState();
         this.installScaleBar();
+        this.regionOverlay = new NapariRegionOverlay(host, viewer, this.regionStore);
       }
       this.scheduleReadback();
       return true;
@@ -682,6 +686,8 @@ export class NapariVisualizerService implements IVisualizer {
     this.displaySub = null;
     this.scaleBar?.destroy();
     this.scaleBar = null;
+    this.regionOverlay?.destroy();
+    this.regionOverlay = null;
     this.channelLayers.clear();
     this.viewer?.dispose();
     this.viewer = null;
@@ -716,7 +722,9 @@ export class NapariVisualizerService implements IVisualizer {
   }
 
   setDragMode(_mode: string | false): void {
-    // POC: on-canvas region tools not yet wired (jit-ui#102 follow-up).
+    // No-op: pan and zoom are always the napari camera's default gestures, and pan/zoom gating for
+    // drawing is owned by the region overlay's setMode (setControlsEnabled). Toggling controls here
+    // would fight that — the host calls setDragMode(false) alongside overlay.setMode(<tool>).
   }
 
   setNavigatorVisible(_visible: boolean): void {
@@ -996,8 +1004,7 @@ export class NapariVisualizerService implements IVisualizer {
 
   // ── IVisualizer composite members ─────────────────────────────────────────
   getRegionOverlay(): IRegionOverlay | null {
-    // TODO(jit-ui#102): render regions as a DOM/canvas overlay positioned via worldToCanvas.
-    return null;
+    return this.regionOverlay;
   }
   getIsosurfaceControls(): IIsosurfaceControls | null {
     if (!this.volumeLayer) return null;

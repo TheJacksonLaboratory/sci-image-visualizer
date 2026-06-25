@@ -8,6 +8,7 @@
 interface StubCamera {
   zoom: number;
   fit(width: number, height: number, vw: number, vh: number): void;
+  changed: { connect(listener: () => void): () => void };
 }
 
 interface StubDims {
@@ -49,7 +50,11 @@ export class Colormap {
 /** Minimal Viewer matching the surface NapariVisualizerService touches. */
 export class Viewer {
   readonly ready: Promise<void> = Promise.resolve();
-  readonly camera: StubCamera = { zoom: 1, fit: () => undefined };
+  readonly camera: StubCamera = {
+    zoom: 1,
+    fit: () => undefined,
+    changed: { connect: () => () => undefined },
+  };
   readonly camera3d: StubCamera3D = { frame: () => undefined };
   readonly dims: StubDims = { z: 0 };
   readonly layers = { clear: (): void => undefined };

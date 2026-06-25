@@ -403,13 +403,17 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   setInvert(on: boolean): void { this.store.setInvert(on); }
 
   /**
-   * The active backend's region overlay. Falls back to Plotly's when OSD is
-   * active but a plot isn't mounted yet, so callers always get a usable overlay.
+   * The active backend's region overlay. Falls back to Plotly's when the active backend
+   * (OSD or napari-js) is selected but a plot isn't mounted yet, so callers always get a
+   * usable overlay.
    */
   getRegionOverlay(): IRegionOverlay {
     const r = this.renderer();
     if (r === this.osd) {
       return this.osd.getRegionOverlay() ?? this.plotly.getRegionOverlay();
+    }
+    if (r === this.napari) {
+      return this.napari.getRegionOverlay() ?? this.plotly.getRegionOverlay();
     }
     return this.plotly.getRegionOverlay();
   }

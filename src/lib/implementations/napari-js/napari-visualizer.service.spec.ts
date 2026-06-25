@@ -161,6 +161,11 @@ describe('NapariVisualizerService', () => {
     service.zoomIn();
     service.zoomOut();
     expect(service.getDisplayedSourceRect()).not.toBeNull();
+    // A region overlay is mounted for the 2D image and accepts a draw mode without throwing.
+    const overlay = service.getRegionOverlay();
+    expect(overlay).not.toBeNull();
+    overlay?.setMode('drawrect');
+    overlay?.setMode('none');
     service.unsubscribe();
     document.body.removeChild(div);
   });
