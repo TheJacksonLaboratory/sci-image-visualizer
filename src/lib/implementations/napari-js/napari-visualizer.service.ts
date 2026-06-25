@@ -558,6 +558,16 @@ export class NapariVisualizerService implements IVisualizer {
       return;
     }
 
+    // The displayed texture may be a downscaled pyramid level; scale the layer into FULL-RESOLUTION
+    // world coordinates (level-0 pixels) so the camera, readback and — critically — pre-saved
+    // regions (stored in full-res coords, e.g. ndpi) all line up regardless of which level is shown.
+    // This mirrors OSD, whose coordinate system is always level 0.
+    const texW = mode === 'rgb' ? (bitmap as ImageBitmap).width : planes[0]?.width ?? 0;
+    const texH = mode === 'rgb' ? (bitmap as ImageBitmap).height : planes[0]?.height ?? 0;
+    const fullW = desc?.width || texW || 1;
+    const fullH = desc?.height || texH || 1;
+    const scale: [number, number] = [texW ? fullW / texW : 1, texH ? fullH / texH : 1];
+
     this.imageMode = mode;
     v.layers.clear();
     this.channelLayers.clear();
@@ -575,12 +585,11 @@ export class NapariVisualizerService implements IVisualizer {
             visible: st?.visible ?? true,
             invert: this.invertEnabled,
             blending: 'additive',
+            scale,
           },
         );
         this.channelLayers.set(c, layer);
       });
-      this.imageW = planes[0]?.width ?? 0;
-      this.imageH = planes[0]?.height ?? 0;
     } else if (mode === 'grayscale') {
       const d = planes[0];
       const st = states[0];
@@ -591,16 +600,15 @@ export class NapariVisualizerService implements IVisualizer {
           contrastLimits: [st?.min ?? 0, st?.max ?? 255],
           gamma: st?.gamma ?? 1,
           invert: this.invertEnabled,
+          scale,
         },
       );
       this.channelLayers.set(0, layer);
-      this.imageW = d.width;
-      this.imageH = d.height;
     } else {
-      v.addImage(bitmap as ImageBitmap);
-      this.imageW = (bitmap as ImageBitmap).width;
-      this.imageH = (bitmap as ImageBitmap).height;
+      v.addImage(bitmap as ImageBitmap, { scale });
     }
+    this.imageW = fullW;
+    this.imageH = fullH;
   }
 
   /** Subscribe channel states + grayscale colormap → live-apply to the rendered layers (no

@@ -558,10 +558,14 @@ export class NapariRegionOverlay implements IRegionOverlay {
     }
     if ('npoints' in b) {
       const p = b as Polygon;
-      // Bezier polygons render as a smooth cubic path using their per-anchor handles.
-      if (p.bezier && p.handlesIn?.length === p.npoints && p.handlesOut?.length === p.npoints) {
+      const isBezier =
+        !!p.bezier && p.handlesIn?.length === p.npoints && p.handlesOut?.length === p.npoints;
+      const hasHoles = !!(p.holes && p.holes.length);
+      // Bezier or donut (holes) → a single <path>; holes use even-odd fill so they punch through.
+      if (isBezier || hasHoles) {
         const el = document.createElementNS(SVG_NS, 'path');
-        el.setAttribute('d', this.bezierPath(p));
+        el.setAttribute('d', this.polygonPathData(p, isBezier));
+        if (hasHoles) el.setAttribute('fill-rule', 'evenodd');
         this.style(el, stroke, isSelected);
         return el;
       }
@@ -574,6 +578,27 @@ export class NapariRegionOverlay implements IRegionOverlay {
       return el;
     }
     return null;
+  }
+
+  /** Path data for a polygon: the exterior ring (bezier or straight) plus any holes as straight
+   *  sub-paths (rendered with even-odd fill so they read as cut-outs). */
+  private polygonPathData(p: Polygon, isBezier: boolean): string {
+    let d = isBezier ? this.bezierPath(p) : this.straightPath(p.xpoints, p.ypoints, p.closed !== false);
+    for (const ring of p.holes ?? []) {
+      if (ring.length < 3) continue;
+      d += ' ' + this.straightPath(ring.map((pt) => pt[0]), ring.map((pt) => pt[1]), true);
+    }
+    return d;
+  }
+
+  /** SVG path data for a straight ring/polyline in image coords (closed appends `Z`). */
+  private straightPath(xs: number[], ys: number[], closed: boolean): string {
+    let d = '';
+    for (let i = 0; i < xs.length; i++) {
+      const [lx, ly] = this.toLocal(xs[i], ys[i]);
+      d += (i === 0 ? 'M' : ' L') + ` ${lx},${ly}`;
+    }
+    return closed ? d + ' Z' : d;
   }
 
   /** SVG path data for a bezier polygon: anchors joined by cubic segments whose control points
