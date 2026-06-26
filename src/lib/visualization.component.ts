@@ -149,6 +149,8 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   plotType = PlotType.IMAGE;
   isHeatmap = true;
   activeSurface3dMode = 'turntable';
+  /** Whether the napari 3D coordinate-axes / scale gizmo is shown (volume/isosurface). */
+  axesVisible = true;
 
   /** Plot types the active backend advertises (3D gated by capability). */
   plotTypeOptions: PlotTypeDescriptor[] = [];
@@ -1463,6 +1465,13 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
 
   resetSurfaceCamera() {
     this.plotService.resetSurfaceCamera();
+  }
+
+  /** Toggle the napari 3D coordinate-axes / scale gizmo (volume/isosurface). No-op on backends
+   *  that don't render one (the control method is optional). */
+  toggleAxes() {
+    this.axesVisible = !this.axesVisible;
+    this.plotService.getSurface3dControls()?.setAxesVisible?.(this.axesVisible);
   }
 
   /**

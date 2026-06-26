@@ -39,6 +39,8 @@ export class ToolbarComponent implements OnChanges {
   @Input() isHeatmap = true;
   @Input() activeDragMode: string | null = null;
   @Input() activeSurface3dMode = 'turntable';
+  /** Whether the napari 3D axes/scale gizmo is currently shown (drives the toggle's look). */
+  @Input() axesVisible = true;
   @Input() wandSensitivity = 2.0;
   @Input() brushSize = 40;
   @Input() vertexEraserRadius = 20;
@@ -83,6 +85,8 @@ export class ToolbarComponent implements OnChanges {
   @Output() zoomOut = new EventEmitter<void>();
   @Output() toggleSurface3dMode = new EventEmitter<string>();
   @Output() resetSurfaceCamera = new EventEmitter<void>();
+  /** Toggle the napari 3D coordinate-axes / scale gizmo on/off. */
+  @Output() toggleAxes = new EventEmitter<void>();
   @Output() deleteRegion = new EventEmitter<void>();
   /** Undo the last region action (jit-ui#85). */
   @Output() undoRegion = new EventEmitter<void>();

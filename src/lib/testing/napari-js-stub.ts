@@ -28,6 +28,14 @@ export interface VolumeLayer {
   isoThreshold: number;
 }
 
+/** A mutable stand-in for napari-js AxesLayer (the 3D coordinate-axes gizmo). */
+export interface AxesLayer {
+  visible: boolean;
+  tickCount: number;
+  boundingBox: boolean;
+  voxelSize: [number, number, number];
+}
+
 /** A mutable stand-in for napari-js ImageLayer (the per-channel display props the adapter sets). */
 export interface ImageLayer {
   colormap: unknown;
@@ -151,6 +159,9 @@ export class Viewer {
   addVolume(): VolumeLayer {
     return { colormap: 'gray', contrastLimits: [0, 255], gamma: 1, rendering: 'mip', isoThreshold: 0.5 };
   }
+  addAxes(): AxesLayer {
+    return { visible: true, tickCount: 5, boundingBox: true, voxelSize: [1, 1, 1] };
+  }
   layerHistogram(): { counts: Uint32Array; bins: number; min: number; max: number } | null {
     return { counts: new Uint32Array(256), bins: 256, min: 0, max: 255 };
   }
@@ -162,6 +173,12 @@ export class Viewer {
   }
   visibleWorldRect(): { x: number; y: number; width: number; height: number } {
     return { x: 0, y: 0, width: 0, height: 0 };
+  }
+  canvasToWorld(clientX: number, clientY: number): [number, number] {
+    return [clientX, clientY];
+  }
+  worldToCanvas(worldX: number, worldY: number): [number, number] {
+    return [worldX, worldY];
   }
   async readDisplayedPixels(): Promise<{
     width: number;

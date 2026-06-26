@@ -5,6 +5,7 @@ import { saveAs } from 'file-saver';
 import { Viewer, histogramScalar, colormapFromLut, MultiChannelImageView } from 'napari-js';
 import type {
   VolumeLayer,
+  AxesLayer,
   TiledSource,
   TileKey,
   PixelChunk,
@@ -190,6 +191,10 @@ export class NapariVisualizerService implements IVisualizer {
   private lastPixels: PixelData | null = null;
   private currentPlotType: PlotType = PlotType.NAPARI_IMAGE;
   private volumeLayer: VolumeLayer | null = null;
+  /** 3D coordinate-axes / scale gizmo for the volume/isosurface view (null in 2D). */
+  private axesLayer: AxesLayer | null = null;
+  /** Persisted axes on/off choice, re-applied when a new volume mounts. Defaults on. */
+  private axesVisible = true;
   private volumeDims: { width: number; height: number; depth: number } | null = null;
   /** Assembled uint8 volume data, kept for the volume intensity histogram. */
   private volumeData: Uint8Array | null = null;
@@ -482,6 +487,15 @@ export class NapariVisualizerService implements IVisualizer {
           this.volumeLayer = viewer.addVolume(vol.data, vol.width, vol.height, vol.depth, {
             colormap: this.grayscaleColormap(),
             rendering: isNapariIsosurface(plotType) ? 'iso' : 'mip',
+          });
+          // 3D coordinate-axes / scale gizmo over the volume. voxelSize = physical µm per
+          // (downsampled) voxel, from the descriptor's µm/pixel where known, so a host can label
+          // the scale. Honours the persisted on/off choice.
+          const mppX = this.descriptor?.mppX || this.loaded?.imageInfo.imageMeta?.[0]?.mppX || 0;
+          const voxel = mppX > 0 ? (mppX * (this.descriptor?.width ?? vol.width)) / vol.width : 1;
+          this.axesLayer = viewer.addAxes(vol.width, vol.height, vol.depth, {
+            voxelSize: [voxel, voxel, voxel],
+            visible: this.axesVisible,
           });
           // Color LUT for the volume/isosurface is driven by the store colormap (+reverse).
           this.subscribeVolumeDisplayState();
@@ -1008,6 +1022,7 @@ export class NapariVisualizerService implements IVisualizer {
     this.canvas = null;
     this.lastPixels = null;
     this.volumeLayer = null;
+    this.axesLayer = null;
     this.volumeDims = null;
     this.volumeData = null;
   }
@@ -1548,6 +1563,14 @@ export class NapariVisualizerService implements IVisualizer {
     return {
       setSurfaceDragMode: (mode: string): void => this.setSurfaceDragMode(mode),
       resetSurfaceCamera: (): void => this.resetSurfaceCamera(),
+      setAxesVisible: (visible: boolean): void => {
+        this.axesVisible = visible;
+        if (this.axesLayer) {
+          this.axesLayer.visible = visible;
+          this.viewer?.requestRender();
+        }
+      },
+      axesVisible: (): boolean => this.axesVisible,
     };
   }
   getHistogram(channelIndex: number, bins: number): IHistogram | null {

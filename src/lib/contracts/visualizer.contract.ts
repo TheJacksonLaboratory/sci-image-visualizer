@@ -231,6 +231,11 @@ export interface ISurface3dControls {
   setSurfaceDragMode(mode: string): void;
   /** Reset the 3D scene camera to its default eye position. */
   resetSurfaceCamera(): void;
+  /** Toggle the 3D coordinate-axes / scale gizmo on/off. Optional — only the napari-js WebGPU
+   *  volume/isosurface backend renders one (jit-ui#102). */
+  setAxesVisible?(visible: boolean): void;
+  /** Whether the axes gizmo is currently shown (for initializing the toggle UI). Optional. */
+  axesVisible?(): boolean;
 }
 
 /**

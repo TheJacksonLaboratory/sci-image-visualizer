@@ -213,6 +213,30 @@ describe('NapariVisualizerService', () => {
     document.body.removeChild(div);
   });
 
+  it('mounts a 3D axes gizmo for volumes and toggles it via Surface-3D controls', async () => {
+    const addAxes = jest.spyOn(
+      Viewer.prototype as unknown as { addAxes: (...a: unknown[]) => unknown },
+      'addAxes',
+    );
+    const div = document.createElement('div');
+    div.id = 'axes-host';
+    document.body.appendChild(div);
+
+    const loaded = await service.load(imageInfo(), 0);
+    await service.plot('axes-host', loaded, imageInfo(), 600, PlotType.NAPARI_VOLUME);
+    const axes = addAxes.mock.results[0].value as { visible: boolean };
+    expect(axes.visible).toBe(true);
+
+    const ctrls = service.getSurface3dControls();
+    expect(ctrls?.axesVisible?.()).toBe(true);
+    ctrls?.setAxesVisible?.(false);
+    expect(axes.visible).toBe(false);
+    expect(ctrls?.axesVisible?.()).toBe(false);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
   it('renders the low-res volume variant (subsampled slices) without error', async () => {
     const div = document.createElement('div');
     div.id = 'vol-lowres-host';

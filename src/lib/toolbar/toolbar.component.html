@@ -176,6 +176,12 @@
                 pTooltip="Reset camera to default" tooltipPosition="bottom"
                 (onClick)="resetSurfaceCamera.emit()">
       </p-button>
+      <!-- 3D coordinate-axes / scale gizmo toggle (napari-js WebGPU volume/isosurface only). -->
+      <p-button icon="pi pi-box" size="small" *ngIf="isNapariMode"
+                [text]="!axesVisible"
+                pTooltip="Toggle 3D axes / scale" tooltipPosition="bottom"
+                (onClick)="toggleAxes.emit()">
+      </p-button>
     </ng-container>
 
     <ng-container *ngIf="isHeatmap && tools.regionTools">
