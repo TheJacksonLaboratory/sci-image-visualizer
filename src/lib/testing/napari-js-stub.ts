@@ -21,7 +21,9 @@ interface StubCamera3D {
 
 /** A mutable stand-in for napari-js VolumeLayer (the props the adapter sets). */
 export interface VolumeLayer {
+  colormap: unknown;
   contrastLimits: [number, number];
+  gamma: number;
   rendering: 'mip' | 'translucent' | 'iso';
   isoThreshold: number;
 }
@@ -147,7 +149,7 @@ export class Viewer {
     };
   }
   addVolume(): VolumeLayer {
-    return { contrastLimits: [0, 255], rendering: 'mip', isoThreshold: 0.5 };
+    return { colormap: 'gray', contrastLimits: [0, 255], gamma: 1, rendering: 'mip', isoThreshold: 0.5 };
   }
   layerHistogram(): { counts: Uint32Array; bins: number; min: number; max: number } | null {
     return { counts: new Uint32Array(256), bins: 256, min: 0, max: 255 };

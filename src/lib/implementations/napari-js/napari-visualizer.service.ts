@@ -784,20 +784,28 @@ export class NapariVisualizerService implements IVisualizer {
     });
   }
 
-  /** Subscribe the store colormap (+reverse) → the volume/isosurface color LUT (transfer function),
-   *  mirroring the grayscale image's colormap control. Replaces any prior subscription. */
+  /** Subscribe the store colormap (+reverse) and channel state → the volume/isosurface transfer
+   *  function: colour LUT, plus the intensity **window (min/max → contrastLimits)** and **gamma**,
+   *  mirroring the grayscale image's display controls so the histogram pane's sliders drive the
+   *  3D render. Replaces any prior subscription. */
   private subscribeVolumeDisplayState(): void {
     this.displaySub?.unsubscribe();
     this.displaySub = combineLatest([
       this.store.getColormap(),
       this.store.getReverseScale(),
-    ]).subscribe(([colormap, reverse]) => {
+      this.store.getChannelStates(),
+    ]).subscribe(([colormap, reverse, channels]) => {
       this.currentColormap = (colormap as ColormapNode) ?? null;
       this.currentReverse = reverse;
-      if (this.volumeLayer) {
-        this.volumeLayer.colormap = this.grayscaleColormap();
-        this.viewer?.requestRender();
+      const vol = this.volumeLayer;
+      if (!vol) return;
+      vol.colormap = this.grayscaleColormap();
+      const st = channels[0];
+      if (st) {
+        vol.contrastLimits = [st.min, st.max];
+        vol.gamma = st.gamma;
       }
+      this.viewer?.requestRender();
     });
   }
 

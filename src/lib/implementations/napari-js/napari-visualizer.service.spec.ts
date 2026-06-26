@@ -2,6 +2,8 @@ import { TestBed } from '@angular/core/testing';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 import { firstValueFrom, of } from 'rxjs';
 
+import { Viewer } from 'napari-js';
+
 import { NapariVisualizerService } from './napari-visualizer.service';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
@@ -10,6 +12,7 @@ import { TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
 import { PlotType } from '../../contracts/plot-type';
 import { ViewerFeature } from '../../contracts/capabilities.contract';
 import { IImageInfo } from '../../contracts/image.contract';
+import { IChannelState } from '../../contracts/channel-histogram-api.contract';
 
 const imageInfo = (over: Partial<IImageInfo> = {}): IImageInfo =>
   ({ urls: ['u0', 'u1'], isGrayscale: true, isStack: true, ...over }) as unknown as IImageInfo;
@@ -173,6 +176,39 @@ describe('NapariVisualizerService', () => {
   it('plot() returns false when the target element is missing', async () => {
     const loaded = await service.load(imageInfo(), 0);
     expect(await service.plot('nope', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE)).toBe(false);
+  });
+
+  it('volume display state drives the layer contrast window + gamma from the store', async () => {
+    // Capture the volume layer the stub Viewer hands back so we can assert what the
+    // display-state subscription writes onto it (regression: min/max/gamma must reach the volume).
+    const addVolume = jest.spyOn(
+      Viewer.prototype as unknown as { addVolume: (...a: unknown[]) => unknown },
+      'addVolume',
+    );
+
+    const div = document.createElement('div');
+    div.id = 'vol-host';
+    document.body.appendChild(div);
+
+    const loaded = await service.load(imageInfo(), 0);
+    const ok = await service.plot('vol-host', loaded, imageInfo(), 600, PlotType.NAPARI_VOLUME);
+    expect(ok).toBe(true);
+    expect(service.getSurface3dControls()).not.toBeNull();
+
+    const volLayer = addVolume.mock.results[0].value as {
+      contrastLimits: [number, number];
+      gamma: number;
+    };
+
+    // The histogram pane's window (min/max) + gamma now reach the 3D volume layer.
+    store.setChannelStates([
+      { index: 0, name: 'v', color: '#ffffff', min: 20, max: 200, gamma: 2, visible: true } as IChannelState,
+    ]);
+    expect(volLayer.contrastLimits).toEqual([20, 200]);
+    expect(volLayer.gamma).toBe(2);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
   });
 
   it('composites multiple channels and serves per-channel histograms (multichannel)', async () => {
