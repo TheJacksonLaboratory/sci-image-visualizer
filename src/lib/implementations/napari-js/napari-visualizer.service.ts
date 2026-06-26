@@ -89,6 +89,9 @@ interface NapariLoaded {
 }
 
 const VOLUME_MAX_SLICE = 256; // downsample volume slices for a tractable 3D preview
+/** Max concurrent slice fetches when assembling a volume — keeps the connection pool busy
+ *  without flooding it (browsers cap ~6/host) on a deep stack. */
+const VOLUME_FETCH_CONCURRENCY = 8;
 const TILE_SIZE = 512; // server tile edge (matches the OSD backend)
 /** Max tiles stitched for one displayed slice (512px tiles → up to ~6144² at full res). Beyond
  *  this we step to a coarser pyramid level so a large image stays tractable. */
@@ -855,7 +858,12 @@ export class NapariVisualizerService implements IVisualizer {
     return { bins, counts, max: counts.reduce((m, c) => (c > m ? c : m), 0) };
   }
 
-  /** Assemble a downsampled uint8 volume (luminance) from the per-slice tile endpoint. */
+  /**
+   * Assemble a downsampled uint8 volume (luminance) from the per-slice tile endpoint. Slices are
+   * fetched with bounded concurrency (keeps the connection pool full without flooding it on a deep
+   * stack) and read into the volume as each arrives, driving {@link stackLoadingProgress$} so the
+   * host shows a determinate progress bar instead of a bare spinner.
+   */
   private async assembleVolume(
     info: IImageInfo | undefined,
   ): Promise<{ data: Uint8Array; width: number; height: number; depth: number } | null> {
@@ -864,46 +872,69 @@ export class NapariVisualizerService implements IVisualizer {
       console.warn('[napari-js] no slices to assemble a volume');
       return null;
     }
-    // One cheap coarse tile per slice (budget 1) — the volume is downsampled to VOLUME_MAX_SLICE
-    // regardless, so stitching the full-res grid per slice would be wasted fetches.
-    const first = await this.fetchSlice(0, undefined, 1);
-    const scale = Math.min(1, VOLUME_MAX_SLICE / Math.max(first.width, first.height, 1));
-    const width = Math.max(1, Math.round(first.width * scale));
-    const height = Math.max(1, Math.round(first.height * scale));
-    const data = new Uint8Array(width * height * depth);
 
-    let canvas: HTMLCanvasElement | OffscreenCanvas;
-    if (typeof OffscreenCanvas !== 'undefined') {
-      canvas = new OffscreenCanvas(width, height);
-    } else {
-      canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-    }
-    const ctx = canvas.getContext('2d') as
-      | CanvasRenderingContext2D
-      | OffscreenCanvasRenderingContext2D
-      | null;
-    if (!ctx) throw new Error('napari-js volume assembly: 2D context unavailable');
+    this.stackLoading$.next(true);
+    this.stackLoadingProgress$.next(0);
+    try {
+      // One cheap coarse tile per slice (budget 1) — the volume is downsampled to VOLUME_MAX_SLICE
+      // regardless, so stitching the full-res grid per slice would be wasted fetches.
+      const first = await this.fetchSlice(0, undefined, 1);
+      const scale = Math.min(1, VOLUME_MAX_SLICE / Math.max(first.width, first.height, 1));
+      const width = Math.max(1, Math.round(first.width * scale));
+      const height = Math.max(1, Math.round(first.height * scale));
+      const data = new Uint8Array(width * height * depth);
 
-    // Fetch all slices concurrently (the browser caps real parallelism), then read luminance
-    // sequentially through the single 2D context.
-    const bitmaps = await Promise.all(
-      Array.from({ length: depth }, (_, z) =>
-        z === 0 ? Promise.resolve(first) : this.fetchSlice(z, undefined, 1),
-      ),
-    );
-    for (let z = 0; z < depth; z++) {
-      ctx.clearRect(0, 0, width, height);
-      ctx.drawImage(bitmaps[z], 0, 0, width, height);
-      const rgba = ctx.getImageData(0, 0, width, height).data;
-      const base = z * width * height;
-      for (let i = 0; i < width * height; i++) {
-        data[base + i] =
-          (rgba[i * 4] * 0.299 + rgba[i * 4 + 1] * 0.587 + rgba[i * 4 + 2] * 0.114) | 0;
+      let canvas: HTMLCanvasElement | OffscreenCanvas;
+      if (typeof OffscreenCanvas !== 'undefined') {
+        canvas = new OffscreenCanvas(width, height);
+      } else {
+        canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
       }
+      const ctx = canvas.getContext('2d') as
+        | CanvasRenderingContext2D
+        | OffscreenCanvasRenderingContext2D
+        | null;
+      if (!ctx) throw new Error('napari-js volume assembly: 2D context unavailable');
+
+      // Read one fetched slice bitmap into the volume plane `z` (luminance). Synchronous between
+      // awaits, so the shared 2D context is safe to reuse across the concurrent fetch workers.
+      let done = 0;
+      const readSlice = (z: number, bmp: ImageBitmap): void => {
+        ctx.clearRect(0, 0, width, height);
+        ctx.drawImage(bmp, 0, 0, width, height);
+        const rgba = ctx.getImageData(0, 0, width, height).data;
+        const base = z * width * height;
+        for (let i = 0; i < width * height; i++) {
+          data[base + i] =
+            (rgba[i * 4] * 0.299 + rgba[i * 4 + 1] * 0.587 + rgba[i * 4 + 2] * 0.114) | 0;
+        }
+        bmp.close?.();
+        done++;
+        this.stackLoadingProgress$.next(Math.round((done / depth) * 100));
+      };
+
+      readSlice(0, first);
+
+      // Remaining slices via a small pool of workers draining a shared queue.
+      const pending: number[] = [];
+      for (let z = 1; z < depth; z++) pending.push(z);
+      const worker = async (): Promise<void> => {
+        for (;;) {
+          const z = pending.shift();
+          if (z === undefined) return;
+          readSlice(z, await this.fetchSlice(z, undefined, 1));
+        }
+      };
+      const poolSize = Math.min(VOLUME_FETCH_CONCURRENCY, Math.max(1, depth - 1));
+      await Promise.all(Array.from({ length: poolSize }, () => worker()));
+
+      return { data, width, height, depth };
+    } finally {
+      this.stackLoading$.next(false);
+      this.stackLoadingProgress$.next(0);
     }
-    return { data, width, height, depth };
   }
 
   private fitCameraSoon(): void {

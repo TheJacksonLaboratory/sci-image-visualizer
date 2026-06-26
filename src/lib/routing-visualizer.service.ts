@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@angular/core';
-import { Observable } from 'rxjs';
+import { Observable, combineLatest, merge } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Image } from 'image-js';
 
@@ -245,10 +245,25 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     return this.plotly.getPlotTypeDescriptors();
   }
 
-  // ── long-lived observables + stack flags → Plotly (stable subscriptions) ──
+  // ── long-lived observables + stack flags ──────────────────────────────────
   setStackLoading(b: boolean): void { this.plotly.setStackLoading(b); }
-  isStackLoading(): Observable<boolean> { return this.plotly.isStackLoading(); }
-  getStackLoadingProgress(): Observable<number> { return this.plotly.getStackLoadingProgress(); }
+  // Loading state is surfaced from whichever backend is doing the work: OSD and napari-js (volume
+  // assembly) drive their own subjects, so merge all three into one stable stream the host
+  // subscribes to once. (Previously hardcoded to Plotly, so napari/OSD progress never showed.)
+  isStackLoading(): Observable<boolean> {
+    return combineLatest([
+      this.plotly.isStackLoading(),
+      this.osd.isStackLoading(),
+      this.napari.isStackLoading(),
+    ]).pipe(map((flags) => flags.some(Boolean)));
+  }
+  getStackLoadingProgress(): Observable<number> {
+    return merge(
+      this.plotly.getStackLoadingProgress(),
+      this.osd.getStackLoadingProgress(),
+      this.napari.getStackLoadingProgress(),
+    );
+  }
   getAutoscaleEvent(): Observable<any> { return this.plotly.getAutoscaleEvent(); }
   getIntensityProfile$(): Observable<IntensityProfile[]> { return this.plotly.getIntensityProfile$(); }
   // The intensity inset is a Plotly LINE chart — render it through Plotly, which
