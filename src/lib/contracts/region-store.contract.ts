@@ -70,6 +70,20 @@ export interface IRegionEditApi {
   moveBezierHandle(id: number, index: number, side: 'in' | 'out', x: number, y: number): void;
 
   /**
+   * Move a bezier control handle on an interior ring (donut hole) — like
+   * {@link moveBezierHandle} but for `holes[holeIndex]`. No-op unless the region is a bezier
+   * polygon with hole handles (jit-ui#102).
+   */
+  moveHoleBezierHandle(
+    id: number,
+    holeIndex: number,
+    index: number,
+    side: 'in' | 'out',
+    x: number,
+    y: number,
+  ): void;
+
+  /**
    * Coalesce the emits from a burst of edits (e.g. a live vertex drag) into a
    * single update on `endBatch`. Calls nest; the update fires when the
    * outermost batch closes. The overlay still redraws itself per frame — this

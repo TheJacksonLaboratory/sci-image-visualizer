@@ -488,12 +488,24 @@ export class OsdRegionOverlay implements IRegionOverlay {
   private drawBezierHandles(poly: Polygon, color: string): void {
     const xs = poly.xpoints;
     const ys = poly.ypoints;
-    const h = resolveHandles(xs, ys, poly.closed !== false, poly.handlesIn, poly.handlesOut);
-    for (let i = 0; i < xs.length; i++) {
-      const a = this.toPx(xs[i], ys[i]);
-      if (h[i].hasIn) this.drawHandle(a, this.toPx(h[i].in[0], h[i].in[1]), color);
-      if (h[i].hasOut) this.drawHandle(a, this.toPx(h[i].out[0], h[i].out[1]), color);
-      this.svg.appendChild(this.anchorSquare(a.x, a.y, color));
+    const drawRing = (rxs: number[], rys: number[], inOff: number[][] | undefined,
+                      outOff: number[][] | undefined, closed: boolean): void => {
+      const h = resolveHandles(rxs, rys, closed, inOff, outOff);
+      for (let i = 0; i < rxs.length; i++) {
+        const a = this.toPx(rxs[i], rys[i]);
+        if (h[i].hasIn) this.drawHandle(a, this.toPx(h[i].in[0], h[i].in[1]), color);
+        if (h[i].hasOut) this.drawHandle(a, this.toPx(h[i].out[0], h[i].out[1]), color);
+        this.svg.appendChild(this.anchorSquare(a.x, a.y, color));
+      }
+    };
+    drawRing(xs, ys, poly.handlesIn, poly.handlesOut, poly.closed !== false);
+    // Donut hole rings get their own editable bezier handles (jit-ui#102).
+    if (poly.holes && poly.holeHandlesIn && poly.holeHandlesOut) {
+      poly.holes.forEach((ring, hi) => {
+        const inOff = poly.holeHandlesIn![hi];
+        const outOff = poly.holeHandlesOut![hi];
+        if (inOff && outOff) drawRing(ring.map((p) => p[0]), ring.map((p) => p[1]), inOff, outOff, true);
+      });
     }
   }
 
@@ -568,7 +580,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
       const hh = this.hitBezierHandle(e.position);
       if (hh) {
         const region = this.store.getRegions()[this.selected[this.selected.length - 1]];
-        this.startEdit('handle', 'move', hh.index, region, this.toImage(e.position), hh.side);
+        this.startEdit('handle', 'move', hh.index, region, this.toImage(e.position), hh.side, hh.ring);
         return;
       }
       // Then dragging a single polygon vertex (over body-move/resize) —
@@ -819,23 +831,45 @@ export class OsdRegionOverlay implements IRegionOverlay {
 
   /** The bezier control handle of the selected region under the cursor (which
    *  anchor, and whether the in- or out-handle), or null. */
-  private hitBezierHandle(position: { x: number; y: number }): { id: number; index: number; side: 'in' | 'out' } | null {
+  private hitBezierHandle(
+    position: { x: number; y: number },
+  ): { id: number; index: number; side: 'in' | 'out'; ring: number } | null {
     const sel = this.selectedRegionInfo();
     if (!sel || !(sel.region.bounds instanceof Polygon) || !sel.region.bounds.bezier) return null;
     const b = sel.region.bounds;
-    const h = resolveHandles(b.xpoints, b.ypoints, b.closed !== false, b.handlesIn, b.handlesOut);
-    for (let i = 0; i < h.length; i++) {
-      if (h[i].hasOut) {
-        const q = this.toPx(h[i].out[0], h[i].out[1]);
-        if (Math.hypot(position.x - q.x, position.y - q.y) <= EDIT_TOL) {
-          return { id: sel.region.id, index: i, side: 'out' };
+    // Test one ring's control handles; returns the matched vertex/side or null.
+    const testRing = (
+      xs: number[], ys: number[], inOff: number[][] | undefined, outOff: number[][] | undefined,
+      closed: boolean, ring: number,
+    ): { id: number; index: number; side: 'in' | 'out'; ring: number } | null => {
+      const h = resolveHandles(xs, ys, closed, inOff, outOff);
+      for (let i = 0; i < h.length; i++) {
+        if (h[i].hasOut) {
+          const q = this.toPx(h[i].out[0], h[i].out[1]);
+          if (Math.hypot(position.x - q.x, position.y - q.y) <= EDIT_TOL) {
+            return { id: sel.region.id, index: i, side: 'out', ring };
+          }
+        }
+        if (h[i].hasIn) {
+          const q = this.toPx(h[i].in[0], h[i].in[1]);
+          if (Math.hypot(position.x - q.x, position.y - q.y) <= EDIT_TOL) {
+            return { id: sel.region.id, index: i, side: 'in', ring };
+          }
         }
       }
-      if (h[i].hasIn) {
-        const q = this.toPx(h[i].in[0], h[i].in[1]);
-        if (Math.hypot(position.x - q.x, position.y - q.y) <= EDIT_TOL) {
-          return { id: sel.region.id, index: i, side: 'in' };
-        }
+      return null;
+    };
+    const ext = testRing(b.xpoints, b.ypoints, b.handlesIn, b.handlesOut, b.closed !== false, -1);
+    if (ext) return ext;
+    // Donut hole rings (jit-ui#102): their own bezier control handles.
+    if (b.holes && b.holeHandlesIn && b.holeHandlesOut) {
+      for (let hi = 0; hi < b.holes.length; hi++) {
+        const ring = b.holes[hi];
+        const hit = testRing(
+          ring.map((p) => p[0]), ring.map((p) => p[1]),
+          b.holeHandlesIn[hi], b.holeHandlesOut[hi], true, hi,
+        );
+        if (hit) return hit;
       }
     }
     return null;
@@ -933,8 +967,14 @@ export class OsdRegionOverlay implements IRegionOverlay {
     }
 
     if (this.edit.kind === 'handle') {
-      // Drag a bezier control handle to the cursor.
-      this.store.moveBezierHandle(this.edit.id, this.edit.vertexIndex, this.edit.handleSide, curImg.x, curImg.y);
+      // Drag a bezier control handle to the cursor — exterior (ring -1) or a donut hole ring.
+      if (this.edit.ring < 0) {
+        this.store.moveBezierHandle(this.edit.id, this.edit.vertexIndex, this.edit.handleSide, curImg.x, curImg.y);
+      } else {
+        this.store.moveHoleBezierHandle(
+          this.edit.id, this.edit.ring, this.edit.vertexIndex, this.edit.handleSide, curImg.x, curImg.y,
+        );
+      }
       this.redraw();
       return;
     }
