@@ -65,7 +65,23 @@ host wiring (`RoutingVisualizerService`, toolbar `toggleDragMode`).
   slice scrub just moves `dims.z`; histogram uses a coarse per-channel luminance sample. Stitch
   remains as a no-descriptor fallback.
 
+## DONE (cont.)
+- **Pixel-tool readback currency (SAM/wand/brush)** — SAM runs client-side and embeds the
+  *displayed* pixels (`getCachedImageData` → `lastPixels`). With tiling, tiles load async after the
+  post-plot readback and the readback wasn't refreshed on pan/zoom, so `lastPixels` was blank/stale
+  → SAM point prompts over-segmented, box prompts found "no cells" (wand/brush silently affected
+  too). Fix: `runReadback()` + debounced `armReadback()` re-armed on `camera.changed`; tools arm a
+  readback on activation; SAM-box awaits a fresh readback before encoding.
+
+## KNOWN LIMITATIONS / NOTES
+- **SAM segments the VISIBLE viewport at screen resolution** (same as OSD) — the client-side encoder
+  embeds the displayed composite, so small features must be zoomed in to segment well; segmenting
+  tiny features while zoomed all the way out won't resolve them.
+
 ## TODO / BACKLOG
+- **Full-resolution SAM embedding (optional)** — instead of embedding the screen readback, fetch
+  the prompt region's native-res tiles and embed those, so SAM segments at full detail regardless
+  of zoom. Larger change (SAM-specific image fetch + coordinate mapping); offered as a follow-up.
 - **Left-click zoom (OSD-style)** (task 7, NOW UNBLOCKED): add click-to-zoom-in (and modifier/
   right-click zoom-out) in napari image mode. (Wheel zoom already gentler in 0.4.2.)
 - **Shared-code refactor** (HELD by user): extract the ~40 identical `IRegionStore`/`IDisplayOptions`
