@@ -78,12 +78,20 @@ host wiring (`RoutingVisualizerService`, toolbar `toggleDragMode`).
   embeds the displayed composite, so small features must be zoomed in to segment well; segmenting
   tiny features while zoomed all the way out won't resolve them.
 
+## DONE (cont.)
+- **Click-to-zoom + gentler wheel** (task 7) — napari-js 0.5.1: OSD-style click-to-zoom (left-click
+  in, right/modifier-click out, drag still pans), and a gentler/clamped/device-normalized wheel zoom
+  (`ViewerOptions.wheelZoomSpeed`/`clickZoomFactor`). Fixes the over-sensitive scroll.
+- **Rubber-band region selection** — select mode draws a marquee in empty space and selects every
+  region whose bbox it overlaps (rect/polygon/multipolygon); click on empty clears. Mirrors OSD.
+
 ## TODO / BACKLOG
-- **Full-resolution SAM embedding (optional)** — instead of embedding the screen readback, fetch
-  the prompt region's native-res tiles and embed those, so SAM segments at full detail regardless
-  of zoom. Larger change (SAM-specific image fetch + coordinate mapping); offered as a follow-up.
-- **Left-click zoom (OSD-style)** (task 7, NOW UNBLOCKED): add click-to-zoom-in (and modifier/
-  right-click zoom-out) in napari image mode. (Wheel zoom already gentler in 0.4.2.)
+- **Full-resolution SAM embedding (optional, task 8)** — instead of embedding the screen readback,
+  fetch the prompt region's native-res tiles and embed those, so SAM segments at full detail
+  regardless of zoom. Larger change (SAM-specific image fetch + coordinate mapping).
+- **Shared-code refactor (held)** — extract the identical OSD+napari IRegionStore/IDisplayOptions
+  delegations into an abstract base.
+- **OSD hole-bézier handle dragging** — OSD renders bézier holes; napari has full edit. Minor.
 - **Shared-code refactor** (HELD by user): extract the ~40 identical `IRegionStore`/`IDisplayOptions`
   delegations from OSD + napari into a shared abstract base class they extend.
 - Known parity gaps (lower priority): `setNavigatorVisible` (napari-js has no minimap — library
