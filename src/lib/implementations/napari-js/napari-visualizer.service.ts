@@ -196,6 +196,10 @@ export class NapariVisualizerService implements IVisualizer {
   /** Cached CachedImageData built from the last readback (rebuilt when lastPixels changes). */
   private cachedImage: CachedImageData | null = null;
   private cachedImageSource: PixelData | null = null;
+  /** Visible world rect captured AT the last readback — must pair with `lastPixels` so the pixel
+   *  tools' ratios/origin match the matrix's camera (using the live rect after a pan/zoom would
+   *  mis-scale the region). */
+  private lastPixelsRect: { x: number; y: number; width: number; height: number } | null = null;
   /** Image smoothing (bilinear) vs nearest-neighbour (crisp pixels, the default). */
   private imageSmoothing = false;
   /** True when the 2D image is rendered via pyramidal TiledSources (descriptor available). */
@@ -936,6 +940,7 @@ export class NapariVisualizerService implements IVisualizer {
     this.regionOverlay = null;
     this.cachedImage = null;
     this.cachedImageSource = null;
+    this.lastPixelsRect = null;
     this.nativeHistograms.clear();
     this.tiled = false;
     this.histSamples.clear();
@@ -1119,9 +1124,10 @@ export class NapariVisualizerService implements IVisualizer {
     try {
       const px = await v.readDisplayedPixels();
       if (this.viewer !== v) return;
+      const rect = v.visibleWorldRect(); // capture WITH the pixels (same camera)
       this.lastPixels = px;
+      this.lastPixelsRect = rect;
       const size = this.getTrueImageSize();
-      const rect = v.visibleWorldRect();
       if (size && rect) {
         const x = Math.max(0, Math.min(size.width, rect.x));
         const y = Math.max(0, Math.min(size.height, rect.y));
@@ -1319,7 +1325,9 @@ export class NapariVisualizerService implements IVisualizer {
       }
       matrix[y] = row;
     }
-    const rect = this.viewer.visibleWorldRect();
+    // Use the rect captured WITH this readback (not the live one) so ratios/origin match the
+    // matrix's camera — otherwise a pan/zoom since the readback mis-scales the traced region.
+    const rect = this.lastPixelsRect ?? this.viewer.visibleWorldRect();
     this.cachedImage = {
       frames: [matrix],
       width: w,
