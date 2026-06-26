@@ -45,6 +45,8 @@ export class NapariRegionOverlay implements IRegionOverlay {
   private draftRect: { x0: number; y0: number; x1: number; y1: number } | null = null;
   /** In-progress rubber-band selection marquee (select mode), image-space. */
   private marquee: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  /** Dedicated marquee rect element, updated directly during the drag (no full region redraw). */
+  private marqueeEl: SVGRectElement | null = null;
   private draftPath: Array<[number, number]> | null = null; // freehand or click polygon
   private drawing = false; // pointer is down for rect / freehand
 
@@ -100,6 +102,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
     this.draftRect = null;
     this.draftPath = null;
     this.marquee = null;
+    this.clearMarqueeEl();
     this.drawing = false;
     // The overlay owns pointer/navigation gating: while a tool is active it captures the pointer
     // and the napari camera controls are disabled; 'none' hands the pointer back for pan/zoom.
@@ -169,7 +172,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
     if (this.marquee) {
       this.marquee.x1 = ix;
       this.marquee.y1 = iy;
-      this.redraw();
+      this.updateMarqueeEl(); // update just the marquee rect — NOT a full region redraw
       return;
     }
     if (this.edit) {
@@ -194,13 +197,13 @@ export class NapariRegionOverlay implements IRegionOverlay {
     if (this.marquee) {
       const m = this.marquee;
       this.marquee = null;
+      this.clearMarqueeEl();
       try {
         this.svg.releasePointerCapture(e.pointerId);
       } catch {
         /* already released */
       }
-      this.finishMarquee(m);
-      this.redraw();
+      this.finishMarquee(m); // setSelectedShapeIndices → one redraw via the selection subscription
       return;
     }
     if (this.edit) {
@@ -311,10 +314,39 @@ export class NapariRegionOverlay implements IRegionOverlay {
     // release); in move mode just clear the selection.
     if (this.mode === 'select') {
       this.marquee = { x0: ix, y0: iy, x1: ix, y1: iy };
+      this.updateMarqueeEl();
       this.svg.setPointerCapture(e.pointerId);
     } else {
       this.store.setSelectedShapeIndices([]);
     }
+  }
+
+  /** Create/update the marquee rect element directly (avoids a full region redraw per move). */
+  private updateMarqueeEl(): void {
+    if (!this.marquee) return;
+    if (!this.marqueeEl || !this.marqueeEl.parentNode) {
+      this.marqueeEl = document.createElementNS(SVG_NS, 'rect');
+      this.marqueeEl.setAttribute('stroke', '#4da3ff');
+      this.marqueeEl.setAttribute('stroke-width', '1');
+      this.marqueeEl.setAttribute('stroke-dasharray', '4 3');
+      this.marqueeEl.setAttribute('fill', '#4da3ff');
+      this.marqueeEl.setAttribute('fill-opacity', '0.12');
+      this.marqueeEl.setAttribute('vector-effect', 'non-scaling-stroke');
+      this.svg.appendChild(this.marqueeEl);
+    }
+    const { x0, y0, x1, y1 } = this.marquee;
+    const [lx, ly] = this.toLocal(Math.min(x0, x1), Math.min(y0, y1));
+    const [rx, ry] = this.toLocal(Math.max(x0, x1), Math.max(y0, y1));
+    this.marqueeEl.setAttribute('x', `${lx}`);
+    this.marqueeEl.setAttribute('y', `${ly}`);
+    this.marqueeEl.setAttribute('width', `${Math.abs(rx - lx)}`);
+    this.marqueeEl.setAttribute('height', `${Math.abs(ry - ly)}`);
+  }
+
+  /** Remove the marquee element from the SVG. */
+  private clearMarqueeEl(): void {
+    if (this.marqueeEl?.parentNode) this.marqueeEl.parentNode.removeChild(this.marqueeEl);
+    this.marqueeEl = null;
   }
 
   /** Test whether a client point grabs a rectangle corner or a polygon vertex of `region`. */
@@ -838,23 +870,6 @@ export class NapariRegionOverlay implements IRegionOverlay {
       const el = document.createElementNS(SVG_NS, 'polyline');
       el.setAttribute('points', pts);
       this.styleDraft(el);
-      this.svg.appendChild(el);
-    }
-    if (this.marquee) {
-      const { x0, y0, x1, y1 } = this.marquee;
-      const [lx, ly] = this.toLocal(Math.min(x0, x1), Math.min(y0, y1));
-      const [rx, ry] = this.toLocal(Math.max(x0, x1), Math.max(y0, y1));
-      const el = document.createElementNS(SVG_NS, 'rect');
-      el.setAttribute('x', `${lx}`);
-      el.setAttribute('y', `${ly}`);
-      el.setAttribute('width', `${Math.abs(rx - lx)}`);
-      el.setAttribute('height', `${Math.abs(ry - ly)}`);
-      el.setAttribute('stroke', '#4da3ff');
-      el.setAttribute('stroke-width', '1');
-      el.setAttribute('stroke-dasharray', '4 3');
-      el.setAttribute('fill', '#4da3ff');
-      el.setAttribute('fill-opacity', '0.12');
-      el.setAttribute('vector-effect', 'non-scaling-stroke');
       this.svg.appendChild(el);
     }
   }
