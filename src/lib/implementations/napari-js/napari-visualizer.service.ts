@@ -3,7 +3,7 @@ import { Observable, BehaviorSubject, Subject, Subscription, combineLatest, from
 import { Image } from 'image-js';
 import { saveAs } from 'file-saver';
 import { Viewer, Colormap, histogramScalar } from 'napari-js';
-import type { VolumeLayer, ImageLayer } from 'napari-js';
+import type { VolumeLayer, ImageLayer, TiledSource, TileKey, PixelChunk } from 'napari-js';
 
 import { IImageInfo, IImageMetadata } from '../../contracts/image.contract';
 import { Region } from '../../models/region';
@@ -198,6 +198,11 @@ export class NapariVisualizerService implements IVisualizer {
   private cachedImageSource: PixelData | null = null;
   /** Image smoothing (bilinear) vs nearest-neighbour (crisp pixels, the default). */
   private imageSmoothing = false;
+  /** True when the 2D image is rendered via pyramidal TiledSources (descriptor available). */
+  private tiled = false;
+  /** Coarse per-channel luminance sample (keyed by channel index) for the histogram in tiled mode,
+   *  where the layers have no full in-memory pixels. Refreshed on plot + slice change. */
+  private readonly histSamples = new Map<number, Uint8Array>();
   /** Native-bit-depth histograms from `/histogram`, keyed `${z}|${channel}` (>8-bit images). */
   private readonly nativeHistograms = new Map<string, IHistogram>();
 
@@ -502,8 +507,14 @@ export class NapariVisualizerService implements IVisualizer {
   private async fetchChannelData(
     z: number,
     channel?: number,
+    budgetTiles?: number,
   ): Promise<{ data: Uint8Array; width: number; height: number }> {
-    const bmp = await this.fetchSlice(z, channel);
+    const bmp = await this.fetchSlice(z, channel, budgetTiles);
+    return this.bitmapToLuminance(bmp);
+  }
+
+  /** Decode an `ImageBitmap` (server bands are grayscale, R=G=B) to a single-channel uint8 plane. */
+  private bitmapToLuminance(bmp: ImageBitmap): { data: Uint8Array; width: number; height: number } {
     const w = bmp.width;
     const h = bmp.height;
     let canvas: HTMLCanvasElement | OffscreenCanvas;
@@ -523,18 +534,30 @@ export class NapariVisualizerService implements IVisualizer {
     bmp.close?.();
     const rgba = ctx.getImageData(0, 0, w, h).data;
     const data = new Uint8Array(w * h);
-    for (let i = 0; i < w * h; i++) data[i] = rgba[i * 4]; // server bands are grayscale (R=G=B)
+    for (let i = 0; i < w * h; i++) data[i] = rgba[i * 4];
     return { data, width: w, height: h };
   }
 
   /**
-   * Render the 2D image for slice `z` in one of three modes, mirroring the OSD display pipeline:
-   *  - **multichannel** (fluorescence): one additive scalar `ImageLayer` per channel, each tinted
-   *    by its channel colour and windowed by the shared channel state — true client-side compositing.
-   *  - **grayscale**: a single scalar layer coloured by the store colormap (+reverse).
-   *  - **rgb**: the server-composited bitmap as-is.
+   * Render the 2D image for slice `z`. With a server pyramid descriptor we use a pyramidal
+   * {@link TiledSource} per layer so the view refines to higher resolution on zoom (like OSD) and
+   * sits naturally in full-resolution coordinates; without one we fall back to the single-level
+   * stitch. Three display modes either way: multichannel additive tint, grayscale colormap, RGB.
    */
   private async renderImage(z: number, token?: number): Promise<void> {
+    const v = this.viewer;
+    if (!v) return;
+    const desc = await this.ensureDescriptor();
+    if (desc && desc.levels?.length) {
+      if (token != null && token !== this.sliceReq) return;
+      await this.renderImageTiled(z, desc);
+      return;
+    }
+    return this.renderImageStitched(z, token);
+  }
+
+  /** Single-level stitch fallback (no descriptor): the pre-tiling path. */
+  private async renderImageStitched(z: number, token?: number): Promise<void> {
     const v = this.viewer;
     if (!v) return;
     const desc = await this.ensureDescriptor();
@@ -625,6 +648,125 @@ export class NapariVisualizerService implements IVisualizer {
     }
     this.imageW = fullW;
     this.imageH = fullH;
+  }
+
+  /**
+   * Render the 2D image with pyramidal {@link TiledSource}s — the view refines to higher resolution
+   * as you zoom in (the visual fetches the level whose texels ≈ screen pixels) and sits in full-res
+   * coordinates so regions align. Same three modes as the stitch path. Per-channel layers use the
+   * REAL pyramid levels (per-channel tiles only exist there); the composite uses all levels.
+   */
+  private async renderImageTiled(z: number, desc: TileDescriptor): Promise<void> {
+    const v = this.viewer;
+    if (!v) return;
+    const states = this.store.currentChannelStates();
+    const channelCount = desc.channels ?? (states.length || 1);
+    const multichannel = !!desc.multichannel && channelCount > 1;
+    const interpolation: 'linear' | 'nearest' = this.imageSmoothing ? 'linear' : 'nearest';
+
+    v.layers.clear();
+    this.channelLayers.clear();
+    this.tiled = true;
+
+    if (multichannel) {
+      this.imageMode = 'multichannel';
+      for (let c = 0; c < channelCount; c++) {
+        const st = states.find((s) => s.index === c);
+        const color = st?.color ?? desc.channelInfo?.[c]?.color ?? tintFor(c);
+        const layer = v.addImage(this.buildTiledSource(desc, c, 1), {
+          name: st?.name ?? `ch${c}`,
+          colormap: this.tintColormap(color),
+          contrastLimits: [st?.min ?? 0, st?.max ?? 255],
+          gamma: st?.gamma ?? 1,
+          visible: st?.visible ?? true,
+          invert: this.invertEnabled,
+          blending: 'additive',
+          interpolation,
+        });
+        this.channelLayers.set(c, layer);
+      }
+    } else if (channelCount === 1) {
+      this.imageMode = 'grayscale';
+      const st = states[0];
+      const layer = v.addImage(this.buildTiledSource(desc, undefined, 1), {
+        colormap: this.grayscaleColormap(),
+        contrastLimits: [st?.min ?? 0, st?.max ?? 255],
+        gamma: st?.gamma ?? 1,
+        invert: this.invertEnabled,
+        interpolation,
+      });
+      this.channelLayers.set(0, layer);
+    } else {
+      this.imageMode = 'rgb';
+      const layer = v.addImage(this.buildTiledSource(desc, undefined, 4), { interpolation });
+      this.channelLayers.set(0, layer);
+    }
+    this.imageW = desc.width;
+    this.imageH = desc.height;
+    // Await on the initial render so getHistogram/autoContrast have data immediately; slice changes
+    // refresh fire-and-forget (the histogram pane retries).
+    await this.refreshHistogramSamples(z, desc);
+  }
+
+  /** Build a pyramidal TiledSource backed by the server `/tile` endpoint. `channel` selects a band
+   *  (grayscale luminance, real levels only); omit it for the composite (RGBA, all levels). */
+  private buildTiledSource(
+    desc: TileDescriptor,
+    channel: number | undefined,
+    channels: 1 | 4,
+  ): TiledSource {
+    const infoB64 = this.tiles.getSelectedInfoB64() ?? '';
+    // Per-channel tiles exist only at REAL Bio-Formats levels; the composite exists at all levels.
+    const usable =
+      channel == null
+        ? desc.levels
+        : desc.levels.slice(0, Math.max(1, desc.realLevels ?? desc.levels.length));
+    const levelScales = usable.map((l) => desc.width / Math.max(1, l.width)); // level-0 px per level px
+    const tileSize = desc.tileSize || TILE_SIZE;
+    const ch = channel == null ? '' : `&channel=${channel}`;
+    const api = this.api;
+    return {
+      kind: 'tiled',
+      width: desc.width,
+      height: desc.height,
+      tileSize,
+      levels: usable.length,
+      levelScales,
+      depth: Math.max(1, desc.z || 1),
+      channels,
+      dtype: 'uint8',
+      fetchTile: async (key: TileKey): Promise<PixelChunk> => {
+        const res = usable[key.level]?.res ?? key.level;
+        const url = `${api}tile?info=${infoB64}&res=${res}&col=${key.col}&row=${key.row}&z=${key.z}&tileSize=${tileSize}${ch}`;
+        const headers = await this.tiles
+          .getAuthHeaders()
+          .catch(() => ({}) as Record<string, string>);
+        const resp = await fetch(url, { headers });
+        if (!resp.ok) {
+          throw new Error(`[napari-js] tile ${key.level}/${key.col}/${key.row} → ${resp.status}`);
+        }
+        const bmp = await createImageBitmap(await resp.blob());
+        if (channels === 4) return { width: bmp.width, height: bmp.height, data: bmp };
+        return this.bitmapToLuminance(bmp);
+      },
+    };
+  }
+
+  /** (Re)fetch a coarse per-channel luminance sample for the histogram (tiled mode has no full
+   *  in-memory pixels). One cheap overview tile per channel; cached by channel index. */
+  private async refreshHistogramSamples(z: number, desc: TileDescriptor): Promise<void> {
+    this.histSamples.clear();
+    if (this.imageMode === 'rgb') return; // RGB uses the displayed-pixel readback (rgbHistogram)
+    const channelCount = this.imageMode === 'multichannel' ? desc.channels ?? 1 : 1;
+    for (let c = 0; c < channelCount; c++) {
+      try {
+        const ch = this.imageMode === 'multichannel' ? c : undefined;
+        const d = await this.fetchChannelData(z, ch, 1); // budget 1 → coarsest single tile
+        this.histSamples.set(c, d.data);
+      } catch {
+        /* leave this channel's sample unset */
+      }
+    }
   }
 
   /** Subscribe channel states + grayscale colormap → live-apply to the rendered layers (no
@@ -789,6 +931,8 @@ export class NapariVisualizerService implements IVisualizer {
     this.cachedImage = null;
     this.cachedImageSource = null;
     this.nativeHistograms.clear();
+    this.tiled = false;
+    this.histSamples.clear();
     this.channelLayers.clear();
     this.viewer?.dispose();
     this.viewer = null;
@@ -855,7 +999,15 @@ export class NapariVisualizerService implements IVisualizer {
       this.scheduleReadback();
       return;
     }
-    // 2D image: re-render the slice (re-fetches per-channel / composite). Branch on the presence
+    // Tiled 2D image: just move the dims plane — the tiled visual fetches the new slice's tiles
+    // (cached per z), no layer rebuild. Refresh the coarse histogram sample for the new slice.
+    if (this.tiled) {
+      v.dims.z = zIndex;
+      if (this.descriptor) void this.refreshHistogramSamples(zIndex, this.descriptor);
+      this.scheduleReadback();
+      return;
+    }
+    // 2D image (stitch fallback): re-render the slice (re-fetches per-channel / composite). Branch
     // of a volume layer (not currentPlotType, which could be stale and silently no-op the swap).
     // The token lets renderImage drop a superseded scrub so a slow older slice can't clobber a newer one.
     const req = ++this.sliceReq;
@@ -1313,8 +1465,14 @@ export class NapariVisualizerService implements IVisualizer {
     if (!v) return null;
     // Volume / isosurface: intensity histogram of the assembled (downsampled) uint8 volume.
     if (this.volumeData) return this.toIHistogram(histogramScalar(this.volumeData, bins, 0, 255));
-    // Grayscale/multichannel: native per-channel histogram straight from the in-memory scalar
-    // layer (no GPU readback). RGB: bin the displayed pixels' R/G/B byte (8-bit client path).
+    // Tiled mode has no full in-memory pixels → use the coarse per-channel sample (RGB: readback).
+    if (this.tiled) {
+      if (this.imageMode === 'rgb') return this.rgbHistogram(channelIndex, bins);
+      const sample = this.histSamples.get(this.imageMode === 'grayscale' ? 0 : channelIndex);
+      return sample ? this.toIHistogram(histogramScalar(sample, bins, 0, 255)) : null;
+    }
+    // Grayscale/multichannel (stitch): native per-channel histogram straight from the in-memory
+    // scalar layer (no GPU readback). RGB: bin the displayed pixels' R/G/B byte (8-bit client path).
     const layer = this.channelLayers.get(this.imageMode === 'grayscale' ? 0 : channelIndex);
     if (layer) {
       const h = v.layerHistogram(layer, bins);

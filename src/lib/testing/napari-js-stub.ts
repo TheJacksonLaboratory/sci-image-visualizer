@@ -36,6 +36,16 @@ export interface ImageLayer {
   blending: string;
 }
 
+/** Stand-in for napari-js histogramScalar (per-channel / volume intensity histogram). */
+export function histogramScalar(
+  _data: ArrayLike<number>,
+  bins: number,
+  min: number,
+  max: number,
+): { counts: Uint32Array; bins: number; min: number; max: number } {
+  return { counts: new Uint32Array(bins), bins, min, max };
+}
+
 /** Stand-in for napari-js Colormap (constructed for per-channel tints / grayscale LUTs). */
 export class Colormap {
   constructor(
