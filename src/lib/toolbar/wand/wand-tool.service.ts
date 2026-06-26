@@ -382,6 +382,33 @@ export class WandToolService {
     this.strokeRegionId = null;
   }
 
+  /**
+   * Whether a region can be faithfully rasterized into the wand stroke at the current view
+   * resolution (rx/ry = data units per matrix pixel). Editing rasterizes the region to the
+   * viewport grid and re-traces it, so a region whose matrix-space bbox exceeds the rasterizer's
+   * cap would be clipped/down-quantized and come back rescaled/corrupted (jit-ui#102) — e.g. a
+   * whole-slide annotation while zoomed out. Skip adopt/merge for those: leave them untouched and
+   * only edit them near native zoom.
+   */
+  private fitsForEdit(
+    verts: { xpoints: number[]; ypoints: number[] },
+    rx: number,
+    ry: number,
+  ): boolean {
+    const xs = verts.xpoints;
+    const ys = verts.ypoints;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (let i = 0; i < xs.length; i++) {
+      if (xs[i] < minX) minX = xs[i];
+      if (xs[i] > maxX) maxX = xs[i];
+      if (ys[i] < minY) minY = ys[i];
+      if (ys[i] > maxY) maxY = ys[i];
+    }
+    const w = (maxX - minX) / (rx || 1);
+    const h = (maxY - minY) / (ry || 1);
+    return w > 0 && h > 0 && w * h <= 4096 * 4096;
+  }
+
   /** A region's closed-polygon vertices (image/data coords), or null when it
    *  isn't a fillable closed polygon (rectangles, open polylines). */
   private regionVerts(
@@ -421,6 +448,8 @@ export class WandToolService {
     for (let i = regions.length - 1; i >= 0; i--) {
       const verts = this.regionVerts(regions[i]);
       if (!verts) continue;
+      // Too large to rasterize at this zoom → don't adopt it (editing would rescale/corrupt it).
+      if (!this.fitsForEdit(verts, rx, ry)) continue;
 
       const ox = cached.originX ?? 0;
       const oy = cached.originY ?? 0;
@@ -458,6 +487,8 @@ export class WandToolService {
 
         const verts = this.regionVerts(region);
         if (!verts) continue;
+        // Too large to rasterize at this zoom → don't merge it (would rescale/corrupt it).
+        if (!this.fitsForEdit(verts, rx, ry)) continue;
 
         const ox = cached.originX ?? 0;
         const oy = cached.originY ?? 0;

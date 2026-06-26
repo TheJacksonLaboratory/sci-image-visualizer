@@ -383,6 +383,25 @@ export class BrushToolService {
     return null;
   }
 
+  /** Whether a region can be faithfully rasterized at this zoom (rx/ry = data units per matrix px).
+   *  Editing rasterizes + re-traces the region, so one whose matrix-space bbox exceeds the
+   *  rasterizer cap would come back rescaled/corrupted (e.g. a whole-slide annotation while zoomed
+   *  out) — skip adopt/merge for those and only edit them near native zoom (jit-ui#102). */
+  private fitsForEdit(verts: { xpoints: number[]; ypoints: number[] }, rx: number, ry: number): boolean {
+    const xs = verts.xpoints;
+    const ys = verts.ypoints;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (let i = 0; i < xs.length; i++) {
+      if (xs[i] < minX) minX = xs[i];
+      if (xs[i] > maxX) maxX = xs[i];
+      if (ys[i] < minY) minY = ys[i];
+      if (ys[i] > maxY) maxY = ys[i];
+    }
+    const w = (maxX - minX) / (rx || 1);
+    const h = (maxY - minY) / (ry || 1);
+    return w > 0 && h > 0 && w * h <= 4096 * 4096;
+  }
+
   /** Convert a region's hole rings from image/data coords into matrix coords so
    *  they line up with the stroke accumulator (jit-ui#85). */
   private holesToMatrix(
@@ -409,6 +428,7 @@ export class BrushToolService {
     for (let i = regions.length - 1; i >= 0; i--) {
       const verts = this.regionVerts(regions[i]);
       if (!verts) continue;
+      if (!this.fitsForEdit(verts, rx, ry)) continue; // too large at this zoom → don't adopt
 
       const ox = cached.originX ?? 0;
       const oy = cached.originY ?? 0;
@@ -444,6 +464,7 @@ export class BrushToolService {
 
         const verts = this.regionVerts(region);
         if (!verts) continue;
+        if (!this.fitsForEdit(verts, rx, ry)) continue; // too large at this zoom → don't merge
 
         const ox = cached.originX ?? 0;
         const oy = cached.originY ?? 0;
