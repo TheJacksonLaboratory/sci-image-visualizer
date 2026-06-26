@@ -25,9 +25,10 @@ host wiring (`RoutingVisualizerService`, toolbar `toggleDragMode`).
 - **0.4.0** (published): `Viewer.setControlsEnabled()` runtime control toggle (region drawing).
 - **0.4.1** (published): readback renders into the canvas format + swizzles BGRA→RGBA (fixed the
   per-scrub WebGPU validation error on Metal).
-- **0.4.2** (TAG PUSHED, **NOT yet on npm** — CI publish pending / may need token re-run): gentler,
-  device-normalized + clamped wheel zoom. jit-ui dep bump to `^0.4.2` is **held** until published;
-  the build is hand-synced into `node_modules` so dev works now.
+- **0.4.2** (published): gentler, device-normalized + clamped wheel zoom.
+- **0.5.0** (published): `TiledSource.levelScales` — arbitrary (non-power-of-two) pyramid level
+  scales, so the dynamic tiling renders the server's Bio-Formats levels correctly.
+- jit-ui dep is at **^0.5.0** (reconciled + committed).
 
 ## DONE (committed on the branch — see git log)
 - Opt-in backend + napari plot types in the dropdown (kept Plotly iso/surface alongside).
@@ -57,14 +58,16 @@ host wiring (`RoutingVisualizerService`, toolbar `toggleDragMode`).
   (with a 4096² memory guard), so extending a region that was panned/zoomed partly off-screen keeps
   its off-screen part. Shared services → OSD + napari + Plotly.
 
+## DONE (cont.)
+- **Dynamic pyramidal tiling on zoom** (task 6) — DONE. napari-js 0.5.0 `TiledSource.levelScales`
+  (arbitrary levels) + adapter `buildTiledSource` feeding `/tile` per (level,col,row,z). The 2D
+  image refines to higher resolution on zoom; tiled layers sit in full-res coords (regions align);
+  slice scrub just moves `dims.z`; histogram uses a coarse per-channel luminance sample. Stitch
+  remains as a no-descriptor fallback.
+
 ## TODO / BACKLOG
-- **Dynamic pyramidal tiling on zoom** (task 6): currently a single downscaled level is shown and
-  zoom just magnifies it (blurry) — no higher-res refinement like OSD. napari-js has a `TiledSource`
-  but its pyramid math assumes power-of-two levels; this server's bioformats levels are arbitrary,
-  so a napari-js v0.5 enhancement (explicit per-level dims) + adapter wiring to feed a `TiledSource`
-  with a `/tile` fetch callback is needed. DEFERRED by user.
-- **Left-click zoom (OSD-style)** (task 7): add click-to-zoom-in (and modifier/right-click zoom-out)
-  in napari image mode. Do AFTER dynamic tiling. (Wheel zoom already gentler in 0.4.2.)
+- **Left-click zoom (OSD-style)** (task 7, NOW UNBLOCKED): add click-to-zoom-in (and modifier/
+  right-click zoom-out) in napari image mode. (Wheel zoom already gentler in 0.4.2.)
 - **Shared-code refactor** (HELD by user): extract the ~40 identical `IRegionStore`/`IDisplayOptions`
   delegations from OSD + napari into a shared abstract base class they extend.
 - Known parity gaps (lower priority): `setNavigatorVisible` (napari-js has no minimap — library
