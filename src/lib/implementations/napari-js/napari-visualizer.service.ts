@@ -200,6 +200,9 @@ export class NapariVisualizerService implements IVisualizer {
   private imageSmoothing = false;
   /** True when the 2D image is rendered via pyramidal TiledSources (descriptor available). */
   private tiled = false;
+  /** Debounced readback timer + camera-change unsubscribe (keep lastPixels current for tools). */
+  private readbackTimer: ReturnType<typeof setTimeout> | null = null;
+  private cameraReadbackOff: (() => void) | null = null;
   /** Coarse per-channel luminance sample (keyed by channel index) for the histogram in tiled mode,
    *  where the layers have no full in-memory pixels. Refreshed on plot + slice change. */
   private readonly histSamples = new Map<number, Uint8Array>();
@@ -458,6 +461,9 @@ export class NapariVisualizerService implements IVisualizer {
         this.installScaleBar();
         this.regionOverlay = new NapariRegionOverlay(host, viewer, this.regionStore);
         this.buildToolHosts();
+        // Keep the pixel-tool readback (lastPixels) current as the view pans/zooms and tiled
+        // levels load, so wand/brush/SAM sample the actually-displayed image (jit-ui#102).
+        this.cameraReadbackOff = viewer.camera.changed.connect(() => this.armReadback());
       }
       this.scheduleReadback();
       return true;
@@ -933,6 +939,12 @@ export class NapariVisualizerService implements IVisualizer {
     this.nativeHistograms.clear();
     this.tiled = false;
     this.histSamples.clear();
+    if (this.readbackTimer != null) {
+      clearTimeout(this.readbackTimer);
+      this.readbackTimer = null;
+    }
+    this.cameraReadbackOff?.();
+    this.cameraReadbackOff = null;
     this.channelLayers.clear();
     this.viewer?.dispose();
     this.viewer = null;
@@ -1099,30 +1111,44 @@ export class NapariVisualizerService implements IVisualizer {
     /* Plotly owns the intensity inset */
   }
 
-  private scheduleReadback(): void {
+  /** Read the displayed composite into `lastPixels` (the pixel-tools' source) + emit the clamped
+   *  visible region. A fresh PixelData object means cachedImageData() rebuilds automatically. */
+  private async runReadback(): Promise<void> {
     const v = this.viewer;
     if (!v) return;
-    const run = (): void => {
-      void v
-        .readDisplayedPixels()
-        .then((px) => {
-          this.lastPixels = px;
-          // Emit the visible image region (full-res coords), clamped to the image bounds — so the
-          // intensity inset / consumers sample the actual viewport, not always the whole image.
-          const size = this.getTrueImageSize();
-          const rect = v.visibleWorldRect();
-          if (size && rect) {
-            const x = Math.max(0, Math.min(size.width, rect.x));
-            const y = Math.max(0, Math.min(size.height, rect.y));
-            const width = Math.max(1, Math.min(size.width - x, rect.width));
-            const height = Math.max(1, Math.min(size.height - y, rect.height));
-            this.viewportChange$.next({ x, y, width, height });
-          }
-        })
-        .catch(() => undefined);
-    };
-    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
-    else setTimeout(run, 0);
+    try {
+      const px = await v.readDisplayedPixels();
+      if (this.viewer !== v) return;
+      this.lastPixels = px;
+      const size = this.getTrueImageSize();
+      const rect = v.visibleWorldRect();
+      if (size && rect) {
+        const x = Math.max(0, Math.min(size.width, rect.x));
+        const y = Math.max(0, Math.min(size.height, rect.y));
+        const width = Math.max(1, Math.min(size.width - x, rect.width));
+        const height = Math.max(1, Math.min(size.height - y, rect.height));
+        this.viewportChange$.next({ x, y, width, height });
+      }
+    } catch {
+      /* readback unavailable */
+    }
+  }
+
+  private scheduleReadback(): void {
+    if (!this.viewer) return;
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => void this.runReadback());
+    else setTimeout(() => void this.runReadback(), 0);
+  }
+
+  /** Debounced readback — armed on camera changes so `lastPixels` tracks the current view after a
+   *  pan/zoom settles (and after tiled levels finish loading), which the on-canvas pixel tools
+   *  (wand/brush/SAM) read synchronously. Coalesces rapid changes. */
+  private armReadback(delayMs = 250): void {
+    if (this.readbackTimer != null) clearTimeout(this.readbackTimer);
+    this.readbackTimer = setTimeout(() => {
+      this.readbackTimer = null;
+      void this.runReadback();
+    }, delayMs);
   }
 
   // ── IRegionStore: delegate to the shared RegionStore ──────────────────────
@@ -1319,6 +1345,7 @@ export class NapariVisualizerService implements IVisualizer {
     }
     this.viewer?.setControlsEnabled(false);
     this.cachedImageSource = null;
+    this.armReadback(0);
     if (this.wandHost) this.wandTool.bindHost(this.wandHost);
     this.wandTool.setMode(true, (options ?? {}) as unknown as WandOptions);
   }
@@ -1336,6 +1363,7 @@ export class NapariVisualizerService implements IVisualizer {
     }
     this.viewer?.setControlsEnabled(false);
     this.cachedImageSource = null;
+    this.armReadback(0);
     if (this.wandHost) this.brushTool.bindHost(this.wandHost);
     this.brushTool.setMode(true, (options ?? {}) as unknown as BrushOptions);
   }
@@ -1364,14 +1392,16 @@ export class NapariVisualizerService implements IVisualizer {
   }
   // SAM / cellpose — server round-trips that read the drawn rectangles + displayed pixels through
   // the same wand host (rectangles from the RegionStore, image from the readback).
-  segmentRectangles(): Promise<number> {
-    if (!this.viewer || !this.wandHost) return Promise.resolve(0);
+  async segmentRectangles(): Promise<number> {
+    if (!this.viewer || !this.wandHost) return 0;
+    await this.runReadback(); // the SAM embedding samples the currently-displayed image
     this.cachedImageSource = null;
     this.samTool.bindHost(this.wandHost);
     return this.samTool.segmentBoxes();
   }
-  segmentRectanglesCellpose(): Promise<number> {
-    if (!this.viewer || !this.wandHost || !this.cellSegmenter) return Promise.resolve(0);
+  async segmentRectanglesCellpose(): Promise<number> {
+    if (!this.viewer || !this.wandHost || !this.cellSegmenter) return 0;
+    await this.runReadback();
     this.cachedImageSource = null;
     this.cellSegmentTool.bindHost(this.wandHost);
     return this.cellSegmentTool.segmentBoxes(this.cellSegmenter);
@@ -1385,6 +1415,7 @@ export class NapariVisualizerService implements IVisualizer {
     if (active) {
       this.viewer?.setControlsEnabled(false);
       this.cachedImageSource = null;
+      this.armReadback(0); // refresh the readback the click's embedding will sample
       if (this.wandHost) this.samPointTool.bindHost(this.wandHost);
     }
     this.samPointTool.setMode(active);
