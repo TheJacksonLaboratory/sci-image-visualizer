@@ -91,7 +91,14 @@ host wiring (`RoutingVisualizerService`, toolbar `toggleDragMode`).
   regardless of zoom. Larger change (SAM-specific image fetch + coordinate mapping).
 - **Shared-code refactor (held)** — extract the identical OSD+napari IRegionStore/IDisplayOptions
   delegations into an abstract base.
-- **OSD hole-bézier handle dragging** — OSD renders bézier holes; napari has full edit. Minor.
+
+## DONE (cont.)
+- **OSD donut hole-bézier full edit** — OSD now draws + hit-tests + drags hole bézier control
+  handles (ring-aware → store.moveHoleBezierHandle), matching napari. Both backends fully edit
+  bézier donuts.
+- **Wand/brush zoom-scale fix** — the persisted stroke is invalidated when the view ratio/origin
+  changes, so editing no longer rescales a region by the zoom-change factor; plus `fitsForEdit`
+  skips adopt/merge of a region too large to rasterize at the current zoom. Shared (all 3 backends).
 - **Shared-code refactor** (HELD by user): extract the ~40 identical `IRegionStore`/`IDisplayOptions`
   delegations from OSD + napari into a shared abstract base class they extend.
 - Known parity gaps (lower priority): `setNavigatorVisible` (napari-js has no minimap — library
