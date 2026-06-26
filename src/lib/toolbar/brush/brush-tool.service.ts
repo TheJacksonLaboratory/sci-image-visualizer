@@ -58,6 +58,9 @@ export class BrushToolService {
   /** Id of the region this stroke is editing (null = a fresh region). For an
    *  erase that splits the region, this tracks the largest resulting piece. */
   private strokeRegionId: number | null = null;
+  /** Readback ratio/origin signature the active stroke is tied to; a change (zoom/pan) invalidates
+   *  it so it isn't re-committed at a different scale (jit-ui#102). */
+  private strokeRatioSig: string | null = null;
   /** Ids of the extra regions produced when an erase stroke splits a region
    *  into disconnected pieces — reused across drag ticks so the split pieces
    *  keep stable identities instead of being recreated each tick. */
@@ -199,6 +202,14 @@ export class BrushToolService {
     const ry = cached.ratios[0] || 1;
     const ox = cached.originX ?? 0;
     const oy = cached.originY ?? 0;
+    // Drop a stroke built at a different view (zoom/pan): its matrix coords are tied to the old
+    // ratio/origin, and re-committing would rescale the region by the zoom factor (jit-ui#102).
+    const sig = `${rx},${ry},${ox},${oy}`;
+    if (this.stroke && this.strokeRatioSig !== sig) {
+      this.stroke = null;
+      this.strokeRegionId = null;
+    }
+    this.strokeRatioSig = sig;
     const matrixX = (dataX - ox) / rx;
     const matrixY = (dataY - oy) / ry;
     if (matrixX < 0 || matrixX >= cached.width) return;

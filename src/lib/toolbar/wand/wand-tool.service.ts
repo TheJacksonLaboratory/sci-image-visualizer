@@ -80,6 +80,9 @@ export class WandToolService {
   private stroke: BBoxMask | null = null;
   /** Id of the region this wand stroke is editing (null = a fresh region). */
   private strokeRegionId: number | null = null;
+  /** Readback ratio/origin signature the active stroke's matrix coords are tied to; a change
+   *  (zoom/pan) invalidates the stroke so it isn't re-committed at a different scale (jit-ui#102). */
+  private strokeRatioSig: string | null = null;
   private dragging = false;
   private options: WandOptions = {};
 
@@ -217,6 +220,16 @@ export class WandToolService {
     const ry = cached.ratios[1] || cached.ratios[0] || 1;
     const ox = cached.originX ?? 0;
     const oy = cached.originY ?? 0;
+    // The stroke accumulator is in matrix (viewport-pixel) coordinates tied to the readback's
+    // ratio/origin. If the view changed (zoom/pan) since the stroke was built, those coords no
+    // longer mean the same thing — re-committing would rescale the region by the zoom factor
+    // (jit-ui#102). Drop the stale stroke so a fresh one is built at the current view.
+    const sig = `${rx},${ry},${ox},${oy}`;
+    if (this.stroke && this.strokeRatioSig !== sig) {
+      this.stroke = null;
+      this.strokeRegionId = null;
+    }
+    this.strokeRatioSig = sig;
     const matrixX = (dataX - ox) / rx;
     const matrixY = (dataY - oy) / ry;
     if (matrixX < 0 || matrixX >= cached.width) return;
