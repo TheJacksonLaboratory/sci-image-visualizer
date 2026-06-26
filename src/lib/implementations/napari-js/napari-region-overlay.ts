@@ -43,6 +43,8 @@ export class NapariRegionOverlay implements IRegionOverlay {
 
   /** In-progress drawing state (image-space). */
   private draftRect: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  /** In-progress rubber-band selection marquee (select mode), image-space. */
+  private marquee: { x0: number; y0: number; x1: number; y1: number } | null = null;
   private draftPath: Array<[number, number]> | null = null; // freehand or click polygon
   private drawing = false; // pointer is down for rect / freehand
 
@@ -97,6 +99,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
     this.mode = mode;
     this.draftRect = null;
     this.draftPath = null;
+    this.marquee = null;
     this.drawing = false;
     // The overlay owns pointer/navigation gating: while a tool is active it captures the pointer
     // and the napari camera controls are disabled; 'none' hands the pointer back for pan/zoom.
@@ -163,6 +166,12 @@ export class NapariRegionOverlay implements IRegionOverlay {
 
   private readonly onPointerMove = (e: PointerEvent): void => {
     const [ix, iy] = this.toImage(e.clientX, e.clientY);
+    if (this.marquee) {
+      this.marquee.x1 = ix;
+      this.marquee.y1 = iy;
+      this.redraw();
+      return;
+    }
     if (this.edit) {
       this.applyManipulation(ix, iy);
       this.redraw();
@@ -182,6 +191,18 @@ export class NapariRegionOverlay implements IRegionOverlay {
   };
 
   private readonly onPointerUp = (e: PointerEvent): void => {
+    if (this.marquee) {
+      const m = this.marquee;
+      this.marquee = null;
+      try {
+        this.svg.releasePointerCapture(e.pointerId);
+      } catch {
+        /* already released */
+      }
+      this.finishMarquee(m);
+      this.redraw();
+      return;
+    }
     if (this.edit) {
       this.store.endBatch();
       this.edit = null;
@@ -286,7 +307,14 @@ export class NapariRegionOverlay implements IRegionOverlay {
         return;
       }
     }
-    this.store.setSelectedShapeIndices([]);
+    // Empty space: in select mode start a rubber-band marquee (selects the regions it covers on
+    // release); in move mode just clear the selection.
+    if (this.mode === 'select') {
+      this.marquee = { x0: ix, y0: iy, x1: ix, y1: iy };
+      this.svg.setPointerCapture(e.pointerId);
+    } else {
+      this.store.setSelectedShapeIndices([]);
+    }
   }
 
   /** Test whether a client point grabs a rectangle corner or a polygon vertex of `region`. */
@@ -456,6 +484,56 @@ export class NapariRegionOverlay implements IRegionOverlay {
     let t = ((px - ax) * dx + (py - ay) * dy) / len2;
     t = Math.max(0, Math.min(1, t));
     return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+  }
+
+  /** Finalize a rubber-band marquee: select every region whose bounding box it overlaps (a tiny
+   *  marquee is treated as a click on empty space → clear the selection). */
+  private finishMarquee(m: { x0: number; y0: number; x1: number; y1: number }): void {
+    const x0 = Math.min(m.x0, m.x1);
+    const x1 = Math.max(m.x0, m.x1);
+    const y0 = Math.min(m.y0, m.y1);
+    const y1 = Math.max(m.y0, m.y1);
+    if (x1 - x0 < 3 && y1 - y0 < 3) {
+      this.store.setSelectedShapeIndices([]);
+      return;
+    }
+    const indices: number[] = [];
+    this.store.getRegions().forEach((r, i) => {
+      if (r.isProfile?.()) return;
+      const bb = this.regionBBox(r);
+      if (bb && bb.x0 <= x1 && bb.x1 >= x0 && bb.y0 <= y1 && bb.y1 >= y0) indices.push(i);
+    });
+    this.store.setSelectedShapeIndices(indices);
+  }
+
+  /** A region's bounding box in image coords (rectangle, polygon, or multipolygon), or null. */
+  private regionBBox(
+    region: Region,
+  ): { x0: number; y0: number; x1: number; y1: number } | null {
+    const b = region.bounds;
+    if (!b) return null;
+    if ('width' in b && 'x' in b) {
+      const r = b as Rectangle;
+      return { x0: r.x, y0: r.y, x1: r.x + r.width, y1: r.y + r.height };
+    }
+    const acc = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+    const addRing = (xs: number[], ys: number[]): void => {
+      for (let i = 0; i < xs.length; i++) {
+        if (xs[i] < acc.x0) acc.x0 = xs[i];
+        if (xs[i] > acc.x1) acc.x1 = xs[i];
+        if (ys[i] < acc.y0) acc.y0 = ys[i];
+        if (ys[i] > acc.y1) acc.y1 = ys[i];
+      }
+    };
+    if ('npoints' in b) {
+      const p = b as Polygon;
+      addRing(p.xpoints, p.ypoints);
+    } else if ('polygons' in b) {
+      for (const p of (b as { polygons: Polygon[] }).polygons) addRing(p.xpoints, p.ypoints);
+    } else {
+      return null;
+    }
+    return isFinite(acc.x0) ? acc : null;
   }
 
   // ── shape commit ──────────────────────────────────────────────────────────
@@ -760,6 +838,23 @@ export class NapariRegionOverlay implements IRegionOverlay {
       const el = document.createElementNS(SVG_NS, 'polyline');
       el.setAttribute('points', pts);
       this.styleDraft(el);
+      this.svg.appendChild(el);
+    }
+    if (this.marquee) {
+      const { x0, y0, x1, y1 } = this.marquee;
+      const [lx, ly] = this.toLocal(Math.min(x0, x1), Math.min(y0, y1));
+      const [rx, ry] = this.toLocal(Math.max(x0, x1), Math.max(y0, y1));
+      const el = document.createElementNS(SVG_NS, 'rect');
+      el.setAttribute('x', `${lx}`);
+      el.setAttribute('y', `${ly}`);
+      el.setAttribute('width', `${Math.abs(rx - lx)}`);
+      el.setAttribute('height', `${Math.abs(ry - ly)}`);
+      el.setAttribute('stroke', '#4da3ff');
+      el.setAttribute('stroke-width', '1');
+      el.setAttribute('stroke-dasharray', '4 3');
+      el.setAttribute('fill', '#4da3ff');
+      el.setAttribute('fill-opacity', '0.12');
+      el.setAttribute('vector-effect', 'non-scaling-stroke');
       this.svg.appendChild(el);
     }
   }
