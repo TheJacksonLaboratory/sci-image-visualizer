@@ -2,8 +2,15 @@ import { Inject, Injectable, Optional } from '@angular/core';
 import { Observable, BehaviorSubject, Subject, Subscription, combineLatest, from, of } from 'rxjs';
 import { Image } from 'image-js';
 import { saveAs } from 'file-saver';
-import { Viewer, Colormap, histogramScalar } from 'napari-js';
-import type { VolumeLayer, ImageLayer, TiledSource, TileKey, PixelChunk } from 'napari-js';
+import { Viewer, histogramScalar, colormapFromLut, MultiChannelImageView } from 'napari-js';
+import type {
+  VolumeLayer,
+  TiledSource,
+  TileKey,
+  PixelChunk,
+  ChannelView,
+  Colormap,
+} from 'napari-js';
 
 import { IImageInfo, IImageMetadata } from '../../contracts/image.contract';
 import { Region } from '../../models/region';
@@ -175,8 +182,9 @@ export class NapariVisualizerService implements IVisualizer {
 
   /** How the current 2D image is composited (drives histogram + state application). */
   private imageMode: 'grayscale' | 'multichannel' | 'rgb' = 'rgb';
-  /** Per-channel scalar layers for the multichannel/grayscale modes, keyed by channel index. */
-  private readonly channelLayers = new Map<number, ImageLayer>();
+  /** napari-js high-level view that owns the per-channel layer set (build + live display
+   *  updates) for the current {@link imageMode}. Rebuilt on each (re)render. */
+  private channelView: MultiChannelImageView | null = null;
   /** Live subscription applying channel-state / colormap changes to the layers. */
   private displaySub: Subscription | null = null;
   /** Latest grayscale colormap selection from the store (applied to the single gray layer). */
@@ -479,35 +487,16 @@ export class NapariVisualizerService implements IVisualizer {
 
   // ── Channels: per-channel composite, LUT, native histograms (jit-ui#102) ──────────────────
 
-  /** Build a napari `Colormap` from a 0..255 RGB LUT (256 stops, t = i/255). */
-  private colormapFromLut(name: string, lut: Rgb[]): Colormap {
-    const stops = lut.map((c, i) => ({
-      t: i / (lut.length - 1),
-      color: [c[0] / 255, c[1] / 255, c[2] / 255] as [number, number, number],
-    }));
-    return new Colormap(name, stops);
-  }
-
-  /** A black→tint ramp for a channel's hex colour (additive multichannel compositing). */
-  private tintColormap(hex: string): Colormap {
-    const h = (hex || '#ffffff').replace('#', '');
-    const full = h.length === 3 ? h[0] + h[0] + h[1] + h[1] + h[2] + h[2] : h;
-    const r = parseInt(full.slice(0, 2), 16) || 0;
-    const g = parseInt(full.slice(2, 4), 16) || 0;
-    const b = parseInt(full.slice(4, 6), 16) || 0;
-    return new Colormap(`tint-${full}`, [
-      { t: 0, color: [0, 0, 0] },
-      { t: 1, color: [r / 255, g / 255, b / 255] },
-    ]);
-  }
-
-  /** The grayscale display colormap from the store selection (+reverse), defaulting to gray. */
+  /** The grayscale display colormap from the store selection (+reverse), defaulting to gray.
+   *  Maps the jit-ui store colormap node to a napari `Colormap` via the library's LUT factory;
+   *  the multichannel tint ramps are built inside {@link MultiChannelImageView} from each
+   *  channel's hex colour. */
   private grayscaleColormap(): Colormap | string {
     const value = (this.currentColormap as { data?: { value?: unknown } } | null)?.data?.value;
     const lut = value != null ? buildColormapLut(value, this.currentReverse) : null;
-    if (lut) return this.colormapFromLut('gray-cmap', lut);
+    if (lut) return colormapFromLut('gray-cmap', lut);
     return this.currentReverse
-      ? this.colormapFromLut('gray-rev', [[255, 255, 255], [0, 0, 0]] as Rgb[])
+      ? colormapFromLut('gray-rev', [[255, 255, 255], [0, 0, 0]] as Rgb[])
       : 'gray';
   }
 
@@ -612,49 +601,43 @@ export class NapariVisualizerService implements IVisualizer {
     const scale: [number, number] = [texW ? fullW / texW : 1, texH ? fullH / texH : 1];
 
     this.imageMode = mode;
-    v.layers.clear();
-    this.channelLayers.clear();
+    const interpolation: 'linear' | 'nearest' = this.imageSmoothing ? 'linear' : 'nearest';
+    this.channelView = new MultiChannelImageView(v);
     if (mode === 'multichannel') {
-      planes.forEach((d, c) => {
+      const views: ChannelView[] = planes.map((d, c) => {
         const st = states.find((s) => s.index === c);
         const color = st?.color ?? desc?.channelInfo?.[c]?.color ?? tintFor(c);
-        const layer = v.addImage(
-          { kind: 'typed', width: d.width, height: d.height, channels: 1, dtype: 'uint8', data: d.data },
-          {
-            name: st?.name ?? `ch${c}`,
-            colormap: this.tintColormap(color),
-            contrastLimits: [st?.min ?? 0, st?.max ?? 255],
-            gamma: st?.gamma ?? 1,
-            visible: st?.visible ?? true,
-            invert: this.invertEnabled,
-            blending: 'additive',
-            interpolation: this.imageSmoothing ? 'linear' : 'nearest',
-            scale,
-          },
-        );
-        this.channelLayers.set(c, layer);
+        return {
+          source: { kind: 'typed', width: d.width, height: d.height, channels: 1, dtype: 'uint8', data: d.data },
+          tint: color,
+          name: st?.name ?? `ch${c}`,
+          contrastLimits: [st?.min ?? 0, st?.max ?? 255],
+          gamma: st?.gamma ?? 1,
+          visible: st?.visible ?? true,
+          invert: this.invertEnabled,
+          scale,
+        };
       });
+      this.channelView.render('multichannel', views, { interpolation });
     } else if (mode === 'grayscale') {
       const d = planes[0];
       const st = states[0];
-      const layer = v.addImage(
-        { kind: 'typed', width: d.width, height: d.height, channels: 1, dtype: 'uint8', data: d.data },
-        {
-          colormap: this.grayscaleColormap(),
-          contrastLimits: [st?.min ?? 0, st?.max ?? 255],
-          gamma: st?.gamma ?? 1,
-          invert: this.invertEnabled,
-          interpolation: this.imageSmoothing ? 'linear' : 'nearest',
-          scale,
-        },
+      this.channelView.render(
+        'grayscale',
+        [
+          {
+            source: { kind: 'typed', width: d.width, height: d.height, channels: 1, dtype: 'uint8', data: d.data },
+            colormap: this.grayscaleColormap(),
+            contrastLimits: [st?.min ?? 0, st?.max ?? 255],
+            gamma: st?.gamma ?? 1,
+            invert: this.invertEnabled,
+            scale,
+          },
+        ],
+        { interpolation },
       );
-      this.channelLayers.set(0, layer);
     } else {
-      const layer = v.addImage(bitmap as ImageBitmap, {
-        scale,
-        interpolation: this.imageSmoothing ? 'linear' : 'nearest',
-      });
-      this.channelLayers.set(0, layer);
+      this.channelView.render('rgb', [{ source: bitmap as ImageBitmap, scale }], { interpolation });
     }
     this.imageW = fullW;
     this.imageH = fullH;
@@ -674,42 +657,47 @@ export class NapariVisualizerService implements IVisualizer {
     const multichannel = !!desc.multichannel && channelCount > 1;
     const interpolation: 'linear' | 'nearest' = this.imageSmoothing ? 'linear' : 'nearest';
 
-    v.layers.clear();
-    this.channelLayers.clear();
     this.tiled = true;
+    this.channelView = new MultiChannelImageView(v);
 
     if (multichannel) {
       this.imageMode = 'multichannel';
+      const views: ChannelView[] = [];
       for (let c = 0; c < channelCount; c++) {
         const st = states.find((s) => s.index === c);
         const color = st?.color ?? desc.channelInfo?.[c]?.color ?? tintFor(c);
-        const layer = v.addImage(this.buildTiledSource(desc, c, 1), {
+        views.push({
+          source: this.buildTiledSource(desc, c, 1),
+          tint: color,
           name: st?.name ?? `ch${c}`,
-          colormap: this.tintColormap(color),
           contrastLimits: [st?.min ?? 0, st?.max ?? 255],
           gamma: st?.gamma ?? 1,
           visible: st?.visible ?? true,
           invert: this.invertEnabled,
-          blending: 'additive',
-          interpolation,
         });
-        this.channelLayers.set(c, layer);
       }
+      this.channelView.render('multichannel', views, { interpolation });
     } else if (channelCount === 1) {
       this.imageMode = 'grayscale';
       const st = states[0];
-      const layer = v.addImage(this.buildTiledSource(desc, undefined, 1), {
-        colormap: this.grayscaleColormap(),
-        contrastLimits: [st?.min ?? 0, st?.max ?? 255],
-        gamma: st?.gamma ?? 1,
-        invert: this.invertEnabled,
-        interpolation,
-      });
-      this.channelLayers.set(0, layer);
+      this.channelView.render(
+        'grayscale',
+        [
+          {
+            source: this.buildTiledSource(desc, undefined, 1),
+            colormap: this.grayscaleColormap(),
+            contrastLimits: [st?.min ?? 0, st?.max ?? 255],
+            gamma: st?.gamma ?? 1,
+            invert: this.invertEnabled,
+          },
+        ],
+        { interpolation },
+      );
     } else {
       this.imageMode = 'rgb';
-      const layer = v.addImage(this.buildTiledSource(desc, undefined, 4), { interpolation });
-      this.channelLayers.set(0, layer);
+      this.channelView.render('rgb', [{ source: this.buildTiledSource(desc, undefined, 4) }], {
+        interpolation,
+      });
     }
     this.imageW = desc.width;
     this.imageH = desc.height;
@@ -813,32 +801,31 @@ export class NapariVisualizerService implements IVisualizer {
     });
   }
 
-  /** Apply the current channel states / colormap to the live layers. */
+  /** Apply the current channel states / colormap to the live layers (no re-fetch), delegating the
+   *  per-channel layer mutations to the {@link MultiChannelImageView}. */
   private applyDisplayState(channels: IChannelState[]): void {
-    if (!this.viewer) return;
+    const view = this.channelView;
+    if (!this.viewer || !view) return;
     if (this.imageMode === 'multichannel') {
-      for (const [c, layer] of this.channelLayers) {
+      view.layers.forEach((_, c) => {
         const st = channels.find((s) => s.index === c);
-        if (!st) continue;
-        layer.colormap = this.tintColormap(st.color);
-        layer.contrastLimits = [st.min, st.max];
-        layer.gamma = st.gamma;
-        layer.visible = st.visible;
-        layer.invert = this.invertEnabled;
-      }
+        if (!st) return;
+        view.updateChannel(c, {
+          tint: st.color,
+          contrastLimits: [st.min, st.max],
+          gamma: st.gamma,
+          visible: st.visible,
+          invert: this.invertEnabled,
+        });
+      });
     } else if (this.imageMode === 'grayscale') {
-      const layer = this.channelLayers.get(0);
       const st = channels[0];
-      if (layer) {
-        layer.colormap = this.grayscaleColormap();
-        layer.invert = this.invertEnabled;
-        if (st) {
-          layer.contrastLimits = [st.min, st.max];
-          layer.gamma = st.gamma;
-        }
-      }
+      view.updateChannel(0, {
+        colormap: this.grayscaleColormap(),
+        invert: this.invertEnabled,
+        ...(st ? { contrastLimits: [st.min, st.max] as [number, number], gamma: st.gamma } : {}),
+      });
     }
-    this.viewer.requestRender();
   }
 
   /** (Re)install the physical scale bar over the 2D image, sized from the image's µm/pixel
@@ -950,7 +937,7 @@ export class NapariVisualizerService implements IVisualizer {
     }
     this.cameraReadbackOff?.();
     this.cameraReadbackOff = null;
-    this.channelLayers.clear();
+    this.channelView = null;
     this.viewer?.dispose();
     this.viewer = null;
     if (this.canvas && this.host?.contains(this.canvas)) this.host.removeChild(this.canvas);
@@ -996,10 +983,8 @@ export class NapariVisualizerService implements IVisualizer {
 
   setImageSmoothingEnabled(enabled: boolean): void {
     this.imageSmoothing = enabled;
-    // Apply live to the rendered image layers; baked into addImage on the next render too.
-    const interpolation = enabled ? 'linear' : 'nearest';
-    for (const layer of this.channelLayers.values()) layer.interpolation = interpolation;
-    this.viewer?.requestRender();
+    // Apply live to the rendered image layers; baked into the next render too.
+    this.channelView?.setInterpolation(enabled ? 'linear' : 'nearest');
   }
 
   setShowStack(_showstack: boolean): void {
@@ -1512,7 +1497,7 @@ export class NapariVisualizerService implements IVisualizer {
     }
     // Grayscale/multichannel (stitch): native per-channel histogram straight from the in-memory
     // scalar layer (no GPU readback). RGB: bin the displayed pixels' R/G/B byte (8-bit client path).
-    const layer = this.channelLayers.get(this.imageMode === 'grayscale' ? 0 : channelIndex);
+    const layer = this.channelView?.layers[this.imageMode === 'grayscale' ? 0 : channelIndex];
     if (layer) {
       const h = v.layerHistogram(layer, bins);
       if (h) return this.toIHistogram(h);

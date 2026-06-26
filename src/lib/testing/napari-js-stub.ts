@@ -57,6 +57,71 @@ export class Colormap {
   }
 }
 
+/** Stand-in for napari-js colormapFromLut (grayscale LUT → Colormap). */
+export function colormapFromLut(name: string, _lut: unknown, _maxValue = 255): Colormap {
+  return new Colormap(name);
+}
+
+export type ChannelMode = 'multichannel' | 'grayscale' | 'rgb';
+
+/** Stand-in for the napari-js ChannelView descriptor. */
+export interface ChannelView {
+  source: unknown;
+  tint?: string;
+  colormap?: unknown;
+  contrastLimits?: [number, number];
+  gamma?: number;
+  visible?: boolean;
+  invert?: boolean;
+  name?: string;
+  scale?: [number, number];
+}
+
+/** The Viewer slice MultiChannelImageView drives (satisfied by the stub Viewer). */
+export interface ImageLayerHost {
+  addImage(input?: unknown, opts?: unknown): ImageLayer;
+  readonly layers: { clear(): void };
+  requestRender(): void;
+}
+
+/**
+ * Stand-in for napari-js MultiChannelImageView: builds + tracks stub ImageLayers through the host
+ * so the adapter's `.layers[i]` lookups and live updates resolve in unit tests (no GPU).
+ */
+export class MultiChannelImageView {
+  private _mode: ChannelMode | null = null;
+  private _layers: ImageLayer[] = [];
+
+  constructor(private readonly host: ImageLayerHost) {}
+
+  get mode(): ChannelMode | null {
+    return this._mode;
+  }
+  get layers(): readonly ImageLayer[] {
+    return this._layers;
+  }
+  render(mode: ChannelMode, channels: ChannelView[]): ImageLayer[] {
+    this.host.layers.clear();
+    this._mode = mode;
+    const count = mode === 'multichannel' ? channels.length : 1;
+    this._layers = Array.from({ length: count }, () => this.host.addImage());
+    this.host.requestRender();
+    return [...this._layers];
+  }
+  updateChannel(): void {
+    this.host.requestRender();
+  }
+  setInterpolation(): void {
+    this.host.requestRender();
+  }
+  clear(): void {
+    this.host.layers.clear();
+    this._layers = [];
+    this._mode = null;
+    this.host.requestRender();
+  }
+}
+
 /** Minimal Viewer matching the surface NapariVisualizerService touches. */
 export class Viewer {
   readonly ready: Promise<void> = Promise.resolve();
