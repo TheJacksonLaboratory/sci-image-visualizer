@@ -16,7 +16,14 @@ import { IImageInfo, IImageMetadata } from '../../contracts/image.contract';
 import { Region } from '../../models/region';
 import { IChannelState } from '../../contracts/channel-histogram-api.contract';
 import { buildColormapLut, Rgb } from '../../contracts/colormap-lut';
-import { PlotType, PlotTypeDescriptor, PLOT_TYPE_DESCRIPTORS } from '../../contracts/plot-type';
+import {
+  PlotType,
+  PlotTypeDescriptor,
+  PLOT_TYPE_DESCRIPTORS,
+  isNapari3d,
+  isNapariIsosurface,
+  isLowResNapari3d,
+} from '../../contracts/plot-type';
 import {
   IVisualizer,
   PixelData,
@@ -88,10 +95,21 @@ interface NapariLoaded {
   filename: string;
 }
 
-const VOLUME_MAX_SLICE = 256; // downsample volume slices for a tractable 3D preview
+const VOLUME_MAX_SLICE = 256; // downsample volume slices for a tractable 3D preview (high-res)
+/** In-plane cap for the low-res 3D variants — coarser, but far fewer pixels to fetch/assemble. */
+const VOLUME_LOWRES_MAX_SLICE = 96;
 /** Max concurrent slice fetches when assembling a volume — keeps the connection pool busy
  *  without flooding it (browsers cap ~6/host) on a deep stack. */
 const VOLUME_FETCH_CONCURRENCY = 8;
+
+/** Slice-sampling preset for a napari 3D plot type. Low-res variants take every other slice
+ *  (`sliceStep` 2) and a smaller in-plane cap, so a deep stack loads markedly faster at the cost
+ *  of z- and in-plane resolution. */
+function volumeResolutionFor(t: PlotType): { maxSlice: number; sliceStep: number } {
+  return isLowResNapari3d(t)
+    ? { maxSlice: VOLUME_LOWRES_MAX_SLICE, sliceStep: 2 }
+    : { maxSlice: VOLUME_MAX_SLICE, sliceStep: 1 };
+}
 const TILE_SIZE = 512; // server tile edge (matches the OSD backend)
 /** Max tiles stitched for one displayed slice (512px tiles → up to ~6144² at full res). Beyond
  *  this we step to a coarser pyramid level so a large image stays tractable. */
@@ -453,10 +471,9 @@ export class NapariVisualizerService implements IVisualizer {
       this.viewer = viewer;
       await viewer.ready;
 
-      const isVolume =
-        plotType === PlotType.NAPARI_VOLUME || plotType === PlotType.NAPARI_ISOSURFACE;
-      if (isVolume) {
-        const vol = await this.assembleVolume(info);
+      if (isNapari3d(plotType)) {
+        // Low-res variants subsample slices + cap the in-plane size for a faster, coarser preview.
+        const vol = await this.assembleVolume(info, volumeResolutionFor(plotType));
         if (vol) {
           this.imageW = vol.width;
           this.imageH = vol.height;
@@ -464,7 +481,7 @@ export class NapariVisualizerService implements IVisualizer {
           this.volumeData = vol.data;
           this.volumeLayer = viewer.addVolume(vol.data, vol.width, vol.height, vol.depth, {
             colormap: this.grayscaleColormap(),
-            rendering: plotType === PlotType.NAPARI_ISOSURFACE ? 'iso' : 'mip',
+            rendering: isNapariIsosurface(plotType) ? 'iso' : 'mip',
           });
           // Color LUT for the volume/isosurface is driven by the store colormap (+reverse).
           this.subscribeVolumeDisplayState();
@@ -866,20 +883,27 @@ export class NapariVisualizerService implements IVisualizer {
    */
   private async assembleVolume(
     info: IImageInfo | undefined,
+    opts: { maxSlice?: number; sliceStep?: number } = {},
   ): Promise<{ data: Uint8Array; width: number; height: number; depth: number } | null> {
-    const depth = info?.imageMeta?.[0]?.z || info?.urls?.length || 1;
-    if (depth < 1) {
+    const fullDepth = info?.imageMeta?.[0]?.z || info?.urls?.length || 1;
+    if (fullDepth < 1) {
       console.warn('[napari-js] no slices to assemble a volume');
       return null;
     }
+    const step = Math.max(1, Math.floor(opts.sliceStep ?? 1));
+    const maxSlice = opts.maxSlice ?? VOLUME_MAX_SLICE;
+    // Source-slice indices sampled into the volume (every `step`th plane → low-res is faster).
+    const zIndices: number[] = [];
+    for (let z = 0; z < fullDepth; z += step) zIndices.push(z);
+    const depth = zIndices.length;
 
     this.stackLoading$.next(true);
     this.stackLoadingProgress$.next(0);
     try {
-      // One cheap coarse tile per slice (budget 1) — the volume is downsampled to VOLUME_MAX_SLICE
+      // One cheap coarse tile per slice (budget 1) — the volume is downsampled to `maxSlice`
       // regardless, so stitching the full-res grid per slice would be wasted fetches.
-      const first = await this.fetchSlice(0, undefined, 1);
-      const scale = Math.min(1, VOLUME_MAX_SLICE / Math.max(first.width, first.height, 1));
+      const first = await this.fetchSlice(zIndices[0], undefined, 1);
+      const scale = Math.min(1, maxSlice / Math.max(first.width, first.height, 1));
       const width = Math.max(1, Math.round(first.width * scale));
       const height = Math.max(1, Math.round(first.height * scale));
       const data = new Uint8Array(width * height * depth);
@@ -917,14 +941,15 @@ export class NapariVisualizerService implements IVisualizer {
 
       readSlice(0, first);
 
-      // Remaining slices via a small pool of workers draining a shared queue.
+      // Remaining planes via a small pool of workers draining a shared queue. Each plane `p`
+      // maps to source slice `zIndices[p]` (subsampled for low-res).
       const pending: number[] = [];
-      for (let z = 1; z < depth; z++) pending.push(z);
+      for (let p = 1; p < depth; p++) pending.push(p);
       const worker = async (): Promise<void> => {
         for (;;) {
-          const z = pending.shift();
-          if (z === undefined) return;
-          readSlice(z, await this.fetchSlice(z, undefined, 1));
+          const p = pending.shift();
+          if (p === undefined) return;
+          readSlice(p, await this.fetchSlice(zIndices[p], undefined, 1));
         }
       };
       const poolSize = Math.min(VOLUME_FETCH_CONCURRENCY, Math.max(1, depth - 1));
@@ -1128,7 +1153,9 @@ export class NapariVisualizerService implements IVisualizer {
     return [
       PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_IMAGE]!,
       PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_VOLUME]!,
+      PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_VOLUME_LOWRES]!,
       PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_ISOSURFACE]!,
+      PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_ISOSURFACE_LOWRES]!,
     ];
   }
 

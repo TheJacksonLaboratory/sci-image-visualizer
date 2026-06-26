@@ -99,7 +99,9 @@ describe('NapariVisualizerService', () => {
     expect(service.getPlotTypeDescriptors().map((d) => d.type)).toEqual([
       PlotType.NAPARI_IMAGE,
       PlotType.NAPARI_VOLUME,
+      PlotType.NAPARI_VOLUME_LOWRES,
       PlotType.NAPARI_ISOSURFACE,
+      PlotType.NAPARI_ISOSURFACE_LOWRES,
     ]);
   });
 
@@ -206,6 +208,28 @@ describe('NapariVisualizerService', () => {
     ]);
     expect(volLayer.contrastLimits).toEqual([20, 200]);
     expect(volLayer.gamma).toBe(2);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('renders the low-res volume variant (subsampled slices) without error', async () => {
+    const div = document.createElement('div');
+    div.id = 'vol-lowres-host';
+    document.body.appendChild(div);
+
+    const loaded = await service.load(imageInfo(), 0);
+    const ok = await service.plot(
+      'vol-lowres-host',
+      loaded,
+      imageInfo(),
+      600,
+      PlotType.NAPARI_VOLUME_LOWRES,
+    );
+    expect(ok).toBe(true);
+    expect(service.getSurface3dControls()).not.toBeNull();
+    // The volume histogram still resolves from the assembled (subsampled) volume.
+    expect(service.getHistogram(0, 256)).not.toBeNull();
 
     service.unsubscribe();
     document.body.removeChild(div);

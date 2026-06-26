@@ -22,10 +22,14 @@ export enum PlotType {
   LINE = 'line',
   SCATTER3D = 'scatter3d',
   ISOSURFACE = 'isosurface',
-  /** WebGPU napari-js renderings (jit-ui#102), selectable alongside the OSD/Plotly types. */
+  /** WebGPU napari-js renderings (jit-ui#102), selectable alongside the OSD/Plotly types.
+   *  Volume/isosurface come in high-res and low-res variants: low-res fetches fewer/smaller
+   *  slices for a faster (coarser) 3D preview. */
   NAPARI_IMAGE = 'napari-image',
   NAPARI_VOLUME = 'napari-volume',
   NAPARI_ISOSURFACE = 'napari-isosurface',
+  NAPARI_VOLUME_LOWRES = 'napari-volume-lowres',
+  NAPARI_ISOSURFACE_LOWRES = 'napari-isosurface-lowres',
 }
 
 /** How many spatial dimensions a plot type renders in. */
@@ -71,10 +75,12 @@ export const PLOT_TYPE_DESCRIPTORS: Partial<Record<PlotType, PlotTypeDescriptor>
   [PlotType.SURFACE]:    { type: PlotType.SURFACE,    label: 'Surface (3D)',       dimensions: '3d', source: 'image', requiresGrayscale: true },
   [PlotType.SCATTER3D]:  { type: PlotType.SCATTER3D,  label: 'Scatter 3D',         dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
   [PlotType.ISOSURFACE]: { type: PlotType.ISOSURFACE, label: 'Isosurface (3D)',    dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
-  // WebGPU napari-js renderings (jit-ui#102).
-  [PlotType.NAPARI_IMAGE]:      { type: PlotType.NAPARI_IMAGE,      label: 'Image (napari · WebGPU)',      dimensions: '2d', source: 'image' },
-  [PlotType.NAPARI_VOLUME]:     { type: PlotType.NAPARI_VOLUME,     label: 'Volume (napari · WebGPU)',     dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
-  [PlotType.NAPARI_ISOSURFACE]: { type: PlotType.NAPARI_ISOSURFACE, label: 'Isosurface (napari · WebGPU)', dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
+  // WebGPU napari-js renderings (jit-ui#102). Volume/isosurface offer high-res + low-res variants.
+  [PlotType.NAPARI_IMAGE]:               { type: PlotType.NAPARI_IMAGE,               label: 'Image (napari · WebGPU)',                dimensions: '2d', source: 'image' },
+  [PlotType.NAPARI_VOLUME]:              { type: PlotType.NAPARI_VOLUME,              label: 'Volume (napari · WebGPU · high-res)',    dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
+  [PlotType.NAPARI_VOLUME_LOWRES]:       { type: PlotType.NAPARI_VOLUME_LOWRES,       label: 'Volume (napari · WebGPU · low-res)',     dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
+  [PlotType.NAPARI_ISOSURFACE]:          { type: PlotType.NAPARI_ISOSURFACE,          label: 'Isosurface (napari · WebGPU · high-res)', dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
+  [PlotType.NAPARI_ISOSURFACE_LOWRES]:   { type: PlotType.NAPARI_ISOSURFACE_LOWRES,   label: 'Isosurface (napari · WebGPU · low-res)',  dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
 };
 
 export function getPlotTypeDescriptor(type: PlotType): PlotTypeDescriptor | undefined {
@@ -83,4 +89,22 @@ export function getPlotTypeDescriptor(type: PlotType): PlotTypeDescriptor | unde
 
 export function isThreeDimensional(type: PlotType): boolean {
   return PLOT_TYPE_DESCRIPTORS[type]?.dimensions === '3d';
+}
+
+// ── napari-js 3D plot-type predicates (high-res + low-res variants) ──────────
+/** napari-js volume (either resolution). */
+export function isNapariVolume(type: PlotType): boolean {
+  return type === PlotType.NAPARI_VOLUME || type === PlotType.NAPARI_VOLUME_LOWRES;
+}
+/** napari-js isosurface (either resolution). */
+export function isNapariIsosurface(type: PlotType): boolean {
+  return type === PlotType.NAPARI_ISOSURFACE || type === PlotType.NAPARI_ISOSURFACE_LOWRES;
+}
+/** Any napari-js 3D plot type (volume or isosurface, either resolution). */
+export function isNapari3d(type: PlotType): boolean {
+  return isNapariVolume(type) || isNapariIsosurface(type);
+}
+/** The low-res napari 3D variants (coarser/faster slice sampling). */
+export function isLowResNapari3d(type: PlotType): boolean {
+  return type === PlotType.NAPARI_VOLUME_LOWRES || type === PlotType.NAPARI_ISOSURFACE_LOWRES;
 }

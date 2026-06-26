@@ -11,7 +11,7 @@ import { Polygon, Rectangle, MultiPolygon, Region } from './models/region';
 import { RegionOpsService } from './region-ops.service';
 import { VisualizerStore } from './store/visualizer-store.service';
 import { RenderOrchestrator, SliceScrubber } from './render-orchestrator';
-import { PlotType, PlotTypeDescriptor } from './contracts/plot-type';
+import { PlotType, PlotTypeDescriptor, isNapari3d } from './contracts/plot-type';
 import { ViewerFeature } from './contracts/capabilities.contract';
 import { IntensityProfile, IVisualizer, VISUALIZER } from './contracts/visualizer.contract';
 import { SAM_MODELS, getDefaultSamModelId, isSamModelReady } from './toolbar/segmentation/sam-model-registry';
@@ -1488,10 +1488,7 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     // napari-js volume/isosurface assemble their own 3D texture from the slice endpoint, so
     // they take the normal re-plot path — NOT Plotly's stack-frame loader (whose "Loading
     // frames" overlay would never clear, since Plotly isn't the active backend) (jit-ui#102).
-    const isNapari =
-      type === PlotType.NAPARI_IMAGE ||
-      type === PlotType.NAPARI_VOLUME ||
-      type === PlotType.NAPARI_ISOSURFACE;
+    const isNapari = type === PlotType.NAPARI_IMAGE || isNapari3d(type);
     if (descriptor?.requiresStack && !isNapari) {
       // Volume types (isosurface, scatter3d) need the whole z-stack loaded as a
       // 3D array, and they always render on Plotly. Drive the stack reload

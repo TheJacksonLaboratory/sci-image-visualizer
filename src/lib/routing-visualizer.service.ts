@@ -7,7 +7,7 @@ import { IImageInfo, IImageMetadata } from './contracts/image.contract';
 import { Region } from './models/region';
 import { PlotlyService } from './implementations/plotly/plotly.service';
 import { OpenSeadragonVisualizerService } from './implementations/osd/openseadragon-visualizer.service';
-import { PlotType, PlotTypeDescriptor } from './contracts/plot-type';
+import { PlotType, PlotTypeDescriptor, isNapari3d } from './contracts/plot-type';
 import { IVisualizer, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls } from './contracts/visualizer.contract';
 import { ViewerCapabilities } from './contracts/capabilities.contract';
 import { IRegionOverlay } from './contracts/region-overlay.contract';
@@ -99,10 +99,10 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     return t === PlotType.NAPARI_IMAGE;
   }
 
-  /** The 3D napari types — no 2D fallback exists (OSD is image-only), so they fall straight
-   *  to Plotly. */
+  /** The 3D napari types (volume/isosurface, either resolution) — no 2D fallback exists (OSD is
+   *  image-only), so they fall straight to Plotly. */
   private isNapari3dType(t: PlotType): boolean {
-    return t === PlotType.NAPARI_VOLUME || t === PlotType.NAPARI_ISOSURFACE;
+    return isNapari3d(t);
   }
 
   /**

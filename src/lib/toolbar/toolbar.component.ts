@@ -2,7 +2,7 @@ import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges } from
 import { MenuItem } from 'primeng/api';
 
 import { IImageInfo } from '../contracts/image.contract';
-import { PlotType, PlotTypeDescriptor } from '../contracts/plot-type';
+import { PlotType, PlotTypeDescriptor, isNapari3d, isNapariIsosurface } from '../contracts/plot-type';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from '../contracts/toolbar-config';
 
 /**
@@ -166,18 +166,13 @@ export class ToolbarComponent implements OnChanges {
   /** Any napari-js WebGPU plot type. The single-image/stack toggle + slice-number field are
    *  Plotly-only stack controls, so they're hidden for napari (jit-ui#102). */
   get isNapariMode(): boolean {
-    return (
-      this.selectedPlotType === PlotType.NAPARI_IMAGE ||
-      this.selectedPlotType === PlotType.NAPARI_VOLUME ||
-      this.selectedPlotType === PlotType.NAPARI_ISOSURFACE
-    );
+    return this.selectedPlotType === PlotType.NAPARI_IMAGE || isNapari3d(this.selectedPlotType);
   }
 
-  /** ISOSURFACE (Plotly or napari-js WebGPU) shows the isovalue range slider. */
+  /** ISOSURFACE (Plotly or napari-js WebGPU, either resolution) shows the isovalue range slider. */
   get isIsosurfaceMode(): boolean {
     return (
-      this.selectedPlotType === PlotType.ISOSURFACE ||
-      this.selectedPlotType === PlotType.NAPARI_ISOSURFACE
+      this.selectedPlotType === PlotType.ISOSURFACE || isNapariIsosurface(this.selectedPlotType)
     );
   }
 
