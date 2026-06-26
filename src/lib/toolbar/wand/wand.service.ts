@@ -243,8 +243,11 @@ export class WandService {
 
   /**
    * Trace the largest 4-connected blob in `mask` (sized w*h) and return a
-   * Polygon translated into image-pixel coordinates via (originX, originY) and
-   * clamped to (imageWidth, imageHeight).
+   * Polygon translated into image-pixel coordinates via (originX, originY).
+   * The traced vertices are NOT clamped to the image bounds: a region drawn while
+   * panned/zoomed keeps its true coordinates even where they fall outside the visible
+   * window (jit-ui#102). `imageWidth`/`imageHeight` are kept for signature compatibility
+   * but no longer used.
    */
   public maskToPolygon(mask: Uint8Array, w: number, h: number,
                        _imageWidth: number, _imageHeight: number,

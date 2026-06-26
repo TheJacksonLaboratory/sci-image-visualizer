@@ -94,27 +94,40 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     return t === PlotType.IMAGE;
   }
 
-  /** The explicit WebGPU napari-js plot types (jit-ui#102) — always route to napari-js. */
-  private isNapariType(t: PlotType): boolean {
-    return (
-      t === PlotType.NAPARI_IMAGE ||
-      t === PlotType.NAPARI_VOLUME ||
-      t === PlotType.NAPARI_ISOSURFACE
-    );
+  /** The 2D napari image type (jit-ui#102) — has a 2D fallback chain (OSD, then Plotly). */
+  private isNapariImageType(t: PlotType): boolean {
+    return t === PlotType.NAPARI_IMAGE;
   }
 
-  /** Backend to attempt for the image plot type this render (OSD unless OSD
-   *  already fell back this cycle). */
+  /** The 3D napari types — no 2D fallback exists (OSD is image-only), so they fall straight
+   *  to Plotly. */
+  private isNapari3dType(t: PlotType): boolean {
+    return t === PlotType.NAPARI_VOLUME || t === PlotType.NAPARI_ISOSURFACE;
+  }
+
+  /**
+   * Backend to attempt for the current plot type this render. The fallback chains below are
+   * mirrored exactly by {@link load} so the handle `plot()` receives always comes from the
+   * backend `plot()` selects (no load/plot backend mismatch):
+   *  - 2D image (explicit `NAPARI_IMAGE`, or `IMAGE` with the WebGPU opt-in): napari-js → OSD → Plotly.
+   *  - plain `IMAGE` (no opt-in): OSD → Plotly.
+   *  - 3D napari (`NAPARI_VOLUME`/`NAPARI_ISOSURFACE`): napari-js → Plotly (OSD can't render 3D).
+   */
   private imageBackend(): IVisualizer {
-    // Explicit napari-js plot types (the user picked one in the dropdown) → napari-js,
-    // falling back to Plotly only if it fails to load.
-    if (this.isNapariType(this.currentPlotType)) {
-      return this.napariFellBack ? this.plotly : this.napari;
-    }
-    if (this.isImageType(this.currentPlotType)) {
-      // Opt-in WebGPU napari-js backend (jit-ui#102), with OSD then Plotly as fallbacks.
-      if (this.config.useNapariRenderer && !this.napariFellBack) return this.napari;
+    const t = this.currentPlotType;
+    // 2D image with a napari-js attempt (explicit napari image, or opt-in on the Image type).
+    if (this.isNapariImageType(t) || (this.isImageType(t) && this.config.useNapariRenderer)) {
+      if (!this.napariFellBack) return this.napari;
       if (!this.osdFellBack) return this.osd;
+      return this.plotly;
+    }
+    // Plain Image type (no napari opt-in): OSD, then Plotly.
+    if (this.isImageType(t)) {
+      return this.osdFellBack ? this.plotly : this.osd;
+    }
+    // 3D napari types: napari-js, with Plotly as the only viable fallback.
+    if (this.isNapari3dType(t)) {
+      return this.napariFellBack ? this.plotly : this.napari;
     }
     return this.plotly;
   }
@@ -135,9 +148,15 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       try {
         return await this.napari.load(imageInfo, zIndex);
       } catch (err) {
-        // napari-js couldn't load → fall back to OSD (then Plotly) for THIS image.
-        console.warn('[visualizer] napari-js load failed — falling back to OpenSeadragon.', err);
         this.napariFellBack = true;
+        // Mirror imageBackend()'s fallback so load + plot pick the same backend:
+        //  - 3D napari types have no 2D fallback → straight to Plotly.
+        //  - 2D image → OSD, then Plotly.
+        if (this.isNapari3dType(this.currentPlotType)) {
+          console.warn('[visualizer] napari-js load failed — falling back to Plotly.', err);
+          return this.plotly.load(imageInfo, zIndex);
+        }
+        console.warn('[visualizer] napari-js load failed — falling back to OpenSeadragon.', err);
         return this.loadViaOsdThenPlotly(imageInfo, zIndex);
       }
     }

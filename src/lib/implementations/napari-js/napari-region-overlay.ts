@@ -30,8 +30,10 @@ interface OverlayViewer {
  * undo / export work identically to OSD) and re-renders from the store on every camera move,
  * region change, and selection change.
  *
- * 5a scope (jit-ui#102): rectangle / polygon / freehand path drawing, click-select, and pan/zoom
- * gating via `setControlsEnabled`. Vertex move/add/delete, body move, and bezier come next (5b).
+ * Supports (jit-ui#102): rectangle / polygon / freehand path drawing, click-select and rubber-band
+ * marquee select, pan/zoom gating via `setControlsEnabled`, body move, vertex move/add/delete,
+ * bezier handle editing, and donut holes (including hole vertex + hole-bezier-handle editing) —
+ * full parity with {@link OsdRegionOverlay}.
  */
 export class NapariRegionOverlay implements IRegionOverlay {
   private readonly svg: SVGSVGElement;
