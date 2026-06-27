@@ -214,7 +214,7 @@ describe('NapariVisualizerService', () => {
 
     // Invert flips the ramp (VolumeLayer has no per-layer invert, so it's emulated).
     store.setInvert(true);
-    expect(volLayer.colormap.name).toContain('flip');
+    expect(volLayer.colormap.name).toContain('reversed');
 
     service.unsubscribe();
     document.body.removeChild(div);
@@ -239,6 +239,49 @@ describe('NapariVisualizerService', () => {
     ctrls?.setAxesVisible?.(false);
     expect(axes.visible).toBe(false);
     expect(ctrls?.axesVisible?.()).toBe(false);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('builds one volume layer per channel for a multichannel volume', async () => {
+    // 3-channel multichannel descriptor → one additive tinted volume per channel.
+    (globalThis.fetch as unknown as jest.Mock).mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('tiles/info')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              width: 64,
+              height: 48,
+              tileSize: 512,
+              z: 2,
+              channels: 3,
+              multichannel: true,
+              realLevels: 1,
+              channelInfo: [{ color: '#ff0000' }, { color: '#00ff00' }, { color: '#0000ff' }],
+              levels: [{ res: 0, width: 64, height: 48 }],
+            }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) });
+    });
+    const addVolume = jest.spyOn(
+      Viewer.prototype as unknown as { addVolume: (...a: unknown[]) => unknown },
+      'addVolume',
+    );
+    addVolume.mockClear(); // the prototype spy persists across tests; count only this plot
+    const div = document.createElement('div');
+    div.id = 'mcvol-host';
+    document.body.appendChild(div);
+
+    const loaded = await service.load(imageInfo(), 0);
+    const ok = await service.plot('mcvol-host', loaded, imageInfo(), 600, PlotType.NAPARI_VOLUME);
+    expect(ok).toBe(true);
+    expect(addVolume).toHaveBeenCalledTimes(3); // one volume layer per channel
+    // Per-channel volume histogram resolves from that channel's assembled data.
+    expect(service.getHistogram(2, 256)).not.toBeNull();
 
     service.unsubscribe();
     document.body.removeChild(div);

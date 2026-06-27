@@ -26,6 +26,8 @@ export interface VolumeLayer {
   colormap: unknown;
   contrastLimits: [number, number];
   gamma: number;
+  visible: boolean;
+  blending: string;
   rendering: 'mip' | 'translucent' | 'iso';
   isoThreshold: number;
 }
@@ -82,6 +84,12 @@ export function tintColormap(hex: string): Colormap {
 /** Stand-in for napari-js resolveColormap (name | instance → Colormap). */
 export function resolveColormap(cmap: Colormap | string): Colormap {
   return cmap instanceof Colormap ? cmap : new Colormap(String(cmap));
+}
+
+/** Stand-in for napari-js reverseColormap (flipped ramp). */
+export function reverseColormap(cmap: Colormap | string): Colormap {
+  const name = cmap instanceof Colormap ? cmap.name : String(cmap);
+  return new Colormap(`${name}-reversed`);
 }
 
 export type ChannelMode = 'multichannel' | 'grayscale' | 'rgb';
@@ -144,6 +152,83 @@ export class MultiChannelImageView {
   }
 }
 
+export type VolumeMode = 'multichannel' | 'grayscale';
+
+/** Stand-in for the napari-js VolumeChannel descriptor. */
+export interface VolumeChannel {
+  data: Uint8Array;
+  width: number;
+  height: number;
+  depth: number;
+  tint?: string;
+  colormap?: unknown;
+  contrastLimits?: [number, number];
+  gamma?: number;
+  visible?: boolean;
+}
+
+export interface VolumeHost {
+  addVolume(
+    data: Uint8Array,
+    width: number,
+    height: number,
+    depth: number,
+    opts?: unknown,
+  ): VolumeLayer;
+  readonly layers: { clear(): void };
+  requestRender(): void;
+}
+
+/** Stand-in for napari-js MultiChannelVolumeView: builds + tracks stub VolumeLayers through the
+ *  host and live-applies per-channel display patches so the adapter's tests resolve (no GPU). */
+export class MultiChannelVolumeView {
+  private _mode: VolumeMode | null = null;
+  private _layers: VolumeLayer[] = [];
+
+  constructor(private readonly host: VolumeHost) {}
+
+  get mode(): VolumeMode | null {
+    return this._mode;
+  }
+  get layers(): readonly VolumeLayer[] {
+    return this._layers;
+  }
+  render(mode: VolumeMode, channels: VolumeChannel[]): VolumeLayer[] {
+    this.host.layers.clear();
+    this._mode = mode;
+    const list = mode === 'grayscale' ? channels.slice(0, 1) : channels;
+    this._layers = list.map((ch) => {
+      const layer = this.host.addVolume(ch.data, ch.width, ch.height, ch.depth);
+      if (ch.colormap !== undefined) layer.colormap = ch.colormap;
+      if (ch.contrastLimits !== undefined) layer.contrastLimits = ch.contrastLimits;
+      if (ch.gamma !== undefined) layer.gamma = ch.gamma;
+      if (ch.visible !== undefined) layer.visible = ch.visible;
+      return layer;
+    });
+    this.host.requestRender();
+    return [...this._layers];
+  }
+  updateChannel(index: number, patch: Partial<VolumeChannel>): void {
+    const layer = this._layers[index];
+    if (layer) {
+      if (patch.colormap !== undefined) layer.colormap = patch.colormap;
+      if (patch.contrastLimits !== undefined) layer.contrastLimits = patch.contrastLimits;
+      if (patch.gamma !== undefined) layer.gamma = patch.gamma;
+      if (patch.visible !== undefined) layer.visible = patch.visible;
+    }
+    this.host.requestRender();
+  }
+  setRendering(): void {
+    this.host.requestRender();
+  }
+  clear(): void {
+    this.host.layers.clear();
+    this._layers = [];
+    this._mode = null;
+    this.host.requestRender();
+  }
+}
+
 /** Minimal Viewer matching the surface NapariVisualizerService touches. */
 export class Viewer {
   readonly ready: Promise<void> = Promise.resolve();
@@ -173,7 +258,15 @@ export class Viewer {
     };
   }
   addVolume(): VolumeLayer {
-    return { colormap: 'gray', contrastLimits: [0, 255], gamma: 1, rendering: 'mip', isoThreshold: 0.5 };
+    return {
+      colormap: 'gray',
+      contrastLimits: [0, 255],
+      gamma: 1,
+      visible: true,
+      blending: 'additive',
+      rendering: 'mip',
+      isoThreshold: 0.5,
+    };
   }
   addAxes(): AxesLayer {
     return { visible: true, tickCount: 5, boundingBox: true, voxelSize: [1, 1, 1] };

@@ -4,20 +4,21 @@ import { Image } from 'image-js';
 import { saveAs } from 'file-saver';
 import {
   Viewer,
-  Colormap,
-  resolveColormap,
   histogramScalar,
   colormapFromLut,
   tintColormap,
+  reverseColormap,
   MultiChannelImageView,
+  MultiChannelVolumeView,
 } from 'napari-js';
 import type {
-  VolumeLayer,
   AxesLayer,
   TiledSource,
   TileKey,
   PixelChunk,
   ChannelView,
+  VolumeChannel,
+  Colormap,
 } from 'napari-js';
 
 import { IImageInfo, IImageMetadata } from '../../contracts/image.contract';
@@ -137,16 +138,6 @@ function tintFor(channel: number): string {
   return DEFAULT_TINTS[channel % DEFAULT_TINTS.length];
 }
 
-/** Reverse a colormap's ramp — used to emulate invert / reverse-scale on a `VolumeLayer`, which
- *  (unlike `ImageLayer`) has no per-layer invert. Resolves a named colormap to its stops first. */
-function reverseColormap(cmap: Colormap | string): Colormap {
-  const c = cmap instanceof Colormap ? cmap : resolveColormap(cmap);
-  return new Colormap(
-    `${c.name}-flip`,
-    c.stops.map((s) => ({ t: 1 - s.t, color: s.color })),
-  );
-}
-
 /** One pyramid level from `GET /tiles/info` (res 0 = full resolution). */
 interface TileLevel {
   res: number;
@@ -208,7 +199,11 @@ export class NapariVisualizerService implements IVisualizer {
   private loaded: NapariLoaded | null = null;
   private lastPixels: PixelData | null = null;
   private currentPlotType: PlotType = PlotType.NAPARI_IMAGE;
-  private volumeLayer: VolumeLayer | null = null;
+  /** napari-js high-level view owning the 3D volume layers (one additive tinted layer per channel
+   *  for multichannel, or a single grayscale volume). Null in 2D. */
+  private volumeView: MultiChannelVolumeView | null = null;
+  /** True when the volume is composited from per-channel layers (vs a single grayscale volume). */
+  private volumeMultichannel = false;
   /** 3D coordinate-axes / scale gizmo for the volume/isosurface view (null in 2D). */
   private axesLayer: AxesLayer | null = null;
   /** DOM X/Y/Z + scale labels tracking the 3D axes gizmo (null in 2D). */
@@ -216,8 +211,9 @@ export class NapariVisualizerService implements IVisualizer {
   /** Persisted axes on/off choice, re-applied when a new volume mounts. Defaults on. */
   private axesVisible = true;
   private volumeDims: { width: number; height: number; depth: number } | null = null;
-  /** Assembled uint8 volume data, kept for the volume intensity histogram. */
-  private volumeData: Uint8Array | null = null;
+  /** Assembled uint8 volume data per channel (key = channel index), kept for the volume intensity
+   *  histogram. Key 0 holds the grayscale/composite volume in the single-channel case. */
+  private readonly volumeChannelData = new Map<number, Uint8Array>();
   private imageW = 0;
   private imageH = 0;
   /** Monotonic slice-request id so a slow out-of-order slice fetch can't clobber a newer one. */
@@ -497,39 +493,7 @@ export class NapariVisualizerService implements IVisualizer {
       await viewer.ready;
 
       if (isNapari3d(plotType)) {
-        // Low-res variants subsample slices + cap the in-plane size for a faster, coarser preview.
-        const vol = await this.assembleVolume(info, volumeResolutionFor(plotType));
-        if (vol) {
-          this.imageW = vol.width;
-          this.imageH = vol.height;
-          this.volumeDims = vol;
-          this.volumeData = vol.data;
-          this.volumeLayer = viewer.addVolume(vol.data, vol.width, vol.height, vol.depth, {
-            colormap: this.grayscaleColormap(),
-            rendering: isNapariIsosurface(plotType) ? 'iso' : 'mip',
-          });
-          // 3D coordinate-axes / scale gizmo over the volume. voxelSize = physical µm per
-          // (downsampled) voxel, from the descriptor's µm/pixel where known, so a host can label
-          // the scale. Honours the persisted on/off choice.
-          const mppX = this.descriptor?.mppX || this.loaded?.imageInfo.imageMeta?.[0]?.mppX || 0;
-          const voxel = mppX > 0 ? (mppX * (this.descriptor?.width ?? vol.width)) / vol.width : 1;
-          this.axesLayer = viewer.addAxes(vol.width, vol.height, vol.depth, {
-            voxelSize: [voxel, voxel, voxel],
-            visible: this.axesVisible,
-          });
-          // X/Y/Z + scale text over the gizmo (DOM, projected by the 3D camera): physical length
-          // (µm) when µm/pixel is known, else pixel/slice counts.
-          if (this.host) {
-            this.axesLabels = new NapariAxesLabels(
-              this.host,
-              viewer.camera3d,
-              this.buildAxesLabels(vol, mppX),
-            );
-            this.axesLabels.setVisible(this.axesVisible);
-          }
-          // Color LUT for the volume/isosurface is driven by the store colormap (+reverse).
-          this.subscribeVolumeDisplayState();
-        }
+        await this.mountVolume(viewer, info, plotType);
       } else {
         await this.renderImage(z);
         this.fitCameraSoon();
@@ -863,16 +827,39 @@ export class NapariVisualizerService implements IVisualizer {
       this.currentColormap = (colormap as ColormapNode) ?? null;
       this.currentReverse = reverse;
       this.invertEnabled = invert;
-      const vol = this.volumeLayer;
-      if (!vol) return;
-      const st = channels[0];
-      vol.colormap = this.volumeColormap(st);
-      if (st) {
-        vol.contrastLimits = [st.min, st.max];
-        vol.gamma = st.gamma;
+      const view = this.volumeView;
+      if (!view) return;
+      if (this.volumeMultichannel) {
+        // Each channel's layer is tinted by its colour and gets its own window/gamma/visibility.
+        view.layers.forEach((_, c) => {
+          const st = channels.find((s) => s.index === c);
+          view.updateChannel(c, {
+            colormap: this.channelTintColormap(st?.color ?? '#ffffff'),
+            ...(st
+              ? {
+                  contrastLimits: [st.min, st.max] as [number, number],
+                  gamma: st.gamma,
+                  visible: st.visible,
+                }
+              : {}),
+          });
+        });
+      } else {
+        const st = channels[0];
+        view.updateChannel(0, {
+          colormap: this.volumeColormap(st),
+          ...(st ? { contrastLimits: [st.min, st.max] as [number, number], gamma: st.gamma } : {}),
+        });
       }
-      this.viewer?.requestRender();
     });
+  }
+
+  /** A channel's tint colormap (black→colour) with reverse-scale / invert applied by flipping. */
+  private channelTintColormap(color: string): Colormap | string {
+    let cmap: Colormap | string = tintColormap(color);
+    if (this.currentReverse) cmap = reverseColormap(cmap);
+    if (this.invertEnabled) cmap = reverseColormap(cmap);
+    return cmap;
   }
 
   /**
@@ -945,6 +932,103 @@ export class NapariVisualizerService implements IVisualizer {
     return { bins, counts, max: counts.reduce((m, c) => (c > m ? c : m), 0) };
   }
 
+  /**
+   * Mount the 3D volume/isosurface. A multichannel image becomes one additive, tinted
+   * {@link VolumeLayer} per channel (so each channel's colour composites into the render); a
+   * grayscale/composite image uses a single volume. Adds the axes gizmo + labels and wires the
+   * display-state subscription. The caller owns `viewer.ready`.
+   */
+  private async mountVolume(
+    viewer: Viewer,
+    info: IImageInfo | undefined,
+    plotType: PlotType,
+  ): Promise<void> {
+    const desc = await this.ensureDescriptor();
+    const channelCount = desc?.channels ?? 1;
+    const multichannel = !!desc?.multichannel && channelCount > 1;
+    const res = volumeResolutionFor(plotType);
+    const rendering: 'iso' | 'mip' = isNapariIsosurface(plotType) ? 'iso' : 'mip';
+    const states = this.store.currentChannelStates();
+
+    this.volumeChannelData.clear();
+    this.volumeMultichannel = multichannel;
+    this.imageMode = multichannel ? 'multichannel' : 'grayscale';
+    const view = new MultiChannelVolumeView(viewer);
+    this.volumeView = view;
+
+    // Assemble per-channel scalar volumes from the server tiles (jit-specific); the napari-js view
+    // owns the layer orchestration (one additive tinted volume per channel, or a single grayscale
+    // volume). The adapter computes each channel's colormap (incl. invert/reverse flips).
+    let dims: { width: number; height: number; depth: number } | null = null;
+    const channels: VolumeChannel[] = [];
+    this.stackLoading$.next(true);
+    this.stackLoadingProgress$.next(0);
+    try {
+      if (multichannel) {
+        for (let c = 0; c < channelCount; c++) {
+          const vol = await this.assembleVolume(info, res, c);
+          if (!vol) continue;
+          dims = vol;
+          this.volumeChannelData.set(c, vol.data);
+          const st = states.find((s) => s.index === c);
+          const color = st?.color ?? desc?.channelInfo?.[c]?.color ?? tintFor(c);
+          channels.push({
+            data: vol.data,
+            width: vol.width,
+            height: vol.height,
+            depth: vol.depth,
+            colormap: this.channelTintColormap(color),
+            contrastLimits: [st?.min ?? 0, st?.max ?? 255],
+            gamma: st?.gamma ?? 1,
+            visible: st?.visible ?? true,
+          });
+        }
+      } else {
+        const vol = await this.assembleVolume(info, res);
+        if (vol) {
+          dims = vol;
+          this.volumeChannelData.set(0, vol.data);
+          const st = states[0];
+          channels.push({
+            data: vol.data,
+            width: vol.width,
+            height: vol.height,
+            depth: vol.depth,
+            colormap: this.volumeColormap(st),
+            contrastLimits: [st?.min ?? 0, st?.max ?? 255],
+            gamma: st?.gamma ?? 1,
+          });
+        }
+      }
+    } finally {
+      this.stackLoading$.next(false);
+      this.stackLoadingProgress$.next(0);
+    }
+
+    if (!dims || !channels.length) return;
+    view.render(multichannel ? 'multichannel' : 'grayscale', channels, { rendering });
+    this.imageW = dims.width;
+    this.imageH = dims.height;
+    this.volumeDims = dims;
+
+    // 3D coordinate-axes / scale gizmo + labels (voxelSize from µm/pixel where known).
+    const mppX = this.descriptor?.mppX || this.loaded?.imageInfo.imageMeta?.[0]?.mppX || 0;
+    const voxel = mppX > 0 ? (mppX * (this.descriptor?.width ?? dims.width)) / dims.width : 1;
+    this.axesLayer = viewer.addAxes(dims.width, dims.height, dims.depth, {
+      voxelSize: [voxel, voxel, voxel],
+      visible: this.axesVisible,
+    });
+    if (this.host) {
+      this.axesLabels = new NapariAxesLabels(
+        this.host,
+        viewer.camera3d,
+        this.buildAxesLabels(dims, mppX),
+      );
+      this.axesLabels.setVisible(this.axesVisible);
+    }
+    this.subscribeVolumeDisplayState();
+  }
+
   /** Build the X/Y/Z axis-end label specs for the 3D gizmo. Anchors are in the volume's centred
    *  world box (matching the AxesLayer geometry); the scale text reflects the FULL image extent —
    *  physical µm when µm/pixel is known, else pixel (X/Y) / slice (Z) counts. */
@@ -976,6 +1060,7 @@ export class NapariVisualizerService implements IVisualizer {
   private async assembleVolume(
     info: IImageInfo | undefined,
     opts: { maxSlice?: number; sliceStep?: number } = {},
+    channel?: number,
   ): Promise<{ data: Uint8Array; width: number; height: number; depth: number } | null> {
     const fullDepth = info?.imageMeta?.[0]?.z || info?.urls?.length || 1;
     if (fullDepth < 1) {
@@ -989,12 +1074,12 @@ export class NapariVisualizerService implements IVisualizer {
     for (let z = 0; z < fullDepth; z += step) zIndices.push(z);
     const depth = zIndices.length;
 
-    this.stackLoading$.next(true);
     this.stackLoadingProgress$.next(0);
     try {
       // One cheap coarse tile per slice (budget 1) — the volume is downsampled to `maxSlice`
-      // regardless, so stitching the full-res grid per slice would be wasted fetches.
-      const first = await this.fetchSlice(zIndices[0], undefined, 1);
+      // regardless. `channel` selects a band (multichannel volume); omit for the grayscale
+      // composite. The caller owns the stackLoading flag (multichannel assembles channels in turn).
+      const first = await this.fetchSlice(zIndices[0], channel, 1);
       const scale = Math.min(1, maxSlice / Math.max(first.width, first.height, 1));
       const width = Math.max(1, Math.round(first.width * scale));
       const height = Math.max(1, Math.round(first.height * scale));
@@ -1041,7 +1126,7 @@ export class NapariVisualizerService implements IVisualizer {
         for (;;) {
           const p = pending.shift();
           if (p === undefined) return;
-          readSlice(p, await this.fetchSlice(zIndices[p], undefined, 1));
+          readSlice(p, await this.fetchSlice(zIndices[p], channel, 1));
         }
       };
       const poolSize = Math.min(VOLUME_FETCH_CONCURRENCY, Math.max(1, depth - 1));
@@ -1049,7 +1134,6 @@ export class NapariVisualizerService implements IVisualizer {
 
       return { data, width, height, depth };
     } finally {
-      this.stackLoading$.next(false);
       this.stackLoadingProgress$.next(0);
     }
   }
@@ -1101,10 +1185,11 @@ export class NapariVisualizerService implements IVisualizer {
     if (this.canvas && this.host?.contains(this.canvas)) this.host.removeChild(this.canvas);
     this.canvas = null;
     this.lastPixels = null;
-    this.volumeLayer = null;
+    this.volumeView = null;
+    this.volumeMultichannel = false;
     this.axesLayer = null;
     this.volumeDims = null;
-    this.volumeData = null;
+    this.volumeChannelData.clear();
   }
 
   relayout(_trueImageSize?: number[]): void {
@@ -1155,7 +1240,7 @@ export class NapariVisualizerService implements IVisualizer {
     const v = this.viewer;
     if (!v) return;
     // Volume / isosurface: step the volume's z plane in place.
-    if (this.volumeLayer) {
+    if (this.volumeView) {
       v.dims.z = zIndex;
       this.scheduleReadback();
       return;
@@ -1624,14 +1709,16 @@ export class NapariVisualizerService implements IVisualizer {
     return this.regionOverlay;
   }
   getIsosurfaceControls(): IIsosurfaceControls | null {
-    if (!this.volumeLayer) return null;
+    if (!this.volumeView) return null;
     return {
       setIsoRange: (isoMin: number, isoMax: number): void => {
-        const vol = this.volumeLayer;
-        if (!vol) return;
-        vol.contrastLimits = [isoMin, isoMax];
-        vol.rendering = 'iso';
-        vol.isoThreshold = 0.5;
+        // Apply to every channel's volume layer.
+        for (const layer of this.volumeView?.layers ?? []) {
+          layer.contrastLimits = [isoMin, isoMax];
+          layer.rendering = 'iso';
+          layer.isoThreshold = 0.5;
+        }
+        this.viewer?.requestRender();
       },
     };
   }
@@ -1639,7 +1726,7 @@ export class NapariVisualizerService implements IVisualizer {
     return null;
   }
   getSurface3dControls(): ISurface3dControls | null {
-    if (!this.volumeLayer) return null;
+    if (!this.volumeView) return null;
     return {
       setSurfaceDragMode: (mode: string): void => this.setSurfaceDragMode(mode),
       resetSurfaceCamera: (): void => this.resetSurfaceCamera(),
@@ -1657,8 +1744,12 @@ export class NapariVisualizerService implements IVisualizer {
   getHistogram(channelIndex: number, bins: number): IHistogram | null {
     const v = this.viewer;
     if (!v) return null;
-    // Volume / isosurface: intensity histogram of the assembled (downsampled) uint8 volume.
-    if (this.volumeData) return this.toIHistogram(histogramScalar(this.volumeData, bins, 0, 255));
+    // Volume / isosurface: intensity histogram of the assembled (downsampled) uint8 volume for the
+    // requested channel (multichannel) or the single grayscale volume (key 0).
+    if (this.volumeChannelData.size) {
+      const data = this.volumeChannelData.get(channelIndex) ?? this.volumeChannelData.get(0);
+      return data ? this.toIHistogram(histogramScalar(data, bins, 0, 255)) : null;
+    }
     // Tiled mode has no full in-memory pixels → use the coarse per-channel sample (RGB: readback).
     if (this.tiled) {
       if (this.imageMode === 'rgb') return this.rgbHistogram(channelIndex, bins);
