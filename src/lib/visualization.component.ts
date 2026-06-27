@@ -83,6 +83,12 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   // overlay a translucent spinner on top of the blurry small-tier image so
   // the user doesn't mistake it for the final preview.
   public sharpening = false;
+  /** A jit-service cache copy is actively in progress (determinate 0..99). Drives the cache
+   *  progress bar independently of `imgLoading` so the bar can't be dropped — or masked by the
+   *  "Sharpening preview..." overlay — mid-download if the loading flag flips early. */
+  get isCaching(): boolean {
+    return this.cacheProgress !== null && this.cacheProgress < 100;
+  }
   private running = false;
   public zIndex = 0;
   public maxIndex = 0;
@@ -441,7 +447,10 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
                 // undo history fresh so the first undo can't wipe them (jit-ui#85).
                 this.plotService.resetUndoHistory();
               };
+              let overlayReleased = false;
               const releaseOverlay = () => {
+                if (overlayReleased) return;
+                overlayReleased = true;
                 if (imgInfo.isStack && imgInfo.showStack) this.stackLoading = false;
                 this.state.setImageLoading(false);
               };
@@ -463,17 +472,23 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
                     );
                   }),
                 smallShown: () => {
-                  // Small tier on screen — drop the full overlay but keep a
-                  // translucent spinner so the blurry render isn't mistaken for
-                  // the final image.
+                  // If the file is still being cached/prepared server-side, keep the full
+                  // cache-progress overlay up instead of dropping to the translucent "Sharpening
+                  // preview..." spinner over a blank canvas (a large uncached image renders its
+                  // small preview before its tiles exist). finished() releases the overlay once
+                  // the real render lands.
+                  if (this.isCaching) return;
+                  // Small tier on screen — drop the full overlay but keep a translucent spinner so
+                  // the blurry render isn't mistaken for the final image.
                   releaseOverlay();
                   this.sharpening = true;
                 },
                 sharpenSettled: () => {
                   this.sharpening = false;
                 },
-                finished: (viaSmall, logTag) => {
-                  if (!viaSmall) releaseOverlay();
+                finished: (_viaSmall, logTag) => {
+                  // Idempotent — releases now if smallShown deferred it (caching) or was skipped.
+                  releaseOverlay();
                   this.running = false;
                   applyRoi();
                   console.log(logTag);

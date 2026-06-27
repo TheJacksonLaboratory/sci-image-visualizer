@@ -86,7 +86,7 @@
      (incl. the OSD scale bar at bottom-left) was clipped by the host's
      overflow:hidden. The component stylesheet sizes it (.viz-plot { flex: 1 }). -->
 <div class="w-full relative viz-plot" [id]="plotDivName">
-  <div *ngIf="imgLoading || stackLoading" id="overlay">
+  <div *ngIf="imgLoading || stackLoading || isCaching" id="overlay">
     <!-- Determinate stack/volume progress takes precedence: while it's active show ONLY the
          progress bar + "Loading frames...", not the generic spinner/"Loading image..." on top of
          it (both were rendering at once for napari volume/isosurface loads). -->
@@ -95,7 +95,9 @@
       <span class="text-loading">Loading frames...</span>
     </ng-container>
     <ng-template #imgLoadingTpl>
-      <ng-container *ngIf="imgLoading && cacheProgress !== null && cacheProgress < 100; else spinnerLoading">
+      <!-- Cache-copy progress is shown whenever a cache download is active (isCaching), independent
+           of `imgLoading`, so it's never dropped/masked mid-download. -->
+      <ng-container *ngIf="isCaching; else spinnerLoading">
         <!-- Stage-aware message comes from CacheProgressService updating
              imageLoadingMessage$ ("Caching image..." during the GCS download,
              then "Generating preview..." during per-slice thumbnail gen). Once the
@@ -120,7 +122,7 @@
        background. Lets the user see the blurry image underneath but makes
        it clear something is still loading so they don't mistake the
        low-res render for the final image. -->
-  <div *ngIf="sharpening && !imgLoading && !stackLoading" id="sharpening-overlay">
+  <div *ngIf="sharpening && !imgLoading && !stackLoading && !isCaching" id="sharpening-overlay">
     <div class="spinner"></div>
     <span class="text-loading">Sharpening preview...</span>
   </div>
