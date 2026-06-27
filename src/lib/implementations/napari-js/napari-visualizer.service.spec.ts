@@ -200,14 +200,21 @@ describe('NapariVisualizerService', () => {
     const volLayer = addVolume.mock.results[0].value as {
       contrastLimits: [number, number];
       gamma: number;
+      colormap: { name: string };
     };
 
     // The histogram pane's window (min/max) + gamma now reach the 3D volume layer.
     store.setChannelStates([
-      { index: 0, name: 'v', color: '#ffffff', min: 20, max: 200, gamma: 2, visible: true } as IChannelState,
+      { index: 0, name: 'v', color: '#00ff00', min: 20, max: 200, gamma: 2, visible: true } as IChannelState,
     ]);
     expect(volLayer.contrastLimits).toEqual([20, 200]);
     expect(volLayer.gamma).toBe(2);
+    // Channel colour tints the volume (no explicit colormap selected) — regression.
+    expect(volLayer.colormap.name).toContain('00ff00');
+
+    // Invert flips the ramp (VolumeLayer has no per-layer invert, so it's emulated).
+    store.setInvert(true);
+    expect(volLayer.colormap.name).toContain('flip');
 
     service.unsubscribe();
     document.body.removeChild(div);

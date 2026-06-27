@@ -74,6 +74,16 @@ export function colormapFromLut(name: string, _lut: unknown, _maxValue = 255): C
   return new Colormap(name);
 }
 
+/** Stand-in for napari-js tintColormap (black→hex ramp). */
+export function tintColormap(hex: string): Colormap {
+  return new Colormap(`tint-${hex}`);
+}
+
+/** Stand-in for napari-js resolveColormap (name | instance → Colormap). */
+export function resolveColormap(cmap: Colormap | string): Colormap {
+  return cmap instanceof Colormap ? cmap : new Colormap(String(cmap));
+}
+
 export type ChannelMode = 'multichannel' | 'grayscale' | 'rgb';
 
 /** Stand-in for the napari-js ChannelView descriptor. */

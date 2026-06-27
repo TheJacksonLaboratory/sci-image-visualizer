@@ -2,7 +2,15 @@ import { Inject, Injectable, Optional } from '@angular/core';
 import { Observable, BehaviorSubject, Subject, Subscription, combineLatest, from, of } from 'rxjs';
 import { Image } from 'image-js';
 import { saveAs } from 'file-saver';
-import { Viewer, histogramScalar, colormapFromLut, MultiChannelImageView } from 'napari-js';
+import {
+  Viewer,
+  Colormap,
+  resolveColormap,
+  histogramScalar,
+  colormapFromLut,
+  tintColormap,
+  MultiChannelImageView,
+} from 'napari-js';
 import type {
   VolumeLayer,
   AxesLayer,
@@ -10,7 +18,6 @@ import type {
   TileKey,
   PixelChunk,
   ChannelView,
-  Colormap,
 } from 'napari-js';
 
 import { IImageInfo, IImageMetadata } from '../../contracts/image.contract';
@@ -128,6 +135,16 @@ const DEFAULT_TINTS = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#
 /** Default tint for a channel index, cycling the Fiji palette. */
 function tintFor(channel: number): string {
   return DEFAULT_TINTS[channel % DEFAULT_TINTS.length];
+}
+
+/** Reverse a colormap's ramp — used to emulate invert / reverse-scale on a `VolumeLayer`, which
+ *  (unlike `ImageLayer`) has no per-layer invert. Resolves a named colormap to its stops first. */
+function reverseColormap(cmap: Colormap | string): Colormap {
+  const c = cmap instanceof Colormap ? cmap : resolveColormap(cmap);
+  return new Colormap(
+    `${c.name}-flip`,
+    c.stops.map((s) => ({ t: 1 - s.t, color: s.color })),
+  );
 }
 
 /** One pyramid level from `GET /tiles/info` (res 0 = full resolution). */
@@ -831,29 +848,55 @@ export class NapariVisualizerService implements IVisualizer {
     });
   }
 
-  /** Subscribe the store colormap (+reverse) and channel state → the volume/isosurface transfer
-   *  function: colour LUT, plus the intensity **window (min/max → contrastLimits)** and **gamma**,
-   *  mirroring the grayscale image's display controls so the histogram pane's sliders drive the
-   *  3D render. Replaces any prior subscription. */
+  /** Subscribe the store colormap (+reverse), invert, and channel state → the volume/isosurface
+   *  transfer function: colour (channel tint or selected colormap), the intensity **window
+   *  (min/max → contrastLimits)** and **gamma**, mirroring the grayscale image's display controls
+   *  so the histogram pane drives the 3D render. Replaces any prior subscription. */
   private subscribeVolumeDisplayState(): void {
     this.displaySub?.unsubscribe();
     this.displaySub = combineLatest([
       this.store.getColormap(),
       this.store.getReverseScale(),
+      this.store.getInvert(),
       this.store.getChannelStates(),
-    ]).subscribe(([colormap, reverse, channels]) => {
+    ]).subscribe(([colormap, reverse, invert, channels]) => {
       this.currentColormap = (colormap as ColormapNode) ?? null;
       this.currentReverse = reverse;
+      this.invertEnabled = invert;
       const vol = this.volumeLayer;
       if (!vol) return;
-      vol.colormap = this.grayscaleColormap();
       const st = channels[0];
+      vol.colormap = this.volumeColormap(st);
       if (st) {
         vol.contrastLimits = [st.min, st.max];
         vol.gamma = st.gamma;
       }
       this.viewer?.requestRender();
     });
+  }
+
+  /**
+   * Colour map for the volume/isosurface. A real colormap selection (viridis/magma/…) wins;
+   * otherwise the channel's colour tints it (so the channel-dialog colour swatch recolors the 3D
+   * render). Reverse-scale and invert each flip the ramp — the `VolumeLayer` has no per-layer
+   * invert, so both are emulated by reversing the colormap.
+   */
+  private volumeColormap(st: IChannelState | undefined): Colormap | string {
+    const node = this.currentColormap as { label?: string; data?: { value?: unknown } } | null;
+    // A colored colormap (viridis/magma/…) drives the volume; the default grayscale family
+    // (gray / Greys / Greys Inv) yields to the channel's colour so the dialog colour swatch
+    // recolors the 3D render.
+    const label = (node?.label ?? '').toLowerCase();
+    const grayFamily = label === '' || label.includes('grey') || label.includes('gray');
+    const value = node?.data?.value;
+    const lut = !grayFamily && value != null ? buildColormapLut(value, false) : null;
+    let cmap: Colormap | string = lut
+      ? colormapFromLut('vol-cmap', lut)
+      : tintColormap(st?.color ?? '#ffffff');
+    // Reverse-scale and invert each flip the ramp (the VolumeLayer has no per-layer invert).
+    if (this.currentReverse) cmap = reverseColormap(cmap);
+    if (this.invertEnabled) cmap = reverseColormap(cmap);
+    return cmap;
   }
 
   /** Apply the current channel states / colormap to the live layers (no re-fetch), delegating the

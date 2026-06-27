@@ -232,14 +232,15 @@ export class PlotlyService implements IVisualizer {
     this.filenameSubscription = this.state.getFilename$().subscribe(filename => {
       this.fileName = filename;
     });
-    // Live brightness/contrast from the Channels & Histogram pane: restyle the
-    // heatmap's display window (zmin/zmax) and reverse/invert when the channel
-    // state changes. (Gamma is applied by the OSD image view; the Plotly heatmap
-    // window covers the common contrast case.)
+    // Live recolor from the Channels & Histogram pane: restyle the display window (zmin/zmax for
+    // a heatmap, cmin/cmax for isosurface/surface), the colorscale (colormap), and reverse/invert
+    // when the channel state OR the colormap changes. (Gamma is applied by the OSD image view; the
+    // Plotly colorscale window covers the common contrast case.)
     this.channelSub = combineLatest([
       this.store.getChannelStates(),
       this.store.getReverseScale(),
       this.store.getInvert(),
+      this.store.getColormap(),
     ]).subscribe(([channels, rev, inv]) => this.applyChannelDisplay(channels, rev, inv));
     // Profile lines are store regions; any region change (add/drag/delete, on
     // either backend) should refresh the inset traces. The live-edit stream
@@ -2145,16 +2146,30 @@ export class PlotlyService implements IVisualizer {
   private applyChannelDisplay(channels: any[], rev: boolean, inv: boolean): void {
     if (!this.plotDiv) return;
     const ch = channels?.[0];
+    const colorscale = this.store.currentColormap()?.data?.value;
+    // reverse-scale and invert each flip the ramp; both together cancel.
     const update: any = { reversescale: rev !== inv };
+    if (colorscale != null) update.colorscale = colorscale; // live colormap recolor
     if (ch) {
-      update.zmin = ch.min;
-      update.zmax = ch.max;
-      update.zauto = false;
+      // Surface/isosurface/scatter3d colour-map via cmin/cmax; heatmap/contour via zmin/zmax.
+      const threeD =
+        this.plotType === PlotType.ISOSURFACE ||
+        this.plotType === PlotType.SURFACE ||
+        this.plotType === PlotType.SCATTER3D;
+      if (threeD) {
+        update.cmin = ch.min;
+        update.cmax = ch.max;
+        update.cauto = false;
+      } else {
+        update.zmin = ch.min;
+        update.zmax = ch.max;
+        update.zauto = false;
+      }
     }
     try {
       Plotly.restyle(this.plotDiv, update);
     } catch {
-      /* not a heatmap, or OSD owns the div */
+      /* not a colour-mapped trace, or OSD owns the div */
     }
   }
 
