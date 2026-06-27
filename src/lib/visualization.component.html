@@ -87,23 +87,30 @@
      overflow:hidden. The component stylesheet sizes it (.viz-plot { flex: 1 }). -->
 <div class="w-full relative viz-plot" [id]="plotDivName">
   <div *ngIf="imgLoading || stackLoading" id="overlay">
-    <ng-container *ngIf="imgLoading && cacheProgress !== null && cacheProgress < 100; else spinnerLoading">
-      <!-- Stage-aware message comes from CacheProgressService updating
-           imageLoadingMessage$ ("Caching image..." during the GCS download,
-           then "Generating preview..." during per-slice thumbnail gen). Once the
-           download hits 100% the remaining work (server preview/tile generation)
-           has no determinate progress, so fall through to the spinner template
-           rather than parking a full bar under "Loading image...". -->
-      <p-progressBar class="progress" [value]="cacheProgress"></p-progressBar>
-      <span class="text-loading">{{loadingMessage}}</span>
+    <!-- Determinate stack/volume progress takes precedence: while it's active show ONLY the
+         progress bar + "Loading frames...", not the generic spinner/"Loading image..." on top of
+         it (both were rendering at once for napari volume/isosurface loads). -->
+    <ng-container *ngIf="stackLoading; else imgLoadingTpl">
+      <p-progressBar class="progress" [value]="loadingPercentage"></p-progressBar>
+      <span class="text-loading">Loading frames...</span>
     </ng-container>
-    <ng-template #spinnerLoading>
-      <div *ngIf="imgLoading" class="spinner"></div>
-      <span *ngIf="imgLoading && !zoom" class="text-loading">{{loadingMessage}}</span>
-      <span *ngIf="imgLoading && zoom" class="zoom-text-loading">{{loadingMessage}}</span>
+    <ng-template #imgLoadingTpl>
+      <ng-container *ngIf="imgLoading && cacheProgress !== null && cacheProgress < 100; else spinnerLoading">
+        <!-- Stage-aware message comes from CacheProgressService updating
+             imageLoadingMessage$ ("Caching image..." during the GCS download,
+             then "Generating preview..." during per-slice thumbnail gen). Once the
+             download hits 100% the remaining work (server preview/tile generation)
+             has no determinate progress, so fall through to the spinner template
+             rather than parking a full bar under "Loading image...". -->
+        <p-progressBar class="progress" [value]="cacheProgress"></p-progressBar>
+        <span class="text-loading">{{loadingMessage}}</span>
+      </ng-container>
+      <ng-template #spinnerLoading>
+        <div *ngIf="imgLoading" class="spinner"></div>
+        <span *ngIf="imgLoading && !zoom" class="text-loading">{{loadingMessage}}</span>
+        <span *ngIf="imgLoading && zoom" class="zoom-text-loading">{{loadingMessage}}</span>
+      </ng-template>
     </ng-template>
-    <p-progressBar class="progress" *ngIf="stackLoading" [value]="loadingPercentage"></p-progressBar>
-    <span *ngIf="stackLoading" class="text-loading">Loading frames...</span>
     <p-button *ngIf="stackLoading || imgLoading" class="cancel-loading " label="Cancel"
               (onClick)="cancelLoading()">
     </p-button>
