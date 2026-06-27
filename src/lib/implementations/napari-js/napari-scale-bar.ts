@@ -17,7 +17,7 @@ function niceLength(x: number): number {
 
 /** Format a length given in micrometres, picking the unit that suits its magnitude (jit-service
  *  normalises whatever unit Bio-Formats reports to µm). */
-function formatUm(um: number): string {
+export function formatUm(um: number): string {
   const trim = (n: number): string => (n % 1 === 0 ? `${n}` : n.toFixed(1));
   if (um >= 1e6) return `${trim(um / 1e6)} m`;
   if (um >= 1e4) return `${trim(um / 1e4)} cm`;

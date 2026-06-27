@@ -177,10 +177,13 @@
                 (onClick)="resetSurfaceCamera.emit()">
       </p-button>
       <!-- 3D coordinate-axes / scale gizmo toggle (napari-js WebGPU volume/isosurface only). -->
-      <p-button icon="pi pi-box" size="small" *ngIf="isNapariMode"
+      <p-button size="small" *ngIf="isNapariMode"
                 [text]="!axesVisible"
                 pTooltip="Toggle 3D axes / scale" tooltipPosition="bottom"
                 (onClick)="toggleAxes.emit()">
+        <img src="assets/plotting/3d-coordinates.svg"
+             [class]="axesVisible ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+             style="width: 1rem"/>
       </p-button>
     </ng-container>
 

@@ -17,6 +17,8 @@ interface StubDims {
 
 interface StubCamera3D {
   frame(width: number, height: number, depth: number): void;
+  viewProjection(vw: number, vh: number): number[];
+  changed: { connect(listener: () => void): () => void };
 }
 
 /** A mutable stand-in for napari-js VolumeLayer (the props the adapter sets). */
@@ -140,7 +142,11 @@ export class Viewer {
     fit: () => undefined,
     changed: { connect: () => () => undefined },
   };
-  readonly camera3d: StubCamera3D = { frame: () => undefined };
+  readonly camera3d: StubCamera3D = {
+    frame: () => undefined,
+    viewProjection: () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+    changed: { connect: () => () => undefined },
+  };
   readonly dims: StubDims = { z: 0 };
   readonly layers = { clear: (): void => undefined };
 

@@ -45,8 +45,9 @@ import { VIZ_CONFIG, VizConfig } from '../../contracts/viz-config';
 import { TILE_ACCESS_PORT, TileAccessPort } from '../../contracts/ports/tile-access.port';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
-import { NapariScaleBar } from './napari-scale-bar';
+import { NapariScaleBar, formatUm } from './napari-scale-bar';
 import { NapariRegionOverlay } from './napari-region-overlay';
+import { NapariAxesLabels, AxisLabelSpec } from './napari-axes-labels';
 import {
   ICoordinateTransform,
 } from '../../contracts/coordinate-transform.contract';
@@ -193,6 +194,8 @@ export class NapariVisualizerService implements IVisualizer {
   private volumeLayer: VolumeLayer | null = null;
   /** 3D coordinate-axes / scale gizmo for the volume/isosurface view (null in 2D). */
   private axesLayer: AxesLayer | null = null;
+  /** DOM X/Y/Z + scale labels tracking the 3D axes gizmo (null in 2D). */
+  private axesLabels: NapariAxesLabels | null = null;
   /** Persisted axes on/off choice, re-applied when a new volume mounts. Defaults on. */
   private axesVisible = true;
   private volumeDims: { width: number; height: number; depth: number } | null = null;
@@ -497,6 +500,16 @@ export class NapariVisualizerService implements IVisualizer {
             voxelSize: [voxel, voxel, voxel],
             visible: this.axesVisible,
           });
+          // X/Y/Z + scale text over the gizmo (DOM, projected by the 3D camera): physical length
+          // (µm) when µm/pixel is known, else pixel/slice counts.
+          if (this.host) {
+            this.axesLabels = new NapariAxesLabels(
+              this.host,
+              viewer.camera3d,
+              this.buildAxesLabels(vol, mppX),
+            );
+            this.axesLabels.setVisible(this.axesVisible);
+          }
           // Color LUT for the volume/isosurface is driven by the store colormap (+reverse).
           this.subscribeVolumeDisplayState();
         }
@@ -889,6 +902,28 @@ export class NapariVisualizerService implements IVisualizer {
     return { bins, counts, max: counts.reduce((m, c) => (c > m ? c : m), 0) };
   }
 
+  /** Build the X/Y/Z axis-end label specs for the 3D gizmo. Anchors are in the volume's centred
+   *  world box (matching the AxesLayer geometry); the scale text reflects the FULL image extent —
+   *  physical µm when µm/pixel is known, else pixel (X/Y) / slice (Z) counts. */
+  private buildAxesLabels(
+    vol: { width: number; height: number; depth: number },
+    mppX: number,
+  ): AxisLabelSpec[] {
+    const hx = vol.width / 2;
+    const hy = vol.height / 2;
+    const hz = vol.depth / 2;
+    const descW = this.descriptor?.width ?? vol.width;
+    const descH = this.descriptor?.height ?? vol.height;
+    const slices =
+      this.loaded?.imageInfo.imageMeta?.[0]?.z || this.loaded?.imageInfo.urls?.length || vol.depth;
+    const len = (px: number): string => (mppX > 0 ? formatUm(px * mppX) : `${px} px`);
+    return [
+      { anchor: [hx, -hy, -hz], text: `X · ${len(descW)}`, color: '#ed4545' },
+      { anchor: [-hx, hy, -hz], text: `Y · ${len(descH)}`, color: '#4dd959' },
+      { anchor: [-hx, -hy, hz], text: `Z · ${slices} px`, color: '#668cff' },
+    ];
+  }
+
   /**
    * Assemble a downsampled uint8 volume (luminance) from the per-slice tile endpoint. Slices are
    * fetched with bounded concurrency (keeps the connection pool full without flooding it on a deep
@@ -1003,6 +1038,8 @@ export class NapariVisualizerService implements IVisualizer {
     this.scaleBar = null;
     this.regionOverlay?.destroy();
     this.regionOverlay = null;
+    this.axesLabels?.destroy();
+    this.axesLabels = null;
     this.cachedImage = null;
     this.cachedImageSource = null;
     this.lastPixelsRect = null;
@@ -1565,6 +1602,7 @@ export class NapariVisualizerService implements IVisualizer {
       resetSurfaceCamera: (): void => this.resetSurfaceCamera(),
       setAxesVisible: (visible: boolean): void => {
         this.axesVisible = visible;
+        this.axesLabels?.setVisible(visible);
         if (this.axesLayer) {
           this.axesLayer.visible = visible;
           this.viewer?.requestRender();
