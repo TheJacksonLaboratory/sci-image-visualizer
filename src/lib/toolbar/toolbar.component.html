@@ -176,8 +176,10 @@
                 pTooltip="Reset camera to default" tooltipPosition="bottom"
                 (onClick)="resetSurfaceCamera.emit()">
       </p-button>
-      <!-- 3D coordinate-axes / scale gizmo toggle (napari-js WebGPU volume/isosurface only). -->
-      <p-button size="small" *ngIf="isNapariMode"
+      <!-- 3D coordinate-axes / scale gizmo toggle (napari-js WebGPU volume/isosurface only).
+           `p-button-icon-only` gives the same square sizing as the neighbouring pi-icon buttons
+           (the projected <img> doesn't trigger PrimeNG's automatic icon-only sizing). -->
+      <p-button size="small" *ngIf="isNapariMode" styleClass="p-button-icon-only"
                 [text]="!axesVisible"
                 pTooltip="Toggle 3D axes / scale" tooltipPosition="bottom"
                 (onClick)="toggleAxes.emit()">
