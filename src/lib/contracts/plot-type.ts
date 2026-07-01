@@ -118,3 +118,7 @@ export const NAPARI_DECIMATE_OPTIONS: { label: string; value: number }[] = [
   { label: '¼', value: 4 },
   { label: '⅛', value: 8 },
 ];
+
+/** Default decimate factor: ½. "Full" is 2× the practical cap, so the default (½) matches the
+ *  previous full-resolution load while letting a user opt into 2× detail via "Full". */
+export const NAPARI_DEFAULT_DECIMATE = 2;

@@ -34,6 +34,7 @@ import {
   isNapari3d,
   isNapariIsosurface,
   isNapariSurface,
+  NAPARI_DEFAULT_DECIMATE,
 } from '../../contracts/plot-type';
 import {
   IVisualizer,
@@ -107,23 +108,26 @@ interface NapariLoaded {
   filename: string;
 }
 
-const VOLUME_MAX_SLICE = 256; // full-resolution in-plane cap for a tractable 3D preview
+const VOLUME_MAX_SLICE = 512; // full-resolution in-plane cap; the default ½ load uses 256
 /** Max concurrent slice fetches when assembling a volume — keeps the connection pool busy
  *  without flooding it (browsers cap ~6/host) on a deep stack. */
 const VOLUME_FETCH_CONCURRENCY = 8;
 
-/** Volume/isosurface sampling for a decimate factor `scale` (1 = full, 2 = ½, 4 = ¼, …): the
- *  in-plane cap shrinks by `scale` and every `scale`-th slice is taken, so the assembled volume is
- *  ~1/scale³ the size — dramatically faster to fetch/assemble at higher factors. */
+/** Volume/isosurface sampling for a decimate factor `scale` (1 = Full, 2 = ½ default, 4 = ¼, 8 = ⅛):
+ *  the in-plane cap halves each step; slices stay un-subsampled until ¼ (so ½ === the previous
+ *  full-res load — 256 in-plane, every slice), then subsample. */
 function volumeResolutionFor(scale: number): { maxSlice: number; sliceStep: number } {
   const s = Math.max(1, Math.round(scale));
-  return { maxSlice: Math.max(8, Math.round(VOLUME_MAX_SLICE / s)), sliceStep: s };
+  return {
+    maxSlice: Math.max(8, Math.round(VOLUME_MAX_SLICE / s)),
+    sliceStep: Math.max(1, Math.floor(s / 2)),
+  };
 }
 /** Fully-normalized intensity height as a fraction of the in-plane extent — matches the Plotly
  *  SURFACE z-aspect (~0.4) so the relief isn't exaggerated. */
 const SURFACE_Z_ASPECT = 0.4;
-/** Full-resolution mesh grid cap; the decimate factor divides it. */
-const SURFACE_MAX_GRID = 220;
+/** Full-resolution mesh grid cap; the decimate factor divides it (default ½ → 220). */
+const SURFACE_MAX_GRID = 440;
 const SURFACE_TILE_BUDGET = 16;
 /** Surface mesh sampling for a decimate factor `scale`: the grid cap shrinks by `scale` (every
  *  slice is kept — the z-slider needs them all). */
@@ -234,9 +238,9 @@ export class NapariVisualizerService implements IVisualizer {
   private surfaceWindow: [number, number] | null = null;
   /** Persisted wireframe choice for the surface (re-applied when a new surface mounts). */
   private surfaceWireframe = false;
-  /** Decimate factor for the napari 3D types (1 = full, 2 = ½, 4 = ¼, 8 = ⅛). Applied when a
+  /** Decimate factor for the napari 3D types (1 = Full, 2 = ½ default, 4 = ¼, 8 = ⅛). Applied when a
    *  volume/isosurface/surface (re)loads; changing it needs a re-plot (it changes fetched data). */
-  private resolutionScale = 1;
+  private resolutionScale = NAPARI_DEFAULT_DECIMATE;
   /** 3D coordinate-axes / scale gizmo for the volume/isosurface view (null in 2D). */
   private axesLayer: AxesLayer | null = null;
   /** DOM X/Y/Z + scale labels tracking the 3D axes gizmo (null in 2D). */

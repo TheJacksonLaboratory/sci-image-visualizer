@@ -9,6 +9,7 @@ import {
   isNapariIsosurface,
   isNapariSurface,
   NAPARI_DECIMATE_OPTIONS,
+  NAPARI_DEFAULT_DECIMATE,
 } from '../contracts/plot-type';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from '../contracts/toolbar-config';
 
@@ -49,8 +50,8 @@ export class ToolbarComponent implements OnChanges {
   /** Whether the napari 3D axes/scale gizmo is currently shown (drives the toggle's look). */
   @Input() axesVisible = true;
   @Input() wireframeActive = false;
-  /** Active napari 3D decimate factor (1 = full … 8 = ⅛). */
-  @Input() resolutionScale = 1;
+  /** Active napari 3D decimate factor (1 = Full … 8 = ⅛; default ½). */
+  @Input() resolutionScale = NAPARI_DEFAULT_DECIMATE;
   /** Decimate-factor options for the Resolution dropdown. */
   readonly decimateOptions = NAPARI_DECIMATE_OPTIONS;
   @Input() wandSensitivity = 2.0;

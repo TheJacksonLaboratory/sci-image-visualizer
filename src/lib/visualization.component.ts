@@ -11,7 +11,12 @@ import { Polygon, Rectangle, MultiPolygon, Region } from './models/region';
 import { RegionOpsService } from './region-ops.service';
 import { VisualizerStore } from './store/visualizer-store.service';
 import { RenderOrchestrator, SliceScrubber } from './render-orchestrator';
-import { PlotType, PlotTypeDescriptor, isNapari3d } from './contracts/plot-type';
+import {
+  PlotType,
+  PlotTypeDescriptor,
+  isNapari3d,
+  NAPARI_DEFAULT_DECIMATE,
+} from './contracts/plot-type';
 import { ViewerFeature } from './contracts/capabilities.contract';
 import { IntensityProfile, IVisualizer, VISUALIZER } from './contracts/visualizer.contract';
 import { SAM_MODELS, getDefaultSamModelId, isSamModelReady } from './toolbar/segmentation/sam-model-registry';
@@ -158,8 +163,8 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   /** Whether the napari 3D coordinate-axes / scale gizmo is shown (volume/isosurface). */
   axesVisible = true;
   wireframeActive = false;
-  /** napari 3D decimate factor (1 = full … 8 = ⅛); changing it re-plots at the new resolution. */
-  resolutionScale = 1;
+  /** napari 3D decimate factor (1 = Full … 8 = ⅛; default ½); changing it re-plots. */
+  resolutionScale = NAPARI_DEFAULT_DECIMATE;
 
   /** Plot types the active backend advertises (3D gated by capability). */
   plotTypeOptions: PlotTypeDescriptor[] = [];

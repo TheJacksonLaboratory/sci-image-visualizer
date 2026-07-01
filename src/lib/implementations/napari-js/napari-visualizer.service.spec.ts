@@ -357,8 +357,8 @@ describe('NapariVisualizerService', () => {
     document.body.appendChild(div);
     const loaded = await service.load(imageInfo(), 0);
 
-    // Full res: the mesh grid caps at the full grid; ⅛ decimate → a much smaller grid.
-    expect(service.getResolutionScale()).toBe(1);
+    // Default load is ½; ⅛ decimate → a much smaller grid.
+    expect(service.getResolutionScale()).toBe(2);
     await service.plot('surf-decimate-host', loaded, imageInfo(), 600, PlotType.NAPARI_SURFACE);
     const fullVerts = (addSurface.mock.calls[0][0] as Float32Array).length;
 
