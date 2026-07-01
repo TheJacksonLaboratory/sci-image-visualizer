@@ -107,6 +107,11 @@ export interface IDataRenderer {
   downloadImage(): void;
 
   setPlotType(plotType: PlotType): void;
+  /** Set the napari 3D decimate factor (1 = full … 8 = ⅛). Optional — only the napari-js WebGPU
+   *  backend honors it; changing it re-loads the current 3D plot at the coarser/finer sampling. */
+  setResolutionScale?(scale: number): void;
+  /** The current napari 3D decimate factor (to initialize the Resolution control). Optional. */
+  getResolutionScale?(): number;
   /** @deprecated Use `getSurface3dControls()` — 3D scene controls only exist on
    *  a backend that renders 3D plot types; this method silently no-ops on OSD. */
   setSurfaceDragMode(mode: string): void;
@@ -236,6 +241,11 @@ export interface ISurface3dControls {
   setAxesVisible?(visible: boolean): void;
   /** Whether the axes gizmo is currently shown (for initializing the toggle UI). Optional. */
   axesVisible?(): boolean;
+  /** Render the surface as a wireframe (edges) instead of a filled surface. Optional — only the
+   *  napari-js WebGPU surface backend supports it (jit-ui#102). */
+  setWireframe?(on: boolean): void;
+  /** Whether the surface is currently drawn as a wireframe (for initializing the toggle UI). */
+  wireframe?(): boolean;
 }
 
 /**

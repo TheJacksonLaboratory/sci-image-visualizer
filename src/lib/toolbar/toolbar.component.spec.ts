@@ -40,6 +40,34 @@ describe('ToolbarComponent', () => {
     expect(component.isIsosurfaceMode).toBe(false);
   });
 
+  it('showsLiveSliceScrubber for the live-scrub views incl. the napari surface (stack slider)', () => {
+    for (const t of [PlotType.IMAGE, PlotType.NAPARI_IMAGE, PlotType.NAPARI_SURFACE]) {
+      component.selectedPlotType = t;
+      expect(component.showsLiveSliceScrubber).toBe(true);
+    }
+    // Volume/isosurface render the whole stack at once — no per-slice scrubber.
+    for (const t of [PlotType.NAPARI_VOLUME, PlotType.NAPARI_ISOSURFACE, PlotType.HEATMAP]) {
+      component.selectedPlotType = t;
+      expect(component.showsLiveSliceScrubber).toBe(false);
+    }
+  });
+
+  it('isNapariSurfaceMode is true only for the napari surface, isNapari3dMode for all napari 3D', () => {
+    component.selectedPlotType = PlotType.NAPARI_SURFACE;
+    expect(component.isNapariSurfaceMode).toBe(true);
+    for (const t of [PlotType.NAPARI_VOLUME, PlotType.SURFACE, PlotType.NAPARI_IMAGE]) {
+      component.selectedPlotType = t;
+      expect(component.isNapariSurfaceMode).toBe(false);
+    }
+    // The Resolution control shows for every napari 3D type.
+    for (const t of [PlotType.NAPARI_VOLUME, PlotType.NAPARI_ISOSURFACE, PlotType.NAPARI_SURFACE]) {
+      component.selectedPlotType = t;
+      expect(component.isNapari3dMode).toBe(true);
+    }
+    component.selectedPlotType = PlotType.NAPARI_IMAGE;
+    expect(component.isNapari3dMode).toBe(false);
+  });
+
   it('showHelp opens the help dialog', () => {
     expect(component.displayHelpDialog).toBe(false);
     component.showHelp();

@@ -90,6 +90,10 @@ describe('NapariVisualizerService', () => {
   });
 
   afterEach(() => http.verify());
+  // Restore prototype spies (addSurface/addVolume/addAxes/…) between tests so a spy from one test
+  // doesn't leak its accumulated `.mock.results` into another (beforeEach re-establishes the base
+  // fetch/canvas mocks).
+  afterEach(() => jest.restoreAllMocks());
 
   it('advertises image + 3D capabilities and the napari plot types', () => {
     expect(service).toBeTruthy();
@@ -99,9 +103,7 @@ describe('NapariVisualizerService', () => {
     expect(service.getPlotTypeDescriptors().map((d) => d.type)).toEqual([
       PlotType.NAPARI_IMAGE,
       PlotType.NAPARI_VOLUME,
-      PlotType.NAPARI_VOLUME_LOWRES,
       PlotType.NAPARI_ISOSURFACE,
-      PlotType.NAPARI_ISOSURFACE_LOWRES,
       PlotType.NAPARI_SURFACE,
     ]);
   });
@@ -221,13 +223,17 @@ describe('NapariVisualizerService', () => {
     document.body.removeChild(div);
   });
 
-  it('mounts a napari-js height-field surface and drives its colormap/window from the store', async () => {
-    // Capture the surface layer the stub Viewer hands back, and confirm addSurface is called with
-    // a real mesh (vertices/faces/values) built by napari-js's heightField — the adapter stays thin.
+  it('mounts a napari-js height-field surface; min/max reshapes it, colour edits update it', async () => {
     const addSurface = jest.spyOn(
       Viewer.prototype as unknown as { addSurface: (...a: unknown[]) => unknown },
       'addSurface',
     );
+    const latest = () =>
+      addSurface.mock.results[addSurface.mock.results.length - 1].value as {
+        contrastLimits: [number, number];
+        gamma: number;
+        colormap: { name: string };
+      };
 
     const div = document.createElement('div');
     div.id = 'surf-host';
@@ -236,8 +242,8 @@ describe('NapariVisualizerService', () => {
     const loaded = await service.load(imageInfo(), 0);
     const ok = await service.plot('surf-host', loaded, imageInfo(), 600, PlotType.NAPARI_SURFACE);
     expect(ok).toBe(true);
-    expect(addSurface).toHaveBeenCalledTimes(1);
-    // Called as addSurface(vertices, faces, values, opts) with typed-array mesh geometry.
+    expect(addSurface).toHaveBeenCalled();
+    // addSurface(vertices, faces, values, opts) with real typed-array mesh geometry (heightField).
     const [vertices, faces, values] = addSurface.mock.calls[0] as [
       Float32Array,
       Uint32Array,
@@ -246,21 +252,123 @@ describe('NapariVisualizerService', () => {
     expect(vertices).toBeInstanceOf(Float32Array);
     expect(faces).toBeInstanceOf(Uint32Array);
     expect(values).toBeInstanceOf(Float32Array);
-
-    // Surface-3D controls are available for a surface (drag mode / camera reset).
     expect(service.getSurface3dControls()).not.toBeNull();
 
-    const surfLayer = addSurface.mock.results[0].value as {
-      contrastLimits: [number, number];
-      gamma: number;
-      colormap: { name: string };
-    };
-    // The histogram pane's window (min/max) + gamma reach the surface layer, like the volume.
+    // Changing min/max REBUILDS the mesh (a pixel's height = its intensity within [min,max]); the
+    // new layer carries the window + gamma + channel-colour colormap.
+    const beforeWindow = addSurface.mock.calls.length;
     store.setChannelStates([
       { index: 0, name: 's', color: '#00ff00', min: 30, max: 210, gamma: 1.5, visible: true } as IChannelState,
     ]);
-    expect(surfLayer.contrastLimits).toEqual([30, 210]);
-    expect(surfLayer.gamma).toBe(1.5);
+    expect(addSurface.mock.calls.length).toBeGreaterThan(beforeWindow); // geometry rebuilt
+    expect(latest().contrastLimits).toEqual([30, 210]);
+    expect(latest().gamma).toBe(1.5);
+    expect(latest().colormap.name).toContain('00ff00');
+
+    // A colour-only edit (invert) updates the existing layer's colormap in place — NO rebuild.
+    const beforeInvert = addSurface.mock.calls.length;
+    store.setInvert(true);
+    expect(addSurface.mock.calls.length).toBe(beforeInvert);
+    expect(latest().colormap.name).toContain('reversed');
+
+    // The stack slider re-slices: picking another z rebuilds the surface (from the pre-loaded cache).
+    service.setZIndex(1);
+    await Promise.resolve();
+    expect(addSurface.mock.calls.length).toBeGreaterThan(beforeInvert);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('mounts a 3D axes gizmo for the napari surface and toggles it via Surface-3D controls', async () => {
+    const addAxes = jest.spyOn(
+      Viewer.prototype as unknown as { addAxes: (...a: unknown[]) => unknown },
+      'addAxes',
+    );
+    const div = document.createElement('div');
+    div.id = 'surf-axes-host';
+    document.body.appendChild(div);
+
+    const loaded = await service.load(imageInfo(), 0);
+    await service.plot('surf-axes-host', loaded, imageInfo(), 600, PlotType.NAPARI_SURFACE);
+    expect(addAxes).toHaveBeenCalled();
+    const axes = addAxes.mock.results[0].value as { visible: boolean };
+
+    const ctrls = service.getSurface3dControls();
+    expect(ctrls?.axesVisible?.()).toBe(true);
+    ctrls?.setAxesVisible?.(false);
+    expect(axes.visible).toBe(false);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('toggles the surface wireframe via Surface-3D controls', async () => {
+    const addSurface = jest.spyOn(
+      Viewer.prototype as unknown as { addSurface: (...a: unknown[]) => unknown },
+      'addSurface',
+    );
+    const div = document.createElement('div');
+    div.id = 'surf-wire-host';
+    document.body.appendChild(div);
+
+    const loaded = await service.load(imageInfo(), 0);
+    await service.plot('surf-wire-host', loaded, imageInfo(), 600, PlotType.NAPARI_SURFACE);
+    const layer = addSurface.mock.results[addSurface.mock.results.length - 1].value as {
+      wireframe: boolean;
+    };
+
+    const ctrls = service.getSurface3dControls();
+    expect(ctrls?.wireframe?.()).toBe(false);
+    ctrls?.setWireframe?.(true);
+    expect(layer.wireframe).toBe(true); // live layer property, no rebuild
+    expect(ctrls?.wireframe?.()).toBe(true);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('sources the surface from the complete per-slice image (urls[z]), not a single tile', async () => {
+    const div = document.createElement('div');
+    div.id = 'surf-url-host';
+    document.body.appendChild(div);
+
+    const loaded = await service.load(imageInfo(), 0);
+    await service.plot('surf-url-host', loaded, imageInfo(), 600, PlotType.NAPARI_SURFACE);
+
+    // The whole-slice image URLs (imageInfo.urls = ['u0','u1']) were fetched for the height field,
+    // instead of only a /tile corner — this is what makes the surface cover the full slice.
+    const fetchMock = globalThis.fetch as jest.Mock;
+    const fetchedUrls = fetchMock.mock.calls.map((c) => c[0] as string);
+    expect(fetchedUrls).toContain('u0');
+    expect(fetchedUrls.some((u) => u.includes('/tile?'))).toBe(false);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('decimates the surface mesh by the resolution scale', async () => {
+    const addSurface = jest.spyOn(
+      Viewer.prototype as unknown as { addSurface: (...a: unknown[]) => unknown },
+      'addSurface',
+    );
+    const div = document.createElement('div');
+    div.id = 'surf-decimate-host';
+    document.body.appendChild(div);
+    const loaded = await service.load(imageInfo(), 0);
+
+    // Full res: the mesh grid caps at the full grid; ⅛ decimate → a much smaller grid.
+    expect(service.getResolutionScale()).toBe(1);
+    await service.plot('surf-decimate-host', loaded, imageInfo(), 600, PlotType.NAPARI_SURFACE);
+    const fullVerts = (addSurface.mock.calls[0][0] as Float32Array).length;
+
+    service.setResolutionScale(8);
+    expect(service.getResolutionScale()).toBe(8);
+    await service.plot('surf-decimate-host', loaded, imageInfo(), 600, PlotType.NAPARI_SURFACE);
+    const coarseVerts = (
+      addSurface.mock.calls[addSurface.mock.calls.length - 1][0] as Float32Array
+    ).length;
+    expect(coarseVerts).toBeLessThan(fullVerts);
 
     service.unsubscribe();
     document.body.removeChild(div);
@@ -333,19 +441,15 @@ describe('NapariVisualizerService', () => {
     document.body.removeChild(div);
   });
 
-  it('renders the low-res volume variant (subsampled slices) without error', async () => {
+  it('renders the volume at a decimate factor (subsampled), histogram still resolves', async () => {
     const div = document.createElement('div');
-    div.id = 'vol-lowres-host';
+    div.id = 'vol-decimate-host';
     document.body.appendChild(div);
 
+    service.setResolutionScale(4); // ¼ resolution
+    expect(service.getResolutionScale()).toBe(4);
     const loaded = await service.load(imageInfo(), 0);
-    const ok = await service.plot(
-      'vol-lowres-host',
-      loaded,
-      imageInfo(),
-      600,
-      PlotType.NAPARI_VOLUME_LOWRES,
-    );
+    const ok = await service.plot('vol-decimate-host', loaded, imageInfo(), 600, PlotType.NAPARI_VOLUME);
     expect(ok).toBe(true);
     expect(service.getSurface3dControls()).not.toBeNull();
     // The volume histogram still resolves from the assembled (subsampled) volume.

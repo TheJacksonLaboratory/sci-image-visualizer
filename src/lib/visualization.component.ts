@@ -157,6 +157,9 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   activeSurface3dMode = 'turntable';
   /** Whether the napari 3D coordinate-axes / scale gizmo is shown (volume/isosurface). */
   axesVisible = true;
+  wireframeActive = false;
+  /** napari 3D decimate factor (1 = full … 8 = ⅛); changing it re-plots at the new resolution. */
+  resolutionScale = 1;
 
   /** Plot types the active backend advertises (3D gated by capability). */
   plotTypeOptions: PlotTypeDescriptor[] = [];
@@ -1487,6 +1490,21 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   toggleAxes() {
     this.axesVisible = !this.axesVisible;
     this.plotService.getSurface3dControls()?.setAxesVisible?.(this.axesVisible);
+  }
+
+  /** Toggle the napari surface wireframe (edges vs filled). No-op on backends without a surface. */
+  toggleWireframe() {
+    this.wireframeActive = !this.wireframeActive;
+    this.plotService.getSurface3dControls()?.setWireframe?.(this.wireframeActive);
+  }
+
+  /** Change the napari 3D decimate factor. Decimation changes the fetched/assembled data, so this
+   *  re-plots the current 3D type at the new resolution (unlike axes/wireframe, which are live). */
+  selectResolution(scale: number) {
+    if (scale === this.resolutionScale) return;
+    this.resolutionScale = scale;
+    this.plotService.setResolutionScale?.(scale);
+    this.reloadAndPlot();
   }
 
   /**

@@ -185,6 +185,22 @@
              [class]="axesVisible ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
              style="width: 1rem"/>
       </p-button>
+      <!-- Surface wireframe toggle (napari-js WebGPU surface only). -->
+      <p-button icon="pi pi-share-alt" size="small" *ngIf="isNapariSurfaceMode"
+                [text]="!wireframeActive"
+                pTooltip="Toggle wireframe" tooltipPosition="bottom"
+                (onClick)="toggleWireframe.emit()">
+      </p-button>
+      <!-- Resolution (decimate factor) for the napari 3D types — reloads at coarser/finer sampling. -->
+      <ng-container *ngIf="isNapari3dMode">
+        <span class="flex align-items-center mx-1 toolbar-text">Res</span>
+        <p-dropdown [options]="decimateOptions" optionLabel="label" optionValue="value"
+                    [ngModel]="resolutionScale" appendTo="body"
+                    pTooltip="Resolution (decimate factor)" tooltipPosition="bottom"
+                    [style]="{'min-width': '6rem'}"
+                    (onChange)="selectResolution.emit($event.value)">
+        </p-dropdown>
+      </ng-container>
     </ng-container>
 
     <ng-container *ngIf="isHeatmap && tools.regionTools">

@@ -239,6 +239,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   }
   setSurfaceDragMode(mode: string): void { this.renderer().setSurfaceDragMode(mode); }
   resetSurfaceCamera(): void { this.renderer().resetSurfaceCamera(); }
+  setResolutionScale(scale: number): void { this.renderer().setResolutionScale?.(scale); }
+  getResolutionScale(): number { return this.renderer().getResolutionScale?.() ?? 1; }
   getPlotTypeDescriptors(): PlotTypeDescriptor[] {
     // Plotly enumerates the full PLOT_TYPE_DESCRIPTORS map, which already includes the
     // napari-js WebGPU types (jit-ui#102) — so this single source covers them (no duplicates).

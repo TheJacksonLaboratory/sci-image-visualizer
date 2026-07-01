@@ -49,6 +49,7 @@ export interface SurfaceLayer {
   gamma: number;
   visible: boolean;
   blending: string;
+  wireframe: boolean;
   bounds(): {
     min: [number, number, number];
     max: [number, number, number];
@@ -307,13 +308,25 @@ export class Viewer {
   addAxes(): AxesLayer {
     return { visible: true, tickCount: 5, boundingBox: true, voxelSize: [1, 1, 1] };
   }
-  addSurface(): SurfaceLayer {
+  addSurface(
+    _vertices?: Float32Array,
+    _faces?: Uint32Array,
+    _values?: Float32Array,
+    opts?: {
+      colormap?: unknown;
+      contrastLimits?: [number, number];
+      gamma?: number;
+      wireframe?: boolean;
+    },
+  ): SurfaceLayer {
+    const o = opts ?? {};
     return {
-      colormap: 'viridis',
-      contrastLimits: [0, 255],
-      gamma: 1,
+      colormap: o.colormap ?? 'viridis',
+      contrastLimits: o.contrastLimits ?? [0, 255],
+      gamma: o.gamma ?? 1,
       visible: true,
       blending: 'opaque',
+      wireframe: o.wireframe ?? false,
       bounds: () => ({
         min: [0, 0, 0],
         max: [1, 1, 1],

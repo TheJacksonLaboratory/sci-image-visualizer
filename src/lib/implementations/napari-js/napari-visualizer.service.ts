@@ -34,7 +34,6 @@ import {
   isNapari3d,
   isNapariIsosurface,
   isNapariSurface,
-  isLowResNapari3d,
 } from '../../contracts/plot-type';
 import {
   IVisualizer,
@@ -108,29 +107,30 @@ interface NapariLoaded {
   filename: string;
 }
 
-const VOLUME_MAX_SLICE = 256; // downsample volume slices for a tractable 3D preview (high-res)
-/** In-plane cap for the low-res 3D variants — coarser, but far fewer pixels to fetch/assemble. */
-const VOLUME_LOWRES_MAX_SLICE = 96;
+const VOLUME_MAX_SLICE = 256; // full-resolution in-plane cap for a tractable 3D preview
 /** Max concurrent slice fetches when assembling a volume — keeps the connection pool busy
  *  without flooding it (browsers cap ~6/host) on a deep stack. */
 const VOLUME_FETCH_CONCURRENCY = 8;
 
-/** Slice-sampling preset for a napari 3D plot type. Low-res variants take every other slice
- *  (`sliceStep` 2) and a smaller in-plane cap, so a deep stack loads markedly faster at the cost
- *  of z- and in-plane resolution. */
-function volumeResolutionFor(t: PlotType): { maxSlice: number; sliceStep: number } {
-  return isLowResNapari3d(t)
-    ? { maxSlice: VOLUME_LOWRES_MAX_SLICE, sliceStep: 2 }
-    : { maxSlice: VOLUME_MAX_SLICE, sliceStep: 1 };
+/** Volume/isosurface sampling for a decimate factor `scale` (1 = full, 2 = ½, 4 = ¼, …): the
+ *  in-plane cap shrinks by `scale` and every `scale`-th slice is taken, so the assembled volume is
+ *  ~1/scale³ the size — dramatically faster to fetch/assemble at higher factors. */
+function volumeResolutionFor(scale: number): { maxSlice: number; sliceStep: number } {
+  const s = Math.max(1, Math.round(scale));
+  return { maxSlice: Math.max(8, Math.round(VOLUME_MAX_SLICE / s)), sliceStep: s };
 }
-/** Max grid nodes per side for a napari surface mesh — large slices are decimated so the mesh
- *  stays tractable (a ~200² grid ≈ 80k triangles). */
-const SURFACE_MAX_GRID = 200;
 /** Fully-normalized intensity height as a fraction of the in-plane extent — matches the Plotly
  *  SURFACE z-aspect (~0.4) so the relief isn't exaggerated. */
 const SURFACE_Z_ASPECT = 0.4;
-/** Tile budget for the single slice a surface samples (a modest overview is plenty at grid res). */
-const SURFACE_STITCH_TILES = 16;
+/** Full-resolution mesh grid cap; the decimate factor divides it. */
+const SURFACE_MAX_GRID = 220;
+const SURFACE_TILE_BUDGET = 16;
+/** Surface mesh sampling for a decimate factor `scale`: the grid cap shrinks by `scale` (every
+ *  slice is kept — the z-slider needs them all). */
+function surfaceResolutionFor(scale: number): { maxGrid: number; tileBudget: number } {
+  const s = Math.max(1, Math.round(scale));
+  return { maxGrid: Math.max(16, Math.round(SURFACE_MAX_GRID / s)), tileBudget: SURFACE_TILE_BUDGET };
+}
 
 const TILE_SIZE = 512; // server tile edge (matches the OSD backend)
 /** Max tiles stitched for one displayed slice (512px tiles → up to ~6144² at full res). Beyond
@@ -221,6 +221,22 @@ export class NapariVisualizerService implements IVisualizer {
   private surfaceLayer: SurfaceLayer | null = null;
   /** Which band the surface samples (a channel index for multichannel, else the composite). */
   private surfaceChannel: number | undefined = undefined;
+  /** Pre-loaded per-slice luminance planes (already decimated to the surface grid), keyed by z,
+   *  so the stack slider rebuilds the surface instantly. Filled by {@link preloadSurfacePlanes}. */
+  private readonly surfacePlanes = new Map<
+    number,
+    { data: Uint8Array; width: number; height: number }
+  >();
+  /** In-plane grid cap for the active surface load (full grid ÷ the decimate factor). */
+  private surfaceMaxGrid = SURFACE_MAX_GRID;
+  /** Contrast window [min,max] the current surface mesh was built with. A change reshapes the
+   *  mesh (pixel height = intensity within [min,max]), so it triggers a geometry rebuild. */
+  private surfaceWindow: [number, number] | null = null;
+  /** Persisted wireframe choice for the surface (re-applied when a new surface mounts). */
+  private surfaceWireframe = false;
+  /** Decimate factor for the napari 3D types (1 = full, 2 = ½, 4 = ¼, 8 = ⅛). Applied when a
+   *  volume/isosurface/surface (re)loads; changing it needs a re-plot (it changes fetched data). */
+  private resolutionScale = 1;
   /** 3D coordinate-axes / scale gizmo for the volume/isosurface view (null in 2D). */
   private axesLayer: AxesLayer | null = null;
   /** DOM X/Y/Z + scale labels tracking the 3D axes gizmo (null in 2D). */
@@ -559,10 +575,16 @@ export class NapariVisualizerService implements IVisualizer {
     return this.bitmapToLuminance(bmp);
   }
 
-  /** Decode an `ImageBitmap` (server bands are grayscale, R=G=B) to a single-channel uint8 plane. */
-  private bitmapToLuminance(bmp: ImageBitmap): { data: Uint8Array; width: number; height: number } {
-    const w = bmp.width;
-    const h = bmp.height;
+  /** Decode an `ImageBitmap` (server bands are grayscale, R=G=B) to a single-channel uint8 plane.
+   *  `maxSide` caps the longest side (downscaling on the canvas draw) — used to keep pre-loaded
+   *  surface slice planes small. */
+  private bitmapToLuminance(
+    bmp: ImageBitmap,
+    maxSide?: number,
+  ): { data: Uint8Array; width: number; height: number } {
+    const scale = maxSide ? Math.min(1, maxSide / Math.max(bmp.width, bmp.height, 1)) : 1;
+    const w = Math.max(1, Math.round(bmp.width * scale));
+    const h = Math.max(1, Math.round(bmp.height * scale));
     let canvas: HTMLCanvasElement | OffscreenCanvas;
     if (typeof OffscreenCanvas !== 'undefined') {
       canvas = new OffscreenCanvas(w, h);
@@ -965,7 +987,7 @@ export class NapariVisualizerService implements IVisualizer {
     const desc = await this.ensureDescriptor();
     const channelCount = desc?.channels ?? 1;
     const multichannel = !!desc?.multichannel && channelCount > 1;
-    const res = volumeResolutionFor(plotType);
+    const res = volumeResolutionFor(this.resolutionScale);
     const rendering: 'iso' | 'mip' = isNapariIsosurface(plotType) ? 'iso' : 'mip';
     const states = this.store.currentChannelStates();
 
@@ -1158,60 +1180,206 @@ export class NapariVisualizerService implements IVisualizer {
   }
 
   /**
-   * Mount the NAPARI_SURFACE height-field surface. Thin adapter: pick the band to sample
-   * (channel 0 for multichannel, else the composite), wire the colormap subscription, then build
-   * the mesh for the current slice. All mesh + GPU work lives in napari-js (`heightField` +
-   * `Viewer.addSurface`); this backend only supplies the scalar slice and the colormap.
+   * Mount the NAPARI_SURFACE height-field surface. A height field is single-scalar, so for a
+   * multichannel image the surface follows ONE band — the first visible channel (fallback 0) —
+   * coloured by that channel's window/colormap (like the Plotly SURFACE, which is grayscale-only).
+   * Pre-loads every slice's height data with a progress bar (as the volume does) so the stack
+   * slider re-slices instantly, then builds the mesh for the current slice. All mesh + GPU work
+   * lives in napari-js (`heightField` + `Viewer.addSurface`); this backend supplies scalar slices.
    */
   private async mountSurface(viewer: Viewer): Promise<void> {
     const desc = await this.ensureDescriptor();
     const multichannel = !!desc?.multichannel && (desc?.channels ?? 1) > 1;
-    this.surfaceChannel = multichannel ? 0 : undefined;
+    const states = this.store.currentChannelStates();
+    this.surfaceChannel = multichannel ? states.find((s) => s.visible)?.index ?? 0 : undefined;
+    this.surfaceMaxGrid = surfaceResolutionFor(this.resolutionScale).maxGrid;
     this.imageMode = 'grayscale';
     this.volumeMultichannel = false;
-    this.subscribeSurfaceDisplayState();
+    await this.preloadSurfacePlanes(viewer);
+    if (this.viewer !== viewer) return;
     await this.buildSurface(viewer, this.loaded?.z ?? 0);
+    this.installSurfaceAxes(viewer);
+    // Subscribe after the first build so display-state edits target a live layer.
+    this.subscribeSurfaceDisplayState();
+  }
+
+  /** Add the 3D axes gizmo + DOM labels around the (origin-centered) surface mesh, matching the
+   *  volume/isosurface. Installed once per mount; the box tracks the mesh bounds, X/Y show the
+   *  physical (or pixel) extent, and Z is the intensity/height axis. */
+  private installSurfaceAxes(viewer: Viewer): void {
+    if (!this.surfaceLayer) return;
+    const b = this.surfaceLayer.bounds();
+    const boxW = Math.max(1, b.max[0] - b.min[0]);
+    const boxH = Math.max(1, b.max[1] - b.min[1]);
+    const boxD = Math.max(1, b.max[2] - b.min[2]);
+    const mppX = this.descriptor?.mppX || this.loaded?.imageInfo.imageMeta?.[0]?.mppX || 0;
+    const voxel = mppX > 0 ? (mppX * (this.descriptor?.width ?? this.imageW)) / Math.max(1, this.imageW) : 1;
+    this.axesLayer = viewer.addAxes(boxW, boxH, boxD, {
+      voxelSize: [voxel, voxel, 1],
+      visible: this.axesVisible,
+    });
+    if (this.host) {
+      this.axesLabels = new NapariAxesLabels(
+        this.host,
+        viewer.camera3d,
+        this.buildSurfaceAxesLabels(boxW, boxH, boxD, mppX),
+      );
+      this.axesLabels.setVisible(this.axesVisible);
+    }
+  }
+
+  /** X/Y/Z end-labels for the surface gizmo: X/Y are the physical (µm) or pixel extent of the FULL
+   *  image; Z is the intensity/height axis. Anchors are in the centered box (matching AxesLayer). */
+  private buildSurfaceAxesLabels(
+    boxW: number,
+    boxH: number,
+    boxD: number,
+    mppX: number,
+  ): AxisLabelSpec[] {
+    const hx = boxW / 2;
+    const hy = boxH / 2;
+    const hz = boxD / 2;
+    const descW = this.descriptor?.width ?? this.imageW;
+    const descH = this.descriptor?.height ?? this.imageH;
+    const len = (px: number): string => (mppX > 0 ? formatUm(px * mppX) : `${px} px`);
+    return [
+      { anchor: [hx, -hy, -hz], text: `X · ${len(descW)}`, color: '#ed4545' },
+      { anchor: [-hx, hy, -hz], text: `Y · ${len(descH)}`, color: '#4dd959' },
+      { anchor: [-hx, -hy, hz], text: 'Z · intensity', color: '#668cff' },
+    ];
   }
 
   /**
-   * (Re)build the surface mesh for slice `z`: fetch one grayscale slice, hand it to napari-js's
-   * pure `heightField` helper (which decimates + builds the triangle grid, z = normalized
-   * intensity), then `addSurface`. Replaces any existing surface layer so the stack slider can
-   * re-slice. The slice intensities double as the volume-histogram source (key 0).
+   * Pre-fetch every stack slice's luminance plane (decimated to the surface grid) into
+   * {@link surfacePlanes}, driving {@link stackLoadingProgress$} — the same load-with-progress UX
+   * as the volume, but keeping one 2D plane per slice rather than packing a 3D volume. Bounded
+   * concurrency keeps the connection pool busy without flooding it on a deep stack.
    */
-  private async buildSurface(viewer: Viewer, z: number): Promise<void> {
+  private async preloadSurfacePlanes(viewer: Viewer): Promise<void> {
+    const info = this.loaded?.imageInfo;
+    const depth = info?.imageMeta?.[0]?.z || info?.urls?.length || 1;
+    const { maxGrid, tileBudget } = surfaceResolutionFor(this.resolutionScale);
+    this.surfacePlanes.clear();
     this.stackLoading$.next(true);
     this.stackLoadingProgress$.next(0);
-    let plane: { data: Uint8Array; width: number; height: number } | null = null;
     try {
-      plane = await this.fetchChannelData(z, this.surfaceChannel, SURFACE_STITCH_TILES);
-    } catch (err) {
-      console.error('[napari-js] surface slice fetch failed:', err);
+      const pending: number[] = [];
+      for (let z = 0; z < depth; z++) pending.push(z);
+      let done = 0;
+      const worker = async (): Promise<void> => {
+        for (;;) {
+          const z = pending.shift();
+          if (z === undefined || this.viewer !== viewer) return;
+          try {
+            this.surfacePlanes.set(z, await this.fetchSurfacePlane(z, maxGrid, tileBudget));
+          } catch (err) {
+            console.warn(`[napari-js] surface slice ${z} preload failed`, err);
+          }
+          done++;
+          this.stackLoadingProgress$.next(Math.round((done / depth) * 100));
+        }
+      };
+      const pool = Math.min(VOLUME_FETCH_CONCURRENCY, Math.max(1, depth));
+      await Promise.all(Array.from({ length: pool }, () => worker()));
     } finally {
       this.stackLoading$.next(false);
       this.stackLoadingProgress$.next(0);
     }
-    if (!plane || this.viewer !== viewer) return;
+  }
 
-    // Decimate large slices so the mesh stays tractable; napari-js maps grid x/y to full pixel
-    // coords regardless of stride, so the z-aspect is independent of decimation.
-    const stride = Math.max(1, Math.ceil(Math.max(plane.width, plane.height) / SURFACE_MAX_GRID));
+  /**
+   * Fetch slice `z` as a single WHOLE-image luminance plane (decimated to `maxGrid`). Prefers the
+   * app's complete per-slice image (`smallUrls`/`urls`, exactly like the Plotly surface) so the
+   * surface always covers the FULL slice — the tile-pyramid `fetchSlice` path would fall back to a
+   * single top-left tile (a corner) for self-contained / non-`/tiles/info` images. Falls back to
+   * stitching the tile grid only when no complete-image URL is available.
+   */
+  private async fetchSurfacePlane(
+    z: number,
+    maxGrid: number,
+    tileBudget: number,
+  ): Promise<{ data: Uint8Array; width: number; height: number }> {
+    const info = this.loaded?.imageInfo;
+    const url = info?.smallUrls?.[z] ?? info?.urls?.[z];
+    if (url) {
+      try {
+        const headers = await this.tiles
+          .getAuthHeaders()
+          .catch(() => ({}) as Record<string, string>);
+        const resp = await fetch(url, { headers });
+        if (resp.ok) {
+          return this.bitmapToLuminance(await createImageBitmap(await resp.blob()), maxGrid);
+        }
+        console.warn(`[napari-js] surface url z=${z} → ${resp.status}; falling back to tiles`);
+      } catch (err) {
+        console.warn(`[napari-js] surface url fetch failed for z=${z}; falling back to tiles`, err);
+      }
+    }
+    return this.bitmapToLuminance(await this.fetchSlice(z, this.surfaceChannel, tileBudget), maxGrid);
+  }
+
+  /** The channel state driving the surface: the chosen band for multichannel (matched by index),
+   *  else the single grayscale channel. */
+  private surfaceState(channels: IChannelState[]): IChannelState | undefined {
+    if (this.surfaceChannel == null) return channels[0];
+    return channels.find((s) => s.index === this.surfaceChannel) ?? channels[0];
+  }
+
+  /**
+   * (Re)build the surface mesh for slice `z` from the pre-loaded plane cache (instant — this is
+   * what the stack slider calls); a slice missing from the cache is fetched on demand. napari-js's
+   * pure `heightField` builds the triangle grid (z = normalized intensity), then `addSurface`
+   * renders it. The slice plane also feeds the intensity histogram (key 0).
+   */
+  private async buildSurface(viewer: Viewer, z: number): Promise<void> {
+    let plane = this.surfacePlanes.get(z);
+    if (!plane) {
+      this.stackLoading$.next(true);
+      try {
+        const budget = surfaceResolutionFor(this.resolutionScale).tileBudget;
+        plane = await this.fetchSurfacePlane(z, this.surfaceMaxGrid, budget);
+        this.surfacePlanes.set(z, plane);
+      } catch (err) {
+        console.error('[napari-js] surface slice fetch failed:', err);
+      } finally {
+        this.stackLoading$.next(false);
+      }
+    }
+    if (!plane || plane.width < 2 || plane.height < 2 || this.viewer !== viewer) return;
+
+    const st = this.surfaceState(this.store.currentChannelStates());
+    const win: [number, number] = [st?.min ?? 0, st?.max ?? 255];
+    this.surfaceWindow = win;
+    // Height AND colour are normalized by the same contrast window, so changing min/max reshapes the
+    // surface (a pixel's height = its intensity within [min,max]). Center it for the axes gizmo. The
+    // plane is already decimated to the grid cap → stride 1.
     const zScale = SURFACE_Z_ASPECT * Math.max(plane.width, plane.height);
     const { vertices, faces, values } = heightField(plane.data, plane.width, plane.height, {
-      stride,
       zScale,
+      zLimits: win,
+      center: true,
     });
 
+    // Preserve the orbit camera across a re-slice / window rebuild — only the first mount frames, so
+    // stepping the stack or changing the window keeps the current zoom/pan/orientation.
+    const cam = viewer.camera3d;
+    const preserveCamera = this.surfaceLayer != null;
+    const savedTarget = cam.target;
+    const savedDistance = cam.distance;
     if (this.surfaceLayer) {
       viewer.layers.remove(this.surfaceLayer);
       this.surfaceLayer = null;
     }
-    const st = this.store.currentChannelStates()[this.surfaceChannel ?? 0];
     this.surfaceLayer = viewer.addSurface(vertices, faces, values, {
       colormap: this.volumeColormap(st),
-      contrastLimits: [st?.min ?? 0, st?.max ?? 255],
+      contrastLimits: win,
       gamma: st?.gamma ?? 1,
+      wireframe: this.surfaceWireframe,
     });
+    if (preserveCamera) {
+      cam.target = savedTarget;
+      cam.distance = savedDistance;
+    }
 
     this.imageW = plane.width;
     this.imageH = plane.height;
@@ -1222,8 +1390,11 @@ export class NapariVisualizerService implements IVisualizer {
     this.scheduleReadback();
   }
 
-  /** Subscribe the store colormap / reverse / invert / channel window → the surface layer's
-   *  colormap, contrast window and gamma (same transfer function as the volume). */
+  /** Subscribe the store colormap / reverse / invert / channel window → the surface, so histogram
+   *  & channel-dialog edits update it live without a re-fetch. **min/max reshapes the surface's
+   *  height** (a pixel's height = its intensity within [min,max]), so a window change rebuilds the
+   *  mesh geometry (from the cached slice); colour-only edits (colormap/LUT, gamma, reverse, invert)
+   *  just update the layer's uniforms. */
   private subscribeSurfaceDisplayState(): void {
     this.displaySub?.unsubscribe();
     this.displaySub = combineLatest([
@@ -1236,14 +1407,25 @@ export class NapariVisualizerService implements IVisualizer {
       this.currentReverse = reverse;
       this.invertEnabled = invert;
       const layer = this.surfaceLayer;
-      if (!layer) return;
-      const st = channels[this.surfaceChannel ?? 0] ?? channels[0];
+      if (!layer || !this.viewer) return;
+      const st = this.surfaceState(channels);
+      const win: [number, number] = [st?.min ?? 0, st?.max ?? 255];
+      const windowChanged =
+        !this.surfaceWindow || win[0] !== this.surfaceWindow[0] || win[1] !== this.surfaceWindow[1];
+      if (windowChanged) {
+        // Height follows the contrast window → rebuild the mesh for the new [min,max] (camera kept).
+        void this.buildSurface(this.viewer, this.loaded?.z ?? 0).catch((err) =>
+          console.error('[napari-js] surface window rebuild failed:', err),
+        );
+        return;
+      }
+      // Colour-only change: update uniforms in place, no geometry rebuild.
       layer.colormap = this.volumeColormap(st);
       if (st) {
-        layer.contrastLimits = [st.min, st.max];
+        layer.contrastLimits = win;
         layer.gamma = st.gamma;
       }
-      this.viewer?.requestRender();
+      this.viewer.requestRender();
     });
   }
 
@@ -1298,6 +1480,8 @@ export class NapariVisualizerService implements IVisualizer {
     this.volumeMultichannel = false;
     this.surfaceLayer = null;
     this.surfaceChannel = undefined;
+    this.surfacePlanes.clear();
+    this.surfaceWindow = null;
     this.axesLayer = null;
     this.volumeDims = null;
     this.volumeChannelData.clear();
@@ -1460,11 +1644,20 @@ export class NapariVisualizerService implements IVisualizer {
     return [
       PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_IMAGE]!,
       PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_VOLUME]!,
-      PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_VOLUME_LOWRES]!,
       PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_ISOSURFACE]!,
-      PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_ISOSURFACE_LOWRES]!,
       PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_SURFACE]!,
     ];
+  }
+
+  /** The napari 3D decimate factor (1 = full … 8 = ⅛). Read by the toolbar to init the control. */
+  getResolutionScale(): number {
+    return this.resolutionScale;
+  }
+
+  /** Set the decimate factor for the napari 3D types. Takes effect on the next (re)load — the host
+   *  re-plots after calling this, since decimation changes the fetched/assembled data. */
+  setResolutionScale(scale: number): void {
+    this.resolutionScale = Math.max(1, Math.round(scale));
   }
 
   getIntensityProfile$(): Observable<IntensityProfile[]> {
@@ -1867,6 +2060,15 @@ export class NapariVisualizerService implements IVisualizer {
         }
       },
       axesVisible: (): boolean => this.axesVisible,
+      // Surface wireframe (napari-js surface only) — a live layer property, no rebuild needed.
+      setWireframe: (on: boolean): void => {
+        this.surfaceWireframe = on;
+        if (this.surfaceLayer) {
+          this.surfaceLayer.wireframe = on;
+          this.viewer?.requestRender();
+        }
+      },
+      wireframe: (): boolean => this.surfaceWireframe,
     };
   }
   getHistogram(channelIndex: number, bins: number): IHistogram | null {

@@ -22,14 +22,11 @@ export enum PlotType {
   LINE = 'line',
   SCATTER3D = 'scatter3d',
   ISOSURFACE = 'isosurface',
-  /** WebGPU napari-js renderings (jit-ui#102), selectable alongside the OSD/Plotly types.
-   *  Volume/isosurface come in high-res and low-res variants: low-res fetches fewer/smaller
-   *  slices for a faster (coarser) 3D preview. */
+  /** WebGPU napari-js renderings (jit-ui#102), selectable alongside the OSD/Plotly types. The 3D
+   *  types take a runtime decimate factor (Full / ½ / ¼ / ⅛) instead of fixed hi/lo-res variants. */
   NAPARI_IMAGE = 'napari-image',
   NAPARI_VOLUME = 'napari-volume',
   NAPARI_ISOSURFACE = 'napari-isosurface',
-  NAPARI_VOLUME_LOWRES = 'napari-volume-lowres',
-  NAPARI_ISOSURFACE_LOWRES = 'napari-isosurface-lowres',
   /** WebGPU height-field surface mesh (z = intensity), the napari-js analog of Plotly SURFACE. */
   NAPARI_SURFACE = 'napari-surface',
 }
@@ -75,16 +72,16 @@ export const PLOT_TYPE_DESCRIPTORS: Partial<Record<PlotType, PlotTypeDescriptor>
   [PlotType.CONTOUR]:    { type: PlotType.CONTOUR,    label: 'Contour',            dimensions: '2d', source: 'image', requiresGrayscale: true },
   [PlotType.SCATTER]:    { type: PlotType.SCATTER,    label: 'Scatter (regions)',  dimensions: '2d', source: 'regions' },
   [PlotType.SURFACE]:    { type: PlotType.SURFACE,    label: 'Surface (3D)',       dimensions: '3d', source: 'image', requiresGrayscale: true },
-  // napari-js WebGPU height-field surface — listed directly below the Plotly "Surface (3D)".
+  // napari-js WebGPU height-field surface — listed directly below the Plotly "Surface (3D)". No
+  // requiresStack: a surface renders a single slice (a stack just adds the z-slider), so it's
+  // offered for single grayscale images too. Resolution is a runtime decimate factor.
   [PlotType.NAPARI_SURFACE]: { type: PlotType.NAPARI_SURFACE, label: 'Surface (napari · WebGPU)', dimensions: '3d', source: 'image', requiresGrayscale: true },
   [PlotType.SCATTER3D]:  { type: PlotType.SCATTER3D,  label: 'Scatter 3D',         dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
   [PlotType.ISOSURFACE]: { type: PlotType.ISOSURFACE, label: 'Isosurface (3D)',    dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
-  // WebGPU napari-js renderings (jit-ui#102). Volume/isosurface offer high-res + low-res variants.
-  [PlotType.NAPARI_IMAGE]:               { type: PlotType.NAPARI_IMAGE,               label: 'Image (napari · WebGPU)',                dimensions: '2d', source: 'image' },
-  [PlotType.NAPARI_VOLUME]:              { type: PlotType.NAPARI_VOLUME,              label: 'Volume (napari · WebGPU · high-res)',    dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
-  [PlotType.NAPARI_VOLUME_LOWRES]:       { type: PlotType.NAPARI_VOLUME_LOWRES,       label: 'Volume (napari · WebGPU · low-res)',     dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
-  [PlotType.NAPARI_ISOSURFACE]:          { type: PlotType.NAPARI_ISOSURFACE,          label: 'Isosurface (napari · WebGPU · high-res)', dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
-  [PlotType.NAPARI_ISOSURFACE_LOWRES]:   { type: PlotType.NAPARI_ISOSURFACE_LOWRES,   label: 'Isosurface (napari · WebGPU · low-res)',  dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
+  // WebGPU napari-js renderings (jit-ui#102). The 3D types take a runtime decimate factor.
+  [PlotType.NAPARI_IMAGE]:      { type: PlotType.NAPARI_IMAGE,      label: 'Image (napari · WebGPU)',      dimensions: '2d', source: 'image' },
+  [PlotType.NAPARI_VOLUME]:     { type: PlotType.NAPARI_VOLUME,     label: 'Volume (napari · WebGPU)',     dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
+  [PlotType.NAPARI_ISOSURFACE]: { type: PlotType.NAPARI_ISOSURFACE, label: 'Isosurface (napari · WebGPU)', dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
 };
 
 export function getPlotTypeDescriptor(type: PlotType): PlotTypeDescriptor | undefined {
@@ -95,24 +92,29 @@ export function isThreeDimensional(type: PlotType): boolean {
   return PLOT_TYPE_DESCRIPTORS[type]?.dimensions === '3d';
 }
 
-// ── napari-js 3D plot-type predicates (high-res + low-res variants) ──────────
-/** napari-js volume (either resolution). */
+// ── napari-js 3D plot-type predicates ────────────────────────────────────────
+/** napari-js volume. */
 export function isNapariVolume(type: PlotType): boolean {
-  return type === PlotType.NAPARI_VOLUME || type === PlotType.NAPARI_VOLUME_LOWRES;
+  return type === PlotType.NAPARI_VOLUME;
 }
-/** napari-js isosurface (either resolution). */
+/** napari-js isosurface. */
 export function isNapariIsosurface(type: PlotType): boolean {
-  return type === PlotType.NAPARI_ISOSURFACE || type === PlotType.NAPARI_ISOSURFACE_LOWRES;
+  return type === PlotType.NAPARI_ISOSURFACE;
 }
 /** napari-js height-field surface mesh. */
 export function isNapariSurface(type: PlotType): boolean {
   return type === PlotType.NAPARI_SURFACE;
 }
-/** Any napari-js 3D plot type (volume, isosurface, or surface). */
+/** Any napari-js 3D plot type (volume, isosurface, or surface). Resolution is a runtime decimate
+ *  factor (Full / ½ / ¼ / ⅛) — see the service's `resolutionScale`. */
 export function isNapari3d(type: PlotType): boolean {
   return isNapariVolume(type) || isNapariIsosurface(type) || isNapariSurface(type);
 }
-/** The low-res napari 3D variants (coarser/faster slice sampling). */
-export function isLowResNapari3d(type: PlotType): boolean {
-  return type === PlotType.NAPARI_VOLUME_LOWRES || type === PlotType.NAPARI_ISOSURFACE_LOWRES;
-}
+
+/** Decimate factors offered by the Resolution control (1 = Full … 8 = ⅛). */
+export const NAPARI_DECIMATE_OPTIONS: { label: string; value: number }[] = [
+  { label: 'Full', value: 1 },
+  { label: '½', value: 2 },
+  { label: '¼', value: 4 },
+  { label: '⅛', value: 8 },
+];

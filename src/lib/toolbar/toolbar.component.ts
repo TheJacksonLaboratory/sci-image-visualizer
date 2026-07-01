@@ -2,7 +2,14 @@ import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges } from
 import { MenuItem } from 'primeng/api';
 
 import { IImageInfo } from '../contracts/image.contract';
-import { PlotType, PlotTypeDescriptor, isNapari3d, isNapariIsosurface } from '../contracts/plot-type';
+import {
+  PlotType,
+  PlotTypeDescriptor,
+  isNapari3d,
+  isNapariIsosurface,
+  isNapariSurface,
+  NAPARI_DECIMATE_OPTIONS,
+} from '../contracts/plot-type';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from '../contracts/toolbar-config';
 
 /**
@@ -41,6 +48,11 @@ export class ToolbarComponent implements OnChanges {
   @Input() activeSurface3dMode = 'turntable';
   /** Whether the napari 3D axes/scale gizmo is currently shown (drives the toggle's look). */
   @Input() axesVisible = true;
+  @Input() wireframeActive = false;
+  /** Active napari 3D decimate factor (1 = full … 8 = ⅛). */
+  @Input() resolutionScale = 1;
+  /** Decimate-factor options for the Resolution dropdown. */
+  readonly decimateOptions = NAPARI_DECIMATE_OPTIONS;
   @Input() wandSensitivity = 2.0;
   @Input() brushSize = 40;
   @Input() vertexEraserRadius = 20;
@@ -87,6 +99,10 @@ export class ToolbarComponent implements OnChanges {
   @Output() resetSurfaceCamera = new EventEmitter<void>();
   /** Toggle the napari 3D coordinate-axes / scale gizmo on/off. */
   @Output() toggleAxes = new EventEmitter<void>();
+  /** Toggle the napari surface wireframe (edges) on/off. */
+  @Output() toggleWireframe = new EventEmitter<void>();
+  /** Change the napari 3D decimate factor (reloads at the new resolution). */
+  @Output() selectResolution = new EventEmitter<number>();
   @Output() deleteRegion = new EventEmitter<void>();
   /** Undo the last region action (jit-ui#85). */
   @Output() undoRegion = new EventEmitter<void>();
@@ -158,12 +174,14 @@ export class ToolbarComponent implements OnChanges {
     );
   }
 
-  /** Plot types that scrub a z-stack live (the renderer swaps the slice in place): the OSD
-   *  Image view and the napari-js WebGPU image (jit-ui#102). Drives the per-slice slider. */
+  /** Plot types that scrub a z-stack live (the renderer swaps the slice in place): the OSD Image
+   *  view, the napari-js WebGPU image, and the napari-js surface — which rebuilds the height field
+   *  from the picked slice (jit-ui#102). Drives the per-slice slider. */
   get showsLiveSliceScrubber(): boolean {
     return (
       this.selectedPlotType === PlotType.IMAGE ||
-      this.selectedPlotType === PlotType.NAPARI_IMAGE
+      this.selectedPlotType === PlotType.NAPARI_IMAGE ||
+      isNapariSurface(this.selectedPlotType)
     );
   }
 
@@ -178,6 +196,16 @@ export class ToolbarComponent implements OnChanges {
     return (
       this.selectedPlotType === PlotType.ISOSURFACE || isNapariIsosurface(this.selectedPlotType)
     );
+  }
+
+  /** The napari-js WebGPU surface — shows the wireframe toggle. */
+  get isNapariSurfaceMode(): boolean {
+    return isNapariSurface(this.selectedPlotType);
+  }
+
+  /** Any napari-js WebGPU 3D type (volume/isosurface/surface) — shows the Resolution control. */
+  get isNapari3dMode(): boolean {
+    return isNapari3d(this.selectedPlotType);
   }
 
   /** Intensity profile lines are Region-based and available in the Heatmap and
