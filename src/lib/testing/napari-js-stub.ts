@@ -18,6 +18,8 @@ interface StubDims {
 interface StubCamera3D {
   frame(width: number, height: number, depth: number): void;
   viewProjection(vw: number, vh: number): number[];
+  target: [number, number, number];
+  distance: number;
   changed: { connect(listener: () => void): () => void };
 }
 
@@ -38,6 +40,38 @@ export interface AxesLayer {
   tickCount: number;
   boundingBox: boolean;
   voxelSize: [number, number, number];
+}
+
+/** A mutable stand-in for napari-js SurfaceLayer (the props/bounds the adapter reads/sets). */
+export interface SurfaceLayer {
+  colormap: unknown;
+  contrastLimits: [number, number];
+  gamma: number;
+  visible: boolean;
+  blending: string;
+  bounds(): {
+    min: [number, number, number];
+    max: [number, number, number];
+    center: [number, number, number];
+    radius: number;
+  };
+}
+
+/** Stand-in for napari-js heightField: returns a grid-sized mesh (values/vertices/faces) so the
+ *  adapter's `addSurface` call shape is exercised without the real triangulation. */
+export function heightField(
+  _data: ArrayLike<number>,
+  cols: number,
+  rows: number,
+  _opts?: unknown,
+): { vertices: Float32Array; faces: Uint32Array; values: Float32Array } {
+  const n = Math.max(0, cols * rows);
+  const cells = Math.max(0, (cols - 1) * (rows - 1));
+  return {
+    vertices: new Float32Array(n * 3),
+    faces: new Uint32Array(cells * 6),
+    values: new Float32Array(n),
+  };
 }
 
 /** A mutable stand-in for napari-js ImageLayer (the per-channel display props the adapter sets). */
@@ -240,10 +274,12 @@ export class Viewer {
   readonly camera3d: StubCamera3D = {
     frame: () => undefined,
     viewProjection: () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+    target: [0, 0, 0],
+    distance: 1,
     changed: { connect: () => () => undefined },
   };
   readonly dims: StubDims = { z: 0 };
-  readonly layers = { clear: (): void => undefined };
+  readonly layers = { clear: (): void => undefined, remove: (): boolean => true };
 
   constructor(_options: { canvas: HTMLCanvasElement }) {}
 
@@ -270,6 +306,21 @@ export class Viewer {
   }
   addAxes(): AxesLayer {
     return { visible: true, tickCount: 5, boundingBox: true, voxelSize: [1, 1, 1] };
+  }
+  addSurface(): SurfaceLayer {
+    return {
+      colormap: 'viridis',
+      contrastLimits: [0, 255],
+      gamma: 1,
+      visible: true,
+      blending: 'opaque',
+      bounds: () => ({
+        min: [0, 0, 0],
+        max: [1, 1, 1],
+        center: [0.5, 0.5, 0.5],
+        radius: 1,
+      }),
+    };
   }
   layerHistogram(): { counts: Uint32Array; bins: number; min: number; max: number } | null {
     return { counts: new Uint32Array(256), bins: 256, min: 0, max: 255 };

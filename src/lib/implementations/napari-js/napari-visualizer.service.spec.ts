@@ -102,6 +102,7 @@ describe('NapariVisualizerService', () => {
       PlotType.NAPARI_VOLUME_LOWRES,
       PlotType.NAPARI_ISOSURFACE,
       PlotType.NAPARI_ISOSURFACE_LOWRES,
+      PlotType.NAPARI_SURFACE,
     ]);
   });
 
@@ -215,6 +216,51 @@ describe('NapariVisualizerService', () => {
     // Invert flips the ramp (VolumeLayer has no per-layer invert, so it's emulated).
     store.setInvert(true);
     expect(volLayer.colormap.name).toContain('reversed');
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('mounts a napari-js height-field surface and drives its colormap/window from the store', async () => {
+    // Capture the surface layer the stub Viewer hands back, and confirm addSurface is called with
+    // a real mesh (vertices/faces/values) built by napari-js's heightField — the adapter stays thin.
+    const addSurface = jest.spyOn(
+      Viewer.prototype as unknown as { addSurface: (...a: unknown[]) => unknown },
+      'addSurface',
+    );
+
+    const div = document.createElement('div');
+    div.id = 'surf-host';
+    document.body.appendChild(div);
+
+    const loaded = await service.load(imageInfo(), 0);
+    const ok = await service.plot('surf-host', loaded, imageInfo(), 600, PlotType.NAPARI_SURFACE);
+    expect(ok).toBe(true);
+    expect(addSurface).toHaveBeenCalledTimes(1);
+    // Called as addSurface(vertices, faces, values, opts) with typed-array mesh geometry.
+    const [vertices, faces, values] = addSurface.mock.calls[0] as [
+      Float32Array,
+      Uint32Array,
+      Float32Array,
+    ];
+    expect(vertices).toBeInstanceOf(Float32Array);
+    expect(faces).toBeInstanceOf(Uint32Array);
+    expect(values).toBeInstanceOf(Float32Array);
+
+    // Surface-3D controls are available for a surface (drag mode / camera reset).
+    expect(service.getSurface3dControls()).not.toBeNull();
+
+    const surfLayer = addSurface.mock.results[0].value as {
+      contrastLimits: [number, number];
+      gamma: number;
+      colormap: { name: string };
+    };
+    // The histogram pane's window (min/max) + gamma reach the surface layer, like the volume.
+    store.setChannelStates([
+      { index: 0, name: 's', color: '#00ff00', min: 30, max: 210, gamma: 1.5, visible: true } as IChannelState,
+    ]);
+    expect(surfLayer.contrastLimits).toEqual([30, 210]);
+    expect(surfLayer.gamma).toBe(1.5);
 
     service.unsubscribe();
     document.body.removeChild(div);

@@ -8,11 +8,13 @@ import {
   colormapFromLut,
   tintColormap,
   reverseColormap,
+  heightField,
   MultiChannelImageView,
   MultiChannelVolumeView,
 } from 'napari-js';
 import type {
   AxesLayer,
+  SurfaceLayer,
   TiledSource,
   TileKey,
   PixelChunk,
@@ -31,6 +33,7 @@ import {
   PLOT_TYPE_DESCRIPTORS,
   isNapari3d,
   isNapariIsosurface,
+  isNapariSurface,
   isLowResNapari3d,
 } from '../../contracts/plot-type';
 import {
@@ -120,6 +123,15 @@ function volumeResolutionFor(t: PlotType): { maxSlice: number; sliceStep: number
     ? { maxSlice: VOLUME_LOWRES_MAX_SLICE, sliceStep: 2 }
     : { maxSlice: VOLUME_MAX_SLICE, sliceStep: 1 };
 }
+/** Max grid nodes per side for a napari surface mesh — large slices are decimated so the mesh
+ *  stays tractable (a ~200² grid ≈ 80k triangles). */
+const SURFACE_MAX_GRID = 200;
+/** Fully-normalized intensity height as a fraction of the in-plane extent — matches the Plotly
+ *  SURFACE z-aspect (~0.4) so the relief isn't exaggerated. */
+const SURFACE_Z_ASPECT = 0.4;
+/** Tile budget for the single slice a surface samples (a modest overview is plenty at grid res). */
+const SURFACE_STITCH_TILES = 16;
+
 const TILE_SIZE = 512; // server tile edge (matches the OSD backend)
 /** Max tiles stitched for one displayed slice (512px tiles → up to ~6144² at full res). Beyond
  *  this we step to a coarser pyramid level so a large image stays tractable. */
@@ -204,6 +216,11 @@ export class NapariVisualizerService implements IVisualizer {
   private volumeView: MultiChannelVolumeView | null = null;
   /** True when the volume is composited from per-channel layers (vs a single grayscale volume). */
   private volumeMultichannel = false;
+  /** napari-js height-field surface mesh (NAPARI_SURFACE plot type; null otherwise). Built from a
+   *  single grayscale slice by {@link buildSurface} via napari-js's `heightField` + `addSurface`. */
+  private surfaceLayer: SurfaceLayer | null = null;
+  /** Which band the surface samples (a channel index for multichannel, else the composite). */
+  private surfaceChannel: number | undefined = undefined;
   /** 3D coordinate-axes / scale gizmo for the volume/isosurface view (null in 2D). */
   private axesLayer: AxesLayer | null = null;
   /** DOM X/Y/Z + scale labels tracking the 3D axes gizmo (null in 2D). */
@@ -492,7 +509,9 @@ export class NapariVisualizerService implements IVisualizer {
       this.viewer = viewer;
       await viewer.ready;
 
-      if (isNapari3d(plotType)) {
+      if (isNapariSurface(plotType)) {
+        await this.mountSurface(viewer);
+      } else if (isNapari3d(plotType)) {
         await this.mountVolume(viewer, info, plotType);
       } else {
         await this.renderImage(z);
@@ -1138,6 +1157,96 @@ export class NapariVisualizerService implements IVisualizer {
     }
   }
 
+  /**
+   * Mount the NAPARI_SURFACE height-field surface. Thin adapter: pick the band to sample
+   * (channel 0 for multichannel, else the composite), wire the colormap subscription, then build
+   * the mesh for the current slice. All mesh + GPU work lives in napari-js (`heightField` +
+   * `Viewer.addSurface`); this backend only supplies the scalar slice and the colormap.
+   */
+  private async mountSurface(viewer: Viewer): Promise<void> {
+    const desc = await this.ensureDescriptor();
+    const multichannel = !!desc?.multichannel && (desc?.channels ?? 1) > 1;
+    this.surfaceChannel = multichannel ? 0 : undefined;
+    this.imageMode = 'grayscale';
+    this.volumeMultichannel = false;
+    this.subscribeSurfaceDisplayState();
+    await this.buildSurface(viewer, this.loaded?.z ?? 0);
+  }
+
+  /**
+   * (Re)build the surface mesh for slice `z`: fetch one grayscale slice, hand it to napari-js's
+   * pure `heightField` helper (which decimates + builds the triangle grid, z = normalized
+   * intensity), then `addSurface`. Replaces any existing surface layer so the stack slider can
+   * re-slice. The slice intensities double as the volume-histogram source (key 0).
+   */
+  private async buildSurface(viewer: Viewer, z: number): Promise<void> {
+    this.stackLoading$.next(true);
+    this.stackLoadingProgress$.next(0);
+    let plane: { data: Uint8Array; width: number; height: number } | null = null;
+    try {
+      plane = await this.fetchChannelData(z, this.surfaceChannel, SURFACE_STITCH_TILES);
+    } catch (err) {
+      console.error('[napari-js] surface slice fetch failed:', err);
+    } finally {
+      this.stackLoading$.next(false);
+      this.stackLoadingProgress$.next(0);
+    }
+    if (!plane || this.viewer !== viewer) return;
+
+    // Decimate large slices so the mesh stays tractable; napari-js maps grid x/y to full pixel
+    // coords regardless of stride, so the z-aspect is independent of decimation.
+    const stride = Math.max(1, Math.ceil(Math.max(plane.width, plane.height) / SURFACE_MAX_GRID));
+    const zScale = SURFACE_Z_ASPECT * Math.max(plane.width, plane.height);
+    const { vertices, faces, values } = heightField(plane.data, plane.width, plane.height, {
+      stride,
+      zScale,
+    });
+
+    if (this.surfaceLayer) {
+      viewer.layers.remove(this.surfaceLayer);
+      this.surfaceLayer = null;
+    }
+    const st = this.store.currentChannelStates()[this.surfaceChannel ?? 0];
+    this.surfaceLayer = viewer.addSurface(vertices, faces, values, {
+      colormap: this.volumeColormap(st),
+      contrastLimits: [st?.min ?? 0, st?.max ?? 255],
+      gamma: st?.gamma ?? 1,
+    });
+
+    this.imageW = plane.width;
+    this.imageH = plane.height;
+    this.volumeDims = { width: plane.width, height: plane.height, depth: Math.max(1, Math.round(zScale)) };
+    // Reuse the volume intensity-histogram path: the slice's scalar plane is the histogram source.
+    this.volumeChannelData.clear();
+    this.volumeChannelData.set(0, plane.data);
+    this.scheduleReadback();
+  }
+
+  /** Subscribe the store colormap / reverse / invert / channel window → the surface layer's
+   *  colormap, contrast window and gamma (same transfer function as the volume). */
+  private subscribeSurfaceDisplayState(): void {
+    this.displaySub?.unsubscribe();
+    this.displaySub = combineLatest([
+      this.store.getColormap(),
+      this.store.getReverseScale(),
+      this.store.getInvert(),
+      this.store.getChannelStates(),
+    ]).subscribe(([colormap, reverse, invert, channels]) => {
+      this.currentColormap = (colormap as ColormapNode) ?? null;
+      this.currentReverse = reverse;
+      this.invertEnabled = invert;
+      const layer = this.surfaceLayer;
+      if (!layer) return;
+      const st = channels[this.surfaceChannel ?? 0] ?? channels[0];
+      layer.colormap = this.volumeColormap(st);
+      if (st) {
+        layer.contrastLimits = [st.min, st.max];
+        layer.gamma = st.gamma;
+      }
+      this.viewer?.requestRender();
+    });
+  }
+
   private fitCameraSoon(): void {
     const run = (): void => {
       if (this.viewer && this.canvas && this.imageW > 0 && this.imageH > 0) {
@@ -1187,6 +1296,8 @@ export class NapariVisualizerService implements IVisualizer {
     this.lastPixels = null;
     this.volumeView = null;
     this.volumeMultichannel = false;
+    this.surfaceLayer = null;
+    this.surfaceChannel = undefined;
     this.axesLayer = null;
     this.volumeDims = null;
     this.volumeChannelData.clear();
@@ -1239,6 +1350,13 @@ export class NapariVisualizerService implements IVisualizer {
     if (this.loaded) this.loaded.z = zIndex;
     const v = this.viewer;
     if (!v) return;
+    // Surface: one slice → one mesh, so re-build the height field for the new slice.
+    if (this.surfaceLayer) {
+      void this.buildSurface(v, zIndex).catch((err) =>
+        console.error('[napari-js] setZIndex surface failed:', err),
+      );
+      return;
+    }
     // Volume / isosurface: step the volume's z plane in place.
     if (this.volumeView) {
       v.dims.z = zIndex;
@@ -1318,10 +1436,19 @@ export class NapariVisualizerService implements IVisualizer {
     this.viewer.setCameraDragMode(m);
   }
 
-  /** @deprecated 3D not yet rendered by this backend. */
+  /** Re-frame the 3D camera on the current 3D layer. A surface mesh sits in the positive octant
+   *  (not centred), so frame it by its own bounds; a volume/isosurface uses its centred box. */
   resetSurfaceCamera(): void {
+    if (!this.viewer) return;
+    if (this.surfaceLayer) {
+      const b = this.surfaceLayer.bounds();
+      this.viewer.camera3d.target = b.center;
+      this.viewer.camera3d.distance = Math.max(b.radius * 2.5, 1e-3);
+      this.viewer.requestRender();
+      return;
+    }
     const d = this.volumeDims;
-    if (this.viewer && d) this.viewer.camera3d.frame(d.width, d.height, d.depth);
+    if (d) this.viewer.camera3d.frame(d.width, d.height, d.depth);
   }
 
   getAutoscaleEvent(): Observable<unknown> {
@@ -1336,6 +1463,7 @@ export class NapariVisualizerService implements IVisualizer {
       PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_VOLUME_LOWRES]!,
       PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_ISOSURFACE]!,
       PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_ISOSURFACE_LOWRES]!,
+      PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_SURFACE]!,
     ];
   }
 
@@ -1726,7 +1854,7 @@ export class NapariVisualizerService implements IVisualizer {
     return null;
   }
   getSurface3dControls(): ISurface3dControls | null {
-    if (!this.volumeView) return null;
+    if (!this.volumeView && !this.surfaceLayer) return null;
     return {
       setSurfaceDragMode: (mode: string): void => this.setSurfaceDragMode(mode),
       resetSurfaceCamera: (): void => this.resetSurfaceCamera(),
