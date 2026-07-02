@@ -108,32 +108,34 @@ interface NapariLoaded {
   filename: string;
 }
 
-const VOLUME_MAX_SLICE = 512; // full-resolution in-plane cap; the default ½ load uses 256
+const VOLUME_MAX_SLICE = 1024; // "Full" in-plane cap; the default ¼ load uses 256
 /** Max concurrent slice fetches when assembling a volume — keeps the connection pool busy
  *  without flooding it (browsers cap ~6/host) on a deep stack. */
 const VOLUME_FETCH_CONCURRENCY = 8;
 
-/** Volume/isosurface sampling for a decimate factor `scale` (1 = Full, 2 = ½ default, 4 = ¼, 8 = ⅛):
- *  the in-plane cap halves each step; slices stay un-subsampled until ¼ (so ½ === the previous
- *  full-res load — 256 in-plane, every slice), then subsample. */
+/** Volume/isosurface sampling for a decimate factor `scale` (1 = Full 1024, 2 = ½ 512, 4 = ¼ 256
+ *  default, 8 = ⅛ 128): the in-plane cap halves each step; slices stay un-subsampled until ⅛, then
+ *  subsample. */
 function volumeResolutionFor(scale: number): { maxSlice: number; sliceStep: number } {
   const s = Math.max(1, Math.round(scale));
   return {
     maxSlice: Math.max(8, Math.round(VOLUME_MAX_SLICE / s)),
-    sliceStep: Math.max(1, Math.floor(s / 2)),
+    sliceStep: Math.max(1, Math.floor(s / 4)),
   };
 }
 /** Fully-normalized intensity height as a fraction of the in-plane extent — matches the Plotly
  *  SURFACE z-aspect (~0.4) so the relief isn't exaggerated. */
 const SURFACE_Z_ASPECT = 0.4;
-/** Full-resolution mesh grid cap; the decimate factor divides it (default ½ → 220). */
-const SURFACE_MAX_GRID = 440;
-const SURFACE_TILE_BUDGET = 16;
-/** Surface mesh sampling for a decimate factor `scale`: the grid cap shrinks by `scale` (every
- *  slice is kept — the z-slider needs them all). */
-function surfaceResolutionFor(scale: number): { maxGrid: number; tileBudget: number } {
+/** "Full" mesh grid cap; the decimate factor divides it (default ¼ → 220, ½ → 440, Full → 880). */
+const SURFACE_MAX_GRID = 880;
+/** Coefficient scaling the pyramid tile budget with the target resolution — a higher target pulls a
+ *  finer pyramid level (more real detail). Shared by the surface plane fetch + volume assembly. */
+const STITCH_BUDGET_COEFF = 16;
+/** Surface mesh target grid for a decimate factor `scale`: the grid cap shrinks by `scale` (every
+ *  slice is kept — the z-slider needs them all). The source is fetched at a matching resolution. */
+function surfaceResolutionFor(scale: number): { maxGrid: number } {
   const s = Math.max(1, Math.round(scale));
-  return { maxGrid: Math.max(16, Math.round(SURFACE_MAX_GRID / s)), tileBudget: SURFACE_TILE_BUDGET };
+  return { maxGrid: Math.max(16, Math.round(SURFACE_MAX_GRID / s)) };
 }
 
 const TILE_SIZE = 512; // server tile edge (matches the OSD backend)
@@ -602,7 +604,9 @@ export class NapariVisualizerService implements IVisualizer {
       | OffscreenCanvasRenderingContext2D
       | null;
     if (!ctx) throw new Error('[napari-js] channel readback: 2D context unavailable');
-    ctx.drawImage(bmp, 0, 0);
+    // Scale the WHOLE bitmap into the (possibly smaller) target canvas — drawing at natural size
+    // would crop to the top-left w×h corner when downscaling a large slice (maxSide < bmp size).
+    ctx.drawImage(bmp, 0, 0, w, h);
     bmp.close?.();
     const rgba = ctx.getImageData(0, 0, w, h).data;
     const data = new Uint8Array(w * h);
@@ -1121,10 +1125,12 @@ export class NapariVisualizerService implements IVisualizer {
 
     this.stackLoadingProgress$.next(0);
     try {
-      // One cheap coarse tile per slice (budget 1) — the volume is downsampled to `maxSlice`
-      // regardless. `channel` selects a band (multichannel volume); omit for the grayscale
+      // Fetch each slice at a pyramid level matching `maxSlice` (budget scales with the decimate
+      // factor), so a higher factor pulls a finer level → more real in-plane detail; then downsample
+      // to `maxSlice`. `channel` selects a band (multichannel volume); omit for the grayscale
       // composite. The caller owns the stackLoading flag (multichannel assembles channels in turn).
-      const first = await this.fetchSlice(zIndices[0], channel, 1);
+      const budget = this.tileBudgetFor(maxSlice);
+      const first = await this.fetchSlice(zIndices[0], channel, budget);
       const scale = Math.min(1, maxSlice / Math.max(first.width, first.height, 1));
       const width = Math.max(1, Math.round(first.width * scale));
       const height = Math.max(1, Math.round(first.height * scale));
@@ -1171,7 +1177,7 @@ export class NapariVisualizerService implements IVisualizer {
         for (;;) {
           const p = pending.shift();
           if (p === undefined) return;
-          readSlice(p, await this.fetchSlice(zIndices[p], channel, 1));
+          readSlice(p, await this.fetchSlice(zIndices[p], channel, budget));
         }
       };
       const poolSize = Math.min(VOLUME_FETCH_CONCURRENCY, Math.max(1, depth - 1));
@@ -1262,7 +1268,7 @@ export class NapariVisualizerService implements IVisualizer {
   private async preloadSurfacePlanes(viewer: Viewer): Promise<void> {
     const info = this.loaded?.imageInfo;
     const depth = info?.imageMeta?.[0]?.z || info?.urls?.length || 1;
-    const { maxGrid, tileBudget } = surfaceResolutionFor(this.resolutionScale);
+    const { maxGrid } = surfaceResolutionFor(this.resolutionScale);
     this.surfacePlanes.clear();
     this.stackLoading$.next(true);
     this.stackLoadingProgress$.next(0);
@@ -1275,7 +1281,7 @@ export class NapariVisualizerService implements IVisualizer {
           const z = pending.shift();
           if (z === undefined || this.viewer !== viewer) return;
           try {
-            this.surfacePlanes.set(z, await this.fetchSurfacePlane(z, maxGrid, tileBudget));
+            this.surfacePlanes.set(z, await this.fetchSurfacePlane(z, maxGrid));
           } catch (err) {
             console.warn(`[napari-js] surface slice ${z} preload failed`, err);
           }
@@ -1298,28 +1304,61 @@ export class NapariVisualizerService implements IVisualizer {
    * single top-left tile (a corner) for self-contained / non-`/tiles/info` images. Falls back to
    * stitching the tile grid only when no complete-image URL is available.
    */
+  /** Tile budget to stitch a whole slice at ~`targetPx` resolution from the pyramid: a higher target
+   *  pulls a FINER pyramid level (more real detail). Shared by the surface plane fetch and the volume
+   *  assembly so both scale their in-plane resolution with the decimate factor. */
+  private tileBudgetFor(targetPx: number): number {
+    const tileSize = this.descriptor?.tileSize || TILE_SIZE;
+    return Math.min(
+      MAX_STITCH_TILES,
+      Math.max(1, Math.round((targetPx / tileSize) ** 2 * STITCH_BUDGET_COEFF)),
+    );
+  }
+
   private async fetchSurfacePlane(
     z: number,
     maxGrid: number,
-    tileBudget: number,
   ): Promise<{ data: Uint8Array; width: number; height: number }> {
     const info = this.loaded?.imageInfo;
-    const url = info?.smallUrls?.[z] ?? info?.urls?.[z];
-    if (url) {
-      try {
-        const headers = await this.tiles
-          .getAuthHeaders()
-          .catch(() => ({}) as Record<string, string>);
-        const resp = await fetch(url, { headers });
-        if (resp.ok) {
-          return this.bitmapToLuminance(await createImageBitmap(await resp.blob()), maxGrid);
+    const desc = await this.ensureDescriptor();
+    let plane: { data: Uint8Array; width: number; height: number } | null = null;
+
+    // Preferred: stitch the WHOLE slice from the server pyramid at a resolution driven by the
+    // decimate factor — a higher target grid pulls a FINER pyramid level (more real detail). With a
+    // descriptor, fetchSlice stitches the whole chosen level (never a corner), then we downscale to
+    // the grid. This is what makes "Full" actually higher-res than "½", not just a fixed preview.
+    if (desc?.levels?.length) {
+      const budget = this.tileBudgetFor(maxGrid);
+      plane = this.bitmapToLuminance(await this.fetchSlice(z, this.surfaceChannel, budget), maxGrid);
+    }
+
+    // Fallback (no pyramid): the app's COMPLETE per-slice image (urls[z], not the small blurry
+    // thumbnail) — whole slice, avoids a corner tile. Capped at the image's own resolution.
+    if (!plane) {
+      const url = info?.urls?.[z] ?? info?.smallUrls?.[z];
+      if (url) {
+        try {
+          const headers = await this.tiles
+            .getAuthHeaders()
+            .catch(() => ({}) as Record<string, string>);
+          const resp = await fetch(url, { headers });
+          if (resp.ok) {
+            plane = this.bitmapToLuminance(await createImageBitmap(await resp.blob()), maxGrid);
+          }
+        } catch (err) {
+          console.warn(`[napari-js] surface url fetch failed for z=${z}`, err);
         }
-        console.warn(`[napari-js] surface url z=${z} → ${resp.status}; falling back to tiles`);
-      } catch (err) {
-        console.warn(`[napari-js] surface url fetch failed for z=${z}; falling back to tiles`, err);
       }
     }
-    return this.bitmapToLuminance(await this.fetchSlice(z, this.surfaceChannel, tileBudget), maxGrid);
+
+    // Last resort (no pyramid and no complete image): a single tile.
+    if (!plane) {
+      plane = this.bitmapToLuminance(
+        await this.fetchSlice(z, this.surfaceChannel, this.tileBudgetFor(maxGrid)),
+        maxGrid,
+      );
+    }
+    return plane;
   }
 
   /** The channel state driving the surface: the chosen band for multichannel (matched by index),
@@ -1340,8 +1379,7 @@ export class NapariVisualizerService implements IVisualizer {
     if (!plane) {
       this.stackLoading$.next(true);
       try {
-        const budget = surfaceResolutionFor(this.resolutionScale).tileBudget;
-        plane = await this.fetchSurfacePlane(z, this.surfaceMaxGrid, budget);
+        plane = await this.fetchSurfacePlane(z, this.surfaceMaxGrid);
         this.surfacePlanes.set(z, plane);
       } catch (err) {
         console.error('[napari-js] surface slice fetch failed:', err);

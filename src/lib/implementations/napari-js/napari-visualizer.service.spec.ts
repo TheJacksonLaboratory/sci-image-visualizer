@@ -328,26 +328,31 @@ describe('NapariVisualizerService', () => {
     document.body.removeChild(div);
   });
 
-  it('sources the surface from the complete per-slice image (urls[z]), not a single tile', async () => {
+  it('sources the surface by stitching the whole slice from the pyramid (resolution scales)', async () => {
     const div = document.createElement('div');
-    div.id = 'surf-url-host';
+    div.id = 'surf-src-host';
     document.body.appendChild(div);
 
     const loaded = await service.load(imageInfo(), 0);
-    await service.plot('surf-url-host', loaded, imageInfo(), 600, PlotType.NAPARI_SURFACE);
+    await service.plot('surf-src-host', loaded, imageInfo(), 600, PlotType.NAPARI_SURFACE);
 
-    // The whole-slice image URLs (imageInfo.urls = ['u0','u1']) were fetched for the height field,
-    // instead of only a /tile corner — this is what makes the surface cover the full slice.
+    // With a /tiles/info descriptor, the surface stitches the slice from the pyramid (/tile) at a
+    // budget driven by the decimate factor — so its resolution can scale (unlike a fixed thumbnail),
+    // and it covers the whole slice rather than a corner.
     const fetchMock = globalThis.fetch as jest.Mock;
     const fetchedUrls = fetchMock.mock.calls.map((c) => c[0] as string);
-    expect(fetchedUrls).toContain('u0');
-    expect(fetchedUrls.some((u) => u.includes('/tile?'))).toBe(false);
+    expect(fetchedUrls.some((u) => u.includes('tiles/info'))).toBe(true);
+    expect(fetchedUrls.some((u) => u.includes('/tile?'))).toBe(true);
 
     service.unsubscribe();
     document.body.removeChild(div);
   });
 
   it('decimates the surface mesh by the resolution scale', async () => {
+    // A large source so the grid caps (¼ = 220, ⅛ = 110) actually downscale it and differ.
+    (globalThis as { createImageBitmap: unknown }).createImageBitmap = jest
+      .fn()
+      .mockResolvedValue({ width: 1024, height: 768, close: () => undefined });
     const addSurface = jest.spyOn(
       Viewer.prototype as unknown as { addSurface: (...a: unknown[]) => unknown },
       'addSurface',
@@ -357,10 +362,10 @@ describe('NapariVisualizerService', () => {
     document.body.appendChild(div);
     const loaded = await service.load(imageInfo(), 0);
 
-    // Default load is ½; ⅛ decimate → a much smaller grid.
-    expect(service.getResolutionScale()).toBe(2);
+    // Default load is ¼; a coarser factor → fewer polygons.
+    expect(service.getResolutionScale()).toBe(4);
     await service.plot('surf-decimate-host', loaded, imageInfo(), 600, PlotType.NAPARI_SURFACE);
-    const fullVerts = (addSurface.mock.calls[0][0] as Float32Array).length;
+    const defaultVerts = (addSurface.mock.calls[0][0] as Float32Array).length;
 
     service.setResolutionScale(8);
     expect(service.getResolutionScale()).toBe(8);
@@ -368,7 +373,7 @@ describe('NapariVisualizerService', () => {
     const coarseVerts = (
       addSurface.mock.calls[addSurface.mock.calls.length - 1][0] as Float32Array
     ).length;
-    expect(coarseVerts).toBeLessThan(fullVerts);
+    expect(coarseVerts).toBeLessThan(defaultVerts);
 
     service.unsubscribe();
     document.body.removeChild(div);
