@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@angular/core';
-import { Observable, combineLatest, merge } from 'rxjs';
+import { Observable, combineLatest } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Image } from 'image-js';
 
@@ -260,10 +260,17 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     ]).pipe(map((flags) => flags.some(Boolean)));
   }
   getStackLoadingProgress(): Observable<number> {
-    return merge(
-      this.plotly.getStackLoadingProgress(),
-      this.osd.getStackLoadingProgress(),
-      this.napari.getStackLoadingProgress(),
+    // Report the progress of whichever backend is ACTIVELY loading (max across active ones). A plain
+    // merge let an idle backend's stale value win the stream on a re-load — leaving the bar below the
+    // active backend's real progress (e.g. stuck ~⅓ while the % read 100). Gating by the loading flag
+    // ignores idle backends, so the bar tracks the one doing the work and reaches 100%.
+    const track = (v: IVisualizer): Observable<[number, boolean]> =>
+      combineLatest([v.getStackLoadingProgress(), v.isStackLoading()]);
+    return combineLatest([track(this.plotly), track(this.osd), track(this.napari)]).pipe(
+      map((pairs) => {
+        const active = pairs.filter(([, loading]) => loading).map(([p]) => p);
+        return active.length ? Math.max(...active) : 0;
+      }),
     );
   }
   getAutoscaleEvent(): Observable<any> { return this.plotly.getAutoscaleEvent(); }
