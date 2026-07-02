@@ -1191,9 +1191,15 @@ export class NapariVisualizerService implements IVisualizer {
         this.buildAxesLabels({ width: world.width, height: world.height, depth: worldZ }, mppX),
       );
       this.axesLabels.setVisible(this.axesVisible);
-      // In-view drag handle at the box's top-face centre; drag ↕ to restretch Z live.
+      // In-view drag handle at the TOP END OF THE Z AXIS (the box's min-XY corner, where the blue
+      // "Z" axis + label live), so it reads as the Z-height control. Floated a little past the axis
+      // tip (×1.12) so the grip clears the "Z · …" label. Drag ↕ to restretch Z live.
       this.zHandle = new NapariVolumeZHandle(this.host, viewer.camera3d, {
-        topAnchor: () => [0, 0, (this.volumeWorldBase!.depth * this.volumeZScale) / 2],
+        topAnchor: () => [
+          -this.volumeWorldBase!.width / 2,
+          -this.volumeWorldBase!.height / 2,
+          ((this.volumeWorldBase!.depth * this.volumeZScale) / 2) * 1.12,
+        ],
         getScale: () => this.volumeZScale,
         setScale: (s) => this.setVolumeZScale(s),
       });
