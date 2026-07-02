@@ -42,6 +42,26 @@ export interface AxesLayer {
   voxelSize: [number, number, number];
 }
 
+/** Stand-in for napari-js PointsLayer (2D scatter markers — the adapter only creates/removes it). */
+export interface PointsLayer {
+  size: number;
+  opacity: number;
+  blending: string;
+}
+
+/** Stand-in for napari-js Points3DLayer (the props/bounds the 3D-scatter adapter reads/sets). */
+export interface Points3DLayer {
+  colormap: unknown;
+  contrastLimits: [number, number];
+  size: number;
+  bounds(): {
+    min: [number, number, number];
+    max: [number, number, number];
+    center: [number, number, number];
+    radius: number;
+  };
+}
+
 /** A mutable stand-in for napari-js SurfaceLayer (the props/bounds the adapter reads/sets). */
 export interface SurfaceLayer {
   colormap: unknown;
@@ -327,6 +347,27 @@ export class Viewer {
       visible: true,
       blending: 'opaque',
       wireframe: o.wireframe ?? false,
+      bounds: () => ({
+        min: [0, 0, 0],
+        max: [1, 1, 1],
+        center: [0.5, 0.5, 0.5],
+        radius: 1,
+      }),
+    };
+  }
+  addPoints(): PointsLayer {
+    return { size: 10, opacity: 1, blending: 'translucent' };
+  }
+  addPoints3D(
+    _positions?: Float32Array,
+    _values?: Float32Array,
+    opts?: { colormap?: unknown; contrastLimits?: [number, number]; size?: number },
+  ): Points3DLayer {
+    const o = opts ?? {};
+    return {
+      colormap: o.colormap ?? 'viridis',
+      contrastLimits: o.contrastLimits ?? [0, 255],
+      size: o.size ?? 6,
       bounds: () => ({
         min: [0, 0, 0],
         max: [1, 1, 1],

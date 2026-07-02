@@ -102,9 +102,11 @@ describe('NapariVisualizerService', () => {
     expect(service.capabilities.has(ViewerFeature.Isosurface)).toBe(true);
     expect(service.getPlotTypeDescriptors().map((d) => d.type)).toEqual([
       PlotType.NAPARI_IMAGE,
+      PlotType.NAPARI_SCATTER,
+      PlotType.NAPARI_SURFACE,
+      PlotType.NAPARI_SCATTER3D,
       PlotType.NAPARI_VOLUME,
       PlotType.NAPARI_ISOSURFACE,
-      PlotType.NAPARI_SURFACE,
     ]);
   });
 
@@ -343,6 +345,54 @@ describe('NapariVisualizerService', () => {
     const fetchedUrls = fetchMock.mock.calls.map((c) => c[0] as string);
     expect(fetchedUrls.some((u) => u.includes('tiles/info'))).toBe(true);
     expect(fetchedUrls.some((u) => u.includes('/tile?'))).toBe(true);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('mounts a 2D scatter of region centroids via addPoints', async () => {
+    jest
+      .spyOn(regionStore, 'getRegions')
+      .mockReturnValue([{ bounds: { x: 10, y: 20, width: 4, height: 6 } }] as never);
+    const addPoints = jest.spyOn(
+      Viewer.prototype as unknown as { addPoints: (...a: unknown[]) => unknown },
+      'addPoints',
+    );
+    const div = document.createElement('div');
+    div.id = 'scatter2d-host';
+    document.body.appendChild(div);
+
+    const loaded = await service.load(imageInfo(), 0);
+    const ok = await service.plot('scatter2d-host', loaded, imageInfo(), 600, PlotType.NAPARI_SCATTER);
+    expect(ok).toBe(true);
+    expect(addPoints).toHaveBeenCalled();
+    // The rectangle centroid (10+2, 20+3) is scattered as a point.
+    expect(Array.from(addPoints.mock.calls[0][0] as Float32Array)).toEqual([12, 23]);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('mounts a 3D scatter voxel cloud via addPoints3D', async () => {
+    const addPoints3d = jest.spyOn(
+      Viewer.prototype as unknown as { addPoints3D: (...a: unknown[]) => unknown },
+      'addPoints3D',
+    );
+    const div = document.createElement('div');
+    div.id = 'scatter3d-host';
+    document.body.appendChild(div);
+
+    const loaded = await service.load(imageInfo(), 0);
+    const ok = await service.plot('scatter3d-host', loaded, imageInfo(), 600, PlotType.NAPARI_SCATTER3D);
+    expect(ok).toBe(true);
+    expect(addPoints3d).toHaveBeenCalled();
+    // addPoints3D(positions, values) with N×3 positions and N values.
+    const [pos, val] = addPoints3d.mock.calls[0] as [Float32Array, Float32Array];
+    expect(pos).toBeInstanceOf(Float32Array);
+    expect(val).toBeInstanceOf(Float32Array);
+    expect(pos.length).toBe(val.length * 3);
+    // A 3D scatter exposes the Surface-3D orbit/reset controls.
+    expect(service.getSurface3dControls()).not.toBeNull();
 
     service.unsubscribe();
     document.body.removeChild(div);

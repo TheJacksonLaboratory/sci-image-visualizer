@@ -8,6 +8,7 @@ import {
   isNapari3d,
   isNapariIsosurface,
   isNapariSurface,
+  isNapariScatter,
   NAPARI_DECIMATE_OPTIONS,
   NAPARI_DEFAULT_DECIMATE,
 } from '../contracts/plot-type';
@@ -182,14 +183,19 @@ export class ToolbarComponent implements OnChanges {
     return (
       this.selectedPlotType === PlotType.IMAGE ||
       this.selectedPlotType === PlotType.NAPARI_IMAGE ||
-      isNapariSurface(this.selectedPlotType)
+      isNapariSurface(this.selectedPlotType) ||
+      isNapariScatter(this.selectedPlotType)
     );
   }
 
   /** Any napari-js WebGPU plot type. The single-image/stack toggle + slice-number field are
    *  Plotly-only stack controls, so they're hidden for napari (jit-ui#102). */
   get isNapariMode(): boolean {
-    return this.selectedPlotType === PlotType.NAPARI_IMAGE || isNapari3d(this.selectedPlotType);
+    return (
+      this.selectedPlotType === PlotType.NAPARI_IMAGE ||
+      isNapariScatter(this.selectedPlotType) ||
+      isNapari3d(this.selectedPlotType)
+    );
   }
 
   /** ISOSURFACE (Plotly or napari-js WebGPU, either resolution) shows the isovalue range slider. */

@@ -29,6 +29,10 @@ export enum PlotType {
   NAPARI_ISOSURFACE = 'napari-isosurface',
   /** WebGPU height-field surface mesh (z = intensity), the napari-js analog of Plotly SURFACE. */
   NAPARI_SURFACE = 'napari-surface',
+  /** WebGPU 2D scatter of region centroids (napari-js analog of Plotly SCATTER). */
+  NAPARI_SCATTER = 'napari-scatter',
+  /** WebGPU 3D scatter of the downsampled voxel cloud (napari-js analog of Plotly SCATTER3D). */
+  NAPARI_SCATTER3D = 'napari-scatter3d',
 }
 
 /** How many spatial dimensions a plot type renders in. */
@@ -66,20 +70,23 @@ export interface PlotTypeDescriptor {
  * mode), so LINE is no longer offered in the selector (the enum member is kept
  * for future use). Hence the `Partial` record.
  */
+// Dropdown order = insertion order: Image (OSD) default at the top, then all Plotly plot modes
+// grouped, then all napari-js WebGPU modes grouped.
 export const PLOT_TYPE_DESCRIPTORS: Partial<Record<PlotType, PlotTypeDescriptor>> = {
-  [PlotType.IMAGE]:      { type: PlotType.IMAGE,      label: 'Image',              dimensions: '2d', source: 'image' },
-  [PlotType.HEATMAP]:    { type: PlotType.HEATMAP,    label: 'Heatmap',            dimensions: '2d', source: 'image' },
-  [PlotType.CONTOUR]:    { type: PlotType.CONTOUR,    label: 'Contour',            dimensions: '2d', source: 'image', requiresGrayscale: true },
-  [PlotType.SCATTER]:    { type: PlotType.SCATTER,    label: 'Scatter (regions)',  dimensions: '2d', source: 'regions' },
-  [PlotType.SURFACE]:    { type: PlotType.SURFACE,    label: 'Surface (3D)',       dimensions: '3d', source: 'image', requiresGrayscale: true },
-  // napari-js WebGPU height-field surface — listed directly below the Plotly "Surface (3D)". No
-  // requiresStack: a surface renders a single slice (a stack just adds the z-slider), so it's
-  // offered for single grayscale images too. Resolution is a runtime decimate factor.
-  [PlotType.NAPARI_SURFACE]: { type: PlotType.NAPARI_SURFACE, label: 'Surface (napari · WebGPU)', dimensions: '3d', source: 'image', requiresGrayscale: true },
-  [PlotType.SCATTER3D]:  { type: PlotType.SCATTER3D,  label: 'Scatter 3D',         dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
-  [PlotType.ISOSURFACE]: { type: PlotType.ISOSURFACE, label: 'Isosurface (3D)',    dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
-  // WebGPU napari-js renderings (jit-ui#102). The 3D types take a runtime decimate factor.
+  // ── Default ──
+  [PlotType.IMAGE]:      { type: PlotType.IMAGE,      label: 'Image (OSD)',           dimensions: '2d', source: 'image' },
+  // ── Plotly ──
+  [PlotType.HEATMAP]:    { type: PlotType.HEATMAP,    label: 'Heatmap (Plotly)',      dimensions: '2d', source: 'image' },
+  [PlotType.CONTOUR]:    { type: PlotType.CONTOUR,    label: 'Contour (Plotly)',      dimensions: '2d', source: 'image', requiresGrayscale: true },
+  [PlotType.SCATTER]:    { type: PlotType.SCATTER,    label: 'Scatter 2D (Plotly)',   dimensions: '2d', source: 'regions' },
+  [PlotType.SURFACE]:    { type: PlotType.SURFACE,    label: 'Surface (Plotly)',      dimensions: '3d', source: 'image', requiresGrayscale: true },
+  [PlotType.SCATTER3D]:  { type: PlotType.SCATTER3D,  label: 'Scatter 3D (Plotly)',   dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
+  [PlotType.ISOSURFACE]: { type: PlotType.ISOSURFACE, label: 'Isosurface (Plotly)',   dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
+  // ── napari-js WebGPU (jit-ui#102). The 3D types take a runtime decimate factor. ──
   [PlotType.NAPARI_IMAGE]:      { type: PlotType.NAPARI_IMAGE,      label: 'Image (napari · WebGPU)',      dimensions: '2d', source: 'image' },
+  [PlotType.NAPARI_SCATTER]:    { type: PlotType.NAPARI_SCATTER,    label: 'Scatter 2D (napari · WebGPU)', dimensions: '2d', source: 'regions' },
+  [PlotType.NAPARI_SURFACE]:    { type: PlotType.NAPARI_SURFACE,    label: 'Surface (napari · WebGPU)',    dimensions: '3d', source: 'image', requiresGrayscale: true },
+  [PlotType.NAPARI_SCATTER3D]:  { type: PlotType.NAPARI_SCATTER3D,  label: 'Scatter 3D (napari · WebGPU)', dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
   [PlotType.NAPARI_VOLUME]:     { type: PlotType.NAPARI_VOLUME,     label: 'Volume (napari · WebGPU)',     dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
   [PlotType.NAPARI_ISOSURFACE]: { type: PlotType.NAPARI_ISOSURFACE, label: 'Isosurface (napari · WebGPU)', dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
 };
@@ -105,10 +112,20 @@ export function isNapariIsosurface(type: PlotType): boolean {
 export function isNapariSurface(type: PlotType): boolean {
   return type === PlotType.NAPARI_SURFACE;
 }
-/** Any napari-js 3D plot type (volume, isosurface, or surface). Resolution is a runtime decimate
- *  factor (Full / ½ / ¼ / ⅛) — see the service's `resolutionScale`. */
+/** napari-js 2D scatter (region centroids). */
+export function isNapariScatter(type: PlotType): boolean {
+  return type === PlotType.NAPARI_SCATTER;
+}
+/** napari-js 3D scatter (voxel point cloud). */
+export function isNapariScatter3d(type: PlotType): boolean {
+  return type === PlotType.NAPARI_SCATTER3D;
+}
+/** Any napari-js 3D plot type (volume, isosurface, surface, or 3D scatter). Resolution is a runtime
+ *  decimate factor (Full / ½ / ¼ / ⅛) — see the service's `resolutionScale`. */
 export function isNapari3d(type: PlotType): boolean {
-  return isNapariVolume(type) || isNapariIsosurface(type) || isNapariSurface(type);
+  return (
+    isNapariVolume(type) || isNapariIsosurface(type) || isNapariSurface(type) || isNapariScatter3d(type)
+  );
 }
 
 /** Decimate factors offered by the Resolution control (1 = Full … 8 = ⅛). */

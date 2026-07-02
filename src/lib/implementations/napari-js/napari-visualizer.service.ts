@@ -15,6 +15,8 @@ import {
 import type {
   AxesLayer,
   SurfaceLayer,
+  PointsLayer,
+  Points3DLayer,
   TiledSource,
   TileKey,
   PixelChunk,
@@ -34,6 +36,8 @@ import {
   isNapari3d,
   isNapariIsosurface,
   isNapariSurface,
+  isNapariScatter,
+  isNapariScatter3d,
   NAPARI_DEFAULT_DECIMATE,
 } from '../../contracts/plot-type';
 import {
@@ -138,6 +142,11 @@ function surfaceResolutionFor(scale: number): { maxGrid: number } {
   return { maxGrid: Math.max(16, Math.round(SURFACE_MAX_GRID / s)) };
 }
 
+/** 3D scatter: in-plane cap for the assembled voxel grid, and the max number of points emitted
+ *  (the grid is flat-strided down to this) — keeps the billboard count interactive. */
+const SCATTER3D_MAX_XY = 64;
+const SCATTER3D_MAX_POINTS = 150000;
+
 const TILE_SIZE = 512; // server tile edge (matches the OSD backend)
 /** Max tiles stitched for one displayed slice (512px tiles → up to ~6144² at full res). Beyond
  *  this we step to a coarser pyramid level so a large image stays tractable. */
@@ -240,6 +249,15 @@ export class NapariVisualizerService implements IVisualizer {
   private surfaceWindow: [number, number] | null = null;
   /** Persisted wireframe choice for the surface (re-applied when a new surface mounts). */
   private surfaceWireframe = false;
+  /** napari-js 2D scatter points (region centroids) + its region-change subscription. */
+  private scatter2dPoints: PointsLayer | null = null;
+  private scatterRegionSub: Subscription | null = null;
+  /** napari-js 3D scatter (voxel point cloud). */
+  private scatter3dLayer: Points3DLayer | null = null;
+  /** Monotonic load generation. Bumped by {@link reset} and {@link cancelLoading}; the frame-loading
+   *  loops (volume assembly, surface preload) capture it and bail when it changes, so a Cancel (or a
+   *  new plot) actually stops fetching frames instead of running to completion in the background. */
+  private loadToken = 0;
   /** Decimate factor for the napari 3D types (1 = Full, 2 = ½ default, 4 = ¼, 8 = ⅛). Applied when a
    *  volume/isosurface/surface (re)loads; changing it needs a re-plot (it changes fetched data). */
   private resolutionScale = NAPARI_DEFAULT_DECIMATE;
@@ -531,7 +549,11 @@ export class NapariVisualizerService implements IVisualizer {
       this.viewer = viewer;
       await viewer.ready;
 
-      if (isNapariSurface(plotType)) {
+      if (isNapariScatter(plotType)) {
+        await this.mountScatter(viewer, z);
+      } else if (isNapariScatter3d(plotType)) {
+        await this.mountScatter3d(viewer, info);
+      } else if (isNapariSurface(plotType)) {
         await this.mountSurface(viewer);
       } else if (isNapari3d(plotType)) {
         await this.mountVolume(viewer, info, plotType);
@@ -992,6 +1014,7 @@ export class NapariVisualizerService implements IVisualizer {
     info: IImageInfo | undefined,
     plotType: PlotType,
   ): Promise<void> {
+    const token = this.loadToken; // bail before rendering if a Cancel / new plot bumps this
     const desc = await this.ensureDescriptor();
     const channelCount = desc?.channels ?? 1;
     const multichannel = !!desc?.multichannel && channelCount > 1;
@@ -1054,7 +1077,7 @@ export class NapariVisualizerService implements IVisualizer {
       this.stackLoadingProgress$.next(0);
     }
 
-    if (!dims || !channels.length) return;
+    if (!dims || !channels.length || this.loadToken !== token) return; // cancelled → don't render
     view.render(multichannel ? 'multichannel' : 'grayscale', channels, { rendering });
     this.imageW = dims.width;
     this.imageH = dims.height;
@@ -1111,6 +1134,7 @@ export class NapariVisualizerService implements IVisualizer {
     opts: { maxSlice?: number; sliceStep?: number } = {},
     channel?: number,
   ): Promise<{ data: Uint8Array; width: number; height: number; depth: number } | null> {
+    const token = this.loadToken; // bail if a Cancel / new plot bumps this while we fetch
     const fullDepth = info?.imageMeta?.[0]?.z || info?.urls?.length || 1;
     if (fullDepth < 1) {
       console.warn('[napari-js] no slices to assemble a volume');
@@ -1176,17 +1200,160 @@ export class NapariVisualizerService implements IVisualizer {
       const worker = async (): Promise<void> => {
         for (;;) {
           const p = pending.shift();
-          if (p === undefined) return;
+          if (p === undefined || this.loadToken !== token) return;
           readSlice(p, await this.fetchSlice(zIndices[p], channel, budget));
         }
       };
       const poolSize = Math.min(VOLUME_FETCH_CONCURRENCY, Math.max(1, depth - 1));
       await Promise.all(Array.from({ length: poolSize }, () => worker()));
 
+      if (this.loadToken !== token) return null; // cancelled → don't render a partial volume
       return { data, width, height, depth };
     } finally {
       this.stackLoadingProgress$.next(0);
     }
+  }
+
+  /**
+   * Mount the NAPARI_SCATTER 2D scatter: the slice image with a points layer at each region's
+   * centroid (napari-js analog of Plotly's region-centroid scatter). Rebuilds the points live as
+   * regions change.
+   */
+  private async mountScatter(viewer: Viewer, z: number): Promise<void> {
+    await this.renderImage(z);
+    this.fitCameraSoon();
+    this.subscribeDisplayState();
+    this.installScaleBar();
+    this.rebuildScatterPoints();
+    this.scatterRegionSub = this.regionStore
+      .getRegionUpdateEvent()
+      .subscribe(() => this.rebuildScatterPoints());
+    this.scheduleReadback();
+  }
+
+  /** (Re)build the 2D scatter's point layer at the current region centroids. */
+  private rebuildScatterPoints(): void {
+    const v = this.viewer;
+    if (!v) return;
+    if (this.scatter2dPoints) {
+      v.layers.remove(this.scatter2dPoints);
+      this.scatter2dPoints = null;
+    }
+    const centroids = this.regionCentroids();
+    if (centroids.length === 0) return;
+    this.scatter2dPoints = v.addPoints(centroids, {
+      size: 12,
+      faceColor: [1, 0.85, 0.2, 1],
+      borderColor: [0, 0, 0, 1],
+      borderWidth: 2,
+    });
+  }
+
+  /** Region centroids as flat `[x, y, …]` data coords (rectangle / polygon / multipolygon). */
+  private regionCentroids(): Float32Array {
+    const out: number[] = [];
+    const polyCentroid = (xs: number[], ys: number[]): void => {
+      const n = xs.length;
+      if (n === 0) return;
+      let cx = 0;
+      let cy = 0;
+      for (let i = 0; i < n; i++) {
+        cx += xs[i];
+        cy += ys[i];
+      }
+      out.push(cx / n, cy / n);
+    };
+    for (const r of this.regionStore.getRegions()) {
+      const b = r.bounds as
+        | { x: number; y: number; width: number; height: number }
+        | { xpoints: number[]; ypoints: number[] }
+        | { polygons: { xpoints: number[]; ypoints: number[] }[] }
+        | null
+        | undefined;
+      if (!b) continue;
+      if ('width' in b && 'x' in b) {
+        out.push(b.x + b.width / 2, b.y + b.height / 2);
+      } else if ('xpoints' in b) {
+        polyCentroid(b.xpoints, b.ypoints);
+      } else if ('polygons' in b) {
+        for (const p of b.polygons) polyCentroid(p.xpoints, p.ypoints);
+      }
+    }
+    return new Float32Array(out);
+  }
+
+  /**
+   * Mount the NAPARI_SCATTER3D 3D scatter: the downsampled voxel grid as a 3D point cloud colored
+   * by intensity (napari-js analog of Plotly's voxel scatter3d). Assembles a coarse volume, then
+   * emits a flat-strided sample of voxels (capped at {@link SCATTER3D_MAX_POINTS}) via `addPoints3D`.
+   */
+  private async mountScatter3d(viewer: Viewer, info: IImageInfo | undefined): Promise<void> {
+    this.imageMode = 'grayscale';
+    this.volumeMultichannel = false;
+    const res = volumeResolutionFor(this.resolutionScale);
+    this.stackLoading$.next(true);
+    this.stackLoadingProgress$.next(0);
+    let vol: { data: Uint8Array; width: number; height: number; depth: number } | null = null;
+    try {
+      vol = await this.assembleVolume(info, {
+        maxSlice: Math.min(res.maxSlice, SCATTER3D_MAX_XY),
+        sliceStep: res.sliceStep,
+      });
+    } finally {
+      this.stackLoading$.next(false);
+      this.stackLoadingProgress$.next(0);
+    }
+    if (!vol || this.viewer !== viewer) return;
+
+    const { data, width, height, depth } = vol;
+    const zScale = Math.max(width, height) / Math.max(1, depth); // ≈ cubic aspect
+    const total = width * height * depth;
+    const stride = Math.max(1, Math.ceil(total / SCATTER3D_MAX_POINTS));
+    const pos: number[] = [];
+    const val: number[] = [];
+    for (let i = 0; i < total; i += stride) {
+      const x = i % width;
+      const y = Math.floor(i / width) % height;
+      const zi = Math.floor(i / (width * height));
+      pos.push(x, y, zi * zScale);
+      val.push(data[i]);
+    }
+
+    const st = this.store.currentChannelStates()[0];
+    this.scatter3dLayer = viewer.addPoints3D(new Float32Array(pos), new Float32Array(val), {
+      colormap: this.volumeColormap(st),
+      contrastLimits: [st?.min ?? 0, st?.max ?? 255],
+      size: 3,
+    });
+    this.imageW = width;
+    this.imageH = height;
+    this.volumeDims = { width, height, depth };
+    // Feed the intensity histogram from the assembled volume (key 0).
+    this.volumeChannelData.clear();
+    this.volumeChannelData.set(0, data);
+    this.subscribeScatter3dDisplayState();
+    this.scheduleReadback();
+  }
+
+  /** Store colormap / reverse / invert / channel window → the 3D scatter's colormap + contrast. */
+  private subscribeScatter3dDisplayState(): void {
+    this.displaySub?.unsubscribe();
+    this.displaySub = combineLatest([
+      this.store.getColormap(),
+      this.store.getReverseScale(),
+      this.store.getInvert(),
+      this.store.getChannelStates(),
+    ]).subscribe(([colormap, reverse, invert, channels]) => {
+      this.currentColormap = (colormap as ColormapNode) ?? null;
+      this.currentReverse = reverse;
+      this.invertEnabled = invert;
+      const layer = this.scatter3dLayer;
+      if (!layer) return;
+      const st = channels[0];
+      layer.colormap = this.volumeColormap(st);
+      if (st) layer.contrastLimits = [st.min, st.max];
+      this.viewer?.requestRender();
+    });
   }
 
   /**
@@ -1266,6 +1433,7 @@ export class NapariVisualizerService implements IVisualizer {
    * concurrency keeps the connection pool busy without flooding it on a deep stack.
    */
   private async preloadSurfacePlanes(viewer: Viewer): Promise<void> {
+    const token = this.loadToken; // bail if a Cancel / new plot bumps this while we fetch
     const info = this.loaded?.imageInfo;
     const depth = info?.imageMeta?.[0]?.z || info?.urls?.length || 1;
     const { maxGrid } = surfaceResolutionFor(this.resolutionScale);
@@ -1279,7 +1447,7 @@ export class NapariVisualizerService implements IVisualizer {
       const worker = async (): Promise<void> => {
         for (;;) {
           const z = pending.shift();
-          if (z === undefined || this.viewer !== viewer) return;
+          if (z === undefined || this.viewer !== viewer || this.loadToken !== token) return;
           try {
             this.surfacePlanes.set(z, await this.fetchSurfacePlane(z, maxGrid));
           } catch (err) {
@@ -1492,6 +1660,7 @@ export class NapariVisualizerService implements IVisualizer {
   }
 
   reset(): void {
+    this.loadToken++; // invalidate any in-flight frame loading from the previous plot
     this.displaySub?.unsubscribe();
     this.displaySub = null;
     this.scaleBar?.destroy();
@@ -1524,6 +1693,10 @@ export class NapariVisualizerService implements IVisualizer {
     this.surfaceChannel = undefined;
     this.surfacePlanes.clear();
     this.surfaceWindow = null;
+    this.scatterRegionSub?.unsubscribe();
+    this.scatterRegionSub = null;
+    this.scatter2dPoints = null;
+    this.scatter3dLayer = null;
     this.axesLayer = null;
     this.volumeDims = null;
     this.volumeChannelData.clear();
@@ -1612,6 +1785,14 @@ export class NapariVisualizerService implements IVisualizer {
     this.stackLoading$.next(stackLoading);
   }
 
+  /** Cancel in-flight frame loading: bump the load generation so the volume-assembly / surface
+   *  preload workers stop fetching more frames, and clear the loading flag + progress. */
+  cancelLoading(): void {
+    this.loadToken++;
+    this.stackLoading$.next(false);
+    this.stackLoadingProgress$.next(0);
+  }
+
   isStackLoading(): Observable<boolean> {
     return this.stackLoading$.asObservable();
   }
@@ -1666,8 +1847,9 @@ export class NapariVisualizerService implements IVisualizer {
    *  (not centred), so frame it by its own bounds; a volume/isosurface uses its centred box. */
   resetSurfaceCamera(): void {
     if (!this.viewer) return;
-    if (this.surfaceLayer) {
-      const b = this.surfaceLayer.bounds();
+    const meshLayer = this.surfaceLayer ?? this.scatter3dLayer;
+    if (meshLayer) {
+      const b = meshLayer.bounds();
       this.viewer.camera3d.target = b.center;
       this.viewer.camera3d.distance = Math.max(b.radius * 2.5, 1e-3);
       this.viewer.requestRender();
@@ -1685,9 +1867,11 @@ export class NapariVisualizerService implements IVisualizer {
     // The WebGPU napari-js options, offered alongside (not replacing) the OSD/Plotly types.
     return [
       PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_IMAGE]!,
+      PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_SCATTER]!,
+      PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_SURFACE]!,
+      PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_SCATTER3D]!,
       PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_VOLUME]!,
       PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_ISOSURFACE]!,
-      PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_SURFACE]!,
     ];
   }
 
@@ -2089,7 +2273,7 @@ export class NapariVisualizerService implements IVisualizer {
     return null;
   }
   getSurface3dControls(): ISurface3dControls | null {
-    if (!this.volumeView && !this.surfaceLayer) return null;
+    if (!this.volumeView && !this.surfaceLayer && !this.scatter3dLayer) return null;
     return {
       setSurfaceDragMode: (mode: string): void => this.setSurfaceDragMode(mode),
       resetSurfaceCamera: (): void => this.resetSurfaceCamera(),

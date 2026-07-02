@@ -7,7 +7,7 @@ import { IImageInfo, IImageMetadata } from './contracts/image.contract';
 import { Region } from './models/region';
 import { PlotlyService } from './implementations/plotly/plotly.service';
 import { OpenSeadragonVisualizerService } from './implementations/osd/openseadragon-visualizer.service';
-import { PlotType, PlotTypeDescriptor, isNapari3d } from './contracts/plot-type';
+import { PlotType, PlotTypeDescriptor, isNapari3d, isNapariScatter } from './contracts/plot-type';
 import { IVisualizer, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls } from './contracts/visualizer.contract';
 import { ViewerCapabilities } from './contracts/capabilities.contract';
 import { IRegionOverlay } from './contracts/region-overlay.contract';
@@ -94,9 +94,9 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     return t === PlotType.IMAGE;
   }
 
-  /** The 2D napari image type (jit-ui#102) — has a 2D fallback chain (OSD, then Plotly). */
+  /** The 2D napari types (image + region-centroid scatter) — a 2D fallback chain (OSD, then Plotly). */
   private isNapariImageType(t: PlotType): boolean {
-    return t === PlotType.NAPARI_IMAGE;
+    return t === PlotType.NAPARI_IMAGE || isNapariScatter(t);
   }
 
   /** The 3D napari types (volume/isosurface, either resolution) — no 2D fallback exists (OSD is
@@ -249,6 +249,14 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
 
   // ── long-lived observables + stack flags ──────────────────────────────────
   setStackLoading(b: boolean): void { this.plotly.setStackLoading(b); }
+  // Cancel in-flight loading on every backend — the user's Cancel shouldn't depend on which one is
+  // active. Only backends that stream frames (napari-js) do real work; the rest no-op. The concrete
+  // backend classes don't all declare the optional contract method, so call it via IVisualizer.
+  cancelLoading(): void {
+    for (const backend of [this.plotly, this.osd, this.napari] as IVisualizer[]) {
+      backend.cancelLoading?.();
+    }
+  }
   // Loading state is surfaced from whichever backend is doing the work: OSD and napari-js (volume
   // assembly) drive their own subjects, so merge all three into one stable stream the host
   // subscribes to once. (Previously hardcoded to Plotly, so napari/OSD progress never showed.)

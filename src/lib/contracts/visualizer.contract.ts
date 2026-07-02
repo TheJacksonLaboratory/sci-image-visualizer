@@ -86,6 +86,10 @@ export interface IDataRenderer {
   setStackLoading(stackLoading: boolean): void;
   isStackLoading(): Observable<boolean>;
   getStackLoadingProgress(): Observable<number>;
+  /** Cancel any in-flight multi-frame loading (volume-assembly / surface preload) so it stops
+   *  fetching more frames and clears the loading state. Optional — only backends that stream a
+   *  z-stack (napari-js WebGPU) do real work here; others no-op. */
+  cancelLoading?(): void;
 
   getTrueImageSize(): { width: number; height: number } | null;
   getCurrentImage(): Promise<Image | null>;

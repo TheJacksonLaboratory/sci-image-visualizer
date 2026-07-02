@@ -941,6 +941,9 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
     }
   }
   cancelLoading() {
+    // Stop any in-flight frame streaming (napari-js volume/surface preload) so the fetch loops
+    // actually abort — clearing the flag alone only routed to Plotly and left napari fetching.
+    this.plotService.cancelLoading?.();
     this.stackLoading = false;
     this.imgLoading = false;
     this.state.setImageLoading(false);
