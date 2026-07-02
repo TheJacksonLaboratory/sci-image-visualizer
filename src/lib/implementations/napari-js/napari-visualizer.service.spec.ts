@@ -676,6 +676,35 @@ describe('NapariVisualizerService', () => {
     document.body.removeChild(div);
   });
 
+  it('restretches the volume Z (voxelSize.z + axes depth) via the Z-height handle', async () => {
+    const div = document.createElement('div');
+    div.id = 'vol-zscale-host';
+    document.body.appendChild(div);
+    const loaded = await service.load(imageInfo(), 0);
+    await service.plot('vol-zscale-host', loaded, imageInfo(), 600, PlotType.NAPARI_VOLUME);
+
+    const svc = service as unknown as {
+      volumeView: { layers: { voxelSize: readonly [number, number, number] }[] };
+      axesLayer: { depth: number };
+      setVolumeZScale: (f: number) => void;
+    };
+    const baseVsZ = svc.volumeView.layers[0].voxelSize[2];
+    const baseDepth = svc.axesLayer.depth;
+
+    svc.setVolumeZScale(2); // taller
+    expect(svc.volumeView.layers[0].voxelSize[2]).toBeCloseTo(baseVsZ * 2, 5);
+    expect(svc.axesLayer.depth).toBeCloseTo(baseDepth * 2, 5);
+    // XY voxel scale is untouched by a Z-height change.
+    expect(svc.volumeView.layers[0].voxelSize[0]).toBeGreaterThan(0);
+
+    svc.setVolumeZScale(0.5); // flatter (relative to base, not the previous 2×)
+    expect(svc.volumeView.layers[0].voxelSize[2]).toBeCloseTo(baseVsZ * 0.5, 5);
+    expect(svc.axesLayer.depth).toBeCloseTo(baseDepth * 0.5, 5);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
   it('composites multiple channels and serves per-channel histograms (multichannel)', async () => {
     // A 3-channel multichannel descriptor → one additive tinted layer per channel.
     (globalThis.fetch as unknown as jest.Mock).mockImplementation((url: string) => {

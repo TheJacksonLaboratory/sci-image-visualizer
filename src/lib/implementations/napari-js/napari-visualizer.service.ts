@@ -63,6 +63,7 @@ import { RegionStore } from '../../store/region-store.service';
 import { NapariScaleBar, formatUm } from './napari-scale-bar';
 import { NapariRegionOverlay } from './napari-region-overlay';
 import { NapariAxesLabels, AxisLabelSpec } from './napari-axes-labels';
+import { NapariVolumeZHandle } from './napari-volume-z-handle';
 import {
   ICoordinateTransform,
 } from '../../contracts/coordinate-transform.contract';
@@ -275,6 +276,15 @@ export class NapariVisualizerService implements IVisualizer {
   private axesLayer: AxesLayer | null = null;
   /** DOM X/Y/Z + scale labels tracking the 3D axes gizmo (null in 2D). */
   private axesLabels: NapariAxesLabels | null = null;
+  /** Draggable Z-height grip over the volume (null unless a volume/isosurface is mounted). */
+  private zHandle: NapariVolumeZHandle | null = null;
+  /** User Z-height factor for the volume (1 = the volume's natural proportions); driven by the
+   *  in-view drag handle. Reset per mount. */
+  private volumeZScale = 1;
+  /** Volume world box at `volumeZScale = 1` (base) + the sampled voxel depth — enough to recompute
+   *  the Z-axis voxel scale, axes depth, and overlay anchors as the handle stretches Z. */
+  private volumeWorldBase: { width: number; height: number; depth: number } | null = null;
+  private volumeSampledDepth = 1;
   /** Persisted axes on/off choice, re-applied when a new volume mounts. Defaults on. */
   private axesVisible = true;
   private volumeDims: { width: number; height: number; depth: number } | null = null;
@@ -1153,10 +1163,15 @@ export class NapariVisualizerService implements IVisualizer {
       height: (fullH * VOLUME_WORLD_INPLANE_REF) / fullLong,
       depth: fullD,
     };
+    // Base box (Z-scale = 1) + the sampled depth drive the live Z-height handle below; the persisted
+    // `volumeZScale` (user drag) applies on top so changing resolution keeps the chosen height.
+    this.volumeWorldBase = world;
+    this.volumeSampledDepth = Math.max(1, dims.depth);
+    const worldZ = world.depth * this.volumeZScale;
     const voxelSize: [number, number, number] = [
       world.width / dims.width,
       world.height / dims.height,
-      world.depth / Math.max(1, dims.depth),
+      worldZ / this.volumeSampledDepth,
     ];
     for (const ch of channels) ch.voxelSize = voxelSize;
 
@@ -1168,18 +1183,47 @@ export class NapariVisualizerService implements IVisualizer {
     // 3D coordinate-axes / scale gizmo + labels, sharing the volume's world box so the gizmo tracks
     // the rendered proportions. Physical scale text still comes from the FULL image extent.
     const mppX = this.descriptor?.mppX || this.loaded?.imageInfo.imageMeta?.[0]?.mppX || 0;
-    this.axesLayer = viewer.addAxes(world.width, world.height, world.depth, {
-      visible: this.axesVisible,
-    });
+    this.axesLayer = viewer.addAxes(world.width, world.height, worldZ, { visible: this.axesVisible });
     if (this.host) {
       this.axesLabels = new NapariAxesLabels(
         this.host,
         viewer.camera3d,
-        this.buildAxesLabels(world, mppX),
+        this.buildAxesLabels({ width: world.width, height: world.height, depth: worldZ }, mppX),
       );
       this.axesLabels.setVisible(this.axesVisible);
+      // In-view drag handle at the box's top-face centre; drag ↕ to restretch Z live.
+      this.zHandle = new NapariVolumeZHandle(this.host, viewer.camera3d, {
+        topAnchor: () => [0, 0, (this.volumeWorldBase!.depth * this.volumeZScale) / 2],
+        getScale: () => this.volumeZScale,
+        setScale: (s) => this.setVolumeZScale(s),
+      });
     }
     this.subscribeVolumeDisplayState();
+  }
+
+  /**
+   * Restretch the volume's Z height live (driven by the in-view {@link NapariVolumeZHandle}). Only
+   * the per-axis `voxelSize` / axes depth change — the voxel textures are untouched — so dragging is
+   * smooth. `factor` is relative to the volume's natural proportions (1). Persists across re-mounts
+   * (resolution changes) so the chosen height sticks.
+   */
+  private setVolumeZScale(factor: number): void {
+    this.volumeZScale = Math.min(10, Math.max(0.1, factor));
+    const base = this.volumeWorldBase;
+    if (!base || !this.volumeView) return;
+    const worldZ = base.depth * this.volumeZScale;
+    const vsZ = worldZ / this.volumeSampledDepth;
+    for (const layer of this.volumeView.layers) {
+      const [sx, sy] = layer.voxelSize;
+      layer.voxelSize = [sx, sy, vsZ];
+    }
+    if (this.axesLayer) this.axesLayer.depth = worldZ;
+    const mppX = this.descriptor?.mppX || this.loaded?.imageInfo.imageMeta?.[0]?.mppX || 0;
+    this.axesLabels?.updateAnchors(
+      this.buildAxesLabels({ width: base.width, height: base.height, depth: worldZ }, mppX),
+    );
+    this.zHandle?.reposition();
+    this.viewer?.requestRender();
   }
 
   /** Build the X/Y/Z axis-end label specs for the 3D gizmo. Anchors are in the volume's centred
@@ -1755,6 +1799,9 @@ export class NapariVisualizerService implements IVisualizer {
     this.regionOverlay = null;
     this.axesLabels?.destroy();
     this.axesLabels = null;
+    this.zHandle?.destroy();
+    this.zHandle = null;
+    this.volumeWorldBase = null;
     this.cachedImage = null;
     this.cachedImageSource = null;
     this.lastPixelsRect = null;

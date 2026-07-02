@@ -32,6 +32,7 @@ export interface VolumeLayer {
   blending: string;
   rendering: 'mip' | 'translucent' | 'iso';
   isoThreshold: number;
+  voxelSize: readonly [number, number, number];
 }
 
 /** A mutable stand-in for napari-js AxesLayer (the 3D coordinate-axes gizmo). */
@@ -40,6 +41,9 @@ export interface AxesLayer {
   tickCount: number;
   boundingBox: boolean;
   voxelSize: [number, number, number];
+  width: number;
+  height: number;
+  depth: number;
 }
 
 /** Stand-in for napari-js PointsLayer (2D scatter markers — the adapter only creates/removes it). */
@@ -317,7 +321,13 @@ export class Viewer {
       blending: 'translucent',
     };
   }
-  addVolume(): VolumeLayer {
+  addVolume(
+    _data?: Uint8Array,
+    _width?: number,
+    _height?: number,
+    _depth?: number,
+    opts?: { voxelSize?: readonly [number, number, number] },
+  ): VolumeLayer {
     return {
       colormap: 'gray',
       contrastLimits: [0, 255],
@@ -326,10 +336,11 @@ export class Viewer {
       blending: 'additive',
       rendering: 'mip',
       isoThreshold: 0.5,
+      voxelSize: opts?.voxelSize ?? [1, 1, 1],
     };
   }
-  addAxes(): AxesLayer {
-    return { visible: true, tickCount: 5, boundingBox: true, voxelSize: [1, 1, 1] };
+  addAxes(width = 1, height = 1, depth = 1): AxesLayer {
+    return { visible: true, tickCount: 5, boundingBox: true, voxelSize: [1, 1, 1], width, height, depth };
   }
   addSurface(
     _vertices?: Float32Array,

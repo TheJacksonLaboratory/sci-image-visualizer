@@ -88,6 +88,17 @@ export class NapariAxesLabels {
     this.update();
   }
 
+  /** Replace the label anchors/text in place (same count) and reproject — lets a host move the
+   *  labels when the box geometry changes live (e.g. a Z-height gizmo restretching the volume)
+   *  without tearing down and recreating the DOM elements (which would flicker). */
+  updateAnchors(labels: AxisLabelSpec[]): void {
+    for (let i = 0; i < this.labels.length && i < labels.length; i++) {
+      this.labels[i] = labels[i];
+      if (labels[i].text !== this.els[i].textContent) this.els[i].textContent = labels[i].text;
+    }
+    this.update();
+  }
+
   private update(): void {
     const vw = this.host.clientWidth;
     const vh = this.host.clientHeight;
