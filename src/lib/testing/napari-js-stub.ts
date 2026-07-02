@@ -220,6 +220,7 @@ export interface VolumeChannel {
   contrastLimits?: [number, number];
   gamma?: number;
   visible?: boolean;
+  voxelSize?: readonly [number, number, number];
 }
 
 export interface VolumeHost {
@@ -253,7 +254,9 @@ export class MultiChannelVolumeView {
     this._mode = mode;
     const list = mode === 'grayscale' ? channels.slice(0, 1) : channels;
     this._layers = list.map((ch) => {
-      const layer = this.host.addVolume(ch.data, ch.width, ch.height, ch.depth);
+      const layer = this.host.addVolume(ch.data, ch.width, ch.height, ch.depth, {
+        ...(ch.voxelSize ? { voxelSize: ch.voxelSize } : {}),
+      });
       if (ch.colormap !== undefined) layer.colormap = ch.colormap;
       if (ch.contrastLimits !== undefined) layer.contrastLimits = ch.contrastLimits;
       if (ch.gamma !== undefined) layer.gamma = ch.gamma;

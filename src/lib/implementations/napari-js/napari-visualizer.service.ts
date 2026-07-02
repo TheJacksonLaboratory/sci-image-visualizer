@@ -113,6 +113,12 @@ interface NapariLoaded {
 }
 
 const VOLUME_MAX_SLICE = 1024; // "Full" in-plane cap; the default ¼ load uses 256
+/** Reference in-plane world size (long side) for the volume/axes box, in arbitrary world units.
+ *  The box is anchored to this reference regardless of the chosen decimate factor, so changing the
+ *  resolution changes DETAIL, not the volume's proportions (Z no longer appears to shrink when the
+ *  in-plane sampling grows). Set to the DEFAULT decimate's in-plane cap so the default view is
+ *  unchanged; higher/lower resolutions keep that same shape. See {@link mountVolume}. */
+const VOLUME_WORLD_INPLANE_REF = VOLUME_MAX_SLICE / NAPARI_DEFAULT_DECIMATE;
 /** Max concurrent slice fetches when assembling a volume — keeps the connection pool busy
  *  without flooding it (browsers cap ~6/host) on a deep stack. */
 const VOLUME_FETCH_CONCURRENCY = 8;
@@ -406,6 +412,12 @@ export class NapariVisualizerService implements IVisualizer {
     z: number,
     channel?: number,
     budgetTiles: number = MAX_STITCH_TILES,
+    /** When a specific channel has no pyramid level within `budgetTiles`, drop to the server
+     *  COMPOSITE overview instead of stitching the huge per-channel level. Only safe when the caller
+     *  wants a single decimated plane (the surface height): for a multichannel VOLUME every channel
+     *  would then fetch the same composite and the channels would collapse into one, so volume
+     *  assembly leaves this `false` to keep each band distinct. */
+    allowCompositeFallback = false,
   ): Promise<ImageBitmap> {
     const infoB64 = this.tiles.getSelectedInfoB64();
     if (!infoB64) throw new Error('[napari-js] no selected image info (getSelectedInfoB64 null)');
@@ -464,7 +476,7 @@ export class NapariVisualizerService implements IVisualizer {
     // overview levels, so fetch the composite instead and derive luminance from it. Every caller here
     // (surface height, volume assembly, readback) downscales the plane anyway, so a composite-derived
     // plane is the right trade for one that actually loads. Only kicks in when the channel can't fit.
-    if (!sel.fits && channel != null && desc.levels.length > perChannelLevels) {
+    if (allowCompositeFallback && !sel.fits && channel != null && desc.levels.length > perChannelLevels) {
       const composite = pick(desc.levels);
       if (composite.fits || tilesFor(composite.lvl) < tilesFor(sel.lvl)) {
         effectiveChannel = undefined;
@@ -1125,23 +1137,45 @@ export class NapariVisualizerService implements IVisualizer {
     }
 
     if (!dims || !channels.length || this.loadToken !== token) return; // cancelled → don't render
+
+    // Resolution-invariant world box. Sizing the box by the sampled voxel counts made higher
+    // in-plane resolution grow X/Y while the depth stayed the (constant) slice count — so Z appeared
+    // to shrink at higher resolution. Instead anchor the in-plane long side to a fixed reference and
+    // let Z span the full slice count; the box shape is then identical at every decimate factor. The
+    // per-axis `voxelSize` (napari `scale`) maps the sampled grid onto that fixed world box.
+    const fullW = this.descriptor?.width ?? dims.width;
+    const fullH = this.descriptor?.height ?? dims.height;
+    const fullD =
+      this.loaded?.imageInfo.imageMeta?.[0]?.z || this.loaded?.imageInfo.urls?.length || dims.depth;
+    const fullLong = Math.max(1, fullW, fullH);
+    const world = {
+      width: (fullW * VOLUME_WORLD_INPLANE_REF) / fullLong,
+      height: (fullH * VOLUME_WORLD_INPLANE_REF) / fullLong,
+      depth: fullD,
+    };
+    const voxelSize: [number, number, number] = [
+      world.width / dims.width,
+      world.height / dims.height,
+      world.depth / Math.max(1, dims.depth),
+    ];
+    for (const ch of channels) ch.voxelSize = voxelSize;
+
     view.render(multichannel ? 'multichannel' : 'grayscale', channels, { rendering });
     this.imageW = dims.width;
     this.imageH = dims.height;
     this.volumeDims = dims;
 
-    // 3D coordinate-axes / scale gizmo + labels (voxelSize from µm/pixel where known).
+    // 3D coordinate-axes / scale gizmo + labels, sharing the volume's world box so the gizmo tracks
+    // the rendered proportions. Physical scale text still comes from the FULL image extent.
     const mppX = this.descriptor?.mppX || this.loaded?.imageInfo.imageMeta?.[0]?.mppX || 0;
-    const voxel = mppX > 0 ? (mppX * (this.descriptor?.width ?? dims.width)) / dims.width : 1;
-    this.axesLayer = viewer.addAxes(dims.width, dims.height, dims.depth, {
-      voxelSize: [voxel, voxel, voxel],
+    this.axesLayer = viewer.addAxes(world.width, world.height, world.depth, {
       visible: this.axesVisible,
     });
     if (this.host) {
       this.axesLabels = new NapariAxesLabels(
         this.host,
         viewer.camera3d,
-        this.buildAxesLabels(dims, mppX),
+        this.buildAxesLabels(world, mppX),
       );
       this.axesLabels.setVisible(this.axesVisible);
     }
@@ -1544,7 +1578,12 @@ export class NapariVisualizerService implements IVisualizer {
     // the grid. This is what makes "Full" actually higher-res than "½", not just a fixed preview.
     if (desc?.levels?.length) {
       const budget = this.tileBudgetFor(maxGrid);
-      plane = this.bitmapToLuminance(await this.fetchSlice(z, this.surfaceChannel, budget), maxGrid);
+      // The surface is a single decimated plane, so the composite fallback is acceptable when the
+      // channel has no small pyramid level (keeps it fast); a multichannel VOLUME must not do this.
+      plane = this.bitmapToLuminance(
+        await this.fetchSlice(z, this.surfaceChannel, budget, true),
+        maxGrid,
+      );
     }
 
     // Fallback (no pyramid): the app's COMPLETE per-slice image (urls[z], not the small blurry
@@ -1569,7 +1608,7 @@ export class NapariVisualizerService implements IVisualizer {
     // Last resort (no pyramid and no complete image): a single tile.
     if (!plane) {
       plane = this.bitmapToLuminance(
-        await this.fetchSlice(z, this.surfaceChannel, this.tileBudgetFor(maxGrid)),
+        await this.fetchSlice(z, this.surfaceChannel, this.tileBudgetFor(maxGrid), true),
         maxGrid,
       );
     }

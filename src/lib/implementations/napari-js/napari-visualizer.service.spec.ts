@@ -429,10 +429,11 @@ describe('NapariVisualizerService', () => {
     document.body.removeChild(div);
   });
 
-  it('fetchSlice falls back to the composite overview when a channel has no in-budget level', async () => {
+  it('fetchSlice falls back to the composite overview when allowed and a channel has no in-budget level', async () => {
     // Multichannel whole-slide: per-channel tiles exist ONLY at the huge real level (res 0); the
     // small overviews are composite-only. Stitching res 0 for a channel is ~1000s of tiles → server
-    // 504s (the reported bug). fetchSlice must instead pull the small composite overview.
+    // 504s (the reported bug). With the fallback opted-in (surface path), fetchSlice pulls the small
+    // composite overview instead.
     const tileUrls: string[] = [];
     (globalThis as { fetch: unknown }).fetch = jest.fn().mockImplementation((url: string) => {
       if (typeof url === 'string' && url.includes('tiles/info')) {
@@ -458,10 +459,10 @@ describe('NapariVisualizerService', () => {
       .fn()
       .mockResolvedValue({ width: 250, height: 297, close: () => undefined });
 
-    // channel 1 at a small (surface ¼) tile budget.
+    // channel 1 at a small (surface ¼) tile budget, WITH composite fallback allowed.
     await (service as unknown as {
-      fetchSlice: (z: number, c: number, b: number) => Promise<unknown>;
-    }).fetchSlice(0, 1, 3);
+      fetchSlice: (z: number, c: number, b: number, allowCompositeFallback: boolean) => Promise<unknown>;
+    }).fetchSlice(0, 1, 3, true);
 
     expect(tileUrls.length).toBeGreaterThan(0);
     // Dropped to the composite (no &channel=) rather than stitching the huge per-channel level…
@@ -470,6 +471,45 @@ describe('NapariVisualizerService', () => {
     expect(tileUrls.every((u) => !u.includes('res=0'))).toBe(true);
     // …and a handful of tiles, not ~1000.
     expect(tileUrls.length).toBeLessThanOrEqual(9);
+  });
+
+  it('fetchSlice keeps each channel distinct (no composite fallback) by default — for volumes', async () => {
+    // Regression: a multichannel VOLUME assembles each channel via fetchSlice. If a channel with no
+    // in-budget level silently fell back to the composite, every channel would fetch identical data
+    // and the channels would collapse into one washed-out grayscale. Volume assembly leaves the
+    // fallback OFF (the default), so the per-channel band is preserved even when it exceeds budget.
+    const tileUrls: string[] = [];
+    (globalThis as { fetch: unknown }).fetch = jest.fn().mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('tiles/info')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              width: 2000, height: 2000, tileSize: 512, z: 1, channels: 3, multichannel: true,
+              realLevels: 1, // per-channel only at res 0 (16 tiles > budget); small composite exists
+              levels: [
+                { res: 0, width: 2000, height: 2000 },
+                { res: 3, width: 250, height: 250 }, // composite overview that WOULD fit the budget
+              ],
+            }),
+        });
+      }
+      tileUrls.push(url);
+      return Promise.resolve({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) });
+    });
+    (globalThis as { createImageBitmap: unknown }).createImageBitmap = jest
+      .fn()
+      .mockResolvedValue({ width: 250, height: 250, close: () => undefined });
+
+    // Default call (allowCompositeFallback omitted → false): the volume path.
+    await (service as unknown as {
+      fetchSlice: (z: number, c: number, b: number) => Promise<unknown>;
+    }).fetchSlice(0, 1, 3);
+
+    // Stayed on the requested channel (never dropped to the composite), so channels stay distinct.
+    expect(tileUrls.length).toBeGreaterThan(0);
+    expect(tileUrls.every((u) => u.includes('channel=1'))).toBe(true);
   });
 
   it('fetchSlice keeps the channel when a real level fits the tile budget', async () => {
@@ -578,6 +618,59 @@ describe('NapariVisualizerService', () => {
     expect(service.getSurface3dControls()).not.toBeNull();
     // The volume histogram still resolves from the assembled (subsampled) volume.
     expect(service.getHistogram(0, 256)).not.toBeNull();
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('keeps the volume world box (and Z) constant across resolution changes', async () => {
+    // Regression: the volume box used to be sized by the sampled voxel counts, so a higher in-plane
+    // resolution grew X/Y while Z (the slice count) stayed put — Z appeared to shrink. The box must
+    // be resolution-invariant: dims × voxelSize is the same at ¼ and Full.
+    (globalThis.fetch as unknown as jest.Mock).mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('tiles/info')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              width: 1024, height: 768, tileSize: 2048, z: 2, channels: 1, realLevels: 1,
+              levels: [{ res: 0, width: 1024, height: 768 }], // one big tile → dims track maxSlice
+            }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) });
+    });
+    (globalThis as { createImageBitmap: unknown }).createImageBitmap = jest
+      .fn()
+      .mockResolvedValue({ width: 1024, height: 768, close: () => undefined });
+    const addVolume = jest.spyOn(
+      Viewer.prototype as unknown as { addVolume: (...a: unknown[]) => unknown },
+      'addVolume',
+    );
+    const div = document.createElement('div');
+    div.id = 'vol-invariant-host';
+    document.body.appendChild(div);
+    const loaded = await service.load(imageInfo(), 0);
+
+    // World box (dims × voxelSize) captured at a given resolution scale.
+    const worldBoxAt = async (scale: number): Promise<[number, number, number]> => {
+      service.setResolutionScale(scale);
+      addVolume.mockClear();
+      await service.plot('vol-invariant-host', loaded, imageInfo(), 600, PlotType.NAPARI_VOLUME);
+      const [, w, h, d, opts] = addVolume.mock.calls[0] as [
+        unknown, number, number, number, { voxelSize: [number, number, number] },
+      ];
+      const vs = opts.voxelSize;
+      return [w * vs[0], h * vs[1], d * vs[2]];
+    };
+
+    const quarter = await worldBoxAt(4); // ¼ (dims ≈ 256×192)
+    const full = await worldBoxAt(1); //    Full (dims ≈ 1024×768)
+    // Same world box at both resolutions — in particular the Z extent doesn't change.
+    expect(full[0]).toBeCloseTo(quarter[0], 3);
+    expect(full[1]).toBeCloseTo(quarter[1], 3);
+    expect(full[2]).toBeCloseTo(quarter[2], 3);
 
     service.unsubscribe();
     document.body.removeChild(div);
