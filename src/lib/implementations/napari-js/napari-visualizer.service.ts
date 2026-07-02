@@ -153,6 +153,10 @@ const TILE_SIZE = 512; // server tile edge (matches the OSD backend)
 const MAX_STITCH_TILES = 144;
 /** WebGPU default `maxTextureDimension2D` — a stitched slice's longest side must fit a texture. */
 const MAX_TEXTURE_DIM = 8192;
+/** Concurrent tile requests per stitched slice. Firing a whole grid at once (hundreds of requests
+ *  for a large level) overwhelmed the tile server (504s); a small pool keeps the pipe full without
+ *  flooding it — and slice-level workers already run several stitches in parallel on top of this. */
+const TILE_FETCH_CONCURRENCY = 6;
 /** How long to poll `/tiles/info` (202 while the server caches the source) before falling back to
  *  a single tile. Generous like the OSD backend — a cold whole-slide can take minutes to cache. */
 const DESCRIPTOR_TIMEOUT_MS = 120000;
@@ -410,13 +414,16 @@ export class NapariVisualizerService implements IVisualizer {
       .catch(() => ({}) as Record<string, string>);
     const desc = await this.ensureDescriptor();
 
-    const ch = channel == null ? '' : `&channel=${channel}`;
+    // The requested band; may be dropped to the composite (undefined) below when the channel has no
+    // pyramid level small enough to stitch within budget.
+    let effectiveChannel = channel;
     const fetchTile = async (
       res: number,
       col: number,
       row: number,
       t: number,
     ): Promise<ImageBitmap> => {
+      const ch = effectiveChannel == null ? '' : `&channel=${effectiveChannel}`;
       const url = `${this.api}tile?info=${infoB64}&res=${res}&col=${col}&row=${row}&z=${z}&tileSize=${t}${ch}`;
       const resp = await fetch(url, { headers });
       if (!resp.ok) {
@@ -429,20 +436,50 @@ export class NapariVisualizerService implements IVisualizer {
     if (!desc || !desc.levels?.length) return fetchTile(0, 0, 0, TILE_SIZE);
 
     const t = desc.tileSize || TILE_SIZE;
-    // Per-channel tiles exist only at REAL Bio-Formats levels; the composite exists at all levels.
-    const maxLevel = channel == null ? desc.levels.length : desc.realLevels ?? desc.levels.length;
-    const usable = desc.levels.slice(0, Math.max(1, maxLevel));
-    // Finest level (res 0 = full) whose grid fits the tile budget and the GPU texture limit.
-    let chosen = usable[0];
-    for (const lvl of usable) {
-      chosen = lvl;
-      const cols = Math.max(1, Math.ceil(lvl.width / t));
-      const rows = Math.max(1, Math.ceil(lvl.height / t));
-      if (cols * rows <= budgetTiles && Math.max(lvl.width, lvl.height) <= MAX_TEXTURE_DIM) break;
+    // Per-channel tiles exist ONLY at REAL Bio-Formats levels (the front of `levels`); the server
+    // composite exists at every level, including the small overviews.
+    const perChannelLevels = desc.realLevels ?? desc.levels.length;
+    const usable =
+      channel == null ? desc.levels : desc.levels.slice(0, Math.max(1, perChannelLevels));
+
+    // Finest level whose stitched grid fits BOTH the tile budget and the GPU texture limit; if none
+    // fits, the coarsest available (fits=false).
+    const tilesFor = (lvl: TileLevel): number =>
+      Math.max(1, Math.ceil(lvl.width / t)) * Math.max(1, Math.ceil(lvl.height / t));
+    const pick = (levels: TileLevel[]): { lvl: TileLevel; fits: boolean } => {
+      let c = levels[0];
+      for (const lvl of levels) {
+        c = lvl;
+        if (tilesFor(lvl) <= budgetTiles && Math.max(lvl.width, lvl.height) <= MAX_TEXTURE_DIM) {
+          return { lvl, fits: true };
+        }
+      }
+      return { lvl: c, fits: false };
+    };
+
+    let sel = pick(usable);
+    // A specific channel only has tiles at the (few, large) real levels. When none of them fit the
+    // budget — e.g. the coarsest real level is still 14982×18670 → ~1100 full-res tiles — stitching
+    // it per slice floods the server (504s) and stalls the load. The composite pyramid has small
+    // overview levels, so fetch the composite instead and derive luminance from it. Every caller here
+    // (surface height, volume assembly, readback) downscales the plane anyway, so a composite-derived
+    // plane is the right trade for one that actually loads. Only kicks in when the channel can't fit.
+    if (!sel.fits && channel != null && desc.levels.length > perChannelLevels) {
+      const composite = pick(desc.levels);
+      if (composite.fits || tilesFor(composite.lvl) < tilesFor(sel.lvl)) {
+        effectiveChannel = undefined;
+        sel = composite;
+        console.warn(
+          `[napari-js] channel ${channel} has no pyramid level within the ${budgetTiles}-tile ` +
+            `budget; using the composite overview (res ${sel.lvl.res}, ${sel.lvl.width}×` +
+            `${sel.lvl.height}) for this plane.`,
+        );
+      }
     }
+    const chosen = sel.lvl;
     const cols = Math.max(1, Math.ceil(chosen.width / t));
     const rows = Math.max(1, Math.ceil(chosen.height / t));
-    if (chosen !== usable[0] && budgetTiles === MAX_STITCH_TILES) {
+    if (!sel.fits && budgetTiles === MAX_STITCH_TILES) {
       console.warn(
         `[napari-js] full resolution exceeds the ${budgetTiles}-tile/${MAX_TEXTURE_DIM}px budget; ` +
           `displaying overview level res ${chosen.res} (${chosen.width}×${chosen.height}).`,
@@ -451,15 +488,25 @@ export class NapariVisualizerService implements IVisualizer {
 
     if (cols === 1 && rows === 1) return fetchTile(chosen.res, 0, 0, t);
 
-    // Fetch the whole grid concurrently, then stitch into one level-sized canvas. Edge tiles are
+    // Stitch into one level-sized canvas. Fetch the grid with BOUNDED concurrency: firing every tile
+    // at once (a big grid = hundreds of requests) overwhelmed the tile server (504s). Edge tiles are
     // narrower/shorter; drawImage places each at its grid offset so partial tiles line up.
-    const jobs: Array<Promise<{ col: number; row: number; bmp: ImageBitmap }>> = [];
+    const coords: Array<{ col: number; row: number }> = [];
     for (let row = 0; row < rows; row++) {
-      for (let col = 0; col < cols; col++) {
-        jobs.push(fetchTile(chosen.res, col, row, t).then((bmp) => ({ col, row, bmp })));
-      }
+      for (let col = 0; col < cols; col++) coords.push({ col, row });
     }
-    const tiles = await Promise.all(jobs);
+    const tiles: Array<{ col: number; row: number; bmp: ImageBitmap }> = [];
+    const stitchWorker = async (): Promise<void> => {
+      for (;;) {
+        const job = coords.shift();
+        if (!job) return;
+        const bmp = await fetchTile(chosen.res, job.col, job.row, t);
+        tiles.push({ col: job.col, row: job.row, bmp });
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(TILE_FETCH_CONCURRENCY, coords.length) }, () => stitchWorker()),
+    );
 
     let canvas: HTMLCanvasElement | OffscreenCanvas;
     if (typeof OffscreenCanvas !== 'undefined') {

@@ -429,6 +429,75 @@ describe('NapariVisualizerService', () => {
     document.body.removeChild(div);
   });
 
+  it('fetchSlice falls back to the composite overview when a channel has no in-budget level', async () => {
+    // Multichannel whole-slide: per-channel tiles exist ONLY at the huge real level (res 0); the
+    // small overviews are composite-only. Stitching res 0 for a channel is ~1000s of tiles → server
+    // 504s (the reported bug). fetchSlice must instead pull the small composite overview.
+    const tileUrls: string[] = [];
+    (globalThis as { fetch: unknown }).fetch = jest.fn().mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('tiles/info')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              width: 16000, height: 19000, tileSize: 512, z: 1, channels: 3, multichannel: true,
+              realLevels: 1, // only res 0 is per-channel; the rest are composite overviews
+              levels: [
+                { res: 0, width: 16000, height: 19000 }, // huge real level (~1178 tiles)
+                { res: 4, width: 1000, height: 1187 },
+                { res: 6, width: 250, height: 297 }, // small overview that fits a tiny budget
+              ],
+            }),
+        });
+      }
+      tileUrls.push(url);
+      return Promise.resolve({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) });
+    });
+    (globalThis as { createImageBitmap: unknown }).createImageBitmap = jest
+      .fn()
+      .mockResolvedValue({ width: 250, height: 297, close: () => undefined });
+
+    // channel 1 at a small (surface ¼) tile budget.
+    await (service as unknown as {
+      fetchSlice: (z: number, c: number, b: number) => Promise<unknown>;
+    }).fetchSlice(0, 1, 3);
+
+    expect(tileUrls.length).toBeGreaterThan(0);
+    // Dropped to the composite (no &channel=) rather than stitching the huge per-channel level…
+    expect(tileUrls.every((u) => !u.includes('channel='))).toBe(true);
+    // …at a small overview (never the huge res 0)…
+    expect(tileUrls.every((u) => !u.includes('res=0'))).toBe(true);
+    // …and a handful of tiles, not ~1000.
+    expect(tileUrls.length).toBeLessThanOrEqual(9);
+  });
+
+  it('fetchSlice keeps the channel when a real level fits the tile budget', async () => {
+    // Small multichannel image: the real level fits, so the surface stays channel-specific.
+    const tileUrls: string[] = [];
+    (globalThis as { fetch: unknown }).fetch = jest.fn().mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('tiles/info')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              width: 64, height: 48, tileSize: 512, z: 1, channels: 3, multichannel: true,
+              realLevels: 1, levels: [{ res: 0, width: 64, height: 48 }],
+            }),
+        });
+      }
+      tileUrls.push(url);
+      return Promise.resolve({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) });
+    });
+
+    await (service as unknown as {
+      fetchSlice: (z: number, c: number, b: number) => Promise<unknown>;
+    }).fetchSlice(0, 1, 3);
+
+    expect(tileUrls.some((u) => u.includes('channel=1'))).toBe(true);
+  });
+
   it('mounts a 3D axes gizmo for volumes and toggles it via Surface-3D controls', async () => {
     const addAxes = jest.spyOn(
       Viewer.prototype as unknown as { addAxes: (...a: unknown[]) => unknown },
