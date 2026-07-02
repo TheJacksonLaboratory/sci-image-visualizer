@@ -215,6 +215,25 @@ describe('PlotlyService relayout handler', () => {
     expect(coords[1] - coords[0]).toBeGreaterThan(600);
     expect(coords[3] - coords[2]).toBeGreaterThan(400);
   });
+
+  // Regression: switching between napari-js plot types (e.g. volume ↔ isosurface) routed the
+  // region-overlay's setMode('none') → PlotlyService.setDragMode while Plotly wasn't the active
+  // renderer. The div id was still set but had no Plotly graph, so Plotly.relayout threw
+  // ("_guiEditing of undefined"), aborting the plot-type switch and wedging the view.
+  it('setDragMode does NOT relayout when the div is not a live Plotly graph', () => {
+    relayoutSpy.mockClear();
+    // `#plot` exists but was never plotted → no `_fullLayout`.
+    service.setDragMode(false);
+    expect(relayoutSpy).not.toHaveBeenCalled();
+  });
+
+  it('setDragMode relayouts a live Plotly graph', () => {
+    const gd = document.getElementById('plot') as any;
+    gd._fullLayout = { xaxis: { range: [0, 1] }, yaxis: { range: [0, 1] } };
+    relayoutSpy.mockClear();
+    service.setDragMode('drawrect');
+    expect(relayoutSpy).toHaveBeenCalledWith('plot', { dragmode: 'drawrect' });
+  });
 });
 
 
@@ -329,6 +348,9 @@ describe('PlotlyService viewport + stack-state methods', () => {
   afterEach(() => jest.restoreAllMocks());
 
   it('setDragMode relayouts the drag mode', () => {
+    // setDragMode only relayouts a LIVE Plotly graph (guards on `_fullLayout` so it no-ops when
+    // another backend owns the div — see the relayout-handler suite's regression test).
+    (document.getElementById('plot') as any)._fullLayout = {};
     service.setDragMode('pan');
     expect(relayout).toHaveBeenCalledWith('plot', { dragmode: 'pan' });
   });

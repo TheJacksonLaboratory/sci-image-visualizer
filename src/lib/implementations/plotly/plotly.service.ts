@@ -1878,9 +1878,16 @@ export class PlotlyService implements IVisualizer {
 
   public setDragMode(mode: string | false) {
     this.dragMode = mode ? (mode as string) : '';
-    if (this.plotDiv) {
-      Plotly.relayout(this.plotDiv, { dragmode: mode } as any);
-    }
+    if (!this.plotDiv) return;
+    // Only relayout a LIVE Plotly graph. When another backend (OSD / napari-js) owns the view the
+    // div id is still set but has no Plotly plot attached, and Plotly.relayout throws
+    // ("can't access property _guiEditing, n is undefined"). That throw aborted the caller
+    // (deactivateActiveTool → onSelectPlotType) before the re-plot ran, wedging the plot type
+    // (e.g. stuck switching napari volume ↔ isosurface). Guard on `_fullLayout` like the zoom
+    // helpers do so it safely no-ops when Plotly isn't the active renderer.
+    const gd = document.getElementById(this.plotDiv) as unknown as { _fullLayout?: unknown } | null;
+    if (!gd?._fullLayout) return;
+    Plotly.relayout(this.plotDiv, { dragmode: mode } as any);
   }
 
   /** {@link IDataRenderer} stub — Plotly has no overview navigator (it's an
