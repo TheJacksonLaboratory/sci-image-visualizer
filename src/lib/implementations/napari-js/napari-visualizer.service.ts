@@ -58,6 +58,7 @@ import { IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { ColormapNode, IWandOptions, IBrushOptions } from '../../contracts/display-types';
 import { VIZ_CONFIG, VizConfig } from '../../contracts/viz-config';
 import { TILE_ACCESS_PORT, TileAccessPort } from '../../contracts/ports/tile-access.port';
+import { SimpleSliceAccessService } from '../simple-slice-access.service';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
 import { NapariScaleBar, formatUm } from './napari-scale-bar';
@@ -363,6 +364,7 @@ export class NapariVisualizerService implements IVisualizer {
     private readonly samPointTool: SamPointToolService,
     private readonly cellSegmentTool: CellSegmentToolService,
     @Optional() @Inject(CELL_SEGMENTER) private readonly cellSegmenter: ICellSegmenter | null,
+    private readonly simpleStack: SimpleSliceAccessService,
     @Inject(VIZ_CONFIG) config: VizConfig,
   ) {
     this.api = config.slideCropServer;
@@ -376,6 +378,14 @@ export class NapariVisualizerService implements IVisualizer {
    * level dims from `trueImageSize` overshoots the real grid and the server 400s out-of-range tiles.
    */
   private async ensureDescriptor(): Promise<TileDescriptor | null> {
+    // Self-contained multi-slice stack (no tile server — e.g. a numbered image
+    // series assembled client-side, each slice a different file): there is no
+    // single server-tiled pyramid to describe. Returning null routes every
+    // caller (2D image, volume, surface) to their stitched/single-fetch
+    // fallback, which — via fetchSlice's own SimpleSliceAccessService branch —
+    // correctly fetches each slice's own URL instead of one fixed file's tile
+    // pyramid.
+    if (this.simpleStack.isSimple(this.loaded?.imageInfo)) return null;
     const infoB64 = this.tiles.getSelectedInfoB64();
     if (!infoB64) return null;
     if (this.descriptor && this.descriptorKey === infoB64) return this.descriptor;
@@ -429,6 +439,19 @@ export class NapariVisualizerService implements IVisualizer {
      *  assembly leaves this `false` to keep each band distinct. */
     allowCompositeFallback = false,
   ): Promise<ImageBitmap> {
+    // Self-contained multi-slice stack (tiled:false): `z` indexes a completely
+    // different file's own preview URL, not an internal slice of one server-
+    // tiled file — resolved and fetched via SimpleSliceAccessService (shared
+    // with OSD; see its docs for why this can't be a bare fetch()) instead of
+    // building a /tile?info=...&z= request against whichever single file
+    // getSelectedInfoB64() points at (which would 400/mismatch for any z
+    // beyond that one file's own extent).
+    const info = this.loaded?.imageInfo;
+    if (this.simpleStack.isSimple(info)) {
+      const url = this.simpleStack.urlFor(info as IImageInfo, z);
+      if (!url) throw new Error(`[napari-js] no URL for slice ${z}`);
+      return this.simpleStack.fetchAsBitmap(url);
+    }
     const infoB64 = this.tiles.getSelectedInfoB64();
     if (!infoB64) throw new Error('[napari-js] no selected image info (getSelectedInfoB64 null)');
     const headers = await this.tiles
@@ -581,6 +604,10 @@ export class NapariVisualizerService implements IVisualizer {
 
   // ── IDataRenderer: load / render / viewport ───────────────────────────────
   async load(imageInfo: IImageInfo, zIndex: number): Promise<NapariLoaded> {
+    // Keeps SimpleSliceAccessService's blob cache in sync even when the user
+    // switches backends (e.g. OSD Image → napari Volume) on the same file —
+    // whichever backend loads a genuinely different file first evicts it.
+    this.simpleStack.noteActiveFile(imageInfo.fileName);
     this.loaded = { imageInfo, z: zIndex, filename: imageInfo.fileName };
     return this.loaded;
   }

@@ -59,4 +59,10 @@ export interface IImageInfo {
    *    opened via OSD's single-image source with no tile server. Lets in-memory
    *    images (the processing pipeline) use the OSD viewer without a round-trip. */
   tiled?: boolean;
+  /** One-shot hint: open the stack on this slice instead of slice 0 (e.g. the
+   *  host clicked a specific file within a numbered image series). The
+   *  component consumes and clears this the first time it sees the object, so
+   *  re-delivering the same ImageInfo (e.g. a plot-type switch) doesn't reset
+   *  the user's current scrub position. */
+  initialZIndex?: number;
 }

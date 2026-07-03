@@ -424,13 +424,24 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
             if (urls) {
               this.plotService.reset();
               this.stackLoading = imgInfo.isStack && imgInfo.showStack;
-              // make sure the zindex is within bounds
-              this.updateZIndex(urls);
-              this.running = true;
-              // set max index of stack
+              // set max index of stack — computed before updateZIndex so a
+              // fresh stack (shorter or longer than whatever was previously
+              // loaded) clamps against ITS bounds, not the stale ones.
               // One URL per slice (0-indexed), so the last reachable index is
               // length-1 — earlier `length-2` dropped the final slice.
               this.maxIndex = urls.length > 1 ? urls.length - 1 : 0;
+              // One-shot hint: jump straight to a specific slice (e.g. the
+              // file the user actually clicked within a numbered series).
+              // Consumed immediately so redelivering the same ImageInfo later
+              // (a plot-type switch, reloadAndPlot) doesn't reset the user's
+              // current scrub position back to it.
+              if (imgInfo.initialZIndex !== undefined) {
+                this.zIndex = imgInfo.initialZIndex;
+                imgInfo.initialZIndex = undefined;
+              }
+              // make sure the zindex is within bounds
+              this.updateZIndex(urls);
+              this.running = true;
               // Multi-tier rendering (small blurry tier first, then sharpen in
               // place) — sequencing lives in RenderOrchestrator; this component
               // supplies the phase render and owns the UI flags via callbacks.

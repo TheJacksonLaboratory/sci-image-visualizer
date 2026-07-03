@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { HttpClient } from '@angular/common/http';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 import { firstValueFrom, of } from 'rxjs';
 
@@ -178,6 +179,43 @@ describe('NapariVisualizerService', () => {
     overlay?.setMode('none');
     service.unsubscribe();
     document.body.removeChild(div);
+  });
+
+  /**
+   * A numbered image series (jit-ui folder-stack feature) assembles its stack
+   * from N separate files' own preview URLs, not one server-tiled file with
+   * an internal z dimension — tiled:false signals this. Regression: without
+   * it, every slice fetch hit /tile?info=<whichever file was last "selected">
+   * &z=<scrub index>, which 400s for any z beyond that ONE file's own extent
+   * (each series file is a single frame). tiled:false must bypass the
+   * /tiles/info descriptor poll entirely and fetch urls[z] directly.
+   */
+  it('renders a tiled:false multi-file stack from urls[z] directly, bypassing /tiles/info', async () => {
+    const info = imageInfo({
+      tiled: false,
+      urls: ['https://x/a.png', 'https://x/b.png', 'https://x/c.png'],
+    });
+    // Fetched via SimpleSliceAccessService (HttpClient), not the raw
+    // globalThis.fetch this beforeEach mocks for the tiled-path tests —
+    // spy on HttpClient.get directly so the response resolves synchronously.
+    const getSpy = jest.spyOn(TestBed.inject(HttpClient), 'get').mockReturnValue(of(new Blob()));
+
+    const div = document.createElement('div');
+    div.id = 'plot-host-tiled-false';
+    document.body.appendChild(div);
+
+    // zIndex 1 — the middle file, the case that broke: a fixed single-file
+    // tile scheme would request z=1 against whichever file was "selected"
+    // (usually z=0/one frame only) and 400.
+    const loaded = await service.load(info, 1);
+    const ok = await service.plot('plot-host-tiled-false', loaded, info, 600, PlotType.NAPARI_IMAGE);
+
+    expect(ok).toBe(true);
+    // Fetched slice 1's own URL directly — no /tiles/info poll, no /tile?...&z= construction.
+    expect(getSpy).toHaveBeenCalledWith('https://x/b.png', { responseType: 'blob' });
+    service.unsubscribe();
+    document.body.removeChild(div);
+    getSpy.mockRestore();
   });
 
   it('plot() returns false when the target element is missing', async () => {

@@ -24,6 +24,7 @@ import { buildTileUrl, fetchTileBitmap } from './tile-client';
 import { SliceCache } from './slice-cache';
 import { DisplayPipeline } from './display-pipeline';
 import { HistogramSampler } from './histogram-sampler';
+import { SimpleSliceAccessService } from '../simple-slice-access.service';
 import { CachedImageData, WandToolService, WandToolHost } from '../../toolbar/wand/wand-tool.service';
 import { BrushToolService, BrushOptions } from '../../toolbar/brush/brush-tool.service';
 import { SamToolService } from '../../toolbar/segmentation/sam-tool.service';
@@ -143,6 +144,15 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
    *  tile source and swap slices live (stack navigation). */
   private infoB64 = '';
   private currentZ = 0;
+  /** True while the current image is "simple" (tiled:false — self-contained
+   *  per-slice URLs, no tile server; e.g. a numbered image series assembled
+   *  client-side into a stack). setZIndex swaps the single-image source for
+   *  the new slice's URL instead of updating a tiled z-param. */
+  private simpleMode = false;
+  /** urls[] for the current simple-mode image, so setZIndex can look up the
+   *  slice being scrubbed to (via {@link SimpleSliceAccessService.urlFor}).
+   *  Unused (and left stale, harmlessly) in tiled mode. */
+  private simpleUrls: string[] = [];
   private coordTransform: ICoordinateTransform | null = null;
   private wandHost!: WandToolHost;
   private eraserHost!: VertexEraserToolHost;
@@ -247,6 +257,7 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     private zoomToBoxTool: ZoomToBoxToolService,
     private store: VisualizerStore,
     private regionStore: RegionStore,
+    private simpleStack: SimpleSliceAccessService,
     @Inject(VIZ_CONFIG) config: VizConfig,
   ) {
     this.api = config.slideCropServer;
@@ -351,10 +362,11 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     if (filename && this.currentFileName && filename !== this.currentFileName) {
       this.cache.cancelBackgroundLoad();
     }
+    this.simpleStack.noteActiveFile(filename);
     // Simple (in-memory / non-tiled) image: skip the tile server entirely — no
     // getSelectedInfoB64, no /tiles/info poll. `urls[zIndex]` is a complete image
     // OSD opens via its single-image source (see plot()).
-    if (imageInfo?.tiled === false) {
+    if (this.simpleStack.isSimple(imageInfo)) {
       return this.loadSimple(imageInfo, zIndex);
     }
     const infoB64 = this.tiles.getSelectedInfoB64();
@@ -399,10 +411,11 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     }
   }
 
-  /** Build the `plot()` payload for a simple (non-tiled) in-memory image: a
-   *  single-level descriptor sized from `trueImageSize`, plus the directly-
-   *  loadable URL. No server poll and no auth (a blob:/data: URL ignores headers). */
-  private loadSimple(imageInfo: IImageInfo, zIndex: number): OsdLoaded {
+  /** Build the `plot()` payload for a simple (tiled:false) image: a single-level
+   *  descriptor sized from `trueImageSize`, plus the directly-loadable URL —
+   *  resolved and fetched via {@link SimpleSliceAccessService} (shared with
+   *  napari-js; see its docs for why this can't be a raw `fetch()`/`<img>`). */
+  private async loadSimple(imageInfo: IImageInfo, zIndex: number): Promise<OsdLoaded> {
     const [width, height] = imageInfo.trueImageSize ?? [0, 0];
     const meta = imageInfo.imageMeta?.[0];
     const z = zIndex || 0;
@@ -419,13 +432,22 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
       mppY: meta?.mppY ?? 0,
     };
     this.authHeaders = {};
+    const rawUrl = this.simpleStack.urlFor(imageInfo, z);
+    let url: string | undefined;
+    if (rawUrl) {
+      try {
+        url = await this.simpleStack.fetchAsBlobUrl(rawUrl);
+      } catch (err) {
+        console.warn('[OSD] simple-mode slice fetch failed', err);
+      }
+    }
     return {
       descriptor,
       infoB64: '',
       z,
       filename: imageInfo?.fileName,
       simple: true,
-      url: imageInfo.urls?.[z] ?? imageInfo.urls?.[0],
+      url,
     };
   }
 
@@ -445,14 +467,32 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     // (unsubscribe()) tore it down — this service is a root singleton, so the
     // constructor won't run again to recreate it.
     this.ensureColormapSubscription();
-    // OSD tiles natively; the diagram's small->large two-pass is a Plotly
-    // optimization, so the in-place (large) pass is a no-op once mounted.
-    if (inPlace && this.viewer) return Promise.resolve(true);
+    // OSD tiles natively, so the in-place (large) pass is normally a no-op
+    // once mounted — the tile pyramid IS the full resolution regardless of
+    // which ImageInfo tier requested it. Simple mode has no pyramid to fall
+    // back on: it displays literally whatever URL was last opened, so
+    // without this swap the small tier's 128px placeholder would stay on
+    // screen forever (pixelated, never "sharpening" like the tiled path).
+    if (inPlace && this.viewer) {
+      if (loaded.simple && loaded.url) {
+        // Also refresh simpleUrls to THIS phase's (large-tier) urls[] — it was
+        // set from the small tier's 128px urls on the initial mount below,
+        // which never runs again for the in-place pass. Without this,
+        // setZIndex's later slider scrubs would keep reading the small
+        // tier's low-res URLs forever, even though the initial slice was
+        // correctly swapped to full resolution here.
+        this.simpleUrls = imageInfo?.urls ?? this.simpleUrls;
+        this.viewer.open({ type: 'image', url: loaded.url } as any);
+      }
+      return Promise.resolve(true);
+    }
     this.plotDiv = plotDiv;
     this.currentFileName = imageInfo?.fileName;
     this.descriptor = d;
     this.infoB64 = loaded.infoB64;
     this.currentZ = loaded.z;
+    this.simpleMode = !!loaded.simple;
+    this.simpleUrls = loaded.simple ? (imageInfo?.urls ?? []) : [];
     // The descriptor's physical pixel size (server Bio-Formats `/tiles/info`) is
     // authoritative — push it into the shared meta so the Region Editor reports
     // areas in µm²/mm², matching the scale bar built from `d.mppX` below.
@@ -532,6 +572,11 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     silenceOsdMultiImageAdvisory();
     this.viewer = (OpenSeadragon as any)({
       id: plotDiv,
+      // Simple-mode z-scrub calls viewer.open() again per slice (see
+      // setZIndex) — without this it resets to the home zoom/pan on every
+      // slice change. Tiled mode never re-opens (it toggles pre-added
+      // TiledImages' opacity instead), so this is a no-op there.
+      preserveViewport: true,
       // Use the 2D canvas drawer, not WebGL: creating/destroying a viewer on
       // each engine toggle / image load churns WebGL contexts (browsers cap
       // how many exist at once), which surfaces as "WebGL context was lost"
@@ -920,11 +965,36 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
    * never-seen slice is added once. The region overlay, coordinate transform,
    * scale bar, colormap pipeline and current zoom/pan all persist — the x/y
    * geometry is identical across slices.
+   *
+   * Simple mode (tiled:false — a numbered image series assembled client-side,
+   * each slice its own complete image with no shared tile server) has no
+   * pyramid to toggle opacity on, so it re-opens the viewer on the new
+   * slice's URL instead. preserveViewport (viewer option, see plot()) keeps
+   * the current zoom/pan across that reopen.
    */
   setZIndex(zIndex: number): void {
     const z = zIndex || 0;
     if (z === this.currentZ) return;
-    if (!this.viewer || !this.descriptor || !this.infoB64) return;
+    if (!this.viewer) return;
+    if (this.simpleMode) {
+      const rawUrl = this.simpleUrls[z] ?? this.simpleUrls[0];
+      if (!rawUrl) return;
+      this.currentZ = z;
+      this.viewportPixels = null;
+      // Fetched via SimpleSliceAccessService (auth interceptor applies), not
+      // opened directly. Guard against a newer scrub landing first.
+      this.simpleStack.fetchAsBlobUrl(rawUrl)
+        .then((url) => {
+          if (this.currentZ !== z || !this.viewer) return;
+          this.viewer.addOnceHandler('open-failed', (e: any) => {
+            console.warn('[OSD] slice re-open failed', e?.message ?? e);
+          });
+          this.viewer.open({ type: 'image', url } as any);
+        })
+        .catch((err) => console.warn('[OSD] slice fetch failed', err));
+      return;
+    }
+    if (!this.descriptor || !this.infoB64) return;
     this.currentZ = z;
     this.viewportPixels = null; // wand readback is slice-specific
     this.cache.showSlice(z);

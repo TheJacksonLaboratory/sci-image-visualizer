@@ -73,6 +73,39 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     expect(loaded.descriptor!.levels).toHaveLength(1);
   });
 
+  /**
+   * Regression: a numbered image series (jit-ui folder-stack feature) is
+   * tiled:false with REAL server /preview URLs, not blob:/data: URLs (the
+   * processing-pipeline's original tiled:false use case, unaffected — see
+   * above). OSD's `type:'image'` source loads via a plain `<img src>`, which
+   * cannot carry the Bearer auth header — behind an OAuth2-proxied
+   * deployment that 302s to the login page and then CORS-fails. The fix
+   * fetches through HttpClient (auth interceptor applies) and hands OSD a
+   * blob: URL instead.
+   */
+  it('load() simple (tiled:false) fetches a real server URL via HttpClient, not directly', async () => {
+    const createObjectURL = jest.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock-1');
+    const loadPromise = service.load({
+      fileName: 'case1_014.dcm',
+      tiled: false,
+      isGrayscale: true,
+      urls: ['/api/preview?info=abc', '/api/preview?info=def'],
+      trueImageSize: [10, 20],
+      imageMeta: [{ rgbChannels: 1, channelCount: 1, x: 10, y: 20, z: 1 }],
+    } as any, 1);
+
+    const req = http.expectOne('/api/preview?info=def'); // urls[zIndex=1]
+    expect(req.request.method).toBe('GET');
+    const blob = new Blob(['x']);
+    req.flush(blob);
+
+    const loaded = await loadPromise;
+    expect(loaded.simple).toBe(true);
+    expect(createObjectURL).toHaveBeenCalledWith(blob);
+    expect(loaded.url).toBe('blob:mock-1');
+    createObjectURL.mockRestore();
+  });
+
   it('load() simple infers a single channel for a grayscale image and falls back to urls[0]', async () => {
     const loaded = await service.load({
       fileName: 'g.png',

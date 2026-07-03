@@ -5,6 +5,9 @@ import { TextEncoder, TextDecoder as UtilTextDecoder } from 'util';
 if (typeof window.URL.createObjectURL === 'undefined') {
   window.URL.createObjectURL = jest.fn();
 }
+if (typeof window.URL.revokeObjectURL === 'undefined') {
+  window.URL.revokeObjectURL = jest.fn();
+}
 
 global.TextEncoder = TextEncoder;
 global.TextDecoder = UtilTextDecoder as unknown as typeof global.TextDecoder;
