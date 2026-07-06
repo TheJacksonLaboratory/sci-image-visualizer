@@ -417,9 +417,29 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    *  resolved and fetched via {@link SimpleSliceAccessService} (shared with
    *  napari-js; see its docs for why this can't be a raw `fetch()`/`<img>`). */
   private async loadSimple(imageInfo: IImageInfo, zIndex: number): Promise<OsdLoaded> {
+    const z = zIndex || 0;
+    const filename = imageInfo?.fileName;
+    this.authHeaders = {};
+    const rawUrl = this.simpleStack.urlFor(imageInfo, z);
+    let url: string | undefined;
+    if (rawUrl) {
+      try {
+        url = await this.simpleStack.fetchAsBlobUrl(rawUrl);
+      } catch (err) {
+        console.warn('[OSD] simple-mode slice fetch failed', err);
+      }
+    }
+    // No loadable URL (empty urls[] or the fetch failed): signal "couldn't
+    // load" with a null descriptor — same as the tiled path when there's no
+    // selected-file info — so plot() returns false (its `if (!d)` guard) and
+    // the router can fall back, instead of mounting an <img> with an undefined
+    // src that throws at runtime.
+    if (!url) {
+      console.warn('[OSD] simple-mode slice has no loadable URL; skipping OSD render', rawUrl);
+      return { descriptor: null, infoB64: '', z, filename };
+    }
     const [width, height] = imageInfo.trueImageSize ?? [0, 0];
     const meta = imageInfo.imageMeta?.[0];
-    const z = zIndex || 0;
     const descriptor: TileDescriptor = {
       width,
       height,
@@ -432,21 +452,11 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       mppX: meta?.mppX ?? 0,
       mppY: meta?.mppY ?? 0,
     };
-    this.authHeaders = {};
-    const rawUrl = this.simpleStack.urlFor(imageInfo, z);
-    let url: string | undefined;
-    if (rawUrl) {
-      try {
-        url = await this.simpleStack.fetchAsBlobUrl(rawUrl);
-      } catch (err) {
-        console.warn('[OSD] simple-mode slice fetch failed', err);
-      }
-    }
     return {
       descriptor,
       infoB64: '',
       z,
-      filename: imageInfo?.fileName,
+      filename,
       simple: true,
       url,
     };

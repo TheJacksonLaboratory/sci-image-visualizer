@@ -120,6 +120,27 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     expect(loaded.descriptor!.channels).toBe(1);
   });
 
+  /**
+   * Regression: when a simple stack has no loadable URL (empty urls[], or the
+   * slice fetch fails), load() must return a null descriptor — the same
+   * "couldn't load" signal as the tiled path — so plot()'s `if (!d)` guard
+   * returns false and the router falls back, instead of handing plot() a
+   * simple source with an undefined src that throws when mounted.
+   */
+  it('load() simple returns a null descriptor when no slice URL can be resolved', async () => {
+    const loaded = await service.load({
+      fileName: 'empty.png',
+      tiled: false,
+      isGrayscale: true,
+      urls: [],                     // nothing to load
+      trueImageSize: [4, 4],
+      imageMeta: [{ rgbChannels: 1, channelCount: 1, x: 4, y: 4, z: 1 }],
+    } as any, 0);
+    expect(loaded.descriptor).toBeNull();
+    // plot() bails on a null descriptor rather than mounting an undefined src.
+    expect(await service.plot('nope', loaded, {} as any, 600, {} as any)).toBe(false);
+  });
+
   it('getHistogram returns null before any slice has been sampled', () => {
     expect(service.getHistogram(0, 256)).toBeNull();
   });

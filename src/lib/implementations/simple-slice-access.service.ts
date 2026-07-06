@@ -76,9 +76,17 @@ export class SimpleSliceAccessService {
   /** Fetch a slice's own URL and decode it as an `ImageBitmap` — for
    *  backends (napari-js) that upload pixels directly rather than opening a
    *  URL. Not cached (ImageBitmaps are consumed once and closed by the
-   *  caller); the underlying HTTP response may still hit the browser cache. */
+   *  caller); the underlying HTTP response may still hit the browser cache.
+   *
+   *  A self-contained blob:/data: URL (e.g. the processing-pipeline's
+   *  in-memory preview, which also emits `tiled:false`) needs no auth and
+   *  isn't a server URL to route through the interceptor — read it directly
+   *  via the browser. Only real server URLs go through HttpClient so the auth
+   *  interceptor applies. Mirrors {@link fetchAsBlobUrl}'s blob:/data: branch. */
   async fetchAsBitmap(rawUrl: string): Promise<ImageBitmap> {
-    const blob = await firstValueFrom(this.http.get(rawUrl, { responseType: 'blob' }));
+    const blob = rawUrl.startsWith('blob:') || rawUrl.startsWith('data:')
+      ? await (await fetch(rawUrl)).blob()
+      : await firstValueFrom(this.http.get(rawUrl, { responseType: 'blob' }));
     return createImageBitmap(blob);
   }
 

@@ -83,6 +83,25 @@ describe('SimpleSliceAccessService', () => {
       await promise;
       expect(createImageBitmap).toHaveBeenCalledWith(blob);
     });
+
+    it('reads a blob:/data: URL directly (browser fetch), never through HttpClient', async () => {
+      // The processing-pipeline preview emits tiled:false with an in-memory
+      // blob: URL — it needs no auth and isn't a server URL. Routing it through
+      // HttpClient's interceptor would break it; read it directly instead.
+      // jsdom has no global fetch, so assign one for this test and restore it.
+      const blob = new Blob(['x']);
+      const fetchMock = jest.fn().mockResolvedValue({ blob: () => Promise.resolve(blob) });
+      const original = (globalThis as { fetch?: unknown }).fetch;
+      (globalThis as { fetch?: unknown }).fetch = fetchMock;
+      try {
+        await service.fetchAsBitmap('blob:abc-123');
+        expect(fetchMock).toHaveBeenCalledWith('blob:abc-123');
+        expect(createImageBitmap).toHaveBeenCalledWith(blob);
+        http.verify(); // no HttpClient request was issued
+      } finally {
+        (globalThis as { fetch?: unknown }).fetch = original;
+      }
+    });
   });
 
   describe('noteActiveFile', () => {
