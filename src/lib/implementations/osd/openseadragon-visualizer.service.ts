@@ -7,10 +7,9 @@ import * as OpenSeadragon from 'openseadragon';
 
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
-import { IImageInfo, IImageMetadata } from '../../contracts/image.contract';
+import { IImageInfo } from '../../contracts/image.contract';
 import { TileAccessPort, TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
 import { VizConfig, VIZ_CONFIG } from '../../contracts/viz-config';
-import { Region } from '../../models/region';
 import { PlotType, PLOT_TYPE_DESCRIPTORS, PlotTypeDescriptor } from '../../contracts/plot-type';
 import { IVisualizer, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls } from '../../contracts/visualizer.contract';
 import { ViewerCapabilities, ViewerFeature, capabilitiesOf } from '../../contracts/capabilities.contract';
@@ -24,6 +23,7 @@ import { buildTileUrl, fetchTileBitmap } from './tile-client';
 import { SliceCache } from './slice-cache';
 import { DisplayPipeline } from './display-pipeline';
 import { HistogramSampler } from './histogram-sampler';
+import { BaseStoreVisualizer } from '../base-store-visualizer';
 import { SimpleSliceAccessService } from '../simple-slice-access.service';
 import { CachedImageData, WandToolService, WandToolHost } from '../../toolbar/wand/wand-tool.service';
 import { BrushToolService, BrushOptions } from '../../toolbar/brush/brush-tool.service';
@@ -131,7 +131,7 @@ interface OsdLoaded {
  * implementation against real endpoints.
  */
 @Injectable({ providedIn: 'root' })
-export class OpenSeadragonVisualizerService implements IVisualizer {
+export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implements IVisualizer {
   /** OSD's strength is displaying a large zoomable image — nothing else here. */
   readonly capabilities: ViewerCapabilities = capabilitiesOf([ViewerFeature.ImageDisplay]);
 
@@ -255,11 +255,12 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     @Optional() @Inject(CELL_SEGMENTER) private cellSegmenter: ICellSegmenter | null,
     private eraserTool: VertexEraserToolService,
     private zoomToBoxTool: ZoomToBoxToolService,
-    private store: VisualizerStore,
-    private regionStore: RegionStore,
+    store: VisualizerStore,
+    regionStore: RegionStore,
     private simpleStack: SimpleSliceAccessService,
     @Inject(VIZ_CONFIG) config: VizConfig,
   ) {
+    super(regionStore, store);
     this.api = config.slideCropServer;
     this.sampler = new HistogramSampler(this.http, this.api, {
       realLevels: () => this.realLevels,
@@ -1138,84 +1139,12 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
     /* no LINE mode on OSD */
   }
 
-  // ── IRegionStore ─────────────────────────────────────────────────────
-  // All region state is owned by the shared RegionStore — the single source of
-  // truth both backends delegate to. The OSD region overlay (constructed in
-  // plot()) reads/writes the same store, so regions stay in sync with Plotly
-  // and the Region Editor. OSD renders regions as an SVG overlay (its own
-  // representation) rather than carrying Plotly shape dicts.
-  setRegions(regions: Region[], showRegionLabel?: boolean, isRegionSaveOn?: boolean,
-             fillColor?: string, append?: boolean): void {
-    this.regionStore.setRegions(regions, showRegionLabel, isRegionSaveOn, fillColor, append);
-  }
-  getRegions(): Region[] {
-    return this.regionStore.getRegions();
-  }
-  getRegionPolygons(): any[] {
-    return this.regionStore.getRegionPolygons();
-  }
-  getRegionUpdateEvent(): Observable<any[]> {
-    return this.regionStore.getRegionUpdateEvent();
-  }
-
-  setSelectedShapeIndices(indices: number[]): void {
-    this.regionStore.setSelectedShapeIndices(indices);
-  }
-  /** Select a region by identity. The overlay highlights the matching SVG
-   *  element via its getSelectedShapeIndices$ subscription. */
-  selectRegion(region: Region): void {
-    this.regionStore.selectRegion(region);
-  }
-  getSelectedShapeIndices$(): Observable<number[]> {
-    return this.regionStore.getSelectedShapeIndices$();
-  }
-  deleteActiveShape(): void {
-    this.regionStore.deleteActiveShape();
-  }
-
-  getShowShapeLabel(): boolean {
-    return this.regionStore.getShowShapeLabel();
-  }
-  getShapeColor(): string {
-    return this.regionStore.getShapeColor();
-  }
-  getFillColor(): string {
-    return this.regionStore.getFillColor();
-  }
-  getClassificationColors(): Map<string, string> {
-    return this.store.getClassificationColors();
-  }
-  setClassificationColor(label: string, color: string): void {
-    this.store.setClassificationColor(label, color);
-  }
-
-  plotPreviousShapes(): void {
-    this.regionStore.plotPreviousShapes();
-  }
-  setPreviousShapes(shapes: any[]): void {
-    this.regionStore.setPreviousShapes(shapes);
-  }
-  getPreviousShapes(): any[] {
-    return this.regionStore.getPreviousShapes();
-  }
-
-  undo(): void { this.regionStore.undo(); }
-  redo(): void { this.regionStore.redo(); }
-  canUndo(): boolean { return this.regionStore.canUndo(); }
-  canRedo(): boolean { return this.regionStore.canRedo(); }
-  getCanUndo$(): Observable<boolean> { return this.regionStore.getCanUndo$(); }
-  getCanRedo$(): Observable<boolean> { return this.regionStore.getCanRedo$(); }
-  resetUndoHistory(): void { this.regionStore.resetUndoHistory(); }
-
-  importRegions(geoJsonStr: string): Region[] {
-    return this.regionStore.importRegions(geoJsonStr);
-  }
-  exportRegions(regions: Region[]): void {
-    this.regionStore.exportRegions(regions);
-  }
-  getGeoJsonString(regions: Region[]): string {
-    return this.regionStore.getGeoJsonString(regions);
-  }
+  // ── IRegionStore + classification colours ────────────────────────────
+  // Inherited from BaseStoreVisualizer — pure delegations to the shared
+  // RegionStore / VisualizerStore (identical to napari-js). The OSD region
+  // overlay (constructed in plot()) reads/writes that same store, so regions
+  // stay in sync with Plotly and the Region Editor; OSD renders them as an SVG
+  // overlay rather than carrying Plotly shape dicts.
 
   // ── IToolController ──────────────────────────────────────────────────
   // Wand + vertex eraser run over OSD via ICoordinateTransform. They share the
@@ -1734,30 +1663,10 @@ export class OpenSeadragonVisualizerService implements IVisualizer {
   }
 
   // ── IDisplayOptions ──────────────────────────────────────────────────
-  // Colormap / metadata state is shared (the VisualizerStore) so OSD and Plotly
-  // stay in lock-step; OSD applies the colormap to grayscale tiles via the LUT
-  // (see the constructor sub).
-  getColormap(): Observable<any> {
-    return this.store.getColormap();
-  }
-  setColormap(colormap: any): void {
-    this.store.setColormap(colormap);
-  }
-  getColormapOptions(): any {
-    return this.store.getColormapOptions();
-  }
-  getReverseScale(): Observable<boolean> {
-    return this.store.getReverseScale();
-  }
-  setReverseScale(reverscale: any): void {
-    this.store.setReverseScale(reverscale);
-  }
-  setImageMeta(imageMeta: IImageMetadata[]): void {
-    this.store.setImageMeta(imageMeta);
-  }
-  getImageMeta(): Observable<IImageMetadata[]> {
-    return this.store.getImageMeta();
-  }
+  // Inherited from BaseStoreVisualizer — pure delegations to the shared
+  // VisualizerStore, so OSD and Plotly stay in lock-step. OSD applies the
+  // colormap to grayscale tiles via the LUT reactively (see the constructor's
+  // colormap subscription), not in setColormap.
 
   // ── IVisualizer ──────────────────────────────────────────────────────
   unsubscribe(): void {

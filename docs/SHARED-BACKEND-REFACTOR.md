@@ -1,8 +1,30 @@
-# Shared-backend refactor — plan (held)
+# Shared-backend refactor — plan
 
-Status: **NOT started** (deferred). Goal: remove the large block of identical delegation code
-duplicated between the OSD and napari-js `IVisualizer` backends by extracting it into a shared
-abstract base class they both extend. Pure de-duplication — **no behavior change**.
+Status: **DONE** (jit-ui#106, 2026-07-06). The identical store-delegation code that was duplicated
+between the OSD and napari-js `IVisualizer` backends now lives in one shared abstract base class,
+`implementations/base-store-visualizer.ts`, which both extend. Pure de-duplication — **no behavior
+change** (all 803 library tests + 164 app tests still pass; `nx build jit-ui` AOT green).
+
+## Outcome vs. this plan
+
+The plan's method list was written at 718 tests and had drifted from the code — verified each
+method against both backends before moving it (`git`-diffed bodies), which changed two things:
+
+- **Extracted the ENTIRE `IRegionStore` and `IDisplayOptions` interfaces** (every member of both is
+  a pure forwarder in both backends), plus the two classification-colour members — not just a
+  subset. The base `implements IRegionStore, IDisplayOptions` so it stays in lockstep with the
+  contract. The apparent "DIFFERS" between backends were all cosmetic (`any` vs `unknown`,
+  one-line vs multi-line, `reverscale: any` vs `reverse: boolean`); the base uses the interface's
+  canonical signatures, which harmonised them.
+- **`setColormap` IS extracted.** This plan's "what NOT to extract" list flagged "setColormap LUT
+  application", but that's stale: in current code both backends' `setColormap` is a plain
+  `this.store.setColormap(colormap)` delegation. OSD applies its LUT reactively via the
+  constructor's colormap subscription, not in `setColormap`, so it moves cleanly.
+
+Everything in the original "what NOT to extract" list below (load/plot/zoom/setZIndex/overlay/tools/
+histograms/scale bar/tiling/colormap-LUT subscription) correctly stayed in each subclass.
+
+## Original plan (for reference)
 
 ## Why
 `OpenseadragonVisualizerService` and `NapariVisualizerService` both implement the composite

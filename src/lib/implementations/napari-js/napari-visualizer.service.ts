@@ -25,8 +25,7 @@ import type {
   Colormap,
 } from 'napari-js';
 
-import { IImageInfo, IImageMetadata } from '../../contracts/image.contract';
-import { Region } from '../../models/region';
+import { IImageInfo } from '../../contracts/image.contract';
 import { IChannelState } from '../../contracts/channel-histogram-api.contract';
 import { buildColormapLut, Rgb } from '../../contracts/colormap-lut';
 import {
@@ -58,6 +57,7 @@ import { IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { ColormapNode, IWandOptions, IBrushOptions } from '../../contracts/display-types';
 import { VIZ_CONFIG, VizConfig } from '../../contracts/viz-config';
 import { TILE_ACCESS_PORT, TileAccessPort } from '../../contracts/ports/tile-access.port';
+import { BaseStoreVisualizer } from '../base-store-visualizer';
 import { SimpleSliceAccessService } from '../simple-slice-access.service';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
@@ -221,7 +221,7 @@ interface TileDescriptor {
  * overlay rendering, per-channel histograms, TIFF export.
  */
 @Injectable({ providedIn: 'root' })
-export class NapariVisualizerService implements IVisualizer {
+export class NapariVisualizerService extends BaseStoreVisualizer implements IVisualizer {
   readonly capabilities: ViewerCapabilities = capabilitiesOf([
     ViewerFeature.ImageDisplay,
     ViewerFeature.StackSlider,
@@ -354,8 +354,8 @@ export class NapariVisualizerService implements IVisualizer {
 
   constructor(
     @Inject(TILE_ACCESS_PORT) private readonly tiles: TileAccessPort,
-    private readonly store: VisualizerStore,
-    private readonly regionStore: RegionStore,
+    store: VisualizerStore,
+    regionStore: RegionStore,
     private readonly wandTool: WandToolService,
     private readonly brushTool: BrushToolService,
     private readonly eraserTool: VertexEraserToolService,
@@ -367,6 +367,7 @@ export class NapariVisualizerService implements IVisualizer {
     private readonly simpleStack: SimpleSliceAccessService,
     @Inject(VIZ_CONFIG) config: VizConfig,
   ) {
+    super(regionStore, store);
     this.api = config.slideCropServer;
   }
 
@@ -2101,91 +2102,9 @@ export class NapariVisualizerService implements IVisualizer {
     }, delayMs);
   }
 
-  // ── IRegionStore: delegate to the shared RegionStore ──────────────────────
-  setRegions(
-    regions: Region[],
-    showRegionLabel?: boolean,
-    isRegionSaveOn?: boolean,
-    fillColor?: string,
-    append?: boolean,
-  ): void {
-    this.regionStore.setRegions(regions, showRegionLabel, isRegionSaveOn, fillColor, append);
-  }
-  getRegions(): Region[] {
-    return this.regionStore.getRegions();
-  }
-  getRegionPolygons(): unknown[] {
-    return this.regionStore.getRegionPolygons();
-  }
-  getRegionUpdateEvent(): Observable<unknown[]> {
-    return this.regionStore.getRegionUpdateEvent();
-  }
-  setSelectedShapeIndices(indices: number[]): void {
-    this.regionStore.setSelectedShapeIndices(indices);
-  }
-  getSelectedShapeIndices$(): Observable<number[]> {
-    return this.regionStore.getSelectedShapeIndices$();
-  }
-  selectRegion(region: Region): void {
-    this.regionStore.selectRegion(region);
-  }
-  deleteActiveShape(): void {
-    this.regionStore.deleteActiveShape();
-  }
-  getShowShapeLabel(): boolean {
-    return this.regionStore.getShowShapeLabel();
-  }
-  getShapeColor(): string {
-    return this.regionStore.getShapeColor();
-  }
-  getFillColor(): string {
-    return this.regionStore.getFillColor();
-  }
-  getClassificationColors(): Map<string, string> {
-    return this.store.getClassificationColors();
-  }
-  setClassificationColor(label: string, color: string): void {
-    this.store.setClassificationColor(label, color);
-  }
-  plotPreviousShapes(): void {
-    this.regionStore.plotPreviousShapes();
-  }
-  setPreviousShapes(shapes: unknown[]): void {
-    this.regionStore.setPreviousShapes(shapes);
-  }
-  getPreviousShapes(): unknown[] {
-    return this.regionStore.getPreviousShapes();
-  }
-  undo(): void {
-    this.regionStore.undo();
-  }
-  redo(): void {
-    this.regionStore.redo();
-  }
-  canUndo(): boolean {
-    return this.regionStore.canUndo();
-  }
-  canRedo(): boolean {
-    return this.regionStore.canRedo();
-  }
-  getCanUndo$(): Observable<boolean> {
-    return this.regionStore.getCanUndo$();
-  }
-  getCanRedo$(): Observable<boolean> {
-    return this.regionStore.getCanRedo$();
-  }
-  resetUndoHistory(): void {
-    this.regionStore.resetUndoHistory();
-  }
-  importRegions(geoJsonStr: string): Region[] {
-    return this.regionStore.importRegions(geoJsonStr);
-  }
-  exportRegions(regions: Region[]): void {
-    this.regionStore.exportRegions(regions);
-  }
-  getGeoJsonString(regions: Region[]): string {
-    return this.regionStore.getGeoJsonString(regions);
-  }
+  // ── IRegionStore + classification colours ──────────────────────────────────
+  // Inherited from BaseStoreVisualizer — pure delegations to the shared
+  // RegionStore / VisualizerStore (identical to the OSD backend).
 
   // ── Pixel tools: reuse the shared, backend-agnostic tool services with a napari host ───────
 
@@ -2379,28 +2298,9 @@ export class NapariVisualizerService implements IVisualizer {
     this.samPointTool.clear();
   }
 
-  // ── IDisplayOptions: delegate to the shared VisualizerStore ───────────────
-  getColormap(): Observable<ColormapNode | null> {
-    return this.store.getColormap();
-  }
-  setColormap(colormap: ColormapNode): void {
-    this.store.setColormap(colormap);
-  }
-  getColormapOptions(): ColormapNode[] {
-    return this.store.getColormapOptions();
-  }
-  getReverseScale(): Observable<boolean> {
-    return this.store.getReverseScale();
-  }
-  setReverseScale(reverse: boolean): void {
-    this.store.setReverseScale(reverse);
-  }
-  setImageMeta(imageMeta: IImageMetadata[]): void {
-    this.store.setImageMeta(imageMeta);
-  }
-  getImageMeta(): Observable<IImageMetadata[]> {
-    return this.store.getImageMeta();
-  }
+  // ── IDisplayOptions ───────────────────────────────────────────────────────
+  // Inherited from BaseStoreVisualizer — pure delegations to the shared
+  // VisualizerStore (identical to the OSD backend).
 
   // ── IIntensitySampling: Plotly owns sampling; emit viewport changes ───────
   ensureIntensitySampling(_imageInfo: IImageInfo, _zIndex: number): Promise<void> {
