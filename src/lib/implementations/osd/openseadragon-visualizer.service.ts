@@ -462,6 +462,28 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     };
   }
 
+  /** Tile source for a simple (tiled:false) image. Declares the FULL-resolution
+   *  (trueImageSize) dimensions as OSD's coordinate space and serves the single
+   *  preview image as one stretched tile — so OSD's image-pixel coordinates stay
+   *  at level-0/full-res, the invariant the region overlay, coordinate transform
+   *  and napari mask sizing all rely on. This makes ROIs stored in full-res
+   *  pixels (QuPath geojson) align, exactly as they do in the tiled path and in
+   *  Plotly. A plain `{type:'image'}` source instead sizes the world to the
+   *  preview's downscaled natural dimensions, which placed full-res regions too
+   *  far right and too large (jit-ui#93). Falls back to the plain image source
+   *  when the full-res dims are unknown. */
+  private simpleTileSource(url: string, width?: number, height?: number): any {
+    if (!width || !height) return { type: 'image', url };
+    return {
+      width,
+      height,
+      tileSize: Math.max(width, height), // one tile spans the whole image
+      minLevel: 0,
+      maxLevel: 0,
+      getTileUrl: () => url,
+    };
+  }
+
   /** Mount the viewer with a custom tile source pointing at `GET /tile`. */
   plot(
     plotDiv: string,
@@ -493,7 +515,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
         // tier's low-res URLs forever, even though the initial slice was
         // correctly swapped to full resolution here.
         this.simpleUrls = imageInfo?.urls ?? this.simpleUrls;
-        this.viewer.open({ type: 'image', url: loaded.url } as any);
+        this.viewer.open(this.simpleTileSource(loaded.url as string, d.width, d.height) as any);
       }
       return Promise.resolve(true);
     }
@@ -578,7 +600,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     // source (multichannel opens on channel 0; the open handler then swaps in this
     // slice's per-channel group and the background loader pre-fills the rest).
     const tileSource = simple
-      ? { type: 'image', url: loaded.url }
+      ? this.simpleTileSource(loaded.url as string, d.width, d.height)
       : this.buildTileSource(d, loaded.infoB64, loaded.z, this.isMultiChannel ? 0 : undefined);
     silenceOsdMultiImageAdvisory();
     this.viewer = (OpenSeadragon as any)({
@@ -1000,7 +1022,9 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
           this.viewer.addOnceHandler('open-failed', (e: any) => {
             console.warn('[OSD] slice re-open failed', e?.message ?? e);
           });
-          this.viewer.open({ type: 'image', url } as any);
+          this.viewer.open(
+            this.simpleTileSource(url, this.descriptor?.width, this.descriptor?.height) as any,
+          );
         })
         .catch((err) => console.warn('[OSD] slice fetch failed', err));
       return;
