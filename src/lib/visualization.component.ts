@@ -221,7 +221,10 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   private wheelListener?: (e: WheelEvent) => void;
 
   /** Debounced z-slice scrubbing (see SliceScrubber — refactoring plan Step 7). */
-  private readonly scrubber = new SliceScrubber((z) => this.plotService.setZIndex(z));
+  private readonly scrubber = new SliceScrubber((z) => {
+    this.plotService.setZIndex(z);
+    this.applySliceRois(z);
+  });
 
   constructor(
     @Inject(IMAGE_STATE_PORT) private state: ImageStatePort,
@@ -454,8 +457,15 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
               const smallImgInfo = hasSmallTier ? { ...imgInfo, urls: imgInfo.smallUrls as string[] } : null;
 
               const applyRoi = () => {
-                if (imgInfo.roiJsonStr) {
-                  const regions = this.plotService.importRegions(imgInfo.roiJsonStr);
+                // A folder stack carries per-slice ROIs (roiJsonStrs, aligned
+                // with urls); apply the displayed slice's. A single image /
+                // server z-stack uses the scalar roiJsonStr (one set for the
+                // whole image). See applySliceRois for the on-scrub swap.
+                const roiJson = imgInfo.roiJsonStrs
+                  ? imgInfo.roiJsonStrs[this.zIndex] ?? null
+                  : imgInfo.roiJsonStr;
+                if (roiJson) {
+                  const regions = this.plotService.importRegions(roiJson);
                   this.plotService.setRegions(regions);
                   const shapes = regions.map((region) =>
                     region.getShape(this.plotService.getShowShapeLabel()),
@@ -883,6 +893,27 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
       }
     }
     this.plotService.setZIndex(this.zIndex);
+  }
+
+  /**
+   * Swap the displayed regions to slice `z`'s ROIs — ONLY for a folder stack
+   * that carries per-slice GeoJSON (`roiJsonStrs`, one entry per slice-file).
+   * A single image / server z-stack has one region set for the whole image, so
+   * this is a no-op there (its regions stay put across slices, as before).
+   * Called on every committed/debounced slice change via the scrubber; the
+   * overlays repaint automatically off setRegions (jit-ui#93).
+   */
+  private applySliceRois(z: number): void {
+    const perSlice = this.imageInfo?.roiJsonStrs;
+    if (!perSlice) return;
+    const json = perSlice[z] ?? null;
+    const regions = json ? this.plotService.importRegions(json) : [];
+    this.plotService.setRegions(regions);
+    const shapes = regions.map((r) => r.getShape(this.plotService.getShowShapeLabel()));
+    this.plotService.setPreviousShapes(shapes);
+    // Loading a slice's saved ROIs isn't a user edit — don't let the first undo
+    // reach across slices into the previous slice's set (mirrors applyRoi).
+    this.plotService.resetUndoHistory();
   }
 
   /**

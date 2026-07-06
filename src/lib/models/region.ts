@@ -19,6 +19,11 @@ export class Region {
   // class label
   label?: string;
   filename?: string;
+  /** Zero-based z-slice this region belongs to within a stack — mirrors
+   *  QuPath's `geometry.plane.z` (a missing plane / default plane reads back as
+   *  0). Used to place/filter ROIs per slice; 0 for a plain single-plane image
+   *  or a region drawn without a slice context (jit-ui#93). */
+  z = 0;
   shapeColor? = '#00FFFF';
   bytesPerPixel = 8;
   /**

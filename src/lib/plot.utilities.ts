@@ -363,6 +363,11 @@ export class PlotUtilities {
       const region = new Region();
       region.name = `shape${idx}`;
       idx++;
+      // QuPath stores the image plane INSIDE the geometry (a sibling of
+      // type/coordinates), not in properties: `geometry.plane = {c,z,t}`, all
+      // zero-based, and the key is omitted for the default plane (z=0,t=0). A
+      // missing plane therefore reads back as z=0 (jit-ui#93).
+      region.z = feature.geometry?.plane?.z ?? 0;
       if (!feature.properties || !feature.properties.classification) {
         // No classification metadata — use a default label and color.
         region.label = 'Cell';
@@ -482,6 +487,11 @@ export class PlotUtilities {
     console.log(rois);
     const features: any[] = [];
     for (const roi of rois.filter(r => (r as any).kind !== 'profile')) {
+      // QuPath places the image plane inside the geometry (sibling of
+      // type/coordinates), zero-based, and omits it for the default plane
+      // (z=0,t=0). Emit `plane: {c,z,t}` only for a non-default slice so a
+      // single-plane image round-trips byte-identically to QuPath (jit-ui#93).
+      const planeProp = (roi.z ?? 0) !== 0 ? { plane: { c: -1, z: roi.z, t: 0 } } : {};
       if (roi.bounds instanceof Rectangle) {
         const rectangle = {
           type: 'Feature',
@@ -503,7 +513,8 @@ export class PlotUtilities {
               [roi.bounds.x + roi.bounds.width, roi.bounds.y + roi.bounds.height],
               [roi.bounds.x, roi.bounds.y + roi.bounds.height],
               [roi.bounds.x, roi.bounds.y]
-            ]]
+            ]],
+            ...planeProp
           }
         };
         features.push(rectangle);
@@ -574,13 +585,13 @@ export class PlotUtilities {
           features.push({
             type: 'Feature',
             properties,
-            geometry: { type: 'Polygon', coordinates: rings }
+            geometry: { type: 'Polygon', coordinates: rings, ...planeProp }
           });
         } else {
           features.push({
             type: 'Feature',
             properties,
-            geometry: { type: 'LineString', coordinates: geomCoords }
+            geometry: { type: 'LineString', coordinates: geomCoords, ...planeProp }
           });
         }
       } else if (roi.bounds instanceof MultiPolygon) {
@@ -606,7 +617,7 @@ export class PlotUtilities {
         features.push({
           type: 'Feature',
           properties: { classification: { name: roi.label ? roi.label : roi.name, color: colorRgb } },
-          geometry: { type: 'MultiPolygon', coordinates }
+          geometry: { type: 'MultiPolygon', coordinates, ...planeProp }
         });
       }
     }

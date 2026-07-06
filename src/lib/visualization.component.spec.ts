@@ -214,6 +214,42 @@ describe('VisualizationComponent (UI shell)', () => {
     expect(plotService.setZIndex).not.toHaveBeenCalled();
   });
 
+  describe('per-slice ROI swap on scrub (jit-ui#93)', () => {
+    beforeEach(() => {
+      plotService.importRegions = jest.fn((_json: string) => [{ getShape: () => ({}) } as any]);
+      plotService.setRegions = jest.fn();
+      plotService.getShowShapeLabel = jest.fn().mockReturnValue(true);
+      plotService.setPreviousShapes = jest.fn();
+      plotService.resetUndoHistory = jest.fn();
+    });
+
+    it('swaps to the slice\'s own ROI for a folder stack that carries roiJsonStrs', () => {
+      component.imageInfo = { roiJsonStrs: ['GEO-0', 'GEO-1', null] } as any;
+
+      component.onZSlide(1); // commit is synchronous
+      expect(plotService.setZIndex).toHaveBeenCalledWith(1);
+      expect(plotService.importRegions).toHaveBeenCalledWith('GEO-1');
+      expect(plotService.setRegions).toHaveBeenCalledTimes(1);
+    });
+
+    it('clears regions on a slice with no geojson (no stale ROI carried over)', () => {
+      component.imageInfo = { roiJsonStrs: ['GEO-0', 'GEO-1', null] } as any;
+
+      component.onZSlide(2); // slice 2 → null
+      expect(plotService.importRegions).not.toHaveBeenCalled();
+      expect(plotService.setRegions).toHaveBeenCalledWith([]);
+    });
+
+    it('does NOT touch regions on scrub for a single image / server z-stack (scalar roiJsonStr)', () => {
+      component.imageInfo = { roiJsonStr: 'GLOBAL' } as any; // not per-slice
+
+      component.onZSlide(2);
+      expect(plotService.setZIndex).toHaveBeenCalledWith(2);
+      expect(plotService.importRegions).not.toHaveBeenCalled();
+      expect(plotService.setRegions).not.toHaveBeenCalled();
+    });
+  });
+
   it('openChannelHistogram shows the dialog; dockToolbar re-docks it', () => {
     expect(component.showChannelHistogram).toBe(false);
     component.openChannelHistogram();

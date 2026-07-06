@@ -410,6 +410,52 @@ describe('PlotUtilities', () => {
     expect(back.polygons[1].xpoints).toEqual([20, 30, 30, 20]);
   });
 
+  /**
+   * QuPath z-stack plane interop (jit-ui#93). QuPath stores the image plane
+   * inside the geometry (sibling of type/coordinates) as {c,z,t}, zero-based,
+   * omitted for the default plane (z=0,t=0). These pin that read/write contract.
+   */
+  describe('QuPath geometry.plane z-index', () => {
+    it('imports geometry.plane.z into region.z, defaulting to 0 when absent', () => {
+      const geoJson = JSON.stringify({
+        type: 'FeatureCollection',
+        features: [
+          { type: 'Feature', properties: { classification: { name: 'A', color: [1, 2, 3] } },
+            geometry: { type: 'Polygon', coordinates: [[[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]]],
+              plane: { c: -1, z: 3, t: 0 } } },
+          { type: 'Feature', properties: { classification: { name: 'B', color: [1, 2, 3] } },
+            geometry: { type: 'Polygon', coordinates: [[[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]]] } },
+        ],
+      });
+      const regions = plotUtilities.importROIsFromGeoJson(geoJson);
+      expect(regions[0].z).toBe(3);       // from geometry.plane.z
+      expect(regions[1].z).toBe(0);       // no plane key → default slice 0
+    });
+
+    it('exports geometry.plane only for a non-default slice (QuPath omit-default)', () => {
+      const onSlice2 = new Region();
+      onSlice2.name = 'r2'; onSlice2.color = '#ff0000'; onSlice2.z = 2;
+      onSlice2.bounds = Object.assign(new Rectangle(), { x: 0, y: 0, width: 4, height: 4 });
+      const onSlice0 = new Region();
+      onSlice0.name = 'r0'; onSlice0.color = '#ff0000'; // z defaults to 0
+      onSlice0.bounds = Object.assign(new Rectangle(), { x: 0, y: 0, width: 4, height: 4 });
+
+      const parsed = JSON.parse(plotUtilities.exportROIsToGeoJson([onSlice2, onSlice0]));
+      // Non-default slice → plane written with QuPath's {c:-1,z,t:0} shape.
+      expect(parsed.features[0].geometry.plane).toEqual({ c: -1, z: 2, t: 0 });
+      // Default slice (z=0) → plane key omitted entirely.
+      expect(parsed.features[1].geometry.plane).toBeUndefined();
+    });
+
+    it('round-trips the slice index through export → import', () => {
+      const region = new Region();
+      region.name = 'r'; region.color = '#00ff00'; region.label = 'Tumour'; region.z = 5;
+      region.bounds = Object.assign(new Rectangle(), { x: 1, y: 1, width: 2, height: 2 });
+      const back = plotUtilities.importROIsFromGeoJson(plotUtilities.exportROIsToGeoJson([region]));
+      expect(back[0].z).toBe(5);
+    });
+  });
+
   it('test rgbToHex', () => {
     const result = plotUtilities.rgbToHex(255, 0, 0);
     expect(result).toBe('#ff0000');

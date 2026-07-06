@@ -50,6 +50,13 @@ export interface IImageInfo {
   scaleRatio: boolean;
   fileName: string;
   roiJsonStr?: string;
+  /** Per-slice ROI GeoJSON, aligned 1:1 with `urls`, for a folder stack where
+   *  each slice is a separate file with its own sibling `<stem>.geojson`
+   *  (`null` for slices without one). When present, the component applies
+   *  `roiJsonStrs[z]` for the displayed slice and swaps it on scrub — as
+   *  opposed to the scalar `roiJsonStr`, which is one ROI set for the whole
+   *  image (a single file or a server z-stack). (jit-ui#93) */
+  roiJsonStrs?: (string | null)[];
   imageMeta: IImageMetadata[];
   /** How the OpenSeadragon backend should source this image.
    *  - `true`/absent (default): server-tiled — OSD polls `/tiles/info` for a
