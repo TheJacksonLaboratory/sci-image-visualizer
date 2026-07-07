@@ -475,16 +475,18 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
 
   /**
    * OSD's `{type:'image'}` source sizes its coordinate world to the image's
-   * NATURAL pixels. A folder-stack slice is a server `/preview`, which is
-   * downscaled for large images — so OSD's world would be smaller than the
-   * full-resolution image, and full-res ROI coordinates (QuPath geojson, in
-   * level-0 pixels) render oversized/offset relative to it. Upscale the preview
-   * to the full-resolution dimensions (blurry, but positionally exact) so OSD's
-   * world matches the ROI coordinate space, while still using OSD's reliable
-   * single-image renderer. Cached per preview URL (revoked on file change);
-   * a no-op when the preview is already ≥ full-res (small images, in-memory
-   * pipeline blobs), when the dims are unknown, or when they're implausibly
-   * large (guards against an enormous canvas). (jit-ui#93)
+   * NATURAL pixels. A folder-stack slice is a server `/preview` whose pixel size
+   * needn't match the full-resolution image — it may be downscaled (large
+   * images) OR larger than the dimensions `/metadata` reports. Either way OSD's
+   * world would differ from the full-res ROI coordinate space (QuPath geojson,
+   * in level-0 pixels): a smaller preview renders ROIs oversized, a larger one
+   * renders them undersized/offset. Resample the preview to EXACTLY the
+   * full-resolution dimensions (blurry but positionally exact — scaling up or
+   * down as needed) so OSD's world matches the ROI coordinate space, while still
+   * using OSD's reliable single-image renderer. Cached per preview URL (revoked
+   * on file change); a no-op when the preview is already exactly full-res (small
+   * images, in-memory pipeline blobs), when the dims are unknown, or when
+   * they're implausibly large (guards against an enormous canvas). (jit-ui#93)
    */
   private async toFullResUrl(previewUrl: string, width: number, height: number): Promise<string> {
     if (!width || !height || Math.max(width, height) > this.SIMPLE_UPSCALE_MAX_DIM) return previewUrl;
@@ -496,13 +498,16 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     } catch {
       return previewUrl; // couldn't decode — let OSD try the URL as-is
     }
-    if (img.naturalWidth >= width && img.naturalHeight >= height) return previewUrl; // already full-res
+    // Already the exact full-res world — no resample needed. (A preview that is
+    // larger OR smaller than full-res must still be resized so OSD's world ==
+    // the ROI coordinate space; only an exact match is skippable.)
+    if (img.naturalWidth === width && img.naturalHeight === height) return previewUrl;
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d');
     if (!ctx) return previewUrl;
-    ctx.drawImage(img, 0, 0, width, height); // stretch preview to full-res
+    ctx.drawImage(img, 0, 0, width, height); // scale preview (up or down) to full-res
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve));
     if (!blob) return previewUrl;
     const fullResUrl = URL.createObjectURL(blob);

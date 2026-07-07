@@ -30,10 +30,12 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     service = TestBed.inject(OpenSeadragonVisualizerService);
     http = TestBed.inject(HttpTestingController);
     // The real loadImageEl decodes via an <img> that never fires load in jsdom
-    // (hanging the simple-mode tests). Default it to "already full-res" so
-    // toFullResUrl is a no-op (returns the preview) unless a test overrides it.
+    // (hanging the simple-mode tests). Default it to a decode failure so
+    // toFullResUrl is a no-op (its catch returns the preview URL unchanged)
+    // unless a test overrides it — decoupling the load() tests from the resample
+    // (which now resizes to EXACTLY trueImageSize, up or down; jit-ui#93).
     (service as unknown as { loadImageEl: (u: string) => Promise<unknown> }).loadImageEl =
-      jest.fn().mockResolvedValue({ naturalWidth: 1e9, naturalHeight: 1e9 });
+      jest.fn().mockRejectedValue(new Error('no <img> decode in jsdom'));
   });
 
   afterEach(() => {
@@ -271,6 +273,16 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
       const out = await call('blob:preview', 512, 512);
       expect(out).toBe('blob:preview');
       expect(createObjectURL).not.toHaveBeenCalled();
+    });
+
+    it('downscales a preview LARGER than full-res so the world matches ROI coords — jit-ui#93', async () => {
+      // A /preview bigger than the dimensions /metadata reports would leave OSD's
+      // world larger than the ROI coordinate space, rendering regions too small.
+      // Resample DOWN to exactly trueImageSize so the world matches.
+      stubDecode(2048, 2048); // preview larger than full-res
+      const out = await call('blob:preview', 1000, 450);
+      expect(out).toBe('blob:upscaled'); // resized (createObjectURL stub label)
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
     });
 
     it('returns the preview unchanged when the full-res dims are unknown', async () => {
