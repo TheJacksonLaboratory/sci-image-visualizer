@@ -166,6 +166,75 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     expect(ts).toEqual({ type: 'image', url: 'blob:slice' });
   });
 
+  /**
+   * Regression: the initial fit-to-home must not depend on WHEN the render
+   * started. If the container is still zero-size (diagram view mid-switch from
+   * a folder view — e.g. "Load as Stack" with no image open), the timed goHome
+   * retries all miss and preserveViewport leaves the image partial ("a tile").
+   * fitWhenContainerSized fits the instant the container first gains a size,
+   * then stops observing (jit-ui#106).
+   */
+  describe('fitWhenContainerSized (initial fit is layout-timing-independent)', () => {
+    const call = (el: HTMLElement | null, refit: () => void) =>
+      (service as unknown as {
+        fitWhenContainerSized: (e: HTMLElement | null, r: () => void) => void;
+      }).fitWhenContainerSized(el, refit);
+
+    let observers: Array<{ cb: () => void; observe: jest.Mock; disconnect: jest.Mock }>;
+    let originalRO: unknown;
+
+    const setSize = (el: HTMLElement, w: number, h: number) => {
+      Object.defineProperty(el, 'clientWidth', { value: w, configurable: true });
+      Object.defineProperty(el, 'clientHeight', { value: h, configurable: true });
+    };
+
+    beforeEach(() => {
+      observers = [];
+      originalRO = (globalThis as { ResizeObserver?: unknown }).ResizeObserver;
+      (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
+        observe = jest.fn();
+        disconnect = jest.fn();
+        constructor(public cb: () => void) { observers.push(this as never); }
+      };
+    });
+    afterEach(() => {
+      (globalThis as { ResizeObserver?: unknown }).ResizeObserver = originalRO;
+    });
+
+    it('does not observe when the container already has a size (timed refits handle it)', () => {
+      const el = document.createElement('div');
+      setSize(el, 800, 600);
+      call(el, jest.fn());
+      expect(observers.length).toBe(0);
+    });
+
+    it('fits once the container first gains a non-zero size, then disconnects', () => {
+      const el = document.createElement('div'); // clientWidth/Height default to 0
+      const refit = jest.fn();
+      call(el, refit);
+
+      expect(observers.length).toBe(1);
+      expect(observers[0].observe).toHaveBeenCalledWith(el);
+
+      // Observer fires while still zero-size → no fit yet.
+      observers[0].cb();
+      expect(refit).not.toHaveBeenCalled();
+
+      // Container laid out → fit exactly once, and stop observing.
+      setSize(el, 1024, 768);
+      observers[0].cb();
+      expect(refit).toHaveBeenCalledTimes(1);
+      expect(observers[0].disconnect).toHaveBeenCalled();
+    });
+
+    it('no-ops without a container', () => {
+      const refit = jest.fn();
+      call(null, refit);
+      expect(observers.length).toBe(0);
+      expect(refit).not.toHaveBeenCalled();
+    });
+  });
+
   it('getHistogram returns null before any slice has been sampled', () => {
     expect(service.getHistogram(0, 256)).toBeNull();
   });

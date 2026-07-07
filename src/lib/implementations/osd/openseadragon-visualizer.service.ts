@@ -764,6 +764,15 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
         requestAnimationFrame(refit);
         setTimeout(refit, 150);
         setTimeout(refit, 400);
+        // The timed retries above miss the case where the container is STILL
+        // zero-size at 400ms — which happens when the render starts while the
+        // file viewer is mid-switch from the folder view to the diagram (e.g.
+        // "Load as Stack" from a folder, with no image open first). Because
+        // preserveViewport suppresses OSD's own open-time fit, the image would
+        // then be left un-fitted at the top-left ("a tile"). A one-shot
+        // ResizeObserver fits the instant the container first has a real size,
+        // regardless of when the render began (jit-ui#106).
+        this.fitWhenContainerSized(document.getElementById(plotDiv), refit);
         // Keep the navigator sized to the container as the panel resizes.
         this.viewer!.addHandler('resize', () => this.resizeNavigator());
         done(true);
@@ -778,6 +787,29 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       }, 8000);
       this.viewer!.open(tileSource as any);
     });
+  }
+
+  /**
+   * Fit-to-home once `el` first has a non-zero size. If it's already sized we
+   * rely on the timed refits the caller scheduled; otherwise a one-shot
+   * ResizeObserver runs `refit` the moment the container is laid out (then
+   * disconnects), so the initial fit doesn't depend on the render's start time
+   * relative to the diagram container's layout. No-op without a container or
+   * ResizeObserver (the timed refits remain the fallback). One-shot + only
+   * attached on a fresh mount, so slice-scrub re-opens keep the user's zoom.
+   */
+  private fitWhenContainerSized(el: HTMLElement | null, refit: () => void): void {
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    if (el.clientWidth > 0 && el.clientHeight > 0) return; // already sized — timed refits suffice
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth > 0 && el.clientHeight > 0) {
+        ro.disconnect();
+        refit();
+      }
+    });
+    ro.observe(el);
+    // Safety net: stop observing even if it never gains a size.
+    setTimeout(() => ro.disconnect(), 5000);
   }
 
   /**
