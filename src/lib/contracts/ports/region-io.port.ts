@@ -16,6 +16,13 @@ export interface RegionIoPort {
   roiFileExists(name: string): Observable<boolean>;
   /** Persist the regions (already serialized to a GeoJSON string) as `filename`. */
   saveGeoJson(geoJsonStr: string, filename: string): Observable<void>;
+  /**
+   * Persist a folder-stack's regions as one geojson per slice-file (jit-ui#93).
+   * Each entry's `z` is the zero-based slice index; the host maps it to that
+   * slice-file's sibling `<stem>.geojson` in the same folder. Completes once
+   * every slice has been written. (jit-ui#93)
+   */
+  saveSliceGeoJsons(slices: { z: number; geoJsonStr: string }[]): Observable<void>;
 }
 
 export const REGION_IO_PORT = new InjectionToken<RegionIoPort>('REGION_IO_PORT');

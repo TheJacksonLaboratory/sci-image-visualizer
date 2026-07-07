@@ -95,6 +95,10 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
    *  z-indexed geojson (single-file z-stack, QuPath schema); `per-slice-file`
    *  writes one geojson per slice-file (a folder of numbered images). */
   private stackSaveLayout: 'combined' | 'per-slice-file' = 'combined';
+  /** Slices that were loaded with regions (jit-ui#93). A per-slice-file save
+   *  re-writes these even when now empty, so clearing a slice's regions and
+   *  saving removes its previously-saved geojson (writes an empty one). */
+  private stackInitialNonEmpty = new Set<number>();
 
   /** Selection is tracked by region *id* internally (stable across edits) and
    *  projected to array indices on the IRegionStore boundary. */
@@ -189,8 +193,11 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.stackSaveLayout = saveLayout;
     this.currentSliceZ = initialZ || 0;
     this.regionsBySlice = new Map<number, Region[]>();
+    this.stackInitialNonEmpty = new Set<number>();
     for (const [z, regs] of slices) {
-      this.regionsBySlice.set(z, this.normalizeSlice(regs || [], z));
+      const normalized = this.normalizeSlice(regs || [], z);
+      this.regionsBySlice.set(z, normalized);
+      if (normalized.length) this.stackInitialNonEmpty.add(z);
     }
     this.regions = (this.regionsBySlice.get(this.currentSliceZ) ?? []).slice();
     this.previousRegions = this.regions.slice();
@@ -207,6 +214,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.stackMode = false;
     this.currentSliceZ = 0;
     this.regionsBySlice = new Map<number, Region[]>();
+    this.stackInitialNonEmpty = new Set<number>();
   }
 
   /**
@@ -246,6 +254,26 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
         r.z = z;
         out.push(r);
       }
+    }
+    return out;
+  }
+
+  /**
+   * Slices to write on a per-slice-file save (folder stack, jit-ui#93): every
+   * slice that currently has regions, PLUS slices that were loaded non-empty but
+   * are now empty (so their file is re-written empty, clearing a slice whose
+   * regions the user deleted). Each returned region is tagged with its z, and
+   * the current live slice is captured first. Empty outside stack mode.
+   */
+  getStackSaveSlices(): Map<number, Region[]> {
+    const out = new Map<number, Region[]>();
+    if (!this.stackMode) return out;
+    this.regionsBySlice.set(this.currentSliceZ, this.regions.slice());
+    const zs = new Set<number>(this.stackInitialNonEmpty);
+    for (const [z, regs] of this.regionsBySlice) if (regs.length) zs.add(z);
+    for (const z of Array.from(zs).sort((a, b) => a - b)) {
+      const regs = (this.regionsBySlice.get(z) ?? []).map((r) => { r.z = z; return r; });
+      out.set(z, regs);
     }
     return out;
   }

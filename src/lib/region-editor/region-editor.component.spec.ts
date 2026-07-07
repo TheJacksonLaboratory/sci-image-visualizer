@@ -72,6 +72,7 @@ describe('RegionEditorComponent', () => {
             getSelectedFileName: () => undefined,
             roiFileExists: () => of(false),
             saveGeoJson: () => of(void 0),
+            saveSliceGeoJsons: () => of(void 0),
           } as RegionIoPort,
         },
       ],
@@ -413,6 +414,7 @@ describe('RegionEditorComponent with shapes', () => {
             getSelectedFileName: () => undefined,
             roiFileExists: () => of(false),
             saveGeoJson: () => of(void 0),
+            saveSliceGeoJsons: () => of(void 0),
           } as RegionIoPort,
         },
       ],
@@ -504,6 +506,7 @@ describe('SelectionDialogComponent with open path shape', () => {
             getSelectedFileName: () => undefined,
             roiFileExists: () => of(false),
             saveGeoJson: () => of(void 0),
+            saveSliceGeoJsons: () => of(void 0),
           } as RegionIoPort,
         },
       ],
@@ -563,6 +566,7 @@ describe('RegionEditorComponent persist / save-as', () => {
       getSelectedFileName: jest.fn(() => fakeSelectedFile.name),
       roiFileExists: jest.fn(() => of(false)),
       saveGeoJson: jest.fn(() => of(void 0)),
+      saveSliceGeoJsons: jest.fn(() => of(void 0)),
     } as unknown as RegionIoPort;
 
     mockMessageService = MockService(MessageService, {
@@ -859,6 +863,33 @@ describe('RegionEditorComponent persist / save-as', () => {
     );
   }));
 
+  it('saves one geojson per slice-file for a folder stack (per-slice-file layout) — jit-ui#93', () => {
+    // Folder stack: persistRegions should skip the single-file save-as dialog
+    // and write each slice's regions back to its own slice-file's geojson.
+    const s0 = new Region(); s0.bounds = Object.assign(new Rectangle(), { x: 0, y: 0, width: 4, height: 4 });
+    const s2 = new Region(); s2.bounds = Object.assign(new Rectangle(), { x: 2, y: 2, width: 4, height: 4 });
+    const bySlice = new Map<number, Region[]>([[0, [s0]], [2, [s2]]]);
+
+    mockVisualizer.isStackMode = jest.fn(() => true);
+    mockVisualizer.getStackSaveLayout = jest.fn(() => 'per-slice-file');
+    mockVisualizer.getStackSaveAnnotationSlices = jest.fn(() => bySlice);
+    (mockVisualizer.getGeoJsonString as jest.Mock).mockImplementation(
+      (regs: any[]) => JSON.stringify({ n: regs.length, z: regs[0]?.z }),
+    );
+
+    component.persistRegions();
+
+    // No single-file dialog for a folder stack.
+    expect(component.showSaveAsDialog).toBe(false);
+    // One saveSliceGeoJsons call carrying both slices; each serialized on the
+    // default plane (z reset to 0 — the file itself is the slice).
+    expect(mockRegionIo.saveSliceGeoJsons).toHaveBeenCalledTimes(1);
+    const arg = (mockRegionIo.saveSliceGeoJsons as jest.Mock).mock.calls[0][0];
+    expect(arg.map((s: any) => s.z).sort()).toEqual([0, 2]);
+    expect(arg.every((s: any) => JSON.parse(s.geoJsonStr).z === 0)).toBe(true);
+    expect(mockRegionIo.saveGeoJson).not.toHaveBeenCalled();
+  });
+
   it('should show error toast when save fails', fakeAsync(() => {
     (mockRegionIo.saveGeoJson as jest.Mock).mockReturnValue(
       throwError(() => new Error('Server error')),
@@ -994,6 +1025,7 @@ describe('RegionEditorComponent export', () => {
       getSelectedFileName: jest.fn(() => fakeSelectedFile.name),
       roiFileExists: jest.fn(() => of(false)),
       saveGeoJson: jest.fn(() => of(void 0)),
+      saveSliceGeoJsons: jest.fn(() => of(void 0)),
     } as unknown as RegionIoPort;
 
     await TestBed.configureTestingModule({
@@ -1134,6 +1166,7 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
             getSelectedFileName: () => undefined,
             roiFileExists: () => of(false),
             saveGeoJson: () => of(void 0),
+            saveSliceGeoJsons: () => of(void 0),
           } as RegionIoPort,
         },
       ],

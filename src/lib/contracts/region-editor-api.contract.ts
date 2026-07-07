@@ -64,6 +64,10 @@ export interface IRegionEditorApi {
   /** Every slice's annotation regions (profile lines excluded), each tagged
    *  with its zero-based {@link Region.z}, for a combined z-indexed save. */
   getSliceAnnotationRegions(): Region[];
+  /** Per-slice annotation regions for a folder-stack (`per-slice-file`) save:
+   *  zero-based slice index → that slice's annotation regions. Includes
+   *  now-empty slices loaded non-empty, so their file is overwritten empty. */
+  getStackSaveAnnotationSlices(): Map<number, Region[]>;
   /**
    * Full-resolution image size (image-pixel dimensions) used to size an exported
    * region mask. Backend-neutral: prefers the active renderer's reported size

@@ -338,11 +338,22 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   getStackSaveLayout(): 'combined' | 'per-slice-file' { return this.renderer().getStackSaveLayout(); }
   setDisplaySlice(z: number): void { this.renderer().setDisplaySlice(z); }
   getSliceRegions(): Region[] { return this.renderer().getSliceRegions(); }
+  getStackSaveSlices(): Map<number, Region[]> { return this.renderer().getStackSaveSlices(); }
   /** All slices' ANNOTATION regions for a z-stack save (jit-ui#93), each tagged
    *  with its zero-based Region.z; profile lines excluded. Flat annotation set
    *  outside stack mode. */
   getSliceAnnotationRegions(): Region[] {
     return this.renderer().getSliceRegions().filter((r) => !isProfileRegion(r));
+  }
+  /** Per-slice annotation regions to write on a folder-stack save (jit-ui#93):
+   *  slice index → that slice's annotation regions (profile lines excluded),
+   *  including now-empty slices that were loaded non-empty (so they overwrite). */
+  getStackSaveAnnotationSlices(): Map<number, Region[]> {
+    const out = new Map<number, Region[]>();
+    for (const [z, regs] of this.renderer().getStackSaveSlices()) {
+      out.set(z, regs.filter((r) => !isProfileRegion(r)));
+    }
+    return out;
   }
 
   /** Authoritative full-resolution image size for mask export. Prefers the

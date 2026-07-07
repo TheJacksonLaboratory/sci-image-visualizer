@@ -71,6 +71,7 @@ export abstract class BaseStoreVisualizer implements IRegionStore, IDisplayOptio
   getStackSaveLayout(): 'combined' | 'per-slice-file' { return this.regionStore.getStackSaveLayout(); }
   setDisplaySlice(z: number): void { this.regionStore.setDisplaySlice(z); }
   getSliceRegions(): Region[] { return this.regionStore.getSliceRegions(); }
+  getStackSaveSlices(): Map<number, Region[]> { return this.regionStore.getStackSaveSlices(); }
 
   // ── Classification colours → shared VisualizerStore ──────────────────────
   getClassificationColors(): Map<string, string> { return this.store.getClassificationColors(); }

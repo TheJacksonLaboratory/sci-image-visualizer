@@ -798,6 +798,36 @@ describe('RegionStore', () => {
       expect(emissions).toBe(before + 1);
     });
 
+    it('getStackSaveSlices returns slices with regions plus cleared-since-load slices (empty)', () => {
+      const slices = new Map<number, Region[]>([
+        [0, [rectRegion(0, 0, 5, 5)]],
+        [1, [rectRegion(1, 1, 5, 5)]],
+        [2, []],
+      ]);
+      store.enterStackMode(slices, 0, 'per-slice-file');
+
+      // Draw on slice 2 (was empty), and clear slice 0 (was non-empty).
+      store.setDisplaySlice(2);
+      store.addRegion(rectRegion(2, 2, 5, 5));
+      store.setDisplaySlice(0);
+      store.setRegions([], undefined, true); // clear slice 0's regions
+
+      const save = store.getStackSaveSlices();
+      // Slice 0: loaded non-empty, now cleared → present, empty (overwrite/clear).
+      expect(save.has(0)).toBe(true);
+      expect(save.get(0)!.length).toBe(0);
+      // Slice 1: untouched, still has its region.
+      expect(save.get(1)!.length).toBe(1);
+      // Slice 2: newly drawn → present with its region, tagged z=2.
+      expect(save.get(2)!.length).toBe(1);
+      expect(save.get(2)![0].z).toBe(2);
+    });
+
+    it('getStackSaveSlices is empty outside stack mode', () => {
+      store.addRegion(rectRegion(0, 0, 5, 5));
+      expect(store.getStackSaveSlices().size).toBe(0);
+    });
+
     it('records the stack save layout (combined by default, per-slice-file when asked)', () => {
       store.enterStackMode(new Map<number, Region[]>([[0, []]]), 0);
       expect(store.getStackSaveLayout()).toBe('combined');

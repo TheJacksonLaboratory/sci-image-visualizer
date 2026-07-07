@@ -209,6 +209,10 @@ export interface IRegionStore {
   /** Every slice's regions for save/export, each tagged with its zero-based
    *  {@link Region.z}; the flat set outside stack mode. */
   getSliceRegions(): Region[];
+  /** Slices to write on a per-slice-file save (folder stack, jit-ui#93): each
+   *  slice with regions, plus slices cleared since load (empty, to overwrite).
+   *  Keyed by zero-based slice index; regions tagged with their z. */
+  getStackSaveSlices(): Map<number, Region[]>;
 }
 
 /** On-canvas tool modes (wand, brush, vertex eraser, zoom-to-box). */

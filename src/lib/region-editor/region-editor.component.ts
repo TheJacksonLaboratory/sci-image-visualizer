@@ -804,6 +804,13 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   }
 
   persistRegions() {
+    // Folder stack: write each slice's regions back to its own slice-file's
+    // sibling geojson — no single-filename prompt (the filenames are the slice
+    // files'). (jit-ui#93)
+    if (this.regionApi.isStackMode() && this.regionApi.getStackSaveLayout() === 'per-slice-file') {
+      this.saveStackSlices();
+      return;
+    }
     const name = this.regionIo.getSelectedFileName();
     if (!name || !this.regionsForSave().length) return;
 
@@ -811,6 +818,44 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.saveAsFileExists = false;
     this.showSaveAsDialog = true;
     this._saveAsCheck$.next(this.saveAsFilename);
+  }
+
+  /**
+   * Save a folder stack's regions as one geojson per slice-file (jit-ui#93).
+   * Groups the store's per-slice regions by slice index and serializes each on
+   * the default plane (z=0) — each slice-file is itself one plane, and the
+   * loader re-derives the slice index from the file's position in the series.
+   * Slices cleared since load are included (empty) so their file is overwritten.
+   */
+  private saveStackSlices() {
+    const bySlice = this.regionApi.getStackSaveAnnotationSlices();
+    if (!bySlice.size) return;
+    const slices: { z: number; geoJsonStr: string }[] = [];
+    for (const [z, regs] of bySlice) {
+      const flat = regs.map((r) => Object.assign(new Region(), r, { z: 0 }));
+      slices.push({ z, geoJsonStr: this.regionApi.getGeoJsonString(flat) });
+    }
+    this.saveAsBusy = true;
+    this._saveAsSub = this.regionIo.saveSliceGeoJsons(slices).subscribe({
+      next: () => {
+        this.saveAsBusy = false;
+        this.messageService.add({
+          key: 'app-toast',
+          severity: 'success',
+          summary: 'Regions saved',
+          detail: `Saved ROIs for ${slices.length} slice${slices.length === 1 ? '' : 's'}`,
+        });
+      },
+      error: (err) => {
+        this.saveAsBusy = false;
+        this.messageService.add({
+          key: 'app-toast',
+          severity: 'error',
+          summary: 'Error saving regions',
+          detail: `${(err as Error)?.message ?? err}`,
+        });
+      },
+    });
   }
 
   checkSaveAsFileExists() {

@@ -1634,6 +1634,7 @@ export class PlotlyService implements IVisualizer {
   }
   public setDisplaySlice(z: number): void { this.regionStore.setDisplaySlice(z); }
   public getSliceRegions(): Region[] { return this.regionStore.getSliceRegions(); }
+  public getStackSaveSlices(): Map<number, Region[]> { return this.regionStore.getStackSaveSlices(); }
 
   private getHeatmapLayout(xRange: number[], yRange: number[]): any {
     return {
