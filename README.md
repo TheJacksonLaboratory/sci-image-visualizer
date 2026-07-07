@@ -12,10 +12,13 @@ Tools). The annotation/segmentation tooling was added under
 
 ## Highlights
 
-- **Two rendering backends** — a tiled [OpenSeadragon](https://openseadragon.github.io/)
-  viewer and [Plotly](https://plotly.com/javascript/) plots — behind one
-  `IVisualizer` contract; the host picks per image via `RoutingVisualizerService`.
-- **Plot types** — Image, Contour, Scatter (regions), Surface 3D, Scatter 3D, Isosurface.
+- **Three rendering backends** — a tiled [OpenSeadragon](https://openseadragon.github.io/)
+  viewer, [Plotly](https://plotly.com/javascript/) plots, and a
+  [napari-js](https://www.npmjs.com/package/napari-js) **WebGPU** backend — behind
+  one `IVisualizer` contract; the host picks per plot type via `RoutingVisualizerService`.
+- **Plot types** — Image (OSD), Plotly (Heatmap, Contour, Scatter 2D, Surface 3D,
+  Scatter 3D, Isosurface), and napari · WebGPU (Image, Scatter 2D, Surface,
+  Scatter 3D, Volume, Isosurface).
 - **Region / annotation tools** — selection, rectangle, polyline, freeform,
   polygon + vertex editing, move, Bézier↔polygon, magic wand, brush, vertex eraser.
 - **Channels & histogram** — brightness/contrast/gamma, per-channel display,
@@ -62,6 +65,17 @@ data as you zoom in:
   **isosurface band** slider and full **3D camera** controls (zoom, pan, orbit,
   turntable, reset);
 - scalar/3D types expect a grayscale image (the volume types also need a z-stack).
+
+### napari-js — WebGPU
+GPU-accelerated renderings via [napari-js](https://www.npmjs.com/package/napari-js)
+(WebGPU), selectable from the plot-type menu as the "napari · WebGPU" variants of
+Image, Scatter 2D, Surface, Scatter 3D, **Volume**, and **Isosurface**. It
+assembles the volume from the slice endpoints with a runtime **decimate factor**
+(resolution slider, default ½), a surface **wireframe** toggle, a 3D **axes / scale
+gizmo**, an in-view **Z-height drag handle** for the volume, **cancellable** loading,
+and **multichannel volume** compositing (one additive tinted layer per channel).
+Regions and display options stay in sync with the other backends via the shared
+stores.
 
 When a stack is open, a slice slider (Image view) or single-image/stack toggle
 (other views) navigates the z-dimension. A stack may be one server-tiled file
