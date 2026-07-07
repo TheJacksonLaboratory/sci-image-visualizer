@@ -61,6 +61,15 @@ export abstract class BaseStoreVisualizer implements IRegionStore, IDisplayOptio
   exportRegions(regions: Region[]): void { this.regionStore.exportRegions(regions); }
   getGeoJsonString(regions: Region[]): string { return this.regionStore.getGeoJsonString(regions); }
 
+  // ── Per-slice z-stack regions → RegionStore (jit-ui#93) ──────────────────
+  enterStackMode(slices: Map<number, Region[]>, initialZ?: number): void {
+    this.regionStore.enterStackMode(slices, initialZ);
+  }
+  exitStackMode(): void { this.regionStore.exitStackMode(); }
+  isStackMode(): boolean { return this.regionStore.isStackMode(); }
+  setDisplaySlice(z: number): void { this.regionStore.setDisplaySlice(z); }
+  getSliceRegions(): Region[] { return this.regionStore.getSliceRegions(); }
+
   // ── Classification colours → shared VisualizerStore ──────────────────────
   getClassificationColors(): Map<string, string> { return this.store.getClassificationColors(); }
   setClassificationColor(label: string, color: string): void {

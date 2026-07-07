@@ -31,6 +31,11 @@ function mockPlotService(): any {
     getColormapOptions: jest.fn().mockReturnValue([{ children: [{ label: 'Greys Inv' }] }]),
     getPlotTypeDescriptors: jest.fn().mockReturnValue([]),
     setZIndex: jest.fn(),
+    setDisplaySlice: jest.fn(),
+    enterStackMode: jest.fn(),
+    exitStackMode: jest.fn(),
+    isStackMode: jest.fn().mockReturnValue(false),
+    getSliceRegions: jest.fn().mockReturnValue([]),
     setPlotType: jest.fn(),
     ensureIntensitySampling: jest.fn().mockResolvedValue(undefined),
     // ── handler delegations exercised by the toolbar/region tests ──
@@ -214,39 +219,40 @@ describe('VisualizationComponent (UI shell)', () => {
     expect(plotService.setZIndex).not.toHaveBeenCalled();
   });
 
-  describe('per-slice ROI swap on scrub (jit-ui#93)', () => {
+  describe('per-slice regions on scrub (jit-ui#93)', () => {
     beforeEach(() => {
-      plotService.importRegions = jest.fn((_json: string) => [{ getShape: () => ({}) } as any]);
       plotService.setRegions = jest.fn();
-      plotService.getShowShapeLabel = jest.fn().mockReturnValue(true);
-      plotService.setPreviousShapes = jest.fn();
-      plotService.resetUndoHistory = jest.fn();
+      plotService.importRegions = jest.fn();
     });
 
-    it('swaps to the slice\'s own ROI for a folder stack that carries roiJsonStrs', () => {
-      component.imageInfo = { roiJsonStrs: ['GEO-0', 'GEO-1', null] } as any;
-
-      component.onZSlide(1); // commit is synchronous
-      expect(plotService.setZIndex).toHaveBeenCalledWith(1);
-      expect(plotService.importRegions).toHaveBeenCalledWith('GEO-1');
-      expect(plotService.setRegions).toHaveBeenCalledTimes(1);
-    });
-
-    it('clears regions on a slice with no geojson (no stale ROI carried over)', () => {
-      component.imageInfo = { roiJsonStrs: ['GEO-0', 'GEO-1', null] } as any;
-
-      component.onZSlide(2); // slice 2 → null
-      expect(plotService.importRegions).not.toHaveBeenCalled();
-      expect(plotService.setRegions).toHaveBeenCalledWith([]);
-    });
-
-    it('does NOT touch regions on scrub for a single image / server z-stack (scalar roiJsonStr)', () => {
-      component.imageInfo = { roiJsonStr: 'GLOBAL' } as any; // not per-slice
-
-      component.onZSlide(2);
+    // Scrubbing hands the slice to the store via setDisplaySlice. In stack mode
+    // the store swaps the live region set (preserving edits); outside stack mode
+    // it only records the slice, leaving single-plane regions untouched. The
+    // per-slice swap/preserve semantics themselves are covered in
+    // region-store.service.spec (enterStackMode / setDisplaySlice / getSliceRegions).
+    it('routes the committed slice to the store via setDisplaySlice', () => {
+      component.onZSlide(2); // commit is synchronous
       expect(plotService.setZIndex).toHaveBeenCalledWith(2);
+      expect(plotService.setDisplaySlice).toHaveBeenCalledWith(2);
+    });
+
+    it('does not re-import geojson or replace regions on scrub (the store owns the swap)', () => {
+      component.imageInfo = { roiJsonStrs: ['GEO-0', 'GEO-1', null] } as any;
+
+      component.onZSlide(1);
+      expect(plotService.setDisplaySlice).toHaveBeenCalledWith(1);
       expect(plotService.importRegions).not.toHaveBeenCalled();
       expect(plotService.setRegions).not.toHaveBeenCalled();
+    });
+
+    it('debounced scrub commits the last slice to the store once', () => {
+      component.onZScrub(1);
+      component.onZScrub(2);
+      component.onZScrub(3);
+      expect(plotService.setDisplaySlice).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(120);
+      expect(plotService.setDisplaySlice).toHaveBeenCalledTimes(1);
+      expect(plotService.setDisplaySlice).toHaveBeenCalledWith(3);
     });
   });
 

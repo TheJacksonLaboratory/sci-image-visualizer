@@ -1622,6 +1622,15 @@ export class PlotlyService implements IVisualizer {
   public getCanRedo$(): Observable<boolean> { return this.regionStore.getCanRedo$(); }
   public resetUndoHistory(): void { this.regionStore.resetUndoHistory(); }
 
+  // ── Per-slice z-stack regions → RegionStore (jit-ui#93) ──────────────────
+  public enterStackMode(slices: Map<number, Region[]>, initialZ?: number): void {
+    this.regionStore.enterStackMode(slices, initialZ);
+  }
+  public exitStackMode(): void { this.regionStore.exitStackMode(); }
+  public isStackMode(): boolean { return this.regionStore.isStackMode(); }
+  public setDisplaySlice(z: number): void { this.regionStore.setDisplaySlice(z); }
+  public getSliceRegions(): Region[] { return this.regionStore.getSliceRegions(); }
+
   private getHeatmapLayout(xRange: number[], yRange: number[]): any {
     return {
       xaxis: {

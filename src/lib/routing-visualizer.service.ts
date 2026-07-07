@@ -327,6 +327,16 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   exportRegions(regions: Region[]): void { this.renderer().exportRegions(regions); }
   getGeoJsonString(regions: Region[]): string { return this.renderer().getGeoJsonString(regions); }
 
+  // ── Per-slice z-stack regions (jit-ui#93) — the RegionStore is shared across
+  //    backends, so routing to the active renderer hits the same store. ──────
+  enterStackMode(slices: Map<number, Region[]>, initialZ?: number): void {
+    this.renderer().enterStackMode(slices, initialZ);
+  }
+  exitStackMode(): void { this.renderer().exitStackMode(); }
+  isStackMode(): boolean { return this.renderer().isStackMode(); }
+  setDisplaySlice(z: number): void { this.renderer().setDisplaySlice(z); }
+  getSliceRegions(): Region[] { return this.renderer().getSliceRegions(); }
+
   /** Authoritative full-resolution image size for mask export. Prefers the
    *  active renderer's reported size, falling back to the image metadata (x/y
    *  are the full-res pixel dimensions used across the app). Rejects non-finite

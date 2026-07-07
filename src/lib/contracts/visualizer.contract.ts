@@ -188,6 +188,22 @@ export interface IRegionStore {
   importRegions(geoJsonStr: string): Region[];
   exportRegions(regions: Region[]): void;
   getGeoJsonString(regions: Region[]): string;
+
+  /** Begin a per-slice z-stack region session (jit-ui#93). `slices` maps each
+   *  zero-based slice index to that slice's regions; the store shows `initialZ`
+   *  live while holding the rest, so scrubbing swaps region sets and edits on a
+   *  slice persist. See {@link setDisplaySlice}, {@link getSliceRegions}. */
+  enterStackMode(slices: Map<number, Region[]>, initialZ?: number): void;
+  /** End the per-slice session (single-plane image, or the stack was closed). */
+  exitStackMode(): void;
+  /** True while a per-slice z-stack session is active. */
+  isStackMode(): boolean;
+  /** Swap the live region set to slice `z` (stack mode only), capturing the
+   *  current slice's edits first. Called on every committed slice scrub. */
+  setDisplaySlice(z: number): void;
+  /** Every slice's regions for save/export, each tagged with its zero-based
+   *  {@link Region.z}; the flat set outside stack mode. */
+  getSliceRegions(): Region[];
 }
 
 /** On-canvas tool modes (wand, brush, vertex eraser, zoom-to-box). */
