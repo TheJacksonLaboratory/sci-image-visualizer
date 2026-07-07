@@ -646,8 +646,22 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     reader.readAsText(file);
   }
 
+  /**
+   * Regions to serialize on save/export. For a single-file z-stack the store
+   * keeps only the current slice live, so pull EVERY slice's annotations (each
+   * tagged with its zero-based Region.z) to write one combined z-indexed
+   * geojson (jit-ui#93). Otherwise (single-plane image, or a folder stack whose
+   * slices save to their own per-slice files) the current set. (jit-ui#93)
+   */
+  private regionsForSave(): Region[] {
+    if (this.regionApi.isStackMode() && this.regionApi.getStackSaveLayout() === 'combined') {
+      return this.regionApi.getSliceAnnotationRegions();
+    }
+    return this.regions;
+  }
+
   exportRois() {
-    if (!this.regions.length) return;
+    if (!this.regionsForSave().length) return;
     const name = this.regionIo.getSelectedFileName();
     const stem = name ? name.substring(0, name.lastIndexOf('.')) : 'rois';
     this.exportFilename = `${stem}.geojson`;
@@ -656,9 +670,10 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   confirmExport() {
     const filename = this.exportFilename.trim();
-    if (!filename || !this.regions.length) return;
+    const regions = this.regionsForSave();
+    if (!filename || !regions.length) return;
     this.showExportDialog = false;
-    const jsonString = this.regionApi.getGeoJsonString(this.regions);
+    const jsonString = this.regionApi.getGeoJsonString(regions);
     const blob = new Blob([jsonString], { type: 'application/json' });
     saveAs(blob, filename);
   }
@@ -790,7 +805,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   persistRegions() {
     const name = this.regionIo.getSelectedFileName();
-    if (!name || !this.regions.length) return;
+    if (!name || !this.regionsForSave().length) return;
 
     this.saveAsFilename = name.substring(0, name.lastIndexOf('.')) + '.geojson';
     this.saveAsFileExists = false;
@@ -817,7 +832,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
         this._saveAsTimer = undefined;
         let geoJsonStr: string;
         try {
-          geoJsonStr = this.regionApi.getGeoJsonString(this.regions);
+          geoJsonStr = this.regionApi.getGeoJsonString(this.regionsForSave());
         } catch (err) {
           this.saveAsBusy = false;
           this.messageService.add({

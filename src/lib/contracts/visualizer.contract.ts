@@ -192,12 +192,17 @@ export interface IRegionStore {
   /** Begin a per-slice z-stack region session (jit-ui#93). `slices` maps each
    *  zero-based slice index to that slice's regions; the store shows `initialZ`
    *  live while holding the rest, so scrubbing swaps region sets and edits on a
-   *  slice persist. See {@link setDisplaySlice}, {@link getSliceRegions}. */
-  enterStackMode(slices: Map<number, Region[]>, initialZ?: number): void;
+   *  slice persist. `saveLayout` records how the stack persists — `combined`
+   *  (one z-indexed geojson, single-file z-stack) or `per-slice-file` (folder
+   *  stack). See {@link setDisplaySlice}, {@link getSliceRegions}. */
+  enterStackMode(slices: Map<number, Region[]>, initialZ?: number,
+                 saveLayout?: 'combined' | 'per-slice-file'): void;
   /** End the per-slice session (single-plane image, or the stack was closed). */
   exitStackMode(): void;
   /** True while a per-slice z-stack session is active. */
   isStackMode(): boolean;
+  /** How the current stack persists to disk (jit-ui#93). */
+  getStackSaveLayout(): 'combined' | 'per-slice-file';
   /** Swap the live region set to slice `z` (stack mode only), capturing the
    *  current slice's edits first. Called on every committed slice scrub. */
   setDisplaySlice(z: number): void;

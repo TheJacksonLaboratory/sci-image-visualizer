@@ -798,6 +798,14 @@ describe('RegionStore', () => {
       expect(emissions).toBe(before + 1);
     });
 
+    it('records the stack save layout (combined by default, per-slice-file when asked)', () => {
+      store.enterStackMode(new Map<number, Region[]>([[0, []]]), 0);
+      expect(store.getStackSaveLayout()).toBe('combined');
+
+      store.enterStackMode(new Map<number, Region[]>([[0, []]]), 0, 'per-slice-file');
+      expect(store.getStackSaveLayout()).toBe('per-slice-file');
+    });
+
     it('exitStackMode resets to single-plane behaviour', () => {
       store.enterStackMode(
         new Map<number, Region[]>([[0, [rectRegion(0, 0, 5, 5)]], [1, [rectRegion(1, 1, 5, 5)]]]),

@@ -91,6 +91,10 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   private regionsBySlice = new Map<number, Region[]>();
   private stackMode = false;
   private currentSliceZ = 0;
+  /** How a stack's regions round-trip to disk (jit-ui#93): `combined` writes one
+   *  z-indexed geojson (single-file z-stack, QuPath schema); `per-slice-file`
+   *  writes one geojson per slice-file (a folder of numbered images). */
+  private stackSaveLayout: 'combined' | 'per-slice-file' = 'combined';
 
   /** Selection is tracked by region *id* internally (stable across edits) and
    *  projected to array indices on the IRegionStore boundary. */
@@ -165,6 +169,11 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   /** The current display slice (zero-based). */
   getDisplaySlice(): number { return this.currentSliceZ; }
 
+  /** How the current stack persists to disk (jit-ui#93): `combined` = one
+   *  z-indexed geojson (single-file z-stack); `per-slice-file` = one geojson per
+   *  slice-file (folder stack). Meaningless outside stack mode. */
+  getStackSaveLayout(): 'combined' | 'per-slice-file' { return this.stackSaveLayout; }
+
   /**
    * Enter per-slice stack mode. `slices` maps each zero-based slice index to
    * the regions imported for that slice; the store makes `initialZ`'s slice the
@@ -174,8 +183,10 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
    * every slice for save/export. Ids/names/classification colours are minted
    * exactly as {@link setRegions} does.
    */
-  enterStackMode(slices: Map<number, Region[]>, initialZ = 0): void {
+  enterStackMode(slices: Map<number, Region[]>, initialZ = 0,
+                 saveLayout: 'combined' | 'per-slice-file' = 'combined'): void {
     this.stackMode = true;
+    this.stackSaveLayout = saveLayout;
     this.currentSliceZ = initialZ || 0;
     this.regionsBySlice = new Map<number, Region[]>();
     for (const [z, regs] of slices) {

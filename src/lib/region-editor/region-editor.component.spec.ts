@@ -834,6 +834,31 @@ describe('RegionEditorComponent persist / save-as', () => {
     );
   }));
 
+  it('saves EVERY slice as one combined z-indexed geojson for a single-file z-stack — jit-ui#93', fakeAsync(() => {
+    // Stack mode with the combined layout: the current slice may hold only some
+    // regions, but save must serialize the whole stack (getSliceAnnotationRegions).
+    const allSlices = [{}, {}, {}] as any[]; // 3 regions across slices
+    mockVisualizer.isStackMode = jest.fn(() => true);
+    mockVisualizer.getStackSaveLayout = jest.fn(() => 'combined');
+    mockVisualizer.getSliceAnnotationRegions = jest.fn(() => allSlices);
+    (mockVisualizer.getGeoJsonString as jest.Mock).mockImplementation(
+      (regs: any[]) => JSON.stringify({ count: regs.length }),
+    );
+
+    component.saveAsFilename = 'stack.geojson';
+    component.saveAsFileExists = false;
+
+    component.confirmSaveAs();
+    tick();
+
+    expect(mockVisualizer.getSliceAnnotationRegions).toHaveBeenCalled();
+    expect(mockVisualizer.getGeoJsonString).toHaveBeenCalledWith(allSlices);
+    expect(mockRegionIo.saveGeoJson).toHaveBeenCalledWith(
+      JSON.stringify({ count: 3 }),
+      'stack.geojson',
+    );
+  }));
+
   it('should show error toast when save fails', fakeAsync(() => {
     (mockRegionIo.saveGeoJson as jest.Mock).mockReturnValue(
       throwError(() => new Error('Server error')),

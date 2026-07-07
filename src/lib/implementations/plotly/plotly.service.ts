@@ -1623,11 +1623,15 @@ export class PlotlyService implements IVisualizer {
   public resetUndoHistory(): void { this.regionStore.resetUndoHistory(); }
 
   // ── Per-slice z-stack regions → RegionStore (jit-ui#93) ──────────────────
-  public enterStackMode(slices: Map<number, Region[]>, initialZ?: number): void {
-    this.regionStore.enterStackMode(slices, initialZ);
+  public enterStackMode(slices: Map<number, Region[]>, initialZ?: number,
+                        saveLayout?: 'combined' | 'per-slice-file'): void {
+    this.regionStore.enterStackMode(slices, initialZ, saveLayout);
   }
   public exitStackMode(): void { this.regionStore.exitStackMode(); }
   public isStackMode(): boolean { return this.regionStore.isStackMode(); }
+  public getStackSaveLayout(): 'combined' | 'per-slice-file' {
+    return this.regionStore.getStackSaveLayout();
+  }
   public setDisplaySlice(z: number): void { this.regionStore.setDisplaySlice(z); }
   public getSliceRegions(): Region[] { return this.regionStore.getSliceRegions(); }
 

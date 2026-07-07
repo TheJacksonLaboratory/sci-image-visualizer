@@ -459,13 +459,24 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
                 (imgInfo.smallUrls?.length ?? 0) > 0;
               const smallImgInfo = hasSmallTier ? { ...imgInfo, urls: imgInfo.smallUrls as string[] } : null;
 
+              // Enter per-slice stack mode with the given slice→regions map and
+              // seed the "previous shapes" from the now-live slice. enterStackMode
+              // makes zIndex's slice live and resets undo (jit-ui#93).
+              const enterStack = (
+                slices: Map<number, Region[]>,
+                layout: 'combined' | 'per-slice-file',
+              ) => {
+                this.plotService.enterStackMode(slices, this.zIndex, layout);
+                const shapes = this.plotService
+                  .getRegions()
+                  .map((region) => region.getShape(this.plotService.getShowShapeLabel()));
+                this.plotService.setPreviousShapes(shapes);
+              };
+
               const applyRoi = () => {
-                // A folder stack carries per-slice ROIs (roiJsonStrs, one entry
-                // per slice-file): import EVERY slice into a per-slice map and
-                // enter stack mode, so the store shows the current slice, edits
-                // persist across scrubs, and save can round-trip every slice
-                // (jit-ui#93). A single image / server z-stack uses the scalar
-                // roiJsonStr (one set for the whole image), unchanged.
+                // Folder stack: per-slice ROIs (roiJsonStrs, one entry per
+                // slice-file). Import EVERY slice into a per-slice map and enter
+                // stack mode; it saves back one geojson per slice-file (jit-ui#93).
                 if (imgInfo.isStack && imgInfo.roiJsonStrs) {
                   const perSlice = imgInfo.roiJsonStrs;
                   const slices = new Map<number, Region[]>();
@@ -473,15 +484,34 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
                     const json = perSlice[z] ?? null;
                     slices.set(z, json ? this.plotService.importRegions(json) : []);
                   }
-                  // enterStackMode makes zIndex's slice live and resets undo.
-                  this.plotService.enterStackMode(slices, this.zIndex);
-                  const shapes = this.plotService
-                    .getRegions()
-                    .map((region) => region.getShape(this.plotService.getShowShapeLabel()));
-                  this.plotService.setPreviousShapes(shapes);
+                  enterStack(slices, 'per-slice-file');
                   return;
                 }
+                // Single-file z-stack: one sibling geojson holding every slice's
+                // regions indexed by QuPath's geometry.plane.z. Enter per-slice
+                // mode (saving back one combined z-indexed geojson) when the
+                // geojson actually carries slice indices, or when there's nothing
+                // yet to author against. A legacy geojson whose regions are all on
+                // the default plane stays global (shown on every slice) so
+                // existing single-plane annotations aren't confined to slice 0.
                 const roiJson = imgInfo.roiJsonStr;
+                if (imgInfo.isStack) {
+                  const regions = roiJson ? this.plotService.importRegions(roiJson) : [];
+                  const hasSliceInfo = regions.some((r) => (r.z ?? 0) !== 0);
+                  if (!roiJson || hasSliceInfo) {
+                    const slices = new Map<number, Region[]>();
+                    for (const r of regions) {
+                      const z = r.z ?? 0;
+                      const bucket = slices.get(z);
+                      if (bucket) bucket.push(r);
+                      else slices.set(z, [r]);
+                    }
+                    enterStack(slices, 'combined');
+                    return;
+                  }
+                }
+                // Single-plane image (or a legacy global z-stack geojson): one
+                // region set for the whole image.
                 if (roiJson) {
                   const regions = this.plotService.importRegions(roiJson);
                   this.plotService.setRegions(regions);

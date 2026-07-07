@@ -52,6 +52,18 @@ export interface IRegionEditorApi {
   // ── import / export ────────────────────────────────────────────────────
   importRegions(geoJsonStr: string): Region[];
   getGeoJsonString(regions: Region[]): string;
+
+  // ── per-slice z-stacks (jit-ui#93) ──────────────────────────────────────
+  /** True while a per-slice z-stack region session is active — the editor then
+   *  saves/edits regions per displayed slice. */
+  isStackMode(): boolean;
+  /** How the current stack persists: `combined` = one z-indexed geojson
+   *  (single-file z-stack, QuPath schema); `per-slice-file` = one geojson per
+   *  slice-file (folder stack). */
+  getStackSaveLayout(): 'combined' | 'per-slice-file';
+  /** Every slice's annotation regions (profile lines excluded), each tagged
+   *  with its zero-based {@link Region.z}, for a combined z-indexed save. */
+  getSliceAnnotationRegions(): Region[];
   /**
    * Full-resolution image size (image-pixel dimensions) used to size an exported
    * region mask. Backend-neutral: prefers the active renderer's reported size

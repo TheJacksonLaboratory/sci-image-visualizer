@@ -329,13 +329,21 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
 
   // ── Per-slice z-stack regions (jit-ui#93) — the RegionStore is shared across
   //    backends, so routing to the active renderer hits the same store. ──────
-  enterStackMode(slices: Map<number, Region[]>, initialZ?: number): void {
-    this.renderer().enterStackMode(slices, initialZ);
+  enterStackMode(slices: Map<number, Region[]>, initialZ?: number,
+                 saveLayout?: 'combined' | 'per-slice-file'): void {
+    this.renderer().enterStackMode(slices, initialZ, saveLayout);
   }
   exitStackMode(): void { this.renderer().exitStackMode(); }
   isStackMode(): boolean { return this.renderer().isStackMode(); }
+  getStackSaveLayout(): 'combined' | 'per-slice-file' { return this.renderer().getStackSaveLayout(); }
   setDisplaySlice(z: number): void { this.renderer().setDisplaySlice(z); }
   getSliceRegions(): Region[] { return this.renderer().getSliceRegions(); }
+  /** All slices' ANNOTATION regions for a z-stack save (jit-ui#93), each tagged
+   *  with its zero-based Region.z; profile lines excluded. Flat annotation set
+   *  outside stack mode. */
+  getSliceAnnotationRegions(): Region[] {
+    return this.renderer().getSliceRegions().filter((r) => !isProfileRegion(r));
+  }
 
   /** Authoritative full-resolution image size for mask export. Prefers the
    *  active renderer's reported size, falling back to the image metadata (x/y
