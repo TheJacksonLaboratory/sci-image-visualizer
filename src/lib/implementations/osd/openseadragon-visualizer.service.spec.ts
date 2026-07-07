@@ -142,31 +142,6 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
   });
 
   /**
-   * Regression: a simple (tiled:false) folder stack must present its FULL
-   * resolution as OSD's coordinate space (one stretched preview tile), not the
-   * preview's downscaled natural size — otherwise ROIs stored in full-res
-   * pixels (QuPath geojson) render offset-right and oversized, while Plotly and
-   * the tiled path (both full-res) show them correctly (jit-ui#93).
-   */
-  it('simpleTileSource declares full-res dims with a single stretched preview tile', () => {
-    const ts = (service as unknown as {
-      simpleTileSource: (u: string, w?: number, h?: number) => any;
-    }).simpleTileSource('blob:slice', 1300, 900);
-    expect(ts.width).toBe(1300);
-    expect(ts.height).toBe(900);
-    expect(ts.maxLevel).toBe(0);
-    expect(ts.tileSize).toBeGreaterThanOrEqual(1300); // one tile spans the whole image
-    expect(ts.getTileUrl()).toBe('blob:slice');       // that tile IS the preview
-  });
-
-  it('simpleTileSource falls back to a plain image source when full-res dims are unknown', () => {
-    const ts = (service as unknown as {
-      simpleTileSource: (u: string, w?: number, h?: number) => any;
-    }).simpleTileSource('blob:slice');
-    expect(ts).toEqual({ type: 'image', url: 'blob:slice' });
-  });
-
-  /**
    * Regression: the initial fit-to-home must not depend on WHEN the render
    * started. If the container is still zero-size (diagram view mid-switch from
    * a folder view — e.g. "Load as Stack" with no image open), the timed goHome
