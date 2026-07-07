@@ -77,6 +77,19 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   private fillColor = '#ff00ff';
   private isRegionSavedOn = true;
 
+  /**
+   * Per-slice region support for z-stacks (jit-ui#93). When
+   * {@link sliceFilterEnabled} is on (a stack is loaded), the store still holds
+   * ALL slices' regions in `regions` (each carrying its zero-based `Region.z`),
+   * but {@link getVisibleRegions} returns only those on {@link currentDisplayZ}
+   * — so the on-canvas overlays show one slice at a time while save/export
+   * (getRegions) still sees every slice. Freshly-added regions are tagged with
+   * the current display slice. Off by default: `getVisibleRegions` === all
+   * regions and z stays 0, so single-plane images are unaffected.
+   */
+  private currentDisplayZ = 0;
+  private sliceFilterEnabled = false;
+
   /** Selection is tracked by region *id* internally (stable across edits) and
    *  projected to array indices on the IRegionStore boundary. */
   private selectedIds: number[] = [];
@@ -140,6 +153,39 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   /** The canonical accessor: current image's regions (live instances). */
   getRegions(): Region[] {
     return this.regions.slice();
+  }
+
+  /**
+   * Regions to DISPLAY on the canvas: when per-slice filtering is on (a stack),
+   * only those on the current display slice ({@link Region.z} === current z);
+   * otherwise all regions. Overlays render this instead of {@link getRegions}
+   * (which stays the full set for save/export). (jit-ui#93)
+   */
+  getVisibleRegions(): Region[] {
+    if (!this.sliceFilterEnabled) return this.regions.slice();
+    return this.regions.filter((r) => (r.z ?? 0) === this.currentDisplayZ);
+  }
+
+  /** Enable/disable per-slice region filtering (on when a z-stack is displayed,
+   *  off for a single-plane image). Re-emits so overlays re-read. */
+  setSliceFilterEnabled(enabled: boolean): void {
+    if (this.sliceFilterEnabled === enabled) return;
+    this.sliceFilterEnabled = enabled;
+    this.regionUpdate$.next(this.getRegions());
+  }
+
+  /** Set the current display slice (0-based). New regions are tagged with it,
+   *  and — when filtering is on — only this slice's regions are shown.
+   *  Re-emits so overlays swap to the new slice's regions. (jit-ui#93) */
+  setDisplaySlice(z: number): void {
+    const next = z || 0;
+    if (this.currentDisplayZ === next) return;
+    this.currentDisplayZ = next;
+    if (this.sliceFilterEnabled) this.regionUpdate$.next(this.getRegions());
+  }
+
+  getDisplaySlice(): number {
+    return this.currentDisplayZ;
   }
 
   /**
@@ -397,6 +443,10 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.recordUndoSnapshot();
     if (region.id == null) region.id = this.nextId++;
     if (region.name == null) region.name = `shape${region.id}`;
+    // A region drawn on a stack belongs to the slice currently displayed, so
+    // it saves/reloads on that slice (jit-ui#93). No-op for single-plane images
+    // (currentDisplayZ stays 0).
+    if (this.sliceFilterEnabled) region.z = this.currentDisplayZ;
     this.applyClassificationColors([region]);
     this.regions.push(region);
     this.selectedIds = [region.id];

@@ -722,4 +722,60 @@ describe('RegionStore', () => {
       expect(store.getRegions().length).toBe(1);
     });
   });
+
+  /**
+   * Per-slice regions for z-stacks (jit-ui#93). The store keeps ALL slices'
+   * regions (getRegions, for save); getVisibleRegions returns only the current
+   * display slice when filtering is on; and a region added while on a slice is
+   * tagged with it. All off by default so single-plane images are unaffected.
+   */
+  describe('per-slice regions (getVisibleRegions / setDisplaySlice)', () => {
+    it('filtering is off by default — getVisibleRegions returns all regions', () => {
+      store.addRegion(rectRegion(0, 0, 5, 5));
+      store.addRegion(rectRegion(10, 10, 5, 5));
+      expect(store.getVisibleRegions().length).toBe(2);
+      expect(store.getVisibleRegions().every((r) => r.z === 0)).toBe(true);
+    });
+
+    it('addRegion tags a region with the current display slice only when filtering is on', () => {
+      // Off: z stays 0 regardless of the display slice.
+      store.setDisplaySlice(3);
+      const idOff = store.addRegion(rectRegion(0, 0, 5, 5));
+      expect(store.getRegions().find((r) => r.id === idOff)!.z).toBe(0);
+
+      // On: a region drawn on slice 3 is tagged z=3.
+      store.setSliceFilterEnabled(true);
+      store.setDisplaySlice(3);
+      const idOn = store.addRegion(rectRegion(1, 1, 5, 5));
+      expect(store.getRegions().find((r) => r.id === idOn)!.z).toBe(3);
+    });
+
+    it('getVisibleRegions shows only the current slice, while getRegions keeps all', () => {
+      store.setSliceFilterEnabled(true);
+
+      store.setDisplaySlice(0);
+      store.addRegion(rectRegion(0, 0, 5, 5)); // z=0
+      store.setDisplaySlice(2);
+      store.addRegion(rectRegion(2, 2, 5, 5)); // z=2
+      store.addRegion(rectRegion(3, 3, 5, 5)); // z=2
+
+      expect(store.getRegions().length).toBe(3);            // all slices retained (for save)
+      expect(store.getVisibleRegions().length).toBe(2);      // only slice 2 shown
+      store.setDisplaySlice(0);
+      expect(store.getVisibleRegions().length).toBe(1);      // only slice 0 shown
+      expect(store.getRegions().length).toBe(3);             // still all
+    });
+
+    it('setDisplaySlice re-emits regionUpdate when filtering is on so overlays re-filter', () => {
+      store.setSliceFilterEnabled(true);
+      let emissions = 0;
+      store.getRegionUpdateEvent().subscribe(() => emissions++);
+      const before = emissions;
+      store.setDisplaySlice(5);
+      expect(emissions).toBe(before + 1);
+      // Same slice again → no redundant emit.
+      store.setDisplaySlice(5);
+      expect(emissions).toBe(before + 1);
+    });
+  });
 });
