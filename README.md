@@ -22,6 +22,13 @@ Tools). The annotation/segmentation tooling was added under
   colormaps / LUTs.
 - **Region editor** — a Regions panel to list, select, rename, classify, recolor,
   import/export (GeoJSON), and delete regions.
+- **Image stacks** — a z-stack can be a single server-tiled file (internal z) or
+  a set of self-contained per-slice image URLs (`IImageInfo.tiled === false`, one
+  URL per slice), e.g. a folder of numbered files assembled by the host. Slices
+  load on demand as you scrub.
+- **Per-slice ROIs + QuPath planes** — GeoJSON import/export carries the QuPath
+  image-plane convention (`geometry.plane.z`), and the host can supply one ROI
+  set per slice (`IImageInfo.roiJsonStrs`) that the viewer swaps on scrub.
 - **Browser-side segmentation** — promptable SAM (box + interactive points) and
   automatic cellpose-SAM, all client-side (see below).
 
@@ -57,7 +64,12 @@ data as you zoom in:
 - scalar/3D types expect a grayscale image (the volume types also need a z-stack).
 
 When a stack is open, a slice slider (Image view) or single-image/stack toggle
-(other views) navigates the z-dimension.
+(other views) navigates the z-dimension. A stack may be one server-tiled file
+(internal z) or a set of self-contained per-slice URLs (`IImageInfo.tiled ===
+false`) — the latter (e.g. a host-assembled folder of numbered files) fetches
+`urls[z]` per slice on demand. For a per-slice stack the host can also supply a
+matching ROI GeoJSON per slice (`IImageInfo.roiJsonStrs`), which the viewer
+shows for the displayed slice and swaps as you scrub.
 
 ### Intensity profiles *(work in progress)*
 A line-ROI tool draws coloured lines and plots intensity along each one in a live
@@ -67,9 +79,11 @@ API/UX are still stabilizing (see [In progress / roadmap](#in-progress--roadmap)
 ## Regions & annotation
 
 Regions are stored in a shared **region store** and use a GeoJSON-friendly model
-(rectangles, polygons, polylines, Bézier curves). Every tool writes to the same
-store, so regions persist across backend/plot-type switches and are editable from
-the Regions panel. The on-canvas tools:
+(rectangles, polygons, polylines, Bézier curves) with an optional zero-based
+`z` slice — GeoJSON import/export uses QuPath's `geometry.plane.z` (written only
+for non-default slices, so single-plane images round-trip byte-identically).
+Every tool writes to the same store, so regions persist across backend/plot-type
+switches and are editable from the Regions panel. The on-canvas tools:
 
 - **Selection** — neutral mode; deactivates any drawing tool.
 - **Rectangle**, **Polyline** (open `LineString`), **Freeform** (drag-to-draw
