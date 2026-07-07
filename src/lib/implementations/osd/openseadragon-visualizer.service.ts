@@ -153,6 +153,13 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    *  slice being scrubbed to (via {@link SimpleSliceAccessService.urlFor}).
    *  Unused (and left stale, harmlessly) in tiled mode. */
   private simpleUrls: string[] = [];
+  /** preview blob URL → full-res upscaled blob URL (see toFullResUrl), so
+   *  re-visiting a simple-mode slice doesn't re-upscale. Revoked on file change. */
+  private readonly simpleFullResUrls = new Map<string, string>();
+  /** Skip the full-res upscale above this longest-side dimension — a folder
+   *  stack is per-file previews (well under this); this only guards against an
+   *  accidental enormous canvas allocation. */
+  private readonly SIMPLE_UPSCALE_MAX_DIM = 8192;
   private coordTransform: ICoordinateTransform | null = null;
   private wandHost!: WandToolHost;
   private eraserHost!: VertexEraserToolHost;
@@ -362,6 +369,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     // loading immediately rather than letting it finish behind the new image.
     if (filename && this.currentFileName && filename !== this.currentFileName) {
       this.cache.cancelBackgroundLoad();
+      this.revokeSimpleFullResUrls();
     }
     this.simpleStack.noteActiveFile(filename);
     // Simple (in-memory / non-tiled) image: skip the tile server entirely — no
@@ -420,11 +428,15 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     const z = zIndex || 0;
     const filename = imageInfo?.fileName;
     this.authHeaders = {};
+    const [width, height] = imageInfo.trueImageSize ?? [0, 0];
     const rawUrl = this.simpleStack.urlFor(imageInfo, z);
     let url: string | undefined;
     if (rawUrl) {
       try {
-        url = await this.simpleStack.fetchAsBlobUrl(rawUrl);
+        const previewUrl = await this.simpleStack.fetchAsBlobUrl(rawUrl);
+        // Upscale the (downscaled) preview to full resolution so OSD's world
+        // matches the full-res ROI coordinate space — see toFullResUrl.
+        url = await this.toFullResUrl(previewUrl, width, height);
       } catch (err) {
         console.warn('[OSD] simple-mode slice fetch failed', err);
       }
@@ -438,7 +450,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       console.warn('[OSD] simple-mode slice has no loadable URL; skipping OSD render', rawUrl);
       return { descriptor: null, infoB64: '', z, filename };
     }
-    const [width, height] = imageInfo.trueImageSize ?? [0, 0];
     const meta = imageInfo.imageMeta?.[0];
     const descriptor: TileDescriptor = {
       width,
@@ -460,6 +471,60 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       simple: true,
       url,
     };
+  }
+
+  /**
+   * OSD's `{type:'image'}` source sizes its coordinate world to the image's
+   * NATURAL pixels. A folder-stack slice is a server `/preview`, which is
+   * downscaled for large images — so OSD's world would be smaller than the
+   * full-resolution image, and full-res ROI coordinates (QuPath geojson, in
+   * level-0 pixels) render oversized/offset relative to it. Upscale the preview
+   * to the full-resolution dimensions (blurry, but positionally exact) so OSD's
+   * world matches the ROI coordinate space, while still using OSD's reliable
+   * single-image renderer. Cached per preview URL (revoked on file change);
+   * a no-op when the preview is already ≥ full-res (small images, in-memory
+   * pipeline blobs), when the dims are unknown, or when they're implausibly
+   * large (guards against an enormous canvas). (jit-ui#93)
+   */
+  private async toFullResUrl(previewUrl: string, width: number, height: number): Promise<string> {
+    if (!width || !height || Math.max(width, height) > this.SIMPLE_UPSCALE_MAX_DIM) return previewUrl;
+    const cached = this.simpleFullResUrls.get(previewUrl);
+    if (cached) return cached;
+    let img: HTMLImageElement;
+    try {
+      img = await this.loadImageEl(previewUrl);
+    } catch {
+      return previewUrl; // couldn't decode — let OSD try the URL as-is
+    }
+    if (img.naturalWidth >= width && img.naturalHeight >= height) return previewUrl; // already full-res
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return previewUrl;
+    ctx.drawImage(img, 0, 0, width, height); // stretch preview to full-res
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve));
+    if (!blob) return previewUrl;
+    const fullResUrl = URL.createObjectURL(blob);
+    this.simpleFullResUrls.set(previewUrl, fullResUrl);
+    return fullResUrl;
+  }
+
+  /** Load a URL into an HTMLImageElement (resolves once decoded). Uses
+   *  document.createElement rather than `new Image()` because this file's
+   *  `Image` import is image-js's decoder, not the DOM element. */
+  private loadImageEl(url: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const img = document.createElement('img');
+      img.onload = () => resolve(img);
+      img.onerror = (e) => reject(e);
+      img.src = url;
+    });
+  }
+
+  private revokeSimpleFullResUrls(): void {
+    for (const u of this.simpleFullResUrls.values()) URL.revokeObjectURL(u);
+    this.simpleFullResUrls.clear();
   }
 
   /** Mount the viewer with a custom tile source pointing at `GET /tile`. */
@@ -1024,9 +1089,14 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       if (!rawUrl) return;
       this.currentZ = z;
       this.viewportPixels = null;
-      // Fetched via SimpleSliceAccessService (auth interceptor applies), not
-      // opened directly. Guard against a newer scrub landing first.
+      // Fetched via SimpleSliceAccessService (auth interceptor applies) then
+      // upscaled to full-res (same as the initial load — see toFullResUrl) so
+      // the world stays full-res across slices and ROIs keep aligning. Guard
+      // against a newer scrub landing first.
       this.simpleStack.fetchAsBlobUrl(rawUrl)
+        .then((previewUrl) =>
+          this.toFullResUrl(previewUrl, this.descriptor?.width ?? 0, this.descriptor?.height ?? 0),
+        )
         .then((url) => {
           if (this.currentZ !== z || !this.viewer) return;
           this.viewer.addOnceHandler('open-failed', (e: any) => {

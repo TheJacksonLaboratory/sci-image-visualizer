@@ -29,6 +29,11 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     });
     service = TestBed.inject(OpenSeadragonVisualizerService);
     http = TestBed.inject(HttpTestingController);
+    // The real loadImageEl decodes via an <img> that never fires load in jsdom
+    // (hanging the simple-mode tests). Default it to "already full-res" so
+    // toFullResUrl is a no-op (returns the preview) unless a test overrides it.
+    (service as unknown as { loadImageEl: (u: string) => Promise<unknown> }).loadImageEl =
+      jest.fn().mockResolvedValue({ naturalWidth: 1e9, naturalHeight: 1e9 });
   });
 
   afterEach(() => {
@@ -207,6 +212,71 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
       call(null, refit);
       expect(observers.length).toBe(0);
       expect(refit).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * Regression: a folder-stack slice is a downscaled server /preview, so OSD's
+   * ImageTileSource world would be smaller than the full-res image and full-res
+   * geojson ROIs render oversized. toFullResUrl upscales the preview to
+   * trueImageSize so the world matches the ROI coordinate space (jit-ui#93).
+   */
+  describe('toFullResUrl (upscale preview so OSD world = full-res)', () => {
+    const call = (u: string, w: number, h: number): Promise<string> =>
+      (service as unknown as {
+        toFullResUrl: (u: string, w: number, h: number) => Promise<string>;
+      }).toFullResUrl(u, w, h);
+
+    let createObjectURL: jest.SpyInstance;
+    let toBlobSpy: jest.SpyInstance;
+
+    // A real <img> (drawImage requires one) with a controllable natural size.
+    const fakeImg = (w: number, h: number): HTMLImageElement => {
+      const img = document.createElement('img');
+      Object.defineProperty(img, 'naturalWidth', { value: w, configurable: true });
+      Object.defineProperty(img, 'naturalHeight', { value: h, configurable: true });
+      return img;
+    };
+    const stubDecode = (w: number, h: number) => {
+      (service as unknown as { loadImageEl: (u: string) => Promise<unknown> }).loadImageEl =
+        jest.fn().mockResolvedValue(fakeImg(w, h));
+    };
+
+    beforeEach(() => {
+      createObjectURL = jest.spyOn(URL, 'createObjectURL').mockReturnValue('blob:upscaled');
+      // jsdom canvas toBlob may be absent — provide one that yields a Blob.
+      toBlobSpy = jest
+        .spyOn(HTMLCanvasElement.prototype, 'toBlob')
+        .mockImplementation((cb: BlobCallback) => cb(new Blob(['x'])));
+      stubDecode(512, 230); // preview smaller than full-res
+    });
+    afterEach(() => {
+      createObjectURL.mockRestore();
+      toBlobSpy.mockRestore();
+    });
+
+    it('upscales a downscaled preview to trueImageSize and caches the result', async () => {
+      const out = await call('blob:preview', 1000, 450); // preview 512x230 < 1000x450
+      expect(out).toBe('blob:upscaled');
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+
+      // Second call for the same preview reuses the cache (no re-upscale).
+      const again = await call('blob:preview', 1000, 450);
+      expect(again).toBe('blob:upscaled');
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns the preview unchanged when it is already full-res', async () => {
+      stubDecode(512, 512); // preview == full-res
+      const out = await call('blob:preview', 512, 512);
+      expect(out).toBe('blob:preview');
+      expect(createObjectURL).not.toHaveBeenCalled();
+    });
+
+    it('returns the preview unchanged when the full-res dims are unknown', async () => {
+      const out = await call('blob:preview', 0, 0);
+      expect(out).toBe('blob:preview');
+      expect(createObjectURL).not.toHaveBeenCalled();
     });
   });
 
