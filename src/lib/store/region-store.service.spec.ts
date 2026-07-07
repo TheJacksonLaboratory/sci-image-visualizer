@@ -724,50 +724,70 @@ describe('RegionStore', () => {
   });
 
   /**
-   * Per-slice regions for z-stacks (jit-ui#93). The store keeps ALL slices'
-   * regions (getRegions, for save); getVisibleRegions returns only the current
-   * display slice when filtering is on; and a region added while on a slice is
-   * tagged with it. All off by default so single-plane images are unaffected.
+   * Per-slice regions for z-stacks (jit-ui#93). In stack mode the live
+   * getRegions() holds ONE slice (so overlays/selection/table are unchanged),
+   * setDisplaySlice swaps the live set on scrub, getSliceRegions() flattens
+   * every slice (each tagged with its z) for save, and a region drawn on a
+   * slice is tagged with it. All off by default so single-plane images are
+   * unaffected.
    */
-  describe('per-slice regions (getVisibleRegions / setDisplaySlice)', () => {
-    it('filtering is off by default — getVisibleRegions returns all regions', () => {
+  describe('per-slice regions (stack mode)', () => {
+    it('stack mode is off by default — z stays 0 and getSliceRegions === getRegions', () => {
       store.addRegion(rectRegion(0, 0, 5, 5));
       store.addRegion(rectRegion(10, 10, 5, 5));
-      expect(store.getVisibleRegions().length).toBe(2);
-      expect(store.getVisibleRegions().every((r) => r.z === 0)).toBe(true);
+      expect(store.isStackMode()).toBe(false);
+      expect(store.getRegions().length).toBe(2);
+      expect(store.getRegions().every((r) => r.z === 0)).toBe(true);
+      expect(store.getSliceRegions().length).toBe(2);
     });
 
-    it('addRegion tags a region with the current display slice only when filtering is on', () => {
-      // Off: z stays 0 regardless of the display slice.
+    it('setDisplaySlice off stack mode only records the slice for tagging (no swap)', () => {
+      // Off: z stays 0 regardless of the requested slice.
       store.setDisplaySlice(3);
       const idOff = store.addRegion(rectRegion(0, 0, 5, 5));
       expect(store.getRegions().find((r) => r.id === idOff)!.z).toBe(0);
-
-      // On: a region drawn on slice 3 is tagged z=3.
-      store.setSliceFilterEnabled(true);
-      store.setDisplaySlice(3);
-      const idOn = store.addRegion(rectRegion(1, 1, 5, 5));
-      expect(store.getRegions().find((r) => r.id === idOn)!.z).toBe(3);
+      expect(store.getRegions().length).toBe(1);
     });
 
-    it('getVisibleRegions shows only the current slice, while getRegions keeps all', () => {
-      store.setSliceFilterEnabled(true);
+    it('enterStackMode shows the initial slice live; getSliceRegions flattens all', () => {
+      const slices = new Map<number, Region[]>([
+        [0, [rectRegion(0, 0, 5, 5)]],
+        [2, [rectRegion(2, 2, 5, 5), rectRegion(3, 3, 5, 5)]],
+      ]);
+      store.enterStackMode(slices, 0);
 
-      store.setDisplaySlice(0);
-      store.addRegion(rectRegion(0, 0, 5, 5)); // z=0
+      expect(store.isStackMode()).toBe(true);
+      expect(store.getDisplaySlice()).toBe(0);
+      expect(store.getRegions().length).toBe(1);            // only slice 0 is live
+      const all = store.getSliceRegions();
+      expect(all.length).toBe(3);                            // every slice, for save
+      expect(all.filter((r) => r.z === 0).length).toBe(1);
+      expect(all.filter((r) => r.z === 2).length).toBe(2);
+    });
+
+    it('setDisplaySlice swaps the live set and preserves edits on the previous slice', () => {
+      store.enterStackMode(new Map<number, Region[]>([[0, [rectRegion(0, 0, 5, 5)]]]), 0);
+
+      // Edit slice 0: add a region, then scrub to slice 2 and draw there.
+      store.addRegion(rectRegion(1, 1, 5, 5)); // slice 0 now has 2
       store.setDisplaySlice(2);
-      store.addRegion(rectRegion(2, 2, 5, 5)); // z=2
-      store.addRegion(rectRegion(3, 3, 5, 5)); // z=2
+      expect(store.getRegions().length).toBe(0); // fresh slice
+      const idOnTwo = store.addRegion(rectRegion(2, 2, 5, 5)); // z tagged 2
+      expect(store.getRegions().find((r) => r.id === idOnTwo)!.z).toBe(2);
 
-      expect(store.getRegions().length).toBe(3);            // all slices retained (for save)
-      expect(store.getVisibleRegions().length).toBe(2);      // only slice 2 shown
+      // Back to slice 0 — the two regions are still there (edits preserved).
       store.setDisplaySlice(0);
-      expect(store.getVisibleRegions().length).toBe(1);      // only slice 0 shown
-      expect(store.getRegions().length).toBe(3);             // still all
+      expect(store.getRegions().length).toBe(2);
+
+      // getSliceRegions sees both slices (2 + 1) with correct z tags.
+      const all = store.getSliceRegions();
+      expect(all.length).toBe(3);
+      expect(all.filter((r) => r.z === 0).length).toBe(2);
+      expect(all.filter((r) => r.z === 2).length).toBe(1);
     });
 
-    it('setDisplaySlice re-emits regionUpdate when filtering is on so overlays re-filter', () => {
-      store.setSliceFilterEnabled(true);
+    it('setDisplaySlice re-emits regionUpdate on a real slice change only', () => {
+      store.enterStackMode(new Map<number, Region[]>([[0, []], [5, []]]), 0);
       let emissions = 0;
       store.getRegionUpdateEvent().subscribe(() => emissions++);
       const before = emissions;
@@ -776,6 +796,20 @@ describe('RegionStore', () => {
       // Same slice again → no redundant emit.
       store.setDisplaySlice(5);
       expect(emissions).toBe(before + 1);
+    });
+
+    it('exitStackMode resets to single-plane behaviour', () => {
+      store.enterStackMode(
+        new Map<number, Region[]>([[0, [rectRegion(0, 0, 5, 5)]], [1, [rectRegion(1, 1, 5, 5)]]]),
+        0,
+      );
+      expect(store.isStackMode()).toBe(true);
+      store.exitStackMode();
+      expect(store.isStackMode()).toBe(false);
+      expect(store.getDisplaySlice()).toBe(0);
+      // Live set is whatever slice was current (slice 0); getSliceRegions no
+      // longer flattens other slices.
+      expect(store.getSliceRegions().length).toBe(store.getRegions().length);
     });
   });
 });

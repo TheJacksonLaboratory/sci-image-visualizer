@@ -78,17 +78,19 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   private isRegionSavedOn = true;
 
   /**
-   * Per-slice region support for z-stacks (jit-ui#93). When
-   * {@link sliceFilterEnabled} is on (a stack is loaded), the store still holds
-   * ALL slices' regions in `regions` (each carrying its zero-based `Region.z`),
-   * but {@link getVisibleRegions} returns only those on {@link currentDisplayZ}
-   * — so the on-canvas overlays show one slice at a time while save/export
-   * (getRegions) still sees every slice. Freshly-added regions are tagged with
-   * the current display slice. Off by default: `getVisibleRegions` === all
-   * regions and z stays 0, so single-plane images are unaffected.
+   * Per-slice region support for z-stacks (jit-ui#93). While {@link stackMode}
+   * is on (a z-stack is loaded), the live `regions` array always holds ONE
+   * slice — the {@link currentSliceZ} slice — so the on-canvas overlays, the
+   * selection projection, and the Regions table keep working unchanged
+   * (they all read {@link getRegions}). The other slices live in
+   * {@link regionsBySlice}; {@link setDisplaySlice} swaps the live set on scrub
+   * and {@link getSliceRegions} flattens every slice (each tagged with its
+   * zero-based {@link Region.z}) for save/export. Off by default (stackMode
+   * false, z 0), so single-plane images are completely unaffected.
    */
-  private currentDisplayZ = 0;
-  private sliceFilterEnabled = false;
+  private regionsBySlice = new Map<number, Region[]>();
+  private stackMode = false;
+  private currentSliceZ = 0;
 
   /** Selection is tracked by region *id* internally (stable across edits) and
    *  projected to array indices on the IRegionStore boundary. */
@@ -155,37 +157,98 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     return this.regions.slice();
   }
 
+  // ── Per-slice regions for z-stacks (jit-ui#93) ─────────────────────────
+
+  /** True while a z-stack is loaded and the store holds regions per slice. */
+  isStackMode(): boolean { return this.stackMode; }
+
+  /** The current display slice (zero-based). */
+  getDisplaySlice(): number { return this.currentSliceZ; }
+
   /**
-   * Regions to DISPLAY on the canvas: when per-slice filtering is on (a stack),
-   * only those on the current display slice ({@link Region.z} === current z);
-   * otherwise all regions. Overlays render this instead of {@link getRegions}
-   * (which stays the full set for save/export). (jit-ui#93)
+   * Enter per-slice stack mode. `slices` maps each zero-based slice index to
+   * the regions imported for that slice; the store makes `initialZ`'s slice the
+   * live set, so the overlays / selection / Regions table are unchanged (they
+   * still read {@link getRegions}). Freshly-created regions are tagged with the
+   * current slice so they persist on it, and {@link getSliceRegions} returns
+   * every slice for save/export. Ids/names/classification colours are minted
+   * exactly as {@link setRegions} does.
    */
-  getVisibleRegions(): Region[] {
-    if (!this.sliceFilterEnabled) return this.regions.slice();
-    return this.regions.filter((r) => (r.z ?? 0) === this.currentDisplayZ);
+  enterStackMode(slices: Map<number, Region[]>, initialZ = 0): void {
+    this.stackMode = true;
+    this.currentSliceZ = initialZ || 0;
+    this.regionsBySlice = new Map<number, Region[]>();
+    for (const [z, regs] of slices) {
+      this.regionsBySlice.set(z, this.normalizeSlice(regs || [], z));
+    }
+    this.regions = (this.regionsBySlice.get(this.currentSliceZ) ?? []).slice();
+    this.previousRegions = this.regions.slice();
+    this.selectedIds = [];
+    this.syncCache();
+    this.resetUndoHistory();
+    this.emitSelection();
+    this.emit();
   }
 
-  /** Enable/disable per-slice region filtering (on when a z-stack is displayed,
-   *  off for a single-plane image). Re-emits so overlays re-read. */
-  setSliceFilterEnabled(enabled: boolean): void {
-    if (this.sliceFilterEnabled === enabled) return;
-    this.sliceFilterEnabled = enabled;
-    this.regionUpdate$.next(this.getRegions());
+  /** Leave stack mode (single-plane image, or the stack was closed). */
+  exitStackMode(): void {
+    if (!this.stackMode) return;
+    this.stackMode = false;
+    this.currentSliceZ = 0;
+    this.regionsBySlice = new Map<number, Region[]>();
   }
 
-  /** Set the current display slice (0-based). New regions are tagged with it,
-   *  and — when filtering is on — only this slice's regions are shown.
-   *  Re-emits so overlays swap to the new slice's regions. (jit-ui#93) */
+  /**
+   * Show a different slice: capture the current slice's (possibly edited)
+   * regions back into the per-slice store, then load the target slice's regions
+   * as the live set and emit. Undo never crosses a slice. Outside stack mode
+   * this only records the requested slice (used to tag freshly-created regions).
+   * (jit-ui#93)
+   */
   setDisplaySlice(z: number): void {
     const next = z || 0;
-    if (this.currentDisplayZ === next) return;
-    this.currentDisplayZ = next;
-    if (this.sliceFilterEnabled) this.regionUpdate$.next(this.getRegions());
+    if (!this.stackMode) { this.currentSliceZ = next; return; }
+    if (this.currentSliceZ === next) return;
+    this.regionsBySlice.set(this.currentSliceZ, this.regions.slice());
+    this.currentSliceZ = next;
+    this.regions = (this.regionsBySlice.get(next) ?? []).slice();
+    this.previousRegions = this.regions.slice();
+    this.selectedIds = [];
+    this.syncCache();
+    this.resetUndoHistory();
+    this.emitSelection();
+    this.emit();
   }
 
-  getDisplaySlice(): number {
-    return this.currentDisplayZ;
+  /**
+   * Every slice's regions for save/export, each tagged with its zero-based
+   * slice index in {@link Region.z}. Captures the current slice's live edits
+   * first. Returns the flat single-plane set when not in stack mode. (jit-ui#93)
+   */
+  getSliceRegions(): Region[] {
+    if (!this.stackMode) return this.regions.slice();
+    this.regionsBySlice.set(this.currentSliceZ, this.regions.slice());
+    const out: Region[] = [];
+    const zs = Array.from(this.regionsBySlice.keys()).sort((a, b) => a - b);
+    for (const z of zs) {
+      for (const r of this.regionsBySlice.get(z) as Region[]) {
+        r.z = z;
+        out.push(r);
+      }
+    }
+    return out;
+  }
+
+  /** Mint ids/names + apply classification colours + tag the slice index, as
+   *  {@link setRegions} does, for regions entering the per-slice store. */
+  private normalizeSlice(regions: Region[], z: number): Region[] {
+    for (const region of regions) {
+      if (region.id == null) region.id = this.nextId++;
+      if (region.name == null) region.name = `shape${region.id}`;
+      region.z = z;
+    }
+    this.applyClassificationColors(regions);
+    return regions.slice();
   }
 
   /**
@@ -445,8 +508,8 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     if (region.name == null) region.name = `shape${region.id}`;
     // A region drawn on a stack belongs to the slice currently displayed, so
     // it saves/reloads on that slice (jit-ui#93). No-op for single-plane images
-    // (currentDisplayZ stays 0).
-    if (this.sliceFilterEnabled) region.z = this.currentDisplayZ;
+    // (currentSliceZ stays 0).
+    if (this.stackMode) region.z = this.currentSliceZ;
     this.applyClassificationColors([region]);
     this.regions.push(region);
     this.selectedIds = [region.id];
@@ -731,6 +794,9 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   setActiveImage(imageInfo: IImageInfo): void {
     const newKey = this.deriveImageKey(imageInfo);
     if (this.currentImageKey === newKey) return;
+    // Switching images ends any per-slice stack session (jit-ui#93); the loader
+    // re-enters stack mode afterwards if the new image is itself a z-stack.
+    this.exitStackMode();
     if (this.currentImageKey) {
       this.regionsByImageKey.set(this.currentImageKey, this.regions.slice());
     }
