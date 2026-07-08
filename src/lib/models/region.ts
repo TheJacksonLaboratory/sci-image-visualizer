@@ -15,9 +15,13 @@ export class Region {
    *  intensity tool, sampled into the inset) from annotation regions (owned by
    *  the Region Editor). Both backends (Plotly, OSD) honour it. */
   kind?: 'profile';
-  color?: string; // [r, g, b]
+  color?: string; // hex string, e.g. '#RRGGBB' (the historical "[r, g, b]" note is stale)
   // class label
   label?: string;
+  /** True when the user set this region's colour explicitly (Region Editor Color
+   *  column). Preset colour resolution (jit-ui#70) skips overridden regions so a
+   *  manual colour is not clobbered when presets are (re)applied on load/import. */
+  colorOverridden?: boolean;
   filename?: string;
   /** Zero-based z-slice this region belongs to within a stack — mirrors
    *  QuPath's `geometry.plane.z` (a missing plane / default plane reads back as

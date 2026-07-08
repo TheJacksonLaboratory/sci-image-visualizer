@@ -88,6 +88,29 @@
   </div>
 </p-toolbar>
 
+<!-- Annotation-class quick-pick strip (jit-ui#70): click a class to make it the
+     active class for new regions, or to re-classify the selected rows. -->
+<div class="class-chip-strip">
+  <span class="chip-strip-label">Classes</span>
+  <div class="chips">
+    <button *ngFor="let c of presetSet.classes" type="button"
+            class="class-chip" [class.active]="activeClass === c.name"
+            [pTooltip]="selectedRegions?.length
+              ? 'Apply “' + c.name + '” to selected region(s)'
+              : 'Set “' + c.name + '” as the active class for new regions'"
+            tooltipPosition="bottom"
+            (click)="selectActiveClass(c.name)">
+      <span class="chip-swatch" [style.background]="c.color"></span>
+      <span class="chip-name">{{ c.name }}</span>
+    </button>
+    <span *ngIf="!presetSet.classes.length" class="chip-strip-empty">No classes yet</span>
+  </div>
+  <button pButton type="button" icon="pi pi-cog" label="Manage"
+          class="p-button-sm p-button-text manage-classes-btn"
+          pTooltip="Manage annotation classes" tooltipPosition="bottom"
+          (click)="openManageDialog()"></button>
+</div>
+
 <div class="region-editor-content">
     <p-table #dt [value]="regions.slice(paginatorFirst, paginatorFirst + paginatorRows)"
              [tableStyle]="{'width': '100%'}" [(selection)]="selectedRegions"
@@ -111,9 +134,28 @@
           <td class="class-cell">
             <ng-container *ngIf="!isEditingLabel(region); else editLabelTpl">
               <span class="class-cell-display">
-                <span class="class-name" [pTooltip]="region.label" tooltipPosition="bottom">{{region.label}}</span>
+                <!-- Quick-pick a preset class (its colour follows); the pencil is for
+                     a free-form name / rename (jit-ui#70). -->
+                <p-dropdown class="class-dropdown" appendTo="body"
+                            [options]="presetSet.classes" optionLabel="name" optionValue="name"
+                            [ngModel]="region.label" [autoDisplayFirst]="false"
+                            (onChange)="applyPresetToRegion(region, $event.value)"
+                            (click)="$event.stopPropagation()">
+                  <ng-template pTemplate="selectedItem">
+                    <span class="dd-value">
+                      <span class="chip-swatch" [style.background]="colorForName(region.label)"></span>
+                      <span class="class-name" [pTooltip]="region.label" tooltipPosition="bottom">{{ region.label || '—' }}</span>
+                    </span>
+                  </ng-template>
+                  <ng-template let-c pTemplate="item">
+                    <span class="dd-value">
+                      <span class="chip-swatch" [style.background]="c.color"></span>
+                      <span>{{ c.name }}</span>
+                    </span>
+                  </ng-template>
+                </p-dropdown>
                 <i class="pi pi-pencil icon-hover ml-2"
-                   pTooltip="Edit label" tooltipPosition="bottom"
+                   pTooltip="Rename / free-form label" tooltipPosition="bottom"
                    (click)="startEditLabel(region, $event)"></i>
               </span>
             </ng-container>
@@ -282,6 +324,73 @@
   </ng-template>
 </p-dialog>
 
+<!-- Manage annotation classes (jit-ui#70): CRUD + fallback palette + matching/auto-add
+     settings + reset/import/export. Edits a working copy, committed on Apply/Done. -->
+<p-dialog header="Manage annotation classes" [(visible)]="showManageDialog" [modal]="true" appendTo="body"
+          [style]="{width: '34rem'}" [draggable]="true" [resizable]="false">
+  <div *ngIf="presetDraft" class="manage-dialog flex flex-column gap-3 pt-2">
+    <div class="manage-classes flex flex-column gap-2">
+      <div *ngFor="let c of presetDraft.classes; let i = index"
+           class="manage-class-row flex align-items-center gap-2">
+        <hex-color-picker [color]="c.color" (colorChange)="c.color = $event"></hex-color-picker>
+        <input type="text" pInputText class="p-inputtext-sm flex-1"
+               [(ngModel)]="c.name" placeholder="Class name"/>
+        <button pButton type="button" icon="pi pi-trash"
+                class="p-button-sm p-button-text p-button-warning"
+                pTooltip="Remove class" tooltipPosition="bottom"
+                (click)="removePresetClass(i)"></button>
+      </div>
+      <button pButton type="button" icon="pi pi-plus" label="Add class"
+              class="p-button-sm p-button-text align-self-start" (click)="addPresetClass()"></button>
+    </div>
+
+    <div class="manage-section flex flex-column gap-2">
+      <span class="section-title font-medium">Fallback palette
+        <small class="text-color-secondary">— colours for classes not listed</small></span>
+      <div class="fallback-palette flex align-items-center flex-wrap gap-2">
+        <span *ngFor="let col of presetDraft.fallbackPalette; let i = index"
+              class="fallback-swatch flex align-items-center">
+          <hex-color-picker [color]="col" (colorChange)="presetDraft.fallbackPalette[i] = $event"></hex-color-picker>
+          <i class="pi pi-times icon-hover ml-1" pTooltip="Remove" tooltipPosition="bottom"
+             (click)="removeFallbackColor(i)"></i>
+        </span>
+        <button pButton type="button" icon="pi pi-plus"
+                class="p-button-sm p-button-text" pTooltip="Add fallback colour"
+                tooltipPosition="bottom" (click)="addFallbackColor()"></button>
+      </div>
+    </div>
+
+    <div class="flex align-items-center gap-2">
+      <p-checkbox [(ngModel)]="presetDraft.autoPromote" [binary]="true" inputId="autoPromote"></p-checkbox>
+      <label for="autoPromote">Auto-add detected classes to this list as they appear</label>
+    </div>
+
+    <div class="flex align-items-center gap-3">
+      <span class="font-medium">Label matching</span>
+      <p-selectButton [options]="matchModeOptions" [(ngModel)]="presetDraft.matchMode"
+                      optionLabel="label" optionValue="value"></p-selectButton>
+    </div>
+  </div>
+
+  <ng-template pTemplate="footer">
+    <div class="flex align-items-center w-full">
+      <span class="flex gap-1">
+        <p-button label="Reset" icon="pi pi-refresh" [text]="true"
+                  (onClick)="resetPresetsToDefaults()"></p-button>
+        <p-button label="Import" icon="pi pi-upload" [text]="true"
+                  (onClick)="presetFileInput.click()"></p-button>
+        <input #presetFileInput type="file" accept=".json,application/json" hidden
+               (change)="importPresets($event); presetFileInput.value = ''"/>
+        <p-button label="Export" icon="pi pi-download" [text]="true"
+                  (onClick)="exportPresets()"></p-button>
+      </span>
+      <span class="flex-1"></span>
+      <p-button label="Apply" icon="pi pi-check" [text]="true" (onClick)="applyManageDialog(false)"></p-button>
+      <p-button label="Done" icon="pi pi-check" (onClick)="applyManageDialog(true)"></p-button>
+    </div>
+  </ng-template>
+</p-dialog>
+
 <p-dialog header="Region editor help" [(visible)]="displayHelpDialog" [style]="{width: '50vw'}"
           [maximizable]="true" [draggable]="true" appendTo="body">
   <p>
@@ -354,6 +463,23 @@
       rows, then use the palette button to set the outline colour <b>per class</b>:
       the dialog shows one colour picker for each class present in the selection,
       and applying recolours the selected regions of that class at once.</li>
+  </ul>
+
+  <h3>Annotation classes (presets)</h3>
+  <ul>
+    <li>The <b>class strip</b> above the table lists your preset classes with their
+      colours. Click a class to make it <b>active</b> (new regions inherit it); with
+      rows selected, clicking a class re-classifies them.</li>
+    <li>The <b>Class</b> column dropdown re-classifies one region to a preset (its
+      colour follows), or use the <i class="pi pi-pencil"></i> for a free-form name.</li>
+    <li><i class="pi pi-cog"></i> <b>Manage</b> opens the class editor: add / rename /
+      recolour / remove classes, edit the <b>fallback palette</b> (used for classes not
+      in the list), toggle auto-adding detected classes, choose exact vs. normalized
+      name matching, reset to defaults, and import/export the set as JSON.</li>
+    <li>Classes are saved <b>per user</b> on the server, so they follow you across
+      images and sessions. A class's colour is applied to matching regions on load,
+      overriding the colour stored in the file; a colour you set on a single region
+      (the Color column) is kept.</li>
   </ul>
 
   <h3>Region actions (right-click the diagram)</h3>

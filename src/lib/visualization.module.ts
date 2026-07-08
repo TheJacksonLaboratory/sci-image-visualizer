@@ -22,6 +22,7 @@ import { ConfirmDialogModule } from 'primeng/confirmdialog';
 import { InputTextModule } from 'primeng/inputtext';
 import { CheckboxModule } from 'primeng/checkbox';
 import { RadioButtonModule } from 'primeng/radiobutton';
+import { SelectButtonModule } from 'primeng/selectbutton';
 
 import { VisualizationComponent } from './visualization.component';
 import { ToolbarComponent } from './toolbar/toolbar.component';
@@ -75,6 +76,7 @@ import { CHANNEL_HISTOGRAM_API } from './contracts/channel-histogram-api.contrac
     InputTextModule,
     CheckboxModule,
     RadioButtonModule,
+    SelectButtonModule,
   ],
   exports: [VisualizationComponent, RegionEditorComponent, HexColorPickerComponent, ChannelHistogramComponent],
   providers: [

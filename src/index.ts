@@ -12,6 +12,7 @@ export * from './lib/contracts/region-editor-api.contract';
 export * from './lib/contracts/ports/image-state.port';
 export * from './lib/contracts/ports/tile-access.port';
 export * from './lib/contracts/ports/region-io.port';
+export * from './lib/contracts/ports/preferences.port';
 export * from './lib/contracts/channel-histogram-api.contract';
 export * from './lib/contracts/viz-config';
 export * from './lib/contracts/image.contract';
@@ -37,6 +38,7 @@ export {
 
 // ── Neutral data models ──────────────────────────────────────────────────
 export * from './lib/models/region';
+export * from './lib/models/class-preset';
 export { ShapeSelection } from './lib/models/shape';
 
 // ── Angular module + composition-root service ────────────────────────────

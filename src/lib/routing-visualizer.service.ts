@@ -5,6 +5,7 @@ import { Image } from 'image-js';
 
 import { IImageInfo, IImageMetadata } from './contracts/image.contract';
 import { Region } from './models/region';
+import { ClassPreset, PresetSet } from './models/class-preset';
 import { PlotlyService } from './implementations/plotly/plotly.service';
 import { OpenSeadragonVisualizerService } from './implementations/osd/openseadragon-visualizer.service';
 import { PlotType, PlotTypeDescriptor, isNapari3d, isNapariScatter } from './contracts/plot-type';
@@ -311,6 +312,14 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   getClassificationColors(): Map<string, string> { return this.renderer().getClassificationColors(); }
   setClassificationColor(label: string, color: string): void {
     this.renderer().setClassificationColor(label, color); }
+  // Annotation-class presets live in the shared VisualizerStore (backend-neutral
+  // session state), so route straight to it rather than through renderer(). (jit-ui#70)
+  getPresetSet(): PresetSet { return this.store.getPresetSet(); }
+  getPresetSet$(): Observable<PresetSet> { return this.store.getPresetSet$(); }
+  setPresetSet(set: PresetSet): void { this.store.setPresetSet(set); }
+  upsertClass(preset: ClassPreset): void { this.store.upsertClass(preset); }
+  removeClass(name: string): void { this.store.removeClass(name); }
+  resetPresets(): void { this.store.resetPresets(); }
   plotPreviousShapes(): void { this.renderer().plotPreviousShapes(); }
   setPreviousShapes(shapes: any[]): void { this.renderer().setPreviousShapes(shapes); }
   getPreviousShapes(): any[] { return this.renderer().getPreviousShapes(); }

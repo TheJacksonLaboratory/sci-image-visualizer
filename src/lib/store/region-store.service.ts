@@ -8,6 +8,7 @@ import { VisualizerStore } from './visualizer-store.service';
 import { defaultHandleOffsets } from '../models/bezier';
 import { IRegionStore } from '../contracts/visualizer.contract';
 import { IRegionEditApi } from '../contracts/region-store.contract';
+import { findPreset, fallbackColorFor } from './class-color.util';
 
 /**
  * Backend-neutral region store — the single source of truth for region state.
@@ -871,11 +872,31 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     return imageInfo.fileName || undefined;
   }
 
+  /**
+   * Resolve each region's colour from the annotation-class preset set (jit-ui#70).
+   * The presets are the source of truth for colour — this **overrides any colour
+   * embedded in the GeoJSON** (which the YOLO worker writes today). A matching
+   * preset gives the class colour; an unknown class gets a deterministic fallback
+   * colour (and, only when `autoPromote` is on, is added to the editable list).
+   * Regions the user explicitly recoloured (`colorOverridden`) are left untouched.
+   */
   private applyClassificationColors(regions: Region[]): void {
-    const classColors = this.store.getClassificationColors();
+    const set = this.store.getPresetSet();
+    const keyOf = (label: string) =>
+      set.matchMode === 'normalized' ? label.trim().toLowerCase() : label;
+    const known = new Set(set.classes.map((c) => keyOf(c.name)));
     for (const region of regions) {
-      if (region.label && classColors.has(region.label)) {
-        region.color = classColors.get(region.label)!;
+      if (!region.label || region.colorOverridden) continue;
+      const preset = findPreset(region.label, set);
+      if (preset) {
+        region.color = preset.color;
+        continue;
+      }
+      const color = fallbackColorFor(region.label, set.fallbackPalette);
+      region.color = color;
+      if (set.autoPromote && !known.has(keyOf(region.label))) {
+        known.add(keyOf(region.label));
+        this.store.upsertClass({ name: region.label, color, source: 'auto' });
       }
     }
   }

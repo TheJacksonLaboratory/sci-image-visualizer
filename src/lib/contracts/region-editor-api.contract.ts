@@ -1,6 +1,7 @@
 import { InjectionToken } from '@angular/core';
 import { Observable } from 'rxjs';
 import { Region } from '../models/region';
+import { ClassPreset, PresetSet } from '../models/class-preset';
 import { IImageMetadata } from './image.contract';
 
 /**
@@ -45,6 +46,20 @@ export interface IRegionEditorApi {
   // ── classification colours ────────────────────────────────────────────
   getClassificationColors(): Map<string, string>;
   setClassificationColor(label: string, color: string): void;
+
+  // ── annotation-class presets (jit-ui#70) ───────────────────────────────
+  /** The current per-user preset set (source of truth for region colours). */
+  getPresetSet(): PresetSet;
+  /** Emits the preset set on every change (BehaviorSubject-backed). */
+  getPresetSet$(): Observable<PresetSet>;
+  /** Replace the whole preset set (persists per-user). */
+  setPresetSet(set: PresetSet): void;
+  /** Add or update one class by name (persists). */
+  upsertClass(preset: ClassPreset): void;
+  /** Remove a class by name (persists). */
+  removeClass(name: string): void;
+  /** Restore the default preset set (persists). */
+  resetPresets(): void;
 
   // ── image metadata (for region areas in µm²) ──────────────────────────
   getImageMeta(): Observable<IImageMetadata[]>;

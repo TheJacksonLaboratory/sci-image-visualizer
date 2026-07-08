@@ -1,6 +1,10 @@
-import { Injectable, Optional } from '@angular/core';
+import { Injectable, Optional, Inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, Observable } from 'rxjs';
+import { BehaviorSubject, Observable, Subject } from 'rxjs';
+import { debounceTime } from 'rxjs/operators';
+
+import { ClassPreset, PresetSet, defaultPresetSet } from '../models/class-preset';
+import { PREFERENCES_PORT, PreferencesPort } from '../contracts/ports/preferences.port';
 
 import { IImageMetadata } from '../contracts/image.contract';
 import { IChannelState } from '../contracts/channel-histogram-api.contract';
@@ -52,23 +56,15 @@ export class VisualizerStore {
   private readonly grayscale$ = new BehaviorSubject<boolean>(false);
   private readonly invert$ = new BehaviorSubject<boolean>(false);
 
-  // ── Classification colours (class label → colour) ────────────────────
-  // Defaults shared by every backend's region renderer.
-  private readonly classificationColors = new Map<string, string>([
-    ['Fragmented-embryo', '#FF8C00'],
-    ['Dying-embryo', '#FF3333'],
-    ['Two-cell-embryo', '#33CC66'],
-    ['One-cell-embryo', '#3399FF'],
-    ['Unknown', '#888888'],
-    ['Tumor', '#FF4444'],
-    ['Stroma', '#44AAFF'],
-    ['Immune cells', '#FFDD00'],
-    ['Necrosis', '#AA6633'],
-    ['Region', '#00FFFF'],
-    ['Ignore', '#AAAAAA'],
-    ['Positive', '#00CC44'],
-    ['Negative', '#CC0000'],
-  ]);
+  // ── Annotation class presets (jit-ui#70) ─────────────────────────────
+  // The per-user, server-persisted source of truth for region colours, seeded
+  // from the historical default classes. Loaded/saved via the optional
+  // PreferencesPort (app-side adapter → jit-service). getClassificationColors()
+  // below stays as a name→colour view for the backends' region renderers.
+  private presetSet: PresetSet = defaultPresetSet();
+  private readonly presetSet$ = new BehaviorSubject<PresetSet>(this.presetSet);
+  private readonly savePresets$ = new Subject<void>();
+  private presetsLoaded = false;
 
   // ── Active on-canvas tool ────────────────────────────────────────────
   // Which tool the user has armed (pan, zoom, drawrect, wand, eraser, …) or
@@ -76,11 +72,15 @@ export class VisualizerStore {
   // the toolbar and whichever backend's overlay handles the pointer.
   private readonly activeTool$ = new BehaviorSubject<string | null>(null);
 
-  // Optional + a null default so the store can be constructed both via DI and
-  // directly (`new VisualizerStore()` in unit tests); the LUT fetch no-ops when
-  // there's no HttpClient.
-  constructor(@Optional() private readonly http: HttpClient | null = null) {
+  // Optional + null defaults so the store can be constructed both via DI and
+  // directly (`new VisualizerStore()` in unit tests); the LUT fetch and preset
+  // load/save no-op when their dependency is absent.
+  constructor(
+    @Optional() private readonly http: HttpClient | null = null,
+    @Optional() @Inject(PREFERENCES_PORT) private readonly prefsPort: PreferencesPort | null = null,
+  ) {
     this.loadColormapLuts();
+    this.initPresetPersistence();
   }
 
   /**
@@ -105,6 +105,43 @@ export class VisualizerStore {
       },
       error: () => { /* leave keys unresolved; named scales still work */ },
     });
+  }
+
+  // ── Preset persistence (jit-ui#70) ───────────────────────────────────
+  private initPresetPersistence(): void {
+    // Debounced write-back so a burst of edits collapses into one PUT.
+    this.savePresets$.pipe(debounceTime(800)).subscribe(() => {
+      this.prefsPort?.savePresetSet(this.presetSet).subscribe({ error: () => { /* keep local copy */ } });
+    });
+    // Load the user's saved set (if any); otherwise keep the seeded defaults.
+    this.prefsPort?.loadPresetSet().subscribe({
+      next: (set) => {
+        if (set && Array.isArray(set.classes) && set.classes.length > 0) {
+          this.presetSet = this.normalizePresetSet(set);
+          this.presetSet$.next(this.presetSet);
+        }
+        this.presetsLoaded = true;
+      },
+      error: () => { this.presetsLoaded = true; },
+    });
+  }
+
+  private normalizePresetSet(set: PresetSet): PresetSet {
+    const defaults = defaultPresetSet();
+    return {
+      classes: Array.isArray(set.classes) ? set.classes : [],
+      fallbackPalette:
+        Array.isArray(set.fallbackPalette) && set.fallbackPalette.length
+          ? set.fallbackPalette
+          : defaults.fallbackPalette,
+      autoPromote: !!set.autoPromote,
+      matchMode: set.matchMode === 'normalized' ? 'normalized' : 'exact',
+    };
+  }
+
+  /** Queue a debounced save. No-ops until the initial load resolves (and when no port is bound). */
+  private queuePresetSave(): void {
+    if (this.presetsLoaded) this.savePresets$.next();
   }
 
   /** The available colormap options (tree for the LUT dropdown). */
@@ -249,11 +286,51 @@ export class VisualizerStore {
     this.invert$.next(on);
   }
 
+  /** Name→colour view of the current preset set (compat for backend renderers
+   *  that still read a Map). */
   getClassificationColors(): Map<string, string> {
-    return this.classificationColors;
+    return new Map(this.presetSet.classes.map((c) => [c.name, c.color]));
   }
+  /** Upsert a single class colour (used by the editor's per-class colour picker). */
   setClassificationColor(label: string, color: string): void {
-    this.classificationColors.set(label, color);
+    this.upsertClass({ name: label, color });
+  }
+
+  // ── Annotation-class preset set accessors (jit-ui#70) ────────────────
+  getPresetSet(): PresetSet {
+    return this.presetSet;
+  }
+  getPresetSet$(): Observable<PresetSet> {
+    return this.presetSet$.asObservable();
+  }
+  setPresetSet(set: PresetSet): void {
+    this.presetSet = this.normalizePresetSet(set);
+    this.presetSet$.next(this.presetSet);
+    this.queuePresetSave();
+  }
+  /** Add or update a class (keyed by exact stored `name`). */
+  upsertClass(preset: ClassPreset): void {
+    const classes = [...this.presetSet.classes];
+    const i = classes.findIndex((c) => c.name === preset.name);
+    if (i >= 0) classes[i] = { ...classes[i], ...preset };
+    else classes.push({ ...preset });
+    this.presetSet = { ...this.presetSet, classes };
+    this.presetSet$.next(this.presetSet);
+    this.queuePresetSave();
+  }
+  removeClass(name: string): void {
+    this.presetSet = { ...this.presetSet, classes: this.presetSet.classes.filter((c) => c.name !== name) };
+    this.presetSet$.next(this.presetSet);
+    this.queuePresetSave();
+  }
+  resetPresets(): void {
+    this.presetSet = defaultPresetSet();
+    this.presetSet$.next(this.presetSet);
+    this.queuePresetSave();
+  }
+  /** Force a (debounced) write-back of the current preset set. */
+  persistPresets(): void {
+    this.queuePresetSave();
   }
 
   getActiveTool$(): Observable<string | null> {

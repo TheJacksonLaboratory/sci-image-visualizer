@@ -5,6 +5,8 @@ import { Subject, Subscription } from 'rxjs';
 import { debounceTime, switchMap } from 'rxjs/operators';
 
 import { Polygon, Rectangle, Region, MultiPolygon } from '../models/region';
+import { PresetSet, ClassPreset, defaultPresetSet } from '../models/class-preset';
+import { colorForLabel } from '../store/class-color.util';
 import { IImageMetadata } from '../contracts/image.contract';
 import { ConfirmationService, MessageService } from 'primeng/api';
 import { IRegionEditorApi, REGION_EDITOR_API } from '../contracts/region-editor-api.contract';
@@ -38,6 +40,20 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   labelColors: Map<string, string> = new Map();
   selectedLabelColor = '';
   labelToEdit = '';
+
+  // ── annotation-class presets (jit-ui#70) ──
+  /** Local mirror of the per-user preset set (chip strip, Class dropdown, dialog). */
+  presetSet: PresetSet = defaultPresetSet();
+  /** Class applied to newly drawn/added regions and to bulk chip-clicks. */
+  activeClass: string | null = null;
+  showManageDialog = false;
+  /** Working copy edited inside the Manage-classes dialog; committed on Apply/Done. */
+  presetDraft: PresetSet | null = null;
+  readonly matchModeOptions = [
+    { label: 'Exact', value: 'exact' },
+    { label: 'Normalized', value: 'normalized' },
+  ];
+
   paginatorFirst = 0;
   paginatorRows = 10;
   readonly rowsPerPageOptions = [10, 25, 50];
@@ -87,6 +103,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   private _regionSub = new Subscription();
   private _selectedIdxSub = new Subscription();
   private _metaSub = new Subscription();
+  private _presetSub = new Subscription();
 
   /** Physical pixel size (µm/pixel) of the active image, for region areas in
    *  µm². Undefined when the format reports no physical size. */
@@ -124,6 +141,16 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.showShapeLabel = this.regionApi.getShowShapeLabel();
     this.shapeColor = this.regionApi.getShapeColor();
     this.fillColor = this.regionApi.getFillColor();
+
+    // Annotation-class presets (jit-ui#70): mirror the set for the chip strip,
+    // the Class dropdown and the manage dialog. Guarded with optional calls so
+    // partial API mocks in tests (which omit the preset methods) don't throw.
+    const initialPresets = this.regionApi.getPresetSet?.();
+    if (initialPresets) this.presetSet = initialPresets;
+    const presets$ = this.regionApi.getPresetSet$?.();
+    if (presets$) {
+      this._presetSub = presets$.subscribe((set) => { if (set) this.presetSet = set; });
+    }
     // Seed from the visualizer's current regions — already scoped to the
     // active image by the per-image cache, and handed back as neutral Region
     // objects (no backend shape format involved).
@@ -190,6 +217,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this._regionSub.unsubscribe();
     this._selectedIdxSub.unsubscribe();
     this._metaSub.unsubscribe();
+    this._presetSub.unsubscribe();
     if (this._saveAsTimer !== undefined) clearTimeout(this._saveAsTimer);
     this._saveAsSub?.unsubscribe();
     this.teardownMaskWorker();
@@ -257,6 +285,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   changeRegionColor(region: Region, color: string): void {
     if (!color || region.color === color) return;
     region.color = color;
+    region.colorOverridden = true; // explicit per-region colour — preserve it against preset (re)apply (jit-ui#70)
     if (region.label) this.labelColors.set(region.label, color);
     this.setRegionsFromEditor();
   }
@@ -266,7 +295,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     region.bounds = new Rectangle();
     region.bounds.width = 512;
     region.bounds.height = 512;
-    region.label = 'legend';
+    region.label = this.activeClass ?? 'legend';
     // id and a non-colliding name are minted by the visualizer's setRegions
     this.regions = [...this.regions, region];
     this.setRegionsFromEditor();
@@ -410,7 +439,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   addPolygon() {
     const region = new Region();
     region.bounds = new Polygon();
-    region.label = 'legend';
+    region.label = this.activeClass ?? 'legend';
     region.bounds.ypoints = [0, 0, 0];
     region.bounds.xpoints = [0, 0, 0];
     region.bounds.coordinates = [
@@ -614,10 +643,115 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       const color = colorByLabel.get(label);
       if (!color) continue;
       region.color = color;
+      region.colorOverridden = true; // explicit colour — preserve against preset (re)apply (jit-ui#70)
       if (label) this.labelColors.set(label, color);
     }
     this.setRegionsFromEditor();
     this.showColorDialog = false;
+  }
+
+  // ── annotation-class presets (jit-ui#70) ─────────────────────────────
+
+  /** Resolve the display colour for a class name (preset colour or deterministic fallback). */
+  colorForName(name?: string): string {
+    return name ? colorForLabel(name, this.presetSet) : this.shapeColor;
+  }
+
+  /** Stamp a class (and its preset/fallback colour) onto one region from the Class
+   *  dropdown; choosing a class opts the region back into the preset colour. */
+  applyPresetToRegion(region: Region, className: string): void {
+    const name = (className ?? '').trim();
+    region.label = name;
+    region.colorOverridden = false;
+    if (name) region.color = colorForLabel(name, this.presetSet);
+    this.setRegionsFromEditor();
+  }
+
+  /** Make a class active (used for new regions) and, if rows are selected, apply
+   *  it to them in one commit. */
+  selectActiveClass(name: string): void {
+    this.activeClass = name;
+    const selected = this.selectedRegions ?? [];
+    if (selected.length) {
+      for (const r of selected) {
+        r.label = name;
+        r.colorOverridden = false;
+        r.color = colorForLabel(name, this.presetSet);
+      }
+      this.setRegionsFromEditor();
+    }
+  }
+
+  // ── Manage-classes dialog ──
+  openManageDialog(): void {
+    this.presetDraft = this.clonePresetSet(this.presetSet);
+    this.showManageDialog = true;
+  }
+  private clonePresetSet(s: PresetSet): PresetSet {
+    return {
+      classes: (s.classes ?? []).map((c) => ({ ...c })),
+      fallbackPalette: [...(s.fallbackPalette ?? [])],
+      autoPromote: !!s.autoPromote,
+      matchMode: s.matchMode === 'normalized' ? 'normalized' : 'exact',
+    };
+  }
+  addPresetClass(): void {
+    this.presetDraft?.classes.push({ name: '', color: '#888888', source: 'user' });
+  }
+  removePresetClass(i: number): void {
+    this.presetDraft?.classes.splice(i, 1);
+  }
+  addFallbackColor(): void {
+    this.presetDraft?.fallbackPalette.push('#888888');
+  }
+  removeFallbackColor(i: number): void {
+    this.presetDraft?.fallbackPalette.splice(i, 1);
+  }
+  /** Commit the draft: drop blank/duplicate names, persist, and recolour
+   *  non-overridden regions with the updated presets. */
+  applyManageDialog(close: boolean): void {
+    if (!this.presetDraft) return;
+    const seen = new Set<string>();
+    const classes: ClassPreset[] = [];
+    for (const c of this.presetDraft.classes) {
+      const name = (c.name ?? '').trim();
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      classes.push({ ...c, name });
+    }
+    this.presetDraft.classes = classes;
+    this.regionApi.setPresetSet(this.presetDraft);
+    this.setRegionsFromEditor(); // recolour existing (non-overridden) regions from the new presets
+    if (close) this.showManageDialog = false;
+  }
+  resetPresetsToDefaults(): void {
+    this.regionApi.resetPresets();
+    this.presetDraft = this.clonePresetSet(this.regionApi.getPresetSet());
+    this.setRegionsFromEditor();
+  }
+  exportPresets(): void {
+    const json = JSON.stringify(this.regionApi.getPresetSet(), null, 2);
+    saveAs(new Blob([json], { type: 'application/json' }), 'annotation-classes.json');
+  }
+  importPresets(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e: any) => {
+      try {
+        const set = JSON.parse(e.target.result) as PresetSet;
+        this.regionApi.setPresetSet(set);
+        this.presetDraft = this.clonePresetSet(this.regionApi.getPresetSet());
+        this.setRegionsFromEditor();
+        this.messageService.add({ key: 'app-toast', severity: 'success',
+          summary: 'Classes imported', detail: 'Annotation classes loaded.' });
+      } catch (err) {
+        this.messageService.add({ key: 'app-toast', severity: 'error',
+          summary: 'Import failed', detail: `${err}` });
+      }
+    };
+    reader.readAsText(file);
   }
 
   importRois(event: Event) {

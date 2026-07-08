@@ -12,6 +12,7 @@ import { ShapeSelection } from '../models/shape';
 import { NO_ERRORS_SCHEMA } from '@angular/core';
 import { HexColorPickerComponent } from '../hex-color-picker/hex-color-picker.component';
 import { REGION_IO_PORT, RegionIoPort } from '../contracts/ports/region-io.port';
+import { PresetSet } from '../models/class-preset';
 
 jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
 import { saveAs } from 'file-saver';
@@ -1366,5 +1367,155 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
     component.stopEditLabel(r, true); // commit
     expect(component.isEditingLabel(r)).toBe(false);
     expect(api.setAnnotationRegions).toHaveBeenCalled();
+  });
+});
+
+describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () => {
+  let component: RegionEditorComponent;
+  let fixture: ComponentFixture<RegionEditorComponent>;
+  let api: RoutingVisualizerService;
+  let currentSet: PresetSet;
+
+  const makeSet = (): PresetSet => ({
+    classes: [
+      { name: 'Tumor', color: '#FF4444' },
+      { name: 'Stroma', color: '#44AAFF' },
+    ],
+    fallbackPalette: ['#111111', '#222222', '#333333'],
+    autoPromote: false,
+    matchMode: 'exact',
+  });
+
+  beforeEach(async () => {
+    currentSet = makeSet();
+    let idc = 1;
+    api = MockService(RoutingVisualizerService, {
+      getShowShapeLabel: () => false,
+      getShapeColor: () => '#00FFFF',
+      getFillColor: () => 'rgba(0,0,0,0)',
+      getClassificationColors: () => new Map<string, string>(),
+      getRegionUpdateEvent: () => EMPTY,
+      getSelectedRegions$: () => EMPTY,
+      getImageMeta: () => EMPTY,
+      setSelectedRegions: jest.fn(),
+      getAnnotationRegions: () => [],
+      setAnnotationRegions: jest.fn((regions: Region[]) => {
+        for (const r of regions ?? []) { if (r.id == null) r.id = idc++; }
+      }),
+      getPresetSet: () => currentSet,
+      getPresetSet$: () => of(currentSet),
+      setPresetSet: jest.fn((s: PresetSet) => { currentSet = s; }),
+      upsertClass: jest.fn(),
+      removeClass: jest.fn(),
+      resetPresets: jest.fn(),
+    });
+
+    await TestBed.configureTestingModule({
+      declarations: [RegionEditorComponent, HexColorPickerComponent],
+      imports: [FormsModule],
+      providers: [
+        { provide: REGION_EDITOR_API, useValue: api },
+        { provide: MessageService, useValue: MockService(MessageService) },
+        { provide: ConfirmationService, useValue: MockService(ConfirmationService) },
+        {
+          provide: REGION_IO_PORT,
+          useValue: {
+            getSelectedFileName: () => undefined,
+            roiFileExists: () => of(false),
+            saveGeoJson: () => of(void 0),
+            saveSliceGeoJsons: () => of(void 0),
+          } as RegionIoPort,
+        },
+      ],
+      schemas: [NO_ERRORS_SCHEMA],
+    }).compileComponents();
+
+    fixture = TestBed.createComponent(RegionEditorComponent);
+    component = fixture.componentInstance;
+    component.ngOnInit();
+  });
+
+  it('mirrors the preset set from the API on init', () => {
+    expect(component.presetSet.classes.map((c) => c.name)).toEqual(['Tumor', 'Stroma']);
+  });
+
+  it('colorForName returns the preset colour, else a deterministic fallback', () => {
+    expect(component.colorForName('Tumor')).toBe('#FF4444');
+    const unknown = component.colorForName('Mitosis');
+    expect(currentSet.fallbackPalette).toContain(unknown);
+    expect(component.colorForName('Mitosis')).toBe(unknown); // stable across calls
+  });
+
+  it('applyPresetToRegion stamps the class + preset colour, clears the override, and commits', () => {
+    const r = Object.assign(new Region(), { id: 1, label: 'x', color: '#000000', colorOverridden: true });
+    component.applyPresetToRegion(r, 'Tumor');
+    expect(r.label).toBe('Tumor');
+    expect(r.color).toBe('#FF4444');
+    expect(r.colorOverridden).toBe(false);
+    expect(api.setAnnotationRegions).toHaveBeenCalled();
+  });
+
+  it('applyPresetToRegion gives an unknown class a deterministic fallback colour', () => {
+    const r = Object.assign(new Region(), { id: 1 });
+    component.applyPresetToRegion(r, 'Mitosis');
+    expect(r.label).toBe('Mitosis');
+    expect(currentSet.fallbackPalette).toContain(r.color);
+  });
+
+  it('selectActiveClass sets the active class and applies it to the selection', () => {
+    const a = Object.assign(new Region(), { id: 1 });
+    const b = Object.assign(new Region(), { id: 2 });
+    component.selectedRegions = [a, b];
+    component.selectActiveClass('Stroma');
+    expect(component.activeClass).toBe('Stroma');
+    expect(a.label).toBe('Stroma');
+    expect(b.color).toBe('#44AAFF');
+    expect(api.setAnnotationRegions).toHaveBeenCalled();
+  });
+
+  it('new regions inherit the active class', () => {
+    component.activeClass = 'Tumor';
+    component.addRectangle();
+    const added = component.regions[component.regions.length - 1];
+    expect(added.label).toBe('Tumor');
+  });
+
+  it('openManageDialog clones the set into an isolated draft', () => {
+    component.openManageDialog();
+    expect(component.showManageDialog).toBe(true);
+    expect(component.presetDraft).toBeTruthy();
+    component.presetDraft!.classes[0].name = 'Changed';
+    // mutating the draft must not touch the live set
+    expect(component.presetSet.classes[0].name).toBe('Tumor');
+  });
+
+  it('applyManageDialog drops blank/duplicate names, persists, and recolours regions', () => {
+    component.openManageDialog();
+    component.presetDraft!.classes = [
+      { name: 'Tumor', color: '#FF0000' },
+      { name: '   ', color: '#000000' },   // blank -> dropped
+      { name: 'Tumor', color: '#00FF00' }, // duplicate -> dropped
+      { name: 'New', color: '#123456' },
+    ];
+    component.applyManageDialog(true);
+    expect(api.setPresetSet).toHaveBeenCalled();
+    const saved = (api.setPresetSet as jest.Mock).mock.calls[0][0] as PresetSet;
+    expect(saved.classes.map((c) => c.name)).toEqual(['Tumor', 'New']);
+    expect(api.setAnnotationRegions).toHaveBeenCalled();
+    expect(component.showManageDialog).toBe(false);
+  });
+
+  it('add/remove helpers mutate the draft', () => {
+    component.openManageDialog();
+    const n = component.presetDraft!.classes.length;
+    component.addPresetClass();
+    expect(component.presetDraft!.classes.length).toBe(n + 1);
+    component.removePresetClass(0);
+    expect(component.presetDraft!.classes.length).toBe(n);
+    const f = component.presetDraft!.fallbackPalette.length;
+    component.addFallbackColor();
+    expect(component.presetDraft!.fallbackPalette.length).toBe(f + 1);
+    component.removeFallbackColor(0);
+    expect(component.presetDraft!.fallbackPalette.length).toBe(f);
   });
 });

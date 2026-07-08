@@ -285,3 +285,112 @@ kbd {
   font-family: monospace;
   font-size: 0.85em;
 }
+
+/* =====================================================================
+ * Annotation-class presets (jit-ui#70): chip strip, Class dropdown, dialog
+ * ===================================================================== */
+
+/* Quick-pick class strip below the toolbar. */
+.class-chip-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--surface-border);
+  overflow-x: auto;
+}
+.class-chip-strip .chip-strip-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-color-secondary);
+  flex: 0 0 auto;
+}
+.class-chip-strip .chips {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.class-chip-strip .chip-strip-empty {
+  font-size: 0.8rem;
+  color: var(--text-color-secondary);
+}
+.class-chip-strip .manage-classes-btn {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+/* A class chip (button styled as a pill). */
+.class-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--surface-border);
+  background: var(--surface-card, #fff);
+  color: var(--text-color);
+  border-radius: 1rem;
+  padding: 0.2rem 0.6rem 0.2rem 0.45rem;
+  font-size: 0.8rem;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.class-chip:hover {
+  border-color: var(--primary-color);
+}
+.class-chip.active {
+  border-color: var(--primary-color);
+  background: var(--highlight-bg, rgba(51, 153, 255, 0.12));
+  color: var(--primary-color);
+  box-shadow: inset 0 0 0 1px var(--primary-color);
+}
+
+/* Small round colour swatch, reused in chips and the Class dropdown. */
+.chip-swatch {
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  flex: 0 0 auto;
+}
+
+/* Class column dropdown: fill the cell; swatch + name inline. */
+.class-cell .class-dropdown {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+::ng-deep .class-cell .class-dropdown.p-dropdown {
+  width: 100%;
+}
+::ng-deep .class-cell .class-dropdown .p-dropdown-label {
+  padding: 0.15rem 0.5rem;
+  display: flex;
+  align-items: center;
+}
+.dd-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.dd-value .class-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Manage-classes dialog. */
+.manage-dialog .manage-class-row hex-color-picker,
+.manage-dialog .fallback-palette hex-color-picker {
+  flex: 0 0 auto;
+}
+.manage-dialog .fallback-palette .icon-hover {
+  cursor: pointer;
+  color: var(--text-color-secondary);
+}
+.manage-dialog .fallback-palette .icon-hover:hover {
+  color: var(--primary-color);
+}
