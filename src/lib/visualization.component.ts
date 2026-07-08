@@ -474,14 +474,20 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
               };
 
               const applyRoi = () => {
-                // Folder stack: per-slice ROIs (roiJsonStrs, one entry per
-                // slice-file). Import EVERY slice into a per-slice map and enter
-                // stack mode; it saves back one geojson per slice-file (jit-ui#93).
-                if (imgInfo.isStack && imgInfo.roiJsonStrs) {
+                // Folder stack: a stack of self-contained per-slice files
+                // (tiled === false; see loadSeriesAsStack). Each slice-file may
+                // carry its own sibling "<stem>.geojson" (roiJsonStrs[z]), but a
+                // fresh folder with none yet leaves roiJsonStrs undefined — key
+                // off `tiled === false`, NOT roiJsonStrs, so an unannotated
+                // folder stack still enters the per-slice-file layout (and saves
+                // back one geojson per slice-file) rather than falling through to
+                // the single-file combined path (jit-ui#93).
+                if (imgInfo.isStack && imgInfo.tiled === false) {
                   const perSlice = imgInfo.roiJsonStrs;
+                  const sliceCount = imgInfo.urls?.length ?? perSlice?.length ?? 0;
                   const slices = new Map<number, Region[]>();
-                  for (let z = 0; z < perSlice.length; z++) {
-                    const json = perSlice[z] ?? null;
+                  for (let z = 0; z < sliceCount; z++) {
+                    const json = perSlice?.[z] ?? null;
                     slices.set(z, json ? this.plotService.importRegions(json) : []);
                   }
                   enterStack(slices, 'per-slice-file');

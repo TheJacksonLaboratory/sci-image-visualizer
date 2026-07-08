@@ -221,8 +221,9 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
    * Show a different slice: capture the current slice's (possibly edited)
    * regions back into the per-slice store, then load the target slice's regions
    * as the live set and emit. Undo never crosses a slice. Outside stack mode
-   * this only records the requested slice (used to tag freshly-created regions).
-   * (jit-ui#93)
+   * this only records the requested slice index (a no-op otherwise: single-plane
+   * regions stay on the default plane — addRegion tags Region.z only in stack
+   * mode, so the recorded index is unused until a stack is entered). (jit-ui#93)
    */
   setDisplaySlice(z: number): void {
     const next = z || 0;
