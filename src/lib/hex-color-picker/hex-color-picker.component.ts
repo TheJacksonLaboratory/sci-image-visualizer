@@ -1,7 +1,6 @@
 import {
-  Component, EventEmitter, Input, Output, ElementRef,
-  HostListener, ViewChild, OnDestroy, Renderer2,
-  ChangeDetectorRef
+  ChangeDetectionStrategy, ChangeDetectorRef, Component, ElementRef,
+  EventEmitter, HostListener, Input, OnDestroy, Output, Renderer2, ViewChild,
 } from '@angular/core';
 
 @Component({
@@ -10,6 +9,10 @@ import {
   selector: 'jaxviz-hex-color-picker, hex-color-picker',
   templateUrl: './hex-color-picker.component.html',
   styleUrls: ['./hex-color-picker.component.scss'],
+  // OnPush so the always-in-DOM (but hidden) picker panel — a ~130-cell honeycomb
+  // grid + sliders — isn't re-checked on every scroll-triggered change detection.
+  // Inputs (`color`) and the picker's own events still mark it for check. (jit-ui#70)
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class HexColorPickerComponent implements OnDestroy {
 
