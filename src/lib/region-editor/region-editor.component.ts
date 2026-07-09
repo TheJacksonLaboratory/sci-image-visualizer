@@ -158,6 +158,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     // intensity tool and excluded by the contract, so the editor never sees them.
     this.regions = this.applyRegionColors(this.regionApi.getAnnotationRegions());
     this.regionsCopy = this.deepClone(this.regions);
+    this.syncClassesFromRegions(this.regions);
 
     // The update event is just a change signal; re-read the regions from the
     // visualizer rather than parsing whatever payload it carries.
@@ -171,6 +172,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       this.regionsCopy = this.deepClone(this.regions);
       this.selectedRegions = updated.filter((r) => selectedIds.has(r.id));
       this.clampPaginatorFirst();
+      this.syncClassesFromRegions(updated);
     });
 
     this._saveAsCheck$.pipe(
@@ -657,6 +659,33 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     return name ? colorForLabel(name, this.presetSet) : this.shapeColor;
   }
 
+  /**
+   * Ensure every class label present in the loaded regions exists in the preset
+   * list, auto-adding any that are missing (using the region's already-resolved
+   * colour). This makes classes carried in a loaded/imported GeoJSON show up as
+   * chips + Class-dropdown options (a p-dropdown can't display a value that isn't
+   * an option) and lets the user manage them. The placeholder 'legend' and empty
+   * labels are ignored. (jit-ui#70)
+   */
+  private syncClassesFromRegions(regions: Region[]): void {
+    const normalized = this.presetSet.matchMode === 'normalized';
+    const keyOf = (l: string) => (normalized ? l.trim().toLowerCase() : l);
+    const known = new Set(this.presetSet.classes.map((c) => keyOf(c.name)));
+    const added = new Set<string>();
+    for (const r of regions) {
+      const label = r.label?.trim();
+      if (!label || label === 'legend') continue;
+      const k = keyOf(label);
+      if (known.has(k) || added.has(k)) continue;
+      added.add(k);
+      this.regionApi.upsertClass({
+        name: label,
+        color: r.color || colorForLabel(label, this.presetSet),
+        source: 'auto',
+      });
+    }
+  }
+
   /** Stamp a class (and its preset/fallback colour) onto one region from the Class
    *  dropdown; choosing a class opts the region back into the preset colour. */
   applyPresetToRegion(region: Region, className: string): void {
@@ -767,6 +796,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
         for (const region of this.regions) {
           this.labelRegionUpdate(region, false);
         }
+        this.syncClassesFromRegions(this.regions);
         this.setRegionsFromEditor();
       } catch (event) {
         this.messageService.add({

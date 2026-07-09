@@ -1505,6 +1505,23 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
     expect(component.showManageDialog).toBe(false);
   });
 
+  it('auto-adds classes found on loaded regions (not already presets), ignoring legend/empty', () => {
+    const loaded = [
+      Object.assign(new Region(), { id: 1, label: 'Tumor', color: '#FF4444' }),      // already a preset
+      Object.assign(new Region(), { id: 2, label: 'Optic-disc', color: '#123456' }), // new -> added
+      Object.assign(new Region(), { id: 3, label: 'legend', color: '#00FFFF' }),      // placeholder -> ignored
+      Object.assign(new Region(), { id: 4, label: '', color: '#000000' }),            // empty -> ignored
+    ];
+    (component as any).syncClassesFromRegions(loaded);
+    const added = (api.upsertClass as jest.Mock).mock.calls.map((c) => c[0]);
+    const names = added.map((p) => p.name);
+    expect(names).toContain('Optic-disc');
+    expect(names).not.toContain('Tumor');
+    expect(names).not.toContain('legend');
+    expect(names).not.toContain('');
+    expect(added.find((p) => p.name === 'Optic-disc').color).toBe('#123456');
+  });
+
   it('add/remove helpers mutate the draft', () => {
     component.openManageDialog();
     const n = component.presetDraft!.classes.length;

@@ -88,10 +88,17 @@
   </div>
 </p-toolbar>
 
-<!-- Annotation-class quick-pick strip (jit-ui#70): click a class to make it the
+<!-- Annotation-class quick-pick strip (jit-ui#70): a "Classes" header + Manage
+     button above a full-width, wrapping tag list. Click a class to make it the
      active class for new regions, or to re-classify the selected rows. -->
 <div class="class-chip-strip">
-  <span class="chip-strip-label">Classes</span>
+  <div class="chip-strip-header">
+    <span class="chip-strip-label">Classes</span>
+    <button pButton type="button" icon="pi pi-cog" label="Manage"
+            class="p-button-sm p-button-text manage-classes-btn"
+            pTooltip="Manage annotation classes" tooltipPosition="bottom"
+            (click)="openManageDialog()"></button>
+  </div>
   <div class="chips">
     <button *ngFor="let c of presetSet.classes" type="button"
             class="class-chip" [class.active]="activeClass === c.name"
@@ -105,10 +112,6 @@
     </button>
     <span *ngIf="!presetSet.classes.length" class="chip-strip-empty">No classes yet</span>
   </div>
-  <button pButton type="button" icon="pi pi-cog" label="Manage"
-          class="p-button-sm p-button-text manage-classes-btn"
-          pTooltip="Manage annotation classes" tooltipPosition="bottom"
-          (click)="openManageDialog()"></button>
 </div>
 
 <div class="region-editor-content">
@@ -373,8 +376,8 @@
   </div>
 
   <ng-template pTemplate="footer">
-    <div class="flex align-items-center w-full">
-      <span class="flex gap-1">
+    <div class="manage-footer flex align-items-center flex-wrap gap-2 w-full">
+      <span class="flex align-items-center flex-wrap gap-1">
         <p-button label="Reset" icon="pi pi-refresh" [text]="true"
                   (onClick)="resetPresetsToDefaults()"></p-button>
         <p-button label="Import" icon="pi pi-upload" [text]="true"
@@ -385,8 +388,8 @@
                   (onClick)="exportPresets()"></p-button>
       </span>
       <span class="flex-1"></span>
-      <p-button label="Apply" icon="pi pi-check" [text]="true" (onClick)="applyManageDialog(false)"></p-button>
-      <p-button label="Done" icon="pi pi-check" (onClick)="applyManageDialog(true)"></p-button>
+      <!-- Apply persists to the server and closes; it replaces the old Apply+Done pair. -->
+      <p-button label="Apply" icon="pi pi-check" (onClick)="applyManageDialog(true)"></p-button>
     </div>
   </ng-template>
 </p-dialog>

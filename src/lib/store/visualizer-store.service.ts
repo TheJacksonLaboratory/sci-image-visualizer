@@ -144,6 +144,14 @@ export class VisualizerStore {
     if (this.presetsLoaded) this.savePresets$.next();
   }
 
+  /** Persist the current preset set immediately, bypassing the incremental-edit
+   *  debounce. Used for explicit bulk actions (Apply / Import / Reset). */
+  private savePresetsNow(): void {
+    if (this.presetsLoaded) {
+      this.prefsPort?.savePresetSet(this.presetSet).subscribe({ error: () => { /* keep local copy */ } });
+    }
+  }
+
   /** The available colormap options (tree for the LUT dropdown). */
   getColormapOptions(): any {
     return COLORMAP_OPTIONS;
@@ -306,7 +314,7 @@ export class VisualizerStore {
   setPresetSet(set: PresetSet): void {
     this.presetSet = this.normalizePresetSet(set);
     this.presetSet$.next(this.presetSet);
-    this.queuePresetSave();
+    this.savePresetsNow(); // explicit bulk apply/import → persist immediately
   }
   /** Add or update a class (keyed by exact stored `name`). */
   upsertClass(preset: ClassPreset): void {
@@ -326,7 +334,7 @@ export class VisualizerStore {
   resetPresets(): void {
     this.presetSet = defaultPresetSet();
     this.presetSet$.next(this.presetSet);
-    this.queuePresetSave();
+    this.savePresetsNow(); // explicit reset → persist immediately
   }
   /** Force a (debounced) write-back of the current preset set. */
   persistPresets(): void {

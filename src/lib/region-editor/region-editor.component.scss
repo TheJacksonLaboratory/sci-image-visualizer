@@ -290,35 +290,43 @@ kbd {
  * Annotation-class presets (jit-ui#70): chip strip, Class dropdown, dialog
  * ===================================================================== */
 
-/* Quick-pick class strip below the toolbar. */
+/* Quick-pick class strip below the toolbar: a header row ("Classes" + Manage)
+ * stacked above a full-width, wrapping tag list. */
 .class-chip-strip {
   display: flex;
-  align-items: center;
-  gap: 0.5rem;
+  flex-direction: column;
+  gap: 0.35rem;
   flex: 0 0 auto;
-  padding: 0.25rem 0.5rem;
+  padding: 0.4rem 0.5rem;
   border-bottom: 1px solid var(--surface-border);
-  overflow-x: auto;
+}
+.class-chip-strip .chip-strip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
 }
 .class-chip-strip .chip-strip-label {
   font-size: 0.75rem;
   font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
   color: var(--text-color-secondary);
+}
+.class-chip-strip .manage-classes-btn {
   flex: 0 0 auto;
 }
+/* The tag list fills the full editor width and wraps onto as many rows as needed. */
 .class-chip-strip .chips {
   display: flex;
   align-items: center;
   gap: 0.35rem;
   flex-wrap: wrap;
+  width: 100%;
 }
 .class-chip-strip .chip-strip-empty {
   font-size: 0.8rem;
   color: var(--text-color-secondary);
-}
-.class-chip-strip .manage-classes-btn {
-  margin-left: auto;
-  flex: 0 0 auto;
 }
 
 /* A class chip (button styled as a pill). */
