@@ -96,7 +96,7 @@ describe('WandToolService', () => {
     expect(state.regions).toHaveLength(1);
     expect(state.regions[0].bounds).toBeInstanceOf(Polygon);
     expect(state.regions[0].color).toBe('#ffffff');
-    expect(state.regions[0].label).toBe('legend'); // default class label
+    expect(state.regions[0].label).toBe('Region'); // default class label
   });
 
   it('a drag (mousedown → mousemove) keeps extending the same region', () => {

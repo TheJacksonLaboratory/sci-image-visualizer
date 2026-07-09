@@ -52,7 +52,7 @@
               [disabled]="!regions || !regions.length">
     </p-button>
     <p-button icon="pi pi-tags" size="small" [text]="true" styleClass="mr-2"
-              pTooltip="Edit labels on selected rows"
+              pTooltip="Edit class on selected rows"
               tooltipPosition="bottom"
               (click)="(!selectedRegions || !selectedRegions.length)? op.hide() : op.toggle($event)"
               [disabled]="!selectedRegions || !selectedRegions.length">
@@ -63,15 +63,26 @@
               (click)="openColorDialog()"
               [disabled]="!selectedRegions || !selectedRegions.length">
     </p-button>
-    <p-overlayPanel #op>
-      <div class="flex flex-column gap-3 w-25rem">
-        <div>
-          <span class="font-medium text-900 block mb-2">Edit label</span>
-          <div class="p-inputgroup">
-            <input type="text" pInputText placeholder="Enter new label" [(ngModel)]="labelToEdit"/>
-            <button pButton type="button" label="Save" icon="pi pi-check" (click)="saveEditedLabel()">
-            </button>
-          </div>
+    <p-overlayPanel #op (onHide)="bulkClass=''; newBulkClass=''">
+      <div class="flex flex-column gap-2" style="width: 18rem">
+        <span class="font-medium text-900">Set class on {{ selectedRegions?.length || 0 }} selected region(s)</span>
+        <!-- Selecting a class applies it immediately (choosing an option closes the
+             overlay, so there's no separate Apply button). -->
+        <p-dropdown styleClass="w-full" appendTo="body" [options]="presetSet.classes"
+                    optionLabel="name" optionValue="name" [(ngModel)]="bulkClass"
+                    placeholder="Choose a class…"
+                    [filter]="presetSet.classes.length > 8" filterBy="name"
+                    (onChange)="applyBulkClass()">
+          <ng-template let-c pTemplate="item">
+            <span class="dd-value"><span class="chip-swatch" [style.background]="c.color"></span>{{ c.name }}</span>
+          </ng-template>
+        </p-dropdown>
+        <div class="p-inputgroup">
+          <input type="text" pInputText placeholder="…or a new class" [(ngModel)]="newBulkClass"
+                 (keydown.enter)="addAndApplyBulkClass()"/>
+          <button pButton type="button" icon="pi pi-plus" pTooltip="Add class &amp; set it"
+                  tooltipPosition="bottom" [disabled]="!newBulkClass.trim()"
+                  (click)="addAndApplyBulkClass()"></button>
         </div>
       </div>
     </p-overlayPanel>
@@ -88,29 +99,42 @@
   </div>
 </p-toolbar>
 
-<!-- Annotation-class quick-pick strip (jit-ui#70): a "Classes" header + Manage
-     button above a full-width, wrapping tag list. Click a class to make it the
-     active class for new regions, or to re-classify the selected rows. -->
-<div class="class-chip-strip">
-  <div class="chip-strip-header">
-    <span class="chip-strip-label">Classes</span>
+<!-- Docked "Classes" panel (jit-ui#70): the always-visible list of annotation
+     classes above the regions table. Click a row to make it the active class
+     (new regions inherit it; with rows selected it re-classifies them); recolour
+     via the swatch; the badge shows how many regions use the class. "Manage"
+     opens the full editor (fallback palette, auto-add, matching, import/export). -->
+<div class="classes-panel">
+  <div class="classes-panel-header">
+    <span class="classes-panel-title">Classes</span>
     <button pButton type="button" icon="pi pi-cog" label="Manage"
-            class="p-button-sm p-button-text manage-classes-btn"
-            pTooltip="Manage annotation classes" tooltipPosition="bottom"
-            (click)="openManageDialog()"></button>
+            class="p-button-sm p-button-text"
+            pTooltip="Manage classes — add / remove, palette, matching, import/export"
+            tooltipPosition="bottom" (click)="openManageDialog()"></button>
   </div>
-  <div class="chips">
-    <button *ngFor="let c of presetSet.classes" type="button"
-            class="class-chip" [class.active]="activeClass === c.name"
-            [pTooltip]="selectedRegions?.length
-              ? 'Apply “' + c.name + '” to selected region(s)'
-              : 'Set “' + c.name + '” as the active class for new regions'"
-            tooltipPosition="bottom"
-            (click)="selectActiveClass(c.name)">
-      <span class="chip-swatch" [style.background]="c.color"></span>
-      <span class="chip-name">{{ c.name }}</span>
-    </button>
-    <span *ngIf="!presetSet.classes.length" class="chip-strip-empty">No classes yet</span>
+  <div class="classes-panel-body">
+    <div *ngFor="let c of displayClasses; trackBy: trackByClassName"
+         class="class-row" [class.active]="activeClass === c.name"
+         (click)="selectActiveClass(c.name)"
+         [pTooltip]="selectedRegions?.length
+           ? 'Apply “' + c.name + '” to the selected region(s)'
+           : 'Set “' + c.name + '” active — new regions use it'"
+         tooltipPosition="bottom">
+      <span class="row-swatch" (click)="$event.stopPropagation()">
+        <hex-color-picker [color]="c.color" (colorChange)="setClassColor(c.name, $event)"></hex-color-picker>
+      </span>
+      <span class="row-name">{{ c.name }}</span>
+      <span class="row-count" [class.zero]="classCount(c.name) === 0">{{ classCount(c.name) }}</span>
+      <button pButton type="button" icon="pi pi-trash"
+              class="p-button-sm p-button-text p-button-warning row-del"
+              [disabled]="classCount(c.name) > 0"
+              [pTooltip]="classCount(c.name) > 0 ? 'In use — reclassify its regions first' : 'Remove class'"
+              tooltipPosition="bottom"
+              (click)="$event.stopPropagation(); deleteClass(c.name)"></button>
+    </div>
+    <div *ngIf="!displayClasses.length" class="classes-empty">
+      No classes yet — add one from Manage.
+    </div>
   </div>
 </div>
 
@@ -124,9 +148,8 @@
              [scrollable]="true" scrollHeight="100%">
       <ng-template pTemplate="header">
         <tr>
-          <!-- Class column: shrinks to fit "legend" by default, grows with longer labels. -->
+          <!-- Class column: shrinks to fit "Region" by default, grows with longer labels. -->
           <th class="class-col-header" pResizableColumn>Class <p-sortIcon field="label"></p-sortIcon></th>
-          <th class="color-col-header" style="width:5rem">Color</th>
           <th class="surface-col-header" pResizableColumn>Surface</th>
           <!-- Trash column: just enough for the icon. -->
           <th style="width:2rem"></th>
@@ -174,12 +197,6 @@
                        (keydown.escape)="stopEditLabel(region, false, $event)"/>
               </span>
             </ng-template>
-          </td>
-          <!-- Per-region outline colour (existing picker). Stop propagation so
-               opening the picker doesn't toggle row selection. -->
-          <td class="color-cell" (click)="$event.stopPropagation()">
-            <hex-color-picker [color]="region.color"
-                              (colorChange)="changeRegionColor(region, $event)"></hex-color-picker>
           </td>
           <!-- Surface area (µm²/mm² when the image is scaled, else px²). -->
           <td class="surface-cell">{{ regionArea(region) || '—' }}</td>
@@ -416,15 +433,13 @@
     <i class="pi pi-pencil"></i> freeform path, brush, or
     <object data="assets/icons/wand.svg" width="14" height="14"></object> wand.
     Anything you draw appears immediately in the table, with the class name
-    "<b>legend</b>" by default.
+    "<b>Region</b>" by default.
   </p>
 
   <h3>The table columns</h3>
   <ul>
-    <li><b>Class</b> — the region's class label. Click the
-      <i class="pi pi-pencil"></i> to rename it inline.</li>
-    <li><b>Color</b> — the region's outline colour. Pick a colour to recolour
-      that region live on the diagram.</li>
+    <li><b>Class</b> — the region's class. Pick a class from the dropdown (its
+      colour follows), or use the <i class="pi pi-pencil"></i> for a free-form name.</li>
     <li><b>Surface</b> — the region's area, in µm²/mm² when the image carries a
       physical pixel size, otherwise in px². Holes (donuts) and multi-part
       regions are accounted for.</li>
@@ -460,12 +475,11 @@
 
   <h3>Colours</h3>
   <ul>
-    <li><b>One region</b> — the <b>Color</b> column sets a single region's outline
-      colour (see "The table columns" above).</li>
-    <li><i class="pi pi-palette"></i> <b>Selected regions</b> — select one or more
-      rows, then use the palette button to set the outline colour <b>per class</b>:
-      the dialog shows one colour picker for each class present in the selection,
-      and applying recolours the selected regions of that class at once.</li>
+    <li>A region's colour comes from its <b>class</b>. Recolour a class from its
+      swatch in the Classes panel (or in <i class="pi pi-cog"></i> Manage) and every
+      region of that class updates.</li>
+    <li><i class="pi pi-palette"></i> <b>Selected regions</b> — set the outline
+      colour per class for the current selection.</li>
   </ul>
 
   <h3>Annotation classes (presets)</h3>

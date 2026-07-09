@@ -287,75 +287,104 @@ kbd {
 }
 
 /* =====================================================================
- * Annotation-class presets (jit-ui#70): chip strip, Class dropdown, dialog
+ * Annotation-class presets (jit-ui#70): docked panel, Class dropdown, dialog
  * ===================================================================== */
 
-/* Quick-pick class strip below the toolbar: a header row ("Classes" + Manage)
- * stacked above a full-width, wrapping tag list. */
-.class-chip-strip {
+/* Docked "Classes" panel above the regions table: a header (title + add + manage)
+ * over a scrollable, height-capped list of class rows. */
+.classes-panel {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
   flex: 0 0 auto;
-  padding: 0.4rem 0.5rem;
   border-bottom: 1px solid var(--surface-border);
 }
-.class-chip-strip .chip-strip-header {
+.classes-panel-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.35rem;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--surface-border);
 }
-.class-chip-strip .chip-strip-label {
+.classes-panel-title {
   font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.03em;
   text-transform: uppercase;
   color: var(--text-color-secondary);
+  margin-right: auto;
 }
-.class-chip-strip .manage-classes-btn {
-  flex: 0 0 auto;
+/* Scrollable class list — kept short so the regions table has room. */
+.classes-panel-body {
+  max-height: 7rem;
+  overflow-y: auto;
 }
-/* The tag list fills the full editor width and wraps onto as many rows as needed. */
-.class-chip-strip .chips {
+/* Compact swatch for the dense class list. */
+::ng-deep .classes-panel-body .hex-picker-swatch {
+  width: 1.25rem;
+  height: 1.25rem;
+  border-width: 1px;
+}
+.class-row {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  flex-wrap: wrap;
-  width: 100%;
+  gap: 0.5rem;
+  padding: 0.1rem 0.5rem;
+  cursor: pointer;
+  border-left: 3px solid transparent;
 }
-.class-chip-strip .chip-strip-empty {
+.class-row:hover {
+  background: var(--surface-hover, rgba(0, 0, 0, 0.04));
+}
+.class-row.active {
+  background: var(--highlight-bg, rgba(51, 153, 255, 0.12));
+  border-left-color: var(--primary-color);
+}
+.class-row .row-swatch {
+  flex: 0 0 auto;
+  display: inline-flex;
+}
+.class-row .row-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
+.class-row.active .row-name {
+  color: var(--primary-color);
+  font-weight: 600;
+}
+.class-row .row-count {
+  flex: 0 0 auto;
+  min-width: 1.5rem;
+  text-align: center;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-color-secondary);
+  background: var(--surface-200, rgba(0, 0, 0, 0.06));
+  border-radius: 10px;
+  padding: 0 0.4rem;
+}
+.class-row .row-count.zero {
+  opacity: 0.5;
+}
+.class-row .row-del {
+  flex: 0 0 auto;
+}
+.classes-empty {
   font-size: 0.8rem;
   color: var(--text-color-secondary);
+  padding: 0.5rem;
+}
+/* Keep the row's icon buttons compact so rows stay dense. */
+::ng-deep .classes-panel-body .class-row .p-button.p-button-icon-only {
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
 }
 
-/* A class chip (button styled as a pill). */
-.class-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  border: 1px solid var(--surface-border);
-  background: var(--surface-card, #fff);
-  color: var(--text-color);
-  border-radius: 1rem;
-  padding: 0.2rem 0.6rem 0.2rem 0.45rem;
-  font-size: 0.8rem;
-  line-height: 1.2;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-.class-chip:hover {
-  border-color: var(--primary-color);
-}
-.class-chip.active {
-  border-color: var(--primary-color);
-  background: var(--highlight-bg, rgba(51, 153, 255, 0.12));
-  color: var(--primary-color);
-  box-shadow: inset 0 0 0 1px var(--primary-color);
-}
-
-/* Small round colour swatch, reused in chips and the Class dropdown. */
+/* Small round colour swatch used in the Class dropdown. */
 .chip-swatch {
   display: inline-block;
   width: 0.75rem;

@@ -96,7 +96,7 @@ describe('BrushToolService', () => {
     expect(state.regions).toHaveLength(1);
     expect(state.regions[0].bounds).toBeInstanceOf(Polygon);
     expect(state.regions[0].color).toBe('#ffffff');
-    expect(state.regions[0].label).toBe('legend'); // default class label
+    expect(state.regions[0].label).toBe('Region'); // default class label
   });
 
   it('the painted disc spans roughly the brush diameter', () => {
@@ -183,7 +183,7 @@ describe('BrushToolService', () => {
     // The larger piece keeps the original id; the other gets a fresh one.
     const ids = state.regions.map((r) => r.id).sort();
     expect(ids).toContain(7);
-    expect(state.regions.every((r) => r.label === 'legend')).toBe(true);
+    expect(state.regions.every((r) => r.label === 'Region')).toBe(true);
   });
 
   it('a split holds stable across drag ticks (no duplicate regions per tick)', () => {

@@ -567,7 +567,7 @@ export class WandToolService {
     }
     // Default class/annotation name, matching the overlay-drawn regions and the
     // Region Editor's "Add" actions so a wand region isn't left unlabeled.
-    region.label = existing?.label ?? 'legend';
+    region.label = existing?.label ?? 'Region';
 
     if (this.strokeRegionId == null) {
       regions.push(region);

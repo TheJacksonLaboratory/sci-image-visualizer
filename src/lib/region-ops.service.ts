@@ -264,7 +264,7 @@ export class RegionOpsService {
     const r = new Region();
     r.bounds = bounds;
     r.color = proto?.color;
-    r.label = proto?.label ?? 'legend';
+    r.label = proto?.label ?? 'Region';
     return r;
   }
 

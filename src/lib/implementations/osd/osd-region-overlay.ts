@@ -1216,7 +1216,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
   private commitRegion(region: Region): void {
     // Default class/annotation name, matching the Plotly backend and the Region
     // Editor's "Add" actions so a freshly drawn region isn't unlabeled.
-    if (region.label == null) region.label = 'legend';
+    if (region.label == null) region.label = 'Region';
     this.store.addRegion(region);
     this.redraw();
   }

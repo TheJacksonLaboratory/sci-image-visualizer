@@ -575,7 +575,7 @@ export class BrushToolService {
     }
     // Default class/annotation name, matching the overlay-drawn regions and the
     // wand so a brush region isn't left unlabeled.
-    region.label = existing?.label ?? 'legend';
+    region.label = existing?.label ?? 'Region';
 
     if (existing) {
       const idx = regions.findIndex((r) => r.id === id);

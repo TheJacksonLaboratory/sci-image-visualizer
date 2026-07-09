@@ -39,7 +39,9 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   classColorEdits: { label: string; color: string }[] = [];
   labelColors: Map<string, string> = new Map();
   selectedLabelColor = '';
-  labelToEdit = '';
+  /** "Edit class on selected rows" popup: chosen existing class, and a new-class name. */
+  bulkClass = '';
+  newBulkClass = '';
 
   // ── annotation-class presets (jit-ui#70) ──
   /** Local mirror of the per-user preset set (chip strip, Class dropdown, dialog). */
@@ -49,6 +51,10 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   showManageDialog = false;
   /** Working copy edited inside the Manage-classes dialog; committed on Apply/Done. */
   presetDraft: PresetSet | null = null;
+  /** class name (match-mode keyed) → number of regions currently using it. */
+  classCounts = new Map<string, number>();
+  /** Classes as shown in the panel: sorted by region count (desc), then name. */
+  displayClasses: ClassPreset[] = [];
   readonly matchModeOptions = [
     { label: 'Exact', value: 'exact' },
     { label: 'Normalized', value: 'normalized' },
@@ -149,7 +155,10 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     if (initialPresets) this.presetSet = initialPresets;
     const presets$ = this.regionApi.getPresetSet$?.();
     if (presets$) {
-      this._presetSub = presets$.subscribe((set) => { if (set) this.presetSet = set; });
+      this._presetSub = presets$.subscribe((set) => {
+        if (set) this.presetSet = set;
+        this.updateDisplayClasses();
+      });
     }
     // Seed from the visualizer's current regions — already scoped to the
     // active image by the per-image cache, and handed back as neutral Region
@@ -159,6 +168,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.regions = this.applyRegionColors(this.regionApi.getAnnotationRegions());
     this.regionsCopy = this.deepClone(this.regions);
     this.syncClassesFromRegions(this.regions);
+    this.recomputeClassCounts();
 
     // The update event is just a change signal; re-read the regions from the
     // visualizer rather than parsing whatever payload it carries.
@@ -173,6 +183,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       this.selectedRegions = updated.filter((r) => selectedIds.has(r.id));
       this.clampPaginatorFirst();
       this.syncClassesFromRegions(updated);
+      this.recomputeClassCounts();
     });
 
     this._saveAsCheck$.pipe(
@@ -279,6 +290,12 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     // lines internally, so editor edits never disturb them.
     this.regionApi.setAnnotationRegions(this.regions, this.showShapeLabel, true, fillColor ?? this.fillColor);
     this._updatingFromEditor = false;
+    // The editor's own commit is ignored by the region-update subscription (the
+    // _updatingFromEditor guard), so refresh here: a class label typed in the
+    // Class column gets added to the list, and the panel counts/order stay in
+    // sync after any edit. (jit-ui#70)
+    this.syncClassesFromRegions(this.regions);
+    this.recomputeClassCounts();
   }
 
   /** Set one region's outline colour from the per-row picker and commit live.
@@ -297,7 +314,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     region.bounds = new Rectangle();
     region.bounds.width = 512;
     region.bounds.height = 512;
-    region.label = this.activeClass ?? 'legend';
+    region.label = this.activeClass ?? 'Region';
     // id and a non-colliding name are minted by the visualizer's setRegions
     this.regions = [...this.regions, region];
     this.setRegionsFromEditor();
@@ -427,21 +444,10 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     });
   }
 
-  saveEditedLabel() {
-    if (this.selectedRegions && this.selectedRegions.length > 0) {
-      this.selectedRegions.forEach((region) => {
-        region.label = this.labelToEdit;
-        this.labelRegionUpdate(region, false);
-      });
-      this.setRegionsFromEditor();
-      this.overlayPanel.hide();
-    }
-  }
-
   addPolygon() {
     const region = new Region();
     region.bounds = new Polygon();
-    region.label = this.activeClass ?? 'legend';
+    region.label = this.activeClass ?? 'Region';
     region.bounds.ypoints = [0, 0, 0];
     region.bounds.xpoints = [0, 0, 0];
     region.bounds.coordinates = [
@@ -686,6 +692,53 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     }
   }
 
+  // ── Docked Classes panel (jit-ui#70) ─────────────────────────────────
+
+  /** Rebuild the per-class region counts shown in the panel. */
+  private recomputeClassCounts(): void {
+    const normalized = this.presetSet.matchMode === 'normalized';
+    const counts = new Map<string, number>();
+    for (const r of this.regions) {
+      if (!r.label) continue;
+      const k = normalized ? r.label.trim().toLowerCase() : r.label;
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    this.classCounts = counts;
+    this.updateDisplayClasses();
+  }
+
+  /** Rebuild the panel's display order — most-used classes first, then by name. */
+  private updateDisplayClasses(): void {
+    this.displayClasses = [...this.presetSet.classes].sort((a, b) => {
+      const d = this.classCount(b.name) - this.classCount(a.name);
+      return d !== 0 ? d : a.name.localeCompare(b.name);
+    });
+  }
+
+  /** trackBy for the class rows so re-sorting doesn't re-create the pickers. */
+  trackByClassName = (_: number, c: ClassPreset): string => c.name;
+
+  /** Number of regions currently using a class (keyed by the active match mode). */
+  classCount(name: string): number {
+    const k = this.presetSet.matchMode === 'normalized' ? name.trim().toLowerCase() : name;
+    return this.classCounts.get(k) ?? 0;
+  }
+
+  /** Recolour a class from its panel swatch and repaint its (non-overridden) regions. */
+  setClassColor(name: string, color: string): void {
+    if (!color) return;
+    this.regionApi.setClassificationColor(name, color);
+    this.setRegionsFromEditor();
+  }
+
+  /** Remove an unused class. Classes still in use can't be removed here (they'd be
+   *  re-added from their regions) — reclassify or delete those regions first. */
+  deleteClass(name: string): void {
+    if (this.classCount(name) > 0) return;
+    this.regionApi.removeClass(name);
+    if (this.activeClass === name) this.activeClass = null;
+  }
+
   /** Stamp a class (and its preset/fallback colour) onto one region from the Class
    *  dropdown; choosing a class opts the region back into the preset colour. */
   applyPresetToRegion(region: Region, className: string): void {
@@ -700,15 +753,43 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
    *  it to them in one commit. */
   selectActiveClass(name: string): void {
     this.activeClass = name;
+    this.applyClassToSelected(name);
+  }
+
+  /** Apply a class (label + preset/fallback colour) to the current selection and commit. */
+  private applyClassToSelected(name: string): void {
     const selected = this.selectedRegions ?? [];
-    if (selected.length) {
-      for (const r of selected) {
-        r.label = name;
-        r.colorOverridden = false;
-        r.color = colorForLabel(name, this.presetSet);
-      }
-      this.setRegionsFromEditor();
+    if (!selected.length) return;
+    for (const r of selected) {
+      r.label = name;
+      r.colorOverridden = false;
+      r.color = colorForLabel(name, this.presetSet);
     }
+    this.setRegionsFromEditor();
+  }
+
+  /** "Edit class on selected rows" popup — apply the chosen existing class. */
+  applyBulkClass(): void {
+    if (!this.bulkClass) return;
+    this.applyClassToSelected(this.bulkClass);
+    this.overlayPanel?.hide();
+  }
+
+  /** "Edit class on selected rows" popup — add a new class and set it on the selection. */
+  addAndApplyBulkClass(): void {
+    const name = this.newBulkClass.trim();
+    if (!name) return;
+    const norm = this.presetSet.matchMode === 'normalized';
+    const exists = this.presetSet.classes.some((c) =>
+      norm ? c.name.trim().toLowerCase() === name.toLowerCase() : c.name === name,
+    );
+    if (!exists) {
+      this.regionApi.upsertClass({ name, color: colorForLabel(name, this.presetSet), source: 'user' });
+    }
+    this.applyClassToSelected(name);
+    this.bulkClass = name;
+    this.newBulkClass = '';
+    this.overlayPanel?.hide();
   }
 
   // ── Manage-classes dialog ──

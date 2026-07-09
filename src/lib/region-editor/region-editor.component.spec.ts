@@ -1408,6 +1408,7 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
       upsertClass: jest.fn(),
       removeClass: jest.fn(),
       resetPresets: jest.fn(),
+      setClassificationColor: jest.fn(),
     });
 
     await TestBed.configureTestingModule({
@@ -1534,5 +1535,68 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
     expect(component.presetDraft!.fallbackPalette.length).toBe(f + 1);
     component.removeFallbackColor(0);
     expect(component.presetDraft!.fallbackPalette.length).toBe(f);
+  });
+
+  // ── docked Classes panel ──
+  it('classCount reflects region labels', () => {
+    (component as any).regions = [
+      Object.assign(new Region(), { id: 1, label: 'Tumor' }),
+      Object.assign(new Region(), { id: 2, label: 'Tumor' }),
+      Object.assign(new Region(), { id: 3, label: 'Stroma' }),
+    ];
+    (component as any).recomputeClassCounts();
+    expect(component.classCount('Tumor')).toBe(2);
+    expect(component.classCount('Stroma')).toBe(1);
+    expect(component.classCount('Necrosis')).toBe(0);
+  });
+
+  it('displayClasses is ordered by region count, descending', () => {
+    (component as any).regions = [
+      Object.assign(new Region(), { id: 1, label: 'Stroma' }),
+      Object.assign(new Region(), { id: 2, label: 'Stroma' }),
+      Object.assign(new Region(), { id: 3, label: 'Tumor' }),
+    ];
+    (component as any).recomputeClassCounts();
+    expect(component.displayClasses.map((c) => c.name)).toEqual(['Stroma', 'Tumor']); // 2 before 1
+  });
+
+  it('committing a region with a new class label adds that class', () => {
+    (component as any).regions = [Object.assign(new Region(), { id: 1, label: 'BrandNewClass' })];
+    (component as any).setRegionsFromEditor();
+    expect(api.upsertClass).toHaveBeenCalledWith(expect.objectContaining({ name: 'BrandNewClass' }));
+  });
+
+  it('setClassColor upserts the class colour and commits a recolour', () => {
+    component.setClassColor('Tumor', '#010203');
+    expect(api.setClassificationColor).toHaveBeenCalledWith('Tumor', '#010203');
+    expect(api.setAnnotationRegions).toHaveBeenCalled();
+  });
+
+  it('deleteClass removes an unused class but refuses one still in use', () => {
+    (component as any).classCounts = new Map([['Tumor', 3]]);
+    component.deleteClass('Tumor'); // in use -> refused
+    expect(api.removeClass).not.toHaveBeenCalled();
+    component.deleteClass('Necrosis'); // unused -> removed
+    expect(api.removeClass).toHaveBeenCalledWith('Necrosis');
+  });
+
+  it('applyBulkClass sets the chosen class on the selection', () => {
+    const a = Object.assign(new Region(), { id: 1 });
+    component.selectedRegions = [a];
+    component.bulkClass = 'Stroma';
+    component.applyBulkClass();
+    expect(a.label).toBe('Stroma');
+    expect(a.color).toBe('#44AAFF');
+    expect(api.setAnnotationRegions).toHaveBeenCalled();
+  });
+
+  it('addAndApplyBulkClass adds a new class and sets it on the selection', () => {
+    const a = Object.assign(new Region(), { id: 1 });
+    component.selectedRegions = [a];
+    component.newBulkClass = 'Mitosis';
+    component.addAndApplyBulkClass();
+    expect(api.upsertClass).toHaveBeenCalledWith(expect.objectContaining({ name: 'Mitosis' }));
+    expect(a.label).toBe('Mitosis');
+    expect(component.newBulkClass).toBe('');
   });
 });

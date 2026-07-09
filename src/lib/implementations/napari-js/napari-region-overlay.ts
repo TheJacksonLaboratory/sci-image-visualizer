@@ -593,7 +593,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
     const region = new Region();
     region.bounds = poly;
     region.color = this.store.getShapeColor();
-    region.label = 'legend';
+    region.label = 'Region';
     this.store.addRegion(region);
   }
 
