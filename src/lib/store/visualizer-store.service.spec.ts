@@ -93,3 +93,35 @@ describe('VisualizerStore.setPhysicalPixelSize', () => {
     expect(latestMeta(store)[0].mppX).toBeUndefined();
   });
 });
+
+/**
+ * Preset set accessors must not leak the store's internal state: getPresetSet()
+ * returns a defensive copy and normalizePresetSet() (via setPresetSet) clones the
+ * caller's arrays, so outside mutation can't desync presetSet$/persistence
+ * (jit-ui#70, Copilot review).
+ */
+describe('VisualizerStore preset-set isolation', () => {
+  it('getPresetSet() returns a defensive copy (mutating it leaves the store intact)', () => {
+    const store = new VisualizerStore();
+    const got = store.getPresetSet();
+    const before = store.getPresetSet().classes.length;
+    got.classes.push({ name: 'Injected', color: '#000000' });
+    got.fallbackPalette.push('#abcdef');
+    expect(store.getPresetSet().classes.length).toBe(before);
+    expect(store.getPresetSet().classes.some((c) => c.name === 'Injected')).toBe(false);
+  });
+
+  it('setPresetSet() clones caller arrays (later mutation does not reach the store)', () => {
+    const store = new VisualizerStore();
+    const incoming = {
+      classes: [{ name: 'Tumor', color: '#FF0000' }],
+      fallbackPalette: ['#111111'],
+      autoPromote: false,
+      matchMode: 'exact' as const,
+    };
+    store.setPresetSet(incoming);
+    incoming.classes.push({ name: 'Sneaky', color: '#00FF00' });
+    incoming.classes[0].name = 'Renamed';
+    expect(store.getPresetSet().classes.map((c) => c.name)).toEqual(['Tumor']);
+  });
+});

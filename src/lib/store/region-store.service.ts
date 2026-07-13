@@ -896,7 +896,10 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
       region.color = color;
       if (set.autoPromote && !known.has(keyOf(region.label))) {
         known.add(keyOf(region.label));
-        this.store.upsertClass({ name: region.label, color, source: 'auto' });
+        // In normalized mode, trim the promoted name so leading/trailing
+        // whitespace doesn't create invisible duplicates or odd display names.
+        const name = set.matchMode === 'normalized' ? region.label.trim() : region.label;
+        this.store.upsertClass({ name, color, source: 'auto' });
       }
     }
   }

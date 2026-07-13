@@ -626,6 +626,22 @@ describe('RegionStore', () => {
       store.addRegion(r);
       expect(store.getRegions()[0].color).toBe('#123456');
     });
+
+    it('auto-promotes an unknown class with a trimmed name in normalized mode', () => {
+      const vis = TestBed.inject(VisualizerStore);
+      vis.setPresetSet({
+        classes: [],
+        fallbackPalette: ['#111111', '#222222'],
+        autoPromote: true,
+        matchMode: 'normalized',
+      });
+      const r = polyRegion([0, 10, 5], [0, 0, 10]);
+      r.label = '  Mitosis  ';
+      store.setRegions([r]);
+      const names = vis.getPresetSet().classes.map((c) => c.name);
+      expect(names).toContain('Mitosis'); // trimmed, not the raw '  Mitosis  '
+      expect(names).not.toContain('  Mitosis  ');
+    });
   });
 
   describe('colour / label + previous-shapes accessors', () => {

@@ -821,12 +821,16 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
    *  non-overridden regions with the updated presets. */
   applyManageDialog(close: boolean): void {
     if (!this.presetDraft) return;
+    // De-duplicate using the active match mode's key so normalized mode can't keep
+    // both "Tumor" and "tumor" (which would collide at runtime in findPreset()).
+    const norm = this.presetDraft.matchMode === 'normalized';
     const seen = new Set<string>();
     const classes: ClassPreset[] = [];
     for (const c of this.presetDraft.classes) {
       const name = (c.name ?? '').trim();
-      if (!name || seen.has(name)) continue;
-      seen.add(name);
+      const key = norm ? name.toLowerCase() : name;
+      if (!name || seen.has(key)) continue;
+      seen.add(key);
       classes.push({ ...c, name });
     }
     this.presetDraft.classes = classes;

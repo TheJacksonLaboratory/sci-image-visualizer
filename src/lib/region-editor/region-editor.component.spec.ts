@@ -1506,6 +1506,19 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
     expect(component.showManageDialog).toBe(false);
   });
 
+  it('applyManageDialog de-duplicates case/whitespace variants in normalized mode', () => {
+    component.openManageDialog();
+    component.presetDraft!.matchMode = 'normalized';
+    component.presetDraft!.classes = [
+      { name: 'Tumor', color: '#FF0000' },
+      { name: '  tumor ', color: '#00FF00' }, // same key under normalization -> dropped
+      { name: 'Stroma', color: '#0000FF' },
+    ];
+    component.applyManageDialog(true);
+    const saved = (api.setPresetSet as jest.Mock).mock.calls.at(-1)![0] as PresetSet;
+    expect(saved.classes.map((c) => c.name)).toEqual(['Tumor', 'Stroma']);
+  });
+
   it('auto-adds classes found on loaded regions (not already presets), ignoring legend/empty', () => {
     const loaded = [
       Object.assign(new Region(), { id: 1, label: 'Tumor', color: '#FF4444' }),      // already a preset

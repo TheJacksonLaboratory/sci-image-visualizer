@@ -128,11 +128,13 @@ export class VisualizerStore {
 
   private normalizePresetSet(set: PresetSet): PresetSet {
     const defaults = defaultPresetSet();
+    // Clone the nested arrays/objects so outside callers can't mutate the store's
+    // internal state without going through setPresetSet()/upsertClass().
     return {
-      classes: Array.isArray(set.classes) ? set.classes : [],
+      classes: Array.isArray(set.classes) ? set.classes.map((c) => ({ ...c })) : [],
       fallbackPalette:
         Array.isArray(set.fallbackPalette) && set.fallbackPalette.length
-          ? set.fallbackPalette
+          ? [...set.fallbackPalette]
           : defaults.fallbackPalette,
       autoPromote: !!set.autoPromote,
       matchMode: set.matchMode === 'normalized' ? 'normalized' : 'exact',
@@ -306,7 +308,15 @@ export class VisualizerStore {
 
   // ── Annotation-class preset set accessors (jit-ui#70) ────────────────
   getPresetSet(): PresetSet {
-    return this.presetSet;
+    // Defensive copy: callers must not mutate the store's state in place —
+    // all changes go through setPresetSet()/upsertClass()/removeClass() so
+    // presetSet$ and persistence stay in sync.
+    return {
+      classes: this.presetSet.classes.map((c) => ({ ...c })),
+      fallbackPalette: [...this.presetSet.fallbackPalette],
+      autoPromote: this.presetSet.autoPromote,
+      matchMode: this.presetSet.matchMode,
+    };
   }
   getPresetSet$(): Observable<PresetSet> {
     return this.presetSet$.asObservable();
