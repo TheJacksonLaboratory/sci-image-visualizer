@@ -1,6 +1,7 @@
 import { BehaviorSubject } from 'rxjs';
 
 import { VisualizationComponent } from './visualization.component';
+import { PlotType, PLOT_TYPE_DESCRIPTORS } from './contracts/plot-type';
 import { VisualizerStore } from './store/visualizer-store.service';
 import { RegionOpsService } from './region-ops.service';
 import { WandService } from './toolbar/wand/wand.service';
@@ -113,6 +114,53 @@ describe('VisualizationComponent (UI shell)', () => {
   it('constructs and reads the plot-type descriptors through the service', () => {
     expect(component).toBeTruthy();
     expect(plotService.getPlotTypeDescriptors).toHaveBeenCalled();
+  });
+
+  describe('plot-mode curation by test mode', () => {
+    const ALL_DESCRIPTORS = Object.values(PLOT_TYPE_DESCRIPTORS).filter(Boolean) as any[];
+
+    beforeEach(() => {
+      // Grayscale stack + a 3D-capable backend so the stack/grayscale/3D gates
+      // all pass, isolating the test-mode curation + relabeling under test.
+      (component as any).imageInfo = { isStack: true, isGrayscale: true };
+      plotService.capabilities = { has: () => true };
+      plotService.getPlotTypeDescriptors.mockReturnValue(ALL_DESCRIPTORS);
+    });
+
+    it('default selector shows only the curated set, under suffix-free labels', () => {
+      component.testMode = false;
+      (component as any).computePlotTypeOptions();
+      const byType = new Map(component.plotTypeOptions.map((d) => [d.type, d.label]));
+
+      // curated + relabeled
+      expect(byType.get(PlotType.IMAGE)).toBe('Image');
+      expect(byType.get(PlotType.HEATMAP)).toBe('Heatmap');
+      expect(byType.get(PlotType.CONTOUR)).toBe('Contour');
+      expect(byType.get(PlotType.NAPARI_SURFACE)).toBe('Surface');
+      expect(byType.get(PlotType.NAPARI_VOLUME)).toBe('Volume');
+      expect(byType.get(PlotType.NAPARI_ISOSURFACE)).toBe('Isosurface');
+
+      // test-only — hidden (all scatters, napari Image, Plotly surface/isosurface)
+      for (const t of [
+        PlotType.SCATTER, PlotType.SCATTER3D, PlotType.SURFACE, PlotType.ISOSURFACE,
+        PlotType.NAPARI_IMAGE, PlotType.NAPARI_SCATTER, PlotType.NAPARI_SCATTER3D,
+      ]) {
+        expect(byType.has(t)).toBe(false);
+      }
+    });
+
+    it('test mode shows every type under its backend-suffixed label', () => {
+      component.testMode = true;
+      (component as any).computePlotTypeOptions();
+      const byType = new Map(component.plotTypeOptions.map((d) => [d.type, d.label]));
+
+      expect(component.plotTypeOptions.length).toBe(ALL_DESCRIPTORS.length);
+      expect(byType.get(PlotType.IMAGE)).toBe('Image (OSD)');
+      expect(byType.get(PlotType.NAPARI_IMAGE)).toBe('Image (napari · WebGPU)');
+      expect(byType.get(PlotType.SURFACE)).toBe('Surface (Plotly)');
+      expect(byType.get(PlotType.NAPARI_SURFACE)).toBe('Surface (napari · WebGPU)');
+      expect(byType.get(PlotType.SCATTER)).toBe('Scatter 2D (Plotly)');
+    });
   });
 
   describe('region set-operations (jit-ui#85)', () => {

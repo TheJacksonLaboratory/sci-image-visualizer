@@ -64,6 +64,12 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
   }
   private _toolbarTools: Required<ToolbarToolVisibility> = ALL_TOOLBAR_TOOLS;
 
+  /** Expose test-only plot modes in the selector (e.g. the napari `Image`
+   *  mode, otherwise hidden). The host app sets this from a `?test=1` URL
+   *  toggle. Off by default, so production users never see them. */
+  @Input()
+  testMode = false;
+
   /** Image-smoothing state for the toolbar's Smoothen toggle (OSD only).
    *  Defaults to `false` so OSD shows raw pixels (nearest-neighbour). */
   imageSmoothingEnabled = false;
@@ -248,23 +254,34 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
 
   /**
    * Plot types offered in the selector for the current image:
-   *  - 3D types hidden when the backend can't render a 3D scene
-   *  - stack-only types (scatter3d, isosurface) hidden unless the file is a
-   *    stack — a volume needs multiple z-slices.
-   *  - scalar-intensity types (contour, intensity profile, surface, isosurface)
-   *    hidden for RGB images — they map a single intensity per pixel. Image,
-   *    Heatmap and Scatter remain available for any image.
+   *  - Outside **test mode**, only the curated default set (descriptors with a
+   *    `productionLabel`) is offered, shown under suffix-free names — Image,
+   *    Heatmap, Contour and the napari Surface / Volume / Isosurface. Test mode
+   *    exposes every backend's type under its full (backend-suffixed) label.
+   *  - 3D types hidden when the backend can't render a 3D scene.
+   *  - stack-only types (volume, isosurface) hidden unless the file is a stack —
+   *    a volume needs multiple z-slices.
+   *  - scalar-intensity types (contour, surface, isosurface) hidden for RGB
+   *    images — they map a single intensity per pixel. Image and Heatmap render
+   *    any image.
    */
   private computePlotTypeOptions() {
     const caps = this.plotService.capabilities;
     const isStack = !!this.imageInfo?.isStack;
     const isGrayscale = !!this.imageInfo?.isGrayscale;
-    this.plotTypeOptions = this.plotService.getPlotTypeDescriptors().filter((d) => {
-      if (d.dimensions === '3d' && !caps.has(ViewerFeature.Surface3D)) return false;
-      if (d.requiresStack && !isStack) return false;
-      if (d.requiresGrayscale && !isGrayscale) return false;
-      return true;
-    });
+    this.plotTypeOptions = this.plotService.getPlotTypeDescriptors()
+      .filter((d) => {
+        // Outside test mode, only the curated set (those with a productionLabel)
+        // is offered; test mode exposes every backend's type.
+        if (!this.testMode && !d.productionLabel) return false;
+        if (d.dimensions === '3d' && !caps.has(ViewerFeature.Surface3D)) return false;
+        if (d.requiresStack && !isStack) return false;
+        if (d.requiresGrayscale && !isGrayscale) return false;
+        return true;
+      })
+      // Default selector shows the suffix-free productionLabel; test mode keeps
+      // the full backend-suffixed label so same-named modes stay distinguishable.
+      .map((d) => (this.testMode ? d : { ...d, label: d.productionLabel! }));
   }
 
   ngOnInit(): void {
