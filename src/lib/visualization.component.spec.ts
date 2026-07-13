@@ -161,6 +161,18 @@ describe('VisualizationComponent (UI shell)', () => {
       expect(byType.get(PlotType.NAPARI_SURFACE)).toBe('Surface (napari · WebGPU)');
       expect(byType.get(PlotType.SCATTER)).toBe('Scatter 2D (Plotly)');
     });
+
+    it('recomputes the selector when testMode is bound (ngOnChanges)', () => {
+      // default (testMode=false): the curated set excludes the napari Image mode
+      component.testMode = false;
+      (component as any).computePlotTypeOptions();
+      expect(component.plotTypeOptions.some((d) => d.type === PlotType.NAPARI_IMAGE)).toBe(false);
+      // host binds testMode=true → ngOnChanges recomputes → it now appears,
+      // without waiting for an image to (re)load
+      component.testMode = true;
+      component.ngOnChanges({ testMode: {} } as any);
+      expect(component.plotTypeOptions.some((d) => d.type === PlotType.NAPARI_IMAGE)).toBe(true);
+    });
   });
 
   describe('region set-operations (jit-ui#85)', () => {

@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, AfterViewInit, EventEmitter, HostListener, Inject, Input, NgZone, OnDestroy, OnInit, Optional, Output, ViewChild } from '@angular/core';
+import { ChangeDetectorRef, Component, AfterViewInit, EventEmitter, HostListener, Inject, Input, NgZone, OnChanges, OnDestroy, OnInit, Optional, Output, SimpleChanges, ViewChild } from '@angular/core';
 
 import { BehaviorSubject, Subject, Subscription } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
@@ -40,7 +40,7 @@ let plotInstanceSeq = 0;
   templateUrl: './visualization.component.html',
   styleUrls: ['./visualization.component.scss'],
 })
-export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy {
+export class VisualizationComponent implements OnInit, OnChanges, AfterViewInit, OnDestroy {
   /** Per-instance toast key. MessageService is a global singleton, so two live
    *  `<visualization>` instances (main viewer + pipeline-dialog preview) sharing
    *  one key would each render the same message — a duplicate toast. A unique
@@ -282,6 +282,15 @@ export class VisualizationComponent implements OnInit, AfterViewInit, OnDestroy 
       // Default selector shows the suffix-free productionLabel; test mode keeps
       // the full backend-suffixed label so same-named modes stay distinguishable.
       .map((d) => (this.testMode ? d : { ...d, label: d.productionLabel! }));
+  }
+
+  ngOnChanges(changes: SimpleChanges): void {
+    // The constructor computes the options with testMode still at its default;
+    // recompute once the host binds it (and on any later change) so the selector
+    // reflects test mode immediately, without waiting for an image to (re)load.
+    if (changes['testMode']) {
+      this.computePlotTypeOptions();
+    }
   }
 
   ngOnInit(): void {
