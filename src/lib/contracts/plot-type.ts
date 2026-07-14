@@ -52,8 +52,18 @@ export type PlotDataSource = 'image' | 'regions';
  */
 export interface PlotTypeDescriptor {
   type: PlotType;
-  /** Human-readable label for menus/dropdowns. */
+  /** Human-readable label for menus/dropdowns. Shown in **test mode**, where
+   *  every backend's type is offered, so it carries the backend suffix (e.g.
+   *  "Surface (napari · WebGPU)") to disambiguate same-named modes. */
   label: string;
+  /**
+   * Label shown in the **default (non-test) selector**, where a single curated
+   * mode owns each name — so it drops the backend suffix (e.g. just "Surface").
+   * A type WITHOUT a `productionLabel` is **test-only**: hidden from the default
+   * selector and shown only when the host enables test mode. This is the single
+   * knob that curates the default plot-mode list (jax-image-visualization).
+   */
+  productionLabel?: string;
   dimensions: PlotDimensions;
   source: PlotDataSource;
   /** True when the type only makes sense over a multi-frame z-stack. */
@@ -72,12 +82,18 @@ export interface PlotTypeDescriptor {
  */
 // Dropdown order = insertion order: Image (OSD) default at the top, then all Plotly plot modes
 // grouped, then all napari-js WebGPU modes grouped.
+// `productionLabel` marks the curated default-selector set (jit-ui#70 follow-up):
+//  - IMAGE / HEATMAP / CONTOUR (2D) and the napari SURFACE / VOLUME / ISOSURFACE
+//    (3D) are the modes shown by default, under suffix-free names.
+//  - Everything else (all Scatters, NAPARI_IMAGE, and the Plotly SURFACE /
+//    ISOSURFACE that the napari versions supersede) is test-only — no
+//    `productionLabel`, so it appears only when the host enables test mode.
 export const PLOT_TYPE_DESCRIPTORS: Partial<Record<PlotType, PlotTypeDescriptor>> = {
   // ── Default ──
-  [PlotType.IMAGE]:      { type: PlotType.IMAGE,      label: 'Image (OSD)',           dimensions: '2d', source: 'image' },
+  [PlotType.IMAGE]:      { type: PlotType.IMAGE,      label: 'Image (OSD)',           productionLabel: 'Image',      dimensions: '2d', source: 'image' },
   // ── Plotly ──
-  [PlotType.HEATMAP]:    { type: PlotType.HEATMAP,    label: 'Heatmap (Plotly)',      dimensions: '2d', source: 'image' },
-  [PlotType.CONTOUR]:    { type: PlotType.CONTOUR,    label: 'Contour (Plotly)',      dimensions: '2d', source: 'image', requiresGrayscale: true },
+  [PlotType.HEATMAP]:    { type: PlotType.HEATMAP,    label: 'Heatmap (Plotly)',      productionLabel: 'Heatmap',    dimensions: '2d', source: 'image' },
+  [PlotType.CONTOUR]:    { type: PlotType.CONTOUR,    label: 'Contour (Plotly)',      productionLabel: 'Contour',    dimensions: '2d', source: 'image', requiresGrayscale: true },
   [PlotType.SCATTER]:    { type: PlotType.SCATTER,    label: 'Scatter 2D (Plotly)',   dimensions: '2d', source: 'regions' },
   [PlotType.SURFACE]:    { type: PlotType.SURFACE,    label: 'Surface (Plotly)',      dimensions: '3d', source: 'image', requiresGrayscale: true },
   [PlotType.SCATTER3D]:  { type: PlotType.SCATTER3D,  label: 'Scatter 3D (Plotly)',   dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
@@ -85,10 +101,10 @@ export const PLOT_TYPE_DESCRIPTORS: Partial<Record<PlotType, PlotTypeDescriptor>
   // ── napari-js WebGPU (jit-ui#102). The 3D types take a runtime decimate factor. ──
   [PlotType.NAPARI_IMAGE]:      { type: PlotType.NAPARI_IMAGE,      label: 'Image (napari · WebGPU)',      dimensions: '2d', source: 'image' },
   [PlotType.NAPARI_SCATTER]:    { type: PlotType.NAPARI_SCATTER,    label: 'Scatter 2D (napari · WebGPU)', dimensions: '2d', source: 'regions' },
-  [PlotType.NAPARI_SURFACE]:    { type: PlotType.NAPARI_SURFACE,    label: 'Surface (napari · WebGPU)',    dimensions: '3d', source: 'image', requiresGrayscale: true },
+  [PlotType.NAPARI_SURFACE]:    { type: PlotType.NAPARI_SURFACE,    label: 'Surface (napari · WebGPU)',    productionLabel: 'Surface',    dimensions: '3d', source: 'image', requiresGrayscale: true },
   [PlotType.NAPARI_SCATTER3D]:  { type: PlotType.NAPARI_SCATTER3D,  label: 'Scatter 3D (napari · WebGPU)', dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
-  [PlotType.NAPARI_VOLUME]:     { type: PlotType.NAPARI_VOLUME,     label: 'Volume (napari · WebGPU)',     dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
-  [PlotType.NAPARI_ISOSURFACE]: { type: PlotType.NAPARI_ISOSURFACE, label: 'Isosurface (napari · WebGPU)', dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
+  [PlotType.NAPARI_VOLUME]:     { type: PlotType.NAPARI_VOLUME,     label: 'Volume (napari · WebGPU)',     productionLabel: 'Volume',     dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
+  [PlotType.NAPARI_ISOSURFACE]: { type: PlotType.NAPARI_ISOSURFACE, label: 'Isosurface (napari · WebGPU)', productionLabel: 'Isosurface', dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
 };
 
 export function getPlotTypeDescriptor(type: PlotType): PlotTypeDescriptor | undefined {
