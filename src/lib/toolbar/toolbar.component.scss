@@ -31,6 +31,30 @@
   filter: brightness(0) invert(1);
 }
 
+// Plot-type selector items (selected value + the body-appended panel list). The
+// panel lives outside this component's view, so these are intentionally global
+// (no :host), like the other PrimeNG overrides above. Labels render in black;
+// icons take the toolbar's primary blue (same recolour filter as the toolbar
+// tool icons) so they match.
+::ng-deep .plotmode-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #000;
+
+  i {
+    font-size: 1rem;
+    color: var(--primary-color);
+  }
+
+  .plotmode-icon-img {
+    width: 1.1rem;
+    height: 1.1rem;
+    object-fit: contain;
+    filter: brightness(0) invert(47%) sepia(98%) saturate(567%) hue-rotate(181deg) brightness(103%) contrast(98%);
+  }
+}
+
 ::ng-deep .wand-sensitivity-slider {
   width: 8rem;
   align-self: center;

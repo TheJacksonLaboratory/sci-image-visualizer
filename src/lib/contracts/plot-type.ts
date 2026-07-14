@@ -64,6 +64,13 @@ export interface PlotTypeDescriptor {
    * knob that curates the default plot-mode list (jax-image-visualization).
    */
   productionLabel?: string;
+  /**
+   * Icon shown to the left of the label in the plot-type selector. Either a
+   * PrimeNG icon class (starts with `pi `, e.g. `pi pi-image`) rendered as a
+   * font glyph, or a served SVG asset path (e.g. `assets/plotting/surface.svg`)
+   * rendered as an `<img>`. Both are tinted to the toolbar's primary blue.
+   */
+  icon?: string;
   dimensions: PlotDimensions;
   source: PlotDataSource;
   /** True when the type only makes sense over a multi-frame z-stack. */
@@ -90,21 +97,21 @@ export interface PlotTypeDescriptor {
 //    `productionLabel`, so it appears only when the host enables test mode.
 export const PLOT_TYPE_DESCRIPTORS: Partial<Record<PlotType, PlotTypeDescriptor>> = {
   // ── Default ──
-  [PlotType.IMAGE]:      { type: PlotType.IMAGE,      label: 'Image (OSD)',           productionLabel: 'Image',      dimensions: '2d', source: 'image' },
+  [PlotType.IMAGE]:      { type: PlotType.IMAGE,      label: 'Image (OSD)',           productionLabel: 'Image',      icon: 'pi pi-image',                    dimensions: '2d', source: 'image' },
   // ── Plotly ──
-  [PlotType.HEATMAP]:    { type: PlotType.HEATMAP,    label: 'Heatmap (Plotly)',      productionLabel: 'Heatmap',    dimensions: '2d', source: 'image' },
-  [PlotType.CONTOUR]:    { type: PlotType.CONTOUR,    label: 'Contour (Plotly)',      productionLabel: 'Contour',    dimensions: '2d', source: 'image', requiresGrayscale: true },
-  [PlotType.SCATTER]:    { type: PlotType.SCATTER,    label: 'Scatter 2D (Plotly)',   dimensions: '2d', source: 'regions' },
-  [PlotType.SURFACE]:    { type: PlotType.SURFACE,    label: 'Surface (Plotly)',      dimensions: '3d', source: 'image', requiresGrayscale: true },
-  [PlotType.SCATTER3D]:  { type: PlotType.SCATTER3D,  label: 'Scatter 3D (Plotly)',   dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
-  [PlotType.ISOSURFACE]: { type: PlotType.ISOSURFACE, label: 'Isosurface (Plotly)',   dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
+  [PlotType.HEATMAP]:    { type: PlotType.HEATMAP,    label: 'Heatmap (Plotly)',      productionLabel: 'Heatmap',    icon: 'assets/plotting/heatmap.svg',    dimensions: '2d', source: 'image' },
+  [PlotType.CONTOUR]:    { type: PlotType.CONTOUR,    label: 'Contour (Plotly)',      productionLabel: 'Contour',    icon: 'assets/plotting/contour.svg',    dimensions: '2d', source: 'image', requiresGrayscale: true },
+  [PlotType.SCATTER]:    { type: PlotType.SCATTER,    label: 'Scatter 2D (Plotly)',   icon: 'pi pi-chart-scatter',            dimensions: '2d', source: 'regions' },
+  [PlotType.SURFACE]:    { type: PlotType.SURFACE,    label: 'Surface (Plotly)',      icon: 'assets/plotting/surface.svg',    dimensions: '3d', source: 'image', requiresGrayscale: true },
+  [PlotType.SCATTER3D]:  { type: PlotType.SCATTER3D,  label: 'Scatter 3D (Plotly)',   icon: 'assets/plotting/3d-coordinates.svg', dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
+  [PlotType.ISOSURFACE]: { type: PlotType.ISOSURFACE, label: 'Isosurface (Plotly)',   icon: 'assets/plotting/isosurface.svg', dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
   // ── napari-js WebGPU (jit-ui#102). The 3D types take a runtime decimate factor. ──
-  [PlotType.NAPARI_IMAGE]:      { type: PlotType.NAPARI_IMAGE,      label: 'Image (napari · WebGPU)',      dimensions: '2d', source: 'image' },
-  [PlotType.NAPARI_SCATTER]:    { type: PlotType.NAPARI_SCATTER,    label: 'Scatter 2D (napari · WebGPU)', dimensions: '2d', source: 'regions' },
-  [PlotType.NAPARI_SURFACE]:    { type: PlotType.NAPARI_SURFACE,    label: 'Surface (napari · WebGPU)',    productionLabel: 'Surface',    dimensions: '3d', source: 'image', requiresGrayscale: true },
-  [PlotType.NAPARI_SCATTER3D]:  { type: PlotType.NAPARI_SCATTER3D,  label: 'Scatter 3D (napari · WebGPU)', dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
-  [PlotType.NAPARI_VOLUME]:     { type: PlotType.NAPARI_VOLUME,     label: 'Volume (napari · WebGPU)',     productionLabel: 'Volume',     dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
-  [PlotType.NAPARI_ISOSURFACE]: { type: PlotType.NAPARI_ISOSURFACE, label: 'Isosurface (napari · WebGPU)', productionLabel: 'Isosurface', dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
+  [PlotType.NAPARI_IMAGE]:      { type: PlotType.NAPARI_IMAGE,      label: 'Image (napari · WebGPU)',      icon: 'pi pi-image',                        dimensions: '2d', source: 'image' },
+  [PlotType.NAPARI_SCATTER]:    { type: PlotType.NAPARI_SCATTER,    label: 'Scatter 2D (napari · WebGPU)', icon: 'pi pi-chart-scatter',                dimensions: '2d', source: 'regions' },
+  [PlotType.NAPARI_SURFACE]:    { type: PlotType.NAPARI_SURFACE,    label: 'Surface (napari · WebGPU)',    productionLabel: 'Surface',    icon: 'assets/plotting/surface.svg',        dimensions: '3d', source: 'image', requiresGrayscale: true },
+  [PlotType.NAPARI_SCATTER3D]:  { type: PlotType.NAPARI_SCATTER3D,  label: 'Scatter 3D (napari · WebGPU)', icon: 'assets/plotting/3d-coordinates.svg', dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
+  [PlotType.NAPARI_VOLUME]:     { type: PlotType.NAPARI_VOLUME,     label: 'Volume (napari · WebGPU)',     productionLabel: 'Volume',     icon: 'assets/plotting/cube-3d.svg',        dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
+  [PlotType.NAPARI_ISOSURFACE]: { type: PlotType.NAPARI_ISOSURFACE, label: 'Isosurface (napari · WebGPU)', productionLabel: 'Isosurface', icon: 'assets/plotting/isosurface.svg',     dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
 };
 
 export function getPlotTypeDescriptor(type: PlotType): PlotTypeDescriptor | undefined {

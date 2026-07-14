@@ -167,6 +167,12 @@ export class ToolbarComponent implements OnChanges {
     return this.selectedPlotType === PlotType.IMAGE;
   }
 
+  /** A plot-type icon is a PrimeNG font glyph (e.g. `pi pi-image`) rather than an
+   *  SVG asset path — drives which element the selector item template renders. */
+  isPiIcon(icon: string | undefined): boolean {
+    return !!icon && icon.startsWith('pi ');
+  }
+
   /** Backends with a vertex-editing region overlay: OSD Image and napari-js WebGPU image
    *  (jit-ui#102). Gates the polygon / add-vertex / delete-vertex / Bézier-convert tools. */
   get supportsRegionVertexTools(): boolean {
