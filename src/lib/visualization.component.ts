@@ -290,6 +290,21 @@ export class VisualizationComponent implements OnInit, OnChanges, AfterViewInit,
     // reflects test mode immediately, without waiting for an image to (re)load.
     if (changes['testMode']) {
       this.computePlotTypeOptions();
+      // If test mode is turned off while a test-only type (e.g. NAPARI_IMAGE) is
+      // active, that type is no longer offered — fall back to Image.
+      this.reconcileSelectedPlotType();
+    }
+  }
+
+  /** If the active plot type is no longer in the offered options (e.g. test mode
+   *  turned off while a test-only type was active, or a scalar type carried onto
+   *  an RGB image), fall back to the default 2D Image view. */
+  private reconcileSelectedPlotType(): void {
+    if (!this.plotTypeOptions.some((d) => d.type === this.selectedPlotType)) {
+      this.selectedPlotType = PlotType.IMAGE;
+      this.plotType = PlotType.IMAGE;
+      this.isHeatmap = true;
+      this.plotService.setPlotType(PlotType.IMAGE);
     }
   }
 
@@ -426,12 +441,7 @@ export class VisualizationComponent implements OnInit, OnChanges, AfterViewInit,
           this.computePlotTypeOptions();
           // If the active plot type isn't valid for this image (e.g. a scalar
           // type like Contour carried over to an RGB image), fall back to Image.
-          if (!this.plotTypeOptions.some((d) => d.type === this.selectedPlotType)) {
-            this.selectedPlotType = PlotType.IMAGE;
-            this.plotType = PlotType.IMAGE;
-            this.isHeatmap = true;
-            this.plotService.setPlotType(PlotType.IMAGE);
-          }
+          this.reconcileSelectedPlotType();
           // reset stack options selection
           this.selectedStackOption = imgInfo.showStack ? this.stackOptions[1] : this.stackOptions[0];
 

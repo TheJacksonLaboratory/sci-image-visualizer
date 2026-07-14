@@ -173,6 +173,18 @@ describe('VisualizationComponent (UI shell)', () => {
       component.ngOnChanges({ testMode: {} } as any);
       expect(component.plotTypeOptions.some((d) => d.type === PlotType.NAPARI_IMAGE)).toBe(true);
     });
+
+    it('falls back to Image when test mode turns off while a test-only type is active', () => {
+      // test mode on, and a test-only type (napari Image) is the active selection
+      component.testMode = true;
+      component.ngOnChanges({ testMode: {} } as any);
+      component.selectedPlotType = PlotType.NAPARI_IMAGE;
+      // turning test mode off drops that option → selection reconciled to Image
+      component.testMode = false;
+      component.ngOnChanges({ testMode: {} } as any);
+      expect(component.selectedPlotType).toBe(PlotType.IMAGE);
+      expect(plotService.setPlotType).toHaveBeenCalledWith(PlotType.IMAGE);
+    });
   });
 
   describe('region set-operations (jit-ui#85)', () => {
