@@ -163,7 +163,7 @@ Promptable SAM models are SAM-v1 encoder/decoder ONNX pairs (the encoder runs
 once per image; the decoder runs per prompt). The registry lives in
 `src/lib/toolbar/sam-model-registry.ts`; the host supplies hosted URLs via
 `setSamModelUrls(...)`. Export/quantization tooling lives in the sibling
-`sam-js` project.
+`browser-onnx-tools` project.
 
 | Picker id | Domain | Encoder | Runs on | HF model |
 |---|---|---|---|---|

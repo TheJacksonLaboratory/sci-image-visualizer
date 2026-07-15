@@ -36,8 +36,8 @@ SAM-architecture) — only the registry entry changes.
 
 ## 2. ONNX export recipe
 
-> The runnable export + quantization tooling lives in the **`sam-js`** project
-> (sibling repo): `sam-js/export/export_sam_onnx.py` (+ its venv/requirements and
+> The runnable export + quantization tooling lives in the **`browser-onnx-tools`** project
+> (sibling repo): `browser-onnx-tools/export/export_sam_onnx.py` (+ its venv/requirements and
 > README). It's validated end-to-end on base SAM ViT-B (encoder → embedding →
 > box-prompt decode → mask). The recipe below documents what that script does.
 

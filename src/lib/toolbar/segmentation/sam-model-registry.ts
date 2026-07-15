@@ -14,7 +14,7 @@ import { SamModelDef } from '../../contracts/sam.contract';
  * cellpose default). A host can repoint them at its own hosting (e.g. a GCS
  * bucket) at runtime via {@link setSamModelUrls}; an empty URL disables a model
  * (the session throws a clear "not configured" error). Export/quantization
- * tooling: the sibling `sam-js` project; see docs/sam-segmentation-design.md.
+ * tooling: the sibling `browser-onnx-tools` project; see docs/sam-segmentation-design.md.
  */
 export const SAM_MODELS: SamModelDef[] = [
   {

@@ -12,7 +12,22 @@
                   [(ngModel)]="selectedPlotType" appendTo="body"
                   pTooltip="Select plot type" tooltipPosition="bottom"
                   [style]="{'min-width': '11rem'}"
+                  styleClass="plotmode-dropdown" panelStyleClass="plotmode-panel"
                   (onChange)="selectPlotType.emit($event.value)">
+        <ng-template let-opt pTemplate="selectedItem">
+          <span class="plotmode-item" *ngIf="opt">
+            <i *ngIf="isPiIcon(opt.icon)" [class]="opt.icon"></i>
+            <img *ngIf="opt.icon && !isPiIcon(opt.icon)" class="plotmode-icon-img" [src]="opt.icon" alt="" />
+            <span>{{ opt.label }}</span>
+          </span>
+        </ng-template>
+        <ng-template let-opt pTemplate="item">
+          <span class="plotmode-item">
+            <i *ngIf="isPiIcon(opt.icon)" [class]="opt.icon"></i>
+            <img *ngIf="opt.icon && !isPiIcon(opt.icon)" class="plotmode-icon-img" [src]="opt.icon" alt="" />
+            <span>{{ opt.label }}</span>
+          </span>
+        </ng-template>
       </p-dropdown>
       <ng-container *ngIf="isIsosurfaceMode">
         <span class="flex align-items-center mx-1 toolbar-text">Iso</span>
