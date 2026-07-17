@@ -165,8 +165,7 @@
                 <p-dropdown class="class-dropdown" appendTo="body"
                             [options]="presetSet.classes" optionLabel="name" optionValue="name"
                             [ngModel]="region.label" [autoDisplayFirst]="false"
-                            (onChange)="applyPresetToRegion(region, $event.value)"
-                            (click)="$event.stopPropagation()">
+                            (onChange)="applyPresetToRegion(region, $event.value)">
                   <ng-template pTemplate="selectedItem">
                     <span class="dd-value">
                       <span class="chip-swatch" [style.background]="colorForName(region.label)"></span>
