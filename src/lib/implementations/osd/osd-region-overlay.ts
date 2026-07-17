@@ -371,9 +371,9 @@ export class OsdRegionOverlay implements IRegionOverlay {
         el.setAttribute('points', pts.map(p => { const q = this.toPx(p.x, p.y); return `${q.x},${q.y}`; }).join(' '));
       }
     }
-    el.setAttribute('fill', selected ? this.rgba(color, 0.2) : 'none');
+    el.setAttribute('fill', selected ? this.rgba(color, 0.35) : 'none');
     el.setAttribute('stroke', color);
-    el.setAttribute('stroke-width', selected ? '3' : '2');
+    el.setAttribute('stroke-width', selected ? '4' : '2');
 
     // The class label (legend), shown when the Region Editor's "show labels" is
     // on — mirrors Plotly's per-shape label (top-left, drawn in the region's

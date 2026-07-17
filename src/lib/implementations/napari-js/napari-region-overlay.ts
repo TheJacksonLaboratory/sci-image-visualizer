@@ -847,9 +847,9 @@ export class NapariRegionOverlay implements IRegionOverlay {
 
   private style(el: SVGElement, stroke: string, isSelected: boolean): void {
     el.setAttribute('stroke', stroke);
-    el.setAttribute('stroke-width', isSelected ? '3' : '2');
+    el.setAttribute('stroke-width', isSelected ? '4' : '2');
     el.setAttribute('fill', isSelected ? stroke : 'none');
-    el.setAttribute('fill-opacity', isSelected ? '0.2' : '0');
+    el.setAttribute('fill-opacity', isSelected ? '0.35' : '0');
     el.setAttribute('vector-effect', 'non-scaling-stroke');
   }
 
