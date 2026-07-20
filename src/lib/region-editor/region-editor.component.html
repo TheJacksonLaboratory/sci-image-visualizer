@@ -127,8 +127,8 @@
       <span class="row-count" [class.zero]="classCount(c.name) === 0">{{ classCount(c.name) }}</span>
       <button pButton type="button" icon="pi pi-trash"
               class="p-button-sm p-button-text p-button-warning row-del"
-              [disabled]="classCount(c.name) > 0"
-              [pTooltip]="classCount(c.name) > 0 ? 'In use — reclassify its regions first' : 'Remove class'"
+              [disabled]="c.name === defaultClassName && classCount(c.name) > 0"
+              [pTooltip]="deleteClassTooltip(c.name)"
               tooltipPosition="bottom"
               (click)="$event.stopPropagation(); deleteClass(c.name)"></button>
     </div>

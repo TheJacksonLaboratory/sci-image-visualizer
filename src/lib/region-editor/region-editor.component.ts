@@ -53,6 +53,8 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   presetDraft: PresetSet | null = null;
   /** class name (match-mode keyed) → number of regions currently using it. */
   classCounts = new Map<string, number>();
+  /** Fallback class that a region reverts to when its class is deleted (jit-ui#70). */
+  readonly defaultClassName = 'Region';
   /** Classes as shown in the panel: sorted by region count (desc), then name. */
   displayClasses: ClassPreset[] = [];
   readonly matchModeOptions = [
@@ -731,12 +733,40 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.setRegionsFromEditor();
   }
 
-  /** Remove an unused class. Classes still in use can't be removed here (they'd be
-   *  re-added from their regions) — reclassify or delete those regions first. */
+  /** Tooltip for a class's delete button in the panel. */
+  deleteClassTooltip(name: string): string {
+    const inUse = this.classCount(name) > 0;
+    if (name === this.defaultClassName && inUse) return 'The default class cannot be removed while in use';
+    return inUse ? 'Remove class — its regions revert to Region' : 'Remove class';
+  }
+
+  /** Remove a class. Any regions still using it fall back to the default
+   *  "Region" class, so they aren't orphaned (and the class isn't immediately
+   *  re-added from its regions by syncClassesFromRegions). */
   deleteClass(name: string): void {
-    if (this.classCount(name) > 0) return;
+    this.reassignRegionsToDefaultClass([name]);
     this.regionApi.removeClass(name);
     if (this.activeClass === name) this.activeClass = null;
+    this.setRegionsFromEditor();
+  }
+
+  /** Regions labelled with any of `removedNames` revert to the default
+   *  {@link defaultClassName} ("Region"): its class colour, override cleared.
+   *  Skips the default itself so deleting "Region" can't self-reassign. (jit-ui#70) */
+  private reassignRegionsToDefaultClass(removedNames: string[]): void {
+    const norm = this.presetSet.matchMode === 'normalized';
+    const keyOf = (s: string) => (norm ? s.trim().toLowerCase() : s);
+    const removed = new Set(removedNames.map(keyOf));
+    removed.delete(keyOf(this.defaultClassName));
+    if (!removed.size) return;
+    const color = colorForLabel(this.defaultClassName, this.presetSet);
+    for (const r of this.regions) {
+      if (r.label && removed.has(keyOf(r.label))) {
+        r.label = this.defaultClassName;
+        r.colorOverridden = false;
+        r.color = color;
+      }
+    }
   }
 
   /** Stamp a class (and its preset/fallback colour) onto one region from the Class
@@ -834,6 +864,14 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       classes.push({ ...c, name });
     }
     this.presetDraft.classes = classes;
+    // Classes dropped in the dialog: their regions revert to the default "Region"
+    // class (else syncClassesFromRegions would just re-add them) (jit-ui#70).
+    const keyOf = (s: string) => (norm ? s.trim().toLowerCase() : s);
+    const kept = new Set(classes.map((c) => keyOf(c.name)));
+    const removed = this.presetSet.classes
+      .map((c) => c.name)
+      .filter((n) => !kept.has(keyOf(n)));
+    this.reassignRegionsToDefaultClass(removed);
     this.regionApi.setPresetSet(this.presetDraft);
     this.setRegionsFromEditor(); // recolour existing (non-overridden) regions from the new presets
     if (close) this.showManageDialog = false;

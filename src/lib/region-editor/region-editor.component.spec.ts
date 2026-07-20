@@ -1519,6 +1519,50 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
     expect(saved.classes.map((c) => c.name)).toEqual(['Tumor', 'Stroma']);
   });
 
+  it('deleteClass reverts its regions to the default "Region" class', () => {
+    component.presetSet = {
+      classes: [{ name: 'Tumor', color: '#FF4444' }, { name: 'Region', color: '#00FFFF' }],
+      fallbackPalette: ['#111111'], autoPromote: false, matchMode: 'exact',
+    };
+    const a = Object.assign(new Region(), { id: 1, label: 'Tumor', color: '#FF4444', colorOverridden: true });
+    const b = Object.assign(new Region(), { id: 2, label: 'Stroma', color: '#44AAFF' });
+    component.regions = [a, b];
+
+    component.deleteClass('Tumor');
+
+    expect(a.label).toBe('Region');
+    expect(a.color).toBe('#00FFFF'); // the Region class colour
+    expect(a.colorOverridden).toBe(false);
+    expect(b.label).toBe('Stroma'); // other regions untouched
+    expect(api.removeClass).toHaveBeenCalledWith('Tumor');
+  });
+
+  it('applyManageDialog reverts regions of a dropped class to "Region"', () => {
+    component.presetSet = {
+      classes: [{ name: 'Tumor', color: '#FF4444' }, { name: 'Region', color: '#00FFFF' }],
+      fallbackPalette: ['#111111'], autoPromote: false, matchMode: 'exact',
+    };
+    const a = Object.assign(new Region(), { id: 1, label: 'Tumor', color: '#FF4444' });
+    component.regions = [a];
+
+    component.openManageDialog();
+    component.presetDraft!.classes = [{ name: 'Region', color: '#00FFFF' }]; // drop Tumor
+    component.applyManageDialog(true);
+
+    expect(a.label).toBe('Region');
+    expect(a.colorOverridden).toBe(false);
+  });
+
+  it('deleting the in-use default "Region" class is disabled (helper reports it)', () => {
+    component.presetSet = {
+      classes: [{ name: 'Region', color: '#00FFFF' }],
+      fallbackPalette: ['#111111'], autoPromote: false, matchMode: 'exact',
+    };
+    component.regions = [Object.assign(new Region(), { id: 1, label: 'Region' })];
+    (component as any).recomputeClassCounts();
+    expect(component.deleteClassTooltip('Region')).toContain('cannot be removed');
+  });
+
   it('auto-adds classes found on loaded regions (not already presets), ignoring legend/empty', () => {
     const loaded = [
       Object.assign(new Region(), { id: 1, label: 'Tumor', color: '#FF4444' }),      // already a preset
@@ -1585,10 +1629,13 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
     expect(api.setAnnotationRegions).toHaveBeenCalled();
   });
 
-  it('deleteClass removes an unused class but refuses one still in use', () => {
-    (component as any).classCounts = new Map([['Tumor', 3]]);
-    component.deleteClass('Tumor'); // in use -> refused
-    expect(api.removeClass).not.toHaveBeenCalled();
+  it('deleteClass removes the class and reverts its in-use regions to "Region"', () => {
+    const t = Object.assign(new Region(), { id: 1, label: 'Tumor' });
+    component.regions = [t];
+    component.deleteClass('Tumor'); // in use -> removed, its region reverts to Region
+    expect(api.removeClass).toHaveBeenCalledWith('Tumor');
+    expect(t.label).toBe('Region');
+    (api.removeClass as jest.Mock).mockClear();
     component.deleteClass('Necrosis'); // unused -> removed
     expect(api.removeClass).toHaveBeenCalledWith('Necrosis');
   });
