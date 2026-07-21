@@ -147,7 +147,8 @@
              [rowHover]="true" dataKey="id" styleClass="p-datatable-sm region-editor-table"
              [scrollable]="true" scrollHeight="100%">
       <ng-template pTemplate="header">
-        <tr>
+        <!-- Hide the column header when there are no regions to show. -->
+        <tr *ngIf="regions.length > 0">
           <!-- Class column: shrinks to fit "Region" by default, grows with longer labels. -->
           <th class="class-col-header" pResizableColumn>Class <p-sortIcon field="label"></p-sortIcon></th>
           <th class="surface-col-header" pResizableColumn>Surface</th>
