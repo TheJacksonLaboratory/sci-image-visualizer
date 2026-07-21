@@ -310,18 +310,6 @@
                [class]="activeDragMode === 'deletepoint' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
                style="width: 1rem"/>
         </p-button>
-        <p-button size="small" [text]="true"
-                  pTooltip="Convert the selected region to a smooth Bézier curve"
-                  [escape]="false" tooltipPosition="bottom"
-                  (onClick)="toBezierRegion.emit()">
-          <img src="assets/plotting/to-bezier.svg" class="toolbar-icon-dark" style="width: 1rem"/>
-        </p-button>
-        <p-button size="small" [text]="true"
-                  pTooltip="Convert the selected region back to a straight-edged polygon"
-                  [escape]="false" tooltipPosition="bottom"
-                  (onClick)="toPolygonRegion.emit()">
-          <img src="assets/plotting/to-polygon.svg" class="toolbar-icon-dark" style="width: 1rem"/>
-        </p-button>
       </ng-container>
 
       <p-button size="small"

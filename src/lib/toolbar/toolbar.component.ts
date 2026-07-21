@@ -116,9 +116,6 @@ export class ToolbarComponent implements OnChanges {
   @Output() segmentCellpose = new EventEmitter<void>();
   /** SAM model picker (jit-ui#90 P1). */
   @Output() samModelChange = new EventEmitter<string>();
-  /** Convert the selected region to/from a bezier curve (toBezier / toPolygon). */
-  @Output() toBezierRegion = new EventEmitter<void>();
-  @Output() toPolygonRegion = new EventEmitter<void>();
   @Output() wandSensitivityChange = new EventEmitter<number | undefined>();
   @Output() brushSizeChange = new EventEmitter<number | undefined>();
   @Output() vertexEraserRadiusChange = new EventEmitter<number | undefined>();
