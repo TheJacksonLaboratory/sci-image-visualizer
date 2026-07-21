@@ -1653,7 +1653,7 @@ export class PlotlyService implements IVisualizer {
         ticksuffix: '  ',
 				// set autorange to false so that plotly does not overwrite the range for the y axis
 				autorange: false,
-			  scaleanchor: this.scaleratio ? 'x' : false
+        scaleanchor: this.scaleratio ? 'x' : false
      },
       margin: { t: 30, b: 5, l: 55, r: 5 },
       height: this.screenHeight,

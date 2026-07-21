@@ -1,10 +1,9 @@
 {
-  "$schema": "../../node_modules/ng-packagr/ng-package.schema.json",
-  "dest": "../../dist/libs/jax-image-visualization",
+  "$schema": "./node_modules/ng-packagr/ng-package.schema.json",
+  "dest": "./dist",
   "lib": {
     "entryFile": "src/index.ts"
   },
-  "assets": [
-    "src/lib/assets"
-  ]
+  "assets": ["src/lib/assets"],
+  "allowedNonPeerDependencies": ["fast-png"]
 }

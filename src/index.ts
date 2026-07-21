@@ -1,6 +1,6 @@
 /**
  * Public API of the jax-image-visualization library. External consumers import
- * ONLY from here (`@jax-image/visualization`); everything else under `lib/` is
+ * ONLY from here (`@jax-data-science/sci-image-visualizer`); everything else under `lib/` is
  * internal. The surface is contracts + tokens + neutral models + the Angular
  * module, plus the routing service the host's composition root binds the tokens
  * to (`useExisting`).
