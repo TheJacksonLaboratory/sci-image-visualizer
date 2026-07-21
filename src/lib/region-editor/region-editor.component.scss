@@ -313,10 +313,15 @@ kbd {
   color: var(--text-color-secondary);
   margin-right: auto;
 }
-/* Scrollable class list — kept short so the regions table has room. */
+/* Scrollable class list — kept short by default so the regions table has room,
+ * but the user can drag its bottom edge (resize handle) to make it taller. */
 .classes-panel-body {
-  max-height: 7rem;
+  height: 7rem;      /* current default height */
+  min-height: 2.5rem;
+  max-height: 60vh;  /* generous cap so the regions table is never fully squeezed out */
+  overflow-x: hidden;
   overflow-y: auto;
+  resize: vertical;  /* drag the bottom edge to grow/shrink the list */
 }
 /* Compact swatch for the dense class list. */
 ::ng-deep .classes-panel-body .hex-picker-swatch {
