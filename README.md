@@ -1,14 +1,55 @@
-# @jax-image/visualization
+# @jax-data-science/sci-image-visualizer
 
-A framework-style Angular 17 library for **interactive scientific image
-visualization and annotation**. It renders large/multi-channel images through
-pluggable backends (OpenSeadragon tiled viewer and Plotly), and provides a rich
-set of on-canvas region tools — including **AI-assisted segmentation that runs
-entirely in the browser** (WebGPU / WASM via `onnxruntime-web`).
+[![npm](https://img.shields.io/npm/v/%40jax-data-science%2Fsci-image-visualizer.svg)](https://www.npmjs.com/package/@jax-data-science/sci-image-visualizer)
+[![CI / CD](https://github.com/TheJacksonLaboratory/sci-image-visualizer/actions/workflows/ci-cd.yaml/badge.svg)](https://github.com/TheJacksonLaboratory/sci-image-visualizer/actions/workflows/ci-cd.yaml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
-Used by [jit-ui](https://github.com/TheJacksonLaboratory/jit-ui) (JAX Image
-Tools). The annotation/segmentation tooling was added under
-[jit-ui#90](https://github.com/TheJacksonLaboratory/jit-ui/issues/90).
+A framework-style **Angular 17** library for **interactive scientific image
+visualization and annotation**. It renders large / multi-channel images through
+pluggable backends — a tiled [OpenSeadragon](https://openseadragon.github.io/)
+viewer, [Plotly](https://plotly.com/javascript/) 2D/3D plots, and a
+[napari-js](https://www.npmjs.com/package/napari-js) **WebGPU** backend — behind a
+single `IVisualizer` contract, and provides a rich set of on-canvas region /
+annotation tools including **AI-assisted segmentation that runs entirely in the
+browser** (WebGPU / WASM via [`onnxruntime-web`](https://github.com/microsoft/onnxruntime)).
+
+Extracted from [jit-ui](https://github.com/TheJacksonLaboratory/jit-ui) (JAX Image
+Tools) — see [jit-ui#80](https://github.com/TheJacksonLaboratory/jit-ui/issues/80) —
+so the same viewer can be reused across the `@jax-data-science` portfolio. Open
+source; contributions welcome.
+
+## Installation
+
+```bash
+npm install @jax-data-science/sci-image-visualizer
+```
+
+Install the Angular / rendering **peer dependencies** your app doesn't already
+have:
+
+```bash
+npm install @angular/animations @angular/router primeng \
+  openseadragon plotly.js-dist-min image-js file-saver buffer onnxruntime-web
+```
+
+### Peer dependencies
+
+| Package | Range | Notes |
+|---|---|---|
+| `@angular/common` · `core` · `forms` · `animations` · `router` | `^17.3.0` | Angular 17 (animations + router are needed by the PrimeNG components) |
+| `rxjs` | `^7.8.0` | |
+| `primeng` | `^17.18.0` | toolbar / dialogs / table / dropdown UI |
+| `openseadragon` | `^6.0.2` | tiled (deep-zoom) image backend |
+| `plotly.js-dist-min` | `^3.0.1` | 2D/3D plot backend |
+| `image-js` | `^0.35.6` | client-side image processing |
+| `file-saver` | `^2.0.5` | GeoJSON / mask export |
+| `buffer` | `^5.7.1` | |
+| `onnxruntime-web` | `~1.26.0` | browser SAM / cellpose inference (WebGPU/WASM) |
+| `cellpose-js` | `^0.3.0` | **optional** — automatic cellpose-SAM segmentation |
+| `napari-js` | `^0.11.0` | **optional** — WebGPU rendering backend |
+
+`fast-png` and `tslib` are bundled as regular dependencies (you don't install
+them). See [Quick start](#usage-host-integration-brief) below for wiring.
 
 ## Highlights
 
@@ -225,16 +266,15 @@ Design, architecture, and planning docs for the library:
 - **[docs/JIT_UI_visualization_library_SOW.docx](docs/JIT_UI_visualization_library_SOW.docx)** —
   statement of work for extracting/publishing this library (incl. test-coverage
   results and the example-server task).
-- **[JIT-PLOTTING-SOW.docx](JIT-PLOTTING-SOW.docx)** — the original plotting SOW.
-- **[REFACTORING-PLAN.md](REFACTORING-PLAN.md)** — the plan that shaped the
+- **[REFACTORING-PLAN.md](docs/REFACTORING-PLAN.md)** — the plan that shaped the
   current module/contract/implementation boundaries.
 
 Related (host side, in jit-ui):
 
-- **[USE-VISUALIZATION-LIB-IN-PIPELINE-DIALOG.md](../../apps/jit-ui/src/app/main/components/processing-pipeline/USE-VISUALIZATION-LIB-IN-PIPELINE-DIALOG.md)** —
+- **[USE-VISUALIZATION-LIB-IN-PIPELINE-DIALOG.md](https://github.com/TheJacksonLaboratory/jit-ui/blob/master/apps/jit-ui/src/app/main/components/processing-pipeline/USE-VISUALIZATION-LIB-IN-PIPELINE-DIALOG.md)** —
   how the processing-pipeline dialog embeds `<visualization>` and drives it
   via `RoutingVisualizerService`.
-- **[processing-pipeline/ARCHITECTURE.md](../../apps/jit-ui/src/app/main/models/processing-pipeline/ARCHITECTURE.md)** —
+- **[processing-pipeline/ARCHITECTURE.md](https://github.com/TheJacksonLaboratory/jit-ui/blob/master/apps/jit-ui/src/app/main/models/processing-pipeline/ARCHITECTURE.md)** —
   the client/server processing-pipeline engines (OpenCV.js, transformers.js,
   cellpose, client slide-crop, server) that consume this library's region tools.
 
@@ -286,7 +326,7 @@ the Regions panel), and provide the DI ports (`TILE_ACCESS_PORT`,
 cellpose adapter). Configure hosted SAM model URLs once at startup:
 
 ```ts
-import { setSamModelUrls } from '@jax-image/visualization';
+import { setSamModelUrls } from '@jax-data-science/sci-image-visualizer';
 
 setSamModelUrls('microsam-vit-t-lm',
   'https://huggingface.co/Ballon999/microsam-vit-t-lm-onnx/resolve/main/encoder.fp16.onnx',
@@ -300,3 +340,41 @@ Each component declares both an unprefixed selector (used here and throughout
 jit-ui) and a `jaxviz-`-prefixed alias for collision-safe use when consuming the
 published library: `visualization` / `jaxviz-visualization`,
 `region-editor` / `jaxviz-region-editor`, `plotting-toolbar` / `jaxviz-toolbar`.
+
+## Development
+
+```bash
+npm install
+npm run build       # ng-packagr → ./dist  (the publishable package)
+npm test            # jest (jest-preset-angular)
+npm run typecheck   # tsc --noEmit
+npm run lint        # eslint
+npm run format      # prettier --write
+```
+
+`npm run build` emits a complete, publishable Angular package into `dist/`
+(FESM2022 + ESM2022 bundles, type declarations, assets, README, LICENSE).
+
+## Releasing
+
+Publishing is automated by CI (`.github/workflows/ci-cd.yaml`): pushing a
+`v*.*.*` tag whose version matches `package.json` and is reachable from `main`
+(or a `release/x.y.z` branch) builds, tests, and runs
+`npm publish --access public --provenance` from `dist/`. It requires an
+`NPM_TOKEN` repository secret with publish rights to the `@jax-data-science`
+npm scope.
+
+```bash
+# bump package.json to x.y.z first, commit, then:
+git tag vx.y.z && git push origin vx.y.z
+```
+
+## Contributing
+
+Issues and pull requests are welcome. Please run `npm run lint`, `npm test`, and
+`npm run build` before opening a PR. Design and architecture notes live in
+[`docs/`](docs/).
+
+## License
+
+[MIT](./LICENSE) © The Jackson Laboratory.

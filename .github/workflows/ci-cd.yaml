@@ -1,0 +1,115 @@
+name: CI / CD
+
+# CI runs on every push to main, every release branch, every PR, and on tags.
+# Publish runs only on a v*.*.* tag whose commit is reachable from main or from
+# a release/x.y.z branch, and whose version matches package.json.
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: CI — typecheck · lint · test · build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck (tsc --noEmit)
+        run: npm run typecheck
+
+      - name: Lint (eslint)
+        run: npm run lint
+
+      - name: Test (jest)
+        run: npm test
+
+      - name: Build (ng-packagr → dist/)
+        run: npm run build
+
+      - name: Upload dist for downstream publish
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  publish:
+    name: Publish to npm
+    needs: ci
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout (full history to verify the tag's branch ancestry)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+
+      - name: Verify tag is reachable from main or release/x.y.z
+        run: |
+          set -euo pipefail
+          TAG_SHA=$(git rev-parse "$GITHUB_REF")
+          BRANCHES=$(git branch -r --contains "$TAG_SHA" \
+            | grep -E 'origin/(main$|release/[0-9]+\.[0-9]+\.[0-9]+$)' || true)
+          if [ -z "$BRANCHES" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} is not reachable from main or any release/x.y.z branch. Refusing to publish."
+            git branch -r --contains "$TAG_SHA"
+            exit 1
+          fi
+          echo "Tag reachable from:"; echo "$BRANCHES"
+
+      - name: Verify tag version matches package.json
+        run: |
+          set -euo pipefail
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} implies $TAG_VERSION, but package.json has $PKG_VERSION."
+            exit 1
+          fi
+          echo "Tag and package.json agree on version: $PKG_VERSION"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (ng-packagr → dist/)
+        run: npm run build
+
+      - name: Re-run tests (sanity gate before publish)
+        run: npm test
+
+      # ng-packagr emits a complete, publishable package into dist/ (its own
+      # package.json, README, LICENSE). Publish from there.
+      # NOTE: this repo is internal. When it is made public, add --provenance to
+      #       the publish command below and restore "id-token: write" to the job
+      #       permissions above (npm provenance requires a public source repo).
+      - name: Publish to npm
+        run: npm publish --access public
+        working-directory: dist
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
