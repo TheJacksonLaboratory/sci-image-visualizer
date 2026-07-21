@@ -428,7 +428,9 @@
                   Shift/Alt-click to refine (exclude) the current one.<br>Esc undoes it."
                   [escape]="false" tooltipPosition="bottom"
                   (onClick)="toggleDragMode.emit('samPoint')">
-          <img src="assets/plotting/click.svg" class="toolbar-icon-dark" style="width: 1rem"/>
+          <img src="assets/plotting/click.svg"
+               [class]="activeDragMode === 'samPoint' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+               style="width: 1rem"/>
         </p-button>
       </ng-template>
       <p-menu #samModelMenu [model]="samMenuItems" [popup]="true" appendTo="body"></p-menu>

@@ -1,1 +1,43 @@
-<svg class="svg-icon" style="width: 1em;height: 1em;vertical-align: middle;fill: currentColor;overflow: hidden;" viewBox="96 96 832 832" version="1.1" xmlns="http://www.w3.org/2000/svg"><path d="M448 832v-288h384v288H448z m32-32h320v-224H480v224z m-192 96H96V429.888L414.08 96l317.568 288H288v512z m-32-32V352h392.736l-233.024-211.328L128 442.688V864h128z m96-384v-32h96v32h-96 96-96z m192 0v-32h96v32h-96z m-96 0h96-96z m448 64v-96h32v96h-32v-96 96z m0 192v-96h32v96h-32v-96 96z m0 192v-96h32v96h-32z m-160-32h96v32h-96v-32h96-96z m-192 0h96v32h-96v-32h96-96z m-192 0h96v32h-96v-32z m32-64h-32v-96h32v96-96 96z m0-192v-96 96h-32v-96h32v96z m352-192h96v32h-96v-32z"  /></svg>
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   class="svg-icon"
+   style="overflow:hidden;fill:currentColor"
+   viewBox="96 96 856 855.99951"
+   version="1.1"
+   id="svg1"
+   sodipodi:docname="picture-segmentation.svg"
+   width="856"
+   height="855.99951"
+   inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs1" />
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="1.7253877"
+     inkscape:cx="184.59619"
+     inkscape:cy="615.22403"
+     inkscape:window-width="2079"
+     inkscape:window-height="1186"
+     inkscape:window-x="0"
+     inkscape:window-y="30"
+     inkscape:window-maximized="0"
+     inkscape:current-layer="svg1" />
+  <path
+     d="m 460,843.99952 v -288 h 384 v 288 z m 32,-32 h 320 v -224 H 492 Z m -192,96 H 108 v -466.112 l 318.08,-333.888 317.568,288 -444.59995,-3.80778 z m -0.21345,-31.62763 -0.57958,-484.02123 401.09629,3.27026 L 427.712,152.67152 140,454.68752 v 421.312 z M 364,491.99952 v -32 h 96 v 32 h -96 96 z m 192,0 v -32 h 96 v 32 z m 352,64 v -96 h 32 v 96 h -32 v -96 z m 0,192 v -96 h 32 v 96 h -32 v -96 z m 0,192 v -96 h 32 v 96 z m -160,-32 h 96 v 32 h -96 v -32 h 96 z m -192,0 h 96 v 32 h -96 v -32 h 96 z m -192,0 h 96 v 32 h -96 z m 32,-64 h -32 v -96 h 32 v 96 -96 z m 0,-192 v -96 96 h -32 v -96 h 32 z m 352,-192 h 96 v 32 h -96 z"
+     stroke="currentColor"
+     stroke-width="24"
+     stroke-linejoin="round"
+     id="path1"
+     sodipodi:nodetypes="ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" />
+</svg>
