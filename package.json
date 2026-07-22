@@ -34,14 +34,15 @@
     "access": "public"
   },
   "scripts": {
-    "build": "ng-packagr -p ng-package.json -c tsconfig.lib.prod.json",
+    "build": "ng-packagr -p ng-package.json -c tsconfig.lib.prod.json && npm run bundle-workers",
     "typecheck": "tsc -p tsconfig.lib.json --noEmit",
     "test": "jest",
     "test:coverage": "jest --coverage",
     "lint": "eslint \"src/**/*.ts\" \"src/**/*.html\"",
     "lint:fix": "eslint --fix \"src/**/*.ts\" \"src/**/*.html\"",
     "format": "prettier --write \"src/**/*.{ts,html,scss}\" \"*.{json,md}\" \"docs/**/*.md\"",
-    "format:check": "prettier --check \"src/**/*.{ts,html,scss}\" \"*.{json,md}\" \"docs/**/*.md\""
+    "format:check": "prettier --check \"src/**/*.{ts,html,scss}\" \"*.{json,md}\" \"docs/**/*.md\"",
+    "bundle-workers": "node scripts/bundle-workers.mjs"
   },
   "dependencies": {
     "fast-png": "^6.4.0",
