@@ -51,6 +51,30 @@ npm install @angular/animations @angular/router primeng \
 `fast-png` and `tslib` are bundled as regular dependencies (you don't install
 them). See [Quick start](#usage-host-integration-brief) below for wiring.
 
+## Live demo & running the example
+
+A serverless, **in-browser** example lives in
+[`examples/browser-image/`](examples/browser-image/): a gallery of sample images
+that render in the viewer with the region + zoom tools, with no backend at all
+(the "Mode B" path — each image is a self-contained `tiled: false` source).
+
+**Live demo:** <https://thejacksonlaboratory.github.io/sci-image-visualizer/>
+— published by CI (`.github/workflows/pages.yaml`) to GitHub Pages. Goes live once
+the repo is public (or GitHub Pages is enabled for the org's internal repos).
+
+### Run on localhost
+
+```bash
+npm install            # repo + example toolchain (Vite + Analog)
+git lfs pull           # fetch the sample-image bytes (they're stored in Git LFS)
+npm run build          # build the library into dist/ (the example consumes it)
+npm run start:example  # dev server → http://localhost:5173
+```
+
+`npm run build:example` produces a static build in `examples/browser-image/dist/`.
+See [`examples/browser-image/README.md`](examples/browser-image/README.md) for the
+full walkthrough (adapters, TIFF handling, the Angular-17 toolchain note).
+
 ## Highlights
 
 - **Three rendering backends** — a tiled [OpenSeadragon](https://openseadragon.github.io/)
@@ -312,6 +336,10 @@ Related (host side, in jit-ui):
 - **Plotly.js** — interactive 2D/3D plotting.
   [plotly.com/javascript](https://plotly.com/javascript/) ·
   [GitHub](https://github.com/plotly/plotly.js).
+- **napari** — multi-dimensional (n-D) scientific image viewer; the WebGPU
+  rendering backend here (`napari-js`) is modeled on it.
+  [napari.org](https://napari.org) · [GitHub](https://github.com/napari/napari) ·
+  doi:[10.5281/zenodo.3555620](https://doi.org/10.5281/zenodo.3555620).
 - **onnxruntime-web** — WebGPU/WASM ONNX inference (the SAM & cellpose runtime).
   [GitHub](https://github.com/microsoft/onnxruntime).
 

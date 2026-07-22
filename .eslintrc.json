@@ -1,12 +1,26 @@
 {
   "root": true,
-  "ignorePatterns": ["dist/**", "coverage/**", "node_modules/**", "*.config.ts"],
+  "ignorePatterns": [
+    "dist/**",
+    "coverage/**",
+    "node_modules/**",
+    "*.config.ts",
+    "examples/**"
+  ],
   "overrides": [
     {
-      "files": ["*.ts"],
+      "files": [
+        "*.ts"
+      ],
       "parser": "@typescript-eslint/parser",
-      "parserOptions": { "ecmaVersion": 2022, "sourceType": "module" },
-      "plugins": ["@typescript-eslint", "@angular-eslint"],
+      "parserOptions": {
+        "ecmaVersion": 2022,
+        "sourceType": "module"
+      },
+      "plugins": [
+        "@typescript-eslint",
+        "@angular-eslint"
+      ],
       "extends": [
         "eslint:recommended",
         "plugin:@typescript-eslint/recommended",
@@ -14,22 +28,65 @@
         "plugin:@angular-eslint/template/process-inline-templates"
       ],
       "rules": {
-        "@angular-eslint/directive-selector": ["error", { "type": "attribute", "style": "camelCase" }],
-        "@angular-eslint/component-selector": ["error", { "type": "element", "style": "kebab-case" }],
+        "@angular-eslint/directive-selector": [
+          "error",
+          {
+            "type": "attribute",
+            "style": "camelCase"
+          }
+        ],
+        "@angular-eslint/component-selector": [
+          "error",
+          {
+            "type": "element",
+            "style": "kebab-case"
+          }
+        ],
         "@typescript-eslint/no-non-null-assertion": "off",
         "@typescript-eslint/no-empty-function": "warn",
         "@typescript-eslint/no-explicit-any": "warn",
-        "@typescript-eslint/no-unused-vars": ["warn", { "args": "none", "varsIgnorePattern": "^_", "caughtErrors": "none" }],
-        "object-curly-spacing": ["error", "always"],
-        "quotes": ["error", "single", { "avoidEscape": true }],
-        "max-len": ["error", { "code": 115, "ignoreUrls": true, "ignoreStrings": true, "ignoreTemplateLiterals": true, "ignoreRegExpLiterals": true }]
+        "@typescript-eslint/no-unused-vars": [
+          "warn",
+          {
+            "args": "none",
+            "varsIgnorePattern": "^_",
+            "caughtErrors": "none"
+          }
+        ],
+        "object-curly-spacing": [
+          "error",
+          "always"
+        ],
+        "quotes": [
+          "error",
+          "single",
+          {
+            "avoidEscape": true
+          }
+        ],
+        "max-len": [
+          "error",
+          {
+            "code": 115,
+            "ignoreUrls": true,
+            "ignoreStrings": true,
+            "ignoreTemplateLiterals": true,
+            "ignoreRegExpLiterals": true
+          }
+        ]
       }
     },
     {
-      "files": ["*.html"],
+      "files": [
+        "*.html"
+      ],
       "parser": "@angular-eslint/template-parser",
-      "plugins": ["@angular-eslint/template"],
-      "extends": ["plugin:@angular-eslint/template/recommended"],
+      "plugins": [
+        "@angular-eslint/template"
+      ],
+      "extends": [
+        "plugin:@angular-eslint/template/recommended"
+      ],
       "rules": {}
     }
   ]

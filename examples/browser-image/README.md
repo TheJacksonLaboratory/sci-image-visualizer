@@ -1,5 +1,7 @@
 # Browser example — serverless image visualization (Mode B)
 
+**Live demo:** <https://thejacksonlaboratory.github.io/sci-image-visualizer/>
+
 A minimal, **fully in-browser** host for `<jaxviz-visualization>`. A gallery of
 bundled sample images (large thumbnails on the left) — click one to load it into
 the OpenSeadragon view with the zoom + region tools. Or drop in your own file.
@@ -39,7 +41,7 @@ git lfs pull
 Without that, the files are tiny LFS pointer stubs and the gallery thumbnails
 won't render.
 
-## Run it
+## Run on localhost
 
 ```bash
 # from the repo root — build the library first (the example consumes dist/):
