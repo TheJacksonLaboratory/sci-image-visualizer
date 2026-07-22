@@ -5,6 +5,19 @@ import { timeout } from 'rxjs/operators';
 import { Image } from 'image-js';
 import * as OpenSeadragon from 'openseadragon';
 
+// OpenSeadragon ships as CommonJS (`export =`). When this library is built into a
+// FESM and re-bundled by a consuming Angular app, `import * as OpenSeadragon`
+// resolves to a true ES *namespace* object, which is NOT callable — so the factory
+// call `OpenSeadragon({...})` throws "is not a function" in the browser (it only
+// worked before extraction because the app compiled this file directly). Under
+// webpack's CJS interop the real OpenSeadragon function — and its static members
+// (Viewer, Point, Rect, TileSource, …) — lives on `.default`; in CJS/Jest the import
+// already IS the function, so fall back to the namespace. `OSD` is that real object,
+// used for every runtime VALUE access below; the `OpenSeadragon` import alias is kept
+// only for its TYPES (e.g. OpenSeadragon.Viewer).
+const OSD: typeof OpenSeadragon =
+  (OpenSeadragon as any).default ?? OpenSeadragon;
+
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
 import { IImageInfo } from '../../contracts/image.contract';
@@ -49,7 +62,7 @@ import { saveAs } from 'file-saver';
  * only that one message string and forwards every other log untouched. Idempotent.
  */
 function silenceOsdMultiImageAdvisory(): void {
-  const osd: any = OpenSeadragon as any;
+  const osd: any = OSD as any;
   if (osd.__multiImageFilterInstalled) return;
   const base: any = (osd.console && typeof osd.console.error === 'function')
     ? osd.console
@@ -651,7 +664,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       ? { type: 'image', url: loaded.url }
       : this.buildTileSource(d, loaded.infoB64, loaded.z, this.isMultiChannel ? 0 : undefined);
     silenceOsdMultiImageAdvisory();
-    this.viewer = (OpenSeadragon as any)({
+    this.viewer = (OSD as any)({
       id: plotDiv,
       // Simple-mode z-scrub calls viewer.open() again per slice (see
       // setZIndex) — without this it resets to the home zoom/pan on every
@@ -883,7 +896,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     // from getLevelScale, so they all stay consistent — requesting exactly the
     // tiles each resolution actually has (no out-of-range 400s, no flood).
     const resForLevel = (level: number) => n - 1 - level;
-    const ts: any = new (OpenSeadragon as any).TileSource({
+    const ts: any = new (OSD as any).TileSource({
       width: d.width,
       height: d.height,
       tileSize: t,
@@ -902,7 +915,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     // actually has — OSD then requests an out-of-range tile that the server 400s
     // ("Tile (col,row) out of range"). Using the level's real w/h matches the
     // server's own bounds check exactly.
-    const Point = (OpenSeadragon as any).Point;
+    const Point = (OSD as any).Point;
     ts.getNumTiles = (level: number) => {
       const lvl = levels[resForLevel(level)];
       if (!lvl) return new Point(0, 0);
