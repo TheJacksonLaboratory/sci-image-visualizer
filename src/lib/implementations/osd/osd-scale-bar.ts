@@ -1,4 +1,4 @@
-import * as OpenSeadragon from 'openseadragon';
+import { OSD } from './osd-lib';
 
 /** Round up to a "nice" 1/2/5 × 10ⁿ value for scale-bar lengths. */
 function niceLength(x: number): number {
@@ -30,7 +30,7 @@ function formatUm(um: number): string {
  * (`mppX`, from Bio-Formats). Hidden when the image has no physical pixel size.
  */
 export class OsdScaleBar {
-  private readonly osd: any = OpenSeadragon as any;
+  private readonly osd: any = OSD;
   private readonly bar: HTMLDivElement;
   private readonly line: HTMLDivElement;
   private readonly label: HTMLSpanElement;

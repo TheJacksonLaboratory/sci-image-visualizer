@@ -4,19 +4,8 @@ import { BehaviorSubject, Observable, Subject, Subscription, combineLatest, firs
 import { timeout } from 'rxjs/operators';
 import { Image } from 'image-js';
 import * as OpenSeadragon from 'openseadragon';
+import { OSD } from './osd-lib';
 
-// OpenSeadragon ships as CommonJS (`export =`). When this library is built into a
-// FESM and re-bundled by a consuming Angular app, `import * as OpenSeadragon`
-// resolves to a true ES *namespace* object, which is NOT callable — so the factory
-// call `OpenSeadragon({...})` throws "is not a function" in the browser (it only
-// worked before extraction because the app compiled this file directly). Under
-// webpack's CJS interop the real OpenSeadragon function — and its static members
-// (Viewer, Point, Rect, TileSource, …) — lives on `.default`; in CJS/Jest the import
-// already IS the function, so fall back to the namespace. `OSD` is that real object,
-// used for every runtime VALUE access below; the `OpenSeadragon` import alias is kept
-// only for its TYPES (e.g. OpenSeadragon.Viewer).
-const OSD: typeof OpenSeadragon =
-  (OpenSeadragon as any).default ?? OpenSeadragon;
 
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';

@@ -1,4 +1,4 @@
-import * as OpenSeadragon from 'openseadragon';
+import { OSD } from './osd-lib';
 
 /**
  * Stack-slice cache for the OpenSeadragon backend (refactoring plan, Step 3 —
@@ -294,7 +294,7 @@ export class SliceCache {
   private invalidateSlice(z: number): void {
     const group = this.channelSliceItems.get(z) ?? [];
     if (!group.length) return;
-    const osd: any = OpenSeadragon;
+    const osd: any = OSD;
     const tStamp = typeof osd.now === 'function' ? osd.now() : Date.now();
     for (const it of group) {
       if (it && typeof it.requestInvalidate === 'function') {

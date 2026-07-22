@@ -1,4 +1,4 @@
-import * as OpenSeadragon from 'openseadragon';
+import { OSD } from './osd-lib';
 
 /**
  * Coordinate conversions between screen (viewer-element) pixels, the OSD viewport,
@@ -12,7 +12,7 @@ import * as OpenSeadragon from 'openseadragon';
  * step on the viewport (which is unambiguous). Falls back to the viewport methods
  * when the world is empty.
  */
-const osd: any = OpenSeadragon as any;
+const osd: any = OSD;
 
 /** Reference tiled image for image<->viewport conversions (any slice works since
  *  they share geometry). */

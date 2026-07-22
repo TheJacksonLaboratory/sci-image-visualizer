@@ -1,4 +1,4 @@
-import * as OpenSeadragon from 'openseadragon';
+import { OSD } from './osd-lib';
 import { Subscription } from 'rxjs';
 
 import { Region, Rectangle, Polygon, MultiPolygon } from '../../models/region';
@@ -49,7 +49,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
 
   private readonly svg: SVGSVGElement;
   private readonly subs = new Subscription();
-  private readonly osd: any = OpenSeadragon as any;
+  private readonly osd: any = OSD;
 
   private selected: number[] = [];
   private mode: RegionToolMode = 'none';
