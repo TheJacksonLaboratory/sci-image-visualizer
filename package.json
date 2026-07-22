@@ -46,6 +46,9 @@
   },
   "dependencies": {
     "fast-png": "^6.4.0",
+    "napari-js": "^0.11.0",
+    "openseadragon": "^6.0.2",
+    "plotly.js-dist-min": "^3.0.1",
     "tslib": "^2.3.0"
   },
   "peerDependencies": {
@@ -58,18 +61,12 @@
     "cellpose-js": "^0.3.0",
     "file-saver": "^2.0.5",
     "image-js": "^0.35.6",
-    "napari-js": "^0.11.0",
     "onnxruntime-web": "~1.26.0",
-    "openseadragon": "^6.0.2",
-    "plotly.js-dist-min": "^3.0.1",
     "primeng": "^17.18.0",
     "rxjs": "^7.8.0"
   },
   "peerDependenciesMeta": {
     "cellpose-js": {
-      "optional": true
-    },
-    "napari-js": {
       "optional": true
     }
   },

@@ -4,6 +4,13 @@
   "lib": {
     "entryFile": "src/index.ts"
   },
-  "assets": ["src/lib/assets"],
-  "allowedNonPeerDependencies": ["fast-png"]
+  "assets": [
+    "src/lib/assets"
+  ],
+  "allowedNonPeerDependencies": [
+    "fast-png",
+    "napari-js",
+    "openseadragon",
+    "plotly.js-dist-min"
+  ]
 }
