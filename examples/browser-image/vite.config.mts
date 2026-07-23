@@ -34,6 +34,9 @@ export default defineConfig({
   },
   // Bridge the mixed ESM/CJS dep graph (image-js + its ml-* deps) for the build.
   build: { commonjsOptions: { transformMixedEsModules: true } },
+  // .dcm has no built-in loader — treat the bundled DICOM series as static assets
+  // so the import.meta.glob('*.dcm', {query:"?url"}) resolves each to a served URL.
+  assetsInclude: ["**/*.dcm"],
   optimizeDeps: {
     // Skip auto-scanning the HTML entry: Vite's dep-scan esbuild chokes on
     // Angular's @Inject() parameter decorators before Analog transforms the files.

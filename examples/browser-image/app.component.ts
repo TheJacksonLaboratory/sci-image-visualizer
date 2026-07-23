@@ -23,6 +23,17 @@ interface Sample {
   isTiff: boolean;
 }
 
+interface DicomSlice {
+  name: string;
+  url: string;
+}
+
+/** A gallery sub-folder (currently just the bundled micro-CT DICOM series). */
+interface Folder {
+  name: string;
+  slices: DicomSlice[];
+}
+
 /**
  * The bundled sample images (examples/browser-image/sample-images/, stored via
  * Git LFS). Vite resolves each to a served URL at build time. `?url` keeps the
@@ -42,14 +53,34 @@ const SAMPLES: Sample[] = Object.entries(
   .sort((a, b) => a.name.localeCompare(b.name));
 
 /**
- * Minimal standalone host for <visualizer>, run entirely in the
- * browser (no backend). A gallery of bundled sample images (large thumbnails) —
- * click one to load it into the viewer with the region + zoom tools. Everything
- * is wired through the library's DI ports, three of which are serverless stubs
- * (see serverless-ports.ts). Mirrors jit-ui's pipeline-preview wiring.
+ * Bundled micro-CT DICOM series (examples/browser-image/micro-ct/, Git LFS).
+ * A folder of numbered single-slice .dcm files — the classic CT z-stack shape.
+ * `numeric` sort keeps case1_008 … case1_068 in slice order.
+ */
+const MICRO_CT: DicomSlice[] = Object.entries(
+  import.meta.glob('./micro-ct/*.dcm', {
+    eager: true,
+    query: '?url',
+    import: 'default',
+  }) as Record<string, string>,
+)
+  .map(([path, url]) => ({ name: path.split('/').pop() as string, url }))
+  .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+
+const FOLDERS: Folder[] = MICRO_CT.length ? [{ name: 'micro-ct', slices: MICRO_CT }] : [];
+
+/**
+ * Minimal standalone host for <visualizer>, run entirely in the browser (no
+ * backend). The gallery has two levels: the root shows folders (e.g. micro-ct)
+ * plus flat sample images; opening a folder shows its DICOM slices. Click a
+ * sample/slice to view it; RIGHT-CLICK a DICOM slice to load the whole folder as
+ * a z-stack (the viewer's slice slider then scrubs through it), mirroring the
+ * jit-ui file browser. DICOM is decoded in the browser (see dicom.ts) — the
+ * serverless stand-in for jit-service + Bio-Formats.
  *
- * The gallery and the viewer are separated by a draggable vertical splitter
- * (see startResize): drag it left/right to trade width between the two.
+ * Everything is wired through the library's DI ports, three of which are
+ * serverless stubs (serverless-ports.ts). The gallery and viewer are separated
+ * by a draggable vertical splitter (see startResize).
  */
 @Component({
   standalone: true,
@@ -167,7 +198,8 @@ const SAMPLES: Sample[] = Object.entries(
       }
     `,
     `
-      .tile .tiff {
+      .tile .tiff,
+      .tile .dcm {
         display: flex;
         align-items: center;
         justify-content: center;
@@ -175,6 +207,82 @@ const SAMPLES: Sample[] = Object.entries(
         font-size: 12px;
         letter-spacing: 0.05em;
         border: 1px dashed #ccc;
+      }
+    `,
+    `
+      .tile .dcm {
+        color: #2b6cb0;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        background: #eef4fb;
+        border-color: #b8cbe0;
+      }
+    `,
+    `
+      .tile.folder .folder-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #e0a92e;
+        background: #fffdf4;
+        border: 1px solid #ecdca8;
+      }
+    `,
+    `
+      .tile.folder .folder-icon svg {
+        width: 56%;
+        height: 56%;
+      }
+    `,
+    `
+      .tile.folder .name {
+        font-weight: 600;
+        color: #333;
+      }
+    `,
+    `
+      .breadcrumb {
+        grid-column: 1 / -1;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: #555;
+      }
+    `,
+    `
+      .breadcrumb .crumb-back {
+        font: inherit;
+        font-size: 12px;
+        color: #2b6cb0;
+        background: none;
+        border: none;
+        padding: 2px 4px;
+        cursor: pointer;
+        border-radius: 4px;
+      }
+    `,
+    `
+      .breadcrumb .crumb-back:hover {
+        background: #eef4fb;
+      }
+    `,
+    `
+      .breadcrumb .crumb-current {
+        font-weight: 600;
+        color: #333;
+      }
+    `,
+    `
+      .folder-hint {
+        grid-column: 1 / -1;
+        font-size: 11px;
+        line-height: 1.4;
+        color: #4a5b6b;
+        background: #eef4fb;
+        border: 1px solid #d6e4f0;
+        border-radius: 6px;
+        padding: 6px 8px;
       }
     `,
     `
@@ -218,22 +326,64 @@ const SAMPLES: Sample[] = Object.entries(
       <strong>sci-image-visualizer — serverless browser example</strong>
       <label class="upload"
         >Load your own…
-        <input type="file" accept="image/*,.tif,.tiff" (change)="onFile($event)" />
+        <input type="file" accept="image/*,.tif,.tiff,.dcm" (change)="onFile($event)" />
       </label>
     </header>
     <div class="body">
       <aside class="gallery" #galleryRef>
-        <button
-          *ngFor="let s of samples"
-          class="tile"
-          [class.active]="s.name === active"
-          (click)="load(s)"
-          [title]="s.name"
-        >
-          <img *ngIf="!s.isTiff" class="thumb" [src]="s.url" loading="lazy" alt="" />
-          <span *ngIf="s.isTiff" class="thumb tiff">TIFF</span>
-          <span class="name">{{ s.name }}</span>
-        </button>
+        <!-- Root: folders first, then the flat sample images. -->
+        <ng-container *ngIf="!currentFolder">
+          <button
+            *ngFor="let f of folders"
+            class="tile folder"
+            (click)="openFolder(f)"
+            [title]="'Open ' + f.name + ' (' + f.slices.length + ' DICOM slices)'"
+          >
+            <span class="thumb folder-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z"
+                />
+              </svg>
+            </span>
+            <span class="name">{{ f.name }}</span>
+          </button>
+          <button
+            *ngFor="let s of samples"
+            class="tile"
+            [class.active]="s.name === active"
+            (click)="load(s)"
+            [title]="s.name"
+          >
+            <img *ngIf="!s.isTiff" class="thumb" [src]="s.url" loading="lazy" alt="" />
+            <span *ngIf="s.isTiff" class="thumb tiff">TIFF</span>
+            <span class="name">{{ s.name }}</span>
+          </button>
+        </ng-container>
+
+        <!-- Inside a folder: DICOM slices. -->
+        <ng-container *ngIf="currentFolder as folder">
+          <div class="breadcrumb">
+            <button class="crumb-back" (click)="closeFolder()" title="Back to gallery">← Gallery</button>
+            <span>/</span>
+            <span class="crumb-current">{{ folder.name }}</span>
+          </div>
+          <div class="folder-hint">
+            Click a slice to view it · <strong>right-click</strong> to load the whole folder as a z-stack.
+          </div>
+          <button
+            *ngFor="let d of folder.slices; let i = index"
+            class="tile dcm-tile"
+            [class.active]="d.name === active"
+            (click)="loadDicom(d)"
+            (contextmenu)="loadStack($event, i)"
+            [title]="d.name + '  —  right-click: load folder as z-stack'"
+          >
+            <span class="thumb dcm">DCM</span>
+            <span class="name">{{ d.name }}</span>
+          </button>
+        </ng-container>
       </aside>
       <div
         class="splitter"
@@ -250,6 +400,9 @@ const SAMPLES: Sample[] = Object.entries(
 })
 export class AppComponent implements OnDestroy {
   readonly samples = SAMPLES;
+  readonly folders = FOLDERS;
+  /** null = root (folders + samples); otherwise the opened folder's slices. */
+  currentFolder: Folder | null = null;
   active?: string;
   loading = false;
   dragging = false;
@@ -277,6 +430,40 @@ export class AppComponent implements OnDestroy {
     this.viz.setImageSmoothingEnabled(false);
     // Show something on load: the first sample.
     if (this.samples.length) void this.load(this.samples[0]);
+  }
+
+  // ── Gallery folder navigation ───────────────────────────────────────────
+  openFolder(f: Folder): void { this.currentFolder = f; }
+  closeFolder(): void { this.currentFolder = null; }
+
+  /** Left-click a DICOM slice: decode + show just that slice. */
+  async loadDicom(d: DicomSlice): Promise<void> {
+    this.active = d.name;
+    this.loading = true;
+    try {
+      await this.imageState.setImageFromDicomUrl(d.url, d.name);
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  /** Right-click a DICOM slice: load the whole folder as a z-stack, opening on
+   *  the clicked slice. The viewer's slice slider then scrubs through it. */
+  async loadStack(event: MouseEvent, index: number): Promise<void> {
+    event.preventDefault(); // suppress the browser's native context menu
+    const folder = this.currentFolder;
+    if (!folder) return;
+    this.active = folder.slices[index]?.name;
+    this.loading = true;
+    try {
+      await this.imageState.setStackFromDicomUrls(
+        folder.slices.map((s) => s.url),
+        folder.name,
+        index,
+      );
+    } finally {
+      this.loading = false;
+    }
   }
 
   /**

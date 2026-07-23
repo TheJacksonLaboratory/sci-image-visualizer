@@ -1,6 +1,6 @@
 {
   "name": "@jax-data-science/sci-image-visualizer",
-  "version": "0.9.0",
+  "version": "0.1.0",
   "description": "Browser-based scientific image visualization for Angular — gigapixel whole-slide (OpenSeadragon), 2D/3D (Plotly) and WebGPU (napari-js) rendering, with region/annotation editing and in-browser SAM segmentation.",
   "keywords": [
     "angular",
@@ -98,6 +98,7 @@
     "@typescript-eslint/parser": "^7.11.0",
     "buffer": "^5.7.1",
     "cellpose-js": "^0.3.0",
+    "dicom-parser": "^1.8.21",
     "esbuild": "^0.20.1",
     "eslint": "^8.57.0",
     "fast-png": "^6.4.0",

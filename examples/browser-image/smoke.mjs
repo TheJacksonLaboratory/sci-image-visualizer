@@ -1,8 +1,9 @@
 // Headless smoke test: build the example first (`npm run build:example`), then
 // `node examples/browser-image/smoke.mjs`. Serves the built dist and loads it in
 // chromium, failing on any console/page error or if <visualizer> doesn't render.
-// Catches white-page runtime failures (JIT-unavailable, CJS-interop) that a green
-// build hides.
+// Catches white-page runtime failures (JIT-unavailable, CJS-interop, wrong Pages
+// base) that a green build hides. Honors PAGES_BASE so it probes the SAME subpath
+// the public deploy uses.
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
@@ -10,7 +11,8 @@ import { chromium } from 'playwright';
 const config = fileURLToPath(new URL('./vite.config.mts', import.meta.url));
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const PORT = 4173;
-const URL_ = `http://localhost:${PORT}/`;
+const BASE = process.env.PAGES_BASE || '/';
+const URL_ = `http://localhost:${PORT}${BASE}`;
 
 const preview = spawn(
   'npx', ['vite', 'preview', '--config', config, '--port', String(PORT), '--strictPort'],
@@ -84,16 +86,30 @@ try {
     hOverflow = Math.round(m.overflow);
     colSkew = Math.round(Math.abs(m.w0 - m.w1));
   } catch {}
+  // DICOM: open the micro-ct folder and load a single slice — guards the
+  // client-side dicom-parser decode path (browser DICOM → grayscale PNG).
+  let dcmTiles = 0, dcmSliceOk = false;
+  try {
+    await page.locator('.tile.folder').first().click();
+    await page.waitForSelector('.dcm-tile', { timeout: 8000 });
+    dcmTiles = await page.locator('.dcm-tile').count();
+    const before = errors.length;
+    await page.locator('.dcm-tile').nth(Math.floor(dcmTiles / 2)).click();
+    await sleep(2500);
+    dcmSliceOk = errors.length === before;
+  } catch {}
   await page.screenshot({ path: '/tmp/smoke.png', fullPage: true }).catch(() => {});
   await browser.close();
-  console.log(`rendered <visualizer>: ${rendered} | gallery tiles: ${tiles} | dropdown options: ${overlayOpts} | gallery resize Δ: ${resizeDelta}px | h-overflow: ${hOverflow}px | col skew: ${colSkew}px`);
+  console.log(`base: ${BASE} | rendered: ${rendered} | tiles: ${tiles} | dropdown: ${overlayOpts} | resize Δ: ${resizeDelta}px | h-overflow: ${hOverflow}px | col skew: ${colSkew}px | dcm tiles: ${dcmTiles} | dcm slice ok: ${dcmSliceOk}`);
   if (errors.length) { console.log('ERRORS:\n  ' + errors.join('\n  ')); failed = true; }
   if (bad.length) { console.log('BAD RESPONSES (missing assets):\n  ' + [...new Set(bad)].join('\n  ')); failed = true; }
   if (!rendered) { console.log('FAIL: <visualizer> did not render'); failed = true; }
   if (!overlayOpts) { console.log('FAIL: plot-mode dropdown overlay did not open'); failed = true; }
   if (resizeDelta < 80) { console.log(`FAIL: splitter did not resize the gallery (Δ=${resizeDelta}px)`); failed = true; }
-  if (hOverflow > 2) { console.log(`FAIL: gallery overflows horizontally (${hOverflow}px) — right column not resizing`); failed = true; }
+  if (hOverflow > 2) { console.log(`FAIL: gallery overflows horizontally (${hOverflow}px)`); failed = true; }
   if (colSkew > 2) { console.log(`FAIL: gallery columns unequal (skew ${colSkew}px)`); failed = true; }
+  if (dcmTiles < 1) { console.log('FAIL: micro-ct folder did not open with DICOM slices'); failed = true; }
+  if (!dcmSliceOk) { console.log('FAIL: loading a DICOM slice errored'); failed = true; }
   if (!failed) console.log('SMOKE OK');
 } catch (e) {
   console.log('SMOKE ERROR:', e.message);
