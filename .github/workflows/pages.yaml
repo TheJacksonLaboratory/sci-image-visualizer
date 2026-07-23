@@ -40,6 +40,8 @@ jobs:
       - run: npm ci
       - run: npm run build # ng-packagr → ./dist (the example aliases to it)
       - run: npm run build:example
+      - run: npx playwright install --with-deps chromium
+      - run: node examples/browser-image/smoke.mjs # fails on any runtime error / white page
       - uses: actions/upload-pages-artifact@v3
         with:
           path: examples/browser-image/dist

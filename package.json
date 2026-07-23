@@ -44,7 +44,9 @@
     "format:check": "prettier --check \"src/**/*.{ts,html,scss}\" \"*.{json,md}\" \"docs/**/*.md\"",
     "bundle-workers": "node scripts/bundle-workers.mjs",
     "start:example": "vite --config examples/browser-image/vite.config.mts",
-    "build:example": "vite build --config examples/browser-image/vite.config.mts"
+    "build:example": "vite build --config examples/browser-image/vite.config.mts",
+    "prebuild:example": "node scripts/stage-lib.mjs",
+    "prestart:example": "node scripts/stage-lib.mjs"
   },
   "dependencies": {
     "fast-png": "^6.4.0",
@@ -110,6 +112,7 @@
     "ng-packagr": "^17.3.0",
     "onnxruntime-web": "~1.26.0",
     "openseadragon": "^6.0.2",
+    "playwright": "^1.61.1",
     "plotly.js-dist-min": "^3.0.1",
     "prettier": "^3.3.0",
     "primeicons": "^7.0.0",

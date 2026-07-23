@@ -4,7 +4,6 @@ import angular from '@analogjs/vite-plugin-angular';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const tsconfig = fileURLToPath(new URL('./tsconfig.json', import.meta.url));
-const libDist = fileURLToPath(new URL('../../dist', import.meta.url));
 
 /**
  * Vite is deliberately the runner here: it builds this Angular example today (via
@@ -30,7 +29,6 @@ export default defineConfig(({ command }) => ({
     // Consume the BUILT library exactly as an external app would (from dist/).
     // Run `npm run build` in the repo root first so dist/ exists.
     alias: {
-      '@jax-data-science/sci-image-visualizer': libDist,
       // ml-matrix's package exports has no `import` condition, so Vite's build
       // picks its CJS entry, whose circular require crashes as `(void 0).Matrix`.
       // Force the pure-ESM source (matrix.mjs just re-wraps the CJS).
