@@ -106,9 +106,10 @@ const SAMPLES: Sample[] = Object.entries(
         width: 232px;
         flex: none;
         overflow-y: auto;
+        overflow-x: hidden;
         padding: 10px;
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 10px;
         align-content: start;
         background: #fafafa;
@@ -141,6 +142,7 @@ const SAMPLES: Sample[] = Object.entries(
         cursor: pointer;
         font: inherit;
         text-align: left;
+        min-width: 0;
       }
     `,
     `

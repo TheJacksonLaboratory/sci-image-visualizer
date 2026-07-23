@@ -67,14 +67,33 @@ try {
     const after = (await page.locator('.gallery').boundingBox()).width;
     resizeDelta = Math.round(after - before);
   } catch {}
+  // After widening, the gallery must stay two equal columns with NO horizontal
+  // scroll (regression: long filenames pinned the right column and forced a
+  // horizontal scrollbar, so the right column didn't resize with the left).
+  let hOverflow = 999, colSkew = 999;
+  try {
+    const m = await page.evaluate(() => {
+      const g = document.querySelector('.gallery');
+      const t = [...document.querySelectorAll('.gallery .tile .thumb')].slice(0, 2);
+      return {
+        overflow: g.scrollWidth - g.clientWidth,
+        w0: t[0] ? t[0].getBoundingClientRect().width : 0,
+        w1: t[1] ? t[1].getBoundingClientRect().width : 0,
+      };
+    });
+    hOverflow = Math.round(m.overflow);
+    colSkew = Math.round(Math.abs(m.w0 - m.w1));
+  } catch {}
   await page.screenshot({ path: '/tmp/smoke.png', fullPage: true }).catch(() => {});
   await browser.close();
-  console.log(`rendered <visualizer>: ${rendered} | gallery tiles: ${tiles} | dropdown options: ${overlayOpts} | gallery resize Δ: ${resizeDelta}px`);
+  console.log(`rendered <visualizer>: ${rendered} | gallery tiles: ${tiles} | dropdown options: ${overlayOpts} | gallery resize Δ: ${resizeDelta}px | h-overflow: ${hOverflow}px | col skew: ${colSkew}px`);
   if (errors.length) { console.log('ERRORS:\n  ' + errors.join('\n  ')); failed = true; }
   if (bad.length) { console.log('BAD RESPONSES (missing assets):\n  ' + [...new Set(bad)].join('\n  ')); failed = true; }
   if (!rendered) { console.log('FAIL: <visualizer> did not render'); failed = true; }
   if (!overlayOpts) { console.log('FAIL: plot-mode dropdown overlay did not open'); failed = true; }
   if (resizeDelta < 80) { console.log(`FAIL: splitter did not resize the gallery (Δ=${resizeDelta}px)`); failed = true; }
+  if (hOverflow > 2) { console.log(`FAIL: gallery overflows horizontally (${hOverflow}px) — right column not resizing`); failed = true; }
+  if (colSkew > 2) { console.log(`FAIL: gallery columns unequal (skew ${colSkew}px)`); failed = true; }
   if (!failed) console.log('SMOKE OK');
 } catch (e) {
   console.log('SMOKE ERROR:', e.message);
