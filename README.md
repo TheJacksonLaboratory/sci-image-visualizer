@@ -58,9 +58,10 @@ A serverless, **in-browser** example lives in
 that render in the viewer with the region + zoom tools, with no backend at all
 (the "Mode B" path — each image is a self-contained `tiled: false` source).
 
-**Live demo:** <https://thejacksonlaboratory.github.io/sci-image-visualizer/>
-— published by CI (`.github/workflows/pages.yaml`) to GitHub Pages. Goes live once
-the repo is public (or GitHub Pages is enabled for the org's internal repos).
+**Live demo:** <https://laughing-adventure-mn6z367.pages.github.io/> — published by CI
+(`.github/workflows/pages.yaml`) to GitHub Pages. While the repo is internal the
+site is access-controlled (viewable by org members with repo access); it becomes
+<https://thejacksonlaboratory.github.io/sci-image-visualizer/> once the repo is made public.
 
 ### Run on localhost
 

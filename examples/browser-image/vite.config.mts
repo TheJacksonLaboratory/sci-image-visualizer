@@ -12,11 +12,12 @@ const libDist = fileURLToPath(new URL('../../dist', import.meta.url));
  * tomorrow with a different plugin — one toolchain as the library grows
  * framework-agnostic consumers.
  */
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   root: here,
-  // Served at the repo root in dev; under /sci-image-visualizer/ on GitHub Pages
-  // (the CI sets PAGES_BASE). Keep the trailing slash.
-  base: process.env.PAGES_BASE || '/',
+  // Relative base so the built site works at ANY mount path: GitHub Pages serves
+  // an internal repo at a randomized *.pages.github.io *root*, and a public repo
+  // at <org>.github.io/sci-image-visualizer/. Dev serves at the root.
+  base: command === 'build' ? './' : '/',
   plugins: [angular({ tsconfig })],
   resolve: {
     // Consume the BUILT library exactly as an external app would (from dist/).
@@ -26,21 +27,13 @@ export default defineConfig({
   optimizeDeps: {
     // Skip auto-scanning the HTML entry: Vite's dep-scan esbuild chokes on
     // Angular's @Inject() parameter decorators before Analog transforms the
-    // files. We list the deps to pre-bundle instead (Vite optimizes the rest
-    // on demand); esbuildOptions.tsconfig carries experimentalDecorators too.
+    // files. List the deps to pre-bundle instead (Vite optimizes the rest on
+    // demand); esbuildOptions.tsconfig carries experimentalDecorators too.
     entries: [],
     include: [
-      'openseadragon',
-      'plotly.js-dist-min',
-      'image-js',
-      'file-saver',
-      'buffer',
-      'rxjs',
-      '@angular/common',
-      '@angular/core',
-      '@angular/forms',
-      '@angular/common/http',
+      'openseadragon', 'plotly.js-dist-min', 'image-js', 'file-saver', 'buffer',
+      'rxjs', '@angular/common', '@angular/core', '@angular/forms', '@angular/common/http',
     ],
     esbuildOptions: { tsconfig },
   },
-});
+}));

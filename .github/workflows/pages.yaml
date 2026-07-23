@@ -1,6 +1,7 @@
 # Builds the browser example (examples/browser-image) and publishes it to GitHub
 # Pages, so the running demo is viewable at
-#   https://thejacksonlaboratory.github.io/sci-image-visualizer/
+#   internal (now): https://laughing-adventure-mn6z367.pages.github.io/
+#   public  (later): https://thejacksonlaboratory.github.io/sci-image-visualizer/
 #
 # Requires: Settings → Pages → Source = "GitHub Actions". For an internal/private
 # repo, Pages is only served with GitHub Enterprise Cloud (access-controlled);
@@ -39,8 +40,6 @@ jobs:
       - run: npm ci
       - run: npm run build # ng-packagr → ./dist (the example aliases to it)
       - run: npm run build:example
-        env:
-          PAGES_BASE: /sci-image-visualizer/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: examples/browser-image/dist

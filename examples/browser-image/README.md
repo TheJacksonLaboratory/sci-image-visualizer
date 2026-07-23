@@ -1,6 +1,6 @@
 # Browser example — serverless image visualization (Mode B)
 
-**Live demo:** <https://thejacksonlaboratory.github.io/sci-image-visualizer/>
+**Live demo:** <https://laughing-adventure-mn6z367.pages.github.io/> (org-internal; becomes the public org URL when the repo is public)
 
 A minimal, **fully in-browser** host for `<visualizer>`. A gallery of
 bundled sample images (large thumbnails on the left) — click one to load it into
