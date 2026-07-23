@@ -52,13 +52,29 @@ try {
     await page.waitForSelector('.p-dropdown-panel', { timeout: 5000 });
     overlayOpts = await page.locator('.p-dropdown-item').count();
   } catch {}
+  // Splitter: dragging the divider right must widen the gallery (and, since the
+  // viewer flexes, shrink the canvas). Verifies the resize wiring end-to-end.
+  let resizeDelta = 0;
+  try {
+    await page.keyboard.press('Escape').catch(() => {}); // dismiss any open overlay
+    const box = await page.locator('.splitter').boundingBox();
+    const before = (await page.locator('.gallery').boundingBox()).width;
+    const cy = box.y + box.height / 2;
+    await page.mouse.move(box.x + box.width / 2, cy);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 120, cy, { steps: 10 });
+    await page.mouse.up();
+    const after = (await page.locator('.gallery').boundingBox()).width;
+    resizeDelta = Math.round(after - before);
+  } catch {}
   await page.screenshot({ path: '/tmp/smoke.png', fullPage: true }).catch(() => {});
   await browser.close();
-  console.log(`rendered <visualizer>: ${rendered} | gallery tiles: ${tiles} | dropdown options: ${overlayOpts}`);
+  console.log(`rendered <visualizer>: ${rendered} | gallery tiles: ${tiles} | dropdown options: ${overlayOpts} | gallery resize Δ: ${resizeDelta}px`);
   if (errors.length) { console.log('ERRORS:\n  ' + errors.join('\n  ')); failed = true; }
   if (bad.length) { console.log('BAD RESPONSES (missing assets):\n  ' + [...new Set(bad)].join('\n  ')); failed = true; }
   if (!rendered) { console.log('FAIL: <visualizer> did not render'); failed = true; }
   if (!overlayOpts) { console.log('FAIL: plot-mode dropdown overlay did not open'); failed = true; }
+  if (resizeDelta < 80) { console.log(`FAIL: splitter did not resize the gallery (Δ=${resizeDelta}px)`); failed = true; }
   if (!failed) console.log('SMOKE OK');
 } catch (e) {
   console.log('SMOKE ERROR:', e.message);

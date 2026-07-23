@@ -1,4 +1,4 @@
-import { Component, Inject } from '@angular/core';
+import { Component, ElementRef, Inject, NgZone, OnDestroy, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
   VisualizationModule,
@@ -47,6 +47,9 @@ const SAMPLES: Sample[] = Object.entries(
  * click one to load it into the viewer with the region + zoom tools. Everything
  * is wired through the library's DI ports, three of which are serverless stubs
  * (see serverless-ports.ts). Mirrors jit-ui's pipeline-preview wiring.
+ *
+ * The gallery and the viewer are separated by a draggable vertical splitter
+ * (see startResize): drag it left/right to trade width between the two.
  */
 @Component({
   standalone: true,
@@ -109,7 +112,21 @@ const SAMPLES: Sample[] = Object.entries(
         gap: 10px;
         align-content: start;
         background: #fafafa;
-        border-right: 1px solid #e2e2e2;
+      }
+    `,
+    `
+      .splitter {
+        flex: none;
+        width: 6px;
+        cursor: col-resize;
+        background: #e2e2e2;
+        transition: background 0.15s ease;
+      }
+    `,
+    `
+      .splitter:hover,
+      .splitter.dragging {
+        background: #2b6cb0;
       }
     `,
     `
@@ -204,7 +221,7 @@ const SAMPLES: Sample[] = Object.entries(
       </label>
     </header>
     <div class="body">
-      <aside class="gallery">
+      <aside class="gallery" #galleryRef>
         <button
           *ngFor="let s of samples"
           class="tile"
@@ -217,6 +234,12 @@ const SAMPLES: Sample[] = Object.entries(
           <span class="name">{{ s.name }}</span>
         </button>
       </aside>
+      <div
+        class="splitter"
+        [class.dragging]="dragging"
+        (mousedown)="startResize($event)"
+        title="Drag to resize the gallery"
+      ></div>
       <main class="viewer">
         <visualizer [toolbarTools]="toolbarTools"></visualizer>
         <div class="spinner" *ngIf="loading">decoding…</div>
@@ -224,10 +247,16 @@ const SAMPLES: Sample[] = Object.entries(
     </div>
   `,
 })
-export class AppComponent {
+export class AppComponent implements OnDestroy {
   readonly samples = SAMPLES;
   active?: string;
   loading = false;
+  dragging = false;
+
+  @ViewChild('galleryRef') private readonly galleryRef!: ElementRef<HTMLElement>;
+
+  /** Tear-down for an in-progress splitter drag; null when not dragging. */
+  private cleanupResize: (() => void) | null = null;
 
   /** Show the plot-type dropdown + zoom + region tools; hide help. (Channels /
    *  download need a backend, but the plot-type selector works serverlessly.) */
@@ -240,12 +269,71 @@ export class AppComponent {
 
   constructor(
     private readonly imageState: ExampleImageStateAdapter,
+    private readonly zone: NgZone,
     @Inject(VISUALIZER) private readonly viz: IVisualizer,
   ) {
     // Render raw pixels (no smoothing) so images are inspectable pixel-for-pixel.
     this.viz.setImageSmoothingEnabled(false);
     // Show something on load: the first sample.
     if (this.samples.length) void this.load(this.samples[0]);
+  }
+
+  /**
+   * Drag the vertical splitter to resize the gallery; the viewer flexes to fill
+   * whatever's left, so the canvas grows/shrinks to match. The move handler runs
+   * OUTSIDE Angular and mutates the gallery's inline width directly — no change
+   * detection per mouse move — and dispatches a `resize` event (rAF-throttled) so
+   * the OpenSeadragon / Plotly canvas re-fits its new container size live.
+   */
+  startResize(event: MouseEvent): void {
+    event.preventDefault();
+    if (this.cleanupResize) return; // guard against a stuck second drag
+    const gallery = this.galleryRef.nativeElement;
+    const container = gallery.parentElement as HTMLElement;
+    const startX = event.clientX;
+    const startWidth = gallery.getBoundingClientRect().width;
+    const min = 140;
+    // Leave the viewer at least ~240px so it never collapses to nothing.
+    const max = Math.max(min, container.getBoundingClientRect().width - 240);
+    const prevCursor = document.body.style.cursor;
+    const prevSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    this.dragging = true;
+    let raf = 0;
+
+    const onMove = (e: MouseEvent): void => {
+      const width = Math.min(max, Math.max(min, startWidth + (e.clientX - startX)));
+      gallery.style.width = `${width}px`;
+      if (!raf) {
+        raf = requestAnimationFrame(() => {
+          raf = 0;
+          window.dispatchEvent(new Event('resize')); // re-fit the viewer canvas
+        });
+      }
+    };
+    const onUp = (): void => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      if (raf) cancelAnimationFrame(raf);
+      document.body.style.cursor = prevCursor;
+      document.body.style.userSelect = prevSelect;
+      this.cleanupResize = null;
+      // Back inside Angular to flip `dragging` off, then one final settle.
+      this.zone.run(() => (this.dragging = false));
+      window.dispatchEvent(new Event('resize'));
+    };
+
+    this.cleanupResize = onUp;
+    this.zone.runOutsideAngular(() => {
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  }
+
+  ngOnDestroy(): void {
+    // Clean up if the component is torn down mid-drag.
+    this.cleanupResize?.();
   }
 
   async load(s: Sample): Promise<void> {
