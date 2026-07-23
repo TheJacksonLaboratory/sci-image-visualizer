@@ -1,6 +1,5 @@
 import { Injectable, OnDestroy } from '@angular/core';
 import { BehaviorSubject, EMPTY, Observable, of } from 'rxjs';
-import { Image as IJImage } from 'image-js';
 import {
   ImageStatePort,
   TileAccessPort,
@@ -62,6 +61,9 @@ export class ExampleImageStateAdapter implements ImageStatePort, OnDestroy {
   private async loadTiff(buf: ArrayBuffer, fileName: string): Promise<void> {
     this.loading$.next(true);
     try {
+      // Lazy-loaded so image-js (+ its ml-matrix dep) stays off the app's init
+      // path — the gallery + PNGs render without it; it loads on first TIFF click.
+      const { Image: IJImage } = await import('image-js');
       const decoded = await IJImage.load(buf);
       const blobUrl = URL.createObjectURL(await decoded.toBlob('image/png'));
       this.emit(blobUrl, fileName, decoded.width, decoded.height, decoded.channels === 1, /*owned*/ true);
