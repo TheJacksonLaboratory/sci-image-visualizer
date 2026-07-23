@@ -36,6 +36,9 @@ export {
   setDefaultSamModel, getDefaultSamModelId,
 } from './lib/toolbar/segmentation/sam-model-registry';
 
+// ── onnxruntime-web WASM location (host overrides once, at app init) ───────
+export { setOrtWasmBase, getOrtWasmBase } from './lib/toolbar/segmentation/ort-runtime-config';
+
 // ── Neutral data models ──────────────────────────────────────────────────
 export * from './lib/models/region';
 export * from './lib/models/class-preset';

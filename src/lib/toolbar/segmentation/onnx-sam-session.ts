@@ -4,6 +4,7 @@ import {
   ISamSession, SamEmbedding, SamMaskResult, SamModelDef, SamPrompt,
 } from '../../contracts/sam.contract';
 import { fetchModel, runEncoder, runDecoder, type CoreEmbedding } from './sam-onnx-core';
+import { getOrtWasmBase } from './ort-runtime-config';
 
 /**
  * onnxruntime-web implementation of {@link ISamSession} (jit-ui#90), with two
@@ -58,7 +59,7 @@ export class OnnxSamSession implements ISamSession {
     this.mode = !usesWebGpu && model.inProcess ? 'inproc' : 'worker';
 
     if (this.mode === 'inproc') {
-      ort.env.wasm.wasmPaths = '/assets/ort/';
+      ort.env.wasm.wasmPaths = getOrtWasmBase();
       const encBuf = await fetchModel(model.encoderUrl, onProgress);
       const decBuf = await fetchModel(model.decoderUrl);
       this.encoder = await ort.InferenceSession.create(encBuf, { executionProviders: eps });
@@ -68,7 +69,7 @@ export class OnnxSamSession implements ISamSession {
         type: 'load',
         encoderUrl: model.encoderUrl,
         decoderUrl: model.decoderUrl,
-        wasmPaths: '/assets/ort/',
+        wasmPaths: getOrtWasmBase(),
         inputSize: model.inputSize,
         encoderProviders: model.encoderProviders,
       }, [], onProgress);

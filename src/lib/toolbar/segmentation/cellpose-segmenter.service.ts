@@ -1,4 +1,5 @@
 import { Injectable } from '@angular/core';
+import { getOrtWasmBase } from './ort-runtime-config';
 
 import type { ICellSegmenter, CellSegmentation, CellSegmentProgress } from '../../contracts/cell-segmenter.contract';
 import type { Cellpose } from 'cellpose-js';
@@ -76,7 +77,7 @@ export class CellposeSegmenterService implements ICellSegmenter {
       this.loading = (async () => {
         // Lazy: keep cellpose-js + its ORT runtime out of the initial bundle.
         const { Cellpose, configureOrt } = await import('cellpose-js');
-        configureOrt({ wasmPaths: '/assets/ort/' });
+        configureOrt({ wasmPaths: getOrtWasmBase() });
         const cp = await Cellpose.fromPretrained(this.modelUrl, {
           preload: true,
           onProgress: ({ loaded, total }) => onProgress?.(loaded, total),
