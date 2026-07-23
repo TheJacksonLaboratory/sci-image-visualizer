@@ -39,17 +39,16 @@ npm install @angular/animations @angular/router primeng \
 | `@angular/common` · `core` · `forms` · `animations` · `router` | `^17.3.0` | Angular 17 (animations + router are needed by the PrimeNG components) |
 | `rxjs` | `^7.8.0` | |
 | `primeng` | `^17.18.0` | toolbar / dialogs / table / dropdown UI |
-| `openseadragon` | `^6.0.2` | tiled (deep-zoom) image backend |
-| `plotly.js-dist-min` | `^3.0.1` | 2D/3D plot backend |
 | `image-js` | `^0.35.6` | client-side image processing |
 | `file-saver` | `^2.0.5` | GeoJSON / mask export |
 | `buffer` | `^5.7.1` | |
 | `onnxruntime-web` | `~1.26.0` | browser SAM / cellpose inference (WebGPU/WASM) |
-| `cellpose-js` | `^0.3.0` | **optional** — automatic cellpose-SAM segmentation |
-| `napari-js` | `^0.11.0` | **optional** — WebGPU rendering backend |
+| `cellpose-js` | `^0.3.0` | automatic cellpose-SAM segmentation |
 
-`fast-png` and `tslib` are bundled as regular dependencies (you don't install
-them). See [Quick start](#usage-host-integration-brief) below for wiring.
+The rendering backends and helpers — `openseadragon`, `plotly.js-dist-min`,
+`napari-js`, `fast-png`, and `tslib` — are declared as regular **dependencies**
+and installed automatically; you don't add them yourself. See
+[Quick start](#usage-host-integration-brief) below for wiring.
 
 ## Live demo & running the example
 

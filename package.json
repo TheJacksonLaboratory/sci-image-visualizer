@@ -69,11 +69,6 @@
     "primeng": "^17.18.0",
     "rxjs": "^7.8.0"
   },
-  "peerDependenciesMeta": {
-    "cellpose-js": {
-      "optional": true
-    }
-  },
   "devDependencies": {
     "@analogjs/vite-plugin-angular": "^1.7.1",
     "@angular-devkit/build-angular": "^17.3.0",
