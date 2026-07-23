@@ -21,7 +21,7 @@ import {
 @Component({
   // Canonical prefixed selector first; the unprefixed original is kept as an
   // alias for one release (pre-publication back-compat).
-  selector: 'jaxviz-channel-histogram, channel-histogram',
+  selector: 'channel-histogram',
   templateUrl: './channel-histogram.component.html',
   styleUrls: ['./channel-histogram.component.scss'],
 })

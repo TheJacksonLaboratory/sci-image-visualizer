@@ -29,7 +29,7 @@ import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from '../contracts/toolbar-c
 @Component({
   // Canonical prefixed selector first; the unprefixed original is kept as an
   // alias for one release (pre-publication back-compat).
-  selector: 'jaxviz-toolbar, plotting-toolbar',
+  selector: 'plotting-toolbar',
   templateUrl: './toolbar.component.html',
   styleUrls: ['./toolbar.component.scss'],
 })

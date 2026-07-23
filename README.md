@@ -365,11 +365,8 @@ setSamModelUrls('microsam-vit-t-lm',
 `onnxruntime-web` WASM/JSEP sidecars must be served from `/assets/ort/`. See
 jit-ui's `app.module.ts` for a full wiring example.
 
-Each embeddable component has a plain, unprefixed selector (used here and
-throughout jit-ui): `visualization`, `region-editor`, `plotting-toolbar`. The
-region-editor and toolbar additionally expose a `jaxviz-`-prefixed alias
-(`jaxviz-region-editor`, `jaxviz-toolbar`) for collision-safe use in the
-published library.
+Each embeddable component uses a plain, unprefixed selector: `visualizer`,
+`region-editor`, `plotting-toolbar`, `channel-histogram`, `hex-color-picker`.
 
 ## Development
 

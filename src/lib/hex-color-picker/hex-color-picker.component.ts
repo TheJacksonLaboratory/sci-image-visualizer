@@ -6,7 +6,7 @@ import {
 @Component({
   // Canonical prefixed selector first; the unprefixed original is kept as an
   // alias for one release (pre-publication back-compat).
-  selector: 'jaxviz-hex-color-picker, hex-color-picker',
+  selector: 'hex-color-picker',
   templateUrl: './hex-color-picker.component.html',
   styleUrls: ['./hex-color-picker.component.scss'],
   // OnPush so the always-in-DOM (but hidden) picker panel — a ~130-cell honeycomb

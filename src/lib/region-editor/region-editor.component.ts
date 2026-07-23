@@ -16,7 +16,7 @@ import { regionToParts, scaleParts, maskScaleFor } from './mask-raster';
 @Component({
   // Canonical prefixed selector first; the unprefixed original is kept as an
   // alias for one release (pre-publication back-compat).
-  selector: 'jaxviz-region-editor, region-editor',
+  selector: 'region-editor',
   templateUrl: './region-editor.component.html',
   styleUrls: ['./region-editor.component.scss'],
 })
