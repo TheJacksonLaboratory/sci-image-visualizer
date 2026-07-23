@@ -229,10 +229,10 @@ export class AppComponent {
   active?: string;
   loading = false;
 
-  /** Show the zoom + region tools; hide the server-only "special" tools (plot
-   *  type / channels / download need a backend) and help. */
+  /** Show the plot-type dropdown + zoom + region tools; hide help. (Channels /
+   *  download need a backend, but the plot-type selector works serverlessly.) */
   readonly toolbarTools: ToolbarToolVisibility = {
-    specialTools: false,
+    specialTools: true,
     zoomTools: true,
     regionTools: true,
     help: false,

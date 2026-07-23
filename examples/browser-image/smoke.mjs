@@ -44,12 +44,21 @@ try {
   let rendered = false;
   try { await page.waitForSelector('visualizer', { timeout: 15000 }); rendered = true; } catch {}
   const tiles = await page.locator('.gallery .tile').count();
+  // PrimeNG overlay sanity: the plot-mode dropdown must open with options
+  // (catches missing PrimeNG CSS / broken overlays that render blank).
+  let overlayOpts = 0;
+  try {
+    await page.locator('p-dropdown').first().click({ timeout: 5000 });
+    await page.waitForSelector('.p-dropdown-panel', { timeout: 5000 });
+    overlayOpts = await page.locator('.p-dropdown-item').count();
+  } catch {}
   await page.screenshot({ path: '/tmp/smoke.png', fullPage: true }).catch(() => {});
   await browser.close();
-  console.log(`rendered <visualizer>: ${rendered} | gallery tiles: ${tiles}`);
+  console.log(`rendered <visualizer>: ${rendered} | gallery tiles: ${tiles} | dropdown options: ${overlayOpts}`);
   if (errors.length) { console.log('ERRORS:\n  ' + errors.join('\n  ')); failed = true; }
   if (bad.length) { console.log('BAD RESPONSES (missing assets):\n  ' + [...new Set(bad)].join('\n  ')); failed = true; }
   if (!rendered) { console.log('FAIL: <visualizer> did not render'); failed = true; }
+  if (!overlayOpts) { console.log('FAIL: plot-mode dropdown overlay did not open'); failed = true; }
   if (!failed) console.log('SMOKE OK');
 } catch (e) {
   console.log('SMOKE ERROR:', e.message);
