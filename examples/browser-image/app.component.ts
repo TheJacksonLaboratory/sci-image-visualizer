@@ -181,9 +181,8 @@ const SAMPLES: Sample[] = Object.entries(
       .tile .name {
         font-size: 10.5px;
         color: #444;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        overflow-wrap: break-word;
+        word-break: break-word;
       }
     `,
     `
