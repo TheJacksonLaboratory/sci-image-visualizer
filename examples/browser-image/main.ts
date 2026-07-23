@@ -1,4 +1,10 @@
 import 'zone.js';
+// Global PrimeNG styles the library's components need (theme + base + icons +
+// PrimeFlex utilities). A host normally loads these; jit-ui does via its styles[].
+import 'primeicons/primeicons.css';
+import 'primeng/resources/primeng.min.css';
+import 'primeflex/primeflex.css';
+import 'primeng/resources/themes/saga-blue/theme.css';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { provideAnimations } from '@angular/platform-browser/animations';
 import { provideHttpClient } from '@angular/common/http';
