@@ -297,7 +297,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   /**
    * Subscribe to the shared VisualizerStore colormap/reverse so OSD recolors in
    * lock-step with Plotly. Idempotent and self-healing: this service is a root
-   * singleton, but `unsubscribe()` (called on VisualizationComponent destroy)
+   * singleton, but `unsubscribe()` (called on VisualizerComponent destroy)
    * tears the subscription down — and the constructor never runs again. So
    * `plot()` calls this to re-establish it after a component teardown/recreate
    * (e.g. switching images), otherwise colormap changes would be silently
@@ -783,7 +783,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
         // the view settles, so they can re-sample at the current zoom resolution.
         this.viewer!.addHandler('animation-finish', () => this.emitViewportChange());
         // Chrome compositor bug: after an OSD zoom the docked toolbar (a sibling of
-        // #plot in the <visualization> host) is left laid-out-but-unpainted and
+        // #plot in the <visualizer> host) is left laid-out-but-unpainted and
         // vanishes — confirmed via DevTools (DOM intact, region simply not painted).
         // CSS (z-index / isolation / contain) and DOM-reparenting don't fix it; a
         // repaint reliably does. Nudge it each animation frame (so it never visibly

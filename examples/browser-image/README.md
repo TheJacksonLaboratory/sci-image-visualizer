@@ -2,7 +2,7 @@
 
 **Live demo:** <https://thejacksonlaboratory.github.io/sci-image-visualizer/>
 
-A minimal, **fully in-browser** host for `<jaxviz-visualization>`. A gallery of
+A minimal, **fully in-browser** host for `<visualizer>`. A gallery of
 bundled sample images (large thumbnails on the left) — click one to load it into
 the OpenSeadragon view with the zoom + region tools. Or drop in your own file.
 No backend, no tile server: each image is handed to OSD as a self-contained
@@ -19,7 +19,7 @@ jit-ui's `processing-pipeline` preview. A later example will add a small Node/TS
 |---|---|
 | `sample-images/` | Bundled example images (**Git LFS**). PNGs open directly; TIFFs are decoded client-side. |
 | `serverless-ports.ts` | The three host DI ports. `ExampleImageStateAdapter` emits `IImageInfo{ tiled:false }`: PNG/JPEG use the URL directly; **TIFF** is decoded in-browser with `image-js` (browsers can't render TIFF) → a PNG blob. `Stub{TileAccess,RegionIo}Adapter` are no-ops. |
-| `app.component.ts` | Standalone host: the thumbnail gallery + `<jaxviz-visualization>`; binds `provideVisualization()` + the four ports. |
+| `app.component.ts` | Standalone host: the thumbnail gallery + `<visualizer>`; binds `provideVisualization()` + the four ports. |
 | `main.ts` | `bootstrapApplication` + the app-level providers the library needs (`HttpClient`, animations, PrimeNG `MessageService`). |
 | `index.html`, `vite.config.ts`, `tsconfig.json` | Vite runner (Angular via `@analogjs/vite-plugin-angular`); aliases the package → the built `dist/`. |
 

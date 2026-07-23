@@ -1,6 +1,6 @@
 import { BehaviorSubject } from 'rxjs';
 
-import { VisualizationComponent } from './visualization.component';
+import { VisualizerComponent } from './visualizer.component';
 import { PlotType, PLOT_TYPE_DESCRIPTORS } from './contracts/plot-type';
 import { VisualizerStore } from './store/visualizer-store.service';
 import { RegionOpsService } from './region-ops.service';
@@ -16,7 +16,7 @@ function rectRegion(x: number, y: number, w: number, h: number): Region {
 }
 
 /**
- * UI-shell tests for VisualizationComponent (refactoring plan, Step 7) —
+ * UI-shell tests for VisualizerComponent (refactoring plan, Step 7) —
  * instantiated directly (no TestBed/template) so the shell logic is testable
  * without mounting OSD/Plotly: z-scrub debouncing through the SliceScrubber,
  * keyboard slice stepping with clamping, and the dialog/toolbar flags.
@@ -73,14 +73,14 @@ function mockPlotService(): any {
   };
 }
 
-describe('VisualizationComponent (UI shell)', () => {
-  let component: VisualizationComponent;
+describe('VisualizerComponent (UI shell)', () => {
+  let component: VisualizerComponent;
   let plotService: any;
 
   beforeEach(() => {
     jest.useFakeTimers();
     plotService = mockPlotService();
-    component = new VisualizationComponent(
+    component = new VisualizerComponent(
       { setDiagram: jest.fn(), setImageLoading: jest.fn(), setImageInfo: jest.fn() } as any, // ImageStatePort
       plotService,
       { add: jest.fn(), clear: jest.fn() } as any, // MessageService

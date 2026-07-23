@@ -19,7 +19,7 @@ import { CHANNEL_HISTOGRAM_API } from './contracts/channel-histogram-api.contrac
  * The chain services are `providedIn: 'root'` singletons, so by default the whole
  * app shares one viewer's state (regions, image, channels, render handles) — which
  * is correct for the single main viewer. A consumer that needs a SECOND, independent
- * viewer (e.g. a modal that mounts `<jaxviz-visualization>` over the live main view
+ * viewer (e.g. a modal that mounts `<visualizer>` over the live main view
  * and must not clobber its regions/image) drops this into its component `providers`:
  *
  * ```ts

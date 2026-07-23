@@ -42,7 +42,7 @@ const SAMPLES: Sample[] = Object.entries(
   .sort((a, b) => a.name.localeCompare(b.name));
 
 /**
- * Minimal standalone host for <jaxviz-visualization>, run entirely in the
+ * Minimal standalone host for <visualizer>, run entirely in the
  * browser (no backend). A gallery of bundled sample images (large thumbnails) —
  * click one to load it into the viewer with the region + zoom tools. Everything
  * is wired through the library's DI ports, three of which are serverless stubs
@@ -61,30 +61,145 @@ const SAMPLES: Sample[] = Object.entries(
     { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
   ],
   styles: [
-    `:host { display: flex; flex-direction: column; height: 100vh; font-family: system-ui, sans-serif; color: #1a1a1a; }`,
-    `header { display: flex; align-items: center; gap: 14px; padding: 10px 14px; border-bottom: 1px solid #e2e2e2; }`,
-    `header strong { font-size: 14px; }`,
-    `header .upload { font-size: 12px; color: #555; margin-left: auto; }`,
-    `.body { display: flex; flex: 1 1 auto; min-height: 0; }`,
-    `.gallery { width: 232px; flex: none; overflow-y: auto; padding: 10px; display: grid;
-       grid-template-columns: 1fr 1fr; gap: 10px; align-content: start; background: #fafafa; border-right: 1px solid #e2e2e2; }`,
-    `.tile { display: flex; flex-direction: column; gap: 4px; padding: 6px; border: 1px solid #ddd; border-radius: 8px;
-       background: #fff; cursor: pointer; font: inherit; text-align: left; }`,
-    `.tile:hover { border-color: #9ab; }`,
-    `.tile.active { border-color: #2b6cb0; box-shadow: 0 0 0 2px rgba(43,108,176,.3); }`,
-    `.tile .thumb { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 5px; background: #f0f0f0; display: block; }`,
-    `.tile .tiff { display: flex; align-items: center; justify-content: center; color: #888; font-size: 12px;
-       letter-spacing: .05em; border: 1px dashed #ccc; }`,
-    `.tile .name { font-size: 10.5px; color: #444; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }`,
-    `.viewer { position: relative; flex: 1 1 auto; min-width: 0; display: flex; }`,
-    `jaxviz-visualization { flex: 1 1 auto; min-height: 0; }`,
-    `.spinner { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-       background: rgba(255,255,255,.6); font-size: 13px; color: #333; pointer-events: none; }`,
+    `
+      :host {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        font-family: system-ui, sans-serif;
+        color: #1a1a1a;
+      }
+    `,
+    `
+      header {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 10px 14px;
+        border-bottom: 1px solid #e2e2e2;
+      }
+    `,
+    `
+      header strong {
+        font-size: 14px;
+      }
+    `,
+    `
+      header .upload {
+        font-size: 12px;
+        color: #555;
+        margin-left: auto;
+      }
+    `,
+    `
+      .body {
+        display: flex;
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+    `,
+    `
+      .gallery {
+        width: 232px;
+        flex: none;
+        overflow-y: auto;
+        padding: 10px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        align-content: start;
+        background: #fafafa;
+        border-right: 1px solid #e2e2e2;
+      }
+    `,
+    `
+      .tile {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 6px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        background: #fff;
+        cursor: pointer;
+        font: inherit;
+        text-align: left;
+      }
+    `,
+    `
+      .tile:hover {
+        border-color: #9ab;
+      }
+    `,
+    `
+      .tile.active {
+        border-color: #2b6cb0;
+        box-shadow: 0 0 0 2px rgba(43, 108, 176, 0.3);
+      }
+    `,
+    `
+      .tile .thumb {
+        width: 100%;
+        aspect-ratio: 1;
+        object-fit: cover;
+        border-radius: 5px;
+        background: #f0f0f0;
+        display: block;
+      }
+    `,
+    `
+      .tile .tiff {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #888;
+        font-size: 12px;
+        letter-spacing: 0.05em;
+        border: 1px dashed #ccc;
+      }
+    `,
+    `
+      .tile .name {
+        font-size: 10.5px;
+        color: #444;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    `,
+    `
+      .viewer {
+        position: relative;
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+      }
+    `,
+    `
+      visualizer {
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+    `,
+    `
+      .spinner {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 255, 255, 0.6);
+        font-size: 13px;
+        color: #333;
+        pointer-events: none;
+      }
+    `,
   ],
   template: `
     <header>
       <strong>sci-image-visualizer — serverless browser example</strong>
-      <label class="upload">Load your own…
+      <label class="upload"
+        >Load your own…
         <input type="file" accept="image/*,.tif,.tiff" (change)="onFile($event)" />
       </label>
     </header>
@@ -95,14 +210,15 @@ const SAMPLES: Sample[] = Object.entries(
           class="tile"
           [class.active]="s.name === active"
           (click)="load(s)"
-          [title]="s.name">
+          [title]="s.name"
+        >
           <img *ngIf="!s.isTiff" class="thumb" [src]="s.url" loading="lazy" alt="" />
           <span *ngIf="s.isTiff" class="thumb tiff">TIFF</span>
           <span class="name">{{ s.name }}</span>
         </button>
       </aside>
       <main class="viewer">
-        <jaxviz-visualization [toolbarTools]="toolbarTools"></jaxviz-visualization>
+        <visualizer [toolbarTools]="toolbarTools"></visualizer>
         <div class="spinner" *ngIf="loading">decoding…</div>
       </main>
     </div>

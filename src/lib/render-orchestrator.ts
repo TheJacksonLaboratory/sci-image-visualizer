@@ -2,7 +2,7 @@ import { IImageInfo } from './contracts/image.contract';
 
 /**
  * Two-pass (small→large) render sequencing, extracted from
- * VisualizationComponent (refactoring plan, Step 7 — a pure move of the
+ * VisualizerComponent (refactoring plan, Step 7 — a pure move of the
  * orchestration; the component keeps the UI flags and supplies them through
  * the host callbacks).
  *

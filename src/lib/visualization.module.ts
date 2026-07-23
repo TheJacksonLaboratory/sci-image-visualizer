@@ -24,7 +24,7 @@ import { CheckboxModule } from 'primeng/checkbox';
 import { RadioButtonModule } from 'primeng/radiobutton';
 import { SelectButtonModule } from 'primeng/selectbutton';
 
-import { VisualizationComponent } from './visualization.component';
+import { VisualizerComponent } from './visualizer.component';
 import { ToolbarComponent } from './toolbar/toolbar.component';
 import { RegionEditorComponent } from './region-editor/region-editor.component';
 import { HexColorPickerComponent } from './hex-color-picker/hex-color-picker.component';
@@ -35,10 +35,10 @@ import { REGION_EDITOR_API } from './contracts/region-editor-api.contract';
 import { CHANNEL_HISTOGRAM_API } from './contracts/channel-histogram-api.contract';
 
 /**
- * Self-contained plotting UI: the {@link VisualizationComponent} (plot surface
+ * Self-contained plotting UI: the {@link VisualizerComponent} (plot surface
  * + render orchestration), its {@link ToolbarComponent}, and the
  * {@link RegionEditorComponent} (the Regions tab table/editor). Consumers embed
- * `<visualization>` / `<region-editor>` and need know nothing about the toolbar,
+ * `<visualizer>` / `<region-editor>` and need know nothing about the toolbar,
  * the rendering backends, or region file I/O (supplied via the REGION_IO_PORT).
  *
  * Also exports {@link HexColorPickerComponent} (`<hex-color-picker>`) as a
@@ -47,7 +47,7 @@ import { CHANNEL_HISTOGRAM_API } from './contracts/channel-histogram-api.contrac
  */
 @NgModule({
   declarations: [
-    VisualizationComponent,
+    VisualizerComponent,
     ToolbarComponent,
     RegionEditorComponent,
     HexColorPickerComponent,
@@ -78,7 +78,7 @@ import { CHANNEL_HISTOGRAM_API } from './contracts/channel-histogram-api.contrac
     RadioButtonModule,
     SelectButtonModule,
   ],
-  exports: [VisualizationComponent, RegionEditorComponent, HexColorPickerComponent, ChannelHistogramComponent],
+  exports: [VisualizerComponent, RegionEditorComponent, HexColorPickerComponent, ChannelHistogramComponent],
   providers: [
     // Internal backend wiring. All three host-facing contracts are served by the
     // RoutingVisualizerService (the Plotly/OpenSeadragon selector), so consumers

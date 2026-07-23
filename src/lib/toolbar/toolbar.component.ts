@@ -21,7 +21,7 @@ import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from '../contracts/toolbar-c
  * image actions (download / autoscale / pipeline), viewport zoom/pan, the
  * Surface-3D camera controls, and the region-drawing tools — plus the plotting
  * help dialog. It owns no rendering or visualization state: the host
- * (VisualizationComponent) stays the orchestrator, passing state in via `@Input` and
+ * (VisualizerComponent) stays the orchestrator, passing state in via `@Input` and
  * handling every action via `@Output`. The same actions are also driven by the
  * diagram's right-click context menu and keyboard shortcuts, so keeping the
  * handlers in the host avoids duplicating that logic.

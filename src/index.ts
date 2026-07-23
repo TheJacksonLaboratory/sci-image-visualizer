@@ -51,8 +51,8 @@ export { provideVisualization } from './lib/provide-visualization';
 // ── Public components (exported by VisualizationModule) ───────────────────
 // ng-packagr requires module-exported components to be reachable from the
 // entry point so consumers get their types; these are the embeddable elements
-// (`<visualization>`, `<region-editor>`, `<hex-color-picker>`).
-export { VisualizationComponent } from './lib/visualization.component';
+// (`<visualizer>`, `<region-editor>`, `<hex-color-picker>`).
+export { VisualizerComponent } from './lib/visualizer.component';
 export { RegionEditorComponent } from './lib/region-editor/region-editor.component';
 export { HexColorPickerComponent } from './lib/hex-color-picker/hex-color-picker.component';
 export { ChannelHistogramComponent } from './lib/channel-histogram/channel-histogram.component';

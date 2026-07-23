@@ -36,13 +36,13 @@ let plotInstanceSeq = 0;
 @Component({
   // Canonical prefixed selector first; the unprefixed original is kept as an
   // alias for one release (pre-publication back-compat).
-  selector: 'jaxviz-visualization, visualization',
-  templateUrl: './visualization.component.html',
-  styleUrls: ['./visualization.component.scss'],
+  selector: 'visualizer',
+  templateUrl: './visualizer.component.html',
+  styleUrls: ['./visualizer.component.scss'],
 })
-export class VisualizationComponent implements OnInit, OnChanges, AfterViewInit, OnDestroy {
+export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, OnDestroy {
   /** Per-instance toast key. MessageService is a global singleton, so two live
-   *  `<visualization>` instances (main viewer + pipeline-dialog preview) sharing
+   *  `<visualizer>` instances (main viewer + pipeline-dialog preview) sharing
    *  one key would each render the same message — a duplicate toast. A unique
    *  key per instance scopes the toast to the component that raised it. */
   private static nextToastId = 0;
@@ -140,7 +140,7 @@ export class VisualizationComponent implements OnInit, OnChanges, AfterViewInit,
    *  every point click, which re-runs inference). */
   private samToastShown = false;
 
-  readonly samToastKey = `sam-${VisualizationComponent.nextToastId++}`;
+  readonly samToastKey = `sam-${VisualizerComponent.nextToastId++}`;
   /** Subscriptions to the point tool's live feeds (status/busy/download). */
   private samPointSub = new Subscription();
   /** Vertex eraser radius in image-pixel coordinates. */

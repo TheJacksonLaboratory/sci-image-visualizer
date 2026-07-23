@@ -296,7 +296,7 @@ Design, architecture, and planning docs for the library:
 Related (host side, in jit-ui):
 
 - **[USE-VISUALIZATION-LIB-IN-PIPELINE-DIALOG.md](https://github.com/TheJacksonLaboratory/jit-ui/blob/master/apps/jit-ui/src/app/main/components/processing-pipeline/USE-VISUALIZATION-LIB-IN-PIPELINE-DIALOG.md)** —
-  how the processing-pipeline dialog embeds `<visualization>` and drives it
+  how the processing-pipeline dialog embeds `<visualizer>` and drives it
   via `RoutingVisualizerService`.
 - **[processing-pipeline/ARCHITECTURE.md](https://github.com/TheJacksonLaboratory/jit-ui/blob/master/apps/jit-ui/src/app/main/models/processing-pipeline/ARCHITECTURE.md)** —
   the client/server processing-pipeline engines (OpenCV.js, transformers.js,
@@ -348,7 +348,7 @@ tools.
 
 ## Usage (host integration, brief)
 
-Import `VisualizationModule`, render `<visualization>` (and `<region-editor>` for
+Import `VisualizationModule`, render `<visualizer>` (and `<region-editor>` for
 the Regions panel), and provide the DI ports (`TILE_ACCESS_PORT`,
 `IMAGE_STATE_PORT`, `REGION_IO_PORT`, `VIZ_CONFIG`, and `CELL_SEGMENTER` for the
 cellpose adapter). Configure hosted SAM model URLs once at startup:
@@ -364,10 +364,11 @@ setSamModelUrls('microsam-vit-t-lm',
 `onnxruntime-web` WASM/JSEP sidecars must be served from `/assets/ort/`. See
 jit-ui's `app.module.ts` for a full wiring example.
 
-Each component declares both an unprefixed selector (used here and throughout
-jit-ui) and a `jaxviz-`-prefixed alias for collision-safe use when consuming the
-published library: `visualization` / `jaxviz-visualization`,
-`region-editor` / `jaxviz-region-editor`, `plotting-toolbar` / `jaxviz-toolbar`.
+Each embeddable component has a plain, unprefixed selector (used here and
+throughout jit-ui): `visualization`, `region-editor`, `plotting-toolbar`. The
+region-editor and toolbar additionally expose a `jaxviz-`-prefixed alias
+(`jaxviz-region-editor`, `jaxviz-toolbar`) for collision-safe use in the
+published library.
 
 ## Development
 

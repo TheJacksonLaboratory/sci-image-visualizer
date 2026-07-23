@@ -1,7 +1,7 @@
 import { RenderOrchestrator, SliceScrubber, TwoPassRenderHost } from './render-orchestrator';
 
 /**
- * Unit tests for the render sequencing extracted from VisualizationComponent
+ * Unit tests for the render sequencing extracted from VisualizerComponent
  * (refactoring plan, Step 7) — the five completion paths and the large-tier
  * retry, previously untestable inside the component's subscription closure.
  */

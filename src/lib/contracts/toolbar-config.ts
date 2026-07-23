@@ -1,6 +1,6 @@
 /**
  * Which groups of controls the visualization toolbar shows. All default to `true`
- * (the full toolbar); a consumer embedding `<jaxviz-visualization>` can hide groups
+ * (the full toolbar); a consumer embedding `<visualizer>` can hide groups
  * it doesn't want via the `toolbarTools` input — e.g. the processing pipeline shows
  * only the zoom and region tools.
  *

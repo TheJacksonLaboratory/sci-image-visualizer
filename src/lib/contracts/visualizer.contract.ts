@@ -358,7 +358,7 @@ export interface IVisualizer extends IDataRenderer, IRegionStore, IToolControlle
 /**
  * DI token for the active visualization backend. Bind it (`useExisting`) to the
  * `RoutingVisualizerService`, which selects Plotly vs OpenSeadragon per plot
- * type. Consumers — including this library's own `VisualizationComponent` —
+ * type. Consumers — including this library's own `VisualizerComponent` —
  * inject `IVisualizer` through this token rather than the concrete router, so
  * the routing/fallback implementation can change without touching constructors.
  */
