@@ -34,6 +34,12 @@ try {
   const errors = [];
   page.on('console', (m) => m.type() === 'error' && errors.push('console: ' + m.text()));
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+  const bad = [];
+  page.on('response', (r) => {
+    const u = new URL(r.url());
+    if (r.status() >= 400 && u.host === `localhost:${PORT}` && !u.pathname.endsWith('/favicon.ico'))
+      bad.push(`${r.status()} ${u.pathname}`);
+  });
   await page.goto(URL_, { waitUntil: 'load', timeout: 30000 });
   let rendered = false;
   try { await page.waitForSelector('visualizer', { timeout: 15000 }); rendered = true; } catch {}
@@ -42,6 +48,7 @@ try {
   await browser.close();
   console.log(`rendered <visualizer>: ${rendered} | gallery tiles: ${tiles}`);
   if (errors.length) { console.log('ERRORS:\n  ' + errors.join('\n  ')); failed = true; }
+  if (bad.length) { console.log('BAD RESPONSES (missing assets):\n  ' + [...new Set(bad)].join('\n  ')); failed = true; }
   if (!rendered) { console.log('FAIL: <visualizer> did not render'); failed = true; }
   if (!failed) console.log('SMOKE OK');
 } catch (e) {
