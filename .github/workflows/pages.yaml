@@ -1,7 +1,6 @@
 # Builds the browser example (examples/browser-image) and publishes it to GitHub
 # Pages, so the running demo is viewable at
-#   internal (now): https://laughing-adventure-mn6z367.pages.github.io/
-#   public  (later): https://thejacksonlaboratory.github.io/sci-image-visualizer/
+#   https://thejacksonlaboratory.github.io/sci-image-visualizer/
 #
 # Requires: Settings → Pages → Source = "GitHub Actions". For an internal/private
 # repo, Pages is only served with GitHub Enterprise Cloud (access-controlled);
@@ -29,6 +28,11 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # Public Pages serves under /sci-image-visualizer/ — Vite must build with this
+      # base or every absolute /assets URL 404s at the subpath (white page). The
+      # smoke test reads it too, to preview + probe at the same subpath.
+      PAGES_BASE: /sci-image-visualizer/
     steps:
       - uses: actions/checkout@v4
         with:
