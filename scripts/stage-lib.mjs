@@ -38,3 +38,15 @@ if (existsSync(libAssets)) {
     if (e.isFile()) cpSync(libAssets + '/' + e.name, publicIcons + '/' + e.name);
   console.log('stage-lib: flat library icons -> public/assets/icons');
 }
+
+// SAM/cellpose run onnxruntime-web, which loads its WASM backend from
+// `/assets/ort/` (ort.env.wasm.wasmPaths in the library). Serve the sidecars.
+const ortSrc = root + 'node_modules/onnxruntime-web/dist';
+if (existsSync(ortSrc)) {
+  const publicOrt = root + 'examples/browser-image/public/assets/ort';
+  mkdirSync(publicOrt, { recursive: true });
+  for (const e of readdirSync(ortSrc, { withFileTypes: true }))
+    if (e.isFile() && (e.name.endsWith('.wasm') || e.name.endsWith('.mjs')))
+      cpSync(ortSrc + '/' + e.name, publicOrt + '/' + e.name);
+  console.log('stage-lib: onnxruntime-web sidecars -> public/assets/ort');
+}
