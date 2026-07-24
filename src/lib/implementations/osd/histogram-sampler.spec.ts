@@ -108,6 +108,32 @@ describe('HistogramSampler', () => {
     expect(sampler.get(0, 0)).toBeNull();
   });
 
+  // ── computeSimpleHistogram (serverless / tiled:false path) ────────────
+  it('bins a grayscale frame in-memory, single channel, and nudges the pane', () => {
+    sampler.computeSimpleHistogram(2, tile(5, [42, 42, 42]).data, /*gray*/ true);
+    const h = sampler.get(2, 0)!;
+    expect(h.counts[42]).toBe(5);
+    expect(sampler.get(2, 1)).toBeNull();            // grayscale → one channel only
+    expect(onSampled).toHaveBeenCalled();
+    expect(tileClient.fetchTileRgba).not.toHaveBeenCalled(); // never hits the server
+  });
+
+  it('bins R/G/B channels for an RGB frame in simple mode', () => {
+    sampler.computeSimpleHistogram(0, tile(3, [10, 20, 30]).data, /*gray*/ false);
+    expect(sampler.get(0, 0)!.counts[10]).toBe(3); // R
+    expect(sampler.get(0, 1)!.counts[20]).toBe(3); // G
+    expect(sampler.get(0, 2)!.counts[30]).toBe(3); // B
+  });
+
+  it('skips fully-transparent pixels', () => {
+    const data = new Uint8ClampedArray(2 * 4);
+    data[0] = 7; data[1] = 7; data[2] = 7; data[3] = 255; // opaque gray 7
+    data[4] = 99; data[5] = 99; data[6] = 99; data[7] = 0; // transparent → ignored
+    sampler.computeSimpleHistogram(0, data, true);
+    expect(sampler.get(0, 0)!.counts[7]).toBe(1);
+    expect(sampler.get(0, 0)!.counts[99]).toBe(0);
+  });
+
   // ── native histogram fetch ────────────────────────────────────────────
   const NATIVE = {
     bitDepth: 16, rangeMin: 96, rangeMax: 150, observedMin: 96, observedMax: 150,

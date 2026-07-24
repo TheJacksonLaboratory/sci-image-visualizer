@@ -517,6 +517,27 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     return fullResUrl;
   }
 
+  /** Sample a SIMPLE-mode slice's own decoded pixels into the histogram — the
+   *  serverless analog of the tiled samplers (no tile server). Fire-and-forget;
+   *  a decode failure just leaves the pane empty rather than throwing. */
+  private async sampleSimpleHistogram(url: string | undefined, z: number): Promise<void> {
+    if (!url) return;
+    try {
+      const img = await this.loadImageEl(url);
+      const w = img.naturalWidth, h = img.naturalHeight;
+      if (!w || !h) return;
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const ctx = c.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0);
+      const data = ctx.getImageData(0, 0, w, h).data;
+      this.sampler.computeSimpleHistogram(z, data, this.isGrayscaleImage);
+    } catch (err) {
+      console.warn('[OSD] simple-mode histogram sample failed', err);
+    }
+  }
+
   /** Load a URL into an HTMLImageElement (resolves once decoded). Uses
    *  document.createElement rather than `new Image()` because this file's
    *  `Image` import is image-js's decoder, not the DOM element. */
@@ -594,6 +615,9 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       this.isMultiChannel = false;
       this.cache.clearChannelGroups();
       this.destroyViewer();
+      // Serverless histogram: bin this slice's own decoded pixels (no tile
+      // server) so the Channels & Histogram pane works in simple mode.
+      void this.sampleSimpleHistogram(loaded.url, loaded.z);
     } else {
       // Multichannel fluorescence (indexed/LUT-bearing stacks) composite client-side
       // from per-channel tiles. Trust the server's explicit `multichannel` flag — the
@@ -1110,6 +1134,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
             console.warn('[OSD] slice re-open failed', e?.message ?? e);
           });
           this.viewer.open({ type: 'image', url } as any);
+          void this.sampleSimpleHistogram(url, z); // re-bin the scrubbed slice
         })
         .catch((err) => console.warn('[OSD] slice fetch failed', err));
       return;

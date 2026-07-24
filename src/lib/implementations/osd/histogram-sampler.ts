@@ -205,6 +205,34 @@ export class HistogramSampler {
   }
 
   /**
+   * Client-side histogram for the SIMPLE (`tiled:false`) path: bin an
+   * already-decoded RGBA frame's OWN pixels — no tile server, no fetch. Same
+   * output shape as {@link computeImageWindow}: grayscale → [intensity];
+   * RGB → [R, G, B]. This is what lets the Channels & Histogram pane work for
+   * serverless images (the processing-pipeline preview, DICOM/TIFF stacks),
+   * which never hit the tile / `/histogram` endpoints.
+   */
+  computeSimpleHistogram(z: number, data: Uint8ClampedArray | Uint8Array, gray: boolean): void {
+    const cR = new Array(256).fill(0);
+    const cG = gray ? null : new Array(256).fill(0);
+    const cB = gray ? null : new Array(256).fill(0);
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] === 0) continue; // skip transparent padding
+      if (gray) {
+        cR[maxRgb(data[i], data[i + 1], data[i + 2])]++;
+      } else {
+        cR[data[i]]++;
+        cG![data[i + 1]]++;
+        cB![data[i + 2]]++;
+      }
+    }
+    this.sliceHistograms.set(
+      z, gray ? [histogram256(cR)] : [histogram256(cR), histogram256(cG!), histogram256(cB!)],
+    );
+    this.host.onChannelHistogramsSampled();
+  }
+
+  /**
    * Native-bit-depth histogram for >8-bit images, from the server `/histogram`
    * endpoint (the 8-bit canvas tiles can't carry 16-bit values). Cached per
    * slice+channel for the session.
