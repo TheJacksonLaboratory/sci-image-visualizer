@@ -8,7 +8,7 @@ import {
   Rectangle,
 } from '@jax-data-science/sci-image-visualizer';
 import { decodeDicom } from './dicom';
-import { decodeTiffStack } from './tiff';
+import { decodeTiffStack, DecodedTiff } from './tiff';
 
 /**
  * Serverless (Mode B) host ports for the browser example — modeled on jit-ui's
@@ -100,13 +100,18 @@ export class ExampleImageStateAdapter implements ImageStatePort, OnDestroy {
   private async loadTiff(buf: ArrayBuffer, fileName: string): Promise<void> {
     this.loading$.next(true);
     try {
-      // Decode every page: a multi-page TIFF (z-stack / hyperstack) loads as a
-      // scrubbable z-stack, a flat TIFF as a single image.
-      const { width, height, isGrayscale, slices } = await decodeTiffStack(buf);
-      this.emit(
-        slices, fileName, width, height, isGrayscale, slices,
-        slices.length > 1 ? { isStack: true, initialZIndex: 0 } : {},
-      );
+      // Decode: an ImageJ hyperstack (channels > 1) loads as a client-composited
+      // MULTICHANNEL stack; a plain multi-page TIFF as a scrubbable z-stack; a
+      // flat TIFF as a single image.
+      const dec = await decodeTiffStack(buf);
+      if (dec.channelCount > 1 && dec.channelUrls) {
+        this.emitMultichannel(dec, fileName);
+      } else {
+        this.emit(
+          dec.slices, fileName, dec.width, dec.height, dec.isGrayscale, dec.slices,
+          dec.slices.length > 1 ? { isStack: true, initialZIndex: 0 } : {},
+        );
+      }
     } catch (e) {
       // Fall back to image-js's first frame for any TIFF the lightweight decoder
       // can't handle (exotic compression / tiling) — better than failing outright.
@@ -169,6 +174,33 @@ export class ExampleImageStateAdapter implements ImageStatePort, OnDestroy {
       ],
       initialZIndex: isStack ? opts.initialZIndex ?? 0 : undefined,
       tiled: false, // ← the switch that keeps everything serverless
+    });
+    this.filename$.next(fileName);
+  }
+
+  /** Emit a SERVERLESS multichannel hyperstack: per-channel plane URLs
+   *  (`channelUrls[z][c]`) so the viewer composites the channels client-side
+   *  (per-channel colour/window/gamma) with per-channel histograms.
+   *  `rgbChannels:1` + `channelCount > 1` makes the library derive one tinted
+   *  channel per band; `z` is the slice count for the scrubber. */
+  private emitMultichannel(dec: DecodedTiff, fileName: string): void {
+    this.revoke();
+    this.ownedUrls = dec.channelUrls!.flat(); // every plane blob is ours to revoke
+    const z = dec.slices.length;
+    this.imageInfo$.next({
+      isGrayscale: false,
+      trueImageSize: [dec.width, dec.height],
+      urls: dec.slices,
+      channelUrls: dec.channelUrls,
+      isStack: z > 1,
+      showStack: false,
+      scaleRatio: true,
+      fileName,
+      imageMeta: [
+        { channelCount: dec.channelCount, rgbChannels: 1, x: dec.width, y: dec.height, z, mppX: null, mppY: null },
+      ],
+      initialZIndex: z > 1 ? 0 : undefined,
+      tiled: false,
     });
     this.filename$.next(fileName);
   }

@@ -233,6 +233,29 @@ export class HistogramSampler {
   }
 
   /**
+   * Per-channel histograms for a SIMPLE (`tiled:false`) MULTICHANNEL image: bin
+   * each already-decoded channel plane's own pixels (no tile server). One
+   * histogram per channel, so the pane's per-channel selector works serverlessly.
+   */
+  computeSimpleMultichannelHistograms(
+    z: number, planes: Array<{ data: Uint8ClampedArray | Uint8Array }>,
+  ): void {
+    this.sliceHistograms.set(
+      z,
+      planes.map((p) => {
+        const c = new Array(256).fill(0);
+        const d = p.data;
+        for (let i = 0; i < d.length; i += 4) {
+          if (d[i + 3] === 0) continue;
+          c[d[i]]++; // single-band plane: R=G=B, bin R
+        }
+        return histogram256(c);
+      }),
+    );
+    this.host.onChannelHistogramsSampled();
+  }
+
+  /**
    * Native-bit-depth histogram for >8-bit images, from the server `/histogram`
    * endpoint (the 8-bit canvas tiles can't carry 16-bit values). Cached per
    * slice+channel for the session.

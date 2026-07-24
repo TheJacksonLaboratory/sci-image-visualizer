@@ -57,6 +57,12 @@ export interface IImageInfo {
    *  opposed to the scalar `roiJsonStr`, which is one ROI set for the whole
    *  image (a single file or a server z-stack). (jit-ui#93) */
   roiJsonStrs?: (string | null)[];
+  /** Per-slice, per-channel plane URLs for a SERVERLESS multichannel image
+   *  (`tiled: false` + `imageMeta[0].channelCount > 1`). `channelUrls[z][c]`
+   *  is a complete single-band image of channel c at slice z. The OSD simple
+   *  path composites them client-side — per-channel colour/window/gamma from
+   *  the channel pane — instead of opening the flat `urls[z]`. (jit-ui#76) */
+  channelUrls?: string[][];
   imageMeta: IImageMetadata[];
   /** How the OpenSeadragon backend should source this image.
    *  - `true`/absent (default): server-tiled — OSD polls `/tiles/info` for a

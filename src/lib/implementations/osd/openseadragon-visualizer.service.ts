@@ -158,6 +158,14 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   /** preview blob URL → full-res upscaled blob URL (see toFullResUrl), so
    *  re-visiting a simple-mode slice doesn't re-upscale. Revoked on file change. */
   private readonly simpleFullResUrls = new Map<string, string>();
+  /** SERVERLESS multichannel (tiled:false + channelCount>1): the stack's
+   *  per-slice per-channel plane URLs, the current slice's decoded planes, and
+   *  the last composite blob URL. Composited client-side via display.channelRgbLut
+   *  (no tile server); kept OFF the tiled isMultiChannel path. */
+  private simpleMultichannel = false;
+  private simpleChannelUrls: string[][] = [];
+  private simpleChannelPlanes: Array<{ data: Uint8ClampedArray; width: number; height: number }> = [];
+  private simpleCompositeUrl: string | null = null;
   /** Skip the full-res upscale above this longest-side dimension — a folder
    *  stack is per-file previews (well under this); this only guards against an
    *  accidental enormous canvas allocation. */
@@ -321,6 +329,9 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       this.colorLut = buildColormapLut(cm?.data?.value, !!rev);
       this.channelStates = channels;
       this.invertBg = !!invert;
+      // Serverless multichannel: re-composite the current slice from its cached
+      // planes with the new channel states + re-open (no tile-invalidate path).
+      if (this.simpleMultichannel) { void this.recompositeAndOpen(); return; }
       // Multichannel: each channel is its own TiledImage — visibility is the
       // image's opacity (window/gamma/colour are applied by recolorChannelTile
       // on the invalidate below). Re-applying the current slice's reveal picks up
@@ -431,16 +442,36 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     const filename = imageInfo?.fileName;
     this.authHeaders = {};
     const [width, height] = imageInfo.trueImageSize ?? [0, 0];
-    const rawUrl = this.simpleStack.urlFor(imageInfo, z);
+    const meta = imageInfo.imageMeta?.[0];
+    // SERVERLESS MULTICHANNEL: composite the slice's per-channel planes
+    // client-side (no tile server), driven by the channel pane. Kept OFF the
+    // tiled isMultiChannel path (see compositeSimpleMultichannel).
+    const chUrls = imageInfo.channelUrls;
+    this.simpleMultichannel = !!chUrls?.length && (meta?.channelCount ?? 1) > 1;
     let url: string | undefined;
-    if (rawUrl) {
+    if (this.simpleMultichannel) {
+      this.simpleChannelUrls = chUrls as string[][];
       try {
-        const previewUrl = await this.simpleStack.fetchAsBlobUrl(rawUrl);
-        // Upscale the (downscaled) preview to full resolution so OSD's world
-        // matches the full-res ROI coordinate space — see toFullResUrl.
-        url = await this.toFullResUrl(previewUrl, width, height);
+        await this.loadSimpleChannelPlanes(chUrls![z] ?? chUrls![0]);
+        url = await this.compositeSimpleMultichannel();
+        // NB: histograms are binned in plot(), AFTER destroyViewer clears the
+        // sampler — computing them here would be wiped by that clear.
       } catch (err) {
-        console.warn('[OSD] simple-mode slice fetch failed', err);
+        console.warn('[OSD] simple multichannel composite failed', err);
+      }
+    } else {
+      this.simpleChannelUrls = [];
+      this.simpleChannelPlanes = [];
+      const rawUrl = this.simpleStack.urlFor(imageInfo, z);
+      if (rawUrl) {
+        try {
+          const previewUrl = await this.simpleStack.fetchAsBlobUrl(rawUrl);
+          // Upscale the (downscaled) preview to full resolution so OSD's world
+          // matches the full-res ROI coordinate space — see toFullResUrl.
+          url = await this.toFullResUrl(previewUrl, width, height);
+        } catch (err) {
+          console.warn('[OSD] simple-mode slice fetch failed', err);
+        }
       }
     }
     // No loadable URL (empty urls[] or the fetch failed): signal "couldn't
@@ -449,10 +480,9 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     // the router can fall back, instead of mounting an <img> with an undefined
     // src that throws at runtime.
     if (!url) {
-      console.warn('[OSD] simple-mode slice has no loadable URL; skipping OSD render', rawUrl);
+      console.warn('[OSD] simple-mode slice has no loadable URL; skipping OSD render', filename);
       return { descriptor: null, infoB64: '', z, filename };
     }
-    const meta = imageInfo.imageMeta?.[0];
     const descriptor: TileDescriptor = {
       width,
       height,
@@ -538,6 +568,79 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     }
   }
 
+  /** Fetch + decode a slice's per-channel planes (single-band grayscale) into
+   *  pixel buffers, for the SERVERLESS multichannel compositor. Auth-safe: goes
+   *  through SimpleSliceAccessService (blob:/data: as-is; http via HttpClient). */
+  private async loadSimpleChannelPlanes(urls: string[] | undefined): Promise<void> {
+    const planes: Array<{ data: Uint8ClampedArray; width: number; height: number }> = [];
+    for (const u of urls ?? []) {
+      try {
+        const previewUrl = await this.simpleStack.fetchAsBlobUrl(u);
+        const img = await this.loadImageEl(previewUrl);
+        const w = img.naturalWidth, h = img.naturalHeight;
+        if (!w || !h) { planes.push({ data: new Uint8ClampedArray(0), width: 0, height: 0 }); continue; }
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        const ctx = c.getContext('2d', { willReadFrequently: true });
+        if (!ctx) { planes.push({ data: new Uint8ClampedArray(0), width: 0, height: 0 }); continue; }
+        ctx.drawImage(img, 0, 0);
+        planes.push({ data: ctx.getImageData(0, 0, w, h).data, width: w, height: h });
+      } catch (err) {
+        console.warn('[OSD] channel plane decode failed', err);
+        planes.push({ data: new Uint8ClampedArray(0), width: 0, height: 0 });
+      }
+    }
+    this.simpleChannelPlanes = planes;
+  }
+
+  /** Composite the cached per-channel planes into ONE RGBA image using the
+   *  current channel states (colour/window/gamma/visibility) — the client-side,
+   *  serverless analog of the tiled per-channel 'lighter' compositor
+   *  (same display.channelRgbLut math as recolorChannelTile, applied per-plane).
+   *  Returns a blob: URL of the composite PNG, revoking the previous one. */
+  private async compositeSimpleMultichannel(): Promise<string | undefined> {
+    const planes = this.simpleChannelPlanes;
+    if (!planes.length) return undefined;
+    const w = planes[0].width, h = planes[0].height;
+    if (!w || !h) return undefined;
+    const states = this.store.currentChannelStates();
+    const out = new Uint8ClampedArray(w * h * 4);
+    for (let c = 0; c < planes.length; c++) {
+      const st = states[c];
+      if (st && st.visible === false) continue; // hidden channel contributes nothing
+      const plane = planes[c];
+      if (plane.width !== w || plane.height !== h || !plane.data.length) continue;
+      const { r, g, b } = this.display.channelRgbLut(st);
+      const pd = plane.data;
+      for (let i = 0; i < out.length; i += 4) {
+        if (pd[i + 3] === 0) continue;
+        const lum = pd[i]; // single-band plane (R=G=B)
+        out[i] += r[lum];          // Uint8ClampedArray clamps → additive ('lighter')
+        out[i + 1] += g[lum];
+        out[i + 2] += b[lum];
+      }
+    }
+    for (let i = 3; i < out.length; i += 4) out[i] = 255; // opaque
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return undefined;
+    ctx.putImageData(new ImageData(out, w, h), 0, 0);
+    const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
+    if (!blob) return undefined;
+    if (this.simpleCompositeUrl) URL.revokeObjectURL(this.simpleCompositeUrl);
+    this.simpleCompositeUrl = URL.createObjectURL(blob);
+    return this.simpleCompositeUrl;
+  }
+
+  /** Re-composite the current slice from its cached planes (new channel states)
+   *  and re-open — the serverless analog of the tiled invalidate-on-channel-change. */
+  private async recompositeAndOpen(): Promise<void> {
+    const url = await this.compositeSimpleMultichannel();
+    if (!url || !this.viewer) return;
+    try { this.viewer.open({ type: 'image', url } as any); } catch { /* viewer gone */ }
+  }
+
   /** Load a URL into an HTMLImageElement (resolves once decoded). Uses
    *  document.createElement rather than `new Image()` because this file's
    *  `Image` import is image-js's decoder, not the DOM element. */
@@ -553,6 +656,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   private revokeSimpleFullResUrls(): void {
     for (const u of this.simpleFullResUrls.values()) URL.revokeObjectURL(u);
     this.simpleFullResUrls.clear();
+    if (this.simpleCompositeUrl) { URL.revokeObjectURL(this.simpleCompositeUrl); this.simpleCompositeUrl = null; }
   }
 
   /** Mount the viewer with a custom tile source pointing at `GET /tile`. */
@@ -615,9 +719,14 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       this.isMultiChannel = false;
       this.cache.clearChannelGroups();
       this.destroyViewer();
-      // Serverless histogram: bin this slice's own decoded pixels (no tile
-      // server) so the Channels & Histogram pane works in simple mode.
-      void this.sampleSimpleHistogram(loaded.url, loaded.z);
+      // Serverless histogram — AFTER destroyViewer (its last act is sampler.clear()).
+      // Multichannel bins each cached channel plane; single-band / RGB bins the
+      // decoded frame's own pixels.
+      if (this.simpleMultichannel) {
+        this.sampler.computeSimpleMultichannelHistograms(loaded.z, this.simpleChannelPlanes);
+      } else {
+        void this.sampleSimpleHistogram(loaded.url, loaded.z);
+      }
     } else {
       // Multichannel fluorescence (indexed/LUT-bearing stacks) composite client-side
       // from per-channel tiles. Trust the server's explicit `multichannel` flag — the
@@ -1116,6 +1225,21 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     if (z === this.currentZ) return;
     if (!this.viewer) return;
     if (this.simpleMode) {
+      if (this.simpleMultichannel) {
+        const urls = this.simpleChannelUrls[z] ?? this.simpleChannelUrls[0];
+        if (!urls) return;
+        this.currentZ = z;
+        this.viewportPixels = null;
+        void (async () => {
+          await this.loadSimpleChannelPlanes(urls);
+          if (this.currentZ !== z || !this.viewer) return;
+          this.sampler.computeSimpleMultichannelHistograms(z, this.simpleChannelPlanes);
+          const url = await this.compositeSimpleMultichannel();
+          if (this.currentZ !== z || !this.viewer || !url) return;
+          this.viewer.open({ type: 'image', url } as any);
+        })();
+        return;
+      }
       const rawUrl = this.simpleUrls[z] ?? this.simpleUrls[0];
       if (!rawUrl) return;
       this.currentZ = z;

@@ -134,6 +134,17 @@ describe('HistogramSampler', () => {
     expect(sampler.get(0, 0)!.counts[99]).toBe(0);
   });
 
+  it('bins one histogram per channel plane (simple multichannel) and nudges the pane', () => {
+    const plane = (v: number) => ({ data: tile(3, [v, v, v]).data });
+    sampler.computeSimpleMultichannelHistograms(4, [plane(10), plane(200), plane(55)]);
+    expect(sampler.get(4, 0)!.counts[10]).toBe(3);
+    expect(sampler.get(4, 1)!.counts[200]).toBe(3);
+    expect(sampler.get(4, 2)!.counts[55]).toBe(3);
+    expect(sampler.get(4, 3)).toBeNull(); // only 3 planes → 3 channels
+    expect(onSampled).toHaveBeenCalled();
+    expect(tileClient.fetchTileRgba).not.toHaveBeenCalled();
+  });
+
   // ── native histogram fetch ────────────────────────────────────────────
   const NATIVE = {
     bitDepth: 16, rangeMin: 96, rangeMax: 150, observedMin: 96, observedMax: 150,

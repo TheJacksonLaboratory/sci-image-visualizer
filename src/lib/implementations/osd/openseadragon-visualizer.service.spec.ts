@@ -156,6 +156,32 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
    * fitWhenContainerSized fits the instant the container first gains a size,
    * then stops observing (jit-ui#106).
    */
+  it('load() simple detects MULTICHANNEL from channelUrls + channelCount>1', async () => {
+    const loaded = await service.load({
+      fileName: 'hyper.tif',
+      tiled: false,
+      isGrayscale: false,
+      urls: ['blob:z0'],
+      channelUrls: [['blob:z0c0', 'blob:z0c1', 'blob:z0c2', 'blob:z0c3']],
+      trueImageSize: [8, 8],
+      imageMeta: [{ rgbChannels: 1, channelCount: 4, x: 8, y: 8, z: 1 }],
+    } as any, 0);
+    // The MULTICHANNEL branch was taken. jsdom can't decode <img>, so the planes
+    // are empty and no composite builds → null descriptor — detection is what we
+    // pin here; the real composite is covered by the headless example test.
+    expect((service as unknown as { simpleMultichannel: boolean }).simpleMultichannel).toBe(true);
+    expect(loaded.descriptor).toBeNull();
+  });
+
+  it('load() simple stays single-image (NOT multichannel) for a plain grayscale image', async () => {
+    await service.load({
+      fileName: 'g.png', tiled: false, isGrayscale: true,
+      urls: ['blob:gray'], trueImageSize: [4, 4],
+      imageMeta: [{ rgbChannels: 1, channelCount: 1, x: 4, y: 4, z: 1 }],
+    } as any, 0);
+    expect((service as unknown as { simpleMultichannel: boolean }).simpleMultichannel).toBe(false);
+  });
+
   describe('fitWhenContainerSized (initial fit is layout-timing-independent)', () => {
     const call = (el: HTMLElement | null, refit: () => void) =>
       (service as unknown as {
