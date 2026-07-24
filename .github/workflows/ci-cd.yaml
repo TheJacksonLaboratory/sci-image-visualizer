@@ -58,6 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write # OIDC token for npm provenance (the repo is public)
     steps:
       - name: Checkout (full history to verify the tag's branch ancestry)
         uses: actions/checkout@v4
@@ -104,12 +105,10 @@ jobs:
         run: npm test
 
       # ng-packagr emits a complete, publishable package into dist/ (its own
-      # package.json, README, LICENSE). Publish from there.
-      # NOTE: this repo is internal. When it is made public, add --provenance to
-      #       the publish command below and restore "id-token: write" to the job
-      #       permissions above (npm provenance requires a public source repo).
+      # package.json, README, LICENSE). Publish from there — with npm provenance
+      # (the repo is public; id-token: write is granted on this job above).
       - name: Publish to npm
-        run: npm publish --access public
+        run: npm publish --access public --provenance
         working-directory: dist
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
