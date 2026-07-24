@@ -449,7 +449,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // beyond that one file's own extent).
     const info = this.loaded?.imageInfo;
     if (this.simpleStack.isSimple(info)) {
-      const url = this.simpleStack.urlFor(info as IImageInfo, z);
+      // Serverless multichannel volume: fetch the requested channel's OWN plane
+      // (channelUrls[z][channel]) so each band stays distinct — the client-side
+      // analog of the server's per-channel /tile?channel=c. Else the z-anchor URL.
+      const chUrls = (info as IImageInfo).channelUrls;
+      const url = channel != null && chUrls?.[z]?.[channel] != null
+        ? chUrls[z][channel]
+        : this.simpleStack.urlFor(info as IImageInfo, z);
       if (!url) throw new Error(`[napari-js] no URL for slice ${z}`);
       return this.simpleStack.fetchAsBitmap(url);
     }
@@ -1113,8 +1119,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   ): Promise<void> {
     const token = this.loadToken; // bail before rendering if a Cancel / new plot bumps this
     const desc = await this.ensureDescriptor();
-    const channelCount = desc?.channels ?? 1;
-    const multichannel = !!desc?.multichannel && channelCount > 1;
+    // Serverless multichannel (tiled:false + channelUrls): no tile descriptor, so
+    // derive the channel count from imageMeta and assemble each band from its own
+    // channelUrls[z][c] plane (fetchSlice does the per-channel routing).
+    const simpleMc = this.simpleStack.isSimple(info) && !!info?.channelUrls?.length
+      && (info?.imageMeta?.[0]?.channelCount ?? 1) > 1;
+    const channelCount = simpleMc ? info!.imageMeta![0].channelCount : (desc?.channels ?? 1);
+    const multichannel = simpleMc || (!!desc?.multichannel && channelCount > 1);
     const res = volumeResolutionFor(this.resolutionScale);
     const rendering: 'iso' | 'mip' = isNapariIsosurface(plotType) ? 'iso' : 'mip';
     const states = this.store.currentChannelStates();

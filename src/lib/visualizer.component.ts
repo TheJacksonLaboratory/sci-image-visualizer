@@ -269,6 +269,11 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     const caps = this.plotService.capabilities;
     const isStack = !!this.imageInfo?.isStack;
     const isGrayscale = !!this.imageInfo?.isGrayscale;
+    // A multichannel image's bands are each single-band (scalar), so the scalar
+    // plot modes (Heatmap / Surface / Volume / Isosurface) apply per channel even
+    // though the RGB composite isn't grayscale — don't gate them out.
+    const m0 = this.imageInfo?.imageMeta?.[0];
+    const isMultichannel = (m0?.channelCount ?? 1) > 1 && (m0?.rgbChannels ?? 1) < 3;
     this.plotTypeOptions = this.plotService.getPlotTypeDescriptors()
       .filter((d) => {
         // Outside test mode, only the curated set (those with a productionLabel)
@@ -276,7 +281,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
         if (!this.testMode && !d.productionLabel) return false;
         if (d.dimensions === '3d' && !caps.has(ViewerFeature.Surface3D)) return false;
         if (d.requiresStack && !isStack) return false;
-        if (d.requiresGrayscale && !isGrayscale) return false;
+        if (d.requiresGrayscale && !isGrayscale && !isMultichannel) return false;
         return true;
       })
       // Default selector shows the suffix-free productionLabel; test mode keeps
