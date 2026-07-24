@@ -188,7 +188,11 @@ export class ExampleImageStateAdapter implements ImageStatePort, OnDestroy {
     this.ownedUrls = dec.channelUrls!.flat(); // every plane blob is ours to revoke
     const z = dec.slices.length;
     this.imageInfo$.next({
-      isGrayscale: false,
+      // Each channel plane is single-band (scalar) — grayscale for the purpose of
+      // the scalar plot modes (Heatmap / Surface / Volume / Isosurface). The 4
+      // channels come from channelCount + channelUrls, not this flag, so the
+      // composite + per-channel pane are unaffected; this re-enables the 3D modes.
+      isGrayscale: true,
       trueImageSize: [dec.width, dec.height],
       urls: dec.slices,
       channelUrls: dec.channelUrls,
