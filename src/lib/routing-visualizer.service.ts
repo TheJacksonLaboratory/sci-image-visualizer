@@ -469,6 +469,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   /** Export the underlying data (16-bit multi-band TIFF) via the active backend. */
   exportData(): void { this.renderer().exportData(); }
   getChannels$(): Observable<IChannelState[]> { return this.store.getChannelStates(); }
+  setSelectedChannel(index: number): void { this.store.setSelectedChannel(index); }
   setChannelState(index: number, partial: Partial<IChannelState>): void {
     this.store.setChannelState(index, partial);
   }

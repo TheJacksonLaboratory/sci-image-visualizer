@@ -125,3 +125,33 @@ describe('VisualizerStore preset-set isolation', () => {
     expect(store.getPresetSet().classes.map((c) => c.name)).toEqual(['Tumor']);
   });
 });
+
+/**
+ * The pane-selected channel drives a single-scalar 3D Surface (jit-ui#76). It
+ * defaults to 0, dedups, emits to subscribers, and resets when the channel
+ * structure changes (a new image with a different band count).
+ */
+describe('VisualizerStore.selectedChannel', () => {
+  it('defaults to 0, updates on set, and resets on a new channel structure', () => {
+    const store = new VisualizerStore();
+    expect(store.currentSelectedChannel()).toBe(0);
+
+    store.setImageMeta([{ channelCount: 4, rgbChannels: 1, x: 8, y: 8, z: 1 }] as any);
+    store.setSelectedChannel(2);
+    expect(store.currentSelectedChannel()).toBe(2);
+
+    // a different band count resets the selection to 0
+    store.setImageMeta([{ channelCount: 2, rgbChannels: 1, x: 8, y: 8, z: 1 }] as any);
+    expect(store.currentSelectedChannel()).toBe(0);
+  });
+
+  it('emits to subscribers and dedups repeat sets', () => {
+    const store = new VisualizerStore();
+    const seen: number[] = [];
+    const sub = store.getSelectedChannel().subscribe((i) => seen.push(i));
+    store.setSelectedChannel(3);
+    store.setSelectedChannel(3); // deduped
+    sub.unsubscribe();
+    expect(seen).toEqual([0, 3]); // initial + one change
+  });
+});

@@ -248,6 +248,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private surfaceLayer: SurfaceLayer | null = null;
   /** Which band the surface samples (a channel index for multichannel, else the composite). */
   private surfaceChannel: number | undefined = undefined;
+  /** True when the mounted Surface follows one band of a multichannel image. */
+  private surfaceMultichannel = false;
   /** Pre-loaded per-slice luminance planes (already decimated to the surface grid), keyed by z,
    *  so the stack slider rebuilds the surface instantly. Filled by {@link preloadSurfacePlanes}. */
   private readonly surfacePlanes = new Map<
@@ -1536,9 +1538,15 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    */
   private async mountSurface(viewer: Viewer): Promise<void> {
     const desc = await this.ensureDescriptor();
-    const multichannel = !!desc?.multichannel && (desc?.channels ?? 1) > 1;
-    const states = this.store.currentChannelStates();
-    this.surfaceChannel = multichannel ? states.find((s) => s.visible)?.index ?? 0 : undefined;
+    const info = this.loaded?.imageInfo;
+    // Serverless multichannel (tiled:false + channelUrls) has no descriptor — detect
+    // it from imageMeta so the Surface still follows one band.
+    const simpleMc = this.simpleStack.isSimple(info) && !!info?.channelUrls?.length
+      && (info?.imageMeta?.[0]?.channelCount ?? 1) > 1;
+    const multichannel = simpleMc || (!!desc?.multichannel && (desc?.channels ?? 1) > 1);
+    this.surfaceMultichannel = multichannel;
+    // A height field is single-scalar → follow the pane-SELECTED channel.
+    this.surfaceChannel = multichannel ? this.store.currentSelectedChannel() : undefined;
     this.surfaceMaxGrid = surfaceResolutionFor(this.resolutionScale).maxGrid;
     this.imageMode = 'grayscale';
     this.volumeMultichannel = false;
@@ -1787,12 +1795,23 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       this.store.getReverseScale(),
       this.store.getInvert(),
       this.store.getChannelStates(),
-    ]).subscribe(([colormap, reverse, invert, channels]) => {
+      this.store.getSelectedChannel(),
+    ]).subscribe(([colormap, reverse, invert, channels, selected]) => {
       this.currentColormap = (colormap as ColormapNode) ?? null;
       this.currentReverse = reverse;
       this.invertEnabled = invert;
       const layer = this.surfaceLayer;
       if (!layer || !this.viewer) return;
+      // Selected channel changed (multichannel): re-fetch THAT band's planes and
+      // rebuild the height-field for the current slice.
+      if (this.surfaceMultichannel && selected !== this.surfaceChannel) {
+        this.surfaceChannel = selected;
+        void (async () => {
+          await this.preloadSurfacePlanes(this.viewer!);
+          if (this.viewer) await this.buildSurface(this.viewer, this.loaded?.z ?? 0);
+        })().catch((err) => console.error('[napari-js] surface channel switch failed:', err));
+        return;
+      }
       const st = this.surfaceState(channels);
       const win: [number, number] = [st?.min ?? 0, st?.max ?? 255];
       const windowChanged =

@@ -48,6 +48,9 @@ export class VisualizerStore {
   // metadata on load (1 "Intensity" channel for grayscale; R/G/B for RGB). The
   // Channels & Histogram pane edits these and both backends recolor live.
   private readonly channelStates$ = new BehaviorSubject<IChannelState[]>([]);
+  /** Index of the channel selected in the Channels pane — the ONE band a
+   *  single-scalar 3D view (the napari Surface) follows for a multichannel image. */
+  private readonly selectedChannel$ = new BehaviorSubject<number>(0);
   // The derived defaults (full window, gamma 1, default tint) for the current
   // image, kept so "Reset" can restore a channel's window/gamma/colour.
   private defaultChannelStates: IChannelState[] = [];
@@ -212,6 +215,7 @@ export class VisualizerStore {
     this.defaultChannelStates = next.map((c) => ({ ...c }));
     if (next.length !== this.channelStates$.value.length) {
       this.channelStates$.next(next);
+      this.selectedChannel$.next(0); // new channel structure → reset the selected band
     }
   }
 
@@ -251,6 +255,12 @@ export class VisualizerStore {
   }
   currentChannelStates(): IChannelState[] {
     return this.channelStates$.value;
+  }
+  /** The channel selected in the pane (drives a single-scalar 3D Surface). */
+  getSelectedChannel(): Observable<number> { return this.selectedChannel$.asObservable(); }
+  currentSelectedChannel(): number { return this.selectedChannel$.value; }
+  setSelectedChannel(index: number): void {
+    if (this.selectedChannel$.value !== index) this.selectedChannel$.next(index);
   }
   /** Patch one channel by index (immutable update). */
   setChannelState(index: number, partial: Partial<IChannelState>): void {

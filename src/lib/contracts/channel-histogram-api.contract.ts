@@ -73,6 +73,8 @@ export interface IChannelHistogramApi {
   getChannels$(): Observable<IChannelState[]>;
   /** Patch one channel's state (window/gamma/visibility/color); live-updates. */
   setChannelState(index: number, partial: Partial<IChannelState>): void;
+  /** Set the channel selected in the pane — the band a single-scalar 3D Surface follows. */
+  setSelectedChannel(index: number): void;
   /** Auto-window the given channels by saturating `saturation` (0..1) of pixels
    *  at each end of their histogram. */
   autoContrast(indices: number[], saturation: number): void;

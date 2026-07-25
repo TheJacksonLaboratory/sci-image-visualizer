@@ -121,6 +121,7 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
 
   selectChannel(ch: IChannelState): void {
     this.selected = ch;
+    this.api.setSelectedChannel(ch.index); // a single-scalar 3D Surface follows the selected band
     this.histRetries = 0;
     this.loadHistogram();
   }

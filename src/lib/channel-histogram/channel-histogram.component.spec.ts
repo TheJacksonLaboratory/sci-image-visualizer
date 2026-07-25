@@ -24,6 +24,7 @@ describe('ChannelHistogramComponent', () => {
     api = {
       getChannels$: jest.fn(() => of(channels)),
       setChannelState: jest.fn(),
+      setSelectedChannel: jest.fn(),
       autoContrast: jest.fn(),
       resetContrast: jest.fn(),
       getHistogram: jest.fn(() => ({ bins: [0, 1], counts: [3, 7], max: 7 })),
