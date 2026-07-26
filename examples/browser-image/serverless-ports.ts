@@ -1,11 +1,12 @@
-import { Injectable, OnDestroy } from '@angular/core';
-import { BehaviorSubject, EMPTY, Observable, of } from 'rxjs';
+import { Inject, Injectable, OnDestroy } from '@angular/core';
+import { BehaviorSubject, EMPTY, from, Observable, of } from 'rxjs';
 import {
   ImageStatePort,
   TileAccessPort,
   RegionIoPort,
   IImageInfo,
   Rectangle,
+  VIZ_CONFIG,
 } from '@jax-data-science/sci-image-visualizer';
 import { decodeDicom } from './dicom';
 import { decodeTiffStack, DecodedTiff } from './tiff';
@@ -30,6 +31,10 @@ export class ExampleImageStateAdapter implements ImageStatePort, OnDestroy {
   /** Object URLs WE created (decoded TIFF/DICOM blobs, or a picked File) — revoke
    *  these on the next load. Bundled asset URLs aren't ours, so they never go here. */
   private ownedUrls: string[] = [];
+  /** For a TILED (Mode A) image, the opaque base64 token the tile server decodes
+   *  ({ image }); null in serverless mode. Read by ServerTileAccessAdapter so OSD
+   *  polls /tiles/info instead of opening a blob. */
+  private currentInfoB64: string | null = null;
 
   /** Load a user-picked File (the "Load your own…" input). */
   async setImageFromFile(file: File | null): Promise<void> {
@@ -205,8 +210,38 @@ export class ExampleImageStateAdapter implements ImageStatePort, OnDestroy {
     this.filename$.next(fileName);
   }
 
+  /** Load a gigapixel image through the TILED (Mode A) server path: emit an
+   *  IImageInfo with `tiled: true` and NO urls, and mint the token the tile
+   *  server decodes. OSD then polls `${slideCropServer}tiles/info?info=…` and
+   *  fetches only the tiles it needs — the large-image showcase. */
+  setTiledImage(
+    image: string,
+    fileName: string,
+    width: number,
+    height: number,
+    mppX: number | null = null,
+    mppY: number | null = null,
+  ): void {
+    this.revoke(); // clears currentInfoB64 + owned urls
+    this.currentInfoB64 = toBase64Url(JSON.stringify({ image }));
+    this.imageInfo$.next({
+      isGrayscale: false,
+      trueImageSize: [width, height],
+      urls: [],
+      isStack: false,
+      showStack: false,
+      scaleRatio: true,
+      fileName,
+      imageMeta: [
+        { channelCount: 3, rgbChannels: 3, x: width, y: height, z: 1, mppX, mppY },
+      ],
+      tiled: true, // ← Mode A: OSD fetches tiles from the server (no blob urls)
+    });
+    this.filename$.next(fileName);
+  }
+
   private clear(): void { this.revoke(); this.imageInfo$.next(null); this.filename$.next(undefined); }
-  private revoke(): void { for (const u of this.ownedUrls) URL.revokeObjectURL(u); this.ownedUrls = []; }
+  private revoke(): void { for (const u of this.ownedUrls) URL.revokeObjectURL(u); this.ownedUrls = []; this.currentInfoB64 = null; }
   ngOnDestroy(): void { this.revoke(); }
 
   // ── ImageStatePort: reads ────────────────────────────────────────────────
@@ -218,6 +253,9 @@ export class ExampleImageStateAdapter implements ImageStatePort, OnDestroy {
   getCacheProgress$(): Observable<number | null> { return of(null); }
   getPanelWidth$(): Observable<number> { return of(0); }
   isZoom$(): Observable<boolean> { return of(false); }
+  /** The current tiled image's info token (null in serverless mode) — the
+   *  ServerTileAccessAdapter delegates here so both ports share one instance. */
+  getSelectedInfoB64(): string | null { return this.currentInfoB64; }
 
   // ── ImageStatePort: writes (no-ops for this self-contained viewer) ───────
   setImageInfo(info: Partial<IImageInfo>): void { this.imageInfo$.next(info as IImageInfo); }
@@ -229,13 +267,51 @@ export class ExampleImageStateAdapter implements ImageStatePort, OnDestroy {
   setDiagram(_d: unknown): void {}
 }
 
-/** Tile-access stub: never exercised because images carry `tiled: false`. */
+/**
+ * Tile-access adapter for the TILED (Mode A) server path. Hands OpenSeadragon the
+ * current tiled image's info token (so OSD polls the tile server for
+ * /tiles/info + /tile) and re-renders heatmap box-zoom regions via
+ * POST /zoom/region. In serverless mode getSelectedInfoB64() returns null, so the
+ * tile server is never touched and OSD stays on the simple blob path.
+ */
 @Injectable()
-export class StubTileAccessAdapter implements TileAccessPort {
-  getSelectedInfoB64(): string | null { return null; }
-  zoomOnRegion(_roi: Rectangle, _screen: Rectangle, _z: number): Observable<ArrayBuffer> { return EMPTY; }
+export class ServerTileAccessAdapter implements TileAccessPort {
+  constructor(
+    private readonly imageState: ExampleImageStateAdapter,
+    @Inject(VIZ_CONFIG) private readonly config: { slideCropServer: string },
+  ) {}
+
+  getSelectedInfoB64(): string | null {
+    return this.imageState.getSelectedInfoB64();
+  }
+
+  /** Plotly heatmap box-zoom -> POST {slideCropServer}zoom/region -> region PNG bytes. */
+  zoomOnRegion(roi: Rectangle, screen: Rectangle, zIndex: number): Observable<ArrayBuffer> {
+    const info = this.imageState.getSelectedInfoB64();
+    if (!info) return EMPTY;
+    return from(
+      fetch(this.config.slideCropServer + 'zoom/region', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ info, roi, screen, zIndex }),
+      }).then((r) => {
+        if (!r.ok) throw new Error('zoom/region ' + r.status);
+        return r.arrayBuffer();
+      }),
+    );
+  }
+
   selectDiagramDisplay(): void {}
   getAuthHeaders(): Promise<Record<string, string>> { return Promise.resolve({}); }
+}
+
+/** URL-safe base64 of a UTF-8 string. The library inserts the info token raw into
+ *  the query string, so it must be URL-safe (base64url, no padding). */
+function toBase64Url(s: string): string {
+  return btoa(unescape(encodeURIComponent(s)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
 }
 
 /** Region-I/O stub: no GeoJSON persistence here (regions live in memory). */

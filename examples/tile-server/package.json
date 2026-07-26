@@ -1,0 +1,18 @@
+{
+  "name": "sci-image-visualizer-tile-server",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "description": "Lightweight example tile server for @jax-data-science/sci-image-visualizer's tiled (Mode A) path. Serves gigapixel pyramided COGs over the library's tiles/info + tile + zoom/region contract so the browser example can showcase large-image tiled loading.",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node --watch server.mjs",
+    "make-cog": "node scripts/make-cog.mjs"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "sharp": "^0.33.5"
+  }
+}

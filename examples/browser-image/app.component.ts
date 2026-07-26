@@ -13,7 +13,7 @@ import {
 } from '@jax-data-science/sci-image-visualizer';
 import {
   ExampleImageStateAdapter,
-  StubTileAccessAdapter,
+  ServerTileAccessAdapter,
   StubRegionIoAdapter,
 } from './serverless-ports';
 
@@ -69,6 +69,46 @@ const MICRO_CT: DicomSlice[] = Object.entries(
 
 const FOLDERS: Folder[] = MICRO_CT.length ? [{ name: 'micro-ct', slices: MICRO_CT }] : [];
 
+/** Base URL of the example tile server (Mode A). Set VITE_TILE_SERVER (with a
+ *  trailing slash — the library concatenates `${api}tile`) to enable the
+ *  gigapixel tiled-loading gallery entries; empty keeps the demo fully serverless. */
+const TILE_SERVER: string = (import.meta.env.VITE_TILE_SERVER as string | undefined) || '';
+
+interface TiledImage {
+  name: string;
+  imageId: string;
+  width: number;
+  height: number;
+  mppX: number;
+  mppY: number;
+}
+
+/** Gigapixel whole-slide images served through the tile server. Shown only when a
+ *  tile server is configured (VITE_TILE_SERVER), so the live Pages demo stays
+ *  serverless until one is deployed. */
+const TILED_IMAGES: TiledImage[] = TILE_SERVER
+  ? [
+      { name: 'CMU-1 · 1.5 Gpx (CC0)', imageId: 'cmu-1', width: 46000, height: 32914, mppX: 0.499, mppY: 0.499 },
+      { name: 'BC18 · 22 Gpx (NDPI)', imageId: 'bc18', width: 218240, height: 103424, mppX: 0.2264, mppY: 0.2264 },
+    ]
+  : [];
+
+/** Ping the tile server so a scaled-to-zero Cloud Run instance cold-starts before
+ *  OSD asks for tiles. Resolves once the server responds — or after a generous
+ *  timeout / on error — so a load never hangs forever. */
+async function warmUp(base: string): Promise<void> {
+  if (!base) return;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 90000);
+  try {
+    await fetch(base, { signal: ctrl.signal, cache: 'no-store' });
+  } catch {
+    /* offline or aborted — proceed; OSD surfaces any real failure */
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Minimal standalone host for <visualizer>, run entirely in the browser (no
  * backend). The gallery has two levels: the root shows folders (e.g. micro-ct)
@@ -90,9 +130,10 @@ const FOLDERS: Folder[] = MICRO_CT.length ? [{ name: 'micro-ct', slices: MICRO_C
     ...provideVisualization(),
     ExampleImageStateAdapter,
     { provide: IMAGE_STATE_PORT, useExisting: ExampleImageStateAdapter },
-    { provide: TILE_ACCESS_PORT, useClass: StubTileAccessAdapter },
+    ServerTileAccessAdapter,
+    { provide: TILE_ACCESS_PORT, useExisting: ServerTileAccessAdapter },
     { provide: REGION_IO_PORT, useClass: StubRegionIoAdapter },
-    { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
+    { provide: VIZ_CONFIG, useValue: { slideCropServer: TILE_SERVER } },
   ],
   styles: [
     `
@@ -350,6 +391,16 @@ const FOLDERS: Folder[] = MICRO_CT.length ? [{ name: 'micro-ct', slices: MICRO_C
             <span class="name">{{ f.name }}</span>
           </button>
           <button
+            *ngFor="let t of tiledImages"
+            class="tile"
+            [class.active]="t.imageId === active"
+            (click)="loadTiled(t)"
+            [title]="t.name + ' — gigapixel, tiled (server) loading'"
+          >
+            <span class="thumb dcm">WSI</span>
+            <span class="name">{{ t.name }}</span>
+          </button>
+          <button
             *ngFor="let s of samples"
             class="tile"
             [class.active]="s.name === active"
@@ -393,7 +444,7 @@ const FOLDERS: Folder[] = MICRO_CT.length ? [{ name: 'micro-ct', slices: MICRO_C
       ></div>
       <main class="viewer">
         <visualizer [toolbarTools]="toolbarTools"></visualizer>
-        <div class="spinner" *ngIf="loading">decoding…</div>
+        <div class="spinner" *ngIf="loading">{{ loadingMessage || 'decoding…' }}</div>
       </main>
     </div>
   `,
@@ -401,10 +452,13 @@ const FOLDERS: Folder[] = MICRO_CT.length ? [{ name: 'micro-ct', slices: MICRO_C
 export class AppComponent implements OnDestroy {
   readonly samples = SAMPLES;
   readonly folders = FOLDERS;
+  readonly tiledImages = TILED_IMAGES;
   /** null = root (folders + samples); otherwise the opened folder's slices. */
   currentFolder: Folder | null = null;
   active?: string;
   loading = false;
+  /** Optional viewer-spinner message (e.g. the tile-server cold-start notice). */
+  loadingMessage = '';
   dragging = false;
 
   @ViewChild('galleryRef') private readonly galleryRef!: ElementRef<HTMLElement>;
@@ -435,6 +489,23 @@ export class AppComponent implements OnDestroy {
   // ── Gallery folder navigation ───────────────────────────────────────────
   openFolder(f: Folder): void { this.currentFolder = f; }
   closeFolder(): void { this.currentFolder = null; }
+
+  /** Load a gigapixel image through the TILED (Mode A) server path. First warms
+   *  the tile server with a visible message — a scaled-to-zero Cloud Run service
+   *  cold-starts on the first request after idle — then emits the tiled image, and
+   *  the viewer's OSD backend polls the server and fetches tiles on demand. */
+  async loadTiled(t: TiledImage): Promise<void> {
+    this.active = t.imageId;
+    this.loading = true;
+    this.loadingMessage = 'Starting the tile server (first load may take up to a minute)…';
+    try {
+      await warmUp(TILE_SERVER);
+    } finally {
+      this.loading = false;
+      this.loadingMessage = '';
+    }
+    this.imageState.setTiledImage(t.imageId, t.name, t.width, t.height, t.mppX, t.mppY);
+  }
 
   /** Left-click a DICOM slice: decode + show just that slice. */
   async loadDicom(d: DicomSlice): Promise<void> {
