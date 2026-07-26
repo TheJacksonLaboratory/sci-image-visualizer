@@ -90,6 +90,7 @@ const TILED_IMAGES: TiledImage[] = TILE_SERVER
   ? [
       { name: 'CMU-1 · 1.5 Gpx (CC0)', imageId: 'cmu-1', width: 46000, height: 32914, mppX: 0.499, mppY: 0.499 },
       { name: 'BC18 · 22 Gpx (NDPI)', imageId: 'bc18', width: 218240, height: 103424, mppX: 0.2264, mppY: 0.2264 },
+      { name: 'Sirius Red · 0.5 Gpx (NDPI)', imageId: 'sirius-red', width: 36480, height: 14080, mppX: 0.442, mppY: 0.442 },
     ]
   : [];
 

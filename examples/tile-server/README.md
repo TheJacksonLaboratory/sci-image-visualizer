@@ -76,7 +76,7 @@ can flip it public later without a redeploy (see below).
 ### What's deployed
 
 - **Service:** `jit-tile-server` (us-central1) — `https://jit-tile-server-ayoik37pnq-uc.a.run.app`
-- **COG bucket (private):** `gs://jax-cimg-tile-cogs` — `cmu-1/`, `bc18/`; read by
+- **COG bucket (private):** `gs://jax-cimg-tile-cogs` — `cmu-1/`, `bc18/`, `sirius-red/`; read by
   the Cloud Run runtime SA (`<projectNumber>-compute@…`, granted
   `roles/storage.objectViewer`).
 - gen2, 2 vCPU / 2 GiB, **scale-to-zero** (`--min-instances 0`), gcsfuse volume at
