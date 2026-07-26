@@ -36,6 +36,8 @@ export class ExampleImageStateAdapter implements ImageStatePort, OnDestroy {
    *  polls /tiles/info instead of opening a blob. */
   private currentInfoB64: string | null = null;
 
+  constructor(@Inject(VIZ_CONFIG) private readonly config: { slideCropServer: string }) {}
+
   /** Load a user-picked File (the "Load your own…" input). */
   async setImageFromFile(file: File | null): Promise<void> {
     if (!file) { this.clear(); return; }
@@ -227,7 +229,7 @@ export class ExampleImageStateAdapter implements ImageStatePort, OnDestroy {
     this.imageInfo$.next({
       isGrayscale: false,
       trueImageSize: [width, height],
-      urls: [],
+      urls: [`${this.config.slideCropServer}preview?info=${this.currentInfoB64}`],
       isStack: false,
       showStack: false,
       scaleRatio: true,

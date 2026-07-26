@@ -16,7 +16,7 @@
 
 import express from 'express';
 import cors from 'cors';
-import { loadDescriptor, readTile, readRegion, listImages } from './lib/cog.mjs';
+import { loadDescriptor, readTile, readRegion, readPreview, listImages } from './lib/cog.mjs';
 
 const PORT = Number(process.env.PORT || 8090);
 const COG_DIR = process.env.COG_DIR
@@ -68,6 +68,19 @@ app.get('/tile', async (req, res) => {
       .send(png);
   } catch (err) {
     if (err instanceof RangeError) return res.status(404).end();
+    res.status(400).json({ error: String(err?.message || err) });
+  }
+});
+
+// Flat downsampled preview — the Plotly heatmap's source (IImageInfo.urls[0]).
+app.get('/preview', async (req, res) => {
+  try {
+    const { image } = decodeInfo(req.query.info);
+    const png = await readPreview(COG_DIR, image, String(req.query.tier || ''));
+    res.set('Content-Type', 'image/png')
+      .set('Cache-Control', 'public, max-age=86400')
+      .send(png);
+  } catch (err) {
     res.status(400).json({ error: String(err?.message || err) });
   }
 });

@@ -92,6 +92,28 @@ export async function readRegion(cogDir, imageId, roi, screen) {
     .toBuffer();
 }
 
+/** A flat, downsampled whole-plane PNG — the Plotly heatmap's source (the host
+ *  puts this URL in IImageInfo.urls[0]; OSD ignores urls and uses the tile grid).
+ *  Rendered from the coarsest pyramid level whose longest side still covers the
+ *  target size, so it never reads full resolution. tier=small -> a ~128px thumb. */
+export async function readPreview(cogDir, imageId, tier) {
+  const desc = await loadDescriptor(cogDir, imageId);
+  const target = tier === 'small' ? 128 : 1600;
+  let chosen = desc.levels[0];
+  for (const l of desc.levels) {
+    if (Math.max(l.width, l.height) >= target) chosen = l;
+    else break;
+  }
+  const scale = Math.min(1, target / Math.max(chosen.width, chosen.height));
+  const outW = Math.max(1, Math.round(chosen.width * scale));
+  const outH = Math.max(1, Math.round(chosen.height * scale));
+  return sharp(levelFile(cogDir, imageId, chosen.res), { limitInputPixels: false })
+    .resize(outW, outH, { fit: 'inside' })
+    .flatten({ background: '#ffffff' })
+    .png()
+    .toBuffer();
+}
+
 function levelFile(cogDir, imageId, res) {
   return path.join(cogDir, safeId(imageId), `L${res}.tif`);
 }
