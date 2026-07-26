@@ -33,6 +33,8 @@ jobs:
       # base or every absolute /assets URL 404s at the subpath (white page). The
       # smoke test reads it too, to preview + probe at the same subpath.
       PAGES_BASE: /sci-image-visualizer/
+      # Live tiled (Mode A) server on the dev cluster (public split-Ingress).
+      VITE_TILE_SERVER: https://imagetools-dev.jax.org/tiles-api/
     steps:
       - uses: actions/checkout@v4
         with:

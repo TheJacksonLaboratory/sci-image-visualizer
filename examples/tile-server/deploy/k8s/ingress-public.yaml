@@ -1,0 +1,39 @@
+# PUBLIC (no-auth) Ingress — the split-Ingress pattern from jit-ui's
+# deploy/PUBLIC-HOME-PAGE-PLAN.md. It deliberately omits the oauth2-proxy
+# auth-url/auth-signin annotations, so /tiles-api/* on imagetools-dev.jax.org is
+# reachable anonymously (the public GitHub Pages demo can hit it), while the main
+# app's `/` stays behind Auth0 on its own Ingress. The rewrite strips the
+# /tiles-api prefix so the server sees its own routes (/tiles/info, /tile,
+# /preview, /zoom/region). Point the Pages build at:
+#   VITE_TILE_SERVER=https://imagetools-dev.jax.org/tiles-api/
+#
+# NOTE: to serve ONLY the CC0 CMU-1 slide publicly and keep the JAX slides
+# private, drop bc18/sirius-red from the bucket the pod mounts (or mount a bucket
+# that holds only cmu-1) — a public route serves whatever the pod can read.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tile-server-public
+  namespace: jit-tile-example
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    # No auth-url / auth-signin here — intentionally PUBLIC.
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - "imagetools-dev.jax.org"
+      secretName: tile-server-imagetools-dev-tls   # cert-manager mints this in-ns
+  rules:
+    - host: "imagetools-dev.jax.org"
+      http:
+        paths:
+          - pathType: ImplementationSpecific
+            path: "/tiles-api(/|$)(.*)"
+            backend:
+              service:
+                name: tile-server
+                port:
+                  number: 80

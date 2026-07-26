@@ -1,0 +1,68 @@
+# Tile server as a pod. Reads the pyramided COGs straight from the private bucket
+# via the GKE GCS Fuse CSI driver (same idea as the Cloud Run gcsfuse mount — no
+# code change; COG_DIR just points at the mount), authenticated by Workload
+# Identity. Small CPU *request* so it always fits spare capacity without forcing a
+# node scale-up; a generous *limit* lets it burst while serving tiles.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tile-server
+  namespace: jit-tile-example
+  labels:
+    app: tile-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tile-server
+  template:
+    metadata:
+      labels:
+        app: tile-server
+      annotations:
+        gke-gcsfuse/volumes: "true"        # inject the GCS Fuse CSI sidecar
+        gke-gcsfuse/cpu-limit: "500m"
+        gke-gcsfuse/memory-limit: 512Mi
+    spec:
+      serviceAccountName: tile-server      # Workload Identity principal
+      containers:
+        - name: tile-server
+          image: TILE_SERVER_IMAGE         # replaced by kustomize (see README)
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+            - name: COG_DIR
+              value: /mnt/cogs
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          volumeMounts:
+            - name: cogs
+              mountPath: /mnt/cogs
+              readOnly: true
+      volumes:
+        - name: cogs
+          csi:
+            driver: gcsfuse.csi.storage.gke.io
+            readOnly: true
+            volumeAttributes:
+              bucketName: jax-cimg-tile-cogs-use1
+              mountOptions: "implicit-dirs"   # show cmu-1/ bc18/ etc. (implicit prefixes)

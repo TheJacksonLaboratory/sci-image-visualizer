@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: jit-tile-example
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress-public.yaml
+# Set the built image here (built + pushed per deploy/README.md).
+images:
+  - name: TILE_SERVER_IMAGE
+    newName: us-east1-docker.pkg.dev/jax-cloud-image-tools/jit-tile-example/tile-server
+    newTag: v1

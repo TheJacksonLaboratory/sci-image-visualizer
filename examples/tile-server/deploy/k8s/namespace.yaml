@@ -1,0 +1,8 @@
+# Isolated namespace so the example never shares fate with anything else on the
+# dev cluster.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jit-tile-example
+  labels:
+    app.kubernetes.io/part-of: sci-image-visualizer-example
