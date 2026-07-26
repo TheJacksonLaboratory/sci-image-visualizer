@@ -43,6 +43,12 @@ export default defineConfig({
     // List the deps to pre-bundle instead; esbuildOptions.tsconfig carries
     // experimentalDecorators too.
     entries: [],
+    // cellpose-js instantiates its inference worker via
+    // new Worker(new URL(./inference.worker.js, import.meta.url)). Vite's dep
+    // pre-bundling turns that into a .vite/deps asset served with an empty MIME, so
+    // the worker load is blocked (NS_ERROR_CORRUPTED_CONTENT). Excluding it makes
+    // Vite serve the dep + its worker from source, with the correct MIME.
+    exclude: ['cellpose-js'],
     include: [
       'openseadragon', 'plotly.js-dist-min', 'image-js', 'file-saver', 'buffer',
       'rxjs', '@angular/common', '@angular/core', '@angular/forms', '@angular/common/http',
