@@ -11,10 +11,11 @@ const DEFAULT_MODEL_URL =
 /**
  * Default in-library {@link ICellSegmenter} backed by cellpose-js (WebGPU/WASM
  * ONNX) — so the toolbar's automatic **Cellpose** tool works out of the box in
- * any app, with no host wiring (jit-ui#90). `cellpose-js` is a peer dependency
- * and is **lazy-imported** on first use, so apps that never run Cellpose pay
- * nothing for it. A host can still override the {@link CELL_SEGMENTER} token to
- * supply a different implementation.
+ * any app, with no host wiring (jit-ui#90). `cellpose-js` is a regular
+ * dependency — installed automatically, like `napari-js` — but it is
+ * **lazy-imported** on first use, so apps that never run Cellpose pay nothing
+ * for it in the bundle. A host can still override the {@link CELL_SEGMENTER}
+ * token to supply a different implementation.
  *
  * Owns a single shared {@link Cellpose} instance (one model load, one WebGPU
  * session, one worker). {@link getModel} exposes that instance so a host's
