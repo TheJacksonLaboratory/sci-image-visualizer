@@ -1,71 +1,215 @@
-# Browser example — serverless image visualization (Mode B)
+# Browser example — image visualization (serverless Mode B + tiled Mode A)
 
-**Live demo:** <https://laughing-adventure-mn6z367.pages.github.io/> (org-internal; becomes the public org URL when the repo is public)
+**Live demo:** <https://thejacksonlaboratory.github.io/sci-image-visualizer/>
 
-A minimal, **fully in-browser** host for `<visualizer>`. A gallery of
-bundled sample images (large thumbnails on the left) — click one to load it into
-the OpenSeadragon view with the zoom + region tools. Or drop in your own file.
-No backend, no tile server: each image is handed to OSD as a self-contained
-single image (`IImageInfo.tiled === false`).
+A minimal, in-browser host for `<visualizer>`. A gallery of bundled sample
+images (large thumbnails on the left) — click one to load it into the
+OpenSeadragon view with the zoom + region tools. Or drop in your own file.
 
-This is the "serverless" consumption path (SOW Mode B), modeled directly on
-jit-ui's `processing-pipeline` preview. A later example will add a small Node/TS
-**example server** for the tiled path (Mode A: `/tiles/info`, `/tile`,
-`/zoom/region`, `/histogram`), similar to what jit-service provides.
+It shows **both** consumption paths:
+
+- **Serverless (Mode B)** — the default. Each image is handed to OSD as a
+  self-contained single image (`IImageInfo.tiled === false`); PNG/JPEG open
+  directly, TIFF/DICOM are decoded in the browser. No backend.
+- **Tiled (Mode A)** — for **gigapixel** whole-slide images that can't be a single
+  blob. The `WSI` gallery entries load through a small **tile server** (see
+  [Tiled mode](#tiled-mode-mode-a--building-a-gigapixel-tile-server) below and the
+  reference implementation in [`../tile-server/`](../tile-server/)). These entries
+  appear only when the example is built with `VITE_TILE_SERVER` set.
 
 ## Files
 
 | File | Role |
 |---|---|
 | `sample-images/` | Bundled example images (**Git LFS**). PNGs open directly; TIFFs are decoded client-side. |
-| `serverless-ports.ts` | The three host DI ports. `ExampleImageStateAdapter` emits `IImageInfo{ tiled:false }`: PNG/JPEG use the URL directly; **TIFF** is decoded in-browser with `image-js` (browsers can't render TIFF) → a PNG blob. `Stub{TileAccess,RegionIo}Adapter` are no-ops. |
-| `app.component.ts` | Standalone host: the thumbnail gallery + `<visualizer>`; binds `provideVisualization()` + the four ports. |
+| `serverless-ports.ts` | The three host DI ports. `ExampleImageStateAdapter` emits `IImageInfo`: serverless images use `tiled:false` (+ a blob URL); tiled images use `setTiledImage()` (`tiled:true`, no blob). `ServerTileAccessAdapter` bridges the tile server; `StubRegionIoAdapter` is a no-op. |
+| `app.component.ts` | Standalone host: the thumbnail gallery + `<visualizer>`; binds `provideVisualization()` + the ports. `TILED_IMAGES` is gated behind `VITE_TILE_SERVER`. |
 | `main.ts` | `bootstrapApplication` + the app-level providers the library needs (`HttpClient`, animations, PrimeNG `MessageService`). |
-| `index.html`, `vite.config.ts`, `tsconfig.json` | Vite runner (Angular via `@analogjs/vite-plugin-angular`); aliases the package → the built `dist/`. |
-
-> **TIFF caveat:** the two `.tif` samples are multichannel / z-stack files. On
-> this serverless path they render as **frame 0**, 8-bit — full z-scrubbing and
-> per-channel display are the tiled-server path (Phase 2). PNGs (including the
-> 16-bit ones) render directly.
+| `index.html`, `vite.config.mts`, `tsconfig.json` | Vite runner (Angular via `@analogjs/vite-plugin-angular`); stages the built library into `node_modules`. |
 
 ## Sample images are stored in Git LFS
 
-`sample-images/*` is tracked via **Git LFS** (see the repo-root `.gitattributes`,
-scoped to this folder). After cloning, pull the actual bytes:
+`sample-images/*` is tracked via **Git LFS**. After cloning, pull the bytes:
 
 ```bash
 git lfs install
 git lfs pull
 ```
 
-Without that, the files are tiny LFS pointer stubs and the gallery thumbnails
-won't render.
+Without that, the files are tiny LFS pointer stubs and the thumbnails won't render.
 
 ## Run on localhost
 
 ```bash
 # from the repo root — build the library first (the example consumes dist/):
 npm run build
-
-# install the example toolchain (dev-only; not part of the published package):
-npm install -D vite@^5 @analogjs/vite-plugin-angular @angular-devkit/build-angular@^17
-
-# serve:
+# serve (staging the library happens automatically):
 npm run start:example      # → http://localhost:5173
 ```
 
-> **Angular 17 note:** Analog's plugin targets Angular 18's `@angular/build` by
-> default; on Angular 17 it uses the `@angular-devkit/build-angular@^17` peer
-> (installed above). When the library moves to Angular 18+, drop that and add
-> `@angular/build`.
+For the gigapixel `WSI` entries, also run a tile server and point the build at it:
 
-`image-js` (a library peer dependency) does the client-side TIFF decode, and
-`onnxruntime-web` sidecars would go in `/assets/ort/` (only for the SAM/cellpose
-tools — not used by this image-only example).
+```bash
+VITE_TILE_SERVER=http://localhost:8090/ npm run start:example
+```
 
 ## Why Vite
 
 Vite is the runner so the **same** tooling can host non-Angular examples later
 (a React or vanilla web-component demo) as the library grows framework-agnostic
-consumers — just add another plugin. Angular CLI would lock the examples to
-Angular.
+consumers — just add another plugin.
+
+---
+
+# Tiled mode (Mode A) — building a gigapixel tile server
+
+The serverless path hands OpenSeadragon one self-contained image
+(`IImageInfo.tiled === false`). That's fine up to a few hundred megapixels; a
+**gigapixel** whole-slide or micro-CT image can't be a single blob. For those,
+`<visualizer>` speaks a small HTTP **tile contract** — it asks a server for a
+pyramid descriptor, then fetches only the ~512 px tiles visible at the current
+zoom. This section is a how-to for building such a server. A complete, ~200-line
+reference lives in [`../tile-server/`](../tile-server/).
+
+```
+browser <visualizer> ──HTTP──▶ your tile server ──▶ pyramided image (COG / tiled TIFF)
+     (OpenSeadragon /            /tiles/info, /tile,
+      Plotly)                    /preview, /zoom/region
+```
+
+## 1. The HTTP contract
+
+`VIZ_CONFIG.slideCropServer` is the base URL (call it `api`) — **it must end in a
+trailing `/`**, because the library builds URLs by concatenation (`` `${api}tile` ``).
+The `info` query param is an **opaque, URL-safe base64 token**: the library takes
+it from your host adapter and passes it back verbatim on every request; your
+server decodes it to identify the image (a path, bucket, or id — your choice).
+The example encodes `base64url(JSON.stringify({ image }))`.
+
+| Method + path | Returns | Called by |
+|---|---|---|
+| `GET {api}tiles/info?info=<b64>[&tileSize=512]` | `TileDescriptor` JSON. **200** = ready, **202** = still caching (the client polls ~1.5 s until 200) | OSD / napari on load |
+| `GET {api}tile?info=&res=&col=&row=&z=&tileSize=[&channel=]` | one `image/png` tile | OSD as you pan/zoom |
+| `GET {api}preview?info=[&tier=small]` | a flat, downsampled whole-plane `image/png` | the **Plotly (heatmap)** backend |
+| `POST {api}zoom/region` — body `{ info, roi, screen, zIndex }` | a re-rendered region `image/png` (returned as an `ArrayBuffer`) | the heatmap **box-zoom** |
+| `GET {api}histogram?info=&channel=&z=&bins=` | histogram JSON — **only for >8-bit** images | contrast / auto-scale |
+
+`TileDescriptor` (what `tiles/info` returns):
+
+```ts
+interface TileDescriptor {
+  width: number; height: number;   // full-resolution plane size, in pixels
+  tileSize: number;                // e.g. 512
+  z: number;                       // slice count (1 for a flat image)
+  channels: number;                // 3 for RGB brightfield
+  multichannel?: boolean;          // true only for per-channel composites the client splits into layers
+  realLevels?: number;             // count of real (per-channel-fetchable) levels at the front of levels[]
+  channelInfo?: Array<{ name?: string; color?: string; bitDepth?: number;
+                        minAllowed?: number; maxAllowed?: number }> | null;
+  levels: Array<{ res: number; width: number; height: number }>;  // res 0 = full res, finest first
+  mppX?: number; mppY?: number;    // µm/pixel → scale bar (0 if unknown)
+}
+```
+
+Conventions that matter:
+
+- **`res`** indexes the pyramid, **0 = full resolution**; larger `res` = coarser.
+- **Tile grid** for a level = `ceil(level.width / tileSize) × ceil(level.height / tileSize)`,
+  computed from **each level's own** width/height (the pyramid is *not* assumed
+  power-of-two). An out-of-range `col`/`row` should `404`.
+- **`channel`** omitted → return the **composited RGB** tile; present (including
+  `0`) → return that single band as grayscale (`R=G=B`; the compositor recovers
+  intensity as `max(R,G,B)`). Plain RGB brightfield is always fetched without a
+  `channel`.
+- Tiles are **raw, un-normalized** pixels; `/preview` may be server-normalized.
+- Edge tiles may be smaller than `tileSize` (or transparently padded — a fully
+  transparent pixel is treated as padding).
+- `histogram` / `export` are only needed for **>8-bit** images; an 8-bit RGB
+  slide (like the demo's) can skip them entirely.
+
+## 2. Wire it into the host (the DI ports)
+
+The library never imports your server — three DI ports bridge it. See
+[`serverless-ports.ts`](./serverless-ports.ts) for the working adapters.
+
+**`IMAGE_STATE_PORT`** emits the `IImageInfo`. For a tiled image set
+`tiled: true` and — importantly — put the **`/preview` URL in `urls[0]`**: OSD
+ignores `urls` and drives the tile grid, but the Plotly (heatmap) backend loads
+`urls[0]` as its flat pixel source. Miss this and switching to Heatmap throws.
+
+```ts
+setTiledImage(image, fileName, width, height, mppX, mppY) {
+  this.currentInfoB64 = toBase64Url(JSON.stringify({ image }));            // your token shape
+  this.imageInfo$.next({
+    tiled: true,                                                           // ← the Mode A switch
+    fileName,
+    trueImageSize: [width, height],
+    urls: [`${slideCropServer}preview?info=${this.currentInfoB64}`],       // Plotly heatmap source
+    imageMeta: [{ channelCount: 3, rgbChannels: 3, x: width, y: height, z: 1, mppX, mppY }],
+    isStack: false,
+  });
+}
+```
+
+**`TILE_ACCESS_PORT`** hands OSD the current image's token and serves the
+box-zoom:
+
+```ts
+class ServerTileAccessAdapter implements TileAccessPort {
+  // null → serverless (OSD uses urls[zIndex]); a token → tiled (OSD polls tiles/info).
+  getSelectedInfoB64(): string | null { return this.imageState.getSelectedInfoB64(); }
+
+  // heatmap box-zoom → POST {api}zoom/region → the region PNG bytes
+  zoomOnRegion(roi, screen, zIndex): Observable<ArrayBuffer> {
+    const info = this.imageState.getSelectedInfoB64();
+    return from(fetch(`${api}zoom/region`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ info, roi, screen, zIndex }),
+    }).then(r => r.arrayBuffer()));
+  }
+
+  getAuthHeaders(): Promise<Record<string, string>> { return Promise.resolve({}); } // bearer for OSD's ajax
+  selectDiagramDisplay() {}
+}
+```
+
+**`VIZ_CONFIG`**: `{ slideCropServer: 'https://…/tiles-api/' }` — trailing slash.
+
+> The whole Mode-A-vs-B switch is `getSelectedInfoB64()`: return `null` and the
+> exact same viewer renders the serverless `urls[]`; return a token and it renders
+> tiles from your server.
+
+## 3. Build the server
+
+A tile server is two jobs — **pyramid the image once**, then **serve tiles on
+demand**. The reference implementation in [`../tile-server/`](../tile-server/):
+
+- **`scripts/make-cog.mjs`** — offline converter: a whole-slide image (SVS, NDPI,
+  OME-TIFF…) → a pyramid of *tiled* TIFFs (`L0.tif` full res, each level halving
+  down to ~1 tile) + a `descriptor.json`, via `vips` + OpenSlide. Any pyramided /
+  Cloud-Optimized-GeoTIFF format works; the one requirement is that each level is
+  **tiled**, so reading one 512 px tile touches a few KB, not the whole level.
+- **`lib/cog.mjs`** — the readers: `loadDescriptor`; `readTile` (extract the
+  `(col,row)` tile from level `res` with `sharp` — libvips reads only the
+  overlapping tiles); `readPreview` (downsample a coarse level to a flat PNG);
+  `readRegion` (crop the ROI at ~screen resolution for `/zoom/region`).
+- **`server.mjs`** — a ~90-line Express app mapping the five routes above onto
+  those readers, with CORS.
+
+No database, no state. At gigapixel scale the only thing that matters is a
+**tiled pyramid**, so every read stays O(tile) instead of O(image). Swap `sharp`
+for `geotiff.js` (range-reading a COG straight from a bucket), or the local
+pyramid for a DeepZoom/IIIF source, as long as you keep the contract above.
+
+## Try it end-to-end
+
+```bash
+cd ../tile-server && npm install
+npm run make-cog -- .cache/CMU-1.svs cmu-1     # needs: brew install vips
+npm start                                       # → http://localhost:8090
+# then, from the repo root:
+VITE_TILE_SERVER=http://localhost:8090/ npm run start:example   # WSI entries appear
+```
+
+See [`../tile-server/README.md`](../tile-server/README.md) for running and
+deploying the server (the demo runs it as a pod behind the dev-cluster ingress).
