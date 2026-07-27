@@ -39,20 +39,17 @@ gcloud storage buckets add-iam-policy-binding gs://jax-cimg-tile-cogs-use1 \
   --role=roles/storage.objectViewer \
   --member="principal://iam.googleapis.com/projects/940576874573/locations/global/workloadIdentityPools/jax-compsci-nc-dev-01.svc.id.goog/subject/ns/jit-tile-example/sa/tile-server"
 
-# 3. DURABLE IMAGE PULL (needs an Artifact Registry ADMIN on jax-cloud-image-tools):
-#    let the dev cluster's node SA pull the cross-project image.
-gcloud artifacts repositories add-iam-policy-binding jit-tile-example \
-  --location=us-east1 --project=jax-cloud-image-tools \
-  --member="serviceAccount:tf-gke-jax-cluster-dev-d21h@jax-compsci-nc-dev-01.iam.gserviceaccount.com" \
-  --role=roles/artifactregistry.reader
+# 3. DURABLE IMAGE PULL — a docker-registry pull secret from a jax-cloud-image-tools
+#    SA key that has AR read (the deployment SA references it via imagePullSecrets).
+kubectl -n jit-tile-example create secret docker-registry ar-pull \\
+  --docker-server=us-east1-docker.pkg.dev --docker-username=_json_key \\
+  --docker-password="$(cat <sa-key>.json)" \\
+  --docker-email=svc-jax-cloud-image-tools@jax-cloud-image-tools.iam.gserviceaccount.com
 ```
 
-> **Note:** step 3 requires `setIamPolicy` on the AR repo (roles/artifactregistry.admin),
-> which the deploying account may lack. Until it's run, the pod can't pull on a fresh
-> node — a **temporary** `docker-registry` pull secret from a user token
-> (`kubectl create secret docker-registry ar-pull …` + patch the KSA) works for
-> validation but expires (~1h) and won't survive a spot-node reschedule. Run step 3
-> for durability, then delete the `ar-pull` secret and remove it from the KSA.
+> **Alternative (no secret, cleaner)** — grant the dev cluster node SA cross-project
+> AR read; needs an Artifact Registry admin on jax-cloud-image-tools:
+> `gcloud artifacts repositories add-iam-policy-binding jit-tile-example --location=us-east1 --project=jax-cloud-image-tools --member="serviceAccount:tf-gke-jax-cluster-dev-d21h@jax-compsci-nc-dev-01.iam.gserviceaccount.com" --role=roles/artifactregistry.reader`
 
 ## Deploy
 
