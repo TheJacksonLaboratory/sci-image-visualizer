@@ -43,11 +43,13 @@ npm install @angular/animations @angular/router primeng \
 | `file-saver` | `^2.0.5` | GeoJSON / mask export |
 | `buffer` | `^5.7.1` | |
 | `onnxruntime-web` | `~1.26.0` | browser SAM / cellpose inference (WebGPU/WASM) |
-| `cellpose-js` | `^0.4.1` | automatic cellpose-SAM segmentation |
 
 The rendering backends and helpers — `openseadragon`, `plotly.js-dist-min`,
-`napari-js`, `fast-png`, and `tslib` — are declared as regular **dependencies**
-and installed automatically; you don't add them yourself. See
+`napari-js`, `cellpose-js`, `fast-png`, and `tslib` — are declared as regular
+**dependencies** and installed automatically; you don't add them yourself.
+`cellpose-js` is still lazy-imported at runtime, so apps that never open the
+Cellpose tool don't pay for it in the bundle — but it does need
+`onnxruntime-web` (its own peer, listed above) present. See
 [Quick start](#usage-host-integration-brief) below for wiring.
 
 ## Live demo & running the example

@@ -8,6 +8,7 @@
     "src/lib/assets"
   ],
   "allowedNonPeerDependencies": [
+    "cellpose-js",
     "fast-png",
     "napari-js",
     "openseadragon",
