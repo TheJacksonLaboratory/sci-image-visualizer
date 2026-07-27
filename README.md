@@ -43,7 +43,7 @@ npm install @angular/animations @angular/router primeng \
 | `file-saver` | `^2.0.5` | GeoJSON / mask export |
 | `buffer` | `^5.7.1` | |
 | `onnxruntime-web` | `~1.26.0` | browser SAM / cellpose inference (WebGPU/WASM) |
-| `cellpose-js` | `^0.3.0` | automatic cellpose-SAM segmentation |
+| `cellpose-js` | `^0.4.1` | automatic cellpose-SAM segmentation |
 
 The rendering backends and helpers — `openseadragon`, `plotly.js-dist-min`,
 `napari-js`, `fast-png`, and `tslib` — are declared as regular **dependencies**
