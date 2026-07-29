@@ -73,16 +73,10 @@ function mockPlotService(): any {
   };
 }
 
-describe('VisualizerComponent (UI shell)', () => {
-  let component: VisualizerComponent;
-  let plotService: any;
-
-  beforeEach(() => {
-    jest.useFakeTimers();
-    plotService = mockPlotService();
-    component = new VisualizerComponent(
+function makeComponent(plot: any): VisualizerComponent {
+  return new VisualizerComponent(
       { setDiagram: jest.fn(), setImageLoading: jest.fn(), setImageInfo: jest.fn() } as any, // ImageStatePort
-      plotService,
+      plot,
       { add: jest.fn(), clear: jest.fn() } as any, // MessageService
       { run: (fn: () => void) => fn(), runOutsideAngular: (fn: () => void) => fn() } as any, // NgZone
       { detectChanges: jest.fn(), markForCheck: jest.fn() } as any, // ChangeDetectorRef
@@ -107,9 +101,52 @@ describe('VisualizerComponent (UI shell)', () => {
       } as any,
       new RegionOpsService(new WandService()), // RegionOpsService
     );
+}
+
+describe('VisualizerComponent (UI shell)', () => {
+  let component: VisualizerComponent;
+  let plotService: any;
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    plotService = mockPlotService();
+    component = makeComponent(plotService);
   });
 
   afterEach(() => jest.useRealTimers());
+
+  // ── shared toast outlets ────────────────────────────────────────────
+  // PlotlyService is providedIn:'root' and the region editor is a child dialog,
+  // so their notices use fixed keys rather than a per-instance one. Exactly one
+  // live visualizer may render those outlets or a single message would appear
+  // once per viewer (jit-ui runs a main view and a pipeline preview at once).
+  describe('shared notice outlets', () => {
+    // ngOnInit/ngOnDestroy only add/remove `this` from the live set; the logic
+    // worth pinning is who that makes the owner. Driving the real lifecycle here
+    // would mean stubbing most of ngOnInit, which this suite deliberately avoids.
+    const live = () => (VisualizerComponent as any).liveInstances as Set<unknown>;
+
+    afterEach(() => live().clear());
+
+    it('is rendered by the oldest live visualizer, and hands over on destroy', () => {
+      const first = component;
+      const second = makeComponent(mockPlotService());
+
+      live().add(first);
+      live().add(second);
+      expect(first.ownsSharedToasts).toBe(true);
+      expect(second.ownsSharedToasts).toBe(false); // no duplicate outlet
+
+      // Tearing down the owner must not leave the outlets unrendered — that
+      // would silently drop every notice raised by the root-provided service.
+      live().delete(first);
+      expect(second.ownsSharedToasts).toBe(true);
+    });
+
+    it('renders no outlet when nothing is live', () => {
+      expect(component.ownsSharedToasts).toBe(false);
+    });
+  });
 
   it('constructs and reads the plot-type descriptors through the service', () => {
     expect(component).toBeTruthy();

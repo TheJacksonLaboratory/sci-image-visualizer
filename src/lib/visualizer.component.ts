@@ -9,6 +9,7 @@ import { IImageInfo } from './contracts/image.contract';
 import { ImageStatePort, IMAGE_STATE_PORT } from './contracts/ports/image-state.port';
 import { Polygon, Rectangle, MultiPolygon, Region } from './models/region';
 import { RegionOpsService } from './region-ops.service';
+import { VIZ_TOAST_KEY, VIZ_ALERT_TOAST_KEY } from './toast-outlets';
 import { VisualizerStore } from './store/visualizer-store.service';
 import { RenderOrchestrator, SliceScrubber } from './render-orchestrator';
 import {
@@ -46,6 +47,35 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    *  one key would each render the same message — a duplicate toast. A unique
    *  key per instance scopes the toast to the component that raised it. */
   private static nextToastId = 0;
+
+  /**
+   * The library also raises notices from places that have no instance of their
+   * own to key against: {@link PlotlyService} is `providedIn: 'root'`, and the
+   * region editor is a child dialog. Those use the fixed
+   * {@link VIZ_TOAST_KEY} / {@link VIZ_ALERT_TOAST_KEY} outlets.
+   *
+   * For the same reason the per-instance key above exists, exactly ONE mounted
+   * visualizer may render those shared outlets — otherwise a message from the
+   * root service would be shown once per live viewer (jit-ui runs a main view
+   * and a pipeline-preview at the same time). The first to init claims them and
+   * releases on destroy, so the surviving viewer picks them up.
+   */
+  private static readonly liveInstances = new Set<VisualizerComponent>();
+  readonly vizToastKey = VIZ_TOAST_KEY;
+  readonly vizAlertToastKey = VIZ_ALERT_TOAST_KEY;
+  /**
+   * Whether this instance renders the shared outlets. The owner is simply the
+   * oldest live visualizer — a `Set` iterates in insertion order, so when the
+   * owner is destroyed the next one takes over on its following change-detection
+   * pass. Tracking a set rather than a single owner matters: with a lone
+   * `owner` reference, tearing down the owner while a sibling was already
+   * initialised would leave nobody rendering the outlets, and every notice from
+   * the root service would silently vanish again.
+   */
+  get ownsSharedToasts(): boolean {
+    const oldest = VisualizerComponent.liveInstances.values().next();
+    return !oldest.done && oldest.value === this;
+  }
 
   @Output()
   isStackEvent = new EventEmitter(false);
@@ -141,6 +171,25 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   private samToastShown = false;
 
   readonly samToastKey = `sam-${VisualizerComponent.nextToastId++}`;
+  /**
+   * Outlet for the library's own result/error notices.
+   *
+   * PrimeNG routes a message to a `<p-toast>` only when the keys match — a
+   * keyless message reaches a keyless toast and nothing else. These notices used
+   * to be emitted with no key, so they rendered only in hosts that happen to
+   * mount a bare `<p-toast>` (jit-ui does, in its file-tree component). Every
+   * other host — including this repo's own browser example — dropped them
+   * silently, which made a failed or no-op segmentation look like a dead button:
+   * the sticky progress toast is cleared in the same tick by hideSamToast, and
+   * the message explaining why never appeared anywhere.
+   *
+   * Keyed to this component instance so the library renders its own outlet and
+   * is not dependent on host markup. Deliberately NOT the sticky toast's key:
+   * {@link hideSamToast} clears that key in the `finally`, which would wipe the
+   * result the moment it was posted, and the sticky toast's custom template is
+   * built for the live status + progress bar.
+   */
+  readonly resultToastKey = `${this.samToastKey}-result`;
   /** Subscriptions to the point tool's live feeds (status/busy/download). */
   private samPointSub = new Subscription();
   /** Vertex eraser radius in image-pixel coordinates. */
@@ -314,6 +363,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   }
 
   ngOnInit(): void {
+    // Join the live set; the oldest member renders the shared notice outlets.
+    VisualizerComponent.liveInstances.add(this);
     this.state.setDiagram(this);
     this.selectedColormap =
       this.colormapsOptions[0].children.find((c: any) => c.label === 'Greys Inv') ??
@@ -622,7 +673,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
                   // user the sharper version isn't coming.
                   const msg = err?.error?.message || err?.message || err?.statusText || String(err);
                   this.messageService.add({
-                    key: 'center-toast',
+                    key: this.vizAlertToastKey,
                     severity: 'warn',
                     summary: 'Preview not sharpened',
                     detail: `The full-resolution preview did not load (${msg}). The low-resolution preview is still shown. Try clicking the image again.`,
@@ -639,7 +690,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
         const msg = err?.error?.message || err?.message || err?.statusText || String(err);
         console.error('Error occured when getting image info', err);
         this.messageService.add({
-          key: 'center-toast',
+          key: this.vizAlertToastKey,
           sticky: true,
           severity: 'error',
           summary: 'An error occured',
@@ -848,6 +899,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   }
 
   ngOnDestroy() {
+    // Leave the live set so the next-oldest visualizer picks up the outlets.
+    VisualizerComponent.liveInstances.delete(this);
     this.scrubber.cancel();
     this.samPointSub.unsubscribe();
     if (this.plotContextMenuListener) {
@@ -1266,6 +1319,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     const inv = this.regionOps.inverse(sel, w, h);
     if (!inv) {
       this.messageService.add({
+        key: this.resultToastKey,
         severity: 'warn', summary: 'Inverse',
         detail: 'Nothing to invert — select one or more closed regions first.',
       });
@@ -1343,12 +1397,16 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     try {
       const n = await op();
       this.messageService.add({
+        key: this.resultToastKey,
         severity: n > 0 ? 'success' : 'warn',
         summary: label,
         detail: tool.status$.value || (n > 0 ? `Added ${n} region(s).` : 'No regions added.'),
       });
     } catch (e) {
-      this.messageService.add({ severity: 'error', summary: `${label} failed`, detail: String(e) });
+      this.messageService.add({
+        key: this.resultToastKey,
+        severity: 'error', summary: `${label} failed`, detail: String(e),
+      });
     } finally {
       psub.unsubscribe();
       ssub.unsubscribe();

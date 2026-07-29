@@ -43,6 +43,7 @@ import { ICoordinateTransform } from '../../contracts/coordinate-transform.contr
 import { PlotlyCoordinateTransform } from './plotly-coordinate-transform';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
+import { VIZ_ALERT_TOAST_KEY } from '../../toast-outlets';
 
 // Re-exported so existing consumers can keep importing PlotType from this
 // module while it physically lives in the backend-neutral contracts/ dir.
@@ -1053,7 +1054,7 @@ export class PlotlyService implements IVisualizer {
       } catch (err: any) {
         const msg = err?.error?.message || err?.message || err?.statusText || String(err);
         console.error('Error occured', err);
-        this.messageService.add({ key: 'center-toast', sticky: true, severity:'error', summary:'An error occured', detail:`The following
+        this.messageService.add({ key: VIZ_ALERT_TOAST_KEY, sticky: true, severity:'error', summary:'An error occured', detail:`The following
                                   error occured: ${msg}. Please try to open the image again through the
                                   file navigator.` });
         // TODO correctly clear the plot
@@ -1458,7 +1459,7 @@ export class PlotlyService implements IVisualizer {
     }, error: err => {
       const msg = err?.error?.message || err?.message || err?.statusText || String(err);
       console.error('Error occured when zooming', err);
-      this.messageService.add({ key: 'center-toast', sticky: true, severity:'error', summary:'An error occured',
+      this.messageService.add({ key: VIZ_ALERT_TOAST_KEY, sticky: true, severity:'error', summary:'An error occured',
         detail:`The following error occured while zooming: ${msg}.
                           Please try to open the image again through the file navigator and
                           zoom on the selected area once more.` });
