@@ -385,6 +385,71 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
   it('getTrueImageSize is null before any descriptor is loaded', () => {
     expect(service.getTrueImageSize()).toBeNull();
   });
+
+  // ── display-invalidation race (white-canvas regression guard) ──────────
+  // A window/gamma slider emits continuously while dragged. Each invalidation
+  // restores and re-processes every tile, and a recolor round that writes back
+  // AFTER a newer round restored the tile makes OSD's conversion throw
+  // DOMException — which destroys the cache record and unloads the tile, so the
+  // viewer goes white mid-drag. These pin both halves of the fix.
+
+  it('coalesces a burst of display changes into ONE invalidation', async () => {
+    const svc = service as any;
+    const invalidate = jest.spyOn(svc, 'invalidateDisplay');
+    for (let i = 0; i < 10; i++) svc.scheduleInvalidate(); // a drag's worth of emissions
+    expect(invalidate).not.toHaveBeenCalled(); // deferred, not synchronous
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+    expect(invalidate).toHaveBeenCalledTimes(1);
+  });
+
+  it('a superseded recolor round does not write back (would destroy the cache record)', async () => {
+    const svc = service as any;
+    svc.isMultiChannel = true;
+    svc.channelStates = [{ index: 0, name: 'c', color: '#ff0000', min: 0, max: 255, gamma: 1, visible: true }];
+
+    const ctx = {
+      canvas: { width: 1, height: 1 },
+      getImageData: () => ({ data: new Uint8ClampedArray([10, 10, 10, 255]) }),
+      putImageData: jest.fn(),
+    };
+    const setData = jest.fn();
+    const event = {
+      tile: { url: 'https://example/tile?channel=0' },
+      // A newer display round lands while this one is awaiting its pixels —
+      // exactly what the next tick of a slider drag does.
+      getData: jest.fn(async (type: string) => {
+        if (type === 'context2d') { svc.displayToken++; return ctx; }
+        return null;
+      }),
+      setData,
+    };
+
+    await svc.recolorChannelTile(event);
+
+    expect(setData).not.toHaveBeenCalled();
+    expect(ctx.putImageData).not.toHaveBeenCalled();
+  });
+
+  it('an uncontested recolor round still writes back', async () => {
+    const svc = service as any;
+    svc.isMultiChannel = true;
+    svc.channelStates = [{ index: 0, name: 'c', color: '#ff0000', min: 0, max: 255, gamma: 1, visible: true }];
+
+    const ctx = {
+      canvas: { width: 1, height: 1 },
+      getImageData: () => ({ data: new Uint8ClampedArray([10, 10, 10, 255]) }),
+      putImageData: jest.fn(),
+    };
+    const setData = jest.fn();
+    await svc.recolorChannelTile({
+      tile: { url: 'https://example/tile?channel=0' },
+      getData: jest.fn(async (type: string) => (type === 'context2d' ? ctx : null)),
+      setData,
+    });
+
+    expect(ctx.putImageData).toHaveBeenCalled();
+    expect(setData).toHaveBeenCalledWith(ctx, 'context2d');
+  });
 });
 
 describe('OpenSeadragonVisualizerService (tiled load via /tiles/info)', () => {
