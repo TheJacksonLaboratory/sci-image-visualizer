@@ -81,6 +81,12 @@ interface TiledImage {
   height: number;
   mppX: number;
   mppY: number;
+  /** Band count. 3 (default) = RGB brightfield; anything else is treated as a
+   *  fluorescence stack (rgbChannels 1), so the Channels pane gets one tinted
+   *  channel per band. */
+  channels?: number;
+  /** z-slice count. >1 shows the slice scrubber; OSD swaps the tile `z` param. */
+  slices?: number;
 }
 
 /** Gigapixel whole-slide images served through the tile server. Shown only when a
@@ -91,6 +97,24 @@ const TILED_IMAGES: TiledImage[] = TILE_SERVER
       { name: 'CMU-1 · 1.5 Gpx (CC0)', imageId: 'cmu-1', width: 46000, height: 32914, mppX: 0.499, mppY: 0.499 },
       { name: 'BC18 · 22 Gpx (NDPI)', imageId: 'bc18', width: 218240, height: 103424, mppX: 0.2264, mppY: 0.2264 },
       { name: 'Sirius Red · 0.5 Gpx (NDPI)', imageId: 'sirius-red', width: 36480, height: 14080, mppX: 0.442, mppY: 0.442 },
+      // Two-channel fluorescence pair — the SAME pixels and the SAME pyramid,
+      // differing only in the descriptor's `multichannel` flag, to isolate what
+      // that flag alone does to the Channels pane:
+      //   …/2ch  multichannel: true  → per-channel layers; hide/tint each band works
+      //   …flat  multichannel: false → one composited layer; the pane's channel
+      //                                toggles have nothing to act on (the
+      //                                behaviour seen against a server that
+      //                                won't flag a LUT-less stack multichannel)
+      { name: '2-channel fluorescence · 0.35 Gpx', imageId: 'result-img', width: 16830, height: 20518, mppX: 0.3211, mppY: 0.3211, channels: 2 },
+      { name: '2-channel · multichannel:false (repro)', imageId: 'result-img-flat', width: 16830, height: 20518, mppX: 0.3211, mppY: 0.3211, channels: 2 },
+      // Project002 series2: a 15 GB ImageJ hyperstack (2ch x 27z, contiguous
+      // planes behind a single IFD). Built from the middle z-slice — unlike
+      // result_img this one carries an embedded ColorMap/LUT, so a server that
+      // gates multichannel on "has a LUT" treats it differently.
+      { name: 'Project002 · 2-channel BF · 0.28 Gpx (z=13)', imageId: 'project002-2ch', width: 14971, height: 18664, mppX: 0.3211, mppY: 0.3211, channels: 2 },
+      // The same file as its real shape: 2 channels x 27 z-slices. Scrubbing the
+      // stack swaps the tile `z` param server-side (no per-slice urls).
+      { name: 'Project002 · 2ch x 27z stack · 7.5 Gpx', imageId: 'project002-stack', width: 14971, height: 18664, mppX: 0.3211, mppY: 0.3211, channels: 2, slices: 27 },
     ]
   : [];
 
@@ -505,7 +529,7 @@ export class AppComponent implements OnDestroy {
       this.loading = false;
       this.loadingMessage = '';
     }
-    this.imageState.setTiledImage(t.imageId, t.name, t.width, t.height, t.mppX, t.mppY);
+    this.imageState.setTiledImage(t.imageId, t.name, t.width, t.height, t.mppX, t.mppY, t.channels ?? 3, t.slices ?? 1);
   }
 
   /** Left-click a DICOM slice: decode + show just that slice. */

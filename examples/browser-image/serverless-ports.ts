@@ -223,20 +223,44 @@ export class ExampleImageStateAdapter implements ImageStatePort, OnDestroy {
     height: number,
     mppX: number | null = null,
     mppY: number | null = null,
+    channels = 3,
+    slices = 1,
   ): void {
     this.revoke(); // clears currentInfoB64 + owned urls
     this.currentInfoB64 = toBase64Url(JSON.stringify({ image }));
+    // Brightfield slides are RGB (channelCount === rgbChannels === 3). A
+    // fluorescence stack is `rgbChannels: 1` with channelCount = the band count,
+    // which is what makes the library derive one tinted channel per band for the
+    // Channels pane (see deriveChannels / visualizer.component isMultichannel).
+    const fluorescence = channels !== 3;
+    const preview = `${this.config.slideCropServer}preview?info=${this.currentInfoB64}`;
+    const previewUrls =
+      slices > 1 ? Array.from({ length: slices }, (_, z) => `${preview}&z=${z}`) : [preview];
     this.imageInfo$.next({
       isGrayscale: false,
       trueImageSize: [width, height],
-      urls: [`${this.config.slideCropServer}preview?info=${this.currentInfoB64}`],
-      isStack: false,
+      // ONE URL PER SLICE, even though OSD renders a tiled image from the tile
+      // grid and ignores `urls`: the component takes the stack depth from
+      // `urls.length` (visualizer.component maxIndex), and the Plotly heatmap
+      // reads urls[z]. A single preview URL here makes the slice bar read
+      // "0 of 0". Mirrors jit-ui's own server path (files.service
+      // buildSingleFileImageInfo).
+      urls: previewUrls,
+      smallUrls: slices > 1 ? previewUrls.map((u) => `${u}&tier=small`) : undefined,
+      isStack: slices > 1,
       showStack: false,
       scaleRatio: true,
       fileName,
       imageMeta: [
-        { channelCount: 3, rgbChannels: 3, x: width, y: height, z: 1, mppX, mppY },
+        {
+          channelCount: channels,
+          rgbChannels: fluorescence ? 1 : 3,
+          x: width, y: height, z: slices, mppX, mppY,
+        },
       ],
+      // Open a stack in the middle — the preview renders the middle slice too, so
+      // the first paint matches the thumbnail instead of jumping to a blurry end.
+      initialZIndex: slices > 1 ? Math.floor(slices / 2) : undefined,
       tiled: true, // ← Mode A: OSD fetches tiles from the server (no blob urls)
     });
     this.filename$.next(fileName);
