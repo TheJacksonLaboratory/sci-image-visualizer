@@ -62,6 +62,11 @@ app.get('/tile', async (req, res) => {
       intParam(req.query.col, 0),
       intParam(req.query.row, 0),
       intParam(req.query.tileSize, 512),
+      // Absent for a flat composite; set per request by the library's
+      // per-channel path so each band can be tinted/windowed client-side.
+      req.query.channel === undefined ? undefined : intParam(req.query.channel, 0),
+      // Slice index for a z-stack (ignored for a single-slice image).
+      intParam(req.query.z, 0),
     );
     res.set('Content-Type', 'image/png')
       .set('Cache-Control', 'public, max-age=86400')
@@ -76,7 +81,12 @@ app.get('/tile', async (req, res) => {
 app.get('/preview', async (req, res) => {
   try {
     const { image } = decodeInfo(req.query.info);
-    const png = await readPreview(COG_DIR, image, String(req.query.tier || ''));
+    const png = await readPreview(
+      COG_DIR,
+      image,
+      String(req.query.tier || ''),
+      req.query.z === undefined ? undefined : intParam(req.query.z, 0),
+    );
     res.set('Content-Type', 'image/png')
       .set('Cache-Control', 'public, max-age=86400')
       .send(png);
@@ -87,10 +97,10 @@ app.get('/preview', async (req, res) => {
 
 app.post('/zoom/region', async (req, res) => {
   try {
-    const { info, roi, screen } = req.body ?? {};
+    const { info, roi, screen, zIndex } = req.body ?? {};
     const { image } = decodeInfo(info);
     if (!roi || typeof roi.width !== 'number') throw new Error('roi required');
-    const png = await readRegion(COG_DIR, image, roi, screen);
+    const png = await readRegion(COG_DIR, image, roi, screen, zIndex);
     res.set('Content-Type', 'image/png').send(png);
   } catch (err) {
     res.status(400).json({ error: String(err?.message || err) });

@@ -188,6 +188,16 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   /** Only grayscale images get a colormap (RGB tiles pass through untouched). */
   private isGrayscaleImage = false;
   private colormapSub: Subscription | null = null;
+  /** Bumped by every display invalidation. A recolor round captures it and, after
+   *  each `await`, abandons the tile once a newer round has started. Writing a
+   *  superseded context back is not merely wasted work: OSD's conversion sees a
+   *  canvas the newer round already replaced, throws `DOMException`, and
+   *  `_handleConversionError` DESTROYS the cache record and unloads the tile
+   *  (unlike the drawer's rasterBlob path, it does not re-prepare). Enough of
+   *  those and the viewer goes white mid-drag. */
+  private displayToken = 0;
+  /** Pending coalesced invalidation (see {@link scheduleInvalidate}). */
+  private invalidateHandle: number | null = null;
   /** Latest per-channel display state (window/gamma/visibility) from the store,
    *  read synchronously by recolorTile. Channel 0 drives grayscale windowing;
    *  R/G/B (indices 0-2) drive RGB per-channel windowing. */
@@ -342,8 +352,10 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       // requestInvalidate(true) restores each tile to its original data before
       // re-running recolorTile, so a change always maps afresh (no compounding).
       // RGB now recolors too (per-channel window/visibility), so don't gate on
-      // grayscale.
-      this.invalidateDisplay();
+      // grayscale. Coalesced: PrimeNG's slider fires (onChange) continuously, so
+      // a single drag would otherwise queue dozens of overlapping restore +
+      // re-process rounds over every channel image.
+      this.scheduleInvalidate();
     });
   }
 
@@ -1054,7 +1066,26 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    *  flooding OSD with "[CacheRecord] … InvalidStateError" and wasting work on tiles
    *  that aren't on screen. The other cached slices are marked stale and re-tinted
    *  lazily when revealed. Composite/grayscale invalidate the world as before. */
+  /** Collapse a burst of display-state changes into ONE invalidation on the next
+   *  frame. Dragging a window slider emits per pixel of travel, and each round
+   *  restores and re-processes every tile of every channel — so the burst is both
+   *  wasted work and the race that breaks cache records (see {@link displayToken}).
+   *  The store write stays live, so the pane itself remains responsive. */
+  private scheduleInvalidate(): void {
+    if (this.invalidateHandle !== null) return; // already queued for this frame
+    const raf =
+      typeof requestAnimationFrame === 'function'
+        ? requestAnimationFrame
+        : (cb: FrameRequestCallback) => setTimeout(() => cb(0), 16) as unknown as number;
+    this.invalidateHandle = raf(() => {
+      this.invalidateHandle = null;
+      this.invalidateDisplay();
+    });
+  }
+
   private invalidateDisplay(): void {
+    // Supersede any in-flight recolor round before restarting one (see displayToken).
+    this.displayToken++;
     const v: any = this.viewer;
     if (!v) return;
     if (this.isMultiChannel) {
@@ -1690,6 +1721,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       await this.recolorChannelTile(event);
       return;
     }
+    const token = this.displayToken;
     const gray = this.isGrayscaleImage;
     if (gray) {
       if (!this.colorLut) return;
@@ -1742,10 +1774,13 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     }
 
     if (!this.display.applyToRgba(img.data) || !ctx) return; // nothing opaque
+    // A newer display round has already restored this tile — writing now would
+    // hand OSD a superseded canvas and destroy the cache record.
+    if (token !== this.displayToken) return;
     ctx.putImageData(img, 0, 0);
-    // The tile's cache can be evicted between the awaits above and here (slice
-    // change / invalidation), making setData throw a DOMException on a dead
-    // canvas. Swallow it — the tile is gone, so there's nothing to recolor.
+    // The tile's cache can still be evicted between the awaits above and here (a
+    // slice change), making setData throw a DOMException on a dead canvas.
+    // Swallow it — the tile is gone, so there's nothing to recolor.
     try { await event.setData(ctx, 'context2d'); } catch { /* tile evicted */ }
   }
 
@@ -1757,6 +1792,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    * cross-tile fetch) → no race, no seams. Channel is parsed from the tile URL.
    */
   private async recolorChannelTile(event: any): Promise<void> {
+    const token = this.displayToken;
     const tile = event?.tile;
     const url: string = (tile && (typeof tile.getUrl === 'function' ? tile.getUrl() : tile.url)) || '';
     const m = /[?&]channel=(\d+)/.exec(url);
@@ -1800,8 +1836,13 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       changed = true;
     }
     if (!changed) return;
+    // A newer display round (the next tick of a slider drag) has already restored
+    // this tile. Writing a superseded context back makes OSD's conversion throw
+    // DOMException, which destroys the cache record and unloads the tile — do
+    // nothing and let the newer round repaint it.
+    if (token !== this.displayToken) return;
     ctx.putImageData(img, 0, 0);
-    // See recolorTile: the tile cache can die between the awaits and here.
+    // See recolorTile: the tile cache can still die between the awaits and here.
     try { await event.setData(ctx, 'context2d'); } catch { /* tile evicted */ }
   }
 
@@ -1940,6 +1981,12 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   unsubscribe(): void {
     this.colormapSub?.unsubscribe();
     this.colormapSub = null;
+    // Drop a queued invalidation so it can't fire against a torn-down viewer.
+    if (this.invalidateHandle !== null) {
+      if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(this.invalidateHandle);
+      else clearTimeout(this.invalidateHandle as unknown as ReturnType<typeof setTimeout>);
+      this.invalidateHandle = null;
+    }
     this.destroyViewer();
   }
 }

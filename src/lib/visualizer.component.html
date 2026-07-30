@@ -12,6 +12,19 @@
   </ng-template>
 </p-toast>
 
+<!-- Result/error notices from the library itself (segmentation outcome, region
+     validation). Rendered here so they do not depend on the host mounting a
+     keyless <p-toast> — without this the messages went nowhere in any host but
+     jit-ui, and a failed run looked like a button that did nothing. -->
+<p-toast [key]="resultToastKey" position="bottom-right"></p-toast>
+
+<!-- Shared outlets for notices raised where there is no per-instance key to use:
+     the root-provided PlotlyService and the region-editor dialog. Rendered by a
+     single visualizer (ownsSharedToasts) so a message from the root service is
+     not shown once per live viewer. -->
+<p-toast *ngIf="ownsSharedToasts" [key]="vizToastKey"></p-toast>
+<p-toast *ngIf="ownsSharedToasts" [key]="vizAlertToastKey" position="center"></p-toast>
+
 <!-- Toolbar dock: docked across the top by default; drag the handle to detach
      it into a floating, movable window (frees the top row for the image). -->
 <div class="toolbar-dock" [class.floating]="toolbarFloating"

@@ -12,6 +12,7 @@ import { ConfirmationService, MessageService } from 'primeng/api';
 import { IRegionEditorApi, REGION_EDITOR_API } from '../contracts/region-editor-api.contract';
 import { RegionIoPort, REGION_IO_PORT } from '../contracts/ports/region-io.port';
 import { regionToParts, scaleParts, maskScaleFor } from './mask-raster';
+import { VIZ_TOAST_KEY } from '../toast-outlets';
 
 @Component({
   // Canonical prefixed selector first; the unprefixed original is kept as an
@@ -896,10 +897,10 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
         this.regionApi.setPresetSet(set);
         this.presetDraft = this.clonePresetSet(this.regionApi.getPresetSet());
         this.setRegionsFromEditor();
-        this.messageService.add({ key: 'app-toast', severity: 'success',
+        this.messageService.add({ key: VIZ_TOAST_KEY, severity: 'success',
           summary: 'Classes imported', detail: 'Annotation classes loaded.' });
       } catch (err) {
-        this.messageService.add({ key: 'app-toast', severity: 'error',
+        this.messageService.add({ key: VIZ_TOAST_KEY, severity: 'error',
           summary: 'Import failed', detail: `${err}` });
       }
     };
@@ -1002,7 +1003,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     const height = Math.max(1, Math.round(size.height * scale));
     if (scale < 1) {
       this.messageService.add({
-        key: 'app-toast',
+        key: VIZ_TOAST_KEY,
         severity: 'info',
         summary: 'Mask downscaled',
         detail: `Image too large for a full-resolution mask; saving at ${width}×${height}.`,
@@ -1078,7 +1079,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.maskBusy = false;
     this.maskEncoding = false;
     this.messageService.add({
-      key: 'app-toast',
+      key: VIZ_TOAST_KEY,
       severity: 'error',
       summary: 'Could not create mask',
       detail,
@@ -1127,7 +1128,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       next: () => {
         this.saveAsBusy = false;
         this.messageService.add({
-          key: 'app-toast',
+          key: VIZ_TOAST_KEY,
           severity: 'success',
           summary: 'Regions saved',
           detail: `Saved ROIs for ${slices.length} slice${slices.length === 1 ? '' : 's'}`,
@@ -1136,7 +1137,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       error: (err) => {
         this.saveAsBusy = false;
         this.messageService.add({
-          key: 'app-toast',
+          key: VIZ_TOAST_KEY,
           severity: 'error',
           summary: 'Error saving regions',
           detail: `${(err as Error)?.message ?? err}`,
@@ -1168,7 +1169,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
         } catch (err) {
           this.saveAsBusy = false;
           this.messageService.add({
-            key: 'app-toast',
+            key: VIZ_TOAST_KEY,
             severity: 'error',
             summary: 'Error saving regions',
             detail: `${(err as Error)?.message ?? err}`,
@@ -1180,7 +1181,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
             this.saveAsBusy = false;
             this.showSaveAsDialog = false;
             this.messageService.add({
-              key: 'app-toast',
+              key: VIZ_TOAST_KEY,
               severity: 'success',
               summary: 'Regions saved',
               detail: `Saved as ${filename}`,
@@ -1189,7 +1190,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
           error: (err) => {
             this.saveAsBusy = false;
             this.messageService.add({
-              key: 'app-toast',
+              key: VIZ_TOAST_KEY,
               severity: 'error',
               summary: 'Error saving regions',
               detail: `${err.message || err}`,
