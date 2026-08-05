@@ -131,6 +131,14 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     return this.cacheProgress !== null && this.cacheProgress < 100;
   }
   private running = false;
+
+  /**
+   * Monotonic render generation. Bumped when a render starts, so a render that
+   * has been superseded by a newer image can be recognised and made inert: its
+   * callbacks return early instead of painting, clearing `running`, releasing
+   * the newer render's overlay, or applying its ROIs.
+   */
+  private renderToken = 0;
   public zIndex = 0;
   public maxIndex = 0;
 
@@ -515,174 +523,202 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
           this.loadedFileName = imgInfo.fileName;
           this.plotService.setImageMeta(this.imageInfo.imageMeta);
           const urls = imgInfo.urls;
-          if (!this.running) {
+          // A newer image ALWAYS preempts an in-flight render. This was
+          // `if (!this.running)`, which DROPPED the new image while the old one
+          // finished: identity above had already flipped to the new file, so the
+          // app reported image B as loaded while image A stayed on screen. Worse,
+          // a cold image holds the slot for its whole server-side cache fill, so
+          // every click for 1-2 minutes was discarded against a blank viewport
+          // and a "Loading image..." overlay that never resolved.
+          if (urls) {
+            const token = ++this.renderToken;
+            const isCurrent = () => this.renderToken === token;
+            if (this.running) {
+              // Stop the previous render's frame streaming (napari volume/surface
+              // preload keeps fetching otherwise) and clear its sharpen flag. Its
+              // callbacks are already inert via the token, so it can neither paint
+              // nor release the overlay this render now owns.
+              this.plotService.cancelLoading?.();
+              this.sharpening = false;
+            }
             // image size — measure the plot div directly so the toolbar height is excluded
             const plotDiv: HTMLElement | null = document.getElementById(this.plotDivName);
             const screenHeight = plotDiv?.offsetHeight || 500;
-            if (urls) {
-              this.plotService.reset();
-              this.stackLoading = imgInfo.isStack && imgInfo.showStack;
-              // set max index of stack — computed before updateZIndex so a
-              // fresh stack (shorter or longer than whatever was previously
-              // loaded) clamps against ITS bounds, not the stale ones.
-              // One URL per slice (0-indexed), so the last reachable index is
-              // length-1 — earlier `length-2` dropped the final slice.
-              this.maxIndex = urls.length > 1 ? urls.length - 1 : 0;
-              // One-shot hint: jump straight to a specific slice (e.g. the
-              // file the user actually clicked within a numbered series).
-              // Consumed immediately so redelivering the same ImageInfo later
-              // (a plot-type switch, reloadAndPlot) doesn't reset the user's
-              // current scrub position back to it.
-              if (imgInfo.initialZIndex !== undefined) {
-                this.zIndex = imgInfo.initialZIndex;
-                imgInfo.initialZIndex = undefined;
+            this.plotService.reset();
+            this.stackLoading = imgInfo.isStack && imgInfo.showStack;
+            // set max index of stack — computed before updateZIndex so a
+            // fresh stack (shorter or longer than whatever was previously
+            // loaded) clamps against ITS bounds, not the stale ones.
+            // One URL per slice (0-indexed), so the last reachable index is
+            // length-1 — earlier `length-2` dropped the final slice.
+            this.maxIndex = urls.length > 1 ? urls.length - 1 : 0;
+            // One-shot hint: jump straight to a specific slice (e.g. the
+            // file the user actually clicked within a numbered series).
+            // Consumed immediately so redelivering the same ImageInfo later
+            // (a plot-type switch, reloadAndPlot) doesn't reset the user's
+            // current scrub position back to it.
+            if (imgInfo.initialZIndex !== undefined) {
+              this.zIndex = imgInfo.initialZIndex;
+              imgInfo.initialZIndex = undefined;
+            }
+            // make sure the zindex is within bounds
+            this.updateZIndex(urls);
+            this.running = true;
+            // Multi-tier rendering (small blurry tier first, then sharpen in
+            // place) — sequencing lives in RenderOrchestrator; this component
+            // supplies the phase render and owns the UI flags via callbacks.
+            // 3D plot types render single-pass: the in-place large pass doesn't
+            // rebuild a 3D gl-mesh isosurface, so the sharpen step blanked it.
+            const hasSmallTier =
+              this.isHeatmap &&
+              (imgInfo.smallUrls?.length ?? 0) === urls.length &&
+              (imgInfo.smallUrls?.length ?? 0) > 0;
+            const smallImgInfo = hasSmallTier ? { ...imgInfo, urls: imgInfo.smallUrls as string[] } : null;
+
+            // Enter per-slice stack mode with the given slice→regions map and
+            // seed the "previous shapes" from the now-live slice. enterStackMode
+            // makes zIndex's slice live and resets undo (jit-ui#93).
+            const enterStack = (
+              slices: Map<number, Region[]>,
+              layout: 'combined' | 'per-slice-file',
+            ) => {
+              this.plotService.enterStackMode(slices, this.zIndex, layout);
+              const shapes = this.plotService
+                .getRegions()
+                .map((region) => region.getShape(this.plotService.getShowShapeLabel()));
+              this.plotService.setPreviousShapes(shapes);
+            };
+
+            const applyRoi = () => {
+              // Folder stack: a stack of self-contained per-slice files
+              // (tiled === false; see loadSeriesAsStack). Each slice-file may
+              // carry its own sibling "<stem>.geojson" (roiJsonStrs[z]), but a
+              // fresh folder with none yet leaves roiJsonStrs undefined — key
+              // off `tiled === false`, NOT roiJsonStrs, so an unannotated
+              // folder stack still enters the per-slice-file layout (and saves
+              // back one geojson per slice-file) rather than falling through to
+              // the single-file combined path (jit-ui#93).
+              if (imgInfo.isStack && imgInfo.tiled === false) {
+                const perSlice = imgInfo.roiJsonStrs;
+                const sliceCount = imgInfo.urls?.length ?? perSlice?.length ?? 0;
+                const slices = new Map<number, Region[]>();
+                for (let z = 0; z < sliceCount; z++) {
+                  const json = perSlice?.[z] ?? null;
+                  slices.set(z, json ? this.plotService.importRegions(json) : []);
+                }
+                enterStack(slices, 'per-slice-file');
+                return;
               }
-              // make sure the zindex is within bounds
-              this.updateZIndex(urls);
-              this.running = true;
-              // Multi-tier rendering (small blurry tier first, then sharpen in
-              // place) — sequencing lives in RenderOrchestrator; this component
-              // supplies the phase render and owns the UI flags via callbacks.
-              // 3D plot types render single-pass: the in-place large pass doesn't
-              // rebuild a 3D gl-mesh isosurface, so the sharpen step blanked it.
-              const hasSmallTier =
-                this.isHeatmap &&
-                (imgInfo.smallUrls?.length ?? 0) === urls.length &&
-                (imgInfo.smallUrls?.length ?? 0) > 0;
-              const smallImgInfo = hasSmallTier ? { ...imgInfo, urls: imgInfo.smallUrls as string[] } : null;
-
-              // Enter per-slice stack mode with the given slice→regions map and
-              // seed the "previous shapes" from the now-live slice. enterStackMode
-              // makes zIndex's slice live and resets undo (jit-ui#93).
-              const enterStack = (
-                slices: Map<number, Region[]>,
-                layout: 'combined' | 'per-slice-file',
-              ) => {
-                this.plotService.enterStackMode(slices, this.zIndex, layout);
-                const shapes = this.plotService
-                  .getRegions()
-                  .map((region) => region.getShape(this.plotService.getShowShapeLabel()));
-                this.plotService.setPreviousShapes(shapes);
-              };
-
-              const applyRoi = () => {
-                // Folder stack: a stack of self-contained per-slice files
-                // (tiled === false; see loadSeriesAsStack). Each slice-file may
-                // carry its own sibling "<stem>.geojson" (roiJsonStrs[z]), but a
-                // fresh folder with none yet leaves roiJsonStrs undefined — key
-                // off `tiled === false`, NOT roiJsonStrs, so an unannotated
-                // folder stack still enters the per-slice-file layout (and saves
-                // back one geojson per slice-file) rather than falling through to
-                // the single-file combined path (jit-ui#93).
-                if (imgInfo.isStack && imgInfo.tiled === false) {
-                  const perSlice = imgInfo.roiJsonStrs;
-                  const sliceCount = imgInfo.urls?.length ?? perSlice?.length ?? 0;
+              // Single-file z-stack: one sibling geojson holding every slice's
+              // regions indexed by QuPath's geometry.plane.z. Enter per-slice
+              // mode (saving back one combined z-indexed geojson) when the
+              // geojson actually carries slice indices, or when there's nothing
+              // yet to author against. A legacy geojson whose regions are all on
+              // the default plane stays global (shown on every slice) so
+              // existing single-plane annotations aren't confined to slice 0.
+              const roiJson = imgInfo.roiJsonStr;
+              if (imgInfo.isStack) {
+                const regions = roiJson ? this.plotService.importRegions(roiJson) : [];
+                const hasSliceInfo = regions.some((r) => (r.z ?? 0) !== 0);
+                if (!roiJson || hasSliceInfo) {
                   const slices = new Map<number, Region[]>();
-                  for (let z = 0; z < sliceCount; z++) {
-                    const json = perSlice?.[z] ?? null;
-                    slices.set(z, json ? this.plotService.importRegions(json) : []);
+                  for (const r of regions) {
+                    const z = r.z ?? 0;
+                    const bucket = slices.get(z);
+                    if (bucket) bucket.push(r);
+                    else slices.set(z, [r]);
                   }
-                  enterStack(slices, 'per-slice-file');
+                  enterStack(slices, 'combined');
                   return;
                 }
-                // Single-file z-stack: one sibling geojson holding every slice's
-                // regions indexed by QuPath's geometry.plane.z. Enter per-slice
-                // mode (saving back one combined z-indexed geojson) when the
-                // geojson actually carries slice indices, or when there's nothing
-                // yet to author against. A legacy geojson whose regions are all on
-                // the default plane stays global (shown on every slice) so
-                // existing single-plane annotations aren't confined to slice 0.
-                const roiJson = imgInfo.roiJsonStr;
-                if (imgInfo.isStack) {
-                  const regions = roiJson ? this.plotService.importRegions(roiJson) : [];
-                  const hasSliceInfo = regions.some((r) => (r.z ?? 0) !== 0);
-                  if (!roiJson || hasSliceInfo) {
-                    const slices = new Map<number, Region[]>();
-                    for (const r of regions) {
-                      const z = r.z ?? 0;
-                      const bucket = slices.get(z);
-                      if (bucket) bucket.push(r);
-                      else slices.set(z, [r]);
-                    }
-                    enterStack(slices, 'combined');
-                    return;
-                  }
-                }
-                // Single-plane image (or a legacy global z-stack geojson): one
-                // region set for the whole image.
-                if (roiJson) {
-                  const regions = this.plotService.importRegions(roiJson);
-                  this.plotService.setRegions(regions);
-                  const shapes = regions.map((region) =>
-                    region.getShape(this.plotService.getShowShapeLabel()),
-                  );
-                  this.plotService.setPreviousShapes(shapes);
-                }
-                // Loading an image's saved ROIs is not a user edit — start the
-                // undo history fresh so the first undo can't wipe them (jit-ui#85).
-                this.plotService.resetUndoHistory();
-              };
-              let overlayReleased = false;
-              const releaseOverlay = () => {
-                if (overlayReleased) return;
-                overlayReleased = true;
-                if (imgInfo.isStack && imgInfo.showStack) this.stackLoading = false;
-                this.state.setImageLoading(false);
-              };
+              }
+              // Single-plane image (or a legacy global z-stack geojson): one
+              // region set for the whole image.
+              if (roiJson) {
+                const regions = this.plotService.importRegions(roiJson);
+                this.plotService.setRegions(regions);
+                const shapes = regions.map((region) =>
+                  region.getShape(this.plotService.getShowShapeLabel()),
+                );
+                this.plotService.setPreviousShapes(shapes);
+              }
+              // Loading an image's saved ROIs is not a user edit — start the
+              // undo history fresh so the first undo can't wipe them (jit-ui#85).
+              this.plotService.resetUndoHistory();
+            };
+            let overlayReleased = false;
+            const releaseOverlay = () => {
+              if (overlayReleased) return;
+              overlayReleased = true;
+              if (imgInfo.isStack && imgInfo.showStack) this.stackLoading = false;
+              this.state.setImageLoading(false);
+            };
 
-              new RenderOrchestrator({
-                // inPlace=true updates the existing render instead of rebuilding
-                // it, so the canvas doesn't blank during the small→large swap.
-                renderPhase: (phaseInfo, inPlace) =>
-                  this.plotService.load(phaseInfo, this.zIndex).then((loadedImage) => {
-                    // Guard against a newer click reaching us mid-render.
-                    if (phaseInfo.fileName !== loadedImage.filename) return null;
-                    return this.plotService.plot(
-                      this.plotDivName,
-                      loadedImage,
-                      phaseInfo,
-                      screenHeight,
-                      this.plotType,
-                      inPlace,
-                    );
-                  }),
-                smallShown: () => {
-                  // If the file is still being cached/prepared server-side, keep the full
-                  // cache-progress overlay up instead of dropping to the translucent "Sharpening
-                  // preview..." spinner over a blank canvas (a large uncached image renders its
-                  // small preview before its tiles exist). finished() releases the overlay once
-                  // the real render lands.
-                  if (this.isCaching) return;
-                  // Small tier on screen — drop the full overlay but keep a translucent spinner so
-                  // the blurry render isn't mistaken for the final image.
-                  releaseOverlay();
-                  this.sharpening = true;
-                },
-                sharpenSettled: () => {
-                  this.sharpening = false;
-                },
-                finished: (_viaSmall, logTag) => {
-                  // Idempotent — releases now if smallShown deferred it (caching) or was skipped.
-                  releaseOverlay();
-                  this.running = false;
-                  applyRoi();
-                  console.log(logTag);
-                },
-                sharpenFailed: (err: any) => {
-                  // The small tier stays on screen as the fallback — tell the
-                  // user the sharper version isn't coming.
-                  const msg = err?.error?.message || err?.message || err?.statusText || String(err);
-                  this.messageService.add({
-                    key: this.vizAlertToastKey,
-                    severity: 'warn',
-                    summary: 'Preview not sharpened',
-                    detail: `The full-resolution preview did not load (${msg}). The low-resolution preview is still shown. Try clicking the image again.`,
-                  });
-                  this.running = false;
-                  applyRoi();
-                },
-              }).render(imgInfo, smallImgInfo);
-            }
+            new RenderOrchestrator({
+              // inPlace=true updates the existing render instead of rebuilding
+              // it, so the canvas doesn't blank during the small→large swap.
+              renderPhase: (phaseInfo, inPlace) => {
+                // Superseded BEFORE this phase started — don't even issue the load.
+                // RenderOrchestrator calls renderPhase once per tier and retries the
+                // sharpen pass on failure, so checking only after the load resolves
+                // would let a preempted render keep fetching slices/tiles for an
+                // image nobody is looking at.
+                if (!isCurrent()) return Promise.resolve(null);
+                return this.plotService.load(phaseInfo, this.zIndex).then((loadedImage) => {
+                  // Preempted while this phase was loading — drop it on the floor.
+                  if (!isCurrent()) return null;
+                  // Guard against a newer click reaching us mid-render.
+                  if (phaseInfo.fileName !== loadedImage.filename) return null;
+                  return this.plotService.plot(
+                    this.plotDivName,
+                    loadedImage,
+                    phaseInfo,
+                    screenHeight,
+                    this.plotType,
+                    inPlace,
+                  );
+                });
+              },
+              smallShown: () => {
+                if (!isCurrent()) return; // superseded by a newer image
+                // If the file is still being cached/prepared server-side, keep the full
+                // cache-progress overlay up instead of dropping to the translucent "Sharpening
+                // preview..." spinner over a blank canvas (a large uncached image renders its
+                // small preview before its tiles exist). finished() releases the overlay once
+                // the real render lands.
+                if (this.isCaching) return;
+                // Small tier on screen — drop the full overlay but keep a translucent spinner so
+                // the blurry render isn't mistaken for the final image.
+                releaseOverlay();
+                this.sharpening = true;
+              },
+              sharpenSettled: () => {
+                if (!isCurrent()) return; // superseded by a newer image
+                this.sharpening = false;
+              },
+              finished: (_viaSmall, logTag) => {
+                if (!isCurrent()) return; // superseded by a newer image
+                // Idempotent — releases now if smallShown deferred it (caching) or was skipped.
+                releaseOverlay();
+                this.running = false;
+                applyRoi();
+                console.log(logTag);
+              },
+              sharpenFailed: (err: any) => {
+                if (!isCurrent()) return; // superseded by a newer image
+                // The small tier stays on screen as the fallback — tell the
+                // user the sharper version isn't coming.
+                const msg = err?.error?.message || err?.message || err?.statusText || String(err);
+                this.messageService.add({
+                  key: this.vizAlertToastKey,
+                  severity: 'warn',
+                  summary: 'Preview not sharpened',
+                  detail: `The full-resolution preview did not load (${msg}). The low-resolution preview is still shown. Try clicking the image again.`,
+                });
+                this.running = false;
+                applyRoi();
+              },
+            }).render(imgInfo, smallImgInfo);
           }
         }
       },
