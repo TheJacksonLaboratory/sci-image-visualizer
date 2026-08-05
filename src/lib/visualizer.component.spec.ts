@@ -1,5 +1,21 @@
 import { BehaviorSubject } from 'rxjs';
 
+// Capture the RenderOrchestrator host config so the preemption tests can invoke a
+// superseded render's callbacks directly and assert they are inert. SliceScrubber
+// (same module) stays real — only the orchestrator is stubbed, and its `render` is a
+// spy so renderPhase is never auto-driven.
+const orchestratorHosts: any[] = [];
+jest.mock('./render-orchestrator', () => {
+  const actual = jest.requireActual('./render-orchestrator');
+  return {
+    ...actual,
+    RenderOrchestrator: jest.fn().mockImplementation((host: any) => {
+      orchestratorHosts.push(host);
+      return { render: jest.fn().mockResolvedValue(undefined) };
+    }),
+  };
+});
+
 import { VisualizerComponent } from './visualizer.component';
 import { PlotType, PLOT_TYPE_DESCRIPTORS } from './contracts/plot-type';
 import { VisualizerStore } from './store/visualizer-store.service';
@@ -496,5 +512,167 @@ describe('VisualizerComponent (UI shell)', () => {
       expect(component.zIndex).toBe(5);
       expect(plotService.setZIndex).toHaveBeenCalledWith(5);
     });
+  });
+});
+
+/**
+ * Preemption of a superseded render (#5).
+ *
+ * A newer image used to be DROPPED while an earlier render was in flight, which
+ * produced three failures: the wrong image on screen, an overlay that never
+ * cleared, and (on a cold image) a minutes-long window where every click was
+ * discarded. These tests pin the two halves of the fix — the newer image is
+ * rendered, and the superseded render can no longer touch UI state.
+ */
+describe('VisualizerComponent — render preemption (#5)', () => {
+  function infoFor(fileName: string): any {
+    return {
+      fileName,
+      urls: [`/api/preview?info=${fileName}`],
+      smallUrls: undefined,
+      isStack: false,
+      showStack: false,
+      isGrayscale: false,
+      trueImageSize: [100, 100],
+      imageMeta: [{ x: 100, y: 100, z: 1, rgbChannels: 3, channelCount: 3 }],
+    };
+  }
+
+  /**
+   * ngOnInit subscribes to a long tail of streams on both ports. Rather than
+   * enumerating them (and re-enumerating whenever one is added), wrap the mock so
+   * any unlisted `getX$()` / `isX()` accessor answers with a BehaviorSubject and
+   * anything else with a jest.fn(). Explicit overrides below win, and identities are
+   * cached so `expect(plot.reset)` is stable across accesses.
+   */
+  function selfCompleting(base: any): any {
+    const cache: any = base;
+    return new Proxy(cache, {
+      has: () => true,
+      get(target, prop: any) {
+        if (typeof prop !== 'string' || prop in target) return target[prop];
+        target[prop] = /\$$|^(get|is)[A-Z]/.test(prop)
+          ? jest.fn(() => new BehaviorSubject(false))
+          : jest.fn();
+        return target[prop];
+      },
+    });
+  }
+
+  function harness() {
+    const plotBase: any = mockPlotService();
+    Object.assign(plotBase, {
+      getAutoscaleEvent: () => new BehaviorSubject(''),
+      getColormap: () => new BehaviorSubject('Greys'),
+      getReverseScale: () => new BehaviorSubject(false),
+      getIntensityProfile$: () => new BehaviorSubject([]),
+      getStackLoadingProgress: () => new BehaviorSubject(0),
+      getViewportChange$: () => new BehaviorSubject({ x: 0, y: 0, width: 1, height: 1 }),
+      isStackLoading: () => new BehaviorSubject(false),
+      relayout: jest.fn(),
+      refreshIntensitySamplingForRoi: jest.fn(),
+      setImageMeta: jest.fn(),
+      reset: jest.fn(),
+      cancelLoading: jest.fn(),
+      load: jest.fn().mockImplementation((info: any) => Promise.resolve({ filename: info.fileName })),
+      plot: jest.fn().mockResolvedValue(undefined),
+      getShowShapeLabel: jest.fn().mockReturnValue(false),
+      importRegions: jest.fn().mockReturnValue([]),
+      setRegions: jest.fn(),
+      setPreviousShapes: jest.fn(),
+      resetUndoHistory: jest.fn(),
+      setStackLoading: jest.fn(),
+    });
+    const plot: any = selfCompleting(plotBase);
+    const imageInfo$ = new BehaviorSubject<any>(null);
+    const stateBase: any = {
+      getImageInfo$: () => imageInfo$,
+      getFilename$: () => new BehaviorSubject('none'),
+      getImageLoadingMessage$: () => new BehaviorSubject(''),
+      getCacheProgress$: () => new BehaviorSubject(null),
+      getPanelWidth$: () => new BehaviorSubject(500),
+      isImageLoading$: () => new BehaviorSubject(false),
+      isImageCached$: () => new BehaviorSubject(true),
+      isZoom$: () => new BehaviorSubject(false),
+      setDiagram: jest.fn(),
+      setImageLoading: jest.fn(),
+      setImageLoadingMessage: jest.fn(),
+      setImageInfo: jest.fn(),
+      setImageCached: jest.fn(),
+      setLoadingError: jest.fn(),
+      setZoom: jest.fn(),
+    };
+    const state: any = selfCompleting(stateBase);
+    const component = new VisualizerComponent(
+      state,
+      plot,
+      { add: jest.fn(), clear: jest.fn() } as any,
+      { run: (fn: () => void) => fn(), runOutsideAngular: (fn: () => void) => fn() } as any,
+      { detectChanges: jest.fn(), markForCheck: jest.fn() } as any,
+      new VisualizerStore(),
+      { status$: new BehaviorSubject(''), busy$: new BehaviorSubject(false), progress$: new BehaviorSubject(-1) } as any,
+      { status$: new BehaviorSubject(''), busy$: new BehaviorSubject(false), progress$: new BehaviorSubject(-1) } as any,
+      { status$: new BehaviorSubject(''), busy$: new BehaviorSubject(false), progress$: new BehaviorSubject(-1) } as any,
+      new RegionOpsService(new WandService()),
+    );
+    component.ngOnInit();
+    return { component, plot, state, imageInfo$ };
+  }
+
+  beforeEach(() => {
+    orchestratorHosts.length = 0;
+  });
+
+  it('renders the newer image instead of dropping it, and stops the replaced render', () => {
+    const { plot, imageInfo$ } = harness();
+
+    imageInfo$.next(infoFor('A.tif'));
+    expect(orchestratorHosts).toHaveLength(1);
+    expect(plot.reset).toHaveBeenCalledTimes(1);
+
+    // B arrives while A is still in flight. Before the fix this was discarded.
+    imageInfo$.next(infoFor('B.tif'));
+    expect(orchestratorHosts).toHaveLength(2);
+    expect(plot.reset).toHaveBeenCalledTimes(2);
+    // the replaced render is told to stop streaming frames
+    expect(plot.cancelLoading).toHaveBeenCalled();
+  });
+
+  it("a superseded render's callbacks cannot flip UI state", () => {
+    const { component, state, imageInfo$ } = harness();
+    imageInfo$.next(infoFor('A.tif'));
+    imageInfo$.next(infoFor('B.tif'));
+    const [staleHost, liveHost] = orchestratorHosts;
+
+    state.setImageLoading.mockClear();
+    staleHost.smallShown();
+    staleHost.sharpenSettled();
+    staleHost.finished(false, 'stale render finished');
+
+    // The overlay belongs to B now, and B is still rendering.
+    expect(state.setImageLoading).not.toHaveBeenCalled();
+    expect((component as any).running).toBe(true);
+
+    // B's own callbacks still work.
+    liveHost.finished(false, 'live render finished');
+    expect(state.setImageLoading).toHaveBeenCalledWith(false);
+    expect((component as any).running).toBe(false);
+  });
+
+  it('a superseded renderPhase does not issue a load at all', async () => {
+    const { plot, imageInfo$ } = harness();
+    imageInfo$.next(infoFor('A.tif'));
+    imageInfo$.next(infoFor('B.tif'));
+    const [staleHost, liveHost] = orchestratorHosts;
+
+    plot.load.mockClear();
+    await expect(staleHost.renderPhase(infoFor('A.tif'), false)).resolves.toBeNull();
+    // Not merely discarded after loading — never fetched. RenderOrchestrator calls
+    // renderPhase per tier and retries the sharpen pass, so a stale render that
+    // still loaded would keep hitting the backend for an abandoned image.
+    expect(plot.load).not.toHaveBeenCalled();
+
+    await liveHost.renderPhase(infoFor('B.tif'), false);
+    expect(plot.load).toHaveBeenCalledTimes(1);
   });
 });

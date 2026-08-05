@@ -657,8 +657,14 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
             new RenderOrchestrator({
               // inPlace=true updates the existing render instead of rebuilding
               // it, so the canvas doesn't blank during the small→large swap.
-              renderPhase: (phaseInfo, inPlace) =>
-                this.plotService.load(phaseInfo, this.zIndex).then((loadedImage) => {
+              renderPhase: (phaseInfo, inPlace) => {
+                // Superseded BEFORE this phase started — don't even issue the load.
+                // RenderOrchestrator calls renderPhase once per tier and retries the
+                // sharpen pass on failure, so checking only after the load resolves
+                // would let a preempted render keep fetching slices/tiles for an
+                // image nobody is looking at.
+                if (!isCurrent()) return Promise.resolve(null);
+                return this.plotService.load(phaseInfo, this.zIndex).then((loadedImage) => {
                   // Preempted while this phase was loading — drop it on the floor.
                   if (!isCurrent()) return null;
                   // Guard against a newer click reaching us mid-render.
@@ -671,7 +677,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
                     this.plotType,
                     inPlace,
                   );
-                }),
+                });
+              },
               smallShown: () => {
                 if (!isCurrent()) return; // superseded by a newer image
                 // If the file is still being cached/prepared server-side, keep the full
