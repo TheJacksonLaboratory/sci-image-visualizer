@@ -1,0 +1,156 @@
+# Changelog
+
+All notable changes to `@jax-data-science/sci-image-visualizer`.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
+this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Entries before 0.2.7 were reconstructed from the git history at the time this
+file was added.
+
+## [Unreleased]
+
+## [0.2.7] — 2026-08-07
+
+### Changed
+
+- **OpenSeadragon switches to a finer pyramid level as soon as the current one
+  would be upscaled at all** (`minPixelRatio: 1`). OSD's default of `0.5`
+  tolerates displaying a level at up to 2× magnification before fetching the
+  next one, which reads as a soft image that abruptly sharpens once the
+  threshold is crossed. At `1` the displayed level always has at least one tile
+  pixel per screen pixel, so the only visible pixellation is past 1:1 — where
+  the blocks are genuine source pixels (`imageSmoothingEnabled: false` already
+  renders those crisply).
+
+  This trades tile volume for sharpness: finer levels are requested at lower
+  zooms than before. On **flat (non-pyramidal) images it is not a fix on its
+  own** — their descriptors have no rungs between the preview size and full
+  resolution (measured on dev, `NZ.tif` steps 931×1024 → 22304×24528, a 24×
+  jump), so there is no finer level to switch to and the setting only moves the
+  jump to full-resolution tiles to a lower zoom. Pair it with gap-filling
+  pyramid levels server-side.
+
+### Added
+
+- `openseadragon-viewer-options.spec.ts` — captures the options object actually
+  handed to the OSD factory and asserts the values the viewer depends on
+  (`minPixelRatio: 1`, `maxZoomPixelRatio: 20`, `minZoomImageRatio: 0.01`).
+  These are OpenSeadragon config keys rather than library code: OSD silently
+  falls back to its own defaults if one is misspelled or renamed upstream, so
+  they were previously invisible to both the test suite and grep.
+- This `CHANGELOG.md`.
+
+### Fixed
+
+- Example (dev server only): the library's web workers load again, so SAM
+  segmentation and the region editor's mask export no longer fail with "SAM
+  worker crashed". The library starts its workers with
+  `new Worker(new URL('./x.worker', import.meta.url))`; Vite's dependency
+  pre-bundling copies that URL into the optimized chunk **without** emitting the
+  worker body, so the request resolved to `node_modules/.vite/deps/x.worker`
+  where nothing exists, the dev server answered with `index.html`, and the
+  browser rejected the script for its `text/html` MIME type. A small
+  `apply: 'serve'` plugin now rewrites those requests to the real worker bundles
+  `npm run bundle-workers` emits beside the FESM. The library itself is
+  unchanged and production builds never needed this — rollup resolves
+  `./x.worker` and emits proper worker chunks.
+
+## [0.2.6] — 2026-08-05
+
+### Fixed
+
+- A newly selected image is no longer silently discarded while another is still
+  rendering — a newer image now **preempts** the in-flight render instead of
+  being dropped ([#5](https://github.com/TheJacksonLaboratory/sci-image-visualizer/issues/5)).
+- Added `renderToken`, a monotonic render generation. All `RenderOrchestrator`
+  callbacks bail when their token is stale, so a superseded render can no longer
+  paint, clear `running`, release the newer render's overlay (the indefinite
+  loading-overlay hang), or apply its ROIs.
+- `renderPhase` bails before loading starts, and the render being replaced calls
+  `plotService.cancelLoading?.()` so the napari backend stops streaming frames.
+
+## [0.2.5] — 2026-07-30
+
+### Fixed
+
+- Display changes (channels, colormaps, window/level) no longer destroy
+  OpenSeadragon tile caches mid-drag.
+- The library renders its own toast outlets instead of depending on the host
+  providing them.
+
+### Added
+
+- Example: multichannel and z-stack images served from the tile server.
+
+### Changed
+
+- CI moved to Node 24 and current GitHub Action majors.
+
+## [0.2.4] — 2026-07-27
+
+### Changed
+
+- `cellpose-js` is a regular dependency rather than a peer dependency.
+
+## [0.2.3] — 2026-07-27
+
+### Changed
+
+- Widened the `cellpose-js` peer range to `^0.4.1`.
+
+### Added
+
+- Example: server-side tile + region-zoom path for gigapixel images, the Sirius
+  Red gigapixel slide in the tiled gallery, and a dev GKE deployment wired to
+  the live demo.
+
+### Fixed
+
+- Example: heatmap preview for tiled images; cellpose worker loading under Vite
+  dev.
+
+## [0.2.2] — 2026-07-25
+
+### Added
+
+- 3D: multichannel **Surface** follows the pane-selected channel.
+
+## [0.2.1] — 2026-07-24
+
+### Added
+
+- 3D: serverless multichannel **Volume** / **Isosurface**, and **Surface** for
+  any image.
+
+### Fixed
+
+- Example: multichannel images stay scalar-gradable so 3D modes remain
+  available.
+
+## [0.2.0] — 2026-07-23
+
+### Added
+
+- Serverless multichannel compositing in the OpenSeadragon view, with
+  per-channel intensity histograms.
+- Client-side intensity histogram for the simple (`tiled: false`) path.
+- npm publish provenance.
+
+## [0.1.0] — 2026-07-23
+
+### Added
+
+- Initial public release: OpenSeadragon tiled image view, Plotly plots and 3D,
+  napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
+  browser-side SAM and cellpose segmentation.
+
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.7...HEAD
+[0.2.7]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.6...v0.2.7
+[0.2.6]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.5...v0.2.6
+[0.2.5]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.4...v0.2.5
+[0.2.4]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.3...v0.2.4
+[0.2.3]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.2...v0.2.3
+[0.2.2]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/releases/tag/v0.1.0

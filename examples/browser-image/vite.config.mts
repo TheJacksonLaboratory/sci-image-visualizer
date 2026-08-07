@@ -1,9 +1,52 @@
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import angular from '@analogjs/vite-plugin-angular';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const tsconfig = fileURLToPath(new URL('./tsconfig.json', import.meta.url));
+
+/** Staged library's FESM dir — holds the worker bodies `bundle-workers` emitted. */
+const libFesm = fileURLToPath(
+  new URL('../../node_modules/@jax-data-science/sci-image-visualizer/fesm2022/', import.meta.url),
+);
+
+/**
+ * Dev-server only: make the library's web workers loadable out of the PRE-BUNDLED
+ * dep. Unlike cellpose-js (excluded below), the library can't opt out of
+ * pre-bundling — that esbuild pass is the only place Analog's linker AOT-compiles
+ * its partial-Ivy FESM (see the note above), since the plugin's transform hook
+ * skips node_modules.
+ *
+ * The library starts its workers with
+ * `new Worker(new URL('./x.worker', import.meta.url), { type: 'module' })`
+ * (onnx-sam.worker for SAM, mask.worker for the region editor's mask export).
+ * esbuild copies that `new URL` into the optimized chunk verbatim WITHOUT emitting
+ * the worker body, so Vite's worker-import-meta-url plugin resolves it next to the
+ * chunk — `node_modules/.vite/deps/x.worker` — where nothing exists. The dev server
+ * serves index.html for it and the browser rejects the worker script
+ * ("non-JavaScript MIME type of text/html"), which surfaces as "SAM worker crashed".
+ *
+ * Point those requests at the real worker bundles `npm run bundle-workers` emitted
+ * next to the FESM. Vite serves them through its normal pipeline, so each worker's
+ * bare `onnxruntime-web` / `fast-png` imports get rewritten as usual. The production
+ * build needs none of this: rollup resolves `./x.worker` -> `x.worker.js` itself and
+ * emits proper worker chunks (dist/assets/{onnx-sam,mask}.worker-*.js).
+ */
+function stagedLibWorkers(): Plugin {
+  // e.g. /@fs/…/node_modules/.vite/deps/onnx-sam.worker?worker_file&type=module
+  const depsWorkerRE = /\/\.vite\/deps\/([\w.-]+\.worker)(\?[^#]*)?$/;
+  return {
+    name: 'example:staged-lib-workers',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use((req, _res, next) => {
+        const m = req.url?.match(depsWorkerRE);
+        if (m) req.url = `/@fs${libFesm}${m[1]}.js${m[2] ?? ''}`;
+        next();
+      });
+    },
+  };
+}
 
 /**
  * Vite is deliberately the runner here: it builds this Angular example today (via
@@ -22,7 +65,7 @@ export default defineConfig({
   // base is fragile for those). When the repo goes PUBLIC (served under
   // /sci-image-visualizer/), set PAGES_BASE=/sci-image-visualizer/ in the Pages workflow.
   base: process.env.PAGES_BASE || '/',
-  plugins: [angular({ tsconfig })],
+  plugins: [angular({ tsconfig }), stagedLibWorkers()],
   resolve: {
     alias: {
       // ml-matrix (via image-js) is CJS with circular requires, and its package
