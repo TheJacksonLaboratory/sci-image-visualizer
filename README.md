@@ -120,6 +120,15 @@ image. It includes:
 - **WYSIWYG PNG download** of the current view and a **fit-to-view / autoscale**
   reset.
 
+The viewer switches to a finer pyramid level as soon as the current one would be
+upscaled at all (`minPixelRatio: 1`), rather than tolerating up to 2× before
+fetching — so the image does not go soft and then abruptly sharpen between
+levels, and the only visible pixellation is past 1:1, where the blocks are
+genuine source pixels. This assumes the host's pyramid actually has intermediate
+levels: for a flat image whose descriptor jumps straight from a preview to full
+resolution there is no finer level to switch to, and the setting only moves the
+jump to full-resolution tiles to a lower zoom.
+
 ### Plotly — plots & 3D
 Non-image plot types render with [Plotly](https://plotly.com/javascript/) and
 support "real zooming" — a downscaled overview that re-fetches higher-resolution
@@ -394,6 +403,10 @@ npm scope.
 # bump package.json to x.y.z first, commit, then:
 git tag vx.y.z && git push origin vx.y.z
 ```
+
+Released versions and what changed in each are recorded in
+[`CHANGELOG.md`](./CHANGELOG.md); add an entry there as part of the change, not
+at tag time.
 
 ## Contributing
 
