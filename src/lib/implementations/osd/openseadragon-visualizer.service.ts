@@ -838,6 +838,14 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       // crisp nearest-neighbour blocks).
       minZoomImageRatio: 0.01,
       maxZoomPixelRatio: 20,
+      // Switch to a finer pyramid level as soon as the current one would be
+      // upscaled at all. OSD's default (0.5) tolerates displaying a level at up
+      // to 2x magnification before fetching the next, which reads as a soft
+      // image that abruptly sharpens when the threshold is crossed. At 1 the
+      // displayed level always has at least one tile pixel per screen pixel, so
+      // the only visible pixellation is past 1:1 - where the blocks are genuine
+      // source pixels (paired with imageSmoothingEnabled=false).
+      minPixelRatio: 1,
       // Wait for the view to settle before pulling new tiles (less churn).
       immediateRender: false,
       animationTime: 0.4,
