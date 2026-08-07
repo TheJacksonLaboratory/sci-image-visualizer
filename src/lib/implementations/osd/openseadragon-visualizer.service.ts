@@ -838,14 +838,29 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       // crisp nearest-neighbour blocks).
       minZoomImageRatio: 0.01,
       maxZoomPixelRatio: 20,
-      // Switch to a finer pyramid level as soon as the current one would be
-      // upscaled at all. OSD's default (0.5) tolerates displaying a level at up
-      // to 2x magnification before fetching the next, which reads as a soft
-      // image that abruptly sharpens when the threshold is crossed. At 1 the
-      // displayed level always has at least one tile pixel per screen pixel, so
-      // the only visible pixellation is past 1:1 - where the blocks are genuine
-      // source pixels (paired with imageSmoothingEnabled=false).
-      minPixelRatio: 1,
+      // OSD's stock value, restored. DO NOT RAISE IT: the name reads like
+      // "minimum sharpness" but it is the opposite. From OSD's own
+      // TiledImage._getLevelsInterval:
+      //
+      //   highestLevel = floor( log2( currentZeroRatio / minPixelRatio ) )
+      //
+      // minPixelRatio is a floor on how small a tile pixel may shrink, and it
+      // DIVIDES into the ratio - so raising it lowers the chosen level, i.e.
+      // picks a COARSER image. OSD's own comment on the default says as much:
+      // "closer to 0 draws tiles meant for a higher zoom at this zoom".
+      //
+      // Measured on a flat 22304x24528 image (levels 697/1394/2788/5576/11152/
+      // 22304), predicted level matching actual in all nine trials:
+      //
+      //            zoom 2        zoom 8        ~1:1
+      //   1.0      1.34x up      1.34x up      1.86x up
+      //   0.5      0.67x (none)  0.67x (none)  0.93x -> full res
+      //   0.25     0.33x         0.33x         0.93x
+      //
+      // 0.5 is what gives "never upscaled below native, full resolution at 1:1".
+      // 0.25 is not better - it jumps two rungs finer and fetches ~4x the tiles
+      // for no visible gain, and tiles are not cached by the ingress.
+      minPixelRatio: 0.5,
       // Wait for the view to settle before pulling new tiles (less churn).
       immediateRender: false,
       animationTime: 0.4,
