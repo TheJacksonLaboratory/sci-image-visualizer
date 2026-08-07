@@ -110,17 +110,24 @@ describe('OpenSeadragonVisualizerService — viewer options', () => {
     return capturedOptions[0];
   }
 
-  it('passes minPixelRatio=1 so a level is never displayed upscaled', () => {
-    // OSD's default is 0.5, which tolerates showing a level at up to 2x
-    // magnification before fetching a finer one - the soft-then-snap behaviour
-    // this value exists to remove. A silent revert to 0.5 is the failure this
-    // assertion is here to catch.
-    expect(optionsFromPlot().minPixelRatio).toBe(1);
+  it('passes minPixelRatio=0.5 — raising it selects COARSER levels, not finer', () => {
+    // This assertion previously pinned 1, on the mistaken reading that
+    // minPixelRatio meant "minimum sharpness". It is the opposite: in
+    // TiledImage._getLevelsInterval it DIVIDES into the ratio -
+    //   highestLevel = floor( log2( currentZeroRatio / minPixelRatio ) )
+    // - so a larger value yields a lower (coarser) level. Measured on a flat
+    // 22304x24528 image, 1 left every zoom below native upscaled ~1.34x (1.86x
+    // at 1:1), while 0.5 never upscaled and reached full resolution at 1:1.
+    //
+    // Guarding the exact value, not just "not 1": 0.25 is finer still but jumps
+    // two rungs and fetches ~4x the tiles for no visible gain, and the ingress
+    // does not cache tiles, so every viewer pays that.
+    expect(optionsFromPlot().minPixelRatio).toBe(0.5);
   });
 
   it('keeps the zoom limits that let the user inspect individual pixels', () => {
-    // Paired with minPixelRatio: past 1:1 the blocks are genuine source pixels,
-    // so maxZoomPixelRatio must stay well above OSD's default 1.1 (jit-ui#94).
+    // Past 1:1 the blocks are genuine source pixels, so maxZoomPixelRatio must
+    // stay well above OSD's default 1.1 (jit-ui#94).
     const o = optionsFromPlot();
     expect(o.maxZoomPixelRatio).toBe(20);
     expect(o.minZoomImageRatio).toBe(0.01);

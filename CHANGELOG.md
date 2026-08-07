@@ -9,7 +9,53 @@ file was added.
 
 ## [Unreleased]
 
+## [0.2.8] — 2026-08-07
+
+### Fixed
+
+- **`minPixelRatio` is back to OpenSeadragon's default `0.5`.** The value of `1`
+  introduced in 0.2.7 was based on a misreading of the option and made zoom
+  **worse than stock**. From `TiledImage._getLevelsInterval` in OpenSeadragon
+  6.0.2:
+
+  ```
+  highestLevel = floor( log2( currentZeroRatio / minPixelRatio ) )
+  ```
+
+  `minPixelRatio` is a floor on how small a tile pixel may shrink, and it
+  _divides_ into the ratio — so **raising it selects a coarser level**, not a
+  finer one. OSD's own comment on the default says as much: _"closer to 0 draws
+  tiles meant for a higher zoom at this zoom"_.
+
+  Measured live on a flat 22304×24528 image whose pyramid levels are
+  697/1394/2788/5576/11152/22304, with OSD's formula predicting the selected
+  level correctly in all nine trials:
+
+  | `minPixelRatio`          | zoom 2               | zoom 8               | ≈1:1                    |
+  | ------------------------ | -------------------- | -------------------- | ----------------------- |
+  | `1.0` (0.2.7)            | 1.34× upscaled       | 1.34× upscaled       | 1.86× upscaled          |
+  | **`0.5` (this release)** | 0.67× — no upscaling | 0.67× — no upscaling | 0.93× → full resolution |
+  | `0.25`                   | 0.33×                | 0.33×                | 0.93×                   |
+
+  `0.5` is therefore what actually delivers "never upscaled below native, full
+  resolution at 1:1". `0.25` is not an improvement: it jumps two rungs finer and
+  fetches roughly 4× the tiles for no visible gain, and the ingress does not
+  cache tiles (verified: 815 of 815 requests reached the service), so every
+  viewer pays that cost.
+
+  The value is set explicitly rather than deleted so the intent stays greppable
+  and the test can pin it. `openseadragon-viewer-options.spec.ts` now asserts
+  `0.5` and was mutation-checked — raising it back to `1` fails the suite.
+
+  What actually fixed soft zoom on flat images was **server-side**: gap-filling
+  pyramid levels, which removed a 24× hole between the preview size and full
+  resolution. This library setting was never the lever.
+
 ## [0.2.7] — 2026-08-07
+
+> **Superseded by 0.2.8.** The `minPixelRatio: 1` change below is based on a
+> misreading of the option — it selects _coarser_ levels, not finer — and was
+> reverted. See 0.2.8.
 
 ### Changed
 
