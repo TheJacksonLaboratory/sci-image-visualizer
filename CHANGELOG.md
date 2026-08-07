@@ -40,6 +40,21 @@ file was added.
   they were previously invisible to both the test suite and grep.
 - This `CHANGELOG.md`.
 
+### Fixed
+
+- Example (dev server only): the library's web workers load again, so SAM
+  segmentation and the region editor's mask export no longer fail with "SAM
+  worker crashed". The library starts its workers with
+  `new Worker(new URL('./x.worker', import.meta.url))`; Vite's dependency
+  pre-bundling copies that URL into the optimized chunk **without** emitting the
+  worker body, so the request resolved to `node_modules/.vite/deps/x.worker`
+  where nothing exists, the dev server answered with `index.html`, and the
+  browser rejected the script for its `text/html` MIME type. A small
+  `apply: 'serve'` plugin now rewrites those requests to the real worker bundles
+  `npm run bundle-workers` emits beside the FESM. The library itself is
+  unchanged and production builds never needed this — rollup resolves
+  `./x.worker` and emits proper worker chunks.
+
 ## [0.2.6] — 2026-08-05
 
 ### Fixed
