@@ -9,6 +9,18 @@ file was added.
 
 ## [Unreleased]
 
+## [0.2.14] — 2026-08-08
+
+### Fixed
+
+- **The scale re-crop produced a 0x0 image.** `ImageBitmap.close()` zeroes the
+  bitmap's width and height, and those were read _after_ closing it — so the
+  crop came back as a 0x0 image carrying a full pixel buffer. Inference then ran
+  on nothing and reported no detections, with no error raised anywhere.
+- **`downsamplingFactor` is now seeded in the toolbar tool's defaults.** The
+  dialog exposed the control but nothing initialised it, so it read as 0 and the
+  re-crop never ran — which is the only reason the bug above stayed hidden here.
+
 ## [0.2.13] — 2026-08-08
 
 ### Added
@@ -290,7 +302,8 @@ file was added.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.13...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.14...HEAD
+[0.2.14]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.10...v0.2.11

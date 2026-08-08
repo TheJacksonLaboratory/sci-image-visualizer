@@ -1441,6 +1441,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       mergeThreshold: def?.defaults.mergeThreshold ?? 0.3,
       overlapX: def?.defaults.overlapX ?? 0,
       overlapY: def?.defaults.overlapY ?? 0,
+      // Exposed in the dialog, so it must be seeded — otherwise the scale
+      // control reads as 0 and the re-crop never runs.
+      downsamplingFactor: 5,
       withMasks: true,
       simplifyTolerance: 1,
       minArea: 0,

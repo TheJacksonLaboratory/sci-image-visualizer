@@ -169,9 +169,14 @@ export class YoloDetectToolService {
       const ctx = canvas.getContext('2d');
       if (!ctx) return null;
       ctx.drawImage(bitmap, 0, 0);
-      const out = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
+      // Read the dimensions BEFORE close(): closing an ImageBitmap zeroes its
+      // width/height, so returning them afterwards yields a 0x0 image with a
+      // full pixel buffer — inference then runs on nothing and finds nothing.
+      const width = bitmap.width;
+      const height = bitmap.height;
+      const out = ctx.getImageData(0, 0, width, height);
       bitmap.close?.();
-      return { data: out.data, width: bitmap.width, height: bitmap.height };
+      return { data: out.data, width, height };
     } catch {
       return null;
     }

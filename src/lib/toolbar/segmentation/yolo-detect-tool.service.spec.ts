@@ -132,6 +132,57 @@ describe('YoloDetectToolService', () => {
     expect(tool.busy$.value).toBe(false);
   });
 
+  it('keeps the crop dimensions after closing the bitmap', async () => {
+    // Closing an ImageBitmap zeroes its width/height. Reading them after close
+    // returned a 0x0 image carrying a full pixel buffer, so inference ran on
+    // nothing and reported no detections — with no error anywhere.
+    const bitmap = { width: 1187, height: 916, close: jest.fn() };
+    // close() zeroes the dimensions, as the real thing does.
+    bitmap.close.mockImplementation(() => {
+      bitmap.width = 0;
+      bitmap.height = 0;
+    });
+    (globalThis as any).createImageBitmap = jest.fn().mockResolvedValue(bitmap);
+    (globalThis as any).Blob = class {};
+
+    const captured: any[] = [];
+    const canvas = {
+      width: 0,
+      height: 0,
+      getContext: () => ({
+        drawImage: jest.fn(),
+        getImageData: (_x: number, _y: number, w: number, h: number) => {
+          captured.push({ w, h });
+          return { data: new Uint8ClampedArray(Math.max(1, w * h) * 4) };
+        },
+      }),
+    };
+    jest.spyOn(document, 'createElement').mockReturnValue(canvas as any);
+
+    const tileAccess = {
+      zoomOnRegion: () => ({
+        subscribe: (o: any) => {
+          o.next(new ArrayBuffer(1024));
+          o.complete?.();
+          return { unsubscribe() {} };
+        },
+      }),
+    } as any;
+
+    const withTiles = new YoloDetectToolService(tileAccess);
+    const viz = makeViz({ width: 100, height: 100, rect: { x: 0, y: 0, width: 1000, height: 1000 } });
+    const seg = segmenterReturning([]);
+
+    await withTiles.detectInView(viz, seg as any, { downsamplingFactor: 2 });
+
+    // The crop was used, at its real size rather than 0x0.
+    expect(captured[0]).toEqual({ w: 1187, h: 916 });
+    expect(seg.segmentInstances.mock.calls[0][0].width).toBe(1187);
+    expect(seg.segmentInstances.mock.calls[0][0].height).toBe(916);
+
+    (document.createElement as any).mockRestore();
+  });
+
   it('runs on the displayed pixels when no tile access is available', async () => {
     // downsamplingFactor asks for a finer crop, but without a TileAccessPort
     // there is nothing to fetch it with — the run proceeds rather than failing.
