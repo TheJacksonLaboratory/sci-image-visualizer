@@ -9,6 +9,41 @@ file was added.
 
 ## [Unreleased]
 
+## [0.2.9] — 2026-08-08
+
+### Added
+
+- **Browser YOLOv8-seg instance segmentation**, backed by the new
+  [`yolo-segdetect-js`](https://www.npmjs.com/package/yolo-segdetect-js) package
+  (lazy-imported, so apps that never run it pay nothing in their initial bundle).
+
+  A new port rather than an extension of `ICellSegmenter`: that contract returns
+  a per-pixel label map, which suits densely packed cells but cannot represent
+  what a detector produces — overlapping instances, each with its own class and
+  confidence. `IInstanceSegmenter` / `INSTANCE_SEGMENTER` returns polygon rings
+  in image pixels instead, ready to become `Region`s without a second conversion.
+
+- **`YOLO_MODELS` registry**, mirroring `SAM_MODELS`: the four published
+  checkpoints on public HF URLs by default, repointable at private hosting via
+  `setYoloModelUrls`. Each entry carries the defaults its checkpoint was trained
+  for — the embryo models want heavy tile overlap and loose merge thresholds
+  because their objects are large and touch — so a host that just picks a model
+  gets sane behaviour without knowing any of that.
+
+- **`YoloSegmenterService`**, the default `IInstanceSegmenter`. Unlike
+  `CellposeSegmenterService` it caches **per model id**, since there are four
+  checkpoints rather than one; a failed load is evicted so the next caller
+  retries instead of inheriting a rejected promise.
+
+### Fixed
+
+- **`YoloSegmenterService.dispose()` no longer leaks a model that is still
+  loading.** It enumerated only loaded instances, so an in-flight load was
+  skipped, then finished, re-populated the cache and left a live worker and ORT
+  session behind — after disposal had reported success. Disposal now awaits an
+  in-flight load and releases what it built, while leaving alone any newer load
+  that started in the meantime.
+
 ## [0.2.8] — 2026-08-07
 
 ### Fixed
@@ -190,7 +225,9 @@ file was added.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.7...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.9...HEAD
+[0.2.9]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.8...v0.2.9
+[0.2.8]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.4...v0.2.5
