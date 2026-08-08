@@ -51,11 +51,11 @@
   "dependencies": {
     "cellpose-js": "^0.4.1",
     "fast-png": "^6.4.0",
-    "yolo-segdetect-js": "^0.1.0",
     "napari-js": "^0.11.0",
     "openseadragon": "^6.0.2",
     "plotly.js-dist-min": "^3.0.1",
-    "tslib": "^2.3.0"
+    "tslib": "^2.3.0",
+    "yolo-segdetect-js": "^0.1.0"
   },
   "peerDependencies": {
     "@angular/animations": "^17.3.0",
