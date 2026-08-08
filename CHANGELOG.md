@@ -9,6 +9,16 @@ file was added.
 
 ## [Unreleased]
 
+## [0.2.11] — 2026-08-08
+
+### Changed
+
+- **YOLO runs now relay the worker's own phase narration** instead of deriving a
+  status from tile counts. Tile counts say nothing until the first tile
+  completes, which is exactly the stretch where a first run is compiling WebGPU
+  shaders — so the UI sat on one unchanging message through the longest pause of
+  the run. Requires `yolo-segdetect-js@^0.1.2`, which reports the phases.
+
 ## [0.2.10] — 2026-08-08
 
 ### Added
@@ -246,7 +256,8 @@ file was added.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.10...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.11...HEAD
+[0.2.11]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.7...v0.2.8

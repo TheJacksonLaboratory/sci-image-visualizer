@@ -182,6 +182,28 @@ describe('YoloSegmenterService', () => {
       expect(passed.tracePolygons).toBe(true);
     });
 
+    it('relays the run phases the worker reports', async () => {
+      // Only the worker knows which phase it is in — shader warm-up, per tile,
+      // merge, tracing — so the service forwards rather than inventing a status
+      // from tile counts, which stay silent until the first tile completes.
+      const onStatus = jest.fn();
+      const segment = jest.fn().mockImplementation((_img: unknown, o: { onStatus: (s: string) => void }) => {
+        o.onStatus('Preparing GPU shaders (first run — this can take a minute)…');
+        o.onStatus('Running inference (tile 2 / 6)…');
+        return Promise.resolve({ detections: [], width: 10, height: 10, classNames: [] });
+      });
+      mockFromPretrained.mockResolvedValueOnce({ segment, dispose: jest.fn() });
+
+      await service.segmentInstances(
+        { data: new Uint8ClampedArray(400), width: 10, height: 10 },
+        { modelId: MODEL },
+        { onStatus },
+      );
+
+      expect(onStatus).toHaveBeenCalledWith('Preparing GPU shaders (first run — this can take a minute)…');
+      expect(onStatus).toHaveBeenCalledWith('Running inference (tile 2 / 6)…');
+    });
+
     it('reports raw download bytes as well as a fraction', async () => {
       // A fraction cannot be turned back into bytes, so a host given only the
       // fraction has to invent them — which renders as "0 MB / 0 MB".

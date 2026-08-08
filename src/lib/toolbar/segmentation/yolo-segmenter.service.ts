@@ -73,8 +73,10 @@ export class YoloSegmenterService implements IInstanceSegmenter {
           ...(opts.simplifyTolerance !== undefined ? { simplifyTolerance: opts.simplifyTolerance } : {}),
           ...(opts.minArea !== undefined ? { minArea: opts.minArea } : {}),
         },
-        onTileProgress: (done, total) =>
-          progress?.onStatus?.(done < total ? `Running inference (tile ${done}/${total})…` : 'Tracing outlines…'),
+        // The worker narrates its own phases — shader warm-up, per tile, merge,
+        // tracing — because only it knows which one it is in. Deriving a second
+        // status from tile counts here would just fight it.
+        onStatus: (s) => progress?.onStatus?.(s),
       },
     );
 
