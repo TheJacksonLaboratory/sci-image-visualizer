@@ -182,6 +182,30 @@ describe('YoloSegmenterService', () => {
       expect(passed.tracePolygons).toBe(true);
     });
 
+    it('keeps detections that have no outline', async () => {
+      // Detection mode produces boxes and no masks. These used to be dropped,
+      // which silently emptied the whole result — the caller saw zero objects
+      // even though the model had found them. The server keeps them too: it
+      // always writes a box feature and only adds outlines when asked.
+      const segment = jest.fn().mockResolvedValue({
+        detections: [{ box: [1, 2, 30, 40], score: 0.9, classId: 0, className: 'Optic-disc-region' }],
+        width: 100,
+        height: 100,
+        classNames: ['Optic-disc-region'],
+      });
+      mockFromPretrained.mockResolvedValueOnce({ segment, dispose: jest.fn() });
+
+      const out = await service.segmentInstances(
+        { data: new Uint8ClampedArray(400), width: 10, height: 10 },
+        { modelId: MODEL, withMasks: false },
+      );
+
+      expect(out.detections).toHaveLength(1);
+      expect(out.detections[0].polygons).toEqual([]);
+      expect(out.detections[0].box).toEqual([1, 2, 30, 40]);
+      expect(out.detections[0].className).toBe('Optic-disc-region');
+    });
+
     it('relays the run phases the worker reports', async () => {
       // Only the worker knows which phase it is in — shader warm-up, per tile,
       // merge, tracing — so the service forwards rather than inventing a status

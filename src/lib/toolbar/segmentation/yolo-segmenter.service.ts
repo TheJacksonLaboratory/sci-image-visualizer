@@ -80,23 +80,24 @@ export class YoloSegmenterService implements IInstanceSegmenter {
       },
     );
 
-    // Detections without geometry are dropped rather than surfaced as empty
-    // regions — a detection whose mask vanished under thresholding has nothing
-    // meaningful to draw or edit.
-    const detections: InstanceDetection[] = [];
-    for (const d of result.detections) {
-      if (!d.polygons || d.polygons.length === 0) continue;
-      detections.push({
-        polygons: d.polygons.map((p) => ({
-          exterior: p.exterior.map(([x, y]): [number, number] => [x, y]),
-          holes: p.holes.map((h) => h.map(([x, y]): [number, number] => [x, y])),
-        })),
-        box: [d.box[0], d.box[1], d.box[2], d.box[3]],
-        score: d.score,
-        classId: d.classId,
-        className: d.className ?? `class${d.classId}`,
-      });
-    }
+    // A detection without an outline is still a detection.
+    //
+    // These used to be dropped, which quietly emptied the entire result in
+    // detection mode: no masks means no polygons, so every object was
+    // discarded and the caller saw nothing at all. The server does not work
+    // that way either — it always writes a box feature and only *adds*
+    // segmentation outlines when asked. Callers get the box and decide what to
+    // do with it.
+    const detections: InstanceDetection[] = result.detections.map((d) => ({
+      polygons: (d.polygons ?? []).map((p) => ({
+        exterior: p.exterior.map(([x, y]): [number, number] => [x, y]),
+        holes: p.holes.map((h) => h.map(([x, y]): [number, number] => [x, y])),
+      })),
+      box: [d.box[0], d.box[1], d.box[2], d.box[3]] as [number, number, number, number],
+      score: d.score,
+      classId: d.classId,
+      className: d.className ?? `class${d.classId}`,
+    }));
 
     return {
       detections,

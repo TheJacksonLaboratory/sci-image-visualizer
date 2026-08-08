@@ -9,6 +9,17 @@ file was added.
 
 ## [Unreleased]
 
+## [0.2.12] — 2026-08-08
+
+### Fixed
+
+- **Detections without an outline are no longer discarded.** A detection with no
+  mask was dropped, which silently emptied the entire result in detection mode:
+  no masks means no polygons, so every object vanished and the caller saw
+  nothing at all despite the model having found them. The server does not behave
+  that way either — it always writes a box feature and only _adds_ segmentation
+  outlines when asked. Callers now receive the box and decide what to do with it.
+
 ## [0.2.11] — 2026-08-08
 
 ### Changed
@@ -256,7 +267,8 @@ file was added.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.11...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.12...HEAD
+[0.2.12]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.8...v0.2.9
