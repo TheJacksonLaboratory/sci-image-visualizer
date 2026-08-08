@@ -60,6 +60,17 @@ export interface InstanceSegmentation {
 export interface InstanceSegmentOptions {
   /** Which registered model to run. Defaults to the registry's default. */
   modelId?: string;
+  /**
+   * Scale to run at, as a divisor of full resolution — the same meaning the
+   * server gives it.
+   *
+   * This is what puts objects at the size the checkpoint was trained on, and it
+   * matters more than any threshold: run a detector at the wrong object scale
+   * and it finds nothing. A caller that can re-crop the source (a tile-backed
+   * viewer) should honour it rather than accepting whatever the display happens
+   * to show.
+   */
+  downsamplingFactor?: number;
   /** Minimum detection confidence, per tile. */
   confidence?: number;
   /** NMS IoU within a single tile. */

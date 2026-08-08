@@ -9,6 +9,29 @@ file was added.
 
 ## [Unreleased]
 
+## [0.2.13] — 2026-08-08
+
+### Added
+
+- **YOLO detection toolbar tool.** A split button next to the cellpose tool:
+  run, pick the checkpoint, open parameters. Unlike the SAM and cellpose tools
+  it takes no prompt — a detector finds objects across a field rather than being
+  pointed at one — so it runs on the current view with nothing to draw first.
+
+  The parameter dialog carries the same vocabulary as the pipeline step and the
+  server tool (confidence, per-tile IoU, cross-tile merge, tile overlap,
+  downsampling factor, segmentation mode, min area, outline simplification), so
+  a result obtained here is reproducible in either. Switching checkpoint
+  re-seeds the parameters from that model's own registry defaults, which encode
+  the scale and crowding it was trained for.
+
+- **`InstanceSegmentOptions.downsamplingFactor`** — the scale to run at, as a
+  divisor of full resolution, matching the server's meaning. It matters more
+  than any threshold: run a detector at the wrong object scale and it finds
+  nothing. The toolbar tool honours it by re-cropping the region through
+  `TileAccessPort`, since a tile-backed image still holds detail the displayed
+  pixels have discarded.
+
 ## [0.2.12] — 2026-08-08
 
 ### Fixed
@@ -267,7 +290,8 @@ file was added.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.12...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.13...HEAD
+[0.2.13]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.9...v0.2.10

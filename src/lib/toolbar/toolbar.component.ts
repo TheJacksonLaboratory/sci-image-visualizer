@@ -75,6 +75,9 @@ export class ToolbarComponent implements OnChanges {
   /** SAM model picker options + current selection (jit-ui#90 P1). */
   @Input() samModels: { id: string; label: string }[] = [];
   @Input() samModelId = '';
+  /** YOLO checkpoints offered by the host's registry, and the active one. */
+  @Input() yoloModels: { id: string; label: string }[] = [];
+  @Input() yoloModelId = '';
 
   @Output() selectPlotType = new EventEmitter<PlotType>();
   /** Intensity (LINE) mode: add another colored line ROI + inset trace. */
@@ -114,6 +117,12 @@ export class ToolbarComponent implements OnChanges {
   @Output() segmentRegions = new EventEmitter<void>();
   /** Run cellpose-SAM (auto) inside each drawn rectangle's crop (jit-ui#90). */
   @Output() segmentCellpose = new EventEmitter<void>();
+  /** Run YOLO detection over the current view. */
+  @Output() detectYolo = new EventEmitter<void>();
+  /** Pick the YOLO checkpoint. */
+  @Output() yoloModelChange = new EventEmitter<string>();
+  /** Open the YOLO parameter dialog. */
+  @Output() openYoloParams = new EventEmitter<void>();
   /** SAM model picker (jit-ui#90 P1). */
   @Output() samModelChange = new EventEmitter<string>();
   @Output() wandSensitivityChange = new EventEmitter<number | undefined>();
@@ -145,6 +154,8 @@ export class ToolbarComponent implements OnChanges {
    *  every change-detection tick, which makes the bound `p-menu` overlay rebuild
    *  its DOM mid-interaction and swallow the click on a menu item. */
   samMenuItems: MenuItem[] = [];
+  /** Same stable-array reasoning as {@link samMenuItems}. */
+  yoloMenuItems: MenuItem[] = [];
 
   /** Rebuild the SAM model menu when the model list or active selection
    *  changes (keeps the array reference stable across other CD ticks). */
@@ -154,6 +165,13 @@ export class ToolbarComponent implements OnChanges {
         label: m.label,
         icon: m.id === this.samModelId ? 'pi pi-check' : 'pi pi-fw',
         command: () => this.samModelChange.emit(m.id),
+      }));
+    }
+    if (changes['yoloModels'] || changes['yoloModelId']) {
+      this.yoloMenuItems = this.yoloModels.map((m) => ({
+        label: m.label,
+        icon: m.id === this.yoloModelId ? 'pi pi-check' : 'pi pi-fw',
+        command: () => this.yoloModelChange.emit(m.id),
       }));
     }
   }

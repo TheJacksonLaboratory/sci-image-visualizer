@@ -468,6 +468,29 @@
                 (onClick)="segmentCellpose.emit()">
         <img src="assets/plotting/cells.svg" class="toolbar-icon-dark" style="width: 1rem"/>
       </p-button>
+
+      <!-- YOLO: detect objects across the current view. Unlike the SAM and
+           cellpose tools it takes no prompt — a detector finds objects in a
+           field rather than being pointed at one — so there is nothing to draw
+           first. Split button: run, pick checkpoint, open parameters. -->
+      <span *ngIf="yoloModels.length" class="p-buttonset segment-split">
+        <p-button icon="pi pi-microchip-ai" size="small" [text]="true"
+                  pTooltip="Detect objects in the current view with YOLO (client-side)"
+                  tooltipPosition="bottom"
+                  (onClick)="detectYolo.emit()">
+        </p-button>
+        <p-button icon="pi pi-chevron-down" size="small" [text]="true"
+                  pTooltip="Pick the YOLO model"
+                  tooltipPosition="bottom"
+                  (onClick)="yoloModelMenu.toggle($event)">
+        </p-button>
+        <p-button icon="pi pi-sliders-h" size="small" [text]="true"
+                  pTooltip="YOLO parameters"
+                  tooltipPosition="bottom"
+                  (onClick)="openYoloParams.emit()">
+        </p-button>
+      </span>
+      <p-menu #yoloModelMenu [model]="yoloMenuItems" [popup]="true" appendTo="body"></p-menu>
     </ng-container>
 
     <ng-container *ngIf="tools.help">

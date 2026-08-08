@@ -24,6 +24,18 @@ import { SAM_MODELS, getDefaultSamModelId, isSamModelReady } from './toolbar/seg
 import { SamToolService } from './toolbar/segmentation/sam-tool.service';
 import { SamPointToolService } from './toolbar/segmentation/sam-point-tool.service';
 import { CellSegmentToolService } from './toolbar/segmentation/cell-segment-tool.service';
+import { YoloDetectToolService } from './toolbar/segmentation/yolo-detect-tool.service';
+import {
+  YOLO_MODELS,
+  isYoloModelReady,
+  getDefaultYoloModelId,
+  setDefaultYoloModel,
+} from './toolbar/segmentation/yolo-model-registry';
+import { INSTANCE_SEGMENTER } from './contracts/instance-segmenter.contract';
+import type {
+  IInstanceSegmenter,
+  InstanceSegmentOptions,
+} from './contracts/instance-segmenter.contract';
 import { RegionToolMode } from './contracts/region-overlay.contract';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from './contracts/toolbar-config';
 import { VIZ_CONFIG, VizConfig } from './contracts/viz-config';
@@ -169,6 +181,17 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    *  offered, so the picker can't select a model that can't run. */
   samModels = SAM_MODELS.filter(isSamModelReady).map((m) => ({ id: m.id, label: m.label }));
   samModelId = getDefaultSamModelId();
+
+  /** YOLO checkpoints with a configured URL, and the active one. */
+  yoloModels = YOLO_MODELS.filter((m) => isYoloModelReady(m.id)).map((m) => ({
+    id: m.id,
+    label: m.label,
+  }));
+  yoloModelId = getDefaultYoloModelId();
+  /** Parameter dialog state. Seeded from the active model's own defaults, which
+   *  encode the scale and crowding each checkpoint was trained for. */
+  showYoloParams = false;
+  yoloParams: InstanceSegmentOptions = this.defaultYoloParams();
   /** SAM download/segment toast state (bound by the `sam` p-toast template). */
   samStatus = '';
   samProgress = 0; // 0..100, encoder download
@@ -301,6 +324,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     private session: VisualizerStore,
     private samTool: SamToolService,
     private cellSegmentTool: CellSegmentToolService,
+    private yoloDetectTool: YoloDetectToolService,
+    @Inject(INSTANCE_SEGMENTER) private instanceSegmenter: IInstanceSegmenter,
     private samPointTool: SamPointToolService,
     private regionOps: RegionOpsService,
     @Optional() @Inject(VIZ_CONFIG) private vizConfig?: VizConfig,
@@ -1403,6 +1428,50 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   async segmentCellpose() {
     await this.runSegmentWithToast('Cellpose', this.cellSegmentTool, () =>
       this.plotService.segmentRectanglesCellpose(),
+    );
+  }
+
+  /** Per-model defaults from the registry — what the checkpoint was trained for. */
+  private defaultYoloParams(): InstanceSegmentOptions {
+    const def = YOLO_MODELS.find((m) => m.id === getDefaultYoloModelId()) ?? YOLO_MODELS[0];
+    return {
+      modelId: def?.id,
+      confidence: def?.defaults.confidence ?? 0.6,
+      iouThreshold: def?.defaults.iouThreshold ?? 0.5,
+      mergeThreshold: def?.defaults.mergeThreshold ?? 0.3,
+      overlapX: def?.defaults.overlapX ?? 0,
+      overlapY: def?.defaults.overlapY ?? 0,
+      withMasks: true,
+      simplifyTolerance: 1,
+      minArea: 0,
+    };
+  }
+
+  /** Switching checkpoint re-seeds the parameters, since the defaults belong to
+   *  the model rather than to the tool. */
+  onYoloModelChange(id: string): void {
+    this.yoloModelId = id;
+    setDefaultYoloModel(id);
+    this.yoloParams = { ...this.defaultYoloParams(), modelId: id };
+  }
+
+  openYoloParams(): void {
+    this.showYoloParams = true;
+  }
+
+  resetYoloParams(): void {
+    this.yoloParams = { ...this.defaultYoloParams(), modelId: this.yoloModelId };
+  }
+
+  /** Detect objects across the current view. No prompt: a detector finds objects
+   *  in a field rather than being pointed at one. Reuses the shared segmentation
+   *  toast so progress and status read the same as the SAM/cellpose tools. */
+  async detectYolo() {
+    await this.runSegmentWithToast('YOLO', this.yoloDetectTool, () =>
+      this.yoloDetectTool.detectInView(this.plotService, this.instanceSegmenter, {
+        ...this.yoloParams,
+        modelId: this.yoloModelId,
+      }),
     );
   }
 

@@ -109,6 +109,15 @@ function makeComponent(plot: any): VisualizerComponent {
         busy$: new BehaviorSubject(false),
         progress$: new BehaviorSubject(-1),
       } as any,
+      // YoloDetectToolService
+      {
+        status$: new BehaviorSubject(''),
+        busy$: new BehaviorSubject(false),
+        progress$: new BehaviorSubject(-1),
+        detectInView: jest.fn().mockResolvedValue(0),
+      } as any,
+      // INSTANCE_SEGMENTER
+      { segmentInstances: jest.fn() } as any,
       // SamPointToolService
       {
         status$: new BehaviorSubject(''),
@@ -612,6 +621,11 @@ describe('VisualizerComponent — render preemption (#5)', () => {
       new VisualizerStore(),
       { status$: new BehaviorSubject(''), busy$: new BehaviorSubject(false), progress$: new BehaviorSubject(-1) } as any,
       { status$: new BehaviorSubject(''), busy$: new BehaviorSubject(false), progress$: new BehaviorSubject(-1) } as any,
+      // YoloDetectToolService
+      { status$: new BehaviorSubject(''), busy$: new BehaviorSubject(false),
+        progress$: new BehaviorSubject(-1), detectInView: jest.fn().mockResolvedValue(0) } as any,
+      // INSTANCE_SEGMENTER
+      { segmentInstances: jest.fn() } as any,
       { status$: new BehaviorSubject(''), busy$: new BehaviorSubject(false), progress$: new BehaviorSubject(-1) } as any,
       new RegionOpsService(new WandService()),
     );

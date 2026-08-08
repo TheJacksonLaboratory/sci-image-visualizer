@@ -51,6 +51,8 @@
   [brushSize]="brushSize"
   [samModels]="samModels"
   [samModelId]="samModelId"
+  [yoloModels]="yoloModels"
+  [yoloModelId]="yoloModelId"
   [vertexEraserRadius]="vertexEraserRadius"
   [canUndo]="canUndoRegion"
   [canRedo]="canRedoRegion"
@@ -84,6 +86,9 @@
   (segmentRegions)="segmentRegions()"
   (segmentCellpose)="segmentCellpose()"
   (samModelChange)="onSamModelChange($event)"
+  (detectYolo)="detectYolo()"
+  (yoloModelChange)="onYoloModelChange($event)"
+  (openYoloParams)="openYoloParams()"
   (wandSensitivityChange)="onWandSensitivityChange($event)"
   (brushSizeChange)="onBrushSizeChange($event)"
   (vertexEraserRadiusChange)="onVertexEraserRadiusChange($event)">
@@ -188,3 +193,63 @@
   </ng-template>
 </p-dialog>
 
+<!-- YOLO parameters. Same vocabulary as the pipeline step and the server tool,
+     so a result obtained here is reproducible there. Defaults come from the
+     active checkpoint's own registry entry. -->
+<p-dialog header="YOLO parameters" [(visible)]="showYoloParams" [modal]="true"
+          [style]="{width: '30rem'}" [draggable]="false" [resizable]="false" appendTo="body">
+  <div class="grid formgrid p-fluid">
+    <div class="field col-6">
+      <label class="text-sm">Confidence</label>
+      <p-inputNumber [(ngModel)]="yoloParams.confidence" [min]="0" [max]="1" [step]="0.05"
+                     [minFractionDigits]="2" [showButtons]="true"></p-inputNumber>
+    </div>
+    <div class="field col-6">
+      <label class="text-sm">IoU (per tile)</label>
+      <p-inputNumber [(ngModel)]="yoloParams.iouThreshold" [min]="0.1" [max]="0.95" [step]="0.05"
+                     [minFractionDigits]="2" [showButtons]="true"></p-inputNumber>
+    </div>
+    <div class="field col-6">
+      <label class="text-sm">Merge (cross-tile)</label>
+      <p-inputNumber [(ngModel)]="yoloParams.mergeThreshold" [min]="0.1" [max]="0.95" [step]="0.05"
+                     [minFractionDigits]="2" [showButtons]="true"></p-inputNumber>
+    </div>
+    <div class="field col-6">
+      <label class="text-sm">Downsampling factor</label>
+      <p-inputNumber [(ngModel)]="yoloParams.downsamplingFactor" [min]="1" [max]="10" [step]="1"
+                     [showButtons]="true"></p-inputNumber>
+    </div>
+    <div class="field col-6">
+      <label class="text-sm">Tile overlap X (%)</label>
+      <p-inputNumber [(ngModel)]="yoloParams.overlapX" [min]="0" [max]="90" [step]="5"
+                     [showButtons]="true"></p-inputNumber>
+    </div>
+    <div class="field col-6">
+      <label class="text-sm">Tile overlap Y (%)</label>
+      <p-inputNumber [(ngModel)]="yoloParams.overlapY" [min]="0" [max]="90" [step]="5"
+                     [showButtons]="true"></p-inputNumber>
+    </div>
+    <div class="field col-6">
+      <label class="text-sm">Min object area (px²)</label>
+      <p-inputNumber [(ngModel)]="yoloParams.minArea" [min]="0" [max]="100000" [step]="10"
+                     [showButtons]="true"></p-inputNumber>
+    </div>
+    <div class="field col-6">
+      <label class="text-sm">Outline simplification (px)</label>
+      <p-inputNumber [(ngModel)]="yoloParams.simplifyTolerance" [min]="0" [max]="10" [step]="0.5"
+                     [minFractionDigits]="1" [showButtons]="true"></p-inputNumber>
+    </div>
+    <div class="field col-12 flex align-items-center gap-2">
+      <p-checkbox [(ngModel)]="yoloParams.withMasks" [binary]="true" inputId="yoloMasks"></p-checkbox>
+      <label for="yoloMasks" class="text-sm mb-0">
+        Segmentation mode — trace object outlines. Off detects bounding boxes only, which is
+        considerably faster.
+      </label>
+    </div>
+  </div>
+  <ng-template pTemplate="footer">
+    <p-button label="Reset to model defaults" [text]="true" size="small"
+              (onClick)="resetYoloParams()"></p-button>
+    <p-button label="Close" size="small" (onClick)="showYoloParams = false"></p-button>
+  </ng-template>
+</p-dialog>
