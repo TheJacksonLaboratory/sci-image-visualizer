@@ -24,6 +24,8 @@ export * from './lib/contracts/display-types';
 export * from './lib/contracts/sam.contract';
 export * from './lib/contracts/cell-segmenter.contract';
 export { CellposeSegmenterService } from './lib/toolbar/segmentation/cellpose-segmenter.service';
+export * from './lib/contracts/instance-segmenter.contract';
+export { YoloSegmenterService } from './lib/toolbar/segmentation/yolo-segmenter.service';
 
 // ── Generic client-side image utilities (shared with the host's pipeline) ──
 export { ProcessingImage } from './lib/processing/processing-image';
@@ -35,6 +37,12 @@ export {
   SAM_MODELS, DEFAULT_SAM_MODEL_ID, getSamModel, isSamModelReady, setSamModelUrls,
   setDefaultSamModel, getDefaultSamModelId,
 } from './lib/toolbar/segmentation/sam-model-registry';
+
+// ── YOLO instance-segmentation model registry (same repointing story) ─────
+export {
+  YOLO_MODELS, DEFAULT_YOLO_MODEL_ID, getYoloModel, isYoloModelReady, setYoloModelUrls,
+  setDefaultYoloModel, getDefaultYoloModelId, YoloModelDef,
+} from './lib/toolbar/segmentation/yolo-model-registry';
 
 // ── onnxruntime-web WASM location (host overrides once, at app init) ───────
 export { setOrtWasmBase, getOrtWasmBase } from './lib/toolbar/segmentation/ort-runtime-config';
