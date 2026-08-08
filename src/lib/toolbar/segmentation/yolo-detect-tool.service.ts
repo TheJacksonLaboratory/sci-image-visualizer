@@ -21,6 +21,9 @@ import type { IInstanceSegmenter, InstanceSegmentOptions } from '../../contracts
  * Exposes the same `status$` / `busy$` / `progress$` surface as the cellpose
  * tool so the host's shared segmentation toast drives it unchanged.
  */
+/** Marks regions this tool produced, so a re-run can replace only its own. */
+export const YOLO_REGION_SOURCE = 'yolo';
+
 @Injectable({ providedIn: 'root' })
 export class YoloDetectToolService {
   readonly status$ = new BehaviorSubject<string>('');
@@ -114,9 +117,13 @@ export class YoloDetectToolService {
         return 0;
       }
 
-      // Append. A detection run must not discard annotations drawn by hand or
-      // produced by another tool.
-      viz.setRegions([...(viz.getRegions() ?? []), ...added]);
+      // Replace this tool's own previous output, keep everything else. Appending
+      // unconditionally made every tuning run stack onto the last, so the
+      // viewer accumulated overlapping results from parameters no longer in
+      // effect. Hand-drawn regions and other tools' output carry no `source`
+      // and are untouched.
+      const kept = (viz.getRegions() ?? []).filter((r) => r.source !== YOLO_REGION_SOURCE);
+      viz.setRegions([...kept, ...added]);
       this.status$.next(`Added ${added.length} region(s).`);
       return added.length;
     } catch (err) {
@@ -192,6 +199,7 @@ export class YoloDetectToolService {
 
     const region = new Region();
     region.bounds = poly;
+    region.source = YOLO_REGION_SOURCE;
     // The class name drives preset colour resolution; leaving `color` unset lets
     // an existing preset for this class win.
     region.label = className;

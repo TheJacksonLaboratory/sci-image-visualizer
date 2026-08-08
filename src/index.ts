@@ -26,7 +26,7 @@ export * from './lib/contracts/cell-segmenter.contract';
 export { CellposeSegmenterService } from './lib/toolbar/segmentation/cellpose-segmenter.service';
 export * from './lib/contracts/instance-segmenter.contract';
 export { YoloSegmenterService } from './lib/toolbar/segmentation/yolo-segmenter.service';
-export { YoloDetectToolService } from './lib/toolbar/segmentation/yolo-detect-tool.service';
+export { YoloDetectToolService, YOLO_REGION_SOURCE } from './lib/toolbar/segmentation/yolo-detect-tool.service';
 
 // ── Generic client-side image utilities (shared with the host's pipeline) ──
 export { ProcessingImage } from './lib/processing/processing-image';

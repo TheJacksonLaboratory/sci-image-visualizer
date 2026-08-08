@@ -99,7 +99,7 @@ describe('YoloDetectToolService', () => {
     expect(region.bounds.ypoints).toEqual([20, 20, 40, 40]);
   });
 
-  it('appends rather than replacing, so hand-drawn work survives a run', async () => {
+  it('keeps hand-drawn work, which carries no source marker', async () => {
     const mine = { label: 'hand-drawn' };
     const viz = makeViz({ existing: [mine] });
     const seg = segmenterReturning([boxOnly(1, 1, 5, 5)]);
@@ -109,6 +109,33 @@ describe('YoloDetectToolService', () => {
     const committed = viz.setRegions.mock.calls[0][0];
     expect(committed).toHaveLength(2);
     expect(committed[0]).toBe(mine);
+  });
+
+  it('replaces its own previous output instead of stacking on it', async () => {
+    // Every tuning run used to pile onto the last, so the viewer accumulated
+    // overlapping results from parameters no longer in effect.
+    const stale = { label: 'retina', source: 'yolo' };
+    const mine = { label: 'hand-drawn' };
+    const otherTool = { label: 'cell', source: 'cellpose' };
+    const viz = makeViz({ existing: [stale, mine, otherTool] });
+    const seg = segmenterReturning([boxOnly(1, 1, 5, 5)]);
+
+    await tool.detectInView(viz, seg as any);
+
+    const committed = viz.setRegions.mock.calls[0][0];
+    expect(committed).not.toContain(stale);
+    expect(committed).toContain(mine);
+    expect(committed).toContain(otherTool);
+    expect(committed).toHaveLength(3); // hand-drawn + other tool + the new one
+  });
+
+  it('marks what it produces so the next run can find it', async () => {
+    const viz = makeViz();
+    const seg = segmenterReturning([boxOnly(1, 1, 5, 5)]);
+
+    await tool.detectInView(viz, seg as any);
+
+    expect(viz.setRegions.mock.calls[0][0][0].source).toBe('yolo');
   });
 
   it('does not touch the region store when nothing is detected', async () => {

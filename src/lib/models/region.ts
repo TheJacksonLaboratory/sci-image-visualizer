@@ -1,7 +1,6 @@
 import { ShapeSelection } from './shape';
 
 export class Region {
-
   /** Stable, unique identity for selection and equality. Minted by
    *  PlotlyService when a region first enters the system. Never derived
    *  from array index — name collisions across delete/add cycles must
@@ -15,6 +14,17 @@ export class Region {
    *  intensity tool, sampled into the inset) from annotation regions (owned by
    *  the Region Editor). Both backends (Plotly, OSD) honour it. */
   kind?: 'profile';
+  /**
+   * Which automated tool produced this region, e.g. `'yolo'`. Absent on
+   * anything the user drew.
+   *
+   * Lets a tool replace its *own* previous output on a re-run without touching
+   * hand-drawn work or another tool's results — which matters while tuning
+   * parameters, where every run would otherwise pile onto the last. Identity
+   * comparison is not a substitute: regions may be re-minted as they pass
+   * through the store, so the marker has to travel with the data.
+   */
+  source?: string;
   color?: string; // hex string, e.g. '#RRGGBB' (the historical "[r, g, b]" note is stale)
   // class label
   label?: string;
@@ -57,7 +67,7 @@ export class Region {
     if (this.bounds instanceof Rectangle) {
       return `x: ${this.bounds.x}, y: ${this.bounds.y},
               width: ${this.bounds.width}, height: ${this.bounds.height}`;
-    } else if (this.bounds instanceof Polygon){
+    } else if (this.bounds instanceof Polygon) {
       let path = 'M';
       // display as path
       for (let i = 0; i < this.bounds.npoints; i++) {
@@ -81,14 +91,14 @@ export class Region {
    * @param showRegionLabel
    * @return ShapeSelection
    */
-   getShape(showRegionLabel: boolean = true): ShapeSelection {
+  getShape(showRegionLabel: boolean = true): ShapeSelection {
     const shape = new ShapeSelection();
     shape.id = this.id;
     shape.name = this.name;
     shape.editable = true;
     shape.line = {
       color: this.color ? this.color : this.shapeColor,
-      width: 3
+      width: 3,
     };
     shape.fileName = this.filename;
     if (this.kind === 'profile') shape.kind = 'profile';
@@ -97,7 +107,7 @@ export class Region {
         text: `${this.label}`,
         texttemplate: `${this.label}`,
         font: { color: this.color ? this.color : this.shapeColor },
-        textposition: 'top left'
+        textposition: 'top left',
       };
     } else {
       shape.label = {};
@@ -211,12 +221,15 @@ export class MultiPolygon {
   polygons: Polygon[] = [];
 }
 
-export type Bounds = Rectangle | Polygon | {
-  x?: number;
-  y?: number;
-  width?: number;
-  height?: number;
-  npoints?: number;
-  xpoints?: number[];
-  ypoints?: number[];
-};
+export type Bounds =
+  | Rectangle
+  | Polygon
+  | {
+      x?: number;
+      y?: number;
+      width?: number;
+      height?: number;
+      npoints?: number;
+      xpoints?: number[];
+      ypoints?: number[];
+    };

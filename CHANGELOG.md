@@ -9,6 +9,22 @@ file was added.
 
 ## [Unreleased]
 
+## [0.2.16] — 2026-08-08
+
+### Added
+
+- **`Region.source`** — which automated tool produced a region, absent on
+  anything the user drew. A tool can then replace its _own_ previous output on
+  a re-run without touching hand-drawn work or another tool's results.
+
+  The YOLO tool now does exactly that. Appending unconditionally meant every
+  tuning run stacked onto the last, so the viewer accumulated overlapping
+  results from parameters no longer in effect — after four runs it read as
+  full coverage when a single run had a quarter of the band missing.
+
+  A marker on the data rather than object identity, because regions may be
+  re-minted as they pass through the store.
+
 ## [0.2.15] — 2026-08-08
 
 ### Changed
@@ -320,7 +336,8 @@ file was added.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.15...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.16...HEAD
+[0.2.16]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.15...v0.2.16
 [0.2.15]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.12...v0.2.13
