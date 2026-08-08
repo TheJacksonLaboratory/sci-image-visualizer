@@ -1,10 +1,6 @@
 import { Injectable } from '@angular/core';
 import { getOrtWasmBase } from './ort-runtime-config';
-import {
-  getDefaultYoloModelId,
-  getYoloModel,
-  type YoloModelDef,
-} from './yolo-model-registry';
+import { getDefaultYoloModelId, getYoloModel, type YoloModelDef } from './yolo-model-registry';
 
 import type {
   IInstanceSegmenter,
@@ -70,15 +66,11 @@ export class YoloSegmenterService implements IInstanceSegmenter {
         ...(opts.classFilter ? { classFilter: opts.classFilter } : {}),
         tracePolygons: true,
         traceOptions: {
-          ...(opts.simplifyTolerance !== undefined
-            ? { simplifyTolerance: opts.simplifyTolerance }
-            : {}),
+          ...(opts.simplifyTolerance !== undefined ? { simplifyTolerance: opts.simplifyTolerance } : {}),
           ...(opts.minArea !== undefined ? { minArea: opts.minArea } : {}),
         },
         onTileProgress: (done, total) =>
-          progress?.onStatus?.(
-            done < total ? `Running inference (tile ${done}/${total})…` : 'Tracing outlines…',
-          ),
+          progress?.onStatus?.(done < total ? `Running inference (tile ${done}/${total})…` : 'Tracing outlines…'),
       },
     );
 
@@ -152,15 +144,37 @@ export class YoloSegmenterService implements IInstanceSegmenter {
     return this.instances.has(modelId);
   }
 
-  /** Release one model, or all of them. Safe to call on a model never loaded. */
+  /**
+   * Release one model, or all of them. Safe to call on a model never loaded.
+   *
+   * In-flight loads are torn down too, not just warm ones. Simply dropping the
+   * pending promise and returning would let the load finish afterwards,
+   * re-populate {@link instances}, and strand a live worker and ORT session that
+   * nothing owns — disposal would have reported success while leaking. So a load
+   * that is still running is awaited and then released.
+   */
   async dispose(modelId?: string): Promise<void> {
-    const ids = modelId ? [modelId] : [...this.instances.keys()];
-    for (const id of ids) {
-      const seg = this.instances.get(id);
-      this.instances.delete(id);
-      this.loading.delete(id);
-      if (seg) await seg.dispose();
-    }
+    const ids = modelId ? [modelId] : [...new Set([...this.instances.keys(), ...this.loading.keys()])];
+    await Promise.all(ids.map((id) => this.disposeOne(id)));
+  }
+
+  private async disposeOne(id: string): Promise<void> {
+    const pending = this.loading.get(id);
+    const loaded = this.instances.get(id);
+    this.instances.delete(id);
+    this.loading.delete(id);
+
+    if (loaded) await loaded.dispose();
+    if (!pending) return;
+
+    // A pending load assigns instances[id] before its promise resolves, so by
+    // the time this await returns the entry is back. Clear it only if it still
+    // points at what *this* load produced — a newer load started in the
+    // meantime owns its own entry and must not be evicted.
+    const seg = await pending.catch(() => null);
+    if (!seg || seg === loaded) return;
+    if (this.instances.get(id) === seg) this.instances.delete(id);
+    await seg.dispose();
   }
 
   private requireModel(modelId: string): YoloModelDef {
