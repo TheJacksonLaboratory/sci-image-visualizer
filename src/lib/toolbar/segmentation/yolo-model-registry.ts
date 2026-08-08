@@ -51,6 +51,37 @@ const EYE_DEFAULTS = {
   overlapY: 0,
 };
 
+/**
+ * The retina is an elongated band spanning the whole field, so it crosses tile
+ * seams wherever they fall.
+ *
+ * With no overlap the tiles butt together at fixed boundaries: a structure
+ * sitting across a seam is cut in half, each tile sees only a slice, and the
+ * slice often fails to clear the confidence threshold — so the object vanishes
+ * exactly where the seam lands. Observed as multi-thousand-pixel holes in the
+ * middle of an otherwise continuous retina, which closed once overlap was
+ * raised.
+ *
+ * An object of size `s` is guaranteed to sit wholly inside some tile only when
+ * the overlap is at least `s / tileSize`; at 60% that covers anything up to
+ * ~307px of a 512px tile. The server's own table uses 0 here and has the same
+ * blind spot — this deliberately diverges from it.
+ */
+const RETINA_DEFAULTS = {
+  confidence: 0.6,
+  iouThreshold: 0.5,
+  // Cross-tile merging uses intersection-over-*smaller*, so at 0.3 a fragment is
+  // discarded once 30% of its own area is covered by a larger box — even when
+  // most of it lies outside. On a band detected as a chain of overlapping
+  // fragments that deletes the middle ones. Measured on one slide: 0.3 gave two
+  // boxes covering 75% of the band with a 3150px hole through it; 0.8 gave four
+  // boxes covering 100% with no hole, at the cost of two overlapping pairs.
+  // Matches the value jit-ui already sends the server for this checkpoint.
+  mergeThreshold: 0.8,
+  overlapX: 60,
+  overlapY: 60,
+};
+
 // Embryos are large, touch each other, and are imaged at native scale — hence
 // the heavy overlap and the far looser merge thresholds.
 const EMBRYO_DEFAULTS = {
@@ -72,7 +103,7 @@ export const YOLO_MODELS: YoloModelDef[] = [
     id: 'yolov8x-seg-retina',
     label: 'Retina',
     modelUrl: `${HF}/yolov8x-seg-retina-onnx/resolve/main/model.fp16w.onnx`,
-    defaults: { ...EYE_DEFAULTS },
+    defaults: { ...RETINA_DEFAULTS },
   },
   {
     id: 'yolov8x-seg-embryo-m2',

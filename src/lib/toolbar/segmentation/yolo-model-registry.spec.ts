@@ -39,6 +39,18 @@ describe('yolo-model-registry', () => {
     }
   });
 
+  it('gives the retina heavy tile overlap, since it spans seams', () => {
+    // Zero overlap cuts an elongated structure at every tile boundary and the
+    // slices fall below threshold, leaving holes mid-object. Diverges from the
+    // server table deliberately.
+    const retina = getYoloModel('yolov8x-seg-retina')!;
+    expect(retina.defaults.overlapX).toBe(60);
+    expect(retina.defaults.overlapY).toBe(60);
+    // Intersection-over-smaller at 0.3 deleted the middle of the band; measured
+    // 75% coverage with a 3150px hole against 100% and none at 0.8.
+    expect(retina.defaults.mergeThreshold).toBe(0.8);
+  });
+
   it('gives the embryo models their heavier overlap and looser merge defaults', () => {
     const optic = getYoloModel('yolov8x-seg-opticnerve')!;
     const embryo = getYoloModel('yolov8x-seg-embryo-m2')!;

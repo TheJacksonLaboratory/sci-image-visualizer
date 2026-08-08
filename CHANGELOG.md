@@ -9,6 +9,24 @@ file was added.
 
 ## [Unreleased]
 
+## [0.2.15] — 2026-08-08
+
+### Changed
+
+- **Retina defaults: 60% tile overlap and a 0.8 cross-tile merge threshold.**
+  Cross-tile merging uses intersection-over-_smaller_, so at 0.3 a fragment is
+  discarded once 30% of its own area is covered by a larger box — even when most
+  of it lies outside. On a structure detected as a chain of overlapping
+  fragments that deletes the middle ones.
+
+  Measured on one slide: at 0.3, two boxes covering 75% of the band with a
+  3150px hole straight through it; at 0.8, four boxes covering 100% with no
+  hole, costing two overlapping pairs. The merge value now matches what jit-ui
+  already sends the server for this checkpoint.
+
+  This diverges from the server's own table, which uses 0 overlap and 0.3 here
+  and has the same blind spot.
+
 ## [0.2.14] — 2026-08-08
 
 ### Fixed
@@ -302,7 +320,8 @@ file was added.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.14...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.15...HEAD
+[0.2.15]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.11...v0.2.12
