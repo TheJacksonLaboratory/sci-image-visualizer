@@ -10,6 +10,7 @@
   "allowedNonPeerDependencies": [
     "cellpose-js",
     "fast-png",
+    "yolo-segdetect-js",
     "napari-js",
     "openseadragon",
     "plotly.js-dist-min"
