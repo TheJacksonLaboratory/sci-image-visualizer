@@ -79,6 +79,20 @@ export interface InstanceSegmentOptions {
   simplifyTolerance?: number;
   /** Drop instances whose outline area is below this, in square pixels. */
   minArea?: number;
+  /**
+   * Set false to detect boxes without assembling masks — substantially faster,
+   * since mask assembly dominates the cost of a run. Detections then carry a
+   * box and class but no outline, so nothing can be committed as a region.
+   */
+  withMasks?: boolean;
+  /**
+   * Abort an in-progress run.
+   *
+   * Cancellation is cooperative and checked at tile boundaries, so it takes
+   * effect within roughly one tile rather than instantly — a `session.run()`
+   * already in flight cannot be interrupted.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -90,6 +104,16 @@ export interface InstanceSegmentOptions {
 export interface InstanceSegmentProgress {
   /** Model-download progress, 0..1 (first run only). */
   onProgress?: (fraction: number) => void;
+  /**
+   * Raw download byte counts, for hosts that render a size ("142 / 287 MB")
+   * rather than a bare percentage. `total` is null when the response carried no
+   * Content-Length.
+   *
+   * A fraction alone cannot be turned back into bytes, so a host given only
+   * {@link onProgress} has to invent the numbers — which reads as "0 MB / 0 MB"
+   * the moment it does.
+   */
+  onBytes?: (loaded: number, total: number | null) => void;
   /** Human-readable phase, e.g. 'Running inference (tile 3/8)…'. */
   onStatus?: (status: string) => void;
 }

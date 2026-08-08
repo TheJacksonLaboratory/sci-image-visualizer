@@ -9,6 +9,27 @@ file was added.
 
 ## [Unreleased]
 
+## [0.2.10] — 2026-08-08
+
+### Added
+
+- **`InstanceSegmentOptions.signal`** — cancellation for a YOLO run. Previously
+  the contract had no way to express it, so a host holding an `AbortController`
+  could not stop a run at all; the only escape was reloading the page.
+  Cancellation is cooperative and lands at a tile boundary.
+- **`InstanceSegmentOptions.withMasks`** — run detection without mask assembly.
+  Mask assembly dominates a run's cost, so a host in detection mode should not
+  pay for it. Outline tracing follows the same flag; there is nothing to trace
+  without masks.
+- **`InstanceSegmentProgress.onBytes`** — raw download byte counts alongside the
+  0..1 fraction. A fraction cannot be converted back into bytes, so a host that
+  renders a size had to invent the numbers, which showed up as "0 MB / 0 MB".
+
+### Changed
+
+- Requires `yolo-segdetect-js@^0.1.1`, which bounds mask assembly. Under 0.1.0 a
+  detection with an out-of-range box could make a run appear to hang.
+
 ## [0.2.9] — 2026-08-08
 
 ### Added
@@ -225,7 +246,8 @@ file was added.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.9...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.10...HEAD
+[0.2.10]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.6...v0.2.7

@@ -138,6 +138,73 @@ describe('YoloSegmenterService', () => {
     await expect(service.dispose()).resolves.toBeUndefined();
   });
 
+  describe('run options', () => {
+    /** Load a model and capture the options handed to segment(). */
+    async function runWith(opts: Record<string, unknown>, progress?: unknown) {
+      const segment = jest.fn().mockResolvedValue({
+        detections: [],
+        width: 10,
+        height: 10,
+        classNames: ['Optic-disc-region'],
+      });
+      const dispose = jest.fn().mockResolvedValue(undefined);
+      mockFromPretrained.mockResolvedValueOnce({ segment, dispose });
+
+      await service.segmentInstances(
+        { data: new Uint8ClampedArray(400), width: 10, height: 10 },
+        { modelId: MODEL, ...opts },
+        progress as never,
+      );
+      return segment.mock.calls[0][1];
+    }
+
+    it('forwards the abort signal so a run can actually be cancelled', async () => {
+      const controller = new AbortController();
+      const passed = await runWith({ signal: controller.signal });
+      expect(passed.signal).toBe(controller.signal);
+    });
+
+    it('omits the signal entirely when none is given', async () => {
+      const passed = await runWith({});
+      expect('signal' in passed).toBe(false);
+    });
+
+    it('skips mask work when masks are not wanted', async () => {
+      // Mask assembly dominates a run, so detection-mode must not pay for it —
+      // and there is nothing to trace without masks.
+      const passed = await runWith({ withMasks: false });
+      expect(passed.withMasks).toBe(false);
+      expect(passed.tracePolygons).toBe(false);
+    });
+
+    it('traces outlines by default', async () => {
+      const passed = await runWith({});
+      expect(passed.tracePolygons).toBe(true);
+    });
+
+    it('reports raw download bytes as well as a fraction', async () => {
+      // A fraction cannot be turned back into bytes, so a host given only the
+      // fraction has to invent them — which renders as "0 MB / 0 MB".
+      const onBytes = jest.fn();
+      const onProgress = jest.fn();
+      const segment = jest.fn().mockResolvedValue({ detections: [], width: 10, height: 10, classNames: [] });
+      type LoadOpts = { onProgress: (p: { loaded: number; total: number | null }) => void };
+      mockFromPretrained.mockImplementationOnce((_url: string, o: LoadOpts) => {
+        o.onProgress({ loaded: 5_000_000, total: 20_000_000 });
+        return Promise.resolve({ segment, dispose: jest.fn() });
+      });
+
+      await service.segmentInstances(
+        { data: new Uint8ClampedArray(400), width: 10, height: 10 },
+        { modelId: MODEL },
+        { onBytes, onProgress },
+      );
+
+      expect(onBytes).toHaveBeenCalledWith(5_000_000, 20_000_000);
+      expect(onProgress).toHaveBeenCalledWith(0.25);
+    });
+  });
+
   it('refuses an unknown model id rather than loading something wrong', () => {
     // Note the asymmetry: getModel validates before entering its async body, so
     // it throws synchronously, whereas segmentInstances (an async method) turns

@@ -44,6 +44,7 @@ export class YoloSegmenterService implements IInstanceSegmenter {
       modelId,
       (loaded, total) => {
         if (total) progress?.onProgress?.(loaded / total);
+        progress?.onBytes?.(loaded, total);
         if (loaded > 0 && !announcedDownload) {
           announcedDownload = true;
           progress?.onStatus?.(`Downloading ${def.label} model…`);
@@ -64,7 +65,10 @@ export class YoloSegmenterService implements IInstanceSegmenter {
         ...(opts.maskThreshold !== undefined ? { maskThreshold: opts.maskThreshold } : {}),
         ...(opts.maxDetections !== undefined ? { maxDetections: opts.maxDetections } : {}),
         ...(opts.classFilter ? { classFilter: opts.classFilter } : {}),
-        tracePolygons: true,
+        ...(opts.withMasks !== undefined ? { withMasks: opts.withMasks } : {}),
+        ...(opts.signal ? { signal: opts.signal } : {}),
+        // Only worth tracing when there are masks to trace.
+        tracePolygons: opts.withMasks !== false,
         traceOptions: {
           ...(opts.simplifyTolerance !== undefined ? { simplifyTolerance: opts.simplifyTolerance } : {}),
           ...(opts.minArea !== undefined ? { minArea: opts.minArea } : {}),
