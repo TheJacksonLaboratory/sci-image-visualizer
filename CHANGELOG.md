@@ -9,6 +9,84 @@ file was added.
 
 ## [Unreleased]
 
+## [0.2.18] — 2026-08-09
+
+### Fixed
+
+- **YOLO detections keep their interior voids.** `YoloDetectToolService` built
+  each `Region` from `poly.exterior` alone, so a mask with a hole through it was
+  committed solid. This does not look like _lost_ geometry, it looks like a
+  detection that **over-covers** — which is the harder failure to notice.
+
+  Holes now travel through the same view→image transform as the exterior; a ring
+  left in view-local pixels lands elsewhere on the slide, frequently outside its
+  own exterior. Each polygon already owned its own rings (the tracer emits them
+  that way, and the segmenter service mapped them through), so a mask that splits
+  into several polygons under thresholding needs no disambiguation — the rings
+  were simply being dropped at the last step.
+
+  Rings that simplification reduces below three points are dropped rather than
+  emitted as geometry that bounds nothing, and `holes` is left unset rather than
+  set to `[]`, so a solid region does not round-trip through export as a donut
+  with no rings.
+
+### Added
+
+- **`RetinalSegmenterService.getModel` accepts an `AbortSignal`.** The retinal
+  checkpoint is ~590 MB; previously a cancel reached the inference but not the
+  download, so the transfer kept running and the UI sat in "Cancelling" until it
+  finished. `segmentSemantic` passes the run's own signal through.
+
+  Cancellation lands within one graph compile rather than instantly: ORT session
+  creation cannot be interrupted once started, so the signal is rechecked after
+  the download and before the session is built.
+
+  A cancel deliberately does **not** abort a load already in flight. That promise
+  is shared — the toolbar tool and a host's pipeline both use this service — so
+  one caller's cancel must not tear the model out from under another. A second
+  caller joining an in-flight load simply waits.
+
+### Changed
+
+- **`jax-ai-js` ^0.1.0 → ^0.1.1**, which is where the signal plumbing lives:
+  `fetchModel` already honoured a signal, but `fromPretrained` never passed one.
+  No API breaks; the option is additive.
+
+## [0.2.17] — 2026-08-09
+
+### Added
+
+- **Retinal-layer segmentation** — a toolbar tool, a parameter dialog, and
+  `ISemanticSegmenter` / `SEMANTIC_SEGMENTER`, backed by `jax-ai-js`.
+
+  A third segmentation port rather than a reuse of the other two, because the
+  output is a genuinely different shape: cellpose separates touching instances
+  of one class, YOLO returns overlapping classified objects with a confidence
+  each, and this returns layers that tile the image, never overlap, and where
+  two disconnected patches of a class are one finding rather than two objects.
+  There is no per-object confidence and no NMS because there are no objects.
+
+  **Only the VNet checkpoint is enabled.** Against the ground-truth masks
+  shipped with them, VNet scores mIoU 0.9061 and the three ResUNet-a variants
+  0.27–0.31. That is not quantization damage — each ONNX export reproduces its
+  own Keras original exactly. They disagree with the _masks_, folding
+  ground-truth class 1 into their class 2 and class 3 into background, and no
+  relabelling rescues them (the best of all 24 permutations reaches 0.36). Their
+  weights are unpublished pending that question, so their registry entries carry
+  an empty `modelUrl` and a specific reason. They are listed rather than deleted
+  so a host can show them as unavailable instead of pretending the server's
+  choice does not exist.
+
+  **WebGPU only, with no fallback**: ORT-Web's WASM EP dies with
+  `std::bad_alloc` on these graphs at 512², at every precision.
+  `WebGpuRequiredError` is re-thrown unchanged so a host can show a real
+  unsupported-browser message.
+
+  An empty result distinguishes "found nothing" from "was unsure everywhere" —
+  the second is the signature of the wrong magnification or wrong preprocessing,
+  and reported as a plain empty result a misconfiguration is indistinguishable
+  from an empty field.
+
 ## [0.2.16] — 2026-08-08
 
 ### Added
@@ -336,7 +414,9 @@ file was added.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.16...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.18...HEAD
+[0.2.18]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.17...v0.2.18
+[0.2.17]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.16...v0.2.17
 [0.2.16]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.15...v0.2.16
 [0.2.15]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.13...v0.2.14
