@@ -84,16 +84,29 @@ export class YoloDetectToolService {
       const ratioX = rect && source.width > 0 ? rect.width / source.width : 1;
       const ratioY = rect && source.height > 0 ? rect.height / source.height : 1;
 
+      // View pixels -> full-resolution image pixels, for any ring.
+      const mapRing = (ring: Array<[number, number]>): number[][] =>
+        ring.map(([x, y]) => [Math.round(offsetX + x * ratioX), Math.round(offsetY + y * ratioY)]);
+
       const added: Region[] = [];
       for (const det of result.detections) {
         if (det.polygons.length > 0) {
           for (const poly of det.polygons) {
             if (poly.exterior.length < 3) continue;
+            const exterior = mapRing(poly.exterior);
             added.push(
               this.makeRegion(
-                poly.exterior.map(([x]) => Math.round(offsetX + x * ratioX)),
-                poly.exterior.map(([, y]) => Math.round(offsetY + y * ratioY)),
+                exterior.map(([x]) => x),
+                exterior.map(([, y]) => y),
                 det.className,
+                // A mask with a void through it is a donut, and committing only
+                // the exterior fills it in silently — which reads as a detection
+                // that over-covers rather than as lost geometry. Each polygon
+                // already owns its own holes, so there is no ambiguity about
+                // which exterior a ring belongs to even when one mask splits
+                // into several polygons. Rings too small to bound anything after
+                // simplification are dropped rather than emitted.
+                poly.holes.filter((h) => h.length >= 3).map(mapRing),
               ),
             );
           }
@@ -189,13 +202,17 @@ export class YoloDetectToolService {
     }
   }
 
-  private makeRegion(xs: number[], ys: number[], className: string): Region {
+  private makeRegion(xs: number[], ys: number[], className: string, holes: number[][][] = []): Region {
     const poly = new Polygon();
     poly.npoints = xs.length;
     poly.xpoints = xs;
     poly.ypoints = ys;
     poly.coordinates = xs.map((x, i) => [x, ys[i]]);
     poly.closed = true;
+    // Same closed-ring convention as the exterior: no repeated closing point.
+    // Left unset when empty so a solid region does not carry an empty array
+    // through export and round-tripping.
+    if (holes.length) poly.holes = holes;
 
     const region = new Region();
     region.bounds = poly;
