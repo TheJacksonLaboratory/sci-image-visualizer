@@ -33,8 +33,8 @@ function segmenterReturning(detections: any[]) {
   return { segmentInstances: jest.fn().mockResolvedValue(result) };
 }
 
-const outline = (pts: Array<[number, number]>) => ({
-  polygons: [{ exterior: pts, holes: [] }],
+const outline = (pts: Array<[number, number]>, holes: Array<Array<[number, number]>> = []) => ({
+  polygons: [{ exterior: pts, holes }],
   box: [0, 0, 1, 1],
   score: 0.9,
   classId: 0,
@@ -86,6 +86,166 @@ describe('YoloDetectToolService', () => {
     expect(region.bounds.xpoints).toEqual([500, 600, 600, 500]);
     expect(region.bounds.ypoints).toEqual([600, 600, 700, 700]);
     expect(region.label).toBe('Optic-disc-region');
+  });
+
+  it('keeps interior voids as holes instead of filling them in', async () => {
+    // A mask with a void through it is a donut. Committing only the exterior
+    // silently fills it, which reads as a detection that over-covers rather
+    // than as lost geometry.
+    const viz = makeViz({ rect: { x: 0, y: 0, width: 100, height: 100 } });
+    const seg = segmenterReturning([
+      outline(
+        [
+          [0, 0],
+          [30, 0],
+          [30, 30],
+          [0, 30],
+        ],
+        [
+          [
+            [10, 10],
+            [20, 10],
+            [20, 20],
+            [10, 20],
+          ],
+        ],
+      ),
+    ]);
+
+    await tool.detectInView(viz, seg as any);
+
+    expect(viz.setRegions.mock.calls[0][0][0].bounds.holes).toEqual([
+      [
+        [10, 10],
+        [20, 10],
+        [20, 20],
+        [10, 20],
+      ],
+    ]);
+  });
+
+  it('maps hole coordinates through the same transform as the exterior', async () => {
+    // A hole left in view-local pixels would land elsewhere on the slide —
+    // often outside its own exterior.
+    const viz = makeViz({ rect: { x: 500, y: 600, width: 1000, height: 1000 } });
+    const seg = segmenterReturning([
+      outline(
+        [
+          [0, 0],
+          [30, 0],
+          [30, 30],
+        ],
+        [
+          [
+            [10, 10],
+            [20, 10],
+            [20, 20],
+          ],
+        ],
+      ),
+    ]);
+
+    await tool.detectInView(viz, seg as any);
+
+    expect(viz.setRegions.mock.calls[0][0][0].bounds.holes).toEqual([
+      [
+        [600, 700],
+        [700, 700],
+        [700, 800],
+      ],
+    ]);
+  });
+
+  it('keeps each split polygon paired with its own holes', async () => {
+    // One mask can break into several polygons under thresholding. Each owns
+    // its own rings, so a shared or misassigned hole list would punch a void
+    // through the wrong object.
+    const viz = makeViz({ rect: { x: 0, y: 0, width: 100, height: 100 } });
+    const seg = segmenterReturning([
+      {
+        polygons: [
+          {
+            exterior: [
+              [0, 0],
+              [30, 0],
+              [30, 30],
+            ],
+            holes: [
+              [
+                [5, 5],
+                [10, 5],
+                [10, 10],
+              ],
+            ],
+          },
+          {
+            exterior: [
+              [50, 50],
+              [60, 50],
+              [60, 60],
+            ],
+            holes: [],
+          },
+        ],
+        box: [0, 0, 1, 1],
+        score: 0.9,
+        classId: 0,
+        className: 'Optic-disc-region',
+      },
+    ]);
+
+    await tool.detectInView(viz, seg as any);
+
+    const committed = viz.setRegions.mock.calls[0][0];
+    expect(committed).toHaveLength(2);
+    expect(committed[0].bounds.holes).toEqual([
+      [
+        [5, 5],
+        [10, 5],
+        [10, 10],
+      ],
+    ]);
+    expect(committed[1].bounds.holes).toBeUndefined();
+  });
+
+  it('leaves holes unset for a solid detection', async () => {
+    // An empty array would travel through export as if the region were a donut
+    // with no rings.
+    const viz = makeViz();
+    const seg = segmenterReturning([
+      outline([
+        [0, 0],
+        [5, 0],
+        [5, 5],
+      ]),
+    ]);
+
+    await tool.detectInView(viz, seg as any);
+
+    expect(viz.setRegions.mock.calls[0][0][0].bounds.holes).toBeUndefined();
+  });
+
+  it('drops a degenerate hole rather than emitting unbounded geometry', async () => {
+    const viz = makeViz();
+    const seg = segmenterReturning([
+      outline(
+        [
+          [0, 0],
+          [30, 0],
+          [30, 30],
+        ],
+        [
+          [
+            [10, 10],
+            [20, 10],
+          ],
+        ],
+      ),
+    ]);
+
+    await tool.detectInView(viz, seg as any);
+
+    expect(viz.setRegions.mock.calls[0][0][0].bounds.holes).toBeUndefined();
   });
 
   it('commits the bounding box when a detection has no outline', async () => {
