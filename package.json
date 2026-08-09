@@ -1,6 +1,6 @@
 {
   "name": "@jax-data-science/sci-image-visualizer",
-  "version": "0.2.18",
+  "version": "0.2.19",
   "description": "Browser-based scientific image visualization for Angular — gigapixel whole-slide (OpenSeadragon), 2D/3D (Plotly) and WebGPU (napari-js) rendering, with region/annotation editing and in-browser SAM segmentation.",
   "keywords": [
     "angular",
@@ -51,7 +51,7 @@
   "dependencies": {
     "cellpose-js": "^0.4.1",
     "fast-png": "^6.4.0",
-    "jax-ai-js": "^0.1.1",
+    "jax-ai-js": "^0.2.0",
     "napari-js": "^0.11.0",
     "openseadragon": "^6.0.2",
     "plotly.js-dist-min": "^3.0.1",
