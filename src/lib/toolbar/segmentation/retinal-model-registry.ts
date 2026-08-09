@@ -127,8 +127,12 @@ export function setRetinalModelUrls(id: string, urls: { modelUrl?: string; metaU
   if (!m) return;
   if (urls.modelUrl !== undefined) m.modelUrl = urls.modelUrl;
   if (urls.metaUrl !== undefined) m.metaUrl = urls.metaUrl;
-  // A host that supplies weights has answered the question the reason describes.
-  if (urls.modelUrl) delete m.unavailableReason;
+  // A host that supplies weights has answered the question the reason
+  // describes. Decided from the model's post-update state rather than from the
+  // argument: a whitespace-only url, or a call that sets only `metaUrl`, leaves
+  // the model just as disabled — and clearing the reason there would strip the
+  // one explanation the user gets while `isRetinalModelReady` still says no.
+  if (isRetinalModelReady(id)) delete m.unavailableReason;
 }
 
 /** Change which model runs when a caller does not name one. */

@@ -27,9 +27,14 @@ function makeViz(
   } as any;
 }
 
-const region = (pts: Array<[number, number]>, className = 'ONL', classId = 1) => ({
+const region = (
+  pts: Array<[number, number]>,
+  className = 'ONL',
+  classId = 1,
+  holes: Array<Array<[number, number]>> = [],
+) => ({
   exterior: pts,
-  holes: [],
+  holes,
   classId,
   className,
   area: 100,
@@ -85,6 +90,121 @@ describe('RetinalLayerToolService', () => {
     expect(committed.bounds.xpoints).toEqual([500, 600, 600, 500]);
     expect(committed.bounds.ypoints).toEqual([600, 600, 700, 700]);
     expect(committed.label).toBe('ONL');
+  });
+
+  it('keeps interior voids as holes instead of filling them in', async () => {
+    // A layer with a void through it is a donut. Committing only the exterior
+    // silently fills it, which reads as a segmentation that over-covers rather
+    // than as lost geometry.
+    const viz = makeViz({ rect: { x: 0, y: 0, width: 100, height: 100 } });
+    const seg = segmenterReturning([
+      region(
+        [
+          [0, 0],
+          [30, 0],
+          [30, 30],
+          [0, 30],
+        ],
+        'ONL',
+        1,
+        [
+          [
+            [10, 10],
+            [20, 10],
+            [20, 20],
+            [10, 20],
+          ],
+        ],
+      ),
+    ]);
+
+    await tool.segmentInView(viz, seg as any);
+
+    const committed = viz.setRegions.mock.calls[0][0][0];
+    expect(committed.bounds.holes).toEqual([
+      [
+        [10, 10],
+        [20, 10],
+        [20, 20],
+        [10, 20],
+      ],
+    ]);
+  });
+
+  it('maps hole coordinates through the same transform as the exterior', async () => {
+    // A hole left in view-local pixels would land somewhere else entirely on
+    // the slide — often outside its own exterior.
+    const viz = makeViz({ rect: { x: 500, y: 600, width: 1000, height: 1000 } });
+    const seg = segmenterReturning([
+      region(
+        [
+          [0, 0],
+          [30, 0],
+          [30, 30],
+        ],
+        'ONL',
+        1,
+        [
+          [
+            [10, 10],
+            [20, 10],
+            [20, 20],
+          ],
+        ],
+      ),
+    ]);
+
+    await tool.segmentInView(viz, seg as any);
+
+    expect(viz.setRegions.mock.calls[0][0][0].bounds.holes).toEqual([
+      [
+        [600, 700],
+        [700, 700],
+        [700, 800],
+      ],
+    ]);
+  });
+
+  it('leaves holes unset for a solid region', async () => {
+    // An empty array would travel through export and round-tripping as if the
+    // region were a donut with no rings.
+    const viz = makeViz();
+    const seg = segmenterReturning([
+      region([
+        [0, 0],
+        [5, 0],
+        [5, 5],
+      ]),
+    ]);
+
+    await tool.segmentInView(viz, seg as any);
+
+    expect(viz.setRegions.mock.calls[0][0][0].bounds.holes).toBeUndefined();
+  });
+
+  it('drops a degenerate hole rather than emitting unbounded geometry', async () => {
+    const viz = makeViz();
+    const seg = segmenterReturning([
+      region(
+        [
+          [0, 0],
+          [30, 0],
+          [30, 30],
+        ],
+        'ONL',
+        1,
+        [
+          [
+            [10, 10],
+            [20, 10],
+          ],
+        ],
+      ),
+    ]);
+
+    await tool.segmentInView(viz, seg as any);
+
+    expect(viz.setRegions.mock.calls[0][0][0].bounds.holes).toBeUndefined();
   });
 
   it('marks what it produces so the next run can find it', async () => {

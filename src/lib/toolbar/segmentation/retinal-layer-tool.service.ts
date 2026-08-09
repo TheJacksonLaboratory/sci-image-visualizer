@@ -85,14 +85,25 @@ export class RetinalLayerToolService {
       const ratioX = rect && source.width > 0 ? rect.width / source.width : 1;
       const ratioY = rect && source.height > 0 ? rect.height / source.height : 1;
 
+      // View pixels -> image pixels, for any ring.
+      const mapRing = (ring: Array<[number, number]>): number[][] =>
+        ring.map(([x, y]) => [Math.round(offsetX + x * ratioX), Math.round(offsetY + y * ratioY)]);
+
       const added: Region[] = [];
       for (const r of result.regions) {
         if (r.exterior.length < 3) continue;
+        const exterior = mapRing(r.exterior);
         added.push(
           this.makeRegion(
-            r.exterior.map(([x]) => Math.round(offsetX + x * ratioX)),
-            r.exterior.map(([, y]) => Math.round(offsetY + y * ratioY)),
+            exterior.map(([x]) => x),
+            exterior.map(([, y]) => y),
             r.className,
+            // Holes are real findings here, not noise: a layer with a void
+            // through it is a donut, and dropping the interior rings fills it
+            // in silently. Rings that survive simplification to fewer than 3
+            // points cannot bound anything, so they are skipped rather than
+            // emitted as degenerate geometry.
+            r.holes.filter((h) => h.length >= 3).map(mapRing),
           ),
         );
       }
@@ -180,13 +191,17 @@ export class RetinalLayerToolService {
     }
   }
 
-  private makeRegion(xs: number[], ys: number[], className: string): Region {
+  private makeRegion(xs: number[], ys: number[], className: string, holes: number[][][] = []): Region {
     const poly = new Polygon();
     poly.npoints = xs.length;
     poly.xpoints = xs;
     poly.ypoints = ys;
     poly.coordinates = xs.map((x, i) => [x, ys[i]]);
     poly.closed = true;
+    // Same closed-ring convention as the exterior: no repeated closing point.
+    // Left unset when empty so a solid region does not carry an empty array
+    // through export and round-tripping.
+    if (holes.length) poly.holes = holes;
 
     const region = new Region();
     region.bounds = poly;

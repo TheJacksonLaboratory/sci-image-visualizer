@@ -53,6 +53,23 @@ describe('retinal model registry', () => {
     expect(isRetinalModelReady('vnet-2d-retinal')).toBe(false);
   });
 
+  it('keeps the reason when the supplied url is only whitespace', () => {
+    // Whitespace leaves the model just as disabled, so clearing the reason
+    // would strip the one explanation the user gets while the model still
+    // cannot run.
+    setRetinalModelUrls('resunet-a-2d-retinal', { modelUrl: '   ' });
+
+    expect(isRetinalModelReady('resunet-a-2d-retinal')).toBe(false);
+    expect(getRetinalModel('resunet-a-2d-retinal')?.unavailableReason).toMatch(/mIoU/);
+  });
+
+  it('keeps the reason when only metaUrl is supplied', () => {
+    setRetinalModelUrls('resunet-a-2d-retinal', { metaUrl: 'https://example.test/model.json' });
+
+    expect(isRetinalModelReady('resunet-a-2d-retinal')).toBe(false);
+    expect(getRetinalModel('resunet-a-2d-retinal')?.unavailableReason).toMatch(/mIoU/);
+  });
+
   it('ignores an unknown id rather than throwing', () => {
     expect(() => setRetinalModelUrls('nope', { modelUrl: 'x' })).not.toThrow();
     expect(getRetinalModel('nope')).toBeUndefined();
