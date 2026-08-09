@@ -78,6 +78,9 @@ export class ToolbarComponent implements OnChanges {
   /** YOLO checkpoints offered by the host's registry, and the active one. */
   @Input() yoloModels: { id: string; label: string }[] = [];
   @Input() yoloModelId = '';
+  /** Retinal-layer checkpoints offered by the host's registry, and the active one. */
+  @Input() retinalModels: { id: string; label: string }[] = [];
+  @Input() retinalModelId = '';
 
   @Output() selectPlotType = new EventEmitter<PlotType>();
   /** Intensity (LINE) mode: add another colored line ROI + inset trace. */
@@ -123,6 +126,12 @@ export class ToolbarComponent implements OnChanges {
   @Output() yoloModelChange = new EventEmitter<string>();
   /** Open the YOLO parameter dialog. */
   @Output() openYoloParams = new EventEmitter<void>();
+  /** Run retinal-layer segmentation over the current view. */
+  @Output() segmentRetinal = new EventEmitter<void>();
+  /** Pick the retinal-layer checkpoint. */
+  @Output() retinalModelChange = new EventEmitter<string>();
+  /** Open the retinal-layer parameter dialog. */
+  @Output() openRetinalParams = new EventEmitter<void>();
   /** SAM model picker (jit-ui#90 P1). */
   @Output() samModelChange = new EventEmitter<string>();
   @Output() wandSensitivityChange = new EventEmitter<number | undefined>();
@@ -156,6 +165,8 @@ export class ToolbarComponent implements OnChanges {
   samMenuItems: MenuItem[] = [];
   /** Same stable-array reasoning as {@link samMenuItems}. */
   yoloMenuItems: MenuItem[] = [];
+  /** Same stable-array reasoning as {@link samMenuItems}. */
+  retinalMenuItems: MenuItem[] = [];
 
   /** Rebuild the SAM model menu when the model list or active selection
    *  changes (keeps the array reference stable across other CD ticks). */
@@ -172,6 +183,13 @@ export class ToolbarComponent implements OnChanges {
         label: m.label,
         icon: m.id === this.yoloModelId ? 'pi pi-check' : 'pi pi-fw',
         command: () => this.yoloModelChange.emit(m.id),
+      }));
+    }
+    if (changes['retinalModels'] || changes['retinalModelId']) {
+      this.retinalMenuItems = this.retinalModels.map((m) => ({
+        label: m.label,
+        icon: m.id === this.retinalModelId ? 'pi pi-check' : 'pi pi-fw',
+        command: () => this.retinalModelChange.emit(m.id),
       }));
     }
   }

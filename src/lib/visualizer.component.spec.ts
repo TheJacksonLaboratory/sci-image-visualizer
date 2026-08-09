@@ -118,6 +118,15 @@ function makeComponent(plot: any): VisualizerComponent {
       } as any,
       // INSTANCE_SEGMENTER
       { segmentInstances: jest.fn() } as any,
+      // SEMANTIC_SEGMENTER
+      { segmentSemantic: jest.fn() } as any,
+      // RetinalLayerToolService
+      {
+        status$: new BehaviorSubject(''),
+        busy$: new BehaviorSubject(false),
+        progress$: new BehaviorSubject(-1),
+        segmentInView: jest.fn().mockResolvedValue(0),
+      } as any,
       // SamPointToolService
       {
         status$: new BehaviorSubject(''),
@@ -626,6 +635,15 @@ describe('VisualizerComponent — render preemption (#5)', () => {
         progress$: new BehaviorSubject(-1), detectInView: jest.fn().mockResolvedValue(0) } as any,
       // INSTANCE_SEGMENTER
       { segmentInstances: jest.fn() } as any,
+      // SEMANTIC_SEGMENTER
+      { segmentSemantic: jest.fn() } as any,
+      // RetinalLayerToolService
+      {
+        status$: new BehaviorSubject(''),
+        busy$: new BehaviorSubject(false),
+        progress$: new BehaviorSubject(-1),
+        segmentInView: jest.fn().mockResolvedValue(0),
+      } as any,
       { status$: new BehaviorSubject(''), busy$: new BehaviorSubject(false), progress$: new BehaviorSubject(-1) } as any,
       new RegionOpsService(new WandService()),
     );

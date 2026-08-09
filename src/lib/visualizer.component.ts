@@ -36,6 +36,19 @@ import type {
   IInstanceSegmenter,
   InstanceSegmentOptions,
 } from './contracts/instance-segmenter.contract';
+import { RetinalLayerToolService } from './toolbar/segmentation/retinal-layer-tool.service';
+import {
+  RETINAL_MODELS,
+  isRetinalModelReady,
+  getDefaultRetinalModelId,
+  setDefaultRetinalModel,
+  getRetinalModel,
+} from './toolbar/segmentation/retinal-model-registry';
+import { SEMANTIC_SEGMENTER } from './contracts/semantic-segmenter.contract';
+import type {
+  ISemanticSegmenter,
+  SemanticSegmentOptions,
+} from './contracts/semantic-segmenter.contract';
 import { RegionToolMode } from './contracts/region-overlay.contract';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from './contracts/toolbar-config';
 import { VIZ_CONFIG, VizConfig } from './contracts/viz-config';
@@ -192,6 +205,21 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    *  encode the scale and crowding each checkpoint was trained for. */
   showYoloParams = false;
   yoloParams: InstanceSegmentOptions = this.defaultYoloParams();
+
+  /** Retinal-layer checkpoints with a configured URL, and the active one.
+   *  Only VNet ships — see the registry for why the ResUNet-a entries are off. */
+  retinalModels = RETINAL_MODELS.filter((m) => isRetinalModelReady(m.id)).map((m) => ({
+    id: m.id,
+    label: m.label,
+  }));
+  retinalModelId = getDefaultRetinalModelId();
+  showRetinalParams = false;
+  retinalParams: SemanticSegmentOptions = this.defaultRetinalParams();
+  /** Download size of the active retinal model, surfaced in the dialog because
+   *  ~590 MB is worth knowing before clicking Run rather than after. */
+  get retinalModelSizeMb(): number {
+    return getRetinalModel(this.retinalModelId)?.sizeMb ?? 0;
+  }
   /** SAM download/segment toast state (bound by the `sam` p-toast template). */
   samStatus = '';
   samProgress = 0; // 0..100, encoder download
@@ -326,6 +354,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     private cellSegmentTool: CellSegmentToolService,
     private yoloDetectTool: YoloDetectToolService,
     @Inject(INSTANCE_SEGMENTER) private instanceSegmenter: IInstanceSegmenter,
+    @Inject(SEMANTIC_SEGMENTER) private semanticSegmenter: ISemanticSegmenter,
+    private retinalLayerTool: RetinalLayerToolService,
     private samPointTool: SamPointToolService,
     private regionOps: RegionOpsService,
     @Optional() @Inject(VIZ_CONFIG) private vizConfig?: VizConfig,
@@ -1474,6 +1504,54 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       this.yoloDetectTool.detectInView(this.plotService, this.instanceSegmenter, {
         ...this.yoloParams,
         modelId: this.yoloModelId,
+      }),
+    );
+  }
+
+  /**
+   * Defaults for the retinal tool.
+   *
+   * `classThreshold` is 0.5 to match the reference worker, which thresholds each
+   * class channel independently rather than taking an argmax — with a softmax
+   * output that makes it argmax plus a confidence floor.
+   *
+   * `downsamplingFactor` is 1 rather than YOLO's 5: these checkpoints were
+   * trained on native 40x patches, so the model wants full resolution and
+   * downsampling actively hurts.
+   */
+  private defaultRetinalParams(): SemanticSegmentOptions {
+    return {
+      modelId: getDefaultRetinalModelId(),
+      classThreshold: 0.5,
+      downsamplingFactor: 1,
+      simplifyTolerance: 1,
+      minArea: 0,
+    };
+  }
+
+  /** Switching checkpoint re-seeds the parameters, since the defaults belong to
+   *  the model rather than to the tool. */
+  onRetinalModelChange(id: string): void {
+    this.retinalModelId = id;
+    setDefaultRetinalModel(id);
+    this.retinalParams = { ...this.defaultRetinalParams(), modelId: id };
+  }
+
+  openRetinalParams(): void {
+    this.showRetinalParams = true;
+  }
+
+  resetRetinalParams(): void {
+    this.retinalParams = { ...this.defaultRetinalParams(), modelId: this.retinalModelId };
+  }
+
+  /** Segment retinal layers across the current view. Like YOLO this takes no
+   *  prompt — it labels every pixel — and reuses the shared segmentation toast. */
+  async segmentRetinal() {
+    await this.runSegmentWithToast('Retinal layers', this.retinalLayerTool, () =>
+      this.retinalLayerTool.segmentInView(this.plotService, this.semanticSegmenter, {
+        ...this.retinalParams,
+        modelId: this.retinalModelId,
       }),
     );
   }

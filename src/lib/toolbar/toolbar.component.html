@@ -491,6 +491,29 @@
         </p-button>
       </span>
       <p-menu #yoloModelMenu [model]="yoloMenuItems" [popup]="true" appendTo="body"></p-menu>
+
+      <!-- Retinal layers: semantic segmentation of the current view. Same
+           no-prompt shape as YOLO — it labels every pixel rather than being
+           pointed at an object — so the same split button: run, pick
+           checkpoint, open parameters. -->
+      <span *ngIf="retinalModels.length" class="p-buttonset segment-split">
+        <p-button icon="pi pi-align-left" size="small" [text]="true"
+                  pTooltip="Segment retinal layers in the current view (client-side)"
+                  tooltipPosition="bottom"
+                  (onClick)="segmentRetinal.emit()">
+        </p-button>
+        <p-button icon="pi pi-chevron-down" size="small" [text]="true"
+                  pTooltip="Pick the retinal layer model"
+                  tooltipPosition="bottom"
+                  (onClick)="retinalModelMenu.toggle($event)">
+        </p-button>
+        <p-button icon="pi pi-sliders-h" size="small" [text]="true"
+                  pTooltip="Retinal layer parameters"
+                  tooltipPosition="bottom"
+                  (onClick)="openRetinalParams.emit()">
+        </p-button>
+      </span>
+      <p-menu #retinalModelMenu [model]="retinalMenuItems" [popup]="true" appendTo="body"></p-menu>
     </ng-container>
 
     <ng-container *ngIf="tools.help">
