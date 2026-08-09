@@ -58,6 +58,9 @@ export class RetinalSegmenterService implements ISemanticSegmenter {
         }
       },
       (status) => progress?.onStatus?.(status),
+      // A run cancelled mid-download should stop the download, not just the
+      // inference queued behind it.
+      opts.signal,
     );
 
     progress?.onStatus?.('Running inference…');
@@ -103,6 +106,17 @@ export class RetinalSegmenterService implements ISemanticSegmenter {
     modelId: string = getDefaultRetinalModelId(),
     onProgress?: (loaded: number, total: number | null) => void,
     onStatus?: (status: string) => void,
+    /**
+     * Abort the load. This model is ~590 MB, so a cancel has to reach the
+     * *download* — aborting only the inference that follows leaves the transfer
+     * running and the UI stuck in "Cancelling" until it completes.
+     *
+     * Deliberately not applied to a load already in flight: that promise may be
+     * shared with another caller (the toolbar tool and the pipeline both use
+     * this service), and one caller's cancel must not tear the model out from
+     * under the other. A second caller joining an in-flight load simply waits.
+     */
+    signal?: AbortSignal,
   ): Promise<RetinalSegmenter> {
     const existing = this.instances.get(modelId);
     if (existing) return Promise.resolve(existing);
@@ -118,6 +132,7 @@ export class RetinalSegmenterService implements ISemanticSegmenter {
       const seg = await RetinalSegmenter.fromPretrained({
         modelUrl: def.modelUrl,
         ...(def.metaUrl ? { metaUrl: def.metaUrl } : {}),
+        ...(signal ? { signal } : {}),
         onProgress: (loaded, total) => onProgress?.(loaded, total),
         onStatus: (s) => onStatus?.(s),
       });
