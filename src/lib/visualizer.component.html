@@ -53,6 +53,8 @@
   [samModelId]="samModelId"
   [yoloModels]="yoloModels"
   [yoloModelId]="yoloModelId"
+  [retinalModels]="retinalModels"
+  [retinalModelId]="retinalModelId"
   [vertexEraserRadius]="vertexEraserRadius"
   [canUndo]="canUndoRegion"
   [canRedo]="canRedoRegion"
@@ -89,6 +91,9 @@
   (detectYolo)="detectYolo()"
   (yoloModelChange)="onYoloModelChange($event)"
   (openYoloParams)="openYoloParams()"
+  (segmentRetinal)="segmentRetinal()"
+  (retinalModelChange)="onRetinalModelChange($event)"
+  (openRetinalParams)="openRetinalParams()"
   (wandSensitivityChange)="onWandSensitivityChange($event)"
   (brushSizeChange)="onBrushSizeChange($event)"
   (vertexEraserRadiusChange)="onVertexEraserRadiusChange($event)">
@@ -251,5 +256,52 @@
     <p-button label="Reset to model defaults" [text]="true" size="small"
               (onClick)="resetYoloParams()"></p-button>
     <p-button label="Close" size="small" (onClick)="showYoloParams = false"></p-button>
+  </ng-template>
+</p-dialog>
+
+<!-- Retinal layer parameters. Same vocabulary as the pipeline step and the
+     server tool, so a result obtained here is reproducible there. Fewer knobs
+     than YOLO because there are no objects: no confidence per object, no NMS,
+     no cross-tile merge — patches tile the image and each pixel gets one class. -->
+<p-dialog header="Retinal layer parameters" [(visible)]="showRetinalParams" [modal]="true"
+          [style]="{width: '30rem'}" [draggable]="false" [resizable]="false" appendTo="body">
+  <div class="grid formgrid p-fluid">
+    <div class="field col-12">
+      <p class="text-sm mt-0 mb-2 text-color-secondary">
+        Runs in your browser and needs WebGPU. The model is ~{{ retinalModelSizeMb }} MB and is
+        downloaded once, then cached.
+      </p>
+    </div>
+    <div class="field col-6">
+      <label class="text-sm">Class threshold</label>
+      <p-inputNumber [(ngModel)]="retinalParams.classThreshold" [min]="0.05" [max]="0.95" [step]="0.05"
+                     [minFractionDigits]="2" [showButtons]="true"></p-inputNumber>
+      <small class="text-color-secondary">
+        Below this a pixel is left unlabelled rather than forced into the best class.
+      </small>
+    </div>
+    <div class="field col-6">
+      <label class="text-sm">Downsampling factor</label>
+      <p-inputNumber [(ngModel)]="retinalParams.downsamplingFactor" [min]="1" [max]="10" [step]="1"
+                     [showButtons]="true"></p-inputNumber>
+      <small class="text-color-secondary">
+        1 = full resolution, which is what these checkpoints were trained on.
+      </small>
+    </div>
+    <div class="field col-6">
+      <label class="text-sm">Min region area (px²)</label>
+      <p-inputNumber [(ngModel)]="retinalParams.minArea" [min]="0" [max]="100000" [step]="10"
+                     [showButtons]="true"></p-inputNumber>
+    </div>
+    <div class="field col-6">
+      <label class="text-sm">Outline simplification (px)</label>
+      <p-inputNumber [(ngModel)]="retinalParams.simplifyTolerance" [min]="0" [max]="10" [step]="0.5"
+                     [minFractionDigits]="1" [showButtons]="true"></p-inputNumber>
+    </div>
+  </div>
+  <ng-template pTemplate="footer">
+    <p-button label="Reset to model defaults" [text]="true" size="small"
+              (onClick)="resetRetinalParams()"></p-button>
+    <p-button label="Close" size="small" (onClick)="showRetinalParams = false"></p-button>
   </ng-template>
 </p-dialog>

@@ -27,6 +27,12 @@ export { CellposeSegmenterService } from './lib/toolbar/segmentation/cellpose-se
 export * from './lib/contracts/instance-segmenter.contract';
 export { YoloSegmenterService } from './lib/toolbar/segmentation/yolo-segmenter.service';
 export { YoloDetectToolService, YOLO_REGION_SOURCE } from './lib/toolbar/segmentation/yolo-detect-tool.service';
+export * from './lib/contracts/semantic-segmenter.contract';
+export { RetinalSegmenterService } from './lib/toolbar/segmentation/retinal-segmenter.service';
+export {
+  RetinalLayerToolService,
+  RETINAL_REGION_SOURCE,
+} from './lib/toolbar/segmentation/retinal-layer-tool.service';
 
 // ── Generic client-side image utilities (shared with the host's pipeline) ──
 export { ProcessingImage } from './lib/processing/processing-image';
@@ -44,6 +50,13 @@ export {
   YOLO_MODELS, DEFAULT_YOLO_MODEL_ID, getYoloModel, isYoloModelReady, setYoloModelUrls,
   setDefaultYoloModel, getDefaultYoloModelId, YoloModelDef,
 } from './lib/toolbar/segmentation/yolo-model-registry';
+
+// ── Retinal-layer semantic-segmentation registry (same repointing story) ──
+export {
+  RETINAL_MODELS, DEFAULT_RETINAL_MODEL_ID, getRetinalModel, isRetinalModelReady,
+  readyRetinalModels, setRetinalModelUrls, setDefaultRetinalModel, getDefaultRetinalModelId,
+  RetinalModelDef,
+} from './lib/toolbar/segmentation/retinal-model-registry';
 
 // ── onnxruntime-web WASM location (host overrides once, at app init) ───────
 export { setOrtWasmBase, getOrtWasmBase } from './lib/toolbar/segmentation/ort-runtime-config';
