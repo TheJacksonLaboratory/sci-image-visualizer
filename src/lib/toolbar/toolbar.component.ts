@@ -13,6 +13,7 @@ import {
   NAPARI_DEFAULT_DECIMATE,
 } from '../contracts/plot-type';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from '../contracts/toolbar-config';
+import { MODEL_INFO } from './model-info';
 
 /**
  * Presentational toolbar for the plotting viewport.
@@ -161,7 +162,11 @@ export class ToolbarComponent implements OnChanges {
    *  Held as a stable array (rebuilt only when `samModels`/`samModelId` change),
    *  NOT a getter: a getter returns a fresh array with new `command` closures on
    *  every change-detection tick, which makes the bound `p-menu` overlay rebuild
-   *  its DOM mid-interaction and swallow the click on a menu item. */
+   *  its DOM mid-interaction and swallow the click on a menu item.
+   *
+   *  `tooltip` carries the model's description from {@link MODEL_INFO}; the
+   *  menus' shared item template turns it into the hover info icon. p-menu's own
+   *  rendering ignores the field (it reads `item.title`), so it is free to use. */
   samMenuItems: MenuItem[] = [];
   /** Same stable-array reasoning as {@link samMenuItems}. */
   yoloMenuItems: MenuItem[] = [];
@@ -175,6 +180,7 @@ export class ToolbarComponent implements OnChanges {
       this.samMenuItems = this.samModels.map((m) => ({
         label: m.label,
         icon: m.id === this.samModelId ? 'pi pi-check' : 'pi pi-fw',
+        tooltip: MODEL_INFO[m.id],
         command: () => this.samModelChange.emit(m.id),
       }));
     }
@@ -182,6 +188,7 @@ export class ToolbarComponent implements OnChanges {
       this.yoloMenuItems = this.yoloModels.map((m) => ({
         label: m.label,
         icon: m.id === this.yoloModelId ? 'pi pi-check' : 'pi pi-fw',
+        tooltip: MODEL_INFO[m.id],
         command: () => this.yoloModelChange.emit(m.id),
       }));
     }
@@ -189,6 +196,7 @@ export class ToolbarComponent implements OnChanges {
       this.retinalMenuItems = this.retinalModels.map((m) => ({
         label: m.label,
         icon: m.id === this.retinalModelId ? 'pi pi-check' : 'pi pi-fw',
+        tooltip: MODEL_INFO[m.id],
         command: () => this.retinalModelChange.emit(m.id),
       }));
     }

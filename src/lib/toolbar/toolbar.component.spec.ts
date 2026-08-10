@@ -98,4 +98,30 @@ describe('ToolbarComponent', () => {
     const toolbar = fixture.nativeElement.querySelector('p-toolbar');
     expect(toolbar).toBeTruthy();
   });
+
+  it('carries each model description on its menu item as `tooltip`', () => {
+    component.samModels = [{ id: 'microsam-vit-t-lm', label: 'micro-sam ViT-T' }];
+    component.samModelId = 'microsam-vit-t-lm';
+    component.yoloModels = [{ id: 'yolov8x-seg-retina', label: 'Retina' }];
+    component.retinalModels = [{ id: 'vnet-2d-retinal', label: 'VNet 2D (40x)' }];
+    component.ngOnChanges({
+      samModels: {} as never,
+      yoloModels: {} as never,
+      retinalModels: {} as never,
+    });
+
+    // The item template turns `tooltip` into the hover info icon, so an empty
+    // one would silently drop the icon rather than fail.
+    expect(component.samMenuItems[0].tooltip).toContain('TinyViT');
+    expect(component.yoloMenuItems[0].tooltip).toContain('tile overlap');
+    expect(component.retinalMenuItems[0].tooltip).toContain('mIoU');
+    // Active model still marked, and selecting still emits.
+    expect(component.samMenuItems[0].icon).toBe('pi pi-check');
+  });
+
+  it('leaves `tooltip` undefined for a model with no description', () => {
+    component.samModels = [{ id: 'some-unregistered-model', label: 'Unknown' }];
+    component.ngOnChanges({ samModels: {} as never });
+    expect(component.samMenuItems[0].tooltip).toBeUndefined();
+  });
 });

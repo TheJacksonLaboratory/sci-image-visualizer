@@ -491,13 +491,15 @@ export class AppComponent implements OnDestroy {
   /** Tear-down for an in-progress splitter drag; null when not dragging. */
   private cleanupResize: (() => void) | null = null;
 
-  /** Show the plot-type dropdown + zoom + region tools; hide help. (Channels /
-   *  download need a backend, but the plot-type selector works serverlessly.) */
+  /** Show the plot-type dropdown + zoom + region tools, and the help dialog —
+   *  it documents the segmentation tools this example exercises, so it is worth
+   *  having here. (Channels / download need a backend, but the plot-type selector
+   *  works serverlessly.) */
   readonly toolbarTools: ToolbarToolVisibility = {
     specialTools: true,
     zoomTools: true,
     regionTools: true,
-    help: false,
+    help: true,
   };
 
   constructor(
