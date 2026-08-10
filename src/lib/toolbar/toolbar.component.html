@@ -474,10 +474,15 @@
            field rather than being pointed at one — so there is nothing to draw
            first. Split button: run, pick checkpoint, open parameters. -->
       <span *ngIf="yoloModels.length" class="p-buttonset segment-split">
-        <p-button icon="pi pi-microchip-ai" size="small" [text]="true"
+        <p-button size="small" [text]="true"
                   pTooltip="Detect objects in the current view with YOLO (client-side)"
                   tooltipPosition="bottom"
                   (onClick)="detectYolo.emit()">
+          <!-- `toolbar-icon-dark` is hardcoded rather than bound, unlike the
+               toggle tools: this fires a detection and has no active state to
+               reflect. -->
+          <img src="assets/plotting/yolo-object-detection.svg" class="toolbar-icon-dark"
+               style="width: 1rem" alt="" />
         </p-button>
         <p-button icon="pi pi-chevron-down" size="small" [text]="true"
                   pTooltip="Pick the YOLO model"
