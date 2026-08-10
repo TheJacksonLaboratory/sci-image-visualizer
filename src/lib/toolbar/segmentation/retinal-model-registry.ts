@@ -4,29 +4,43 @@
  * Mirrors {@link YOLO_MODELS}: public HF-hosted ONNX by default, repointable at
  * private hosting via {@link setRetinalModelUrls}.
  *
- * ONLY ONE CHECKPOINT IS ENABLED, AND THAT IS DELIBERATE
- * The server offers four. Measured against the ground-truth masks shipped
- * alongside them, only VNet reproduces them:
+ * THE mIoU COLUMN IS NOT THE GATE, AND IT IS NOT HELD-OUT
+ * Every figure below is scored against `retinal_layer_train_images/` — the
+ * models' own TRAINING data, because the bucket ships no validation split. So
+ * VNet's 0.906 is an optimistic ceiling and the ResUNet-a numbers are worse
+ * than they look, since a model should do well on what it saw.
  *
- * | checkpoint | mIoU |
- * |---|---|
- * | **VNet 2D** | **0.9061** |
- * | ResUNet-a 2D (base) | 0.3065 |
- * | ResUNet-a 2D 20x | 0.2869 |
- * | ResUNet-a 2D 40x | 0.2718 |
+ * | checkpoint | mIoU (train-set) | ONNX vs Keras |
+ * |---|---|---|
+ * | **VNet 2D** | **0.9061** | 100.0000% argmax |
+ * | ResUNet-a 2D 40x | 0.40 | 100.0000% argmax |
+ * | ResUNet-a 2D 20x | 0.30 | 100.0000% argmax |
+ * | ResUNet-a 2D (base) | 0.36 | 100.0000% argmax |
  *
- * The ResUNet-a numbers are not quantization damage — their ONNX exports match
- * their own Keras originals exactly. They disagree with the *masks*, folding
- * ground-truth class 1 into their class 2 and class 3 into background, and no
- * relabelling rescues them (the best of all 24 class permutations reaches only
- * 0.36). Either those masks belong to a different model generation or the class
- * definitions moved — an open question for whoever trained them.
+ * What gates a model here is **port fidelity**: whether the ONNX graph
+ * reproduces the Keras checkpoint the server runs. All of them do, argmax-
+ * identical at fp32 and within 1 pixel in 19,000 at fp16w — so the browser
+ * cannot be worse than the server, whatever the absolute accuracy is.
  *
- * So their weights stay unpublished (their Hub repos are private) and their
- * entries here carry an empty `modelUrl`, which {@link isRetinalModelReady}
- * reports as not-ready. They are listed rather than deleted so a host shows
- * them as unavailable-in-browser instead of pretending the server's choice does
- * not exist — and so enabling one later is a URL, not a code change.
+ * The ResUNet-a/VNet gap on those masks is real and unexplained, but it is a
+ * property of the checkpoints rather than the conversion: it is not the
+ * preprocessing (five variants swept), not a label permutation (all 24 scored,
+ * identity optimal), not the export (Keras alone reproduces it), and not tile
+ * geometry (40x runs at its native 512). The likeliest explanation is that the
+ * ResUNet-a checkpoints saw a different annotation round. That is a domain
+ * question for whoever trained them, not a reason to withhold the port.
+ *
+ * `resunet-a-2d-retinal` (base) stays disabled: superseded by the 2025 20x/40x
+ * pair, and its Hub repo is private. It is listed rather than deleted so a host
+ * shows it as unavailable-in-browser instead of pretending the server's choice
+ * does not exist — and so enabling it later is a URL, not a code change.
+ *
+ * PREPROCESSING IS NOT UNIFORM ACROSS THESE
+ * VNet is grayscale `x/255`; the ResUNet-a models are 3-channel `caffe` (RGB
+ * ImageNet means subtracted, no division). Each `model.json` carries its own,
+ * and jax-ai-js reads it — but it must be >= 0.2.2, since earlier versions
+ * ignored `subtractMeansRGB` and would feed ResUNet-a raw 0-255, which silently
+ * drops class 1 (ONL) to IoU 0.000.
  *
  * Export tooling: the sibling `browser-onnx-tools` project.
  */
@@ -53,9 +67,9 @@ export interface RetinalModelDef {
 
 const HF = 'https://huggingface.co/Ballon999';
 
-const RESUNET_UNAVAILABLE =
-  'Not available in the browser: this checkpoint scores mIoU ~0.3 against its own ' +
-  'ground-truth masks, pending a review of its class definitions. Run this step on the server.';
+const RESUNET_BASE_UNAVAILABLE =
+  'Not available in the browser: superseded by the 20x and 40x checkpoints. ' +
+  'Run this step on the server if you specifically need it.';
 
 export const RETINAL_MODELS: RetinalModelDef[] = [
   {
@@ -69,31 +83,34 @@ export const RETINAL_MODELS: RetinalModelDef[] = [
     miou: 0.9061,
   },
   {
-    id: 'resunet-a-2d-retinal',
+    id: 'resunet-a-2d-retinal-40x',
     label: 'ResUNet-a 2D (40x)',
-    modelUrl: '',
+    modelUrl: `${HF}/resunet-a-2d-retinal-layer-40x-onnx/resolve/main/model.fp16w.onnx`,
     patchSize: 512,
+    // A sixth of VNet — the practical choice on a metered connection.
     sizeMb: 102,
-    miou: 0.3065,
-    unavailableReason: RESUNET_UNAVAILABLE,
+    miou: 0.4,
   },
   {
     id: 'resunet-a-2d-retinal-20x',
     label: 'ResUNet-a 2D (20x)',
-    modelUrl: '',
+    modelUrl: `${HF}/resunet-a-2d-retinal-layer-20x-onnx/resolve/main/model.fp16w.onnx`,
+    // 256, not 128. The checkpoint's input size is baked into the graph: a
+    // 128 patch raises inside a dilated conv (SpaceToBatchND), and feeding it
+    // 128-resolution content resampled up to 256 scores 0.19 against 0.31 for
+    // plain half-scale. Run it at 256.
     patchSize: 256,
     sizeMb: 102,
-    miou: 0.2869,
-    unavailableReason: RESUNET_UNAVAILABLE,
+    miou: 0.3,
   },
   {
-    id: 'resunet-a-2d-retinal-40x',
-    label: 'ResUNet-a 2D (40x, alt)',
+    id: 'resunet-a-2d-retinal',
+    label: 'ResUNet-a 2D (base)',
     modelUrl: '',
     patchSize: 512,
     sizeMb: 102,
-    miou: 0.2718,
-    unavailableReason: RESUNET_UNAVAILABLE,
+    miou: 0.36,
+    unavailableReason: RESUNET_BASE_UNAVAILABLE,
   },
 ];
 

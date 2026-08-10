@@ -9,6 +9,75 @@ file was added.
 
 ## [Unreleased]
 
+### Added
+
+- **The ResUNet-a 20x and 40x retinal checkpoints now run in the browser.** They
+  join VNet in the retinal-layer picker; only the superseded base checkpoint
+  stays disabled.
+
+  They were held back on mIoU, which was the wrong gate. What this library is
+  accountable for is whether the browser reproduces the Keras model the server
+  runs, and both exports are **argmax-identical** to theirs at fp32 (within 1
+  pixel in 19,000 at fp16w) — so a browser run cannot differ from a server run
+  of the same weights. Their accuracy gap against the shipped masks (0.30–0.40
+  versus VNet's 0.906) is a property of the checkpoints, identical wherever they
+  execute, so it is a reason to keep VNet the default rather than to withhold
+  them and push users to a server run of the very same model.
+
+  Two things to know when reading those numbers: they are scored against the
+  models' own *training* data (the bucket ships no validation split), and the
+  20x model runs at **256**, not 128 — 128 raises inside a dilated conv, and
+  128-resolution content resampled to 256 scores 0.19 against 0.31 for plain
+  half-scale.
+
+  Requires **jax-ai-js ^0.2.2**, which is the release that applies
+  `preprocess.subtractMeansRGB`. Earlier versions ignored it and would feed
+  these checkpoints raw 0-255 — a silent failure that drops class 1 (ONL) to
+  IoU 0.000 while still producing a plausible-looking map.
+
+- **Per-model info in all three model pickers.** Every item in the SAM, YOLO and
+  retinal-layer dropdowns now carries an info icon whose hover tooltip describes
+  that checkpoint: download size, speed, training domain, measured accuracy, and
+  — for the tiled detectors — why its overlap and merge defaults are what they
+  are.
+
+  This replaces the single "About the SAM models" panel (removed below). That
+  panel sat behind an extra click, had to restate every model's name in order to
+  say anything about it, and covered only SAM — YOLO and retinal shipped with no
+  explanation at all. Attaching each description to the row it describes settles
+  all three at once, and puts the text where the choice is actually made.
+
+  Copy lives in `toolbar/model-info.ts`, keyed by registry model id, and rides on
+  the menu item's `tooltip` field (which `p-menu`'s own rendering ignores — it
+  reads `title`). A model with no entry renders no icon, so a host that registers
+  its own checkpoint degrades quietly instead of showing an empty tooltip. The
+  numbers quoted there come from the registries (`sizeMb`, `miou`, `patchSize`,
+  per-model tiling `defaults`) and need updating alongside them.
+
+- **A dedicated toolbar icon for the retinal-layer tool**, replacing the
+  `pi pi-align-left` placeholder: corner brackets — the framing the YOLO detector
+  already uses, marking the no-prompt tools that sweep the whole view — around an
+  eyeball whose posterior wall carries the segmented layers.
+
+### Changed
+
+- **The help dialog documents the no-prompt tools.** Its segmentation section
+  described only SAM and cellpose, so YOLO detection and retinal-layer
+  segmentation were absent from the one place a user goes to find out what a
+  button does. It now splits the tools by shape — prompted ones act on rectangles
+  you draw, no-prompt ones sweep the current view — which is the distinction that
+  explains why two of the buttons want nothing selected first.
+
+  It also no longer points at the removed info button, and the general SAM
+  material from that panel (encoders differ, prompting does not; each tool loads
+  its own encoder, so the first click after switching re-encodes once) moved here
+  rather than being dropped.
+
+### Removed
+
+- **The "About the SAM models" info button** and its overlay panel, superseded by
+  the per-model tooltips above.
+
 ## [0.2.19] — 2026-08-09
 
 ### Changed
