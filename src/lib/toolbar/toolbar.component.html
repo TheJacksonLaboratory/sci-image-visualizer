@@ -385,7 +385,7 @@
                   pTooltip="Segment the drawn rectangles with SAM (box prompt)"
                   tooltipPosition="bottom"
                   (onClick)="segmentRegions.emit()">
-          <img src="assets/plotting/picture-segmentation.svg"
+          <img src="assets/plotting/sam-box-prompt.svg"
                class="toolbar-icon-dark" style="width: 1rem"/>
         </p-button>
         <ng-container [ngTemplateOutlet]="samPointBtn"></ng-container>
@@ -401,7 +401,7 @@
                     pTooltip="Segment the drawn rectangles with SAM (box prompt)"
                     tooltipPosition="bottom"
                     (onClick)="segmentRegions.emit()">
-            <img src="assets/plotting/picture-segmentation.svg"
+            <img src="assets/plotting/sam-box-prompt.svg"
                  class="toolbar-icon-dark" style="width: 1rem"/>
           </p-button>
           <ng-container [ngTemplateOutlet]="samPointBtn"></ng-container>
@@ -416,7 +416,7 @@
                   Shift/Alt-click to refine (exclude) the current one.<br>Esc undoes it."
                   [escape]="false" tooltipPosition="bottom"
                   (onClick)="toggleDragMode.emit('samPoint')">
-          <img src="assets/plotting/click.svg"
+          <img src="assets/plotting/sam-point-prompt.svg"
                [class]="activeDragMode === 'samPoint' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
                style="width: 1rem"/>
         </p-button>
@@ -459,68 +459,47 @@
         <img src="assets/plotting/cells.svg" class="toolbar-icon-dark" style="width: 1rem"/>
       </p-button>
 
-      <!-- YOLO: detect objects across the current view. Unlike the SAM and
-           cellpose tools it takes no prompt — a detector finds objects in a
-           field rather than being pointed at one — so there is nothing to draw
-           first. Split button: run, pick checkpoint, open parameters. -->
-      <span *ngIf="yoloModels.length" class="p-buttonset segment-split">
-        <p-button size="small" [text]="true"
-                  pTooltip="Detect objects in the current view with YOLO"
-                  tooltipPosition="bottom"
-                  (onClick)="detectYolo.emit()">
-          <!-- `toolbar-icon-dark` is hardcoded rather than bound, unlike the
-               toggle tools: this fires a detection and has no active state to
-               reflect. -->
-          <img src="assets/plotting/yolo-object-detection.svg" class="toolbar-icon-dark"
-               style="width: 1rem" alt="" />
-        </p-button>
-        <p-button icon="pi pi-chevron-down" size="small" [text]="true"
-                  pTooltip="Pick the YOLO model"
-                  tooltipPosition="bottom"
-                  (onClick)="yoloModelMenu.toggle($event)">
-        </p-button>
-        <p-button icon="pi pi-sliders-h" size="small" [text]="true"
-                  pTooltip="YOLO parameters"
-                  tooltipPosition="bottom"
-                  (onClick)="openYoloParams.emit()">
-        </p-button>
-      </span>
-      <p-menu #yoloModelMenu styleClass="model-menu" [model]="yoloMenuItems" [popup]="true" appendTo="body">
-        <ng-template pTemplate="item" let-item>
-          <ng-container [ngTemplateOutlet]="modelMenuItem"
-                        [ngTemplateOutletContext]="{ $implicit: item }"></ng-container>
-        </ng-template>
-      </p-menu>
+      <!-- Contributed no-prompt tools (TOOLBAR_TOOLS). Unlike the SAM and
+           cellpose tools these take no prompt — they sweep the whole current
+           view rather than being pointed at something — so there is nothing to
+           draw first. Each renders the same split button: run, pick checkpoint,
+           open parameters.
 
-      <!-- Retinal layers: semantic segmentation of the current view. Same
-           no-prompt shape as YOLO — it labels every pixel rather than being
-           pointed at an object — so the same split button: run, pick
-           checkpoint, open parameters. -->
-      <span *ngIf="retinalModels.length" class="p-buttonset segment-split">
-        <p-button size="small" [text]="true"
-                  pTooltip="Segment retinal layers in the current view"
-                  tooltipPosition="bottom"
-                  (onClick)="segmentRetinal.emit()">
-          <img src="assets/plotting/retinal-layer-segmentation.svg" class="toolbar-icon-dark"
-               style="width: 1rem" alt="" />
-        </p-button>
-        <p-button icon="pi pi-chevron-down" size="small" [text]="true"
-                  pTooltip="Pick the retinal layer model"
-                  tooltipPosition="bottom"
-                  (onClick)="retinalModelMenu.toggle($event)">
-        </p-button>
-        <p-button icon="pi pi-sliders-h" size="small" [text]="true"
-                  pTooltip="Retinal layer parameters"
-                  tooltipPosition="bottom"
-                  (onClick)="openRetinalParams.emit()">
-        </p-button>
-      </span>
-      <p-menu #retinalModelMenu styleClass="model-menu" [model]="retinalMenuItems" [popup]="true" appendTo="body">
-        <ng-template pTemplate="item" let-item>
-          <ng-container [ngTemplateOutlet]="modelMenuItem"
-                        [ngTemplateOutletContext]="{ $implicit: item }"></ng-container>
-        </ng-template>
-      </p-menu>
+           Nothing here names a specific tool. The library ships none; a host
+           registers them, which is what lets this package be published without
+           the closed model dependencies. -->
+      <ng-container *ngFor="let tool of contributedTools; trackBy: trackToolById">
+        <span class="p-buttonset segment-split">
+          <p-button size="small" [text]="true"
+                    [pTooltip]="tool.runTooltip"
+                    tooltipPosition="bottom"
+                    (onClick)="runTool.emit(tool.id)">
+            <!-- `toolbar-icon-dark` is hardcoded rather than bound, unlike the
+                 toggle tools: these fire a run and have no active state. -->
+            <img *ngIf="tool.icon.src" [src]="tool.icon.src" class="toolbar-icon-dark"
+                 style="width: 1rem" [alt]="tool.label" />
+            <i *ngIf="tool.icon.pi" class="pi {{ tool.icon.pi }}"></i>
+          </p-button>
+          <p-button icon="pi pi-chevron-down" size="small" [text]="true"
+                    [pTooltip]="tool.modelTooltip || 'Pick the model'"
+                    tooltipPosition="bottom"
+                    (onClick)="toolMenu.toggle($event)">
+          </p-button>
+          <p-button *ngIf="tool.params.length"
+                    icon="pi pi-sliders-h" size="small" [text]="true"
+                    [pTooltip]="tool.paramsTooltip || 'Parameters'"
+                    tooltipPosition="bottom"
+                    (onClick)="openToolParams.emit(tool.id)">
+          </p-button>
+        </span>
+        <p-menu #toolMenu styleClass="model-menu" [model]="toolMenuItems[tool.id] || []"
+                [popup]="true" appendTo="body">
+          <ng-template pTemplate="item" let-item>
+            <ng-container [ngTemplateOutlet]="modelMenuItem"
+                          [ngTemplateOutletContext]="{ $implicit: item }"></ng-container>
+          </ng-template>
+        </p-menu>
+      </ng-container>
     </ng-container>
 
     <ng-container *ngIf="tools.help">
@@ -687,16 +666,16 @@
     of any model downloads it (a progress toast is shown); it's then cached.</p>
   <p>Two shapes of tool: the <b>prompted</b> ones (Segment, Point prompts, Cellpose) act on
     rectangles you draw, and generated regions inherit the color of the rectangle they came
-    from; the <b>no-prompt</b> ones (YOLO, Retinal layers) sweep the whole current view, so
-    there is nothing to draw first.</p>
+    from<span *ngIf="contributedTools.length">; the <b>no-prompt</b> ones ({{ contributedToolNames }})
+    sweep the whole current view, so there is nothing to draw first</span>.</p>
   <p>Each model dropdown <i class="pi pi-chevron-down"></i> lists the available checkpoints with
     a <i class="pi pi-info-circle"></i> beside each one — hover it for that model's size, speed,
     training domain and accuracy, so you can pick without leaving the toolbar.</p>
   <ul>
-    <li>"<b>Segment</b>" <img src="assets/plotting/picture-segmentation.svg" width="15" height="15">
+    <li>"<b>Segment</b>" <img src="assets/plotting/sam-box-prompt.svg" width="15" height="15">
       (box prompt): draw one or more <b>Rectangular regions</b> around the objects of interest,
       then click Segment. Each rectangle is replaced by the SAM mask of the object inside it.</li>
-    <li>"<b>Point prompts</b>" <img src="assets/plotting/click.svg" width="15" height="15">: click directly on an object to
+    <li>"<b>Point prompts</b>" <img src="assets/plotting/sam-point-prompt.svg" width="15" height="15">: click directly on an object to
       segment it as a <b>new</b> region. Each click starts a fresh object — clicking another
       object won't grow the previous one. <kbd>Shift</kbd>/<kbd>Alt</kbd>-click adds an
       <i>exclude</i> point that refines the current object; <kbd>Esc</kbd> undoes it,
@@ -712,18 +691,12 @@
     <li>"<b>Cellpose</b>" <img src="assets/plotting/cells.svg" width="15" height="15">: draw rectangles, then click Cellpose to
       automatically segment every cell inside each rectangle (client-side cellpose-SAM) — one
       region per detected cell. No clicking on individual cells needed.</li>
-    <li>"<b>Detect objects</b>" <img src="assets/plotting/yolo-object-detection.svg" width="15" height="15">
-      (YOLO): finds every object in the current view and adds one region per detection — a
-      detector searches a field rather than being pointed at something, so no rectangle is
-      needed. Checkpoints are trained per structure (<b>Optic nerve</b>, <b>Retina</b>,
-      <b>Embryo</b>); the <i class="pi pi-sliders-h"></i> button opens confidence, IoU and
-      tiling parameters.</li>
-    <li>"<b>Retinal layers</b>" <img src="assets/plotting/retinal-layer-segmentation.svg" width="15" height="15">:
-      semantic segmentation of the current view — it labels <i>every</i> pixel with its retinal
-      layer rather than outlining one object, so it also takes no prompt. <b>VNet 2D (40x)</b> is
-      the browser checkpoint; it is a large download (~590&nbsp;MB), so the first run takes a
-      while before anything appears. The <i class="pi pi-sliders-h"></i> button opens its
-      parameters.</li>
+    <!-- Contributed tools describe themselves. This library ships none, so an
+         open build's help lists only the prompted tools above — the text no
+         longer promises buttons that are not there. -->
+    <ng-container *ngFor="let tool of contributedTools">
+      <li *ngIf="tool.help" [innerHTML]="tool.help.body"></li>
+    </ng-container>
   </ul>
 
   <h3>Help</h3>

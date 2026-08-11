@@ -1,6 +1,6 @@
 import { ChangeDetectorRef, Component, AfterViewInit, EventEmitter, HostListener, Inject, Input, NgZone, OnChanges, OnDestroy, OnInit, Optional, Output, SimpleChanges, ViewChild } from '@angular/core';
 
-import { BehaviorSubject, Subject, Subscription } from 'rxjs';
+import { BehaviorSubject, Observable, Subject, Subscription } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 
 import { MenuItem, MessageService, TreeNode } from 'primeng/api';
@@ -24,31 +24,14 @@ import { SAM_MODELS, getDefaultSamModelId, isSamModelReady } from './toolbar/seg
 import { SamToolService } from './toolbar/segmentation/sam-tool.service';
 import { SamPointToolService } from './toolbar/segmentation/sam-point-tool.service';
 import { CellSegmentToolService } from './toolbar/segmentation/cell-segment-tool.service';
-import { YoloDetectToolService } from './toolbar/segmentation/yolo-detect-tool.service';
 import {
-  YOLO_MODELS,
-  isYoloModelReady,
-  getDefaultYoloModelId,
-  setDefaultYoloModel,
-} from './toolbar/segmentation/yolo-model-registry';
-import { INSTANCE_SEGMENTER } from './contracts/instance-segmenter.contract';
-import type {
-  IInstanceSegmenter,
-  InstanceSegmentOptions,
-} from './contracts/instance-segmenter.contract';
-import { RetinalLayerToolService } from './toolbar/segmentation/retinal-layer-tool.service';
-import {
-  RETINAL_MODELS,
-  isRetinalModelReady,
-  getDefaultRetinalModelId,
-  setDefaultRetinalModel,
-  getRetinalModel,
-} from './toolbar/segmentation/retinal-model-registry';
-import { SEMANTIC_SEGMENTER } from './contracts/semantic-segmenter.contract';
-import type {
-  ISemanticSegmenter,
-  SemanticSegmentOptions,
-} from './contracts/semantic-segmenter.contract';
+  TOOLBAR_TOOLS,
+  NumberParamSpec,
+  SelectParamSpec,
+  ToolParamSpec,
+  ToolbarToolContribution,
+  visibleToolContributions,
+} from './contracts/toolbar-tool.contract';
 import { RegionToolMode } from './contracts/region-overlay.contract';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from './contracts/toolbar-config';
 import { VIZ_CONFIG, VizConfig } from './contracts/viz-config';
@@ -195,31 +178,22 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   samModels = SAM_MODELS.filter(isSamModelReady).map((m) => ({ id: m.id, label: m.label }));
   samModelId = getDefaultSamModelId();
 
-  /** YOLO checkpoints with a configured URL, and the active one. */
-  yoloModels = YOLO_MODELS.filter((m) => isYoloModelReady(m.id)).map((m) => ({
-    id: m.id,
-    label: m.label,
-  }));
-  yoloModelId = getDefaultYoloModelId();
-  /** Parameter dialog state. Seeded from the active model's own defaults, which
-   *  encode the scale and crowding each checkpoint was trained for. */
-  showYoloParams = false;
-  yoloParams: InstanceSegmentOptions = this.defaultYoloParams();
-
-  /** Retinal-layer checkpoints with a configured URL, and the active one.
-   *  Only VNet ships — see the registry for why the ResUNet-a entries are off. */
-  retinalModels = RETINAL_MODELS.filter((m) => isRetinalModelReady(m.id)).map((m) => ({
-    id: m.id,
-    label: m.label,
-  }));
-  retinalModelId = getDefaultRetinalModelId();
-  showRetinalParams = false;
-  retinalParams: SemanticSegmentOptions = this.defaultRetinalParams();
-  /** Download size of the active retinal model, surfaced in the dialog because
-   *  ~590 MB is worth knowing before clicking Run rather than after. */
-  get retinalModelSizeMb(): number {
-    return getRetinalModel(this.retinalModelId)?.sizeMb ?? 0;
-  }
+  /**
+   * No-prompt tools registered through {@link TOOLBAR_TOOLS}, filtered to those
+   * with configured models and sorted. This library registers none — a host
+   * supplies them — so an open build has an empty array here and the toolbar
+   * and help dialog simply omit that group.
+   */
+  contributedTools: ToolbarToolContribution[] = [];
+  /** Active checkpoint per contributed tool. */
+  toolModelIds: Record<string, string> = {};
+  /**
+   * Parameter values per contributed tool, seeded from each tool's own defaults
+   * — which encode the scale and crowding its checkpoint was trained for.
+   */
+  toolParams: Record<string, Record<string, unknown>> = {};
+  /** Which tool's parameter dialog is open, or null. */
+  openParamsToolId: string | null = null;
   /** SAM download/segment toast state (bound by the `sam` p-toast template). */
   samStatus = '';
   samProgress = 0; // 0..100, encoder download
@@ -352,14 +326,15 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     private session: VisualizerStore,
     private samTool: SamToolService,
     private cellSegmentTool: CellSegmentToolService,
-    private yoloDetectTool: YoloDetectToolService,
-    @Inject(INSTANCE_SEGMENTER) private instanceSegmenter: IInstanceSegmenter,
-    @Inject(SEMANTIC_SEGMENTER) private semanticSegmenter: ISemanticSegmenter,
-    private retinalLayerTool: RetinalLayerToolService,
     private samPointTool: SamPointToolService,
     private regionOps: RegionOpsService,
     @Optional() @Inject(VIZ_CONFIG) private vizConfig?: VizConfig,
+    // A constructor parameter rather than a field `inject()`: this component is
+    // also constructed directly with `new` in its own specs, which is outside
+    // an injection context and would throw NG0203 on a field initializer.
+    @Optional() @Inject(TOOLBAR_TOOLS) toolContributions?: readonly ToolbarToolContribution[],
   ) {
+    this.contributedTools = visibleToolContributions(toolContributions);
     this.colormapsOptions = plotService.getColormapOptions();
     this.computePlotTypeOptions();
   }
@@ -1461,98 +1436,84 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     );
   }
 
-  /** Per-model defaults from the registry — what the checkpoint was trained for. */
-  private defaultYoloParams(): InstanceSegmentOptions {
-    const def = YOLO_MODELS.find((m) => m.id === getDefaultYoloModelId()) ?? YOLO_MODELS[0];
-    return {
-      modelId: def?.id,
-      confidence: def?.defaults.confidence ?? 0.6,
-      iouThreshold: def?.defaults.iouThreshold ?? 0.5,
-      mergeThreshold: def?.defaults.mergeThreshold ?? 0.3,
-      overlapX: def?.defaults.overlapX ?? 0,
-      overlapY: def?.defaults.overlapY ?? 0,
-      // Exposed in the dialog, so it must be seeded — otherwise the scale
-      // control reads as 0 and the re-crop never runs.
-      downsamplingFactor: 5,
-      withMasks: true,
-      simplifyTolerance: 1,
-      minArea: 0,
-    };
+  /**
+   * Parameters currently bound by the generic parameter dialog, for whichever
+   * tool is open. Seeded lazily: a tool's defaults are only asked for when the
+   * user first touches it, so registering a tool costs nothing until used.
+   */
+  paramsFor(toolId: string): Record<string, unknown> {
+    const tool = this.contributedTools.find((t) => t.id === toolId);
+    if (!tool) return {};
+    if (!this.toolParams[toolId]) {
+      this.toolParams[toolId] = tool.defaultParams(this.modelIdFor(tool));
+    }
+    return this.toolParams[toolId]!;
+  }
+
+  /** Active checkpoint for a tool, falling back to the tool's own default. */
+  modelIdFor(tool: ToolbarToolContribution): string {
+    return this.toolModelIds[tool.id] ?? tool.defaultModelId();
   }
 
   /** Switching checkpoint re-seeds the parameters, since the defaults belong to
    *  the model rather than to the tool. */
-  onYoloModelChange(id: string): void {
-    this.yoloModelId = id;
-    setDefaultYoloModel(id);
-    this.yoloParams = { ...this.defaultYoloParams(), modelId: id };
+  onToolModelChange(e: { toolId: string; modelId: string }): void {
+    const tool = this.contributedTools.find((t) => t.id === e.toolId);
+    if (!tool) return;
+    // Reassigned rather than mutated so the toolbar's ngOnChanges sees a new
+    // reference and rebuilds that tool's model menu with the check mark moved.
+    this.toolModelIds = { ...this.toolModelIds, [e.toolId]: e.modelId };
+    tool.onModelChange?.(e.modelId);
+    this.toolParams[e.toolId] = this.seedParams(tool, e.modelId);
   }
 
-  openYoloParams(): void {
-    this.showYoloParams = true;
-  }
-
-  resetYoloParams(): void {
-    this.yoloParams = { ...this.defaultYoloParams(), modelId: this.yoloModelId };
-  }
-
-  /** Detect objects across the current view. No prompt: a detector finds objects
-   *  in a field rather than being pointed at one. Reuses the shared segmentation
-   *  toast so progress and status read the same as the SAM/cellpose tools. */
-  async detectYolo() {
-    await this.runSegmentWithToast('YOLO', this.yoloDetectTool, () =>
-      this.yoloDetectTool.detectInView(this.plotService, this.instanceSegmenter, {
-        ...this.yoloParams,
-        modelId: this.yoloModelId,
-      }),
-    );
+  /** A tool's defaults for a checkpoint, with that checkpoint's own overrides
+   *  applied on top — per-model defaults beat per-tool ones. */
+  private seedParams(tool: ToolbarToolContribution, modelId: string): Record<string, unknown> {
+    const model = tool.models().find((m) => m.id === modelId);
+    return { ...tool.defaultParams(modelId), ...(model?.defaults ?? {}) };
   }
 
   /**
-   * Defaults for the retinal tool.
+   * Narrow a param spec for the template.
    *
-   * `classThreshold` is 0.5 to match the reference worker, which thresholds each
-   * class channel independently rather than taking an argmax — with a softmax
-   * output that makes it argmax plus a confidence floor.
-   *
-   * `downsamplingFactor` is 1 rather than YOLO's 5: these checkpoints were
-   * trained on native 40x patches, so the model wants full resolution and
-   * downsampling actively hurts.
+   * `*ngSwitchCase` does not narrow a discriminated union in Angular's template
+   * type checker the way a `switch` does in TypeScript, so the template asks for
+   * the variant it has already matched on.
    */
-  private defaultRetinalParams(): SemanticSegmentOptions {
-    return {
-      modelId: getDefaultRetinalModelId(),
-      classThreshold: 0.5,
-      downsamplingFactor: 1,
-      simplifyTolerance: 1,
-      minArea: 0,
-    };
+  numberParam(p: ToolParamSpec): NumberParamSpec {
+    return p as NumberParamSpec;
   }
 
-  /** Switching checkpoint re-seeds the parameters, since the defaults belong to
-   *  the model rather than to the tool. */
-  onRetinalModelChange(id: string): void {
-    this.retinalModelId = id;
-    setDefaultRetinalModel(id);
-    this.retinalParams = { ...this.defaultRetinalParams(), modelId: id };
+  selectParam(p: ToolParamSpec): SelectParamSpec {
+    return p as SelectParamSpec;
   }
 
-  openRetinalParams(): void {
-    this.showRetinalParams = true;
+  openToolParams(toolId: string): void {
+    this.paramsFor(toolId); // seed before the dialog binds to it
+    this.openParamsToolId = toolId;
   }
 
-  resetRetinalParams(): void {
-    this.retinalParams = { ...this.defaultRetinalParams(), modelId: this.retinalModelId };
+  /** The tool whose parameter dialog is open, for the generic dialog's header
+   *  and field list. */
+  get openParamsTool(): ToolbarToolContribution | undefined {
+    return this.contributedTools.find((t) => t.id === this.openParamsToolId);
   }
 
-  /** Segment retinal layers across the current view. Like YOLO this takes no
-   *  prompt — it labels every pixel — and reuses the shared segmentation toast. */
-  async segmentRetinal() {
-    await this.runSegmentWithToast('Retinal layers', this.retinalLayerTool, () =>
-      this.retinalLayerTool.segmentInView(this.plotService, this.semanticSegmenter, {
-        ...this.retinalParams,
-        modelId: this.retinalModelId,
-      }),
+  resetToolParams(toolId: string): void {
+    const tool = this.contributedTools.find((t) => t.id === toolId);
+    if (tool) this.toolParams[toolId] = this.seedParams(tool, this.modelIdFor(tool));
+  }
+
+  /** Run a contributed tool over the current view. No prompt: these sweep the
+   *  whole view rather than being pointed at something. Reuses the shared
+   *  segmentation toast so progress reads the same as the SAM/cellpose tools. */
+  async runTool(toolId: string): Promise<void> {
+    const tool = this.contributedTools.find((t) => t.id === toolId);
+    if (!tool) return;
+    const params = { ...this.paramsFor(toolId), modelId: this.modelIdFor(tool) };
+    await this.runSegmentWithToast(tool.label, tool.progress, () =>
+      tool.run(this.plotService, params),
     );
   }
 
@@ -1561,7 +1522,10 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    *  region count. Keeps the toast open until the run settles (bar hits 100%). */
   private async runSegmentWithToast(
     label: string,
-    tool: { status$: BehaviorSubject<string>; progress$: BehaviorSubject<number> },
+    // Observables rather than BehaviorSubjects: a contributed tool implements
+    // ToolProgress, and requiring a concrete subject would force every plugin
+    // to expose its internals just to drive this toast.
+    tool: { status$: Observable<string>; progress$: Observable<number> },
     op: () => Promise<number>,
   ) {
     this.samStatus = 'Starting…';
@@ -1573,8 +1537,13 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       if (f >= 0) this.samProgress = Math.min(100, Math.round(f * 100));
       this.cdr.detectChanges();
     });
+    // Tracked here rather than read off the subject at the end: `tool` is only
+    // an Observable pair now, so there is no `.value` to sample once the run
+    // settles. The last non-empty status is what the result toast reports.
+    let lastStatus = '';
     const ssub = tool.status$.subscribe((m) => {
       if (m) {
+        lastStatus = m;
         this.samStatus = m;
         this.cdr.detectChanges();
       }
@@ -1586,7 +1555,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
         key: this.resultToastKey,
         severity: n > 0 ? 'success' : 'warn',
         summary: label,
-        detail: tool.status$.value || (n > 0 ? `Added ${n} region(s).` : 'No regions added.'),
+        detail: lastStatus || (n > 0 ? `Added ${n} region(s).` : 'No regions added.'),
       });
     } catch (e) {
       this.messageService.add({

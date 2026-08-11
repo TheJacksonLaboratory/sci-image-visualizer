@@ -1,6 +1,5 @@
-import { InjectionToken, inject } from '@angular/core';
+import { InjectionToken } from '@angular/core';
 
-import { YoloSegmenterService } from '../toolbar/segmentation/yolo-segmenter.service';
 
 /**
  * Port for an automatic **instance** segmenter — one that returns discrete,
@@ -139,11 +138,12 @@ export interface IInstanceSegmenter {
 }
 
 /**
- * DI token for the automatic instance segmenter. Defaults to the in-library
- * {@link YoloSegmenterService} (yolo-segdetect-js, lazy-loaded); override it in
- * the host to swap implementations — for example to delegate to the server.
+ * DI token for the automatic instance segmenter.
+ *
+ * **No default.** It used to fall back to an in-library YOLO service, and that
+ * factory was what pulled `yolo-segdetect-js` into every bundle of this package
+ * — which is not shippable while the checkpoints are closed. A host provides an
+ * implementation (see `@jax-data-science/sci-image-visualizer-jax-tools`), or
+ * nothing does and no tool needing it is registered.
  */
-export const INSTANCE_SEGMENTER = new InjectionToken<IInstanceSegmenter>('INSTANCE_SEGMENTER', {
-  providedIn: 'root',
-  factory: () => inject(YoloSegmenterService),
-});
+export const INSTANCE_SEGMENTER = new InjectionToken<IInstanceSegmenter>('INSTANCE_SEGMENTER');

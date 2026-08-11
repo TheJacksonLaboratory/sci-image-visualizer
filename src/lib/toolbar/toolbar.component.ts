@@ -13,6 +13,7 @@ import {
   NAPARI_DEFAULT_DECIMATE,
 } from '../contracts/plot-type';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from '../contracts/toolbar-config';
+import { ToolbarToolContribution } from '../contracts/toolbar-tool.contract';
 import { MODEL_INFO } from './model-info';
 
 /**
@@ -76,12 +77,14 @@ export class ToolbarComponent implements OnChanges {
   /** SAM model picker options + current selection (jit-ui#90 P1). */
   @Input() samModels: { id: string; label: string }[] = [];
   @Input() samModelId = '';
-  /** YOLO checkpoints offered by the host's registry, and the active one. */
-  @Input() yoloModels: { id: string; label: string }[] = [];
-  @Input() yoloModelId = '';
-  /** Retinal-layer checkpoints offered by the host's registry, and the active one. */
-  @Input() retinalModels: { id: string; label: string }[] = [];
-  @Input() retinalModelId = '';
+  /**
+   * Tools contributed through {@link TOOLBAR_TOOLS}, already filtered to the
+   * ones with models and sorted. The host resolves them so it can own the
+   * per-tool parameter state; this component only draws them.
+   */
+  @Input() contributedTools: ToolbarToolContribution[] = [];
+  /** Active checkpoint per contributed tool, keyed by tool id. */
+  @Input() toolModelIds: Record<string, string> = {};
 
   @Output() selectPlotType = new EventEmitter<PlotType>();
   /** Intensity (LINE) mode: add another colored line ROI + inset trace. */
@@ -121,18 +124,12 @@ export class ToolbarComponent implements OnChanges {
   @Output() segmentRegions = new EventEmitter<void>();
   /** Run cellpose-SAM (auto) inside each drawn rectangle's crop (jit-ui#90). */
   @Output() segmentCellpose = new EventEmitter<void>();
-  /** Run YOLO detection over the current view. */
-  @Output() detectYolo = new EventEmitter<void>();
-  /** Pick the YOLO checkpoint. */
-  @Output() yoloModelChange = new EventEmitter<string>();
-  /** Open the YOLO parameter dialog. */
-  @Output() openYoloParams = new EventEmitter<void>();
-  /** Run retinal-layer segmentation over the current view. */
-  @Output() segmentRetinal = new EventEmitter<void>();
-  /** Pick the retinal-layer checkpoint. */
-  @Output() retinalModelChange = new EventEmitter<string>();
-  /** Open the retinal-layer parameter dialog. */
-  @Output() openRetinalParams = new EventEmitter<void>();
+  /** Run a contributed tool over the current view, by tool id. */
+  @Output() runTool = new EventEmitter<string>();
+  /** Pick a contributed tool's checkpoint. */
+  @Output() toolModelChange = new EventEmitter<{ toolId: string; modelId: string }>();
+  /** Open a contributed tool's parameter dialog, by tool id. */
+  @Output() openToolParams = new EventEmitter<string>();
   /** SAM model picker (jit-ui#90 P1). */
   @Output() samModelChange = new EventEmitter<string>();
   @Output() wandSensitivityChange = new EventEmitter<number | undefined>();
@@ -168,10 +165,17 @@ export class ToolbarComponent implements OnChanges {
    *  menus' shared item template turns it into the hover info icon. p-menu's own
    *  rendering ignores the field (it reads `item.title`), so it is free to use. */
   samMenuItems: MenuItem[] = [];
-  /** Same stable-array reasoning as {@link samMenuItems}. */
-  yoloMenuItems: MenuItem[] = [];
-  /** Same stable-array reasoning as {@link samMenuItems}. */
-  retinalMenuItems: MenuItem[] = [];
+  /**
+   * Model menus for the contributed tools, keyed by tool id. Same stable-array
+   * reasoning as {@link samMenuItems} — and it is why this is a map rebuilt in
+   * `ngOnChanges` rather than a method called from the template, which would
+   * hand `p-menu` a new array every tick.
+   *
+   * A contributed tool supplies its own per-model description, so unlike the
+   * SAM menu these do not consult {@link MODEL_INFO}: this library has no
+   * copy for checkpoints it does not know about.
+   */
+  toolMenuItems: Record<string, MenuItem[]> = {};
 
   /** Rebuild the SAM model menu when the model list or active selection
    *  changes (keeps the array reference stable across other CD ticks). */
@@ -184,22 +188,31 @@ export class ToolbarComponent implements OnChanges {
         command: () => this.samModelChange.emit(m.id),
       }));
     }
-    if (changes['yoloModels'] || changes['yoloModelId']) {
-      this.yoloMenuItems = this.yoloModels.map((m) => ({
-        label: m.label,
-        icon: m.id === this.yoloModelId ? 'pi pi-check' : 'pi pi-fw',
-        tooltip: MODEL_INFO[m.id],
-        command: () => this.yoloModelChange.emit(m.id),
-      }));
+    if (changes['contributedTools'] || changes['toolModelIds']) {
+      this.toolMenuItems = {};
+      for (const tool of this.contributedTools) {
+        const active = this.toolModelIds[tool.id] ?? tool.defaultModelId();
+        this.toolMenuItems[tool.id] = tool.models().map((m) => ({
+          label: m.label,
+          icon: m.id === active ? 'pi pi-check' : 'pi pi-fw',
+          tooltip: m.info,
+          command: () => this.toolModelChange.emit({ toolId: tool.id, modelId: m.id }),
+        }));
+      }
     }
-    if (changes['retinalModels'] || changes['retinalModelId']) {
-      this.retinalMenuItems = this.retinalModels.map((m) => ({
-        label: m.label,
-        icon: m.id === this.retinalModelId ? 'pi pi-check' : 'pi pi-fw',
-        tooltip: MODEL_INFO[m.id],
-        command: () => this.retinalModelChange.emit(m.id),
-      }));
-    }
+  }
+
+  /** Contributed tool names for the help dialog's prompted/no-prompt contrast,
+   *  e.g. "YOLO, Retinal layers". Empty when nothing is registered, which is
+   *  why the sentence that uses it is itself conditional. */
+  get contributedToolNames(): string {
+    return this.contributedTools.map((t) => t.label).join(', ');
+  }
+
+  /** Keeps each contributed tool's `p-menu` overlay alive across CD ticks —
+   *  re-creating it mid-interaction swallows the click on a menu item. */
+  trackToolById(_index: number, tool: ToolbarToolContribution): string {
+    return tool.id;
   }
 
   /** The Image plot type renders as a natively pan/zoom-able raster, so the

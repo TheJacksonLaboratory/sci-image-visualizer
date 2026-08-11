@@ -5,6 +5,26 @@ import { EventEmitter } from '@angular/core';
 
 import { ToolbarComponent } from './toolbar.component';
 import { PlotType } from '../contracts/plot-type';
+import { ToolbarToolContribution } from '../contracts/toolbar-tool.contract';
+
+/** A contributed tool with two checkpoints, enough to exercise the menu. */
+function contributedTool(): ToolbarToolContribution {
+  return {
+    id: 'detect',
+    label: 'Detect',
+    icon: { pi: 'pi-search' },
+    runTooltip: 'Detect things',
+    models: () => [
+      { id: 'model-a', label: 'A', info: 'the first one' },
+      { id: 'model-b', label: 'B', info: 'the second one' },
+    ],
+    defaultModelId: () => 'model-a',
+    params: [],
+    defaultParams: () => ({}),
+    progress: { status$: null as never, busy$: null as never, progress$: null as never },
+    run: async () => 0,
+  };
+}
 
 describe('ToolbarComponent', () => {
   let component: ToolbarComponent;
@@ -99,24 +119,42 @@ describe('ToolbarComponent', () => {
     expect(toolbar).toBeTruthy();
   });
 
-  it('carries each model description on its menu item as `tooltip`', () => {
+  it('carries each SAM model description on its menu item as `tooltip`', () => {
     component.samModels = [{ id: 'microsam-vit-t-lm', label: 'micro-sam ViT-T' }];
     component.samModelId = 'microsam-vit-t-lm';
-    component.yoloModels = [{ id: 'yolov8x-seg-retina', label: 'Retina' }];
-    component.retinalModels = [{ id: 'vnet-2d-retinal', label: 'VNet 2D (40x)' }];
-    component.ngOnChanges({
-      samModels: {} as never,
-      yoloModels: {} as never,
-      retinalModels: {} as never,
-    });
+    component.ngOnChanges({ samModels: {} as never });
 
     // The item template turns `tooltip` into the hover info icon, so an empty
     // one would silently drop the icon rather than fail.
     expect(component.samMenuItems[0].tooltip).toContain('TinyViT');
-    expect(component.yoloMenuItems[0].tooltip).toContain('tile overlap');
-    expect(component.retinalMenuItems[0].tooltip).toContain('mIoU');
     // Active model still marked, and selecting still emits.
     expect(component.samMenuItems[0].icon).toBe('pi pi-check');
+  });
+
+  it('builds a contributed tool\'s menu from the tool\'s own model info', () => {
+    // Contributed tools describe their own checkpoints: this library ships no
+    // copy for models it does not know about, so the description must come off
+    // the contribution rather than out of MODEL_INFO.
+    component.contributedTools = [contributedTool()];
+    component.toolModelIds = { detect: 'model-b' };
+    component.ngOnChanges({ contributedTools: {} as never });
+
+    const items = component.toolMenuItems['detect']!;
+    expect(items[0].tooltip).toContain('the first one');
+    expect(items[1].icon).toBe('pi pi-check');
+    expect(items[0].icon).toBe('pi pi-fw');
+  });
+
+  it('emits the tool id alongside the model when a contributed model is picked', () => {
+    // Without the id the host cannot tell which tool's parameters to re-seed.
+    component.contributedTools = [contributedTool()];
+    component.ngOnChanges({ contributedTools: {} as never });
+    const picked: { toolId: string; modelId: string }[] = [];
+    component.toolModelChange.subscribe((e) => picked.push(e));
+
+    component.toolMenuItems['detect']![1].command!({} as never);
+
+    expect(picked).toEqual([{ toolId: 'detect', modelId: 'model-b' }]);
   });
 
   it('leaves `tooltip` undefined for a model with no description', () => {
