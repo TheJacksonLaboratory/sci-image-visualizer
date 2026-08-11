@@ -7,7 +7,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Entries before 0.2.7 were reconstructed from the git history at the time this
 file was added.
 
-## [Unreleased]
+## [0.3.0] — 2026-08-11
 
 ### Removed
 
