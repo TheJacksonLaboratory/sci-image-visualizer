@@ -23,7 +23,11 @@ CORE='@jax-data-science/sci-image-visualizer'
 NEW_MSG="Depends on model libraries that moved to jax-cs-registry. Use ${CORE}@^0.3.0 with @jax-data-science/sci-image-visualizer-jax-tools."
 
 # Every published 0.2.x declares yolo-segdetect-js; 0.2.17+ also jax-ai-js.
-for v in 0.2.14 0.2.15 0.2.16 0.2.17 0.2.18 0.2.19; do
+# One list, used for both the deprecation and the verification below -- two
+# copies would silently drift.
+LEGACY=(0.2.14 0.2.15 0.2.16 0.2.17 0.2.18 0.2.19)
+
+for v in "${LEGACY[@]}"; do
   echo "==> deprecating ${CORE}@${v}"
   npm deprecate "${CORE}@${v}" "$NEW_MSG"
 done
@@ -36,7 +40,34 @@ npm deprecate yolo-segdetect-js \
 
 echo
 echo "==> verifying"
-npm view "${CORE}" deprecated --json 2>/dev/null || true
-for p in jax-ai-js yolo-segdetect-js; do
-  printf '  %s: ' "$p"; npm view "$p" deprecated 2>/dev/null || echo '(none)'
+# Per version, not per package. `npm view <pkg> deprecated` reports only the
+# dist-tag'd latest, which is 0.3.0 and deliberately NOT deprecated -- so the
+# obvious one-line check would print an empty result and read as success while
+# every version this script targets went untouched.
+fail=0
+for v in "${LEGACY[@]}"; do
+  msg=$(npm view "${CORE}@${v}" deprecated 2>/dev/null || true)
+  if [ -z "$msg" ]; then
+    echo "  MISSING ${CORE}@${v}"
+    fail=1
+  else
+    echo "  ok      ${CORE}@${v}"
+  fi
 done
+for p in jax-ai-js yolo-segdetect-js; do
+  # A whole-package deprecation lands on every version, so check the versions
+  # rather than the package: an empty reply here would also be a false pass.
+  for v in $(npm view "$p" versions --json 2>/dev/null | tr -d '[]", ' | tr '\n' ' '); do
+    [ -z "$v" ] && continue
+    msg=$(npm view "$p@$v" deprecated 2>/dev/null || true)
+    if [ -z "$msg" ]; then echo "  MISSING $p@$v"; fail=1; fi
+  done
+  echo "  checked $p"
+done
+
+if [ "$fail" -ne 0 ]; then
+  echo
+  echo "Some deprecations did not take. Re-run, or check you are logged in as a maintainer." >&2
+  exit 1
+fi
+echo "All targeted versions are deprecated."

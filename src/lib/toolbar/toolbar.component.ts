@@ -202,6 +202,27 @@ export class ToolbarComponent implements OnChanges {
     }
   }
 
+  /**
+   * Strip markup from a model description so it can be read aloud.
+   *
+   * The copy in MODEL_INFO and in a contribution's `ToolModelOption.info` is
+   * written for a visual tooltip rendered with `[escape]="false"`, so it carries
+   * `<b>` and `<br>`. Passed to `aria-label` verbatim a screen reader announces
+   * the tags, so they are removed and `<br>` becomes a sentence break. Entities
+   * used in that copy (`&nbsp;`, `&times;`, `&amp;`) are decoded for the same
+   * reason.
+   */
+  plainText(html: string): string {
+    return (html ?? '')
+      .replace(/<br\s*\/?>/gi, '. ')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&times;/g, 'x')
+      .replace(/&amp;/g, '&')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
   /** Contributed tool names for the help dialog's prompted/no-prompt contrast,
    *  e.g. "YOLO, Retinal layers". Empty when nothing is registered, which is
    *  why the sentence that uses it is itself conditional. */

@@ -446,10 +446,27 @@
                these menus open under buttons that can sit near the right edge,
                where a `right` tooltip has a few hundred px and squeezes its text
                into a narrow column instead of using its max-width. -->
-          <i *ngIf="item.tooltip" class="pi pi-info-circle model-info-icon"
-             [pTooltip]="item.tooltip" [escape]="false" tooltipPosition="bottom"
-             appendTo="body" tooltipStyleClass="model-info-tooltip"
-             (click)="$event.stopPropagation()"></i>
+          <!-- A focusable <button>, not a bare <i>. As an <i> the description
+               was reachable only by hovering a mouse: not tabbable, no
+               accessible name, nothing for a screen reader to announce — so
+               keyboard and AT users could pick a checkpoint but never read what
+               it was. PrimeNG's tooltip shows on focus as well as hover, so
+               making it a button restores it for free.
+
+               `aria-describedby` is deliberately not used: the tooltip is
+               rendered into `body` on demand and has no stable id to point at.
+               The description is carried on `aria-label` instead, which is
+               announced whether or not the tooltip is showing. It is stripped of
+               markup first, since the copy contains `<b>`/`<br>` for the visual
+               tooltip and those would otherwise be read out literally. -->
+          <button *ngIf="item.tooltip" type="button"
+                  class="pi pi-info-circle model-info-icon"
+                  [attr.aria-label]="'About ' + item.label + ': ' + plainText(item.tooltip)"
+                  [pTooltip]="item.tooltip" [escape]="false" tooltipPosition="bottom"
+                  appendTo="body" tooltipStyleClass="model-info-tooltip"
+                  (click)="$event.stopPropagation()"
+                  (keydown.enter)="$event.stopPropagation()"
+                  (keydown.space)="$event.stopPropagation()"></button>
         </a>
       </ng-template>
       <p-button size="small" [text]="true"

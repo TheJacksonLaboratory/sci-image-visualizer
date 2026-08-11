@@ -1445,7 +1445,13 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     const tool = this.contributedTools.find((t) => t.id === toolId);
     if (!tool) return {};
     if (!this.toolParams[toolId]) {
-      this.toolParams[toolId] = tool.defaultParams(this.modelIdFor(tool));
+      // Through `seedParams`, not `defaultParams` directly: the active
+      // checkpoint's own `ToolModelOption.defaults` have to be merged on top.
+      // Calling `defaultParams` here bypassed them, so the very first run of a
+      // tool used the tool's baseline thresholds and tiling rather than the
+      // model's — and it only corrected itself once the user switched
+      // checkpoints or hit Reset. Every entry point now goes through one path.
+      this.toolParams[toolId] = this.seedParams(tool, this.modelIdFor(tool));
     }
     return this.toolParams[toolId]!;
   }

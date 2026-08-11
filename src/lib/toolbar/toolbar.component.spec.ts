@@ -163,3 +163,23 @@ describe('ToolbarComponent', () => {
     expect(component.samMenuItems[0].tooltip).toBeUndefined();
   });
 });
+
+describe('ToolbarComponent — model info accessibility', () => {
+  it('strips markup so a screen reader does not announce tags', () => {
+    // The copy is written for a visual tooltip rendered with [escape]="false",
+    // so it carries <b> and <br>. Passed to aria-label verbatim those get read
+    // out literally.
+    const c = new ToolbarComponent();
+
+    const out = c.plainText('<b>VNet 2D</b><br>~590&nbsp;MB download &amp; 6&times; slower.');
+
+    expect(out).toBe('VNet 2D. ~590 MB download & 6x slower.');
+    expect(out).not.toMatch(/[<>]/);
+  });
+
+  it('survives an empty or missing description', () => {
+    const c = new ToolbarComponent();
+    expect(c.plainText('')).toBe('');
+    expect(c.plainText(undefined as never)).toBe('');
+  });
+});

@@ -87,12 +87,32 @@
     flex: 0 0 auto;
     font-size: 0.875rem;
     opacity: 0.55;
-    // `help` rather than `pointer`: the icon is hover-only, and clicking it is
-    // swallowed so it cannot switch models.
+    // `help` rather than `pointer`: the affordance only reveals text, and its
+    // click is swallowed so it cannot switch models.
     cursor: help;
+
+    // It is a real <button> so keyboard and screen-reader users can reach the
+    // description, which means undoing the UA button chrome that would
+    // otherwise box the glyph in.
+    appearance: none;
+    background: none;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    color: inherit;
+    line-height: 1;
 
     &:hover {
       opacity: 1;
+    }
+
+    // Keyboard users need to see where they are. Not `outline: none` -- that is
+    // exactly what would make this button reachable but invisible.
+    &:focus-visible {
+      opacity: 1;
+      outline: 2px solid var(--primary-color, #2196f3);
+      outline-offset: 2px;
+      border-radius: 2px;
     }
   }
 }

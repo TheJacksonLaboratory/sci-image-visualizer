@@ -7,6 +7,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Entries before 0.2.7 were reconstructed from the git history at the time this
 file was added.
 
+## [Unreleased]
+
 ## [0.3.0] — 2026-08-11
 
 ### Removed
@@ -17,8 +19,9 @@ file was added.
   now has no import edge to either — the remaining mentions are the doc comments
   explaining this.
 
-  This supersedes the ResUNet-a entry added earlier in this same unreleased
-  cycle: those checkpoints still run in a browser, just not from this package.
+  This includes the ResUNet-a 20x/40x checkpoints, which were briefly enabled
+  here during this cycle and never released: they still run in a browser, just
+  not from this package.
 
   What made the coupling small was that the contracts were already clean. The
   only thing pulling either package in was the *default factory* on
@@ -53,30 +56,6 @@ file was added.
   parameters registered without showing a button that cannot run.
 
 ### Added
-
-- **The ResUNet-a 20x and 40x retinal checkpoints now run in the browser.** They
-  join VNet in the retinal-layer picker; only the superseded base checkpoint
-  stays disabled.
-
-  They were held back on mIoU, which was the wrong gate. What this library is
-  accountable for is whether the browser reproduces the Keras model the server
-  runs, and both exports are **argmax-identical** to theirs at fp32 (within 1
-  pixel in 19,000 at fp16w) — so a browser run cannot differ from a server run
-  of the same weights. Their accuracy gap against the shipped masks (0.30–0.40
-  versus VNet's 0.906) is a property of the checkpoints, identical wherever they
-  execute, so it is a reason to keep VNet the default rather than to withhold
-  them and push users to a server run of the very same model.
-
-  Two things to know when reading those numbers: they are scored against the
-  models' own *training* data (the bucket ships no validation split), and the
-  20x model runs at **256**, not 128 — 128 raises inside a dilated conv, and
-  128-resolution content resampled to 256 scores 0.19 against 0.31 for plain
-  half-scale.
-
-  Requires **jax-ai-js ^0.2.2**, which is the release that applies
-  `preprocess.subtractMeansRGB`. Earlier versions ignored it and would feed
-  these checkpoints raw 0-255 — a silent failure that drops class 1 (ONL) to
-  IoU 0.000 while still producing a plausible-looking map.
 
 - **Per-model info in all three model pickers.** Every item in the SAM, YOLO and
   retinal-layer dropdowns now carries an info icon whose hover tooltip describes
@@ -601,7 +580,8 @@ file was added.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.19...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.19...v0.3.0
 [0.2.19]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.18...v0.2.19
 [0.2.18]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.17...v0.2.18
 [0.2.17]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.16...v0.2.17
