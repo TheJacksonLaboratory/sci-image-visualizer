@@ -385,7 +385,7 @@
                   pTooltip="Segment the drawn rectangles with SAM (box prompt)"
                   tooltipPosition="bottom"
                   (onClick)="segmentRegions.emit()">
-          <img src="assets/plotting/picture-segmentation.svg"
+          <img src="assets/plotting/sam-box-prompt.svg"
                class="toolbar-icon-dark" style="width: 1rem"/>
         </p-button>
         <ng-container [ngTemplateOutlet]="samPointBtn"></ng-container>
@@ -401,7 +401,7 @@
                     pTooltip="Segment the drawn rectangles with SAM (box prompt)"
                     tooltipPosition="bottom"
                     (onClick)="segmentRegions.emit()">
-            <img src="assets/plotting/picture-segmentation.svg"
+            <img src="assets/plotting/sam-box-prompt.svg"
                  class="toolbar-icon-dark" style="width: 1rem"/>
           </p-button>
           <ng-container [ngTemplateOutlet]="samPointBtn"></ng-container>
@@ -416,104 +416,107 @@
                   Shift/Alt-click to refine (exclude) the current one.<br>Esc undoes it."
                   [escape]="false" tooltipPosition="bottom"
                   (onClick)="toggleDragMode.emit('samPoint')">
-          <img src="assets/plotting/click.svg"
+          <img src="assets/plotting/sam-point-prompt.svg"
                [class]="activeDragMode === 'samPoint' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
                style="width: 1rem"/>
         </p-button>
       </ng-template>
-      <p-menu #samModelMenu [model]="samMenuItems" [popup]="true" appendTo="body"></p-menu>
-      <!-- Help: explains the ViT-T vs ViT-B trade-off behind the model picker. -->
-      <p-button *ngIf="samModels.length" icon="pi pi-info-circle" size="small" [text]="true"
-                pTooltip="About the SAM models" tooltipPosition="bottom"
-                (onClick)="samModelInfo.toggle($event)">
-      </p-button>
-      <p-overlayPanel #samModelInfo appendTo="body" styleClass="sam-model-info">
-        <div style="max-width: 24rem; line-height: 1.4">
-          <div class="font-bold mb-1">SAM models</div>
-          <p class="mt-0 mb-2">
-            All are promptable Segment Anything models finetuned for biomedical images. They differ
-            in the <i>image encoder</i> (the heavy once-per-image step) and the training domain —
-            box and point prompting behave the same.
-          </p>
-          <div class="mb-2">
-            <div class="font-bold">micro-sam ViT-T <span class="font-normal">(default)</span></div>
-            <div>Light-microscopy finetuned. TinyViT encoder, ~14&nbsp;MB, very fast, runs on WASM.
-              Good mask quality — best for quick interactive work and many/large objects.</div>
-          </div>
-          <div class="mb-2">
-            <div class="font-bold">micro-sam ViT-B</div>
-            <div>Light-microscopy finetuned. ViT-Base encoder, ~172&nbsp;MB, slower, GPU-accelerated
-              (WebGPU). Highest accuracy — when ViT-T misses subtle or overlapping boundaries.</div>
-          </div>
-          <div class="mb-2">
-            <div class="font-bold">patho-sam ViT-B</div>
-            <div>Histopathology finetuned (H&amp;E / stained tissue). ViT-Base encoder, GPU-accelerated.
-              Use it for pathology slides — it segments tissue/nuclei better than the microscopy models.</div>
-          </div>
-          <div class="mb-2">
-            <div class="font-bold">patho-sam ViT-B (int8)</div>
-            <div>Same model, int8-quantized — ~100&nbsp;MB vs ~180&nbsp;MB (smaller download). Runs on
-              WASM (slower encode than the fp16 version); masks are near-identical. Pick it on slow
-              connections.</div>
-          </div>
-          <div class="text-sm" style="opacity: 0.75">
-            The choice applies to both the box and point tools. Each tool loads its own encoder,
-            so the first click after switching re-encodes once.
-          </div>
-        </div>
-      </p-overlayPanel>
+      <p-menu #samModelMenu styleClass="model-menu" [model]="samMenuItems" [popup]="true" appendTo="body">
+        <ng-template pTemplate="item" let-item>
+          <ng-container [ngTemplateOutlet]="modelMenuItem"
+                        [ngTemplateOutletContext]="{ $implicit: item }"></ng-container>
+        </ng-template>
+      </p-menu>
+
+      <!-- Shared item body for all three model pickers (SAM / YOLO / retinal):
+           the standard check-or-blank icon and label, plus an info icon carrying
+           the model's description as a hover tooltip. This replaced a single
+           "About the SAM models" overlay panel — per-model text sits next to the
+           model it describes, and YOLO/retinal get the same affordance.
+
+           p-menu puts its click handler on the wrapping `.p-menuitem-content`,
+           outside this template, so `command` still fires and the whole row stays
+           clickable — which is also why the info icon has to stop propagation, or
+           reading about a model would switch to it. -->
+      <ng-template #modelMenuItem let-item>
+        <a class="p-menuitem-link model-menu-item">
+          <span class="p-menuitem-icon" [ngClass]="item.icon"></span>
+          <span class="p-menuitem-text">{{ item.label }}</span>
+          <!-- `bottom` like every other tooltip in this toolbar, and for room:
+               these menus open under buttons that can sit near the right edge,
+               where a `right` tooltip has a few hundred px and squeezes its text
+               into a narrow column instead of using its max-width. -->
+          <!-- A focusable <button>, not a bare <i>. As an <i> the description
+               was reachable only by hovering a mouse: not tabbable, no
+               accessible name, nothing for a screen reader to announce — so
+               keyboard and AT users could pick a checkpoint but never read what
+               it was. PrimeNG's tooltip shows on focus as well as hover, so
+               making it a button restores it for free.
+
+               `aria-describedby` is deliberately not used: the tooltip is
+               rendered into `body` on demand and has no stable id to point at.
+               The description is carried on `aria-label` instead, which is
+               announced whether or not the tooltip is showing. It is stripped of
+               markup first, since the copy contains `<b>`/`<br>` for the visual
+               tooltip and those would otherwise be read out literally. -->
+          <button *ngIf="item.tooltip" type="button"
+                  class="pi pi-info-circle model-info-icon"
+                  [attr.aria-label]="'About ' + item.label + ': ' + plainText(item.tooltip)"
+                  [pTooltip]="item.tooltip" [escape]="false" tooltipPosition="bottom"
+                  appendTo="body" tooltipStyleClass="model-info-tooltip"
+                  (click)="$event.stopPropagation()"
+                  (keydown.enter)="$event.stopPropagation()"
+                  (keydown.space)="$event.stopPropagation()"></button>
+        </a>
+      </ng-template>
       <p-button size="small" [text]="true"
-                pTooltip="Auto-segment cells inside each drawn rectangle (cellpose-SAM, client-side)"
+                pTooltip="Auto-segment cells inside each drawn rectangle (cellpose-SAM)"
                 tooltipPosition="bottom"
                 (onClick)="segmentCellpose.emit()">
         <img src="assets/plotting/cells.svg" class="toolbar-icon-dark" style="width: 1rem"/>
       </p-button>
 
-      <!-- YOLO: detect objects across the current view. Unlike the SAM and
-           cellpose tools it takes no prompt — a detector finds objects in a
-           field rather than being pointed at one — so there is nothing to draw
-           first. Split button: run, pick checkpoint, open parameters. -->
-      <span *ngIf="yoloModels.length" class="p-buttonset segment-split">
-        <p-button icon="pi pi-microchip-ai" size="small" [text]="true"
-                  pTooltip="Detect objects in the current view with YOLO (client-side)"
-                  tooltipPosition="bottom"
-                  (onClick)="detectYolo.emit()">
-        </p-button>
-        <p-button icon="pi pi-chevron-down" size="small" [text]="true"
-                  pTooltip="Pick the YOLO model"
-                  tooltipPosition="bottom"
-                  (onClick)="yoloModelMenu.toggle($event)">
-        </p-button>
-        <p-button icon="pi pi-sliders-h" size="small" [text]="true"
-                  pTooltip="YOLO parameters"
-                  tooltipPosition="bottom"
-                  (onClick)="openYoloParams.emit()">
-        </p-button>
-      </span>
-      <p-menu #yoloModelMenu [model]="yoloMenuItems" [popup]="true" appendTo="body"></p-menu>
+      <!-- Contributed no-prompt tools (TOOLBAR_TOOLS). Unlike the SAM and
+           cellpose tools these take no prompt — they sweep the whole current
+           view rather than being pointed at something — so there is nothing to
+           draw first. Each renders the same split button: run, pick checkpoint,
+           open parameters.
 
-      <!-- Retinal layers: semantic segmentation of the current view. Same
-           no-prompt shape as YOLO — it labels every pixel rather than being
-           pointed at an object — so the same split button: run, pick
-           checkpoint, open parameters. -->
-      <span *ngIf="retinalModels.length" class="p-buttonset segment-split">
-        <p-button icon="pi pi-align-left" size="small" [text]="true"
-                  pTooltip="Segment retinal layers in the current view (client-side)"
-                  tooltipPosition="bottom"
-                  (onClick)="segmentRetinal.emit()">
-        </p-button>
-        <p-button icon="pi pi-chevron-down" size="small" [text]="true"
-                  pTooltip="Pick the retinal layer model"
-                  tooltipPosition="bottom"
-                  (onClick)="retinalModelMenu.toggle($event)">
-        </p-button>
-        <p-button icon="pi pi-sliders-h" size="small" [text]="true"
-                  pTooltip="Retinal layer parameters"
-                  tooltipPosition="bottom"
-                  (onClick)="openRetinalParams.emit()">
-        </p-button>
-      </span>
-      <p-menu #retinalModelMenu [model]="retinalMenuItems" [popup]="true" appendTo="body"></p-menu>
+           Nothing here names a specific tool. The library ships none; a host
+           registers them, which is what lets this package be published without
+           the closed model dependencies. -->
+      <ng-container *ngFor="let tool of contributedTools; trackBy: trackToolById">
+        <span class="p-buttonset segment-split">
+          <p-button size="small" [text]="true"
+                    [pTooltip]="tool.runTooltip"
+                    tooltipPosition="bottom"
+                    (onClick)="runTool.emit(tool.id)">
+            <!-- `toolbar-icon-dark` is hardcoded rather than bound, unlike the
+                 toggle tools: these fire a run and have no active state. -->
+            <img *ngIf="tool.icon.src" [src]="tool.icon.src" class="toolbar-icon-dark"
+                 style="width: 1rem" [alt]="tool.label" />
+            <i *ngIf="tool.icon.pi" class="pi {{ tool.icon.pi }}"></i>
+          </p-button>
+          <p-button icon="pi pi-chevron-down" size="small" [text]="true"
+                    [pTooltip]="tool.modelTooltip || 'Pick the model'"
+                    tooltipPosition="bottom"
+                    (onClick)="toolMenu.toggle($event)">
+          </p-button>
+          <p-button *ngIf="tool.params.length"
+                    icon="pi pi-sliders-h" size="small" [text]="true"
+                    [pTooltip]="tool.paramsTooltip || 'Parameters'"
+                    tooltipPosition="bottom"
+                    (onClick)="openToolParams.emit(tool.id)">
+          </p-button>
+        </span>
+        <p-menu #toolMenu styleClass="model-menu" [model]="toolMenuItems[tool.id] || []"
+                [popup]="true" appendTo="body">
+          <ng-template pTemplate="item" let-item>
+            <ng-container [ngTemplateOutlet]="modelMenuItem"
+                          [ngTemplateOutletContext]="{ $implicit: item }"></ng-container>
+          </ng-template>
+        </p-menu>
+      </ng-container>
     </ng-container>
 
     <ng-container *ngIf="tools.help">
@@ -675,16 +678,21 @@
       the toolbar / vertex tools above).</li>
   </ul>
 
-  <h3>Segmentation tools (SAM &amp; cellpose)</h3>
-  <p>AI-assisted segmentation that runs entirely in the browser. The box and point
-    tools use a promptable <b>micro-sam</b> model; the cellpose tool auto-detects cells.
-    Generated regions inherit the color of the rectangle they came from. The first run
-    downloads the model (a progress toast is shown); it's then cached.</p>
+  <h3>Segmentation &amp; detection tools</h3>
+  <p>AI-assisted segmentation and detection that run entirely in the browser. The first run
+    of any model downloads it (a progress toast is shown); it's then cached.</p>
+  <p>Two shapes of tool: the <b>prompted</b> ones (Segment, Point prompts, Cellpose) act on
+    rectangles you draw, and generated regions inherit the color of the rectangle they came
+    from<span *ngIf="contributedTools.length">; the <b>no-prompt</b> ones ({{ contributedToolNames }})
+    sweep the whole current view, so there is nothing to draw first</span>.</p>
+  <p>Each model dropdown <i class="pi pi-chevron-down"></i> lists the available checkpoints with
+    a <i class="pi pi-info-circle"></i> beside each one — hover it for that model's size, speed,
+    training domain and accuracy, so you can pick without leaving the toolbar.</p>
   <ul>
-    <li>"<b>Segment</b>" <img src="assets/plotting/picture-segmentation.svg" width="15" height="15">
+    <li>"<b>Segment</b>" <img src="assets/plotting/sam-box-prompt.svg" width="15" height="15">
       (box prompt): draw one or more <b>Rectangular regions</b> around the objects of interest,
       then click Segment. Each rectangle is replaced by the SAM mask of the object inside it.</li>
-    <li>"<b>Point prompts</b>" <img src="assets/plotting/click.svg" width="15" height="15">: click directly on an object to
+    <li>"<b>Point prompts</b>" <img src="assets/plotting/sam-point-prompt.svg" width="15" height="15">: click directly on an object to
       segment it as a <b>new</b> region. Each click starts a fresh object — clicking another
       object won't grow the previous one. <kbd>Shift</kbd>/<kbd>Alt</kbd>-click adds an
       <i>exclude</i> point that refines the current object; <kbd>Esc</kbd> undoes it,
@@ -692,12 +700,20 @@
     <li>"<b>Model picker</b>" <i class="pi pi-chevron-down"></i>: the dropdown attached to the
       Segment button chooses the SAM model — <b>micro-sam ViT-T</b> (default; small, fast) or
       <b>micro-sam ViT-B</b> (larger, highest accuracy) for light microscopy, or
-      <b>patho-sam ViT-B</b> for histopathology (H&amp;E / stained tissue). The choice applies to
-      <i>both</i> the box and point tools. The <i class="pi pi-info-circle"></i> info button next
-      to it explains the trade-off.</li>
+      <b>patho-sam ViT-B</b> for histopathology (H&amp;E / stained tissue). All are promptable
+      Segment Anything models finetuned for biomedical images; they differ in the <i>image
+      encoder</i> (the heavy once-per-image step) and the training domain — box and point
+      prompting behave the same. The choice applies to <i>both</i> the box and point tools, and
+      each tool loads its own encoder, so the first click after switching re-encodes once.</li>
     <li>"<b>Cellpose</b>" <img src="assets/plotting/cells.svg" width="15" height="15">: draw rectangles, then click Cellpose to
       automatically segment every cell inside each rectangle (client-side cellpose-SAM) — one
       region per detected cell. No clicking on individual cells needed.</li>
+    <!-- Contributed tools describe themselves. This library ships none, so an
+         open build's help lists only the prompted tools above — the text no
+         longer promises buttons that are not there. -->
+    <ng-container *ngFor="let tool of contributedTools">
+      <li *ngIf="tool.help" [innerHTML]="tool.help.body"></li>
+    </ng-container>
   </ul>
 
   <h3>Help</h3>

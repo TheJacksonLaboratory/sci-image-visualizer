@@ -9,6 +9,160 @@ file was added.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-11
+
+### Removed
+
+- **The YOLO and retinal-layer tools, their model registries, and the
+  `yolo-segdetect-js` / `jax-ai-js` dependencies.** Their checkpoints are not
+  open, so a library that named them could not be published. The built package
+  now has no import edge to either — the remaining mentions are the doc comments
+  explaining this.
+
+  This includes the ResUNet-a 20x/40x checkpoints, which were briefly enabled
+  here during this cycle and never released: they still run in a browser, just
+  not from this package.
+
+  What made the coupling small was that the contracts were already clean. The
+  only thing pulling either package in was the *default factory* on
+  `INSTANCE_SEGMENTER` / `SEMANTIC_SEGMENTER`, which fell back to an in-library
+  service. Both tokens now have **no default**: unprovided means the capability
+  is absent.
+
+  The tools themselves are unchanged and move to
+  `@jax-data-science/sci-image-visualizer-jax-tools`, which a JAX host registers.
+
+### Added
+
+- **A toolbar tool-contribution mechanism** (`TOOLBAR_TOOLS`,
+  `ToolbarToolContribution`), so tools can be added from outside this library
+  rather than hardcoded into the toolbar template.
+
+  A contribution describes itself — icon, tooltips, checkpoints, parameters,
+  help text — and supplies a `run`. The toolbar renders the split button and
+  model menu from that, and the help dialog builds its tool list from the same
+  descriptors, so an open build's help no longer promises buttons that are not
+  there.
+
+  Parameters are **declared** (`ToolParamSpec`) rather than drawn: one generic
+  dialog renders every tool's fields. A plugin shipping its own dialog component
+  would have to match this library's exact PrimeNG version and styling to look
+  right, and the two dialogs this replaces were entirely numbers plus one
+  checkbox. It is the same vocabulary jit-ui already uses for pipeline step
+  parameters.
+
+  Returning an empty model list hides a tool, which is the switch for "the
+  weights are not configured in this deployment" — it keeps the tool's help and
+  parameters registered without showing a button that cannot run.
+
+### Added
+
+- **Per-model info in all three model pickers.** Every item in the SAM, YOLO and
+  retinal-layer dropdowns now carries an info icon whose hover tooltip describes
+  that checkpoint: download size, speed, training domain, measured accuracy, and
+  — for the tiled detectors — why its overlap and merge defaults are what they
+  are.
+
+  This replaces the single "About the SAM models" panel (removed below). That
+  panel sat behind an extra click, had to restate every model's name in order to
+  say anything about it, and covered only SAM — YOLO and retinal shipped with no
+  explanation at all. Attaching each description to the row it describes settles
+  all three at once, and puts the text where the choice is actually made.
+
+  Copy lives in `toolbar/model-info.ts`, keyed by registry model id, and rides on
+  the menu item's `tooltip` field (which `p-menu`'s own rendering ignores — it
+  reads `title`). A model with no entry renders no icon, so a host that registers
+  its own checkpoint degrades quietly instead of showing an empty tooltip. The
+  numbers quoted there come from the registries (`sizeMb`, `miou`, `patchSize`,
+  per-model tiling `defaults`) and need updating alongside them.
+
+- **A dedicated toolbar icon for the retinal-layer tool**, replacing the
+  `pi pi-align-left` placeholder: corner brackets — the framing the YOLO detector
+  already uses, marking the no-prompt tools that sweep the whole view — around an
+  eyeball whose posterior wall carries the segmented layers.
+
+- **Purpose-built icons for the two SAM prompt tools**, `sam-box-prompt.svg` and
+  `sam-point-prompt.svg`. The box tool wore a generic "crop a photo" glyph (a
+  house behind a dashed marquee) and the point tool a stock cursor-with-sparkles;
+  neither said *segmentation*, and nothing tied the two tools together.
+
+  Both show the same subject — an outlined blob holding three cells, which is
+  `cells.svg`'s vocabulary — so the only difference between the icons is the
+  difference between the tools: a rectangle drawn around the object, versus a
+  cursor clicking on it (with tail and click rays, as in `click.svg`). Corner
+  brackets are deliberately not reused here; they mark the no-prompt tools.
+
+  The point icon's interior is laid out around the cursor rather than the reverse:
+  the cursor sits wholly inside the blob, because where it straddled the outline
+  the outline's black band filled its concave notch and flattened it into a plain
+  triangle; and the three cells are placed off the diagonal the cursor and its
+  rays occupy, because a ray crossing a cell fuses into a lollipop. Both
+  constraints are geometric rather than enforced anywhere, so moving a cell or
+  resizing the cursor needs a look at the result, not just at the numbers.
+
+  Each icon ships as one object per component (blob, each cell, cursor, each
+  click ray), labelled for Inkscape's Objects panel, so a piece can be moved or
+  turned without unpicking a merged path. Every object carries an identity
+  `rotate(0, cx, cy)` about its own centre, so setting an angle spins it in place
+  rather than swinging it around the canvas origin. Stacking is document order —
+  the cursor paints over the blob — rather than the winding interactions a single
+  path would need. One thing stays merged: a ring (frame, blob) keeps its outer
+  and inner contour in one path, because the inner contour *is* its hole and
+  separating them turns the ring into a slab.
+
+  A thin gap separates the cursor and rays from what they overlap. It is a hole
+  cut into those shapes, not white paint — the toolbar recolours icons with
+  `filter: brightness(0) invert(...)`, which blackens every painted pixel before
+  tinting, so white would tint to the icon colour and disappear. That makes the
+  gap a property of the shapes underneath rather than of the cursor: **move or
+  rotate the cursor and the notch stays where it was**, and the cut has to be
+  redone against the new positions. Which objects need cutting depends on the
+  layout — currently the blob and two of the three cells.
+
+  The paths use **nonzero** winding with inner contours reversed, rather than the
+  `evenodd` the other icons use. That is load-bearing:
+  the arrow overlaps the blob outline, and under evenodd an overlap *cancels* —
+  an earlier attempt rendered a checkerboard where the two crossed. Under nonzero
+  the overlap fuses while the holes still read (hole = +1−1 = 0; a cell inside it
+  = +1; arrow over the ring = +2). Rings are explicit outer+inner contours, so
+  there is no stroke-to-path step to redo when the geometry changes.
+
+  Caveat: at `width: 1rem` on a 1× display these resolve less crisply than the
+  solid-blob draft they replaced — an outline plus three small circles is more
+  detail than 16 device pixels can hold. They are clear from roughly 24px up.
+
+  `picture-segmentation.svg` and `click.svg` are left in the published asset set —
+  a host may reference them directly — but nothing in this library uses them now.
+
+### Changed
+
+- **`cells.svg` (the cellpose tool) is now framed by a rounded square** rather
+  than a circle, reusing `sam-box-prompt.svg`'s frame proportions exactly — same
+  inset, corner radius and weight, scaled into this file's canvas. Cellpose is a
+  prompted tool that runs inside the rectangles you draw, so it belongs with the
+  box-prompt framing rather than looking like a petri dish.
+
+  It reads better small as well: at 16px a straight axis-aligned edge rasterises
+  crisply where the circle went soft and wobbly. The six cells are untouched, so
+  their own small-size mushiness is unchanged.
+
+- **The help dialog documents the no-prompt tools.** Its segmentation section
+  described only SAM and cellpose, so YOLO detection and retinal-layer
+  segmentation were absent from the one place a user goes to find out what a
+  button does. It now splits the tools by shape — prompted ones act on rectangles
+  you draw, no-prompt ones sweep the current view — which is the distinction that
+  explains why two of the buttons want nothing selected first.
+
+  It also no longer points at the removed info button, and the general SAM
+  material from that panel (encoders differ, prompting does not; each tool loads
+  its own encoder, so the first click after switching re-encodes once) moved here
+  rather than being dropped.
+
+### Removed
+
+- **The "About the SAM models" info button** and its overlay panel, superseded by
+  the per-model tooltips above.
+
 ## [0.2.19] — 2026-08-09
 
 ### Changed
@@ -426,7 +580,8 @@ file was added.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.19...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.19...v0.3.0
 [0.2.19]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.18...v0.2.19
 [0.2.18]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.17...v0.2.18
 [0.2.17]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.16...v0.2.17

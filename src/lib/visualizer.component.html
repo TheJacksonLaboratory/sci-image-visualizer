@@ -51,10 +51,8 @@
   [brushSize]="brushSize"
   [samModels]="samModels"
   [samModelId]="samModelId"
-  [yoloModels]="yoloModels"
-  [yoloModelId]="yoloModelId"
-  [retinalModels]="retinalModels"
-  [retinalModelId]="retinalModelId"
+  [contributedTools]="contributedTools"
+  [toolModelIds]="toolModelIds"
   [vertexEraserRadius]="vertexEraserRadius"
   [canUndo]="canUndoRegion"
   [canRedo]="canRedoRegion"
@@ -88,12 +86,9 @@
   (segmentRegions)="segmentRegions()"
   (segmentCellpose)="segmentCellpose()"
   (samModelChange)="onSamModelChange($event)"
-  (detectYolo)="detectYolo()"
-  (yoloModelChange)="onYoloModelChange($event)"
-  (openYoloParams)="openYoloParams()"
-  (segmentRetinal)="segmentRetinal()"
-  (retinalModelChange)="onRetinalModelChange($event)"
-  (openRetinalParams)="openRetinalParams()"
+  (runTool)="runTool($event)"
+  (toolModelChange)="onToolModelChange($event)"
+  (openToolParams)="openToolParams($event)"
   (wandSensitivityChange)="onWandSensitivityChange($event)"
   (brushSizeChange)="onBrushSizeChange($event)"
   (vertexEraserRadiusChange)="onVertexEraserRadiusChange($event)">
@@ -198,110 +193,56 @@
   </ng-template>
 </p-dialog>
 
-<!-- YOLO parameters. Same vocabulary as the pipeline step and the server tool,
-     so a result obtained here is reproducible there. Defaults come from the
-     active checkpoint's own registry entry. -->
-<p-dialog header="YOLO parameters" [(visible)]="showYoloParams" [modal]="true"
+<!-- Parameters for whichever contributed tool is open. One dialog for all of
+     them: a tool declares its fields (ToolParamSpec) and this renders them, so
+     the toolbar can lay every tool out the same way and a plugin needs no
+     PrimeNG of its own. Defaults come from the active checkpoint, since they
+     encode what it was trained for. -->
+<p-dialog *ngIf="openParamsTool as tool"
+          [header]="tool.label + ' parameters'"
+          [visible]="true" (visibleChange)="openParamsToolId = null"
+          [modal]="true"
           [style]="{width: '30rem'}" [draggable]="false" [resizable]="false" appendTo="body">
   <div class="grid formgrid p-fluid">
-    <div class="field col-6">
-      <label class="text-sm">Confidence</label>
-      <p-inputNumber [(ngModel)]="yoloParams.confidence" [min]="0" [max]="1" [step]="0.05"
-                     [minFractionDigits]="2" [showButtons]="true"></p-inputNumber>
-    </div>
-    <div class="field col-6">
-      <label class="text-sm">IoU (per tile)</label>
-      <p-inputNumber [(ngModel)]="yoloParams.iouThreshold" [min]="0.1" [max]="0.95" [step]="0.05"
-                     [minFractionDigits]="2" [showButtons]="true"></p-inputNumber>
-    </div>
-    <div class="field col-6">
-      <label class="text-sm">Merge (cross-tile)</label>
-      <p-inputNumber [(ngModel)]="yoloParams.mergeThreshold" [min]="0.1" [max]="0.95" [step]="0.05"
-                     [minFractionDigits]="2" [showButtons]="true"></p-inputNumber>
-    </div>
-    <div class="field col-6">
-      <label class="text-sm">Downsampling factor</label>
-      <p-inputNumber [(ngModel)]="yoloParams.downsamplingFactor" [min]="1" [max]="10" [step]="1"
-                     [showButtons]="true"></p-inputNumber>
-    </div>
-    <div class="field col-6">
-      <label class="text-sm">Tile overlap X (%)</label>
-      <p-inputNumber [(ngModel)]="yoloParams.overlapX" [min]="0" [max]="90" [step]="5"
-                     [showButtons]="true"></p-inputNumber>
-    </div>
-    <div class="field col-6">
-      <label class="text-sm">Tile overlap Y (%)</label>
-      <p-inputNumber [(ngModel)]="yoloParams.overlapY" [min]="0" [max]="90" [step]="5"
-                     [showButtons]="true"></p-inputNumber>
-    </div>
-    <div class="field col-6">
-      <label class="text-sm">Min object area (px²)</label>
-      <p-inputNumber [(ngModel)]="yoloParams.minArea" [min]="0" [max]="100000" [step]="10"
-                     [showButtons]="true"></p-inputNumber>
-    </div>
-    <div class="field col-6">
-      <label class="text-sm">Outline simplification (px)</label>
-      <p-inputNumber [(ngModel)]="yoloParams.simplifyTolerance" [min]="0" [max]="10" [step]="0.5"
-                     [minFractionDigits]="1" [showButtons]="true"></p-inputNumber>
-    </div>
-    <div class="field col-12 flex align-items-center gap-2">
-      <p-checkbox [(ngModel)]="yoloParams.withMasks" [binary]="true" inputId="yoloMasks"></p-checkbox>
-      <label for="yoloMasks" class="text-sm mb-0">
-        Segmentation mode — trace object outlines. Off detects bounding boxes only, which is
-        considerably faster.
-      </label>
-    </div>
-  </div>
-  <ng-template pTemplate="footer">
-    <p-button label="Reset to model defaults" [text]="true" size="small"
-              (onClick)="resetYoloParams()"></p-button>
-    <p-button label="Close" size="small" (onClick)="showYoloParams = false"></p-button>
-  </ng-template>
-</p-dialog>
+    <ng-container *ngFor="let p of tool.params">
+      <div class="field" [ngClass]="p.type === 'boolean' ? 'col-12' : 'col-6'">
+        <ng-container [ngSwitch]="p.type">
 
-<!-- Retinal layer parameters. Same vocabulary as the pipeline step and the
-     server tool, so a result obtained here is reproducible there. Fewer knobs
-     than YOLO because there are no objects: no confidence per object, no NMS,
-     no cross-tile merge — patches tile the image and each pixel gets one class. -->
-<p-dialog header="Retinal layer parameters" [(visible)]="showRetinalParams" [modal]="true"
-          [style]="{width: '30rem'}" [draggable]="false" [resizable]="false" appendTo="body">
-  <div class="grid formgrid p-fluid">
-    <div class="field col-12">
-      <p class="text-sm mt-0 mb-2 text-color-secondary">
-        Runs in your browser and needs WebGPU. The model is ~{{ retinalModelSizeMb }} MB and is
-        downloaded once, then cached.
-      </p>
-    </div>
-    <div class="field col-6">
-      <label class="text-sm">Class threshold</label>
-      <p-inputNumber [(ngModel)]="retinalParams.classThreshold" [min]="0.05" [max]="0.95" [step]="0.05"
-                     [minFractionDigits]="2" [showButtons]="true"></p-inputNumber>
-      <small class="text-color-secondary">
-        Below this a pixel is left unlabelled rather than forced into the best class.
-      </small>
-    </div>
-    <div class="field col-6">
-      <label class="text-sm">Downsampling factor</label>
-      <p-inputNumber [(ngModel)]="retinalParams.downsamplingFactor" [min]="1" [max]="10" [step]="1"
-                     [showButtons]="true"></p-inputNumber>
-      <small class="text-color-secondary">
-        1 = full resolution, which is what these checkpoints were trained on.
-      </small>
-    </div>
-    <div class="field col-6">
-      <label class="text-sm">Min region area (px²)</label>
-      <p-inputNumber [(ngModel)]="retinalParams.minArea" [min]="0" [max]="100000" [step]="10"
-                     [showButtons]="true"></p-inputNumber>
-    </div>
-    <div class="field col-6">
-      <label class="text-sm">Outline simplification (px)</label>
-      <p-inputNumber [(ngModel)]="retinalParams.simplifyTolerance" [min]="0" [max]="10" [step]="0.5"
-                     [minFractionDigits]="1" [showButtons]="true"></p-inputNumber>
-    </div>
+          <ng-container *ngSwitchCase="'number'">
+            <label class="text-sm" [pTooltip]="p.tooltip || ''">{{ p.label }}</label>
+            <p-inputNumber [ngModel]="paramsFor(tool.id)[p.id]"
+                           (ngModelChange)="paramsFor(tool.id)[p.id] = $event"
+                           [min]="numberParam(p).min" [max]="numberParam(p).max"
+                           [step]="numberParam(p).step"
+                           [minFractionDigits]="numberParam(p).fractionDigits"
+                           [showButtons]="true"></p-inputNumber>
+          </ng-container>
+
+          <ng-container *ngSwitchCase="'select'">
+            <label class="text-sm" [pTooltip]="p.tooltip || ''">{{ p.label }}</label>
+            <p-dropdown [options]="selectParam(p).options" optionLabel="label" optionValue="value"
+                        [ngModel]="paramsFor(tool.id)[p.id]"
+                        (ngModelChange)="paramsFor(tool.id)[p.id] = $event"
+                        appendTo="body"></p-dropdown>
+          </ng-container>
+
+          <!-- Checkbox label sits beside the box and may run to a sentence, so
+               it does not get the stacked label the other types use. -->
+          <div *ngSwitchCase="'boolean'" class="flex align-items-center gap-2">
+            <p-checkbox [ngModel]="paramsFor(tool.id)[p.id]"
+                        (ngModelChange)="paramsFor(tool.id)[p.id] = $event"
+                        [binary]="true" [inputId]="tool.id + '-' + p.id"></p-checkbox>
+            <label [for]="tool.id + '-' + p.id" class="text-sm mb-0"
+                   [pTooltip]="p.tooltip || ''">{{ p.label }}</label>
+          </div>
+
+        </ng-container>
+      </div>
+    </ng-container>
   </div>
   <ng-template pTemplate="footer">
     <p-button label="Reset to model defaults" [text]="true" size="small"
-              (onClick)="resetRetinalParams()"></p-button>
-    <p-button label="Close" size="small" (onClick)="showRetinalParams = false"></p-button>
+              (onClick)="resetToolParams(tool.id)"></p-button>
+    <p-button label="Close" size="small" (onClick)="openParamsToolId = null"></p-button>
   </ng-template>
 </p-dialog>

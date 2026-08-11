@@ -1,6 +1,5 @@
-import { InjectionToken, inject } from '@angular/core';
+import { InjectionToken } from '@angular/core';
 
-import { RetinalSegmenterService } from '../toolbar/segmentation/retinal-segmenter.service';
 
 /**
  * Port for a **semantic** segmenter — one that assigns every pixel a class from
@@ -109,10 +108,12 @@ export interface ISemanticSegmenter {
 }
 
 /**
- * DI token for the semantic segmenter, defaulting to the in-library
- * jax-ai-js-backed implementation. Hosts override it to supply their own.
+ * DI token for the semantic segmenter.
+ *
+ * **No default.** It used to fall back to an in-library jax-ai-js service, and
+ * that factory was what pulled `jax-ai-js` into every bundle of this package —
+ * which is not shippable while the checkpoints are closed. A host provides an
+ * implementation (see `@jax-data-science/sci-image-visualizer-jax-tools`), or
+ * nothing does and no tool needing it is registered.
  */
-export const SEMANTIC_SEGMENTER = new InjectionToken<ISemanticSegmenter>('SEMANTIC_SEGMENTER', {
-  providedIn: 'root',
-  factory: () => inject(RetinalSegmenterService),
-});
+export const SEMANTIC_SEGMENTER = new InjectionToken<ISemanticSegmenter>('SEMANTIC_SEGMENTER');
