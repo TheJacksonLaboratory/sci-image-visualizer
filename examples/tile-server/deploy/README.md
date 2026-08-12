@@ -1,6 +1,6 @@
 # Deploy the tile server as a pod on the dev cluster
 
-Runs the tile server **in** `jax-cluster-dev-10` (project `jax-compsci-nc-dev-01`)
+Runs the tile server **in** the dev GKE cluster
 behind the cluster's existing nginx ingress, exposed publicly (no auth) via a
 **split Ingress** at `https://imagetools-dev.jax.org/tiles-api/`. This reuses the
 LB + TLS and makes the gigapixel demo reachable from the public GitHub Pages site
@@ -12,7 +12,8 @@ in `.github/workflows/pages.yaml`.
 ## What's deployed
 
 - **Namespace:** `jit-tile-example` · **Deployment/Service:** `tile-server` · **Ingress:** `tile-server-public`
-- **Image:** `us-east1-docker.pkg.dev/jax-cloud-image-tools/jit-tile-example/tile-server:v1`
+- **Image:** `us-docker.pkg.dev/jax-cs-registry/docker/jit-tile-server:v1`
+  (multi-region `us-docker.pkg.dev`, not `us-east1-`)
 - **COGs:** `gs://jax-cimg-tile-cogs-use1` (us-east1, project `jax-cloud-image-tools`),
   mounted read-only via the GCS Fuse CSI driver at `/mnt/cogs` with `implicit-dirs`
   (the `cmu-1/ bc18/ sirius-red/` prefixes have no placeholder objects).
@@ -24,32 +25,55 @@ in `.github/workflows/pages.yaml`.
 
 - GCS Fuse CSI driver: enabled ✓ · Workload Identity: enabled ✓ · cert-manager: ✓
 
+## Placeholders
+
+The commands below use placeholders rather than hardcoded identifiers, since this
+is a public repository. Fill them from your own environment:
+
+| | |
+|---|---|
+| `$CLUSTER_PROJECT` | the project holding the dev GKE cluster |
+| `$CLUSTER_PROJECT_NUMBER` | that project's numeric id (for the Workload Identity pool) |
+| `$CLUSTER_NODE_SA` | the cluster's node service account |
+| `$IMAGE_PROJECT` | the project hosting the Artifact Registry repo. The committed
+  manifests use `jax-cs-registry`, chosen because the cluster can pull from it
+  without a secret |
+| `$AR_READER_SA` | a service account with Artifact Registry read. Only needed for
+  the optional pull-secret route below |
+| `$OTHER_REGISTRY_HOST` | registry host for that optional route, e.g.
+  `us-east1-docker.pkg.dev` |
+
 ## One-time setup
 
 ```bash
-# 1. Build + push the image (project jax-cloud-image-tools, us-east1 AR)
-gcloud artifacts repositories create jit-tile-example \
-  --repository-format=docker --location=us-east1 --project=jax-cloud-image-tools
-gcloud builds submit examples/tile-server \
-  --tag us-east1-docker.pkg.dev/jax-cloud-image-tools/jit-tile-example/tile-server:v1 \
-  --project jax-cloud-image-tools
+# 1. Build + push the image, to a registry the cluster can already read.
+#    Cloud Build is not enabled on jax-cs-registry, so build locally and push, or
+#    build with Cloud Build elsewhere and copy the image across.
+gcloud auth print-access-token \
+  | docker login -u oauth2accesstoken --password-stdin https://us-docker.pkg.dev
+docker build -t us-docker.pkg.dev/jax-cs-registry/docker/jit-tile-server:v1 examples/tile-server
+docker push us-docker.pkg.dev/jax-cs-registry/docker/jit-tile-server:v1
+#    Use a NEW tag for a rebuild: overwriting one leaves running pods on the old
+#    image with no way to tell.
 
 # 2. Let the pod read the COG bucket (Workload Identity principal — no GSA)
 gcloud storage buckets add-iam-policy-binding gs://jax-cimg-tile-cogs-use1 \
   --role=roles/storage.objectViewer \
-  --member="principal://iam.googleapis.com/projects/940576874573/locations/global/workloadIdentityPools/jax-compsci-nc-dev-01.svc.id.goog/subject/ns/jit-tile-example/sa/tile-server"
+  --member="principal://iam.googleapis.com/projects/$CLUSTER_PROJECT_NUMBER/locations/global/workloadIdentityPools/$CLUSTER_PROJECT.svc.id.goog/subject/ns/jit-tile-example/sa/tile-server"
 
-# 3. DURABLE IMAGE PULL — a docker-registry pull secret from a jax-cloud-image-tools
-#    SA key that has AR read (the deployment SA references it via imagePullSecrets).
+# 3. OPTIONAL — only if you point the image at a registry the cluster cannot
+#    read. Creates a pull secret from a long-lived SA key, and you must also add
+#    `imagePullSecrets: [{name: ar-pull}]` back to serviceaccount.yaml. Prefer
+#    step 1's registry and skip this entirely.
 kubectl -n jit-tile-example create secret docker-registry ar-pull \\
-  --docker-server=us-east1-docker.pkg.dev --docker-username=_json_key \\
+  --docker-server=$OTHER_REGISTRY_HOST --docker-username=_json_key \\
   --docker-password="$(cat <sa-key>.json)" \\
-  --docker-email=svc-jax-cloud-image-tools@jax-cloud-image-tools.iam.gserviceaccount.com
+  --docker-email=$AR_READER_SA
 ```
 
-> **Alternative (no secret, cleaner)** — grant the dev cluster node SA cross-project
-> AR read; needs an Artifact Registry admin on jax-cloud-image-tools:
-> `gcloud artifacts repositories add-iam-policy-binding jit-tile-example --location=us-east1 --project=jax-cloud-image-tools --member="serviceAccount:tf-gke-jax-cluster-dev-d21h@jax-compsci-nc-dev-01.iam.gserviceaccount.com" --role=roles/artifactregistry.reader`
+> **Alternative (no secret, cleaner)** — grant the cluster's node SA cross-project
+> AR read; needs an Artifact Registry admin on the image project:
+> `gcloud artifacts repositories add-iam-policy-binding jit-tile-example --location=us-east1 --project=$IMAGE_PROJECT --member="serviceAccount:$CLUSTER_NODE_SA" --role=roles/artifactregistry.reader`
 
 ## Deploy
 

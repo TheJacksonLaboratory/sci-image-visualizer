@@ -23,6 +23,11 @@ spec:
         gke-gcsfuse/volumes: "true"        # inject the GCS Fuse CSI sidecar
         gke-gcsfuse/cpu-limit: "500m"
         gke-gcsfuse/memory-limit: 512Mi
+        # Without this GKE defaults the sidecar to a 5Gi ephemeral-storage
+        # *request*, which was the largest single resource this pod asked for.
+        # The COG bucket is 2.5 GiB, so a cache can never approach 5Gi; 3Gi keeps
+        # headroom. Raise it only if the bucket grows past ~2.5 GiB.
+        gke-gcsfuse/ephemeral-storage-limit: "3Gi"
     spec:
       serviceAccountName: tile-server      # Workload Identity principal
       containers:
