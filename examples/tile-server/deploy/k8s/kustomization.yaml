@@ -8,7 +8,20 @@ resources:
   - service.yaml
   - ingress-public.yaml
 # Set the built image here (built + pushed per deploy/README.md).
+#
+# Hosted in jax-cs-registry, which the cluster can read without a pull secret.
+#
+# The previous registry needed one: an `ar-pull` docker-registry secret built
+# from a long-lived service-account key, attached to this namespace's KSA (see
+# deploy/README.md step 3). That works, but it is a key to store, rotate and
+# recreate in every namespace that wants the image — which is exactly what bit
+# the sibling model-server deploy, in a namespace that had no such secret.
+#
+# Pulling from a registry the cluster already reads removes the key entirely.
+# deploy/README.md called this the cleaner option; this makes it the default.
+#
+# Note `us-docker.pkg.dev`, not `us-east1-`: that repo is multi-region.
 images:
   - name: TILE_SERVER_IMAGE
-    newName: us-east1-docker.pkg.dev/jax-cloud-image-tools/jit-tile-example/tile-server
+    newName: us-docker.pkg.dev/jax-cs-registry/docker/jit-tile-server
     newTag: v1
