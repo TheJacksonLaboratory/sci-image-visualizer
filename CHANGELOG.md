@@ -9,6 +9,31 @@ file was added.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Regions handed to the store as JSON now render on every backend**
+  (jit-ui#124). A `bounds` that came through `JSON.parse` — a host's server
+  response, a `structuredClone` — has the right fields but not the right
+  prototype, and the renderers disagreed about whether that is acceptable:
+  `Region.getShape()` (Plotly) and the napari overlay duck-type the bounds,
+  while the OpenSeadragon overlay discriminates with `bounds instanceof
+  Rectangle`. So a JSON region drew in Heatmap mode and silently vanished in
+  Image mode.
+
+  `instanceof` also gates the store's geometry de-duplication, `moveRegion`,
+  and the GeoJSON export, so the same regions were undraggable, re-appended on
+  every repeat, and missing from a save — in *every* mode, unreported because
+  they were at least visible.
+
+  `RegionStore` now normalizes on the way in (`setRegions`, `addRegion`,
+  `enterStackMode`) via the exported `hydrateBounds`, so the ~20 `instanceof`
+  call sites downstream stay valid rather than each having to duck-type.
+  Instances are passed through by reference — overlays and tools mutate the
+  bounds they created during a drag. `hydrateBounds` also fills in what a lean
+  serializer omits (JIT's Java `PolygonSerializer` writes only `npoints` /
+  `xpoints` / `ypoints`, while the GeoJSON export reads `coordinates` and the
+  overlays read `closed`).
+
 ## [0.3.0] — 2026-08-11
 
 ### Removed

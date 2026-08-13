@@ -233,3 +233,62 @@ export type Bounds =
       xpoints?: number[];
       ypoints?: number[];
     };
+
+/**
+ * Rebuild a plain-object `bounds` as the class instance the renderers expect
+ * (jit-ui#124).
+ *
+ * Regions that arrive as JSON — a host's server response, a `structuredClone`,
+ * anything that has been through `JSON.parse` — carry a `bounds` that has the
+ * right *fields* but not the right *prototype*. The renderers disagree about
+ * whether that is acceptable: `Region.getShape()` (Plotly) and the napari
+ * overlay duck-type the bounds, while the OpenSeadragon overlay discriminates
+ * with `bounds instanceof Rectangle`. So a JSON region drew in Heatmap mode and
+ * silently vanished in Image mode. `instanceof` also gates the store's own
+ * geometry de-duplication, `moveRegion`, and the GeoJSON export — a JSON region
+ * is undraggable and absent from a save in *every* mode.
+ *
+ * Rather than duck-type ~20 call sites, the store normalizes here on the way in,
+ * so everything downstream can keep relying on `instanceof`. Values that are
+ * already instances are returned **by reference**, untouched: overlays and tools
+ * hold onto the bounds they created and mutate them in place during a drag.
+ */
+export function hydrateBounds(bounds: any): Rectangle | Polygon | MultiPolygon | null | undefined {
+  if (
+    !bounds ||
+    bounds instanceof Rectangle ||
+    bounds instanceof Polygon ||
+    bounds instanceof MultiPolygon
+  ) {
+    return bounds;
+  }
+  if (Array.isArray(bounds.polygons)) {
+    const multi = new MultiPolygon();
+    multi.polygons = bounds.polygons.map((part: any) => hydratePolygon(part));
+    return multi;
+  }
+  if ('npoints' in bounds || 'xpoints' in bounds) {
+    return hydratePolygon(bounds);
+  }
+  if ('width' in bounds && 'height' in bounds) {
+    return Object.assign(new Rectangle(), bounds);
+  }
+  // Nothing recognisable — hand it back rather than coerce it into the wrong
+  // geometry. It renders nowhere either way, but a caller can still inspect it.
+  return bounds;
+}
+
+/** {@link hydrateBounds} for one polygon, deriving the fields a lean serializer
+ *  omits: JIT's Java `PolygonSerializer` writes only `npoints`/`xpoints`/
+ *  `ypoints`, while the GeoJSON export reads `coordinates` and the overlays read
+ *  `closed`. */
+function hydratePolygon(raw: any): Polygon {
+  if (raw instanceof Polygon) return raw;
+  const polygon: Polygon = Object.assign(new Polygon(), raw);
+  polygon.xpoints = [...(raw.xpoints ?? [])];
+  polygon.ypoints = [...(raw.ypoints ?? [])];
+  polygon.npoints = raw.npoints ?? polygon.xpoints.length;
+  polygon.coordinates = raw.coordinates ?? polygon.xpoints.map((x, i) => [x, polygon.ypoints[i]]);
+  polygon.closed = raw.closed ?? true;
+  return polygon;
+}
