@@ -403,3 +403,67 @@ describe('OsdRegionOverlay — vertex tools', () => {
     expect(store.getSelectedShapeIndices()).toEqual([0]);
   });
 });
+
+/**
+ * jit-ui#124 — the reported symptom: regions handed over as JSON (a server FIND
+ * response) drew in Plotly's Heatmap mode and nowhere in OSD's Image mode,
+ * because this overlay discriminates `bounds` with `instanceof` while Plotly
+ * duck-types it. The store now normalizes on the way in, so both agree.
+ */
+describe('OsdRegionOverlay — regions arriving as JSON (jit-ui#124)', () => {
+  let store: RegionStore;
+  let overlay: OsdRegionOverlay;
+  let svg: SVGSVGElement;
+
+  /** A region shaped exactly as JIT's Java API serializes one: right fields,
+   *  no prototype. */
+  const jsonRegion = (bounds: any): Region => Object.assign(new Region(), { bounds });
+
+  beforeEach(() => {
+    store = new RegionStore(new VisualizerStore());
+    overlay = new OsdRegionOverlay(fakeViewer(), store);
+    svg = (overlay as any).svg as SVGSVGElement;
+  });
+
+  afterEach(() => overlay.destroy());
+
+  it('draws a JSON rectangle', () => {
+    store.setRegions([jsonRegion({ x: 0, y: 0, width: 10, height: 10 })]);
+
+    const shapes = svg.querySelectorAll('polygon');
+    expect(shapes.length).toBe(1);
+    // Identity viewport, so element coords == image coords.
+    expect(shapes[0].getAttribute('points')).toBe('0,0 10,0 10,10 0,10');
+  });
+
+  it('draws a JSON polygon', () => {
+    store.setRegions([jsonRegion({ npoints: 3, xpoints: [0, 10, 5], ypoints: [0, 0, 10] })]);
+
+    const shapes = svg.querySelectorAll('polygon');
+    expect(shapes.length).toBe(1);
+    expect(shapes[0].getAttribute('points')).toBe('0,0 10,0 5,10');
+  });
+
+  it('draws a JSON multi-polygon as one even-odd path', () => {
+    store.setRegions([jsonRegion({
+      polygons: [
+        { npoints: 3, xpoints: [0, 10, 5], ypoints: [0, 0, 10] },
+        { npoints: 3, xpoints: [20, 30, 25], ypoints: [20, 20, 30] },
+      ],
+    })]);
+
+    const paths = svg.querySelectorAll('path');
+    expect(paths.length).toBe(1);
+    expect(paths[0].getAttribute('fill-rule')).toBe('evenodd');
+  });
+
+  it('selects a JSON region by click, like any other', () => {
+    store.setRegions([jsonRegion({ x: 0, y: 0, width: 10, height: 10 })]);
+    store.setSelectedShapeIndices([]);
+    overlay.setMode('select');
+
+    handlers().clickHandler({ position: { x: 5, y: 5 } });
+
+    expect(store.getSelectedShapeIndices()).toEqual([0]);
+  });
+});

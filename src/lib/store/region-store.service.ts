@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable, Subject } from 'rxjs';
 
 import { IImageInfo } from '../contracts/image.contract';
-import { Region, Rectangle, Polygon, MultiPolygon } from '../models/region';
+import { Region, Rectangle, Polygon, MultiPolygon, hydrateBounds } from '../models/region';
 import { PlotUtilities } from '../plot.utilities';
 import { VisualizerStore } from './visualizer-store.service';
 import { defaultHandleOffsets } from '../models/bezier';
@@ -135,6 +135,10 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     for (const region of regions) {
       if (region.id == null) region.id = this.nextId++;
       if (region.name == null) region.name = `shape${region.id}`;
+      // JSON in, class instances out — everything downstream (the overlays'
+      // rendering, geometry de-dup, moveRegion, GeoJSON export) discriminates
+      // the bounds with `instanceof` (jit-ui#124).
+      region.bounds = hydrateBounds(region.bounds);
     }
     this.applyClassificationColors(regions);
 
@@ -287,6 +291,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
       if (region.id == null) region.id = this.nextId++;
       if (region.name == null) region.name = `shape${region.id}`;
       region.z = z;
+      region.bounds = hydrateBounds(region.bounds);   // jit-ui#124
     }
     this.applyClassificationColors(regions);
     return regions.slice();
@@ -547,6 +552,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.recordUndoSnapshot();
     if (region.id == null) region.id = this.nextId++;
     if (region.name == null) region.name = `shape${region.id}`;
+    region.bounds = hydrateBounds(region.bounds);   // jit-ui#124
     // A region drawn on a stack belongs to the slice currently displayed, so
     // it saves/reloads on that slice (jit-ui#93). No-op for single-plane images
     // (currentSliceZ stays 0).

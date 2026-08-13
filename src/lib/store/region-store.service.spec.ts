@@ -77,6 +77,65 @@ describe('RegionStore', () => {
       expect(store.getRegions().length).toBe(2);
     });
 
+    // jit-ui#124: a host handing over regions parsed from a server response has
+    // `bounds` with the right fields and the wrong prototype. Normalizing here
+    // is what lets everything downstream keep using `instanceof`.
+    describe('JSON bounds (jit-ui#124)', () => {
+      /** A region shaped exactly as JIT's Java API serializes one. */
+      const jsonRectRegion = (x: number, y: number, w: number, h: number): Region =>
+        Object.assign(new Region(), { bounds: { x, y, width: w, height: h } });
+
+      it('rebuilds a JSON rectangle as a Rectangle instance', () => {
+        store.setRegions([jsonRectRegion(10, 20, 30, 40)]);
+
+        const bounds = store.getRegions()[0].bounds as Rectangle;
+        expect(bounds).toBeInstanceOf(Rectangle);
+        expect(bounds).toEqual(expect.objectContaining({ x: 10, y: 20, width: 30, height: 40 }));
+      });
+
+      it('rebuilds a JSON polygon as a Polygon instance', () => {
+        store.setRegions([
+          Object.assign(new Region(), { bounds: { npoints: 3, xpoints: [0, 4, 4], ypoints: [0, 0, 6] } }),
+        ]);
+
+        expect(store.getRegions()[0].bounds).toBeInstanceOf(Polygon);
+      });
+
+      // The de-dup is geometry equality, which is `instanceof`-gated — so before
+      // the fix a repeated Find appended the same regions over and over.
+      it('append de-dupes JSON regions by geometry, as it does instances', () => {
+        store.setRegions([jsonRectRegion(0, 0, 10, 10)]);
+        store.setRegions([jsonRectRegion(0, 0, 10, 10)], undefined, undefined, undefined, true);
+        expect(store.getRegions().length).toBe(1);
+
+        store.setRegions([jsonRectRegion(3, 3, 10, 10)], undefined, undefined, undefined, true);
+        expect(store.getRegions().length).toBe(2);
+      });
+
+      it('leaves a JSON region draggable', () => {
+        store.setRegions([jsonRectRegion(10, 20, 30, 40)]);
+        const id = store.getRegions()[0].id as number;
+
+        store.moveRegion(id, 5, -5);
+
+        expect(store.getRegions()[0].bounds).toEqual(
+          expect.objectContaining({ x: 15, y: 15, width: 30, height: 40 }),
+        );
+      });
+
+      it('rebuilds bounds on addRegion too', () => {
+        store.addRegion(jsonRectRegion(1, 2, 3, 4));
+
+        expect(store.getRegions()[0].bounds).toBeInstanceOf(Rectangle);
+      });
+
+      it('rebuilds bounds on the per-slice stack path', () => {
+        store.enterStackMode(new Map([[0, [jsonRectRegion(1, 2, 3, 4)]]]), 0);
+
+        expect(store.getRegions()[0].bounds).toBeInstanceOf(Rectangle);
+      });
+    });
+
     it('does not store transient regions when isRegionSaveOn is false', () => {
       const emitted: Region[][] = [];
       store.getRegionUpdateEvent().subscribe(rs => emitted.push(rs as Region[]));
