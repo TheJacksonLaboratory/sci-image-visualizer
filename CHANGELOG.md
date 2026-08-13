@@ -9,6 +9,8 @@ file was added.
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-08-13
+
 ### Fixed
 
 - **Regions handed to the store as JSON now render on every backend**
