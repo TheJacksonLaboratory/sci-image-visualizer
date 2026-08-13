@@ -34,6 +34,22 @@ file was added.
   `xpoints` / `ypoints`, while the GeoJSON export reads `coordinates` and the
   overlays read `closed`).
 
+## [0.3.1] — 2026-08-12
+
+Backfilled: 0.3.1 was published without an entry.
+
+### Changed
+
+- **`cellpose-js` bumped to `^0.5.0`** (from `^0.4.1`), in both `dependencies`
+  and `peerDependencies`.
+
+### Fixed
+
+- **The `examples/tile-server` deployment pulls its image without a
+  service-account key**, and its docs/manifests carry placeholders rather than
+  real identities — this repo is public. No effect on the published package;
+  `examples/` is not part of it.
+
 ## [0.3.0] — 2026-08-11
 
 ### Removed
