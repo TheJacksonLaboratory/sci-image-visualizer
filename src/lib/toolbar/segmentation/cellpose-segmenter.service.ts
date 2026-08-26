@@ -6,7 +6,7 @@ import type { Cellpose } from 'cellpose-js';
 
 /** Hosted cellpose-SAM ONNX (CPSAM, fp16). Override via {@link setModelUrl}. */
 const DEFAULT_MODEL_URL =
-  'https://huggingface.co/ballon999/cellpose-sam-onnx/resolve/main/cpsam_fp16.onnx';
+  'https://huggingface.co/jax-image-tools/cellpose-sam-onnx/resolve/main/cpsam_fp16.onnx';
 
 /**
  * Default in-library {@link ICellSegmenter} backed by cellpose-js (WebGPU/WASM

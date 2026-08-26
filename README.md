@@ -241,11 +241,11 @@ once per image; the decoder runs per prompt). The registry lives in
 
 | Picker id | Domain | Encoder | Runs on | HF model |
 |---|---|---|---|---|
-| `microsam-vit-t-lm` *(default)* | light microscopy | TinyViT, ~14 MB fp16 | WASM¹ | [Ballon999/microsam-vit-t-lm-onnx](https://huggingface.co/Ballon999/microsam-vit-t-lm-onnx) |
-| `microsam-vit-b-lm` | light microscopy | ViT-B, ~172 MB fp16 | WebGPU | [Ballon999/microsam-vit-b-lm-onnx](https://huggingface.co/Ballon999/microsam-vit-b-lm-onnx) |
-| `patho-sam-vit-b` | histopathology (H&E) | ViT-B, ~172 MB fp16 | WebGPU | [Ballon999/patho-sam-vit-b-onnx](https://huggingface.co/Ballon999/patho-sam-vit-b-onnx) |
-| `patho-sam-vit-b-int8` | histopathology (H&E) | ViT-B, ~100 MB int8 | WASM | [Ballon999/patho-sam-vit-b-onnx](https://huggingface.co/Ballon999/patho-sam-vit-b-onnx) (`encoder.int8.onnx`) |
-| cellpose-SAM *(automatic)* | cells (generalist) | SAM ViT + flow head | WebGPU/WASM | [ballon999/cellpose-sam-onnx](https://huggingface.co/ballon999/cellpose-sam-onnx) |
+| `microsam-vit-t-lm` *(default)* | light microscopy | TinyViT, ~14 MB fp16 | WASM¹ | [jax-image-tools/microsam-vit-t-lm-onnx](https://huggingface.co/jax-image-tools/microsam-vit-t-lm-onnx) |
+| `microsam-vit-b-lm` | light microscopy | ViT-B, ~172 MB fp16 | WebGPU | [jax-image-tools/microsam-vit-b-lm-onnx](https://huggingface.co/jax-image-tools/microsam-vit-b-lm-onnx) |
+| `patho-sam-vit-b` | histopathology (H&E) | ViT-B, ~172 MB fp16 | WebGPU | [jax-image-tools/patho-sam-vit-b-onnx](https://huggingface.co/jax-image-tools/patho-sam-vit-b-onnx) |
+| `patho-sam-vit-b-int8` | histopathology (H&E) | ViT-B, ~100 MB int8 | WASM | [jax-image-tools/patho-sam-vit-b-onnx](https://huggingface.co/jax-image-tools/patho-sam-vit-b-onnx) (`encoder.int8.onnx`) |
+| cellpose-SAM *(automatic)* | cells (generalist) | SAM ViT + flow head | WebGPU/WASM | [jax-image-tools/cellpose-sam-onnx](https://huggingface.co/jax-image-tools/cellpose-sam-onnx) |
 
 ¹ TinyViT's fp16 attention overflows on the onnxruntime-web WebGPU EP (returns an
 empty mask); it is numerically correct and fast on WASM, so its encoder is pinned
@@ -366,8 +366,8 @@ cellpose adapter). Configure hosted SAM model URLs once at startup:
 import { setSamModelUrls } from '@jax-data-science/sci-image-visualizer';
 
 setSamModelUrls('microsam-vit-t-lm',
-  'https://huggingface.co/Ballon999/microsam-vit-t-lm-onnx/resolve/main/encoder.fp16.onnx',
-  'https://huggingface.co/Ballon999/microsam-vit-t-lm-onnx/resolve/main/decoder.onnx');
+  'https://huggingface.co/jax-image-tools/microsam-vit-t-lm-onnx/resolve/main/encoder.fp16.onnx',
+  'https://huggingface.co/jax-image-tools/microsam-vit-t-lm-onnx/resolve/main/decoder.onnx');
 ```
 
 `onnxruntime-web` WASM/JSEP sidecars must be served from `/assets/ort/`. See

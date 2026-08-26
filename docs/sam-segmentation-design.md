@@ -136,7 +136,7 @@ you go that route.
 ### 2.5 Hosting
 
 Publish the quantized `encoder.*.onnx` + `decoder.onnx` to HF Hub (like the existing
-`ballon999/cellpose-sam-onnx`) or a GCS model bucket. The engine fetches once and caches
+`jax-image-tools/cellpose-sam-onnx`) or a GCS model bucket. The engine fetches once and caches
 in IndexedDB — same model-caching story cellpose-js already uses.
 
 ---
