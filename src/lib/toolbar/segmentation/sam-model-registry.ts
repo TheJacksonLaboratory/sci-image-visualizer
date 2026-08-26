@@ -20,8 +20,8 @@ export const SAM_MODELS: SamModelDef[] = [
   {
     id: 'microsam-vit-t-lm',
     label: 'micro-sam ViT-T',
-    encoderUrl: 'https://huggingface.co/Ballon999/microsam-vit-t-lm-onnx/resolve/main/encoder.fp16.onnx',
-    decoderUrl: 'https://huggingface.co/Ballon999/microsam-vit-t-lm-onnx/resolve/main/decoder.onnx',
+    encoderUrl: 'https://huggingface.co/jax-image-tools/microsam-vit-t-lm-onnx/resolve/main/encoder.fp16.onnx',
+    decoderUrl: 'https://huggingface.co/jax-image-tools/microsam-vit-t-lm-onnx/resolve/main/decoder.onnx',
     variant: 'sam1',
     inputSize: 1024,
     microscopy: true,
@@ -37,8 +37,8 @@ export const SAM_MODELS: SamModelDef[] = [
   {
     id: 'microsam-vit-b-lm',
     label: 'micro-sam ViT-B',
-    encoderUrl: 'https://huggingface.co/Ballon999/microsam-vit-b-lm-onnx/resolve/main/encoder.fp16.onnx',
-    decoderUrl: 'https://huggingface.co/Ballon999/microsam-vit-b-lm-onnx/resolve/main/decoder.onnx',
+    encoderUrl: 'https://huggingface.co/jax-image-tools/microsam-vit-b-lm-onnx/resolve/main/encoder.fp16.onnx',
+    decoderUrl: 'https://huggingface.co/jax-image-tools/microsam-vit-b-lm-onnx/resolve/main/decoder.onnx',
     variant: 'sam1',
     inputSize: 1024,
     microscopy: true,
@@ -46,8 +46,8 @@ export const SAM_MODELS: SamModelDef[] = [
   {
     id: 'patho-sam-vit-b',
     label: 'patho-sam ViT-B',
-    encoderUrl: 'https://huggingface.co/Ballon999/patho-sam-vit-b-onnx/resolve/main/encoder.fp16.onnx',
-    decoderUrl: 'https://huggingface.co/Ballon999/patho-sam-vit-b-onnx/resolve/main/decoder.onnx',
+    encoderUrl: 'https://huggingface.co/jax-image-tools/patho-sam-vit-b-onnx/resolve/main/encoder.fp16.onnx',
+    decoderUrl: 'https://huggingface.co/jax-image-tools/patho-sam-vit-b-onnx/resolve/main/decoder.onnx',
     variant: 'sam1',
     inputSize: 1024,
     microscopy: true,
@@ -55,8 +55,8 @@ export const SAM_MODELS: SamModelDef[] = [
   {
     id: 'patho-sam-vit-b-int8',
     label: 'patho-sam ViT-B (int8)',
-    encoderUrl: 'https://huggingface.co/Ballon999/patho-sam-vit-b-onnx/resolve/main/encoder.int8.onnx',
-    decoderUrl: 'https://huggingface.co/Ballon999/patho-sam-vit-b-onnx/resolve/main/decoder.onnx',
+    encoderUrl: 'https://huggingface.co/jax-image-tools/patho-sam-vit-b-onnx/resolve/main/encoder.int8.onnx',
+    decoderUrl: 'https://huggingface.co/jax-image-tools/patho-sam-vit-b-onnx/resolve/main/decoder.onnx',
     variant: 'sam1',
     inputSize: 1024,
     microscopy: true,
