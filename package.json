@@ -49,9 +49,9 @@
     "prestart:example": "node scripts/stage-lib.mjs"
   },
   "dependencies": {
-    "cellpose-js": "^0.5.0",
+    "cellpose-js": "^0.6.0",
     "fast-png": "^6.4.0",
-    "napari-js": "^0.11.0",
+    "napari-js": "^0.11.1",
     "openseadragon": "^6.0.2",
     "plotly.js-dist-min": "^3.0.1",
     "tslib": "^2.3.0"
@@ -92,7 +92,7 @@
     "@typescript-eslint/eslint-plugin": "^7.11.0",
     "@typescript-eslint/parser": "^7.11.0",
     "buffer": "^5.7.1",
-    "cellpose-js": "^0.5.0",
+    "cellpose-js": "^0.6.0",
     "dicom-parser": "^1.8.21",
     "esbuild": "^0.20.1",
     "eslint": "^8.57.0",
@@ -103,7 +103,7 @@
     "jest-canvas-mock": "^2.5.2",
     "jest-environment-jsdom": "^29.7.0",
     "jest-preset-angular": "^13.1.6",
-    "napari-js": "^0.11.0",
+    "napari-js": "^0.11.1",
     "ng-mocks": "^14.5.0",
     "ng-packagr": "^17.3.0",
     "onnxruntime-web": "~1.26.0",
