@@ -9,6 +9,26 @@ file was added.
 
 ## [Unreleased]
 
+## [0.3.3] — 2026-08-31
+
+Backfilled: 0.3.3 was published without an entry.
+
+### Changed
+
+- **`cellpose-js` bumped to `^0.6.0`** (from `^0.5.0`) and **`napari-js` to
+  `^0.11.1`** (from `^0.11.0`), in both `dependencies` and `devDependencies`.
+  No source change was needed. The bump is covered by the ng-packagr build
+  type-checking against both packages' published `.d.ts`: the unit tests map
+  `napari-js` to the WebGPU-free stub in `src/lib/testing`, and reach
+  `cellpose-js` only through a type-only import plus the lazy
+  `await import('cellpose-js')` in `CellposeSegmenterService`.
+
+- **Hosted model weights now live under the `jax-image-tools` Hugging Face
+  organization** rather than a personal account: the default cellpose-SAM
+  checkpoint (`cpsam_fp16.onnx`) and all four `SAM_MODELS` entries — micro-sam
+  ViT-T and ViT-B, patho-sam ViT-B and its int8 variant. Hosts that override
+  those URLs through `setModelUrl` or their own `SamModelDef` are unaffected.
+
 ## [0.3.2] — 2026-08-13
 
 ### Fixed
@@ -623,7 +643,10 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.2...v0.3.3
+[0.3.2]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.19...v0.3.0
 [0.2.19]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.18...v0.2.19
 [0.2.18]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.2.17...v0.2.18
