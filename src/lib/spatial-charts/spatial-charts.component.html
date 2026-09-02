@@ -17,7 +17,7 @@
                     styleClass="sx-kind"></p-selectButton>
     <p-dropdown [options]="groupOptions" optionLabel="label" optionValue="value"
                 [ngModel]="groupBy" (ngModelChange)="onGroupBy($event)"
-                placeholder="No grouping" appendTo="body" styleClass="sx-group"
+                placeholder="No grouping" appendTo="body"
                 [disabled]="kind === 'histogram'"
                 pTooltip="Split a violin or box by a categorical column"
                 tooltipPosition="top"></p-dropdown>

@@ -154,6 +154,15 @@ file was added.
   out. The browser example now discovers its spatial gallery entries this way
   rather than hardcoding them.
 
+- **Fixed: the point-size and opacity sliders rendered as bare handles** — small
+  circles that read as radio buttons. PrimeNG puts `styleClass` on its *inner*
+  `.p-slider` div, so styling that left the `<p-slider>` HOST element at its
+  default `display: inline`, where it ignores flex sizing and collapses; only the
+  round handle was left to see. The hosts are now sized by element selector and
+  the track stretched to fill them, which is what `channel-histogram.component.scss`
+  already does — and says so in a comment I should have followed. Same fix for the
+  distribution panel's group dropdown.
+
 - **Fixed: the Opacity control did nothing in the spatial mode's default state.**
   With no colour source and no selection the flat marker colour was a constant
   RGBA tuple, so `view.opacity` was dropped — and that is the state the mode

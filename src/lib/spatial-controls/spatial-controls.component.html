@@ -80,13 +80,13 @@
       <div class="sc-row">
         <span class="sc-lbl">Point size</span>
         <p-slider [ngModel]="view.pointScale" [min]="0.25" [max]="5" [step]="0.25"
-                  (onChange)="onPointScale($event.value)" styleClass="sc-slider"></p-slider>
+                  (onChange)="onPointScale($event.value)"></p-slider>
         <span class="sc-val">{{ view.pointScale }}×</span>
       </div>
       <div class="sc-row">
         <span class="sc-lbl">Opacity</span>
         <p-slider [ngModel]="view.opacity" [min]="0.1" [max]="1" [step]="0.05"
-                  (onChange)="onOpacity($event.value)" styleClass="sc-slider"></p-slider>
+                  (onChange)="onOpacity($event.value)"></p-slider>
         <span class="sc-val">{{ view.opacity }}</span>
       </div>
     </div>
@@ -104,7 +104,7 @@
         <span class="sc-lbl">Clip outliers</span>
         <p-dropdown [options]="clipOptions" optionLabel="label" optionValue="value"
                     [ngModel]="view.percentileClip" (ngModelChange)="onClip($event)"
-                    appendTo="body" styleClass="sc-clip"
+                    appendTo="body"
                     pTooltip="Percentile the contrast window is taken at"
                     tooltipPosition="top"></p-dropdown>
       </div>
