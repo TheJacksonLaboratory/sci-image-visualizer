@@ -3,7 +3,7 @@
  * genuinely 3D spatial-omics source.
  *
  * Every other source here serves a single plane. This one serves ~4M cells from
- * 59 coronal sections, each affinely registered into the Allen CCFv3, so a cell
+ * 53 coronal sections, each affinely registered into the Allen CCFv3, so a cell
  * has a real (x, y, z) in a common anatomical frame. That is the difference that
  * matters: the HER2 sections in st/ are also a series through a block, but they
  * were never registered to each other, so they cannot be stacked. Here they can.
@@ -53,7 +53,7 @@ const CATEGORICAL = [
   { name: 'class', color: 'class_color', description: 'Cell class — the top level of the whole-brain taxonomy' },
   { name: 'neurotransmitter', color: 'neurotransmitter_color', description: 'Neurotransmitter identity, blank where not assigned' },
   { name: 'parcellation_division', color: 'parcellation_division_color', description: 'CCF anatomical division' },
-  { name: 'brain_section_label', color: null, description: 'Source coronal section — 59 of them, ordered anterior to posterior' },
+  { name: 'brain_section_label', color: null, description: 'Source coronal section — 53 of them, ordered anterior to posterior' },
 ];
 
 /** Continuous columns worth colouring by. */

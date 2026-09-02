@@ -181,7 +181,7 @@ section can afford in a way 84k cells cannot.
 
 Every source above serves a single plane. `lib/spatial-abc.mjs` serves the one
 genuinely **3D** dataset here: the Allen Brain Cell Atlas whole-mouse-brain
-MERFISH map — ~3.74M cells from 59 coronal sections, each affinely registered
+MERFISH map — ~3.74M cells from 53 coronal sections, each affinely registered
 into the Allen CCFv3, so every cell has a real `(x, y, z)` in one anatomical
 frame.
 
@@ -193,6 +193,15 @@ can.
 It also ships the **anatomy**: the CCF average template, resampled onto the same
 grid, is served as a `VolumeLayer` under the cloud, so a cluster can be located
 in the brain rather than floating in space.
+
+The sections sit on the template's own 200 µm grid, but not at every step of it:
+consecutive sections are 200 µm apart 41 times, 400 µm apart 9 times and 800 µm
+apart twice, over z 800–14 200 µm. So **23 of the volume's 76 planes hold no
+cells** — 15 interior gaps where the atlas has no section, plus 4 planes at each
+end where the template box extends past the sampled range. Scrubbing the 2D
+spatial view through those planes shows anatomy with no observations over it, and
+that is the data, not a dropped read: every populated plane holds exactly one
+section (never two), which is what a correctly aligned slab width looks like.
 
 ```bash
 npm run fetch-abc        # ~2.0 GB from a public AWS Open Data bucket, resumable

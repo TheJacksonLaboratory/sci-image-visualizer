@@ -161,7 +161,7 @@ file was added.
 
 - **Allen Brain Cell Atlas source in the example server** (`lib/spatial-abc.mjs`,
   `lib/nifti.mjs`, `npm run fetch-abc`) — the whole-mouse-brain MERFISH map,
-  3,739,961 cells from 59 coronal sections registered into a common frame, plus
+  3,739,961 cells from 53 coronal sections registered into a common frame, plus
   the CCF average template as the anatomical backdrop. Plain CSV and NIfTI from a
   public AWS Open Data bucket, transcoded once into a binary cache (~20 s).
   Served with Allen's own deposited category colours, so the render matches the
