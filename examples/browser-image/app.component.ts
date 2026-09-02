@@ -40,7 +40,15 @@ interface DicomSlice {
 interface SpatialEntry {
   datasetId: string;
   name: string;
-  imageId: string;
+  /**
+   * The tissue image this dataset registers onto, when there is one.
+   *
+   * Absent for a dataset that has no single reference plane — a 3D cloud
+   * registered into a common anatomical frame (the Allen CCF) is coordinates all
+   * the way down, with no one section to draw them over. Those open straight
+   * into the 3D mode with no image behind them.
+   */
+  imageId?: string;
 }
 
 /**
@@ -718,15 +726,15 @@ export class AppComponent implements OnDestroy {
       const datasets = await this.spatialData.listDatasets();
       const entries: SpatialEntry[] = [];
       for (const d of datasets) {
-        // The manifest names the image this dataset registers onto; a dataset
-        // without one cannot be shown over tissue.
+        // The manifest names the image this dataset registers onto, if any. No
+        // image is not a reason to skip the dataset: a 3D cloud has none, and is
+        // rendered on its own.
         const manifest = await this.spatialData.readManifest(d.id).catch(() => null);
-        const imageId = manifest?.imageRef?.imageId;
-        if (!imageId) continue;
+        if (!manifest) continue;
         entries.push({
           datasetId: d.id,
           name: `${d.name} · ${d.count.toLocaleString()} obs`,
-          imageId,
+          imageId: manifest.imageRef?.imageId,
         });
       }
       this.zone.run(() => {
@@ -746,17 +754,24 @@ export class AppComponent implements OnDestroy {
   async loadSpatial(entry: SpatialEntry): Promise<void> {
     this.active = entry.datasetId;
     this.loading = true;
-    this.loadingMessage = 'Preparing the tissue image…';
+    this.loadingMessage = entry.imageId
+      ? 'Preparing the tissue image…'
+      : 'Loading observations…';
     try {
       await warmUp(TILE_SERVER);
-      // The tile DESCRIPTOR is a tile-server concern, not part of the spatial
-      // contract, so the host fetches it — and it is what makes the server
-      // materialise this image's pyramid, on first open only.
-      const desc = await fetchTileDescriptor(TILE_SERVER, entry.imageId);
-      this.imageState.setTiledImage(
-        entry.imageId, entry.name, desc.width, desc.height,
-        desc.mppX ?? 1, desc.mppY ?? 1, 3, 1,
-      );
+      if (entry.imageId) {
+        // The tile DESCRIPTOR is a tile-server concern, not part of the spatial
+        // contract, so the host fetches it — and it is what makes the server
+        // materialise this image's pyramid, on first open only.
+        const desc = await fetchTileDescriptor(TILE_SERVER, entry.imageId);
+        this.imageState.setTiledImage(
+          entry.imageId, entry.name, desc.width, desc.height,
+          desc.mppX ?? 1, desc.mppY ?? 1, 3, 1,
+        );
+      }
+      // No reference image means the visualizer selects the 3D cloud itself —
+      // it is the only mode that can render such a dataset, so the host does not
+      // have to know that.
       await this.selectSpatialDataset(entry.datasetId);
     } finally {
       this.loading = false;

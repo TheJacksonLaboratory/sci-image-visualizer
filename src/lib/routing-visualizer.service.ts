@@ -8,13 +8,13 @@ import { Region } from './models/region';
 import { ClassPreset, PresetSet } from './models/class-preset';
 import { PlotlyService } from './implementations/plotly/plotly.service';
 import { OpenSeadragonVisualizerService } from './implementations/osd/openseadragon-visualizer.service';
-import { PlotType, PlotTypeDescriptor, isNapari3d, isNapariScatter, isSpatialOmics } from './contracts/plot-type';
+import { PlotType, PlotTypeDescriptor, isNapari3d, isNapariScatter, isSpatialOmics, isSpatialOmics3d } from './contracts/plot-type';
 import { IVisualizer, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls, ISpatialControls } from './contracts/visualizer.contract';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-data.port';
 import { SpatialDataset, isCategoricalColumn } from './contracts/spatial-dataset.contract';
 import { resolveCategoryColors } from './implementations/spatial/spatial-encoding';
 import {
-  emptySelection, selectByCategory, selectInRegions,
+  emptySelection, selectByCategory, selectInRegions, selectInRegionsProjected,
 } from './implementations/spatial/spatial-selection';
 import { RegionStore } from './store/region-store.service';
 import { SpatialSelectionStore } from './store/spatial-selection.service';
@@ -120,10 +120,10 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     return t === PlotType.NAPARI_IMAGE || isNapariScatter(t) || isSpatialOmics(t);
   }
 
-  /** The 3D napari types (volume/isosurface, either resolution) — no 2D fallback exists (OSD is
-   *  image-only), so they fall straight to Plotly. */
+  /** The 3D napari types (volume/isosurface/surface/scatter, plus the 3D spatial cloud) — no 2D
+   *  fallback exists (OSD is image-only), so they fall straight to Plotly. */
   private isNapari3dType(t: PlotType): boolean {
-    return isNapari3d(t);
+    return isNapari3d(t) || isSpatialOmics3d(t);
   }
 
   /**
@@ -622,11 +622,20 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       selectFromRegions: () => {
         const dataset = this.currentSpatialDataset;
         if (!dataset) return 0;
+        const regions = this.regionStore.getRegions();
         // The union of every drawn region — so every ROI tool the library
         // already has doubles as a spatial selection tool.
-        const selection = selectInRegions(
-          dataset.observations, dataset.imageRef, this.regionStore.getRegions(),
-        );
+        //
+        // In the 3D cloud there is no data-space affine to push a drawn shape
+        // through, so the observations are projected to canvas pixels by the
+        // renderer (which owns the camera) and tested in screen space instead.
+        // Falls back to the 2D path whenever the cloud is not mounted.
+        const projected = isSpatialOmics3d(this.currentPlotType)
+          ? this.napari.getSpatialScreenProjection(dataset.observations)
+          : null;
+        const selection = projected
+          ? selectInRegionsProjected(projected, dataset.observations.count, regions)
+          : selectInRegions(dataset.observations, dataset.imageRef, regions);
         this.selectionStore.set(selection);
         return selection.count;
       },

@@ -214,12 +214,16 @@ describe('VisualizerComponent (UI shell)', () => {
       const byType = new Map(component.plotTypeOptions.map((d) => [d.type, d.label]));
 
       // Test mode lifts the `productionLabel` CURATION, not the capability gates:
-      // the spatial type still needs a dataset, exactly as a volume still needs a
-      // stack. This fixture has no dataset, so it is the one type held back.
+      // the spatial types still need a dataset, exactly as a volume still needs a
+      // stack. This fixture has no dataset, so every spatial mode is held back —
+      // the 3D one doubly so, since it also needs observations with a z.
       const gated = ALL_DESCRIPTORS.filter((d) => d.requiresSpatialData);
-      expect(gated).toHaveLength(1);
+      expect(gated.map((d) => d.type).sort()).toEqual(
+        [PlotType.SPATIAL_OMICS, PlotType.SPATIAL_OMICS_3D].sort(),
+      );
       expect(component.plotTypeOptions.length).toBe(ALL_DESCRIPTORS.length - gated.length);
       expect(byType.has(PlotType.SPATIAL_OMICS)).toBe(false);
+      expect(byType.has(PlotType.SPATIAL_OMICS_3D)).toBe(false);
       expect(byType.get(PlotType.IMAGE)).toBe('Image (OSD)');
       expect(byType.get(PlotType.NAPARI_IMAGE)).toBe('Image (napari · WebGPU)');
       expect(byType.get(PlotType.SURFACE)).toBe('Surface (Plotly)');

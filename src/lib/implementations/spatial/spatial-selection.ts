@@ -196,6 +196,52 @@ export function selectInRegions(
   return { mask, count };
 }
 
+/**
+ * Select observations whose SCREEN projection falls inside the drawn regions.
+ *
+ * This is how a region selection works in the 3D cloud. There is no data-space
+ * affine to map a drawn shape through, because the shape was drawn on a 2D screen
+ * against a perspective camera — so the observations come the other way, already
+ * projected to canvas pixels by the renderer (which owns the camera), and the
+ * regions are tested in that same screen space.
+ *
+ * The consequence is worth being explicit about: a screen-space lasso selects
+ * through the WHOLE DEPTH of the cloud, like a cookie cutter, not a slab at some
+ * chosen z. That is inherent to drawing on a flat screen, and it is what napari
+ * and every other orbit-camera point picker do. Orbit and draw again to cut from
+ * another angle.
+ *
+ * `screen` is `[x0, y0, x1, y1, …]` in canvas pixels, `count` entries long. An
+ * observation the camera puts behind the eye is given NaN by the projector and
+ * never selected.
+ */
+export function selectInRegionsProjected(
+  screen: Float32Array,
+  count: number,
+  regions: readonly Region[],
+): SpatialSelectionMask {
+  const mask = new Uint8Array(count);
+  const shapes = regions.flatMap((r) => regionShapes(r));
+  if (shapes.length === 0) return { mask, count: 0 };
+
+  let hits = 0;
+  for (let i = 0; i < count; i++) {
+    const px = screen[i * 2];
+    const py = screen[i * 2 + 1];
+    // Behind the camera, or otherwise unprojectable.
+    if (!Number.isFinite(px) || !Number.isFinite(py)) continue;
+    for (const shape of shapes) {
+      if (!inBounds(shape.bounds, px, py)) continue;
+      if (shape.hit(px, py)) {
+        mask[i] = 1;
+        hits++;
+        break;
+      }
+    }
+  }
+  return { mask, count: hits };
+}
+
 /** Every observation whose categorical code equals `code` — the legend click. */
 export function selectByCategory(codes: Uint16Array, code: number): SpatialSelectionMask {
   const mask = new Uint8Array(codes.length);

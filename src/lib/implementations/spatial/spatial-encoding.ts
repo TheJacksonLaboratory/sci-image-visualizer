@@ -77,8 +77,9 @@ export interface ContinuousEncodingOptions extends MuteOptions {
   missingColor?: Rgb;
 }
 
-/** Parse `#rgb` / `#rrggbb` to 0–255 RGB; unparseable input falls back to grey. */
-function parseHex(hex: string): Rgb {
+/** Parse `#rgb` / `#rrggbb` to 0–255 RGB; unparseable input falls back to grey.
+ *  Exported so the 3D LUT path parses palettes exactly as the 2D path does. */
+export function parseHex(hex: string): Rgb {
   const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec((hex ?? '').trim());
   if (!m) return MISSING_COLOR;
   let h = m[1];

@@ -14,8 +14,15 @@ const HANDLE_HIT_PX = 9;
 /** Rendered handle size (screen px). */
 const HANDLE_SIZE = 7;
 
-/** The slice of the napari Viewer the overlay needs (coord transforms + control gating). */
-interface OverlayViewer {
+/**
+ * The slice of the napari Viewer the overlay needs (coord transforms + control gating).
+ *
+ * Exported because the 3D spatial mode supplies a SCREEN-SPACE implementation of it: there the
+ * drawn shape is a lasso in canvas pixels, not a rectangle in image space, so "world" is the
+ * canvas itself and both transforms collapse to identity. That lets the 3D view reuse this whole
+ * overlay — every tool, the handles, the store round-trip — with no 3D-specific drawing code.
+ */
+export interface OverlayViewer {
   canvasToWorld(clientX: number, clientY: number): [number, number];
   worldToCanvas(worldX: number, worldY: number): [number, number];
   setControlsEnabled(enabled: boolean): void;

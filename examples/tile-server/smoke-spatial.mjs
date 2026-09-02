@@ -154,6 +154,44 @@ try {
   check('spots span the tissue-sized fraction of the image', spanX > 0.7 && spanX < 0.85,
     `${(spanX * 100).toFixed(0)}%`);
 
+  // The 3D source is optional — it needs a ~1.9GB download — so probe it and skip
+  // rather than fail when it is absent. When it IS there, hasZ and the third
+  // coordinate block are the things worth pinning: a 2-block response silently
+  // read as 3 would shear the whole cloud.
+  console.log('3D source (skipped unless abc/ is populated)');
+  const abcList = await (await fetch(`${BASE}/spatial/datasets`)).json();
+  const abc = abcList.datasets.find((d) => d.id === 'abc.wholebrain.sub10');
+  if (!abc) {
+    console.log('  - not present (run npm run fetch-abc)');
+  } else {
+    const m = await (await fetch(`${BASE}/spatial/${abc.id}/manifest`)).json();
+    check('3D manifest sets hasZ', m.hasZ === true, String(m.hasZ));
+    check('3D manifest has no imageRef', !m.imageRef, JSON.stringify(m.imageRef));
+    const buf = new Float32Array(
+      await (await fetch(`${BASE}/spatial/${abc.id}/coords`)).arrayBuffer(),
+    );
+    check('coords carry THREE f32 blocks', buf.length === m.count * 3,
+      `${buf.length} floats for ${m.count} obs`);
+    // z must actually vary; a constant would mean the sections were stacked flat
+    // rather than registered, which is the whole point of this dataset.
+    const z = buf.subarray(m.count * 2, m.count * 3);
+    let zlo = Infinity;
+    let zhi = -Infinity;
+    for (const v of z) {
+      if (v < zlo) zlo = v;
+      if (v > zhi) zhi = v;
+    }
+    check('z spans the brain, not one plane', zhi - zlo > 5000,
+      `${(zlo / 1000).toFixed(1)}-${(zhi / 1000).toFixed(1)} mm`);
+    // Every categorical must fit the 3D layer's 256-entry LUT, or its colours
+    // would be wrong on screen while the legend looked right.
+    const wide = (m.columns || [])
+      .filter((c) => c.kind === 'categorical' && c.categories.length > 96)
+      .map((c) => `${c.name}=${c.categories.length}`);
+    check('every categorical fits the 96-category LUT ceiling', wide.length === 0,
+      wide.join(', '));
+  }
+
   console.log('error handling');
   const notFound = await fetch(`${BASE}/spatial/${ID}/feature/NotAGene`);
   check('unknown gene is 404', notFound.status === 404, `got ${notFound.status}`);

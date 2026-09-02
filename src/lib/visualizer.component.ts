@@ -16,6 +16,7 @@ import {
   PlotType,
   PlotTypeDescriptor,
   isNapari3d,
+  isSpatialOmics3d,
   NAPARI_DEFAULT_DECIMATE,
 } from './contracts/plot-type';
 import { ViewerFeature } from './contracts/capabilities.contract';
@@ -284,6 +285,13 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   private profileDragUpListener?: () => void;
   private profileResizeListener?: () => void;
 
+  /** True while the 3D spatial cloud is the active mode. The controls drop the ROI
+   *  selection there: region tools are screen-space, and against an orbiting
+   *  camera a drawn rectangle has no fixed meaning in the data. */
+  get isSpatial3dMode(): boolean {
+    return isSpatialOmics3d(this.selectedPlotType);
+  }
+
   /** LINE plot type shows the image + draggable line ROI + intensity inset. */
   get isProfileMode(): boolean {
     return this.selectedPlotType === PlotType.LINE;
@@ -303,6 +311,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   /** Whether a spatial-omics dataset is currently published on
    *  `SPATIAL_DATA_PORT` — gates the spatial plot types in the selector. */
   private hasSpatialDataset = false;
+  /** Whether that dataset's observations carry a z, gating the 3D spatial mode. */
+  private hasSpatial3dDataset = false;
   private spatialDatasetSubscription?: Subscription;
 
   plotWidthSubscription?: Subscription;
@@ -377,11 +387,24 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   private watchSpatialDataset(): void {
     this.spatialDatasetSubscription = this.spatialData?.getDataset$().subscribe((dataset) => {
       const has = !!dataset;
+      // Only a dataset whose observations carry a z can be drawn as a cloud, so
+      // the 3D mode is gated on the coordinates, not merely on a dataset being
+      // present. Most spatial assays are one plane.
+      const has3d = !!dataset?.observations.z;
       // The port publishes its current value on subscribe, so the initial `null`
       // would otherwise recompute the selector for no change.
-      if (has === this.hasSpatialDataset) return;
+      if (has === this.hasSpatialDataset && has3d === this.hasSpatial3dDataset) return;
       this.hasSpatialDataset = has;
+      this.hasSpatial3dDataset = has3d;
       this.computePlotTypeOptions();
+      // A dataset with no reference image has nothing to draw observations OVER:
+      // a cloud registered into a common frame (the Allen CCF) has coordinates
+      // but no one section. Select the 3D mode rather than leaving the host on an
+      // Image view with an empty canvas. Ordered after computePlotTypeOptions so
+      // the type is on offer before it is selected.
+      if (has3d && !dataset?.imageRef && !isSpatialOmics3d(this.selectedPlotType)) {
+        this.onSelectPlotType(PlotType.SPATIAL_OMICS_3D);
+      }
       // Clearing the dataset while a spatial mode is active leaves a type that is
       // no longer offered — fall back to Image, as turning test mode off does.
       this.reconcileSelectedPlotType();
@@ -407,6 +430,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
         if (d.requiresStack && !isStack) return false;
         if (d.requiresGrayscale && !isGrayscale && !isMultichannel) return false;
         if (d.requiresSpatialData && !this.hasSpatialDataset) return false;
+        if (d.requiresSpatial3d && !this.hasSpatial3dDataset) return false;
         return true;
       })
       // Default selector shows the suffix-free productionLabel; test mode keeps

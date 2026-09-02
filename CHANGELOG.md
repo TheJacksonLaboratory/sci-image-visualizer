@@ -11,6 +11,54 @@ file was added.
 
 ### Added
 
+- **`Spatial omics 3D` plot mode** — spatial-omics observations as a 3D point
+  cloud under the orbit camera, alongside the existing 2D `Spatial omics` mode.
+  For assays whose observations carry a z: serial sections registered into a
+  common frame, or a genuinely volumetric assay. Gated by `requiresSpatial3d`, a
+  strictly narrower gate than `requiresSpatialData` — most spatial assays are a
+  single plane and have no z to render, so the mode stays hidden for them.
+
+  A dataset with no `imageRef` selects this mode automatically. Such a dataset
+  has nothing to draw observations *over* — a cloud registered into an
+  anatomical frame has coordinates but no one section — so leaving the host on
+  an Image view would show an empty canvas.
+
+  Two constraints come from the 3D points layer having no per-point colour
+  channel, only a per-point scalar mapped through a 256-entry LUT:
+
+  - **Categorical colouring is exact up to 96 categories.** A palette is encoded
+    as one contiguous block of LUT entries per category. Measured against
+    napari-js, every K from 2..96 round-trips its colours exactly and K=97 is
+    the first that does not. Above the ceiling the renderer draws flat and warns,
+    rather than drawing colours that are subtly wrong next to a confident legend.
+  - **A selection cannot be an alpha ramp.** The layer has one opacity for all
+    points, so the selected subset becomes its own layer at full opacity while
+    the parent cloud drops to the muted level — reading the way the 2D
+    highlight-vs-mute does. Point size is in *screen* pixels here, not data
+    units, which is the layer's unit.
+
+- **Region selection in 3D.** The existing ROI tools — rectangle, polygon,
+  freehand — work on the cloud, by handing `NapariRegionOverlay` a screen-space
+  viewer whose transforms are identity. The drawn shape is a lasso in canvas
+  pixels, so every tool works with no 3D-specific drawing code. Selection then
+  projects each observation through the camera's view-projection and tests it in
+  that same screen space (`selectInRegionsProjected`).
+
+  A screen-space lasso cuts through the cloud's **full depth**, not a slab at a
+  chosen z — inherent to drawing on a flat screen, and what every orbit-camera
+  point picker does. The panel says so. An orbit clears the drawn outline, since
+  a screen-space shape stops meaning anything once the camera moves; the
+  selection it produced is kept, and stays highlighted from every angle.
+
+- **Allen Brain Cell Atlas source in the example server** (`lib/spatial-abc.mjs`,
+  `npm run fetch-abc`) — the whole-mouse-brain MERFISH map, ~3.74M cells from 59
+  coronal sections each registered into the CCFv3, as the example's only 3D
+  dataset. Plain CSV from a public AWS Open Data bucket, transcoded once into a
+  binary cache (~20 s). Served with Allen's own deposited category colours, so
+  the render matches the atlas figures. See the example server's README for the
+  two things it does not serve: categoricals above the LUT ceiling, and the 492
+  genes that ship only as h5ad.
+
 - **Spatial-omics data plane** — contracts for spatial-omics datasets (Visium
   spots, segmented cells) so the library can hold N observations positioned in a
   tissue image's pixel space, each with categorical and continuous annotations
@@ -153,6 +201,10 @@ file was added.
   server offers while building a picker instead of loading each dataset to find
   out. The browser example now discovers its spatial gallery entries this way
   rather than hardcoding them.
+
+- **Fixed: the example gallery skipped datasets with no tissue image.** It
+  required an `imageRef` to list a dataset at all, which excluded every dataset
+  that has no single reference plane.
 
 - **Fixed: the point-size and opacity sliders rendered as bare handles** — small
   circles that read as radio buttons. PrimeNG puts `styleClass` on its *inner*

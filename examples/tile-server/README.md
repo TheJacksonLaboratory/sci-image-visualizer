@@ -55,6 +55,11 @@ format `SpatialDataHttpService` speaks (see
 | `GET /spatial/:id/features?q=&limit=` | `{ names: [...] }` typeahead |
 | `GET /spatial/:id/polygons` | `u32` count, `u32[count+1]` offsets, `f32` coords |
 
+A manifest sets `hasZ: true` when the observations carry a third axis, and
+`/coords` then returns three `f32[N]` blocks instead of two. A dataset with no
+single reference plane (a registered 3D cloud) has **no** `imageRef` — there is
+no one section to draw it over.
+
 Vectors are **raw little-endian bytes**, decoded by a typed-array view with no
 copy — JSON would cost ~8–12× the bytes and allocate a JS number per value.
 
@@ -171,6 +176,60 @@ What it costs: the cheap index (spot keys, pixel positions, gene names) is read
 per request in ~25 ms; the count matrix is parsed on the first gene or derived
 column and kept **gene-major** (~21 MB for ~350 spots x ~15k genes), which a
 section can afford in a way 84k cells cannot.
+
+#### Serving a 3D dataset (Allen Brain Cell Atlas)
+
+Every source above serves a single plane. `lib/spatial-abc.mjs` serves the one
+genuinely **3D** dataset here: the Allen Brain Cell Atlas whole-mouse-brain
+MERFISH map — ~3.74M cells from 59 coronal sections, each affinely registered
+into the Allen CCFv3, so every cell has a real `(x, y, z)` in one anatomical
+frame.
+
+That registration is the whole difference. The HER2 sections above are also a
+series through a block, but they were never registered to each other — their
+extents disagree by up to ~850 µm in origin — so they cannot be stacked. These
+can, and the deposit says so: `ccf_coordinates.csv` varies z continuously, while
+the sibling `reconstructed_coordinates.csv` pins it to the section plane.
+
+```bash
+npm run fetch-abc        # ~1.9 GB from a public AWS Open Data bucket, resumable
+```
+
+No credentials and no signing — it is plain CSV over HTTPS. The fetch takes the
+two pre-joined "view" tables rather than joining `cell_metadata` +
+`ccf_coordinates` + the taxonomy ourselves: CSV is row-major, so a join would
+mean downloading ~820 MB and doing the work anyway, against 1.5 GB and no join.
+
+The first request transcodes the CSVs once into a compact binary cache under
+`abc/.cache/` (~20 s, ~1.9 GB peak heap, 8 s of it the coordinates and columns);
+every later request slices that. Two datasets come out of it:
+
+| id | observations |
+|---|---|
+| `abc.wholebrain` | 3,739,961 |
+| `abc.wholebrain.sub10` | 373,997 (deterministic 1-in-10 stride) |
+
+The subsample is the same cloud at the same extent, just thinner — 3.7M
+billboards is a lot to ask of integrated graphics.
+
+Two things are worth knowing about what it serves:
+
+- **Categoricals stop at ~96 values.** The 3D points layer has no per-point
+  RGBA: it maps a per-point *scalar* through a 256-entry LUT, so a palette is
+  encoded as one contiguous block of LUT entries per category. Measured against
+  napari-js, every K from 2..96 round-trips its colours exactly and K=97 is the
+  first that does not. So `class` (34), `neurotransmitter` (9),
+  `parcellation_division` (25) and `brain_section_label` (53) are served with
+  Allen's own deposited hex colours, and `subclass` (338),
+  `parcellation_structure` (~300), `supertype` (1,201) and `cluster` (5,322) are
+  deliberately not: they would render colours that are subtly wrong while the
+  legend claimed otherwise.
+- **Genes are 8, not 500.** The full panel ships only as `.h5ad` and there is no
+  HDF5 reader here. Eight marker genes (`Slc17a7`, `Slc32a1`, …) are published as
+  CSV and are joined on `cell_label` — a real hash join, since that file has
+  4,334,174 rows in a different order. Join on the label **verbatim**: about a
+  third of the labels on both sides carry a `-<n>` suffix that is part of the
+  identity, and stripping it collapses 3,739,961 cells into 2,648,427 keys.
 
 #### Pre-built bundles
 

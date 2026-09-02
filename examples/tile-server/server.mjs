@@ -45,6 +45,9 @@ import {
   listStDatasets, stManifest, stCoords, stIds, stColumn, stFeature, stFeatureSearch, stImage,
 } from './lib/spatial-st.mjs';
 import { writePyramid } from './lib/pyramid.mjs';
+import {
+  listAbcDatasets, abcManifest, abcCoords, abcColumn, abcFeature, abcFeatureSearch,
+} from './lib/spatial-abc.mjs';
 import { readArray } from './lib/zarr3.mjs';
 
 const PORT = Number(process.env.PORT || 8090);
@@ -64,6 +67,11 @@ const ZARR_DIR = process.env.ZARR_DIR
 const ST_DIR = process.env.ST_DIR
   ? process.env.ST_DIR
   : new URL('./st', import.meta.url).pathname;
+// Allen Brain Cell Atlas CSVs — the only 3D source here (see lib/spatial-abc.mjs
+// and scripts/fetch-abc.mjs). Absent unless someone has run the fetch script.
+const ABC_DIR = process.env.ABC_DIR
+  ? process.env.ABC_DIR
+  : new URL('./abc', import.meta.url).pathname;
 
 const app = express();
 
@@ -246,6 +254,7 @@ async function resolveSource(id) {
     ['bundle', () => loadManifest(SPATIAL_DIR, id)],
     ['zarr', () => zarrManifest(ZARR_DIR, id)],
     ['st', () => stManifest(ST_DIR, id)],
+    ['abc', () => abcManifest(ABC_DIR, id)],
   ]) {
     try {
       await probe();
@@ -276,15 +285,16 @@ async function fromSource(res, id, handlers) {
 
 app.get('/spatial/datasets', async (_req, res) => {
   try {
-    const [bundles, stores, st] = await Promise.all([
+    const [bundles, stores, st, abc] = await Promise.all([
       listSpatialDatasets(SPATIAL_DIR),
       listZarrDatasets(ZARR_DIR).catch(() => []),
       listStDatasets(ST_DIR).catch(() => []),
+      listAbcDatasets(ABC_DIR).catch(() => []),
     ]);
     const seen = new Set();
     const datasets = [];
     // Priority order, first id wins.
-    for (const list of [bundles, stores, st]) {
+    for (const list of [bundles, stores, st, abc]) {
       for (const d of list) {
         if (seen.has(d.id)) continue;
         seen.add(d.id);
@@ -304,6 +314,7 @@ app.get('/spatial/:id/manifest', async (req, res) => {
       .json(await loadManifest(SPATIAL_DIR, id)),
     zarr: async () => res.json(await zarrManifest(ZARR_DIR, id)),
     st: async () => res.json(await stManifest(ST_DIR, id)),
+    abc: async () => res.json(await abcManifest(ABC_DIR, id)),
   });
 });
 
@@ -313,11 +324,11 @@ app.get('/spatial/:id/manifest', async (req, res) => {
 // A legacy ST dataset has uniform spot radii and no outlines, so it answers
 // only `coords` — `radius` and `polygons` legitimately 404 there.
 const WIRE_FILES = {
-  coords: { file: 'coords.bin', zarr: zarrCoords, st: stCoords },
+  coords: { file: 'coords.bin', zarr: zarrCoords, st: stCoords, abc: abcCoords },
   radius: { file: 'radius.bin', zarr: zarrRadius },
   polygons: { file: 'polygons.bin', zarr: zarrPolygons },
 };
-for (const [route, { file, zarr, st }] of Object.entries(WIRE_FILES)) {
+for (const [route, { file, zarr, st, abc }] of Object.entries(WIRE_FILES)) {
   app.get(`/spatial/:id/${route}`, async (req, res) => {
     const { id } = req.params;
     await fromSource(res, id, {
@@ -328,6 +339,7 @@ for (const [route, { file, zarr, st }] of Object.entries(WIRE_FILES)) {
       },
       zarr: async () => octet(res).send(await zarr(ZARR_DIR, id)),
       ...(st ? { st: async () => octet(res).send(await st(ST_DIR, id)) } : {}),
+      ...(abc ? { abc: async () => octet(res).send(await abc(ABC_DIR, id)) } : {}),
     });
   });
 }
@@ -348,6 +360,7 @@ app.get('/spatial/:id/column/:name', async (req, res) => {
     bundle: async () => octet(res).send(await readColumn(SPATIAL_DIR, id, name)),
     zarr: async () => octet(res).send(await zarrColumn(ZARR_DIR, id, name)),
     st: async () => octet(res).send(await stColumn(ST_DIR, id, name)),
+    abc: async () => octet(res).send(await abcColumn(ABC_DIR, id, name)),
   });
 });
 
@@ -357,6 +370,7 @@ app.get('/spatial/:id/feature/:name', async (req, res) => {
     bundle: async () => octet(res).send(await readFeatureVector(SPATIAL_DIR, id, name)),
     zarr: async () => octet(res).send(await zarrFeature(ZARR_DIR, id, name)),
     st: async () => octet(res).send(await stFeature(ST_DIR, id, name)),
+    abc: async () => octet(res).send(await abcFeature(ABC_DIR, id, name)),
   });
 });
 
@@ -367,6 +381,7 @@ app.get('/spatial/:id/features', async (req, res) => {
     bundle: async () => res.json({ names: await searchFeatures(SPATIAL_DIR, id, req.query.q, limit) }),
     zarr: async () => res.json({ names: await zarrFeatureSearch(ZARR_DIR, id, req.query.q, limit) }),
     st: async () => res.json({ names: await stFeatureSearch(ST_DIR, id, req.query.q, limit) }),
+    abc: async () => res.json({ names: await abcFeatureSearch(ABC_DIR, id, req.query.q, limit) }),
   });
 });
 

@@ -15,7 +15,11 @@ import { ViewerFeature } from '../../contracts/capabilities.contract';
 import { IImageInfo } from '../../contracts/image.contract';
 import { IChannelState } from '../../contracts/channel-histogram-api.contract';
 import { SPATIAL_DATA_PORT } from '../../contracts/ports/spatial-data.port';
-import { CategoricalColumn, SpatialDataset } from '../../contracts/spatial-dataset.contract';
+import {
+  CategoricalColumn, ContinuousColumn, SpatialDataset,
+} from '../../contracts/spatial-dataset.contract';
+import { DEFAULT_MUTED_OPACITY } from '../spatial/spatial-encoding';
+import { SpatialSelectionStore } from '../../store/spatial-selection.service';
 
 const imageInfo = (over: Partial<IImageInfo> = {}): IImageInfo =>
   ({ urls: ['u0', 'u1'], isGrayscale: true, isStack: true, ...over }) as unknown as IImageInfo;
@@ -35,6 +39,18 @@ const spatialDataset = (count = 3): SpatialDataset => ({
   ],
   features: { count: 1, names: ['Ttr'] },
 });
+
+/** The same dataset with a z, so it can be drawn as a cloud. */
+const spatialDataset3d = (count = 3): SpatialDataset => {
+  const base = spatialDataset(count);
+  return {
+    ...base,
+    observations: {
+      ...base.observations,
+      z: Float32Array.from({ length: count }, (_, i) => i * 30),
+    },
+  };
+};
 
 const tilesPort = {
   getSelectedInfoB64: () => 'INFO',
@@ -823,6 +839,208 @@ describe('NapariVisualizerService', () => {
 
     service.unsubscribe();
     document.body.removeChild(div);
+  });
+
+  describe('SPATIAL_OMICS_3D mode', () => {
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    let addPoints3D: jest.SpyInstance;
+
+    /** Mount the 3D cloud with `dataset` published; returns every layer built. */
+    async function mount3d(dataset: SpatialDataset | null = spatialDataset3d()) {
+      const div = document.createElement('div');
+      div.id = 'spatial3d-host';
+      document.body.appendChild(div);
+      dataset$.next(dataset);
+      const loaded = await service.load(imageInfo(), 0);
+      await service.plot('spatial3d-host', loaded, imageInfo(), 600, PlotType.SPATIAL_OMICS_3D);
+      await flush();
+      return addPoints3D.mock.results.map((r) => r.value);
+    }
+
+    const last = (layers: any[]) => layers.at(-1);
+    const named = (layers: any[], name: string) => layers.filter((l) => l.name === name).at(-1);
+
+    beforeEach(() => {
+      addPoints3D = jest.spyOn(Viewer.prototype, 'addPoints3D');
+    });
+
+    it('draws the cloud with x, y and z interleaved', async () => {
+      const layers = await mount3d();
+      expect(addPoints3D).toHaveBeenCalled();
+      // x = i*10, y = i*20, z = i*30, laid out x-fastest.
+      expect(Array.from(named(layers, 'observations').positions)).toEqual([
+        0, 0, 0,
+        10, 20, 30,
+        20, 40, 60,
+      ]);
+    });
+
+    it('draws nothing when the observations have no z', async () => {
+      // The plot type is gated on `requiresSpatial3d`, but a host can set the
+      // type directly, and a 2D dataset must not be silently flattened onto z=0.
+      const layers = await mount3d(spatialDataset());
+      expect(layers).toHaveLength(0);
+    });
+
+    it('scales the marker size by pointScale', async () => {
+      const layers = await mount3d();
+      // Screen pixels here, not data units: the 3D layer sizes billboards in
+      // screen space, so the data-unit radius does not carry over.
+      expect(named(layers, 'observations').size).toBe(3);
+
+      store.setSpatialView({ pointScale: 2 });
+      await flush();
+      expect(last(addPoints3D.mock.results.map((r) => r.value)).size).toBe(6);
+    });
+
+    it('maps each category code onto its OWN colour in the LUT', async () => {
+      // The heart of the 3D categorical path. The layer has no per-point RGBA, so
+      // a palette is smuggled through a 256-entry scalar LUT as one block per
+      // category. This asserts the block arithmetic: with slot 0 reserved for
+      // "no category", code i must resolve to palette entry i and not a
+      // neighbour's blend.
+      const column: CategoricalColumn = {
+        meta: {
+          kind: 'categorical', name: 'region', categories: ['A', 'B'],
+          colors: ['#ff0000', '#0000ff'],
+        },
+        codes: new Uint16Array([0, 1, 0]),
+      };
+      spatialPort.getColumn.mockResolvedValue(column);
+
+      await mount3d();
+      store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+      await flush();
+
+      const layer = last(addPoints3D.mock.results.map((r) => r.value));
+      // Codes are shifted by one, keeping 0 free for the unassigned colour.
+      expect(Array.from(layer.values)).toEqual([1, 2, 1]);
+      const k = 3; // 2 categories + the reserved slot
+      expect(layer.contrastLimits).toEqual([-0.5, k - 0.5]);
+
+      // Resolve each code the way the shader does: normalise through
+      // contrastLimits, then index the LUT.
+      const lut = layer.colormap.stops as [number, number, number][];
+      expect(lut).toHaveLength(256);
+      const colourOf = (value: number) => {
+        const [lo, hi] = layer.contrastLimits;
+        const t = (value - lo) / (hi - lo);
+        return lut[Math.max(0, Math.min(255, Math.round(t * 255)))];
+      };
+      expect(colourOf(1)).toEqual([255, 0, 0]);   // category A
+      expect(colourOf(2)).toEqual([0, 0, 255]);   // category B
+    });
+
+    it('refuses to colour more categories than the LUT can hold apart', async () => {
+      // 96 is the measured ceiling; beyond it the colours would be subtly wrong
+      // while the legend stayed confident, so the renderer draws flat instead.
+      const categories = Array.from({ length: 200 }, (_, i) => `c${i}`);
+      const column: CategoricalColumn = {
+        meta: {
+          kind: 'categorical', name: 'many', categories,
+          colors: categories.map(() => '#ff0000'),
+        },
+        codes: new Uint16Array([0, 1, 2]),
+      };
+      spatialPort.getColumn.mockResolvedValue(column);
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+      await mount3d();
+      store.setSpatialView({ colorBy: { kind: 'column', name: 'many' } });
+      await flush();
+
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('256-entry LUT'));
+      const layer = last(addPoints3D.mock.results.map((r) => r.value));
+      // Flat: a two-stop colormap, every value resolving to the same colour.
+      expect((layer.colormap as any).name).toBe('spatial-flat');
+      warn.mockRestore();
+    });
+
+    it('windows a continuous column through the colormap', async () => {
+      const column: ContinuousColumn = {
+        meta: { kind: 'continuous', name: 'score' },
+        values: Float32Array.from([0, 5, 10]),
+      };
+      spatialPort.getColumn.mockResolvedValue(column);
+
+      await mount3d();
+      store.setSpatialView({ colorBy: { kind: 'column', name: 'score' }, percentileClip: [0, 1] });
+      await flush();
+
+      const layer = last(addPoints3D.mock.results.map((r) => r.value));
+      expect(Array.from(layer.values)).toEqual([0, 5, 10]);
+      expect(layer.contrastLimits).toEqual([0, 10]);
+    });
+
+    it('never hands the shader a degenerate window', async () => {
+      // Every value identical: a zero-width window would divide by zero when the
+      // shader normalises, so it has to be widened.
+      const column: ContinuousColumn = {
+        meta: { kind: 'continuous', name: 'flat' },
+        values: Float32Array.from([7, 7, 7]),
+      };
+      spatialPort.getColumn.mockResolvedValue(column);
+
+      await mount3d();
+      store.setSpatialView({ colorBy: { kind: 'column', name: 'flat' }, percentileClip: [0, 1] });
+      await flush();
+
+      const [lo, hi] = last(addPoints3D.mock.results.map((r) => r.value)).contrastLimits;
+      expect(hi).toBeGreaterThan(lo);
+    });
+
+    it('mounts the region overlay so the ROI tools work in 3D', async () => {
+      // REGRESSION: the 3D mount is deliberately thinner than the 2D one (no
+      // image, no scale bar, no readback), and an earlier revision dropped region
+      // drawing along with all that. The tools then showed in the toolbar and did
+      // nothing — exactly the failure the 2D spatial mode shipped with once.
+      await mount3d();
+      const overlay = service.getRegionOverlay();
+      expect(overlay).not.toBeNull();
+      expect(() => overlay?.setMode('drawrect')).not.toThrow();
+      expect(() => overlay?.setMode('none')).not.toThrow();
+    });
+
+    it('projects observations to canvas pixels through the 3D camera', async () => {
+      await mount3d();
+      const projected = service.getSpatialScreenProjection(spatialDataset3d().observations);
+      expect(projected).not.toBeNull();
+      expect(projected!.length).toBe(3 * 2);
+      // The stub camera is the identity, so clip == world and the mapping reduces
+      // to NDC -> canvas: x = (nx/2 + 0.5)*w, y = (1 - (ny/2 + 0.5))*h. The y flip
+      // is the part worth pinning: NDC points up, canvas points down, and getting
+      // it backwards would silently mirror every selection.
+      const w = 300;
+      const h = 150;
+      const obs = spatialDataset3d().observations;
+      for (let i = 0; i < obs.count; i++) {
+        expect(projected![i * 2]).toBeCloseTo((obs.x[i] * 0.5 + 0.5) * w, 3);
+        expect(projected![i * 2 + 1]).toBeCloseTo((1 - (obs.y[i] * 0.5 + 0.5)) * h, 3);
+      }
+    });
+
+    it('draws a selection as a second layer, muting the parent cloud', async () => {
+      // There is no per-point alpha in 3D, so the 2D highlight-vs-mute trick has
+      // to be rebuilt out of two layers.
+      const layers = await mount3d();
+      const before = named(layers, 'observations');
+      expect(before.opacity).toBe(1);
+
+      TestBed.inject(SpatialSelectionStore).set({
+        mask: Uint8Array.from([0, 1, 0]), count: 1,
+      });
+      await flush();
+
+      const all = addPoints3D.mock.results.map((r) => r.value);
+      const selected = named(all, 'selected');
+      expect(selected).toBeDefined();
+      // Only the selected observation, at its own coordinates.
+      expect(Array.from(selected.positions)).toEqual([10, 20, 30]);
+      expect(selected.opacity).toBe(1);
+      // ...and the parent drops to the muted level.
+      expect(named(all, 'observations').opacity).toBeCloseTo(DEFAULT_MUTED_OPACITY);
+    });
   });
 
   describe('SPATIAL_OMICS mode', () => {

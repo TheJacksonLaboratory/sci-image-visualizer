@@ -71,6 +71,13 @@ export interface Points3DLayer {
   colormap: unknown;
   contrastLimits: [number, number];
   size: number;
+  /** One value for the whole layer — the 3D layer has no per-point alpha, which
+   *  is why the spatial 3D path draws a selection as a second layer. */
+  opacity: number;
+  name?: string;
+  /** Captured so tests can assert the interleaved x,y,z layout and the scalars. */
+  positions?: Float32Array;
+  values?: Float32Array;
   bounds(): {
     min: [number, number, number];
     max: [number, number, number];
@@ -143,9 +150,15 @@ export class Colormap {
   }
 }
 
-/** Stand-in for napari-js colormapFromLut (grayscale LUT → Colormap). */
-export function colormapFromLut(name: string, _lut: unknown, _maxValue = 255): Colormap {
-  return new Colormap(name);
+/** Real napari-js LUT resolution. The spatial 3D path derives its categorical
+ *  block widths from this, so the stub must agree with the library or the tests
+ *  would verify arithmetic the renderer never does. */
+export const LUT_SIZE = 256;
+
+/** Stand-in for napari-js colormapFromLut. Keeps the LUT so tests can assert that
+ *  a category code lands on its own colour rather than a neighbour's blend. */
+export function colormapFromLut(name: string, lut: unknown, _maxValue = 255): Colormap {
+  return new Colormap(name, Array.isArray(lut) ? lut : []);
 }
 
 /** Stand-in for napari-js tintColormap (black→hex ramp). */
@@ -408,15 +421,22 @@ export class Viewer {
     };
   }
   addPoints3D(
-    _positions?: Float32Array,
-    _values?: Float32Array,
-    opts?: { colormap?: unknown; contrastLimits?: [number, number]; size?: number },
+    positions?: Float32Array,
+    values?: Float32Array,
+    opts?: {
+      colormap?: unknown; contrastLimits?: [number, number]; size?: number;
+      opacity?: number; name?: string;
+    },
   ): Points3DLayer {
     const o = opts ?? {};
     return {
       colormap: o.colormap ?? 'viridis',
       contrastLimits: o.contrastLimits ?? [0, 255],
       size: o.size ?? 6,
+      opacity: o.opacity ?? 1,
+      name: o.name,
+      positions,
+      values,
       bounds: () => ({
         min: [0, 0, 0],
         max: [1, 1, 1],

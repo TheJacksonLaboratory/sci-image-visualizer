@@ -9,6 +9,7 @@ import {
   tintColormap,
   reverseColormap,
   heightField,
+  LUT_SIZE,
   MultiChannelImageView,
   MultiChannelVolumeView,
 } from 'napari-js';
@@ -35,8 +36,10 @@ import {
 import { SpatialViewState } from '../../contracts/display-types';
 import {
   contrastWindow, encodeCategorical, encodeContinuous, lutFor, markerDiameters,
-  resolveCategoryColors, toRgbaTuples,
+  resolveCategoryColors, toRgbaTuples, parseHex, MISSING_COLOR, DEFAULT_MUTED_OPACITY,
 } from '../spatial/spatial-encoding';
+import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
+import { SpatialObservations } from '../../contracts/spatial-dataset.contract';
 import {
   SpatialSelectionMask, emptySelection, mutedFromSelection,
 } from '../spatial/spatial-selection';
@@ -51,6 +54,7 @@ import {
   isNapariScatter,
   isNapariScatter3d,
   isSpatialOmics,
+  isSpatialOmics3d,
   NAPARI_DEFAULT_DECIMATE,
 } from '../../contracts/plot-type';
 import {
@@ -76,7 +80,7 @@ import { SimpleSliceAccessService } from '../simple-slice-access.service';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
 import { NapariScaleBar, formatUm } from './napari-scale-bar';
-import { NapariRegionOverlay } from './napari-region-overlay';
+import { NapariRegionOverlay, OverlayViewer } from './napari-region-overlay';
 import { NapariAxesLabels, AxisLabelSpec } from './napari-axes-labels';
 import { NapariVolumeZHandle } from './napari-volume-z-handle';
 import {
@@ -234,6 +238,17 @@ interface TileDescriptor {
  * Follow-ups (jit-ui#102): native-resolution pyramidal tiling, on-canvas tools, region
  * overlay rendering, per-channel histograms, TIFF export.
  */
+/**
+ * What the 3D points layer needs to colour a cloud: one scalar per point, a colormap, and the
+ * window that maps scalars onto it. Categorical and continuous colourings both reduce to this,
+ * because the layer offers no per-point colour channel.
+ */
+interface Spatial3dEncoding {
+  values: Float32Array;
+  colormap: Colormap;
+  contrastLimits: [number, number];
+}
+
 @Injectable({ providedIn: 'root' })
 export class NapariVisualizerService extends BaseStoreVisualizer implements IVisualizer {
   readonly capabilities: ViewerCapabilities = capabilitiesOf([
@@ -284,6 +299,14 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private scatter3dLayer: Points3DLayer | null = null;
   /** Spatial-omics observation markers + the dataset/view subscription driving them. */
   private spatialPoints: PointsLayer | null = null;
+  /** The 3D point cloud, and a second layer holding just the selected subset. */
+  private spatialPoints3d: Points3DLayer | null = null;
+  private spatialPoints3dSel: Points3DLayer | null = null;
+  private spatialLayerKey3d: string | null = null;
+  /** Interleaved x,y,z, cached so a colour change does not re-walk 3.7M observations. */
+  private spatialPositions3d: Float32Array | null = null;
+  /** Identity of the scalars currently uploaded — see {@link rebuildSpatialPoints3d}. */
+  private spatialScalarKey3d: string | null = null;
   private spatialSub: Subscription | null = null;
   /** Which dataset the current marker layer was built for, so a display-only
    *  change (size, colour, opacity, selection) can update it in place. */
@@ -682,7 +705,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       this.viewer = viewer;
       await viewer.ready;
 
-      if (isSpatialOmics(plotType)) {
+      if (isSpatialOmics3d(plotType)) {
+        await this.mountSpatialOmics3d(viewer, host);
+      } else if (isSpatialOmics(plotType)) {
         await this.mountSpatialOmics(viewer, host, z);
       } else if (isNapariScatter(plotType)) {
         await this.mountScatter(viewer, host, z);
@@ -1527,6 +1552,79 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.scheduleReadback();
   }
 
+  /**
+   * Region drawing for the 3D cloud.
+   *
+   * Reuses {@link NapariRegionOverlay} verbatim by handing it a SCREEN-SPACE viewer: the drawn
+   * shape is a lasso in canvas pixels, so "world" is the canvas and both transforms are identity
+   * (bar the client→canvas offset). Every existing tool — rectangle, polygon, freehand — therefore
+   * works in 3D with no new drawing code.
+   *
+   * A screen-space shape stops meaning anything the moment the camera moves, so an orbit clears
+   * the drawn regions. The SELECTION it produced is kept: that is the durable artefact, and the
+   * highlighted points stay highlighted from every angle.
+   */
+  private install3dInteraction(viewer: Viewer, host: HTMLElement): void {
+    const canvasRect = () => this.canvas?.getBoundingClientRect();
+    const screenSpace: OverlayViewer = {
+      canvasToWorld: (clientX: number, clientY: number) => {
+        const r = canvasRect();
+        return r ? [clientX - r.left, clientY - r.top] : [clientX, clientY];
+      },
+      // Already canvas pixels.
+      worldToCanvas: (x: number, y: number) => [x, y],
+      setControlsEnabled: (enabled: boolean) => viewer.setControlsEnabled(enabled),
+      camera: viewer.camera3d,
+    };
+    this.regionOverlay = new NapariRegionOverlay(host, screenSpace, this.regionStore);
+    this.buildToolHosts();
+    this.cameraReadbackOff = viewer.camera3d.changed.connect(() => {
+      // Only while nothing is being drawn — clearing mid-gesture would delete the
+      // shape under the user's cursor.
+      if (this.regionStore.getRegions().length > 0) this.regionStore.setRegions([]);
+    });
+  }
+
+  /**
+   * Project every observation to canvas pixels under the current 3D camera.
+   *
+   * The renderer owns the camera, so it owns the projection; the pure selection maths then lives
+   * in {@link selectInRegionsProjected}. Returns `[x0, y0, x1, y1, …]`, with NaN for anything at
+   * or behind the eye plane (a perspective divide by a non-positive w), which the selector skips.
+   * Null when the 3D cloud is not mounted, so the caller can fall back to the 2D affine path.
+   */
+  getSpatialScreenProjection(obs: SpatialObservations): Float32Array | null {
+    const viewer = this.viewer;
+    const canvas = this.canvas;
+    if (!viewer || !canvas || !this.spatialPositions3d) return null;
+
+    const w = canvas.clientWidth || canvas.width;
+    const h = canvas.clientHeight || canvas.height;
+    if (!w || !h) return null;
+    const m = viewer.camera3d.viewProjection(w, h);
+    const pos = this.spatialPositions3d;
+    const out = new Float32Array(obs.count * 2);
+
+    for (let i = 0; i < obs.count; i++) {
+      const x = pos[i * 3];
+      const y = pos[i * 3 + 1];
+      const z = pos[i * 3 + 2];
+      // Column-major mat4 · vec4(x, y, z, 1).
+      const cx = m[0] * x + m[4] * y + m[8] * z + m[12];
+      const cy = m[1] * x + m[5] * y + m[9] * z + m[13];
+      const cw = m[3] * x + m[7] * y + m[11] * z + m[15];
+      if (!(cw > 0)) {
+        out[i * 2] = NaN;
+        out[i * 2 + 1] = NaN;
+        continue;
+      }
+      // Clip → NDC → canvas pixels. NDC y points up, canvas y points down.
+      out[i * 2] = ((cx / cw) * 0.5 + 0.5) * w;
+      out[i * 2 + 1] = (1 - ((cy / cw) * 0.5 + 0.5)) * h;
+    }
+    return out;
+  }
+
   /** Rebuild the markers on any dataset or view-state change. */
   private subscribeSpatial(): void {
     this.spatialSub?.unsubscribe();
@@ -1536,7 +1634,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.spatialSub = combineLatest([
       port.getDataset$(), this.store.getSpatialView$(), selection$,
     ]).subscribe(([dataset, view, selection]) => {
-      void this.rebuildSpatialPoints(dataset, view, selection);
+      void (isSpatialOmics3d(this.currentPlotType)
+        ? this.rebuildSpatialPoints3d(dataset, view, selection)
+        : this.rebuildSpatialPoints(dataset, view, selection));
     });
   }
 
@@ -1621,6 +1721,255 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       scale: dataset.imageRef?.scale ?? [1, 1],
       translate: dataset.imageRef?.translate ?? [0, 0],
     });
+  }
+
+  /**
+   * Mount the SPATIAL_OMICS_3D view: observations as a 3D point cloud under the orbit camera.
+   *
+   * Deliberately much thinner than the 2D mount. There is no tissue image to render (a registered
+   * volume like the Allen CCF has no single reference plane), so no scale bar, no readback, and no
+   * 2D interaction stack — the region tools draw in screen space and have no meaning against an
+   * orbiting camera, which is why `Select from ROIs` is hidden in this mode. `addPoints3D` puts
+   * the viewer in 3D and frames the camera on the cloud itself.
+   */
+  private async mountSpatialOmics3d(viewer: Viewer, host: HTMLElement): Promise<void> {
+    this.install3dInteraction(viewer, host);
+    this.subscribeSpatial();
+  }
+
+  /**
+   * Largest category count whose colours survive the 3D layer's LUT intact.
+   *
+   * The 3D points layer has no per-point RGBA — it maps a per-point SCALAR through a 256-entry
+   * colormap LUT — so a categorical palette is encoded as one contiguous block of LUT entries per
+   * category. Measured against napari-js, every K in 2..96 round-trips exactly and K=97 is the
+   * first that does not: 256 texels cannot keep more categories apart than that. Above the ceiling
+   * we draw flat rather than draw a lie, because subtly wrong category colours next to a confident
+   * legend is the failure nobody catches.
+   */
+  private static readonly SPATIAL_3D_MAX_CATEGORIES = 96;
+
+  /** Base marker diameter for the 3D cloud, in SCREEN pixels (the layer's unit). */
+  private static readonly SPATIAL_3D_BASE_SIZE = 3;
+
+  /** (Re)build the 3D point cloud for the current dataset + view state. */
+  private async rebuildSpatialPoints3d(
+    dataset: SpatialDataset | null, view: SpatialViewState,
+    selection: SpatialSelectionMask = emptySelection(),
+  ): Promise<void> {
+    const viewer = this.viewer;
+    if (!viewer) return;
+    const token = ++this.spatialRebuildToken;
+
+    // Resolve the scalar encoding BEFORE touching the scene, for the same reason
+    // the 2D path does: a gene fetch can fail or be superseded, and dropping the
+    // layer first would blank the view.
+    let enc: Spatial3dEncoding | null = null;
+    if (dataset) {
+      try {
+        enc = await this.spatialScalar3d(dataset, view);
+      } catch (err) {
+        console.warn('[napari-js] spatial 3D colouring failed — falling back to a flat colour', err);
+        enc = null;
+      }
+    }
+    if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
+
+    const obs = dataset?.observations;
+    // No z means nothing to draw in 3D. The plot type is gated on `requiresSpatial3d`
+    // so this should be unreachable from the UI, but a host can set the type directly.
+    if (!dataset || !obs || obs.count === 0 || !obs.z) {
+      this.removeSpatial3dLayers(viewer);
+      return;
+    }
+
+    const scale = view.pointScale > 0 ? view.pointScale : 1;
+    const size = NapariVisualizerService.SPATIAL_3D_BASE_SIZE * scale;
+    const values = enc?.values ?? new Float32Array(obs.count);
+    const colormap = enc?.colormap ?? this.spatialFlatColormap();
+    const contrastLimits: [number, number] = enc?.contrastLimits ?? [0, 1];
+
+    const key = `${dataset.id}:${obs.count}`;
+    // `Points3DLayer.values` is readonly and the layer exposes no dataVersion to
+    // bump, so unlike the 2D path a change of colour SOURCE cannot be mutated in
+    // — the layer has to be rebuilt. Only the size/opacity/colormap knobs are
+    // genuinely display-only. So track the scalars' identity separately from the
+    // geometry's: `colorBy` plus the transforms feeding the encoding.
+    const clip = view.percentileClip ?? [0.01, 0.99];
+    const scalarKey = [
+      key,
+      view.colorBy ? `${view.colorBy.kind}:${view.colorBy.name}` : 'flat',
+      view.logScale ? 'log' : 'lin',
+      clip.join(','),
+    ].join('|');
+
+    if (key !== this.spatialLayerKey3d) {
+      // New geometry: interleave x,y,z (the layer's documented layout, x-fastest)
+      // and cache it, so later colour changes rebuild the layer without walking
+      // the observations again.
+      const positions = new Float32Array(obs.count * 3);
+      for (let i = 0; i < obs.count; i++) {
+        positions[i * 3] = obs.x[i];
+        positions[i * 3 + 1] = obs.y[i];
+        positions[i * 3 + 2] = obs.z[i];
+      }
+      this.spatialPositions3d = positions;
+    }
+
+    if (!this.spatialPoints3d || scalarKey !== this.spatialScalarKey3d) {
+      if (this.spatialPoints3d) viewer.layers.remove(this.spatialPoints3d);
+      this.spatialLayerKey3d = key;
+      this.spatialScalarKey3d = scalarKey;
+      this.spatialPoints3d = viewer.addPoints3D(this.spatialPositions3d!, values, {
+        name: 'observations',
+        colormap,
+        contrastLimits,
+        size,
+      });
+    } else {
+      // Same scalars — a size or window change only.
+      this.spatialPoints3d.colormap = colormap;
+      this.spatialPoints3d.contrastLimits = contrastLimits;
+      this.spatialPoints3d.size = size;
+    }
+
+    // Selection cannot be an alpha ramp here — the layer has ONE opacity for all
+    // points, not one per point. So the selected subset becomes its own layer at
+    // full opacity while the parent cloud drops to the muted level, which reads
+    // the same way the 2D highlight-vs-mute does.
+    const hasSelection = selection.count > 0 && selection.mask.length === obs.count;
+    if (this.spatialPoints3d) {
+      this.spatialPoints3d.opacity = view.opacity * (hasSelection ? DEFAULT_MUTED_OPACITY : 1);
+    }
+    if (this.spatialPoints3dSel) {
+      viewer.layers.remove(this.spatialPoints3dSel);
+      this.spatialPoints3dSel = null;
+    }
+    if (hasSelection) {
+      const positions = new Float32Array(selection.count * 3);
+      const picked = new Float32Array(selection.count);
+      let at = 0;
+      for (let i = 0; i < obs.count; i++) {
+        if (!selection.mask[i]) continue;
+        positions[at * 3] = obs.x[i];
+        positions[at * 3 + 1] = obs.y[i];
+        positions[at * 3 + 2] = obs.z[i];
+        picked[at] = values[i];
+        at++;
+      }
+      this.spatialPoints3dSel = viewer.addPoints3D(positions, picked, {
+        name: 'selected',
+        colormap,
+        contrastLimits,
+        // A touch larger, so a small selection is findable inside a 3.7M-point
+        // cloud rather than merely brighter.
+        size: size * 1.6,
+        opacity: view.opacity,
+      });
+    }
+    viewer.requestRender();
+  }
+
+  private removeSpatial3dLayers(viewer: Viewer): void {
+    for (const layer of [this.spatialPoints3d, this.spatialPoints3dSel]) {
+      if (layer) viewer.layers.remove(layer);
+    }
+    this.spatialPoints3d = null;
+    this.spatialPoints3dSel = null;
+    this.spatialLayerKey3d = null;
+    this.spatialScalarKey3d = null;
+    this.spatialPositions3d = null;
+  }
+
+  /** A one-colour colormap, for the "nothing to colour by" state. */
+  private spatialFlatColormap(): Colormap {
+    const [r, g, b] = NapariVisualizerService.SPATIAL_NEUTRAL_COLOR;
+    const rgb: Rgb = [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+    // Two identical stops: colormapFromLut needs at least two, and equal ends
+    // make every value resolve to the same colour.
+    return colormapFromLut('spatial-flat', [rgb, rgb]);
+  }
+
+  /**
+   * The per-point scalar + colormap + window that colour the 3D cloud.
+   *
+   * Continuous data is the natural fit: values go straight through the active colormap with the
+   * same percentile window the 2D path uses. Categorical data has to be smuggled through the same
+   * scalar channel — see {@link SPATIAL_3D_MAX_CATEGORIES}. Codes map to LUT blocks, and
+   * `contrastLimits` of `[-0.5, K - 0.5]` puts code `i` at the centre of block `i`, which is what
+   * makes the round-trip exact instead of approximately right.
+   */
+  private async spatialScalar3d(
+    dataset: SpatialDataset, view: SpatialViewState,
+  ): Promise<Spatial3dEncoding | null> {
+    const port = this.spatialData;
+    const colorBy = view.colorBy;
+    if (!port || !colorBy) return null;
+
+    if (colorBy.kind === 'column') {
+      const column: SpatialColumn = await port.getColumn(colorBy.name);
+      if (isCategoricalColumn(column)) {
+        return this.encodeSpatial3dCategorical(column.codes, resolveCategoryColors(column.meta));
+      }
+      return this.encodeSpatial3dContinuous(
+        column.values, view, view.logScale || !!column.meta.logScaleHint,
+      );
+    }
+    const values = await port.getFeatureVector(colorBy.name);
+    return this.encodeSpatial3dContinuous(
+      values, view, view.logScale || !!dataset.features?.logScaleHint,
+    );
+  }
+
+  /** Category codes → a stepped LUT, exact for up to {@link SPATIAL_3D_MAX_CATEGORIES}. */
+  private encodeSpatial3dCategorical(codes: Uint16Array, colors: string[]): Spatial3dEncoding | null {
+    // Slot 0 is reserved for "no category", so the palette occupies 1..K.
+    const k = colors.length + 1;
+    if (k > NapariVisualizerService.SPATIAL_3D_MAX_CATEGORIES) {
+      console.warn(
+        `[napari-js] ${colors.length} categories exceeds what the 3D layer's 256-entry LUT can `
+        + 'hold distinctly; drawing flat instead of with wrong colours',
+      );
+      return null;
+    }
+    const palette: Rgb[] = [
+      MISSING_COLOR,
+      ...colors.map(parseHex),
+    ];
+    const lut: Rgb[] = new Array(LUT_SIZE);
+    for (let j = 0; j < LUT_SIZE; j++) {
+      lut[j] = palette[Math.min(k - 1, Math.floor((j * k) / LUT_SIZE))];
+    }
+    const values = new Float32Array(codes.length);
+    for (let i = 0; i < codes.length; i++) {
+      values[i] = codes[i] === NO_CATEGORY ? 0 : codes[i] + 1;
+    }
+    return {
+      values,
+      colormap: colormapFromLut('spatial-categories', lut),
+      contrastLimits: [-0.5, k - 0.5],
+    };
+  }
+
+  /** Continuous values → the active colormap over a percentile-clipped window. */
+  private encodeSpatial3dContinuous(
+    source: Float32Array, view: SpatialViewState, log: boolean,
+  ): Spatial3dEncoding {
+    const node = this.currentColormap as { data?: { value?: unknown } } | null;
+    const lut = lutFor(node?.data?.value, this.currentReverse);
+    const [lo, hi] = view.percentileClip ?? [0.01, 0.99];
+    let values = source;
+    if (log) {
+      values = new Float32Array(source.length);
+      for (let i = 0; i < source.length; i++) values[i] = Math.log1p(Math.max(0, source[i]));
+    }
+    const [min, max] = contrastWindow(values, lo, hi);
+    return {
+      values,
+      colormap: colormapFromLut('spatial-continuous', lut),
+      // A degenerate window would divide by zero in the shader's normalisation.
+      contrastLimits: max > min ? [min, max] : [min, min + 1],
+    };
   }
 
   /**
@@ -2130,6 +2479,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.spatialSub = null;
     this.spatialPoints = null;
     this.spatialLayerKey = null;
+    this.spatialPoints3d = null;
+    this.spatialPoints3dSel = null;
+    this.spatialLayerKey3d = null;
+    this.spatialScalarKey3d = null;
+    // Drop the cached interleaved coordinates too: holding 3.7M x 3 floats after
+    // a teardown is ~45MB of retained heap for a scene that no longer exists.
+    this.spatialPositions3d = null;
     // Invalidate any colour fetch still in flight so it can't attach to the next scene.
     this.spatialRebuildToken++;
     this.scatter2dPoints = null;

@@ -13,7 +13,8 @@
     "make-cog": "node scripts/make-cog.mjs",
     "make-spatial-demo": "node scripts/make-spatial-demo.mjs",
     "smoke-spatial": "node smoke-spatial.mjs",
-    "make-pyramid": "node scripts/make-pyramid.mjs"
+    "make-pyramid": "node scripts/make-pyramid.mjs",
+    "fetch-abc": "node scripts/fetch-abc.mjs"
   },
   "dependencies": {
     "cors": "^2.8.5",

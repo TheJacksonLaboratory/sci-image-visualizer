@@ -1,6 +1,6 @@
 import {
   countMask, emptySelection, maskToIndices, mutedFromSelection, pointInRing,
-  regionShapes, selectByCategory, selectInRegions,
+  regionShapes, selectByCategory, selectInRegions, selectInRegionsProjected,
 } from './spatial-selection';
 import { MultiPolygon, Polygon, Rectangle, Region } from '../../models/region';
 import { SpatialObservations } from '../../contracts/spatial-dataset.contract';
@@ -137,6 +137,64 @@ describe('spatial-selection', () => {
 
     it('selects nothing for an empty region list', () => {
       expect(selectInRegions(obs([1, 1]), undefined, []).count).toBe(0);
+    });
+  });
+
+  describe('selectInRegionsProjected', () => {
+    /** Screen positions as the renderer hands them over: [x0, y0, x1, y1, …]. */
+    const screen = (...pts: [number, number][]) =>
+      Float32Array.from(pts.flatMap(([x, y]) => [x, y]));
+
+    it('selects points whose SCREEN position falls inside the region', () => {
+      const selection = selectInRegionsProjected(
+        screen([5, 5], [50, 50], [8, 2]), 3, [rectRegion(0, 0, 10, 10)],
+      );
+      expect(selection.count).toBe(2);
+      expect(Array.from(maskToIndices(selection.mask))).toEqual([0, 2]);
+    });
+
+    it('ignores the imageRef affine entirely', () => {
+      // The whole point of this path: the coordinates are ALREADY in screen
+      // space, so there is no data->world transform left to apply. A selection
+      // that silently re-applied one would land in the wrong place, and would do
+      // it invisibly because the outline and the cloud both look plausible.
+      const pts = screen([5, 5]);
+      expect(selectInRegionsProjected(pts, 1, [rectRegion(0, 0, 10, 10)]).count).toBe(1);
+      // Same numbers via the 2D path with a 0.5 scale would MISS this rectangle,
+      // which is what makes the two paths genuinely different.
+      expect(selectInRegions(obs([5, 5]), { scale: [10, 10] }, [rectRegion(0, 0, 10, 10)]).count)
+        .toBe(0);
+    });
+
+    it('never selects a point the camera puts behind the eye', () => {
+      // The projector writes NaN for a non-positive w rather than a wild
+      // coordinate; without the finite check those wrap into the region and a
+      // lasso would grab points behind the viewer.
+      const selection = selectInRegionsProjected(
+        screen([NaN, NaN], [5, 5]), 2, [rectRegion(0, 0, 10, 10)],
+      );
+      expect(selection.count).toBe(1);
+      expect(Array.from(maskToIndices(selection.mask))).toEqual([1]);
+    });
+
+    it('selects nothing when no region is drawn', () => {
+      expect(selectInRegionsProjected(screen([5, 5]), 1, []).count).toBe(0);
+    });
+
+    it('takes the union across regions, counting a point once', () => {
+      const selection = selectInRegionsProjected(
+        screen([5, 5]), 1, [rectRegion(0, 0, 10, 10), rectRegion(4, 4, 10, 10)],
+      );
+      expect(selection.count).toBe(1);
+    });
+
+    it('works with a polygon lasso, not just a rectangle', () => {
+      // Freehand and polygon are the tools people actually reach for on a cloud.
+      const triangle = polyRegion([0, 10, 0], [0, 0, 10]);
+      const selection = selectInRegionsProjected(
+        screen([1, 1], [9, 9]), 2, [triangle],
+      );
+      expect(Array.from(maskToIndices(selection.mask))).toEqual([0]);
     });
   });
 

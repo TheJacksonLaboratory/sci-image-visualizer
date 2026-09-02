@@ -37,6 +37,11 @@ export enum PlotType {
    *  coloured by an annotation column or a gene. Needs a `SpatialDataset` on `SPATIAL_DATA_PORT`,
    *  so it is gated by `requiresSpatialData` and never appears for an image-only host. */
   SPATIAL_OMICS = 'spatial-omics',
+  /** Spatial-omics observations as a 3D point cloud, for assays whose observations carry a z —
+   *  serial sections registered into a common frame (e.g. the Allen CCF), or a genuinely
+   *  volumetric assay. Gated by `requiresSpatial3d`, a strictly narrower gate than
+   *  {@link SPATIAL_OMICS}: a single-plane dataset has no z to render. */
+  SPATIAL_OMICS_3D = 'spatial-omics-3d',
 }
 
 /** How many spatial dimensions a plot type renders in. */
@@ -92,6 +97,11 @@ export interface PlotTypeDescriptor {
    *  {@link requiresStack} for a z-stack, so a host with no spatial data never
    *  sees the mode. */
   requiresSpatialData?: boolean;
+  /** True when the type needs observations with a z coordinate, not merely a
+   *  `SpatialDataset`. Narrower than {@link requiresSpatialData}: most spatial
+   *  assays are a single plane, so this hides the 3D mode unless the published
+   *  dataset actually carries `observations.z`. */
+  requiresSpatial3d?: boolean;
 }
 
 /**
@@ -127,6 +137,7 @@ export const PLOT_TYPE_DESCRIPTORS: Partial<Record<PlotType, PlotTypeDescriptor>
   [PlotType.NAPARI_ISOSURFACE]: { type: PlotType.NAPARI_ISOSURFACE, label: 'Isosurface (napari · WebGPU)', productionLabel: 'Isosurface', icon: 'assets/plotting/isosurface.svg',     dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
   // ── Spatial omics ──
   [PlotType.SPATIAL_OMICS]:     { type: PlotType.SPATIAL_OMICS,     label: 'Spatial omics (napari · WebGPU)', productionLabel: 'Spatial omics', icon: 'assets/plotting/spatial-omics.svg',  dimensions: '2d', source: 'spatial', requiresSpatialData: true },
+  [PlotType.SPATIAL_OMICS_3D]:  { type: PlotType.SPATIAL_OMICS_3D,  label: 'Spatial omics 3D (napari · WebGPU)', productionLabel: 'Spatial omics 3D', icon: 'assets/plotting/spatial-omics.svg', dimensions: '3d', source: 'spatial', requiresSpatialData: true, requiresSpatial3d: true },
 };
 
 export function getPlotTypeDescriptor(type: PlotType): PlotTypeDescriptor | undefined {
@@ -161,6 +172,10 @@ export function isNapariScatter3d(type: PlotType): boolean {
 /** Spatial-omics observations over the tissue image. */
 export function isSpatialOmics(type: PlotType): boolean {
   return type === PlotType.SPATIAL_OMICS;
+}
+/** Spatial-omics observations as a 3D point cloud. */
+export function isSpatialOmics3d(type: PlotType): boolean {
+  return type === PlotType.SPATIAL_OMICS_3D;
 }
 /** Any napari-js 3D plot type (volume, isosurface, surface, or 3D scatter). Resolution is a runtime
  *  decimate factor (Full / ½ / ¼ / ⅛) — see the service's `resolutionScale`. */

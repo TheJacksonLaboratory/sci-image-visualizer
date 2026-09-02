@@ -49,6 +49,10 @@ const CLIP_OPTIONS: { label: string; value: [number, number] }[] = [
 export class SpatialControlsComponent implements OnInit, OnDestroy {
   /** Dialog visibility, two-way bound so a toolbar button can open it. */
   @Input() visible = false;
+  /** Set while the 3D cloud is the active mode. Changes what the ROI selection
+   *  MEANS — a screen-space lasso cutting through the cloud's full depth rather
+   *  than a shape in tissue coordinates — so the hint below it says so. */
+  @Input() is3d = false;
   @Output() visibleChange = new EventEmitter<boolean>();
 
   readonly clipOptions = CLIP_OPTIONS;
