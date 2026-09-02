@@ -74,15 +74,27 @@ export async function listSpatialDatasets(spatialDir) {
   return out.sort((a, b) => a.id.localeCompare(b.id));
 }
 
+/**
+ * Parsed manifest for `id`, cached but invalidated by the file's mtime.
+ *
+ * Re-running the converter while the server is up used to serve the OLD
+ * manifest until a restart, which is exactly the kind of stale-state trap that
+ * wastes debugging time. One `stat` per manifest request is nothing: they happen
+ * once per dataset selection, not per vector.
+ */
 export async function loadManifest(spatialDir, id) {
-  const cached = manifestCache.get(id);
-  if (cached) return cached;
   const file = path.join(datasetDir(spatialDir, id), 'manifest.json');
+  const { mtimeMs } = await stat(file);
+  const cached = manifestCache.get(id);
+  if (cached && cached.mtimeMs === mtimeMs) return cached.manifest;
+
   const manifest = JSON.parse(await readFile(file, 'utf8'));
   if (manifest.id !== id) {
     throw new Error(`manifest id "${manifest.id}" does not match directory "${id}"`);
   }
-  manifestCache.set(id, manifest);
+  manifestCache.set(id, { manifest, mtimeMs });
+  // The feature-name list is keyed to the same bundle, so drop it together.
+  featureNameCache.delete(id);
   return manifest;
 }
 

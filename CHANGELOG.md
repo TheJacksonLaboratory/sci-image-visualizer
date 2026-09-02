@@ -149,6 +149,29 @@ file was added.
     as a ruler, and derives `total_counts` / `n_genes_by_counts` — a raw table
     has only `array_row`/`array_col`/`in_tissue`/`spot_id`, nothing worth
     colouring by.
+  - **Segmentation stores** (Visium HD, and by extension Xenium) are supported
+    alongside spot stores. These keep one table per segmentation and have an
+    **empty `obsm`**, so centroids, per-cell radii and the outlines all come from
+    the shapes **GeoParquet** — read via `hyparquet` (example-server dependency
+    only; the library gains nothing) and decoded from GeoJSON in
+    `lib/geoparquet.mjs`. Rows are joined to the table by id, not by position.
+
+    Verified against the Visium HD 4.0.1 mouse brain: 84,031 cells, all joined,
+    1.8M outline vertices served on `/polygons`, per-cell equivalent-circle radii
+    from the outline areas, and a derived `area` column. `--grid-um 2` turns the
+    outlines into a ruler — a segmentation traced on a binned assay steps one bin
+    at a time, so the modal vertex step (7.3 px here) is one 2 µm bin, giving
+    0.973 µm/px for the image and a correct scale bar.
+
+    Two spec details this shook out: Zarr v3 **omits a chunk that is entirely
+    `fill_value`** (a single-region table has no `region/codes` chunk, which the
+    reader previously treated as an error), and the pyramid level is **named by
+    the multiscales metadata** — `0` for Visium, `s0` for HD.
+  - `--max-matrix-mb` (default 64) caps the gene-major matrix, which is
+    `genes x observations x 4` bytes — 84k cells at 2,000 genes would be 672 MB,
+    so it is reduced to 190 genes and says so.
+  - The server's manifest cache is now **mtime-aware**: re-running the converter
+    while the server is up used to serve the previous manifest until a restart.
   - `scripts/make-pyramid.mjs` + `lib/pyramid.mjs` turn any sharp-readable image
     into the tiled pyramid the server serves — the no-`vips` counterpart to
     `make-cog.mjs`.

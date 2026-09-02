@@ -91,39 +91,65 @@ arrangement Visium has with its 2000 px hires tier — so `imageRef.scale` is a
 real affine rather than a trivial 1:1, and the renderer's registration is
 actually exercised.
 
-Real data goes through the **Node** converter — no Python, no Zarr or Parquet
-libraries. These stores are Zarr v3 with `bytes` + `zstd` codecs and `vlen-utf8`
-strings, and Node 24 ships zstd in `node:zlib`, so `lib/zarr3.mjs` reads them
-directly:
+Real data goes through the **Node** converter — no Python. These stores are
+Zarr v3 with `bytes` + `zstd` codecs and `vlen-utf8` strings, and Node 24 ships
+zstd in `node:zlib` (`lib/zarr3.mjs`); the shapes are GeoParquet, which
+`hyparquet` reads and decodes to GeoJSON (`lib/geoparquet.mjs`).
 
 ```bash
-curl -O https://s3.embl.de/spatialdata/spatialdata-sandbox/visium_spatialdata_0.7.1.zip
-unzip visium_spatialdata_0.7.1.zip                 # -> data.zarr  (Visium mouse brain, ~68 MB)
+npm run make-spatial -- --input data.zarr --list      # tables / shapes / images
 
-npm run make-spatial -- --input data.zarr --list   # which sections are in there
-npm run make-spatial -- --input data.zarr --sample ST8059048
+# Visium — spot centres in obsm/spatial, one uniform 55 um spot radius
+npm run make-spatial -- --input data.zarr --sample ST8059048 \
+  --id st8059048 --name "Visium mouse brain — ST8059048"
+
+# Visium HD — CELL SEGMENTATIONS: 84k cells with real boundaries
+npm run make-spatial -- --input data.zarr --table cell_segmentations \
+  --id hd-cells --grid-um 2 --name "Visium HD mouse brain — cell segmentations"
 ```
 
-That writes `./spatial/st8059048` **and** `./cogs/st8059048-tissue` (the H&E
-image as a tiled pyramid), then prints a ready-made gallery entry for the
-browser example.
+Each run writes `./spatial/<id>` **and** `./cogs/<id>-tissue` (the tissue image
+as a tiled pyramid), then prints a ready-made gallery entry for the browser
+example.
 
-Three things it handles that a naive reader would get wrong:
+### The two store shapes it handles
 
-- The store is **multi-sample** — one row block per section — so rows are
+| | Visium | Visium HD / Xenium |
+|---|---|---|
+| Tables | one `table` | one per segmentation (`cell_segmentations`, …) |
+| Positions | `obsm/spatial` | **`obsm` is empty** — centroids come from the shapes GeoParquet |
+| Size | one uniform spot radius | per-cell equivalent-circle radius from the outline area |
+| Boundaries | none | real outlines, served on `/polygons` |
+| `imageRef.scale` | ~0.115 | ~0.281 |
+
+### Things a naive reader gets wrong
+
+- A table can be **multi-sample** (one row block per section), so rows must be
   filtered by the region column before anything is index-aligned.
-- The **spot shapes carry the full-res → hires `scale`**, which is exactly the
-  `imageRef.scale` the viewer needs. Skip it and every spot lands ~8.7× too far out.
-- Nothing in the store states the image's µm/px, so it is derived by using
-  Visium's known 100 µm spot pitch as a ruler.
+- The **shapes** carry the transform into the image's coordinate system, and
+  that scale *is* `imageRef.scale`. Skip it and observations land 3.5–8.7× too
+  far out.
+- The pyramid level is **named by the multiscales metadata** — `0` for Visium,
+  `s0` for HD — and the coordinate system is stated there too.
+- Zarr v3 **omits a chunk that is entirely `fill_value`**, so a single-region
+  table has no `region/codes` chunk at all. Treating that as an error rejects a
+  valid store.
+- Segmentation rows are joined to table rows **by id**, not by position.
 
-A raw table carries only `array_row` / `array_col` / `in_tissue` / `spot_id`, so
-the converter also derives `total_counts` and `n_genes_by_counts` from the
-expression matrix — otherwise there is nothing meaningful to colour by.
+### Derived values
 
-`--genes N` keeps the N most-expressed genes (default 2,000; the full 31k
-matrix would be ~370 MB). `scripts/make-pyramid.mjs` turns any other image into
-the same pyramid format, if you need one without `vips`.
+A raw table carries little worth colouring by, so the converter derives
+`total_counts` and `n_genes_by_counts` from the expression matrix (free in the
+pass that transposes it), plus `area` for segmentations.
+
+`--grid-um U` turns the outlines into a ruler: a segmentation traced on a binned
+assay steps one bin at a time, so the modal vertex step *is* one bin — asserting
+its physical size (2 µm for Visium HD) yields the image's µm/px and a correct
+scale bar. For Visium the same job is done by the known 100 µm spot pitch.
+
+`--genes N` keeps the N most-expressed (default 2,000), and `--max-matrix-mb`
+caps the output: the gene-major matrix is `genes x N x 4` bytes, so 84k cells
+would be 672 MB at 2,000 genes — it is capped to 190 genes at the 64 MB default.
 
 ## Deploy (Cloud Run)
 

@@ -75,22 +75,42 @@ export async function readArray(storeDir, arrayPath) {
   const counts = shape.map((s, i) => Math.ceil(s / chunkShape[i]));
   const dir = path.join(storeDir, arrayPath);
 
+  /**
+   * One chunk's decompressed bytes, or `null` when the chunk file is absent.
+   *
+   * Zarr v3 OMITS a chunk that is entirely `fill_value` — a single-region
+   * table's `region/codes` is all zeros and so is never written. A reader that
+   * treats that as an error refuses perfectly valid stores.
+   */
   const chunkBytes = async (coords) => {
     const file = path.join(dir, 'c', ...coords.map(String));
-    return decompress(await readFile(file), codecs);
+    try {
+      return decompress(await readFile(file), codecs);
+    } catch (err) {
+      if (err?.code === 'ENOENT') return null;
+      throw err;
+    }
   };
+
+  const total = product(shape);
 
   // Single chunk — the common case.
   if (counts.every((c) => c === 1)) {
     const raw = await chunkBytes(shape.map(() => 0));
-    if (isString) return { data: decodeVlenUtf8(raw), shape, meta };
+    if (isString) {
+      return { data: raw ? decodeVlenUtf8(raw) : new Array(total).fill(meta.fill_value ?? ''), shape, meta };
+    }
     const Ctor = DTYPES[meta.data_type];
     if (!Ctor) throw new Error(`[zarr3] unsupported dtype "${meta.data_type}"`);
-    // Copy rather than view: the Buffer's byteOffset is rarely aligned for a
-    // wider typed array, and a misaligned view throws.
-    const total = product(shape);
     const out = new Ctor(total);
-    new Uint8Array(out.buffer).set(raw.subarray(0, out.byteLength));
+    if (raw) {
+      // Copy rather than view: the Buffer's byteOffset is rarely aligned for a
+      // wider typed array, and a misaligned view throws.
+      new Uint8Array(out.buffer).set(raw.subarray(0, out.byteLength));
+    } else if (meta.fill_value) {
+      out.fill(Ctor === BigInt64Array || Ctor === BigUint64Array
+        ? BigInt(meta.fill_value) : meta.fill_value);
+    }
     return { data: out, shape, meta };
   }
 
@@ -109,6 +129,7 @@ export async function readArray(storeDir, arrayPath) {
   const chunkByteLen = chunkShape[0] * out.BYTES_PER_ELEMENT;
   for (let i = 0; i < counts[0]; i++) {
     const raw = await chunkBytes([i]);
+    if (!raw) continue; // absent chunk = fill_value, and the buffer starts zeroed
     const at = i * chunkByteLen;
     bytes.set(raw.subarray(0, Math.min(raw.length, bytes.length - at)), at);
   }

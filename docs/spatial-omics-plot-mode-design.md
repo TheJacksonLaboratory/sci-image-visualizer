@@ -272,8 +272,11 @@ shaped, and wrong for "one value per cell". Plan:
 
 14. **Violin** and **box** plots of a continuous column grouped by a categorical one.
 15. Two-way brushing: select on a chart → highlight in space, and vice versa.
-16. Cell/spot **boundary polygon layer** (needs napari-js shapes layer). Not needed for Visium;
-    needed the moment a Xenium/CosMx dataset appears.
+16. Cell/spot **boundary polygon layer** (needs napari-js shapes layer). **Now unblocked on the
+    data side and blocked only on the renderer**: the Visium HD demo serves 84,031 real cell
+    outlines (1.8M vertices) on `/polygons`, and `SpatialDataPort.getPolygons()` reads them — but
+    nothing draws them, because napari-js has no shapes layer (ask #2 in §3.4). This is the
+    clearest case for building it.
 17. Plotly `scattergl` fallback mode so the feature degrades gracefully without WebGPU.
 18. `SPATIAL_OMICS_3D`: elevation ∝ numeric column (Spatial-Live ColumnLayer analog), on the
     existing 3D camera/axes controls (needs napari-js per-point colour in 3D).

@@ -128,6 +128,11 @@ const TILED_IMAGES: TiledImage[] = TILE_SERVER
       // hires affine. Built by `npm run make-spatial -- --input <store.zarr>`.
       // Selecting it adds the "Spatial omics" plot type.
       { name: 'Visium mouse brain · ST8059048', imageId: 'st8059048-tissue', width: 1969, height: 2000, mppX: 3.9591, mppY: 3.9591, spatialDatasetId: 'st8059048' },
+      // Visium HD 4.0.1 mouse brain, CELL SEGMENTATIONS: 84,031 cells with real
+      // boundaries (served as polygons) rather than a spot grid. Built with
+      // `npm run make-spatial -- --input <store.zarr> --table cell_segmentations
+      // --id hd-cells --grid-um 2`.
+      { name: 'Visium HD mouse brain · 84k cells', imageId: 'hd-cells-tissue', width: 6000, height: 5492, mppX: 0.9734, mppY: 0.9734, spatialDatasetId: 'hd-cells' },
       // Synthetic stand-in with the same geometry, for when the 68 MB store
       // hasn't been downloaded (`npm run make-spatial-demo`). Harmless if absent:
       // the entry just fails to load its dataset and the mode stays hidden.

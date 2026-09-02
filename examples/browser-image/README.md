@@ -217,8 +217,10 @@ image, and **Spatial omics** still needs a dataset loaded.
 
 ## Spatial-omics demo
 
-The gallery's **Spatial omics demo · Visium geometry** entry loads a tissue image
-*and* the spatial-omics dataset registered onto it. Selecting it makes the
+The gallery carries three spatial entries — **Visium mouse brain · ST8059048**
+(2,987 spots), **Visium HD mouse brain · 84k cells** (real cell segmentations),
+and a synthetic stand-in that needs no download. Each loads a tissue image *and*
+the spatial-omics dataset registered onto it. Selecting it makes the
 **Spatial omics** plot type appear in the plot-type selector (it is hidden
 whenever no dataset is loaded, like Volume is hidden without a z-stack); picking
 that mode draws ~2,000 spots over the tissue, coloured by anatomical region.
@@ -226,7 +228,8 @@ that mode draws ~2,000 spots over the tissue, coloured by anatomical region.
 ```bash
 cd examples/tile-server
 npm install
-npm run make-spatial-demo     # writes ./spatial/demo-brain and ./cogs/demo-brain-tissue
+npm run make-spatial-demo     # synthetic; no download
+# or convert a real store — see ../tile-server/README.md#spatial-omics-endpoints
 npm start
 
 # then, from the repo root:
