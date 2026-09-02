@@ -442,6 +442,13 @@ describe('NapariVisualizerService', () => {
     // The rectangle centroid (10+2, 20+3) is scattered as a point.
     expect(Array.from(addPoints.mock.calls[0][0] as Float32Array)).toEqual([12, 23]);
 
+    // REGRESSION: this mode plots REGION centroids, so without the region overlay
+    // there is no way to produce a point at all. The toolbar gates its region
+    // buttons on 2D-vs-3D, not on plot type, so they showed and did nothing.
+    const overlay = service.getRegionOverlay();
+    expect(overlay).not.toBeNull();
+    expect(() => overlay?.setMode('drawrect')).not.toThrow();
+
     service.unsubscribe();
     document.body.removeChild(div);
   });
@@ -929,6 +936,30 @@ describe('NapariVisualizerService', () => {
       await flush();
       // The stale response must not add another layer.
       expect(addPoints.mock.calls.length).toBe(afterFast);
+    });
+
+    // REGRESSION: the mode's selection is driven by drawn ROIs, so mounting it
+    // without the region overlay left the region tools inert — the toolbar
+    // buttons showed (they gate on 2D, not on plot type) but did nothing.
+    it('mounts the region overlay, so the ROI tools work as they do on the image view', async () => {
+      await mount();
+      const overlay = service.getRegionOverlay();
+      expect(overlay).not.toBeNull();
+      expect(() => {
+        overlay?.setMode('drawrect');
+        overlay?.setMode('drawpolygon');
+        overlay?.setMode('none');
+      }).not.toThrow();
+    });
+
+    it('arms the pixel tools, so wand/brush work over the spots too', async () => {
+      await mount();
+      expect(() => {
+        service.setWandMode(true);
+        service.setBrushMode(true);
+        service.setZoomToBoxMode(true);
+        service.setVertexEraserMode(true);
+      }).not.toThrow();
     });
 
     it('applies the dataset\'s data->world affine so spots land on the image', async () => {

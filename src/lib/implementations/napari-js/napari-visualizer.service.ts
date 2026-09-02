@@ -680,9 +680,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       await viewer.ready;
 
       if (isSpatialOmics(plotType)) {
-        await this.mountSpatialOmics(viewer, z);
+        await this.mountSpatialOmics(viewer, host, z);
       } else if (isNapariScatter(plotType)) {
-        await this.mountScatter(viewer, z);
+        await this.mountScatter(viewer, host, z);
       } else if (isNapariScatter3d(plotType)) {
         await this.mountScatter3d(viewer, info);
       } else if (isNapariSurface(plotType)) {
@@ -694,11 +694,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         this.fitCameraSoon();
         this.subscribeDisplayState();
         this.installScaleBar();
-        this.regionOverlay = new NapariRegionOverlay(host, viewer, this.regionStore);
-        this.buildToolHosts();
-        // Keep the pixel-tool readback (lastPixels) current as the view pans/zooms and tiled
-        // levels load, so wand/brush/SAM sample the actually-displayed image (jit-ui#102).
-        this.cameraReadbackOff = viewer.camera.changed.connect(() => this.armReadback());
+        this.install2dInteraction(viewer, host);
       }
       this.scheduleReadback();
       return true;
@@ -1418,11 +1414,14 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    * centroid (napari-js analog of Plotly's region-centroid scatter). Rebuilds the points live as
    * regions change.
    */
-  private async mountScatter(viewer: Viewer, z: number): Promise<void> {
+  private async mountScatter(viewer: Viewer, host: HTMLElement, z: number): Promise<void> {
     await this.renderImage(z);
     this.fitCameraSoon();
     this.subscribeDisplayState();
     this.installScaleBar();
+    // This mode plots REGION centroids, so without the region tools there is no
+    // way to produce a point — drawing a region now adds one immediately.
+    this.install2dInteraction(viewer, host);
     this.rebuildScatterPoints();
     this.scatterRegionSub = this.regionStore
       .getRegionUpdateEvent()
@@ -1481,6 +1480,22 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     return new Float32Array(out);
   }
 
+  /**
+   * The interaction stack every 2D mode needs: the region overlay (draw/select/edit), the pixel
+   * tools that read back displayed pixels (wand, brush, vertex eraser, zoom-to-box, SAM/cellpose),
+   * and a camera hook that keeps that readback current as the view pans/zooms and tiled levels
+   * load.
+   *
+   * Extracted because forgetting it is invisible: the toolbar gates its region buttons on 2D-vs-3D
+   * rather than on plot type, so a 2D mode that skips this shows every tool and silently does
+   * nothing. That is exactly what happened to the spatial and region-centroid scatter modes.
+   */
+  private install2dInteraction(viewer: Viewer, host: HTMLElement): void {
+    this.regionOverlay = new NapariRegionOverlay(host, viewer, this.regionStore);
+    this.buildToolHosts();
+    this.cameraReadbackOff = viewer.camera.changed.connect(() => this.armReadback());
+  }
+
   // ── Spatial omics ────────────────────────────────────────────────────────────────────────
 
   /** Marker radius (image px) for a dataset that declares none — segmented cells often don't. */
@@ -1494,12 +1509,17 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    * Mount the SPATIAL_OMICS view: the tissue image with one marker per observation, coloured by
    * an annotation column or a gene. The markers rebuild whenever the dataset or the view state
    * changes, so switching the colour-by column does not remount the scene.
+   *
+   * Sets up the full 2D interaction stack — region overlay, pixel-tool hosts, readback currency —
+   * exactly as the plain image view does. That is NOT optional here: this mode's selection is
+   * driven by drawn ROIs, so without the overlay there is no way to make a selection at all.
    */
-  private async mountSpatialOmics(viewer: Viewer, z: number): Promise<void> {
+  private async mountSpatialOmics(viewer: Viewer, host: HTMLElement, z: number): Promise<void> {
     await this.renderImage(z);
     this.fitCameraSoon();
     this.subscribeDisplayState();
     this.installScaleBar();
+    this.install2dInteraction(viewer, host);
     this.subscribeSpatial();
     this.scheduleReadback();
   }
