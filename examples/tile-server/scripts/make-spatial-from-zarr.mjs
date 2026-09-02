@@ -38,6 +38,7 @@ import sharp from 'sharp';
 
 import { readArray, readAttrs, readMeta, scaleFor } from '../lib/zarr3.mjs';
 import { readShapes } from '../lib/geoparquet.mjs';
+import { kmeansClusters } from '../lib/cluster.mjs';
 import { writePyramid } from '../lib/pyramid.mjs';
 
 const args = process.argv.slice(2);
@@ -63,6 +64,10 @@ const MATRIX_BUDGET_MB = Number(argOf('--max-matrix-mb', 64));
  *  Given this, the converter MEASURES the grid in the outlines and derives the
  *  image's µm/px from it — nothing in the store states that. */
 const GRID_UM = argOf('--grid-um', null);
+/** Derive a `cluster` column by k-means on expression. These stores are RAW —
+ *  no clusters, no cell types — so without this there is nothing to group a
+ *  violin by, put in a legend, or select a category of. 0 disables. */
+const CLUSTERS = Number(argOf('--cluster', 8));
 
 /** Visium v1: 55 µm spots on a 100 µm centre-to-centre grid. */
 const VISIUM_RADIUS_OVER_PITCH = 27.5 / 100;
@@ -328,7 +333,17 @@ for (const col of obsColumns) {
   if (col.kind === 'array' && col.dtype === 'string') continue; // ids carry no encoding
   if (col.kind === 'categorical') {
     const codes = new Uint16Array(N);
-    for (let i = 0; i < N; i++) codes[i] = Number(col.codes[keep[i]]);
+    const present = new Set();
+    for (let i = 0; i < N; i++) {
+      codes[i] = Number(col.codes[keep[i]]);
+      present.add(codes[i]);
+    }
+    // A column with one value left after filtering (in_tissue, once
+    // out-of-tissue spots are gone) groups nothing and just clutters the picker.
+    if (present.size < 2) {
+      console.log(`[columns] skipping "${col.name}" — constant after filtering`);
+      continue;
+    }
     columns.push({ kind: 'categorical', name: col.name, categories: col.categories.map(String) });
     columnPayloads.push(Buffer.from(codes.buffer));
     continue;
@@ -336,6 +351,17 @@ for (const col of obsColumns) {
   const values = new Float32Array(N);
   for (let i = 0; i < N; i++) values[i] = Number(col.values[keep[i]]);
   const distinct = new Set(values);
+  // A distinct integer per observation is an IDENTIFIER (spot_id, cell index),
+  // not a measurement — charting or colouring by it is meaningless.
+  if (distinct.size === N && N > 1 && [...distinct].every((v) => Number.isInteger(v))) {
+    continue;
+  }
+  if (distinct.size < 2) {
+    // Constant after filtering (in_tissue, once out-of-tissue rows are gone):
+    // it groups nothing and only clutters the pickers.
+    console.log(`[columns] skipping "${col.name}" — constant after filtering`);
+    continue;
+  }
   if (distinct.size <= MAX_CATEGORY_CARDINALITY
       && [...distinct].every((v) => Number.isInteger(v))) {
     const cats = [...distinct].sort((a, b) => a - b);
@@ -450,6 +476,24 @@ console.log(`[genes] ${selectedNames.length} of ${geneNames.length} genes, `
   });
   columnPayloads.push(Buffer.from(nGenes.buffer));
   console.log(`[qc] total_counts ${tc.min}-${tc.max}, n_genes ${ng.min}-${ng.max}`);
+}
+// Derived clusters. Uses the gene-major matrix that already exists, so it costs
+// no extra I/O.
+if (CLUSTERS >= 2 && selectedNames.length > 1) {
+  const t0 = Date.now();
+  const labels = kmeansClusters(matrix, selectedNames.length, N, { k: CLUSTERS });
+  const sizes = new Array(CLUSTERS).fill(0);
+  for (const c of labels) sizes[c]++;
+  columns.push({
+    kind: 'categorical',
+    name: 'cluster',
+    categories: sizes.map((_, i) => `cluster ${i}`),
+    description: `k-means (k=${CLUSTERS}) on log1p-normalised expression — `
+      + 'derived for the demo, not an analysis result',
+  });
+  columnPayloads.push(Buffer.from(labels.buffer));
+  console.log(`[cluster] k=${CLUSTERS} in ${((Date.now() - t0) / 1000).toFixed(1)}s, `
+    + `sizes ${sizes.join('/')}`);
 }
 console.log(`[columns] ${columns.map((c) => c.name).join(', ')}`);
 

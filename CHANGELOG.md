@@ -191,6 +191,28 @@ file was added.
     `fill_value`** (a single-region table has no `region/codes` chunk, which the
     reader previously treated as an error), and the pyramid level is **named by
     the multiscales metadata** — `0` for Visium, `s0` for HD.
+  - **Derived `cluster` column** (`--cluster K`, default 8) — k-means on
+    log1p-normalised expression, because the sandbox stores are raw: their only
+    categorical is `in_tissue`, which is constant once out-of-tissue rows are
+    filtered, so there was nothing to put in a legend, split a violin by, or
+    select a category of.
+
+    Normalising each observation to a common total before `log1p` is what makes
+    this anatomy rather than an artefact — without it the clusters follow
+    sequencing depth and come out as concentric count bands. Verified on both
+    datasets: the Visium HD run resolves cortex, a layer tracing the cortical
+    surface and hippocampal pyramidal layer, a white-matter band and the
+    thalamus. Fits centroids on an even subsample (84k cells x k x dims is
+    minutes in plain JS otherwise), uses the 50 most variable genes, seeds with
+    k-means++ from a fixed seed so rebuilds are identical, and relabels
+    largest-first for stable legends. 84k cells cluster in 0.6 s.
+
+    It is a **demo-data convenience, not an analysis tool**: the column carries a
+    `description` saying so, and `<spatial-controls>` now surfaces column
+    descriptions so a derived column cannot read as measured data.
+  - Columns that carry no encoding are dropped: identifiers (a distinct integer
+    per observation, e.g. `spot_id`) and columns constant after filtering
+    (`in_tissue`).
   - `--max-matrix-mb` (default 64) caps the gene-major matrix, which is
     `genes x observations x 4` bytes — 84k cells at 2,000 genes would be 672 MB,
     so it is reduced to 190 genes and says so.

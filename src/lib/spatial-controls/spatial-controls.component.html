@@ -48,6 +48,8 @@
          functions the renderer uses so it cannot disagree with the canvas. -->
     <div class="sc-section sc-key" *ngIf="view.colorBy">
       <span class="sc-lbl">{{ colorByLabel }}</span>
+      <!-- Derived columns say so, so they are not mistaken for measured data. -->
+      <small class="sc-hint" *ngIf="activeDescription">{{ activeDescription }}</small>
 
       <!-- Legend rows are buttons: clicking one selects that category, clicking
            it again clears — so a click is always reversible. -->

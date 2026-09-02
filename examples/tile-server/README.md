@@ -138,9 +138,31 @@ example.
 
 ### Derived values
 
-A raw table carries little worth colouring by, so the converter derives
-`total_counts` and `n_genes_by_counts` from the expression matrix (free in the
-pass that transposes it), plus `area` for segmentations.
+The sandbox stores are **raw**: their tables carry ids, array indices and
+`in_tissue` and nothing else — no clusters, no cell types. A viewer demo built
+on them would have nothing to put in a legend, split a violin by, or select a
+category of. So the converter derives:
+
+| column | how |
+|---|---|
+| `total_counts`, `n_genes_by_counts` | from the expression matrix, free in the pass that transposes it |
+| `area` | segmentation outline area (polygon stores only) |
+| `cluster` | **k-means** on log1p-normalised expression (`--cluster K`, default 8; `0` disables) |
+
+Clustering normalises each observation to a common total before `log1p` —
+without that it follows sequencing depth and the clusters come out as concentric
+count bands rather than anatomy. It fits centroids on an even subsample (84k
+cells is minutes in plain JS otherwise), picks the 50 most variable genes,
+seeds with k-means++ from a fixed seed so a rebuild is identical, and relabels
+largest-cluster-first so legends read consistently.
+
+This is a **demo-data convenience, not an analysis tool** — the column's
+`description` says so, and the viewer surfaces it. Real work belongs in
+scanpy/squidpy.
+
+Columns that carry no encoding are dropped: identifiers (a distinct integer per
+observation, like `spot_id`) and columns that are constant after filtering (like
+`in_tissue`, once out-of-tissue rows are gone).
 
 `--grid-um U` turns the outlines into a ruler: a segmentation traced on a binned
 assay steps one bin at a time, so the modal vertex step *is* one bin — asserting

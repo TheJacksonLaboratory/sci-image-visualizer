@@ -231,6 +231,17 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     this.geneQuery = null;
   }
 
+  /**
+   * Description of the active column, when it has one. Surfaced because a
+   * DERIVED column (k-means clusters, QC totals computed at conversion) must not
+   * read as though it came with the data.
+   */
+  get activeDescription(): string | null {
+    const by = this.view.colorBy;
+    if (!by || by.kind !== 'column') return null;
+    return this.dataset?.columns.find((c) => c.name === by.name)?.description ?? null;
+  }
+
   /** Label for the current colouring, for the key's heading. */
   get colorByLabel(): string {
     const by = this.view.colorBy;

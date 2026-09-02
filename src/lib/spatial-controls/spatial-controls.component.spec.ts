@@ -197,6 +197,28 @@ describe('SpatialControlsComponent', () => {
       expect(component.colorByLabel).toBe('Gene · Ttr');
     });
 
+    it('surfaces a column description, so a DERIVED column does not read as measured', async () => {
+      dataset$.next({
+        ...dataset,
+        columns: [{
+          kind: 'categorical', name: 'cluster', categories: ['a', 'b'],
+          description: 'k-means (k=8) — derived for the demo',
+        }],
+      });
+      component.onColumn('cluster');
+      await flush();
+      expect(component.activeDescription).toMatch(/k-means/);
+    });
+
+    it('has no description for a gene or an undescribed column', async () => {
+      component.onGene('Ttr');
+      await flush();
+      expect(component.activeDescription).toBeNull();
+      component.onColumn('region');
+      await flush();
+      expect(component.activeDescription).toBeNull();
+    });
+
     it('shows no key at all when nothing is coloured by', async () => {
       component.onColumn(null);
       await flush();
