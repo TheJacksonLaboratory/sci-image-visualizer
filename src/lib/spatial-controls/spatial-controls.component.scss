@@ -1,0 +1,142 @@
+:host ::ng-deep .spatial-controls-dialog .p-dialog-content {
+  padding: 0.75rem 1rem 1rem;
+}
+
+.sc-empty {
+  padding: 0.5rem 0;
+  font-size: 0.85rem;
+  color: var(--text-color-secondary, #6c757d);
+  line-height: 1.4;
+
+  code {
+    font-size: 0.8rem;
+  }
+}
+
+.sc-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.sc-dataset {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--surface-border, #dee2e6);
+}
+
+.sc-dataset-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.sc-dataset-count,
+.sc-hint {
+  font-size: 0.75rem;
+  color: var(--text-color-secondary, #6c757d);
+}
+
+.sc-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.sc-lbl {
+  font-size: 0.78rem;
+  color: var(--text-color-secondary, #6c757d);
+  white-space: nowrap;
+}
+
+.sc-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.sc-row .sc-lbl {
+  min-width: 5rem;
+}
+
+.sc-val {
+  min-width: 2.5rem;
+  text-align: right;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+:host ::ng-deep .sc-full,
+:host ::ng-deep .sc-full .p-dropdown,
+:host ::ng-deep .sc-full .p-autocomplete,
+:host ::ng-deep .sc-full input {
+  width: 100%;
+}
+
+:host ::ng-deep .sc-slider {
+  flex: 1;
+}
+
+:host ::ng-deep .sc-clip {
+  flex: 1;
+}
+
+/* Key: legend or colour bar. Scrolls rather than growing the dialog — a
+   40-cluster column must not push the sliders off screen. */
+.sc-key {
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--surface-border, #dee2e6);
+  border-bottom: 1px solid var(--surface-border, #dee2e6);
+}
+
+.sc-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 11rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.8rem;
+  }
+}
+
+.sc-swatch {
+  width: 0.85rem;
+  height: 0.85rem;
+  flex: 0 0 auto;
+  border-radius: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+.sc-legend-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sc-colorbar {
+  height: 0.75rem;
+  border-radius: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+.sc-colorbar-ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--text-color-secondary, #6c757d);
+  margin-top: 0.2rem;
+}
+
+.sc-btns {
+  display: flex;
+  justify-content: flex-end;
+}

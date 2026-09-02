@@ -72,6 +72,21 @@ file was added.
   1D charts, and background subsampling. When napari-js is unavailable the
   fallback renders the tissue image **without** the observation layer.
 
+- **`<spatial-controls>` panel** (`SpatialControlsComponent`) — a non-modal,
+  resizable, draggable dialog for the spatial mode, opened from a toolbar button
+  that appears only while that mode is active. Offers a colour-by-column
+  dropdown, a gene typeahead over the feature panel, a legend for categorical
+  colourings, a colour bar for continuous ones, and point-size / opacity /
+  log-scale / outlier-clip controls. Column and gene selection are mutually
+  exclusive, so what drives the colours is never ambiguous.
+
+  Depends only on `ISpatialControls`, reached through the `VISUALIZER` contract
+  token — never a concrete backend — mirroring `ChannelHistogramComponent`. With
+  no `SPATIAL_DATA_PORT` bound it renders an explanatory empty state rather than
+  dead controls. Legend swatches and the colour bar are built with the same
+  functions the renderer uses (`resolveCategoryColors`, `lutFor`), so the key
+  cannot drift from what is on screen.
+
 - **`ISpatialControls` via `IVisualizer.getSpatialControls()`** — the host-facing
   surface for the spatial mode: colour by a column or a gene, read/patch the view
   state, search features, and resolve legend swatches. Returns null unless a

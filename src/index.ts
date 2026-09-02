@@ -86,3 +86,7 @@ export { VisualizerComponent } from './lib/visualizer.component';
 export { RegionEditorComponent } from './lib/region-editor/region-editor.component';
 export { HexColorPickerComponent } from './lib/hex-color-picker/hex-color-picker.component';
 export { ChannelHistogramComponent } from './lib/channel-histogram/channel-histogram.component';
+export {
+  SpatialControlsComponent,
+} from './lib/spatial-controls/spatial-controls.component';
+export type { SpatialLegendEntry } from './lib/spatial-controls/spatial-controls.component';

@@ -1,0 +1,109 @@
+<p-dialog header="Spatial omics"
+          [visible]="visible" (visibleChange)="onVisibleChange($event)"
+          [modal]="false" [resizable]="true" [draggable]="true"
+          [style]="{ width: '24rem' }"
+          [breakpoints]="{ '960px': '90vw' }"
+          styleClass="spatial-controls-dialog">
+
+  <!-- No port bound: say why rather than showing controls that do nothing. -->
+  <div class="sc-empty" *ngIf="!controls">
+    No spatial-omics data source is configured. A host provides one by binding
+    <code>SPATIAL_DATA_PORT</code>.
+  </div>
+
+  <div class="sc-empty" *ngIf="controls && !dataset">
+    No dataset is loaded.
+  </div>
+
+  <div class="sc-body" *ngIf="controls && dataset as ds">
+
+    <div class="sc-dataset">
+      <span class="sc-dataset-name">{{ ds.name }}</span>
+      <span class="sc-dataset-count">{{ ds.observations.count | number }} observations</span>
+    </div>
+
+    <!-- Colour source. Column and gene are mutually exclusive: picking one
+         clears the other, so what drives the colours is never ambiguous. -->
+    <div class="sc-section">
+      <label class="sc-lbl" for="sc-column">Colour by column</label>
+      <p-dropdown inputId="sc-column" [options]="columnOptions"
+                  optionLabel="label" optionValue="value"
+                  [ngModel]="selectedColumn" (ngModelChange)="onColumn($event)"
+                  placeholder="None (flat colour)" appendTo="body"
+                  styleClass="sc-full"></p-dropdown>
+    </div>
+
+    <div class="sc-section" *ngIf="ds.features">
+      <label class="sc-lbl" for="sc-gene">Colour by gene</label>
+      <p-autoComplete inputId="sc-gene" [(ngModel)]="geneQuery"
+                      [suggestions]="geneSuggestions" (completeMethod)="searchGenes($event)"
+                      (onSelect)="onGene($event.value ?? $event)"
+                      [forceSelection]="true" [delay]="200" appendTo="body"
+                      placeholder="Search {{ ds.features.count | number }} genes…"
+                      styleClass="sc-full"></p-autoComplete>
+      <small class="sc-hint" *ngIf="geneSearchFailed">Gene lookup failed.</small>
+    </div>
+
+    <!-- Key: categorical legend or a continuous colour bar, built from the same
+         functions the renderer uses so it cannot disagree with the canvas. -->
+    <div class="sc-section sc-key" *ngIf="view.colorBy">
+      <span class="sc-lbl">{{ colorByLabel }}</span>
+
+      <ul class="sc-legend" *ngIf="isCategorical">
+        <li *ngFor="let entry of legend">
+          <span class="sc-swatch" [style.background]="entry.color"></span>
+          <span class="sc-legend-label" [title]="entry.label">{{ entry.label }}</span>
+        </li>
+      </ul>
+
+      <div *ngIf="isContinuous">
+        <div class="sc-colorbar" [style.background]="colorBarCss"></div>
+        <div class="sc-colorbar-ends">
+          <span>low</span>
+          <span class="sc-hint">window from percentiles</span>
+          <span>high</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Display -->
+    <div class="sc-section">
+      <div class="sc-row">
+        <span class="sc-lbl">Point size</span>
+        <p-slider [ngModel]="view.pointScale" [min]="0.25" [max]="5" [step]="0.25"
+                  (onChange)="onPointScale($event.value)" styleClass="sc-slider"></p-slider>
+        <span class="sc-val">{{ view.pointScale }}×</span>
+      </div>
+      <div class="sc-row">
+        <span class="sc-lbl">Opacity</span>
+        <p-slider [ngModel]="view.opacity" [min]="0.1" [max]="1" [step]="0.05"
+                  (onChange)="onOpacity($event.value)" styleClass="sc-slider"></p-slider>
+        <span class="sc-val">{{ view.opacity }}</span>
+      </div>
+    </div>
+
+    <!-- Continuous-only knobs: meaningless for a categorical palette. -->
+    <div class="sc-section" *ngIf="isContinuous">
+      <div class="sc-row">
+        <p-checkbox [binary]="true" [ngModel]="view.logScale"
+                    (onChange)="onLogScale($event.checked)"
+                    label="Log scale"
+                    pTooltip="Counts collapse against their outliers on a linear ramp"
+                    tooltipPosition="top"></p-checkbox>
+      </div>
+      <div class="sc-row">
+        <span class="sc-lbl">Clip outliers</span>
+        <p-dropdown [options]="clipOptions" optionLabel="label" optionValue="value"
+                    [ngModel]="view.percentileClip" (ngModelChange)="onClip($event)"
+                    appendTo="body" styleClass="sc-clip"
+                    pTooltip="Percentile the contrast window is taken at"
+                    tooltipPosition="top"></p-dropdown>
+      </div>
+    </div>
+
+    <div class="sc-btns">
+      <p-button label="Reset" size="small" [text]="true" (onClick)="reset()"></p-button>
+    </div>
+
+  </div>
+</p-dialog>

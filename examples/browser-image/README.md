@@ -238,8 +238,11 @@ lives in the shared store — so it works before any backend has mounted and
 survives a plot-type switch. The example calls `spatialData.clear()` whenever a
 non-spatial image is selected, which is what withdraws the plot type again.
 
-> There is no built-in column/gene picker or legend yet, so the example chooses
-> the colour column in code. That panel is the next piece of work.
+Once the mode is active, the **Spatial omics** toolbar button opens the controls
+panel: colour by any column or search the gene panel, with a legend for
+categorical colourings, a colour bar for continuous ones, and point-size,
+opacity, log-scale and outlier-clip controls. The example sets an initial
+colour column in code only so the mode opens on something meaningful.
 
 ## Try it end-to-end
 

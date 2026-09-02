@@ -559,10 +559,10 @@ export class AppComponent implements OnDestroy {
    * The "Spatial omics" plot type is gated on a dataset being published, so
    * clearing here is what makes it disappear when you move to a plain slide.
    *
-   * With a dataset loaded, colour by the `region` column straight away —
-   * otherwise the mode opens as undifferentiated neutral dots, which shows where
-   * the tissue is but not what the demo is for. (A real host would offer a
-   * column/gene picker; that panel is the next piece of work.)
+   * With a dataset loaded, colour by the first categorical column straight away
+   * so the mode opens on something meaningful rather than undifferentiated
+   * neutral dots. From there the Spatial omics toolbar button opens the controls
+   * panel, which offers every column, a gene search, and the display knobs.
    */
   private async selectSpatialDataset(datasetId?: string): Promise<void> {
     const controls = this.viz.getSpatialControls?.();

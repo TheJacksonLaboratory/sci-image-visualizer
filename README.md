@@ -220,8 +220,14 @@ Visium-geometry dataset **and a matching tissue image** so the
 whole path with no download. A converter for real SpatialData Zarr stores ships
 alongside it.
 
-Still to build: a column/gene picker and legend, hover tooltips, selection, and
-the linked 1D charts — see
+A **Spatial omics** controls panel (`<spatial-controls>`, opened from the
+toolbar) drives all of this from the UI: a column dropdown, a gene search over
+the feature panel, a legend for categorical colourings and a colour bar for
+continuous ones, plus point-size, opacity, log-scale and outlier-clip controls.
+Its legend swatches and colour bar are built with the same functions the
+renderer uses, so the key cannot drift from the canvas.
+
+Still to build: hover tooltips, selection, and the linked 1D charts — see
 [docs/spatial-omics-plot-mode-design.md](docs/spatial-omics-plot-mode-design.md).
 
 ## Regions & annotation

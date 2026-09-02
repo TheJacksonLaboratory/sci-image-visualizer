@@ -68,6 +68,16 @@
       <img src="assets/plotting/invert.svg" class="toolbar-icon-dark" style="width: 1rem"/>
     </p-button>
 
+    <!-- Spatial-omics controls. Only meaningful in the spatial mode, which is
+         itself only offered while a dataset is loaded — so this button appears
+         exactly when there is something for it to control. -->
+    <p-button *ngIf="tools.specialTools && isSpatialMode" pRipple size="small" [text]="true"
+              pTooltip="Spatial omics (colour by column or gene, legend, point display)"
+              tooltipPosition="bottom"
+              (onClick)="openSpatialControls.emit()">
+      <img src="assets/plotting/cells.svg" class="toolbar-icon-dark" style="width: 1rem"/>
+    </p-button>
+
     <!-- Smoothen toggle: bilinear smoothing vs nearest-neighbour raw pixels (Image
          view only — it's an OpenSeadragon drawer setting). Highlighted when smoothing on. -->
     <p-button *ngIf="tools.specialTools && isImageView" size="small"

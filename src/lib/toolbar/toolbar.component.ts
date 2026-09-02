@@ -96,6 +96,8 @@ export class ToolbarComponent implements OnChanges {
   @Output() isoRangeChange = new EventEmitter<number[] | undefined>();
   /** Open the Channels & Histogram dialog (brightness/contrast, colormap, …). */
   @Output() openChannelHistogram = new EventEmitter<void>();
+  /** Open the spatial-omics controls (colour-by, legend, point display). */
+  @Output() openSpatialControls = new EventEmitter<void>();
   @Output() openRegionEditor = new EventEmitter<void>();
   @Output() selectStackOption = new EventEmitter<{ name: string; val: string }>();
   @Output() zScrub = new EventEmitter<number | undefined>();
@@ -240,6 +242,11 @@ export class ToolbarComponent implements OnChanges {
    *  generic zoom/pan tools are hidden. */
   get isImageView(): boolean {
     return this.selectedPlotType === PlotType.IMAGE;
+  }
+
+  /** The spatial-omics mode is active, so its controls are worth offering. */
+  get isSpatialMode(): boolean {
+    return this.selectedPlotType === PlotType.SPATIAL_OMICS;
   }
 
   /** A plot-type icon is a PrimeNG font glyph (e.g. `pi pi-image`) rather than an
