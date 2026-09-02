@@ -98,8 +98,6 @@ export class ToolbarComponent implements OnChanges {
   @Output() openChannelHistogram = new EventEmitter<void>();
   /** Open the spatial-omics controls (colour-by, legend, point display). */
   @Output() openSpatialControls = new EventEmitter<void>();
-  /** Open the linked distribution charts (histogram / violin / box). */
-  @Output() openSpatialCharts = new EventEmitter<void>();
   @Output() openRegionEditor = new EventEmitter<void>();
   @Output() selectStackOption = new EventEmitter<{ name: string; val: string }>();
   @Output() zScrub = new EventEmitter<number | undefined>();

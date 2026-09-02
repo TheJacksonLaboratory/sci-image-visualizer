@@ -236,8 +236,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   showChannelHistogram = false;
   /** Spatial-omics controls dialog visibility (toolbar button). */
   showSpatialControls = false;
-  /** Spatial-omics distribution charts visibility (toolbar button). */
-  showSpatialCharts = false;
   /** Region Editor dialog visibility (opened from the toolbar). */
   showRegionEditor = false;
   /** Region Editor dialog width. On open it is set to the configured host
@@ -1099,11 +1097,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   /** Open the Channels & Histogram dialog (toolbar button). */
   openChannelHistogram() {
     this.showChannelHistogram = true;
-  }
-
-  /** Toolbar → open the linked distribution charts. */
-  openSpatialCharts(): void {
-    this.showSpatialCharts = true;
   }
 
   /** Toolbar → open the spatial-omics controls. */

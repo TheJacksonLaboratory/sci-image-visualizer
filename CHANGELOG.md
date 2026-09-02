@@ -104,9 +104,15 @@ file was added.
   out. The browser example now discovers its spatial gallery entries this way
   rather than hardcoding them.
 
-- **Linked distribution charts** — `<spatial-charts>` (`SpatialChartsComponent`),
-  a non-modal panel opened from the toolbar in the spatial mode: **histogram**,
-  **violin** and **box** over the values the map is coloured by.
+- **Linked distribution charts** — `<spatial-charts>` (`SpatialChartsComponent`):
+  **histogram**, **violin** and **box** over the values the map is coloured by,
+  embedded in the `<spatial-controls>` panel below the colour controls rather
+  than owning a dialog of its own. The two are one workflow — change the colour
+  source, watch the distribution move — and splitting them across two floating
+  windows made that link harder to see, not easier. It remains a separate
+  component, so the pure trace builders and its own tests keep their boundary,
+  and takes an `active` input because the enclosing dialog creates and destroys
+  its content.
 
   The chart's subject is the map's colour source rather than an independent
   picker, so the two cannot disagree about what is being shown. It follows the

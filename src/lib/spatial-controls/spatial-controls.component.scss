@@ -167,3 +167,10 @@
   display: flex;
   justify-content: flex-end;
 }
+
+/* The embedded distribution panel. Separated by a rule so the dialog reads as
+   "controls, then the chart they drive" rather than one long form. */
+.sc-charts {
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--surface-border, #dee2e6);
+}

@@ -1,5 +1,5 @@
 import {
-  Component, EventEmitter, Inject, Input, OnDestroy, OnInit, Output,
+  AfterViewInit, Component, Inject, Input, OnDestroy, OnInit,
 } from '@angular/core';
 import { Subscription, combineLatest } from 'rxjs';
 import * as Plotly from 'plotly.js-dist-min';
@@ -23,6 +23,12 @@ const CHART_CONFIG = {
  * **linked to the map**: they chart whatever the map is coloured by, and narrow
  * to the current selection.
  *
+ * Embedded INSIDE `<spatial-controls>` rather than owning a dialog of its own:
+ * the two are one workflow (change the colour source, watch the distribution
+ * move), and splitting them across two floating windows made the link harder to
+ * see, not easier. It stays a separate component so the pure trace builders and
+ * its own tests keep their boundary.
+ *
  * Charting the active colour source rather than offering its own value picker is
  * deliberate: it keeps one source of truth, so what you see on the map and what
  * you see in the chart cannot disagree, and it makes the link legible without
@@ -37,9 +43,21 @@ const CHART_CONFIG = {
   templateUrl: './spatial-charts.component.html',
   styleUrls: ['./spatial-charts.component.scss'],
 })
-export class SpatialChartsComponent implements OnInit, OnDestroy {
-  @Input() visible = false;
-  @Output() visibleChange = new EventEmitter<boolean>();
+export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy {
+  /**
+   * Whether the host panel is on screen. The chart only draws when it is: the
+   * enclosing dialog creates and destroys its content, so without this the
+   * component would mount with a div present but no state change to trigger a
+   * first draw.
+   */
+  @Input() set active(on: boolean) {
+    this.isActive = on;
+    if (on) void this.reload();
+  }
+  get active(): boolean {
+    return this.isActive;
+  }
+  private isActive = true;
 
   readonly chartDiv = 'spatial-charts-plot';
   readonly kindOptions: { label: string; value: OmicsChartKind }[] = [
@@ -124,16 +142,12 @@ export class SpatialChartsComponent implements OnInit, OnDestroy {
     }
   }
 
-  onVisibleChange(value: boolean): void {
-    this.visible = value;
-    this.visibleChange.emit(value);
-    if (value) void this.reload();
-  }
-
-  /** Keep the plot sized to the (resizable) dialog body. */
-  onShow(): void {
+  /** Keep the plot sized to the (resizable) host dialog. */
+  ngAfterViewInit(): void {
     const el = document.getElementById(this.chartDiv);
-    if (el && !this.resizeObserver) {
+    // ResizeObserver is browser-only; the component must still work where it is
+    // absent (jsdom, SSR) — resize tracking is a nicety, drawing is not.
+    if (el && !this.resizeObserver && typeof ResizeObserver !== 'undefined') {
       this.resizeObserver = new ResizeObserver(() => {
         try {
           Plotly.relayout(this.chartDiv, { autosize: true });
@@ -143,6 +157,7 @@ export class SpatialChartsComponent implements OnInit, OnDestroy {
       });
       this.resizeObserver.observe(el);
     }
+    // The div exists only now, so this is the earliest a first draw can land.
     void this.reload();
   }
 
@@ -212,6 +227,7 @@ export class SpatialChartsComponent implements OnInit, OnDestroy {
   }
 
   private async render(): Promise<void> {
+    if (!this.isActive) return;
     const el = document.getElementById(this.chartDiv);
     if (!el) return;
     if (!this.values || !this.colorBy) {

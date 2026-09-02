@@ -54,8 +54,12 @@ describe('SpatialChartsComponent', () => {
     }).compileComponents();
     fixture = TestBed.createComponent(SpatialChartsComponent);
     component = fixture.componentInstance;
-    if (render) fixture.detectChanges();
-    else component.ngOnInit();
+    if (render) {
+      fixture.detectChanges();
+    } else {
+      component.ngOnInit();
+      component.ngAfterViewInit();
+    }
     await flush();
     return component;
   }
@@ -93,10 +97,36 @@ describe('SpatialChartsComponent', () => {
     document.getElementById('spatial-charts-plot')?.remove();
   });
 
-  it('renders an empty state without a SPATIAL_DATA_PORT', async () => {
+  it('stays inert without a SPATIAL_DATA_PORT (the host panel explains why)', async () => {
+    // The empty state lives in the enclosing <spatial-controls> dialog now, so
+    // this component simply does nothing rather than repeating the message.
     await build(null, true);
     expect(component.controls).toBeNull();
-    expect((fixture.nativeElement as HTMLElement).textContent).toContain('SPATIAL_DATA_PORT');
+    expect(Plotly.react).not.toHaveBeenCalled();
+  });
+
+  describe('active', () => {
+    it('draws when the host panel becomes visible', async () => {
+      await build(controls);
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'total_counts' } });
+      await flush();
+      (Plotly.react as jest.Mock).mockClear();
+
+      component.active = true;
+      await flush();
+      // The enclosing dialog creates and destroys its content, so an explicit
+      // trigger is what guarantees a first draw with no state change.
+      expect(Plotly.react).toHaveBeenCalled();
+    });
+
+    it('does not draw while the host panel is hidden', async () => {
+      await build(controls);
+      component.active = false;
+      (Plotly.react as jest.Mock).mockClear();
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'total_counts' } });
+      await flush();
+      expect(Plotly.react).not.toHaveBeenCalled();
+    });
   });
 
   it('says what to do when nothing is coloured by', async () => {

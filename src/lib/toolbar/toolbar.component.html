@@ -72,18 +72,10 @@
          itself only offered while a dataset is loaded — so this button appears
          exactly when there is something for it to control. -->
     <p-button *ngIf="tools.specialTools && isSpatialMode" pRipple size="small" [text]="true"
-              pTooltip="Spatial omics (colour by column or gene, legend, point display)"
+              pTooltip="Spatial omics (colour by column or gene, legend, selection, distributions)"
               tooltipPosition="bottom"
               (onClick)="openSpatialControls.emit()">
       <img src="assets/plotting/spatial-omics.svg" class="toolbar-icon-dark" style="width: 1rem"/>
-    </p-button>
-
-    <!-- Linked distribution charts, same gating as the controls above. -->
-    <p-button *ngIf="tools.specialTools && isSpatialMode" pRipple size="small" [text]="true"
-              pTooltip="Distributions (histogram, violin, box) of what the map is coloured by"
-              tooltipPosition="bottom"
-              (onClick)="openSpatialCharts.emit()">
-      <img src="assets/plotting/spline-chart.svg" class="toolbar-icon-dark" style="width: 1rem"/>
     </p-button>
 
     <!-- Smoothen toggle: bilinear smoothing vs nearest-neighbour raw pixels (Image

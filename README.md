@@ -232,9 +232,10 @@ polygon, freehand shape, wand or brush region, then *Select from ROIs* selects
 every observation inside their union and mutes the rest. Legend rows select
 their category on click.
 
-**Linked distributions** (`<spatial-charts>`, also from the toolbar) chart
-whatever the map is coloured by — histogram, violin or box, with violin/box
-splittable by a categorical column. They follow the selection: the histogram
+**Linked distributions** sit in the same panel, below the colour controls:
+histogram, violin or box over whatever the map is coloured by, with violin/box
+splittable by a categorical column. One dialog on purpose — changing the gene
+and watching the distribution move is a single action. They follow the selection: the histogram
 overlays *Selected* on the full distribution, violin and box narrow to it. The
 chart's subject is the map's colour source rather than an independent picker, so
 the two cannot disagree about what is being shown.

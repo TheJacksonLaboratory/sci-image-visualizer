@@ -1,7 +1,7 @@
 <p-dialog header="Spatial omics"
           [visible]="visible" (visibleChange)="onVisibleChange($event)"
           [modal]="false" [resizable]="true" [draggable]="true"
-          [style]="{ width: '24rem' }"
+          [style]="{ width: '30rem' }"
           [breakpoints]="{ '960px': '90vw' }"
           styleClass="spatial-controls-dialog">
 
@@ -128,6 +128,15 @@
       <small class="sc-hint" *ngIf="selectionMissed">
         No observations fell inside the drawn regions.
       </small>
+    </div>
+
+    <!-- Distributions of whatever the map is coloured by. In the SAME dialog as
+         the colour controls on purpose: changing the gene and watching the
+         distribution move is one action, and two floating windows made that
+         harder to see rather than easier. -->
+    <div class="sc-section sc-charts">
+      <span class="sc-lbl">Distribution</span>
+      <spatial-charts [active]="visible"></spatial-charts>
     </div>
 
     <div class="sc-btns">
