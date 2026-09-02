@@ -2,16 +2,7 @@ import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges } from
 import { MenuItem } from 'primeng/api';
 
 import { IImageInfo } from '../contracts/image.contract';
-import {
-  PlotType,
-  PlotTypeDescriptor,
-  isNapari3d,
-  isNapariIsosurface,
-  isNapariSurface,
-  isNapariScatter,
-  NAPARI_DECIMATE_OPTIONS,
-  NAPARI_DEFAULT_DECIMATE,
-} from '../contracts/plot-type';
+import { PlotType, PlotTypeDescriptor, isNapari3d, isNapariIsosurface, isNapariSurface, isNapariScatter, NAPARI_DECIMATE_OPTIONS, NAPARI_DEFAULT_DECIMATE, isSpatialOmics, isSpatialOmics3d } from '../contracts/plot-type';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from '../contracts/toolbar-config';
 import { ToolbarToolContribution } from '../contracts/toolbar-tool.contract';
 import { MODEL_INFO } from './model-info';
@@ -244,9 +235,12 @@ export class ToolbarComponent implements OnChanges {
     return this.selectedPlotType === PlotType.IMAGE;
   }
 
-  /** The spatial-omics mode is active, so its controls are worth offering. */
+  /** Either spatial-omics mode is active, so its controls are worth offering.
+   *  The 3D cloud needs the panel MORE than the 2D view does, not less: colouring,
+   *  the legend and category show/hide are the only way to make sense of a
+   *  million overlapping points. */
   get isSpatialMode(): boolean {
-    return this.selectedPlotType === PlotType.SPATIAL_OMICS;
+    return isSpatialOmics(this.selectedPlotType) || isSpatialOmics3d(this.selectedPlotType);
   }
 
   /** A plot-type icon is a PrimeNG font glyph (e.g. `pi pi-image`) rather than an

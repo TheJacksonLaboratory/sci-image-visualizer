@@ -162,6 +162,27 @@ describe('ToolbarComponent', () => {
     component.ngOnChanges({ samModels: {} as never });
     expect(component.samMenuItems[0].tooltip).toBeUndefined();
   });
+  describe('spatial-omics controls button', () => {
+    it('offers the panel in BOTH spatial modes', () => {
+      // REGRESSION: the gate matched only the 2D type, so adding the 3D mode left
+      // its toolbar button hidden — and with it the only route to the legend,
+      // colouring and category selection. The 3D cloud needs that panel more than
+      // the 2D view does, not less: a million overlapping points are unreadable
+      // without a colour source.
+      component.selectedPlotType = PlotType.SPATIAL_OMICS;
+      expect(component.isSpatialMode).toBe(true);
+
+      component.selectedPlotType = PlotType.SPATIAL_OMICS_3D;
+      expect(component.isSpatialMode).toBe(true);
+    });
+
+    it('hides it for every non-spatial mode', () => {
+      for (const t of [PlotType.IMAGE, PlotType.NAPARI_VOLUME, PlotType.SCATTER]) {
+        component.selectedPlotType = t;
+        expect(component.isSpatialMode).toBe(false);
+      }
+    });
+  });
 });
 
 describe('ToolbarComponent — model info accessibility', () => {
