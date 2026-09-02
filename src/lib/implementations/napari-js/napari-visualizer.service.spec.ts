@@ -52,6 +52,12 @@ const spatialDataset3d = (count = 3): SpatialDataset => {
   };
 };
 
+/** The 3D dataset plus a reference volume, for the anatomy-backdrop path. */
+const spatialDatasetVolume = (count = 3): SpatialDataset => ({
+  ...spatialDataset3d(count),
+  volume: { width: 4, height: 6, depth: 10, voxelSize: [100, 200, 400] },
+});
+
 const tilesPort = {
   getSelectedInfoB64: () => 'INFO',
   zoomOnRegion: () => of(new ArrayBuffer(0)),
@@ -69,6 +75,7 @@ describe('NapariVisualizerService', () => {
     getDataset$: () => typeof dataset$;
     getColumn: jest.Mock;
     getFeatureVector: jest.Mock;
+    getVolume: jest.Mock;
   };
 
   beforeEach(() => {
@@ -77,6 +84,8 @@ describe('NapariVisualizerService', () => {
       getDataset$: () => dataset$,
       getColumn: jest.fn(),
       getFeatureVector: jest.fn(),
+      // Rejects by default: a dataset with no volume must never be waiting on one.
+      getVolume: jest.fn().mockRejectedValue(new Error('no volume')),
     };
     // The render path polls /tiles/info (descriptor JSON) then fetches /tile blobs, both via the
     // global fetch (no WebGPU). A single-level 64×48 pyramid keeps the stitch on the single-tile
@@ -1018,6 +1027,85 @@ describe('NapariVisualizerService', () => {
         expect(projected![i * 2]).toBeCloseTo((obs.x[i] * 0.5 + 0.5) * w, 3);
         expect(projected![i * 2 + 1]).toBeCloseTo((1 - (obs.y[i] * 0.5 + 0.5)) * h, 3);
       }
+    });
+
+    describe('reference volume', () => {
+      it('adds the volume with the declared dimensions and voxel size', async () => {
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+
+        await mount3d(spatialDatasetVolume());
+
+        expect(addVolume).toHaveBeenCalled();
+        const layer = addVolume.mock.results.at(-1)?.value;
+        expect([layer.width, layer.height, layer.depth]).toEqual([4, 6, 10]);
+        expect(layer.voxelSize).toEqual([100, 200, 400]);
+        // Translucent, not MIP: a maximum-intensity projection of an averaged
+        // template is a flat shell that hides the very points it is backing.
+        expect(layer.rendering).toBe('translucent');
+        expect(layer.opacity).toBeLessThan(1);
+      });
+
+      it('offsets the cloud by HALF THE BOX so it sits inside the volume', async () => {
+        // The load-bearing bit. napari-js centres a volume's box on the world
+        // origin, while observations are in the volume's frame with its near
+        // corner AT the origin — so the points have to move by half the box or
+        // the cloud floats outside the anatomy by half a brain.
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        const layers = await mount3d(spatialDatasetVolume());
+
+        const half = [(4 * 100) / 2, (6 * 200) / 2, (10 * 400) / 2];
+        const obs = spatialDataset3d().observations;
+        const z = obs.z!;
+        const positions = named(layers, 'observations').positions;
+        for (let i = 0; i < obs.count; i++) {
+          expect(positions[i * 3]).toBeCloseTo(obs.x[i] - half[0], 3);
+          expect(positions[i * 3 + 1]).toBeCloseTo(obs.y[i] - half[1], 3);
+          expect(positions[i * 3 + 2]).toBeCloseTo(z[i] - half[2], 3);
+        }
+      });
+
+      it('leaves the cloud at its own coordinates when there is no volume', async () => {
+        const layers = await mount3d(spatialDataset3d());
+        const obs = spatialDataset3d().observations;
+        const positions = named(layers, 'observations').positions;
+        expect(positions[3]).toBeCloseTo(obs.x[1], 3);
+      });
+
+      it('draws the cloud anyway when the volume fails to load', async () => {
+        // A backdrop is a nicety; losing it must not cost the data.
+        spatialPort.getVolume = jest.fn().mockRejectedValue(new Error('503'));
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+        const layers = await mount3d(spatialDatasetVolume());
+
+        expect(named(layers, 'observations')).toBeDefined();
+        // ...and unoffset, since there is no box to sit inside.
+        expect(named(layers, 'observations').positions[3])
+          .toBeCloseTo(spatialDataset3d().observations.x[1], 3);
+        expect(warn).toHaveBeenCalled();
+        warn.mockRestore();
+      });
+
+      it('applies the same offset to the selected-subset layer', async () => {
+        // Two layers drawn from one cloud: if only one is offset, a selection
+        // appears half a brain away from the points it selected.
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        await mount3d(spatialDatasetVolume());
+        TestBed.inject(SpatialSelectionStore).set({
+          mask: Uint8Array.from([0, 1, 0]), count: 1,
+        });
+        await flush();
+
+        const all = addPoints3D.mock.results.map((r) => r.value);
+        const selected = named(all, 'selected');
+        const obs = spatialDataset3d().observations;
+        expect(Array.from(selected.positions)).toEqual([
+          obs.x[1] - (4 * 100) / 2,
+          obs.y[1] - (6 * 200) / 2,
+          obs.z![1] - (10 * 400) / 2,
+        ]);
+      });
     });
 
     it('draws a selection as a second layer, muting the parent cloud', async () => {

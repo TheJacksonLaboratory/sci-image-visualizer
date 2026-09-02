@@ -25,6 +25,12 @@ interface StubCamera3D {
 
 /** A mutable stand-in for napari-js VolumeLayer (the props the adapter sets). */
 export interface VolumeLayer {
+  opacity?: number;
+  name?: string;
+  data?: Uint8Array;
+  width?: number;
+  height?: number;
+  depth?: number;
   colormap: unknown;
   contrastLimits: [number, number];
   gamma: number;
@@ -348,21 +354,35 @@ export class Viewer {
     };
   }
   addVolume(
-    _data?: Uint8Array,
-    _width?: number,
-    _height?: number,
-    _depth?: number,
-    opts?: { voxelSize?: readonly [number, number, number] },
+    data?: Uint8Array,
+    width?: number,
+    height?: number,
+    depth?: number,
+    opts?: {
+      voxelSize?: readonly [number, number, number];
+      name?: string;
+      colormap?: unknown;
+      rendering?: string;
+      opacity?: number;
+    },
   ): VolumeLayer {
     return {
-      colormap: 'gray',
+      colormap: opts?.colormap ?? 'gray',
       contrastLimits: [0, 255],
       gamma: 1,
       visible: true,
       blending: 'additive',
-      rendering: 'mip',
+      rendering: (opts?.rendering as VolumeLayer['rendering']) ?? 'mip',
       isoThreshold: 0.5,
       voxelSize: opts?.voxelSize ?? [1, 1, 1],
+      opacity: opts?.opacity ?? 1,
+      name: opts?.name,
+      // Captured so tests can assert the dimensions the adapter passed and that
+      // the byte count matches them.
+      data,
+      width,
+      height,
+      depth,
     };
   }
   addAxes(width = 1, height = 1, depth = 1): AxesLayer {

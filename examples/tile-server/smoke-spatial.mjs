@@ -190,6 +190,26 @@ try {
       .map((c) => `${c.name}=${c.categories.length}`);
     check('every categorical fits the 96-category LUT ceiling', wide.length === 0,
       wide.join(', '));
+
+    // The anatomical backdrop. Byte count against the declared dims is the check
+    // that matters: a short or long buffer read as a 3D texture does not error,
+    // it shears the anatomy into diagonal streaks.
+    const vol = m.volume;
+    check('3D manifest declares a reference volume', !!vol, JSON.stringify(vol));
+    if (vol) {
+      const bytes = await (await fetch(`${BASE}/spatial/${abc.id}/volume`)).arrayBuffer();
+      const want = vol.width * vol.height * vol.depth;
+      check('volume byte count matches its declared dims', bytes.byteLength === want,
+        `${bytes.byteLength} vs ${want}`);
+      // Voxel dims x size must reproduce the brain's real extent, or the cloud
+      // and the anatomy are drawn at different scales.
+      const mm = [vol.width, vol.height, vol.depth]
+        .map((d, i) => (d * vol.voxelSize[i]) / 1000);
+      check('volume extent is a mouse brain, in mm', mm.every((x) => x > 5 && x < 20),
+        mm.map((x) => x.toFixed(1)).join(' x '));
+    }
+    const noVol = await fetch(`${BASE}/spatial/${ID}/volume`);
+    check('a dataset without a volume 404s', noVol.status === 404, `got ${noVol.status}`);
   }
 
   console.log('error handling');

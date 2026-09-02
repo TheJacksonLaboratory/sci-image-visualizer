@@ -37,6 +37,19 @@ file was added.
     highlight-vs-mute does. Point size is in *screen* pixels here, not data
     units, which is the layer's unit.
 
+- **A reference volume under the 3D cloud.** `SpatialDataset.volume` +
+  `SpatialDataPort.getVolume()` describe a 3D scalar field registered to the
+  observation coordinates — an atlas template, or an image z-stack — which the
+  3D mode draws as a translucent `VolumeLayer` beneath the points. Without it a
+  cloud floats in empty space and "where in the brain is this cluster" has no
+  answer.
+
+  napari-js centres a volume's box on the world origin and `VolumeLayer` has no
+  translate, so the contract puts the volume's near corner at the coordinate
+  origin and the renderer offsets the *points* by half the box. Both the cloud
+  and the selected-subset layer take that offset; a volume that fails to load
+  costs the backdrop, not the data.
+
 - **Region selection in 3D.** The existing ROI tools — rectangle, polygon,
   freehand — work on the cloud, by handing `NapariRegionOverlay` a screen-space
   viewer whose transforms are identity. The drawn shape is a lasso in canvas
@@ -51,13 +64,21 @@ file was added.
   selection it produced is kept, and stays highlighted from every angle.
 
 - **Allen Brain Cell Atlas source in the example server** (`lib/spatial-abc.mjs`,
-  `npm run fetch-abc`) — the whole-mouse-brain MERFISH map, ~3.74M cells from 59
-  coronal sections each registered into the CCFv3, as the example's only 3D
-  dataset. Plain CSV from a public AWS Open Data bucket, transcoded once into a
-  binary cache (~20 s). Served with Allen's own deposited category colours, so
-  the render matches the atlas figures. See the example server's README for the
-  two things it does not serve: categoricals above the LUT ceiling, and the 492
-  genes that ship only as h5ad.
+  `lib/nifti.mjs`, `npm run fetch-abc`) — the whole-mouse-brain MERFISH map,
+  3,739,961 cells from 59 coronal sections registered into a common frame, plus
+  the CCF average template as the anatomical backdrop. Plain CSV and NIfTI from a
+  public AWS Open Data bucket, transcoded once into a binary cache (~20 s).
+  Served with Allen's own deposited category colours, so the render matches the
+  atlas figures.
+
+  Serves the **reconstructed** coordinate frame, not the CCF one, because that is
+  the frame the reference volumes are on. Established by scoring candidate
+  alignments against each cell's own `parcellation_index`: reconstructed with
+  axes as-is agrees for 9000 of 9000 sampled cells, while the best of the CCF
+  frame's 48 permutation/flip combinations manages 126. Bounding-box alignment
+  would not have done — the cloud's extent and the template's differ by 5–14% per
+  axis. See the example server's README for what it does not serve: categoricals
+  above the LUT ceiling, and the 492 genes that ship only as h5ad.
 
 - **Spatial-omics data plane** — contracts for spatial-omics datasets (Visium
   spots, segmented cells) so the library can hold N observations positioned in a

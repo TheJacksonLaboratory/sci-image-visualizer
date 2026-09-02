@@ -67,6 +67,17 @@ export interface SpatialDataPort {
   getPolygons?(): Promise<SpatialPolygons>;
 
   /**
+   * The reference volume's voxels: a uint8 scalar field, x-fastest, of exactly
+   * `width * height * depth` bytes as the dataset's {@link SpatialVolumeMeta}
+   * declares.
+   *
+   * Optional, and only meaningful when the dataset advertises a volume. Separate
+   * from `getDataset$()` because it is megabytes: a host that never opens the 3D
+   * mode should never pay for it.
+   */
+  getVolume?(): Promise<Uint8Array>;
+
+  /**
    * Server-side "which observations fall inside this polygon", for datasets
    * too large to hit-test client-side. Optional: without it the library
    * point-in-polygons the resident coordinates itself, which is fine into the

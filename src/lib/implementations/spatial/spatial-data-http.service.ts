@@ -58,6 +58,7 @@ export class SpatialDataHttpService implements SpatialDataPort {
   /** In-flight requests, so double-clicking a gene issues one fetch. */
   private readonly inFlight = new Map<string, Promise<SpatialColumn | Float32Array>>();
 
+  private volumePromise: Promise<Uint8Array> | null = null;
   private polygonsPromise: Promise<SpatialPolygons> | null = null;
 
   constructor(private http: HttpClient) {}
@@ -124,6 +125,7 @@ export class SpatialDataHttpService implements SpatialDataPort {
     this.cache.clear();
     this.inFlight.clear();
     this.polygonsPromise = null;
+    this.volumePromise = null;
     if (this.dataset$.value !== null) this.dataset$.next(null);
   }
 
@@ -190,6 +192,36 @@ export class SpatialDataHttpService implements SpatialDataPort {
       .then(decodePolygons)
       .catch((err) => { this.polygonsPromise = null; throw err; });
     return this.polygonsPromise;
+  }
+
+  /**
+   * The reference volume's voxels, single-flighted like the polygons.
+   *
+   * Validated against the manifest's declared dimensions before it is handed
+   * back: a short or long buffer read as a 3D texture does not fail, it shears
+   * the anatomy into diagonal streaks, and that is far harder to recognise as a
+   * transport problem than an error is.
+   */
+  getVolume(): Promise<Uint8Array> {
+    const manifest = this.requireManifest();
+    const meta = manifest.volume;
+    if (!meta) {
+      return Promise.reject(new Error('[spatial] this dataset has no reference volume'));
+    }
+    this.volumePromise ??= this
+      .getBinary(`spatial/${encodeURIComponent(manifest.id)}/volume`)
+      .then((buf) => {
+        const want = meta.width * meta.height * meta.depth;
+        if (buf.byteLength !== want) {
+          throw new Error(
+            `[spatial] volume is ${buf.byteLength} bytes, expected ${want} `
+            + `(${meta.width}x${meta.height}x${meta.depth})`,
+          );
+        }
+        return new Uint8Array(buf);
+      })
+      .catch((err) => { this.volumePromise = null; throw err; });
+    return this.volumePromise;
   }
 
   // ── internals ───────────────────────────────────────────────────────────

@@ -203,6 +203,29 @@ export interface SpatialDataset {
   features?: SpatialFeatureMeta;
   polygons?: SpatialPolygonsMeta;
   imageRef?: SpatialImageRef;
+  /** Presence + geometry of a reference volume the observations sit inside. */
+  volume?: SpatialVolumeMeta;
+}
+
+/**
+ * A 3D scalar reference volume registered to the observation coordinates — the
+ * anatomical backdrop for a point cloud (an atlas template, or an image z-stack).
+ *
+ * Geometry only; the voxels are fetched through
+ * {@link SpatialDataPort.getVolume} when something is going to draw them. A cloud
+ * without one still renders, just in empty space.
+ *
+ * The observations' coordinate frame must be the volume's own: voxel `(i, j, k)`
+ * covers `[i * voxelSize[0], (i + 1) * voxelSize[0])` on x, and so on. That means
+ * the volume's near corner sits at the coordinate origin, so a renderer can place
+ * the two together knowing nothing else.
+ */
+export interface SpatialVolumeMeta {
+  width: number;
+  height: number;
+  depth: number;
+  /** World size of one voxel per axis, in the observations' units. */
+  voxelSize: [number, number, number];
 }
 
 /** Look a column's descriptor up by name. */

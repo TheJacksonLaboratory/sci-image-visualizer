@@ -1,6 +1,6 @@
 import {
-  CategoricalColumnMeta, ContinuousColumnMeta, NO_CATEGORY, SpatialColumn, SpatialColumnMeta,
-  SpatialDataset, SpatialFeatureMeta, SpatialImageRef, SpatialObservations, SpatialPolygons,
+  CategoricalColumnMeta, ContinuousColumnMeta, NO_CATEGORY, SpatialColumn, SpatialColumnMeta, SpatialDataset,
+  SpatialFeatureMeta, SpatialImageRef, SpatialObservations, SpatialPolygons, SpatialVolumeMeta,
 } from '../../contracts/spatial-dataset.contract';
 
 /**
@@ -62,6 +62,7 @@ export interface SpatialManifest {
   features?: SpatialFeatureMeta;
   polygons?: { count: number };
   imageRef?: SpatialImageRef;
+  volume?: SpatialVolumeMeta;
 }
 
 /** `GET /spatial/datasets` */
@@ -209,5 +210,6 @@ export function datasetFromManifest(
     ...(manifest.features ? { features: manifest.features } : {}),
     ...(manifest.polygons ? { polygons: manifest.polygons } : {}),
     ...(manifest.imageRef ? { imageRef: manifest.imageRef } : {}),
+    ...(manifest.volume ? { volume: manifest.volume } : {}),
   };
 }

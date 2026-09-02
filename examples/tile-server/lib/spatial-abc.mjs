@@ -22,6 +22,7 @@
  * integrated graphics; it is the same cloud at the same extent, just thinner.
  */
 import { createReadStream } from 'node:fs';
+import { readNifti } from './nifti.mjs';
 import { readFile, writeFile, mkdir, rename, stat, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -66,16 +67,42 @@ const CONTINUOUS = [
 ];
 
 /**
- * CCF axis -> our axis.
+ * Which deposited coordinate columns become our (x, y, z).
  *
- * CCF is (anterior-posterior, dorsal-ventral, left-right). We put mediolateral
- * on x and dorsoventral on y so the default camera looks straight down the
- * anterior-posterior axis at a coronal section — the orientation every mouse
- * brain figure uses — and depth lands on z where the 3D layer wants it.
+ * The RECONSTRUCTED coordinates, not the CCF ones, and that choice is load-bearing:
+ * the reference volumes we render underneath are on the reconstructed section grid
+ * (their z pixdim is 0.2mm, exactly the section spacing), and voxel index is then
+ * simply `coord / pixdim` along each axis with no offset or flip.
+ *
+ * That is measured, not assumed. Every cell carries its own `parcellation_index`,
+ * and `resampled_annotation.nii.gz` holds the same labels per voxel, so a candidate
+ * alignment can be scored against the data: this one agrees with the cells' own
+ * labels for 9,000 out of 9,000 sampled cells. Searching the CCF coordinates over
+ * every axis permutation and flip peaks at 1.4%.
+ *
+ * The cost is that z is quantised to the 76 section planes rather than varying
+ * continuously as `z_ccf` does. That is the honest sampling — the cells really do
+ * come from serial sections — and exact registration to the anatomy is worth more
+ * than a continuous z synthesised by registering tilted sections.
+ *
+ * Axis order puts mediolateral on x and dorsoventral on y, so the default camera
+ * looks down the anterior-posterior axis at a coronal section: the orientation
+ * every mouse-brain figure uses.
  */
-const AXES = { x: 'z_ccf', y: 'y_ccf', z: 'x_ccf' };
+const AXES = { x: 'x_reconstructed', y: 'y_reconstructed', z: 'z_reconstructed' };
 
-/** CCF coordinates are millimetres; the rest of the library thinks in microns. */
+/**
+ * The anatomical backdrop: the CCF average template resampled onto the same grid.
+ *
+ * Downsampled 4x in the two 10um axes on the way into the cache. The source is
+ * 1100x1100x76 float32 = 351MB, which is neither a sane response nor a sane 3D
+ * texture; at 40um it is 275x275x76 uint8 = 5.7MB and still far finer than the
+ * 200um section spacing, which is the real limit on what the data can resolve.
+ */
+const VOLUME_FILE = 'resampled_average_template.nii.gz';
+const VOLUME_XY_DOWNSAMPLE = 4;
+
+/** Deposited coordinates are millimetres; the rest of the library thinks in microns. */
 const MM_TO_UM = 1000;
 
 const caches = new Map();
@@ -263,7 +290,7 @@ async function buildCache(abcDir, log = () => {}) {
     const x = +slot(AXES.x);
     const y = +slot(AXES.y);
     const z = +slot(AXES.z);
-    // A cell with no CCF registration cannot be placed in the volume. Dropping
+    // A cell with no reconstructed position cannot be placed in the volume. Dropping
     // it is the honest choice: putting it at the origin would draw a spurious
     // blob of thousands of cells at one corner of the brain.
     if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
@@ -287,7 +314,7 @@ async function buildCache(abcDir, log = () => {}) {
   }
 
   if (!n) throw new Error(`${CELLS_CSV} produced no rows`);
-  log(`  ${n.toLocaleString()} cells (${dropped.toLocaleString()} without CCF coords, dropped)`);
+  log(`  ${n.toLocaleString()} cells (${dropped.toLocaleString()} without coordinates, dropped)`);
 
   // Planar layout — x block, then y, then z — matching decodeCoords() on the
   // client, which takes three contiguous Float32 views over one buffer.
@@ -328,8 +355,9 @@ async function buildCache(abcDir, log = () => {}) {
   }
 
   const genes = await buildGenes(abcDir, cacheDir, n, write, log);
+  const volume = await buildVolume(abcDir, write, log);
 
-  const index = { version: CACHE_VERSION, count: n, columns, genes };
+  const index = { version: CACHE_VERSION, count: n, columns, genes, volume };
   await writeFile(path.join(cacheDir, 'index.json'), JSON.stringify(index));
   return index;
 }
@@ -444,6 +472,80 @@ async function buildGenes(abcDir, cacheDir, n, write, log) {
   return names;
 }
 
+/**
+ * Transcode the reference volume: float32 -> uint8, downsampled in x/y.
+ *
+ * Box-averages each 4x4 column rather than picking one voxel, so the result is a
+ * proper reduction instead of a subsample that would alias the fine anatomy into
+ * speckle. Values are windowed on the volume's own min/max: the template is an
+ * average of many brains and its range is arbitrary, so there is no fixed scale
+ * to preserve.
+ *
+ * Optional. Absent volume file -> no volume, and the cloud renders alone.
+ */
+async function buildVolume(abcDir, write, log) {
+  const file = path.join(abcDir, VOLUME_FILE);
+  try {
+    await stat(file);
+  } catch {
+    log('  no reference volume; the 3D cloud renders without anatomy');
+    return null;
+  }
+
+  const v = await readNifti(file);
+  const [W, H, D] = v.dims;
+  const step = VOLUME_XY_DOWNSAMPLE;
+  const ow = Math.ceil(W / step);
+  const oh = Math.ceil(H / step);
+  const src = v.data;
+
+  let min = Infinity;
+  let max = -Infinity;
+  for (let i = 0; i < src.length; i++) {
+    const x = src[i];
+    if (x < min) min = x;
+    if (x > max) max = x;
+  }
+  const span = max > min ? max - min : 1;
+
+  const out = new Uint8Array(ow * oh * D);
+  for (let k = 0; k < D; k++) {
+    const plane = k * W * H;
+    for (let oy = 0; oy < oh; oy++) {
+      const y0 = oy * step;
+      const y1 = Math.min(H, y0 + step);
+      for (let ox = 0; ox < ow; ox++) {
+        const x0 = ox * step;
+        const x1 = Math.min(W, x0 + step);
+        let sum = 0;
+        let cells = 0;
+        for (let y = y0; y < y1; y++) {
+          const row = plane + y * W;
+          for (let x = x0; x < x1; x++) {
+            sum += src[row + x];
+            cells++;
+          }
+        }
+        const mean = cells ? sum / cells : 0;
+        out[(k * oh + oy) * ow + ox] = Math.max(0, Math.min(255,
+          Math.round(((mean - min) / span) * 255)));
+      }
+    }
+  }
+  await write('volume.u8', out);
+
+  // World size of one output voxel, in microns — the axes keep their true
+  // proportions only if this reflects the downsample.
+  const voxelSize = [
+    v.pixdim[0] * step * MM_TO_UM,
+    v.pixdim[1] * step * MM_TO_UM,
+    v.pixdim[2] * MM_TO_UM,
+  ];
+  log(`  volume ${ow}x${oh}x${D} uint8 (${(out.length / 1048576).toFixed(1)} MB), `
+    + `voxel ${voxelSize.map((x) => x.toFixed(0)).join('x')} um`);
+  return { width: ow, height: oh, depth: D, voxelSize };
+}
+
 /* --------------------------------------------------------------- serve ----- */
 
 async function load(abcDir, log) {
@@ -532,6 +634,9 @@ export async function abcManifest(abcDir, id) {
     // microns of tissue, same units as the coordinates.
     radius: { mode: 'uniform', value: 5 },
     columns: entry.index.columns,
+    // The anatomical volume the observations sit inside. Same grid for every
+    // variant — striding thins the cloud, not the anatomy.
+    volume: entry.index.volume ?? undefined,
     features: entry.index.genes.length
       ? { count: entry.index.genes.length, unit: 'log2(CPM+1)', logScaleHint: false }
       : undefined,
@@ -583,6 +688,14 @@ export async function abcFeature(abcDir, id, name) {
   const entry = await load(abcDir);
   if (!entry.index.genes.includes(name)) throw new RangeError(`unknown gene: ${name}`);
   return vector(abcDir, id, `gene.${name}.f32`, Float32Array);
+}
+
+export async function abcVolume(abcDir, id) {
+  const v = variantOf(id);
+  if (!v) throw new RangeError(`unknown dataset: ${id}`);
+  const entry = await load(abcDir);
+  if (!entry.index.volume) throw new RangeError('no volume for this dataset');
+  return blob(entry, 'volume.u8');
 }
 
 export async function abcFeatureSearch(abcDir, id, query, limit = 50) {

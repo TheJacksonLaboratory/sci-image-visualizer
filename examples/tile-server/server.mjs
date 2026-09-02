@@ -46,7 +46,7 @@ import {
 } from './lib/spatial-st.mjs';
 import { writePyramid } from './lib/pyramid.mjs';
 import {
-  listAbcDatasets, abcManifest, abcCoords, abcColumn, abcFeature, abcFeatureSearch,
+  listAbcDatasets, abcManifest, abcCoords, abcColumn, abcFeature, abcFeatureSearch, abcVolume,
 } from './lib/spatial-abc.mjs';
 import { readArray } from './lib/zarr3.mjs';
 
@@ -325,6 +325,9 @@ app.get('/spatial/:id/manifest', async (req, res) => {
 // only `coords` — `radius` and `polygons` legitimately 404 there.
 const WIRE_FILES = {
   coords: { file: 'coords.bin', zarr: zarrCoords, st: stCoords, abc: abcCoords },
+  // The anatomical volume a 3D cloud sits inside: uint8 scalar field, x-fastest.
+  // Only the ABC source has one, so every other source legitimately 404s here.
+  volume: { file: 'volume.bin', abc: abcVolume },
   radius: { file: 'radius.bin', zarr: zarrRadius },
   polygons: { file: 'polygons.bin', zarr: zarrPolygons },
 };

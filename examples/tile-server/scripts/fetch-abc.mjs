@@ -14,7 +14,7 @@
  * a join would mean downloading ~820MB and doing the work anyway, against 1.5GB
  * and no join. Downloads resume, so a dropped connection is not a restart.
  *
- *   node scripts/fetch-abc.mjs [--dir abc] [--genes-only|--cells-only]
+ *   node scripts/fetch-abc.mjs [--dir abc] [--cells-only|--genes-only|--volume-only]
  */
 import { createWriteStream } from 'node:fs';
 import { mkdir, stat } from 'node:fs/promises';
@@ -23,9 +23,15 @@ import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 
 const BUCKET = 'https://allen-brain-cell-atlas.s3.amazonaws.com';
-// Pinned release. The bucket keeps every release, so pinning means a rebuild a
+// Pinned releases. The bucket keeps every release, so pinning means a rebuild a
 // year from now reproduces today's numbers instead of silently drifting.
+//
+// They are not all the same date: the metadata tables were revised through
+// 20231215, while the image volumes stop at 20230630 (asking for them under the
+// newer prefix is a 404). Same registration either way — the later releases
+// revised annotations, not the reference volume.
 const RELEASE = '20231215';
+const VOLUME_RELEASE = '20230630';
 
 const FILES = [
   {
@@ -46,12 +52,22 @@ const FILES = [
     name: 'example_genes_all_cells_expression.csv',
     approxMb: 343,
   },
+  {
+    key: 'volume',
+    // The CCF average template, resampled into the SAME frame the cells are
+    // registered to. This is the anatomical backdrop: without it the cloud floats
+    // in empty space, and "where in the brain is this cluster" has no answer.
+    url: `${BUCKET}/image_volumes/MERFISH-C57BL6J-638850-CCF/${VOLUME_RELEASE}/resampled_average_template.nii.gz`,
+    name: 'resampled_average_template.nii.gz',
+    approxMb: 112,
+  },
 ];
 
 const args = process.argv.slice(2);
 const dirArg = args.indexOf('--dir');
 const outDir = path.resolve(dirArg >= 0 ? args[dirArg + 1] : new URL('../abc', import.meta.url).pathname);
-const only = args.includes('--genes-only') ? 'genes' : args.includes('--cells-only') ? 'cells' : null;
+const ONLY_FLAGS = ['cells', 'genes', 'volume'];
+const only = ONLY_FLAGS.find((k) => args.includes(`--${k}-only`)) ?? null;
 
 const mb = (n) => (n / 1048576).toFixed(1) + ' MB';
 
@@ -103,7 +119,7 @@ async function download(spec) {
 
 await mkdir(outDir, { recursive: true });
 console.log(`Allen Brain Cell Atlas -> ${outDir}`);
-console.log('Public AWS Open Data bucket (arn:aws:s3:::allen-brain-cell-atlas), release ' + RELEASE + '.\n');
+console.log(`Public AWS Open Data bucket (arn:aws:s3:::allen-brain-cell-atlas), releases ${RELEASE} (tables) / ${VOLUME_RELEASE} (volume).\n`);
 for (const spec of FILES) {
   if (only && spec.key !== only) continue;
   await download(spec);

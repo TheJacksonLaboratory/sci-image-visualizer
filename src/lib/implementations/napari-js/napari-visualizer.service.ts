@@ -16,6 +16,7 @@ import {
 import type {
   AxesLayer,
   SurfaceLayer,
+  VolumeLayer,
   PointsLayer,
   Points3DLayer,
   TiledSource,
@@ -307,6 +308,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private spatialPositions3d: Float32Array | null = null;
   /** Identity of the scalars currently uploaded — see {@link rebuildSpatialPoints3d}. */
   private spatialScalarKey3d: string | null = null;
+  /** The anatomical volume the cloud sits inside, when the dataset has one. */
+  private spatialVolume: VolumeLayer | null = null;
+  private spatialVolumeKey: string | null = null;
+  /** Offset applied to observation coordinates to sit them in the volume's box. */
+  private spatialOrigin3d: [number, number, number] = [0, 0, 0];
   private spatialSub: Subscription | null = null;
   /** Which dataset the current marker layer was built for, so a display-only
    *  change (size, colour, opacity, selection) can update it in place. */
@@ -1783,6 +1789,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       return;
     }
 
+    // Anatomy first: `addVolume` frames the orbit camera on the volume, and that
+    // is the framing we want — the brain, not the outermost stray segmentation.
+    await this.ensureSpatialVolume(viewer, dataset);
+    if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
+
     const scale = view.pointScale > 0 ? view.pointScale : 1;
     const size = NapariVisualizerService.SPATIAL_3D_BASE_SIZE * scale;
     const values = enc?.values ?? new Float32Array(obs.count);
@@ -1807,11 +1818,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       // New geometry: interleave x,y,z (the layer's documented layout, x-fastest)
       // and cache it, so later colour changes rebuild the layer without walking
       // the observations again.
+      const [ox, oy, oz] = this.spatialOrigin3d;
       const positions = new Float32Array(obs.count * 3);
       for (let i = 0; i < obs.count; i++) {
-        positions[i * 3] = obs.x[i];
-        positions[i * 3 + 1] = obs.y[i];
-        positions[i * 3 + 2] = obs.z[i];
+        positions[i * 3] = obs.x[i] + ox;
+        positions[i * 3 + 1] = obs.y[i] + oy;
+        positions[i * 3 + 2] = obs.z[i] + oz;
       }
       this.spatialPositions3d = positions;
     }
@@ -1848,12 +1860,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     if (hasSelection) {
       const positions = new Float32Array(selection.count * 3);
       const picked = new Float32Array(selection.count);
+      const [sx, sy, sz] = this.spatialOrigin3d;
       let at = 0;
       for (let i = 0; i < obs.count; i++) {
         if (!selection.mask[i]) continue;
-        positions[at * 3] = obs.x[i];
-        positions[at * 3 + 1] = obs.y[i];
-        positions[at * 3 + 2] = obs.z[i];
+        positions[at * 3] = obs.x[i] + sx;
+        positions[at * 3 + 1] = obs.y[i] + sy;
+        positions[at * 3 + 2] = obs.z[i] + sz;
         picked[at] = values[i];
         at++;
       }
@@ -1870,10 +1883,72 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     viewer.requestRender();
   }
 
+  /**
+   * Add (or keep) the dataset's reference volume, and derive the offset that sits the
+   * observations inside it.
+   *
+   * `VolumeLayer` has no translate: napari-js maps the volume's unit cube to a world box
+   * **centred on the origin**, sized `dims x voxelSize`. The observations, by contract, are in
+   * the volume's own frame with its near corner at the coordinate origin. So the two only line
+   * up if the POINTS move — by half the box — which is what {@link spatialOrigin3d} is.
+   *
+   * A failed or absent volume is not fatal: the cloud renders on its own, at its own
+   * coordinates, and the camera frames the points instead.
+   */
+  private async ensureSpatialVolume(viewer: Viewer, dataset: SpatialDataset): Promise<void> {
+    const meta = dataset.volume;
+    const port = this.spatialData;
+    const key = meta ? `${dataset.id}:${meta.width}x${meta.height}x${meta.depth}` : null;
+    if (key && key === this.spatialVolumeKey) return;
+
+    if (this.spatialVolume) {
+      viewer.layers.remove(this.spatialVolume);
+      this.spatialVolume = null;
+      this.spatialVolumeKey = null;
+    }
+    this.spatialOrigin3d = [0, 0, 0];
+    if (!meta || !port?.getVolume) return;
+
+    let voxels: Uint8Array;
+    try {
+      voxels = await port.getVolume();
+    } catch (err) {
+      console.warn('[napari-js] reference volume unavailable — drawing the cloud alone', err);
+      return;
+    }
+    if (this.viewer !== viewer) return;
+
+    const [vx, vy, vz] = meta.voxelSize;
+    this.spatialVolumeKey = key;
+    this.spatialVolume = viewer.addVolume(voxels, meta.width, meta.height, meta.depth, {
+      name: 'reference volume',
+      colormap: 'gray',
+      // MIP would draw the brightest voxel along each ray, which for an averaged
+      // template means a flat white shell that hides the cloud. Translucent lets
+      // the points read through the tissue, which is the entire point of drawing
+      // them together.
+      rendering: 'translucent',
+      opacity: 0.5,
+      voxelSize: [vx, vy, vz],
+    });
+    // Half the box, negated: the observations' origin is the box's near corner,
+    // and the box is centred on the world origin.
+    this.spatialOrigin3d = [
+      -(meta.width * vx) / 2,
+      -(meta.height * vy) / 2,
+      -(meta.depth * vz) / 2,
+    ];
+    // Force a geometry rebuild: the offset changed, so cached positions are stale.
+    this.spatialLayerKey3d = null;
+  }
+
   private removeSpatial3dLayers(viewer: Viewer): void {
-    for (const layer of [this.spatialPoints3d, this.spatialPoints3dSel]) {
+    for (const layer of [this.spatialPoints3d, this.spatialPoints3dSel, this.spatialVolume]) {
       if (layer) viewer.layers.remove(layer);
     }
+    this.spatialVolume = null;
+    this.spatialVolumeKey = null;
+    this.spatialOrigin3d = [0, 0, 0];
     this.spatialPoints3d = null;
     this.spatialPoints3dSel = null;
     this.spatialLayerKey3d = null;
@@ -2483,6 +2558,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.spatialPoints3dSel = null;
     this.spatialLayerKey3d = null;
     this.spatialScalarKey3d = null;
+    this.spatialVolume = null;
+    this.spatialVolumeKey = null;
+    this.spatialOrigin3d = [0, 0, 0];
     // Drop the cached interleaved coordinates too: holding 3.7M x 3 floats after
     // a teardown is ~45MB of retained heap for a scene that no longer exists.
     this.spatialPositions3d = null;

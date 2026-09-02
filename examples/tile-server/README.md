@@ -188,12 +188,44 @@ frame.
 That registration is the whole difference. The HER2 sections above are also a
 series through a block, but they were never registered to each other — their
 extents disagree by up to ~850 µm in origin — so they cannot be stacked. These
-can, and the deposit says so: `ccf_coordinates.csv` varies z continuously, while
-the sibling `reconstructed_coordinates.csv` pins it to the section plane.
+can.
+
+It also ships the **anatomy**: the CCF average template, resampled onto the same
+grid, is served as a `VolumeLayer` under the cloud, so a cluster can be located
+in the brain rather than floating in space.
 
 ```bash
-npm run fetch-abc        # ~1.9 GB from a public AWS Open Data bucket, resumable
+npm run fetch-abc        # ~2.0 GB from a public AWS Open Data bucket, resumable
 ```
+
+Note the releases differ per artefact: the metadata tables were revised through
+`20231215`, the image volumes stop at `20230630`, and asking for a volume under
+the newer prefix is a 404.
+
+**Which coordinates, and how we know.** The deposit carries two frames per cell
+— `x/y/z_ccf` and `x/y/z_reconstructed` — and this source serves the
+**reconstructed** one, because that is the frame the reference volumes are on
+(their z pixdim is 0.2 mm, exactly the section spacing). Voxel index is then
+`coord / pixdim` per axis, with no offset, permutation or flip.
+
+That is measured, not reasoned. Every cell carries its own `parcellation_index`,
+and `resampled_annotation.nii.gz` holds the same labels per voxel, so a candidate
+alignment can be *scored against the data*:
+
+| candidate | agreement with the cells' own labels |
+|---|---|
+| reconstructed, axes as-is | **9000 / 9000** |
+| CCF, best of all 6 permutations × 8 flips | 126 / 9000 |
+
+The cost is that z is quantised to the 76 section planes instead of varying
+continuously as `z_ccf` does. That is the honest sampling — the cells really do
+come from serial sections — and exact registration to the anatomy is worth more
+than a continuous z synthesised by registering tilted sections.
+
+Bounding-box alignment would *not* have worked, which is why it is worth doing
+this properly: the cell cloud's extent and the template's differ by 5–14% per
+axis, because the cloud's extremes include stray segmentations and the template
+covers more than the sections do.
 
 No credentials and no signing — it is plain CSV over HTTPS. The fetch takes the
 two pre-joined "view" tables rather than joining `cell_metadata` +
@@ -210,7 +242,15 @@ every later request slices that. Two datasets come out of it:
 | `abc.wholebrain.sub10` | 373,997 (deterministic 1-in-10 stride) |
 
 The subsample is the same cloud at the same extent, just thinner — 3.7M
-billboards is a lot to ask of integrated graphics.
+billboards is a lot to ask of integrated graphics. Both share one volume:
+striding thins the cloud, not the anatomy.
+
+The volume is downsampled 4× in the two 10 µm axes on the way into the cache.
+The source is 1100×1100×76 float32 = 351 MB, which is neither a sane response
+nor a sane 3D texture; at 40 µm it is 275×275×76 uint8 = 5.5 MB, still far finer
+than the 200 µm section spacing that actually limits the data. Each output voxel
+is a box-average of its 4×4 column rather than a picked sample, so the reduction
+does not alias fine anatomy into speckle.
 
 Two things are worth knowing about what it serves:
 
