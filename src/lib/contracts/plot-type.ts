@@ -126,7 +126,7 @@ export const PLOT_TYPE_DESCRIPTORS: Partial<Record<PlotType, PlotTypeDescriptor>
   [PlotType.NAPARI_VOLUME]:     { type: PlotType.NAPARI_VOLUME,     label: 'Volume (napari · WebGPU)',     productionLabel: 'Volume',     icon: 'assets/plotting/cube-3d.svg',        dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
   [PlotType.NAPARI_ISOSURFACE]: { type: PlotType.NAPARI_ISOSURFACE, label: 'Isosurface (napari · WebGPU)', productionLabel: 'Isosurface', icon: 'assets/plotting/isosurface.svg',     dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
   // ── Spatial omics ──
-  [PlotType.SPATIAL_OMICS]:     { type: PlotType.SPATIAL_OMICS,     label: 'Spatial omics (napari · WebGPU)', productionLabel: 'Spatial omics', icon: 'assets/plotting/cells.svg',  dimensions: '2d', source: 'spatial', requiresSpatialData: true },
+  [PlotType.SPATIAL_OMICS]:     { type: PlotType.SPATIAL_OMICS,     label: 'Spatial omics (napari · WebGPU)', productionLabel: 'Spatial omics', icon: 'assets/plotting/spatial-omics.svg',  dimensions: '2d', source: 'spatial', requiresSpatialData: true },
 };
 
 export function getPlotTypeDescriptor(type: PlotType): PlotTypeDescriptor | undefined {
