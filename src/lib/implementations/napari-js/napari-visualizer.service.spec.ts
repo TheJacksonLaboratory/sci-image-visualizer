@@ -857,6 +857,9 @@ describe('NapariVisualizerService', () => {
 
     /** Mount the 3D cloud with `dataset` published; returns every layer built. */
     async function mount3d(dataset: SpatialDataset | null = spatialDataset3d()) {
+      // Replace any host from an earlier mount: overlays and the scale bar attach
+      // to it, and a leftover would be visible to the next test's DOM assertions.
+      document.getElementById('spatial3d-host')?.remove();
       const div = document.createElement('div');
       div.id = 'spatial3d-host';
       document.body.appendChild(div);
@@ -1108,6 +1111,22 @@ describe('NapariVisualizerService', () => {
       });
     });
 
+    it('shows a scale bar when the dataset declares its unit', async () => {
+      const layers = await mount3d({ ...spatialDataset3d(), micronsPerUnit: 1 });
+      expect(layers.length).toBeGreaterThan(0);
+      // Rendered into the plot host, so its presence is observable from the DOM
+      // rather than through a private field.
+      expect(document.getElementById('spatial3d-host')?.textContent).toMatch(/µm|nm|mm|cm/);
+    });
+
+    it('shows NO scale bar when the coordinate unit is unknown', async () => {
+      // A bar labelled in microns over unknown units reads as a measurement, and
+      // is worse than no bar at all.
+      await mount3d(spatialDataset3d());
+      expect(document.getElementById('spatial3d-host')?.textContent ?? '')
+        .not.toMatch(/µm|nm|mm|cm/);
+    });
+
     it('draws a selection as a second layer, muting the parent cloud', async () => {
       // There is no per-point alpha in 3D, so the 2D highlight-vs-mute trick has
       // to be rebuilt out of two layers.
@@ -1128,6 +1147,36 @@ describe('NapariVisualizerService', () => {
       expect(selected.opacity).toBe(1);
       // ...and the parent drops to the muted level.
       expect(named(all, 'observations').opacity).toBeCloseTo(DEFAULT_MUTED_OPACITY);
+    });
+  });
+
+  describe('Volume / Isosurface from a spatial dataset', () => {
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    it('renders the dataset\'s registered volume when there is no image stack', async () => {
+      // A 3D omics dataset is volumetric data without a pyramid behind it, so the
+      // voxels come from the port instead of the slice endpoint — but everything
+      // downstream (colormap, contrast, iso threshold) is the same path.
+      spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+      dataset$.next(spatialDatasetVolume());
+      const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+
+      const div = document.createElement('div');
+      div.id = 'vol-host';
+      document.body.appendChild(div);
+      const loaded = await service.load(imageInfo(), 0);
+      await service.plot('vol-host', loaded, imageInfo(), 600, PlotType.NAPARI_ISOSURFACE);
+      await flush();
+
+      expect(spatialPort.getVolume).toHaveBeenCalled();
+      const layer = addVolume.mock.results.at(-1)?.value;
+      expect([layer.width, layer.height, layer.depth]).toEqual([4, 6, 10]);
+      // Anisotropic voxels must carry through, or a 40x40x200um grid renders as a
+      // cube-aspect brick and squashes the anatomy.
+      expect(layer.voxelSize).toEqual([100, 200, 400]);
+
+      service.unsubscribe();
+      document.body.removeChild(div);
     });
   });
 

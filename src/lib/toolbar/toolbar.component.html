@@ -230,7 +230,7 @@
       </ng-container>
     </ng-container>
 
-    <ng-container *ngIf="isHeatmap && tools.regionTools">
+    <ng-container *ngIf="(isHeatmap || is3dRegions) && tools.regionTools">
       <span class="toolbar-separator"></span>
       <!-- Region Editor: opens the editor as a floating dialog (formerly the
            right-panel Regions tab). Sits with the region drawing tools. -->
@@ -252,7 +252,7 @@
                 tooltipPosition="bottom"
                 (onClick)="toggleDragMode.emit('drawrect')">
       </p-button>
-      <p-button size="small"
+      <p-button *ngIf="!is3dRegions" size="small"
                 [text]="activeDragMode !== 'drawopenpath'"
                 pTooltip="Draw a polyline (<kbd>l</kbd>)" [escape]="false"
                 tooltipPosition="bottom"
@@ -269,7 +269,10 @@
       </p-button>
       <!-- Brush: paint a region by dragging a disc of the given size; the Size
            slider appears while it's active. Hold Shift to erase (subtract). -->
-      <p-button size="small"
+      <!-- Brush and polyline are absent from a 3D cloud: the brush paints in IMAGE
+                 pixels and there is no raster to sample, and an open polyline is a
+                 profile tool, not a closed region a selection can test against. -->
+            <p-button *ngIf="!is3dRegions" size="small"
                 [text]="activeDragMode !== 'brush'"
                 pTooltip="Brush: click and drag to paint a region.
                 <br>Hold <kbd>Shift</kbd> while painting to erase from a region."

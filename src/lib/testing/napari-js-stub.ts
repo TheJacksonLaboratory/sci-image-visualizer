@@ -20,6 +20,10 @@ interface StubCamera3D {
   viewProjection(vw: number, vh: number): number[];
   target: [number, number, number];
   distance: number;
+  /** Vertical field of view in RADIANS, as napari-js has it. Needed by anything
+   *  deriving world-per-pixel at the pivot (the 3D scale bar); without it that
+   *  arithmetic silently goes NaN and the feature just does not appear. */
+  fov: number;
   changed: { connect(listener: () => void): () => void };
 }
 
@@ -336,6 +340,7 @@ export class Viewer {
     viewProjection: () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
     target: [0, 0, 0],
     distance: 1,
+    fov: (45 * Math.PI) / 180,
     changed: { connect: () => () => undefined },
   };
   readonly dims: StubDims = { z: 0 };

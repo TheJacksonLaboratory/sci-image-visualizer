@@ -26,8 +26,13 @@ export function formatUm(um: number): string {
   return `${trim(um * 1000)} nm`;
 }
 
-/** The slice of the napari Camera the scale bar reads (zoom = CSS px per world/image pixel). */
-interface ScaleBarCamera {
+/**
+ * The slice of the napari Camera the scale bar reads (zoom = CSS px per world/image pixel).
+ *
+ * Exported so the 3D spatial view can satisfy it with a shim: an orbit camera has no `zoom`, but
+ * px-per-world-unit AT THE PIVOT DEPTH is well defined, and that is what a 3D scale bar means.
+ */
+export interface ScaleBarCamera {
   readonly zoom: number;
   readonly changed: { connect(listener: () => void): () => void };
 }

@@ -39,6 +39,13 @@ export class ToolbarComponent implements OnChanges {
   @Input() zIndex = 0;
   /** True for any 2D (non Surface-3D) plot type. */
   @Input() isHeatmap = true;
+  /**
+   * Region tools apply even though this is a 3D view, because they draw a
+   * SCREEN-SPACE lasso (the 3D spatial cloud). Separate from {@link isHeatmap},
+   * which means "2D view" and also drives the zoom tools and the 3D camera
+   * controls — flipping that would show 2D pan/zoom and hide the orbit controls.
+   */
+  @Input() is3dRegions = false;
   @Input() activeDragMode: string | null = null;
   @Input() activeSurface3dMode = 'turntable';
   /** Whether the napari 3D axes/scale gizmo is currently shown (drives the toggle's look). */

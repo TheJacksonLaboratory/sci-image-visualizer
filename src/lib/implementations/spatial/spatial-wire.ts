@@ -63,6 +63,7 @@ export interface SpatialManifest {
   polygons?: { count: number };
   imageRef?: SpatialImageRef;
   volume?: SpatialVolumeMeta;
+  micronsPerUnit?: number;
 }
 
 /** `GET /spatial/datasets` */
@@ -211,5 +212,8 @@ export function datasetFromManifest(
     ...(manifest.polygons ? { polygons: manifest.polygons } : {}),
     ...(manifest.imageRef ? { imageRef: manifest.imageRef } : {}),
     ...(manifest.volume ? { volume: manifest.volume } : {}),
+    ...(manifest.micronsPerUnit !== undefined
+      ? { micronsPerUnit: manifest.micronsPerUnit }
+      : {}),
   };
 }

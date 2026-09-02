@@ -1,5 +1,7 @@
 import { Inject, Injectable, Optional } from '@angular/core';
-import { Observable, BehaviorSubject, Subject, Subscription, combineLatest, from, of } from 'rxjs';
+import {
+  Observable, BehaviorSubject, Subject, Subscription, combineLatest, from, of, firstValueFrom,
+} from 'rxjs';
 import { Image } from 'image-js';
 import { saveAs } from 'file-saver';
 import {
@@ -80,7 +82,7 @@ import { BaseStoreVisualizer } from '../base-store-visualizer';
 import { SimpleSliceAccessService } from '../simple-slice-access.service';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
-import { NapariScaleBar, formatUm } from './napari-scale-bar';
+import { NapariScaleBar, ScaleBarCamera, formatUm } from './napari-scale-bar';
 import { NapariRegionOverlay, OverlayViewer } from './napari-region-overlay';
 import { NapariAxesLabels, AxisLabelSpec } from './napari-axes-labels';
 import { NapariVolumeZHandle } from './napari-volume-z-handle';
@@ -313,6 +315,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private spatialVolumeKey: string | null = null;
   /** Offset applied to observation coordinates to sit them in the volume's box. */
   private spatialOrigin3d: [number, number, number] = [0, 0, 0];
+  /** Dataset the 3D scale bar was built for. */
+  private spatialScaleBarKey: string | null = null;
   private spatialSub: Subscription | null = null;
   /** Which dataset the current marker layer was built for, so a display-only
    *  change (size, colour, opacity, selection) can update it in place. */
@@ -1157,6 +1161,45 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     }
   }
 
+  /**
+   * The active spatial dataset's registered volume, shaped like an assembled image volume.
+   *
+   * Lets the existing Volume and Isosurface modes render a 3D omics dataset: the voxels come from
+   * `SPATIAL_DATA_PORT` rather than the slice endpoint, but everything downstream — colormap,
+   * contrast, iso threshold, the channel-state subscription — is the same path an image stack
+   * takes. An isosurface of an averaged template is a brain surface, which is a genuinely useful
+   * thing to see the cloud inside.
+   *
+   * Null whenever there is no dataset, no volume, or no port method for it, which sends the
+   * caller back to the image-stack path.
+   */
+  private async assembleSpatialVolume(): Promise<
+    { data: Uint8Array; width: number; height: number; depth: number;
+      voxelSize: [number, number, number] } | null
+  > {
+    const port = this.spatialData;
+    if (!port?.getVolume) return null;
+    // Read the dataset lazily rather than holding a mirror: the port publishes
+    // its current value on subscribe (the selector relies on that too), so this
+    // resolves synchronously and there is no subscription to own.
+    const dataset = await firstValueFrom(port.getDataset$());
+    const meta = dataset?.volume;
+    if (!meta) return null;
+    try {
+      const data = await port.getVolume();
+      return {
+        data,
+        width: meta.width,
+        height: meta.height,
+        depth: meta.depth,
+        voxelSize: meta.voxelSize,
+      };
+    } catch (err) {
+      console.warn('[napari-js] spatial volume unavailable for the volume view', err);
+      return null;
+    }
+  }
+
   /** Convert a napari-js `Histogram` (bin count + min/max) to the pane's `IHistogram` (bin edges). */
   private toIHistogram(h: { counts: Uint32Array; bins: number; min: number; max: number }): IHistogram {
     const span = h.max - h.min || 1;
@@ -1189,9 +1232,17 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const rendering: 'iso' | 'mip' = isNapariIsosurface(plotType) ? 'iso' : 'mip';
     const states = this.store.currentChannelStates();
 
+    // A spatial dataset can supply the volume itself — a registered atlas template
+    // rather than an image stack — so Volume and Isosurface work on a 3D omics
+    // dataset with no pyramid behind it. It WINS over the image: it is a single
+    // scalar field, and if the dataset carries volumetric data that is what these
+    // modes are being asked to show, whatever the loaded image happens to have.
+    const spatialVol = await this.assembleSpatialVolume();
+    const useSpatial = !!spatialVol;
+
     this.volumeChannelData.clear();
-    this.volumeMultichannel = multichannel;
-    this.imageMode = multichannel ? 'multichannel' : 'grayscale';
+    this.volumeMultichannel = multichannel && !useSpatial;
+    this.imageMode = this.volumeMultichannel ? 'multichannel' : 'grayscale';
     const view = new MultiChannelVolumeView(viewer);
     this.volumeView = view;
 
@@ -1203,7 +1254,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.stackLoading$.next(true);
     this.stackLoadingProgress$.next(0);
     try {
-      if (multichannel) {
+      if (multichannel && !useSpatial) {
         for (let c = 0; c < channelCount; c++) {
           const vol = await this.assembleVolume(info, res, c);
           if (!vol) continue;
@@ -1223,7 +1274,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
           });
         }
       } else {
-        const vol = await this.assembleVolume(info, res);
+        const vol = spatialVol ?? (await this.assembleVolume(info, res));
         if (vol) {
           dims = vol;
           this.volumeChannelData.set(0, vol.data);
@@ -1236,6 +1287,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
             colormap: this.volumeColormap(st),
             contrastLimits: [st?.min ?? 0, st?.max ?? 255],
             gamma: st?.gamma ?? 1,
+            // Anisotropic on purpose here: 40x40x200um voxels would render as a
+            // cube-aspect brick without this, squashing the whole brain.
+            ...(spatialVol?.voxelSize ? { voxelSize: spatialVol.voxelSize } : {}),
           });
         }
       }
@@ -1251,16 +1305,31 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // to shrink at higher resolution. Instead anchor the in-plane long side to a fixed reference and
     // let Z span the full slice count; the box shape is then identical at every decimate factor. The
     // per-axis `voxelSize` (napari `scale`) maps the sampled grid onto that fixed world box.
-    const fullW = this.descriptor?.width ?? dims.width;
-    const fullH = this.descriptor?.height ?? dims.height;
-    const fullD =
-      this.loaded?.imageInfo.imageMeta?.[0]?.z || this.loaded?.imageInfo.urls?.length || dims.depth;
-    const fullLong = Math.max(1, fullW, fullH);
-    const world = {
-      width: (fullW * VOLUME_WORLD_INPLANE_REF) / fullLong,
-      height: (fullH * VOLUME_WORLD_INPLANE_REF) / fullLong,
-      depth: fullD,
-    };
+    // A dataset-supplied volume already knows its physical voxel size, so its box
+    // is simply dims x voxelSize. The reference-box arithmetic below exists to make
+    // an IMAGE stack's proportions independent of the decimate factor, which a
+    // fixed grid does not need — and applying it would discard real anisotropy
+    // (40x40x200um) and render the brain as a cube-aspect brick.
+    let world: { width: number; height: number; depth: number };
+    if (spatialVol) {
+      const [vx, vy, vz] = spatialVol.voxelSize;
+      world = {
+        width: dims.width * vx,
+        height: dims.height * vy,
+        depth: dims.depth * vz,
+      };
+    } else {
+      const fullW = this.descriptor?.width ?? dims.width;
+      const fullH = this.descriptor?.height ?? dims.height;
+      const fullD =
+        this.loaded?.imageInfo.imageMeta?.[0]?.z || this.loaded?.imageInfo.urls?.length || dims.depth;
+      const fullLong = Math.max(1, fullW, fullH);
+      world = {
+        width: (fullW * VOLUME_WORLD_INPLANE_REF) / fullLong,
+        height: (fullH * VOLUME_WORLD_INPLANE_REF) / fullLong,
+        depth: fullD,
+      };
+    }
     // Base box (Z-scale = 1) + the sampled depth drive the live Z-height handle below; the persisted
     // `volumeZScale` (user drag) applies on top so changing resolution keeps the chosen height.
     this.volumeWorldBase = world;
@@ -1273,7 +1342,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     ];
     for (const ch of channels) ch.voxelSize = voxelSize;
 
-    view.render(multichannel ? 'multichannel' : 'grayscale', channels, { rendering });
+    view.render(this.volumeMultichannel ? 'multichannel' : 'grayscale', channels, { rendering });
     this.imageW = dims.width;
     this.imageH = dims.height;
     this.volumeDims = dims;
@@ -1744,6 +1813,39 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   }
 
   /**
+   * Scale bar for the 3D cloud, measured at the ORBIT PIVOT.
+   *
+   * A perspective camera has no single scale — things farther away are smaller — so a bar can
+   * only be true at one depth. The pivot is the honest choice: it is what the camera is framing,
+   * what a zoom moves towards, and where the eye is anyway. napari's own 3D scale bar works the
+   * same way.
+   *
+   * `NapariScaleBar` needs CSS px per world unit, which an orbit camera does not expose, but at
+   * the pivot it is exactly `viewportHeight / (2 * distance * tan(fov / 2))` — the same
+   * relationship `Camera3D.pan` uses to track the cursor. The bar then converts through
+   * `micronsPerUnit`, and draws nothing at all when the dataset does not declare one, because a
+   * bar labelled in microns over unknown units would read as a measurement.
+   */
+  private installSpatial3dScaleBar(viewer: Viewer, dataset: SpatialDataset | null): void {
+    this.scaleBar?.destroy();
+    this.scaleBar = null;
+    const micronsPerUnit = dataset?.micronsPerUnit;
+    if (!this.host || !micronsPerUnit || micronsPerUnit <= 0) return;
+
+    const canvas = this.canvas;
+    const cam = viewer.camera3d;
+    const shim: ScaleBarCamera = {
+      get zoom(): number {
+        const h = canvas?.clientHeight || canvas?.height || 0;
+        const worldPerPx = (2 * cam.distance * Math.tan(cam.fov / 2)) / (h || 1);
+        return worldPerPx > 0 ? 1 / worldPerPx : 0;
+      },
+      changed: cam.changed,
+    };
+    this.scaleBar = new NapariScaleBar(this.host, shim, micronsPerUnit);
+  }
+
+  /**
    * Largest category count whose colours survive the 3D layer's LUT intact.
    *
    * The 3D points layer has no per-point RGBA — it maps a per-point SCALAR through a 256-entry
@@ -1793,6 +1895,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // is the framing we want — the brain, not the outermost stray segmentation.
     await this.ensureSpatialVolume(viewer, dataset);
     if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
+    // Scale depends on the dataset's declared unit, so it waits for the dataset
+    // rather than being set up at mount time.
+    if (dataset.id !== this.spatialScaleBarKey) {
+      this.spatialScaleBarKey = dataset.id;
+      this.installSpatial3dScaleBar(viewer, dataset);
+    }
 
     const scale = view.pointScale > 0 ? view.pointScale : 1;
     const size = NapariVisualizerService.SPATIAL_3D_BASE_SIZE * scale;
@@ -2561,6 +2669,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.spatialVolume = null;
     this.spatialVolumeKey = null;
     this.spatialOrigin3d = [0, 0, 0];
+    this.spatialScaleBarKey = null;
     // Drop the cached interleaved coordinates too: holding 3.7M x 3 floats after
     // a teardown is ~45MB of retained heap for a scene that no longer exists.
     this.spatialPositions3d = null;

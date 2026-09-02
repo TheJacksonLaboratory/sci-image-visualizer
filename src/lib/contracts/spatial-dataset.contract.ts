@@ -205,6 +205,18 @@ export interface SpatialDataset {
   imageRef?: SpatialImageRef;
   /** Presence + geometry of a reference volume the observations sit inside. */
   volume?: SpatialVolumeMeta;
+  /**
+   * Microns per observation coordinate unit — what makes a scale bar possible.
+   *
+   * The 2D path gets this from `imageRef.mppX`, because there the coordinates are
+   * image pixels. A 3D cloud has no image, so it has to say for itself: `1` means
+   * the coordinates are already microns.
+   *
+   * Absent means the unit is UNKNOWN, and a renderer must then draw no scale bar
+   * rather than assume one. A bar labelled in microns over pixel-space
+   * coordinates is worse than no bar: it looks like a measurement.
+   */
+  micronsPerUnit?: number;
 }
 
 /**

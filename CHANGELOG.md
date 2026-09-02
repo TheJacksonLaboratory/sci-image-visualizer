@@ -50,6 +50,36 @@ file was added.
   and the selected-subset layer take that offset; a volume that fails to load
   costs the backdrop, not the data.
 
+- **Volume and Isosurface work on a 3D omics dataset.** Those modes take their
+  voxels from `SpatialDataPort.getVolume()` when the dataset carries a registered
+  volume, so a 3D omics dataset with no image pyramid behind it can still be
+  raymarched or contoured. The dataset's volume wins over the loaded image: it is
+  a single scalar field, and if the dataset carries volumetric data that is what
+  these modes are being asked to show. `requiresStack` is satisfied by a spatial
+  volume as well as by a z-stack.
+
+  A declared voxel size is honoured rather than overwritten. The existing
+  reference-box arithmetic exists to make an image stack's proportions
+  independent of the decimate factor; applying it to a fixed grid would discard
+  real anisotropy and render 40 × 40 × 200 µm voxels as a cube-aspect brick.
+
+- **Region tools in the 3D cloud's toolbar.** They were hidden, because the
+  toolbar gates them on `isHeatmap`, which means "2D view" and is false for any
+  3D descriptor — so the screen-space overlay was installed with no way to arm
+  it. Gated on a separate `is3dRegions` input instead, leaving `isHeatmap` to go
+  on driving the zoom tools and the 3D camera controls. The brush and the open
+  polyline stay hidden there: the brush paints in image pixels and there is no
+  raster to sample, and an open polyline is a profile tool, not a closed region a
+  selection can test against.
+
+- **Scale bar in the 3D cloud**, measured at the orbit pivot — a perspective
+  camera has no single scale, so a bar can only be true at one depth, and the
+  pivot is what the camera is framing. Needs `SpatialDataset.micronsPerUnit`,
+  new: the 2D path reads `imageRef.mppX` because its coordinates are image
+  pixels, but a cloud has no image and must state its own unit. Absent means
+  unknown, and then no bar is drawn — one labelled in microns over pixel-space
+  coordinates would read as a measurement.
+
 - **Region selection in 3D.** The existing ROI tools — rectangle, polygon,
   freehand — work on the cloud, by handing `NapariRegionOverlay` a screen-space
   viewer whose transforms are identity. The drawn shape is a lasso in canvas

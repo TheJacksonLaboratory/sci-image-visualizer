@@ -313,6 +313,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   private hasSpatialDataset = false;
   /** Whether that dataset's observations carry a z, gating the 3D spatial mode. */
   private hasSpatial3dDataset = false;
+  /** Whether it carries a registered volume, which feeds Volume / Isosurface. */
+  private hasSpatialVolume = false;
   private spatialDatasetSubscription?: Subscription;
 
   plotWidthSubscription?: Subscription;
@@ -391,11 +393,15 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       // the 3D mode is gated on the coordinates, not merely on a dataset being
       // present. Most spatial assays are one plane.
       const has3d = !!dataset?.observations.z;
+      const hasVolume = !!dataset?.volume;
       // The port publishes its current value on subscribe, so the initial `null`
       // would otherwise recompute the selector for no change.
-      if (has === this.hasSpatialDataset && has3d === this.hasSpatial3dDataset) return;
+      if (has === this.hasSpatialDataset
+        && has3d === this.hasSpatial3dDataset
+        && hasVolume === this.hasSpatialVolume) return;
       this.hasSpatialDataset = has;
       this.hasSpatial3dDataset = has3d;
+      this.hasSpatialVolume = hasVolume;
       this.computePlotTypeOptions();
       // A dataset with no reference image has nothing to draw observations OVER:
       // a cloud registered into a common frame (the Allen CCF) has coordinates
@@ -427,7 +433,11 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
         // is offered; test mode exposes every backend's type.
         if (!this.testMode && !d.productionLabel) return false;
         if (d.dimensions === '3d' && !caps.has(ViewerFeature.Surface3D)) return false;
-        if (d.requiresStack && !isStack) return false;
+        // `requiresStack` means "needs volumetric data", which a z-stack image is
+        // the usual source of — but a spatial dataset carrying a registered
+        // volume is another. Without this, Volume and Isosurface stay hidden for
+        // a 3D omics dataset that has the voxels to feed them.
+        if (d.requiresStack && !isStack && !this.hasSpatialVolume) return false;
         if (d.requiresGrayscale && !isGrayscale && !isMultichannel) return false;
         if (d.requiresSpatialData && !this.hasSpatialDataset) return false;
         if (d.requiresSpatial3d && !this.hasSpatial3dDataset) return false;

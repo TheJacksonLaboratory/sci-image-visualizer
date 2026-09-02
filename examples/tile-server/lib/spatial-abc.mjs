@@ -630,6 +630,9 @@ export async function abcManifest(abcDir, id) {
     count,
     hasZ: true,
     hasIds: false,
+    // Coordinates are microns (deposited millimetres x MM_TO_UM), which is what
+    // lets the 3D view draw a scale bar at all.
+    micronsPerUnit: 1,
     // MERFISH somata run ~10um across. There is no reference image, so this is
     // microns of tissue, same units as the coordinates.
     radius: { mode: 'uniform', value: 5 },
