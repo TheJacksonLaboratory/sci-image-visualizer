@@ -72,6 +72,12 @@ file was added.
   1D charts, and background subsampling. When napari-js is unavailable the
   fallback renders the tissue image **without** the observation layer.
 
+- The browser example groups its discovered spatial-omics datasets into a
+  **`spatial-omics` folder**, alongside the bundled micro-CT series: with 41
+  datasets the root gallery was unreadable flat. `Folder` now holds either an
+  image series or a set of spatial datasets, since both are "many related things
+  behind one tile".
+
 - **Legacy Spatial Transcriptomics datasets are served live too**
   (`lib/spatial-st.mjs`), from `$ST_DIR` (default `./st`). Pre-Visium ST is a
   different shape from a SpatialData store — gzipped TSV count matrices, separate

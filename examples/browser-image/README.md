@@ -219,9 +219,10 @@ image, and **Spatial omics** still needs a dataset loaded.
 
 The gallery's spatial entries are **discovered from the server**, not hardcoded:
 the example asks `/spatial/datasets` at startup, so dropping a SpatialData store
-into the server's `stores/` directory makes it appear here with no code change.
-Each entry loads a tissue image *and* the spatial-omics dataset registered onto
-it.
+(or a legacy ST bundle) into the server's data directories makes it appear here
+with no code change. They live in a **`spatial-omics` folder**, like the bundled
+micro-CT series — with 41 datasets the root gallery is unreadable flat. Each
+entry loads a tissue image *and* the spatial-omics dataset registered onto it.
 
 Image dimensions are fetched on **click**, not at startup — asking for a
 descriptor is what makes the server build that image's pyramid, so only the

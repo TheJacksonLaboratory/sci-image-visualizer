@@ -31,9 +31,29 @@ interface DicomSlice {
 }
 
 /** A gallery sub-folder (currently just the bundled micro-CT DICOM series). */
+/**
+ * A spatial-omics dataset the SERVER reported, rather than one hardcoded here.
+ * The example asks `/spatial/datasets` at startup, so dropping a SpatialData
+ * store (or a legacy ST bundle) into the server's data directories makes it
+ * appear in this gallery with no code change.
+ */
+interface SpatialEntry {
+  datasetId: string;
+  name: string;
+  imageId: string;
+}
+
+/**
+ * A gallery folder. Holds EITHER a DICOM series or a set of spatial-omics
+ * datasets — both are "many related things behind one tile", and the root
+ * gallery is unreadable with 41 spatial entries flattened into it.
+ */
 interface Folder {
   name: string;
-  slices: DicomSlice[];
+  /** Slices of an image series (micro-CT). */
+  slices?: DicomSlice[];
+  /** Spatial-omics datasets, discovered from the server. */
+  spatial?: SpatialEntry[];
 }
 
 /**
@@ -125,18 +145,6 @@ const TILED_IMAGES: TiledImage[] = TILE_SERVER
       { name: 'Project002 · 2ch x 27z stack · 7.5 Gpx', imageId: 'project002-stack', width: 14971, height: 18664, mppX: 0.3211, mppY: 0.3211, channels: 2, slices: 27 },
     ]
   : [];
-
-/**
- * A spatial-omics dataset the SERVER reported, rather than one hardcoded here.
- * The example asks `/spatial/datasets` at startup, so dropping a SpatialData
- * store into the server's `stores/` directory makes it appear in this gallery
- * with no code change.
- */
-interface SpatialEntry {
-  datasetId: string;
-  name: string;
-  imageId: string;
-}
 
 /**
  * The tile server's descriptor for an image: its true dimensions and µm/px.
@@ -442,7 +450,7 @@ async function warmUp(base: string): Promise<void> {
             *ngFor="let f of folders"
             class="tile folder"
             (click)="openFolder(f)"
-            [title]="'Open ' + f.name + ' (' + f.slices.length + ' DICOM slices)'"
+            [title]="'Open ' + f.name + ' (' + folderCount(f) + ' items)'"
           >
             <span class="thumb folder-icon">
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -464,18 +472,6 @@ async function warmUp(base: string): Promise<void> {
             <span class="thumb dcm">WSI</span>
             <span class="name">{{ t.name }}</span>
           </button>
-          <!-- Spatial-omics datasets the SERVER reported. Adding a store to the
-               server's stores/ directory makes one appear here with no code change. -->
-          <button
-            *ngFor="let e of spatialEntries"
-            class="tile"
-            [class.active]="e.datasetId === active"
-            (click)="loadSpatial(e)"
-            [title]="e.name + ' — spatial omics, read live from a SpatialData Zarr store'"
-          >
-            <span class="thumb dcm">OMIC</span>
-            <span class="name">{{ e.name }}</span>
-          </button>
           <button
             *ngFor="let s of samples"
             class="tile"
@@ -496,8 +492,12 @@ async function warmUp(base: string): Promise<void> {
             <span>/</span>
             <span class="crumb-current">{{ folder.name }}</span>
           </div>
-          <div class="folder-hint">
+          <div class="folder-hint" *ngIf="folder.slices">
             Click a slice to view it · <strong>right-click</strong> to load the whole folder as a z-stack.
+          </div>
+          <div class="folder-hint" *ngIf="folder.spatial">
+            Click a dataset to open it over its tissue image, then pick
+            <strong>Spatial omics</strong> in the plot-type menu.
           </div>
           <button
             *ngFor="let d of folder.slices; let i = index"
@@ -509,6 +509,16 @@ async function warmUp(base: string): Promise<void> {
           >
             <span class="thumb dcm">DCM</span>
             <span class="name">{{ d.name }}</span>
+          </button>
+          <button
+            *ngFor="let e of folder.spatial"
+            class="tile dcm-tile"
+            [class.active]="e.datasetId === active"
+            (click)="loadSpatial(e)"
+            [title]="e.name + '  —  ' + e.datasetId"
+          >
+            <span class="thumb dcm">OMIC</span>
+            <span class="name">{{ e.name }}</span>
           </button>
         </ng-container>
       </aside>
@@ -527,9 +537,18 @@ async function warmUp(base: string): Promise<void> {
 })
 export class AppComponent implements OnDestroy {
   readonly samples = SAMPLES;
-  readonly folders = FOLDERS;
+  /**
+   * Root folders: the bundled micro-CT series, plus a spatial-omics folder once
+   * the server has reported any. Derived rather than fixed because discovery is
+   * async — the folder appears when its contents do.
+   */
+  get folders(): Folder[] {
+    return this.spatialEntries.length
+      ? [...FOLDERS, { name: 'spatial-omics', spatial: this.spatialEntries }]
+      : FOLDERS;
+  }
   readonly tiledImages = TILED_IMAGES;
-  /** null = root (folders + samples); otherwise the opened folder's slices. */
+  /** null = root (folders + samples); otherwise the opened folder's contents. */
   currentFolder: Folder | null = null;
   active?: string;
   loading = false;
@@ -586,6 +605,11 @@ export class AppComponent implements OnDestroy {
 
   // ── Gallery folder navigation ───────────────────────────────────────────
   openFolder(f: Folder): void { this.currentFolder = f; }
+
+  /** How many items a folder holds, for its tooltip. */
+  folderCount(f: Folder): number {
+    return (f.slices?.length ?? 0) + (f.spatial?.length ?? 0);
+  }
   closeFolder(): void { this.currentFolder = null; }
 
   /** Load a gigapixel image through the TILED (Mode A) server path. First warms
@@ -707,13 +731,15 @@ export class AppComponent implements OnDestroy {
   async loadStack(event: MouseEvent, index: number): Promise<void> {
     event.preventDefault(); // suppress the browser's native context menu
     const folder = this.currentFolder;
-    if (!folder) return;
-    this.active = folder.slices[index]?.name;
+    // Only a slice folder can be loaded as a z-stack; a spatial-omics folder has
+    // no slices to stack.
+    if (!folder?.slices?.length) return;
+    this.active = folder.slices![index]?.name;
     this.spatialData.clear();
     this.loading = true;
     try {
       await this.imageState.setStackFromDicomUrls(
-        folder.slices.map((s) => s.url),
+        folder.slices!.map((s) => s.url),
         folder.name,
         index,
       );
