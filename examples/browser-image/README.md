@@ -201,6 +201,20 @@ No database, no state. At gigapixel scale the only thing that matters is a
 for `geotiff.js` (range-reading a COG straight from a bucket), or the local
 pyramid for a DeepZoom/IIIF source, as long as you keep the contract above.
 
+## Showing every plot mode
+
+`?test=1` on the example URL turns on the viewer's `testMode` input, which shows
+every backend's plot mode under its backend-suffixed label — `Image (OSD)` next
+to `Image (napari · WebGPU)`, both Surfaces, all the Scatters:
+
+```
+http://localhost:5173/?test=1
+```
+
+It lifts the `productionLabel` curation only. The capability gates still apply:
+a stack-only mode still needs a stack, a scalar mode still needs a grayscale
+image, and **Spatial omics** still needs a dataset loaded.
+
 ## Spatial-omics demo
 
 The gallery's **Spatial omics demo · Visium geometry** entry loads a tissue image

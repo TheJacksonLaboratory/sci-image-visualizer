@@ -261,9 +261,10 @@ shaped, and wrong for "one value per cell". Plan:
 10. Linked **histogram** of the active continuous column, selection-aware.
 11. Display controls: ~~point size/scale, global alpha~~ **done**; log scale and outlier clip
     also landed. Background subsample fraction still open (gated on the scale question, Q4).
-12. ~~Runnable demo in `examples/` end to end.~~ **Done** for the synthetic Visium-geometry
-    dataset (image + data + affine, no download). Still open for the *real* mouse-brain store,
-    which needs `make_spatial.py` run against it.
+12. ~~Runnable demo in `examples/` end to end.~~ **Done, on real data**: the scverse
+    `visium_spatialdata_0.7.1` mouse-brain store converts to 2,987 spots + its H&E image with the
+    store's own affine, via a dependency-free Node reader (`lib/zarr3.mjs`). The synthetic
+    generator remains for a no-download path.
 13. Tests to the repo standard (jest specs beside source) + `npm run typecheck`, `lint`, `test`
     green; README + this doc updated.
 

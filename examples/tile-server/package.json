@@ -12,7 +12,9 @@
     "dev": "node --watch server.mjs",
     "make-cog": "node scripts/make-cog.mjs",
     "make-spatial-demo": "node scripts/make-spatial-demo.mjs",
-    "smoke-spatial": "node smoke-spatial.mjs"
+    "smoke-spatial": "node smoke-spatial.mjs",
+    "make-spatial": "node --max-old-space-size=6144 scripts/make-spatial-from-zarr.mjs",
+    "make-pyramid": "node scripts/make-pyramid.mjs"
   },
   "dependencies": {
     "cors": "^2.8.5",

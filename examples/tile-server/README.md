@@ -91,51 +91,39 @@ arrangement Visium has with its 2000 px hires tier — so `imageRef.scale` is a
 real affine rather than a trivial 1:1, and the renderer's registration is
 actually exercised.
 
-Real data goes through the Python converter, which reads a SpatialData Zarr
-store (Zarr v3 + AnnData conventions + GeoParquet shapes):
+Real data goes through the **Node** converter — no Python, no Zarr or Parquet
+libraries. These stores are Zarr v3 with `bytes` + `zstd` codecs and `vlen-utf8`
+strings, and Node 24 ships zstd in `node:zlib`, so `lib/zarr3.mjs` reads them
+directly:
 
 ```bash
-pip install "spatialdata>=0.2" numpy pandas
-
 curl -O https://s3.embl.de/spatialdata/spatialdata-sandbox/visium_spatialdata_0.7.1.zip
-unzip visium_spatialdata_0.7.1.zip     # -> data.zarr  (Visium mouse brain, ~68 MB)
+unzip visium_spatialdata_0.7.1.zip                 # -> data.zarr  (Visium mouse brain, ~68 MB)
 
-python scripts/make_spatial.py --input data.zarr --list
-python scripts/make_spatial.py --input data.zarr --sample ST8059048 --out ./spatial
+npm run make-spatial -- --input data.zarr --list   # which sections are in there
+npm run make-spatial -- --input data.zarr --sample ST8059048
 ```
 
-> The store is **multi-sample** (`ST8059048`, `ST8059050`, …), so `--sample`
-> picks the section. `--genes` defaults to the 2,000 most-expressed;
-> `--genes all` writes the full matrix. If spots do not line up with the tissue
-> image, the transform lookup fell back to intrinsic coordinates (it says so on
-> stderr, and records it in `manifest.imageRef._note`) — correct it with
-> `--coordinate-system` or `--scale`.
->
-> `make_spatial.py` has not been executed against a live store yet; treat the
-> first run as a verification step.
+That writes `./spatial/st8059048` **and** `./cogs/st8059048-tissue` (the H&E
+image as a tiled pyramid), then prints a ready-made gallery entry for the
+browser example.
 
-## Quick start (local)
+Three things it handles that a naive reader would get wrong:
 
-```bash
-cd examples/tile-server
-npm install
+- The store is **multi-sample** — one row block per section — so rows are
+  filtered by the region column before anything is index-aligned.
+- The **spot shapes carry the full-res → hires `scale`**, which is exactly the
+  `imageRef.scale` the viewer needs. Skip it and every spot lands ~8.7× too far out.
+- Nothing in the store states the image's µm/px, so it is derived by using
+  Visium's known 100 µm spot pitch as a ruler.
 
-# 1. Produce a pyramid from a whole-slide image (needs: brew install vips)
-#    CMU-1 (CC0, ~1.5 Gpx):
-npm run make-cog -- .cache/CMU-1.svs cmu-1
-#    A JAX slide (~22 Gpx):
-npm run make-cog -- .cache/BC18_1.ndpi bc18
+A raw table carries only `array_row` / `array_col` / `in_tissue` / `spot_id`, so
+the converter also derives `total_counts` and `n_genes_by_counts` from the
+expression matrix — otherwise there is nothing meaningful to colour by.
 
-# 2. Serve
-npm start                       # -> http://localhost:8090   (COG_DIR=./cogs)
-
-# 3. From the repo root, point the browser example at it (trailing slash matters —
-#    the library concatenates `${api}tile`):
-VITE_TILE_SERVER=http://localhost:8090/ npm run start:example
-```
-
-The gigapixel gallery entries only appear when `VITE_TILE_SERVER` is set, so the
-public Pages demo stays fully serverless until a server is wired in.
+`--genes N` keeps the N most-expressed genes (default 2,000; the full 31k
+matrix would be ~370 MB). `scripts/make-pyramid.mjs` turns any other image into
+the same pyramid format, if you need one without `vips`.
 
 ## Deploy (Cloud Run)
 

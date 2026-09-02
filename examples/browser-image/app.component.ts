@@ -123,11 +123,15 @@ const TILED_IMAGES: TiledImage[] = TILE_SERVER
       // The same file as its real shape: 2 channels x 27 z-slices. Scrubbing the
       // stack swaps the tile `z` param server-side (no per-slice urls).
       { name: 'Project002 · 2ch x 27z stack · 7.5 Gpx', imageId: 'project002-stack', width: 14971, height: 18664, mppX: 0.3211, mppY: 0.3211, channels: 2, slices: 27 },
-      // Synthetic Visium-geometry demo: tissue image + the spatial-omics dataset
-      // that registers onto it. Built by `npm run make-spatial-demo` in
-      // examples/tile-server (no download, no Python). Selecting it adds the
-      // "Spatial omics" plot type, which draws ~2k spots over the tissue.
-      { name: 'Spatial omics demo · Visium geometry', imageId: 'demo-brain-tissue', width: 2000, height: 2099, mppX: 3.225, mppY: 3.225, spatialDatasetId: 'demo-brain' },
+      // REAL Visium mouse brain (scverse spatialdata-sandbox, section ST8059048):
+      // 2,987 spots over the H&E tissue image, with the store's own full-res ->
+      // hires affine. Built by `npm run make-spatial -- --input <store.zarr>`.
+      // Selecting it adds the "Spatial omics" plot type.
+      { name: 'Visium mouse brain · ST8059048', imageId: 'st8059048-tissue', width: 1969, height: 2000, mppX: 3.9591, mppY: 3.9591, spatialDatasetId: 'st8059048' },
+      // Synthetic stand-in with the same geometry, for when the 68 MB store
+      // hasn't been downloaded (`npm run make-spatial-demo`). Harmless if absent:
+      // the entry just fails to load its dataset and the mode stays hidden.
+      { name: 'Spatial omics demo · synthetic', imageId: 'demo-brain-tissue', width: 2000, height: 2099, mppX: 3.225, mppY: 3.225, spatialDatasetId: 'demo-brain' },
     ]
   : [];
 
@@ -485,7 +489,7 @@ async function warmUp(base: string): Promise<void> {
         title="Drag to resize the gallery"
       ></div>
       <main class="viewer">
-        <visualizer [toolbarTools]="toolbarTools"></visualizer>
+        <visualizer [toolbarTools]="toolbarTools" [testMode]="testMode"></visualizer>
         <div class="spinner" *ngIf="loading">{{ loadingMessage || 'decoding…' }}</div>
       </main>
     </div>
@@ -512,6 +516,18 @@ export class AppComponent implements OnDestroy {
    *  it documents the segmentation tools this example exercises, so it is worth
    *  having here. (Channels / download need a backend, but the plot-type selector
    *  works serverlessly.) */
+  /**
+   * Show every backend's plot mode in the selector, under its backend-suffixed
+   * label — `?test=1` (or `?test=true`) in the URL.
+   *
+   * This lifts the `productionLabel` CURATION only. The capability gates still
+   * apply: a stack-only mode still needs a stack, a scalar mode still needs a
+   * grayscale image, and Spatial omics still needs a dataset loaded.
+   */
+  readonly testMode = /^(1|true|yes)$/i.test(
+    new URLSearchParams(window.location.search).get('test') ?? '',
+  );
+
   readonly toolbarTools: ToolbarToolVisibility = {
     specialTools: true,
     zoomTools: true,

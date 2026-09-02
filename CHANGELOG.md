@@ -133,11 +133,25 @@ file was added.
   - The browser example gains a **Spatial omics demo** gallery entry that loads
     the image and the dataset together; selecting any other image clears the
     dataset, which withdraws the plot type.
-  - `scripts/make_spatial.py` converts a real SpatialData Zarr store (e.g. the
-    Visium mouse brain sandbox dataset). Written but **not yet executed against
-    a live store** — no `spatialdata` install was available; it falls back
-    loudly rather than silently when the coordinate transform cannot be
-    resolved.
+  - `npm run make-spatial` converts a real **SpatialData Zarr store** into the
+    same bundle plus a tissue pyramid — in plain Node, with no Python and no
+    Zarr/Parquet libraries. These stores use Zarr v3 with `bytes` + `zstd`
+    codecs and `vlen-utf8` strings, and Node 24 ships zstd in `node:zlib`, so
+    `lib/zarr3.mjs` (a small read-only reader that throws by name on an
+    unsupported codec) is enough.
+
+    Verified against the scverse `visium_spatialdata_0.7.1` mouse brain: 2,987
+    spots for section ST8059048, the 2,000 most-expressed of 31,053 genes
+    written gene-major, and the H&E hires image at 3.96 µm/px. It filters the
+    **multi-sample** table by region before index-aligning anything, takes the
+    full-res → hires affine from the **spot shapes** transform (skipping it puts
+    every spot ~8.7× too far out), derives µm/px by using Visium's 100 µm pitch
+    as a ruler, and derives `total_counts` / `n_genes_by_counts` — a raw table
+    has only `array_row`/`array_col`/`in_tissue`/`spot_id`, nothing worth
+    colouring by.
+  - `scripts/make-pyramid.mjs` + `lib/pyramid.mjs` turn any sharp-readable image
+    into the tiled pyramid the server serves — the no-`vips` counterpart to
+    `make-cog.mjs`.
 
 
 ## [0.3.3] — 2026-08-31
