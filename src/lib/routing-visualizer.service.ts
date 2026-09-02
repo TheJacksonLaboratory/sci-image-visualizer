@@ -8,7 +8,7 @@ import { Region } from './models/region';
 import { ClassPreset, PresetSet } from './models/class-preset';
 import { PlotlyService } from './implementations/plotly/plotly.service';
 import { OpenSeadragonVisualizerService } from './implementations/osd/openseadragon-visualizer.service';
-import { PlotType, PlotTypeDescriptor, isNapari3d, isNapariScatter } from './contracts/plot-type';
+import { PlotType, PlotTypeDescriptor, isNapari3d, isNapariScatter, isSpatialOmics } from './contracts/plot-type';
 import { IVisualizer, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls } from './contracts/visualizer.contract';
 import { ViewerCapabilities } from './contracts/capabilities.contract';
 import { IRegionOverlay } from './contracts/region-overlay.contract';
@@ -95,9 +95,15 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     return t === PlotType.IMAGE;
   }
 
-  /** The 2D napari types (image + region-centroid scatter) — a 2D fallback chain (OSD, then Plotly). */
+  /** The 2D napari types (image, region-centroid scatter, spatial omics) — a 2D fallback chain
+   *  (OSD, then Plotly).
+   *
+   *  NOTE for SPATIAL_OMICS: only napari-js draws the observation markers. If it fails (no WebGPU,
+   *  device loss) the fallback renders the tissue image ALONE — the spatial layer is absent, not
+   *  degraded. That is deliberate for now: showing the slide beats showing nothing, and a Plotly
+   *  `scattergl` spatial mode is the planned real fallback (see the plot-mode design doc). */
   private isNapariImageType(t: PlotType): boolean {
-    return t === PlotType.NAPARI_IMAGE || isNapariScatter(t);
+    return t === PlotType.NAPARI_IMAGE || isNapariScatter(t) || isSpatialOmics(t);
   }
 
   /** The 3D napari types (volume/isosurface, either resolution) — no 2D fallback exists (OSD is

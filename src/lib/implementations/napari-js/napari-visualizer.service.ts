@@ -28,6 +28,15 @@ import type {
 import { IImageInfo } from '../../contracts/image.contract';
 import { IChannelState } from '../../contracts/channel-histogram-api.contract';
 import { buildColormapLut, Rgb } from '../../contracts/colormap-lut';
+import { SPATIAL_DATA_PORT, SpatialDataPort } from '../../contracts/ports/spatial-data.port';
+import {
+  SpatialColumn, SpatialDataset, isCategoricalColumn,
+} from '../../contracts/spatial-dataset.contract';
+import { SpatialViewState } from '../../contracts/display-types';
+import {
+  contrastWindow, encodeCategorical, encodeContinuous, lutFor, markerDiameters,
+  resolveCategoryColors, toRgbaTuples,
+} from '../spatial/spatial-encoding';
 import {
   PlotType,
   PlotTypeDescriptor,
@@ -37,6 +46,7 @@ import {
   isNapariSurface,
   isNapariScatter,
   isNapariScatter3d,
+  isSpatialOmics,
   NAPARI_DEFAULT_DECIMATE,
 } from '../../contracts/plot-type';
 import {
@@ -268,6 +278,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private scatterRegionSub: Subscription | null = null;
   /** napari-js 3D scatter (voxel point cloud). */
   private scatter3dLayer: Points3DLayer | null = null;
+  /** Spatial-omics observation markers + the dataset/view subscription driving them. */
+  private spatialPoints: PointsLayer | null = null;
+  private spatialSub: Subscription | null = null;
+  /** Monotonic guard for the async colour rebuild: fetching a gene vector is a
+   *  round-trip, so a fast sequence of colour-by changes can resolve out of
+   *  order. Only the newest rebuild is allowed to touch the layer. */
+  private spatialRebuildToken = 0;
   /** Monotonic load generation. Bumped by {@link reset} and {@link cancelLoading}; the frame-loading
    *  loops (volume assembly, surface preload) capture it and bail when it changes, so a Cancel (or a
    *  new plot) actually stops fetching frames instead of running to completion in the background. */
@@ -368,6 +385,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     @Optional() @Inject(CELL_SEGMENTER) private readonly cellSegmenter: ICellSegmenter | null,
     private readonly simpleStack: SimpleSliceAccessService,
     @Inject(VIZ_CONFIG) config: VizConfig,
+    // Optional: only a host that serves spatial-omics data provides it, and
+    // without it the SPATIAL_OMICS plot type is never offered anyway.
+    @Optional() @Inject(SPATIAL_DATA_PORT) private readonly spatialData: SpatialDataPort | null = null,
   ) {
     super(regionStore, store);
     this.api = config.slideCropServer;
@@ -654,7 +674,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       this.viewer = viewer;
       await viewer.ready;
 
-      if (isNapariScatter(plotType)) {
+      if (isSpatialOmics(plotType)) {
+        await this.mountSpatialOmics(viewer, z);
+      } else if (isNapariScatter(plotType)) {
         await this.mountScatter(viewer, z);
       } else if (isNapariScatter3d(plotType)) {
         await this.mountScatter3d(viewer, info);
@@ -1454,6 +1476,146 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     return new Float32Array(out);
   }
 
+  // ── Spatial omics ────────────────────────────────────────────────────────────────────────
+
+  /** Marker radius (image px) for a dataset that declares none — segmented cells often don't. */
+  private static readonly SPATIAL_FALLBACK_RADIUS = 4;
+  /** Colour for observations when nothing is selected to colour by: visible, neutral, and
+   *  obviously not encoding anything. */
+  private static readonly SPATIAL_NEUTRAL_COLOR: [number, number, number, number] =
+    [0.35, 0.72, 0.95, 0.9];
+
+  /**
+   * Mount the SPATIAL_OMICS view: the tissue image with one marker per observation, coloured by
+   * an annotation column or a gene. The markers rebuild whenever the dataset or the view state
+   * changes, so switching the colour-by column does not remount the scene.
+   */
+  private async mountSpatialOmics(viewer: Viewer, z: number): Promise<void> {
+    await this.renderImage(z);
+    this.fitCameraSoon();
+    this.subscribeDisplayState();
+    this.installScaleBar();
+    this.subscribeSpatial();
+    this.scheduleReadback();
+  }
+
+  /** Rebuild the markers on any dataset or view-state change. */
+  private subscribeSpatial(): void {
+    this.spatialSub?.unsubscribe();
+    const port = this.spatialData;
+    if (!port) return;
+    this.spatialSub = combineLatest([port.getDataset$(), this.store.getSpatialView$()])
+      .subscribe(([dataset, view]) => {
+        void this.rebuildSpatialPoints(dataset, view);
+      });
+  }
+
+  /** (Re)build the observation marker layer for the current dataset + view state. */
+  private async rebuildSpatialPoints(
+    dataset: SpatialDataset | null, view: SpatialViewState,
+  ): Promise<void> {
+    const viewer = this.viewer;
+    if (!viewer) return;
+    const token = ++this.spatialRebuildToken;
+
+    // Resolve colours BEFORE touching the scene: a gene fetch can fail or be
+    // superseded, and dropping the existing layer first would blank the view.
+    let faceColor: ReturnType<typeof toRgbaTuples> | [number, number, number, number];
+    try {
+      faceColor = dataset
+        ? await this.spatialFaceColors(dataset, view)
+        : NapariVisualizerService.SPATIAL_NEUTRAL_COLOR;
+    } catch (err) {
+      console.warn('[napari-js] spatial colouring failed — falling back to a flat colour', err);
+      faceColor = NapariVisualizerService.SPATIAL_NEUTRAL_COLOR;
+    }
+    // A newer rebuild (or a teardown) started while the vector was in flight.
+    if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
+
+    if (this.spatialPoints) {
+      viewer.layers.remove(this.spatialPoints);
+      this.spatialPoints = null;
+    }
+    if (!dataset || dataset.observations.count === 0) return;
+
+    const obs = dataset.observations;
+    const positions = new Float32Array(obs.count * 2);
+    for (let i = 0; i < obs.count; i++) {
+      positions[i * 2] = obs.x[i];
+      positions[i * 2 + 1] = obs.y[i];
+    }
+
+    const base = markerDiameters(obs, NapariVisualizerService.SPATIAL_FALLBACK_RADIUS);
+    const scale = view.pointScale > 0 ? view.pointScale : 1;
+    let size: number | Float32Array;
+    if (typeof base === 'number') {
+      size = base * scale;
+    } else {
+      size = new Float32Array(base.length);
+      for (let i = 0; i < base.length; i++) size[i] = base[i] * scale;
+    }
+
+    this.spatialPoints = viewer.addPoints(positions, {
+      name: 'observations',
+      size,
+      faceColor,
+      // No border: at Visium spot density an outline per marker reads as noise,
+      // and it costs a second colour array.
+      borderWidth: 0,
+      // The dataset's data->world affine. SpatialData records one per coordinate
+      // system (Visium spot coords are in the FULL-resolution frame while the
+      // served image may be the hires downscale), so without this the markers
+      // land in the right shape at the wrong scale. Defaults to identity when
+      // the coordinates are already in the image's pixel space.
+      scale: dataset.imageRef?.scale ?? [1, 1],
+      translate: dataset.imageRef?.translate ?? [0, 0],
+    });
+  }
+
+  /**
+   * Per-observation colours for the current view state, or a single flat colour when nothing is
+   * selected to colour by. Categorical columns use the column's own palette; continuous columns
+   * and gene vectors go through the active colormap with a percentile-clipped window.
+   */
+  private async spatialFaceColors(
+    dataset: SpatialDataset, view: SpatialViewState,
+  ): Promise<ReturnType<typeof toRgbaTuples> | [number, number, number, number]> {
+    const port = this.spatialData;
+    const colorBy = view.colorBy;
+    if (!port || !colorBy) return NapariVisualizerService.SPATIAL_NEUTRAL_COLOR;
+
+    if (colorBy.kind === 'column') {
+      const column: SpatialColumn = await port.getColumn(colorBy.name);
+      if (isCategoricalColumn(column)) {
+        return toRgbaTuples(encodeCategorical(column.codes, {
+          colors: resolveCategoryColors(column.meta),
+          opacity: view.opacity,
+        }));
+      }
+      // A continuous column may carry its own log hint (counts); the view's
+      // toggle wins once the user has set it.
+      return toRgbaTuples(this.encodeSpatialContinuous(
+        column.values, view, view.logScale || !!column.meta.logScaleHint,
+      ));
+    }
+
+    const values = await port.getFeatureVector(colorBy.name);
+    return toRgbaTuples(this.encodeSpatialContinuous(
+      values, view, view.logScale || !!dataset.features?.logScaleHint,
+    ));
+  }
+
+  /** Continuous values → RGBA through the active colormap and a clipped window. */
+  private encodeSpatialContinuous(
+    values: Float32Array, view: SpatialViewState, log: boolean,
+  ): Float32Array {
+    const node = this.currentColormap as { data?: { value?: unknown } } | null;
+    const lut = lutFor(node?.data?.value, this.currentReverse);
+    const [lo, hi] = view.percentileClip ?? [0.01, 0.99];
+    const [min, max] = contrastWindow(values, lo, hi);
+    return encodeContinuous(values, { lut, min, max, log, opacity: view.opacity });
+  }
+
   /**
    * Mount the NAPARI_SCATTER3D 3D scatter: the downsampled voxel grid as a 3D point cloud colored
    * by intensity (napari-js analog of Plotly's voxel scatter3d). Assembles a coarse volume, then
@@ -1892,6 +2054,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.surfaceWindow = null;
     this.scatterRegionSub?.unsubscribe();
     this.scatterRegionSub = null;
+    this.spatialSub?.unsubscribe();
+    this.spatialSub = null;
+    this.spatialPoints = null;
+    // Invalidate any colour fetch still in flight so it can't attach to the next scene.
+    this.spatialRebuildToken++;
     this.scatter2dPoints = null;
     this.scatter3dLayer = null;
     this.axesLayer = null;
@@ -2069,6 +2236,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_SCATTER3D]!,
       PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_VOLUME]!,
       PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_ISOSURFACE]!,
+      // Gated by `requiresSpatialData`, so the selector hides it until a dataset is published.
+      PLOT_TYPE_DESCRIPTORS[PlotType.SPATIAL_OMICS]!,
     ];
   }
 

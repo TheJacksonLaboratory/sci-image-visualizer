@@ -41,3 +41,38 @@ export interface IBrushOptions {
   /** Brush diameter in matrix (image) pixels. */
   size?: number;
 }
+
+/** What drives point colour in the spatial-omics mode: an annotation column
+ *  from the dataset, or one feature (gene) vector fetched on demand. */
+export interface SpatialColorBy {
+  kind: 'column' | 'feature';
+  name: string;
+}
+
+/** Display state for the spatial-omics plot mode. Lives in `VisualizerStore`
+ *  alongside the colormap/channel state so the renderer reacts to edits the
+ *  same way it does for an image. */
+export interface SpatialViewState {
+  /** Colour source; `null` renders every observation in one neutral colour
+   *  (useful on its own — it shows where the tissue actually is). */
+  colorBy: SpatialColorBy | null;
+  /** Multiplier on the dataset's physical marker size. 1 = true size, which for
+   *  a 55 µm Visium spot is correct but can be invisible when zoomed out. */
+  pointScale: number;
+  /** Alpha for points that are not muted. */
+  opacity: number;
+  /** Log-scale continuous values before mapping them onto the colormap. Seeded
+   *  from the column's `logScaleHint` — count data needs it. */
+  logScale: boolean;
+  /** Percentile clip for the contrast window as `[lo, hi]` fractions, so a
+   *  handful of saturated observations don't flatten the rest. */
+  percentileClip: [number, number];
+}
+
+export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
+  colorBy: null,
+  pointScale: 1,
+  opacity: 1,
+  logScale: false,
+  percentileClip: [0.01, 0.99],
+};

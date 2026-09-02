@@ -35,6 +35,7 @@ import {
 import { RegionToolMode } from './contracts/region-overlay.contract';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from './contracts/toolbar-config';
 import { VIZ_CONFIG, VizConfig } from './contracts/viz-config';
+import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-data.port';
 
 /** Per-instance plot-div id source. The mount element's id must be unique so two
  *  live viewers (e.g. the main diagram + a modal preview) don't collide on the
@@ -297,6 +298,11 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    *  intensity range by the renderer. Defaults to the full range. */
   isoRange: number[] = [0, 255];
 
+  /** Whether a spatial-omics dataset is currently published on
+   *  `SPATIAL_DATA_PORT` — gates the spatial plot types in the selector. */
+  private hasSpatialDataset = false;
+  private spatialDatasetSubscription?: Subscription;
+
   plotWidthSubscription?: Subscription;
   imageLoadingSubscription?: Subscription;
   imgLoadingMessageSubscription?: Subscription;
@@ -333,6 +339,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // also constructed directly with `new` in its own specs, which is outside
     // an injection context and would throw NG0203 on a field initializer.
     @Optional() @Inject(TOOLBAR_TOOLS) toolContributions?: readonly ToolbarToolContribution[],
+    // Optional like the rest: a host that shows only images never provides it,
+    // and the spatial plot types simply stay hidden.
+    @Optional() @Inject(SPATIAL_DATA_PORT) private spatialData?: SpatialDataPort,
   ) {
     this.contributedTools = visibleToolContributions(toolContributions);
     this.colormapsOptions = plotService.getColormapOptions();
@@ -351,7 +360,33 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    *  - scalar-intensity types (contour, surface, isosurface) hidden for RGB
    *    images — they map a single intensity per pixel. Image and Heatmap render
    *    any image.
+   *  - spatial-omics types hidden until a `SpatialDataset` is published on
+   *    `SPATIAL_DATA_PORT` — the mode has nothing to draw without observations,
+   *    exactly as a volume has nothing to draw without a stack.
    */
+  /**
+   * Track whether a spatial-omics dataset is available. A dataset appearing (or
+   * being cleared) changes which plot types make sense, so it drives the same
+   * recompute + reconcile that the image stream and the test-mode toggle do.
+   *
+   * No-op when the host provides no `SPATIAL_DATA_PORT` — the spatial types then
+   * stay hidden for the life of the component.
+   */
+  private watchSpatialDataset(): void {
+    this.spatialDatasetSubscription = this.spatialData?.getDataset$().subscribe((dataset) => {
+      const has = !!dataset;
+      // The port publishes its current value on subscribe, so the initial `null`
+      // would otherwise recompute the selector for no change.
+      if (has === this.hasSpatialDataset) return;
+      this.hasSpatialDataset = has;
+      this.computePlotTypeOptions();
+      // Clearing the dataset while a spatial mode is active leaves a type that is
+      // no longer offered — fall back to Image, as turning test mode off does.
+      this.reconcileSelectedPlotType();
+      this.cdr.detectChanges();
+    });
+  }
+
   private computePlotTypeOptions() {
     const caps = this.plotService.capabilities;
     const isStack = !!this.imageInfo?.isStack;
@@ -369,6 +404,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
         if (d.dimensions === '3d' && !caps.has(ViewerFeature.Surface3D)) return false;
         if (d.requiresStack && !isStack) return false;
         if (d.requiresGrayscale && !isGrayscale && !isMultichannel) return false;
+        if (d.requiresSpatialData && !this.hasSpatialDataset) return false;
         return true;
       })
       // Default selector shows the suffix-free productionLabel; test mode keeps
@@ -412,6 +448,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       { name: 'Stack', val: 'true' },
     ];
     this.selectedStackOption = this.stackOptions[0];
+    this.watchSpatialDataset();
     this.autoscaleSubscription = this.plotService.getAutoscaleEvent().subscribe(() => {
       // reset the image mode to single image
       this.selectedStackOption = { name: 'Single image', val: 'false' };
@@ -997,6 +1034,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.unsub.complete();
     if (this.previewSubscription) {
       this.previewSubscription.unsubscribe();
+    }
+    if (this.spatialDatasetSubscription) {
+      this.spatialDatasetSubscription.unsubscribe();
     }
     if (this.plotWidthSubscription) {
       this.plotWidthSubscription.unsubscribe();

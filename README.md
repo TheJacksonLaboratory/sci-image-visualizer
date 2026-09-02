@@ -164,6 +164,46 @@ A line-ROI tool draws coloured lines and plots intensity along each one in a liv
 floating inset chart that re-samples at the current zoom. It works today but the
 API/UX are still stabilizing (see [In progress / roadmap](#in-progress--roadmap)).
 
+## Spatial-omics data *(data plane — no plot mode yet)*
+
+Contracts for **spatial-omics datasets**: N observations (Visium spots,
+segmented cells) positioned in a tissue image's pixel space, each carrying
+categorical and continuous annotations plus a lazily-fetched feature (gene)
+matrix.
+
+```ts
+import {
+  SPATIAL_DATA_PORT, SpatialDataHttpService, SpatialDataset,
+} from '@jax-data-science/sci-image-visualizer';
+
+providers: [
+  SpatialDataHttpService,
+  { provide: SPATIAL_DATA_PORT, useExisting: SpatialDataHttpService },
+]
+```
+
+Like `TILE_ACCESS_PORT`, this is a **port**: the library consumes typed arrays
+and never learns how the data is stored. `SpatialDataHttpService` is an optional
+reference adapter for the format the bundled example server speaks; a host with
+its own backend implements `SpatialDataPort` instead and imports neither.
+
+Two properties the design turns on:
+
+- **Metadata is eager, values are lazy.** A `SpatialDataset` holds coordinates
+  plus column and feature *descriptors*; vectors arrive one at a time, for the
+  one column or gene being displayed. A Visium table is ~31k genes wide — the
+  dense matrix is ~800 MB — so loading a dataset can never mean loading its
+  matrix.
+- **Struct-of-arrays, not object-per-cell.** Datasets run 10³ (Visium) to 10⁶
+  (Xenium/CosMx) observations; two `Float32Array`s beat 500k `{x, y}` objects
+  and upload to the GPU without a copy.
+
+The rendering mode that consumes this is designed but not built — see
+[docs/spatial-omics-plot-mode-design.md](docs/spatial-omics-plot-mode-design.md).
+The [example server](examples/tile-server/README.md#spatial-omics-endpoints)
+implements the endpoints today, with a synthetic Visium-geometry demo dataset
+(`npm run make-spatial-demo`) and a converter for real SpatialData Zarr stores.
+
 ## Regions & annotation
 
 Regions are stored in a shared **region store** and use a GeoJSON-friendly model
@@ -270,6 +310,12 @@ Work that is landed-but-unstable or planned (not yet available):
   and browser-side SAM/cellpose segmentation) against sample images — so the
   library can be evaluated and developed standalone, outside jit-ui. Tracked in
   the library-extraction SOW ([docs/JIT_UI_visualization_library_SOW.docx](docs/JIT_UI_visualization_library_SOW.docx)).
+- **Spatial-omics plot mode** *(in progress — data plane landed, rendering not)* —
+  a layered mode drawing spots/cells over the tissue image, coloured by cluster
+  or gene, with ROI-linked histogram / violin / box charts. The contracts
+  (`SpatialDataPort`, `SpatialDataset`) and the example server's endpoints are
+  in place; the plot type itself is not. Scope, phasing and open questions:
+  [docs/spatial-omics-plot-mode-design.md](docs/spatial-omics-plot-mode-design.md).
 - **SAM 3 model** *(planned)* — a `variant: 'sam3'` decoder path + export tooling
   (SAM 2/3 use a different mask I/O than the current SAM-v1 path). See
   [docs/sam-segmentation-design.md](docs/sam-segmentation-design.md).
@@ -284,6 +330,10 @@ Design, architecture, and planning docs for the library:
 - **[docs/sam-segmentation-design.md](docs/sam-segmentation-design.md)** — design of
   the browser SAM segmentation: model choice, ONNX export/quantization recipe,
   encoder/decoder I/O, the engine/session architecture, and the rollout phases.
+- **[docs/spatial-omics-plot-mode-design.md](docs/spatial-omics-plot-mode-design.md)** —
+  design and phased plan for the spatial-omics plot mode: current-state audit,
+  what the CosMx / Spatial-Live / SpatialData references contribute, the data
+  plane, MoSCoW requirements, and the open questions still to settle.
 - **Architecture diagrams**
   - [docs/jit-ui-visualization-architecture.mmd](docs/jit-ui-visualization-architecture.mmd)
     ([PNG](docs/img/jit-ui-visualization-architecture.png) ·

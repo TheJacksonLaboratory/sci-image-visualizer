@@ -5,6 +5,17 @@
 //   GET  /tile?info=<b64>&res=&col=&row=&z=&tileSize=[&channel=] -> image/png
 //   POST /zoom/region  { info, roi, screen, zIndex }             -> image/png
 //
+// …plus the SPATIAL-OMICS data plane the library's SpatialDataHttpService
+// speaks (see src/lib/implementations/spatial/spatial-wire.ts):
+//
+//   GET  /spatial/datasets                    -> { datasets: [...] }
+//   GET  /spatial/:id/manifest                -> manifest JSON
+//   GET  /spatial/:id/{coords,radius,polygons}-> raw little-endian typed arrays
+//   GET  /spatial/:id/ids                     -> { ids: [...] }
+//   GET  /spatial/:id/column/:name            -> u16 codes | f32 values
+//   GET  /spatial/:id/feature/:name           -> f32 vector (ranged read)
+//   GET  /spatial/:id/features?q=&limit=      -> { names: [...] }
+//
 // The `info` param is an OPAQUE, URL-safe base64 token minted by the browser
 // example's host adapter (ServerTileAccessAdapter). Here it decodes to
 // `{ image: "<imageId>" }` naming a pyramid under $COG_DIR. The library never
@@ -17,11 +28,18 @@
 import express from 'express';
 import cors from 'cors';
 import { loadDescriptor, readTile, readRegion, readPreview, listImages } from './lib/cog.mjs';
+import {
+  listSpatialDatasets, loadManifest, openWireFile, readIds, readColumn,
+  readFeatureVector, searchFeatures,
+} from './lib/spatial.mjs';
 
 const PORT = Number(process.env.PORT || 8090);
 const COG_DIR = process.env.COG_DIR
   ? process.env.COG_DIR
   : new URL('./cogs', import.meta.url).pathname;
+const SPATIAL_DIR = process.env.SPATIAL_DIR
+  ? process.env.SPATIAL_DIR
+  : new URL('./spatial', import.meta.url).pathname;
 
 const app = express();
 
@@ -107,6 +125,99 @@ app.post('/zoom/region', async (req, res) => {
   }
 });
 
+// ── Spatial-omics data plane ────────────────────────────────────────────────
+// Vectors are served as raw little-endian bytes: one Float32Array/Uint16Array
+// per request, decoded by a typed-array view on the client with no copy. JSON
+// would cost ~8-12x the bytes and a parse that allocates a JS number per value.
+
+/** RangeError (bad id / unknown name) and ENOENT are 404s; anything else is a 400. */
+function spatialError(res, err) {
+  if (err instanceof RangeError || err?.code === 'ENOENT') {
+    return res.status(404).json({ error: String(err?.message || err) });
+  }
+  return res.status(400).json({ error: String(err?.message || err) });
+}
+
+/** Stream a file that is already in wire layout — no parse, no transform. */
+async function sendWireFile(res, id, name) {
+  const { stream, size } = await openWireFile(SPATIAL_DIR, id, name);
+  res.set('Content-Type', 'application/octet-stream')
+    .set('Content-Length', String(size))
+    .set('Cache-Control', 'public, max-age=3600');
+  stream.pipe(res);
+}
+
+app.get('/spatial/datasets', async (_req, res) => {
+  try {
+    res.json({ datasets: await listSpatialDatasets(SPATIAL_DIR) });
+  } catch (err) {
+    spatialError(res, err);
+  }
+});
+
+app.get('/spatial/:id/manifest', async (req, res) => {
+  try {
+    res.set('Cache-Control', 'public, max-age=3600')
+      .json(await loadManifest(SPATIAL_DIR, req.params.id));
+  } catch (err) {
+    spatialError(res, err);
+  }
+});
+
+// coords.bin / radius.bin / polygons.bin are written by the converter in the
+// exact byte layout the client decodes, so serving them is a file stream.
+for (const [route, file] of [['coords', 'coords.bin'], ['radius', 'radius.bin'], ['polygons', 'polygons.bin']]) {
+  app.get(`/spatial/:id/${route}`, async (req, res) => {
+    try {
+      await sendWireFile(res, req.params.id, file);
+    } catch (err) {
+      spatialError(res, err);
+    }
+  });
+}
+
+app.get('/spatial/:id/ids', async (req, res) => {
+  try {
+    res.set('Cache-Control', 'public, max-age=3600')
+      .json(await readIds(SPATIAL_DIR, req.params.id));
+  } catch (err) {
+    spatialError(res, err);
+  }
+});
+
+app.get('/spatial/:id/column/:name', async (req, res) => {
+  try {
+    const buf = await readColumn(SPATIAL_DIR, req.params.id, req.params.name);
+    res.set('Content-Type', 'application/octet-stream')
+      .set('Cache-Control', 'public, max-age=3600')
+      .send(buf);
+  } catch (err) {
+    spatialError(res, err);
+  }
+});
+
+app.get('/spatial/:id/feature/:name', async (req, res) => {
+  try {
+    const buf = await readFeatureVector(SPATIAL_DIR, req.params.id, req.params.name);
+    res.set('Content-Type', 'application/octet-stream')
+      .set('Cache-Control', 'public, max-age=3600')
+      .send(buf);
+  } catch (err) {
+    spatialError(res, err);
+  }
+});
+
+app.get('/spatial/:id/features', async (req, res) => {
+  try {
+    const names = await searchFeatures(
+      SPATIAL_DIR, req.params.id, req.query.q, intParam(req.query.limit, 50),
+    );
+    res.json({ names });
+  } catch (err) {
+    spatialError(res, err);
+  }
+});
+
 // Health + discovery (handy for the example / smoke checks).
 app.get('/', (_req, res) => res.json({ ok: true, service: 'tile-server' }));
 app.get('/images', async (_req, res) => res.json({ images: await listImages(COG_DIR) }));
@@ -117,5 +228,5 @@ function intParam(v, dflt) {
 }
 
 app.listen(PORT, () => {
-  console.log(`[tile-server] listening on :${PORT}  COG_DIR=${COG_DIR}`);
+  console.log(`[tile-server] listening on :${PORT}  COG_DIR=${COG_DIR}  SPATIAL_DIR=${SPATIAL_DIR}`);
 });

@@ -46,11 +46,24 @@ export interface AxesLayer {
   depth: number;
 }
 
-/** Stand-in for napari-js PointsLayer (2D scatter markers — the adapter only creates/removes it). */
+/** Stand-in for napari-js PointsLayer (2D scatter markers).
+ *
+ *  Unlike the real layer this KEEPS the constructor arguments: the spatial-omics
+ *  adapter's whole job is deciding positions, per-point colours and sizes, so a
+ *  test that can only see "a layer exists" cannot check the part that matters. */
 export interface PointsLayer {
-  size: number;
+  size: number | Float32Array;
   opacity: number;
   blending: string;
+  /** Flat `[x, y, …]` in data coords, as handed to `addPoints`. */
+  positions?: Float32Array;
+  /** One RGBA tuple per point, or a single broadcast tuple. */
+  faceColor?: unknown;
+  borderWidth?: number;
+  name?: string;
+  /** Data->world affine, as handed to `addPoints`. */
+  scale?: [number, number];
+  translate?: [number, number];
 }
 
 /** Stand-in for napari-js Points3DLayer (the props/bounds the 3D-scatter adapter reads/sets). */
@@ -369,8 +382,30 @@ export class Viewer {
       }),
     };
   }
-  addPoints(): PointsLayer {
-    return { size: 10, opacity: 1, blending: 'translucent' };
+  addPoints(
+    positions?: Float32Array | number[][],
+    opts?: {
+      name?: string;
+      size?: number | Float32Array;
+      faceColor?: unknown;
+      borderWidth?: number;
+      opacity?: number;
+      scale?: [number, number];
+      translate?: [number, number];
+    },
+  ): PointsLayer {
+    const o = opts ?? {};
+    return {
+      size: o.size ?? 10,
+      opacity: o.opacity ?? 1,
+      blending: 'translucent',
+      positions: positions instanceof Float32Array ? positions : undefined,
+      faceColor: o.faceColor,
+      borderWidth: o.borderWidth,
+      name: o.name,
+      scale: o.scale,
+      translate: o.translate,
+    };
   }
   addPoints3D(
     _positions?: Float32Array,

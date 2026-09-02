@@ -9,6 +9,86 @@ file was added.
 
 ## [Unreleased]
 
+### Added
+
+- **Spatial-omics data plane** — contracts for spatial-omics datasets (Visium
+  spots, segmented cells) so the library can hold N observations positioned in a
+  tissue image's pixel space, each with categorical and continuous annotations
+  and a lazily-fetched feature (gene) matrix. This is the data layer only; the
+  plot mode that renders it is designed but not built
+  ([docs/spatial-omics-plot-mode-design.md](docs/spatial-omics-plot-mode-design.md)).
+
+  - `SpatialDataset` and friends (`contracts/spatial-dataset.contract.ts`):
+    struct-of-arrays observations, `CategoricalColumnMeta` /
+    `ContinuousColumnMeta` descriptors, `SpatialFeatureMeta`, flat-ring
+    `SpatialPolygons`, and a `SpatialImageRef` affine. Typed arrays rather than
+    object-per-cell because datasets run 10³ (Visium) to 10⁶ (Xenium/CosMx)
+    observations.
+  - `SPATIAL_DATA_PORT` / `SpatialDataPort` (`contracts/ports/spatial-data.port.ts`):
+    the host-supplied accessor, mirroring `TILE_ACCESS_PORT`. Metadata is eager,
+    vectors are lazy — a Visium table is ~31k genes wide (~800 MB dense), so
+    loading a dataset can never mean loading its matrix.
+  - `SpatialDataHttpService` — an **optional** reference adapter (`@Injectable()`
+    with no `providedIn`, like `CellposeSegmenterService`) for the wire format
+    the bundled example server speaks. Requests go through `HttpClient` so host
+    interceptors apply; loaded vectors are cached with a bounded LRU and
+    concurrent requests for the same vector are coalesced.
+  - `spatial-wire.ts` — the wire format and its pure decoders, exported so a
+    host can reuse them over its own transport.
+  - `PlotDataSource` gains `'spatial'` alongside `'image'` and `'regions'`.
+  - `PlotTypeDescriptor.requiresSpatialData` — a declarative selector gate, in the
+    same shape as `requiresStack` and `requiresGrayscale`: a plot type that
+    renders a `SpatialDataset` is offered **only while one is published** on
+    `SPATIAL_DATA_PORT`, and is withdrawn (falling back to Image) when the
+    dataset is cleared. `VisualizerComponent` injects the port `@Optional()`, so
+    a host that never provides it simply never sees the spatial modes. No
+    shipped plot type sets the flag yet — the rendering mode is the next phase.
+
+- **Spatial-omics plot mode — renderer** (`PlotType.SPATIAL_OMICS`). Draws one
+  marker per observation over the tissue image through napari-js, coloured by an
+  annotation column or a gene. Gated by `requiresSpatialData`, so it appears in
+  the selector only while a dataset is loaded.
+
+  - `spatial-encoding.ts` — backend-neutral, pure encodings, exported for reuse:
+    `encodeCategorical` / `encodeContinuous` (flat `Float32Array` RGBA),
+    `resolveCategoryColors` (the column's authored palette first, then a
+    colour-blind-safe default, then a deterministic name hash),
+    `contrastWindow` (percentile clipping so outliers don't flatten the ramp),
+    `markerDiameters` (radius → the diameter napari sizes markers by), and
+    `lutFor`. Log scaling is applied for count-like columns, per the CosMx
+    guidance; `NaN` and unassigned categories render as muted grey rather than
+    as the ramp floor or a real category.
+  - `SpatialViewState` on `VisualizerStore` (`colorBy`, `pointScale`, `opacity`,
+    `logScale`, `percentileClip`) — editing it rebuilds the markers without
+    remounting the scene, the same way colormap edits recolor an image.
+  - The dataset's `imageRef` affine is applied as the layer's `scale`/`translate`,
+    so spot coordinates recorded in one frame land correctly on an image served
+    in another.
+  - An out-of-order guard: a gene fetch is a round-trip, so a superseded colour
+    change cannot attach its result to a newer scene, and a failed fetch falls
+    back to a flat colour rather than blanking the view.
+
+  Not yet built: legend and gene-picker UI, hover tooltips, selection, the linked
+  1D charts, and background subsampling. When napari-js is unavailable the
+  fallback renders the tissue image **without** the observation layer.
+
+- **Example server: spatial-omics endpoints** (`examples/tile-server`) —
+  `/spatial/datasets`, `/spatial/:id/{manifest,coords,radius,ids,polygons}`,
+  `/spatial/:id/column/:name`, `/spatial/:id/feature/:name` and
+  `/spatial/:id/features`. Vectors are served as raw little-endian bytes. The
+  feature matrix is stored **gene-major**, so serving one gene is a contiguous
+  ranged read rather than a scan of an observation-major (CSR) matrix.
+  - `npm run make-spatial-demo` generates a synthetic Visium-geometry dataset
+    (~2k spots on the real 100 µm hex grid, 12 mouse-brain marker genes) so the
+    endpoints work with no download and no Python.
+  - `npm run smoke-spatial` boots the server and decodes every route end to end.
+  - `scripts/make_spatial.py` converts a real SpatialData Zarr store (e.g. the
+    Visium mouse brain sandbox dataset). Written but **not yet executed against
+    a live store** — no `spatialdata` install was available; it falls back
+    loudly rather than silently when the coordinate transform cannot be
+    resolved.
+
+
 ## [0.3.3] — 2026-08-31
 
 Backfilled: 0.3.3 was published without an entry.

@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { HttpClient } from '@angular/common/http';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
-import { firstValueFrom, of } from 'rxjs';
+import { BehaviorSubject, firstValueFrom, of } from 'rxjs';
 
 import { Viewer } from 'napari-js';
 
@@ -14,9 +14,27 @@ import { PlotType } from '../../contracts/plot-type';
 import { ViewerFeature } from '../../contracts/capabilities.contract';
 import { IImageInfo } from '../../contracts/image.contract';
 import { IChannelState } from '../../contracts/channel-histogram-api.contract';
+import { SPATIAL_DATA_PORT } from '../../contracts/ports/spatial-data.port';
+import { CategoricalColumn, SpatialDataset } from '../../contracts/spatial-dataset.contract';
 
 const imageInfo = (over: Partial<IImageInfo> = {}): IImageInfo =>
   ({ urls: ['u0', 'u1'], isGrayscale: true, isStack: true, ...over }) as unknown as IImageInfo;
+
+/** A spatial dataset with `count` observations on a diagonal, 27.5 px spot radius. */
+const spatialDataset = (count = 3): SpatialDataset => ({
+  id: 'demo', name: 'Demo',
+  observations: {
+    count,
+    x: Float32Array.from({ length: count }, (_, i) => i * 10),
+    y: Float32Array.from({ length: count }, (_, i) => i * 20),
+    radius: 27.5,
+  },
+  columns: [
+    { kind: 'categorical', name: 'region', categories: ['A', 'B'], colors: ['#ff0000', '#0000ff'] },
+    { kind: 'continuous', name: 'total_counts', logScaleHint: true },
+  ],
+  features: { count: 1, names: ['Ttr'] },
+});
 
 const tilesPort = {
   getSelectedInfoB64: () => 'INFO',
@@ -30,8 +48,20 @@ describe('NapariVisualizerService', () => {
   let http: HttpTestingController;
   let regionStore: RegionStore;
   let store: VisualizerStore;
+  let dataset$: BehaviorSubject<SpatialDataset | null>;
+  let spatialPort: {
+    getDataset$: () => typeof dataset$;
+    getColumn: jest.Mock;
+    getFeatureVector: jest.Mock;
+  };
 
   beforeEach(() => {
+    dataset$ = new BehaviorSubject<SpatialDataset | null>(null);
+    spatialPort = {
+      getDataset$: () => dataset$,
+      getColumn: jest.fn(),
+      getFeatureVector: jest.fn(),
+    };
     // The render path polls /tiles/info (descriptor JSON) then fetches /tile blobs, both via the
     // global fetch (no WebGPU). A single-level 64×48 pyramid keeps the stitch on the single-tile
     // path. createImageBitmap is stubbed since jsdom can't decode.
@@ -80,6 +110,7 @@ describe('NapariVisualizerService', () => {
         RegionStore,
         { provide: TILE_ACCESS_PORT, useValue: tilesPort },
         { provide: VIZ_CONFIG, useValue: { slideCropServer: 'http://srv/' } },
+        { provide: SPATIAL_DATA_PORT, useValue: spatialPort },
       ],
     });
     service = TestBed.inject(NapariVisualizerService);
@@ -108,6 +139,10 @@ describe('NapariVisualizerService', () => {
       PlotType.NAPARI_SCATTER3D,
       PlotType.NAPARI_VOLUME,
       PlotType.NAPARI_ISOSURFACE,
+      // Advertised unconditionally; the SELECTOR hides it until a dataset is
+      // published (`requiresSpatialData`), so a host with no spatial data never
+      // sees it even though the backend can render it.
+      PlotType.SPATIAL_OMICS,
     ]);
   });
 
@@ -781,5 +816,148 @@ describe('NapariVisualizerService', () => {
 
     service.unsubscribe();
     document.body.removeChild(div);
+  });
+
+  describe('SPATIAL_OMICS mode', () => {
+    /** Let the async colour resolution settle (a gene fetch is a round-trip). */
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    let addPoints: jest.SpyInstance;
+
+    /** Mount the spatial mode with `dataset` published, and return the layer built. */
+    async function mount(dataset: SpatialDataset | null = spatialDataset()) {
+      const div = document.createElement('div');
+      div.id = 'spatial-host';
+      document.body.appendChild(div);
+      dataset$.next(dataset);
+      const loaded = await service.load(imageInfo(), 0);
+      await service.plot('spatial-host', loaded, imageInfo(), 600, PlotType.SPATIAL_OMICS);
+      await flush();
+      return addPoints.mock.results.at(-1)?.value;
+    }
+
+    beforeEach(() => {
+      addPoints = jest.spyOn(Viewer.prototype, 'addPoints');
+    });
+
+    it('draws one marker per observation at its coordinates', async () => {
+      const layer = await mount();
+      expect(addPoints).toHaveBeenCalled();
+      expect(Array.from(layer.positions)).toEqual([0, 0, 10, 20, 20, 40]);
+    });
+
+    it('sizes markers by DIAMETER from the radius, scaled by pointScale', async () => {
+      const layer = await mount();
+      expect(layer.size).toBe(55); // 27.5 px radius -> 55 px diameter
+
+      store.setSpatialView({ pointScale: 2 });
+      await flush();
+      expect(addPoints.mock.results.at(-1)?.value.size).toBe(110);
+    });
+
+    it('uses one flat colour when nothing is selected to colour by', async () => {
+      const layer = await mount();
+      // A single RGBA tuple, broadcast — not a per-point array.
+      expect(Array.isArray(layer.faceColor)).toBe(true);
+      expect(layer.faceColor).toHaveLength(4);
+      expect(typeof layer.faceColor[0]).toBe('number');
+    });
+
+    it('colours by a categorical column using the column\'s own palette', async () => {
+      const column: CategoricalColumn = {
+        meta: {
+          kind: 'categorical', name: 'region', categories: ['A', 'B'],
+          colors: ['#ff0000', '#0000ff'],
+        },
+        codes: new Uint16Array([0, 1, 0]),
+      };
+      spatialPort.getColumn.mockResolvedValue(column);
+
+      await mount();
+      store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+      await flush();
+
+      const layer = addPoints.mock.results.at(-1)?.value;
+      expect(spatialPort.getColumn).toHaveBeenCalledWith('region');
+      expect(layer.faceColor).toHaveLength(3); // one tuple per observation
+      expect(layer.faceColor[0].slice(0, 3)).toEqual([1, 0, 0]);
+      expect(layer.faceColor[1].slice(0, 3)).toEqual([0, 0, 1]);
+    });
+
+    it('colours by a gene vector through the active colormap', async () => {
+      spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([0, 5, 10]));
+
+      await mount();
+      store.setSpatialView({ colorBy: { kind: 'feature', name: 'Ttr' } });
+      await flush();
+
+      const layer = addPoints.mock.results.at(-1)?.value;
+      expect(spatialPort.getFeatureVector).toHaveBeenCalledWith('Ttr');
+      expect(layer.faceColor).toHaveLength(3);
+      // Distinct values must map to distinct colours — a flat result would mean
+      // the contrast window collapsed.
+      expect(layer.faceColor[0]).not.toEqual(layer.faceColor[2]);
+    });
+
+    it('falls back to a flat colour when a gene fetch fails, rather than blanking the view', async () => {
+      spatialPort.getFeatureVector.mockRejectedValue(new Error('404'));
+      jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+      await mount();
+      store.setSpatialView({ colorBy: { kind: 'feature', name: 'Missing' } });
+      await flush();
+
+      const layer = addPoints.mock.results.at(-1)?.value;
+      expect(layer.faceColor).toHaveLength(4); // the broadcast tuple, so points still render
+    });
+
+    it('ignores a superseded colour fetch that resolves late', async () => {
+      await mount();
+      // 'slow' resolves AFTER 'fast', but 'fast' was requested second.
+      let releaseSlow: (v: Float32Array) => void = () => undefined;
+      spatialPort.getFeatureVector.mockImplementationOnce(
+        () => new Promise<Float32Array>((resolve) => { releaseSlow = resolve; }),
+      );
+      spatialPort.getFeatureVector.mockResolvedValueOnce(new Float32Array([9, 9, 9]));
+
+      store.setSpatialView({ colorBy: { kind: 'feature', name: 'slow' } });
+      store.setSpatialView({ colorBy: { kind: 'feature', name: 'fast' } });
+      await flush();
+      const afterFast = addPoints.mock.calls.length;
+
+      releaseSlow(new Float32Array([0, 0, 0]));
+      await flush();
+      // The stale response must not add another layer.
+      expect(addPoints.mock.calls.length).toBe(afterFast);
+    });
+
+    it('applies the dataset\'s data->world affine so spots land on the image', async () => {
+      const layer = await mount({
+        ...spatialDataset(),
+        imageRef: { scale: [0.5, 0.5], translate: [10, -4], mppX: 1 },
+      });
+      expect(layer.scale).toEqual([0.5, 0.5]);
+      expect(layer.translate).toEqual([10, -4]);
+    });
+
+    it('defaults the affine to identity when the dataset declares none', async () => {
+      const layer = await mount();
+      expect(layer.scale).toEqual([1, 1]);
+      expect(layer.translate).toEqual([0, 0]);
+    });
+
+    it('renders nothing extra for an empty dataset', async () => {
+      const layer = await mount({ ...spatialDataset(0), observations: {
+        count: 0, x: new Float32Array(0), y: new Float32Array(0),
+      } });
+      expect(layer).toBeUndefined();
+    });
+
+    it('stops tracking the dataset on reset', async () => {
+      await mount();
+      expect(dataset$.observed).toBe(true);
+      service.reset();
+      expect(dataset$.observed).toBe(false);
+    });
   });
 });

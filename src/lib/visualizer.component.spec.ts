@@ -87,10 +87,12 @@ function mockPlotService(): any {
     getRegionPolygons: jest.fn().mockReturnValue([]),
     getRegionOverlay: jest.fn().mockReturnValue(mockOverlay()),
     getIsosurfaceControls: jest.fn().mockReturnValue({ setIsoRange: jest.fn() }),
+    // Only reached by ngOnDestroy, which most of this suite deliberately skips.
+    unsubscribe: jest.fn(),
   };
 }
 
-function makeComponent(plot: any): VisualizerComponent {
+function makeComponent(plot: any, spatialData?: any): VisualizerComponent {
   return new VisualizerComponent(
       { setDiagram: jest.fn(), setImageLoading: jest.fn(), setImageInfo: jest.fn() } as any, // ImageStatePort
       plot,
@@ -117,6 +119,9 @@ function makeComponent(plot: any): VisualizerComponent {
         progress$: new BehaviorSubject(-1),
       } as any,
       new RegionOpsService(new WandService()), // RegionOpsService
+      undefined, // VIZ_CONFIG
+      undefined, // TOOLBAR_TOOLS
+      spatialData, // SPATIAL_DATA_PORT (optional — absent for image-only hosts)
     );
 }
 
@@ -208,7 +213,13 @@ describe('VisualizerComponent (UI shell)', () => {
       (component as any).computePlotTypeOptions();
       const byType = new Map(component.plotTypeOptions.map((d) => [d.type, d.label]));
 
-      expect(component.plotTypeOptions.length).toBe(ALL_DESCRIPTORS.length);
+      // Test mode lifts the `productionLabel` CURATION, not the capability gates:
+      // the spatial type still needs a dataset, exactly as a volume still needs a
+      // stack. This fixture has no dataset, so it is the one type held back.
+      const gated = ALL_DESCRIPTORS.filter((d) => d.requiresSpatialData);
+      expect(gated).toHaveLength(1);
+      expect(component.plotTypeOptions.length).toBe(ALL_DESCRIPTORS.length - gated.length);
+      expect(byType.has(PlotType.SPATIAL_OMICS)).toBe(false);
       expect(byType.get(PlotType.IMAGE)).toBe('Image (OSD)');
       expect(byType.get(PlotType.NAPARI_IMAGE)).toBe('Image (napari · WebGPU)');
       expect(byType.get(PlotType.SURFACE)).toBe('Surface (Plotly)');
@@ -238,6 +249,105 @@ describe('VisualizerComponent (UI shell)', () => {
       component.ngOnChanges({ testMode: {} } as any);
       expect(component.selectedPlotType).toBe(PlotType.IMAGE);
       expect(plotService.setPlotType).toHaveBeenCalledWith(PlotType.IMAGE);
+    });
+  });
+
+  describe('spatial-omics plot types gated by dataset availability', () => {
+    // No shipped plot type carries `requiresSpatialData` yet — the rendering mode
+    // is the next phase. What is under test is the GATE: a descriptor that
+    // declares the flag must stay hidden until a dataset is published, exactly
+    // as `requiresStack` hides the volume types until a stack is open.
+    const SPATIAL_DESCRIPTOR: any = {
+      type: 'spatial-omics',
+      label: 'Spatial omics (napari · WebGPU)',
+      productionLabel: 'Spatial omics',
+      dimensions: '2d',
+      source: 'spatial',
+      requiresSpatialData: true,
+    };
+    const DESCRIPTORS = [PLOT_TYPE_DESCRIPTORS[PlotType.IMAGE], SPATIAL_DESCRIPTOR] as any[];
+
+    const offered = (c: VisualizerComponent) =>
+      c.plotTypeOptions.some((d) => d.type === SPATIAL_DESCRIPTOR.type);
+
+    let dataset$: BehaviorSubject<any>;
+    let port: any;
+
+    beforeEach(() => {
+      (component as any).imageInfo = { isStack: false, isGrayscale: true };
+      plotService.capabilities = { has: () => true };
+      plotService.getPlotTypeDescriptors.mockReturnValue(DESCRIPTORS);
+      dataset$ = new BehaviorSubject<any>(null);
+      port = { getDataset$: () => dataset$.asObservable() };
+    });
+
+    it('hides the spatial type when the host provides no SPATIAL_DATA_PORT at all', () => {
+      const c = makeComponent(plotService); // no port
+      (c as any).watchSpatialDataset();
+      (c as any).computePlotTypeOptions();
+      expect(offered(c)).toBe(false);
+      expect(c.plotTypeOptions.some((d) => d.type === PlotType.IMAGE)).toBe(true);
+    });
+
+    it('hides it while the port is bound but no dataset is selected', () => {
+      const c = makeComponent(plotService, port);
+      (c as any).watchSpatialDataset();
+      (c as any).computePlotTypeOptions();
+      expect(offered(c)).toBe(false);
+    });
+
+    it('offers it as soon as a dataset is published', () => {
+      const c = makeComponent(plotService, port);
+      (c as any).watchSpatialDataset();
+      expect(offered(c)).toBe(false);
+
+      dataset$.next({ id: 'visium-brain', observations: { count: 2 } });
+      expect(offered(c)).toBe(true);
+    });
+
+    it('hides it again and falls back to Image when the dataset is cleared', () => {
+      const c = makeComponent(plotService, port);
+      (c as any).watchSpatialDataset();
+      dataset$.next({ id: 'visium-brain', observations: { count: 2 } });
+
+      // The spatial mode is the active selection…
+      c.selectedPlotType = SPATIAL_DESCRIPTOR.type;
+      c.plotType = SPATIAL_DESCRIPTOR.type;
+
+      // …and the host deselects the dataset.
+      dataset$.next(null);
+
+      expect(offered(c)).toBe(false);
+      expect(c.selectedPlotType).toBe(PlotType.IMAGE);
+      expect(plotService.setPlotType).toHaveBeenCalledWith(PlotType.IMAGE);
+    });
+
+    it('does not recompute on the port\'s initial null emission', () => {
+      const c = makeComponent(plotService, port);
+      const spy = jest.spyOn(c as any, 'computePlotTypeOptions');
+      (c as any).watchSpatialDataset(); // BehaviorSubject replays null immediately
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('leaves the other gates intact — a stack-only type stays hidden with a dataset loaded', () => {
+      plotService.getPlotTypeDescriptors.mockReturnValue([
+        ...DESCRIPTORS, PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_VOLUME],
+      ] as any[]);
+      const c = makeComponent(plotService, port);
+      (c as any).imageInfo = { isStack: false, isGrayscale: true };
+      (c as any).watchSpatialDataset();
+      dataset$.next({ id: 'visium-brain', observations: { count: 2 } });
+
+      expect(offered(c)).toBe(true);
+      expect(c.plotTypeOptions.some((d) => d.type === PlotType.NAPARI_VOLUME)).toBe(false);
+    });
+
+    it('unsubscribes on destroy', () => {
+      const c = makeComponent(plotService, port);
+      (c as any).watchSpatialDataset();
+      expect(dataset$.observed).toBe(true);
+      c.ngOnDestroy();
+      expect(dataset$.observed).toBe(false);
     });
   });
 

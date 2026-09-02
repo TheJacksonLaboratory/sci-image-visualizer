@@ -13,6 +13,8 @@ export * from './lib/contracts/ports/image-state.port';
 export * from './lib/contracts/ports/tile-access.port';
 export * from './lib/contracts/ports/region-io.port';
 export * from './lib/contracts/ports/preferences.port';
+export * from './lib/contracts/ports/spatial-data.port';
+export * from './lib/contracts/spatial-dataset.contract';
 export * from './lib/contracts/channel-histogram-api.contract';
 export * from './lib/contracts/viz-config';
 export * from './lib/contracts/image.contract';
@@ -25,6 +27,28 @@ export * from './lib/contracts/display-types';
 export * from './lib/contracts/sam.contract';
 export * from './lib/contracts/cell-segmenter.contract';
 export { CellposeSegmenterService } from './lib/toolbar/segmentation/cellpose-segmenter.service';
+
+// ── Spatial-omics data plane ─────────────────────────────────────────────
+// The wire format the bundled example server speaks, plus a ready-made
+// SpatialDataPort adapter for it. Both are OPTIONAL: a host with its own
+// backend implements SpatialDataPort directly and imports neither.
+export { SpatialDataHttpService } from './lib/implementations/spatial/spatial-data-http.service';
+export {
+  SPATIAL_WIRE_VERSION, isLittleEndian, assertManifestVersion, datasetFromManifest,
+  decodeCoords, decodeRadius, decodeColumn, decodeFeatureVector, decodePolygons,
+} from './lib/implementations/spatial/spatial-wire';
+export type {
+  SpatialManifest, SpatialDatasetSummary, SpatialRadiusSpec,
+} from './lib/implementations/spatial/spatial-wire';
+// Backend-neutral encodings: columns/genes -> per-point colours and sizes.
+export {
+  encodeCategorical, encodeContinuous, resolveCategoryColors, contrastWindow,
+  markerDiameters, toRgbaTuples, lutFor,
+  DEFAULT_CATEGORICAL_PALETTE, DEFAULT_MUTED_OPACITY, MISSING_COLOR,
+} from './lib/implementations/spatial/spatial-encoding';
+export type {
+  RGBA, CategoricalEncodingOptions, ContinuousEncodingOptions,
+} from './lib/implementations/spatial/spatial-encoding';
 export * from './lib/contracts/instance-segmenter.contract';
 export * from './lib/contracts/semantic-segmenter.contract';
 

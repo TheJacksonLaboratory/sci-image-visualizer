@@ -3,12 +3,16 @@
   "private": true,
   "type": "module",
   "version": "0.0.0",
-  "description": "Lightweight example tile server for @jax-data-science/sci-image-visualizer's tiled (Mode A) path. Serves gigapixel pyramided COGs over the library's tiles/info + tile + zoom/region contract so the browser example can showcase large-image tiled loading.",
-  "engines": { "node": ">=20" },
+  "description": "Lightweight example server for @jax-data-science/sci-image-visualizer: the tiled (Mode A) image path over tiles/info + tile + zoom/region, plus the spatial-omics data plane (SpatialDataPort) the library's SpatialDataHttpService consumes.",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node server.mjs",
     "dev": "node --watch server.mjs",
-    "make-cog": "node scripts/make-cog.mjs"
+    "make-cog": "node scripts/make-cog.mjs",
+    "make-spatial-demo": "node scripts/make-spatial-demo.mjs",
+    "smoke-spatial": "node smoke-spatial.mjs"
   },
   "dependencies": {
     "cors": "^2.8.5",

@@ -37,6 +37,72 @@ so it stays lightweight and stateless.
 > Histogram / export endpoints are only needed for >8-bit images. These demo
 > slides are 8-bit RGB brightfield, so they are intentionally omitted.
 
+### Spatial-omics endpoints
+
+The same server also implements the **spatial-omics data plane** — the wire
+format `SpatialDataHttpService` speaks (see
+[`src/lib/implementations/spatial/spatial-wire.ts`](../../src/lib/implementations/spatial/spatial-wire.ts)).
+
+| Method + path | Returns |
+|---|---|
+| `GET /spatial/datasets` | `{ datasets: [{ id, name, count }] }` |
+| `GET /spatial/:id/manifest` | manifest: count, column + feature metadata, radius, imageRef |
+| `GET /spatial/:id/coords` | `f32[N]` x, `f32[N]` y, `f32[N]` z? — one response |
+| `GET /spatial/:id/radius` | `f32[N]` (per-observation radius only) |
+| `GET /spatial/:id/ids` | `{ ids: [...] }` |
+| `GET /spatial/:id/column/:name` | `u16[N]` codes (categorical) or `f32[N]` values (continuous) |
+| `GET /spatial/:id/feature/:name` | `f32[N]` — one gene's expression vector |
+| `GET /spatial/:id/features?q=&limit=` | `{ names: [...] }` typeahead |
+| `GET /spatial/:id/polygons` | `u32` count, `u32[count+1]` offsets, `f32` coords |
+
+Vectors are **raw little-endian bytes**, decoded by a typed-array view with no
+copy — JSON would cost ~8–12× the bytes and allocate a JS number per value.
+
+Two things the layout is built around:
+
+- **Nothing loads the whole matrix.** The manifest carries only metadata; a
+  column or gene vector is fetched when it is displayed. Visium ships ~31k
+  genes — the dense matrix is ~800 MB, so "load the dataset" can never mean
+  "load the matrix".
+- **The matrix is stored gene-major.** AnnData stores `X` observation-major
+  (CSR), so reading one gene means touching every row. The converter transposes
+  once, offline; serving a gene is then a contiguous ranged read at
+  `geneIndex * N * 4`, and the matrix is never held in server memory.
+
+#### Generating data
+
+```bash
+# A synthetic Visium-geometry dataset — no download, no Python, runs instantly.
+npm run make-spatial-demo        # -> ./spatial/demo-brain (~2k spots, 12 marker genes)
+npm start                        # SPATIAL_DIR=./spatial
+
+# Verify the whole wire format end to end (boots the server, decodes every route):
+npm run smoke-spatial
+```
+
+Real data goes through the Python converter, which reads a SpatialData Zarr
+store (Zarr v3 + AnnData conventions + GeoParquet shapes):
+
+```bash
+pip install "spatialdata>=0.2" numpy pandas
+
+curl -O https://s3.embl.de/spatialdata/spatialdata-sandbox/visium_spatialdata_0.7.1.zip
+unzip visium_spatialdata_0.7.1.zip     # -> data.zarr  (Visium mouse brain, ~68 MB)
+
+python scripts/make_spatial.py --input data.zarr --list
+python scripts/make_spatial.py --input data.zarr --sample ST8059048 --out ./spatial
+```
+
+> The store is **multi-sample** (`ST8059048`, `ST8059050`, …), so `--sample`
+> picks the section. `--genes` defaults to the 2,000 most-expressed;
+> `--genes all` writes the full matrix. If spots do not line up with the tissue
+> image, the transform lookup fell back to intrinsic coordinates (it says so on
+> stderr, and records it in `manifest.imageRef._note`) — correct it with
+> `--coordinate-system` or `--scale`.
+>
+> `make_spatial.py` has not been executed against a live store yet; treat the
+> first run as a verification step.
+
 ## Quick start (local)
 
 ```bash
