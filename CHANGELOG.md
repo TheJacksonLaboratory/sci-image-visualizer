@@ -72,12 +72,30 @@ file was added.
   1D charts, and background subsampling. When napari-js is unavailable the
   fallback renders the tissue image **without** the observation layer.
 
+- **Spatial-omics selection.** `SpatialSelectionStore` holds the selected
+  observations; `spatial-selection.ts` computes them. Selecting is driven from
+  the **existing ROI tools** — rectangle, polygon, freehand, magic wand, brush —
+  so no new canvas interaction was added: the controls panel's *Select from ROIs*
+  button tests every observation against the union of the drawn regions. Legend
+  rows are also clickable (click again to clear).
+
+  Unselected observations render muted while a selection is active, and nothing
+  is muted when it is empty — the CosMx highlight-vs-mute rule, applied to a flat
+  colouring as well, so selecting is visible before a colour source is chosen.
+
+  The geometry is a ray cast with a bounding-box pre-reject, honours polygon
+  holes (a point inside the exterior and inside a hole is outside), ignores
+  shapes that enclose no area (open polylines, profile-line ROIs, degenerate
+  rectangles), and applies the dataset's `imageRef` affine so the test happens in
+  the same world space the regions were drawn in. Changing dataset drops the
+  selection, since the masks are index-based.
+
 - **`<spatial-controls>` panel** (`SpatialControlsComponent`) — a non-modal,
   resizable, draggable dialog for the spatial mode, opened from a toolbar button
   that appears only while that mode is active. Offers a colour-by-column
-  dropdown, a gene typeahead over the feature panel, a legend for categorical
-  colourings, a colour bar for continuous ones, and point-size / opacity /
-  log-scale / outlier-clip controls. Column and gene selection are mutually
+  dropdown, a gene typeahead over the feature panel, a clickable legend for
+  categorical colourings, a colour bar for continuous ones, selection from the
+  drawn ROIs, and point-size / opacity / log-scale / outlier-clip controls. Column and gene selection are mutually
   exclusive, so what drives the colours is never ambiguous.
 
   Depends only on `ISpatialControls`, reached through the `VISUALIZER` contract

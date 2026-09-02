@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional } from '@angular/core';
-import { Observable, combineLatest, firstValueFrom } from 'rxjs';
+import { Observable, Subscription, combineLatest, firstValueFrom } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Image } from 'image-js';
 
@@ -11,8 +11,13 @@ import { OpenSeadragonVisualizerService } from './implementations/osd/openseadra
 import { PlotType, PlotTypeDescriptor, isNapari3d, isNapariScatter, isSpatialOmics } from './contracts/plot-type';
 import { IVisualizer, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls, ISpatialControls } from './contracts/visualizer.contract';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-data.port';
-import { isCategoricalColumn } from './contracts/spatial-dataset.contract';
+import { SpatialDataset, isCategoricalColumn } from './contracts/spatial-dataset.contract';
 import { resolveCategoryColors } from './implementations/spatial/spatial-encoding';
+import {
+  emptySelection, selectByCategory, selectInRegions,
+} from './implementations/spatial/spatial-selection';
+import { RegionStore } from './store/region-store.service';
+import { SpatialSelectionStore } from './store/spatial-selection.service';
 import { ViewerCapabilities } from './contracts/capabilities.contract';
 import { IRegionOverlay } from './contracts/region-overlay.contract';
 import { IRegionEditorApi } from './contracts/region-editor-api.contract';
@@ -95,6 +100,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
               @Inject(VIZ_CONFIG) private config: VizConfig,
               // Optional: a host that serves no spatial-omics data binds nothing,
               // and `getSpatialControls()` then returns null.
+              private regionStore: RegionStore,
+              private selectionStore: SpatialSelectionStore,
               @Optional() @Inject(SPATIAL_DATA_PORT)
               private spatialData: SpatialDataPort | null = null) {}
 
@@ -546,6 +553,13 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   getSpatialControls(): ISpatialControls | null {
     const port = this.spatialData;
     if (!port) return null;
+    // Mirror the dataset (and drop a stale selection when it changes — the masks
+    // are index-based, so they are meaningless against different observations).
+    this.spatialDatasetSub ??= port.getDataset$().subscribe((dataset) => {
+      const changed = dataset?.id !== this.currentSpatialDataset?.id;
+      this.currentSpatialDataset = dataset;
+      if (changed) this.selectionStore.set(emptySelection(dataset?.observations.count ?? 0));
+    });
     this.spatialControls ??= {
       getDataset$: () => port.getDataset$(),
       getViewState$: () => this.store.getSpatialView$(),
@@ -574,12 +588,42 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
         // can never disagree with the colour on screen.
         return resolveCategoryColors(column.meta);
       },
+
+      getSelection$: () => this.selectionStore.getSelection$(),
+
+      selectFromRegions: () => {
+        const dataset = this.currentSpatialDataset;
+        if (!dataset) return 0;
+        // The union of every drawn region — so every ROI tool the library
+        // already has doubles as a spatial selection tool.
+        const selection = selectInRegions(
+          dataset.observations, dataset.imageRef, this.regionStore.getRegions(),
+        );
+        this.selectionStore.set(selection);
+        return selection.count;
+      },
+
+      selectCategory: async (column: string, categoryIndex: number) => {
+        const loaded = await port.getColumn(column);
+        if (!isCategoricalColumn(loaded)) {
+          throw new Error(`[spatial] column "${column}" is continuous — it has no categories`);
+        }
+        const selection = selectByCategory(loaded.codes, categoryIndex);
+        this.selectionStore.set(selection);
+        return selection.count;
+      },
+
+      clearSelection: () => this.selectionStore.clear(),
     };
     return this.spatialControls;
   }
 
   /** Memoised so consumers can hold the object across calls. */
   private spatialControls: ISpatialControls | null = null;
+  /** Latest dataset, mirrored so `selectFromRegions()` can answer synchronously
+   *  — it runs from a button click and must not await a round-trip. */
+  private currentSpatialDataset: SpatialDataset | null = null;
+  private spatialDatasetSub: Subscription | null = null;
 
   /** Load pixel frames for intensity sampling when OpenSeadragon owns the image
    *  (it doesn't feed Plotly's frame cache). No-op needed when Plotly renders. */

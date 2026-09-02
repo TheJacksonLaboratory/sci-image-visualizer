@@ -49,10 +49,17 @@
     <div class="sc-section sc-key" *ngIf="view.colorBy">
       <span class="sc-lbl">{{ colorByLabel }}</span>
 
+      <!-- Legend rows are buttons: clicking one selects that category, clicking
+           it again clears — so a click is always reversible. -->
       <ul class="sc-legend" *ngIf="isCategorical">
-        <li *ngFor="let entry of legend">
-          <span class="sc-swatch" [style.background]="entry.color"></span>
-          <span class="sc-legend-label" [title]="entry.label">{{ entry.label }}</span>
+        <li *ngFor="let entry of legend; index as i">
+          <button type="button" class="sc-legend-btn"
+                  [class.selected]="selectedCategory === i"
+                  (click)="selectCategory(i)"
+                  [title]="'Select ' + entry.label">
+            <span class="sc-swatch" [style.background]="entry.color"></span>
+            <span class="sc-legend-label">{{ entry.label }}</span>
+          </button>
         </li>
       </ul>
 
@@ -99,6 +106,26 @@
                     pTooltip="Percentile the contrast window is taken at"
                     tooltipPosition="top"></p-dropdown>
       </div>
+    </div>
+
+    <!-- Selection. Regions come from the existing ROI tools (rectangle, polygon,
+         freehand, wand, brush), so there is no separate marquee to learn. -->
+    <div class="sc-section sc-selection">
+      <div class="sc-row">
+        <p-button label="Select from ROIs" icon="pi pi-object-group" size="small"
+                  [outlined]="true" (onClick)="selectFromRegions()"
+                  pTooltip="Select every observation inside the drawn regions"
+                  tooltipPosition="top"></p-button>
+        <p-button *ngIf="hasSelection" label="Clear" size="small" [text]="true"
+                  (onClick)="clearSelection()"></p-button>
+      </div>
+      <small class="sc-hint" *ngIf="hasSelection">
+        {{ selection.count | number }} of {{ ds.observations.count | number }} selected —
+        the rest are muted.
+      </small>
+      <small class="sc-hint" *ngIf="selectionMissed">
+        No observations fell inside the drawn regions.
+      </small>
     </div>
 
     <div class="sc-btns">

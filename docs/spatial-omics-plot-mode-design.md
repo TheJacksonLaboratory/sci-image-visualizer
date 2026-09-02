@@ -255,8 +255,9 @@ shaped, and wrong for "one value per cell". Plan:
 7. ~~**Gene/feature picker** → lazy `getVector(name)` → continuous colouring.~~ **Done** —
    typeahead in the controls panel, over the port's search or the inlined names.
 8. Hover tooltip: observation id + the active column's value.
-9. `SelectionStore` + selection by drag-rectangle **and** by existing `RegionStore` ROIs
-   (point-in-polygon); selected obs highlighted, non-selected muted via alpha.
+9. ~~`SelectionStore` + selection by existing `RegionStore` ROIs (point-in-polygon);
+   selected obs highlighted, non-selected muted via alpha.~~ **Done.** The drag-rectangle
+   case is covered by the existing rectangle ROI tool, so no separate marquee was built.
 10. Linked **histogram** of the active continuous column, selection-aware.
 11. Display controls: ~~point size/scale, global alpha~~ **done**; log scale and outlier clip
     also landed. Background subsample fraction still open (gated on the scale question, Q4).
@@ -310,7 +311,7 @@ Each phase ends green on `npm run typecheck && npm run lint && npm test`.
 | **P0 — Spike** (~1–2 d) | Hard-code the Visium spots into a `PointsLayer` over the tissue image in the example app. No contracts. | A screenshot of ~3k spots coloured by cluster over mouse brain. Kills or confirms the approach. |
 | **P1 — Data plane** ✅ **done** | `SpatialDataset` contract, `SPATIAL_DATA_PORT`, `SpatialDataHttpService`, `PlotDataSource: 'spatial'`; example-server endpoints, synthetic demo generator, end-to-end smoke check, Python converter for real SpatialData Zarr stores. *(`SelectionStore` moved to P3, where it is actually consumed.)* | ✅ Contracts exported from `src/index.ts`; 45 new unit tests; `smoke-spatial` green; typecheck · lint · test (965) · build all pass. Also landed: the `requiresSpatialData` selector gate (D4). Converter is written but not yet run against a live store. |
 | **P2 — 2D mode** ⏳ **renderer done, host controls not** | ✅ `SPATIAL_OMICS` plot type + descriptor + routing to napari-js; ✅ observation markers over the tissue image with the dataset's data→world affine; ✅ categorical colouring (column palette) and continuous colouring (active colormap, log scale, percentile-clipped window); ✅ gene colouring through the port's lazy vector fetch; ✅ point-size scale + opacity via `VisualizerStore`. ✅ `ISpatialControls` (`getSpatialControls()`) — the host-facing surface for colour-by, view state, feature search and legend colours, implemented on the router because the state is backend-neutral; ✅ end-to-end demo: `make-spatial-demo` now emits a matching tissue-image pyramid with a real (non-identity) `imageRef` affine, and the browser example loads image + dataset together. ✅ `<spatial-controls>` panel: column dropdown, gene typeahead, categorical legend, continuous colour bar, point-size / opacity / log-scale / outlier-clip. ❌ Still to build: hover tooltip, background subsampling. | Renderer + encodings + controls covered by 37 napari, 26 encoding and 9 router specs; `smoke-spatial` checks every spot lands inside the image under the affine. |
-| **P3 — Selection** | `SelectionStore` wiring: rect drag, ROI point-in-polygon, mute/highlight, legend-click. | Must-have 9 done. |
+| **P3 — Selection** ✅ **done** | `SpatialSelectionStore` + pure `spatial-selection.ts` (ray-cast point-in-polygon with holes, bbox pre-reject, `imageRef` affine applied); selection from the drawn ROIs and from a legend click; unselected observations muted per the CosMx rule. **No separate marquee** — every existing ROI tool (rect, polygon, freehand, wand, brush) becomes a selection tool. | ✅ Must-have 9. 20 geometry specs, 5 store specs, 7 router specs, 7 panel specs. |
 | **P4 — Linked charts** | `omics-trace-builders.ts`, charts panel, histogram (Must) then violin + box (Should). | Must-have 10 + Should 14–15. |
 | **P5 — 3D** | napari-js per-point colour/size in 3D; `SPATIAL_OMICS_3D` with elevation. | Should 18. |
 | **P6 — Scale** | napari-js shapes layer; boundary rendering; point LOD/tiling; validate on a Xenium/CosMx dataset. | Should 16, Might 23. |

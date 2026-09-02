@@ -38,6 +38,10 @@ import {
   resolveCategoryColors, toRgbaTuples,
 } from '../spatial/spatial-encoding';
 import {
+  SpatialSelectionMask, emptySelection, mutedFromSelection,
+} from '../spatial/spatial-selection';
+import { SpatialSelectionStore } from '../../store/spatial-selection.service';
+import {
   PlotType,
   PlotTypeDescriptor,
   PLOT_TYPE_DESCRIPTORS,
@@ -388,6 +392,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // Optional: only a host that serves spatial-omics data provides it, and
     // without it the SPATIAL_OMICS plot type is never offered anyway.
     @Optional() @Inject(SPATIAL_DATA_PORT) private readonly spatialData: SpatialDataPort | null = null,
+    private readonly selectionStore: SpatialSelectionStore | null = null,
   ) {
     super(regionStore, store);
     this.api = config.slideCropServer;
@@ -1504,15 +1509,18 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.spatialSub?.unsubscribe();
     const port = this.spatialData;
     if (!port) return;
-    this.spatialSub = combineLatest([port.getDataset$(), this.store.getSpatialView$()])
-      .subscribe(([dataset, view]) => {
-        void this.rebuildSpatialPoints(dataset, view);
-      });
+    const selection$ = this.selectionStore?.getSelection$() ?? of(emptySelection());
+    this.spatialSub = combineLatest([
+      port.getDataset$(), this.store.getSpatialView$(), selection$,
+    ]).subscribe(([dataset, view, selection]) => {
+      void this.rebuildSpatialPoints(dataset, view, selection);
+    });
   }
 
   /** (Re)build the observation marker layer for the current dataset + view state. */
   private async rebuildSpatialPoints(
     dataset: SpatialDataset | null, view: SpatialViewState,
+    selection: SpatialSelectionMask = emptySelection(),
   ): Promise<void> {
     const viewer = this.viewer;
     if (!viewer) return;
@@ -1523,7 +1531,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     let faceColor: ReturnType<typeof toRgbaTuples> | [number, number, number, number];
     try {
       faceColor = dataset
-        ? await this.spatialFaceColors(dataset, view)
+        ? await this.spatialFaceColors(dataset, view, selection)
         : NapariVisualizerService.SPATIAL_NEUTRAL_COLOR;
     } catch (err) {
       console.warn('[napari-js] spatial colouring failed — falling back to a flat colour', err);
@@ -1578,11 +1586,25 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    * and gene vectors go through the active colormap with a percentile-clipped window.
    */
   private async spatialFaceColors(
-    dataset: SpatialDataset, view: SpatialViewState,
+    dataset: SpatialDataset, view: SpatialViewState, selection: SpatialSelectionMask,
   ): Promise<ReturnType<typeof toRgbaTuples> | [number, number, number, number]> {
     const port = this.spatialData;
     const colorBy = view.colorBy;
-    if (!port || !colorBy) return NapariVisualizerService.SPATIAL_NEUTRAL_COLOR;
+    // Everything NOT selected is muted; with nothing selected, nothing is muted
+    // and the whole tissue reads normally (the CosMx highlight-vs-mute rule).
+    const muted = mutedFromSelection(selection);
+
+    if (!port || !colorBy) {
+      // A flat colour still has to honour a selection, or selecting would appear
+      // to do nothing until a colour source is picked.
+      if (!muted) return NapariVisualizerService.SPATIAL_NEUTRAL_COLOR;
+      const [r, g, b] = NapariVisualizerService.SPATIAL_NEUTRAL_COLOR;
+      return toRgbaTuples(encodeCategorical(new Uint16Array(dataset.observations.count), {
+        colors: [`#${[r, g, b].map((c) => Math.round(c * 255).toString(16).padStart(2, '0')).join('')}`],
+        opacity: view.opacity,
+        muted,
+      }));
+    }
 
     if (colorBy.kind === 'column') {
       const column: SpatialColumn = await port.getColumn(colorBy.name);
@@ -1590,30 +1612,32 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         return toRgbaTuples(encodeCategorical(column.codes, {
           colors: resolveCategoryColors(column.meta),
           opacity: view.opacity,
+          muted,
         }));
       }
       // A continuous column may carry its own log hint (counts); the view's
       // toggle wins once the user has set it.
       return toRgbaTuples(this.encodeSpatialContinuous(
-        column.values, view, view.logScale || !!column.meta.logScaleHint,
+        column.values, view, view.logScale || !!column.meta.logScaleHint, muted,
       ));
     }
 
     const values = await port.getFeatureVector(colorBy.name);
     return toRgbaTuples(this.encodeSpatialContinuous(
-      values, view, view.logScale || !!dataset.features?.logScaleHint,
+      values, view, view.logScale || !!dataset.features?.logScaleHint, muted,
     ));
   }
 
   /** Continuous values → RGBA through the active colormap and a clipped window. */
   private encodeSpatialContinuous(
     values: Float32Array, view: SpatialViewState, log: boolean,
+    muted: Uint8Array | null = null,
   ): Float32Array {
     const node = this.currentColormap as { data?: { value?: unknown } } | null;
     const lut = lutFor(node?.data?.value, this.currentReverse);
     const [lo, hi] = view.percentileClip ?? [0.01, 0.99];
     const [min, max] = contrastWindow(values, lo, hi);
-    return encodeContinuous(values, { lut, min, max, log, opacity: view.opacity });
+    return encodeContinuous(values, { lut, min, max, log, opacity: view.opacity, muted });
   }
 
   /**

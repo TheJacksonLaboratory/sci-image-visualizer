@@ -9,6 +9,9 @@ import {
 } from '../contracts/spatial-dataset.contract';
 import { ColormapNode, SpatialViewState, DEFAULT_SPATIAL_VIEW } from '../contracts/display-types';
 import { lutFor } from '../implementations/spatial/spatial-encoding';
+import {
+  SpatialSelectionMask, emptySelection,
+} from '../implementations/spatial/spatial-selection';
 
 /** One legend row for a categorical colouring. */
 export interface SpatialLegendEntry {
@@ -69,6 +72,14 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   /** CSS gradient for a continuous colouring, or null when categorical. */
   colorBarCss: string | null = null;
 
+  /** Current selection — drives the count, the Clear button and the muting. */
+  selection: SpatialSelectionMask = emptySelection();
+  /** The legend row whose category is currently selected, for highlighting. */
+  selectedCategory: number | null = null;
+  /** An ROI selection that matched nothing, so the UI can say so rather than
+   *  looking like the button did nothing. */
+  selectionMissed = false;
+
   private colormap: ColormapNode | null = null;
   private reverse = false;
   private readonly subs = new Subscription();
@@ -96,6 +107,11 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       this.selectedColumn = view.colorBy?.kind === 'column' ? view.colorBy.name : null;
       if (view.colorBy?.kind === 'feature') this.geneQuery = view.colorBy.name;
       void this.refreshKey();
+    }));
+
+    this.subs.add(this.controls.getSelection$().subscribe((selection) => {
+      this.selection = selection;
+      if (selection.count === 0) this.selectedCategory = null;
     }));
 
     // The colour bar must use the colormap the renderer is using.
@@ -152,6 +168,44 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     this.controls?.colorByFeature(name);
   }
 
+  // ── selection ───────────────────────────────────────────────────────────
+
+  /** Select every observation inside the drawn regions (their union). */
+  selectFromRegions(): void {
+    const count = this.controls?.selectFromRegions() ?? 0;
+    this.selectedCategory = null;
+    this.selectionMissed = count === 0;
+  }
+
+  /** Legend click: select one category. Clicking the active row clears it, so a
+   *  second click is an undo rather than a no-op. */
+  async selectCategory(index: number): Promise<void> {
+    const by = this.view.colorBy;
+    if (!this.controls || by?.kind !== 'column') return;
+    if (this.selectedCategory === index) {
+      this.clearSelection();
+      return;
+    }
+    try {
+      await this.controls.selectCategory(by.name, index);
+      this.selectedCategory = index;
+      this.selectionMissed = false;
+    } catch {
+      this.selectedCategory = null;
+    }
+  }
+
+  clearSelection(): void {
+    this.controls?.clearSelection();
+    this.selectedCategory = null;
+    this.selectionMissed = false;
+  }
+
+  /** True while a selection is active — everything else renders muted. */
+  get hasSelection(): boolean {
+    return this.selection.count > 0;
+  }
+
   // ── display ─────────────────────────────────────────────────────────────
 
   // PrimeNG's slider reports `number | undefined`; ignore the empty case rather
@@ -172,6 +226,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   }
   reset(): void {
     this.controls?.setViewState({ ...DEFAULT_SPATIAL_VIEW });
+    this.clearSelection();
     this.selectedColumn = null;
     this.geneQuery = null;
   }

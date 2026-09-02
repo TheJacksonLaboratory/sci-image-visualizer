@@ -10,6 +10,7 @@ import { IRegionOverlay } from './region-overlay.contract';
 import { IHistogram } from './channel-histogram-api.contract';
 import { ColormapNode, IWandOptions, IBrushOptions, SpatialViewState } from './display-types';
 import { SpatialDataset } from './spatial-dataset.contract';
+import { SpatialSelectionMask } from '../implementations/spatial/spatial-selection';
 
 /**
  * Backend-neutral visualization contract. Plotly is one implementation;
@@ -321,6 +322,21 @@ export interface ISpatialControls {
    *  its `categories` — the legend's swatches, resolved the same way the
    *  renderer resolves them so the two cannot disagree. */
   categoryColors(name: string): Promise<string[]>;
+
+  // ── selection ─────────────────────────────────────────────────────────
+  /** The current selection. Empty means "nothing selected", in which case the
+   *  whole tissue renders normally rather than everything being muted. */
+  getSelection$(): Observable<SpatialSelectionMask>;
+  /**
+   * Select every observation inside the currently-drawn regions (their union).
+   * Reuses the existing ROI tools — rectangle, polygon, freehand, wand, brush —
+   * so there is no separate marquee to learn. Returns how many were selected.
+   */
+  selectFromRegions(): number;
+  /** Select every observation in one category of a categorical column — the
+   *  legend click. Rejects for an unknown or continuous column. */
+  selectCategory(column: string, categoryIndex: number): Promise<number>;
+  clearSelection(): void;
 }
 
 /** Display options (colormap/LUT, reverse scale, image metadata). */

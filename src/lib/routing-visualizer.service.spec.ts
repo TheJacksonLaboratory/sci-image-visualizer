@@ -11,6 +11,9 @@ import { PlotType } from './contracts/plot-type';
 import { IChannelState, IHistogram } from './contracts/channel-histogram-api.contract';
 import { SPATIAL_DATA_PORT } from './contracts/ports/spatial-data.port';
 import { CategoricalColumn, SpatialDataset } from './contracts/spatial-dataset.contract';
+import { RegionStore } from './store/region-store.service';
+import { SpatialSelectionStore } from './store/spatial-selection.service';
+import { Rectangle, Region } from './models/region';
 import { BehaviorSubject } from 'rxjs';
 
 /**
@@ -555,6 +558,106 @@ describe('RoutingVisualizerService — spatial controls', () => {
       ...over,
     };
   }
+
+  /** A rectangle ROI in world coordinates. */
+  function roi(x: number, y: number, w: number, h: number): Region {
+    const r = new Region();
+    const b = new Rectangle();
+    b.x = x; b.y = y; b.width = w; b.height = h;
+    r.bounds = b;
+    return r;
+  }
+
+  describe('selection', () => {
+    /** Three observations: two inside a 0..10 box, one far away. */
+    const spatial: SpatialDataset = {
+      ...dataset,
+      observations: {
+        count: 3,
+        x: Float32Array.from([1, 5, 500]),
+        y: Float32Array.from([1, 5, 500]),
+      },
+    };
+
+    function withDataset(over: Record<string, unknown> = {}) {
+      const built = build(mockPort({
+        getDataset$: () => new BehaviorSubject<SpatialDataset | null>(spatial),
+        ...over,
+      }));
+      return {
+        ...built,
+        regions: TestBed.inject(RegionStore),
+        selection: TestBed.inject(SpatialSelectionStore),
+      };
+    }
+
+    it('selects observations inside the drawn ROIs — every ROI tool becomes a selector', () => {
+      const { router, regions, selection } = withDataset();
+      regions.setRegions([roi(0, 0, 10, 10)]);
+
+      const count = router.getSpatialControls()!.selectFromRegions();
+      expect(count).toBe(2);
+      expect(Array.from(selection.current().mask)).toEqual([1, 1, 0]);
+    });
+
+    it('reports zero (and publishes an empty selection) when the ROIs match nothing', () => {
+      const { router, regions, selection } = withDataset();
+      regions.setRegions([roi(900, 900, 10, 10)]);
+      expect(router.getSpatialControls()!.selectFromRegions()).toBe(0);
+      expect(selection.isEmpty()).toBe(true);
+    });
+
+    it('selects a whole category from the legend', async () => {
+      const column: CategoricalColumn = {
+        meta: { kind: 'categorical', name: 'region', categories: ['A', 'B'] },
+        codes: new Uint16Array([0, 1, 1]),
+      };
+      const { router, selection } = withDataset({
+        getColumn: jest.fn().mockResolvedValue(column),
+      });
+      const count = await router.getSpatialControls()!.selectCategory('region', 1);
+      expect(count).toBe(2);
+      expect(Array.from(selection.current().mask)).toEqual([0, 1, 1]);
+    });
+
+    it('rejects a category selection on a continuous column', async () => {
+      const { router } = withDataset({
+        getColumn: jest.fn().mockResolvedValue({
+          meta: { kind: 'continuous', name: 'counts' }, values: new Float32Array(3),
+        }),
+      });
+      await expect(router.getSpatialControls()!.selectCategory('counts', 0))
+        .rejects.toThrow(/continuous/);
+    });
+
+    it('clears the selection', () => {
+      const { router, regions, selection } = withDataset();
+      regions.setRegions([roi(0, 0, 10, 10)]);
+      router.getSpatialControls()!.selectFromRegions();
+      router.getSpatialControls()!.clearSelection();
+      expect(selection.isEmpty()).toBe(true);
+    });
+
+    it('drops the selection when the dataset changes — masks are index-based', () => {
+      const dataset$ = new BehaviorSubject<SpatialDataset | null>(spatial);
+      const built = build(mockPort({ getDataset$: () => dataset$ }));
+      const regions = TestBed.inject(RegionStore);
+      const selection = TestBed.inject(SpatialSelectionStore);
+      regions.setRegions([roi(0, 0, 10, 10)]);
+      built.router.getSpatialControls()!.selectFromRegions();
+      expect(selection.current().count).toBe(2);
+
+      dataset$.next({ ...spatial, id: 'other' });
+      expect(selection.isEmpty()).toBe(true);
+    });
+
+    it('selects nothing when no dataset is loaded', () => {
+      const { router } = build(mockPort({
+        getDataset$: () => new BehaviorSubject<SpatialDataset | null>(null),
+      }));
+      expect(router.getSpatialControls()!.selectFromRegions()).toBe(0);
+    });
+  });
 
   it('returns null when the host binds no SPATIAL_DATA_PORT', () => {
     const { router } = build(null);

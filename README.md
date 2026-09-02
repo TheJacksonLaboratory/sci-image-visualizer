@@ -227,7 +227,12 @@ continuous ones, plus point-size, opacity, log-scale and outlier-clip controls.
 Its legend swatches and colour bar are built with the same functions the
 renderer uses, so the key cannot drift from the canvas.
 
-Still to build: hover tooltips, selection, and the linked 1D charts — see
+**Selection** reuses the region tools you already have: draw a rectangle,
+polygon, freehand shape, wand or brush region, then *Select from ROIs* selects
+every observation inside their union and mutes the rest. Legend rows select
+their category on click.
+
+Still to build: hover tooltips and the linked 1D charts — see
 [docs/spatial-omics-plot-mode-design.md](docs/spatial-omics-plot-mode-design.md).
 
 ## Regions & annotation

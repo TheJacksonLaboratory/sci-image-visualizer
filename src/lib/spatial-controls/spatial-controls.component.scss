@@ -102,10 +102,37 @@
 
   li {
     display: flex;
-    align-items: center;
-    gap: 0.45rem;
-    font-size: 0.8rem;
   }
+}
+
+.sc-legend-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.15rem 0.3rem;
+  font: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  color: inherit;
+
+  &:hover {
+    background: var(--surface-hover, rgba(0, 0, 0, 0.04));
+  }
+
+  &.selected {
+    border-color: var(--primary-color, #3b82f6);
+    background: var(--surface-hover, rgba(59, 130, 246, 0.08));
+    font-weight: 600;
+  }
+}
+
+.sc-selection .sc-row {
+  gap: 0.4rem;
 }
 
 .sc-swatch {

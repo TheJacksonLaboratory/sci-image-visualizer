@@ -7,6 +7,9 @@ import { SpatialControlsComponent } from './spatial-controls.component';
 import { VISUALIZER, ISpatialControls } from '../contracts/visualizer.contract';
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../contracts/display-types';
+import {
+  SpatialSelectionMask, emptySelection,
+} from '../implementations/spatial/spatial-selection';
 
 const dataset: SpatialDataset = {
   id: 'demo',
@@ -25,6 +28,7 @@ describe('SpatialControlsComponent', () => {
   let dataset$: BehaviorSubject<SpatialDataset | null>;
   let view$: BehaviorSubject<SpatialViewState>;
   let controls: jest.Mocked<ISpatialControls>;
+  let selection$: BehaviorSubject<SpatialSelectionMask>;
 
   /** Let the async key rebuild (categoryColors is a promise) settle. */
   const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -64,6 +68,7 @@ describe('SpatialControlsComponent', () => {
   beforeEach(() => {
     dataset$ = new BehaviorSubject<SpatialDataset | null>(dataset);
     view$ = new BehaviorSubject<SpatialViewState>({ ...DEFAULT_SPATIAL_VIEW });
+    selection$ = new BehaviorSubject<SpatialSelectionMask>(emptySelection());
     controls = {
       getDataset$: jest.fn(() => dataset$),
       getViewState$: jest.fn(() => view$),
@@ -76,6 +81,16 @@ describe('SpatialControlsComponent', () => {
       clearColorBy: jest.fn(() => view$.next({ ...view$.value, colorBy: null })),
       searchFeatures: jest.fn(async () => ['Ttr']),
       categoryColors: jest.fn(async () => ['#ff0000', '#0000ff']),
+      getSelection$: jest.fn(() => selection$),
+      selectFromRegions: jest.fn(() => {
+        selection$.next({ mask: new Uint8Array([1, 0, 1]), count: 2 });
+        return 2;
+      }),
+      selectCategory: jest.fn(async () => {
+        selection$.next({ mask: new Uint8Array([1, 0, 0]), count: 1 });
+        return 1;
+      }),
+      clearSelection: jest.fn(() => selection$.next(emptySelection())),
     } as unknown as jest.Mocked<ISpatialControls>;
   });
 
@@ -227,6 +242,68 @@ describe('SpatialControlsComponent', () => {
       expect(controls.setViewState).toHaveBeenCalledWith({ ...DEFAULT_SPATIAL_VIEW });
       expect(component.selectedColumn).toBeNull();
       expect(component.geneQuery).toBeNull();
+    });
+  });
+
+  describe('selection', () => {
+    beforeEach(async () => build(controls));
+
+    it('selects from the drawn ROIs and reports the count', () => {
+      component.selectFromRegions();
+      expect(controls.selectFromRegions).toHaveBeenCalled();
+      expect(component.hasSelection).toBe(true);
+      expect(component.selection.count).toBe(2);
+      expect(component.selectionMissed).toBe(false);
+    });
+
+    it('says so when the ROIs matched nothing, rather than looking inert', () => {
+      controls.selectFromRegions.mockReturnValueOnce(0);
+      component.selectFromRegions();
+      expect(component.selectionMissed).toBe(true);
+      expect(component.hasSelection).toBe(false);
+    });
+
+    it('selects a category from the legend', async () => {
+      component.onColumn('region');
+      await flush();
+      await component.selectCategory(1);
+      expect(controls.selectCategory).toHaveBeenCalledWith('region', 1);
+      expect(component.selectedCategory).toBe(1);
+      expect(component.hasSelection).toBe(true);
+    });
+
+    it('clicking the active legend row again clears — a click is reversible', async () => {
+      component.onColumn('region');
+      await flush();
+      await component.selectCategory(0);
+      expect(component.selectedCategory).toBe(0);
+
+      await component.selectCategory(0);
+      expect(controls.clearSelection).toHaveBeenCalled();
+      expect(component.selectedCategory).toBeNull();
+      expect(component.hasSelection).toBe(false);
+    });
+
+    it('ignores a legend click while colouring by a gene (no categories to select)', async () => {
+      component.onGene('Ttr');
+      await flush();
+      await component.selectCategory(0);
+      expect(controls.selectCategory).not.toHaveBeenCalled();
+    });
+
+    it('drops the highlighted row when the selection is cleared elsewhere', async () => {
+      component.onColumn('region');
+      await flush();
+      await component.selectCategory(1);
+      selection$.next(emptySelection());
+      expect(component.selectedCategory).toBeNull();
+    });
+
+    it('reset clears the selection as well as the view state', () => {
+      component.selectFromRegions();
+      component.reset();
+      expect(controls.clearSelection).toHaveBeenCalled();
+      expect(component.hasSelection).toBe(false);
     });
   });
 
