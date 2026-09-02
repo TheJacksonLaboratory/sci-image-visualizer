@@ -589,6 +589,34 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
         return resolveCategoryColors(column.meta);
       },
 
+      continuousValues: async (source) => {
+        if (source.kind === 'feature') return port.getFeatureVector(source.name);
+        const column = await port.getColumn(source.name);
+        if (isCategoricalColumn(column)) {
+          throw new Error(
+            `[spatial] column "${source.name}" is categorical — it has no values to chart`,
+          );
+        }
+        return column.values;
+      },
+
+      categoricalView: async (name: string) => {
+        const column = await port.getColumn(name);
+        if (!isCategoricalColumn(column)) {
+          throw new Error(`[spatial] column "${name}" is continuous — it has no categories`);
+        }
+        return {
+          name,
+          categories: column.meta.categories,
+          colors: resolveCategoryColors(column.meta),
+          codes: column.codes,
+        };
+      },
+
+      categoricalColumns: () => (this.currentSpatialDataset?.columns ?? [])
+        .filter((c) => c.kind === 'categorical')
+        .map((c) => c.name),
+
       getSelection$: () => this.selectionStore.getSelection$(),
 
       selectFromRegions: () => {

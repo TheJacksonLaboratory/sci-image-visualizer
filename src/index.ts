@@ -98,3 +98,12 @@ export {
   SpatialControlsComponent,
 } from './lib/spatial-controls/spatial-controls.component';
 export type { SpatialLegendEntry } from './lib/spatial-controls/spatial-controls.component';
+export { SpatialChartsComponent } from './lib/spatial-charts/spatial-charts.component';
+// Pure chart builders, exported so a host can render the same distributions
+// wherever it likes (a report, a different charting surface).
+export {
+  buildOmicsTraces, omicsLayout, benefitsFromGrouping,
+} from './lib/implementations/plotly/omics-trace-builders';
+export type {
+  OmicsChartKind, OmicsGrouping, OmicsTraceInput,
+} from './lib/implementations/plotly/omics-trace-builders';

@@ -258,7 +258,9 @@ shaped, and wrong for "one value per cell". Plan:
 9. ~~`SelectionStore` + selection by existing `RegionStore` ROIs (point-in-polygon);
    selected obs highlighted, non-selected muted via alpha.~~ **Done.** The drag-rectangle
    case is covered by the existing rectangle ROI tool, so no separate marquee was built.
-10. Linked **histogram** of the active continuous column, selection-aware.
+10. ~~Linked **histogram** of the active continuous column, selection-aware.~~ **Done** —
+    plus violin and box (Should 14). The histogram overlays *Selected* on the full distribution;
+    violin/box narrow to the selection and split by a categorical column.
 11. Display controls: ~~point size/scale, global alpha~~ **done**; log scale and outlier clip
     also landed. Background subsample fraction still open (gated on the scale question, Q4).
 12. ~~Runnable demo in `examples/` end to end.~~ **Done, on real data**: the scverse
@@ -271,7 +273,8 @@ shaped, and wrong for "one value per cell". Plan:
 ### Should-have
 
 14. **Violin** and **box** plots of a continuous column grouped by a categorical one.
-15. Two-way brushing: select on a chart → highlight in space, and vice versa.
+15. Two-way brushing: ~~space → chart~~ **done** (the charts narrow to the selection);
+    chart → space still open (a Plotly `selected` event writing back to the selection store).
 16. Cell/spot **boundary polygon layer** (needs napari-js shapes layer). **Now unblocked on the
     data side and blocked only on the renderer**: the Visium HD demo serves 84,031 real cell
     outlines (1.8M vertices) on `/polygons`, and `SpatialDataPort.getPolygons()` reads them — but
@@ -316,7 +319,7 @@ Each phase ends green on `npm run typecheck && npm run lint && npm test`.
 | **P1 — Data plane** ✅ **done** | `SpatialDataset` contract, `SPATIAL_DATA_PORT`, `SpatialDataHttpService`, `PlotDataSource: 'spatial'`; example-server endpoints, synthetic demo generator, end-to-end smoke check, Python converter for real SpatialData Zarr stores. *(`SelectionStore` moved to P3, where it is actually consumed.)* | ✅ Contracts exported from `src/index.ts`; 45 new unit tests; `smoke-spatial` green; typecheck · lint · test (965) · build all pass. Also landed: the `requiresSpatialData` selector gate (D4). Converter is written but not yet run against a live store. |
 | **P2 — 2D mode** ⏳ **renderer done, host controls not** | ✅ `SPATIAL_OMICS` plot type + descriptor + routing to napari-js; ✅ observation markers over the tissue image with the dataset's data→world affine; ✅ categorical colouring (column palette) and continuous colouring (active colormap, log scale, percentile-clipped window); ✅ gene colouring through the port's lazy vector fetch; ✅ point-size scale + opacity via `VisualizerStore`. ✅ `ISpatialControls` (`getSpatialControls()`) — the host-facing surface for colour-by, view state, feature search and legend colours, implemented on the router because the state is backend-neutral; ✅ end-to-end demo: `make-spatial-demo` now emits a matching tissue-image pyramid with a real (non-identity) `imageRef` affine, and the browser example loads image + dataset together. ✅ `<spatial-controls>` panel: column dropdown, gene typeahead, categorical legend, continuous colour bar, point-size / opacity / log-scale / outlier-clip. ❌ Still to build: hover tooltip, background subsampling. | Renderer + encodings + controls covered by 37 napari, 26 encoding and 9 router specs; `smoke-spatial` checks every spot lands inside the image under the affine. |
 | **P3 — Selection** ✅ **done** | `SpatialSelectionStore` + pure `spatial-selection.ts` (ray-cast point-in-polygon with holes, bbox pre-reject, `imageRef` affine applied); selection from the drawn ROIs and from a legend click; unselected observations muted per the CosMx rule. **No separate marquee** — every existing ROI tool (rect, polygon, freehand, wand, brush) becomes a selection tool. | ✅ Must-have 9. 20 geometry specs, 5 store specs, 7 router specs, 7 panel specs. |
-| **P4 — Linked charts** | `omics-trace-builders.ts`, charts panel, histogram (Must) then violin + box (Should). | Must-have 10 + Should 14–15. |
+| **P4 — Linked charts** ✅ **done** | `omics-trace-builders.ts` (pure: histogram / violin / box, kept separate from the image-shaped `plotly-trace-builders`), `<spatial-charts>` panel, `ISpatialControls.continuousValues` / `categoricalView` / `categoricalColumns`. The chart follows whatever the MAP is coloured by, so the two cannot disagree. | ✅ Must-have 10, Should 14. 21 builder specs + 16 panel specs. Violin needed no bundling — `plotly.js-dist-min` already carries it. |
 | **P5 — 3D** | napari-js per-point colour/size in 3D; `SPATIAL_OMICS_3D` with elevation. | Should 18. |
 | **P6 — Scale** | napari-js shapes layer; boundary rendering; point LOD/tiling; validate on a Xenium/CosMx dataset. | Should 16, Might 23. |
 

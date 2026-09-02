@@ -72,6 +72,30 @@ file was added.
   1D charts, and background subsampling. When napari-js is unavailable the
   fallback renders the tissue image **without** the observation layer.
 
+- **Linked distribution charts** — `<spatial-charts>` (`SpatialChartsComponent`),
+  a non-modal panel opened from the toolbar in the spatial mode: **histogram**,
+  **violin** and **box** over the values the map is coloured by.
+
+  The chart's subject is the map's colour source rather than an independent
+  picker, so the two cannot disagree about what is being shown. It follows the
+  selection: the histogram overlays *Selected* on the full distribution (that
+  comparison is the point of linking them), while violin and box narrow to it —
+  a violin per category per selection state is unreadable. Violin and box split
+  by any categorical column, in the same colours the map uses.
+
+  `implementations/plotly/omics-trace-builders.ts` holds the trace building as
+  pure functions, deliberately separate from `plotly-trace-builders.ts`: that
+  module's `TraceBuildInput` is image-matrix shaped (`frames`, `ratios`,
+  `trueImageSize`) and cannot express "one value per observation". It drops
+  non-finite values, clamps negatives before `log1p`, skips `NO_CATEGORY` rather
+  than misbucketing it, omits empty categories (an empty violin reads as data),
+  and thins samples past 20k points — Plotly renders every point of a violin, and
+  84k cells per category is seconds of layout.
+
+  **Violin needed no bundling work**: `plotly.js-dist-min` is the full
+  distribution and already carries `violin` and `box`. `ISpatialControls` gains
+  `continuousValues`, `categoricalView` and `categoricalColumns`.
+
 - **Spatial-omics selection.** `SpatialSelectionStore` holds the selected
   observations; `spatial-selection.ts` computes them. Selecting is driven from
   the **existing ROI tools** — rectangle, polygon, freehand, magic wand, brush —

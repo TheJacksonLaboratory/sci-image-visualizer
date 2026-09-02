@@ -8,7 +8,7 @@ import { PlotType, PlotTypeDescriptor } from './plot-type';
 import { ViewerCapabilities } from './capabilities.contract';
 import { IRegionOverlay } from './region-overlay.contract';
 import { IHistogram } from './channel-histogram-api.contract';
-import { ColormapNode, IWandOptions, IBrushOptions, SpatialViewState } from './display-types';
+import { ColormapNode, IWandOptions, IBrushOptions, SpatialViewState, SpatialColorBy } from './display-types';
 import { SpatialDataset } from './spatial-dataset.contract';
 import { SpatialSelectionMask } from '../implementations/spatial/spatial-selection';
 
@@ -291,6 +291,16 @@ export interface IIntensityControls {
   addProfileLine(): Region | null;
 }
 
+/** A categorical column resolved for charting: labels, codes and map colours. */
+export interface SpatialCategoricalView {
+  name: string;
+  categories: string[];
+  /** `#rrggbb` per category, index-aligned with {@link categories}. */
+  colors: string[];
+  /** Per-observation category index, or `NO_CATEGORY`. */
+  codes: Uint16Array;
+}
+
 /**
  * Controls for the SPATIAL_OMICS plot type: what the observation markers are
  * coloured by, and how they are drawn. Capability-gated like
@@ -322,6 +332,21 @@ export interface ISpatialControls {
    *  its `categories` — the legend's swatches, resolved the same way the
    *  renderer resolves them so the two cannot disagree. */
   categoryColors(name: string): Promise<string[]>;
+
+  // ── values, for the 1-D charts ────────────────────────────────────────
+  /**
+   * The values behind a colour source, index-aligned with the observations.
+   * Rejects for a categorical column — there is nothing continuous to chart.
+   */
+  continuousValues(source: SpatialColorBy): Promise<Float32Array>;
+  /**
+   * A categorical column's categories, per-observation codes and display
+   * colours — everything a grouped violin/box needs, with the colours resolved
+   * the same way the map resolves them.
+   */
+  categoricalView(column: string): Promise<SpatialCategoricalView>;
+  /** Names of the categorical columns available to group by. */
+  categoricalColumns(): string[];
 
   // ── selection ─────────────────────────────────────────────────────────
   /** The current selection. Empty means "nothing selected", in which case the

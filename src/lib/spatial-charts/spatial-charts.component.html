@@ -1,0 +1,53 @@
+<p-dialog header="Spatial distributions"
+          [visible]="visible" (visibleChange)="onVisibleChange($event)"
+          [modal]="false" [resizable]="true" [draggable]="true"
+          [style]="{ width: '32rem' }"
+          [breakpoints]="{ '960px': '90vw' }"
+          styleClass="spatial-charts-dialog"
+          (onShow)="onShow()">
+
+  <div class="sx-empty" *ngIf="!controls">
+    No spatial-omics data source is configured. A host provides one by binding
+    <code>SPATIAL_DATA_PORT</code>.
+  </div>
+
+  <div class="sx-body" *ngIf="controls">
+
+    <!-- The chart follows whatever the map is coloured by, so the two can never
+         disagree about what is being shown. -->
+    <div class="sx-head">
+      <span class="sx-subject" *ngIf="subject">{{ subject }}</span>
+      <span class="sx-subject sx-muted" *ngIf="!subject">nothing selected to chart</span>
+      <span class="sx-badge" *ngIf="selectionCount">
+        {{ selectionCount | number }} selected
+      </span>
+      <i class="pi pi-spin pi-spinner sx-busy" *ngIf="busy" aria-label="loading"></i>
+    </div>
+
+    <div class="sx-controls">
+      <p-selectButton [options]="kindOptions" optionLabel="label" optionValue="value"
+                      [ngModel]="kind" (ngModelChange)="onKind($event)"
+                      styleClass="sx-kind"></p-selectButton>
+      <p-dropdown [options]="groupOptions" optionLabel="label" optionValue="value"
+                  [ngModel]="groupBy" (ngModelChange)="onGroupBy($event)"
+                  placeholder="No grouping" appendTo="body" styleClass="sx-group"
+                  [disabled]="kind === 'histogram'"
+                  pTooltip="Split a violin or box by a categorical column"
+                  tooltipPosition="top"></p-dropdown>
+    </div>
+
+    <div [id]="chartDiv" class="sx-plot"></div>
+
+    <small class="sx-hint" *ngIf="notice">{{ notice }}</small>
+    <small class="sx-hint" *ngIf="!notice && suggestsGrouping">
+      Pick a grouping to compare categories.
+    </small>
+    <small class="sx-hint" *ngIf="!notice && selectionCount && kind === 'histogram'">
+      The selection is overlaid on the full distribution.
+    </small>
+    <small class="sx-hint" *ngIf="!notice && selectionCount && kind !== 'histogram'">
+      Showing the selection only.
+    </small>
+
+  </div>
+</p-dialog>

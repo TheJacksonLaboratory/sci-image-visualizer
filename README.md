@@ -232,7 +232,15 @@ polygon, freehand shape, wand or brush region, then *Select from ROIs* selects
 every observation inside their union and mutes the rest. Legend rows select
 their category on click.
 
-Still to build: hover tooltips and the linked 1D charts — see
+**Linked distributions** (`<spatial-charts>`, also from the toolbar) chart
+whatever the map is coloured by — histogram, violin or box, with violin/box
+splittable by a categorical column. They follow the selection: the histogram
+overlays *Selected* on the full distribution, violin and box narrow to it. The
+chart's subject is the map's colour source rather than an independent picker, so
+the two cannot disagree about what is being shown.
+
+Still to build: hover tooltips, chart → map brushing, and a GPU layer for cell
+boundary polygons (they are served, not yet drawn) — see
 [docs/spatial-omics-plot-mode-design.md](docs/spatial-omics-plot-mode-design.md).
 
 ## Regions & annotation

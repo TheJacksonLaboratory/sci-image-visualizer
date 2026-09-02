@@ -78,6 +78,14 @@
       <img src="assets/plotting/cells.svg" class="toolbar-icon-dark" style="width: 1rem"/>
     </p-button>
 
+    <!-- Linked distribution charts, same gating as the controls above. -->
+    <p-button *ngIf="tools.specialTools && isSpatialMode" pRipple size="small" [text]="true"
+              pTooltip="Distributions (histogram, violin, box) of what the map is coloured by"
+              tooltipPosition="bottom"
+              (onClick)="openSpatialCharts.emit()">
+      <img src="assets/plotting/spline-chart.svg" class="toolbar-icon-dark" style="width: 1rem"/>
+    </p-button>
+
     <!-- Smoothen toggle: bilinear smoothing vs nearest-neighbour raw pixels (Image
          view only — it's an OpenSeadragon drawer setting). Highlighted when smoothing on. -->
     <p-button *ngIf="tools.specialTools && isImageView" size="small"

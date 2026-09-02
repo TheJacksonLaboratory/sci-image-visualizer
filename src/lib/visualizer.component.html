@@ -65,6 +65,7 @@
   (isoRangeChange)="onIsoRangeChange($event)"
   (openChannelHistogram)="openChannelHistogram()"
   (openSpatialControls)="openSpatialControls()"
+  (openSpatialCharts)="openSpatialCharts()"
   (openRegionEditor)="openRegionEditor()"
   (selectStackOption)="selectStackOption($event)"
   (zScrub)="onZScrub($event)"
@@ -169,6 +170,10 @@
 <!-- Spatial-omics controls. Renders its own empty state when no dataset (or no
      SPATIAL_DATA_PORT) is present, so it is always safe to host. -->
 <spatial-controls [(visible)]="showSpatialControls"></spatial-controls>
+
+<!-- Distribution charts of whatever the map is coloured by, narrowed to the
+     current selection. -->
+<spatial-charts [(visible)]="showSpatialCharts"></spatial-charts>
 
 <!-- Region Editor: non-modal, draggable, resizable floating dialog opened from
      the toolbar (formerly the right-panel Regions tab). Modeless so regions can
