@@ -353,6 +353,165 @@ describe('VisualizerComponent (UI shell)', () => {
       c.ngOnDestroy();
       expect(dataset$.observed).toBe(false);
     });
+
+    describe('a registered volume feeds the volumetric modes', () => {
+      // The real shape of an ABC-atlas cloud: observations with a z, a registered
+      // reference volume, and NO `imageRef` — so there is no image behind it and
+      // `isStack`/`isGrayscale` are both unknowable from the image.
+      const VOLUME_DATASET = {
+        id: 'abc.wholebrain',
+        name: 'Whole mouse brain MERFISH',
+        observations: { count: 3, z: new Float32Array([0, 1, 2]) },
+        volume: { width: 4, height: 4, depth: 4, voxelSize: [1, 1, 1] },
+      };
+      // The encode awaits `toBlob`, which jest-canvas-mock answers on a timer. The
+      // suite's fake clock would hold that forever, and swapping clocks afterwards
+      // DISCARDS the pending timer rather than firing it — so real timers have to
+      // be in place before the dataset is ever published.
+      beforeEach(() => jest.useRealTimers());
+
+      /** Let the volume fetch + slice encode settle: `toBlob` answers per plane, so
+       *  one tick is not enough for a whole stack. */
+      const flush = async () => {
+        for (let i = 0; i < 30; i++) await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      };
+
+      it('offers Volume and Isosurface with no image loaded at all', () => {
+        plotService.getPlotTypeDescriptors.mockReturnValue([
+          PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_VOLUME],
+          PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_ISOSURFACE],
+        ] as any[]);
+        const c = makeComponent(plotService, port);
+        (c as any).imageInfo = undefined; // a cloud with no imageRef loads no image
+        (c as any).watchSpatialDataset();
+        dataset$.next(VOLUME_DATASET);
+
+        const offeredTypes = c.plotTypeOptions.map((d) => d.type);
+        expect(offeredTypes).toContain(PlotType.NAPARI_VOLUME);
+        expect(offeredTypes).toContain(PlotType.NAPARI_ISOSURFACE);
+      });
+
+      it('holds them back when the same dataset carries no volume', () => {
+        plotService.getPlotTypeDescriptors.mockReturnValue([
+          PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_VOLUME],
+          PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_ISOSURFACE],
+        ] as any[]);
+        const c = makeComponent(plotService, port);
+        (c as any).imageInfo = undefined;
+        (c as any).watchSpatialDataset();
+        dataset$.next({ ...VOLUME_DATASET, volume: undefined });
+
+        expect(c.plotTypeOptions.length).toBe(0);
+      });
+
+      it('publishes the volume AS the image and opens the 2D Image view on it', async () => {
+        plotService.getPlotTypeDescriptors.mockReturnValue([
+          PLOT_TYPE_DESCRIPTORS[PlotType.IMAGE], SPATIAL_DESCRIPTOR,
+        ] as any[]);
+        port.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 4 * 4));
+        const c = makeComponent(plotService, port);
+        // The user was on the 3D cloud (the previous dataset), so this also covers
+        // the mode actually switching rather than merely already being Image.
+        c.selectedPlotType = PlotType.SPATIAL_OMICS_3D;
+        (c as any).watchSpatialDataset();
+        dataset$.next({
+          ...VOLUME_DATASET,
+          volume: { width: 4, height: 4, depth: 4, voxelSize: [40, 40, 200] },
+        });
+        await flush();
+
+        const published = ((c as any).state.setImageInfo as jest.Mock).mock.calls.at(-1)?.[0];
+        expect(published).toMatchObject({ isStack: true, isGrayscale: true, tiled: false });
+        expect(published.imageMeta[0].z).toBe(4);
+        expect(published.urls.length).toBe(4);
+        expect(plotService.setPlotType).toHaveBeenCalledWith(PlotType.IMAGE);
+      });
+
+      it('does not refetch the voxels when the same dataset is re-emitted', async () => {
+        port.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 4 * 4));
+        const c = makeComponent(plotService, port);
+        (c as any).watchSpatialDataset();
+        const withVolume = {
+          ...VOLUME_DATASET,
+          volume: { width: 4, height: 4, depth: 4, voxelSize: [40, 40, 200] },
+        };
+        dataset$.next(withVolume);
+        await flush();
+        // A colour-column change re-emits the dataset; rebuilding then would refetch
+        // megabytes and throw the user back to the middle slice.
+        dataset$.next({ ...withVolume });
+        await flush();
+
+        expect(port.getVolume).toHaveBeenCalledTimes(1);
+      });
+
+      it('republishes the volume after a detour through an image-backed dataset', async () => {
+        port.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 4 * 4));
+        const c = makeComponent(plotService, port);
+        (c as any).watchSpatialDataset();
+        const withVolume = {
+          ...VOLUME_DATASET,
+          volume: { width: 4, height: 4, depth: 4, voxelSize: [40, 40, 200] },
+        };
+        dataset$.next(withVolume);
+        await flush();
+
+        // A Visium-style dataset in between: it brings its own tissue image, which
+        // is now what the Image view shows.
+        dataset$.next({ id: 'visium', name: 'V', observations: { count: 2 }, columns: [],
+          imageRef: { imageId: 'tissue' } });
+        await flush();
+        // Back to the volume dataset — its image has to be published AGAIN, or the
+        // Image view keeps the Visium tissue under a whole-brain cloud's controls.
+        dataset$.next(withVolume);
+        await flush();
+
+        expect(port.getVolume).toHaveBeenCalledTimes(2);
+        const infos = ((c as any).state.setImageInfo as jest.Mock).mock.calls.map((a: any[]) => a[0]);
+        expect(infos.filter((i: any) => i?.isStack).length).toBe(2);
+      });
+
+      it('falls back to the 3D cloud when the volume cannot be fetched', async () => {
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        port.getVolume = jest.fn().mockRejectedValue(new Error('503'));
+        const c = makeComponent(plotService, port);
+        (c as any).watchSpatialDataset();
+        dataset$.next({
+          ...VOLUME_DATASET,
+          volume: { width: 4, height: 4, depth: 4, voxelSize: [40, 40, 200] },
+        });
+        await flush();
+
+        expect(plotService.setPlotType).toHaveBeenCalledWith(PlotType.SPATIAL_OMICS_3D);
+        expect(warn).toHaveBeenCalled();
+        warn.mockRestore();
+      });
+
+      it('still opens the cloud for a 3D dataset that carries no volume', async () => {
+        const c = makeComponent(plotService, port);
+        (c as any).watchSpatialDataset();
+        dataset$.next({ ...VOLUME_DATASET, volume: undefined });
+        await flush();
+
+        expect(plotService.setPlotType).toHaveBeenCalledWith(PlotType.SPATIAL_OMICS_3D);
+      });
+
+      it('does not open the grayscale gate for a mode that cannot read the volume', () => {
+        // Contour is grayscale-gated but image-sourced: a spatial volume is not a
+        // source it can draw from, so the relaxation must not reach it.
+        plotService.getPlotTypeDescriptors.mockReturnValue([
+          PLOT_TYPE_DESCRIPTORS[PlotType.CONTOUR],
+          PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_VOLUME],
+        ] as any[]);
+        const c = makeComponent(plotService, port);
+        (c as any).imageInfo = { isStack: false, isGrayscale: false };
+        (c as any).watchSpatialDataset();
+        dataset$.next(VOLUME_DATASET);
+
+        expect(c.plotTypeOptions.some((d) => d.type === PlotType.NAPARI_VOLUME)).toBe(true);
+        expect(c.plotTypeOptions.some((d) => d.type === PlotType.CONTOUR)).toBe(false);
+      });
+    });
   });
 
   describe('region set-operations (jit-ui#85)', () => {

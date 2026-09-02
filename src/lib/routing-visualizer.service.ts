@@ -14,6 +14,9 @@ import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-da
 import { SpatialDataset, isCategoricalColumn } from './contracts/spatial-dataset.contract';
 import { resolveCategoryColors } from './implementations/spatial/spatial-encoding';
 import {
+  observationsInSlice, volumeImageRef,
+} from './implementations/spatial/spatial-volume-image';
+import {
   emptySelection, selectByCategory, selectInRegions, selectInRegionsProjected,
 } from './implementations/spatial/spatial-selection';
 import { RegionStore } from './store/region-store.service';
@@ -164,6 +167,9 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
 
   // ── render / viewport → active renderer ──────────────────────────────
   async load(imageInfo: IImageInfo, zIndex: number): Promise<any> {
+    // A stack can open away from slice 0 (`initialZIndex` — a volume opens
+    // mid-specimen), and that arrives here rather than through setZIndex.
+    this.currentZIndex = zIndex;
     const backend = this.imageBackend();
     if (backend === this.napari) {
       try {
@@ -244,7 +250,10 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.plotly.setImageSmoothingEnabled(enabled);
   }
   setShowStack(showstack: boolean): void { this.renderer().setShowStack(showstack); }
-  setZIndex(zIndex: number): void { this.renderer().setZIndex(zIndex); }
+  setZIndex(zIndex: number): void {
+    this.currentZIndex = zIndex;
+    this.renderer().setZIndex(zIndex);
+  }
   getTrueImageSize(): { width: number; height: number } | null { return this.renderer().getTrueImageSize(); }
   getCurrentImage(): Promise<Image | null> { return this.renderer().getCurrentImage(); }
   getDisplayedPixelData(): PixelData | null { return this.renderer().getDisplayedPixelData(); }
@@ -633,9 +642,20 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
         const projected = isSpatialOmics3d(this.currentPlotType)
           ? this.napari.getSpatialScreenProjection(dataset.observations)
           : null;
+        // In the 2D view of a volume-backed dataset the shape was drawn over ONE
+        // section, in the volume's pixel grid: it selects the cells of that
+        // section, not the whole depth of brain standing behind them.
+        const volume = !dataset.imageRef ? dataset.volume : undefined;
         const selection = projected
           ? selectInRegionsProjected(projected, dataset.observations.count, regions)
-          : selectInRegions(dataset.observations, dataset.imageRef, regions);
+          : selectInRegions(
+              dataset.observations,
+              volume ? volumeImageRef(volume, dataset.micronsPerUnit) : dataset.imageRef,
+              regions,
+              volume
+                ? observationsInSlice(dataset.observations, volume, this.currentZIndex)
+                : undefined,
+            );
         this.selectionStore.set(selection);
         return selection.count;
       },
@@ -660,6 +680,9 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   /** Latest dataset, mirrored so `selectFromRegions()` can answer synchronously
    *  — it runs from a button click and must not await a round-trip. */
   private currentSpatialDataset: SpatialDataset | null = null;
+  /** Displayed slice. Only a volume-backed spatial dataset reads it, to keep a
+   *  region drawn over one section from selecting the whole depth behind it. */
+  private currentZIndex = 0;
   private spatialDatasetSub: Subscription | null = null;
 
   /** Load pixel frames for intensity sampling when OpenSeadragon owns the image

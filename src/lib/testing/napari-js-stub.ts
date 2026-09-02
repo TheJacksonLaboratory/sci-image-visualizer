@@ -344,19 +344,43 @@ export class Viewer {
     changed: { connect: () => () => undefined },
   };
   readonly dims: StubDims = { z: 0 };
-  readonly layers = { clear: (): void => undefined, remove: (): boolean => true };
+  /** Tracked for real, not stubbed away: napari's image view CLEARS the layer list
+   *  on every render, so whether a layer is still in the scene is exactly the kind
+   *  of thing a test has to be able to see. */
+  private readonly _layers: unknown[] = [];
+  readonly layers = {
+    items: this._layers as readonly unknown[],
+    get length(): number {
+      return (this.items as unknown[]).length;
+    },
+    clear: (): void => {
+      this._layers.length = 0;
+    },
+    remove: (layer: unknown): boolean => {
+      const i = this._layers.indexOf(layer);
+      if (i < 0) return false;
+      this._layers.splice(i, 1);
+      return true;
+    },
+  };
 
   constructor(_options: { canvas: HTMLCanvasElement }) {}
 
+  /** Record a layer as mounted, and hand it back. */
+  private mount<T>(layer: T): T {
+    this._layers.push(layer);
+    return layer;
+  }
+
   addImage(): ImageLayer {
-    return {
+    return this.mount({
       colormap: 'gray',
       contrastLimits: [0, 255],
       gamma: 1,
       visible: true,
       invert: false,
       blending: 'translucent',
-    };
+    });
   }
   addVolume(
     data?: Uint8Array,
@@ -371,7 +395,7 @@ export class Viewer {
       opacity?: number;
     },
   ): VolumeLayer {
-    return {
+    return this.mount({
       colormap: opts?.colormap ?? 'gray',
       contrastLimits: [0, 255],
       gamma: 1,
@@ -388,10 +412,12 @@ export class Viewer {
       width,
       height,
       depth,
-    };
+    });
   }
   addAxes(width = 1, height = 1, depth = 1): AxesLayer {
-    return { visible: true, tickCount: 5, boundingBox: true, voxelSize: [1, 1, 1], width, height, depth };
+    return this.mount(
+      { visible: true, tickCount: 5, boundingBox: true, voxelSize: [1, 1, 1], width, height, depth },
+    );
   }
   addSurface(
     _vertices?: Float32Array,
@@ -405,7 +431,7 @@ export class Viewer {
     },
   ): SurfaceLayer {
     const o = opts ?? {};
-    return {
+    return this.mount({
       colormap: o.colormap ?? 'viridis',
       contrastLimits: o.contrastLimits ?? [0, 255],
       gamma: o.gamma ?? 1,
@@ -418,7 +444,7 @@ export class Viewer {
         center: [0.5, 0.5, 0.5],
         radius: 1,
       }),
-    };
+    });
   }
   addPoints(
     positions?: Float32Array | number[][],
@@ -433,7 +459,7 @@ export class Viewer {
     },
   ): PointsLayer {
     const o = opts ?? {};
-    return {
+    return this.mount({
       size: o.size ?? 10,
       opacity: o.opacity ?? 1,
       blending: 'translucent',
@@ -443,7 +469,7 @@ export class Viewer {
       name: o.name,
       scale: o.scale,
       translate: o.translate,
-    };
+    });
   }
   addPoints3D(
     positions?: Float32Array,
@@ -454,7 +480,7 @@ export class Viewer {
     },
   ): Points3DLayer {
     const o = opts ?? {};
-    return {
+    return this.mount({
       colormap: o.colormap ?? 'viridis',
       contrastLimits: o.contrastLimits ?? [0, 255],
       size: o.size ?? 6,
@@ -468,7 +494,7 @@ export class Viewer {
         center: [0.5, 0.5, 0.5],
         radius: 1,
       }),
-    };
+    });
   }
   layerHistogram(): { counts: Uint32Array; bins: number; min: number; max: number } | null {
     return { counts: new Uint32Array(256), bins: 256, min: 0, max: 255 };

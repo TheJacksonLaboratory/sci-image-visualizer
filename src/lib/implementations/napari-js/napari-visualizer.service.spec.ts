@@ -1202,6 +1202,139 @@ describe('NapariVisualizerService', () => {
       addPoints = jest.spyOn(Viewer.prototype, 'addPoints');
     });
 
+    /** Layers currently in the stub viewer's scene. */
+    const viewerLayers = () =>
+      ((service as unknown as { viewer: { layers: { items: readonly unknown[] } } })
+        .viewer?.layers.items ?? []) as readonly unknown[];
+
+    /** Mount with the stack opened on slice `z`, as a volume-backed dataset does. */
+    async function mountAt(dataset: SpatialDataset, z: number) {
+      const div = document.createElement('div');
+      div.id = 'spatial-slice-host';
+      document.body.appendChild(div);
+      dataset$.next(dataset);
+      const loaded = await service.load(imageInfo(), z);
+      await service.plot('spatial-slice-host', loaded, imageInfo(), 600, PlotType.SPATIAL_OMICS);
+      await flush();
+      return addPoints.mock.results.at(-1)?.value;
+    }
+
+    describe('over a volume-backed 3D dataset', () => {
+      /** Observations at x/y (0,0), (10,20), (20,40) with z 0, 500, 900 — which on
+       *  400-deep planes is slice 0, 1 and 2. */
+      const sliced = (): SpatialDataset => {
+        const base = spatialDatasetVolume(3);
+        return {
+          ...base,
+          observations: { ...base.observations, z: new Float32Array([0, 500, 900]) },
+        };
+      };
+
+      it('draws only the displayed plane\'s observations, in the slice pixel grid', async () => {
+        const layer = await mountAt(sliced(), 1);
+
+        // Just observation 1 — the other two are other sections, and drawing them
+        // would pile the specimen's whole depth onto one plane.
+        expect(Array.from(layer.positions)).toEqual([10, 20]);
+        // Coordinates stay data-space; the volume's affine puts them in the
+        // slice's pixels (voxels are 100 x 200 wide, near corner at the origin).
+        expect(layer.scale).toEqual([1 / 100, 1 / 200]);
+        expect(layer.translate).toEqual([0, 0]);
+      });
+
+      it('follows a scrub to the new plane', async () => {
+        await mountAt(sliced(), 1);
+        service.setZIndex(2);
+        await flush();
+
+        expect(Array.from(addPoints.mock.results.at(-1)?.value.positions)).toEqual([20, 40]);
+      });
+
+      it('re-adds a marker layer the image render cleared out of the scene', async () => {
+        const layer = await mountAt(sliced(), 1);
+        expect(viewerLayers()).toContain(layer);
+
+        // What napari's image view does on EVERY render: empty the layer list. The
+        // service's cached handle is now detached, and mutating it draws nothing.
+        (service as unknown as { viewer: { layers: { clear(): void } } }).viewer.layers.clear();
+        expect(viewerLayers()).toHaveLength(0);
+
+        // A display-only change, so nothing about the marker key changed — the
+        // fast path would mutate the detached layer and leave the plane empty.
+        store.setSpatialView({ pointScale: 3 });
+        await flush();
+
+        const next = addPoints.mock.results.at(-1)?.value;
+        expect(next).not.toBe(layer);
+        expect(viewerLayers()).toContain(next);
+        expect(Array.from(next.positions)).toEqual([10, 20]);
+      });
+
+      it('redraws the markers only AFTER the image render that clears them', async () => {
+        await mountAt(sliced(), 1);
+        // The stitched branch, which is what a volume-backed dataset takes: its
+        // slices are blob images, not a server pyramid. (The tiled branch only
+        // moves `dims.z` — no render, so nothing clears the markers there.)
+        (service as unknown as { tiled: boolean }).tiled = false;
+        const order: string[] = [];
+        jest
+          .spyOn(service as unknown as { renderImage: (z: number, t?: number) => Promise<void> },
+            'renderImage')
+          .mockImplementation(async () => { order.push('image'); });
+        jest
+          .spyOn(service as unknown as { rebuildSpatialPoints: (...a: unknown[]) => Promise<void> },
+            'rebuildSpatialPoints')
+          .mockImplementation(async () => { order.push('markers'); });
+
+        service.setZIndex(2);
+        await flush();
+
+        // Markers first would put them under the clear the render performs, which
+        // is exactly how a scrubbed plane ended up with no observations on it.
+        expect(order).toEqual(['image', 'markers']);
+      });
+
+      it('floors the marker diameter so a sub-pixel cell still shows', async () => {
+        const ds = sliced();
+        // 2-unit radius on a 100-unit voxel grid: drawn to scale that is 1/25 of a
+        // pixel, and the section would come up empty.
+        const layer = await mountAt(
+          { ...ds, observations: { ...ds.observations, radius: 2 } }, 1,
+        );
+        expect(Array.from(layer.size as Float32Array)).toEqual([1.5 * 100]);
+      });
+
+      it('gathers per-point colours down to the drawn subset', async () => {
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical', name: 'region', categories: ['A', 'B', 'C'],
+            colors: ['#ff0000', '#00ff00', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 1, 2]),
+        });
+        await mountAt(sliced(), 1);
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+
+        const layer = addPoints.mock.results.at(-1)?.value;
+        // One colour, and it is observation 1's — a colour array still indexed by
+        // the whole dataset would paint this point red.
+        expect(layer.faceColor).toHaveLength(1);
+        expect(layer.faceColor[0].slice(0, 3)).toEqual([0, 1, 0]);
+      });
+
+      it('leaves a dataset with a real imageRef drawing every observation', async () => {
+        const ds = sliced();
+        const layer = await mountAt(
+          { ...ds, imageRef: { imageId: 'tissue', scale: [2, 2] } }, 1,
+        );
+        // Its coordinates are already the image's pixels and there is one section:
+        // nothing to filter, and the dataset's own affine still wins.
+        expect(Array.from(layer.positions)).toEqual([0, 0, 10, 20, 20, 40]);
+        expect(layer.scale).toEqual([2, 2]);
+      });
+    });
+
     it('draws one marker per observation at its coordinates', async () => {
       const layer = await mount();
       expect(addPoints).toHaveBeenCalled();

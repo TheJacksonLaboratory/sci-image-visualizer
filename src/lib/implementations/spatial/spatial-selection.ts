@@ -165,11 +165,19 @@ export function regionShapes(region: Region): Shape[] {
  * Observations inside ANY of `regions` (union). Coordinates are transformed by
  * `imageRef` first, so the test happens in the same world space the regions were
  * drawn in.
+ *
+ * `candidates`, when given, restricts the test to those observation indices — how
+ * a 2D view of a 3D dataset keeps a drawn region meaning what it looks like it
+ * means: the shape was drawn over ONE section, so it selects that section's cells
+ * rather than the whole depth of the specimen behind them. The returned mask stays
+ * indexed by observation, so every consumer (charts, legend, the 3D cloud) reads it
+ * the same way.
  */
 export function selectInRegions(
   observations: SpatialObservations,
   imageRef: SpatialImageRef | undefined,
   regions: readonly Region[],
+  candidates?: Uint32Array,
 ): SpatialSelectionMask {
   const n = observations.count;
   const mask = new Uint8Array(n);
@@ -179,7 +187,9 @@ export function selectInRegions(
   const [sx, sy] = imageRef?.scale ?? [1, 1];
   const [tx, ty] = imageRef?.translate ?? [0, 0];
   let count = 0;
-  for (let i = 0; i < n; i++) {
+  const total = candidates ? candidates.length : n;
+  for (let k = 0; k < total; k++) {
+    const i = candidates ? candidates[k] : k;
     const px = observations.x[i] * sx + tx;
     const py = observations.y[i] * sy + ty;
     for (const shape of shapes) {

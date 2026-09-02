@@ -34,7 +34,7 @@ import { IChannelState } from '../../contracts/channel-histogram-api.contract';
 import { buildColormapLut, Rgb } from '../../contracts/colormap-lut';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import {
-  SpatialColumn, SpatialDataset, isCategoricalColumn,
+  SpatialColumn, SpatialDataset, SpatialImageRef, isCategoricalColumn,
 } from '../../contracts/spatial-dataset.contract';
 import { SpatialViewState } from '../../contracts/display-types';
 import {
@@ -46,6 +46,7 @@ import { SpatialObservations } from '../../contracts/spatial-dataset.contract';
 import {
   SpatialSelectionMask, emptySelection, mutedFromSelection,
 } from '../spatial/spatial-selection';
+import { observationsInSlice, volumeImageRef } from '../spatial/spatial-volume-image';
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
 import {
   PlotType,
@@ -318,6 +319,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   /** Dataset the 3D scale bar was built for. */
   private spatialScaleBarKey: string | null = null;
   private spatialSub: Subscription | null = null;
+  /** Latest (dataset, view, selection) the spatial subscription saw, so a slice
+   *  change can rebuild the markers for the new plane. */
+  private spatialLatest: [SpatialDataset | null, SpatialViewState, SpatialSelectionMask] | null =
+    null;
   /** Which dataset the current marker layer was built for, so a display-only
    *  change (size, colour, opacity, selection) can update it in place. */
   private spatialLayerKey: string | null = null;
@@ -1603,6 +1608,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
 
   /** Marker radius (image px) for a dataset that declares none — segmented cells often don't. */
   private static readonly SPATIAL_FALLBACK_RADIUS = 4;
+  /** Smallest marker DIAMETER, in slice pixels, over a volume-backed dataset. A cell's real
+   *  size is honoured wherever it survives the grid: the ABC atlas serves 5 µm radii on a
+   *  40 µm/px template, so drawing them to scale would put every cell a fifth of a pixel wide
+   *  and the section would come up empty. The point-size control scales up from this floor. */
+  private static readonly SPATIAL_SLICE_MIN_DIAMETER_PX = 1.5;
   /** Colour for observations when nothing is selected to colour by: visible, neutral, and
    *  obviously not encoding anything. */
   private static readonly SPATIAL_NEUTRAL_COLOR: [number, number, number, number] =
@@ -1709,6 +1719,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.spatialSub = combineLatest([
       port.getDataset$(), this.store.getSpatialView$(), selection$,
     ]).subscribe(([dataset, view, selection]) => {
+      // Kept so a slice change can redraw the markers for the new plane, which
+      // arrives through setZIndex rather than through any of these streams.
+      this.spatialLatest = [dataset, view, selection];
       void (isSpatialOmics3d(this.currentPlotType)
         ? this.rebuildSpatialPoints3d(dataset, view, selection)
         : this.rebuildSpatialPoints(dataset, view, selection));
@@ -1748,24 +1761,43 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     }
 
     const obs = dataset.observations;
+    // A dataset whose image IS its volume shows ONE PLANE at a time, so the
+    // markers are the observations in the displayed plane, drawn in that plane's
+    // pixel grid. Without the filter the specimen's whole depth piles onto one
+    // section and reads as a smear; without the affine the coordinates are read
+    // as pixels and land off the slice entirely.
+    const slab = this.spatialSlab(dataset);
+    const ref = slab?.ref ?? dataset.imageRef;
     const base = markerDiameters(obs, NapariVisualizerService.SPATIAL_FALLBACK_RADIUS);
     const scale = view.pointScale > 0 ? view.pointScale : 1;
-    let size: number | Float32Array;
-    if (typeof base === 'number') {
-      size = base * scale;
-    } else {
-      size = new Float32Array(base.length);
-      for (let i = 0; i < base.length; i++) size[i] = base[i] * scale;
+    const floor = slab?.minDiameter ?? 0;
+    const sizeOf = (i: number) =>
+      Math.max(typeof base === 'number' ? base : base[i], floor) * scale;
+    const size: number | Float32Array =
+      typeof base === 'number' && !slab
+        ? Math.max(base, floor) * scale
+        : Float32Array.from(slab?.indices ?? { length: obs.count }, (_v, i) =>
+            sizeOf(slab ? slab.indices[i] : i));
+
+    // napari's image view CLEARS the whole layer list on every render, so the
+    // markers go with it whenever the image is re-rendered — a scrub, a contrast
+    // change. The cached handle is then detached, and mutating it draws nothing:
+    // treat a layer that is no longer in the scene as absent so it gets re-added.
+    if (this.spatialPoints && !viewer.layers.items.includes(this.spatialPoints)) {
+      this.spatialPoints = null;
+      this.spatialLayerKey = null;
     }
 
     // A size/colour/opacity/selection change is DISPLAY-only: mutate the layer
     // rather than dropping and re-adding it. Both setters bump the layer's
     // dataVersion, which is what makes napari-js rebuild the instance buffer and
     // redraw — and it avoids rebuilding 84k positions to change one number.
-    const key = `${dataset.id}:${obs.count}`;
+    // The slice is part of the key: a scrub changes WHICH observations are drawn,
+    // which is geometry, not display.
+    const key = `${dataset.id}:${obs.count}:${slab?.slice ?? ''}`;
     if (this.spatialPoints && key === this.spatialLayerKey) {
       this.spatialPoints.size = size;
-      this.spatialPoints.faceColor = faceColor as never;
+      this.spatialPoints.faceColor = this.gatherColors(faceColor, slab?.indices) as never;
       viewer.requestRender();
       return;
     }
@@ -1775,16 +1807,19 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       this.spatialPoints = null;
     }
 
-    const positions = new Float32Array(obs.count * 2);
-    for (let i = 0; i < obs.count; i++) {
-      positions[i * 2] = obs.x[i];
-      positions[i * 2 + 1] = obs.y[i];
+    const drawn = slab?.indices;
+    const count = drawn ? drawn.length : obs.count;
+    const positions = new Float32Array(count * 2);
+    for (let i = 0; i < count; i++) {
+      const o = drawn ? drawn[i] : i;
+      positions[i * 2] = obs.x[o];
+      positions[i * 2 + 1] = obs.y[o];
     }
     this.spatialLayerKey = key;
     this.spatialPoints = viewer.addPoints(positions, {
       name: 'observations',
       size,
-      faceColor,
+      faceColor: this.gatherColors(faceColor, drawn),
       // No border: at Visium spot density an outline per marker reads as noise,
       // and it costs a second colour array.
       borderWidth: 0,
@@ -1793,9 +1828,59 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       // served image may be the hires downscale), so without this the markers
       // land in the right shape at the wrong scale. Defaults to identity when
       // the coordinates are already in the image's pixel space.
-      scale: dataset.imageRef?.scale ?? [1, 1],
-      translate: dataset.imageRef?.translate ?? [0, 0],
+      scale: ref?.scale ?? [1, 1],
+      translate: ref?.translate ?? [0, 0],
     });
+  }
+
+  /**
+   * The plane a volume-backed dataset is currently showing: its pixel affine, the
+   * observations that fall in it, and the marker floor that grid needs.
+   *
+   * Null for a dataset with a real `imageRef` (its coordinates are already the
+   * image's pixels and every observation belongs to the one section) and for one
+   * with no volume at all — both of which draw exactly as before.
+   */
+  private spatialSlab(dataset: SpatialDataset): {
+    ref: SpatialImageRef; indices: Uint32Array; slice: number; minDiameter: number;
+  } | null {
+    const volume = dataset.volume;
+    if (dataset.imageRef || !volume) return null;
+    const slice = this.loaded?.z ?? 0;
+    return {
+      ref: volumeImageRef(volume, dataset.micronsPerUnit),
+      indices: observationsInSlice(dataset.observations, volume, slice),
+      slice,
+      minDiameter: NapariVisualizerService.SPATIAL_SLICE_MIN_DIAMETER_PX * volume.voxelSize[0],
+    };
+  }
+
+  /** Per-point colours for the drawn subset. A broadcast tuple stays broadcast —
+   *  it is one colour for every point either way. */
+  private gatherColors<T>(colors: T[] | T, indices?: Uint32Array): T[] | T {
+    if (!indices || !Array.isArray(colors)) return colors;
+    const out: T[] = new Array(indices.length);
+    for (let i = 0; i < indices.length; i++) out[i] = colors[indices[i]];
+    return out;
+  }
+
+  /**
+   * Redraw the observation markers over a freshly rendered image.
+   *
+   * Two reasons, both invisible from the spatial store — which is why a scrub or a
+   * re-render never reached the markers on its own:
+   *  - the image render CLEARS the layer list, taking the markers with it;
+   *  - over a volume-backed dataset the displayed plane decides which
+   *    observations belong on screen at all, so the cells have to move with the
+   *    section rather than hang over a different one.
+   *
+   * Uses the latest values the marker subscription saw; a no-op until it has seen
+   * any, in the 3D cloud (no image, no plane), and with no dataset to draw.
+   */
+  private redrawSpatialMarkers(): void {
+    const latest = this.spatialLatest;
+    if (!latest?.[0] || isSpatialOmics3d(this.currentPlotType)) return;
+    void this.rebuildSpatialPoints(...latest);
   }
 
   /**
@@ -2747,6 +2832,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     if (this.tiled) {
       v.dims.z = zIndex;
       if (this.descriptor) void this.refreshHistogramSamples(zIndex, this.descriptor);
+      this.redrawSpatialMarkers();
       this.scheduleReadback();
       return;
     }
@@ -2756,7 +2842,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const req = ++this.sliceReq;
     void this.renderImage(zIndex, req)
       .then(() => {
-        if (req === this.sliceReq) this.scheduleReadback();
+        if (req !== this.sliceReq) return;
+        // AFTER the image, never before: the render clears the layer list, so
+        // markers drawn first are wiped by the very image meant to sit under them.
+        // Over a volume-backed dataset the plane also decides which observations
+        // are drawn at all, so this is what moves the cells with the section.
+        this.redrawSpatialMarkers();
+        this.scheduleReadback();
       })
       .catch((err) => console.error('[napari-js] setZIndex slice failed:', err));
   }

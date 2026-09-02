@@ -101,8 +101,10 @@
         <span class="flex align-items-center mx-1 toolbar-text">{{zIndex}} of {{maxIndex}}</span>
       </ng-container>
       <!-- Heatmap view: single-image (high-def zoom) vs stack (frame slider). Plotly-only —
-           hidden for napari, which has no single/stack toggle or per-frame fetch. -->
-      <ng-container *ngIf="!showsLiveSliceScrubber && !isNapariMode">
+           hidden for napari, which has no single/stack toggle or per-frame fetch, and for the
+           spatial-omics modes: a 3D omics dataset publishes its reference volume as a z-stack
+           image, and these modes draw observations, not one of its slices. -->
+      <ng-container *ngIf="!showsLiveSliceScrubber && !isNapariMode && !isSpatialMode">
       <p-button icon="pi pi-image" size="small"
                 [text]="imageInfo?.showStack"
                 pTooltip="Single image mode: enables high-def zoom" tooltipPosition="bottom"

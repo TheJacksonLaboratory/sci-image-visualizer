@@ -266,14 +266,17 @@ export class ToolbarComponent implements OnChanges {
   }
 
   /** Plot types that scrub a z-stack live (the renderer swaps the slice in place): the OSD Image
-   *  view, the napari-js WebGPU image, and the napari-js surface — which rebuilds the height field
-   *  from the picked slice (jit-ui#102). Drives the per-slice slider. */
+   *  view, the napari-js WebGPU image, the napari-js surface — which rebuilds the height field
+   *  from the picked slice (jit-ui#102) — and the 2D spatial-omics view, where a 3D dataset's
+   *  registered volume is the image and the slider picks the section whose observations are
+   *  drawn. Drives the per-slice slider. */
   get showsLiveSliceScrubber(): boolean {
     return (
       this.selectedPlotType === PlotType.IMAGE ||
       this.selectedPlotType === PlotType.NAPARI_IMAGE ||
       isNapariSurface(this.selectedPlotType) ||
-      isNapariScatter(this.selectedPlotType)
+      isNapariScatter(this.selectedPlotType) ||
+      isSpatialOmics(this.selectedPlotType)
     );
   }
 

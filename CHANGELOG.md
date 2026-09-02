@@ -11,6 +11,52 @@ file was added.
 
 ### Added
 
+- **The 2D `Spatial omics` view slices a 3D dataset.** Over a dataset whose image
+  is its registered volume, the view draws the displayed plane's anatomy with
+  *that plane's* observations over it, and the toolbar carries the Image view's
+  live slice **slider** — scrub, and the cells move with the section. Previously
+  the whole depth of the specimen piled onto whatever section was showing.
+
+  A plane is one voxel-slab thick (`voxelSize[2]`), which is the sampling the
+  volume itself has — for serial sections registered into a common frame, one
+  slab is one section. Coordinates reach the slice's pixel grid through the
+  affine the volume implies (`volumeImageRef`: divide out the voxel size, near
+  corner at the origin), shaped as a `SpatialImageRef` so the markers and the ROI
+  selection take the same transform they take for a dataset with a real
+  `imageRef`. Marker diameters have a **floor of 1.5 slice pixels**: the ABC
+  atlas serves 5 µm cell radii on a 40 µm/px template, so drawn strictly to scale
+  every cell would be a fifth of a pixel and the section would come up empty. The
+  point-size control scales up from there.
+
+  A region drawn in this view selects **that plane's** observations, not the
+  column of specimen behind them (`selectInRegions` takes the candidate indices).
+  The 3D cloud's screen-space lasso still cuts through the full depth, which is
+  the honest reading of a shape drawn against an orbit camera.
+
+- **A 3D omics dataset opens as its own image, sliceable.** A dataset with a
+  registered volume and no `imageRef` now publishes that volume AS the image —
+  one PNG per z plane — and opens the 2D Image view on it, with the toolbar's
+  slice bar scrubbing depth. The volume is a 3D image delivered in one file, so
+  this is what such a dataset actually has to show, and everything image-shaped
+  (contrast window, colormaps, region tools, the physical scale bar) works
+  because the volume genuinely *is* the image. The 3D cloud stays one menu pick
+  away.
+
+  Fixes a real symptom: with nothing published for such a dataset, the Image view
+  kept whatever slide was loaded before — open the synthetic Visium demo, then
+  the ABC atlas, and the Image mode showed the synthetic tissue under a
+  whole-brain cloud's controls.
+
+  It opens **mid-volume** (`depth >> 1`), not on slice 0: the end planes of an
+  anatomical volume are outside the specimen, and an empty first frame reads as a
+  failed load. `mppX`/`mppY` come from `voxelSize` x `micronsPerUnit`, and stay
+  null when `micronsPerUnit` is absent — the unit is then unknown, and a scale
+  bar drawn from a guess would read as a measurement. Keyed by dataset +
+  geometry, so a re-emitted dataset (a colour-column change does that) neither
+  refetches megabytes of voxels nor resets the user's scrub position. A volume
+  whose byte count contradicts its declared geometry is refused rather than
+  sliced into plausible-looking anatomy from the wrong depth.
+
 - **`Spatial omics 3D` plot mode** — spatial-omics observations as a 3D point
   cloud under the orbit camera, alongside the existing 2D `Spatial omics` mode.
   For assays whose observations carry a z: serial sections registered into a
@@ -18,10 +64,11 @@ file was added.
   strictly narrower gate than `requiresSpatialData` — most spatial assays are a
   single plane and have no z to render, so the mode stays hidden for them.
 
-  A dataset with no `imageRef` selects this mode automatically. Such a dataset
-  has nothing to draw observations *over* — a cloud registered into an
+  A dataset with no `imageRef` and no volume selects this mode automatically:
+  it has nothing to draw observations *over* — a cloud registered into an
   anatomical frame has coordinates but no one section — so leaving the host on
-  an Image view would show an empty canvas.
+  an Image view would show an empty canvas. One that *does* carry a volume opens
+  on the Image view over that volume's slices instead (below).
 
   Two constraints come from the 3D points layer having no per-point colour
   channel, only a per-point scalar mapped through a 256-entry LUT:
@@ -49,6 +96,25 @@ file was added.
   origin and the renderer offsets the *points* by half the box. Both the cloud
   and the selected-subset layer take that offset; a volume that fails to load
   costs the backdrop, not the data.
+
+- **Observations survived the image they were drawn over.** napari's image view
+  CLEARS the whole layer list on every render, so each slice re-render took the
+  marker layer with it — a scrubbed plane came up with no observations on it at
+  all. The markers are now rebuilt *after* the render rather than before it (drawn
+  first, they were wiped by the very image meant to sit under them), and a cached
+  layer handle that is no longer in the scene is treated as absent instead of
+  mutated in place, which also covers a re-render from a contrast or colormap
+  change. The unit stub now tracks its layer list for real, since whether a layer
+  is still mounted is exactly what these tests have to see.
+
+- **Volume and Isosurface are actually selectable on a 3D omics dataset.**
+  `requiresStack` was relaxed for a registered volume but `requiresGrayscale`,
+  the gate on the next line, was not — and a cloud with no `imageRef` has no
+  image at all, so `isGrayscale` was false and both modes stayed hidden on
+  exactly the dataset whose volume had been fetched for them. A volume satisfies
+  both gates for the same reason: it is a single scalar field. Narrowed to the
+  two modes whose mount path reads the volume, since Contour is grayscale-gated
+  too and has no spatial source to draw from.
 
 - **Volume and Isosurface work on a 3D omics dataset.** Those modes take their
   voxels from `SpatialDataPort.getVolume()` when the dataset carries a registered

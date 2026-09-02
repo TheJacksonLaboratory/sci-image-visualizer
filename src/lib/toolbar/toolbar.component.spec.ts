@@ -67,12 +67,20 @@ describe('ToolbarComponent', () => {
   });
 
   it('showsLiveSliceScrubber for the live-scrub views incl. the napari surface (stack slider)', () => {
-    for (const t of [PlotType.IMAGE, PlotType.NAPARI_IMAGE, PlotType.NAPARI_SURFACE]) {
+    // The 2D spatial view scrubs too: over a 3D dataset the registered volume IS
+    // the image, and the slider picks the section whose observations are drawn.
+    for (const t of [
+      PlotType.IMAGE, PlotType.NAPARI_IMAGE, PlotType.NAPARI_SURFACE, PlotType.SPATIAL_OMICS,
+    ]) {
       component.selectedPlotType = t;
       expect(component.showsLiveSliceScrubber).toBe(true);
     }
-    // Volume/isosurface render the whole stack at once — no per-slice scrubber.
-    for (const t of [PlotType.NAPARI_VOLUME, PlotType.NAPARI_ISOSURFACE, PlotType.HEATMAP]) {
+    // Volume/isosurface render the whole stack at once — no per-slice scrubber —
+    // and the 3D cloud has no plane to pick.
+    for (const t of [
+      PlotType.NAPARI_VOLUME, PlotType.NAPARI_ISOSURFACE, PlotType.HEATMAP,
+      PlotType.SPATIAL_OMICS_3D,
+    ]) {
       component.selectedPlotType = t;
       expect(component.showsLiveSliceScrubber).toBe(false);
     }

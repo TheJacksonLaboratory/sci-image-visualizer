@@ -16,6 +16,8 @@ import {
   PlotType,
   PlotTypeDescriptor,
   isNapari3d,
+  isNapariIsosurface,
+  isNapariVolume,
   isSpatialOmics3d,
   NAPARI_DEFAULT_DECIMATE,
 } from './contracts/plot-type';
@@ -37,6 +39,8 @@ import { RegionToolMode } from './contracts/region-overlay.contract';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from './contracts/toolbar-config';
 import { VIZ_CONFIG, VizConfig } from './contracts/viz-config';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-data.port';
+import { SpatialDataset } from './contracts/spatial-dataset.contract';
+import { buildVolumeStackImage } from './implementations/spatial/spatial-volume-image';
 
 /** Per-instance plot-div id source. The mount element's id must be unique so two
  *  live viewers (e.g. the main diagram + a modal preview) don't collide on the
@@ -315,6 +319,11 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   private hasSpatial3dDataset = false;
   /** Whether it carries a registered volume, which feeds Volume / Isosurface. */
   private hasSpatialVolume = false;
+  /** Dataset + geometry the currently published volume image was built from, so a
+   *  re-emitted dataset doesn't re-fetch megabytes or reset the user's scrub. */
+  private volumeImageKey: string | null = null;
+  /** Blob URLs backing that image — ours to revoke. */
+  private volumeImageUrls: string[] = [];
   private spatialDatasetSubscription?: Subscription;
 
   plotWidthSubscription?: Subscription;
@@ -405,17 +414,96 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       this.computePlotTypeOptions();
       // A dataset with no reference image has nothing to draw observations OVER:
       // a cloud registered into a common frame (the Allen CCF) has coordinates
-      // but no one section. Select the 3D mode rather than leaving the host on an
-      // Image view with an empty canvas. Ordered after computePlotTypeOptions so
-      // the type is on offer before it is selected.
-      if (has3d && !dataset?.imageRef && !isSpatialOmics3d(this.selectedPlotType)) {
-        this.onSelectPlotType(PlotType.SPATIAL_OMICS_3D);
+      // but no one section. What it does have is its registered VOLUME, which is
+      // a 3D image in one file — so make that the image and open on it, slice bar
+      // and all, rather than leaving the host on an Image view showing whatever
+      // slide was loaded before. Ordered after computePlotTypeOptions so the type
+      // is on offer before it is selected.
+      if (dataset && !dataset.imageRef && hasVolume) {
+        void this.showVolumeAsImage(dataset);
+      } else {
+        // Anything else — a dataset with its own section image, a volume-less
+        // cloud, or none at all — means a published volume image is no longer what
+        // is on screen. Forget it, or coming BACK to the volume dataset would
+        // short-circuit on a matching key and leave the other dataset's slide up.
+        this.dropVolumeImage();
+        if (has3d && !dataset?.imageRef && !isSpatialOmics3d(this.selectedPlotType)) {
+          // No volume to slice: the cloud is the only thing that can be drawn.
+          this.onSelectPlotType(PlotType.SPATIAL_OMICS_3D);
+        }
       }
       // Clearing the dataset while a spatial mode is active leaves a type that is
       // no longer offered — fall back to Image, as turning test mode off does.
       this.reconcileSelectedPlotType();
       this.cdr.detectChanges();
     });
+  }
+
+  /**
+   * Publish a dataset's reference volume AS the image, and open the 2D Image view
+   * on it.
+   *
+   * The volume is a 3D image delivered in one file, so for a dataset that has no
+   * section image it is the honest thing to put on screen: the slice bar scrubs z,
+   * and the contrast window, colormaps and region tools all work because the
+   * volume genuinely is the image now. The 3D cloud stays one menu pick away.
+   *
+   * Keyed by dataset + geometry: the dataset stream re-emits on things like a
+   * colour-column change, and rebuilding then would re-fetch the voxels and throw
+   * the user back to the middle slice.
+   */
+  private async showVolumeAsImage(dataset: SpatialDataset): Promise<void> {
+    const meta = dataset.volume;
+    if (!meta || !this.spatialData?.getVolume) return;
+    const key = `${dataset.id}:${meta.width}x${meta.height}x${meta.depth}`;
+    if (key === this.volumeImageKey) return;
+    // Claim the key BEFORE awaiting: the stream can emit again while the voxels
+    // are in flight, and two builds of the same volume would race to publish.
+    this.volumeImageKey = key;
+    this.state.setImageLoading(true);
+    try {
+      const built = await buildVolumeStackImage(dataset, await this.spatialData.getVolume());
+      // A different dataset was selected while this one encoded — its image is the
+      // one that belongs on screen, so drop what we just built.
+      if (this.volumeImageKey !== key) {
+        built?.urls.forEach((u) => URL.revokeObjectURL(u));
+        return;
+      }
+      if (!built) {
+        this.volumeImageKey = null;
+        return;
+      }
+      // Pick the mode first so the image lands in the view that will show it,
+      // instead of rendering once into whatever mode the last dataset left active.
+      if (this.selectedPlotType !== PlotType.IMAGE) this.onSelectPlotType(PlotType.IMAGE);
+      this.revokeVolumeImageUrls();
+      this.volumeImageUrls = built.urls;
+      this.state.setImageInfo(built.info);
+    } catch (err) {
+      // No volume served after all: the cloud is still renderable, so fall back to
+      // it rather than leaving the host on an Image view with nothing in it.
+      console.warn('[visualizer] reference volume unavailable — falling back to the 3D cloud', err);
+      this.volumeImageKey = null;
+      if (this.hasSpatial3dDataset && !isSpatialOmics3d(this.selectedPlotType)) {
+        this.onSelectPlotType(PlotType.SPATIAL_OMICS_3D);
+      }
+    } finally {
+      this.state.setImageLoading(false);
+      this.cdr.detectChanges();
+    }
+  }
+
+  /** Forget the published volume image so re-selecting the dataset rebuilds it.
+   *  The URLs deliberately stay alive: the host may still be displaying that image
+   *  at this instant, and revoking under it would break every later tile read. They
+   *  are freed when the next volume replaces them, or on destroy. */
+  private dropVolumeImage(): void {
+    this.volumeImageKey = null;
+  }
+
+  private revokeVolumeImageUrls(): void {
+    this.volumeImageUrls.forEach((u) => URL.revokeObjectURL(u));
+    this.volumeImageUrls = [];
   }
 
   private computePlotTypeOptions() {
@@ -438,7 +526,17 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
         // volume is another. Without this, Volume and Isosurface stay hidden for
         // a 3D omics dataset that has the voxels to feed them.
         if (d.requiresStack && !isStack && !this.hasSpatialVolume) return false;
-        if (d.requiresGrayscale && !isGrayscale && !isMultichannel) return false;
+        // `requiresGrayscale` asks for SCALAR voxels, and a registered volume is a
+        // single scalar field by construction — so it satisfies this gate for the
+        // same reason it satisfies `requiresStack`. Without this the pair only half
+        // opened: a cloud with no `imageRef` has no image at all, so `isGrayscale`
+        // was false and Volume/Isosurface stayed hidden on exactly the dataset the
+        // volume was fetched for. Narrowed to the two modes whose mount path reads
+        // the dataset's volume — Contour is grayscale-gated too, and has no spatial
+        // source to draw from.
+        const spatialVoxels =
+          this.hasSpatialVolume && (isNapariVolume(d.type) || isNapariIsosurface(d.type));
+        if (d.requiresGrayscale && !isGrayscale && !isMultichannel && !spatialVoxels) return false;
         if (d.requiresSpatialData && !this.hasSpatialDataset) return false;
         if (d.requiresSpatial3d && !this.hasSpatial3dDataset) return false;
         return true;
@@ -1040,6 +1138,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   ngOnDestroy() {
     // Leave the live set so the next-oldest visualizer picks up the outlets.
     VisualizerComponent.liveInstances.delete(this);
+    this.revokeVolumeImageUrls();
     this.scrubber.cancel();
     this.samPointSub.unsubscribe();
     if (this.plotContextMenuListener) {

@@ -130,6 +130,26 @@ describe('spatial-selection', () => {
       ).count).toBe(1);
     });
 
+    it('restricts the test to the candidate indices, keeping the mask observation-indexed', () => {
+      // Three observations at the same x/y — different sections of a registered
+      // volume seen from above. A region drawn over the displayed section must
+      // select that section's cell only, not the column of brain behind it.
+      const observations = obs([1, 1], [1, 1], [1, 1]);
+      const region = [rectRegion(0, 0, 10, 10)];
+      expect(selectInRegions(observations, undefined, region).count).toBe(3);
+
+      const selection = selectInRegions(observations, undefined, region, new Uint32Array([1]));
+      expect(Array.from(selection.mask)).toEqual([0, 1, 0]);
+      expect(selection.count).toBe(1);
+    });
+
+    it('selects nothing when every candidate is outside the region', () => {
+      const selection = selectInRegions(
+        obs([1, 1], [50, 50]), undefined, [rectRegion(0, 0, 10, 10)], new Uint32Array([1]),
+      );
+      expect(selection.count).toBe(0);
+    });
+
     it('selects nothing when no region encloses area', () => {
       const selection = selectInRegions(obs([1, 1]), undefined, [rectRegion(0, 0, 0, 0)]);
       expect(selection.count).toBe(0);
