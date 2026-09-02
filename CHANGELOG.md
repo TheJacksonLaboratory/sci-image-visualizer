@@ -72,6 +72,38 @@ file was added.
   1D charts, and background subsampling. When napari-js is unavailable the
   fallback renders the tissue image **without** the observation layer.
 
+- **Legacy Spatial Transcriptomics datasets are served live too**
+  (`lib/spatial-st.mjs`), from `$ST_DIR` (default `./st`). Pre-Visium ST is a
+  different shape from a SpatialData store — gzipped TSV count matrices, separate
+  HE JPEGs, and spot-selection tables joining array coordinates to image pixels,
+  with no Zarr, no AnnData and no coordinate transformations — so it is a third
+  source alongside Zarr stores and pre-built bundles rather than a branch inside
+  one.
+
+  Verified against the Andersson et al. HER2+ breast cancer deposition
+  ([Zenodo 4751624](https://zenodo.org/records/4751624)): **36 sections**, 8 of
+  them carrying the **pathologist's annotation** (`invasive cancer`,
+  `cancer in situ`, `connective tissue`, `adipose tissue`, `immune infiltrate`,
+  `undetermined`) — the richest categorical any of the demo datasets has, and a
+  real one rather than derived. Rendering section A1's spots over its HE image
+  shows the annotation tracking the histology and `ERBB2` high across the tumour,
+  low in the fat.
+
+  Two supporting pieces:
+  - `lib/zip-aes.mjs` — a dependency-free ZIP reader **including WinZip-AES**
+    (method 99). These archives are AES-encrypted with the password published in
+    the authors' README; macOS's `unzip` refuses them ("need PK compat. v5.1")
+    and 7-Zip is not always installed, but Node already has PBKDF2-HMAC-SHA1,
+    AES and HMAC. It reads by byte range, so pulling one JPEG out of the 592 MB
+    `images.zip` does not load the archive.
+  - Passwords live in a per-bundle `config.json` sidecar, not in source: they are
+    the depositor's to publish, not ours to embed.
+
+  A section's cheap index (spot keys, pixel positions, gene names) is read per
+  request in ~25 ms; the count matrix is parsed on the first gene or derived
+  column and kept **gene-major** (~21 MB per section), which is affordable here
+  in a way it is not for 84k cells.
+
 - **The example server now reads SpatialData Zarr stores LIVE** (`lib/spatial-zarr.mjs`).
   Drop or symlink a `*.zarr` store into `$ZARR_DIR` (default `./stores`) and every
   `(store, table, region)` triple appears on `/spatial/datasets` — no build step,

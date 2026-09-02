@@ -126,6 +126,52 @@ does not pay to cluster it. Columns that encode nothing are dropped:
 identifiers (a distinct integer per observation) and columns constant after
 filtering.
 
+#### Serving a LEGACY Spatial Transcriptomics dataset
+
+Pre-Visium ST data is a different shape: gzipped TSV count matrices, separate
+brightfield HE JPEGs, and "spot selection" tables mapping array coordinates to
+image pixels. `lib/spatial-st.mjs` serves those from `$ST_DIR` (default `./st`),
+one sub-directory per dataset.
+
+The reference case is the Andersson et al. HER2+ breast cancer deposition
+([Zenodo 4751624](https://zenodo.org/records/4751624)) — 36 sections, 8 of them
+carrying the **pathologist's annotation**, which is the richest categorical any
+of these demo datasets has:
+
+```bash
+mkdir -p st/her2 && cd st/her2
+for f in count-matrices spot-selections meta images; do
+  curl -LO "https://zenodo.org/records/4751624/files/$f.zip?download=1"
+done
+```
+
+The archives are **AES-encrypted**, with the passwords published in the authors'
+own [README](https://github.com/almaan/her2st) — note there are **two**, one per
+pair of archives (the Zenodo description lists only the first):
+
+```json
+// st/her2/config.json
+{
+  "dataPassword": "zNLXkYk3Q9znUseS",
+  "metaPassword": "yUx44SzG6NdB32gY"
+}
+```
+
+`lib/zip-aes.mjs` reads them: macOS's `unzip` refuses AES entries
+("need PK compat. v5.1") and 7-Zip is not always installed, but Node already has
+PBKDF2-HMAC-SHA1, AES and HMAC, so the WinZip-AES format is a short module. It
+reads entries by byte range, so pulling one JPEG out of the 592 MB `images.zip`
+does not load the archive.
+
+Each section becomes `her2.<SECTION>` — `her2.A1` … `her2.H3`. `radius` and
+`polygons` legitimately 404 there: ST spots are a uniform size and the format has
+no outlines.
+
+What it costs: the cheap index (spot keys, pixel positions, gene names) is read
+per request in ~25 ms; the count matrix is parsed on the first gene or derived
+column and kept **gene-major** (~21 MB for ~350 spots x ~15k genes), which a
+section can afford in a way 84k cells cannot.
+
 #### Pre-built bundles
 
 `$SPATIAL_DIR` still serves bundles in the same wire format, and a bundle **wins**
