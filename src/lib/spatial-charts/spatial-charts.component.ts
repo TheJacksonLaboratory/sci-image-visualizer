@@ -51,8 +51,13 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    * first draw.
    */
   @Input() set active(on: boolean) {
+    const was = this.isActive;
     this.isActive = on;
-    if (on) void this.reload();
+    // Deferred by a task: when a collapsed section expands, the host is still
+    // `hidden` at the moment this setter runs, so plotting now would size the
+    // chart to a zero-height div.
+    if (on && !was) setTimeout(() => void this.reload(), 0);
+    else if (on) void this.reload();
   }
   get active(): boolean {
     return this.isActive;

@@ -119,6 +119,21 @@ describe('SpatialChartsComponent', () => {
       expect(Plotly.react).toHaveBeenCalled();
     });
 
+    it('defers the draw when a collapsed section expands', async () => {
+      await build(controls);
+      component.active = false;
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'total_counts' } });
+      await flush();
+      (Plotly.react as jest.Mock).mockClear();
+
+      // The host is still `hidden` at the moment the setter runs, so drawing
+      // synchronously would size the chart to a zero-height div.
+      component.active = true;
+      expect(Plotly.react).not.toHaveBeenCalled();
+      await flush();
+      expect(Plotly.react).toHaveBeenCalled();
+    });
+
     it('does not draw while the host panel is hidden', async () => {
       await build(controls);
       component.active = false;

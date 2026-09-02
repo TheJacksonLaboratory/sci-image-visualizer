@@ -173,4 +173,38 @@
 .sc-charts {
   padding-top: 0.5rem;
   border-top: 1px solid var(--surface-border, #dee2e6);
+  gap: 0;
+}
+
+.sc-disclosure {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.2rem 0;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  color: inherit;
+
+  i {
+    font-size: 0.7rem;
+    color: var(--text-color-secondary, #6c757d);
+  }
+
+  small {
+    font-weight: 400;
+    color: var(--text-color-secondary, #6c757d);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &:hover {
+    color: var(--primary-color, #3b82f6);
+  }
 }

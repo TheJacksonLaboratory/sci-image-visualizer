@@ -107,7 +107,9 @@ file was added.
 - **Linked distribution charts** — `<spatial-charts>` (`SpatialChartsComponent`):
   **histogram**, **violin** and **box** over the values the map is coloured by,
   embedded in the `<spatial-controls>` panel below the colour controls rather
-  than owning a dialog of its own. The two are one workflow — change the colour
+  than owning a dialog of its own, in a **collapsible** section (collapsed by
+  default — the panel's primary job is the colour controls, and the chart roughly
+  doubles its height; the collapsed header names what it would chart). The two are one workflow — change the colour
   source, watch the distribution move — and splitting them across two floating
   windows made that link harder to see, not easier. It remains a separate
   component, so the pure trace builders and its own tests keep their boundary,

@@ -329,6 +329,21 @@ describe('SpatialControlsComponent', () => {
     });
   });
 
+  describe('distribution section', () => {
+    beforeEach(async () => build(controls));
+
+    it('starts collapsed, so the panel stays the height of its controls', () => {
+      expect(component.chartsOpen).toBe(false);
+    });
+
+    it('toggles open and shut', () => {
+      component.toggleCharts();
+      expect(component.chartsOpen).toBe(true);
+      component.toggleCharts();
+      expect(component.chartsOpen).toBe(false);
+    });
+  });
+
   describe('lifecycle', () => {
     it('drops stale picker state when the dataset changes', async () => {
       await build(controls);

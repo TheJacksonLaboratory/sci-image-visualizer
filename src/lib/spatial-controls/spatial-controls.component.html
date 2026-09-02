@@ -135,8 +135,19 @@
          distribution move is one action, and two floating windows made that
          harder to see rather than easier. -->
     <div class="sc-section sc-charts">
-      <span class="sc-lbl">Distribution</span>
-      <spatial-charts [active]="visible"></spatial-charts>
+      <button type="button" class="sc-disclosure" (click)="toggleCharts()"
+              [attr.aria-expanded]="chartsOpen" aria-controls="sc-charts-body">
+        <i class="pi" [class.pi-chevron-right]="!chartsOpen"
+           [class.pi-chevron-down]="chartsOpen"></i>
+        <span>Distribution</span>
+        <small *ngIf="!chartsOpen && view.colorBy">of {{ colorByLabel }}</small>
+      </button>
+      <!-- Kept MOUNTED when collapsed, only hidden: destroying it would throw
+           away the chart kind and grouping the user picked. `active` is what
+           stops it drawing while it has no size. -->
+      <div id="sc-charts-body" [hidden]="!chartsOpen">
+        <spatial-charts [active]="visible && chartsOpen"></spatial-charts>
+      </div>
     </div>
 
     <div class="sc-btns">

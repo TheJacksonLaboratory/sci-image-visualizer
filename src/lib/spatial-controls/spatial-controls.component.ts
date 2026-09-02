@@ -80,6 +80,13 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
    *  looking like the button did nothing. */
   selectionMissed = false;
 
+  /**
+   * Whether the Distribution section is expanded. Collapsed by default: the
+   * panel's primary job is the colour controls, and the chart roughly doubles
+   * its height.
+   */
+  chartsOpen = false;
+
   private colormap: ColormapNode | null = null;
   private reverse = false;
   private readonly subs = new Subscription();
@@ -193,6 +200,10 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     } catch {
       this.selectedCategory = null;
     }
+  }
+
+  toggleCharts(): void {
+    this.chartsOpen = !this.chartsOpen;
   }
 
   clearSelection(): void {
