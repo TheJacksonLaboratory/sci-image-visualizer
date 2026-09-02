@@ -10,10 +10,17 @@
 // spatially structured noise, not measurements. For real data use
 // `make_spatial.py`, which converts a SpatialData Zarr store.
 //
-// Writes the layout documented in ../lib/spatial.mjs.
+// It ALSO renders a matching synthetic tissue image and writes it as a tiled
+// pyramid under $COG_DIR, so the demo is complete end to end: the same region
+// map drives both the H&E-ish tint of the image and the `region` column of the
+// data, and the manifest's `imageRef` carries the affine between them.
+//
+// Writes the spatial layout documented in ../lib/spatial.mjs, plus
+// <cogDir>/<id>-tissue/{descriptor.json,L0.tif,…} in make-cog's pyramid format.
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import sharp from 'sharp';
 
 const args = process.argv.slice(2);
 const argOf = (flag, dflt) => {
@@ -24,6 +31,14 @@ const argOf = (flag, dflt) => {
 const ID = argOf('--id', 'demo-brain');
 const OUT_ROOT = argOf('--out', new URL('../spatial', import.meta.url).pathname);
 const OUT = path.join(OUT_ROOT, ID);
+const COG_ROOT = argOf('--cog-dir', new URL('../cogs', import.meta.url).pathname);
+const IMAGE_ID = `${ID}-tissue`;
+const IMAGE_OUT = path.join(COG_ROOT, IMAGE_ID);
+/** Served tissue-image width. Real Visium ships a 2000 px "hires" tier while the
+ *  spot coordinates stay in the full-resolution frame — so the demo has a
+ *  non-identity `imageRef` affine, like real data, instead of a trivial 1:1. */
+const IMAGE_WIDTH = 2000;
+const TILE_SIZE = 512;
 
 // ── Visium v1 capture geometry ──────────────────────────────────────────────
 const ROWS = 78;              // array_row 0..77
@@ -90,17 +105,24 @@ const N = xs.length;
 // thalamus in the middle, with a choroid-plexus spot near the midline.
 const REGIONS = ['Cortex', 'White matter', 'Hippocampus', 'Thalamus', 'Choroid plexus'];
 const REGION_COLORS = ['#4c72b0', '#dd8452', '#55a868', '#c44e52', '#8172b3'];
+/** Region index at a point in the spot coordinate frame. Shared by the spot
+ *  codes and the tissue image, so the picture and the data cannot disagree.
+ *  `jitter` roughens the boundary for spots; the image passes 0 to stay smooth. */
+function regionAt(x, y, jitter = 0) {
+  const nx = (x - CX) / RX;
+  const ny = (y - CY) / RY;
+  const r = Math.sqrt(nx * nx + ny * ny) + jitter;
+  const nearMidline = Math.abs(nx) < 0.10 && ny > -0.15 && ny < 0.25;
+  if (nearMidline && r < 0.35) return 4;
+  if (r > 0.80) return 0;
+  if (r > 0.62) return 1;
+  if (r > 0.38) return 2;
+  return 3;
+}
+
 const codes = new Uint16Array(N);
 for (let i = 0; i < N; i++) {
-  const nx = (xs[i] - CX) / RX;
-  const ny = (ys[i] - CY) / RY;
-  const r = Math.sqrt(nx * nx + ny * ny) + gauss(0, 0.03);
-  const nearMidline = Math.abs(nx) < 0.10 && ny > -0.15 && ny < 0.25;
-  if (nearMidline && r < 0.35) codes[i] = 4;
-  else if (r > 0.80) codes[i] = 0;
-  else if (r > 0.62) codes[i] = 1;
-  else if (r > 0.38) codes[i] = 2;
-  else codes[i] = 3;
+  codes[i] = regionAt(xs[i], ys[i], gauss(0, 0.03));
 }
 
 // ── Continuous columns ──────────────────────────────────────────────────────
@@ -172,6 +194,92 @@ function polygonsBuffer() {
   return Buffer.concat([Buffer.from(header.buffer), Buffer.from(polyCoords.buffer)]);
 }
 
+// ── Tissue image ────────────────────────────────────────────────────────────
+// The spot frame is the "full resolution" space; the served image is a
+// downscale of it, exactly as Visium serves a 2000 px hires tier for spots
+// recorded in full-res pixels. The ratio becomes `imageRef.scale`.
+const FRAME_W = Math.round((COLS - 1) * (PITCH_PX / 2) + PITCH_PX);
+const FRAME_H = Math.round((ROWS - 1) * PITCH_PX * (Math.sqrt(3) / 2) + PITCH_PX);
+const IMAGE_SCALE = IMAGE_WIDTH / FRAME_W;
+const IMAGE_H = Math.round(FRAME_H * IMAGE_SCALE);
+
+/** H&E-ish tint per region, plus the off-tissue background. */
+const TISSUE_RGB = [
+  [196, 148, 190], // Cortex        — mid purple-pink
+  [232, 205, 224], // White matter  — pale, sparse
+  [150, 100, 165], // Hippocampus   — dense, darker
+  [211, 165, 200], // Thalamus
+  [118, 74, 140],  // Choroid plexus — densest
+];
+const BACKGROUND_RGB = [244, 242, 246];
+
+/** Render the tissue as a raw RGB buffer at the served resolution. */
+function renderTissue() {
+  const buf = Buffer.allocUnsafe(IMAGE_WIDTH * IMAGE_H * 3);
+  const noise = rng(77); // its own stream, so image texture doesn't shift the data
+  let o = 0;
+  for (let py = 0; py < IMAGE_H; py++) {
+    // Image pixel -> spot frame: the inverse of imageRef.scale.
+    const fy = py / IMAGE_SCALE;
+    for (let px = 0; px < IMAGE_WIDTH; px++) {
+      const fx = px / IMAGE_SCALE;
+      const tint = inTissue(fx, fy) ? TISSUE_RGB[regionAt(fx, fy)] : BACKGROUND_RGB;
+      // Mild per-pixel grain so the image reads as tissue rather than flat fill,
+      // and so JPEG tiles have something to compress.
+      const n = (noise() - 0.5) * 18;
+      buf[o++] = Math.max(0, Math.min(255, tint[0] + n));
+      buf[o++] = Math.max(0, Math.min(255, tint[1] + n));
+      buf[o++] = Math.max(0, Math.min(255, tint[2] + n));
+    }
+  }
+  return buf;
+}
+
+/** Write the tiled-TIFF pyramid + descriptor make-cog produces, so the tile
+ *  server serves this image through the identical path as a real slide. */
+async function writeTissuePyramid() {
+  await mkdir(IMAGE_OUT, { recursive: true });
+  const raw = renderTissue();
+  const source = sharp(raw, { raw: { width: IMAGE_WIDTH, height: IMAGE_H, channels: 3 } });
+
+  const levels = [];
+  for (let res = 0; res <= 20; res++) {
+    const f = 2 ** res;
+    const w = Math.round(IMAGE_WIDTH / f);
+    const h = Math.round(IMAGE_H / f);
+    if (w < 1 || h < 1) break;
+    await source
+      .clone()
+      .resize(w, h, { fit: 'fill' })
+      .tiff({
+        tile: true, tileWidth: TILE_SIZE, tileHeight: TILE_SIZE,
+        compression: 'jpeg', quality: 85,
+      })
+      .toFile(path.join(IMAGE_OUT, `L${res}.tif`));
+    levels.push({ res, width: w, height: h });
+    // Stop once the whole level fits in one tile — the library has no use for
+    // anything coarser.
+    if (w <= TILE_SIZE && h <= TILE_SIZE) break;
+  }
+
+  await writeFile(path.join(IMAGE_OUT, 'descriptor.json'), JSON.stringify({
+    width: IMAGE_WIDTH,
+    height: IMAGE_H,
+    tileSize: TILE_SIZE,
+    z: 1,
+    channels: 3,
+    multichannel: false,
+    realLevels: levels.length,
+    channelInfo: null,
+    levels,
+    // µm per pixel OF THE SERVED IMAGE: the spot frame is 1 µm/px and the image
+    // is a `IMAGE_SCALE` downscale of it, so each image pixel covers more ground.
+    mppX: MPP / IMAGE_SCALE,
+    mppY: MPP / IMAGE_SCALE,
+  }, null, 2));
+  return levels;
+}
+
 const columns = [
   {
     kind: 'categorical', name: 'region', description: 'Anatomical region (synthetic)',
@@ -209,9 +317,12 @@ const manifest = {
   },
   polygons: { count: N },
   imageRef: {
-    // No image is generated here — the host points this at whichever tissue
-    // image it serves. Coordinates are already in that image's pixel space.
-    scale: [1, 1],
+    // The tissue pyramid written alongside this dataset. Spot coordinates are in
+    // the FULL-resolution frame; the served image is an `IMAGE_SCALE` downscale,
+    // so the renderer applies this affine to land them on it — the same
+    // arrangement a real Visium hires image has.
+    imageId: IMAGE_ID,
+    scale: [IMAGE_SCALE, IMAGE_SCALE],
     translate: [0, 0],
     mppX: MPP,
     mppY: MPP,
@@ -233,8 +344,12 @@ await writeFile(path.join(OUT, 'columns', '3.bin'), Buffer.from(Float32Array.fro
 await writeFile(path.join(OUT, 'features', 'names.json'), JSON.stringify(GENES.map((g) => g.name)));
 await writeFile(path.join(OUT, 'features', 'matrix.f32'), Buffer.from(matrix.buffer));
 
+const levels = await writeTissuePyramid();
+
 const counts = REGIONS.map((r, i) => `${r}=${codes.reduce((n, c) => n + (c === i ? 1 : 0), 0)}`);
 console.log(`[make-spatial-demo] wrote ${OUT}`);
+console.log(`  tissue image ${IMAGE_OUT} — ${IMAGE_WIDTH}x${IMAGE_H}, ${levels.length} levels`);
+console.log(`  spot frame ${FRAME_W}x${FRAME_H} px @ ${MPP} um/px -> imageRef.scale ${IMAGE_SCALE.toFixed(4)}`);
 console.log(`  ${N} spots (of ${ROWS * (COLS / 2)} capture positions), radius ${RADIUS_PX} px`);
 console.log(`  regions: ${counts.join(', ')}`);
 console.log(`  ${GENES.length} genes, matrix ${(GENES.length * N * 4 / 1024).toFixed(0)} KiB gene-major`);

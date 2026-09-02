@@ -10,6 +10,8 @@ import {
   REGION_IO_PORT,
   VIZ_CONFIG,
   ToolbarToolVisibility,
+  SPATIAL_DATA_PORT,
+  SpatialDataHttpService,
 } from '@jax-data-science/sci-image-visualizer';
 import {
   ExampleImageStateAdapter,
@@ -87,6 +89,12 @@ interface TiledImage {
   channels?: number;
   /** z-slice count. >1 shows the slice scrubber; OSD swaps the tile `z` param. */
   slices?: number;
+  /**
+   * Spatial-omics dataset served alongside this image (`/spatial/<id>/…`).
+   * Selecting the image loads the dataset, which makes the "Spatial omics" plot
+   * type appear in the selector; selecting any other image clears it again.
+   */
+  spatialDatasetId?: string;
 }
 
 /** Gigapixel whole-slide images served through the tile server. Shown only when a
@@ -115,6 +123,11 @@ const TILED_IMAGES: TiledImage[] = TILE_SERVER
       // The same file as its real shape: 2 channels x 27 z-slices. Scrubbing the
       // stack swaps the tile `z` param server-side (no per-slice urls).
       { name: 'Project002 · 2ch x 27z stack · 7.5 Gpx', imageId: 'project002-stack', width: 14971, height: 18664, mppX: 0.3211, mppY: 0.3211, channels: 2, slices: 27 },
+      // Synthetic Visium-geometry demo: tissue image + the spatial-omics dataset
+      // that registers onto it. Built by `npm run make-spatial-demo` in
+      // examples/tile-server (no download, no Python). Selecting it adds the
+      // "Spatial omics" plot type, which draws ~2k spots over the tissue.
+      { name: 'Spatial omics demo · Visium geometry', imageId: 'demo-brain-tissue', width: 2000, height: 2099, mppX: 3.225, mppY: 3.225, spatialDatasetId: 'demo-brain' },
     ]
   : [];
 
@@ -158,6 +171,10 @@ async function warmUp(base: string): Promise<void> {
     ServerTileAccessAdapter,
     { provide: TILE_ACCESS_PORT, useExisting: ServerTileAccessAdapter },
     { provide: REGION_IO_PORT, useClass: StubRegionIoAdapter },
+    // The library's reference adapter for the example server's /spatial/* wire
+    // format. Unbound by default, so this line is what turns the feature on.
+    SpatialDataHttpService,
+    { provide: SPATIAL_DATA_PORT, useExisting: SpatialDataHttpService },
     { provide: VIZ_CONFIG, useValue: { slideCropServer: TILE_SERVER } },
   ],
   styles: [
@@ -506,9 +523,11 @@ export class AppComponent implements OnDestroy {
     private readonly imageState: ExampleImageStateAdapter,
     private readonly zone: NgZone,
     @Inject(VISUALIZER) private readonly viz: IVisualizer,
+    private readonly spatialData: SpatialDataHttpService,
   ) {
     // Render raw pixels (no smoothing) so images are inspectable pixel-for-pixel.
     this.viz.setImageSmoothingEnabled(false);
+    if (TILE_SERVER) this.spatialData.configure({ baseUrl: TILE_SERVER });
     // Show something on load: the first sample.
     if (this.samples.length) void this.load(this.samples[0]);
   }
@@ -532,11 +551,41 @@ export class AppComponent implements OnDestroy {
       this.loadingMessage = '';
     }
     this.imageState.setTiledImage(t.imageId, t.name, t.width, t.height, t.mppX, t.mppY, t.channels ?? 3, t.slices ?? 1);
+    await this.selectSpatialDataset(t.spatialDatasetId);
+  }
+
+  /**
+   * Load (or clear) the spatial-omics dataset that goes with the current image.
+   * The "Spatial omics" plot type is gated on a dataset being published, so
+   * clearing here is what makes it disappear when you move to a plain slide.
+   *
+   * With a dataset loaded, colour by the `region` column straight away —
+   * otherwise the mode opens as undifferentiated neutral dots, which shows where
+   * the tissue is but not what the demo is for. (A real host would offer a
+   * column/gene picker; that panel is the next piece of work.)
+   */
+  private async selectSpatialDataset(datasetId?: string): Promise<void> {
+    const controls = this.viz.getSpatialControls?.();
+    if (!datasetId) {
+      this.spatialData.clear();
+      return;
+    }
+    try {
+      const dataset = await this.spatialData.selectDataset(datasetId);
+      const categorical = dataset.columns.find((c) => c.kind === 'categorical');
+      if (categorical) controls?.colorByColumn(categorical.name);
+    } catch (err) {
+      // A missing dataset must not break image loading — the slide still renders,
+      // just without the spatial mode on offer.
+      console.warn(`[example] spatial dataset "${datasetId}" unavailable`, err);
+      this.spatialData.clear();
+    }
   }
 
   /** Left-click a DICOM slice: decode + show just that slice. */
   async loadDicom(d: DicomSlice): Promise<void> {
     this.active = d.name;
+    this.spatialData.clear();
     this.loading = true;
     try {
       await this.imageState.setImageFromDicomUrl(d.url, d.name);
@@ -552,6 +601,7 @@ export class AppComponent implements OnDestroy {
     const folder = this.currentFolder;
     if (!folder) return;
     this.active = folder.slices[index]?.name;
+    this.spatialData.clear();
     this.loading = true;
     try {
       await this.imageState.setStackFromDicomUrls(
@@ -624,6 +674,7 @@ export class AppComponent implements OnDestroy {
 
   async load(s: Sample): Promise<void> {
     this.active = s.name;
+    this.spatialData.clear();
     this.loading = true;
     try {
       await this.imageState.setImageFromUrl(s.url, s.name);
@@ -636,6 +687,7 @@ export class AppComponent implements OnDestroy {
     const file = (event.target as HTMLInputElement).files?.[0] ?? null;
     if (!file) return;
     this.active = file.name;
+    this.spatialData.clear();
     this.loading = true;
     try {
       await this.imageState.setImageFromFile(file);

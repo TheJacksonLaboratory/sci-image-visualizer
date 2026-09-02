@@ -73,12 +73,23 @@ Two things the layout is built around:
 
 ```bash
 # A synthetic Visium-geometry dataset — no download, no Python, runs instantly.
-npm run make-spatial-demo        # -> ./spatial/demo-brain (~2k spots, 12 marker genes)
-npm start                        # SPATIAL_DIR=./spatial
+# Writes BOTH the spatial bundle and a matching tissue-image pyramid:
+#   ./spatial/demo-brain          ~2k spots on a real 100 um hex grid, 12 marker genes
+#   ./cogs/demo-brain-tissue      2000 px H&E-ish image, tiled pyramid + descriptor
+npm run make-spatial-demo
+npm start                        # SPATIAL_DIR=./spatial  COG_DIR=./cogs
 
-# Verify the whole wire format end to end (boots the server, decodes every route):
+# Verify the whole thing end to end (boots the server, decodes every route,
+# and checks every spot lands inside the image under the manifest's affine):
 npm run smoke-spatial
 ```
+
+The image and the data are generated from the **same** region function, so the
+H&E tint and the `region` column agree by construction. Spot coordinates stay in
+the full-resolution frame while the image is a ~0.31 downscale of it — the same
+arrangement Visium has with its 2000 px hires tier — so `imageRef.scale` is a
+real affine rather than a trivial 1:1, and the renderer's registration is
+actually exercised.
 
 Real data goes through the Python converter, which reads a SpatialData Zarr
 store (Zarr v3 + AnnData conventions + GeoParquet shapes):

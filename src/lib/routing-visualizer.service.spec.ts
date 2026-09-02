@@ -9,6 +9,9 @@ import { VisualizerStore } from './store/visualizer-store.service';
 import { VIZ_CONFIG } from './contracts/viz-config';
 import { PlotType } from './contracts/plot-type';
 import { IChannelState, IHistogram } from './contracts/channel-histogram-api.contract';
+import { SPATIAL_DATA_PORT } from './contracts/ports/spatial-data.port';
+import { CategoricalColumn, SpatialDataset } from './contracts/spatial-dataset.contract';
+import { BehaviorSubject } from 'rxjs';
 
 /**
  * CHARACTERIZATION TESTS (refactoring plan, Step 0).
@@ -504,5 +507,139 @@ describe('RoutingVisualizerService (characterization)', () => {
     const chans = await firstValueFrom(router.getChannels$());
     expect(chans).toHaveLength(1);
     expect(chans[0].name).toBe('Intensity');
+  });
+});
+
+/**
+ * The spatial controls are implemented on the ROUTER rather than a backend
+ * because the state is backend-neutral (it lives in the shared store, like the
+ * colormap) — so they must work with no backend mounted and survive a plot-type
+ * switch. These pin that, plus the two pieces with real logic: the feature
+ * search fallback and the legend colours.
+ */
+describe('RoutingVisualizerService — spatial controls', () => {
+  const dataset: SpatialDataset = {
+    id: 'demo', name: 'Demo',
+    observations: { count: 2, x: new Float32Array(2), y: new Float32Array(2) },
+    columns: [
+      { kind: 'categorical', name: 'region', categories: ['A', 'B'], colors: ['#ff0000', '#0000ff'] },
+      { kind: 'continuous', name: 'counts' },
+    ],
+    features: { count: 3, names: ['Ttr', 'Fth1', 'Mbp'] },
+  };
+
+  function build(port: unknown | null) {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        RoutingVisualizerService,
+        VisualizerStore,
+        { provide: PlotlyService, useValue: mockBackend() },
+        { provide: OpenSeadragonVisualizerService, useValue: mockBackend() },
+        { provide: NapariVisualizerService, useValue: mockBackend() },
+        { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
+        ...(port ? [{ provide: SPATIAL_DATA_PORT, useValue: port }] : []),
+      ],
+    });
+    return {
+      router: TestBed.inject(RoutingVisualizerService),
+      store: TestBed.inject(VisualizerStore),
+    };
+  }
+
+  function mockPort(over: Record<string, unknown> = {}) {
+    return {
+      getDataset$: () => new BehaviorSubject<SpatialDataset | null>(dataset),
+      getColumn: jest.fn(),
+      getFeatureVector: jest.fn(),
+      ...over,
+    };
+  }
+
+  it('returns null when the host binds no SPATIAL_DATA_PORT', () => {
+    const { router } = build(null);
+    expect(router.getSpatialControls()).toBeNull();
+  });
+
+  it('returns the same object across calls, so a consumer can hold it', () => {
+    const { router } = build(mockPort());
+    expect(router.getSpatialControls()).toBe(router.getSpatialControls());
+  });
+
+  it('reads and writes the shared view state', async () => {
+    const { router, store } = build(mockPort());
+    const controls = router.getSpatialControls()!;
+
+    expect(controls.viewState().colorBy).toBeNull();
+    controls.colorByColumn('region');
+    expect(store.currentSpatialView().colorBy).toEqual({ kind: 'column', name: 'region' });
+    expect(await firstValueFrom(controls.getViewState$())).toEqual(
+      expect.objectContaining({ colorBy: { kind: 'column', name: 'region' } }),
+    );
+
+    controls.colorByFeature('Ttr');
+    expect(store.currentSpatialView().colorBy).toEqual({ kind: 'feature', name: 'Ttr' });
+
+    controls.clearColorBy();
+    expect(store.currentSpatialView().colorBy).toBeNull();
+
+    controls.setViewState({ pointScale: 3, opacity: 0.5 });
+    expect(store.currentSpatialView()).toEqual(
+      expect.objectContaining({ pointScale: 3, opacity: 0.5 }),
+    );
+  });
+
+  it('exposes the dataset stream for pickers and legends', async () => {
+    const { router } = build(mockPort());
+    expect(await firstValueFrom(router.getSpatialControls()!.getDataset$())).toBe(dataset);
+  });
+
+  describe('searchFeatures', () => {
+    it('delegates to the port when it can search (a 31k-gene dataset ships no names)', async () => {
+      const searchFeatures = jest.fn().mockResolvedValue(['Ttr']);
+      const { router } = build(mockPort({ searchFeatures }));
+      expect(await router.getSpatialControls()!.searchFeatures('tt', 5)).toEqual(['Ttr']);
+      expect(searchFeatures).toHaveBeenCalledWith('tt', 5);
+    });
+
+    it('falls back to filtering the inlined names when the port cannot search', async () => {
+      const { router } = build(mockPort()); // no searchFeatures on the port
+      // Case-insensitive substring over ['Ttr', 'Fth1', 'Mbp'] — 'Mbp' has no 't'.
+      expect(await router.getSpatialControls()!.searchFeatures('t')).toEqual(['Ttr', 'Fth1']);
+      expect(await router.getSpatialControls()!.searchFeatures('mb')).toEqual(['Mbp']);
+    });
+
+    it('returns nothing rather than throwing when neither is available', async () => {
+      const port = mockPort({
+        getDataset$: () => new BehaviorSubject<SpatialDataset | null>(null),
+      });
+      const { router } = build(port);
+      expect(await router.getSpatialControls()!.searchFeatures('t')).toEqual([]);
+    });
+  });
+
+  describe('categoryColors', () => {
+    it('resolves legend swatches with the same function the renderer uses', async () => {
+      const column: CategoricalColumn = {
+        meta: {
+          kind: 'categorical', name: 'region', categories: ['A', 'B'],
+          colors: ['#ff0000', '#0000ff'],
+        },
+        codes: new Uint16Array([0, 1]),
+      };
+      const { router } = build(mockPort({ getColumn: jest.fn().mockResolvedValue(column) }));
+      expect(await router.getSpatialControls()!.categoryColors('region'))
+        .toEqual(['#ff0000', '#0000ff']);
+    });
+
+    it('rejects for a continuous column instead of returning an empty legend', async () => {
+      const column = {
+        meta: { kind: 'continuous', name: 'counts' },
+        values: new Float32Array(2),
+      };
+      const { router } = build(mockPort({ getColumn: jest.fn().mockResolvedValue(column) }));
+      await expect(router.getSpatialControls()!.categoryColors('counts'))
+        .rejects.toThrow(/continuous .* no categories/);
+    });
   });
 });

@@ -8,7 +8,8 @@ import { PlotType, PlotTypeDescriptor } from './plot-type';
 import { ViewerCapabilities } from './capabilities.contract';
 import { IRegionOverlay } from './region-overlay.contract';
 import { IHistogram } from './channel-histogram-api.contract';
-import { ColormapNode, IWandOptions, IBrushOptions } from './display-types';
+import { ColormapNode, IWandOptions, IBrushOptions, SpatialViewState } from './display-types';
+import { SpatialDataset } from './spatial-dataset.contract';
 
 /**
  * Backend-neutral visualization contract. Plotly is one implementation;
@@ -289,6 +290,39 @@ export interface IIntensityControls {
   addProfileLine(): Region | null;
 }
 
+/**
+ * Controls for the SPATIAL_OMICS plot type: what the observation markers are
+ * coloured by, and how they are drawn. Capability-gated like
+ * {@link IIsosurfaceControls} — `getSpatialControls()` returns null unless a
+ * host has bound `SPATIAL_DATA_PORT`.
+ *
+ * The view state is backend-neutral (it lives in the shared store, like the
+ * colormap), so these controls work whichever backend is on screen.
+ */
+export interface ISpatialControls {
+  /** The dataset being visualized, or null. Drives the column/gene pickers and
+   *  the legend. */
+  getDataset$(): Observable<SpatialDataset | null>;
+  /** Current display state (colour source, point scale, opacity, scaling). */
+  getViewState$(): Observable<SpatialViewState>;
+  /** Synchronous read, for seeding a control's initial value. */
+  viewState(): SpatialViewState;
+  /** Patch the display state; the markers rebuild without remounting the scene. */
+  setViewState(partial: Partial<SpatialViewState>): void;
+  /** Colour by an annotation column. Rejects for an unknown column. */
+  colorByColumn(name: string): void;
+  /** Colour by a gene; its vector is fetched on demand. */
+  colorByFeature(name: string): void;
+  /** Clear the colour source — every observation renders in one neutral colour. */
+  clearColorBy(): void;
+  /** Typeahead over feature names, for datasets too wide to inline the list. */
+  searchFeatures(query: string, limit?: number): Promise<string[]>;
+  /** Per-category display colours for a categorical column, index-aligned with
+   *  its `categories` — the legend's swatches, resolved the same way the
+   *  renderer resolves them so the two cannot disagree. */
+  categoryColors(name: string): Promise<string[]>;
+}
+
 /** Display options (colormap/LUT, reverse scale, image metadata). */
 export interface IDisplayOptions {
   getColormap(): Observable<ColormapNode | null>;
@@ -339,6 +373,10 @@ export interface IVisualizer extends IDataRenderer, IRegionStore, IToolControlle
    *  the capability-gated replacement for the deprecated top-level
    *  `setSurfaceDragMode`/`resetSurfaceCamera`. */
   getSurface3dControls(): ISurface3dControls | null;
+  /** Spatial-omics controls when a `SPATIAL_DATA_PORT` is bound, else null.
+   *  Optional: only the routing service implements it, since the state is shared
+   *  rather than owned by any one backend. */
+  getSpatialControls?(): ISpatialControls | null;
   /** Binned intensity histogram for a channel from the currently-displayed
    *  pixels, or null when none are available. Feeds the Channels & Histogram
    *  pane. */

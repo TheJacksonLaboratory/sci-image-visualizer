@@ -198,11 +198,31 @@ Two properties the design turns on:
   (Xenium/CosMx) observations; two `Float32Array`s beat 500k `{x, y}` objects
   and upload to the GPU without a copy.
 
-The rendering mode that consumes this is designed but not built — see
-[docs/spatial-omics-plot-mode-design.md](docs/spatial-omics-plot-mode-design.md).
+Once a dataset is published, the **Spatial omics** plot type appears in the
+selector (and disappears when it is cleared — the same gating that hides Volume
+without a z-stack) and draws one marker per observation over the tissue image.
+Colour it through `getSpatialControls()`:
+
+```ts
+const controls = viz.getSpatialControls();   // null unless a port is bound
+controls?.colorByColumn('region');           // categorical -> the column's palette
+controls?.colorByFeature('Ttr');             // gene -> colormap, log, percentile-clipped
+controls?.setViewState({ pointScale: 2 });
+```
+
+The view state lives in the shared store, so the controls work before any
+backend has mounted and survive a plot-type switch.
+
 The [example server](examples/tile-server/README.md#spatial-omics-endpoints)
-implements the endpoints today, with a synthetic Visium-geometry demo dataset
-(`npm run make-spatial-demo`) and a converter for real SpatialData Zarr stores.
+implements the endpoints, and `npm run make-spatial-demo` generates a synthetic
+Visium-geometry dataset **and a matching tissue image** so the
+[browser example](examples/browser-image/README.md#spatial-omics-demo) runs the
+whole path with no download. A converter for real SpatialData Zarr stores ships
+alongside it.
+
+Still to build: a column/gene picker and legend, hover tooltips, selection, and
+the linked 1D charts — see
+[docs/spatial-omics-plot-mode-design.md](docs/spatial-omics-plot-mode-design.md).
 
 ## Regions & annotation
 

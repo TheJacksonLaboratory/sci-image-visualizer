@@ -119,6 +119,41 @@ try {
   check('offsets are monotonic',
     offsets.every((v, i) => i === 0 || v >= offsets[i - 1]));
 
+  console.log('tissue image (the spatial dataset\'s imageRef target)');
+  const imageId = manifest.imageRef?.imageId;
+  check('manifest names a tissue image', !!imageId, String(imageId));
+  const infoB64 = Buffer.from(JSON.stringify({ image: imageId })).toString('base64url');
+
+  const desc = await getJson(`/tiles/info?info=${infoB64}`);
+  check('descriptor has a pyramid', Array.isArray(desc.levels) && desc.levels.length > 1,
+    `${desc.levels?.length} levels, ${desc.width}x${desc.height}`);
+  check('res 0 is the full-size level',
+    desc.levels[0].res === 0 && desc.levels[0].width === desc.width);
+
+  const tile = await fetch(`${BASE}/tile?info=${infoB64}&res=0&col=0&row=0&tileSize=512&z=0`);
+  check('serves a PNG tile', tile.ok && tile.headers.get('content-type') === 'image/png',
+    `HTTP ${tile.status}`);
+
+  // The affine is the thing most likely to be silently wrong, so check it
+  // numerically: every spot, transformed, must land inside the image.
+  const [sx, sy] = manifest.imageRef.scale ?? [1, 1];
+  const [tx, ty] = manifest.imageRef.translate ?? [0, 0];
+  let inside = 0;
+  for (let i = 0; i < N; i++) {
+    const ix = x[i] * sx + tx;
+    const iy = y[i] * sy + ty;
+    if (ix >= 0 && ix <= desc.width && iy >= 0 && iy <= desc.height) inside++;
+  }
+  check('every spot maps inside the image under imageRef', inside === N, `${inside}/${N}`);
+
+  // A degenerate affine (everything squashed into one corner) would still pass
+  // the bounds test, so also require the spots to span the image. The tissue is
+  // an ellipse inscribed at 78% of the frame and spots exist only inside it, so
+  // ~76% is the expected figure — not ~100%.
+  const spanX = (Math.max(...x) - Math.min(...x)) * sx / desc.width;
+  check('spots span the tissue-sized fraction of the image', spanX > 0.7 && spanX < 0.85,
+    `${(spanX * 100).toFixed(0)}%`);
+
   console.log('error handling');
   const notFound = await fetch(`${BASE}/spatial/${ID}/feature/NotAGene`);
   check('unknown gene is 404', notFound.status === 404, `got ${notFound.status}`);

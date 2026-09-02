@@ -201,6 +201,46 @@ No database, no state. At gigapixel scale the only thing that matters is a
 for `geotiff.js` (range-reading a COG straight from a bucket), or the local
 pyramid for a DeepZoom/IIIF source, as long as you keep the contract above.
 
+## Spatial-omics demo
+
+The gallery's **Spatial omics demo · Visium geometry** entry loads a tissue image
+*and* the spatial-omics dataset registered onto it. Selecting it makes the
+**Spatial omics** plot type appear in the plot-type selector (it is hidden
+whenever no dataset is loaded, like Volume is hidden without a z-stack); picking
+that mode draws ~2,000 spots over the tissue, coloured by anatomical region.
+
+```bash
+cd examples/tile-server
+npm install
+npm run make-spatial-demo     # writes ./spatial/demo-brain and ./cogs/demo-brain-tissue
+npm start
+
+# then, from the repo root:
+VITE_TILE_SERVER=http://localhost:8090/ npm run start:example
+```
+
+Wiring it into a host takes two things — a provider and a call:
+
+```ts
+providers: [
+  SpatialDataHttpService,
+  { provide: SPATIAL_DATA_PORT, useExisting: SpatialDataHttpService },
+]
+
+// then, when the user picks a dataset:
+this.spatialData.configure({ baseUrl: TILE_SERVER });
+await this.spatialData.selectDataset('demo-brain');
+this.viz.getSpatialControls()?.colorByColumn('region');
+```
+
+`getSpatialControls()` returns null unless a port is bound, and its view state
+lives in the shared store — so it works before any backend has mounted and
+survives a plot-type switch. The example calls `spatialData.clear()` whenever a
+non-spatial image is selected, which is what withdraws the plot type again.
+
+> There is no built-in column/gene picker or legend yet, so the example chooses
+> the colour column in code. That panel is the next piece of work.
+
 ## Try it end-to-end
 
 ```bash

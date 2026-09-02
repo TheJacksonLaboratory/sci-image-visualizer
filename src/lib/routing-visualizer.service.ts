@@ -1,5 +1,5 @@
-import { Inject, Injectable } from '@angular/core';
-import { Observable, combineLatest } from 'rxjs';
+import { Inject, Injectable, Optional } from '@angular/core';
+import { Observable, combineLatest, firstValueFrom } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Image } from 'image-js';
 
@@ -9,7 +9,10 @@ import { ClassPreset, PresetSet } from './models/class-preset';
 import { PlotlyService } from './implementations/plotly/plotly.service';
 import { OpenSeadragonVisualizerService } from './implementations/osd/openseadragon-visualizer.service';
 import { PlotType, PlotTypeDescriptor, isNapari3d, isNapariScatter, isSpatialOmics } from './contracts/plot-type';
-import { IVisualizer, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls } from './contracts/visualizer.contract';
+import { IVisualizer, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls, ISpatialControls } from './contracts/visualizer.contract';
+import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-data.port';
+import { isCategoricalColumn } from './contracts/spatial-dataset.contract';
+import { resolveCategoryColors } from './implementations/spatial/spatial-encoding';
 import { ViewerCapabilities } from './contracts/capabilities.contract';
 import { IRegionOverlay } from './contracts/region-overlay.contract';
 import { IRegionEditorApi } from './contracts/region-editor-api.contract';
@@ -89,7 +92,11 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
               private osd: OpenSeadragonVisualizerService,
               private napari: NapariVisualizerService,
               private store: VisualizerStore,
-              @Inject(VIZ_CONFIG) private config: VizConfig) {}
+              @Inject(VIZ_CONFIG) private config: VizConfig,
+              // Optional: a host that serves no spatial-omics data binds nothing,
+              // and `getSpatialControls()` then returns null.
+              @Optional() @Inject(SPATIAL_DATA_PORT)
+              private spatialData: SpatialDataPort | null = null) {}
 
   private isImageType(t: PlotType): boolean {
     return t === PlotType.IMAGE;
@@ -527,6 +534,52 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   /** Intensity (line-ROI) controls — always Plotly's, since the line profiles
    *  render their inset on Plotly regardless of which backend draws the image. */
   getIntensityControls(): IIntensityControls | null { return this.plotly.getIntensityControls(); }
+
+  /**
+   * Spatial-omics controls, or null when no `SPATIAL_DATA_PORT` is bound.
+   *
+   * Implemented HERE rather than on a backend because the state is
+   * backend-neutral: the view state lives in the shared `VisualizerStore` (like
+   * the colormap), so the controls keep working across a plot-type switch and a
+   * host can drive them before any backend has mounted.
+   */
+  getSpatialControls(): ISpatialControls | null {
+    const port = this.spatialData;
+    if (!port) return null;
+    this.spatialControls ??= {
+      getDataset$: () => port.getDataset$(),
+      getViewState$: () => this.store.getSpatialView$(),
+      viewState: () => this.store.currentSpatialView(),
+      setViewState: (partial) => this.store.setSpatialView(partial),
+      colorByColumn: (name: string) =>
+        this.store.setSpatialView({ colorBy: { kind: 'column', name } }),
+      colorByFeature: (name: string) =>
+        this.store.setSpatialView({ colorBy: { kind: 'feature', name } }),
+      clearColorBy: () => this.store.setSpatialView({ colorBy: null }),
+      searchFeatures: async (query: string, limit = 50) => {
+        // Prefer the port's search (a 31k-gene dataset does not ship its names);
+        // otherwise filter whatever the manifest inlined.
+        if (port.searchFeatures) return port.searchFeatures(query, limit);
+        const dataset = await firstValueFrom(port.getDataset$());
+        const names = dataset?.features?.names ?? [];
+        const q = query.toLowerCase();
+        return names.filter((n) => n.toLowerCase().includes(q)).slice(0, limit);
+      },
+      categoryColors: async (name: string) => {
+        const column = await port.getColumn(name);
+        if (!isCategoricalColumn(column)) {
+          throw new Error(`[spatial] column "${name}" is continuous — it has no categories`);
+        }
+        // Resolved by the SAME function the renderer uses, so a legend swatch
+        // can never disagree with the colour on screen.
+        return resolveCategoryColors(column.meta);
+      },
+    };
+    return this.spatialControls;
+  }
+
+  /** Memoised so consumers can hold the object across calls. */
+  private spatialControls: ISpatialControls | null = null;
 
   /** Load pixel frames for intensity sampling when OpenSeadragon owns the image
    *  (it doesn't feed Plotly's frame cache). No-op needed when Plotly renders. */

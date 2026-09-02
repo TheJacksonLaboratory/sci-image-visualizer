@@ -72,6 +72,15 @@ file was added.
   1D charts, and background subsampling. When napari-js is unavailable the
   fallback renders the tissue image **without** the observation layer.
 
+- **`ISpatialControls` via `IVisualizer.getSpatialControls()`** — the host-facing
+  surface for the spatial mode: colour by a column or a gene, read/patch the view
+  state, search features, and resolve legend swatches. Returns null unless a
+  `SPATIAL_DATA_PORT` is bound. Implemented on `RoutingVisualizerService` rather
+  than a backend, because the state is backend-neutral (it lives in the shared
+  store, like the colormap) — so it works before any backend has mounted and
+  survives a plot-type switch. Legend colours resolve through the same function
+  the renderer uses, so a swatch cannot disagree with the screen.
+
 - **Example server: spatial-omics endpoints** (`examples/tile-server`) —
   `/spatial/datasets`, `/spatial/:id/{manifest,coords,radius,ids,polygons}`,
   `/spatial/:id/column/:name`, `/spatial/:id/feature/:name` and
@@ -79,9 +88,18 @@ file was added.
   feature matrix is stored **gene-major**, so serving one gene is a contiguous
   ranged read rather than a scan of an observation-major (CSR) matrix.
   - `npm run make-spatial-demo` generates a synthetic Visium-geometry dataset
-    (~2k spots on the real 100 µm hex grid, 12 mouse-brain marker genes) so the
-    endpoints work with no download and no Python.
-  - `npm run smoke-spatial` boots the server and decodes every route end to end.
+    (~2k spots on the real 100 µm hex grid, 12 mouse-brain marker genes) **and a
+    matching tissue-image pyramid**, so the endpoints and the viewer work with no
+    download and no Python. The image and the `region` column come from the same
+    region function, so they agree by construction; spot coordinates stay in the
+    full-resolution frame while the image is a ~0.31 downscale, giving the demo a
+    real `imageRef` affine rather than a trivial 1:1.
+  - `npm run smoke-spatial` boots the server and decodes every route end to end,
+    including a numeric check that every spot lands inside the image under that
+    affine.
+  - The browser example gains a **Spatial omics demo** gallery entry that loads
+    the image and the dataset together; selecting any other image clears the
+    dataset, which withdraws the plot type.
   - `scripts/make_spatial.py` converts a real SpatialData Zarr store (e.g. the
     Visium mouse brain sandbox dataset). Written but **not yet executed against
     a live store** — no `spatialdata` install was available; it falls back
