@@ -1,19 +1,27 @@
-<?xml version="1.0" ?>
-<svg xmlns="http://www.w3.org/2000/svg"
-     xmlns:svg="http://www.w3.org/2000/svg"
-     viewBox="0 0 512 512" width="300" height="300">
-      <path d="M96 256h320M256 96v320" stroke="#000000" stroke-width="6" stroke-dasharray="8 8" opacity="0.4"/>
-      <circle cx="256" cy="256" r="120" fill="none" stroke="#000000" stroke-width="6" stroke-dasharray="4 6" opacity="0.3"/>
-      <circle cx="256" cy="256" r="180" fill="none" stroke="#000000" stroke-width="6" stroke-dasharray="6 8" opacity="0.2"/>
-      <path d="M170 170l86 30M170 170l30 142M342 170l-86 30M342 170l10 142M256 200v142M200 312h142" stroke="#000000" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
-      <circle cx="170" cy="170" r="28" fill="#ffffff" stroke="#000000" stroke-width="14"/>
-      <circle cx="170" cy="170" r="10" fill="#000000"/>
-      <circle cx="342" cy="170" r="28" fill="#000000"/>
-      <path d="M342 150v40M322 170h40" stroke="#ffffff" stroke-width="6"/>
-      <circle cx="200" cy="312" r="28" fill="#ffffff" stroke="#000000" stroke-width="14"/>
-      <path d="M200 284v56M172 312h56" stroke="#000000" stroke-width="6"/>
-      <circle cx="352" cy="312" r="28" fill="#000000"/>
-      <circle cx="352" cy="312" r="14" fill="#ffffff"/>
-      <circle cx="256" cy="200" r="12" fill="#000000"/>
-      <circle cx="256" cy="342" r="12" fill="#000000"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 512 512">
+  <!-- Spatial omics: an array of observations (spots / cells) whose SIZE varies
+       with the value they carry — the thing this plot mode draws.
+       Deliberately frameless, so it does not read as cells.svg (the cellpose
+       button, a framed dot cluster) sitting in the same toolbar.
+
+       Sized for a 16px toolbar icon, which drives every choice:
+        - Solid fills only. The toolbar tints icons with
+          `filter: brightness(0) …`, which flattens every colour to black — a
+          white highlight inside a dark shape simply disappears, so shape has to
+          carry the meaning, not tone.
+        - Ink at ~7-13% of the viewBox. Thin strokes (the 6/512 and 12/512 of the
+          previous version) render sub-pixel at 16px, antialias to ~20-40% alpha,
+          and the recolour filter then washes them out to an illegible smudge.
+        - No low-opacity decoration: invisible at 16px either way. -->
+  <g fill="#000000">
+    <circle cx="128" cy="128" r="34"/>
+    <circle cx="256" cy="128" r="52"/>
+    <circle cx="384" cy="128" r="40"/>
+    <circle cx="128" cy="256" r="52"/>
+    <circle cx="256" cy="256" r="68"/>
+    <circle cx="384" cy="256" r="34"/>
+    <circle cx="128" cy="384" r="40"/>
+    <circle cx="256" cy="384" r="34"/>
+    <circle cx="384" cy="384" r="52"/>
+  </g>
 </svg>
