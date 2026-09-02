@@ -74,9 +74,21 @@ file was added.
 
 - The browser example groups its discovered spatial-omics datasets into a
   **`spatial-omics` folder**, alongside the bundled micro-CT series: with 41
-  datasets the root gallery was unreadable flat. `Folder` now holds either an
-  image series or a set of spatial datasets, since both are "many related things
-  behind one tile".
+  datasets the root gallery was unreadable flat. Folders **nest** one level, so a
+  source with several sections gets its own — the HER2 deposition's 36 sections
+  would otherwise bury the two Visium and two Visium HD datasets beside them.
+  Grouping is by dataset-id prefix (`her2.A1` → `her2`), and a source with only a
+  couple stays a direct tile rather than costing a click for nothing.
+
+  `Folder` holds an image series, a set of spatial datasets, or sub-folders, and
+  navigation became a breadcrumb path since "up one level" and "back to the root"
+  are now different actions.
+
+  `folders` is assigned once when discovery completes rather than derived in a
+  getter: a getter returned a new `Folder` object every change-detection pass,
+  and because `*ngFor` tracks by identity that folder's button was destroyed and
+  recreated between mousedown and click — so clicking it did nothing, while the
+  micro-CT tile kept working precisely because its object was stable.
 
 - **Legacy Spatial Transcriptomics datasets are served live too**
   (`lib/spatial-st.mjs`), from `$ST_DIR` (default `./st`). Pre-Visium ST is a

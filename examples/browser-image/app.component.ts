@@ -54,6 +54,8 @@ interface Folder {
   slices?: DicomSlice[];
   /** Spatial-omics datasets, discovered from the server. */
   spatial?: SpatialEntry[];
+  /** Nested folders, so a source with many sections does not flood its parent. */
+  folders?: Folder[];
 }
 
 /**
@@ -487,18 +489,44 @@ async function warmUp(base: string): Promise<void> {
 
         <!-- Inside a folder: DICOM slices. -->
         <ng-container *ngIf="currentFolder as folder">
+          <!-- A trail rather than one back button: folders nest, so "up one
+               level" and "back to the root" are different actions. -->
           <div class="breadcrumb">
-            <button class="crumb-back" (click)="closeFolder()" title="Back to gallery">← Gallery</button>
-            <span>/</span>
-            <span class="crumb-current">{{ folder.name }}</span>
+            <button class="crumb-back" (click)="goToDepth(0)" title="Back to gallery">← Gallery</button>
+            <ng-container *ngFor="let f of folderPath; let i = index; let last = last">
+              <span>/</span>
+              <span *ngIf="last" class="crumb-current">{{ f.name }}</span>
+              <button *ngIf="!last" class="crumb-back" (click)="goToDepth(i + 1)"
+                      [title]="'Back to ' + f.name">{{ f.name }}</button>
+            </ng-container>
           </div>
           <div class="folder-hint" *ngIf="folder.slices">
             Click a slice to view it · <strong>right-click</strong> to load the whole folder as a z-stack.
+          </div>
+          <div class="folder-hint" *ngIf="folder.folders">
+            Grouped by source · a source with several sections gets its own folder.
           </div>
           <div class="folder-hint" *ngIf="folder.spatial">
             Click a dataset to open it over its tissue image, then pick
             <strong>Spatial omics</strong> in the plot-type menu.
           </div>
+          <!-- Nested folders, rendered like the root's. -->
+          <button
+            *ngFor="let sub of folder.folders"
+            class="tile folder"
+            (click)="openFolder(sub)"
+            [title]="'Open ' + sub.name + ' (' + folderCount(sub) + ' items)'"
+          >
+            <span class="thumb folder-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z"
+                />
+              </svg>
+            </span>
+            <span class="name">{{ sub.name }}</span>
+          </button>
           <button
             *ngFor="let d of folder.slices; let i = index"
             class="tile dcm-tile"
@@ -539,17 +567,55 @@ export class AppComponent implements OnDestroy {
   readonly samples = SAMPLES;
   /**
    * Root folders: the bundled micro-CT series, plus a spatial-omics folder once
-   * the server has reported any. Derived rather than fixed because discovery is
-   * async — the folder appears when its contents do.
+   * the server has reported any.
+   *
+   * Assigned ONCE when discovery completes, never derived in a getter. A getter
+   * would return a new `Folder` object on every change-detection pass, and
+   * `*ngFor` tracks by identity — so that folder's button was destroyed and
+   * recreated between mousedown and click, and clicking it did nothing. The
+   * micro-CT tile kept working precisely because its object was stable.
    */
-  get folders(): Folder[] {
-    return this.spatialEntries.length
-      ? [...FOLDERS, { name: 'spatial-omics', spatial: this.spatialEntries }]
-      : FOLDERS;
+  folders: Folder[] = FOLDERS;
+
+  /**
+   * The spatial-omics folder, with each SOURCE that has several datasets nested
+   * one level down.
+   *
+   * Dataset ids are `<source>.<section>` (`her2.A1`, `visium.table.ST8059048`),
+   * so the prefix groups them for free. The HER2 deposition alone is 36
+   * sections, which would bury the two Visium and two Visium HD datasets it sits
+   * beside; a source with only a couple stays a direct tile rather than costing
+   * an extra click for nothing.
+   */
+  private spatialFolder(entries: SpatialEntry[]): Folder {
+    const NEST_FROM = 4;
+    const groups = new Map<string, SpatialEntry[]>();
+    for (const e of entries) {
+      const dot = e.datasetId.indexOf('.');
+      const source = dot > 0 ? e.datasetId.slice(0, dot) : '';
+      const list = groups.get(source) ?? [];
+      list.push(e);
+      groups.set(source, list);
+    }
+
+    const folders: Folder[] = [];
+    const spatial: SpatialEntry[] = [];
+    for (const [source, list] of [...groups].sort((a, b) => a[0].localeCompare(b[0]))) {
+      if (source && list.length >= NEST_FROM) folders.push({ name: source, spatial: list });
+      else spatial.push(...list);
+    }
+    return {
+      name: 'spatial-omics',
+      ...(folders.length ? { folders } : {}),
+      ...(spatial.length ? { spatial } : {}),
+    };
   }
   readonly tiledImages = TILED_IMAGES;
-  /** null = root (folders + samples); otherwise the opened folder's contents. */
-  currentFolder: Folder | null = null;
+  /**
+   * Breadcrumb trail of opened folders. Empty = the root gallery. A path rather
+   * than a single folder because folders nest (spatial-omics → her2).
+   */
+  folderPath: Folder[] = [];
   active?: string;
   loading = false;
   /** Optional viewer-spinner message (e.g. the tile-server cold-start notice). */
@@ -604,13 +670,22 @@ export class AppComponent implements OnDestroy {
   }
 
   // ── Gallery folder navigation ───────────────────────────────────────────
-  openFolder(f: Folder): void { this.currentFolder = f; }
+  /** The folder being shown, or null at the root. */
+  get currentFolder(): Folder | null {
+    return this.folderPath.length ? this.folderPath[this.folderPath.length - 1] : null;
+  }
+
+  openFolder(f: Folder): void { this.folderPath = [...this.folderPath, f]; }
+
+  /** Jump to a breadcrumb depth: 0 = root, 1 = the first folder, and so on. */
+  goToDepth(depth: number): void { this.folderPath = this.folderPath.slice(0, depth); }
 
   /** How many items a folder holds, for its tooltip. */
   folderCount(f: Folder): number {
-    return (f.slices?.length ?? 0) + (f.spatial?.length ?? 0);
+    return (f.slices?.length ?? 0) + (f.spatial?.length ?? 0) + (f.folders?.length ?? 0);
   }
-  closeFolder(): void { this.currentFolder = null; }
+  /** Up one level, not all the way to the root. */
+  closeFolder(): void { this.folderPath = this.folderPath.slice(0, -1); }
 
   /** Load a gigapixel image through the TILED (Mode A) server path. First warms
    *  the tile server with a visible message — a scaled-to-zero Cloud Run service
@@ -654,7 +729,10 @@ export class AppComponent implements OnDestroy {
           imageId,
         });
       }
-      this.zone.run(() => { this.spatialEntries = entries; });
+      this.zone.run(() => {
+        this.spatialEntries = entries;
+        this.folders = entries.length ? [...FOLDERS, this.spatialFolder(entries)] : FOLDERS;
+      });
     } catch {
       // No server, or none configured — the gallery just has no spatial entries.
     }
