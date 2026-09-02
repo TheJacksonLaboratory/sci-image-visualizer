@@ -72,6 +72,38 @@ file was added.
   1D charts, and background subsampling. When napari-js is unavailable the
   fallback renders the tissue image **without** the observation layer.
 
+- **The example server now reads SpatialData Zarr stores LIVE** (`lib/spatial-zarr.mjs`).
+  Drop or symlink a `*.zarr` store into `$ZARR_DIR` (default `./stores`) and every
+  `(store, table, region)` triple appears on `/spatial/datasets` — no build step,
+  no intermediate bundle. The offline converter script is removed; `$SPATIAL_DIR`
+  bundles still work and win on an id clash, so a deliberately-converted dataset
+  can override a live one.
+
+  Zero-config discovery surfaces more than a converter run did: the Visium store
+  yields **both** of its sections, and the Visium HD store both its cell and
+  nucleus segmentations (84,031 and 83,153 observations).
+
+  The tissue image is materialised into `$COG_DIR` on first request (0.1–0.8 s),
+  so OSD's tile path is unchanged and only the dataset you open pays. Derived
+  columns are advertised in the manifest and computed on first request, so
+  opening a dataset does not pay to cluster it. An optional
+  `stores/<name>.json` sidecar carries only what the store cannot state —
+  `gridUm`, the assay's bin pitch in µm, without which a segmentation has no
+  µm/px and no scale bar.
+
+  **What it costs, measured:** the matrix is CSR over observations, so a gene's
+  column is scattered across every row. The first gene request reads X (0.4–0.5 s)
+  and keeps it resident (227 MB Visium / 331 MB HD); later genes are 13–40 ms.
+  It is deliberately not transposed to gene-major in memory — that would double
+  residency for tens of milliseconds saved. A production server should serve a
+  pre-transposed file, which is the same argument for keeping ingest out of the
+  browser.
+
+  `SpatialDataHttpService` gains `readManifest(id)`, so a host can inspect what a
+  server offers while building a picker instead of loading each dataset to find
+  out. The browser example now discovers its spatial gallery entries this way
+  rather than hardcoding them.
+
 - **Linked distribution charts** — `<spatial-charts>` (`SpatialChartsComponent`),
   a non-modal panel opened from the toolbar in the spatial mode: **histogram**,
   **violin** and **box** over the values the map is coloured by.

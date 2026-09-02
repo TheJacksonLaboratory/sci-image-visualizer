@@ -27,11 +27,22 @@
 
 import express from 'express';
 import cors from 'cors';
+import path from 'node:path';
+import sharp from 'sharp';
+
+const pathJoin = path.join;
+const sharpFor = (raw, width, height) => sharp(raw, { raw: { width, height, channels: 3 } });
 import { loadDescriptor, readTile, readRegion, readPreview, listImages } from './lib/cog.mjs';
 import {
   listSpatialDatasets, loadManifest, openWireFile, readIds, readColumn,
   readFeatureVector, searchFeatures,
 } from './lib/spatial.mjs';
+import {
+  listZarrDatasets, zarrManifest, zarrCoords, zarrRadius, zarrIds, zarrColumn,
+  zarrFeature, zarrFeatureSearch, zarrPolygons, zarrImageSource,
+} from './lib/spatial-zarr.mjs';
+import { writePyramid } from './lib/pyramid.mjs';
+import { readArray } from './lib/zarr3.mjs';
 
 const PORT = Number(process.env.PORT || 8090);
 const COG_DIR = process.env.COG_DIR
@@ -40,6 +51,11 @@ const COG_DIR = process.env.COG_DIR
 const SPATIAL_DIR = process.env.SPATIAL_DIR
   ? process.env.SPATIAL_DIR
   : new URL('./spatial', import.meta.url).pathname;
+// Directory of SpatialData *.zarr stores, served LIVE — no build step. Each
+// (store, table, region) triple becomes a dataset.
+const ZARR_DIR = process.env.ZARR_DIR
+  ? process.env.ZARR_DIR
+  : new URL('./stores', import.meta.url).pathname;
 
 const app = express();
 
@@ -57,9 +73,46 @@ function decodeInfo(raw) {
   return info;
 }
 
+/**
+ * Materialise a Zarr-backed dataset's tissue image into $COG_DIR the first time
+ * it is asked for, so OSD's tile path is unchanged and only the first request
+ * pays. `<datasetId>-tissue` is the id `zarrManifest` advertises.
+ */
+const pyramidJobs = new Map();
+async function ensureZarrImage(imageId) {
+  if (!imageId.endsWith('-tissue')) return;
+  const datasetId = imageId.slice(0, -'-tissue'.length);
+  try {
+    await loadDescriptor(COG_DIR, imageId);
+    return; // already built
+  } catch { /* fall through and build */ }
+
+  // One build per image, even under concurrent tile requests.
+  if (!pyramidJobs.has(imageId)) {
+    pyramidJobs.set(imageId, (async () => {
+      const { root, imageName, levelPath, mpp } = await zarrImageSource(ZARR_DIR, datasetId);
+      console.log(`[tile-server] building pyramid for ${imageId} from ${imageName}/${levelPath}`);
+      const img = await readArray(root, `images/${imageName}/${levelPath}`);
+      const [bands, height, width] = img.shape;
+      const rgb = Buffer.allocUnsafe(width * height * 3);
+      const plane = width * height;
+      for (let p = 0; p < plane; p++) {
+        rgb[p * 3] = img.data[p];
+        rgb[p * 3 + 1] = bands > 1 ? img.data[plane + p] : img.data[p];
+        rgb[p * 3 + 2] = bands > 2 ? img.data[2 * plane + p] : img.data[p];
+      }
+      await writePyramid(pathJoin(COG_DIR, imageId),
+        sharpFor(rgb, width, height), { width, height, mppX: mpp, mppY: mpp });
+      console.log(`[tile-server] pyramid ready: ${imageId} (${width}x${height})`);
+    })().finally(() => pyramidJobs.delete(imageId)));
+  }
+  await pyramidJobs.get(imageId);
+}
+
 app.get('/tiles/info', async (req, res) => {
   try {
     const { image } = decodeInfo(req.query.info);
+    await ensureZarrImage(image).catch(() => undefined);
     const desc = await loadDescriptor(COG_DIR, image);
     // Pyramids are pre-generated, so the descriptor is always ready (200). A
     // server that lazily fetched the source from a bucket would return 202 here
@@ -73,6 +126,8 @@ app.get('/tiles/info', async (req, res) => {
 app.get('/tile', async (req, res) => {
   try {
     const { image } = decodeInfo(req.query.info);
+    // A client that jumps straight to /tile still gets a built pyramid.
+    await ensureZarrImage(image).catch(() => undefined);
     const png = await readTile(
       COG_DIR,
       image,
@@ -129,8 +184,15 @@ app.post('/zoom/region', async (req, res) => {
 // Vectors are served as raw little-endian bytes: one Float32Array/Uint16Array
 // per request, decoded by a typed-array view on the client with no copy. JSON
 // would cost ~8-12x the bytes and a parse that allocates a JS number per value.
+//
+// TWO SOURCES, one wire format:
+//   * $ZARR_DIR   — SpatialData *.zarr stores read LIVE (no build step). See
+//                   lib/spatial-zarr.mjs for what that costs.
+//   * $SPATIAL_DIR — pre-built bundles, for a synthetic demo or a dataset
+//                   someone converted deliberately.
+// A bundle wins when both offer the same id, so a pre-built one can override.
 
-/** RangeError (bad id / unknown name) and ENOENT are 404s; anything else is a 400. */
+/** RangeError (bad id / unknown name) and ENOENT are 404s; anything else 400. */
 function spatialError(res, err) {
   if (err instanceof RangeError || err?.code === 'ENOENT') {
     return res.status(404).json({ error: String(err?.message || err) });
@@ -138,84 +200,110 @@ function spatialError(res, err) {
   return res.status(400).json({ error: String(err?.message || err) });
 }
 
-/** Stream a file that is already in wire layout — no parse, no transform. */
-async function sendWireFile(res, id, name) {
-  const { stream, size } = await openWireFile(SPATIAL_DIR, id, name);
-  res.set('Content-Type', 'application/octet-stream')
-    .set('Content-Length', String(size))
-    .set('Cache-Control', 'public, max-age=3600');
-  stream.pipe(res);
+const octet = (res) => res
+  .set('Content-Type', 'application/octet-stream')
+  .set('Cache-Control', 'public, max-age=3600');
+
+/** Whether $SPATIAL_DIR holds a bundle for this id. */
+async function hasBundle(id) {
+  try {
+    await loadManifest(SPATIAL_DIR, id);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Run the bundle handler when a bundle exists, else the Zarr one. Keeping the
+ * choice here rather than in each route means the two sources can never drift
+ * in which paths they answer.
+ */
+async function fromSource(res, id, { bundle, zarr }) {
+  try {
+    if (await hasBundle(id)) await bundle();
+    else await zarr();
+  } catch (err) {
+    spatialError(res, err);
+  }
 }
 
 app.get('/spatial/datasets', async (_req, res) => {
   try {
-    res.json({ datasets: await listSpatialDatasets(SPATIAL_DIR) });
+    const [bundles, stores] = await Promise.all([
+      listSpatialDatasets(SPATIAL_DIR),
+      listZarrDatasets(ZARR_DIR).catch(() => []),
+    ]);
+    const seen = new Set(bundles.map((d) => d.id));
+    res.json({ datasets: [...bundles, ...stores.filter((d) => !seen.has(d.id))] });
   } catch (err) {
     spatialError(res, err);
   }
 });
 
 app.get('/spatial/:id/manifest', async (req, res) => {
-  try {
-    res.set('Cache-Control', 'public, max-age=3600')
-      .json(await loadManifest(SPATIAL_DIR, req.params.id));
-  } catch (err) {
-    spatialError(res, err);
-  }
+  const { id } = req.params;
+  await fromSource(res, id, {
+    bundle: async () => res.set('Cache-Control', 'public, max-age=3600')
+      .json(await loadManifest(SPATIAL_DIR, id)),
+    zarr: async () => res.json(await zarrManifest(ZARR_DIR, id)),
+  });
 });
 
 // coords.bin / radius.bin / polygons.bin are written by the converter in the
-// exact byte layout the client decodes, so serving them is a file stream.
-for (const [route, file] of [['coords', 'coords.bin'], ['radius', 'radius.bin'], ['polygons', 'polygons.bin']]) {
+// exact byte layout the client decodes, so the bundle path is a file stream; the
+// Zarr path assembles the same bytes on demand.
+const WIRE_FILES = {
+  coords: { file: 'coords.bin', zarr: zarrCoords },
+  radius: { file: 'radius.bin', zarr: zarrRadius },
+  polygons: { file: 'polygons.bin', zarr: zarrPolygons },
+};
+for (const [route, { file, zarr }] of Object.entries(WIRE_FILES)) {
   app.get(`/spatial/:id/${route}`, async (req, res) => {
-    try {
-      await sendWireFile(res, req.params.id, file);
-    } catch (err) {
-      spatialError(res, err);
-    }
+    const { id } = req.params;
+    await fromSource(res, id, {
+      bundle: async () => {
+        const { stream, size } = await openWireFile(SPATIAL_DIR, id, file);
+        octet(res).set('Content-Length', String(size));
+        stream.pipe(res);
+      },
+      zarr: async () => octet(res).send(await zarr(ZARR_DIR, id)),
+    });
   });
 }
 
 app.get('/spatial/:id/ids', async (req, res) => {
-  try {
-    res.set('Cache-Control', 'public, max-age=3600')
-      .json(await readIds(SPATIAL_DIR, req.params.id));
-  } catch (err) {
-    spatialError(res, err);
-  }
+  const { id } = req.params;
+  await fromSource(res, id, {
+    bundle: async () => res.set('Cache-Control', 'public, max-age=3600')
+      .json(await readIds(SPATIAL_DIR, id)),
+    zarr: async () => res.json(await zarrIds(ZARR_DIR, id)),
+  });
 });
 
 app.get('/spatial/:id/column/:name', async (req, res) => {
-  try {
-    const buf = await readColumn(SPATIAL_DIR, req.params.id, req.params.name);
-    res.set('Content-Type', 'application/octet-stream')
-      .set('Cache-Control', 'public, max-age=3600')
-      .send(buf);
-  } catch (err) {
-    spatialError(res, err);
-  }
+  const { id, name } = req.params;
+  await fromSource(res, id, {
+    bundle: async () => octet(res).send(await readColumn(SPATIAL_DIR, id, name)),
+    zarr: async () => octet(res).send(await zarrColumn(ZARR_DIR, id, name)),
+  });
 });
 
 app.get('/spatial/:id/feature/:name', async (req, res) => {
-  try {
-    const buf = await readFeatureVector(SPATIAL_DIR, req.params.id, req.params.name);
-    res.set('Content-Type', 'application/octet-stream')
-      .set('Cache-Control', 'public, max-age=3600')
-      .send(buf);
-  } catch (err) {
-    spatialError(res, err);
-  }
+  const { id, name } = req.params;
+  await fromSource(res, id, {
+    bundle: async () => octet(res).send(await readFeatureVector(SPATIAL_DIR, id, name)),
+    zarr: async () => octet(res).send(await zarrFeature(ZARR_DIR, id, name)),
+  });
 });
 
 app.get('/spatial/:id/features', async (req, res) => {
-  try {
-    const names = await searchFeatures(
-      SPATIAL_DIR, req.params.id, req.query.q, intParam(req.query.limit, 50),
-    );
-    res.json({ names });
-  } catch (err) {
-    spatialError(res, err);
-  }
+  const { id } = req.params;
+  const limit = intParam(req.query.limit, 50);
+  await fromSource(res, id, {
+    bundle: async () => res.json({ names: await searchFeatures(SPATIAL_DIR, id, req.query.q, limit) }),
+    zarr: async () => res.json({ names: await zarrFeatureSearch(ZARR_DIR, id, req.query.q, limit) }),
+  });
 });
 
 // Health + discovery (handy for the example / smoke checks).
@@ -228,5 +316,8 @@ function intParam(v, dflt) {
 }
 
 app.listen(PORT, () => {
-  console.log(`[tile-server] listening on :${PORT}  COG_DIR=${COG_DIR}  SPATIAL_DIR=${SPATIAL_DIR}`);
+  console.log(`[tile-server] listening on :${PORT}`);
+  console.log(`  COG_DIR=${COG_DIR}`);
+  console.log(`  SPATIAL_DIR=${SPATIAL_DIR}  (pre-built bundles)`);
+  console.log(`  ZARR_DIR=${ZARR_DIR}  (SpatialData stores, read live)`);
 });

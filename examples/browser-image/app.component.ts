@@ -123,22 +123,35 @@ const TILED_IMAGES: TiledImage[] = TILE_SERVER
       // The same file as its real shape: 2 channels x 27 z-slices. Scrubbing the
       // stack swaps the tile `z` param server-side (no per-slice urls).
       { name: 'Project002 · 2ch x 27z stack · 7.5 Gpx', imageId: 'project002-stack', width: 14971, height: 18664, mppX: 0.3211, mppY: 0.3211, channels: 2, slices: 27 },
-      // REAL Visium mouse brain (scverse spatialdata-sandbox, section ST8059048):
-      // 2,987 spots over the H&E tissue image, with the store's own full-res ->
-      // hires affine. Built by `npm run make-spatial -- --input <store.zarr>`.
-      // Selecting it adds the "Spatial omics" plot type.
-      { name: 'Visium mouse brain · ST8059048', imageId: 'st8059048-tissue', width: 1969, height: 2000, mppX: 3.9591, mppY: 3.9591, spatialDatasetId: 'st8059048' },
-      // Visium HD 4.0.1 mouse brain, CELL SEGMENTATIONS: 84,031 cells with real
-      // boundaries (served as polygons) rather than a spot grid. Built with
-      // `npm run make-spatial -- --input <store.zarr> --table cell_segmentations
-      // --id hd-cells --grid-um 2`.
-      { name: 'Visium HD mouse brain · 84k cells', imageId: 'hd-cells-tissue', width: 6000, height: 5492, mppX: 0.9734, mppY: 0.9734, spatialDatasetId: 'hd-cells' },
-      // Synthetic stand-in with the same geometry, for when the 68 MB store
-      // hasn't been downloaded (`npm run make-spatial-demo`). Harmless if absent:
-      // the entry just fails to load its dataset and the mode stays hidden.
-      { name: 'Spatial omics demo · synthetic', imageId: 'demo-brain-tissue', width: 2000, height: 2099, mppX: 3.225, mppY: 3.225, spatialDatasetId: 'demo-brain' },
     ]
   : [];
+
+/**
+ * A spatial-omics dataset the SERVER reported, rather than one hardcoded here.
+ * The example asks `/spatial/datasets` at startup, so dropping a SpatialData
+ * store into the server's `stores/` directory makes it appear in this gallery
+ * with no code change.
+ */
+interface SpatialEntry {
+  datasetId: string;
+  name: string;
+  imageId: string;
+}
+
+/**
+ * The tile server's descriptor for an image: its true dimensions and µm/px.
+ * Asking for it is also what triggers the server to build that image's pyramid
+ * from the Zarr store, so this is deliberately called on open, not at startup.
+ */
+async function fetchTileDescriptor(base: string, imageId: string): Promise<{
+  width: number; height: number; mppX?: number; mppY?: number;
+}> {
+  const info = btoa(JSON.stringify({ image: imageId }))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const res = await fetch(`${base}tiles/info?info=${info}`);
+  if (!res.ok) throw new Error(`tiles/info ${res.status}`);
+  return res.json();
+}
 
 /** Ping the tile server so a scaled-to-zero Cloud Run instance cold-starts before
  *  OSD asks for tiles. Resolves once the server responds — or after a generous
@@ -451,6 +464,18 @@ async function warmUp(base: string): Promise<void> {
             <span class="thumb dcm">WSI</span>
             <span class="name">{{ t.name }}</span>
           </button>
+          <!-- Spatial-omics datasets the SERVER reported. Adding a store to the
+               server's stores/ directory makes one appear here with no code change. -->
+          <button
+            *ngFor="let e of spatialEntries"
+            class="tile"
+            [class.active]="e.datasetId === active"
+            (click)="loadSpatial(e)"
+            [title]="e.name + ' — spatial omics, read live from a SpatialData Zarr store'"
+          >
+            <span class="thumb dcm">OMIC</span>
+            <span class="name">{{ e.name }}</span>
+          </button>
           <button
             *ngFor="let s of samples"
             class="tile"
@@ -533,6 +558,9 @@ export class AppComponent implements OnDestroy {
     new URLSearchParams(window.location.search).get('test') ?? '',
   );
 
+  /** Spatial-omics datasets discovered from the server (see SpatialEntry). */
+  spatialEntries: SpatialEntry[] = [];
+
   readonly toolbarTools: ToolbarToolVisibility = {
     specialTools: true,
     zoomTools: true,
@@ -548,7 +576,10 @@ export class AppComponent implements OnDestroy {
   ) {
     // Render raw pixels (no smoothing) so images are inspectable pixel-for-pixel.
     this.viz.setImageSmoothingEnabled(false);
-    if (TILE_SERVER) this.spatialData.configure({ baseUrl: TILE_SERVER });
+    if (TILE_SERVER) {
+      this.spatialData.configure({ baseUrl: TILE_SERVER });
+      void this.discoverSpatial();
+    }
     // Show something on load: the first sample.
     if (this.samples.length) void this.load(this.samples[0]);
   }
@@ -573,6 +604,62 @@ export class AppComponent implements OnDestroy {
     }
     this.imageState.setTiledImage(t.imageId, t.name, t.width, t.height, t.mppX, t.mppY, t.channels ?? 3, t.slices ?? 1);
     await this.selectSpatialDataset(t.spatialDatasetId);
+  }
+
+  /**
+   * Ask the server which spatial-omics datasets it has.
+   *
+   * Deliberately NOT fetching each dataset's image dimensions here: that would
+   * hit `/tiles/info`, which makes the server materialise every pyramid at
+   * startup. Dimensions are fetched on click instead, so only the dataset you
+   * open pays for its image.
+   */
+  private async discoverSpatial(): Promise<void> {
+    try {
+      const datasets = await this.spatialData.listDatasets();
+      const entries: SpatialEntry[] = [];
+      for (const d of datasets) {
+        // The manifest names the image this dataset registers onto; a dataset
+        // without one cannot be shown over tissue.
+        const manifest = await this.spatialData.readManifest(d.id).catch(() => null);
+        const imageId = manifest?.imageRef?.imageId;
+        if (!imageId) continue;
+        entries.push({
+          datasetId: d.id,
+          name: `${d.name} · ${d.count.toLocaleString()} obs`,
+          imageId,
+        });
+      }
+      this.zone.run(() => { this.spatialEntries = entries; });
+    } catch {
+      // No server, or none configured — the gallery just has no spatial entries.
+    }
+  }
+
+  /**
+   * Open a discovered spatial dataset: read the image's real dimensions from the
+   * server, show it, then load the dataset so the Spatial omics plot type
+   * appears.
+   */
+  async loadSpatial(entry: SpatialEntry): Promise<void> {
+    this.active = entry.datasetId;
+    this.loading = true;
+    this.loadingMessage = 'Preparing the tissue image…';
+    try {
+      await warmUp(TILE_SERVER);
+      // The tile DESCRIPTOR is a tile-server concern, not part of the spatial
+      // contract, so the host fetches it — and it is what makes the server
+      // materialise this image's pyramid, on first open only.
+      const desc = await fetchTileDescriptor(TILE_SERVER, entry.imageId);
+      this.imageState.setTiledImage(
+        entry.imageId, entry.name, desc.width, desc.height,
+        desc.mppX ?? 1, desc.mppY ?? 1, 3, 1,
+      );
+      await this.selectSpatialDataset(entry.datasetId);
+    } finally {
+      this.loading = false;
+      this.loadingMessage = '';
+    }
   }
 
   /**

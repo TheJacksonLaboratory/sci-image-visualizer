@@ -217,10 +217,15 @@ image, and **Spatial omics** still needs a dataset loaded.
 
 ## Spatial-omics demo
 
-The gallery carries three spatial entries — **Visium mouse brain · ST8059048**
-(2,987 spots), **Visium HD mouse brain · 84k cells** (real cell segmentations),
-and a synthetic stand-in that needs no download. Each loads a tissue image *and*
-the spatial-omics dataset registered onto it. Selecting it makes the
+The gallery's spatial entries are **discovered from the server**, not hardcoded:
+the example asks `/spatial/datasets` at startup, so dropping a SpatialData store
+into the server's `stores/` directory makes it appear here with no code change.
+Each entry loads a tissue image *and* the spatial-omics dataset registered onto
+it.
+
+Image dimensions are fetched on **click**, not at startup — asking for a
+descriptor is what makes the server build that image's pyramid, so only the
+dataset you open pays for it. Selecting it makes the
 **Spatial omics** plot type appear in the plot-type selector (it is hidden
 whenever no dataset is loaded, like Volume is hidden without a z-stack); picking
 that mode draws ~2,000 spots over the tissue, coloured by anatomical region.
@@ -228,8 +233,10 @@ that mode draws ~2,000 spots over the tissue, coloured by anatomical region.
 ```bash
 cd examples/tile-server
 npm install
-npm run make-spatial-demo     # synthetic; no download
-# or convert a real store — see ../tile-server/README.md#spatial-omics-endpoints
+# either: a synthetic dataset, no download
+npm run make-spatial-demo
+# or: drop a real SpatialData store in and it is served live
+#   ln -s /path/to/data.zarr stores/visium
 npm start
 
 # then, from the repo root:

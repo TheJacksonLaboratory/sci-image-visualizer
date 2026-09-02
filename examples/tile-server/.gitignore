@@ -3,3 +3,4 @@ node_modules/
 cogs/
 spatial/
 *.log
+stores/

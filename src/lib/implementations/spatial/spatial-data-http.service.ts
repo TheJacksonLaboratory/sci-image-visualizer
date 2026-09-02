@@ -79,6 +79,20 @@ export class SpatialDataHttpService implements SpatialDataPort {
   }
 
   /**
+   * One dataset's manifest, WITHOUT selecting it. Lets a host inspect what a
+   * server offers — column and feature metadata, and which image a dataset
+   * registers onto — while building a picker, rather than having to load each
+   * dataset to find out.
+   */
+  readManifest(id: string): Promise<SpatialManifest> {
+    return this.getJson<SpatialManifest>(`spatial/${encodeURIComponent(id)}/manifest`)
+      .then((manifest) => {
+        assertManifestVersion(manifest);
+        return manifest;
+      });
+  }
+
+  /**
    * Load a dataset and publish it on {@link getDataset$}. Fetches the manifest,
    * then the vectors that are always needed (coordinates, and ids/radius when
    * the manifest says they exist) — nothing else.

@@ -69,109 +69,70 @@ Two things the layout is built around:
   once, offline; serving a gene is then a contiguous ranged read at
   `geneIndex * N * 4`, and the matrix is never held in server memory.
 
-#### Generating data
+#### Serving a SpatialData store LIVE
+
+Drop (or symlink) a `*.zarr` store into `./stores` and it appears on
+`/spatial/datasets` — no build step, no intermediate bundle:
 
 ```bash
-# A synthetic Visium-geometry dataset — no download, no Python, runs instantly.
-# Writes BOTH the spatial bundle and a matching tissue-image pyramid:
-#   ./spatial/demo-brain          ~2k spots on a real 100 um hex grid, 12 marker genes
-#   ./cogs/demo-brain-tissue      2000 px H&E-ish image, tiled pyramid + descriptor
-npm run make-spatial-demo
-npm start                        # SPATIAL_DIR=./spatial  COG_DIR=./cogs
-
-# Verify the whole thing end to end (boots the server, decodes every route,
-# and checks every spot lands inside the image under the manifest's affine):
-npm run smoke-spatial
+curl -O https://s3.embl.de/spatialdata/spatialdata-sandbox/visium_spatialdata_0.7.1.zip
+unzip visium_spatialdata_0.7.1.zip
+ln -s "$PWD/data.zarr" stores/visium        # or just move it in
+npm start
 ```
 
-The image and the data are generated from the **same** region function, so the
-H&E tint and the `region` column agree by construction. Spot coordinates stay in
-the full-resolution frame while the image is a ~0.31 downscale of it — the same
-arrangement Visium has with its 2000 px hires tier — so `imageRef.scale` is a
-real affine rather than a trivial 1:1, and the renderer's registration is
-actually exercised.
+Every `(store, table, region)` triple becomes a dataset. Ids stay short when
+they can — `hd.cell_segmentations` for a single-region table,
+`visium.table.ST8059048` when a table covers several sections — so the Visium
+store above yields **both** of its sections without being asked.
 
-Real data goes through the **Node** converter — no Python. These stores are
-Zarr v3 with `bytes` + `zstd` codecs and `vlen-utf8` strings, and Node 24 ships
-zstd in `node:zlib` (`lib/zarr3.mjs`); the shapes are GeoParquet, which
-`hyparquet` reads and decodes to GeoJSON (`lib/geoparquet.mjs`).
+The tissue image is materialised into `./cogs` the first time it is requested
+(0.1–0.8 s for these stores), so OSD's tile path is unchanged and only the first
+open pays.
 
-```bash
-npm run make-spatial -- --input data.zarr --list      # tables / shapes / images
+**Optional sidecar** at `stores/<name>.json`, carrying only what cannot be
+inferred from the store:
 
-# Visium — spot centres in obsm/spatial, one uniform 55 um spot radius
-npm run make-spatial -- --input data.zarr --sample ST8059048 \
-  --id st8059048 --name "Visium mouse brain — ST8059048"
-
-# Visium HD — CELL SEGMENTATIONS: 84k cells with real boundaries
-npm run make-spatial -- --input data.zarr --table cell_segmentations \
-  --id hd-cells --grid-um 2 --name "Visium HD mouse brain — cell segmentations"
+```json
+{ "gridUm": 2 }
 ```
 
-Each run writes `./spatial/<id>` **and** `./cogs/<id>-tissue` (the tissue image
-as a tiled pyramid), then prints a ready-made gallery entry for the browser
-example.
+`gridUm` is the assay's grid pitch in µm. A segmentation traced on a binned
+assay steps one bin at a time, so the outlines measure the grid — but nothing in
+the store states the bin's physical size, and without it there is no µm/px and
+no scale bar. Visium needs no sidecar: its 100 µm spot pitch is fixed.
 
-### The two store shapes it handles
+#### What live serving costs
 
-| | Visium | Visium HD / Xenium |
-|---|---|---|
-| Tables | one `table` | one per segmentation (`cell_segmentations`, …) |
-| Positions | `obsm/spatial` | **`obsm` is empty** — centroids come from the shapes GeoParquet |
-| Size | one uniform spot radius | per-cell equivalent-circle radius from the outline area |
-| Boundaries | none | real outlines, served on `/polygons` |
-| `imageRef.scale` | ~0.115 | ~0.281 |
+The expression matrix is CSR over **observations**, so one gene's column is
+scattered across every row. Serving it means holding the matrix and scanning it:
 
-### Things a naive reader gets wrong
-
-- A table can be **multi-sample** (one row block per section), so rows must be
-  filtered by the region column before anything is index-aligned.
-- The **shapes** carry the transform into the image's coordinate system, and
-  that scale *is* `imageRef.scale`. Skip it and observations land 3.5–8.7× too
-  far out.
-- The pyramid level is **named by the multiscales metadata** — `0` for Visium,
-  `s0` for HD — and the coordinate system is stated there too.
-- Zarr v3 **omits a chunk that is entirely `fill_value`**, so a single-region
-  table has no `region/codes` chunk at all. Treating that as an error rejects a
-  valid store.
-- Segmentation rows are joined to table rows **by id**, not by position.
-
-### Derived values
-
-The sandbox stores are **raw**: their tables carry ids, array indices and
-`in_tissue` and nothing else — no clusters, no cell types. A viewer demo built
-on them would have nothing to put in a legend, split a violin by, or select a
-category of. So the converter derives:
-
-| column | how |
+| request | cost, measured on these stores |
 |---|---|
-| `total_counts`, `n_genes_by_counts` | from the expression matrix, free in the pass that transposes it |
-| `area` | segmentation outline area (polygon stores only) |
-| `cluster` | **k-means** on log1p-normalised expression (`--cluster K`, default 8; `0` disables) |
+| manifest, coords, ids, columns | 2–30 ms |
+| first gene (reads X into memory) | 0.4–0.5 s, then 227 MB (Visium) / 331 MB (HD) resident |
+| subsequent genes | 13–40 ms |
+| derived `cluster` (k-means, on first request) | 0.3 s / 1.4 s |
+| tissue pyramid (first open) | 0.1 s / 0.8 s |
 
-Clustering normalises each observation to a common total before `log1p` —
-without that it follows sequencing depth and the clusters come out as concentric
-count bands rather than anatomy. It fits centroids on an even subsample (84k
-cells is minutes in plain JS otherwise), picks the 50 most variable genes,
-seeds with k-means++ from a fixed seed so a rebuild is identical, and relabels
-largest-cluster-first so legends read consistently.
+It is deliberately **not** transposed to gene-major in memory — that would
+double the residency, and a scan is tens of milliseconds. A production server
+should serve a pre-transposed gene-major file instead, which is exactly the
+argument for keeping this ingest out of the browser.
 
-This is a **demo-data convenience, not an analysis tool** — the column's
-`description` says so, and the viewer surfaces it. Real work belongs in
-scanpy/squidpy.
+Derived columns (`total_counts`, `n_genes_by_counts`, `area`, `cluster`) are
+advertised in the manifest and computed on first request, so opening a dataset
+does not pay to cluster it. Columns that encode nothing are dropped:
+identifiers (a distinct integer per observation) and columns constant after
+filtering.
 
-Columns that carry no encoding are dropped: identifiers (a distinct integer per
-observation, like `spot_id`) and columns that are constant after filtering (like
-`in_tissue`, once out-of-tissue rows are gone).
+#### Pre-built bundles
 
-`--grid-um U` turns the outlines into a ruler: a segmentation traced on a binned
-assay steps one bin at a time, so the modal vertex step *is* one bin — asserting
-its physical size (2 µm for Visium HD) yields the image's µm/px and a correct
-scale bar. For Visium the same job is done by the known 100 µm spot pitch.
-
-`--genes N` keeps the N most-expressed (default 2,000), and `--max-matrix-mb`
-caps the output: the gene-major matrix is `genes x N x 4` bytes, so 84k cells
-would be 672 MB at 2,000 genes — it is capped to 190 genes at the 64 MB default.
+`$SPATIAL_DIR` still serves bundles in the same wire format, and a bundle **wins**
+when both sources offer the same id — so a deliberately-converted dataset can
+override a live one. `npm run make-spatial-demo` writes a synthetic
+Visium-geometry bundle plus its image, which needs no download and is what the
+smoke check runs against.
 
 ## Deploy (Cloud Run)
 

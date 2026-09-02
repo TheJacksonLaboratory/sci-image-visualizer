@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "version": "0.0.0",
-  "description": "Lightweight example server for @jax-data-science/sci-image-visualizer: the tiled (Mode A) image path over tiles/info + tile + zoom/region, plus the spatial-omics data plane (SpatialDataPort) the library's SpatialDataHttpService consumes.",
+  "description": "Lightweight example server for @jax-data-science/sci-image-visualizer: the tiled (Mode A) image path over tiles/info + tile + zoom/region, plus the spatial-omics data plane (SpatialDataPort) served LIVE from SpatialData Zarr stores in ./stores.",
   "engines": {
     "node": ">=20"
   },
@@ -13,7 +13,6 @@
     "make-cog": "node scripts/make-cog.mjs",
     "make-spatial-demo": "node scripts/make-spatial-demo.mjs",
     "smoke-spatial": "node smoke-spatial.mjs",
-    "make-spatial": "node --max-old-space-size=6144 scripts/make-spatial-from-zarr.mjs",
     "make-pyramid": "node scripts/make-pyramid.mjs"
   },
   "dependencies": {
