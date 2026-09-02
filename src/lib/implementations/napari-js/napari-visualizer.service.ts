@@ -285,6 +285,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   /** Spatial-omics observation markers + the dataset/view subscription driving them. */
   private spatialPoints: PointsLayer | null = null;
   private spatialSub: Subscription | null = null;
+  /** Which dataset the current marker layer was built for, so a display-only
+   *  change (size, colour, opacity, selection) can update it in place. */
+  private spatialLayerKey: string | null = null;
   /** Monotonic guard for the async colour rebuild: fetching a gene vector is a
    *  round-trip, so a fast sequence of colour-by changes can resolve out of
    *  order. Only the newest rebuild is allowed to touch the layer. */
@@ -1560,19 +1563,16 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // A newer rebuild (or a teardown) started while the vector was in flight.
     if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
 
-    if (this.spatialPoints) {
-      viewer.layers.remove(this.spatialPoints);
-      this.spatialPoints = null;
+    if (!dataset || dataset.observations.count === 0) {
+      if (this.spatialPoints) {
+        viewer.layers.remove(this.spatialPoints);
+        this.spatialPoints = null;
+        this.spatialLayerKey = null;
+      }
+      return;
     }
-    if (!dataset || dataset.observations.count === 0) return;
 
     const obs = dataset.observations;
-    const positions = new Float32Array(obs.count * 2);
-    for (let i = 0; i < obs.count; i++) {
-      positions[i * 2] = obs.x[i];
-      positions[i * 2 + 1] = obs.y[i];
-    }
-
     const base = markerDiameters(obs, NapariVisualizerService.SPATIAL_FALLBACK_RADIUS);
     const scale = view.pointScale > 0 ? view.pointScale : 1;
     let size: number | Float32Array;
@@ -1583,6 +1583,29 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       for (let i = 0; i < base.length; i++) size[i] = base[i] * scale;
     }
 
+    // A size/colour/opacity/selection change is DISPLAY-only: mutate the layer
+    // rather than dropping and re-adding it. Both setters bump the layer's
+    // dataVersion, which is what makes napari-js rebuild the instance buffer and
+    // redraw — and it avoids rebuilding 84k positions to change one number.
+    const key = `${dataset.id}:${obs.count}`;
+    if (this.spatialPoints && key === this.spatialLayerKey) {
+      this.spatialPoints.size = size;
+      this.spatialPoints.faceColor = faceColor as never;
+      viewer.requestRender();
+      return;
+    }
+
+    if (this.spatialPoints) {
+      viewer.layers.remove(this.spatialPoints);
+      this.spatialPoints = null;
+    }
+
+    const positions = new Float32Array(obs.count * 2);
+    for (let i = 0; i < obs.count; i++) {
+      positions[i * 2] = obs.x[i];
+      positions[i * 2 + 1] = obs.y[i];
+    }
+    this.spatialLayerKey = key;
     this.spatialPoints = viewer.addPoints(positions, {
       name: 'observations',
       size,
@@ -1615,12 +1638,17 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const muted = mutedFromSelection(selection);
 
     if (!port || !colorBy) {
-      // A flat colour still has to honour a selection, or selecting would appear
-      // to do nothing until a colour source is picked.
-      if (!muted) return NapariVisualizerService.SPATIAL_NEUTRAL_COLOR;
       const [r, g, b] = NapariVisualizerService.SPATIAL_NEUTRAL_COLOR;
+      // Genuinely uniform: one broadcast tuple, so a flat 84k-observation view
+      // does not allocate 84k of them.
+      if (!muted && view.opacity >= 1) return NapariVisualizerService.SPATIAL_NEUTRAL_COLOR;
+      // Not uniform — the opacity control or a selection varies the alpha, so it
+      // has to be per-point. Returning the constant tuple here is what made the
+      // Opacity slider do nothing in the default state, which is the state anyone
+      // lands in before picking a colour source.
+      const hex = `#${[r, g, b].map((c) => Math.round(c * 255).toString(16).padStart(2, '0')).join('')}`;
       return toRgbaTuples(encodeCategorical(new Uint16Array(dataset.observations.count), {
-        colors: [`#${[r, g, b].map((c) => Math.round(c * 255).toString(16).padStart(2, '0')).join('')}`],
+        colors: [hex],
         opacity: view.opacity,
         muted,
       }));
@@ -2101,6 +2129,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.spatialSub?.unsubscribe();
     this.spatialSub = null;
     this.spatialPoints = null;
+    this.spatialLayerKey = null;
     // Invalidate any colour fetch still in flight so it can't attach to the next scene.
     this.spatialRebuildToken++;
     this.scatter2dPoints = null;

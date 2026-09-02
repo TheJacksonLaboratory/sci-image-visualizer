@@ -962,6 +962,44 @@ describe('NapariVisualizerService', () => {
       }).not.toThrow();
     });
 
+    // REGRESSION: the Opacity slider did nothing in the DEFAULT state. With no
+    // colour source and no selection the flat colour was a constant tuple, so
+    // `view.opacity` was dropped on the floor — and that is the state anyone
+    // lands in before picking a column or a gene.
+    it('honours opacity with no colour source selected', async () => {
+      const layer = await mount();
+      // Uniform at opacity 1: one broadcast tuple, so a flat 84k view does not
+      // allocate 84k of them.
+      expect(layer.faceColor).toHaveLength(4);
+
+      store.setSpatialView({ opacity: 0.3 });
+      await flush();
+      // No longer uniform, so it becomes per-point and the alpha carries it.
+      expect(layer.faceColor).toHaveLength(3);
+      expect((layer.faceColor as number[][])[0][3]).toBeCloseTo(0.3, 2);
+    });
+
+    it('updates size and colour IN PLACE, without rebuilding the layer', async () => {
+      await mount();
+      const calls = addPoints.mock.calls.length;
+      const layer = addPoints.mock.results.at(-1)?.value;
+
+      store.setSpatialView({ pointScale: 3 });
+      await flush();
+      // A display-only change must not re-add the layer: at 84k observations
+      // that would rebuild every position to change one number.
+      expect(addPoints.mock.calls.length).toBe(calls);
+      expect(layer.size).toBe(165); // 27.5 radius -> 55 diameter x 3
+    });
+
+    it('rebuilds the layer when the DATASET changes', async () => {
+      await mount();
+      const calls = addPoints.mock.calls.length;
+      dataset$.next({ ...spatialDataset(2), id: 'other' });
+      await flush();
+      expect(addPoints.mock.calls.length).toBe(calls + 1);
+    });
+
     it('applies the dataset\'s data->world affine so spots land on the image', async () => {
       const layer = await mount({
         ...spatialDataset(),

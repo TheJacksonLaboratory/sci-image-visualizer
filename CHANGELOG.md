@@ -154,6 +154,21 @@ file was added.
   out. The browser example now discovers its spatial gallery entries this way
   rather than hardcoding them.
 
+- **Fixed: the Opacity control did nothing in the spatial mode's default state.**
+  With no colour source and no selection the flat marker colour was a constant
+  RGBA tuple, so `view.opacity` was dropped — and that is the state the mode
+  opens in, before a column or gene is picked. It now falls back to a broadcast
+  tuple only when the colour genuinely is uniform (opacity 1, no selection) and
+  goes per-point otherwise, so a flat 84k-observation view still does not
+  allocate 84k tuples.
+
+- **Display-only changes now update the marker layer in place.** Point size,
+  colour, opacity and selection previously dropped and re-added the layer, which
+  rebuilt every position to change one number — 84k of them on the Visium HD
+  dataset. They now assign `size`/`faceColor` on the existing layer, whose
+  setters bump napari-js's `dataVersion` and trigger the redraw; the layer is
+  only rebuilt when the dataset itself changes.
+
 - **Linked distribution charts** — `<spatial-charts>` (`SpatialChartsComponent`):
   **histogram**, **violin** and **box** over the values the map is coloured by,
   embedded in the `<spatial-controls>` panel below the colour controls rather
