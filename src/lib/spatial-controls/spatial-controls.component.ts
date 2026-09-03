@@ -76,6 +76,10 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   columnOptions: { label: string; value: string | null }[] = [];
   selectedColumn: string | null = null;
 
+  /** Virtual-scrolled only past this many options: the scroller earns its
+   *  complexity for a few thousand names, and for eight it adds only overhead —
+   *  a virtual viewport that short swallows the clicks it is meant to forward. */
+  readonly geneVirtualScrollFrom = 200;
   /**
    * Gene picker: a filterable dropdown rather than a free-text typeahead, so the
    * options are visible before anything is typed and each keystroke narrows a list
