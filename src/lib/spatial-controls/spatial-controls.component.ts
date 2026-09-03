@@ -355,6 +355,10 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   onShowVolume(on: boolean): void {
     this.controls?.setViewState({ showVolume: on });
   }
+  onVolumeOpacity(value: number | undefined): void {
+    if (value === undefined) return;
+    this.controls?.setViewState({ volumeOpacity: value });
+  }
   onShowPoints(on: boolean): void {
     this.controls?.setViewState({ showPoints: on });
   }

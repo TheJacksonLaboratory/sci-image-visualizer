@@ -143,6 +143,14 @@
                     pTooltip="The registered anatomy the observations sit in"
                     tooltipPosition="top"></p-checkbox>
       </div>
+      <!-- The backdrop's own opacity: reading the cloud or a density field
+           through the anatomy means turning the anatomy down, not the data. -->
+      <div class="sc-row" *ngIf="ds.volume && view.showVolume">
+        <span class="sc-lbl">Volume opacity</span>
+        <p-slider [ngModel]="view.volumeOpacity" [min]="0.05" [max]="1" [step]="0.05"
+                  (onChange)="onVolumeOpacity($event.value)"></p-slider>
+        <span class="sc-val">{{ view.volumeOpacity }}</span>
+      </div>
       <div class="sc-row">
         <p-checkbox [binary]="true" [ngModel]="view.showPoints"
                     (onChange)="onShowPoints($event.checked)"

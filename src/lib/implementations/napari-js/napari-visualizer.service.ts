@@ -2105,7 +2105,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
 
     // Anatomy first: `addVolume` frames the orbit camera on the volume, and that
     // is the framing we want — the brain, not the outermost stray segmentation.
-    await this.ensureSpatialVolume(viewer, dataset);
+    await this.ensureSpatialVolume(viewer, dataset, view);
     if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
     // Then the cluster density volumes, which can set the centring offset when
     // there is no reference volume — so before any position is computed from it.
@@ -2121,7 +2121,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // The reference volume is hidden, not removed: it also fixes the centring
     // offset every position is computed from, and re-fetching a 100 MB template
     // to un-hide it would make a checkbox feel like a load.
-    if (this.spatialVolume) this.spatialVolume.visible = view.showVolume;
+    if (this.spatialVolume) {
+      this.spatialVolume.visible = view.showVolume;
+      this.spatialVolume.opacity = view.volumeOpacity;
+    }
 
     const scale = view.pointScale > 0 ? view.pointScale : 1;
     const size = NapariVisualizerService.SPATIAL_3D_BASE_SIZE * scale;
@@ -2425,7 +2428,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    * A failed or absent volume is not fatal: the cloud renders on its own, at its own
    * coordinates, and the camera frames the points instead.
    */
-  private async ensureSpatialVolume(viewer: Viewer, dataset: SpatialDataset): Promise<void> {
+  private async ensureSpatialVolume(
+    viewer: Viewer, dataset: SpatialDataset, view: SpatialViewState,
+  ): Promise<void> {
     const meta = dataset.volume;
     const port = this.spatialData;
     const key = meta ? `${dataset.id}:${meta.width}x${meta.height}x${meta.depth}` : null;
@@ -2458,7 +2463,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       // the points read through the tissue, which is the entire point of drawing
       // them together.
       rendering: 'translucent',
-      opacity: 0.5,
+      opacity: view.volumeOpacity,
       voxelSize: [vx, vy, vz],
     });
     // Half the box, negated: the observations' origin is the box's near corner,

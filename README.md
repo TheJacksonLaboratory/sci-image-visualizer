@@ -247,7 +247,9 @@ alone, the fields with the anatomy behind them, the anatomy on its own. These ar
 visibility only: the layers stay built, so a toggle never re-fetches the template
 or re-rasterises a field, and none of them re-frames the orbit camera. (The
 density checkbox is the exception and still gates construction, since building six
-volumes is not free.) **One section at a time** restricts the cloud to a single
+volumes is not free.) **Volume opacity** is the backdrop's own slider, separate
+from the markers': reading the cloud or a density field *through* the anatomy
+means turning the anatomy down, not the data over it. **One section at a time** restricts the cloud to a single
 imaged section, which is how you check whether the estimated field follows the
 cells that were actually measured. Sections are the distinct z of the
 observations — every cell on a slide shares that slide's registered z, so no

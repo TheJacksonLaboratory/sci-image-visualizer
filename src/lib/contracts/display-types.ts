@@ -80,6 +80,16 @@ export interface SpatialViewState {
    * genuinely gates construction, because building six volumes is not free.
    */
   showVolume: boolean;
+  /**
+   * The reference volume's opacity.
+   *
+   * Its own, not {@link opacity} (which belongs to the markers): the volume is a
+   * BACKDROP, and reading the cloud or a density field through it means turning
+   * the anatomy down without touching the data drawn over it. Ranges lower than
+   * the markers' slider for the same reason — a faint anatomical hint is a useful
+   * setting for a backdrop and a useless one for the measurement.
+   */
+  volumeOpacity: number;
   /** Draw the observation cloud (3D). */
   showPoints: boolean;
   /**
@@ -132,6 +142,7 @@ export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
   logScale: false,
   percentileClip: [0.01, 0.99],
   showVolume: true,
+  volumeOpacity: 0.5,
   showPoints: true,
   pointSection: null,
   densityVolume: false,

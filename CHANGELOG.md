@@ -25,6 +25,12 @@ file was added.
   checkbox remains the exception: building six volumes is not free, so it still
   gates the work.) Neither toggle re-frames the orbit camera.
 
+  **Volume opacity** is a slider of its own, separate from the markers' opacity:
+  the volume is a backdrop, so reading the cloud or a density field *through* the
+  anatomy means turning the anatomy down without touching the data drawn over it.
+  It reaches lower than the markers' slider (0.05) because a faint anatomical
+  hint is a useful setting for a backdrop and a useless one for a measurement.
+
 - **`One section at a time`** restricts the cloud to a single imaged section, with
   a slider over the sections the dataset actually has (53 for the ABC 1-in-10
   atlas). This is the view that answers whether the estimated field follows the

@@ -953,6 +953,26 @@ describe('NapariVisualizerService', () => {
         expect(getVolume).toHaveBeenCalledTimes(1);
       });
 
+      it('applies the reference volume opacity, at build and on a change', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        store.setSpatialView({ volumeOpacity: 0.2 });
+        await mount3d(spatialDatasetVolume(3));
+
+        // Built at the requested opacity, so the first painted frame is right
+        // rather than flashing the default and settling.
+        const volume = addVolume.mock.results.map((r) => r.value).at(-1);
+        expect(addVolume.mock.calls.at(-1)![4]!.opacity).toBe(0.2);
+        expect(volume.opacity).toBe(0.2);
+
+        store.setSpatialView({ volumeOpacity: 0.9 });
+        await flush();
+        expect(volume.opacity).toBe(0.9);
+        // The backdrop's opacity is its own — the cloud keeps the markers' value.
+        expect(named(addPoints3D.mock.results.map((r) => r.value), 'observations').opacity).toBe(1);
+        expect(addVolume.mock.calls.length).toBe(1); // a property, not a rebuild
+      });
+
       it('draws one imaged section at a time, cells and scalars together', async () => {
         // z = 0, 30, 60 — three sections, one observation each.
         spatialPort.getColumn.mockResolvedValue({
