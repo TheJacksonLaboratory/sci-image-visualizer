@@ -9,6 +9,16 @@ file was added.
 
 ## [Unreleased]
 
+### Changed
+
+- **Every slider in the Spatial omics panel is the same size, in one column.** The
+  track used to start wherever the label happened to end, so its width varied row
+  to row and the controls read as a ragged edge. The label column is now exactly
+  half the dialog, putting every slider's left edge on the dialog's horizontal
+  centre, and the value readout has a fixed column so a long one ("27 of 53")
+  cannot steal width from its own track. The in-row dropdown follows the same
+  column, so the right edges line up too.
+
 ### Added
 
 - **The gene map works in 3D, as one field per imaged section.** Ticking `Gene map`

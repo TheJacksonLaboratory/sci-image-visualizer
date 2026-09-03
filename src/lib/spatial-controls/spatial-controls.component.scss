@@ -74,15 +74,31 @@
   width: 100%;
 }
 
+// Every slider (and the one in-row dropdown) starts at the SAME x — the dialog's
+// horizontal centre — so the controls read as one column instead of a ragged edge
+// whose width depends on how long each label happens to be.
+//
+// The row spans the dialog's content box, which is inset by equal padding, so the
+// row's 50% mark IS the dialog's 50% mark. The gap is subtracted from the label
+// rather than left to push the track right, which would put every slider at
+// 50% + one gap instead of at 50%.
 .sc-row .sc-lbl {
-  min-width: 5rem;
+  flex: 0 0 calc(50% - 0.6rem);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
+// FIXED, not a minimum: the readouts are not all the same length ("0.85" against
+// "27 of 53"), and a min-width lets the longest one steal from its own slider —
+// which is exactly the ragged-width problem the label column above fixes. Wide
+// enough for "27 of 53" at this size.
 .sc-val {
-  min-width: 2.5rem;
+  flex: 0 0 4rem;
   text-align: right;
   font-size: 0.78rem;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 :host ::ng-deep .sc-full,
