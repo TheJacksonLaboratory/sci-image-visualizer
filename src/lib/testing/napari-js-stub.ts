@@ -137,6 +137,12 @@ export interface ImageLayer {
   visible: boolean;
   invert: boolean;
   blending: string;
+  /** Options the real `addImage` records on the layer. Kept because a scene with
+   *  several image layers is only distinguishable by them. */
+  name?: string;
+  opacity?: number;
+  scale?: [number, number];
+  translate?: [number, number];
 }
 
 /** Stand-in for napari-js histogramScalar (per-channel / volume intensity histogram). */
@@ -372,14 +378,27 @@ export class Viewer {
     return layer;
   }
 
-  addImage(): ImageLayer {
+  addImage(
+    _input?: unknown,
+    opts?: {
+      name?: string;
+      opacity?: number;
+      blending?: string;
+      scale?: [number, number];
+      translate?: [number, number];
+    },
+  ): ImageLayer {
     return this.mount({
       colormap: 'gray',
       contrastLimits: [0, 255],
       gamma: 1,
       visible: true,
       invert: false,
-      blending: 'translucent',
+      blending: opts?.blending ?? 'translucent',
+      name: opts?.name,
+      opacity: opts?.opacity ?? 1,
+      scale: opts?.scale,
+      translate: opts?.translate,
     });
   }
   addVolume(

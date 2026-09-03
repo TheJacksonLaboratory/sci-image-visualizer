@@ -11,6 +11,7 @@ import { RegionStore } from '../../store/region-store.service';
 import { VIZ_CONFIG } from '../../contracts/viz-config';
 import { TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
 import { SPATIAL_3D_MAX_CATEGORIES } from '../spatial/spatial-encoding';
+import * as expressionModule from '../spatial/spatial-expression';
 import { PlotType } from '../../contracts/plot-type';
 import { ViewerFeature } from '../../contracts/capabilities.contract';
 import { IImageInfo } from '../../contracts/image.contract';
@@ -1597,6 +1598,87 @@ describe('NapariVisualizerService', () => {
         // nothing to filter, and the dataset's own affine still wins.
         expect(Array.from(layer.positions)).toEqual([0, 0, 10, 20, 20, 40]);
         expect(layer.scale).toEqual([2, 2]);
+      });
+    });
+
+    describe('gene map', () => {
+      const geneMapLayers = (addImage: jest.SpyInstance) =>
+        addImage.mock.calls.filter((c) => /gene map/.test(String((c[1] as { name?: string })?.name)));
+
+      it('draws nothing until the option is on AND a gene is the colour source', async () => {
+        const addImage = jest.spyOn(Viewer.prototype, 'addImage');
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 5, 9]));
+        await mount();
+
+        // On, but coloured by a column: there is no gene to map.
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        expect(geneMapLayers(addImage)).toHaveLength(0);
+
+        store.setSpatialView({ colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        expect(geneMapLayers(addImage)).toHaveLength(1);
+      });
+
+      it('hands napari an RGBA raster on the image grid, blended under the cells', async () => {
+        const addImage = jest.spyOn(Viewer.prototype, 'addImage');
+        const addPoints = jest.spyOn(Viewer.prototype, 'addPoints');
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 5, 9]));
+        await mount();
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+
+        const [source, opts] = geneMapLayers(addImage).at(-1)!;
+        const src = source as { kind: string; channels: number; dtype: string; data: Uint8Array };
+        expect(src.kind).toBe('typed');
+        // RGBA, so the layer can be transparent where nothing was measured.
+        expect(src.channels).toBe(4);
+        expect(src.dtype).toBe('uint8');
+        expect((opts as { blending?: string }).blending).toBe('translucent');
+        // The markers are re-added after it, so the cells stay on top of the field.
+        expect(addPoints.mock.invocationCallOrder.at(-1)).toBeGreaterThan(
+          addImage.mock.invocationCallOrder.at(-1)!,
+        );
+      });
+
+      it('does not re-estimate the field for a recolour, only for a new gene', async () => {
+        // Counted on the estimator itself, not on the fetch: the points path fetches
+        // the same vector to colour the markers, so a fetch count says nothing about
+        // whether the FIELD was rebuilt.
+        const estimate = jest.spyOn(expressionModule, 'expressionField');
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 5, 9]));
+        await mount();
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        expect(estimate).toHaveBeenCalledTimes(1);
+
+        // A window change recolours the cached field — re-estimating would be a full
+        // pass over the raster for colours that come out of a LUT.
+        store.setSpatialView({ percentileClip: [0.05, 0.95] });
+        await flush();
+        expect(estimate).toHaveBeenCalledTimes(1);
+
+        // A different gene is a different field.
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([9, 5, 1]));
+        store.setSpatialView({ colorBy: { kind: 'feature', name: 'Mbp' } });
+        await flush();
+        expect(estimate).toHaveBeenCalledTimes(2);
+        estimate.mockRestore();
+      });
+
+      it('removes the layer when the option is switched off', async () => {
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 5, 9]));
+        await mount();
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        const inScene = () =>
+          ((service as unknown as { viewer: { layers: { items: readonly { name?: string }[] } } })
+            .viewer.layers.items).filter((l) => l.name?.startsWith('gene map')).length;
+        expect(inScene()).toBe(1);
+
+        store.setSpatialView({ geneMap: false });
+        await flush();
+        expect(inScene()).toBe(0);
       });
     });
 

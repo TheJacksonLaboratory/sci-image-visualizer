@@ -294,6 +294,28 @@ describe('SpatialControlsComponent', () => {
       expect(controls.setViewState).toHaveBeenCalledWith({ percentileClip: [0.05, 0.95] });
     });
 
+    it('offers the gene map only while a gene is the colour source', () => {
+      expect(component.canMapGene).toBe(false); // nothing to map
+      component.onColumn('region');
+      expect(component.canMapGene).toBe(false); // a column is not a gene
+      view$.next({ ...view$.value, colorBy: { kind: 'feature', name: 'Ttr' } });
+      expect(component.canMapGene).toBe(true);
+    });
+
+    it('writes the gene-map toggle and its bandwidth, ignoring an empty slider', () => {
+      component.onGeneMap(true);
+      expect(controls.setViewState).toHaveBeenCalledWith({ geneMap: true });
+      component.onGeneMapSmoothing(2);
+      expect(controls.setViewState).toHaveBeenCalledWith({ geneMapSmoothing: 2 });
+      // The map's opacity is its own: turning the cells down to read the field
+      // beneath them must not dim the field too.
+      component.onGeneMapOpacity(0.4);
+      expect(controls.setViewState).toHaveBeenCalledWith({ geneMapOpacity: 0.4 });
+      (controls.setViewState as jest.Mock).mockClear();
+      component.onGeneMapOpacity(undefined);
+      expect(controls.setViewState).not.toHaveBeenCalled();
+    });
+
     it('writes the density toggle and its bandwidth, ignoring an empty slider', () => {
       component.onDensityVolume(true);
       expect(controls.setViewState).toHaveBeenCalledWith({ densityVolume: true });

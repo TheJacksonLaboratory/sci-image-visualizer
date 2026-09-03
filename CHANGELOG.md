@@ -9,6 +9,38 @@ file was added.
 
 ## [Unreleased]
 
+### Added
+
+- **Gene map — a gene's expression drawn as a field under the cells.** A scatter
+  coloured by a gene answers "which cells express it"; the eye cannot integrate
+  thousands of small dots into a territory, so it does not answer "where is it
+  expressed". Ticking **Gene map** in the `Spatial omics` panel estimates that
+  gene's expression between the cells and draws it as an image layer beneath
+  them, so the region reads at a glance while the individual cells stay visible
+  on top.
+
+  The quantity is the kernel-weighted **mean per cell, not a sum**:
+  `mean(p) = Σᵢ w(p, xᵢ)·eᵢ / Σᵢ w(p, xᵢ)`. A sum conflates "many cells here"
+  with "high expression here" — a dense region would glow whatever its cells were
+  doing, which is the easiest way to misread a heat layer. Smoothing the numerator
+  and the denominator together (Nadaraya–Watson) spreads *where*, not *how much*.
+
+  The denominator is also what makes emptiness expressible. Where no cell was
+  measured the mean is undefined rather than zero, so the layer is **fully
+  transparent** there instead of painting the colormap's low end over unmeasured
+  tissue; alpha then ramps with local support up to the field's own median, so a
+  pixel backed by one distant cell reads as tentative and a properly sampled one
+  reads as solid. A cell with no measurement for the gene (`NaN`) is skipped, not
+  counted as absent.
+
+  **Smoothing** sets the kernel σ and **Map opacity** the layer's own opacity,
+  separate from the cells' — turn the cells down to read the field under them. The
+  contrast window and the log scale are shared with the point colouring, so the
+  field and the cells over it always agree. On a volume-backed dataset the field
+  is re-estimated per plane from that plane's cells. When the display colormap is
+  a grey ramp the field falls back to Viridis, because the tissue underneath it is
+  already grey.
+
 ### Changed
 
 - **The gene picker is a searchable dropdown, not a free-text typeahead.** The old

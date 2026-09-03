@@ -323,6 +323,22 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   /** The ceiling itself, for the message. */
   readonly cloudPaletteLimit = SPATIAL_3D_MAX_CATEGORIES;
 
+  onGeneMap(on: boolean): void {
+    this.controls?.setViewState({ geneMap: on });
+  }
+  onGeneMapSmoothing(value: number | undefined): void {
+    if (value === undefined) return;
+    this.controls?.setViewState({ geneMapSmoothing: value });
+  }
+  onGeneMapOpacity(value: number | undefined): void {
+    if (value === undefined) return;
+    this.controls?.setViewState({ geneMapOpacity: value });
+  }
+  /** True while a gene is the colour source — the only thing a gene map can map. */
+  get canMapGene(): boolean {
+    return this.view.colorBy?.kind === 'feature';
+  }
+
   onDensityVolume(on: boolean): void {
     this.controls?.setViewState({ densityVolume: on });
   }

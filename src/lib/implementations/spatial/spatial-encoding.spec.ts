@@ -1,4 +1,5 @@
 import {
+  isGrayscaleLut, spatialContinuousLut,
   DEFAULT_CATEGORICAL_PALETTE, DEFAULT_MUTED_OPACITY, MISSING_COLOR, contrastWindow,
   encodeCategorical, encodeContinuous, lutFor, markerDiameters, resolveCategoryColors,
   toRgbaTuples,
@@ -203,6 +204,30 @@ describe('spatial-encoding', () => {
       const lut = lutFor('not-a-colormap');
       expect(lut).toHaveLength(256);
       expect(lut[0]).not.toEqual(lut[255]);
+    });
+  });
+
+  describe('spatialContinuousLut', () => {
+    it('refuses a grayscale ramp, because the tissue underneath is grayscale', () => {
+      // Guard first: the ramp really is grey, or the assertion below is vacuous.
+      expect(isGrayscaleLut(lutFor('Greys'))).toBe(true);
+      // A grey measurement drawn over grey anatomy cannot be told apart from it.
+      const gray = spatialContinuousLut('Greys');
+      expect(isGrayscaleLut(gray)).toBe(false);
+      // …and what it falls back to is the same Viridis the rest of the library uses.
+      expect(gray).toEqual(lutFor('Viridis'));
+    });
+
+    it('keeps a colour colormap the user chose', () => {
+      const magma = spatialContinuousLut('Magma');
+      expect(isGrayscaleLut(magma)).toBe(false);
+      // Not silently replaced by the fallback: it is the user's choice.
+      expect(magma).toEqual(lutFor('Magma'));
+    });
+
+    it('detects a grayscale LUT from its values, not its name', () => {
+      expect(isGrayscaleLut([[0, 0, 0], [128, 128, 128]])).toBe(true);
+      expect(isGrayscaleLut([[0, 0, 0], [128, 128, 129]])).toBe(false);
     });
   });
 });

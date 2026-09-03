@@ -80,6 +80,24 @@ export interface SpatialViewState {
   /** Multiplier on the default kernel bandwidth. Above 1 is smoother and less
    *  committal; below 1 exposes the individual sections. */
   densitySmoothing: number;
+  /**
+   * Draw the active GENE as a continuous field under the observations (2D).
+   *
+   * Colouring the markers by a gene says which cells express it; it cannot say
+   * where, because the eye will not integrate thousands of dots into a territory.
+   * The field is an estimate — a kernel-weighted mean per cell, transparent where
+   * no cell was measured — and it is drawn beneath the cells, not instead of them,
+   * so the measurement stays on screen next to the interpolation.
+   *
+   * Ignored unless the colour source is a gene: there is nothing else to map.
+   */
+  geneMap: boolean;
+  /** Multiplier on the gene map's kernel bandwidth. */
+  geneMapSmoothing: number;
+  /** The gene map's own opacity. Separate from {@link opacity}, which belongs to
+   *  the markers: turning the cells down to read the field underneath must not
+   *  turn the field down with them. */
+  geneMapOpacity: number;
 }
 
 export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
@@ -90,4 +108,7 @@ export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
   percentileClip: [0.01, 0.99],
   densityVolume: false,
   densitySmoothing: 1,
+  geneMap: false,
+  geneMapSmoothing: 1,
+  geneMapOpacity: 0.85,
 };

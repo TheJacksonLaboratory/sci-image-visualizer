@@ -239,6 +239,21 @@ translucent cloud so it cannot be mistaken for measurement. The kernel is
 anisotropic (σ along z clears one section gap) and the field is coverage-normalised
 along z, so unimaged planes do not read as empty tissue.
 
+**Gene map** *(2D mode, optional, with a gene selected)* — a checkbox that draws
+the selected gene's expression as a smooth field *beneath* the cells. Coloured
+markers answer "which cells express this gene"; they do not answer "where is it
+expressed", because the eye cannot integrate thousands of small dots into a
+territory. The field is the kernel-weighted **mean per cell, not a sum** — a sum
+would make a crowded region glow whatever its cells were doing — and smoothing the
+numerator and denominator together spreads *where*, not *how much*. That
+denominator is also what lets the layer say nothing: where no cell was measured the
+mean is undefined rather than zero, so those pixels stay fully transparent instead
+of taking the colormap's low end, and alpha ramps with local support so a thinly
+sampled pixel reads as tentative. `Smoothing` sets the kernel σ; `Map opacity` is
+the field's own opacity, separate from the markers' — turn the markers down to read
+the field under them. On a volume-backed dataset the field is re-estimated per
+plane from that plane's cells.
+
 Colour it through `getSpatialControls()`:
 
 ```ts

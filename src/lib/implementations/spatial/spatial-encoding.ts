@@ -273,3 +273,26 @@ export function lutFor(colormapValue: unknown, reverse = false): Rgb[] {
   return buildColormapLut(colormapValue, reverse)
     ?? buildColormapLut('Viridis', reverse)!;
 }
+
+/** True when every entry of a LUT is a neutral grey. Tested on the VALUES rather
+ *  than the colormap's name, so a reversed or renamed grey ramp still counts. */
+export function isGrayscaleLut(lut: readonly Rgb[]): boolean {
+  return lut.every(([r, g, b]) => r === g && g === b);
+}
+
+/**
+ * LUT for a spatial CONTINUOUS encoding — a gene, a numeric column.
+ *
+ * The display colormap, unless that colormap is grayscale: the tissue underneath
+ * is grayscale, so a grey overlay of a measurement is indistinguishable from the
+ * anatomy it is drawn over — the reader cannot tell which channel a bright pixel
+ * belongs to. Viridis is then the fallback, which is what the CosMx guidance
+ * prescribes for continuous values anyway.
+ *
+ * Shared by the markers and the gene map so the two cannot disagree about what a
+ * colour means, whichever way the choice falls.
+ */
+export function spatialContinuousLut(colormapValue: unknown, reverse = false): Rgb[] {
+  const lut = lutFor(colormapValue, reverse);
+  return isGrayscaleLut(lut) ? buildColormapLut('Viridis', reverse)! : lut;
+}

@@ -101,6 +101,35 @@
       </div>
     </div>
 
+    <!-- 2D, and only for a gene: the map draws that gene's expression as a field
+         under the cells. Hidden in the 3D cloud, which has the density volumes. -->
+    <div class="sc-section" *ngIf="!is3d && canMapGene">
+      <div class="sc-row">
+        <p-checkbox [binary]="true" [ngModel]="view.geneMap"
+                    (onChange)="onGeneMap($event.checked)"
+                    label="Gene map (expression field)"
+                    pTooltip="Draw this gene's expression as a smooth field UNDER the cells — an estimate between them, transparent where nothing was measured"
+                    tooltipPosition="top"></p-checkbox>
+      </div>
+      <div class="sc-row" *ngIf="view.geneMap">
+        <span class="sc-lbl">Smoothing</span>
+        <p-slider [ngModel]="view.geneMapSmoothing" [min]="0.5" [max]="4" [step]="0.5"
+                  (onChange)="onGeneMapSmoothing($event.value)"></p-slider>
+        <span class="sc-val">{{ view.geneMapSmoothing }}×</span>
+      </div>
+      <div class="sc-row" *ngIf="view.geneMap">
+        <span class="sc-lbl">Map opacity</span>
+        <p-slider [ngModel]="view.geneMapOpacity" [min]="0.1" [max]="1" [step]="0.05"
+                  (onChange)="onGeneMapOpacity($event.value)"></p-slider>
+        <span class="sc-val">{{ view.geneMapOpacity }}</span>
+      </div>
+      <div class="sc-hint" *ngIf="view.geneMap">
+        Kernel-weighted mean per cell, not a sum — so a crowded region does not glow
+        for being crowded. Transparent where no cell was measured. Turn the cells'
+        own Opacity down to read the field under them.
+      </div>
+    </div>
+
     <!-- 3D only: a density field needs a z to estimate along, and in 2D the plane
          already shows its own cells. -->
     <div class="sc-section" *ngIf="is3d">

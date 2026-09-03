@@ -17,6 +17,7 @@ import {
 } from 'napari-js';
 import type {
   AxesLayer,
+  ImageLayer,
   SurfaceLayer,
   VolumeLayer,
   PointsLayer,
@@ -38,9 +39,9 @@ import {
 } from '../../contracts/spatial-dataset.contract';
 import { SpatialViewState } from '../../contracts/display-types';
 import {
-  contrastWindow, encodeCategorical, encodeContinuous, lutFor, markerDiameters,
+  contrastWindow, encodeCategorical, encodeContinuous, markerDiameters,
   resolveCategoryColors, toRgbaTuples, parseHex, MISSING_COLOR, DEFAULT_MUTED_OPACITY,
-  SPATIAL_3D_MAX_CATEGORIES,
+  SPATIAL_3D_MAX_CATEGORIES, spatialContinuousLut,
 } from '../spatial/spatial-encoding';
 import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
 import { SpatialObservations } from '../../contracts/spatial-dataset.contract';
@@ -49,6 +50,9 @@ import {
 } from '../spatial/spatial-selection';
 import { observationsInSlice, volumeImageRef } from '../spatial/spatial-volume-image';
 import { defaultSigma, densityGrid, rasterizeDensity } from '../spatial/spatial-density';
+import {
+  type ExpressionField, colorExpressionField, expressionField,
+} from '../spatial/spatial-expression';
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
 import {
   PlotType,
@@ -324,6 +328,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   /** Selection identity, as a number the density key can carry. */
   private lastSelectionSeen: SpatialSelectionMask | null = null;
   private selectionRevision = 0;
+  /** The gene map: its layer, the field it was estimated from, and the inputs each
+   *  was built for — the field is the expensive half and survives a recolour. */
+  private geneMapLayer: ImageLayer | null = null;
+  private geneMapKey: string | null = null;
+  private geneMapField: ExpressionField | null = null;
+  private geneMapFieldKey: string | null = null;
   /** Offset applied to observation coordinates to sit them in the volume's box. */
   private spatialOrigin3d: [number, number, number] = [0, 0, 0];
   /** Dataset the 3D scale bar was built for. */
@@ -1606,6 +1616,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    *  40 µm/px template, so drawing them to scale would put every cell a fifth of a pixel wide
    *  and the section would come up empty. The point-size control scales up from this floor. */
   private static readonly SPATIAL_SLICE_MIN_DIAMETER_PX = 1.5;
+  /** Longest side of the gene-map raster, in field pixels. A gene map is a smooth
+   *  field read as territory, so it gains nothing from matching a 2 Gpx slide's
+   *  resolution — and the estimate costs one pass over this many pixels. */
+  private static readonly GENE_MAP_MAX_SIDE = 512;
+  /** Kernel σ in field pixels at smoothing 1: wide enough to read between cells,
+   *  tight enough to keep a nucleus-scale structure distinct. */
+  private static readonly GENE_MAP_SIGMA = 2.5;
   /** Clusters drawn as density volumes at once. Past a handful, additive translucent
    *  clouds stop being separable by eye — and each one is a full rasterisation. */
   private static readonly DENSITY_MAX_CLUSTERS = 6;
@@ -1753,6 +1770,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         this.spatialPoints = null;
         this.spatialLayerKey = null;
       }
+      if (this.geneMapLayer) {
+        viewer.layers.remove(this.geneMapLayer);
+        this.geneMapLayer = null;
+        this.geneMapKey = null;
+      }
       return;
     }
 
@@ -1763,6 +1785,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // section and reads as a smear; without the affine the coordinates are read
     // as pixels and land off the slice entirely.
     const slab = this.spatialSlab(dataset);
+    // The gene map goes UNDER the cells, so it is settled before they are added.
+    await this.ensureGeneMap(viewer, dataset, view, selection, slab);
+    if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
     const ref = slab?.ref ?? dataset.imageRef;
     const base = markerDiameters(obs, NapariVisualizerService.SPATIAL_FALLBACK_RADIUS);
     const scale = view.pointScale > 0 ? view.pointScale : 1;
@@ -1827,6 +1852,123 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       scale: ref?.scale ?? [1, 1],
       translate: ref?.translate ?? [0, 0],
     });
+  }
+
+  /**
+   * The **gene map**: the active gene's expression as a continuous field drawn under
+   * the cells.
+   *
+   * A scatter coloured by a gene says which cells express it; it cannot say where,
+   * because the eye will not integrate thousands of dots into a territory. The field
+   * is a kernel-weighted MEAN per cell (see `spatial-expression.ts`), so a dense
+   * region does not glow merely for being dense, and it is transparent wherever no
+   * cell was measured — an unsampled gap must not read as "not expressed".
+   *
+   * It shares the points' LUT, percentile window and log flag, so the layer under
+   * the cells and the cells themselves cannot disagree about what a colour means.
+   *
+   * Estimated on the DISPLAYED image's pixel grid, coarsened so the long side is at
+   * most {@link GENE_MAP_MAX_SIDE}: a smooth field gains nothing from a slide's full
+   * resolution. For a volume-backed dataset that grid is the current slice, and only
+   * that plane's observations are included — the same rule the markers follow.
+   */
+  private async ensureGeneMap(
+    viewer: Viewer, dataset: SpatialDataset, view: SpatialViewState,
+    selection: SpatialSelectionMask,
+    slab: { ref: SpatialImageRef; indices: Uint32Array; slice: number } | null,
+  ): Promise<void> {
+    const gene = view.geneMap && view.colorBy?.kind === 'feature' ? view.colorBy.name : null;
+    const port = this.spatialData;
+    const smoothing = view.geneMapSmoothing > 0 ? view.geneMapSmoothing : 1;
+    const clip = view.percentileClip ?? [0.01, 0.99];
+
+    // Two clocks: the FIELD depends on the gene, the plane and the bandwidth, while
+    // the colours depend on the window, the log flag and the opacity. Recolouring a
+    // cached field is a fraction of estimating one.
+    const fieldKey = gene
+      ? [dataset.id, gene, slab?.slice ?? '', smoothing, this.selectionRev(selection)].join('|')
+      : null;
+    const key = fieldKey
+      ? [fieldKey, clip.join(','), view.logScale ? 'log' : 'lin', view.geneMapOpacity].join('|')
+      : null;
+    if (key === this.geneMapKey) return;
+
+    if (this.geneMapLayer) {
+      viewer.layers.remove(this.geneMapLayer);
+      this.geneMapLayer = null;
+    }
+    // ANY change here changes the order the cells have to sit above — including the
+    // first one, where there is no previous layer to remove — and the layer list is
+    // append-only. So drop the markers unconditionally and let the rebuild below put
+    // them back on top; otherwise the field is appended over the measurement.
+    if (this.spatialPoints) {
+      viewer.layers.remove(this.spatialPoints);
+      this.spatialPoints = null;
+      this.spatialLayerKey = null;
+    }
+    this.geneMapKey = key;
+    if (!key || !gene || !port) {
+      this.geneMapField = null;
+      this.geneMapFieldKey = null;
+      return;
+    }
+
+    // The raster covers the displayed image; without one there is nothing to
+    // overlay and the cloud is the 3D mode's business, not this one's.
+    const imageW = slab ? dataset.volume!.width : this.imageW;
+    const imageH = slab ? dataset.volume!.height : this.imageH;
+    if (!imageW || !imageH) return;
+    const step = Math.max(
+      1,
+      Math.ceil(Math.max(imageW, imageH) / NapariVisualizerService.GENE_MAP_MAX_SIDE),
+    );
+
+    if (fieldKey !== this.geneMapFieldKey) {
+      let values: Float32Array;
+      try {
+        values = await port.getFeatureVector(gene);
+      } catch (err) {
+        console.warn(`[napari-js] gene map: "${gene}" unavailable`, err);
+        this.geneMapKey = null;
+        return;
+      }
+      if (this.viewer !== viewer || this.geneMapKey !== key) return;
+      const inSelection = selection.count > 0 ? maskToIndices(selection.mask) : undefined;
+      this.geneMapField = expressionField(dataset.observations, {
+        ref: slab?.ref ?? dataset.imageRef,
+        width: Math.ceil(imageW / step),
+        height: Math.ceil(imageH / step),
+        step,
+        sigma: NapariVisualizerService.GENE_MAP_SIGMA * smoothing,
+        values,
+        // A plane wins over a selection: the 2D view is showing one section, so a
+        // field spanning the specimen's depth would not be the thing on screen.
+        indices: slab?.indices ?? inSelection,
+      });
+      this.geneMapFieldKey = fieldKey;
+    }
+    const field = this.geneMapField;
+    if (!field) return;
+
+    const node = this.currentColormap as { data?: { value?: unknown } } | null;
+    const lut = spatialContinuousLut(node?.data?.value, this.currentReverse);
+    const [lo, hi] = contrastWindow(field.mean, clip[0], clip[1]);
+    const rgba = colorExpressionField(field, lut, [lo, hi], {
+      log: view.logScale,
+      // The MAP's own opacity: reading a field under the cells means turning the
+      // cells down, which must not take the field with them.
+      opacity: view.geneMapOpacity,
+    });
+    this.geneMapLayer = viewer.addImage(
+      { kind: 'typed', width: field.width, height: field.height, channels: 4, dtype: 'uint8', data: rgba },
+      {
+        name: `gene map · ${gene}`,
+        scale: [step, step],
+        translate: [0, 0],
+        blending: 'translucent',
+      },
+    );
+    viewer.requestRender();
   }
 
   /**
@@ -2391,7 +2533,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     source: Float32Array, view: SpatialViewState, log: boolean,
   ): Spatial3dEncoding {
     const node = this.currentColormap as { data?: { value?: unknown } } | null;
-    const lut = lutFor(node?.data?.value, this.currentReverse);
+    const lut = spatialContinuousLut(node?.data?.value, this.currentReverse);
     const [lo, hi] = view.percentileClip ?? [0.01, 0.99];
     let values = source;
     if (log) {
@@ -2466,7 +2608,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     muted: Uint8Array | null = null,
   ): Float32Array {
     const node = this.currentColormap as { data?: { value?: unknown } } | null;
-    const lut = lutFor(node?.data?.value, this.currentReverse);
+    const lut = spatialContinuousLut(node?.data?.value, this.currentReverse);
     const [lo, hi] = view.percentileClip ?? [0.01, 0.99];
     const [min, max] = contrastWindow(values, lo, hi);
     return encodeContinuous(values, { lut, min, max, log, opacity: view.opacity, muted });
