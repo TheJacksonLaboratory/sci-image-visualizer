@@ -19,6 +19,9 @@ export interface SpatialLegendEntry {
   color: string;
 }
 
+/** Per-instance id source — see {@link SpatialControlsComponent.chartsBodyId}. */
+let controlsInstanceSeq = 0;
+
 /** Outlier clipping presets, as `[lo, hi]` percentile fractions. */
 const CLIP_OPTIONS: { label: string; value: [number, number] }[] = [
   { label: 'None', value: [0, 1] },
@@ -90,6 +93,9 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
    * its height.
    */
   chartsOpen = false;
+  /** Per-instance id for the collapsible body, so `aria-controls` points at one
+   *  element and expanding the second panel cannot scroll the first one's chart. */
+  readonly chartsBodyId = `sc-charts-body-${++controlsInstanceSeq}`;
 
   private colormap: ColormapNode | null = null;
   private reverse = false;
@@ -230,7 +236,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     this.chartsOpen = !this.chartsOpen;
     if (!this.chartsOpen) return;
     setTimeout(() => {
-      document.getElementById('sc-charts-body')
+      document.getElementById(this.chartsBodyId)
         ?.scrollIntoView({ block: 'end', behavior: 'smooth' });
     }, 0);
   }

@@ -12,6 +12,9 @@ import {
   countsLayout, omicsLayout,
 } from '../implementations/plotly/omics-trace-builders';
 
+/** Per-instance chart-div id source — see {@link SpatialChartsComponent.chartDiv}. */
+let chartInstanceSeq = 0;
+
 /** Plotly config: a static-ish analysis chart, not an editable figure. */
 const CHART_CONFIG = {
   displaylogo: false,
@@ -65,7 +68,11 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   }
   private isActive = true;
 
-  readonly chartDiv = 'spatial-charts-plot';
+  /** Per-instance, for the same reason the visualizer's plot div is
+   *  (`visualizer.component.ts`): two mounted charts sharing one DOM id means
+   *  `getElementById` hands both of them the first element, so one instance draws
+   *  into — or purges — the other's canvas. */
+  readonly chartDiv = `spatial-charts-plot-${++chartInstanceSeq}`;
   private static readonly CONTINUOUS_KINDS: { label: string; value: OmicsChartKind }[] = [
     { label: 'Histogram', value: 'histogram' },
     { label: 'Violin', value: 'violin' },

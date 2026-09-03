@@ -312,6 +312,15 @@ describe('SpatialControlsComponent', () => {
     });
   });
 
+  it('gives each instance its own charts-body id for aria-controls and the scroll', async () => {
+    await build(controls);
+    const first = component.chartsBodyId;
+    await build(controls);
+    // Otherwise `aria-controls` names a non-unique target and expanding the
+    // second panel scrolls the first panel's chart into view.
+    expect(component.chartsBodyId).not.toBe(first);
+  });
+
   describe('out-of-order responses', () => {
     beforeEach(async () => build(controls));
 

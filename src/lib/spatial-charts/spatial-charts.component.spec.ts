@@ -28,6 +28,7 @@ const dataset: SpatialDataset = {
 
 describe('SpatialChartsComponent', () => {
   let component: SpatialChartsComponent;
+  let chartHost: HTMLDivElement | null = null;
   let fixture: ComponentFixture<SpatialChartsComponent>;
   let view$: BehaviorSubject<SpatialViewState>;
   let selection$: BehaviorSubject<SpatialSelectionMask>;
@@ -54,6 +55,11 @@ describe('SpatialChartsComponent', () => {
     }).compileComponents();
     fixture = TestBed.createComponent(SpatialChartsComponent);
     component = fixture.componentInstance;
+    // The component draws into a div it looks up by its OWN per-instance id, so
+    // the host element can only be made once that id exists.
+    chartHost = document.createElement('div');
+    chartHost.id = component.chartDiv;
+    document.body.appendChild(chartHost);
     if (render) {
       fixture.detectChanges();
     } else {
@@ -87,14 +93,11 @@ describe('SpatialChartsComponent', () => {
       categoricalColumns: jest.fn(() => ['region']),
     } as unknown as jest.Mocked<ISpatialControls>;
 
-    // The component draws into a div it looks up by id.
-    const div = document.createElement('div');
-    div.id = 'spatial-charts-plot';
-    document.body.appendChild(div);
   });
 
   afterEach(() => {
-    document.getElementById('spatial-charts-plot')?.remove();
+    chartHost?.remove();
+    chartHost = null;
   });
 
   it('stays inert without a SPATIAL_DATA_PORT (the host panel explains why)', async () => {
@@ -327,6 +330,16 @@ describe('SpatialChartsComponent', () => {
     expect(lastPlot().traces.map((t: Record<string, unknown>) => t.name)).toEqual(['X']);
   });
 
+  it('gives each instance its own chart div, so two panels cannot draw into one', async () => {
+    // Two exported visualizers on a page (the main diagram + a modal preview) mean
+    // two charts; a shared DOM id hands both the first element.
+    await build(controls);
+    const first = component.chartDiv;
+    await build(controls);
+    expect(component.chartDiv).not.toBe(first);
+    expect(document.getElementById(component.chartDiv)).not.toBeNull();
+  });
+
   describe('lifecycle', () => {
     it('lists the dataset\'s categorical columns to group by', async () => {
       await build(controls);
@@ -350,7 +363,7 @@ describe('SpatialChartsComponent', () => {
       fixture.destroy();
       expect(view$.observed).toBe(false);
       expect(selection$.observed).toBe(false);
-      expect(Plotly.purge).toHaveBeenCalledWith('spatial-charts-plot');
+      expect(Plotly.purge).toHaveBeenCalledWith(component.chartDiv);
     });
   });
 });

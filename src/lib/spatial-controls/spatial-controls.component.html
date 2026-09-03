@@ -166,7 +166,7 @@
          harder to see rather than easier. -->
     <div class="sc-section sc-charts">
       <button type="button" class="sc-disclosure" (click)="toggleCharts()"
-              [attr.aria-expanded]="chartsOpen" aria-controls="sc-charts-body">
+              [attr.aria-expanded]="chartsOpen" [attr.aria-controls]="chartsBodyId">
         <i class="pi" [class.pi-chevron-right]="!chartsOpen"
            [class.pi-chevron-down]="chartsOpen"></i>
         <span>Distribution</span>
@@ -175,7 +175,7 @@
       <!-- Kept MOUNTED when collapsed, only hidden: destroying it would throw
            away the chart kind and grouping the user picked. `active` is what
            stops it drawing while it has no size. -->
-      <div id="sc-charts-body" [hidden]="!chartsOpen">
+      <div [id]="chartsBodyId" [hidden]="!chartsOpen">
         <spatial-charts [active]="visible && chartsOpen"></spatial-charts>
       </div>
     </div>
