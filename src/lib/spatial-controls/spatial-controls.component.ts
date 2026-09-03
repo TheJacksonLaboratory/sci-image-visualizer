@@ -8,7 +8,7 @@ import {
   CategoricalColumnMeta, SpatialColumnMeta, SpatialDataset,
 } from '../contracts/spatial-dataset.contract';
 import { ColormapNode, SpatialViewState, DEFAULT_SPATIAL_VIEW } from '../contracts/display-types';
-import { lutFor } from '../implementations/spatial/spatial-encoding';
+import { SPATIAL_3D_MAX_CATEGORIES, lutFor } from '../implementations/spatial/spatial-encoding';
 import {
   SpatialSelectionMask, emptySelection,
 } from '../implementations/spatial/spatial-selection';
@@ -236,6 +236,21 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   onLogScale(on: boolean): void {
     this.controls?.setViewState({ logScale: on });
   }
+  /**
+   * Set when the active categorical colouring has more categories than the 3D
+   * cloud can keep apart, so the points are drawing FLAT.
+   *
+   * Said in the panel rather than left to a console warning: `subclass` (338) is
+   * served precisely because the density volumes and the 2D view can render it, and
+   * a user who picks it in the cloud and sees one colour deserves to know both why
+   * and what to do instead.
+   */
+  get exceedsCloudPalette(): boolean {
+    return this.is3d && (this.legend?.length ?? 0) > SPATIAL_3D_MAX_CATEGORIES;
+  }
+  /** The ceiling itself, for the message. */
+  readonly cloudPaletteLimit = SPATIAL_3D_MAX_CATEGORIES;
+
   onDensityVolume(on: boolean): void {
     this.controls?.setViewState({ densityVolume: on });
   }

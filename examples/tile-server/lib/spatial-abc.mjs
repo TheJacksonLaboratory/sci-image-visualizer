@@ -27,7 +27,7 @@ import { readFile, writeFile, mkdir, rename, stat, readdir } from 'node:fs/promi
 import path from 'node:path';
 import readline from 'node:readline';
 
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2;
 
 const CELLS_CSV = 'cell_metadata_with_parcellation_annotation.csv';
 const GENES_CSV = 'example_genes_all_cells_expression.csv';
@@ -37,21 +37,28 @@ const GENES_CSV = 'example_genes_all_cells_expression.csv';
  * each. Using the deposited colours rather than our default palette means the
  * render matches every figure in the Yao et al. atlas papers.
  *
- * The list stops at columns with at most ~96 distinct values, and that ceiling
- * is not arbitrary: the 3D points layer colours points by mapping a per-point
- * SCALAR through a 256-entry LUT (it has no per-point RGBA), so a categorical
- * palette has to be encoded as one contiguous block of LUT entries per category.
- * Measured against napari-js, every K from 2..96 round-trips its colours exactly
- * and K=97 is the first that does not — 256 texels cannot keep more categories
- * apart than that. So `subclass` (338), `parcellation_structure` (~300),
- * `supertype` (1,201) and `cluster` (5,322) are deliberately absent: serving them
- * would render colours that are subtly wrong while the legend claimed otherwise,
- * which is worse than not offering them. Class and division tell the same story
- * at a cardinality that both the LUT and a human legend can hold.
+ * Cardinality decides which VIEWS a column can drive, not whether it is worth
+ * serving, and the two have to be told apart.
+ *
+ * The 3D points layer colours by mapping a per-point SCALAR through a 256-entry
+ * LUT (it has no per-point RGBA), so a categorical palette is encoded as one
+ * contiguous block of LUT entries per category. Measured against napari-js, every
+ * K from 2..96 round-trips exactly and K=97 is the first that does not, so above
+ * 96 that layer draws flat rather than draw subtly wrong colours under a confident
+ * legend. Nothing else has that limit: the 2D markers carry per-point RGBA, and a
+ * density volume is a SCALAR FIELD PER CLUSTER, so neither cares how many
+ * categories the column has.
+ *
+ * `subclass` (338) is served for exactly that reason — it is the level the biology
+ * is usually read at, and the density volumes and the 2D view can both render it
+ * honestly. `supertype` (1,201) and `cluster` (5,274) stay out on a different
+ * ground: no legend a human reads, and no palette, keeps that many apart, so they
+ * would be a column nobody could interpret rather than one a layer cannot draw.
  */
 const CATEGORICAL = [
   { name: 'class', color: 'class_color', description: 'Cell class — the top level of the whole-brain taxonomy' },
   { name: 'neurotransmitter', color: 'neurotransmitter_color', description: 'Neurotransmitter identity, blank where not assigned' },
+  { name: 'subclass', color: 'subclass_color', description: 'Cell subclass — 338 of them, the level most analysis is read at. Above the 3D points layer\'s 96-category LUT ceiling, so the cloud draws flat for it; the density volumes and the 2D view render it in full' },
   { name: 'parcellation_division', color: 'parcellation_division_color', description: 'CCF anatomical division' },
   { name: 'brain_section_label', color: null, description: 'Source coronal section — 53 of them, ordered anterior to posterior' },
 ];

@@ -268,6 +268,25 @@ describe('SpatialControlsComponent', () => {
       expect(controls.setViewState).not.toHaveBeenCalled();
     });
 
+    it('says when a column has more categories than the 3D cloud can colour', () => {
+      // subclass (338) is served for the density volumes; a user who picks it in the
+      // cloud sees one flat colour, and a console warning is not something anyone
+      // reads — so the panel says why, and what does render it.
+      component.is3d = true;
+      (component as any).legend = Array.from({ length: 338 }, (_, i) => ({
+        label: `s${i}`, color: '#888888',
+      }));
+      expect(component.exceedsCloudPalette).toBe(true);
+      expect(component.cloudPaletteLimit).toBe(96);
+
+      // Within the ceiling, or in 2D, there is nothing to warn about.
+      (component as any).legend = Array.from({ length: 34 }, () => ({ label: 'c', color: '#888' }));
+      expect(component.exceedsCloudPalette).toBe(false);
+      (component as any).legend = Array.from({ length: 338 }, () => ({ label: 'c', color: '#888' }));
+      component.is3d = false;
+      expect(component.exceedsCloudPalette).toBe(false);
+    });
+
     it('says what the density volumes are showing, and that it is an estimate', () => {
       // An estimate is only honest if the reader can tell it from measurement.
       expect(component.densityNote).toContain('not measured cells');

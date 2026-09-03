@@ -40,6 +40,7 @@ import { SpatialViewState } from '../../contracts/display-types';
 import {
   contrastWindow, encodeCategorical, encodeContinuous, lutFor, markerDiameters,
   resolveCategoryColors, toRgbaTuples, parseHex, MISSING_COLOR, DEFAULT_MUTED_OPACITY,
+  SPATIAL_3D_MAX_CATEGORIES,
 } from '../spatial/spatial-encoding';
 import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
 import { SpatialObservations } from '../../contracts/spatial-dataset.contract';
@@ -1922,18 +1923,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.scaleBar = new NapariScaleBar(this.host, shim, micronsPerUnit);
   }
 
-  /**
-   * Largest category count whose colours survive the 3D layer's LUT intact.
-   *
-   * The 3D points layer has no per-point RGBA — it maps a per-point SCALAR through a 256-entry
-   * colormap LUT — so a categorical palette is encoded as one contiguous block of LUT entries per
-   * category. Measured against napari-js, every K in 2..96 round-trips exactly and K=97 is the
-   * first that does not: 256 texels cannot keep more categories apart than that. Above the ceiling
-   * we draw flat rather than draw a lie, because subtly wrong category colours next to a confident
-   * legend is the failure nobody catches.
-   */
-  private static readonly SPATIAL_3D_MAX_CATEGORIES = 96;
-
   /** Base marker diameter for the 3D cloud, in SCREEN pixels (the layer's unit). */
   private static readonly SPATIAL_3D_BASE_SIZE = 3;
 
@@ -2136,6 +2125,15 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     if (this.viewer !== viewer || this.densityKey !== key) return;
 
     const sigma = defaultSigma(grid, smoothing);
+    // Additive blending SUMS, so a fixed per-layer opacity blows out to white as
+    // soon as several broad clusters overlap — six subclasses at 0.55 each turned
+    // the brain into one cyan mass. Splitting the budget keeps n fully overlapping
+    // peaks inside the display's range, so overlap reads as overlap; a single
+    // cluster still gets the full 0.55. It only mitigates: a translucent raymarch
+    // integrates along the ray, so clusters that are ubiquitous rather than
+    // regional (the largest subclasses are glia, which are everywhere) still pile
+    // up, and one cluster at a time is the readable way to look at those.
+    const opacity = Math.min(0.55, 0.9 / Math.max(1, groups.length));
     for (const group of groups) {
       const data = rasterizeDensity(dataset.observations, grid, { sigma, indices: group.indices });
       // A cluster with nothing on the grid draws no layer, rather than an empty box.
@@ -2148,7 +2146,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
           // Translucent, not MIP: a cluster's interior is the readable part, and MIP
           // would flatten every cloud to its brightest shell.
           rendering: 'translucent',
-          opacity: 0.55,
+          opacity,
           // Additive, so two clusters overlapping read as both being there instead
           // of the nearer one hiding the other.
           blending: 'additive',
@@ -2338,7 +2336,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private encodeSpatial3dCategorical(codes: Uint16Array, colors: string[]): Spatial3dEncoding | null {
     // Slot 0 is reserved for "no category", so the palette occupies 1..K.
     const k = colors.length + 1;
-    if (k > NapariVisualizerService.SPATIAL_3D_MAX_CATEGORIES) {
+    if (k > SPATIAL_3D_MAX_CATEGORIES) {
       console.warn(
         `[napari-js] ${colors.length} categories exceeds what the 3D layer's 256-entry LUT can `
         + 'hold distinctly; drawing flat instead of with wrong colours',

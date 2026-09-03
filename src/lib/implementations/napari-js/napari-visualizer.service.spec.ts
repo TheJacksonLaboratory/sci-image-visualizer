@@ -939,6 +939,27 @@ describe('NapariVisualizerService', () => {
         expect(layers[0].width).toBeLessThan(4 * 100);
       });
 
+      it('divides the opacity budget across the clusters so overlap does not blow out', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getColumn.mockResolvedValue(column);
+        await mount3d(clustered());
+
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' }, densityVolume: true });
+        await flush();
+        const many = densityLayers(addVolume);
+        expect(many).toHaveLength(3);
+        // Additive blending sums: three broad fields at full opacity saturate to
+        // white, so the budget is split.
+        expect(many.every((l) => l.opacity < 0.55)).toBe(true);
+        expect(many[0].opacity * many.length).toBeLessThanOrEqual(1.2);
+
+        // One cluster has nothing to blow out against, so it keeps the full value.
+        store.setSpatialView({ colorBy: null });
+        await flush();
+        expect(densityLayers(addVolume).at(-1).opacity).toBeCloseTo(0.55, 6);
+      });
+
       it('rasterises total density when the colouring is not categorical', async () => {
         const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));

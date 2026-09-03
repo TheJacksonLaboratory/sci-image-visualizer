@@ -39,6 +39,23 @@ export const MISSING_COLOR: Rgb = [150, 150, 150];
 export const DEFAULT_MUTED_OPACITY = 0.15;
 
 /**
+ * Largest category count whose colours survive the 3D points layer's LUT intact.
+ *
+ * That layer has no per-point RGBA — it maps a per-point SCALAR through a
+ * 256-entry colormap LUT — so a categorical palette is encoded as one contiguous
+ * block of LUT entries per category. Measured against napari-js, every K in 2..96
+ * round-trips exactly and K=97 is the first that does not: 256 texels cannot keep
+ * more categories apart than that. Above it the cloud draws FLAT rather than draw
+ * a lie, because subtly wrong category colours under a confident legend is the
+ * failure nobody catches.
+ *
+ * A limit of that one layer, and of nothing else: the 2D markers carry per-point
+ * RGBA, and a density volume is a scalar field per cluster. Shared here so the
+ * renderer that enforces it and the panel that explains it cannot drift apart.
+ */
+export const SPATIAL_3D_MAX_CATEGORIES = 96;
+
+/**
  * Fallback categorical palette. Colour-blind-safe and stable, so a category
  * without an authored colour still lands somewhere sensible and lands there
  * every run (`fallbackColorFor` hashes the name — same name, same colour).

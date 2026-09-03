@@ -183,13 +183,26 @@ try {
     }
     check('z spans the brain, not one plane', zhi - zlo > 5000,
       `${(zlo / 1000).toFixed(1)}-${(zhi / 1000).toFixed(1)} mm`);
-    // Every categorical must fit the 3D layer's 256-entry LUT, or its colours
-    // would be wrong on screen while the legend looked right.
-    const wide = (m.columns || [])
-      .filter((c) => c.kind === 'categorical' && c.categories.length > 96)
-      .map((c) => `${c.name}=${c.categories.length}`);
-    check('every categorical fits the 96-category LUT ceiling', wide.length === 0,
-      wide.join(', '));
+    // Cardinality decides which views a column can drive, not whether it is
+    // servable: the 3D POINTS layer draws flat above 96 categories (its 256-entry
+    // LUT cannot keep more apart), while the 2D markers and the per-cluster density
+    // volumes have no such limit. So what matters is that a wide column arrives
+    // COMPLETE — every category named, every colour present — since those are what
+    // the views that can render it read.
+    const cats = (m.columns || []).filter((c) => c.kind === 'categorical');
+    const wide = cats.filter((c) => c.categories.length > 96);
+    check('subclass is served, above the LUT ceiling, for the density volumes',
+      wide.some((c) => c.name === 'subclass'),
+      wide.map((c) => `${c.name}=${c.categories.length}`).join(', ') || 'none served');
+    const ragged = cats.filter(
+      (c) => c.categories.some((n) => !n && n !== '')
+        || (c.colors && c.colors.length !== c.categories.length),
+    );
+    check('every categorical names every category, and colours match 1:1',
+      ragged.length === 0, ragged.map((c) => c.name).join(', '));
+    // A code has to fit the u16 the wire format sends it in.
+    check('category counts fit the u16 code space',
+      cats.every((c) => c.categories.length <= 65535));
 
     // The anatomical backdrop. Byte count against the declared dims is the check
     // that matters: a short or long buffer read as a 3D texture does not error,

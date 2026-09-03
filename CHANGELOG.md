@@ -11,6 +11,31 @@ file was added.
 
 ### Added
 
+- **`subclass` (338 categories) is served by the example ABC source**, for the
+  density volumes. Cardinality decides which VIEWS a column can drive, not whether
+  it is worth serving, and the two had been conflated: the ceiling is a property of
+  the 3D points layer alone (a 256-entry LUT, measured to hold 96 categories
+  exactly), while the 2D markers carry per-point RGBA and a density volume is a
+  scalar field per cluster. Neither cares how many categories exist.
+
+  Subclass is the level most analysis is read at, so serving it makes the density
+  volumes answer a question worth asking. `supertype` (1,201) and `cluster` (5,274)
+  stay out on a different ground: no legend a human reads keeps that many apart.
+
+  The panel now says out loud when the active colouring is past what the cloud can
+  colour — how many categories, what the limit is, that the points are drawing
+  flat, and which views do render it. A console warning is not something anyone
+  sees. `SPATIAL_3D_MAX_CATEGORIES` moved to `spatial-encoding.ts` so the renderer
+  that enforces the limit and the panel that explains it cannot drift apart.
+
+  With many clusters the additive opacity budget is split (`0.9 / n`, so n fully
+  overlapping peaks stay inside the display range) rather than fixed per layer.
+  That only mitigates: a translucent raymarch integrates along the ray, and the six
+  LARGEST subclasses are non-neuronal types present throughout the brain, so they
+  overlap almost everywhere. At subclass level the readable view is one cluster at a
+  time — click a legend row, or select a region — which resolves individual nuclei
+  and layers cleanly. The multi-cluster view separates best at `class`.
+
 - **Cluster density volumes in the 3D spatial view** — a checkbox that raymarches
   each cluster as a smooth density field alongside the point cloud, tinted with
   its legend colour and blended additively, so overlapping territories both read
