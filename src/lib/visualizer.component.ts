@@ -16,8 +16,6 @@ import {
   PlotType,
   PlotTypeDescriptor,
   isNapari3d,
-  isNapariIsosurface,
-  isNapariVolume,
   isSpatialOmics3d,
   NAPARI_DEFAULT_DECIMATE,
 } from './contracts/plot-type';
@@ -317,7 +315,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   private hasSpatialDataset = false;
   /** Whether that dataset's observations carry a z, gating the 3D spatial mode. */
   private hasSpatial3dDataset = false;
-  /** Whether it carries a registered volume, which feeds Volume / Isosurface. */
+  /** Whether it carries a registered volume. Change detection only: a volume
+   *  appearing is what publishes it as the image, and the plot-type gates then
+   *  see an ordinary grayscale stack. */
   private hasSpatialVolume = false;
   /** Dataset + geometry the currently published volume image was built from, so a
    *  re-emitted dataset doesn't re-fetch megabytes or reset the user's scrub. */
@@ -521,22 +521,13 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
         // is offered; test mode exposes every backend's type.
         if (!this.testMode && !d.productionLabel) return false;
         if (d.dimensions === '3d' && !caps.has(ViewerFeature.Surface3D)) return false;
-        // `requiresStack` means "needs volumetric data", which a z-stack image is
-        // the usual source of — but a spatial dataset carrying a registered
-        // volume is another. Without this, Volume and Isosurface stay hidden for
-        // a 3D omics dataset that has the voxels to feed them.
-        if (d.requiresStack && !isStack && !this.hasSpatialVolume) return false;
-        // `requiresGrayscale` asks for SCALAR voxels, and a registered volume is a
-        // single scalar field by construction — so it satisfies this gate for the
-        // same reason it satisfies `requiresStack`. Without this the pair only half
-        // opened: a cloud with no `imageRef` has no image at all, so `isGrayscale`
-        // was false and Volume/Isosurface stayed hidden on exactly the dataset the
-        // volume was fetched for. Narrowed to the two modes whose mount path reads
-        // the dataset's volume — Contour is grayscale-gated too, and has no spatial
-        // source to draw from.
-        const spatialVoxels =
-          this.hasSpatialVolume && (isNapariVolume(d.type) || isNapariIsosurface(d.type));
-        if (d.requiresGrayscale && !isGrayscale && !isMultichannel && !spatialVoxels) return false;
+        // Volume and Isosurface raymarch the IMAGE STACK, and nothing else: these
+        // two gates are about the loaded image, full stop. A 3D omics dataset
+        // reaches them because its registered volume is published AS a grayscale
+        // z-stack image (`buildVolumeStackImage`), not through a second voxel
+        // source hiding behind the same modes.
+        if (d.requiresStack && !isStack) return false;
+        if (d.requiresGrayscale && !isGrayscale && !isMultichannel) return false;
         if (d.requiresSpatialData && !this.hasSpatialDataset) return false;
         if (d.requiresSpatial3d && !this.hasSpatial3dDataset) return false;
         return true;

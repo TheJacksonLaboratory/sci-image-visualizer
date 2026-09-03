@@ -107,27 +107,27 @@ file was added.
   change. The unit stub now tracks its layer list for real, since whether a layer
   is still mounted is exactly what these tests have to see.
 
-- **Volume and Isosurface are actually selectable on a 3D omics dataset.**
-  `requiresStack` was relaxed for a registered volume but `requiresGrayscale`,
-  the gate on the next line, was not — and a cloud with no `imageRef` has no
-  image at all, so `isGrayscale` was false and both modes stayed hidden on
-  exactly the dataset whose volume had been fetched for them. A volume satisfies
-  both gates for the same reason: it is a single scalar field. Narrowed to the
-  two modes whose mount path reads the volume, since Contour is grayscale-gated
-  too and has no spatial source to draw from.
+- **Volume and Isosurface read the image stack, and only the image stack.** They
+  had grown a second voxel source — the spatial dataset's registered volume,
+  fetched through `SPATIAL_DATA_PORT` and preferred over the loaded image. That is
+  gone: a 3D omics dataset reaches these modes because its volume is *published as*
+  a grayscale z-stack image, so there is one voxel path, and the plot-type gates go
+  back to being about the loaded image and nothing else.
 
-- **Volume and Isosurface work on a 3D omics dataset.** Those modes take their
-  voxels from `SpatialDataPort.getVolume()` when the dataset carries a registered
-  volume, so a 3D omics dataset with no image pyramid behind it can still be
-  raymarched or contoured. The dataset's volume wins over the loaded image: it is
-  a single scalar field, and if the dataset carries volumetric data that is what
-  these modes are being asked to show. `requiresStack` is satisfied by a spatial
-  volume as well as by a z-stack.
+  What the removed path did carry was the volume's real voxel size, and losing that
+  would render 40 x 40 x 200 µm anatomy as a cube-aspect brick. So `IImageMetadata`
+  gains **`mppZ`** — the spacing between slices, the z counterpart of `mppX`/`mppY`
+  — and a stack declaring all three gets its true physical extent as the world box.
+  A stack without it (a WSI z-series, which has no slice spacing to report) keeps
+  the resolution-invariant reference box, which is shape-only. Any z-stack that
+  knows its spacing benefits, not just a spatial volume.
 
-  A declared voxel size is honoured rather than overwritten. The existing
-  reference-box arithmetic exists to make an image stack's proportions
-  independent of the decimate factor; applying it to a fixed grid would discard
-  real anisotropy and render 40 × 40 × 200 µm voxels as a cube-aspect brick.
+  The axis labels are measured from the image's own extent rather than from the
+  world box, which is what they always meant: reading a pixel count off a box that
+  is already in µm and multiplying by mpp scaled it twice, so 11 mm of mouse brain
+  was labelled `44.0 cm`. Z is physical too when `mppZ` is known (`Z · 1.5 cm`
+  instead of `Z · 76 px`), and still reads in slices when it is not — an unstated
+  thickness must not become a measurement.
 
 - **Region tools in the 3D cloud's toolbar.** They were hidden, because the
   toolbar gates them on `isHeatmap`, which means "2D view" and is false for any

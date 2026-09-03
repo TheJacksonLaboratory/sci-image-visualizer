@@ -376,32 +376,28 @@ describe('VisualizerComponent (UI shell)', () => {
         for (let i = 0; i < 30; i++) await new Promise<void>((resolve) => setTimeout(resolve, 0));
       };
 
-      it('offers Volume and Isosurface with no image loaded at all', () => {
+      it('reaches Volume and Isosurface through the published stack, not a second source', () => {
+        // Those modes raymarch the IMAGE STACK and nothing else. What puts them on
+        // offer for a 3D omics dataset is that its volume is published AS a
+        // grayscale z-stack image — so with no image there is nothing to raymarch,
+        // and with one there is, by the ordinary gates.
         plotService.getPlotTypeDescriptors.mockReturnValue([
           PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_VOLUME],
           PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_ISOSURFACE],
         ] as any[]);
         const c = makeComponent(plotService, port);
-        (c as any).imageInfo = undefined; // a cloud with no imageRef loads no image
+        (c as any).imageInfo = undefined; // before the volume image is published
         (c as any).watchSpatialDataset();
         dataset$.next(VOLUME_DATASET);
+        expect(c.plotTypeOptions.length).toBe(0);
+
+        // …and after: the shape `buildVolumeStackImage` publishes.
+        (c as any).imageInfo = { isStack: true, isGrayscale: true };
+        (c as any).computePlotTypeOptions();
 
         const offeredTypes = c.plotTypeOptions.map((d) => d.type);
         expect(offeredTypes).toContain(PlotType.NAPARI_VOLUME);
         expect(offeredTypes).toContain(PlotType.NAPARI_ISOSURFACE);
-      });
-
-      it('holds them back when the same dataset carries no volume', () => {
-        plotService.getPlotTypeDescriptors.mockReturnValue([
-          PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_VOLUME],
-          PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_ISOSURFACE],
-        ] as any[]);
-        const c = makeComponent(plotService, port);
-        (c as any).imageInfo = undefined;
-        (c as any).watchSpatialDataset();
-        dataset$.next({ ...VOLUME_DATASET, volume: undefined });
-
-        expect(c.plotTypeOptions.length).toBe(0);
       });
 
       it('publishes the volume AS the image and opens the 2D Image view on it', async () => {
@@ -496,21 +492,6 @@ describe('VisualizerComponent (UI shell)', () => {
         expect(plotService.setPlotType).toHaveBeenCalledWith(PlotType.SPATIAL_OMICS_3D);
       });
 
-      it('does not open the grayscale gate for a mode that cannot read the volume', () => {
-        // Contour is grayscale-gated but image-sourced: a spatial volume is not a
-        // source it can draw from, so the relaxation must not reach it.
-        plotService.getPlotTypeDescriptors.mockReturnValue([
-          PLOT_TYPE_DESCRIPTORS[PlotType.CONTOUR],
-          PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_VOLUME],
-        ] as any[]);
-        const c = makeComponent(plotService, port);
-        (c as any).imageInfo = { isStack: false, isGrayscale: false };
-        (c as any).watchSpatialDataset();
-        dataset$.next(VOLUME_DATASET);
-
-        expect(c.plotTypeOptions.some((d) => d.type === PlotType.NAPARI_VOLUME)).toBe(true);
-        expect(c.plotTypeOptions.some((d) => d.type === PlotType.CONTOUR)).toBe(false);
-      });
     });
   });
 

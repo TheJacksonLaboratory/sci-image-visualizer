@@ -1166,45 +1166,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     }
   }
 
-  /**
-   * The active spatial dataset's registered volume, shaped like an assembled image volume.
-   *
-   * Lets the existing Volume and Isosurface modes render a 3D omics dataset: the voxels come from
-   * `SPATIAL_DATA_PORT` rather than the slice endpoint, but everything downstream — colormap,
-   * contrast, iso threshold, the channel-state subscription — is the same path an image stack
-   * takes. An isosurface of an averaged template is a brain surface, which is a genuinely useful
-   * thing to see the cloud inside.
-   *
-   * Null whenever there is no dataset, no volume, or no port method for it, which sends the
-   * caller back to the image-stack path.
-   */
-  private async assembleSpatialVolume(): Promise<
-    { data: Uint8Array; width: number; height: number; depth: number;
-      voxelSize: [number, number, number] } | null
-  > {
-    const port = this.spatialData;
-    if (!port?.getVolume) return null;
-    // Read the dataset lazily rather than holding a mirror: the port publishes
-    // its current value on subscribe (the selector relies on that too), so this
-    // resolves synchronously and there is no subscription to own.
-    const dataset = await firstValueFrom(port.getDataset$());
-    const meta = dataset?.volume;
-    if (!meta) return null;
-    try {
-      const data = await port.getVolume();
-      return {
-        data,
-        width: meta.width,
-        height: meta.height,
-        depth: meta.depth,
-        voxelSize: meta.voxelSize,
-      };
-    } catch (err) {
-      console.warn('[napari-js] spatial volume unavailable for the volume view', err);
-      return null;
-    }
-  }
-
   /** Convert a napari-js `Histogram` (bin count + min/max) to the pane's `IHistogram` (bin edges). */
   private toIHistogram(h: { counts: Uint32Array; bins: number; min: number; max: number }): IHistogram {
     const span = h.max - h.min || 1;
@@ -1237,16 +1198,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const rendering: 'iso' | 'mip' = isNapariIsosurface(plotType) ? 'iso' : 'mip';
     const states = this.store.currentChannelStates();
 
-    // A spatial dataset can supply the volume itself — a registered atlas template
-    // rather than an image stack — so Volume and Isosurface work on a 3D omics
-    // dataset with no pyramid behind it. It WINS over the image: it is a single
-    // scalar field, and if the dataset carries volumetric data that is what these
-    // modes are being asked to show, whatever the loaded image happens to have.
-    const spatialVol = await this.assembleSpatialVolume();
-    const useSpatial = !!spatialVol;
-
     this.volumeChannelData.clear();
-    this.volumeMultichannel = multichannel && !useSpatial;
+    this.volumeMultichannel = multichannel;
     this.imageMode = this.volumeMultichannel ? 'multichannel' : 'grayscale';
     const view = new MultiChannelVolumeView(viewer);
     this.volumeView = view;
@@ -1259,7 +1212,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.stackLoading$.next(true);
     this.stackLoadingProgress$.next(0);
     try {
-      if (multichannel && !useSpatial) {
+      if (multichannel) {
         for (let c = 0; c < channelCount; c++) {
           const vol = await this.assembleVolume(info, res, c);
           if (!vol) continue;
@@ -1279,7 +1232,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
           });
         }
       } else {
-        const vol = spatialVol ?? (await this.assembleVolume(info, res));
+        const vol = await this.assembleVolume(info, res);
         if (vol) {
           dims = vol;
           this.volumeChannelData.set(0, vol.data);
@@ -1292,9 +1245,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
             colormap: this.volumeColormap(st),
             contrastLimits: [st?.min ?? 0, st?.max ?? 255],
             gamma: st?.gamma ?? 1,
-            // Anisotropic on purpose here: 40x40x200um voxels would render as a
-            // cube-aspect brick without this, squashing the whole brain.
-            ...(spatialVol?.voxelSize ? { voxelSize: spatialVol.voxelSize } : {}),
           });
         }
       }
@@ -1310,24 +1260,34 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // to shrink at higher resolution. Instead anchor the in-plane long side to a fixed reference and
     // let Z span the full slice count; the box shape is then identical at every decimate factor. The
     // per-axis `voxelSize` (napari `scale`) maps the sampled grid onto that fixed world box.
-    // A dataset-supplied volume already knows its physical voxel size, so its box
-    // is simply dims x voxelSize. The reference-box arithmetic below exists to make
-    // an IMAGE stack's proportions independent of the decimate factor, which a
-    // fixed grid does not need — and applying it would discard real anisotropy
-    // (40x40x200um) and render the brain as a cube-aspect brick.
+    // A stack that declares its physical spacing on ALL THREE axes gets its true
+    // extent as the world box — the only way anisotropy survives, and what makes a
+    // resampled 40 x 40 x 200 µm volume read as a brain instead of a cube-aspect
+    // brick. It needs none of the reference-box arithmetic: a physical box is
+    // already independent of the decimate factor.
+    //
+    // Everything else keeps that arithmetic. Sizing the box by the sampled voxel
+    // counts made higher in-plane resolution grow X/Y while the depth stayed the
+    // (constant) slice count — so Z appeared to shrink at higher resolution.
+    // Anchoring the in-plane long side to a fixed reference and letting Z span the
+    // full slice count makes the box shape identical at every decimate factor.
+    const meta = this.loaded?.imageInfo.imageMeta?.[0];
+    const mppXYZ: [number, number, number] | null =
+      meta?.mppX && meta?.mppY && meta?.mppZ ? [meta.mppX, meta.mppY, meta.mppZ] : null;
+    // The image's DECLARED pixel dimensions, which is what mpp is per: the sampled
+    // dims are decimated, so sizing a physical box by them would make the world
+    // box depend on the resolution the user happens to be viewing at.
+    const fullW = this.descriptor?.width ?? meta?.x ?? dims.width;
+    const fullH = this.descriptor?.height ?? meta?.y ?? dims.height;
+    const fullD = meta?.z || this.loaded?.imageInfo.urls?.length || dims.depth;
     let world: { width: number; height: number; depth: number };
-    if (spatialVol) {
-      const [vx, vy, vz] = spatialVol.voxelSize;
+    if (mppXYZ) {
       world = {
-        width: dims.width * vx,
-        height: dims.height * vy,
-        depth: dims.depth * vz,
+        width: fullW * mppXYZ[0],
+        height: fullH * mppXYZ[1],
+        depth: fullD * mppXYZ[2],
       };
     } else {
-      const fullW = this.descriptor?.width ?? dims.width;
-      const fullH = this.descriptor?.height ?? dims.height;
-      const fullD =
-        this.loaded?.imageInfo.imageMeta?.[0]?.z || this.loaded?.imageInfo.urls?.length || dims.depth;
       const fullLong = Math.max(1, fullW, fullH);
       world = {
         width: (fullW * VOLUME_WORLD_INPLANE_REF) / fullLong,
@@ -1354,13 +1314,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
 
     // 3D coordinate-axes / scale gizmo + labels, sharing the volume's world box so the gizmo tracks
     // the rendered proportions. Physical scale text still comes from the FULL image extent.
-    const mppX = this.descriptor?.mppX || this.loaded?.imageInfo.imageMeta?.[0]?.mppX || 0;
     this.axesLayer = viewer.addAxes(world.width, world.height, worldZ, { visible: this.axesVisible });
     if (this.host) {
       this.axesLabels = new NapariAxesLabels(
         this.host,
         viewer.camera3d,
-        this.buildAxesLabels({ width: world.width, height: world.height, depth: worldZ }, mppX),
+        this.buildAxesLabels({ width: world.width, height: world.height, depth: worldZ }),
       );
       this.axesLabels.setVisible(this.axesVisible);
       // In-view drag handle at the TOP END OF THE Z AXIS (the box's min-XY corner, where the blue
@@ -1396,9 +1355,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       layer.voxelSize = [sx, sy, vsZ];
     }
     if (this.axesLayer) this.axesLayer.depth = worldZ;
-    const mppX = this.descriptor?.mppX || this.loaded?.imageInfo.imageMeta?.[0]?.mppX || 0;
     this.axesLabels?.updateAnchors(
-      this.buildAxesLabels({ width: base.width, height: base.height, depth: worldZ }, mppX),
+      this.buildAxesLabels({ width: base.width, height: base.height, depth: worldZ }),
     );
     this.zHandle?.reposition();
     this.viewer?.requestRender();
@@ -1409,21 +1367,46 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    *  physical µm when µm/pixel is known, else pixel (X/Y) / slice (Z) counts. */
   private buildAxesLabels(
     vol: { width: number; height: number; depth: number },
-    mppX: number,
   ): AxisLabelSpec[] {
     const hx = vol.width / 2;
     const hy = vol.height / 2;
     const hz = vol.depth / 2;
-    const descW = this.descriptor?.width ?? vol.width;
-    const descH = this.descriptor?.height ?? vol.height;
-    const slices =
-      this.loaded?.imageInfo.imageMeta?.[0]?.z || this.loaded?.imageInfo.urls?.length || vol.depth;
-    const len = (px: number): string => (mppX > 0 ? formatUm(px * mppX) : `${px} px`);
+    // Measured from the IMAGE's own extent, never from the world box: the box is a
+    // shape (and for a physically sized volume it is already in µm, so reading a
+    // pixel count off it and multiplying by mpp would scale the label twice).
+    const { px, mpp } = this.imageExtent();
+    const len = (n: number, um: number): string => (um > 0 ? formatUm(n * um) : `${n} px`);
     return [
-      { anchor: [hx, -hy, -hz], text: `X · ${len(descW)}`, color: '#ed4545' },
-      { anchor: [-hx, hy, -hz], text: `Y · ${len(descH)}`, color: '#4dd959' },
-      { anchor: [-hx, -hy, hz], text: `Z · ${slices} px`, color: '#668cff' },
+      { anchor: [hx, -hy, -hz], text: `X · ${len(px[0], mpp[0])}`, color: '#ed4545' },
+      { anchor: [-hx, hy, -hz], text: `Y · ${len(px[1], mpp[1])}`, color: '#4dd959' },
+      // Physical when the stack declares its slice spacing (`mppZ`) — a resampled
+      // volume knows how thick it is; a plain z-stack can only say how many slices.
+      { anchor: [-hx, -hy, hz], text: `Z · ${len(px[2], mpp[2])}`, color: '#668cff' },
     ];
+  }
+
+  /**
+   * The image's declared extent in pixels/slices, and its physical spacing per
+   * axis in µm (0 = undeclared, and then that axis reads in pixels).
+   *
+   * One place, because the volume world box and the axis labels have to agree
+   * about what the image's real dimensions are — the sampled grid is decimated and
+   * says nothing about either.
+   */
+  private imageExtent(): { px: [number, number, number]; mpp: [number, number, number] } {
+    const meta = this.loaded?.imageInfo.imageMeta?.[0];
+    const dims = this.volumeDims;
+    const mppX = this.descriptor?.mppX || meta?.mppX || 0;
+    return {
+      px: [
+        this.descriptor?.width ?? meta?.x ?? dims?.width ?? 1,
+        this.descriptor?.height ?? meta?.y ?? dims?.height ?? 1,
+        meta?.z || this.loaded?.imageInfo.urls?.length || dims?.depth || 1,
+      ],
+      // A descriptor that reports only mppX is square-pixel by convention, which is
+      // what the 2D scale bar already assumes of it.
+      mpp: [mppX, this.descriptor?.mppY || meta?.mppY || mppX, meta?.mppZ || 0],
+    };
   }
 
   /**

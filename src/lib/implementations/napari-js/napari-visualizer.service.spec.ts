@@ -1150,33 +1150,118 @@ describe('NapariVisualizerService', () => {
     });
   });
 
-  describe('Volume / Isosurface from a spatial dataset', () => {
+  describe('Volume / Isosurface world box', () => {
     const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-    it('renders the dataset\'s registered volume when there is no image stack', async () => {
-      // A 3D omics dataset is volumetric data without a pyramid behind it, so the
-      // voxels come from the port instead of the slice endpoint — but everything
-      // downstream (colormap, contrast, iso threshold) is the same path.
+    /** Mount the volume view over `info` and return the volume layer built.
+     *  A `tiled: false` stack fetches each slice through SimpleSliceAccessService
+     *  (HttpClient), not the raw `globalThis.fetch` this suite mocks — so stub it
+     *  here, or the assembly awaits responses that never come. */
+    async function mountVolume(info: IImageInfo) {
+      jest.spyOn(TestBed.inject(HttpClient), 'get').mockReturnValue(of(new Blob()));
+      const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+      const div = document.createElement('div');
+      div.id = 'vol-box-host';
+      document.body.appendChild(div);
+      const loaded = await service.load(info, 0);
+      await service.plot('vol-box-host', loaded, info, 600, PlotType.NAPARI_VOLUME);
+      await flush();
+      const layer = addVolume.mock.results.at(-1)?.value;
+      document.body.removeChild(div);
+      return layer;
+    }
+
+    it('takes its voxels from the IMAGE STACK, not from a spatial dataset', async () => {
+      // These modes raymarch the stack and nothing else. A 3D omics dataset reaches
+      // them because its registered volume is published AS a grayscale z-stack
+      // image — not through a second voxel source behind the same modes.
       spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
       dataset$.next(spatialDatasetVolume());
-      const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
 
-      const div = document.createElement('div');
-      div.id = 'vol-host';
-      document.body.appendChild(div);
-      const loaded = await service.load(imageInfo(), 0);
-      await service.plot('vol-host', loaded, imageInfo(), 600, PlotType.NAPARI_ISOSURFACE);
-      await flush();
+      await mountVolume(imageInfo());
 
-      expect(spatialPort.getVolume).toHaveBeenCalled();
-      const layer = addVolume.mock.results.at(-1)?.value;
-      expect([layer.width, layer.height, layer.depth]).toEqual([4, 6, 10]);
-      // Anisotropic voxels must carry through, or a 40x40x200um grid renders as a
-      // cube-aspect brick and squashes the anatomy.
-      expect(layer.voxelSize).toEqual([100, 200, 400]);
+      expect(spatialPort.getVolume).not.toHaveBeenCalled();
+    });
 
-      service.unsubscribe();
-      document.body.removeChild(div);
+    it('gives a stack that declares mppX/Y/Z its true physical proportions', async () => {
+      // 40 x 40 x 200 µm voxels: the box has to come out 11 x 11 x 15.2 mm, or the
+      // anatomy renders as a cube-aspect brick.
+      const layer = await mountVolume(imageInfo({
+        // `tiled: false` is the shape a published volume image has: complete
+        // per-slice images, no server pyramid to describe.
+        tiled: false,
+        urls: Array.from({ length: 76 }, (_, z) => `u${z}`),
+        imageMeta: [
+          { channelCount: 1, rgbChannels: 1, x: 275, y: 275, z: 76, mppX: 40, mppY: 40, mppZ: 200 },
+        ],
+      }));
+
+      // voxelSize maps the SAMPLED grid onto the world box, so the box itself is
+      // voxelSize x sampled dims — the assertion that survives any decimate factor.
+      const [vx, vy, vz] = layer.voxelSize;
+      expect(vx * layer.width).toBeCloseTo(275 * 40, 3);
+      expect(vy * layer.height).toBeCloseTo(275 * 40, 3);
+      expect(vz * layer.depth).toBeCloseTo(76 * 200, 3);
+      // Anisotropic, and in the right direction: z voxels are the long ones.
+      expect(vz / vx).toBeGreaterThan(1);
+    });
+
+    it('labels the axes from the physical extent, once — not the world box', async () => {
+      // Regression: the label maths read a pixel count off the world box and
+      // multiplied by mpp. Once the box is physical (µm) that scaled it twice —
+      // 11 mm of mouse brain came out as "44.0 cm" — and Z, never physical at all,
+      // read "76 px" for a volume that knows it is 15.2 mm deep.
+      await mountVolume(imageInfo({
+        tiled: false,
+        urls: Array.from({ length: 76 }, (_, z) => `u${z}`),
+        imageMeta: [
+          { channelCount: 1, rgbChannels: 1, x: 275, y: 275, z: 76, mppX: 40, mppY: 40, mppZ: 200 },
+        ],
+      }));
+
+      const labels = (service as unknown as {
+        buildAxesLabels: (v: { width: number; height: number; depth: number }) => { text: string }[];
+      }).buildAxesLabels({ width: 1, height: 1, depth: 1 }).map((l) => l.text);
+
+      // 275 x 40 µm = 11 000 µm and 76 x 200 µm = 15 200 µm, formatted in cm at
+      // this scale — a mouse brain, not the 44.0 cm the double-scaled label gave.
+      expect(labels[0]).toBe('X · 1.1 cm');
+      expect(labels[1]).toBe('Y · 1.1 cm');
+      expect(labels[2]).toBe('Z · 1.5 cm');
+    });
+
+    it('labels Z in slices when the stack declares no slice spacing', async () => {
+      await mountVolume(imageInfo({
+        tiled: false,
+        urls: Array.from({ length: 8 }, (_, z) => `u${z}`),
+        imageMeta: [
+          { channelCount: 1, rgbChannels: 1, x: 275, y: 275, z: 8, mppX: 40, mppY: 40 },
+        ],
+      }));
+
+      const labels = (service as unknown as {
+        buildAxesLabels: (v: { width: number; height: number; depth: number }) => { text: string }[];
+      }).buildAxesLabels({ width: 1, height: 1, depth: 1 }).map((l) => l.text);
+
+      expect(labels[0]).toBe('X · 1.1 cm');
+      expect(labels[2]).toBe('Z · 8 px'); // unknown thickness — say so, don't invent one
+    });
+
+    it('falls back to the shape-only reference box when no slice spacing is declared', async () => {
+      // Most stacks (a WSI z-series) have no mppZ to offer. The box is then chosen
+      // to be independent of the decimate factor rather than physically true.
+      const layer = await mountVolume(imageInfo({
+        tiled: false,
+        urls: Array.from({ length: 8 }, (_, z) => `u${z}`),
+        imageMeta: [
+          { channelCount: 1, rgbChannels: 1, x: 275, y: 275, z: 8, mppX: 40, mppY: 40 },
+        ],
+      }));
+
+      const [vx, , vz] = layer.voxelSize;
+      // Depth spans the slice count, not a physical extent.
+      expect(vz * layer.depth).toBeCloseTo(8, 3);
+      expect(vx * layer.width).not.toBeCloseTo(275 * 40, 3);
     });
   });
 

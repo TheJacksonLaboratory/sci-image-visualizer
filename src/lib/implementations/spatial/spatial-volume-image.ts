@@ -100,6 +100,10 @@ export async function buildVolumeStackImage(
   const perUnit = dataset.micronsPerUnit;
   const mppX = perUnit != null ? meta.voxelSize[0] * perUnit : null;
   const mppY = perUnit != null ? meta.voxelSize[1] * perUnit : null;
+  // The z counterpart, which is what carries the volume's anisotropy into the
+  // Volume / Isosurface views: they raymarch the image stack, and a stack with no
+  // declared slice spacing can only be given a shape-only world box.
+  const mppZ = perUnit != null ? meta.voxelSize[2] * perUnit : null;
 
   return {
     urls,
@@ -117,7 +121,7 @@ export async function buildVolumeStackImage(
       // that changed per load would re-fetch a volume that never moved.
       fileName: `${dataset.name} · reference volume`,
       imageMeta: [
-        { channelCount: 1, rgbChannels: 1, x: width, y: height, z: depth, mppX, mppY },
+        { channelCount: 1, rgbChannels: 1, x: width, y: height, z: depth, mppX, mppY, mppZ },
       ],
       // Blob URLs are complete images: OSD must open them directly, not ask a tile
       // server for a pyramid that does not exist.
