@@ -84,6 +84,9 @@ export interface Points3DLayer {
   /** One value for the whole layer — the 3D layer has no per-point alpha, which
    *  is why the spatial 3D path draws a selection as a second layer. */
   opacity: number;
+  /** Layer-level visibility, from the real `Layer` base: what the 3D panel's
+   *  show/hide toggles drive, so a test can read what the scene would draw. */
+  visible: boolean;
   name?: string;
   /** Captured so tests can assert the interleaved x,y,z layout and the scalars. */
   positions?: Float32Array;
@@ -495,7 +498,7 @@ export class Viewer {
     values?: Float32Array,
     opts?: {
       colormap?: unknown; contrastLimits?: [number, number]; size?: number;
-      opacity?: number; name?: string;
+      opacity?: number; name?: string; visible?: boolean;
     },
   ): Points3DLayer {
     const o = opts ?? {};
@@ -504,6 +507,7 @@ export class Viewer {
       contrastLimits: o.contrastLimits ?? [0, 255],
       size: o.size ?? 6,
       opacity: o.opacity ?? 1,
+      visible: o.visible ?? true,
       name: o.name,
       positions,
       values,

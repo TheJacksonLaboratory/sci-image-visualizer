@@ -11,6 +11,34 @@ file was added.
 
 ### Added
 
+- **The 3D scene's three layers can be shown and hidden independently.** The
+  reference volume, the observation cloud and the cluster density volumes occupy
+  the same space, so any two of them hide each other — and 374k points drawn as a
+  stack of discs hide the density volumes almost completely, which is the one thing
+  the volumes exist to show. A **Show** group in the `Spatial omics 3D` panel now
+  carries `Reference volume` and `Observations` alongside the existing
+  `Cluster density volumes`, so every combination is reachable: the estimated
+  fields alone, the fields with the anatomy behind them, the anatomy on its own.
+
+  Visibility, not construction — the layers stay built, so a toggle is immediate
+  and never re-fetches a 100 MB template or re-runs a rasterisation. (The density
+  checkbox remains the exception: building six volumes is not free, so it still
+  gates the work.) Neither toggle re-frames the orbit camera.
+
+- **`One section at a time`** restricts the cloud to a single imaged section, with
+  a slider over the sections the dataset actually has (53 for the ABC 1-in-10
+  atlas). This is the view that answers whether the estimated field follows the
+  cells that were measured: one measured plane, drawn over the estimate, with the
+  volumes still readable between the sections. A selection highlight is restricted
+  to the same section, so it cannot float where its own cells are not drawn.
+
+  Sections come from the distinct z of the observations — every cell on a slide
+  shares that slide's registered z exactly, so no section-label column and no
+  binning is needed. A dataset whose z is continuous rather than sectioned is
+  reported as having no sections and is offered no section control, rather than
+  having one invented for it. `ISpatialControls.sampledSections()` exposes the
+  list; the scan is memoized, so the renderer and the panel share one pass.
+
 - **Gene map — a gene's expression drawn as a field under the cells.** A scatter
   coloured by a gene answers "which cells express it"; the eye cannot integrate
   thousands of small dots into a territory, so it does not answer "where is it

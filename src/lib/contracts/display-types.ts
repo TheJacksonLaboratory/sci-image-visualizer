@@ -68,6 +68,31 @@ export interface SpatialViewState {
    *  handful of saturated observations don't flatten the rest. */
    percentileClip: [number, number];
   /**
+   * What the 3D scene draws. The three things in it — the reference volume, the
+   * observation cloud and the cluster density volumes — occupy the same space, so
+   * any two of them hide each other to some degree. These are independent because
+   * the useful views are the combinations: the volumes alone to read an estimated
+   * distribution, one section's cells over them to check that estimate against the
+   * measurement, the anatomy alone to find a landmark.
+   *
+   * Visibility only — the layers stay built, so toggling one back on is immediate
+   * and does not re-run a rasterisation. {@link densityVolume} is the exception and
+   * genuinely gates construction, because building six volumes is not free.
+   */
+  showVolume: boolean;
+  /** Draw the observation cloud (3D). */
+  showPoints: boolean;
+  /**
+   * Restrict the cloud to ONE imaged section, by index into the dataset's sampled
+   * sections; null draws every section.
+   *
+   * The whole cloud is a stack of discs that hides whatever is drawn between them.
+   * One section at a time is the view that answers "does the estimated field
+   * actually follow the cells I measured" — and it is only offered for data that
+   * really is sectioned (see `sampledSections`).
+   */
+  pointSection: number | null;
+  /**
    * Draw each cluster as a translucent DENSITY volume alongside the 3D cloud.
    *
    * Serial sections hundreds of microns apart make a cloud hard to read as an
@@ -106,6 +131,9 @@ export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
   opacity: 1,
   logScale: false,
   percentileClip: [0.01, 0.99],
+  showVolume: true,
+  showPoints: true,
+  pointSection: null,
   densityVolume: false,
   densitySmoothing: 1,
   geneMap: false,

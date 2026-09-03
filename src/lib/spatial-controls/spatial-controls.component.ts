@@ -120,6 +120,13 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
    *  element and expanding the second panel cannot scroll the first one's chart. */
   readonly chartsBodyId = `sc-charts-body-${++controlsInstanceSeq}`;
 
+  /**
+   * The dataset's imaged section positions, or null when its z is continuous
+   * rather than sectioned. Read once per dataset — the scan walks the z of every
+   * observation, so it must not sit in a template getter.
+   */
+  sections: Float32Array | null = null;
+
   private colormap: ColormapNode | null = null;
   private reverse = false;
   /** Guards the gene typeahead and the legend/colour-bar rebuild: both are async
@@ -146,6 +153,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       const names = dataset?.features?.names;
       this.genesAreRemote = !!dataset?.features && !names;
       this.geneOptions = names ? names.map(geneOption) : [];
+      this.sections = this.controls?.sampledSections() ?? null;
       void this.refreshKey();
     }));
 
@@ -337,6 +345,52 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   /** True while a gene is the colour source — the only thing a gene map can map. */
   get canMapGene(): boolean {
     return this.view.colorBy?.kind === 'feature';
+  }
+
+  // ── what the 3D scene draws ─────────────────────────────────────────────
+  // The volume, the cloud and the density volumes share one space, so each one
+  // hides the others to some degree. Independent toggles because the useful views
+  // are the combinations, not a single "3D mode".
+
+  onShowVolume(on: boolean): void {
+    this.controls?.setViewState({ showVolume: on });
+  }
+  onShowPoints(on: boolean): void {
+    this.controls?.setViewState({ showPoints: on });
+  }
+  /** The "one section at a time" switch: null restores the whole stack. */
+  onOneSection(on: boolean): void {
+    if (!on) {
+      this.controls?.setViewState({ pointSection: null });
+      return;
+    }
+    // Open in the middle of the stack rather than on the first section, which for
+    // a brain is a nearly empty olfactory-bulb slide.
+    const middle = this.sections ? Math.floor((this.sections.length - 1) / 2) : 0;
+    this.controls?.setViewState({ pointSection: middle });
+  }
+  onPointSection(value: number | undefined): void {
+    if (value === undefined) return;
+    this.controls?.setViewState({ pointSection: value });
+  }
+  /** True while the cloud is restricted to a single section. */
+  get oneSection(): boolean {
+    return this.view.pointSection != null;
+  }
+  /** Highest section index the slider can reach. */
+  get lastSection(): number {
+    return Math.max(0, (this.sections?.length ?? 1) - 1);
+  }
+  /** "12 of 53" — 1-based, because the sections are slides, not array slots. */
+  get sectionLabel(): string {
+    const total = this.sections?.length ?? 0;
+    if (!total) return '';
+    const at = Math.max(0, Math.min(total - 1, this.view.pointSection ?? 0));
+    return `${at + 1} of ${total}`;
+  }
+  /** Whether this dataset has sections to pick from at all. */
+  get isSectioned(): boolean {
+    return (this.sections?.length ?? 0) > 1;
   }
 
   onDensityVolume(on: boolean): void {

@@ -91,6 +91,9 @@ describe('SpatialControlsComponent', () => {
         return 1;
       }),
       clearSelection: jest.fn(() => selection$.next(emptySelection())),
+      // Three imaged sections, so the "one section at a time" control has
+      // something to step through.
+      sampledSections: jest.fn(() => Float32Array.from([0, 10, 20])),
     } as unknown as jest.Mocked<ISpatialControls>;
   });
 
@@ -314,6 +317,46 @@ describe('SpatialControlsComponent', () => {
       (controls.setViewState as jest.Mock).mockClear();
       component.onGeneMapOpacity(undefined);
       expect(controls.setViewState).not.toHaveBeenCalled();
+    });
+
+    it('writes the volume and cloud visibility independently', () => {
+      // The point of separate toggles: every combination is reachable, including
+      // the density volumes alone.
+      component.onShowVolume(false);
+      expect(controls.setViewState).toHaveBeenCalledWith({ showVolume: false });
+      component.onShowPoints(false);
+      expect(controls.setViewState).toHaveBeenCalledWith({ showPoints: false });
+      expect(component.view.showVolume).toBe(false);
+      expect(component.view.showPoints).toBe(false);
+    });
+
+    it('opens the section picker mid-stack and releases it back to every section', () => {
+      expect(component.oneSection).toBe(false);
+      expect(component.isSectioned).toBe(true); // three sections in the mock
+      expect(component.lastSection).toBe(2);
+
+      component.onOneSection(true);
+      // The middle slide, not the first: for a brain the first is a nearly empty
+      // olfactory-bulb section, which reads as a broken control.
+      expect(controls.setViewState).toHaveBeenCalledWith({ pointSection: 1 });
+      expect(component.oneSection).toBe(true);
+      expect(component.sectionLabel).toBe('2 of 3');
+
+      component.onPointSection(2);
+      expect(component.sectionLabel).toBe('3 of 3');
+
+      component.onOneSection(false);
+      expect(controls.setViewState).toHaveBeenCalledWith({ pointSection: null });
+      expect(component.oneSection).toBe(false);
+    });
+
+    it('offers no section picker for a dataset whose z is not sectioned', () => {
+      component.sections = null;
+      expect(component.isSectioned).toBe(false);
+      expect(component.sectionLabel).toBe('');
+      // A single section is not a stack to step through either.
+      component.sections = Float32Array.from([5]);
+      expect(component.isSectioned).toBe(false);
     });
 
     it('writes the density toggle and its bandwidth, ignoring an empty slider', () => {

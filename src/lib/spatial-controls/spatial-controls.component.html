@@ -130,8 +130,43 @@
       </div>
     </div>
 
-    <!-- 3D only: a density field needs a z to estimate along, and in 2D the plane
-         already shows its own cells. -->
+    <!-- 3D only: the volume, the cloud and the density volumes occupy the same
+         space, so each hides the others. Independent toggles, because the useful
+         views are the combinations — the field alone, one section's cells over it,
+         the anatomy alone. -->
+    <div class="sc-section" *ngIf="is3d">
+      <span class="sc-lbl">Show</span>
+      <div class="sc-row" *ngIf="ds.volume">
+        <p-checkbox [binary]="true" [ngModel]="view.showVolume"
+                    (onChange)="onShowVolume($event.checked)"
+                    label="Reference volume"
+                    pTooltip="The registered anatomy the observations sit in"
+                    tooltipPosition="top"></p-checkbox>
+      </div>
+      <div class="sc-row">
+        <p-checkbox [binary]="true" [ngModel]="view.showPoints"
+                    (onChange)="onShowPoints($event.checked)"
+                    label="Observations"
+                    pTooltip="The measured cells. Hide them to read the density volumes underneath"
+                    tooltipPosition="top"></p-checkbox>
+      </div>
+      <!-- Only for data that really is sectioned; a continuous z has no sections
+           to step through. -->
+      <div class="sc-row" *ngIf="view.showPoints && isSectioned">
+        <p-checkbox [binary]="true" [ngModel]="oneSection"
+                    (onChange)="onOneSection($event.checked)"
+                    label="One section at a time"
+                    pTooltip="Draw a single imaged section's cells, so the density volumes between the sections stay visible"
+                    tooltipPosition="top"></p-checkbox>
+      </div>
+      <div class="sc-row" *ngIf="view.showPoints && isSectioned && oneSection">
+        <span class="sc-lbl">Section</span>
+        <p-slider [ngModel]="view.pointSection" [min]="0" [max]="lastSection" [step]="1"
+                  (onChange)="onPointSection($event.value)"></p-slider>
+        <span class="sc-val">{{ sectionLabel }}</span>
+      </div>
+    </div>
+
     <div class="sc-section" *ngIf="is3d">
       <div class="sc-hint" *ngIf="exceedsCloudPalette">
         {{ legend?.length }} categories is past the {{ cloudPaletteLimit }} the 3D cloud's

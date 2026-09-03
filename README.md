@@ -239,6 +239,21 @@ translucent cloud so it cannot be mistaken for measurement. The kernel is
 anisotropic (σ along z clears one section gap) and the field is coverage-normalised
 along z, so unimaged planes do not read as empty tissue.
 
+**Show** *(3D mode)* — the reference volume, the observation cloud and the cluster
+density volumes share one space, so any two of them hide each other; 374k points
+drawn as a stack of discs hide the density volumes almost entirely. Each is
+toggled independently, so every combination is reachable — the estimated fields
+alone, the fields with the anatomy behind them, the anatomy on its own. These are
+visibility only: the layers stay built, so a toggle never re-fetches the template
+or re-rasterises a field, and none of them re-frames the orbit camera. (The
+density checkbox is the exception and still gates construction, since building six
+volumes is not free.) **One section at a time** restricts the cloud to a single
+imaged section, which is how you check whether the estimated field follows the
+cells that were actually measured. Sections are the distinct z of the
+observations — every cell on a slide shares that slide's registered z, so no
+section-label column is needed — and a dataset whose z is continuous rather than
+sectioned is offered no section control instead of having one invented for it.
+
 **Gene map** *(2D mode, optional, with a gene selected)* — a checkbox that draws
 the selected gene's expression as a smooth field *beneath* the cells. Coloured
 markers answer "which cells express this gene"; they do not answer "where is it

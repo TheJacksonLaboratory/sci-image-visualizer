@@ -347,6 +347,15 @@ export interface ISpatialControls {
   categoricalView(column: string): Promise<SpatialCategoricalView>;
   /** Names of the categorical columns available to group by. */
   categoricalColumns(): string[];
+  /**
+   * The z positions of the sections the dataset was imaged at, ascending — or
+   * null when its z is continuous rather than sectioned (so there are no sections
+   * to offer) or when there is no dataset.
+   *
+   * Lets a panel offer "one section at a time" for the 3D cloud only where that
+   * means something, and label the chosen one. Scanned once per dataset.
+   */
+  sampledSections(): Float32Array | null;
 
   // ── selection ─────────────────────────────────────────────────────────
   /** The current selection. Empty means "nothing selected", in which case the

@@ -14,6 +14,7 @@ import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-da
 import { SpatialColorBy } from './contracts/display-types';
 import { SpatialDataset, isCategoricalColumn } from './contracts/spatial-dataset.contract';
 import { resolveCategoryColors } from './implementations/spatial/spatial-encoding';
+import { sectionsOf } from './implementations/spatial/spatial-sections';
 import {
   observationsInSlice, volumeImageRef,
 } from './implementations/spatial/spatial-volume-image';
@@ -644,6 +645,13 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       categoricalColumns: () => (this.currentSpatialDataset?.columns ?? [])
         .filter((c) => c.kind === 'categorical')
         .map((c) => c.name),
+
+      // Memoized on the observations object, so the renderer's own lookup and
+      // this one are the same single scan of up to 3.7M z values.
+      sampledSections: () => {
+        const obs = this.currentSpatialDataset?.observations;
+        return obs ? sectionsOf(obs) : null;
+      },
 
       getSelection$: () => this.selectionStore.getSelection$(),
 

@@ -906,6 +906,107 @@ describe('NapariVisualizerService', () => {
       warn.mockRestore();
     });
 
+    describe('scene visibility', () => {
+      const cloud = (layers: any[]) => named(layers, 'observations');
+
+      it('hides the cloud without discarding it, so it comes straight back', async () => {
+        const layers = await mount3d();
+        expect(cloud(layers).visible).toBe(true);
+        const built = addPoints3D.mock.calls.length;
+
+        store.setSpatialView({ showPoints: false });
+        await flush();
+        // The SAME layer, hidden — not a rebuild, and not removed from the scene.
+        expect(cloud(addPoints3D.mock.results.map((r) => r.value)).visible).toBe(false);
+        expect(addPoints3D.mock.calls.length).toBe(built);
+        const inScene = (service as unknown as {
+          viewer: { layers: { items: readonly { name?: string }[] } };
+        }).viewer.layers.items.filter((l) => l.name === 'observations');
+        expect(inScene).toHaveLength(1);
+
+        store.setSpatialView({ showPoints: true });
+        await flush();
+        expect(cloud(addPoints3D.mock.results.map((r) => r.value)).visible).toBe(true);
+        expect(addPoints3D.mock.calls.length).toBe(built);
+      });
+
+      it('hides the reference volume without re-fetching it', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        const getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getVolume = getVolume;
+        await mount3d(spatialDatasetVolume(3));
+        const volume = addVolume.mock.results.map((r) => r.value).at(-1);
+        expect(volume.visible).toBe(true);
+        expect(getVolume).toHaveBeenCalledTimes(1);
+
+        store.setSpatialView({ showVolume: false });
+        await flush();
+        // A 100 MB template must not be re-fetched to un-hide a checkbox, so the
+        // toggle is visibility and nothing else.
+        expect(volume.visible).toBe(false);
+        expect(getVolume).toHaveBeenCalledTimes(1);
+        expect(addVolume.mock.calls.length).toBe(1);
+
+        store.setSpatialView({ showVolume: true });
+        await flush();
+        expect(volume.visible).toBe(true);
+        expect(getVolume).toHaveBeenCalledTimes(1);
+      });
+
+      it('draws one imaged section at a time, cells and scalars together', async () => {
+        // z = 0, 30, 60 — three sections, one observation each.
+        spatialPort.getColumn.mockResolvedValue({
+          meta: { kind: 'continuous', name: 'total_counts' },
+          values: new Float32Array([10, 20, 30]),
+        });
+        await mount3d();
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'total_counts' } });
+        await flush();
+        expect(cloud(addPoints3D.mock.results.map((r) => r.value)).positions).toHaveLength(9);
+
+        store.setSpatialView({ pointSection: 1 });
+        await flush();
+        const one = cloud(addPoints3D.mock.results.map((r) => r.value));
+        // The middle section's single cell: x=10, y=20, z=30.
+        expect(Array.from(one.positions)).toEqual([10, 20, 30]);
+        // …and ITS scalar, not the first observation's — a per-observation vector
+        // against one section's positions would colour each cell by a stranger.
+        expect(one.values).toHaveLength(1);
+
+        store.setSpatialView({ pointSection: null });
+        await flush();
+        expect(cloud(addPoints3D.mock.results.map((r) => r.value)).positions).toHaveLength(9);
+      });
+
+      it('clamps a section index the dataset no longer has', async () => {
+        // The view state outlives the dataset, so a stale index must not blank
+        // the cloud or read past the section list.
+        await mount3d();
+        store.setSpatialView({ pointSection: 99 });
+        await flush();
+        const layer = cloud(addPoints3D.mock.results.map((r) => r.value));
+        // The last section, drawn — not an empty layer.
+        expect(Array.from(layer.positions)).toEqual([20, 40, 60]);
+      });
+
+      it('restricts the selection highlight to the section on screen', async () => {
+        await mount3d();
+        // Select the first and last observations, then show only the middle one.
+        TestBed.inject(SpatialSelectionStore).set({ mask: new Uint8Array([1, 0, 1]), count: 2 });
+        await flush();
+        expect(named(addPoints3D.mock.results.map((r) => r.value), 'selected')).toBeDefined();
+
+        store.setSpatialView({ pointSection: 1 });
+        await flush();
+        // Nothing selected is on this section, so there is no highlight layer to
+        // leave floating where its own cells are not drawn.
+        const inScene = (service as unknown as {
+          viewer: { layers: { items: readonly { name?: string }[] } };
+        }).viewer.layers.items.filter((l) => l.name === 'selected');
+        expect(inScene).toHaveLength(0);
+      });
+    });
+
     describe('cluster density volumes', () => {
       /** A dataset with a volume, a categorical column, and cells on 3 planes. */
       const clustered = (): SpatialDataset => {

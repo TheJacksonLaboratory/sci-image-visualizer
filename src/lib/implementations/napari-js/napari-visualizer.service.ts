@@ -50,6 +50,7 @@ import {
 } from '../spatial/spatial-selection';
 import { observationsInSlice, volumeImageRef } from '../spatial/spatial-volume-image';
 import { defaultSigma, densityGrid, rasterizeDensity } from '../spatial/spatial-density';
+import { observationsInSection, sectionsOf } from '../spatial/spatial-sections';
 import {
   type ExpressionField, colorExpressionField, expressionField,
 } from '../spatial/spatial-expression';
@@ -2117,13 +2118,30 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       this.installSpatial3dScaleBar(viewer, dataset);
     }
 
+    // The reference volume is hidden, not removed: it also fixes the centring
+    // offset every position is computed from, and re-fetching a 100 MB template
+    // to un-hide it would make a checkbox feel like a load.
+    if (this.spatialVolume) this.spatialVolume.visible = view.showVolume;
+
     const scale = view.pointScale > 0 ? view.pointScale : 1;
     const size = NapariVisualizerService.SPATIAL_3D_BASE_SIZE * scale;
-    const values = enc?.values ?? new Float32Array(obs.count);
+    const scalars = enc?.values ?? new Float32Array(obs.count);
     const colormap = enc?.colormap ?? this.spatialFlatColormap();
     const contrastLimits: [number, number] = enc?.contrastLimits ?? [0, 1];
 
-    const key = `${dataset.id}:${obs.count}`;
+    // One imaged section, or the whole stack. The subset IS the geometry, so it
+    // belongs in the geometry key rather than being re-derived per frame — and an
+    // out-of-range index is clamped rather than dropping the cloud, because the
+    // section count changes with the dataset while the view state persists.
+    const sections = sectionsOf(obs);
+    const section =
+      view.pointSection != null && sections && sections.length > 0
+        ? sections[Math.max(0, Math.min(sections.length - 1, view.pointSection))]
+        : null;
+    const shown = section != null ? observationsInSection(obs, section) : null;
+    const shownCount = shown ? shown.length : obs.count;
+
+    const key = `${dataset.id}:${obs.count}:${section ?? 'all'}`;
     // `Points3DLayer.values` is readonly and the layer exposes no dataVersion to
     // bump, so unlike the 2D path a change of colour SOURCE cannot be mutated in
     // — the layer has to be rebuilt. Only the size/opacity/colormap knobs are
@@ -2142,11 +2160,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       // and cache it, so later colour changes rebuild the layer without walking
       // the observations again.
       const [ox, oy, oz] = this.spatialOrigin3d;
-      const positions = new Float32Array(obs.count * 3);
-      for (let i = 0; i < obs.count; i++) {
-        positions[i * 3] = obs.x[i] + ox;
-        positions[i * 3 + 1] = obs.y[i] + oy;
-        positions[i * 3 + 2] = obs.z[i] + oz;
+      const positions = new Float32Array(shownCount * 3);
+      for (let k = 0; k < shownCount; k++) {
+        const i = shown ? shown[k] : k;
+        positions[k * 3] = obs.x[i] + ox;
+        positions[k * 3 + 1] = obs.y[i] + oy;
+        positions[k * 3 + 2] = obs.z[i] + oz;
       }
       this.spatialPositions3d = positions;
     }
@@ -2155,6 +2174,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       if (this.spatialPoints3d) viewer.layers.remove(this.spatialPoints3d);
       this.spatialLayerKey3d = key;
       this.spatialScalarKey3d = scalarKey;
+      // The scalars have to follow the geometry: a per-observation vector against
+      // one section's positions would colour each cell by a stranger's value.
+      const values = shown ? Float32Array.from(shown, (i) => scalars[i]) : scalars;
       this.spatialPoints3d = viewer.addPoints3D(this.spatialPositions3d!, values, {
         name: 'observations',
         colormap,
@@ -2181,28 +2203,40 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       this.spatialPoints3dSel = null;
     }
     if (hasSelection) {
-      const positions = new Float32Array(selection.count * 3);
-      const picked = new Float32Array(selection.count);
+      // Restricted to the shown section like the cloud is: a highlight floating
+      // where its own section is not drawn would be a selection of nothing visible.
       const [sx, sy, sz] = this.spatialOrigin3d;
-      let at = 0;
-      for (let i = 0; i < obs.count; i++) {
-        if (!selection.mask[i]) continue;
-        positions[at * 3] = obs.x[i] + sx;
-        positions[at * 3 + 1] = obs.y[i] + sy;
-        positions[at * 3 + 2] = obs.z[i] + sz;
-        picked[at] = values[i];
-        at++;
+      const picks = new Uint32Array(shownCount);
+      let n = 0;
+      for (let k = 0; k < shownCount; k++) {
+        const i = shown ? shown[k] : k;
+        if (selection.mask[i]) picks[n++] = i;
       }
-      this.spatialPoints3dSel = viewer.addPoints3D(positions, picked, {
-        name: 'selected',
-        colormap,
-        contrastLimits,
-        // A touch larger, so a small selection is findable inside a 3.7M-point
-        // cloud rather than merely brighter.
-        size: size * 1.6,
-        opacity: view.opacity,
-      });
+      if (n > 0) {
+        const positions = new Float32Array(n * 3);
+        const picked = new Float32Array(n);
+        for (let k = 0; k < n; k++) {
+          const i = picks[k];
+          positions[k * 3] = obs.x[i] + sx;
+          positions[k * 3 + 1] = obs.y[i] + sy;
+          positions[k * 3 + 2] = obs.z[i] + sz;
+          picked[k] = scalars[i];
+        }
+        this.spatialPoints3dSel = viewer.addPoints3D(positions, picked, {
+          name: 'selected',
+          colormap,
+          contrastLimits,
+          // A touch larger, so a small selection is findable inside a 3.7M-point
+          // cloud rather than merely brighter.
+          size: size * 1.6,
+          opacity: view.opacity,
+        });
+      }
     }
+
+    // Last, so it also covers the layers this pass just created.
+    if (this.spatialPoints3d) this.spatialPoints3d.visible = view.showPoints;
+    if (this.spatialPoints3dSel) this.spatialPoints3dSel.visible = view.showPoints;
     viewer.requestRender();
   }
 
