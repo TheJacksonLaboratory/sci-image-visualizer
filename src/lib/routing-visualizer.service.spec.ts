@@ -568,6 +568,51 @@ describe('RoutingVisualizerService — spatial controls', () => {
     return r;
   }
 
+  describe('on a dataset change', () => {
+    it('drops a colour source the new dataset cannot satisfy, and keeps the rest', async () => {
+      const dataset$ = new BehaviorSubject<SpatialDataset | null>(dataset);
+      const { router, store } = build(mockPort({ getDataset$: () => dataset$ }));
+      const controls = router.getSpatialControls()!;
+
+      controls.colorByColumn('region');
+      controls.setViewState({ pointScale: 3 });
+      expect(store.currentSpatialView().colorBy).toEqual({ kind: 'column', name: 'region' });
+
+      // A different dataset with no `region`: keeping the source would leave the
+      // map flat while the panel and the charts kept naming it.
+      dataset$.next({
+        ...dataset, id: 'other',
+        columns: [{ kind: 'categorical', name: 'zone', categories: ['Z'] }],
+      });
+
+      expect(store.currentSpatialView().colorBy).toBeNull();
+      // Display preferences are the user's, not the previous dataset's state.
+      expect(store.currentSpatialView().pointScale).toBe(3);
+    });
+
+    it('keeps a colour source the new dataset still has', () => {
+      const dataset$ = new BehaviorSubject<SpatialDataset | null>(dataset);
+      const { router, store } = build(mockPort({ getDataset$: () => dataset$ }));
+      router.getSpatialControls()!.colorByColumn('region');
+
+      dataset$.next({ ...dataset, id: 'other' }); // same columns
+
+      expect(store.currentSpatialView().colorBy).toEqual({ kind: 'column', name: 'region' });
+    });
+
+    it('keeps a gene when the new dataset is too wide to inline its names', () => {
+      const dataset$ = new BehaviorSubject<SpatialDataset | null>(dataset);
+      const { router, store } = build(mockPort({ getDataset$: () => dataset$ }));
+      router.getSpatialControls()!.colorByFeature('Ttr');
+
+      // Typeahead-only: the names are not there to check against, so a name that
+      // turns out not to exist should surface as a failed fetch, not a silent reset.
+      dataset$.next({ ...dataset, id: 'wide', features: { count: 31_000 } });
+
+      expect(store.currentSpatialView().colorBy).toEqual({ kind: 'feature', name: 'Ttr' });
+    });
+  });
+
   describe('selection', () => {
     /** Three observations: two inside a 0..10 box, one far away. */
     const spatial: SpatialDataset = {

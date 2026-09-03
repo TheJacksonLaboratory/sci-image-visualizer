@@ -1014,6 +1014,28 @@ describe('NapariVisualizerService', () => {
         expect(inScene()).toBe(0);
       });
 
+      it('re-rasterises for a different selection of the same size', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        await mount3d(clustered());
+        store.setSpatialView({ densityVolume: true });
+        await flush();
+        const built = densityLayers(addVolume).length;
+
+        // Two DIFFERENT selections, same count: keyed on the count alone this
+        // looks unchanged, and the previous ROI's fields stay on screen.
+        TestBed.inject(SpatialSelectionStore)
+          .set({ mask: Uint8Array.from([1, 1, 0, 0, 0, 0]), count: 2 });
+        await flush();
+        const afterFirst = densityLayers(addVolume).length;
+        expect(afterFirst).toBeGreaterThan(built);
+
+        TestBed.inject(SpatialSelectionStore)
+          .set({ mask: Uint8Array.from([0, 0, 0, 0, 1, 1]), count: 2 });
+        await flush();
+        expect(densityLayers(addVolume).length).toBeGreaterThan(afterFirst);
+      });
+
       it('does not re-rasterise for a change that cannot alter the field', async () => {
         const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));

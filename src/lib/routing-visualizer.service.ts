@@ -11,6 +11,7 @@ import { OpenSeadragonVisualizerService } from './implementations/osd/openseadra
 import { PlotType, PlotTypeDescriptor, isNapari3d, isNapariScatter, isSpatialOmics, isSpatialOmics3d } from './contracts/plot-type';
 import { IVisualizer, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls, ISpatialControls } from './contracts/visualizer.contract';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-data.port';
+import { SpatialColorBy } from './contracts/display-types';
 import { SpatialDataset, isCategoricalColumn } from './contracts/spatial-dataset.contract';
 import { resolveCategoryColors } from './implementations/spatial/spatial-encoding';
 import {
@@ -567,7 +568,14 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.spatialDatasetSub ??= port.getDataset$().subscribe((dataset) => {
       const changed = dataset?.id !== this.currentSpatialDataset?.id;
       this.currentSpatialDataset = dataset;
-      if (changed) this.selectionStore.set(emptySelection(dataset?.observations.count ?? 0));
+      if (!changed) return;
+      this.selectionStore.set(emptySelection(dataset?.observations.count ?? 0));
+      // A colour source the new dataset cannot satisfy would leave the map flat
+      // while the panel and the charts kept naming the old column — so drop it,
+      // and only it: point size, opacity and the rest are the user's preferences,
+      // not the previous dataset's state.
+      const by = this.store.currentSpatialView().colorBy;
+      if (by && !this.canColorBy(dataset, by)) this.store.setSpatialView({ colorBy: null });
     });
     this.spatialControls ??= {
       getDataset$: () => port.getDataset$(),
@@ -673,6 +681,21 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       clearSelection: () => this.selectionStore.clear(),
     };
     return this.spatialControls;
+  }
+
+  /**
+   * Whether `dataset` can answer this colour source.
+   *
+   * A column is checkable against the declared list. A gene is checkable only when
+   * the dataset inlines its feature names — a dataset too wide to inline them
+   * (typeahead-only) keeps the source, and a name that turns out not to exist
+   * surfaces as the chart's "could not be charted" rather than as a silent reset.
+   */
+  private canColorBy(dataset: SpatialDataset | null, by: SpatialColorBy): boolean {
+    if (!dataset) return false;
+    if (by.kind === 'column') return dataset.columns.some((c) => c.name === by.name);
+    const names = dataset.features?.names;
+    return !!dataset.features && (!names || names.includes(by.name));
   }
 
   /** Memoised so consumers can hold the object across calls. */

@@ -117,9 +117,11 @@ export async function buildVolumeStackImage(
       isStack: depth > 1,
       showStack: false,
       scaleRatio: true,
-      // Stable per dataset: the slice-blob cache keys off the file name, so a name
-      // that changed per load would re-fetch a volume that never moved.
-      fileName: `${dataset.name} · reference volume`,
+      // Stable AND unique per dataset: the slice-blob cache keys off the file name,
+      // so a name that changed per load would re-fetch a volume that never moved —
+      // and a name SHARED by two datasets (only `id` is required to be unique)
+      // would serve one dataset's slices for the other.
+      fileName: `${dataset.name} · reference volume [${dataset.id}]`,
       imageMeta: [
         { channelCount: 1, rgbChannels: 1, x: width, y: height, z: depth, mppX, mppY, mppZ },
       ],

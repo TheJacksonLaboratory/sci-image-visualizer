@@ -80,6 +80,19 @@ describe('buildVolumeStackImage', () => {
     expect(planes.map((p) => p[0])).toEqual([0, 100, 200, 300 & 255]);
   });
 
+  it('keys the image on the dataset id, not only its display name', async () => {
+    // The slice-blob cache keys off `fileName`, and only `id` is required to be
+    // unique — two datasets sharing a display name would otherwise serve each
+    // other's slices.
+    const a = await buildVolumeStackImage(dataset({ id: 'abc.full' }), voxels(2, 3, 4));
+    const b = await buildVolumeStackImage(dataset({ id: 'abc.sub10' }), voxels(2, 3, 4));
+
+    expect(a!.info.fileName).not.toBe(b!.info.fileName);
+    expect(a!.info.fileName).toContain('abc.full');
+    // The name is still in there, since it is what a user sees.
+    expect(a!.info.fileName).toContain('Whole mouse brain MERFISH');
+  });
+
   it('scales mpp by micronsPerUnit, and reports none when the unit is unknown', async () => {
     const known = await buildVolumeStackImage(
       dataset({ micronsPerUnit: 2 }), voxels(2, 3, 4),

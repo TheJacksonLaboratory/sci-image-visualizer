@@ -321,6 +321,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    *  change that cannot affect the field. */
   private densityLayers: VolumeLayer[] = [];
   private densityKey: string | null = null;
+  /** Selection identity, as a number the density key can carry. */
+  private lastSelectionSeen: SpatialSelectionMask | null = null;
+  private selectionRevision = 0;
   /** Offset applied to observation coordinates to sit them in the volume's box. */
   private spatialOrigin3d: [number, number, number] = [0, 0, 0];
   /** Dataset the 3D scale bar was built for. */
@@ -2089,8 +2092,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const on = !!view.densityVolume && !!dataset.observations.z;
     const smoothing = view.densitySmoothing > 0 ? view.densitySmoothing : 1;
     const column = view.colorBy?.kind === 'column' ? view.colorBy.name : null;
+    // The selection enters the key by IDENTITY, not by count: two different ROIs
+    // holding the same number of cells would otherwise look like the same key and
+    // leave the previous ROI's fields on screen.
     const key = on
-      ? [dataset.id, column ?? 'all', smoothing, selection.count].join('|')
+      ? [dataset.id, column ?? 'all', smoothing, this.selectionRev(selection)].join('|')
       : null;
     if (key === this.densityKey) return;
 
@@ -2155,6 +2161,22 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       );
     }
     viewer.requestRender();
+  }
+
+  /**
+   * A revision number for a selection object.
+   *
+   * The store hands out a NEW mask object per change, so object identity is the
+   * cheap and exact way to tell two selections apart — a fingerprint over 3.7M
+   * mask bytes would be neither. Counting revisions keeps the cache key a short
+   * string.
+   */
+  private selectionRev(selection: SpatialSelectionMask): number {
+    if (selection !== this.lastSelectionSeen) {
+      this.lastSelectionSeen = selection;
+      this.selectionRevision++;
+    }
+    return this.selectionRevision;
   }
 
   /**

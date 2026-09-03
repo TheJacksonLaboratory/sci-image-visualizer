@@ -319,6 +319,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    *  appearing is what publishes it as the image, and the plot-type gates then
    *  see an ordinary grayscale stack. */
   private hasSpatialVolume = false;
+  /** Dataset identity + capability shape the last emission was handled at, so a
+   *  switch between two datasets of the same shape is not mistaken for a repeat. */
+  private spatialDatasetKey: string | null = null;
   /** Dataset + geometry the currently published volume image was built from, so a
    *  re-emitted dataset doesn't re-fetch megabytes or reset the user's scrub. */
   private volumeImageKey: string | null = null;
@@ -404,10 +407,17 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       const has3d = !!dataset?.observations.z;
       const hasVolume = !!dataset?.volume;
       // The port publishes its current value on subscribe, so the initial `null`
-      // would otherwise recompute the selector for no change.
-      if (has === this.hasSpatialDataset
-        && has3d === this.hasSpatial3dDataset
-        && hasVolume === this.hasSpatialVolume) return;
+      // would otherwise recompute the selector for no change. Keyed by dataset
+      // IDENTITY as well as capability shape: two 3D datasets that both carry a
+      // volume have the same shape, and comparing only that skipped the switch —
+      // leaving the previous dataset's volume image on screen underneath the new
+      // one's observations.
+      const key = dataset
+        ? `${dataset.id}|${has3d}|${hasVolume}|${dataset.volume
+          ? `${dataset.volume.width}x${dataset.volume.height}x${dataset.volume.depth}` : ''}`
+        : null;
+      if (key === this.spatialDatasetKey) return;
+      this.spatialDatasetKey = key;
       this.hasSpatialDataset = has;
       this.hasSpatial3dDataset = has3d;
       this.hasSpatialVolume = hasVolume;

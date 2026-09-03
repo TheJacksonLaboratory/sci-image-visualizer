@@ -441,6 +441,25 @@ describe('VisualizerComponent (UI shell)', () => {
         expect(port.getVolume).toHaveBeenCalledTimes(1);
       });
 
+      it('republishes when switching between two datasets of the same shape', async () => {
+        // Two 3D datasets that both carry a volume have the same capability shape,
+        // so a guard comparing only that skipped the switch — leaving the first
+        // dataset's volume image under the second's observations.
+        port.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 4 * 4));
+        const c = makeComponent(plotService, port);
+        (c as any).watchSpatialDataset();
+        const volume = { width: 4, height: 4, depth: 4, voxelSize: [40, 40, 200] };
+
+        dataset$.next({ ...VOLUME_DATASET, id: 'abc.full', volume });
+        await flush();
+        dataset$.next({ ...VOLUME_DATASET, id: 'abc.sub10', volume });
+        await flush();
+
+        expect(port.getVolume).toHaveBeenCalledTimes(2);
+        const infos = ((c as any).state.setImageInfo as jest.Mock).mock.calls.map((a: any[]) => a[0]);
+        expect(infos.filter((i: any) => i?.isStack).length).toBe(2);
+      });
+
       it('republishes the volume after a detour through an image-backed dataset', async () => {
         port.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 4 * 4));
         const c = makeComponent(plotService, port);
