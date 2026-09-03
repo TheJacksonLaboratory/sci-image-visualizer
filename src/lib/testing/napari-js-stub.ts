@@ -18,6 +18,8 @@ interface StubDims {
 interface StubCamera3D {
   frame(width: number, height: number, depth: number): void;
   viewProjection(vw: number, vh: number): number[];
+  azimuth: number;
+  elevation: number;
   target: [number, number, number];
   distance: number;
   /** Vertical field of view in RADIANS, as napari-js has it. Needed by anything
@@ -344,9 +346,19 @@ export class Viewer {
     fit: () => undefined,
     changed: { connect: () => () => undefined },
   };
+  /** Faithful about the ONE behaviour the adapter has to work around: napari-js
+   *  re-frames this camera on every 3D layer it is handed, so a stubbed no-op
+   *  would make a "the camera did not move" test pass without proving anything. */
   readonly camera3d: StubCamera3D = {
-    frame: () => undefined,
+    // Mirrors napari-js Camera3D.frame: resets the pivot and the dolly, and
+    // leaves the orbit angles alone.
+    frame(width: number, height: number, depth: number) {
+      this.target = [0, 0, 0];
+      this.distance = Math.max(width, height, depth) * 1.8;
+    },
     viewProjection: () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+    azimuth: 0,
+    elevation: 0,
     target: [0, 0, 0],
     distance: 1,
     fov: (45 * Math.PI) / 180,
@@ -417,9 +429,9 @@ export class Viewer {
       opacity?: number;
     },
   ): VolumeLayer {
-    return this.mount({
+    const layer = this.mount({
       colormap: opts?.colormap ?? 'gray',
-      contrastLimits: [0, 255],
+      contrastLimits: [0, 255] as [number, number],
       gamma: 1,
       visible: true,
       blending: 'additive',
@@ -435,6 +447,10 @@ export class Viewer {
       height,
       depth,
     });
+    const [sx, sy, sz] = opts?.voxelSize ?? [1, 1, 1];
+    // The real Viewer frames on the world box (dims x voxelSize) here.
+    this.camera3d.frame((width ?? 1) * sx, (height ?? 1) * sy, (depth ?? 1) * sz);
+    return layer;
   }
   addAxes(width = 1, height = 1, depth = 1): AxesLayer {
     return this.mount(
@@ -502,7 +518,7 @@ export class Viewer {
     },
   ): Points3DLayer {
     const o = opts ?? {};
-    return this.mount({
+    const layer = this.mount({
       colormap: o.colormap ?? 'viridis',
       contrastLimits: o.contrastLimits ?? [0, 255],
       size: o.size ?? 6,
@@ -512,12 +528,17 @@ export class Viewer {
       positions,
       values,
       bounds: () => ({
-        min: [0, 0, 0],
-        max: [1, 1, 1],
-        center: [0.5, 0.5, 0.5],
+        min: [0, 0, 0] as [number, number, number],
+        max: [1, 1, 1] as [number, number, number],
+        center: [0.5, 0.5, 0.5] as [number, number, number],
         radius: 1,
       }),
     });
+    // The real Viewer pivots on the point bounds and dollies to fit them here.
+    const b = layer.bounds();
+    this.camera3d.target = b.center;
+    this.camera3d.distance = Math.max(b.radius * 2.5, 1e-3);
+    return layer;
   }
   layerHistogram(): { counts: Uint32Array; bins: number; min: number; max: number } | null {
     return { counts: new Uint32Array(256), bins: 256, min: 0, max: 255 };

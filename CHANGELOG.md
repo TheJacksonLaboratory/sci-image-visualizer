@@ -134,6 +134,24 @@ file was added.
 
 
 
+### Fixed
+
+- **Changing the data no longer moves the 3D camera.** napari frames the orbit
+  camera on every 3D layer it is handed — `addVolume` calls `camera3d.frame()`,
+  `addPoints3D` writes the pivot and the dolly from the point bounds — so
+  recolouring by a class, picking a gene, drawing a gene map, isolating a section
+  and selecting a region each threw away whatever view you had orbited to. Worse,
+  where it landed depended on which layer was rebuilt, so stepping through
+  sections lurched to each section's own bounds in turn.
+
+  A scene's first layer still frames (the reference volume's box is the opening
+  view worth having); every later add restores the pose it found, captured and
+  restored synchronously around the add so a drag landing mid-rebuild cannot be
+  undone. The camera now changes only through the toolbar's camera tools and by
+  dragging or wheeling on the canvas. 2D was already correct — it fits once and
+  never again.
+
+
 ## [0.4.0] — 2026-09-02
 
 The spatial-omics release. Two new plot modes:

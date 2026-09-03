@@ -352,6 +352,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private geneMapVolumeFieldKey: string | null = null;
   /** Offset applied to observation coordinates to sit them in the volume's box. */
   private spatialOrigin3d: [number, number, number] = [0, 0, 0];
+  /** The (viewer, dataset) whose 3D scene has already had its opening framing. */
+  private spatialFramed: { viewer: Viewer; datasetId: string } | null = null;
   /** Dataset the 3D scale bar was built for. */
   private spatialScaleBarKey: string | null = null;
   private spatialSub: Subscription | null = null;
@@ -2118,8 +2120,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       return;
     }
 
-    // Anatomy first: `addVolume` frames the orbit camera on the volume, and that
-    // is the framing we want — the brain, not the outermost stray segmentation.
+    // Anatomy first: on a scene's FIRST layer napari frames the orbit camera, and
+    // the reference volume is the framing we want — the brain, not the outermost
+    // stray segmentation. Every later add keeps the pose instead (addFramingOnce).
     await this.ensureSpatialVolume(viewer, dataset, view);
     if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
     // Then the cluster density volumes, which can set the centring offset when
@@ -2199,12 +2202,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       // The scalars have to follow the geometry: a per-observation vector against
       // one section's positions would colour each cell by a stranger's value.
       const values = shown ? Float32Array.from(shown, (i) => scalars[i]) : scalars;
-      this.spatialPoints3d = viewer.addPoints3D(this.spatialPositions3d!, values, {
-        name: 'observations',
-        colormap,
-        contrastLimits,
-        size,
-      });
+      this.spatialPoints3d = this.addFramingOnce(viewer, dataset.id, () =>
+        viewer.addPoints3D(this.spatialPositions3d!, values, {
+          name: 'observations',
+          colormap,
+          contrastLimits,
+          size,
+        }));
     } else {
       // Same scalars — a size or window change only.
       this.spatialPoints3d.colormap = colormap;
@@ -2244,15 +2248,16 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
           positions[k * 3 + 2] = obs.z[i] + sz;
           picked[k] = scalars[i];
         }
-        this.spatialPoints3dSel = viewer.addPoints3D(positions, picked, {
-          name: 'selected',
-          colormap,
-          contrastLimits,
-          // A touch larger, so a small selection is findable inside a 3.7M-point
-          // cloud rather than merely brighter.
-          size: size * 1.6,
-          opacity: view.opacity,
-        });
+        this.spatialPoints3dSel = this.addFramingOnce(viewer, dataset.id, () =>
+          viewer.addPoints3D(positions, picked, {
+            name: 'selected',
+            colormap,
+            contrastLimits,
+            // A touch larger, so a small selection is findable inside a 3.7M-point
+            // cloud rather than merely brighter.
+            size: size * 1.6,
+            opacity: view.opacity,
+          }));
       }
     }
 
@@ -2373,7 +2378,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const data = encodeExpressionVolume(field, [lo, hi], { log: view.logScale });
     const node = this.currentColormap as { data?: { value?: unknown } } | null;
     const lut = spatialContinuousLut(node?.data?.value, this.currentReverse);
-    this.geneMapVolumeLayer = viewer.addVolume(
+    this.geneMapVolumeLayer = this.addFramingOnce(viewer, dataset.id, () => viewer.addVolume(
       data, field.width, field.height, field.depth,
       {
         name: `gene map · ${gene}${interpolate ? ' · volume' : ''}`,
@@ -2389,7 +2394,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         opacity: view.geneMapOpacity,
         voxelSize: grid.voxelSize,
       },
-    );
+    ));
     viewer.requestRender();
   }
 
@@ -2475,18 +2480,19 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       if (!data) continue;
       if (this.viewer !== viewer || this.densityKey !== key) return;
       this.densityLayers.push(
-        viewer.addVolume(data, grid.width, grid.height, grid.depth, {
-          name: `density · ${group.name}`,
-          colormap: this.channelTintColormap(group.color),
-          // Translucent, not MIP: a cluster's interior is the readable part, and MIP
-          // would flatten every cloud to its brightest shell.
-          rendering: 'translucent',
-          opacity,
-          // Additive, so two clusters overlapping read as both being there instead
-          // of the nearer one hiding the other.
-          blending: 'additive',
-          voxelSize: grid.voxelSize,
-        }),
+        this.addFramingOnce(viewer, dataset.id, () =>
+          viewer.addVolume(data, grid.width, grid.height, grid.depth, {
+            name: `density · ${group.name}`,
+            colormap: this.channelTintColormap(group.color),
+            // Translucent, not MIP: a cluster's interior is the readable part, and MIP
+            // would flatten every cloud to its brightest shell.
+            rendering: 'translucent',
+            opacity,
+            // Additive, so two clusters overlapping read as both being there instead
+            // of the nearer one hiding the other.
+            blending: 'additive',
+            voxelSize: grid.voxelSize,
+          })),
       );
     }
     viewer.requestRender();
@@ -2605,7 +2611,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
 
     const [vx, vy, vz] = meta.voxelSize;
     this.spatialVolumeKey = key;
-    this.spatialVolume = viewer.addVolume(voxels, meta.width, meta.height, meta.depth, {
+    this.spatialVolume = this.addFramingOnce(viewer, dataset.id, () =>
+      viewer.addVolume(voxels, meta.width, meta.height, meta.depth, {
       name: 'reference volume',
       colormap: 'gray',
       // MIP would draw the brightest voxel along each ray, which for an averaged
@@ -2614,8 +2621,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       // them together.
       rendering: 'translucent',
       opacity: view.volumeOpacity,
-      voxelSize: [vx, vy, vz],
-    });
+        voxelSize: [vx, vy, vz],
+      }));
     // Half the box, negated: the observations' origin is the box's near corner,
     // and the box is centred on the world origin.
     this.spatialOrigin3d = [
@@ -2625,6 +2632,42 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     ];
     // Force a geometry rebuild: the offset changed, so cached positions are stale.
     this.spatialLayerKey3d = null;
+  }
+
+  /**
+   * Add a 3D layer, letting napari frame the camera only on the FIRST layer of a
+   * scene.
+   *
+   * napari frames on every 3D layer it is handed: `addVolume` calls
+   * `camera3d.frame()`, and `addPoints3D` writes `target` and `distance` from the
+   * point bounds. That is what you want when a scene first appears and wrong every
+   * time after — recolouring by a class, picking a gene, stepping a section and
+   * selecting a region all rebuild a layer, and each one would throw away an orbit
+   * the user had set. Worse, the pose it snaps back to depends on WHICH layer was
+   * rebuilt, so isolating one section would zoom to that section's bounds.
+   *
+   * The camera belongs to the toolbar's camera tools and to dragging on the canvas.
+   * So the first add of a scene frames, and every later add restores the pose it
+   * found. Captured and restored SYNCHRONOUSLY around the add, so a drag that
+   * lands mid-rebuild cannot be undone by a pose read before some earlier await.
+   */
+  private addFramingOnce<T>(viewer: Viewer, datasetId: string, add: () => T): T {
+    if (this.spatialFramed?.viewer !== viewer || this.spatialFramed.datasetId !== datasetId) {
+      // Nothing worth keeping yet — and the flag is set here, at a real add, so a
+      // reference volume that failed to load does not spend the scene's one framing.
+      this.spatialFramed = { viewer, datasetId };
+      return add();
+    }
+    const cam = viewer.camera3d;
+    const { azimuth, elevation, fov, distance } = cam;
+    const target = cam.target;
+    const layer = add();
+    cam.azimuth = azimuth;
+    cam.elevation = elevation;
+    cam.fov = fov;
+    cam.distance = distance;
+    cam.target = target;
+    return layer;
   }
 
   private removeSpatial3dLayers(viewer: Viewer): void {
@@ -2640,6 +2683,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.geneMapVolumeFieldKey = null;
     this.densityLayers = [];
     this.densityKey = null;
+    this.spatialFramed = null;
     this.spatialVolume = null;
     this.spatialVolumeKey = null;
     this.spatialOrigin3d = [0, 0, 0];

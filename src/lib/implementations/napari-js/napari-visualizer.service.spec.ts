@@ -906,6 +906,138 @@ describe('NapariVisualizerService', () => {
       warn.mockRestore();
     });
 
+    describe('camera', () => {
+      /** The pose a user would have set by orbiting and dollying the canvas. */
+      const POSE = { azimuth: 1.1, elevation: 0.4, distance: 4242, target: [7, 8, 9] };
+      const cam = () => (service as unknown as {
+        viewer: { camera3d: { azimuth: number; elevation: number; distance: number;
+          target: [number, number, number] } };
+      }).viewer.camera3d;
+      const setPose = () => {
+        const c = cam();
+        c.azimuth = POSE.azimuth;
+        c.elevation = POSE.elevation;
+        c.distance = POSE.distance;
+        c.target = [...POSE.target] as [number, number, number];
+      };
+      const pose = () => {
+        const c = cam();
+        return {
+          azimuth: c.azimuth, elevation: c.elevation, distance: c.distance,
+          target: [...c.target],
+        };
+      };
+
+      /** A volume-backed dataset with a categorical column and cells on 3 planes. */
+      const clustered3d = (): SpatialDataset => {
+        const base = spatialDatasetVolume(6);
+        return {
+          ...base,
+          observations: {
+            ...base.observations,
+            count: 6,
+            x: Float32Array.from({ length: 6 }, () => 150),
+            y: Float32Array.from({ length: 6 }, () => 500),
+            z: new Float32Array([400, 400, 1200, 1200, 2000, 2000]),
+          },
+        } as SpatialDataset;
+      };
+
+      it('frames once when the scene first appears', async () => {
+        // The opening view has to come from somewhere, and the reference volume's
+        // box is the framing worth having — the brain, not a stray segmentation.
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        await mount3d(spatialDatasetVolume(3));
+        // 4x6x10 voxels of 100x200x400 -> a 400 x 1200 x 4000 world box, framed at
+        // 1.8x its longest side. Suppressing every framing would leave the stub's
+        // initial distance of 1 and an unusable opening view.
+        expect(pose().distance).toBeCloseTo(4000 * 1.8, 5);
+        expect(pose().target).toEqual([0, 0, 0]);
+      });
+
+      it('keeps the camera when the colour column changes', async () => {
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical', name: 'region', categories: ['A', 'B'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 0, 0, 1, 1, 1]),
+        });
+        await mount3d(clustered3d());
+        setPose();
+
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        expect(pose()).toEqual({ ...POSE, target: [...POSE.target] });
+      });
+
+      it('keeps the camera when a gene is picked, and when its map is drawn', async () => {
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
+        await mount3d(clustered3d());
+        setPose();
+
+        store.setSpatialView({ colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        expect(pose()).toEqual({ ...POSE, target: [...POSE.target] });
+
+        // The gene map adds a VOLUME, which is the add that calls frame().
+        store.setSpatialView({ geneMap: true });
+        await flush();
+        expect(pose()).toEqual({ ...POSE, target: [...POSE.target] });
+
+        store.setSpatialView({ geneMapVolume: true });
+        await flush();
+        expect(pose()).toEqual({ ...POSE, target: [...POSE.target] });
+      });
+
+      it('keeps the camera when a section is isolated', async () => {
+        // The worst case: napari would pivot and dolly onto ONE section's bounds,
+        // so the view would lurch to a different place for every section.
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        await mount3d(clustered3d());
+        setPose();
+
+        store.setSpatialView({ pointSection: 1 });
+        await flush();
+        expect(pose()).toEqual({ ...POSE, target: [...POSE.target] });
+
+        store.setSpatialView({ pointSection: 2 });
+        await flush();
+        expect(pose()).toEqual({ ...POSE, target: [...POSE.target] });
+
+        store.setSpatialView({ pointSection: null });
+        await flush();
+        expect(pose()).toEqual({ ...POSE, target: [...POSE.target] });
+      });
+
+      it('keeps the camera when a selection is highlighted, and when volumes appear', async () => {
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical', name: 'region', categories: ['A', 'B'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 0, 0, 1, 1, 1]),
+        });
+        await mount3d(clustered3d());
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        setPose();
+
+        TestBed.inject(SpatialSelectionStore).set({
+          mask: new Uint8Array([1, 0, 1, 0, 1, 0]), count: 3,
+        });
+        await flush();
+        expect(pose()).toEqual({ ...POSE, target: [...POSE.target] });
+
+        store.setSpatialView({ densityVolume: true });
+        await flush();
+        expect(pose()).toEqual({ ...POSE, target: [...POSE.target] });
+      });
+    });
+
     describe('scene visibility', () => {
       const cloud = (layers: any[]) => named(layers, 'observations');
 
