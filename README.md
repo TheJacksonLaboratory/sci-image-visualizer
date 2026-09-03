@@ -403,8 +403,12 @@ Work that is landed-but-unstable or planned (not yet available):
   0.4.0, see [Spatial omics](#spatial-omics))* — hover tooltips over
   observations, brushing a chart selection back onto the map, and a GPU shapes
   layer for cell-boundary polygons (the example server serves them; nothing draws
-  them yet, since a DOM overlay will not hold 10⁴–10⁵ outlines).
-  [docs/spatial-omics-plot-mode-design.md](docs/spatial-omics-plot-mode-design.md).
+  them yet, since a DOM overlay will not hold 10⁴–10⁵ outlines). The GPU layer is
+  measured as feasible — generating the geometry in a compute pass is bit-exact
+  and ~16× faster than JS, and 10⁵–10⁶ outlines draw in single-digit
+  milliseconds; the constraint is napari-js's closed renderer, not WebGPU. See
+  [.planning/research/cell-boundary-polygons-webgpu.md](.planning/research/cell-boundary-polygons-webgpu.md)
+  and [docs/spatial-omics-plot-mode-design.md](docs/spatial-omics-plot-mode-design.md).
 - **SAM 3 model** *(planned)* — a `variant: 'sam3'` decoder path + export tooling
   (SAM 2/3 use a different mask I/O than the current SAM-v1 path). See
   [docs/sam-segmentation-design.md](docs/sam-segmentation-design.md).
