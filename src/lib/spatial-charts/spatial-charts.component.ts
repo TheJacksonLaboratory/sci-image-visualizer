@@ -107,6 +107,8 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   /** Guards the async value fetch: a fast colour-source change can resolve out
    *  of order, and a stale vector would be charted against the new label. */
   private token = 0;
+  /** The same guard for the grouping fetch, which the user can change as fast. */
+  private groupToken = 0;
   /** Whether the first view emission has been handled. */
   private primed = false;
   private resizeObserver?: ResizeObserver;
@@ -194,10 +196,15 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       void this.render();
       return;
     }
+    // Sequenced: pick A then B and a slower A would otherwise land last, charting
+    // A's categories under a dropdown that says B.
+    const mine = ++this.groupToken;
     try {
       const view = await this.controls.categoricalView(name);
+      if (mine !== this.groupToken) return;
       this.grouping = { codes: view.codes, categories: view.categories, colors: view.colors };
     } catch {
+      if (mine !== this.groupToken) return;
       this.grouping = null;
       this.groupBy = null;
     }

@@ -115,6 +115,58 @@ describe('SpatialDataHttpService', () => {
     });
   });
 
+  describe('concurrent selections', () => {
+    it('publishes only the newest, and rejects the one it overtook', async () => {
+      // Two selections in flight, the FIRST answering last: without sequencing it
+      // publishes after the second, leaving `manifest` and the observations from
+      // two different datasets — which is worse than either arriving late.
+      const other: SpatialManifest = { ...MANIFEST, id: 'other', count: 2 };
+      const published: (string | null)[] = [];
+      const sub = service.getDataset$().subscribe((d) => published.push(d?.id ?? null));
+
+      const slow = service.selectDataset(MANIFEST.id);
+      // Handled from the moment it exists: it rejects during a flush below, and an
+      // unhandled rejection there fails the run before any assertion is reached.
+      const slowSettled = slow.then(() => 'resolved', (e: Error) => e.name);
+      const slowManifest = http.expectOne(`${BASE}/spatial/${MANIFEST.id}/manifest`);
+      const fast = service.selectDataset(other.id);
+      const fastManifest = http.expectOne(`${BASE}/spatial/${other.id}/manifest`);
+
+      // The newer one completes first…
+      fastManifest.flush(other);
+      await Promise.resolve();
+      http.expectOne(`${BASE}/spatial/${other.id}/coords`).flush(f32(1, 2, 4, 5));
+      await expect(fast).resolves.toMatchObject({ id: 'other' });
+
+      // …then the older one's manifest arrives, and it stops there: no coords
+      // request follows, so a dataset nobody wants costs one response, not four.
+      slowManifest.flush(MANIFEST);
+      await Promise.resolve();
+      http.expectNone(`${BASE}/spatial/${MANIFEST.id}/coords`);
+      expect(await slowSettled).toBe('SupersededError');
+
+      // The last thing published is the newer dataset, not the older one.
+      expect(published.filter((id) => id !== null).at(-1)).toBe('other');
+      sub.unsubscribe();
+    });
+
+    it('lets a clear supersede a selection still in flight', async () => {
+      const pending = service.selectDataset(MANIFEST.id);
+      const settled = pending.then(() => 'resolved', (e: Error) => e.name);
+      const manifest = http.expectOne(`${BASE}/spatial/${MANIFEST.id}/manifest`);
+
+      service.clear();
+      manifest.flush(MANIFEST);
+      await Promise.resolve();
+
+      expect(await settled).toBe('SupersededError');
+      // Nothing published: a clear is the newest intent, not a slower request.
+      let latest: string | null | undefined;
+      service.getDataset$().subscribe((d) => { latest = d?.id ?? null; }).unsubscribe();
+      expect(latest).toBeNull();
+    });
+  });
+
   describe('getColumn', () => {
     it('decodes a categorical column', async () => {
       await loadDataset();

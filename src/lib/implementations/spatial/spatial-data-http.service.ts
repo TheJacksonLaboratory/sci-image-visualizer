@@ -35,6 +35,19 @@ import {
  * Requests go through Angular's `HttpClient` (not `fetch`) so the host's
  * interceptors — auth headers above all — apply, matching `tile-client.ts`.
  */
+/**
+ * A dataset selection that a newer selection (or a `clear`) overtook.
+ *
+ * Thrown rather than resolved so a caller cannot mistake it for "this dataset is
+ * now loaded": nothing was published, on purpose.
+ */
+export class SupersededError extends Error {
+  constructor(id: string) {
+    super(`[spatial] selection of "${id}" was superseded by a newer one`);
+    this.name = 'SupersededError';
+  }
+}
+
 @Injectable()
 export class SpatialDataHttpService implements SpatialDataPort {
   /** Server root, normalised to end with exactly one `/`. */
@@ -45,6 +58,9 @@ export class SpatialDataHttpService implements SpatialDataPort {
 
   private readonly dataset$ = new BehaviorSubject<SpatialDataset | null>(null);
   private manifest: SpatialManifest | null = null;
+  /** Bumped by every `selectDataset` and every `clear`, so a selection that
+   *  finishes after a newer intent can tell and drop what it fetched. */
+  private selectToken = 0;
 
   /**
    * Loaded vectors, keyed `column:<name>` / `feature:<name>`. Bounded LRU:
@@ -100,19 +116,30 @@ export class SpatialDataHttpService implements SpatialDataPort {
    */
   async selectDataset(id: string): Promise<SpatialDataset> {
     this.clear();
-    const manifest = await this.getJson<SpatialManifest>(`spatial/${encodeURIComponent(id)}/manifest`);
+    // Selections are SEQUENCED: this is four awaits deep, so a slower earlier
+    // call would otherwise assign `this.manifest` or publish its dataset after a
+    // later one — leaving the manifest and the observations from two different
+    // datasets, which is worse than either being late.
+    const mine = ++this.selectToken;
+    const superseded = () => mine !== this.selectToken;
+    const path = `spatial/${encodeURIComponent(id)}`;
+
+    const manifest = await this.getJson<SpatialManifest>(`${path}/manifest`);
     assertManifestVersion(manifest);
+    if (superseded()) throw new SupersededError(id);
     this.manifest = manifest;
 
-    const coordsBuf = await this.getBinary(`spatial/${encodeURIComponent(id)}/coords`);
+    const coordsBuf = await this.getBinary(`${path}/coords`);
+    if (superseded()) throw new SupersededError(id);
     const coords = decodeCoords(coordsBuf, manifest.count, !!manifest.hasZ);
 
     const ids = manifest.hasIds
-      ? (await this.getJson<{ ids: string[] }>(`spatial/${encodeURIComponent(id)}/ids`)).ids
+      ? (await this.getJson<{ ids: string[] }>(`${path}/ids`)).ids
       : undefined;
     const radius = manifest.radius?.mode === 'per-observation'
-      ? decodeRadius(await this.getBinary(`spatial/${encodeURIComponent(id)}/radius`), manifest.count)
+      ? decodeRadius(await this.getBinary(`${path}/radius`), manifest.count)
       : undefined;
+    if (superseded()) throw new SupersededError(id);
 
     const dataset = datasetFromManifest(manifest, coords, { ids, radius });
     this.dataset$.next(dataset);
@@ -121,6 +148,9 @@ export class SpatialDataHttpService implements SpatialDataPort {
 
   /** Drop the loaded dataset and every cached vector. */
   clear(): void {
+    // A clear is itself the newest intent, so it supersedes any selection still
+    // in flight rather than letting one land afterwards.
+    this.selectToken++;
     this.manifest = null;
     this.cache.clear();
     this.inFlight.clear();

@@ -32,7 +32,7 @@ export { CellposeSegmenterService } from './lib/toolbar/segmentation/cellpose-se
 // The wire format the bundled example server speaks, plus a ready-made
 // SpatialDataPort adapter for it. Both are OPTIONAL: a host with its own
 // backend implements SpatialDataPort directly and imports neither.
-export { SpatialDataHttpService } from './lib/implementations/spatial/spatial-data-http.service';
+export { SpatialDataHttpService, SupersededError } from './lib/implementations/spatial/spatial-data-http.service';
 export {
   SPATIAL_WIRE_VERSION, isLittleEndian, assertManifestVersion, datasetFromManifest,
   decodeCoords, decodeRadius, decodeColumn, decodeFeatureVector, decodePolygons,

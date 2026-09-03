@@ -312,6 +312,57 @@ describe('SpatialControlsComponent', () => {
     });
   });
 
+  describe('out-of-order responses', () => {
+    beforeEach(async () => build(controls));
+
+    it('keeps the suggestions for the query in the box, not an earlier one', async () => {
+      // Typing outruns the lookup: a slow answer for "Tt" must not replace the
+      // suggestions for "Ttr", and its failure must not mark "Ttr" as failed.
+      let resolveSlow: (v: string[]) => void = () => undefined;
+      controls.searchFeatures
+        .mockImplementationOnce(() => new Promise((r) => { resolveSlow = r; }))
+        .mockResolvedValueOnce(['Ttr']);
+
+      const slow = component.searchGenes({ query: 'Tt' });
+      await component.searchGenes({ query: 'Ttr' });
+      expect(component.geneSuggestions).toEqual(['Ttr']);
+
+      resolveSlow(['Tt-one', 'Tt-two']);
+      await slow;
+
+      expect(component.geneSuggestions).toEqual(['Ttr']);
+      expect(component.geneSearchFailed).toBe(false);
+    });
+
+    it('keeps the legend of the column that is selected now', async () => {
+      // Two categorical columns, so the slow one's palette has somewhere wrong to
+      // land: `region` (2 categories) answering after `zone` (1).
+      dataset$.next({
+        ...dataset,
+        columns: [
+          ...dataset.columns,
+          { kind: 'categorical', name: 'zone', categories: ['Z'], colors: ['#0f0'] },
+        ],
+      } as SpatialDataset);
+      await flush();
+
+      let resolveSlow: (v: string[]) => void = () => undefined;
+      controls.categoryColors
+        .mockImplementationOnce(() => new Promise((r) => { resolveSlow = r; }))
+        .mockResolvedValueOnce(['#0f0']);
+
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+      await flush();
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'zone' } });
+      await flush();
+      resolveSlow(['#f00', '#00f']);
+      await flush();
+
+      // region's two-colour answer arriving late must not repaint zone's key.
+      expect(component.legend?.map((e) => e.color)).toEqual(['#0f0']);
+    });
+  });
+
   describe('selection', () => {
     beforeEach(async () => build(controls));
 

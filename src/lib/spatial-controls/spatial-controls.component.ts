@@ -93,6 +93,10 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
 
   private colormap: ColormapNode | null = null;
   private reverse = false;
+  /** Guards the gene typeahead and the legend/colour-bar rebuild: both are async
+   *  and both are driven by input the user changes faster than they resolve. */
+  private geneSearchToken = 0;
+  private keyToken = 0;
   private readonly subs = new Subscription();
 
   constructor(@Inject(VISUALIZER) private readonly viz: IVisualizer) {}
@@ -162,10 +166,17 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   /** Gene typeahead query — delegates to the port (or its local fallback). */
   async searchGenes(event: { query: string }): Promise<void> {
     if (!this.controls) return;
+    // Typing is faster than the lookup, so a slow answer for an earlier query
+    // would replace the suggestions for the text now in the box — including a
+    // failure, which would wrongly mark the current query as failed.
+    const mine = ++this.geneSearchToken;
     try {
-      this.geneSuggestions = await this.controls.searchFeatures(event.query, 25);
+      const names = await this.controls.searchFeatures(event.query, 25);
+      if (mine !== this.geneSearchToken) return;
+      this.geneSuggestions = names;
       this.geneSearchFailed = false;
     } catch {
+      if (mine !== this.geneSearchToken) return;
       // A failed lookup must not wedge the box — show none and say so.
       this.geneSuggestions = [];
       this.geneSearchFailed = true;
@@ -343,12 +354,17 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       ? this.dataset?.columns.find((c) => c.name === by.name)
       : undefined;
 
+    const mine = ++this.keyToken;
     if (meta?.kind === 'categorical') {
       try {
         const colors = await this.controls.categoryColors(by.name);
+        // Same race, same cost if it is lost: a slower earlier column would paint
+        // its palette into the legend for the column now selected.
+        if (mine !== this.keyToken) return;
         this.legend = meta.categories.map((label, i) => ({ label, color: colors[i] }));
         this.colorBarCss = null;
       } catch {
+        if (mine !== this.keyToken) return;
         // The column's values may not have loaded yet; leave the key empty
         // rather than showing a legend that might not match the render.
         this.legend = null;

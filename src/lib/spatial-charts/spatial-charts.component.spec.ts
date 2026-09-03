@@ -298,6 +298,35 @@ describe('SpatialChartsComponent', () => {
     });
   });
 
+  it('ignores a grouping response that a later choice overtook', async () => {
+    await build(controls);
+    view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'total_counts' } });
+    await flush();
+    component.onKind('violin');
+
+    // A slow 'region' and a fast 'other': without sequencing the slow one lands
+    // last and charts region's categories under a dropdown that says other.
+    type CatView = Awaited<ReturnType<ISpatialControls['categoricalView']>>;
+    let resolveSlow: (v: CatView) => void = () => undefined;
+    controls.categoricalView
+      .mockImplementationOnce(() => new Promise<CatView>((r) => { resolveSlow = r; }))
+      .mockResolvedValueOnce({
+        name: 'other', categories: ['X'], colors: ['#0f0'], codes: new Uint16Array([0, 0, 0, 0]),
+      });
+
+    const slow = component.onGroupBy('region');
+    await component.onGroupBy('other');
+    resolveSlow({
+      name: 'region', categories: ['A', 'B'], colors: ['#f00', '#00f'],
+      codes: new Uint16Array([0, 0, 1, 1]),
+    });
+    await slow;
+    await flush();
+
+    expect(component.groupBy).toBe('other');
+    expect(lastPlot().traces.map((t: Record<string, unknown>) => t.name)).toEqual(['X']);
+  });
+
   describe('lifecycle', () => {
     it('lists the dataset\'s categorical columns to group by', async () => {
       await build(controls);
