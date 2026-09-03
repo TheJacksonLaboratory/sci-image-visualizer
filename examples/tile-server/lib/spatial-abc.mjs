@@ -28,6 +28,9 @@ import path from 'node:path';
 import readline from 'node:readline';
 
 const CACHE_VERSION = 2;
+/** Feature names are inlined in the manifest below this count, matching the ST
+ *  source: a targeted panel is a few dozen KB, a transcriptome is ~350 KB. */
+const INLINE_NAMES_LIMIT = 2000;
 
 const CELLS_CSV = 'cell_metadata_with_parcellation_annotation.csv';
 const GENES_CSV = 'example_genes_all_cells_expression.csv';
@@ -649,7 +652,18 @@ export async function abcManifest(abcDir, id) {
     // variant — striding thins the cloud, not the anatomy.
     volume: entry.index.volume ?? undefined,
     features: entry.index.genes.length
-      ? { count: entry.index.genes.length, unit: 'log2(CPM+1)', logScaleHint: false }
+      ? {
+          count: entry.index.genes.length,
+          // Inlined, like the ST and Zarr sources do below their own limits: this
+          // source serves a handful of example genes, and a client that has the
+          // names can populate a picker instead of making the user guess one to
+          // type. Whole-transcriptome data is the case that must NOT inline.
+          ...(entry.index.genes.length <= INLINE_NAMES_LIMIT
+            ? { names: entry.index.genes }
+            : {}),
+          unit: 'log2(CPM+1)',
+          logScaleHint: false,
+        }
       : undefined,
   };
 }

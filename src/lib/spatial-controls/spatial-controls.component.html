@@ -35,12 +35,20 @@
 
     <div class="sc-section" *ngIf="ds.features">
       <label class="sc-lbl" for="sc-gene">Colour by gene</label>
-      <p-autoComplete inputId="sc-gene" [(ngModel)]="geneQuery"
-                      [suggestions]="geneSuggestions" (completeMethod)="searchGenes($event)"
-                      (onSelect)="onGene($event.value ?? $event)"
-                      [forceSelection]="true" [delay]="200" appendTo="body"
-                      placeholder="Search {{ ds.features.count | number }} genes…"
-                      styleClass="sc-full"></p-autoComplete>
+      <!-- A filterable dropdown, not a free-text box: the genes are visible before
+           anything is typed, and each keystroke narrows a list the user can see.
+           Virtual-scrolled because a targeted panel runs to a few thousand names. -->
+      <p-dropdown inputId="sc-gene" [options]="geneOptions"
+                  optionLabel="label" optionValue="value"
+                  [ngModel]="selectedGene" (ngModelChange)="onGene($event)"
+                  [filter]="true" filterBy="label" [resetFilterOnHide]="true"
+                  (onFilter)="onGeneFilter($event.filter)"
+                  [showClear]="true" [virtualScroll]="true" [virtualScrollItemSize]="30"
+                  [emptyFilterMessage]="genesAreRemote ? 'No match — keep typing' : 'No match'"
+                  [emptyMessage]="genesAreRemote ? 'Type to search genes' : 'No genes'"
+                  appendTo="body"
+                  placeholder="Search {{ ds.features.count | number }} genes…"
+                  styleClass="sc-full"></p-dropdown>
       <small class="sc-hint" *ngIf="geneSearchFailed">Gene lookup failed.</small>
     </div>
 

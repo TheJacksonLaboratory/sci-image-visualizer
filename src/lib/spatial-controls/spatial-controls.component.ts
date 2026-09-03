@@ -19,6 +19,13 @@ export interface SpatialLegendEntry {
   color: string;
 }
 
+/** A gene name as a dropdown option. Objects rather than bare strings because the
+ *  dropdown filters on a named field (`filterBy="label"`), which a string has not. */
+const geneOption = (name: string): { label: string; value: string } => ({
+  label: name,
+  value: name,
+});
+
 /** Per-instance id source — see {@link SpatialControlsComponent.chartsBodyId}. */
 let controlsInstanceSeq = 0;
 
@@ -69,9 +76,21 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   columnOptions: { label: string; value: string | null }[] = [];
   selectedColumn: string | null = null;
 
-  /** Gene typeahead. */
-  geneQuery: string | null = null;
-  geneSuggestions: string[] = [];
+  /**
+   * Gene picker: a filterable dropdown rather than a free-text typeahead, so the
+   * options are visible before anything is typed and each keystroke narrows a list
+   * the user can see.
+   *
+   * `geneOptions` is the full name list when the dataset inlines it (a targeted
+   * panel: 8 for the ABC demo, 300–5,000 for Xenium/CosMx). A whole-transcriptome
+   * dataset does not ship its ~31k names, so there the list is what the port's last
+   * search returned and filtering is server-side — same control either way.
+   */
+  geneOptions: { label: string; value: string }[] = [];
+  selectedGene: string | null = null;
+  /** True when the options come from the port per keystroke rather than a resident
+   *  list, which changes what an empty list means (nothing matched *yet*). */
+  genesAreRemote = false;
   geneSearchFailed = false;
 
   /** Categorical key, or null when the active colouring is continuous. */
@@ -118,15 +137,18 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
         ...(dataset?.columns ?? []).map((c) => ({ label: this.columnLabel(c), value: c.name })),
       ];
       // A new dataset almost certainly has different columns; drop stale UI state.
-      this.geneQuery = null;
-      this.geneSuggestions = [];
+      this.selectedGene = null;
+      this.geneSearchFailed = false;
+      const names = dataset?.features?.names;
+      this.genesAreRemote = !!dataset?.features && !names;
+      this.geneOptions = names ? names.map(geneOption) : [];
       void this.refreshKey();
     }));
 
     this.subs.add(this.controls.getViewState$().subscribe((view) => {
       this.view = view;
       this.selectedColumn = view.colorBy?.kind === 'column' ? view.colorBy.name : null;
-      if (view.colorBy?.kind === 'feature') this.geneQuery = view.colorBy.name;
+      this.selectedGene = view.colorBy?.kind === 'feature' ? view.colorBy.name : null;
       void this.refreshKey();
     }));
 
@@ -162,36 +184,51 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     this.selectedColumn = name;
     if (!name) {
       this.controls?.clearColorBy();
-      this.geneQuery = null;
+      this.selectedGene = null;
       return;
     }
-    this.geneQuery = null;
+    this.selectedGene = null;
     this.controls?.colorByColumn(name);
   }
 
-  /** Gene typeahead query — delegates to the port (or its local fallback). */
-  async searchGenes(event: { query: string }): Promise<void> {
-    if (!this.controls) return;
-    // Typing is faster than the lookup, so a slow answer for an earlier query
-    // would replace the suggestions for the text now in the box — including a
-    // failure, which would wrongly mark the current query as failed.
+  /**
+   * A keystroke in the gene dropdown's filter box.
+   *
+   * With the names resident the dropdown filters them itself and this only clears a
+   * stale failure. Without them there is nothing to filter, so the query goes to the
+   * port and its answer BECOMES the option list — the same control, filtering one
+   * hop further away.
+   */
+  async onGeneFilter(query: string): Promise<void> {
+    this.geneSearchFailed = false;
+    if (!this.controls || !this.genesAreRemote) return;
+    // Typing outruns the lookup, so a slow answer for an earlier query would
+    // replace the options for the text now in the box — including a failure, which
+    // would wrongly mark the current query as failed.
     const mine = ++this.geneSearchToken;
+    if (!query) {
+      this.geneOptions = [];
+      return;
+    }
     try {
-      const names = await this.controls.searchFeatures(event.query, 25);
+      const names = await this.controls.searchFeatures(query, 50);
       if (mine !== this.geneSearchToken) return;
-      this.geneSuggestions = names;
-      this.geneSearchFailed = false;
+      this.geneOptions = names.map(geneOption);
     } catch {
       if (mine !== this.geneSearchToken) return;
-      // A failed lookup must not wedge the box — show none and say so.
-      this.geneSuggestions = [];
+      // A failed lookup must not wedge the control — show none and say so.
+      this.geneOptions = [];
       this.geneSearchFailed = true;
     }
   }
 
   /** A gene was picked; it supersedes any column selection. */
-  onGene(name: string): void {
-    if (!name) return;
+  onGene(name: string | null): void {
+    this.selectedGene = name;
+    if (!name) {
+      this.controls?.clearColorBy();
+      return;
+    }
     this.selectedColumn = null;
     this.controls?.colorByFeature(name);
   }
@@ -308,7 +345,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     this.controls?.setViewState({ ...DEFAULT_SPATIAL_VIEW });
     this.clearSelection();
     this.selectedColumn = null;
-    this.geneQuery = null;
+    this.selectedGene = null;
   }
 
   /**

@@ -9,6 +9,28 @@ file was added.
 
 ## [Unreleased]
 
+### Changed
+
+- **The gene picker is a searchable dropdown, not a free-text typeahead.** The old
+  control was an empty box: you had to already know a gene name to type one, and
+  nothing told you what the dataset carried. It is now a filterable `p-dropdown` —
+  the names are listed before anything is typed, and each keystroke narrows the
+  visible list (case-insensitive substring, so `17a7` finds `Slc17a7`).
+
+  Both dataset shapes keep the same control. A targeted panel inlines its names, so
+  the dropdown filters them locally with no round-trip; a whole-transcriptome
+  dataset does not ship its ~31k names, so there the query goes to
+  `searchFeatures` per keystroke and the answer becomes the option list. The empty
+  message says which case you are in ("Type to search genes" vs "No genes"), and a
+  remote lookup that fails says so without latching — the next keystroke clears it.
+
+- **The example ABC source inlines its gene names.** It served `features.count`
+  without `names`, alone among the sources (the ST source inlines below 2,000, the
+  Zarr source always does), which made the new dropdown open empty for a dataset
+  carrying all of 8 genes. Same 2,000-name limit as the ST source, so
+  whole-transcriptome data still stays out of the manifest.
+
+
 
 ## [0.4.0] — 2026-09-02
 

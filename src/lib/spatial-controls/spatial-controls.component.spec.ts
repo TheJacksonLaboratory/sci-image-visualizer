@@ -140,30 +140,66 @@ describe('SpatialControlsComponent', () => {
       expect(controls.colorByFeature).toHaveBeenCalledWith('Ttr');
 
       component.onColumn('region');
-      expect(component.geneQuery).toBeNull();
+      expect(component.selectedGene).toBeNull();
     });
 
     it('reflects a colour source set elsewhere (e.g. by the host)', () => {
       controls.colorByFeature('Mbp');
-      expect(component.geneQuery).toBe('Mbp');
+      expect(component.selectedGene).toBe('Mbp');
       expect(component.selectedColumn).toBeNull();
     });
   });
 
-  describe('gene search', () => {
+  describe('gene picker', () => {
     beforeEach(async () => build(controls));
 
-    it('delegates to the controls', async () => {
-      await component.searchGenes({ query: 'tt' });
-      expect(controls.searchFeatures).toHaveBeenCalledWith('tt', 25);
-      expect(component.geneSuggestions).toEqual(['Ttr']);
+    it('lists the dataset\'s own gene names, so the options exist before typing', () => {
+      // The fixture inlines its names, which is the targeted-panel case.
+      expect(component.geneOptions.map((o) => o.value)).toEqual(['Ttr', 'Mbp']);
+      expect(component.genesAreRemote).toBe(false);
     });
 
-    it('surfaces a failure instead of wedging the box', async () => {
+    it('filters resident names in the dropdown, without hitting the port', async () => {
+      await component.onGeneFilter('tt');
+      // Nothing to fetch: the dropdown narrows the list it already has.
+      expect(controls.searchFeatures).not.toHaveBeenCalled();
+      expect(component.geneOptions.map((o) => o.value)).toEqual(['Ttr', 'Mbp']);
+    });
+
+    it('searches the port per keystroke when the dataset inlines no names', async () => {
+      // Whole-transcriptome: ~31k names are not shipped, so the answer to the
+      // query BECOMES the option list — same control, filtering one hop away.
+      dataset$.next({ ...dataset, features: { count: 31_000 } } as SpatialDataset);
+      await flush();
+      expect(component.genesAreRemote).toBe(true);
+      expect(component.geneOptions).toEqual([]);
+
+      await component.onGeneFilter('tt');
+      expect(controls.searchFeatures).toHaveBeenCalledWith('tt', 50);
+      expect(component.geneOptions.map((o) => o.value)).toEqual(['Ttr']);
+
+      // Clearing the filter empties the list rather than leaving a stale one.
+      await component.onGeneFilter('');
+      expect(component.geneOptions).toEqual([]);
+    });
+
+    it('surfaces a remote failure instead of wedging the control', async () => {
+      dataset$.next({ ...dataset, features: { count: 31_000 } } as SpatialDataset);
+      await flush();
       controls.searchFeatures.mockRejectedValueOnce(new Error('offline'));
-      await component.searchGenes({ query: 'tt' });
-      expect(component.geneSuggestions).toEqual([]);
+      await component.onGeneFilter('tt');
+      expect(component.geneOptions).toEqual([]);
       expect(component.geneSearchFailed).toBe(true);
+
+      // …and the next keystroke clears the failure rather than latching it.
+      await component.onGeneFilter('ttr');
+      expect(component.geneSearchFailed).toBe(false);
+    });
+
+    it('clearing the dropdown clears the colour source', () => {
+      component.onGene(null);
+      expect(controls.clearColorBy).toHaveBeenCalled();
+      expect(component.selectedGene).toBeNull();
     });
   });
 
@@ -308,7 +344,7 @@ describe('SpatialControlsComponent', () => {
       component.reset();
       expect(controls.setViewState).toHaveBeenCalledWith({ ...DEFAULT_SPATIAL_VIEW });
       expect(component.selectedColumn).toBeNull();
-      expect(component.geneQuery).toBeNull();
+      expect(component.selectedGene).toBeNull();
     });
   });
 
@@ -324,22 +360,24 @@ describe('SpatialControlsComponent', () => {
   describe('out-of-order responses', () => {
     beforeEach(async () => build(controls));
 
-    it('keeps the suggestions for the query in the box, not an earlier one', async () => {
+    it('keeps the options for the query in the box, not an earlier one', async () => {
       // Typing outruns the lookup: a slow answer for "Tt" must not replace the
-      // suggestions for "Ttr", and its failure must not mark "Ttr" as failed.
+      // options for "Ttr", and its failure must not mark "Ttr" as failed.
+      dataset$.next({ ...dataset, features: { count: 31_000 } } as SpatialDataset);
+      await flush();
       let resolveSlow: (v: string[]) => void = () => undefined;
       controls.searchFeatures
         .mockImplementationOnce(() => new Promise((r) => { resolveSlow = r; }))
         .mockResolvedValueOnce(['Ttr']);
 
-      const slow = component.searchGenes({ query: 'Tt' });
-      await component.searchGenes({ query: 'Ttr' });
-      expect(component.geneSuggestions).toEqual(['Ttr']);
+      const slow = component.onGeneFilter('Tt');
+      await component.onGeneFilter('Ttr');
+      expect(component.geneOptions.map((o) => o.value)).toEqual(['Ttr']);
 
       resolveSlow(['Tt-one', 'Tt-two']);
       await slow;
 
-      expect(component.geneSuggestions).toEqual(['Ttr']);
+      expect(component.geneOptions.map((o) => o.value)).toEqual(['Ttr']);
       expect(component.geneSearchFailed).toBe(false);
     });
 
@@ -454,7 +492,7 @@ describe('SpatialControlsComponent', () => {
       await build(controls);
       component.onGene('Ttr');
       dataset$.next({ ...dataset, id: 'other', name: 'Other', columns: [] });
-      expect(component.geneQuery).toBeNull();
+      expect(component.selectedGene).toBeNull();
       expect(component.columnOptions).toHaveLength(1); // just "None"
     });
 
