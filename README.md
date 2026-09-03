@@ -83,7 +83,7 @@ full walkthrough (adapters, TIFF handling, the Angular-17 toolchain note).
   one `IVisualizer` contract; the host picks per plot type via `RoutingVisualizerService`.
 - **Plot types** — Image (OSD), Plotly (Heatmap, Contour, Scatter 2D, Surface 3D,
   Scatter 3D, Isosurface), and napari · WebGPU (Image, Scatter 2D, Surface,
-  Scatter 3D, Volume, Isosurface).
+  Scatter 3D, Volume, Isosurface, **Spatial omics**, **Spatial omics 3D**).
 - **Region / annotation tools** — selection, rectangle, polyline, freeform,
   polygon + vertex editing, move, Bézier↔polygon, magic wand, brush, vertex eraser.
 - **Channels & histogram** — brightness/contrast/gamma, per-channel display,
@@ -143,7 +143,8 @@ data as you zoom in:
 ### napari-js — WebGPU
 GPU-accelerated renderings via [napari-js](https://www.npmjs.com/package/napari-js)
 (WebGPU), selectable from the plot-type menu as the "napari · WebGPU" variants of
-Image, Scatter 2D, Surface, Scatter 3D, **Volume**, and **Isosurface**. It
+Image, Scatter 2D, Surface, Scatter 3D, **Volume**, **Isosurface**, and the two
+spatial-omics modes ([below](#spatial-omics)). It
 assembles the volume from the slice endpoints with a runtime **decimate factor**
 (resolution slider, default ½), a surface **wireframe** toggle, a 3D **axes / scale
 gizmo**, an in-view **Z-height drag handle** for the volume, **cancellable** loading,
@@ -151,8 +152,16 @@ and **multichannel volume** compositing (one additive tinted layer per channel).
 Regions and display options stay in sync with the other backends via the shared
 stores.
 
-When a stack is open, a slice slider (Image view) or single-image/stack toggle
-(other views) navigates the z-dimension. A stack may be one server-tiled file
+Volume and Isosurface take their voxels from the **image stack**, and only from
+it — there is one voxel path, so a dataset reaches those modes by being a stack.
+A stack that declares its slice spacing (`imageMeta[0].mppZ`, alongside
+`mppX`/`mppY`) is rendered at its **true physical extent**, so 40 × 40 × 200 µm
+voxels read as anatomy rather than as a cube-aspect brick, and the axis labels
+read in real units on all three axes. Without it the world box is
+resolution-invariant but shape-only, and Z is labelled in slices.
+
+When a stack is open, a slice slider (Image view, and the 2D Spatial omics view)
+or single-image/stack toggle (other views) navigates the z-dimension. A stack may be one server-tiled file
 (internal z) or a set of self-contained per-slice URLs (`IImageInfo.tiled ===
 false`) — the latter (e.g. a host-assembled folder of numbered files) fetches
 `urls[z]` per slice on demand. For a per-slice stack the host can also supply a
@@ -164,7 +173,7 @@ A line-ROI tool draws coloured lines and plots intensity along each one in a liv
 floating inset chart that re-samples at the current zoom. It works today but the
 API/UX are still stabilizing (see [In progress / roadmap](#in-progress--roadmap)).
 
-## Spatial-omics data *(data plane — no plot mode yet)*
+## Spatial omics
 
 Contracts for **spatial-omics datasets**: N observations (Visium spots,
 segmented cells) positioned in a tissue image's pixel space, each carrying
@@ -198,9 +207,38 @@ Two properties the design turns on:
   (Xenium/CosMx) observations; two `Float32Array`s beat 500k `{x, y}` objects
   and upload to the GPU without a copy.
 
-Once a dataset is published, the **Spatial omics** plot type appears in the
-selector (and disappears when it is cleared — the same gating that hides Volume
-without a z-stack) and draws one marker per observation over the tissue image.
+Once a dataset is published, the spatial plot types appear in the selector (and
+disappear when it is cleared — the same gating that hides Volume without a
+z-stack):
+
+- **Spatial omics** — one marker per observation over the tissue image the
+  coordinates live in, positioned through `imageRef`'s affine.
+- **Spatial omics 3D** — gated additionally on the observations carrying a `z`
+  (`requiresSpatial3d`): the same observations as a point cloud under an orbit
+  camera, inside the dataset's reference volume if it has one.
+
+**A dataset whose 3D data is one file gets an image made from it.** A registered
+volume (`SpatialDataset.volume` + `SpatialDataPort.getVolume()`) is published *as*
+a grayscale z-stack image — one plane per slice, opened mid-volume — so the whole
+image surface applies to it: the toolbar slice slider, the contrast window,
+colormaps, the region tools, the physical scale bar, and Volume / Isosurface
+through the ordinary stack path. In the 2D mode the displayed plane then draws
+**that plane's** observations over that plane's anatomy, in the volume's own pixel
+grid, and a region drawn there selects that plane's cells rather than the whole
+depth behind them.
+
+**Cluster density volumes** *(3D mode, optional)* — a checkbox that raymarches
+each cluster as a smooth density field beside the cloud, tinted with its legend
+colour and blended additively. Serial sections hundreds of microns apart cannot be
+read as an anatomical distribution from points alone: the eye will not integrate a
+stack of discs into a shape, and every gap between sections reads as absence.
+Individual cells are never interpolated — consecutive sections sample different
+cells, so there is nothing to interpolate along — but a density *field* is an
+estimate legitimately defined between the imaged planes, and it renders as a
+translucent cloud so it cannot be mistaken for measurement. The kernel is
+anisotropic (σ along z clears one section gap) and the field is coverage-normalised
+along z, so unimaged planes do not read as empty tissue.
+
 Colour it through `getSpatialControls()`:
 
 ```ts
@@ -232,13 +270,23 @@ polygon, freehand shape, wand or brush region, then *Select from ROIs* selects
 every observation inside their union and mutes the rest. Legend rows select
 their category on click.
 
-**Linked distributions** sit in the same panel, below the colour controls:
-histogram, violin or box over whatever the map is coloured by, with violin/box
-splittable by a categorical column. One dialog on purpose — changing the gene
+**Linked distributions** sit in the same panel, below the colour controls, over
+whatever the map is coloured by: histogram, violin or box for a continuous column
+or a gene, and per-category **counts** for a categorical one — a histogram of a
+category code would be meaningless, but "how many cells per class" is the question
+the legend implies and never answers. Violin and box are splittable by a
+categorical column. One dialog on purpose — changing the gene
 and watching the distribution move is a single action. They follow the selection: the histogram
 overlays *Selected* on the full distribution, violin and box narrow to it. The
 chart's subject is the map's colour source rather than an independent picker, so
 the two cannot disagree about what is being shown.
+
+Categorical colouring has one renderer-specific limit worth knowing: the 3D
+points layer maps a per-point scalar through a 256-entry LUT, which holds **96
+categories** exactly, so above that the cloud draws flat and the panel says so.
+The 2D markers (per-point RGBA) and the density volumes (a scalar field per
+cluster) have no such limit — which is why the example server serves `subclass`
+(338) even though the cloud cannot colour by it.
 
 Still to build: hover tooltips, chart → map brushing, and a GPU layer for cell
 boundary polygons (they are served, not yet drawn) — see
@@ -350,11 +398,11 @@ Work that is landed-but-unstable or planned (not yet available):
   and browser-side SAM/cellpose segmentation) against sample images — so the
   library can be evaluated and developed standalone, outside jit-ui. Tracked in
   the library-extraction SOW ([docs/JIT_UI_visualization_library_SOW.docx](docs/JIT_UI_visualization_library_SOW.docx)).
-- **Spatial-omics plot mode** *(in progress — data plane landed, rendering not)* —
-  a layered mode drawing spots/cells over the tissue image, coloured by cluster
-  or gene, with ROI-linked histogram / violin / box charts. The contracts
-  (`SpatialDataPort`, `SpatialDataset`) and the example server's endpoints are
-  in place; the plot type itself is not. Scope, phasing and open questions:
+- **Spatial-omics follow-ons** *(planned — the modes themselves shipped in
+  0.4.0, see [Spatial omics](#spatial-omics))* — hover tooltips over
+  observations, brushing a chart selection back onto the map, and a GPU shapes
+  layer for cell-boundary polygons (the example server serves them; nothing draws
+  them yet, since a DOM overlay will not hold 10⁴–10⁵ outlines).
   [docs/spatial-omics-plot-mode-design.md](docs/spatial-omics-plot-mode-design.md).
 - **SAM 3 model** *(planned)* — a `variant: 'sam3'` decoder path + export tooling
   (SAM 2/3 use a different mask I/O than the current SAM-v1 path). See

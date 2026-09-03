@@ -9,6 +9,26 @@ file was added.
 
 ## [Unreleased]
 
+
+## [0.4.0] — 2026-09-02
+
+The spatial-omics release. Two new plot modes:
+
+- **`Spatial omics`** — one marker per observation over the tissue image, coloured
+  by an annotation column or a gene, with ROI-linked distribution charts. For a
+  dataset whose 3D data is a registered volume, it draws the displayed plane's
+  anatomy with that plane's observations over it, and the toolbar's slice slider
+  scrubs depth.
+- **`Spatial omics 3D`** — the same observations as a point cloud under an orbit
+  camera, inside the dataset's reference volume, with screen-space region
+  selection and optional per-cluster **density volumes**.
+
+Both sit on a new spatial data plane (`SPATIAL_DATA_PORT`, `SpatialDataset`) that
+holds observations resident while column, feature and polygon values arrive one at
+a time. Volume and Isosurface now read the image stack and nothing else, and
+`IImageMetadata` gains **`mppZ`** so any stack that knows its slice spacing
+renders with true physical anisotropy.
+
 ### Added
 
 - **A categorical colour source now charts, as counts per category.** The
@@ -1242,7 +1262,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.0...v0.3.1

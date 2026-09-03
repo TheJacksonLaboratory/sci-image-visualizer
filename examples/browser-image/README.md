@@ -221,8 +221,11 @@ The gallery's spatial entries are **discovered from the server**, not hardcoded:
 the example asks `/spatial/datasets` at startup, so dropping a SpatialData store
 (or a legacy ST bundle) into the server's data directories makes it appear here
 with no code change. They live in a **`spatial-omics` folder**, like the bundled
-micro-CT series — with 41 datasets the root gallery is unreadable flat. Each
-entry loads a tissue image *and* the spatial-omics dataset registered onto it.
+micro-CT series — with 41 datasets the root gallery is unreadable flat. A 2D
+entry loads a tissue image *and* the spatial-omics dataset registered onto it; a
+**3D** entry (the ABC atlas ones, which have no `imageRef`) loads only the
+dataset, and the library then publishes that dataset's registered volume as the
+image, opening on the Image view over its slices.
 
 Image dimensions are fetched on **click**, not at startup — asking for a
 descriptor is what makes the server build that image's pyramid, so only the
@@ -230,6 +233,13 @@ dataset you open pays for it. Selecting it makes the
 **Spatial omics** plot type appear in the plot-type selector (it is hidden
 whenever no dataset is loaded, like Volume is hidden without a z-stack); picking
 that mode draws ~2,000 spots over the tissue, coloured by anatomical region.
+
+A dataset whose observations carry a `z` also offers **Spatial omics 3D** — the
+cloud under an orbit camera inside the reference volume. Its slice slider scrubs
+the volume in the 2D mode (each plane drawing its own section's cells), and the
+panel's **Cluster density volumes** checkbox raymarches the largest clusters as
+smooth density fields alongside the cloud. `npm run fetch-abc` in the tile server
+populates the whole-mouse-brain MERFISH datasets those paths were built against.
 
 ```bash
 cd examples/tile-server
@@ -265,8 +275,10 @@ non-spatial image is selected, which is what withdraws the plot type again.
 
 Once the mode is active, the **Spatial omics** toolbar button opens the controls
 panel: colour by any column or search the gene panel, with a legend for
-categorical colourings, a colour bar for continuous ones, and point-size,
-opacity, log-scale and outlier-clip controls. The example sets an initial
+categorical colourings, a colour bar for continuous ones, point-size, opacity,
+log-scale and outlier-clip controls, and a **Distribution** section charting
+whatever the map is coloured by — counts per category for a categorical column,
+histogram / violin / box for a continuous one or a gene. The example sets an initial
 colour column in code only so the mode opens on something meaningful.
 
 ## Try it end-to-end
