@@ -2334,15 +2334,17 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
 
   /** Category codes → a stepped LUT, exact for up to {@link SPATIAL_3D_MAX_CATEGORIES}. */
   private encodeSpatial3dCategorical(codes: Uint16Array, colors: string[]): Spatial3dEncoding | null {
-    // Slot 0 is reserved for "no category", so the palette occupies 1..K.
-    const k = colors.length + 1;
-    if (k > SPATIAL_3D_MAX_CATEGORIES) {
+    // Slot 0 is reserved for "no category", so the palette occupies 1..K and the
+    // block count is one more than the category count — which is why the published
+    // ceiling is 95 categories rather than the LUT's 96 distinguishable blocks.
+    if (colors.length > SPATIAL_3D_MAX_CATEGORIES) {
       console.warn(
-        `[napari-js] ${colors.length} categories exceeds what the 3D layer's 256-entry LUT can `
-        + 'hold distinctly; drawing flat instead of with wrong colours',
+        `[napari-js] ${colors.length} categories exceeds the ${SPATIAL_3D_MAX_CATEGORIES} the 3D `
+        + "layer's 256-entry LUT can hold distinctly; drawing flat instead of with wrong colours",
       );
       return null;
     }
+    const k = colors.length + 1;
     const palette: Rgb[] = [
       MISSING_COLOR,
       ...colors.map(parseHex),

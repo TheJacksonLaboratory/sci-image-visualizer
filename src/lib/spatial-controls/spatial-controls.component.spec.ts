@@ -277,10 +277,15 @@ describe('SpatialControlsComponent', () => {
         label: `s${i}`, color: '#888888',
       }));
       expect(component.exceedsCloudPalette).toBe(true);
-      expect(component.cloudPaletteLimit).toBe(96);
+      // 95, not 96: one of the LUT's 96 distinguishable blocks is reserved for a
+      // missing value, and the panel must publish what the renderer enforces —
+      // at 96 the cloud drew flat with no warning at all.
+      expect(component.cloudPaletteLimit).toBe(95);
+      (component as any).legend = Array.from({ length: 96 }, () => ({ label: 'c', color: '#888' }));
+      expect(component.exceedsCloudPalette).toBe(true);
 
       // Within the ceiling, or in 2D, there is nothing to warn about.
-      (component as any).legend = Array.from({ length: 34 }, () => ({ label: 'c', color: '#888' }));
+      (component as any).legend = Array.from({ length: 95 }, () => ({ label: 'c', color: '#888' }));
       expect(component.exceedsCloudPalette).toBe(false);
       (component as any).legend = Array.from({ length: 338 }, () => ({ label: 'c', color: '#888' }));
       component.is3d = false;

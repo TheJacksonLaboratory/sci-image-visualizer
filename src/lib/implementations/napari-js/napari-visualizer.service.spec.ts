@@ -10,6 +10,7 @@ import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
 import { VIZ_CONFIG } from '../../contracts/viz-config';
 import { TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
+import { SPATIAL_3D_MAX_CATEGORIES } from '../spatial/spatial-encoding';
 import { PlotType } from '../../contracts/plot-type';
 import { ViewerFeature } from '../../contracts/capabilities.contract';
 import { IImageInfo } from '../../contracts/image.contract';
@@ -875,6 +876,33 @@ describe('NapariVisualizerService', () => {
 
     beforeEach(() => {
       addPoints3D = jest.spyOn(Viewer.prototype, 'addPoints3D');
+    });
+
+    it('draws the cloud flat above the published category ceiling, and in colour at it', async () => {
+      // The enforced limit and the one the panel publishes have to be the same
+      // number: at 96 categories the encoder rejected while the panel warned only
+      // above 96, so the cloud drew flat with nothing said.
+      const palette = (n: number) => ({
+        meta: {
+          kind: 'categorical', name: 'wide',
+          categories: Array.from({ length: n }, (_, i) => `c${i}`),
+          colors: Array.from({ length: n }, () => '#123456'),
+        },
+        codes: new Uint16Array([0, 1, 2]),
+      });
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+      spatialPort.getColumn.mockResolvedValue(palette(SPATIAL_3D_MAX_CATEGORIES));
+      await mount3d(spatialDataset3d());
+      store.setSpatialView({ colorBy: { kind: 'column', name: 'wide' } });
+      await flush();
+      expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('exceeds'));
+
+      spatialPort.getColumn.mockResolvedValue(palette(SPATIAL_3D_MAX_CATEGORIES + 1));
+      store.setSpatialView({ colorBy: { kind: 'column', name: 'wider' } });
+      await flush();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('exceeds'));
+      warn.mockRestore();
     });
 
     describe('cluster density volumes', () => {

@@ -42,10 +42,11 @@ const GENES_CSV = 'example_genes_all_cells_expression.csv';
  *
  * The 3D points layer colours by mapping a per-point SCALAR through a 256-entry
  * LUT (it has no per-point RGBA), so a categorical palette is encoded as one
- * contiguous block of LUT entries per category. Measured against napari-js, every
- * K from 2..96 round-trips exactly and K=97 is the first that does not, so above
- * 96 that layer draws flat rather than draw subtly wrong colours under a confident
- * legend. Nothing else has that limit: the 2D markers carry per-point RGBA, and a
+ * contiguous block of LUT entries per value. Measured against napari-js, every
+ * K from 2..96 BLOCKS round-trips exactly and K=97 is the first that does not —
+ * and one block is reserved for a missing value, which every column can contain,
+ * so above 95 CATEGORIES that layer draws flat rather than draw subtly wrong
+ * colours under a confident legend. Nothing else has that limit: the 2D markers carry per-point RGBA, and a
  * density volume is a SCALAR FIELD PER CLUSTER, so neither cares how many
  * categories the column has.
  *
@@ -58,7 +59,7 @@ const GENES_CSV = 'example_genes_all_cells_expression.csv';
 const CATEGORICAL = [
   { name: 'class', color: 'class_color', description: 'Cell class — the top level of the whole-brain taxonomy' },
   { name: 'neurotransmitter', color: 'neurotransmitter_color', description: 'Neurotransmitter identity, blank where not assigned' },
-  { name: 'subclass', color: 'subclass_color', description: 'Cell subclass — 338 of them, the level most analysis is read at. Above the 3D points layer\'s 96-category LUT ceiling, so the cloud draws flat for it; the density volumes and the 2D view render it in full' },
+  { name: 'subclass', color: 'subclass_color', description: 'Cell subclass — 338 of them, the level most analysis is read at. Above the 3D points layer\'s 95-category LUT ceiling, so the cloud draws flat for it; the density volumes and the 2D view render it in full' },
   { name: 'parcellation_division', color: 'parcellation_division_color', description: 'CCF anatomical division' },
   { name: 'brain_section_label', color: null, description: 'Source coronal section — 53 of them, ordered anterior to posterior' },
 ];

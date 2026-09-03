@@ -136,15 +136,22 @@ function blurAxis(
  * sections are empty because nobody imaged there, and only the second is a
  * sampling artefact to correct for.
  */
-function sampledPlanes(obs: SpatialObservations, grid: DensityGrid): Float32Array {
+function sampledPlanes(
+  obs: SpatialObservations, grid: DensityGrid,
+): { cover: Float32Array; first: number; last: number } {
   const cover = new Float32Array(grid.depth);
   const z = obs.z;
-  if (!z) return cover.fill(1);
+  if (!z) return { cover: cover.fill(1), first: 0, last: grid.depth - 1 };
+  let first = grid.depth;
+  let last = -1;
   for (let i = 0; i < obs.count; i++) {
     const k = Math.floor(z[i] / grid.voxelSize[2]);
-    if (k >= 0 && k < grid.depth) cover[k] = 1;
+    if (k < 0 || k >= grid.depth) continue;
+    cover[k] = 1;
+    if (k < first) first = k;
+    if (k > last) last = k;
   }
-  return cover;
+  return { cover, first, last };
 }
 
 /** Blur a 1D profile with the same kernel `blurAxis` uses, so the correction and
@@ -192,17 +199,26 @@ export function rasterizeDensity(
 
   // Coverage correction, per plane: the same kernel over the sampled support says
   // how much of each plane's neighbourhood was actually imaged.
-  const cover = blur1d(sampledPlanes(obs, grid), sigmaVox[2]);
+  const { cover, first, last } = sampledPlanes(obs, grid);
+  const smoothedCover = blur1d(cover, sigmaVox[2]);
   let max = 0;
   const plane = w * h;
   for (let k = 0; k < d; k++) {
-    // The correction BRIDGES gaps; it does not extrapolate. Capping the
-    // amplification at 2x (coverage floored at 0.5) is enough to lift a plane
-    // sitting between two imaged sections — where a bandwidth spanning one gap
-    // leaves coverage around a half — while a plane at or past the edge of the
-    // sampled range, whose coverage falls towards zero, stays dark instead of
-    // having a trace of smoothing leakage inflated into a signal.
-    const scale = 1 / Math.max(cover[k], 0.5);
+    // OUTSIDE the sampled range there is nothing to interpolate between, only
+    // one side to extrapolate from — so the field is zeroed rather than scaled.
+    // The blur leaves a positive tail past the first and last imaged planes, and
+    // keeping it would put estimated cells in front of the specimen's first
+    // section and behind its last, which is exactly what "smoothed BETWEEN the
+    // imaged sections" promises not to do.
+    if (k < first || k > last) {
+      field.fill(0, k * plane, (k + 1) * plane);
+      continue;
+    }
+    // Inside it, the correction BRIDGES gaps. Capping the amplification at 2x
+    // (coverage floored at 0.5) lifts a plane sitting between two imaged sections
+    // — where a bandwidth spanning one gap leaves coverage around a half —
+    // without inflating a trace of smoothing leakage into a signal.
+    const scale = 1 / Math.max(smoothedCover[k], 0.5);
     for (let i = k * plane; i < (k + 1) * plane; i++) {
       const v = field[i] * scale;
       field[i] = v;

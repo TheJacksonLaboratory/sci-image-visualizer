@@ -81,12 +81,16 @@ describe('spatial density', () => {
 
     it('spreads along z by the z bandwidth alone, not the in-plane one', () => {
       const g = grid();
-      // A wide z kernel and a narrow in-plane one: the field must reach the
-      // neighbouring PLANE while staying tight in x. An isotropic kernel would
-      // leave one disc per section, which is a sampling artefact, not biology.
-      const f = rasterizeDensity(obs([[45, 45, 45]]), g, { sigma: [3, 3, 30] })!;
+      // Two sections, four planes apart, with a wide z kernel and a narrow
+      // in-plane one: the field must bridge the planes BETWEEN them while staying
+      // tight in x. An isotropic kernel would leave one disc per section, which is
+      // a sampling artefact, not biology.
+      const f = rasterizeDensity(obs([[45, 45, 25], [45, 45, 65]]), g, { sigma: [3, 3, 30] })!;
 
-      expect(at(f, g, 4, 4, 6)).toBeGreaterThan(at(f, g, 6, 4, 4));
+      // Midway between the sections, on axis…
+      expect(at(f, g, 4, 4, 4)).toBeGreaterThan(0);
+      // …beats two voxels off axis on a section's own plane.
+      expect(at(f, g, 4, 4, 4)).toBeGreaterThan(at(f, g, 6, 4, 2));
     });
 
     it('lifts an unsampled plane to its neighbours level instead of leaving a hole', () => {
@@ -111,6 +115,21 @@ describe('spatial density', () => {
 
       expect(at(f, g, 4, 4, 4)).toBe(255);       // its own plane
       expect(at(f, g, 4, 4, 1)).toBeLessThan(60); // a plane it is absent from
+    });
+
+    it('leaves nothing outside the sampled z range, where there is only one side to extrapolate from', () => {
+      // Cells on planes 3 and 4 only. A wide z kernel leaves a positive tail
+      // before the first and after the last imaged plane, and the coverage floor
+      // scales it rather than removing it — so the tail is zeroed instead, or the
+      // estimate puts cells in front of the specimen's first section.
+      const g = grid();
+      const f = rasterizeDensity(obs([[45, 45, 35], [45, 45, 45]]), g, { sigma: [10, 10, 25] })!;
+
+      expect(at(f, g, 4, 4, 3)).toBeGreaterThan(0); // inside the range
+      expect(at(f, g, 4, 4, 4)).toBeGreaterThan(0);
+      for (const outside of [0, 1, 2, 5, 6, 7]) {
+        expect(at(f, g, 4, 4, outside)).toBe(0);
+      }
     });
 
     it('rasterises only the given indices', () => {

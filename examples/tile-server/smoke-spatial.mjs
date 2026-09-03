@@ -184,13 +184,13 @@ try {
     check('z spans the brain, not one plane', zhi - zlo > 5000,
       `${(zlo / 1000).toFixed(1)}-${(zhi / 1000).toFixed(1)} mm`);
     // Cardinality decides which views a column can drive, not whether it is
-    // servable: the 3D POINTS layer draws flat above 96 categories (its 256-entry
+    // servable: the 3D POINTS layer draws flat above 95 categories (its 256-entry
     // LUT cannot keep more apart), while the 2D markers and the per-cluster density
     // volumes have no such limit. So what matters is that a wide column arrives
     // COMPLETE — every category named, every colour present — since those are what
     // the views that can render it read.
     const cats = (m.columns || []).filter((c) => c.kind === 'categorical');
-    const wide = cats.filter((c) => c.categories.length > 96);
+    const wide = cats.filter((c) => c.categories.length > 95);
     check('subclass is served, above the LUT ceiling, for the density volumes',
       wide.some((c) => c.name === 'subclass'),
       wide.map((c) => `${c.name}=${c.categories.length}`).join(', ') || 'none served');
