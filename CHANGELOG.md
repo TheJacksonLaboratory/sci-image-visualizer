@@ -11,6 +11,32 @@ file was added.
 
 ### Added
 
+- **A categorical colour source now charts, as counts per category.** The
+  distribution section charts whatever the map is coloured by, and a categorical
+  column used to get a notice instead of a chart — which for the ABC atlas is
+  every column anyone reaches for first (`class`, `subclass`, `neurotransmitter`,
+  `parcellation_division`, `brain_section_label`; the dataset serves exactly one
+  continuous column). A histogram of a category *code* would be meaningless, since
+  the codes are labels and not magnitudes — but "how many cells per class" is a
+  real question, and the one the legend implies without answering.
+
+  Horizontal bars, because taxonomy labels are long; sorted by count, because rank
+  is what the chart is read for; in the map's own category colours, so the chart
+  and the render cannot disagree. Ties keep category order, so bars do not
+  reshuffle between two datasets that happen to tie. Past 25 categories the tail
+  folds into one `other (N categories)` bar rather than being dropped — 338
+  subclasses do not fit a readable axis, but showing 25 of them silently would
+  misstate the whole. With a selection the bars show it against the total,
+  overlaid. The kind selector follows the subject: Counts for a categorical one,
+  Histogram / Violin / Box for a continuous one.
+
+### Fixed
+
+- **Expanding `Distribution` scrolls the chart into view.** The panel is taller
+  than the viewport once that section is open and the chart is its last row, so
+  expanding it drew a chart a few hundred pixels below the fold — the section read
+  as empty, on a panel that does scroll but says nothing about it.
+
 - **`subclass` (338 categories) is served by the example ABC source**, for the
   density volumes. Cardinality decides which VIEWS a column can drive, not whether
   it is worth serving, and the two had been conflated: the ceiling is a property of

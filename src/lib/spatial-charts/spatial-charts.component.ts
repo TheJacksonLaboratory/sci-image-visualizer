@@ -8,7 +8,8 @@ import { VISUALIZER, IVisualizer, ISpatialControls } from '../contracts/visualiz
 import { SpatialColorBy, SpatialViewState, DEFAULT_SPATIAL_VIEW } from '../contracts/display-types';
 import { SpatialSelectionMask, emptySelection } from '../implementations/spatial/spatial-selection';
 import {
-  OmicsChartKind, OmicsGrouping, benefitsFromGrouping, buildOmicsTraces, omicsLayout,
+  OmicsChartKind, OmicsGrouping, benefitsFromGrouping, buildCountTraces, buildOmicsTraces,
+  countsLayout, omicsLayout,
 } from '../implementations/plotly/omics-trace-builders';
 
 /** Plotly config: a static-ish analysis chart, not an editable figure. */
@@ -65,11 +66,23 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   private isActive = true;
 
   readonly chartDiv = 'spatial-charts-plot';
-  readonly kindOptions: { label: string; value: OmicsChartKind }[] = [
+  private static readonly CONTINUOUS_KINDS: { label: string; value: OmicsChartKind }[] = [
     { label: 'Histogram', value: 'histogram' },
     { label: 'Violin', value: 'violin' },
     { label: 'Box', value: 'box' },
   ];
+  private static readonly CATEGORICAL_KINDS: { label: string; value: OmicsChartKind }[] = [
+    { label: 'Counts', value: 'counts' },
+  ];
+
+  /** The kinds the ACTIVE subject can be drawn as. A category code is a label,
+   *  not a magnitude, so a histogram of it would be meaningless — what a
+   *  categorical column has is a frequency distribution. */
+  get kindOptions(): { label: string; value: OmicsChartKind }[] {
+    return this.categorical
+      ? SpatialChartsComponent.CATEGORICAL_KINDS
+      : SpatialChartsComponent.CONTINUOUS_KINDS;
+  }
 
   controls: ISpatialControls | null = null;
   kind: OmicsChartKind = 'histogram';
@@ -87,6 +100,9 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   private view: SpatialViewState = { ...DEFAULT_SPATIAL_VIEW };
   private selection: SpatialSelectionMask = emptySelection();
   private values: Float32Array | null = null;
+  /** Set instead of `values` when the colour source is a categorical column: its
+   *  distribution is counts per category, not a histogram of its codes. */
+  private categorical: OmicsGrouping | null = null;
   private grouping: OmicsGrouping | null = null;
   /** Guards the async value fetch: a fast colour-source change can resolve out
    *  of order, and a stale vector would be charted against the new label. */
@@ -207,24 +223,40 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     const mine = ++this.token;
     if (!controls || !source) {
       this.values = null;
+      this.categorical = null;
       this.notice = controls
-        ? 'Colour the map by a continuous column or a gene to chart it.'
+        ? 'Colour the map by a column or a gene to chart its distribution.'
         : null;
       void this.render();
       return;
     }
     this.busy = true;
+    // A categorical column charts as COUNTS per category — asked for by name
+    // rather than discovered by catching the continuous fetch's error, so a
+    // genuine failure still reads as a failure.
+    const isCategorical = source.kind === 'column'
+      && (controls.categoricalColumns() ?? []).includes(source.name);
     try {
-      const values = await controls.continuousValues(source);
-      if (mine !== this.token) return; // superseded
-      this.values = values;
-      this.notice = null;
-    } catch {
+      if (isCategorical) {
+        const view = await controls.categoricalView(source.name);
+        if (mine !== this.token) return; // superseded
+        this.categorical = { codes: view.codes, categories: view.categories, colors: view.colors };
+        this.values = null;
+        this.kind = 'counts';
+        this.notice = null;
+      } else {
+        const values = await controls.continuousValues(source);
+        if (mine !== this.token) return;
+        this.values = values;
+        this.categorical = null;
+        if (this.kind === 'counts') this.kind = 'histogram';
+        this.notice = null;
+      }
+    } catch (err) {
       if (mine !== this.token) return;
       this.values = null;
-      // The common case: the map is coloured by a categorical column.
-      this.notice = `"${source.name}" is categorical — it has no distribution. `
-        + 'Colour by a continuous column or a gene, or group a violin by it.';
+      this.categorical = null;
+      this.notice = `"${source.name}" could not be charted: ${(err as Error)?.message ?? err}`;
     } finally {
       if (mine === this.token) this.busy = false;
     }
@@ -235,12 +267,23 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     if (!this.isActive) return;
     const el = document.getElementById(this.chartDiv);
     if (!el) return;
-    if (!this.values || !this.colorBy) {
+    if (!this.colorBy || (!this.values && !this.categorical)) {
       try {
         Plotly.purge(this.chartDiv);
       } catch { /* nothing plotted */ }
       return;
     }
+    if (this.categorical) {
+      const counts = {
+        group: this.categorical,
+        selection: this.selection.count > 0 ? this.selection.mask : null,
+        name: this.colorBy.name,
+      };
+      await Plotly.react(this.chartDiv, buildCountTraces(counts) as never,
+        countsLayout(counts) as never, CHART_CONFIG as never);
+      return;
+    }
+    if (!this.values) return;
     const input = {
       values: this.values,
       name: this.colorBy.kind === 'feature' ? this.colorBy.name : this.colorBy.name,

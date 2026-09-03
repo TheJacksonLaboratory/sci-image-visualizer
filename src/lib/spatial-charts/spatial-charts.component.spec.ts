@@ -146,7 +146,7 @@ describe('SpatialChartsComponent', () => {
 
   it('says what to do when nothing is coloured by', async () => {
     await build(controls);
-    expect(component.notice).toMatch(/Colour the map by a continuous column or a gene/);
+    expect(component.notice).toMatch(/Colour the map by a column or a gene/);
     expect(Plotly.react).not.toHaveBeenCalled();
   });
 
@@ -249,13 +249,53 @@ describe('SpatialChartsComponent', () => {
     });
   });
 
-  it('explains a categorical colour source rather than charting nothing', async () => {
-    controls.continuousValues.mockRejectedValueOnce(new Error('categorical'));
-    await build(controls);
-    view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
-    await flush();
-    expect(component.notice).toMatch(/is categorical/);
-    expect(Plotly.purge).toHaveBeenCalled();
+  describe('with a categorical colour source', () => {
+    beforeEach(async () => {
+      await build(controls);
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+      await flush();
+    });
+
+    it('charts counts per category instead of refusing', () => {
+      // A category CODE is a label, not a magnitude, so a histogram of it would be
+      // meaningless — but "how many cells per class" is the question the legend
+      // implies and never answers.
+      expect(controls.categoricalView).toHaveBeenCalledWith('region');
+      expect(controls.continuousValues).not.toHaveBeenCalled();
+      expect(component.notice).toBeNull();
+      expect(component.kind).toBe('counts');
+
+      const { traces, layout } = lastPlot();
+      expect(traces[0].type).toBe('bar');
+      expect(traces[0].orientation).toBe('h');
+      // A x2, B x2, biggest first — and reversed, since Plotly draws the first
+      // horizontal category at the bottom.
+      expect(traces[0].y).toEqual(['B', 'A']);
+      expect(traces[0].x).toEqual([2, 2]);
+      expect(layout.xaxis.title.text).toBe('observations');
+    });
+
+    it('offers only the kinds a categorical subject can be drawn as', () => {
+      expect(component.kindOptions.map((k) => k.value)).toEqual(['counts']);
+    });
+
+    it('returns to a histogram when the source goes back to continuous', async () => {
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'total_counts' } });
+      await flush();
+      expect(component.kind).toBe('histogram');
+      expect(component.kindOptions.map((k) => k.value)).toEqual(['histogram', 'violin', 'box']);
+      expect(lastPlot().traces[0].type).toBe('histogram');
+    });
+
+    it('reports a genuine failure rather than swallowing it', async () => {
+      controls.categoricalView.mockRejectedValueOnce(new Error('column blew up'));
+      view$.next({ ...view$.value, colorBy: null });
+      await flush();
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+      await flush();
+      expect(component.notice).toMatch(/could not be charted/);
+      expect(Plotly.purge).toHaveBeenCalled();
+    });
   });
 
   describe('lifecycle', () => {

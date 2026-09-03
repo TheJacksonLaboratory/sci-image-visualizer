@@ -1,4 +1,5 @@
 import {
+  buildCountTraces, countByCategory, countsLayout,
   OmicsGrouping, OmicsTraceInput, benefitsFromGrouping, buildOmicsTraces, omicsLayout,
 } from './omics-trace-builders';
 import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
@@ -173,6 +174,69 @@ describe('omics-trace-builders', () => {
       expect(benefitsFromGrouping('violin')).toBe(true);
       expect(benefitsFromGrouping('box')).toBe(true);
       expect(benefitsFromGrouping('histogram')).toBe(false);
+      expect(benefitsFromGrouping('counts')).toBe(false);
+    });
+  });
+
+  describe('counts (the distribution a CATEGORICAL column has)', () => {
+    const group = (codes: number[], n = 3) => ({
+      codes: Uint16Array.from(codes),
+      categories: Array.from({ length: n }, (_, i) => `c${i}`),
+      colors: Array.from({ length: n }, (_, i) => `#00000${i}`),
+    });
+
+    it('counts per category, biggest first, with its own colours', () => {
+      const { labels, totals, colors } = countByCategory({ group: group([0, 1, 1, 2, 1]) });
+      // 3, 1, 1 — by count, and ties keep CATEGORY order (a stable sort), so the
+      // bars do not reshuffle between two datasets that happen to tie.
+      expect(labels).toEqual(['c1', 'c0', 'c2']);
+      expect(totals).toEqual([3, 1, 1]);
+      expect(colors[0]).toBe('#000001');
+    });
+
+    it('skips unassigned observations rather than counting them as a category', () => {
+      const g = group([0, NO_CATEGORY, 0]);
+      const { labels, totals } = countByCategory({ group: g });
+      expect(labels).toEqual(['c0']);
+      expect(totals).toEqual([2]);
+    });
+
+    it('folds the tail into one aggregate bar rather than dropping it', () => {
+      // 338 subclasses do not fit a readable axis, but showing 25 of them silently
+      // would misstate the whole.
+      const codes = Array.from({ length: 60 }, (_, i) => i % 30);
+      const { labels, totals } = countByCategory({ group: group(codes, 30), max: 25 });
+      expect(labels).toHaveLength(26);
+      expect(labels.at(-1)).toBe('other (5 categories)');
+      expect(totals.reduce((a, b) => a + b, 0)).toBe(60); // nothing lost
+    });
+
+    it('shows the selection against the total, overlaid', () => {
+      const input = {
+        group: group([0, 0, 1, 1]),
+        selection: new Uint8Array([1, 0, 0, 0]),
+      };
+      const traces = buildCountTraces(input) as any[];
+      expect(traces).toHaveLength(2);
+      expect(traces[0].name).toBe('All');
+      expect(traces[1].name).toBe('Selected');
+      // Reversed for the horizontal axis, so the biggest bar sits at the top.
+      expect(traces[1].y).toEqual(['c1', 'c0']);
+      expect(traces[1].x).toEqual([0, 1]);
+      expect((countsLayout({ ...input, name: 'region' }) as any).barmode).toBe('overlay');
+    });
+
+    it('grows the plot height with the bar count', () => {
+      const few = countsLayout({ group: group([0, 1]), name: 'region' }) as any;
+      const many = countsLayout({
+        group: group(Array.from({ length: 40 }, (_, i) => i % 20), 20), name: 'region',
+      }) as any;
+      expect(many.height).toBeGreaterThan(few.height);
+    });
+
+    it('draws no bar for a category nothing is assigned to', () => {
+      const traces = buildCountTraces({ group: group([0, 0], 3) }) as any[];
+      expect(traces[0].y).toEqual(['c0']);
     });
   });
 });

@@ -206,8 +206,22 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     }
   }
 
+  /**
+   * Expand or collapse the distribution section.
+   *
+   * Expanding SCROLLS it into view, because the panel is taller than the viewport
+   * once this section is open and the chart is its last row: expanding it drew a
+   * chart ~300 px below the fold, which reads as the section being empty. The
+   * scroll is deferred a task so the chart's own deferred first draw has given the
+   * body its height.
+   */
   toggleCharts(): void {
     this.chartsOpen = !this.chartsOpen;
+    if (!this.chartsOpen) return;
+    setTimeout(() => {
+      document.getElementById('sc-charts-body')
+        ?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+    }, 0);
   }
 
   clearSelection(): void {

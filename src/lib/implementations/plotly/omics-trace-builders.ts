@@ -13,7 +13,7 @@ import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
  * distribution and already carries both trace types.
  */
 
-export type OmicsChartKind = 'histogram' | 'violin' | 'box';
+export type OmicsChartKind = 'histogram' | 'violin' | 'box' | 'counts';
 
 /** Per-observation grouping for a violin/box, or an overlaid histogram. */
 export interface OmicsGrouping {
@@ -190,4 +190,114 @@ export function omicsLayout(kind: OmicsChartKind, input: OmicsTraceInput): unkno
 /** Whether a chart kind needs a categorical grouping to be worth showing. */
 export function benefitsFromGrouping(kind: OmicsChartKind): boolean {
   return kind === 'violin' || kind === 'box';
+}
+
+/** Categories shown as bars before the tail is folded into one "other". */
+const MAX_COUNT_BARS = 25;
+
+export interface OmicsCountInput {
+  /** The categorical being counted, with the map's own colours. */
+  group: OmicsGrouping;
+  /** `1` marks a selected observation; when present the bars show the selection
+   *  against the total. */
+  selection?: Uint8Array | null;
+  /** Bars before the tail is aggregated. */
+  max?: number;
+}
+
+/** Per-category counts, biggest first, with the tail folded into one bar. */
+export function countByCategory(
+  input: OmicsCountInput,
+): { labels: string[]; colors: string[]; totals: number[]; selected: number[] } {
+  const { codes, categories, colors } = input.group;
+  const selection = activeSelection(input.selection);
+  const totals = new Float64Array(categories.length);
+  const selected = new Float64Array(categories.length);
+  for (let i = 0; i < codes.length; i++) {
+    const c = codes[i];
+    if (c === NO_CATEGORY || c >= categories.length) continue;
+    totals[c]++;
+    if (selection && selection[i]) selected[c]++;
+  }
+
+  const ranked = Array.from(totals, (n, c) => ({ c, n }))
+    .filter((r) => r.n > 0)
+    .sort((a, b) => b.n - a.n);
+  const max = input.max ?? MAX_COUNT_BARS;
+  const head = ranked.slice(0, max);
+  const tail = ranked.slice(max);
+
+  const out = {
+    labels: head.map((r) => categories[r.c]),
+    colors: head.map((r) => colors[r.c] ?? DEFAULT_COLOR),
+    totals: head.map((r) => r.n),
+    selected: head.map((r) => selected[r.c]),
+  };
+  // The tail is aggregated rather than dropped: 338 subclasses do not fit a
+  // readable axis, but silently showing 25 of them would misstate the whole.
+  if (tail.length) {
+    out.labels.push(`other (${tail.length} categories)`);
+    out.colors.push('#9e9e9e');
+    out.totals.push(tail.reduce((a, r) => a + r.n, 0));
+    out.selected.push(tail.reduce((a, r) => a + selected[r.c], 0));
+  }
+  return out;
+}
+
+/**
+ * Bars of per-category cell counts — the distribution a CATEGORICAL colour
+ * source has.
+ *
+ * A histogram of a category code would be meaningless (the codes are labels, not
+ * magnitudes), but "how many cells per class" is a real question, and the same one
+ * the legend implies without answering. Horizontal, because taxonomy labels are
+ * long, and sorted, because rank is what the chart is read for.
+ */
+export function buildCountTraces(input: OmicsCountInput): unknown[] {
+  const { labels, colors, totals, selected } = countByCategory(input);
+  const selection = activeSelection(input.selection);
+  // Plotly draws the first category at the BOTTOM of a horizontal axis, so
+  // reverse to put the biggest bar at the top where the eye starts.
+  const flip = <T>(a: T[]): T[] => a.slice().reverse();
+  const traces: unknown[] = [{
+    type: 'bar',
+    orientation: 'h',
+    x: flip(totals),
+    y: flip(labels),
+    name: selection ? 'All' : 'Cells',
+    marker: { color: flip(colors) },
+    opacity: selection ? 0.45 : 1,
+    hovertemplate: '%{x} obs<extra>%{y}</extra>',
+  }];
+  if (selection) {
+    traces.push({
+      type: 'bar',
+      orientation: 'h',
+      x: flip(selected),
+      y: flip(labels),
+      name: 'Selected',
+      marker: { color: flip(colors) },
+      hovertemplate: '%{x} obs<extra>%{y} · selected</extra>',
+    });
+  }
+  return traces;
+}
+
+export function countsLayout(input: OmicsCountInput & { name: string }): unknown {
+  const { labels } = countByCategory(input);
+  return {
+    // Room for the labels, and a height that grows with the bar count so 25
+    // categories are not crushed into the same box as 3.
+    margin: { t: 10, r: 10, b: 40, l: 8 },
+    autosize: true,
+    // Overlaid, not stacked: the selected bar reads against the total it came
+    // from, which is the comparison being made.
+    barmode: 'overlay',
+    showlegend: !!activeSelection(input.selection),
+    legend: { orientation: 'h', y: 1.12, x: 0 },
+    hovermode: 'closest',
+    xaxis: { title: { text: 'observations' } },
+    yaxis: { automargin: true, ticklabelposition: 'inside', tickfont: { size: 10 } },
+    height: Math.max(180, 22 * labels.length + 60),
+  };
 }
