@@ -91,7 +91,9 @@ compute path avoids the question.
 **Source:** `node_modules/napari-js/dist/{napari-js.js,viewer.d.ts,layers/*.d.ts}`
 (0.11.1).
 **Confidence:** high (read, not inferred).
-**Action:** Two viable paths, below. Neither is blocked by WebGPU.
+**Action:** Two viable paths, below. Neither is blocked by WebGPU — and since
+napari-js is our own package, "change napari-js" is a normal option rather than
+an upstream request.
 
 ### 5. Device limits must be requested — the default is 128 MiB, and the failure is silent
 **What:** The adapter advertises `maxStorageBufferBindingSize` and
@@ -164,24 +166,41 @@ The real constraint is **napari-js**: its renderer selects visuals with an
 mesh layer is 3D-only, its labels layer is 8-bit, and it uses no compute at all.
 So the choice is:
 
-- **Path A — a `ShapesLayer` upstream in napari-js.** The durable answer: their
-  camera, their z-order, their blending, and it benefits every consumer. Needs a
-  layer + visual (line-list and/or triangle-list), `requiredLimits` raised, and
-  ideally the compute expansion. Costs an upstream release cycle.
-- **Path B — a second, transparent WebGPU canvas above napari's.** No upstream
+- **Path A — a `ShapesLayer` in napari-js.** Its camera, its z-order, its
+  blending, and every consumer gets it.
+- **Path B — a second, transparent WebGPU canvas above napari's.** No napari
   change: our own device and pipeline, camera synced through the `Viewer.camera`
-  /`canvasToWorld` API that already exists for exactly this purpose. Verified
-  that a second device and context coexist with napari's while it holds its own
-  canvas. Limits: strictly above everything napari draws (no interleaving with
-  its layers), and one more context to keep in sync per frame.
+  /`canvasToWorld` API that exists for exactly this purpose. Verified that a
+  second device and context coexist with napari's while it holds its own canvas.
+  Permanent costs: strictly above everything napari draws (no interleaving with
+  its layers), a second context to sync every frame, and its own picking.
 
-**Recommendation:** Path B first, because it replaces precisely the piece that
-does not scale — the SVG overlay already lives above the canvas and already syncs
-to the camera, so the surrounding machinery exists and only the drawing changes —
-and Path A as the durable follow-up, informed by whatever Path B teaches about
-the interaction model (hover, per-cell picking, selection). Either way the
-expansion goes in a compute pass, chunked to ≤128 MiB bindings unless the device
-is created with raised limits.
+**Recommendation: Path A.** An earlier draft of this document recommended Path B
+on the grounds that Path A "costs an upstream release cycle" — which was wrong on
+the facts. **napari-js is ours**: `TheJacksonLaboratory/napari-js`, authored in
+this group, MIT, checked out at `~/git/napari-js` on `main` at the same 0.11.1
+this package depends on. There is no upstream to negotiate with, so Path B's only
+real advantage evaporates while its costs stay permanent.
+
+And the seam is already the right shape for it:
+
+- `LayerVisual` is `{ ndisplay, sync(), draw(pass, view), dispose() }`, and the
+  renderer draws only visuals whose `ndisplay` matches the current mode. A shapes
+  visual declaring `ndisplay: 2` lands in the same pass as image/points/labels,
+  ordered by layer order, with no depth attachment to satisfy.
+- `createVisual()` grows one `instanceof` line.
+- The generation half has a precedent to copy: `surface-layer.ts` already exports
+  `heightField()`, a pure GPU-free mesh builder covered by `test/surface.test.ts`.
+  A `ringsToOutline()` / `ringsToFan()` builder belongs there, unit-tested the
+  same way — which is the better library default, with the compute path (measured
+  bit-exact above) as the optimisation for 10⁶.
+- Scope reference: `PointsLayer` is 151 lines, its visual 125, its shader 63.
+
+Two napari-js changes fall out of the measurements regardless of path:
+`acquireDevice()` requests `requiredFeatures` only, so every consumer inherits the
+128 MiB storage-binding default (§5) — it should ask for what the adapter offers;
+and the expansion needs chunking above that limit either way (~349k cells for
+outlines, ~155k for fills, at 24 vertices).
 
 ## Open Questions
 
