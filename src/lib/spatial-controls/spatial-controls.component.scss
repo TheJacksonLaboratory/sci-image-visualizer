@@ -61,7 +61,8 @@
   // renders a slider as nothing but its round handle, and reads as a radio
   // button. Size the hosts here and stretch the track below.
   p-slider,
-  p-dropdown {
+  p-dropdown,
+  p-treeSelect {
     flex: 1 1 0;
     min-width: 0;
   }
@@ -70,7 +71,8 @@
 :host ::ng-deep .sc-row p-slider .p-slider {
   width: 100%;
 }
-:host ::ng-deep .sc-row p-dropdown .p-dropdown {
+:host ::ng-deep .sc-row p-dropdown .p-dropdown,
+:host ::ng-deep .sc-row p-treeSelect .p-treeselect {
   width: 100%;
 }
 
@@ -93,6 +95,20 @@
 // "27 of 53"), and a min-width lets the longest one steal from its own slider —
 // which is exactly the ragged-width problem the label column above fixes. Wide
 // enough for "27 of 53" at this size.
+// A colormap option is its own gradient plus its name: the swatch is the part
+// that actually answers "is this the ramp I want".
+.sc-cmap-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.sc-cmap-swatch {
+  width: 3.5rem;
+  height: 0.7rem;
+  border-radius: 2px;
+  display: block;
+}
+
 .sc-val {
   flex: 0 0 4rem;
   text-align: right;

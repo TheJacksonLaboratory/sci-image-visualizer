@@ -9,17 +9,18 @@ file was added.
 
 ## [Unreleased]
 
-### Changed
-
-- **Every slider in the Spatial omics panel is the same size, in one column.** The
-  track used to start wherever the label happened to end, so its width varied row
-  to row and the controls read as a ragged edge. The label column is now exactly
-  half the dialog, putting every slider's left edge on the dialog's horizontal
-  centre, and the value readout has a fixed column so a long one ("27 of 53")
-  cannot steal width from its own track. The in-row dropdown follows the same
-  column, so the right edges line up too.
-
 ### Added
+
+- **The continuous colour scale is pickable, from the library's own colormaps.**
+  Gene expression (and any numeric column) followed the *image's* colormap, which
+  is usually a grey ramp — so the scale was chosen for the tissue and inherited by
+  the measurement, with a Viridis fallback for the grey case. A `Colormap` picker
+  now sits under the colour bar in the `Spatial omics` panel, offering the
+  library's `COLORMAP_OPTIONS` with the same gradient swatches the image's picker
+  uses; clearing it goes back to following the image.
+
+  One setting drives the markers, the 2D gene map, the 3D gene map and the panel's
+  own colour bar, so none of them can disagree about what a colour means.
 
 - **The gene map works in 3D, as one field per imaged section.** Ticking `Gene map`
   in `Spatial omics 3D` estimates the selected gene's expression over the whole
@@ -132,9 +133,22 @@ file was added.
   carrying all of 8 genes. Same 2,000-name limit as the ST source, so
   whole-transcriptome data still stays out of the manifest.
 
-
+- **Every slider in the Spatial omics panel is the same size, in one column.** The
+  track used to start wherever the label happened to end, so its width varied row
+  to row and the controls read as a ragged edge. The label column is now exactly
+  half the dialog, putting every slider's left edge on the dialog's horizontal
+  centre, and the value readout has a fixed column so a long one ("27 of 53")
+  cannot steal width from its own track. The in-row dropdown follows the same
+  column, so the right edges line up too.
 
 ### Fixed
+
+- **The gene map now recolours when the colour scale changes.** Both gene maps
+  cache their coloured output, and the cache key left out the colour scale — so a
+  colormap change recoloured the markers and left the field beneath them in the
+  previous colours. The spatial scene also never watched the display colormap at
+  all, which is why "follow the image" only ever took effect at whatever colormap
+  happened to be current when a layer was built.
 
 - **Changing the data no longer moves the 3D camera.** napari frames the orbit
   camera on every 3D layer it is handed — `addVolume` calls `camera3d.frame()`,

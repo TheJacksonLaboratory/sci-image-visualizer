@@ -3,6 +3,7 @@ import { fallbackColorFor } from '../../store/class-color.util';
 import {
   CategoricalColumnMeta, NO_CATEGORY, SpatialObservations,
 } from '../../contracts/spatial-dataset.contract';
+import { ColormapValue } from '../../contracts/display-types';
 
 /**
  * Turning spatial-omics columns into per-point visual attributes.
@@ -283,16 +284,26 @@ export function isGrayscaleLut(lut: readonly Rgb[]): boolean {
 /**
  * LUT for a spatial CONTINUOUS encoding — a gene, a numeric column.
  *
- * The display colormap, unless that colormap is grayscale: the tissue underneath
- * is grayscale, so a grey overlay of a measurement is indistinguishable from the
- * anatomy it is drawn over — the reader cannot tell which channel a bright pixel
- * belongs to. Viridis is then the fallback, which is what the CosMx guidance
- * prescribes for continuous values anyway.
+ * `override` is the caller's explicit choice and wins outright, grey included: a
+ * grey ramp picked FOR the data is a decision, not the image's colormap leaking
+ * in.
  *
- * Shared by the markers and the gene map so the two cannot disagree about what a
- * colour means, whichever way the choice falls.
+ * Without one, the display colormap — unless that colormap is grayscale. The
+ * tissue underneath is grayscale, so a grey overlay of a measurement is
+ * indistinguishable from the anatomy it is drawn over, and the reader cannot tell
+ * which channel a bright pixel belongs to. Viridis is then the fallback, which is
+ * what the CosMx guidance prescribes for continuous values anyway.
+ *
+ * Shared by the markers, both gene maps and the panel's colour bar, so none of
+ * them can disagree about what a colour means, whichever way the choice falls.
  */
-export function spatialContinuousLut(colormapValue: unknown, reverse = false): Rgb[] {
+export function spatialContinuousLut(
+  colormapValue: unknown, reverse = false, override?: ColormapValue | null,
+): Rgb[] {
+  // An inline scale is an array, so emptiness has to be checked as well as
+  // presence: `[]` is truthy and would resolve to the fallback LUT silently.
+  const chosen = Array.isArray(override) ? (override.length ? override : null) : override;
+  if (chosen) return lutFor(chosen, reverse);
   const lut = lutFor(colormapValue, reverse);
   return isGrayscaleLut(lut) ? buildColormapLut('Viridis', reverse)! : lut;
 }

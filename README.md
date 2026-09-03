@@ -268,6 +268,14 @@ observations — every cell on a slide shares that slide's registered z, so no
 section-label column is needed — and a dataset whose z is continuous rather than
 sectioned is offered no section control instead of having one invented for it.
 
+**Colormap** *(continuous colouring)* — the low→high gradient for a gene or a
+numeric column, chosen from the library's own `COLORMAP_OPTIONS` with the same
+swatch previews the image's colormap picker uses. It defaults to following the
+image's colormap (with a Viridis fallback, since a grey measurement over grey
+anatomy cannot be told apart from it), and clearing the picker returns to that.
+One setting drives the markers, both gene maps and the panel's colour bar, so none
+of them can disagree about what a colour means.
+
 **Gene map** *(2D mode, optional, with a gene selected)* — a checkbox that draws
 the selected gene's expression as a smooth field *beneath* the cells. Coloured
 markers answer "which cells express this gene"; they do not answer "where is it

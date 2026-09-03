@@ -1339,6 +1339,31 @@ describe('NapariVisualizerService', () => {
         estimate.mockRestore();
       });
 
+      it('honours the chosen colormap, and follows the image’s live without one', async () => {
+        // 3D mounts no display-state subscription of its own, so the spatial
+        // subscription is the ONLY thing that keeps the colour scale current here.
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
+        await mount3d(sectioned());
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        const first = mapLayers(addVolume).at(-1)!.colormap;
+
+        store.setSpatialView({ continuousColormap: 'Reds' });
+        await flush();
+        const chosen = mapLayers(addVolume).at(-1)!.colormap;
+        expect(chosen).not.toEqual(first);
+
+        // Back to following the image, then change the image's colormap.
+        store.setSpatialView({ continuousColormap: null });
+        await flush();
+        const following = mapLayers(addVolume).at(-1)!.colormap;
+        store.setColormap({ label: 'Reds', data: { value: 'Reds' } } as never);
+        await flush();
+        expect(mapLayers(addVolume).at(-1)!.colormap).not.toEqual(following);
+      });
+
       it('removes the layer when the option is switched off', async () => {
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
         spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
@@ -2114,6 +2139,51 @@ describe('NapariVisualizerService', () => {
         await flush();
         expect(estimate).toHaveBeenCalledTimes(2);
         estimate.mockRestore();
+      });
+
+      it('colours the field with the chosen colormap, not the image’s', async () => {
+        // The display colormap belongs to the tissue image; the gene map's own
+        // choice has to override it, or picking a gradient does nothing.
+        const addImage = jest.spyOn(Viewer.prototype, 'addImage');
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 5, 9]));
+        await mount();
+        store.setSpatialView({
+          geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' },
+          continuousColormap: 'Reds',
+        });
+        await flush();
+        const reds = geneMapLayers(addImage).at(-1)![0] as { data: Uint8Array };
+
+        store.setSpatialView({ continuousColormap: 'Blues' });
+        await flush();
+        const blues = geneMapLayers(addImage).at(-1)![0] as { data: Uint8Array };
+        expect(Array.from(blues.data)).not.toEqual(Array.from(reds.data));
+
+        // Reds really is red-dominant and Blues blue-dominant, so this is the
+        // colormap reaching the pixels and not merely some byte changing.
+        const channelSums = (d: Uint8Array) => {
+          let r = 0; let b = 0;
+          for (let i = 0; i < d.length; i += 4) { r += d[i]; b += d[i + 2]; }
+          return { r, b };
+        };
+        expect(channelSums(reds.data).r).toBeGreaterThan(channelSums(reds.data).b);
+        expect(channelSums(blues.data).b).toBeGreaterThan(channelSums(blues.data).r);
+      });
+
+      it('follows the image’s colormap live while none is chosen', async () => {
+        // "Match the image" is the default, and a setting that only takes effect
+        // at the next unrelated rebuild is not a setting.
+        const addImage = jest.spyOn(Viewer.prototype, 'addImage');
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 5, 9]));
+        await mount();
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        const before = geneMapLayers(addImage).at(-1)![0] as { data: Uint8Array };
+
+        store.setColormap({ label: 'Reds', data: { value: 'Reds' } } as never);
+        await flush();
+        const after = geneMapLayers(addImage).at(-1)![0] as { data: Uint8Array };
+        expect(Array.from(after.data)).not.toEqual(Array.from(before.data));
       });
 
       it('removes the layer when the option is switched off', async () => {

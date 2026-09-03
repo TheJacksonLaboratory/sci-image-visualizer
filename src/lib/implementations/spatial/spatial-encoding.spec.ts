@@ -218,6 +218,30 @@ describe('spatial-encoding', () => {
       expect(gray).toEqual(lutFor('Viridis'));
     });
 
+    it('lets an explicit choice win outright, grey included', () => {
+      // A grey ramp picked FOR the data is a decision; the fallback exists only to
+      // stop the IMAGE's colormap leaking into a measurement.
+      expect(spatialContinuousLut('Magma', false, 'Greys')).toEqual(lutFor('Greys'));
+      expect(isGrayscaleLut(spatialContinuousLut('Magma', false, 'Greys'))).toBe(true);
+      // …and it still honours the reverse flag.
+      expect(spatialContinuousLut('Magma', true, 'Viridis')).toEqual(lutFor('Viridis', true));
+      // An empty override is not a choice — it falls back to the display colormap.
+      expect(spatialContinuousLut('Magma', false, null)).toEqual(lutFor('Magma'));
+    });
+
+    it('accepts an INLINE scale, not just a built-in name', () => {
+      // Half of COLORMAP_OPTIONS carries `[stop, colour]` arrays rather than
+      // names, so an override path that only handles strings drops half the
+      // library's colormaps on the floor.
+      const inline: [number, string][] = [[0, 'rgb(0,0,0)'], [1, 'rgb(255,0,0)']];
+      const lut = spatialContinuousLut('Viridis', false, inline);
+      expect(lut).toEqual(lutFor(inline));
+      expect(lut[255]).toEqual([255, 0, 0]);
+      // An EMPTY array is not a choice: it is truthy, and would otherwise resolve
+      // to whatever `lutFor` falls back to.
+      expect(spatialContinuousLut('Magma', false, [])).toEqual(lutFor('Magma'));
+    });
+
     it('keeps a colour colormap the user chose', () => {
       const magma = spatialContinuousLut('Magma');
       expect(isGrayscaleLut(magma)).toBe(false);

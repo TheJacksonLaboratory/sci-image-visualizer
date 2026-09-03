@@ -53,6 +53,29 @@ import { defaultSigma, densityGrid, rasterizeDensity } from '../spatial/spatial-
 import { observationsInSection, sectionsOf } from '../spatial/spatial-sections';
 
 /**
+ * A short, stable id for a colormap value, for cache keys.
+ *
+ * Half the library's colormaps are NAMES and half are inline `[stop, colour]`
+ * arrays of 256 entries. Stringifying the array kind would put 6 KB in a key that
+ * is rebuilt and compared on every view change; hashing it keeps the key small,
+ * and it only has to distinguish one colormap from another.
+ */
+function colormapId(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value)) return '?';
+  // FNV-1a over the stops. A collision would leave a stale colouring on screen,
+  // not corrupt anything, and 32 bits over a few hundred colormaps will not.
+  let hash = 0x811c9dc5;
+  const text = value.map((stop) => String(stop)).join(',');
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `#${(hash >>> 0).toString(36)}`;
+}
+
+/**
  * In-plane coarsening of the 3D gene map's lattice, relative to the reference
  * volume. The field is smooth, so its detail is set by the kernel rather than the
  * raster — and the estimate is a pair of separable blurs on the main thread, which
@@ -1747,9 +1770,15 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const port = this.spatialData;
     if (!port) return;
     const selection$ = this.selectionStore?.getSelection$() ?? of(emptySelection());
+    // The display colormap is an input here, not just something read at build
+    // time: `continuousColormap: null` means "follow the image's colormap", and a
+    // setting that only takes effect at the next unrelated rebuild is not one.
     this.spatialSub = combineLatest([
       port.getDataset$(), this.store.getSpatialView$(), selection$,
-    ]).subscribe(([dataset, view, selection]) => {
+      this.store.getColormap(), this.store.getReverseScale(),
+    ]).subscribe(([dataset, view, selection, colormap, reverse]) => {
+      this.currentColormap = (colormap as ColormapNode) ?? null;
+      this.currentReverse = !!reverse;
       // Kept so a slice change can redraw the markers for the new plane, which
       // arrives through setZIndex rather than through any of these streams.
       this.spatialLatest = [dataset, view, selection];
@@ -1907,7 +1936,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       ? [dataset.id, gene, slab?.slice ?? '', smoothing, this.selectionRev(selection)].join('|')
       : null;
     const key = fieldKey
-      ? [fieldKey, clip.join(','), view.logScale ? 'log' : 'lin', view.geneMapOpacity].join('|')
+      ? [
+        fieldKey, clip.join(','), view.logScale ? 'log' : 'lin', view.geneMapOpacity,
+        this.continuousColormapKey(view),
+      ].join('|')
       : null;
     if (key === this.geneMapKey) return;
 
@@ -1969,7 +2001,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     if (!field) return;
 
     const node = this.currentColormap as { data?: { value?: unknown } } | null;
-    const lut = spatialContinuousLut(node?.data?.value, this.currentReverse);
+    const lut = spatialContinuousLut(
+      node?.data?.value, this.currentReverse, view.continuousColormap,
+    );
     const [lo, hi] = contrastWindow(field.mean, clip[0], clip[1]);
     const rgba = colorExpressionField(field, lut, [lo, hi], {
       log: view.logScale,
@@ -2316,7 +2350,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       ].join('|')
       : null;
     const key = fieldKey
-      ? [fieldKey, clip.join(','), view.logScale ? 'log' : 'lin', view.geneMapOpacity].join('|')
+      ? [
+        fieldKey, clip.join(','), view.logScale ? 'log' : 'lin', view.geneMapOpacity,
+        this.continuousColormapKey(view),
+      ].join('|')
       : null;
     if (key === this.geneMapVolumeKey) return;
 
@@ -2377,7 +2414,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const [lo, hi] = contrastWindow(field.mean, clip[0], clip[1]);
     const data = encodeExpressionVolume(field, [lo, hi], { log: view.logScale });
     const node = this.currentColormap as { data?: { value?: unknown } } | null;
-    const lut = spatialContinuousLut(node?.data?.value, this.currentReverse);
+    const lut = spatialContinuousLut(
+      node?.data?.value, this.currentReverse, view.continuousColormap,
+    );
     this.geneMapVolumeLayer = this.addFramingOnce(viewer, dataset.id, () => viewer.addVolume(
       data, field.width, field.height, field.depth,
       {
@@ -2496,6 +2535,24 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       );
     }
     viewer.requestRender();
+  }
+
+  /**
+   * Identity of the colour scale a continuous spatial layer will draw with, for a
+   * cache key: the explicit choice, or else the display colormap and its reverse
+   * flag, since that is what {@link spatialContinuousLut} falls back to.
+   *
+   * The gene maps cache their coloured output, so without this in the key a change
+   * of colour scale left the field on screen in the previous colours — the markers
+   * recoloured and the map under them did not.
+   */
+  private continuousColormapKey(view: SpatialViewState): string {
+    const node = this.currentColormap as { data?: { value?: unknown } } | null;
+    return [
+      colormapId(view.continuousColormap),
+      colormapId(node?.data?.value),
+      this.currentReverse ? 'rev' : '',
+    ].join(':');
   }
 
   /**
@@ -2771,7 +2828,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     source: Float32Array, view: SpatialViewState, log: boolean,
   ): Spatial3dEncoding {
     const node = this.currentColormap as { data?: { value?: unknown } } | null;
-    const lut = spatialContinuousLut(node?.data?.value, this.currentReverse);
+    const lut = spatialContinuousLut(
+      node?.data?.value, this.currentReverse, view.continuousColormap,
+    );
     const [lo, hi] = view.percentileClip ?? [0.01, 0.99];
     let values = source;
     if (log) {
@@ -2846,7 +2905,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     muted: Uint8Array | null = null,
   ): Float32Array {
     const node = this.currentColormap as { data?: { value?: unknown } } | null;
-    const lut = spatialContinuousLut(node?.data?.value, this.currentReverse);
+    const lut = spatialContinuousLut(
+      node?.data?.value, this.currentReverse, view.continuousColormap,
+    );
     const [lo, hi] = view.percentileClip ?? [0.01, 0.99];
     const [min, max] = contrastWindow(values, lo, hi);
     return encodeContinuous(values, { lut, min, max, log, opacity: view.opacity, muted });

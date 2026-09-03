@@ -7,8 +7,12 @@ import { VISUALIZER, IVisualizer, ISpatialControls } from '../contracts/visualiz
 import {
   CategoricalColumnMeta, SpatialColumnMeta, SpatialDataset,
 } from '../contracts/spatial-dataset.contract';
-import { ColormapNode, SpatialViewState, DEFAULT_SPATIAL_VIEW } from '../contracts/display-types';
-import { SPATIAL_3D_MAX_CATEGORIES, lutFor } from '../implementations/spatial/spatial-encoding';
+import {
+  ColormapNode, ColormapValue, SpatialViewState, DEFAULT_SPATIAL_VIEW,
+} from '../contracts/display-types';
+import {
+  SPATIAL_3D_MAX_CATEGORIES, spatialContinuousLut,
+} from '../implementations/spatial/spatial-encoding';
 import {
   SpatialSelectionMask, emptySelection,
 } from '../implementations/spatial/spatial-selection';
@@ -49,7 +53,7 @@ const CLIP_OPTIONS: { label: string; value: [number, number] }[] = [
  *
  * The legend swatches and the continuous colour bar are built with the SAME
  * functions the renderer uses (`categoryColors` → `resolveCategoryColors`,
- * `lutFor`), so the key cannot drift from what is on screen.
+ * `spatialContinuousLut`), so the key cannot drift from what is on screen.
  */
 @Component({
   selector: 'spatial-controls',
@@ -127,6 +131,15 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
    */
   sections: Float32Array | null = null;
 
+  /**
+   * Colormap tree for the continuous colour scale, and the node currently picked
+   * from it. The library's own `COLORMAP_OPTIONS`, shown with the same swatches
+   * the image's colormap picker uses — choosing a gradient is a visual decision,
+   * so a list of names would be the wrong control.
+   */
+  colormapOptions: ColormapNode[] = [];
+  selectedColormapNode: ColormapNode | null = null;
+
   private colormap: ColormapNode | null = null;
   private reverse = false;
   /** Guards the gene typeahead and the legend/colour-bar rebuild: both are async
@@ -139,6 +152,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.controls = this.viz.getSpatialControls?.() ?? null;
+    this.colormapOptions = this.viz.getColormapOptions?.() ?? [];
     if (!this.controls) return;
 
     this.subs.add(this.controls.getDataset$().subscribe((dataset) => {
@@ -161,6 +175,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       this.view = view;
       this.selectedColumn = view.colorBy?.kind === 'column' ? view.colorBy.name : null;
       this.selectedGene = view.colorBy?.kind === 'feature' ? view.colorBy.name : null;
+      this.selectedColormapNode = this.colormapNodeFor(view.continuousColormap);
       void this.refreshKey();
     }));
 
@@ -546,9 +561,44 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     this.colorBarCss = this.buildColorBar();
   }
 
-  /** `linear-gradient(...)` sampling the active colormap at 16 stops. */
+  /**
+   * The continuous colour scale's colormap. Clearing it goes back to following
+   * the image's, which is the default.
+   */
+  onContinuousColormap(node: ColormapNode | null): void {
+    this.selectedColormapNode = node;
+    // The value is a ColormapValue, which is a NAME for the built-in scales and an
+    // inline `[stop, colour]` array for the rest — half the library's colormaps
+    // are the array kind, so anything that only accepts a string silently drops
+    // them. A group row carries no value and clears the setting.
+    this.controls?.setViewState({ continuousColormap: node?.data?.value ?? null });
+  }
+
+  /** The tree node holding a colormap value, so the picker shows what is in use. */
+  private colormapNodeFor(value: ColormapValue | null): ColormapNode | null {
+    if (!value) return null;
+    for (const group of this.colormapOptions) {
+      for (const node of group.children ?? []) {
+        // Reference equality: the value came out of this same tree, and an inline
+        // scale is a 256-entry array not worth comparing element by element.
+        if (node.data?.value === value) return node;
+      }
+      if (group.data?.value === value) return group;
+    }
+    return null;
+  }
+
+  /**
+   * `linear-gradient(...)` sampling the active colormap at 16 stops.
+   *
+   * Resolved exactly the way the renderer resolves it — the same override, the
+   * same grey fallback. Built from `lutFor` alone, this bar showed a black-to-white
+   * ramp while the canvas drew Viridis, which makes the key worse than no key.
+   */
   private buildColorBar(): string {
-    const lut = lutFor(this.colormap?.data?.value, this.reverse);
+    const lut = spatialContinuousLut(
+      this.colormap?.data?.value, this.reverse, this.view.continuousColormap,
+    );
     const stops: string[] = [];
     const steps = 16;
     for (let i = 0; i <= steps; i++) {

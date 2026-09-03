@@ -82,6 +82,30 @@
           <span class="sc-hint">window from percentiles</span>
           <span>high</span>
         </div>
+        <!-- The gradient this bar and the map are drawn with. Sits under the bar
+             it controls, with the same swatch previews the image's colormap picker
+             uses: which gradient reads best is a visual judgement, so a list of
+             names would be the wrong control. Cleared = follow the image's. -->
+        <div class="sc-row">
+          <span class="sc-lbl">Colormap</span>
+          <p-treeSelect [options]="colormapOptions" [ngModel]="selectedColormapNode"
+                        selectionMode="single" [showClear]="true"
+                        placeholder="Match the image" [scrollHeight]="'260px'"
+                        appendTo="body"
+                        pTooltip="Colour scale for gene and numeric values — the markers, the gene map and this bar. Clear it to follow the image's colormap"
+                        tooltipPosition="top"
+                        (onNodeSelect)="onContinuousColormap($event.node)"
+                        (onClear)="onContinuousColormap(null)">
+            <ng-template let-node pTemplate="default">
+              <span class="sc-cmap-option">
+                <img *ngIf="!node.children && node.data?.src" [src]="node.data.src"
+                     class="sc-cmap-swatch" alt="" />
+                <span>{{ node.label }}</span>
+              </span>
+            </ng-template>
+          </p-treeSelect>
+          <span class="sc-val"></span>
+        </div>
       </div>
     </div>
 

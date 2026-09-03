@@ -68,6 +68,23 @@ export interface SpatialViewState {
    *  handful of saturated observations don't flatten the rest. */
    percentileClip: [number, number];
   /**
+   * Colormap for CONTINUOUS spatial colouring — a gene, a numeric column — as a
+   * {@link ColormapValue}, the same shape the display colormap carries: a scale
+   * NAME for the built-ins, or an inline `[stop, colour]` array for the rest.
+   * Null follows the display colormap.
+   *
+   * Its own setting because the display colormap belongs to the tissue image and
+   * is usually a grey ramp, which is the wrong thing to read a measurement
+   * through: grey over grey cannot be told apart from the anatomy. Following it
+   * (with a Viridis fallback for exactly that case) is a reasonable default and a
+   * poor ceiling, since which gradient reads best is a judgement about the data.
+   *
+   * One setting for the markers, the 2D gene map and the 3D gene map together, so
+   * the field under the cells and the cells over it cannot disagree about what a
+   * colour means — and the panel's own colour bar is built from it too.
+   */
+  continuousColormap: ColormapValue | null;
+  /**
    * What the 3D scene draws. The three things in it — the reference volume, the
    * observation cloud and the cluster density volumes — occupy the same space, so
    * any two of them hide each other to some degree. These are independent because
@@ -163,6 +180,7 @@ export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
   opacity: 1,
   logScale: false,
   percentileClip: [0.01, 0.99],
+  continuousColormap: null,
   showVolume: true,
   volumeOpacity: 0.5,
   showPoints: true,
