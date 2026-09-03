@@ -1027,6 +1027,203 @@ describe('NapariVisualizerService', () => {
       });
     });
 
+    describe('gene map in 3D', () => {
+      /**
+       * A volume-backed dataset whose sections have GAPS between them: the 400-unit
+       * z voxel puts the cells on planes 1, 3 and 5, leaving 2 and 4 unimaged. The
+       * gap is the whole point — it is what separates the measured sheets from the
+       * interpolated volume, and a fixture with adjacent sections cannot tell them
+       * apart.
+       */
+      const sectioned = (): SpatialDataset => {
+        const base = spatialDatasetVolume(6);
+        return {
+          ...base,
+          observations: {
+            ...base.observations,
+            count: 6,
+            x: Float32Array.from({ length: 6 }, () => 150),
+            y: Float32Array.from({ length: 6 }, () => 500),
+            z: new Float32Array([400, 400, 1200, 1200, 2000, 2000]),
+          },
+        } as SpatialDataset;
+      };
+      const mapLayers = (addVolume: jest.SpyInstance) =>
+        addVolume.mock.results
+          .map((r) => r.value)
+          .filter((l) => typeof l?.name === 'string' && l.name.startsWith('gene map'));
+
+      it('draws nothing until the option is on AND a gene is the colour source', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
+        await mount3d(sectioned());
+
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        expect(mapLayers(addVolume)).toHaveLength(0);
+
+        store.setSpatialView({ colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        expect(mapLayers(addVolume)).toHaveLength(1);
+      });
+
+      it('draws the sheets additively on the reference volume’s own lattice', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
+        await mount3d(sectioned());
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+
+        const call = addVolume.mock.calls.find((c) => /gene map/.test(String(c[4]?.name)))!;
+        const [, w, h, d, opts] = call;
+        // Coarsened in-plane (the 4x6 template becomes 2x3) but the depth is the
+        // volume's own, so there is still one plane per imaged section.
+        expect([w, h, d]).toEqual([2, 3, 10]);
+        // The physical extent is unchanged, so the box still coincides with the
+        // reference volume's — a VolumeLayer has no translate to correct with.
+        expect(opts!.voxelSize).toEqual([200, 400, 400]);
+        expect([w * 200, h * 400, d * 400]).toEqual([4 * 100, 6 * 200, 10 * 400]);
+        // Additive, so the sheets read through each other and through the tissue.
+        expect(opts!.blending).toBe('additive');
+        // The encoding already applied the window; a second one would re-window it.
+        expect(opts!.contrastLimits).toEqual([0, 255]);
+        expect(opts!.name).toBe('gene map · Ttr');
+      });
+
+      it('fills only the imaged planes as sheets, and bridges them as a volume', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
+        await mount3d(sectioned());
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+
+        const plane = 2 * 3; // the coarsened lattice's in-plane size
+        const filled = (data: Uint8Array, k: number) =>
+          Array.from(data.slice(k * plane, (k + 1) * plane)).some((v) => v > 0);
+        const sheets = addVolume.mock.calls.find((c) => /gene map/.test(String(c[4]?.name)))![0];
+        // The imaged planes carry the measurement…
+        expect(filled(sheets, 1)).toBe(true);
+        expect(filled(sheets, 3)).toBe(true);
+        expect(filled(sheets, 5)).toBe(true);
+        // …and the gap between two sections stays EMPTY, which is what makes these
+        // sheets rather than a volume. Empty means invisible, since the raymarch
+        // takes alpha from the value.
+        expect(filled(sheets, 2)).toBe(false);
+        expect(filled(sheets, 4)).toBe(false);
+        expect(filled(sheets, 0)).toBe(false);
+
+        store.setSpatialView({ geneMapVolume: true });
+        await flush();
+        const vol = addVolume.mock.calls.filter((c) => /gene map/.test(String(c[4]?.name))).at(-1)!;
+        expect(String(vol[4]!.name)).toContain('volume');
+        const volData = vol[0] as Uint8Array;
+        // Now the gaps carry an interpolated estimate…
+        expect(filled(volData, 2)).toBe(true);
+        expect(filled(volData, 4)).toBe(true);
+        // …but nothing appears beyond the outermost imaged section.
+        expect(filled(volData, 0)).toBe(false);
+      });
+
+      it('ignores the section restriction while interpolating', async () => {
+        // A volume built from ONE section would smear that slide through the whole
+        // depth and present it as an estimate of the specimen.
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
+        await mount3d(sectioned());
+        store.setSpatialView({
+          geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' },
+          geneMapVolume: true, geneMapSection: 0,
+        });
+        await flush();
+
+        const plane = 2 * 3; // the coarsened lattice's in-plane size
+        const filled = (data: Uint8Array, k: number) =>
+          Array.from(data.slice(k * plane, (k + 1) * plane)).some((v) => v > 0);
+        const data = addVolume.mock.calls
+          .filter((c) => /gene map/.test(String(c[4]?.name))).at(-1)![0] as Uint8Array;
+        // Every imaged plane contributed, not just section 0: plane 5 is the last
+        // section, and with section 0 alone it would fall outside the sampled
+        // range and be zeroed.
+        expect(filled(data, 5)).toBe(true);
+        expect(filled(data, 3)).toBe(true);
+      });
+
+      it('draws one sheet when a section is picked, and clamps a stale index', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
+        await mount3d(sectioned());
+        store.setSpatialView({
+          geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' }, geneMapSection: 0,
+        });
+        await flush();
+
+        const plane = 2 * 3; // the coarsened lattice's in-plane size
+        const filled = (data: Uint8Array, k: number) =>
+          Array.from(data.slice(k * plane, (k + 1) * plane)).some((v) => v > 0);
+        const one = addVolume.mock.calls
+          .filter((c) => /gene map/.test(String(c[4]?.name))).at(-1)![0] as Uint8Array;
+        // Section 0 is z = 400 -> plane 1, and no other section is drawn.
+        expect(filled(one, 1)).toBe(true);
+        expect(filled(one, 3)).toBe(false);
+        expect(filled(one, 5)).toBe(false);
+
+        store.setSpatialView({ geneMapSection: 99 });
+        await flush();
+        const clamped = addVolume.mock.calls
+          .filter((c) => /gene map/.test(String(c[4]?.name))).at(-1)![0] as Uint8Array;
+        // The LAST section, drawn — not an empty volume.
+        expect(filled(clamped, 5)).toBe(true);
+        expect(filled(clamped, 1)).toBe(false);
+      });
+
+      it('does not re-estimate the field for a recolour, only for a new gene', async () => {
+        const estimate = jest.spyOn(expressionModule, 'expressionVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
+        await mount3d(sectioned());
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        expect(estimate).toHaveBeenCalledTimes(1);
+
+        // A window change recolours the cached field — re-estimating would be a
+        // full pass over the lattice for colours that come out of a LUT.
+        store.setSpatialView({ percentileClip: [0.05, 0.95] });
+        await flush();
+        expect(estimate).toHaveBeenCalledTimes(1);
+
+        store.setSpatialView({ geneMapOpacity: 0.4 });
+        await flush();
+        expect(estimate).toHaveBeenCalledTimes(1);
+
+        // Interpolating is a different field, and so is a different gene.
+        store.setSpatialView({ geneMapVolume: true });
+        await flush();
+        expect(estimate).toHaveBeenCalledTimes(2);
+        estimate.mockRestore();
+      });
+
+      it('removes the layer when the option is switched off', async () => {
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
+        await mount3d(sectioned());
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        const inScene = () =>
+          ((service as unknown as { viewer: { layers: { items: readonly { name?: string }[] } } })
+            .viewer.layers.items).filter((l) => l.name?.startsWith('gene map')).length;
+        expect(inScene()).toBe(1);
+
+        store.setSpatialView({ geneMap: false });
+        await flush();
+        expect(inScene()).toBe(0);
+      });
+    });
+
     describe('cluster density volumes', () => {
       /** A dataset with a volume, a categorical column, and cells on 3 planes. */
       const clustered = (): SpatialDataset => {

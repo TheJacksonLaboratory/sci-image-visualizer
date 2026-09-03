@@ -101,15 +101,43 @@
       </div>
     </div>
 
-    <!-- 2D, and only for a gene: the map draws that gene's expression as a field
-         under the cells. Hidden in the 3D cloud, which has the density volumes. -->
-    <div class="sc-section" *ngIf="!is3d && canMapGene">
+    <!-- Only for a gene: the map draws that gene's expression as a field. In 2D
+         it goes under the cells of the displayed plane; in 3D it is one sheet per
+         imaged section, optionally smoothed along z into a volume. -->
+    <div class="sc-section" *ngIf="canMapGene">
       <div class="sc-row">
         <p-checkbox [binary]="true" [ngModel]="view.geneMap"
                     (onChange)="onGeneMap($event.checked)"
                     label="Gene map (expression field)"
-                    pTooltip="Draw this gene's expression as a smooth field UNDER the cells — an estimate between them, transparent where nothing was measured"
+                    [pTooltip]="is3d
+                      ? 'Draw this gene\'s expression as one field per imaged section — an estimate between the cells, empty where nothing was measured'
+                      : 'Draw this gene\'s expression as a smooth field UNDER the cells — an estimate between them, transparent where nothing was measured'"
                     tooltipPosition="top"></p-checkbox>
+      </div>
+      <!-- 3D only: interpolating along z turns the measured sheets into an
+           estimate, so it is its own decision and its own label. -->
+      <div class="sc-row" *ngIf="view.geneMap && is3d">
+        <p-checkbox [binary]="true" [ngModel]="view.geneMapVolume"
+                    (onChange)="onGeneMapVolume($event.checked)"
+                    label="Volume rendering (interpolate along z)"
+                    pTooltip="Smooth the per-section fields into a continuous volume — an ESTIMATE between the imaged sections, not measured tissue"
+                    tooltipPosition="top"></p-checkbox>
+      </div>
+      <!-- Meaningless while interpolating: a volume built from one section would
+           smear that slide through the specimen's whole depth. -->
+      <div class="sc-row" *ngIf="view.geneMap && is3d && isSectioned && !view.geneMapVolume">
+        <p-checkbox [binary]="true" [ngModel]="geneMapOneSection"
+                    (onChange)="onGeneMapOneSection($event.checked)"
+                    label="One map section at a time"
+                    pTooltip="Draw a single imaged section's field instead of the whole stack of sheets"
+                    tooltipPosition="top"></p-checkbox>
+      </div>
+      <div class="sc-row"
+           *ngIf="view.geneMap && is3d && isSectioned && !view.geneMapVolume && geneMapOneSection">
+        <span class="sc-lbl">Map section</span>
+        <p-slider [ngModel]="view.geneMapSection" [min]="0" [max]="lastSection" [step]="1"
+                  (onChange)="onGeneMapSection($event.value)"></p-slider>
+        <span class="sc-val">{{ geneMapSectionLabel }}</span>
       </div>
       <div class="sc-row" *ngIf="view.geneMap">
         <span class="sc-lbl">Smoothing</span>
@@ -123,10 +151,13 @@
                   (onChange)="onGeneMapOpacity($event.value)"></p-slider>
         <span class="sc-val">{{ view.geneMapOpacity }}</span>
       </div>
-      <div class="sc-hint" *ngIf="view.geneMap">
+      <div class="sc-hint" *ngIf="view.geneMap && !is3d">
         Kernel-weighted mean per cell, not a sum — so a crowded region does not glow
         for being crowded. Transparent where no cell was measured. Turn the cells'
         own Opacity down to read the field under them.
+      </div>
+      <div class="sc-hint" *ngIf="view.geneMap && is3d">
+        {{ geneMapVolumeNote }}
       </div>
     </div>
 

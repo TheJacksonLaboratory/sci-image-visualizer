@@ -239,6 +239,18 @@ translucent cloud so it cannot be mistaken for measurement. The kernel is
 anisotropic (σ along z clears one section gap) and the field is coverage-normalised
 along z, so unimaged planes do not read as empty tissue.
 
+In **3D** the same `Gene map` checkbox draws one field per imaged section, at its
+own depth, with the gaps between sections empty — the measured slides, stacked.
+`One map section at a time` isolates a single sheet (its own control, separate from
+the cloud's, so every combination stays reachable), and `Volume rendering
+(interpolate along z)` smooths the sheets into a continuous volume. The last is a
+different object and the panel labels it as one: the planes between sections then
+carry an estimate smoothed from their neighbours' mean, nothing is drawn past the
+outermost section, and the section restriction is ignored because a volume built
+from one slide would smear it through the whole specimen. It is estimated on the
+reference volume's lattice — coarsened in-plane but never along z, so one plane is
+one section — and shares the 2D map's bandwidth, window and colormap.
+
 **Show** *(3D mode)* — the reference volume, the observation cloud and the cluster
 density volumes share one space, so any two of them hide each other; 374k points
 drawn as a stack of discs hide the density volumes almost entirely. Each is

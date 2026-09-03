@@ -11,6 +11,32 @@ file was added.
 
 ### Added
 
+- **The gene map works in 3D, as one field per imaged section.** Ticking `Gene map`
+  in `Spatial omics 3D` estimates the selected gene's expression over the whole
+  sectioned specimen and raymarches it: exactly the z planes that were imaged carry
+  that slide's own 2D field, and the gaps between sections stay empty. A stack of
+  measured fields at their true depth, rather than a smear.
+
+  `One map section at a time` restricts it to a single sheet — its own control,
+  separate from the cloud's, so all the sheets with one section's cells over them
+  and one sheet inside the whole cloud are both reachable.
+
+  `Volume rendering (interpolate along z)` smooths the sheets into a continuous
+  volume. That is a different object and the panel says so: the planes between the
+  sections then carry an ESTIMATE, smoothed from their neighbours' mean, and
+  nothing is drawn beyond the outermost section. It is the move the cluster density
+  volumes make, with the same caveat — a field may be interpolated between
+  sections, individual cells may not. The section restriction is ignored while
+  interpolating, because a volume built from one slide would smear it through the
+  specimen's whole depth and present that as an estimate.
+
+  Estimated on the reference volume's own lattice, coarsened in-plane but never
+  along z, so there is one plane per section and the field lands on the anatomy
+  with no offset to correct. The in-plane bandwidth is a physical length anchored
+  to the template's voxel, so a sheet and the 2D view of the same section are the
+  same field. Windowing, the log scale and the colormap are shared with the 2D map
+  and the markers, so the three cannot disagree about what a colour means.
+
 - **The 3D scene's three layers can be shown and hidden independently.** The
   reference volume, the observation cloud and the cluster density volumes occupy
   the same space, so any two of them hide each other — and 374k points drawn as a

@@ -127,6 +127,28 @@ export interface SpatialViewState {
    * Ignored unless the colour source is a gene: there is nothing else to map.
    */
   geneMap: boolean;
+  /**
+   * Restrict the 3D gene map to ONE imaged section, by index into the dataset's
+   * sampled sections; null draws every section's sheet.
+   *
+   * Separate from {@link pointSection} so the combinations stay open: all the
+   * sheets with one section's cells over them is a useful view, and so is one
+   * sheet inside the whole cloud. Ignored while {@link geneMapVolume} is set —
+   * interpolating a single section along z would smear one slide through the
+   * specimen's whole depth and call it an estimate.
+   */
+  geneMapSection: number | null;
+  /**
+   * Smooth the per-section gene maps along z into a continuous VOLUME (3D).
+   *
+   * The sheets are what was measured — one field per imaged slide, with the gaps
+   * between them empty. This turns them into an estimate defined between the
+   * slides, the same move the cluster density volumes make and with the same
+   * caveat: a field may be interpolated between sections, individual cells may
+   * not, and the result is drawn as a translucent cloud so it cannot be mistaken
+   * for measurement.
+   */
+  geneMapVolume: boolean;
   /** Multiplier on the gene map's kernel bandwidth. */
   geneMapSmoothing: number;
   /** The gene map's own opacity. Separate from {@link opacity}, which belongs to
@@ -148,6 +170,8 @@ export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
   densityVolume: false,
   densitySmoothing: 1,
   geneMap: false,
+  geneMapSection: null,
+  geneMapVolume: false,
   geneMapSmoothing: 1,
   geneMapOpacity: 0.85,
 };

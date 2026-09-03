@@ -47,12 +47,17 @@ export interface DensityOptions {
  * align. Without a volume the box comes from the observations' own bounds.
  */
 export function densityGrid(
-  dataset: SpatialDataset, stride = 2, targetLongAxis = 128,
+  dataset: SpatialDataset, stride = 2, targetLongAxis = 128, zStride = stride,
 ): DensityGrid | null {
   const volume = dataset.volume;
   if (volume) {
-    const cells = (n: number) => Math.max(1, Math.ceil(n / stride));
-    const [w, h, d] = [cells(volume.width), cells(volume.height), cells(volume.depth)];
+    const cells = (n: number, by: number) => Math.max(1, Math.ceil(n / by));
+    // z can be coarsened less than x/y — a gene map's sheets need one plane per
+    // imaged section, while its in-plane detail is smooth by construction. The
+    // physical extent is unchanged either way, so the box still aligns.
+    const [w, h, d] = [
+      cells(volume.width, stride), cells(volume.height, stride), cells(volume.depth, zStride),
+    ];
     // Voxel size from the SPAN, not stride x original: `ceil` can add a fraction
     // of a voxel, and scaling the original size would push the far edge past the
     // reference volume's.
@@ -89,8 +94,15 @@ export function densityGrid(
   };
 }
 
-/** In-place separable Gaussian along one axis of a w x h x d field. */
-function blurAxis(
+/**
+ * In-place separable Gaussian along one axis of a w x h x d field.
+ *
+ * Exported because the gene-map volume estimates a different quantity on the same
+ * lattice with the same kernel (see `spatial-expression.ts`): two copies of a
+ * separable blur would be two chances to smooth the estimate and its normaliser
+ * differently, which is the one thing a Nadaraya-Watson field cannot survive.
+ */
+export function blurVolumeAxis(
   field: Float32Array, w: number, h: number, d: number, axis: 0 | 1 | 2, sigmaVox: number,
 ): void {
   if (!(sigmaVox > 0.01)) return;
@@ -154,11 +166,11 @@ function sampledPlanes(
   return { cover, first, last };
 }
 
-/** Blur a 1D profile with the same kernel `blurAxis` uses, so the correction and
+/** Blur a 1D profile with the same kernel `blurVolumeAxis` uses, so the correction and
  *  the field are smoothed identically. */
 function blur1d(profile: Float32Array, sigmaVox: number): Float32Array {
   const out = profile.slice();
-  blurAxis(out, 1, 1, out.length, 2, sigmaVox);
+  blurVolumeAxis(out, 1, 1, out.length, 2, sigmaVox);
   return out;
 }
 
@@ -193,9 +205,9 @@ export function rasterizeDensity(
   const sigmaVox: [number, number, number] = [
     opts.sigma[0] / voxelSize[0], opts.sigma[1] / voxelSize[1], opts.sigma[2] / voxelSize[2],
   ];
-  blurAxis(field, w, h, d, 0, sigmaVox[0]);
-  blurAxis(field, w, h, d, 1, sigmaVox[1]);
-  blurAxis(field, w, h, d, 2, sigmaVox[2]);
+  blurVolumeAxis(field, w, h, d, 0, sigmaVox[0]);
+  blurVolumeAxis(field, w, h, d, 1, sigmaVox[1]);
+  blurVolumeAxis(field, w, h, d, 2, sigmaVox[2]);
 
   // Coverage correction, per plane: the same kernel over the sampled support says
   // how much of each plane's neighbourhood was actually imaged.

@@ -51,8 +51,17 @@ import {
 import { observationsInSlice, volumeImageRef } from '../spatial/spatial-volume-image';
 import { defaultSigma, densityGrid, rasterizeDensity } from '../spatial/spatial-density';
 import { observationsInSection, sectionsOf } from '../spatial/spatial-sections';
+
+/**
+ * In-plane coarsening of the 3D gene map's lattice, relative to the reference
+ * volume. The field is smooth, so its detail is set by the kernel rather than the
+ * raster — and the estimate is a pair of separable blurs on the main thread, which
+ * at the template's full resolution means seconds of frozen UI per toggle.
+ */
+const GENE_MAP_VOLUME_STRIDE = 2;
 import {
-  type ExpressionField, colorExpressionField, expressionField,
+  type ExpressionField, type ExpressionVolumeField, colorExpressionField,
+  encodeExpressionVolume, expressionField, expressionVolume,
 } from '../spatial/spatial-expression';
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
 import {
@@ -335,6 +344,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private geneMapKey: string | null = null;
   private geneMapField: ExpressionField | null = null;
   private geneMapFieldKey: string | null = null;
+  /** The 3D gene map: its volume layer, the field behind it, and the inputs each
+   *  was built for — same two clocks as the 2D map. */
+  private geneMapVolumeLayer: VolumeLayer | null = null;
+  private geneMapVolumeKey: string | null = null;
+  private geneMapVolumeField: ExpressionVolumeField | null = null;
+  private geneMapVolumeFieldKey: string | null = null;
   /** Offset applied to observation coordinates to sit them in the volume's box. */
   private spatialOrigin3d: [number, number, number] = [0, 0, 0];
   /** Dataset the 3D scale bar was built for. */
@@ -2111,6 +2126,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // there is no reference volume — so before any position is computed from it.
     await this.ensureDensityVolumes(viewer, dataset, view, selection);
     if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
+    // Then the gene map, which shares the reference volume's lattice — so it goes
+    // after anything that can still move the centring offset.
+    await this.ensureGeneMapVolume(viewer, dataset, view, selection);
+    if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
     // Scale depends on the dataset's declared unit, so it waits for the dataset
     // rather than being set up at mount time.
     if (dataset.id !== this.spatialScaleBarKey) {
@@ -2240,6 +2259,137 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // Last, so it also covers the layers this pass just created.
     if (this.spatialPoints3d) this.spatialPoints3d.visible = view.showPoints;
     if (this.spatialPoints3dSel) this.spatialPoints3dSel.visible = view.showPoints;
+    viewer.requestRender();
+  }
+
+  /**
+   * The **3D gene map**: the active gene's expression over the whole sectioned
+   * specimen, as one raymarched volume.
+   *
+   * Two things it can be, and the panel's `Volume rendering` toggle picks which:
+   *
+   *  - **sheets** — exactly the planes that were imaged, each carrying that
+   *    slide's own 2D gene map, with the gaps between sections empty. A stack of
+   *    measured fields, at their true z.
+   *  - **volume** — the same fields smoothed along z, so the planes between the
+   *    sections carry an interpolated value. An estimate, and drawn as a
+   *    translucent cloud for the same reason the density volumes are.
+   *
+   * One `VolumeLayer` rather than a textured quad per section: an `ImageLayer`
+   * renders only at `ndisplay === 2`, so 53 sheets in the orbit view would need a
+   * new layer type upstream — while a scalar volume whose z sampling already IS
+   * the section spacing expresses the sheets exactly, and the same lattice then
+   * gives the interpolated version for free.
+   *
+   * Estimated on the reference volume's own lattice (`densityGrid` at stride 1),
+   * so the field lands voxel-for-voxel on the anatomy and needs no offset — a
+   * `VolumeLayer` has no translate, and napari centres both boxes on the world
+   * origin.
+   */
+  private async ensureGeneMapVolume(
+    viewer: Viewer, dataset: SpatialDataset, view: SpatialViewState,
+    selection: SpatialSelectionMask,
+  ): Promise<void> {
+    const gene = view.geneMap && view.colorBy?.kind === 'feature' ? view.colorBy.name : null;
+    const port = this.spatialData;
+    const smoothing = view.geneMapSmoothing > 0 ? view.geneMapSmoothing : 1;
+    const clip = view.percentileClip ?? [0.01, 0.99];
+    const obs = dataset.observations;
+    // A volume built from ONE section would smear that slide through the whole
+    // depth, so the section restriction only applies to the sheets.
+    const interpolate = !!view.geneMapVolume;
+    const sections = sectionsOf(obs);
+    const section =
+      !interpolate && view.geneMapSection != null && sections && sections.length > 0
+        ? sections[Math.max(0, Math.min(sections.length - 1, view.geneMapSection))]
+        : null;
+
+    const fieldKey = gene
+      ? [
+        dataset.id, gene, smoothing, section ?? 'all', interpolate ? 'vol' : 'sheets',
+        this.selectionRev(selection),
+      ].join('|')
+      : null;
+    const key = fieldKey
+      ? [fieldKey, clip.join(','), view.logScale ? 'log' : 'lin', view.geneMapOpacity].join('|')
+      : null;
+    if (key === this.geneMapVolumeKey) return;
+
+    if (this.geneMapVolumeLayer) {
+      viewer.layers.remove(this.geneMapVolumeLayer);
+      this.geneMapVolumeLayer = null;
+    }
+    this.geneMapVolumeKey = key;
+    if (!key || !gene || !port) {
+      this.geneMapVolumeField = null;
+      this.geneMapVolumeFieldKey = null;
+      return;
+    }
+
+    // Coarsened in-plane but NOT along z: the sheets need one plane per imaged
+    // section, while the field they carry is smooth by construction and gains
+    // nothing from the template's 40 µm detail. At full resolution the estimate is
+    // a 5.7M-voxel pair of blurs on the main thread — seconds of frozen UI for a
+    // checkbox; an eighth of the voxels is an eighth of the work.
+    const grid = densityGrid(dataset, GENE_MAP_VOLUME_STRIDE, 128, 1);
+    if (!grid) return;
+
+    if (fieldKey !== this.geneMapVolumeFieldKey) {
+      let values: Float32Array;
+      try {
+        values = await port.getFeatureVector(gene);
+      } catch (err) {
+        console.warn(`[napari-js] 3D gene map: "${gene}" unavailable`, err);
+        this.geneMapVolumeKey = null;
+        return;
+      }
+      if (this.viewer !== viewer || this.geneMapVolumeKey !== key) return;
+      const inSelection = selection.count > 0 ? maskToIndices(selection.mask) : undefined;
+      // In-plane bandwidth is the 2D map's, in this lattice's units, so a sheet
+      // and the 2D view of the same section are the same field. Along z it is the
+      // density path's 1.5 voxels — the smallest σ that bridges one section gap.
+      // In-plane σ is a PHYSICAL bandwidth, anchored to the reference volume's own
+      // voxel — the resolution the 2D map estimates at — so a sheet and the 2D
+      // view of the same section are the same field whatever lattice this is
+      // rasterised on. Along z it is the density path's 1.5 voxels: the smallest σ
+      // that bridges one section gap.
+      const inPlane = dataset.volume?.voxelSize ?? grid.voxelSize;
+      this.geneMapVolumeField = expressionVolume(obs, grid, {
+        sigma: [
+          inPlane[0] * NapariVisualizerService.GENE_MAP_SIGMA * smoothing,
+          inPlane[1] * NapariVisualizerService.GENE_MAP_SIGMA * smoothing,
+          grid.voxelSize[2] * 1.5 * smoothing,
+        ],
+        values,
+        indices: section != null ? observationsInSection(obs, section) : inSelection,
+        interpolate,
+      });
+      this.geneMapVolumeFieldKey = fieldKey;
+    }
+    const field = this.geneMapVolumeField;
+    if (!field) return;
+
+    const [lo, hi] = contrastWindow(field.mean, clip[0], clip[1]);
+    const data = encodeExpressionVolume(field, [lo, hi], { log: view.logScale });
+    const node = this.currentColormap as { data?: { value?: unknown } } | null;
+    const lut = spatialContinuousLut(node?.data?.value, this.currentReverse);
+    this.geneMapVolumeLayer = viewer.addVolume(
+      data, field.width, field.height, field.depth,
+      {
+        name: `gene map · ${gene}${interpolate ? ' · volume' : ''}`,
+        colormap: colormapFromLut(`gene-map-${gene}`, lut),
+        // The encoding already applied the window, so the layer must not apply a
+        // second one: 0..255 is the whole of what it was given.
+        contrastLimits: [0, 255],
+        rendering: 'translucent',
+        // Additive like the density volumes, and for the same reason: the sheets
+        // have to read THROUGH each other and through the anatomy, which a
+        // translucent blend would occlude one sheet at a time.
+        blending: 'additive',
+        opacity: view.geneMapOpacity,
+        voxelSize: grid.voxelSize,
+      },
+    );
     viewer.requestRender();
   }
 
@@ -2479,10 +2629,15 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
 
   private removeSpatial3dLayers(viewer: Viewer): void {
     for (const layer of [
-      this.spatialPoints3d, this.spatialPoints3dSel, this.spatialVolume, ...this.densityLayers,
+      this.spatialPoints3d, this.spatialPoints3dSel, this.spatialVolume,
+      this.geneMapVolumeLayer, ...this.densityLayers,
     ]) {
       if (layer) viewer.layers.remove(layer);
     }
+    this.geneMapVolumeLayer = null;
+    this.geneMapVolumeKey = null;
+    this.geneMapVolumeField = null;
+    this.geneMapVolumeFieldKey = null;
     this.densityLayers = [];
     this.densityKey = null;
     this.spatialVolume = null;

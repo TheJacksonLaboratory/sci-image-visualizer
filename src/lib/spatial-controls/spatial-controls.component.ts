@@ -334,6 +334,33 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   onGeneMap(on: boolean): void {
     this.controls?.setViewState({ geneMap: on });
   }
+  /** 3D: smooth the per-section sheets along z into a continuous volume. */
+  onGeneMapVolume(on: boolean): void {
+    this.controls?.setViewState({ geneMapVolume: on });
+  }
+  /** 3D: restrict the sheets to one imaged section. */
+  onGeneMapOneSection(on: boolean): void {
+    if (!on) {
+      this.controls?.setViewState({ geneMapSection: null });
+      return;
+    }
+    const middle = this.sections ? Math.floor((this.sections.length - 1) / 2) : 0;
+    this.controls?.setViewState({ geneMapSection: middle });
+  }
+  onGeneMapSection(value: number | undefined): void {
+    if (value === undefined) return;
+    this.controls?.setViewState({ geneMapSection: value });
+  }
+  get geneMapOneSection(): boolean {
+    return this.view.geneMapSection != null;
+  }
+  /** "12 of 53" for the gene map's own section, 1-based like the cloud's. */
+  get geneMapSectionLabel(): string {
+    const total = this.sections?.length ?? 0;
+    if (!total) return '';
+    const at = Math.max(0, Math.min(total - 1, this.view.geneMapSection ?? 0));
+    return `${at + 1} of ${total}`;
+  }
   onGeneMapSmoothing(value: number | undefined): void {
     if (value === undefined) return;
     this.controls?.setViewState({ geneMapSmoothing: value });
@@ -342,6 +369,26 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     if (value === undefined) return;
     this.controls?.setViewState({ geneMapOpacity: value });
   }
+  /**
+   * What the 3D gene map is currently showing, said plainly — the sheets are a
+   * measurement and the volume is an estimate, and the panel has to be the place
+   * that says which one is on screen.
+   */
+  get geneMapVolumeNote(): string {
+    const total = this.sections?.length ?? 0;
+    if (this.view.geneMapVolume) {
+      return 'Interpolated along z: the planes between the imaged sections carry an '
+        + 'ESTIMATE, smoothed from their neighbours\' mean. Nothing is drawn beyond the '
+        + 'outermost section.';
+    }
+    if (this.geneMapOneSection) {
+      return 'One imaged section\'s field — measured, not interpolated. Hide the '
+        + 'observations to read it, or leave them on to check the field against them.';
+    }
+    return `One field per imaged section${total ? ` (${total})` : ''}, at its own depth, `
+      + 'with the gaps between sections empty. Kernel-weighted mean per cell, not a sum.';
+  }
+
   /** True while a gene is the colour source — the only thing a gene map can map. */
   get canMapGene(): boolean {
     return this.view.colorBy?.kind === 'feature';
