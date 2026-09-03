@@ -258,6 +258,27 @@ describe('SpatialControlsComponent', () => {
       expect(controls.setViewState).toHaveBeenCalledWith({ percentileClip: [0.05, 0.95] });
     });
 
+    it('writes the density toggle and its bandwidth, ignoring an empty slider', () => {
+      component.onDensityVolume(true);
+      expect(controls.setViewState).toHaveBeenCalledWith({ densityVolume: true });
+      component.onDensitySmoothing(2.5);
+      expect(controls.setViewState).toHaveBeenCalledWith({ densitySmoothing: 2.5 });
+      (controls.setViewState as jest.Mock).mockClear();
+      component.onDensitySmoothing(undefined);
+      expect(controls.setViewState).not.toHaveBeenCalled();
+    });
+
+    it('says what the density volumes are showing, and that it is an estimate', () => {
+      // An estimate is only honest if the reader can tell it from measurement.
+      expect(component.densityNote).toContain('not measured cells');
+      expect(component.densityNote).toContain('all cells');
+      // …and how to actually see them: the cloud is drawn over the fields.
+      expect(component.densityNote).toContain('Lower Opacity');
+
+      (component as any).legend = [{ label: 'A', color: '#f00' }];
+      expect(component.densityNote).toContain('largest clusters');
+    });
+
     it('reset restores the defaults and clears both pickers', () => {
       component.onColumn('region');
       component.reset();

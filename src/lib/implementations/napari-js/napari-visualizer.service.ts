@@ -34,7 +34,7 @@ import { IChannelState } from '../../contracts/channel-histogram-api.contract';
 import { buildColormapLut, Rgb } from '../../contracts/colormap-lut';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import {
-  SpatialColumn, SpatialDataset, SpatialImageRef, isCategoricalColumn,
+  SpatialColumn, SpatialDataset, SpatialImageRef, findColumnMeta, isCategoricalColumn,
 } from '../../contracts/spatial-dataset.contract';
 import { SpatialViewState } from '../../contracts/display-types';
 import {
@@ -44,9 +44,10 @@ import {
 import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
 import { SpatialObservations } from '../../contracts/spatial-dataset.contract';
 import {
-  SpatialSelectionMask, emptySelection, mutedFromSelection,
+  SpatialSelectionMask, emptySelection, maskToIndices, mutedFromSelection,
 } from '../spatial/spatial-selection';
 import { observationsInSlice, volumeImageRef } from '../spatial/spatial-volume-image';
+import { defaultSigma, densityGrid, rasterizeDensity } from '../spatial/spatial-density';
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
 import {
   PlotType,
@@ -314,6 +315,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   /** The anatomical volume the cloud sits inside, when the dataset has one. */
   private spatialVolume: VolumeLayer | null = null;
   private spatialVolumeKey: string | null = null;
+  /** Per-cluster density volumes drawn alongside the cloud, and what they were
+   *  built from — rasterising is seconds of work, so it must not repeat for a
+   *  change that cannot affect the field. */
+  private densityLayers: VolumeLayer[] = [];
+  private densityKey: string | null = null;
   /** Offset applied to observation coordinates to sit them in the volume's box. */
   private spatialOrigin3d: [number, number, number] = [0, 0, 0];
   /** Dataset the 3D scale bar was built for. */
@@ -1596,6 +1602,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    *  40 µm/px template, so drawing them to scale would put every cell a fifth of a pixel wide
    *  and the section would come up empty. The point-size control scales up from this floor. */
   private static readonly SPATIAL_SLICE_MIN_DIAMETER_PX = 1.5;
+  /** Clusters drawn as density volumes at once. Past a handful, additive translucent
+   *  clouds stop being separable by eye — and each one is a full rasterisation. */
+  private static readonly DENSITY_MAX_CLUSTERS = 6;
   /** Colour for observations when nothing is selected to colour by: visible, neutral, and
    *  obviously not encoding anything. */
   private static readonly SPATIAL_NEUTRAL_COLOR: [number, number, number, number] =
@@ -1963,6 +1972,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // is the framing we want — the brain, not the outermost stray segmentation.
     await this.ensureSpatialVolume(viewer, dataset);
     if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
+    // Then the cluster density volumes, which can set the centring offset when
+    // there is no reference volume — so before any position is computed from it.
+    await this.ensureDensityVolumes(viewer, dataset, view, selection);
+    if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
     // Scale depends on the dataset's declared unit, so it waits for the dataset
     // rather than being set up at mount time.
     if (dataset.id !== this.spatialScaleBarKey) {
@@ -2060,6 +2073,151 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   }
 
   /**
+   * Cluster density volumes: each cluster rasterised into a smooth scalar field and
+   * raymarched alongside the cloud, tinted with the cluster's own legend colour.
+   *
+   * This is what makes a serially sectioned dataset readable as an anatomical
+   * distribution. The cloud shows measured cells and nothing else — but at 200 µm
+   * section spacing the eye cannot integrate a stack of discs into a shape, and
+   * every gap reads as absence. A density field is a different object from a cell:
+   * an estimate, defined between the imaged planes, drawn as a translucent cloud so
+   * it cannot be mistaken for measurement. Individual cells are never interpolated —
+   * consecutive sections sample different cells, so there is nothing to interpolate
+   * along.
+   *
+   * One volume per cluster rather than one for everything: additive blending is what
+   * makes two clusters' territories comparable, and a single blended field would
+   * answer no question anyone asks of a taxonomy. Capped at
+   * {@link DENSITY_MAX_CLUSTERS} by cell count.
+   *
+   * Keyed so it rebuilds only when the field would actually differ — the dataset,
+   * the colour column, the bandwidth, or the selection.
+   */
+  private async ensureDensityVolumes(
+    viewer: Viewer, dataset: SpatialDataset, view: SpatialViewState,
+    selection: SpatialSelectionMask,
+  ): Promise<void> {
+    const on = !!view.densityVolume && !!dataset.observations.z;
+    const smoothing = view.densitySmoothing > 0 ? view.densitySmoothing : 1;
+    const column = view.colorBy?.kind === 'column' ? view.colorBy.name : null;
+    const key = on
+      ? [dataset.id, column ?? 'all', smoothing, selection.count].join('|')
+      : null;
+    if (key === this.densityKey) return;
+
+    for (const layer of this.densityLayers) viewer.layers.remove(layer);
+    this.densityLayers = [];
+    this.densityKey = key;
+    if (!key) return;
+
+    const grid = densityGrid(dataset);
+    if (!grid) return;
+    // With no reference volume there is no offset yet, and a VolumeLayer has no
+    // translate — napari centres its box on the world origin. So the POINTS move by
+    // half the density box, exactly as they do for a reference volume, and the
+    // cached geometry is invalidated because that offset just changed.
+    if (!this.spatialVolume) {
+      this.spatialOrigin3d = [
+        -(grid.width * grid.voxelSize[0]) / 2,
+        -(grid.height * grid.voxelSize[1]) / 2,
+        -(grid.depth * grid.voxelSize[2]) / 2,
+      ];
+      this.spatialLayerKey3d = null;
+    }
+
+    let groups: { name: string; color: string; indices?: Uint32Array }[];
+    try {
+      groups = await this.densityGroups(dataset, column, selection);
+    } catch (err) {
+      console.warn('[napari-js] density volumes: column unavailable', err);
+      this.densityKey = null;
+      return;
+    }
+    if (this.viewer !== viewer || this.densityKey !== key) return;
+
+    const sigma = defaultSigma(grid, smoothing);
+    for (const group of groups) {
+      const data = rasterizeDensity(dataset.observations, grid, { sigma, indices: group.indices });
+      // A cluster with nothing on the grid draws no layer, rather than an empty box.
+      if (!data) continue;
+      if (this.viewer !== viewer || this.densityKey !== key) return;
+      this.densityLayers.push(
+        viewer.addVolume(data, grid.width, grid.height, grid.depth, {
+          name: `density · ${group.name}`,
+          colormap: this.channelTintColormap(group.color),
+          // Translucent, not MIP: a cluster's interior is the readable part, and MIP
+          // would flatten every cloud to its brightest shell.
+          rendering: 'translucent',
+          opacity: 0.55,
+          // Additive, so two clusters overlapping read as both being there instead
+          // of the nearer one hiding the other.
+          blending: 'additive',
+          voxelSize: grid.voxelSize,
+        }),
+      );
+    }
+    viewer.requestRender();
+  }
+
+  /**
+   * The clusters to rasterise: the categories of the active categorical colouring,
+   * biggest first and capped, each with its legend colour.
+   *
+   * Restricted to the current selection when there is one, so "select a region,
+   * check the box" answers which clusters live there. With no categorical colouring
+   * there is one group — total cell density, which is a real question on its own
+   * ("where is the tissue dense?") and the honest thing to show when the view is
+   * not encoding a taxonomy.
+   */
+  private async densityGroups(
+    dataset: SpatialDataset, column: string | null, selection: SpatialSelectionMask,
+  ): Promise<{ name: string; color: string; indices?: Uint32Array }[]> {
+    const n = dataset.observations.count;
+    const inSelection = selection.count > 0 ? selection.mask : null;
+    const port = this.spatialData;
+    const meta = column ? findColumnMeta(dataset, column) : undefined;
+    if (!port || !column || !meta || meta.kind !== 'categorical') {
+      const indices = inSelection ? maskToIndices(inSelection) : undefined;
+      const [r, g, b] = NapariVisualizerService.SPATIAL_NEUTRAL_COLOR;
+      const hex = `#${[r, g, b].map((c) => Math.round(c * 255).toString(16).padStart(2, '0')).join('')}`;
+      return [{ name: inSelection ? 'selected cells' : 'all cells', color: hex, indices }];
+    }
+
+    const loaded = await port.getColumn(column);
+    if (!isCategoricalColumn(loaded)) return [];
+    const colors = resolveCategoryColors(loaded.meta);
+    const counts = new Uint32Array(loaded.meta.categories.length);
+    for (let i = 0; i < n; i++) {
+      if (inSelection && !inSelection[i]) continue;
+      const code = loaded.codes[i];
+      if (code !== NO_CATEGORY && code < counts.length) counts[code]++;
+    }
+    const ranked = Array.from(counts, (count, code) => ({ code, count }))
+      .filter((c) => c.count > 0)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, NapariVisualizerService.DENSITY_MAX_CLUSTERS);
+    if (counts.filter((c) => c > 0).length > ranked.length) {
+      console.info(
+        `[napari-js] ${column}: drawing the ${ranked.length} largest clusters as density ` +
+          'volumes; more than that stop being separable by eye',
+      );
+    }
+    return ranked.map(({ code }) => {
+      const indices = new Uint32Array(counts[code]);
+      let k = 0;
+      for (let i = 0; i < n; i++) {
+        if (inSelection && !inSelection[i]) continue;
+        if (loaded.codes[i] === code) indices[k++] = i;
+      }
+      return {
+        name: loaded.meta.categories[code],
+        color: colors[code] ?? '#888888',
+        indices: indices.subarray(0, k),
+      };
+    });
+  }
+
+  /**
    * Add (or keep) the dataset's reference volume, and derive the offset that sits the
    * observations inside it.
    *
@@ -2119,9 +2277,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   }
 
   private removeSpatial3dLayers(viewer: Viewer): void {
-    for (const layer of [this.spatialPoints3d, this.spatialPoints3dSel, this.spatialVolume]) {
+    for (const layer of [
+      this.spatialPoints3d, this.spatialPoints3dSel, this.spatialVolume, ...this.densityLayers,
+    ]) {
       if (layer) viewer.layers.remove(layer);
     }
+    this.densityLayers = [];
+    this.densityKey = null;
     this.spatialVolume = null;
     this.spatialVolumeKey = null;
     this.spatialOrigin3d = [0, 0, 0];

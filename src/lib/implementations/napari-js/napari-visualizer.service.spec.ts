@@ -877,6 +877,115 @@ describe('NapariVisualizerService', () => {
       addPoints3D = jest.spyOn(Viewer.prototype, 'addPoints3D');
     });
 
+    describe('cluster density volumes', () => {
+      /** A dataset with a volume, a categorical column, and cells on 3 planes. */
+      const clustered = (): SpatialDataset => {
+        const base = spatialDatasetVolume(6);
+        return {
+          ...base,
+          observations: {
+            ...base.observations,
+            count: 6,
+            x: Float32Array.from({ length: 6 }, () => 150),
+            y: Float32Array.from({ length: 6 }, () => 500),
+            z: new Float32Array([400, 400, 800, 800, 1200, 1200]),
+          },
+        } as SpatialDataset;
+      };
+
+      /** Three categories: A x3, B x2, C x1 — so the ranking is observable. */
+      const column = {
+        meta: {
+          kind: 'categorical', name: 'region', categories: ['A', 'B', 'C'],
+          colors: ['#ff0000', '#00ff00', '#0000ff'],
+        },
+        codes: new Uint16Array([0, 0, 0, 1, 1, 2]),
+      };
+
+      const densityLayers = (addVolume: jest.SpyInstance) =>
+        addVolume.mock.results
+          .map((r) => r.value)
+          .filter((l) => typeof l?.name === 'string' && l.name.startsWith('density · '));
+
+      it('draws nothing extra until the option is switched on', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        await mount3d(clustered());
+
+        expect(densityLayers(addVolume)).toHaveLength(0); // the reference volume only
+      });
+
+      it('draws one additive, tinted volume per cluster, biggest first', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getColumn.mockResolvedValue(column);
+        await mount3d(clustered());
+
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' }, densityVolume: true });
+        await flush();
+
+        const layers = densityLayers(addVolume);
+        // One per category, ranked by cell count — A (3), B (2), C (1).
+        expect(layers.map((l) => l.name)).toEqual([
+          'density · A', 'density · B', 'density · C',
+        ]);
+        // Additive so overlapping territories both read; translucent so the
+        // interior is visible rather than only the brightest shell.
+        expect(layers[0].blending).toBe('additive');
+        expect(layers[0].rendering).toBe('translucent');
+        // On the volume's grid, coarsened — same physical box, fewer voxels.
+        expect(layers[0].width * layers[0].voxelSize[0]).toBeCloseTo(4 * 100, 6);
+        expect(layers[0].depth * layers[0].voxelSize[2]).toBeCloseTo(10 * 400, 6);
+        expect(layers[0].width).toBeLessThan(4 * 100);
+      });
+
+      it('rasterises total density when the colouring is not categorical', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        await mount3d(clustered());
+
+        store.setSpatialView({ colorBy: null, densityVolume: true });
+        await flush();
+
+        expect(densityLayers(addVolume).map((l) => l.name)).toEqual(['density · all cells']);
+      });
+
+      it('removes the volumes when the option is switched off', async () => {
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        await mount3d(clustered());
+        store.setSpatialView({ densityVolume: true });
+        await flush();
+        const inScene = () =>
+          ((service as unknown as { viewer: { layers: { items: readonly { name?: string }[] } } })
+            .viewer.layers.items).filter((l) => l.name?.startsWith('density · ')).length;
+        expect(inScene()).toBe(1);
+
+        store.setSpatialView({ densityVolume: false });
+        await flush();
+        expect(inScene()).toBe(0);
+      });
+
+      it('does not re-rasterise for a change that cannot alter the field', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        await mount3d(clustered());
+        store.setSpatialView({ densityVolume: true });
+        await flush();
+        const built = densityLayers(addVolume).length;
+
+        // Point size is a cloud knob: rasterising again would cost seconds for a
+        // field that cannot have changed.
+        store.setSpatialView({ pointScale: 3 });
+        await flush();
+        expect(densityLayers(addVolume).length).toBe(built);
+
+        // Bandwidth does change it.
+        store.setSpatialView({ densitySmoothing: 3 });
+        await flush();
+        expect(densityLayers(addVolume).length).toBeGreaterThan(built);
+      });
+    });
+
     it('draws the cloud with x, y and z interleaved', async () => {
       const layers = await mount3d();
       expect(addPoints3D).toHaveBeenCalled();

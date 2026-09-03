@@ -11,6 +11,57 @@ file was added.
 
 ### Added
 
+- **Cluster density volumes in the 3D spatial view** — a checkbox that raymarches
+  each cluster as a smooth density field alongside the point cloud, tinted with
+  its legend colour and blended additively, so overlapping territories both read
+  instead of the nearer one hiding the other.
+
+  This is what makes a serially sectioned dataset legible as an anatomical
+  distribution. The cloud shows measured cells and nothing else, but at 200 µm
+  section spacing the eye cannot integrate a stack of discs into a shape and every
+  gap reads as absence. A density field is a different object from a cell: an
+  estimate, defined between the imaged planes, drawn as a translucent cloud so it
+  cannot be taken for measurement — and the panel says so in as many words, with
+  the tip that lowering Opacity is what lets you see the fields under the cloud.
+
+  Individual cells are **never** interpolated, and that is deliberate. Consecutive
+  sections sample entirely different cells, so there is no correspondence to
+  interpolate along; synthesising positions would fabricate observations
+  indistinguishable from measured ones, which single-cell resolution asserts have a
+  measured transcriptome.
+
+  Two properties are what separate an honest estimate from a smear, and both are in
+  `spatial-density.ts`:
+
+  - the kernel is **anisotropic** — the default σ is 1.5 grid voxels per axis, and
+    the grid's z voxel *is* the section spacing, so σ along z clears one section gap
+    while staying tight in plane. An isotropic kernel leaves one disc per section:
+    a sampling artefact that looks like biology;
+  - the field is **coverage-normalised** along z (Nadaraya–Watson over the sampled
+    planes), or the 23 unimaged planes of the ABC atlas would read as genuinely
+    empty tissue rather than tissue nobody looked at. Amplification is capped at
+    2x, so the correction bridges interior gaps without inflating a trace of
+    smoothing leakage past the edge of the sampled range into a signal. Coverage
+    comes from the whole dataset, never the subset being drawn — a rare cluster is
+    sparse because it is rare.
+
+  Estimated on the reference volume's own grid, coarsened 2x (density is smooth by
+  construction, and an eighth of the voxels is an eighth of the work) with the
+  physical extent preserved exactly, so the fields sit inside the anatomy rather
+  than overhanging it. Without a reference volume the grid comes from the
+  observations, anchored at the coordinate origin so the same half-box offset
+  centres it. Measured cost on the ABC 1-in-10 subsample (373,997 cells,
+  138 x 138 x 38 grid): ~56 ms per field, ~290 ms for six — main-thread work, and no
+  worker needed at this size.
+
+  Follows the **selection** when there is one, so "draw a region, tick the box"
+  answers which clusters live there. Capped at the 6 largest clusters by cell
+  count: past a handful, additive translucent clouds stop being separable by eye.
+  With no categorical colouring it draws one total-density field, which is a real
+  question on its own. Because a field is scalar, this also sidesteps the
+  96-category LUT ceiling that keeps `subclass` (338), `supertype` (1201) and
+  `cluster` (5274) off the 3D points.
+
 - **The 2D `Spatial omics` view slices a 3D dataset.** Over a dataset whose image
   is its registered volume, the view draws the displayed plane's anatomy with
   *that plane's* observations over it, and the toolbar carries the Image view's

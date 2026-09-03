@@ -66,7 +66,20 @@ export interface SpatialViewState {
   logScale: boolean;
   /** Percentile clip for the contrast window as `[lo, hi]` fractions, so a
    *  handful of saturated observations don't flatten the rest. */
-  percentileClip: [number, number];
+   percentileClip: [number, number];
+  /**
+   * Draw each cluster as a translucent DENSITY volume alongside the 3D cloud.
+   *
+   * Serial sections hundreds of microns apart make a cloud hard to read as an
+   * anatomical distribution — the eye cannot integrate discs into a shape. A
+   * density field can be estimated between the imaged planes (a continuous
+   * estimate, unlike individual cells, which have no correspondence to
+   * interpolate along) and renders as a cloud that reads as an estimate.
+   */
+  densityVolume: boolean;
+  /** Multiplier on the default kernel bandwidth. Above 1 is smoother and less
+   *  committal; below 1 exposes the individual sections. */
+  densitySmoothing: number;
 }
 
 export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
@@ -75,4 +88,6 @@ export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
   opacity: 1,
   logScale: false,
   percentileClip: [0.01, 0.99],
+  densityVolume: false,
+  densitySmoothing: 1,
 };

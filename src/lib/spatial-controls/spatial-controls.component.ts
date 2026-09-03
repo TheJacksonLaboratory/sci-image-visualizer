@@ -236,6 +236,25 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   onLogScale(on: boolean): void {
     this.controls?.setViewState({ logScale: on });
   }
+  onDensityVolume(on: boolean): void {
+    this.controls?.setViewState({ densityVolume: on });
+  }
+  onDensitySmoothing(value: number | undefined): void {
+    if (value === undefined) return;
+    this.controls?.setViewState({ densitySmoothing: value });
+  }
+
+  /** What the density volumes are actually showing, said plainly — an estimate is
+   *  only honest if the reader knows it is one, and which clusters are in view. */
+  get densityNote(): string {
+    const capped = `the ${SpatialControlsComponent.DENSITY_MAX_CLUSTERS} largest clusters`;
+    const what = this.legend ? capped : this.hasSelection ? 'the selected cells' : 'all cells';
+    return `Density estimate over ${what} — smoothed between the imaged sections, `
+      + 'not measured cells. Lower Opacity to read the fields under the cloud.';
+  }
+
+  /** Mirrors the renderer's cap, for the note only. */
+  private static readonly DENSITY_MAX_CLUSTERS = 6;
   onClip(value: [number, number]): void {
     this.controls?.setViewState({ percentileClip: value });
   }

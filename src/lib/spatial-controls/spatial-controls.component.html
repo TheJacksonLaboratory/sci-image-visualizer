@@ -91,6 +91,25 @@
       </div>
     </div>
 
+    <!-- 3D only: a density field needs a z to estimate along, and in 2D the plane
+         already shows its own cells. -->
+    <div class="sc-section" *ngIf="is3d">
+      <div class="sc-row">
+        <p-checkbox [binary]="true" [ngModel]="view.densityVolume"
+                    (onChange)="onDensityVolume($event.checked)"
+                    label="Cluster density volumes"
+                    pTooltip="Raymarch each cluster as a smooth density field — an ESTIMATE between the imaged sections, not measured cells"
+                    tooltipPosition="top"></p-checkbox>
+      </div>
+      <div class="sc-row" *ngIf="view.densityVolume">
+        <span class="sc-lbl">Smoothing</span>
+        <p-slider [ngModel]="view.densitySmoothing" [min]="0.5" [max]="4" [step]="0.5"
+                  (onChange)="onDensitySmoothing($event.value)"></p-slider>
+        <span class="sc-val">{{ view.densitySmoothing }}×</span>
+      </div>
+      <div class="sc-hint" *ngIf="view.densityVolume">{{ densityNote }}</div>
+    </div>
+
     <!-- Continuous-only knobs: meaningless for a categorical palette. -->
     <div class="sc-section" *ngIf="isContinuous">
       <div class="sc-row">
