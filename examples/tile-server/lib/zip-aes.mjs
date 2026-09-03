@@ -29,7 +29,7 @@ const CEN = 0x02014b50;
 const STRENGTH = { 1: { salt: 8, key: 16 }, 2: { salt: 12, key: 24 }, 3: { salt: 16, key: 32 } };
 
 /** Entries in the central directory. */
-export function listEntries(buf) {
+export function listEntries(buf, base = 0) {
   // The EOCD sits at the end, after a comment of up to 64 KiB.
   let eocd = -1;
   for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) {
@@ -37,7 +37,15 @@ export function listEntries(buf) {
   }
   if (eocd < 0) throw new Error('[zip] no end-of-central-directory record');
   const count = buf.readUInt16LE(eocd + 10);
-  let at = buf.readUInt32LE(eocd + 16);
+  // The recorded offset is absolute in the FILE. `base` is where `buf` starts in
+  // that file, so the central directory is at `offset - base` within the window —
+  // treating the absolute value as a buffer index is what made every archive
+  // larger than the tail throw, turning the ranged path into a full-file read.
+  const cdStart = buf.readUInt32LE(eocd + 16);
+  let at = cdStart - base;
+  if (at < 0 || at >= buf.length) {
+    throw new Error('[zip] central directory is outside the buffer');
+  }
 
   const entries = [];
   for (let i = 0; i < count; i++) {
@@ -194,17 +202,19 @@ export async function openZipRanged(filePath, password) {
   // just before it, so one tail read usually covers both.
   const tailLen = Math.min(size, 65557 + 1024 * 1024);
   let tail = await read(size - tailLen, tailLen);
+  let base = size - tail.length;
   let entries;
   try {
-    entries = listEntries(tail);
+    entries = listEntries(tail, base);
   } catch {
-    // A directory larger than the tail we grabbed: fall back to the whole file.
+    // A central directory that starts before the window we grabbed: only then is
+    // the whole file worth reading.
     tail = await readFile(filePath);
-    entries = listEntries(tail);
+    base = 0;
+    entries = listEntries(tail, base);
   }
-  // listEntries resolved offsets against `tail`, which may be a window into the
-  // file — re-base them onto absolute file offsets.
-  const base = tail.length === size ? 0 : size - tail.length;
+  // Each entry's own `offset` is already absolute in the file, and `read()` seeks
+  // the file — so nothing else needs re-basing.
 
   return {
     entries,
@@ -222,6 +232,5 @@ export async function openZipRanged(filePath, password) {
       return readEntry(block, { ...entry, offset: 0 }, password);
     },
     close: () => fh.close(),
-    _base: base,
   };
 }

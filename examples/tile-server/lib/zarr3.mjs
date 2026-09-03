@@ -94,6 +94,24 @@ export async function readArray(storeDir, arrayPath) {
 
   const total = product(shape);
 
+  /**
+   * Write `fill_value` over `[from, to)` of a typed array.
+   *
+   * An omitted chunk means fill_value, which is NOT always zero — and the
+   * zero-initialised buffer only happens to agree when it is. `!= null` rather
+   * than truthiness because 0 needs no work while NaN is falsy and does (Zarr v3
+   * encodes it as the string "NaN", which a typed array coerces correctly).
+   */
+  const fillRange = (out, Ctor, from, to) => {
+    const fill = meta.fill_value;
+    if (fill == null || fill === 0) return;
+    out.fill(
+      Ctor === BigInt64Array || Ctor === BigUint64Array ? BigInt(fill) : fill,
+      from,
+      to,
+    );
+  };
+
   // Single chunk — the common case.
   if (counts.every((c) => c === 1)) {
     const raw = await chunkBytes(shape.map(() => 0));
@@ -107,9 +125,8 @@ export async function readArray(storeDir, arrayPath) {
       // Copy rather than view: the Buffer's byteOffset is rarely aligned for a
       // wider typed array, and a misaligned view throws.
       new Uint8Array(out.buffer).set(raw.subarray(0, out.byteLength));
-    } else if (meta.fill_value) {
-      out.fill(Ctor === BigInt64Array || Ctor === BigUint64Array
-        ? BigInt(meta.fill_value) : meta.fill_value);
+    } else {
+      fillRange(out, Ctor, 0, total);
     }
     return { data: out, shape, meta };
   }
@@ -129,7 +146,14 @@ export async function readArray(storeDir, arrayPath) {
   const chunkByteLen = chunkShape[0] * out.BYTES_PER_ELEMENT;
   for (let i = 0; i < counts[0]; i++) {
     const raw = await chunkBytes([i]);
-    if (!raw) continue; // absent chunk = fill_value, and the buffer starts zeroed
+    if (!raw) {
+      // An absent chunk is fill_value, which the zeroed buffer only matches when
+      // that value is zero — a NaN- or sentinel-filled array decoded as zeros
+      // silently turns "no data here" into a real measurement.
+      const from = i * chunkShape[0];
+      fillRange(out, Ctor, from, Math.min(shape[0], from + chunkShape[0]));
+      continue;
+    }
     const at = i * chunkByteLen;
     bytes.set(raw.subarray(0, Math.min(raw.length, bytes.length - at)), at);
   }
