@@ -2345,12 +2345,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         return this.encodeSpatial3dCategorical(column.codes, resolveCategoryColors(column.meta));
       }
       return this.encodeSpatial3dContinuous(
-        column.values, view, view.logScale || !!column.meta.logScaleHint,
+        column.values, view, view.logScale,
       );
     }
     const values = await port.getFeatureVector(colorBy.name);
     return this.encodeSpatial3dContinuous(
-      values, view, view.logScale || !!dataset.features?.logScaleHint,
+      values, view, view.logScale,
     );
   }
 
@@ -2450,13 +2450,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       // A continuous column may carry its own log hint (counts); the view's
       // toggle wins once the user has set it.
       return toRgbaTuples(this.encodeSpatialContinuous(
-        column.values, view, view.logScale || !!column.meta.logScaleHint, muted,
+        column.values, view, view.logScale, muted,
       ));
     }
 
     const values = await port.getFeatureVector(colorBy.name);
     return toRgbaTuples(this.encodeSpatialContinuous(
-      values, view, view.logScale || !!dataset.features?.logScaleHint, muted,
+      values, view, view.logScale, muted,
     ));
   }
 

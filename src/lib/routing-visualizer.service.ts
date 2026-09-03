@@ -582,10 +582,21 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       getViewState$: () => this.store.getSpatialView$(),
       viewState: () => this.store.currentSpatialView(),
       setViewState: (partial) => this.store.setSpatialView(partial),
-      colorByColumn: (name: string) =>
-        this.store.setSpatialView({ colorBy: { kind: 'column', name } }),
+      // The hint SEEDS the toggle when the source changes, and nothing consults it
+      // afterwards. It used to be ORed in at render time, which meant an unchecked
+      // box could not turn log scaling off for a hinted column — and the linked
+      // chart, which reads `logScale` alone, disagreed with the map about what it
+      // was showing. One authority, set once per source.
+      colorByColumn: (name: string) => {
+        const meta = this.currentSpatialDataset?.columns.find((c) => c.name === name);
+        const hint = meta?.kind === 'continuous' ? !!meta.logScaleHint : false;
+        this.store.setSpatialView({ colorBy: { kind: 'column', name }, logScale: hint });
+      },
       colorByFeature: (name: string) =>
-        this.store.setSpatialView({ colorBy: { kind: 'feature', name } }),
+        this.store.setSpatialView({
+          colorBy: { kind: 'feature', name },
+          logScale: !!this.currentSpatialDataset?.features?.logScaleHint,
+        }),
       clearColorBy: () => this.store.setSpatialView({ colorBy: null }),
       searchFeatures: async (query: string, limit = 50) => {
         // Prefer the port's search (a 31k-gene dataset does not ship its names);

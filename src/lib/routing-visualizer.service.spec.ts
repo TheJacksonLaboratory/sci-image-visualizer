@@ -568,6 +568,43 @@ describe('RoutingVisualizerService — spatial controls', () => {
     return r;
   }
 
+  describe('log scaling', () => {
+    it('seeds the toggle from the source hint, and lets an explicit off win', () => {
+      // The hint used to be ORed in at render time, so an unchecked box could not
+      // turn log scaling off for a hinted column — and the linked chart, which
+      // reads `logScale` alone, disagreed with the map about what it showed.
+      const hinted: SpatialDataset = {
+        ...dataset,
+        columns: [{ kind: 'continuous', name: 'total_counts', logScaleHint: true }],
+        features: { count: 1, names: ['Ttr'], logScaleHint: true },
+      };
+      const { router, store } = build(mockPort({
+        getDataset$: () => new BehaviorSubject<SpatialDataset | null>(hinted),
+      }));
+      const controls = router.getSpatialControls()!;
+
+      controls.colorByColumn('total_counts');
+      expect(store.currentSpatialView().logScale).toBe(true);
+
+      // Explicitly off, and it stays off — nothing consults the hint again.
+      controls.setViewState({ logScale: false });
+      expect(store.currentSpatialView().logScale).toBe(false);
+
+      // A gene carries its own hint, and re-seeds on the switch.
+      controls.colorByFeature('Ttr');
+      expect(store.currentSpatialView().logScale).toBe(true);
+    });
+
+    it('clears the toggle for a source with no hint', () => {
+      const { router, store } = build(mockPort());
+      const controls = router.getSpatialControls()!;
+      controls.setViewState({ logScale: true });
+
+      controls.colorByColumn('counts'); // continuous, no hint
+      expect(store.currentSpatialView().logScale).toBe(false);
+    });
+  });
+
   describe('on a dataset change', () => {
     it('drops a colour source the new dataset cannot satisfy, and keeps the rest', async () => {
       const dataset$ = new BehaviorSubject<SpatialDataset | null>(dataset);
