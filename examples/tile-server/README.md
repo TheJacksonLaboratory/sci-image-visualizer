@@ -41,7 +41,7 @@ so it stays lightweight and stateless.
 
 The same server also implements the **spatial-omics data plane** — the wire
 format `SpatialDataHttpService` speaks (see
-[`src/lib/implementations/spatial/spatial-wire.ts`](../../src/lib/implementations/spatial/spatial-wire.ts)).
+[`src/lib/implementations/spatial-data-http/spatial-wire.ts`](../../src/lib/implementations/spatial-data-http/spatial-wire.ts)).
 
 | Method + path | Returns |
 |---|---|

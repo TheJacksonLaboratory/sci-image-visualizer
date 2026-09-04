@@ -1,7 +1,7 @@
 import {
   buildVolumeStackImage, observationsInSlice, sliceIndexOf, volumeImageRef,
 } from './spatial-volume-image';
-import { SpatialDataset } from '../../contracts/spatial-dataset.contract';
+import { SpatialDataset } from '../contracts/spatial-dataset.contract';
 
 /**
  * The volume-as-image encoder. What matters here is that a dataset's ONE volume

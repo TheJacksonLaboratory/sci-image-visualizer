@@ -38,7 +38,7 @@ import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from './contracts/toolbar-co
 import { VIZ_CONFIG, VizConfig } from './contracts/viz-config';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-data.port';
 import { SpatialDataset } from './contracts/spatial-dataset.contract';
-import { buildVolumeStackImage } from './implementations/spatial/spatial-volume-image';
+import { buildVolumeStackImage } from './spatial/spatial-volume-image';
 
 /** Per-instance plot-div id source. The mount element's id must be unique so two
  *  live viewers (e.g. the main diagram + a modal preview) don't collide on the

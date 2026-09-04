@@ -3,7 +3,7 @@ import { BehaviorSubject, Observable } from 'rxjs';
 
 import {
   SpatialSelectionMask, emptySelection,
-} from '../implementations/spatial/spatial-selection';
+} from '../spatial/spatial-selection';
 
 /**
  * The set of currently-selected spatial observations, shared the way

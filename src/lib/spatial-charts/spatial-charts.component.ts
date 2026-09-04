@@ -6,7 +6,7 @@ import * as Plotly from 'plotly.js-dist-min';
 
 import { VISUALIZER, IVisualizer, ISpatialControls } from '../contracts/visualizer.contract';
 import { SpatialColorBy, SpatialViewState, DEFAULT_SPATIAL_VIEW } from '../contracts/display-types';
-import { SpatialSelectionMask, emptySelection } from '../implementations/spatial/spatial-selection';
+import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selection';
 import {
   OmicsChartKind, OmicsGrouping, benefitsFromGrouping, buildCountTraces, buildOmicsTraces,
   countsLayout, omicsLayout,

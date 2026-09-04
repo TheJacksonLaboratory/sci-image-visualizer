@@ -1,4 +1,4 @@
-import { SpatialObservations } from '../../contracts/spatial-dataset.contract';
+import { SpatialObservations } from '../contracts/spatial-dataset.contract';
 
 /**
  * The planes a **serially sectioned** dataset was actually imaged at.

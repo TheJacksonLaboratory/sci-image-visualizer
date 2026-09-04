@@ -1,7 +1,7 @@
-import { IImageInfo } from '../../contracts/image.contract';
+import { IImageInfo } from '../contracts/image.contract';
 import {
   SpatialDataset, SpatialImageRef, SpatialObservations, SpatialVolumeMeta,
-} from '../../contracts/spatial-dataset.contract';
+} from '../contracts/spatial-dataset.contract';
 
 /**
  * A dataset's reference volume, encoded as the z-stack image the 2D path renders,

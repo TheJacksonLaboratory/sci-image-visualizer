@@ -1,5 +1,5 @@
-import { Region } from '../../models/region';
-import { SpatialImageRef, SpatialObservations } from '../../contracts/spatial-dataset.contract';
+import { Region } from '../models/region';
+import { SpatialImageRef, SpatialObservations } from '../contracts/spatial-dataset.contract';
 
 /**
  * Which observations fall inside a set of drawn regions.

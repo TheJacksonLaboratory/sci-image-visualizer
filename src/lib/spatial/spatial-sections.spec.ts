@@ -1,7 +1,7 @@
 import {
   MAX_SAMPLED_SECTIONS, observationsInSection, sampledSections, sectionsOf,
 } from './spatial-sections';
-import { SpatialObservations } from '../../contracts/spatial-dataset.contract';
+import { SpatialObservations } from '../contracts/spatial-dataset.contract';
 
 /**
  * Sections of a serially sectioned dataset. The two things that matter: the

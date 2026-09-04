@@ -1,9 +1,9 @@
-import { Rgb, buildColormapLut } from '../../contracts/colormap-lut';
-import { fallbackColorFor } from '../../store/class-color.util';
+import { Rgb, buildColormapLut } from '../contracts/colormap-lut';
+import { fallbackColorFor } from '../store/class-color.util';
 import {
   CategoricalColumnMeta, NO_CATEGORY, SpatialObservations,
-} from '../../contracts/spatial-dataset.contract';
-import { ColormapValue } from '../../contracts/display-types';
+} from '../contracts/spatial-dataset.contract';
+import { ColormapValue } from '../contracts/display-types';
 
 /**
  * Turning spatial-omics columns into per-point visual attributes.

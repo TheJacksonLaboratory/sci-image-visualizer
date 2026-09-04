@@ -1,4 +1,4 @@
-import { SpatialImageRef, SpatialObservations } from '../../contracts/spatial-dataset.contract';
+import { SpatialImageRef, SpatialObservations } from '../contracts/spatial-dataset.contract';
 import { blurVolumeAxis, DensityGrid } from './spatial-density';
 
 /**

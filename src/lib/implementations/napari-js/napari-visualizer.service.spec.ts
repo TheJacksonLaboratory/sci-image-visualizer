@@ -10,8 +10,8 @@ import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
 import { VIZ_CONFIG } from '../../contracts/viz-config';
 import { TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
-import { SPATIAL_3D_MAX_CATEGORIES } from '../spatial/spatial-encoding';
-import * as expressionModule from '../spatial/spatial-expression';
+import { SPATIAL_3D_MAX_CATEGORIES } from '../../spatial/spatial-encoding';
+import * as expressionModule from '../../spatial/spatial-expression';
 import { PlotType } from '../../contracts/plot-type';
 import { ViewerFeature } from '../../contracts/capabilities.contract';
 import { IImageInfo } from '../../contracts/image.contract';
@@ -20,7 +20,7 @@ import { SPATIAL_DATA_PORT } from '../../contracts/ports/spatial-data.port';
 import {
   CategoricalColumn, ContinuousColumn, SpatialDataset,
 } from '../../contracts/spatial-dataset.contract';
-import { DEFAULT_MUTED_OPACITY } from '../spatial/spatial-encoding';
+import { DEFAULT_MUTED_OPACITY } from '../../spatial/spatial-encoding';
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
 
 const imageInfo = (over: Partial<IImageInfo> = {}): IImageInfo =>

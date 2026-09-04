@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { firstValueFrom } from 'rxjs';
 
 import { SpatialSelectionStore } from './spatial-selection.service';
-import { emptySelection } from '../implementations/spatial/spatial-selection';
+import { emptySelection } from '../spatial/spatial-selection';
 
 describe('SpatialSelectionStore', () => {
   let store: SpatialSelectionStore;

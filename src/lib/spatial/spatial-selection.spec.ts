@@ -2,8 +2,8 @@ import {
   countMask, emptySelection, maskToIndices, mutedFromSelection, pointInRing,
   regionShapes, sameSelection, selectByCategory, selectInRegions, selectInRegionsProjected,
 } from './spatial-selection';
-import { MultiPolygon, Polygon, Rectangle, Region } from '../../models/region';
-import { SpatialObservations } from '../../contracts/spatial-dataset.contract';
+import { MultiPolygon, Polygon, Rectangle, Region } from '../models/region';
+import { SpatialObservations } from '../contracts/spatial-dataset.contract';
 
 /** Observations at the given [x, y] pairs. */
 function obs(...points: [number, number][]): SpatialObservations {

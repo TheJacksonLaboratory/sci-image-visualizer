@@ -1,5 +1,5 @@
 import { HoverSource, hoverText, nearestObservation } from './spatial-hover';
-import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
+import { NO_CATEGORY } from '../contracts/spatial-dataset.contract';
 
 describe('nearestObservation', () => {
   // Three drawn points and one that is not on screen.

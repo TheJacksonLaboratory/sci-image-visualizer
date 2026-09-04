@@ -6,7 +6,7 @@ import {
 } from './spatial-encoding';
 import {
   CategoricalColumnMeta, NO_CATEGORY, SpatialObservations,
-} from '../../contracts/spatial-dataset.contract';
+} from '../contracts/spatial-dataset.contract';
 
 /** RGBA of point i, as 0–255 ints plus alpha, for readable assertions.
  *  Alpha is rounded because the buffer is `Float32Array`: 0.15 stores as

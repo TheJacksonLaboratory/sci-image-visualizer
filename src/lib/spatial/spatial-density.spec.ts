@@ -1,7 +1,7 @@
 import {
   DensityGrid, defaultSigma, densityGrid, rasterizeDensity,
 } from './spatial-density';
-import { SpatialDataset, SpatialObservations } from '../../contracts/spatial-dataset.contract';
+import { SpatialDataset, SpatialObservations } from '../contracts/spatial-dataset.contract';
 
 /**
  * The density estimator. What is under test is the part that makes it an honest

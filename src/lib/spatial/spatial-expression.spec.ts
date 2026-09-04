@@ -2,7 +2,7 @@ import {
   colorExpressionField, encodeExpressionVolume, expressionField,
   expressionVolume,
 } from './spatial-expression';
-import { SpatialObservations } from '../../contracts/spatial-dataset.contract';
+import { SpatialObservations } from '../contracts/spatial-dataset.contract';
 
 /**
  * The gene-map estimator. What matters is that it reports a MEAN per cell (so a

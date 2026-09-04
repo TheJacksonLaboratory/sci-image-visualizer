@@ -1,4 +1,4 @@
-import { SpatialDataset, SpatialObservations } from '../../contracts/spatial-dataset.contract';
+import { SpatialDataset, SpatialObservations } from '../contracts/spatial-dataset.contract';
 
 /**
  * Turning a cell cloud into a density field — the honest way to render a cluster

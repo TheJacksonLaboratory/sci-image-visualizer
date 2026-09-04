@@ -10,7 +10,7 @@ import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../contracts/display-typ
 import { COLORMAP_OPTIONS } from '../plot.utilities';
 import {
   SpatialSelectionMask, emptySelection,
-} from '../implementations/spatial/spatial-selection';
+} from '../spatial/spatial-selection';
 
 const dataset: SpatialDataset = {
   id: 'demo',

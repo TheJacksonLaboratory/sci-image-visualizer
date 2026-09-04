@@ -42,17 +42,17 @@ import {
   contrastWindow, encodeCategorical, encodeContinuous, markerDiameters,
   resolveCategoryColors, toRgbaTuples, parseHex, MISSING_COLOR, DEFAULT_MUTED_OPACITY,
   SPATIAL_3D_MAX_CATEGORIES, spatialContinuousLut,
-} from '../spatial/spatial-encoding';
+} from '../../spatial/spatial-encoding';
 import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
 import { SpatialObservations } from '../../contracts/spatial-dataset.contract';
 import {
   SpatialSelectionMask, emptySelection, maskToIndices, mutedFromSelection, sameSelection,
   selectByCategory,
-} from '../spatial/spatial-selection';
-import { observationsInSlice, volumeImageRef } from '../spatial/spatial-volume-image';
-import { defaultSigma, densityGrid, rasterizeDensity } from '../spatial/spatial-density';
-import { observationsInSection, sectionsOf } from '../spatial/spatial-sections';
-import { type HoverSource, hoverText, nearestObservation } from '../spatial/spatial-hover';
+} from '../../spatial/spatial-selection';
+import { observationsInSlice, volumeImageRef } from '../../spatial/spatial-volume-image';
+import { defaultSigma, densityGrid, rasterizeDensity } from '../../spatial/spatial-density';
+import { observationsInSection, sectionsOf } from '../../spatial/spatial-sections';
+import { type HoverSource, hoverText, nearestObservation } from '../../spatial/spatial-hover';
 import { NapariSpatialTooltip } from './napari-spatial-tooltip';
 
 /**
@@ -88,7 +88,7 @@ const GENE_MAP_VOLUME_STRIDE = 2;
 import {
   type ExpressionField, type ExpressionVolumeField, colorExpressionField,
   encodeExpressionVolume, expressionField, expressionVolume,
-} from '../spatial/spatial-expression';
+} from '../../spatial/spatial-expression';
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
 import {
   PlotType,

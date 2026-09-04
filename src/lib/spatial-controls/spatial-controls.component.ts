@@ -12,10 +12,10 @@ import {
 } from '../contracts/display-types';
 import {
   SPATIAL_3D_MAX_CATEGORIES, spatialContinuousLut,
-} from '../implementations/spatial/spatial-encoding';
+} from '../spatial/spatial-encoding';
 import {
   SpatialSelectionMask, emptySelection,
-} from '../implementations/spatial/spatial-selection';
+} from '../spatial/spatial-selection';
 
 /** One legend row for a categorical colouring. */
 export interface SpatialLegendEntry {

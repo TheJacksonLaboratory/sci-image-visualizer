@@ -10,7 +10,7 @@ import { IRegionOverlay } from './region-overlay.contract';
 import { IHistogram } from './channel-histogram-api.contract';
 import { ColormapNode, IWandOptions, IBrushOptions, SpatialViewState, SpatialColorBy } from './display-types';
 import { SpatialDataset } from './spatial-dataset.contract';
-import { SpatialSelectionMask } from '../implementations/spatial/spatial-selection';
+import { SpatialSelectionMask } from '../spatial/spatial-selection';
 
 /**
  * Backend-neutral visualization contract. Plotly is one implementation;

@@ -32,30 +32,30 @@ export { CellposeSegmenterService } from './lib/toolbar/segmentation/cellpose-se
 // The wire format the bundled example server speaks, plus a ready-made
 // SpatialDataPort adapter for it. Both are OPTIONAL: a host with its own
 // backend implements SpatialDataPort directly and imports neither.
-export { SpatialDataHttpService, SupersededError } from './lib/implementations/spatial/spatial-data-http.service';
+export { SpatialDataHttpService, SupersededError } from './lib/implementations/spatial-data-http/spatial-data-http.service';
 export {
   SPATIAL_WIRE_VERSION, isLittleEndian, assertManifestVersion, datasetFromManifest,
   decodeCoords, decodeRadius, decodeColumn, decodeFeatureVector, decodePolygons,
-} from './lib/implementations/spatial/spatial-wire';
+} from './lib/implementations/spatial-data-http/spatial-wire';
 export type {
   SpatialManifest, SpatialDatasetSummary, SpatialRadiusSpec,
-} from './lib/implementations/spatial/spatial-wire';
+} from './lib/implementations/spatial-data-http/spatial-wire';
 // Backend-neutral encodings: columns/genes -> per-point colours and sizes.
 export {
   encodeCategorical, encodeContinuous, resolveCategoryColors, contrastWindow,
   markerDiameters, toRgbaTuples, lutFor,
   DEFAULT_CATEGORICAL_PALETTE, DEFAULT_MUTED_OPACITY, MISSING_COLOR,
-} from './lib/implementations/spatial/spatial-encoding';
+} from './lib/spatial/spatial-encoding';
 export type {
   RGBA, CategoricalEncodingOptions, ContinuousEncodingOptions,
-} from './lib/implementations/spatial/spatial-encoding';
+} from './lib/spatial/spatial-encoding';
 // Selection: which observations fall inside the drawn ROIs, and the shared store
 // that holds the answer.
 export {
   selectInRegions, selectByCategory, mutedFromSelection, pointInRing,
   emptySelection, countMask, maskToIndices,
-} from './lib/implementations/spatial/spatial-selection';
-export type { SpatialSelectionMask } from './lib/implementations/spatial/spatial-selection';
+} from './lib/spatial/spatial-selection';
+export type { SpatialSelectionMask } from './lib/spatial/spatial-selection';
 export { SpatialSelectionStore } from './lib/store/spatial-selection.service';
 export * from './lib/contracts/instance-segmenter.contract';
 export * from './lib/contracts/semantic-segmenter.contract';

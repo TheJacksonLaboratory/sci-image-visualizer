@@ -6,7 +6,7 @@
 //   POST /zoom/region  { info, roi, screen, zIndex }             -> image/png
 //
 // …plus the SPATIAL-OMICS data plane the library's SpatialDataHttpService
-// speaks (see src/lib/implementations/spatial/spatial-wire.ts):
+// speaks (see src/lib/implementations/spatial-data-http/spatial-wire.ts):
 //
 //   GET  /spatial/datasets                    -> { datasets: [...] }
 //   GET  /spatial/:id/manifest                -> manifest JSON

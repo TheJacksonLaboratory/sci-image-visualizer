@@ -13,14 +13,14 @@ import { IVisualizer, PixelData, IntensityProfile, IIsosurfaceControls, IIntensi
 import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-data.port';
 import { SpatialColorBy } from './contracts/display-types';
 import { SpatialDataset, isCategoricalColumn } from './contracts/spatial-dataset.contract';
-import { resolveCategoryColors } from './implementations/spatial/spatial-encoding';
-import { sectionsOf } from './implementations/spatial/spatial-sections';
+import { resolveCategoryColors } from './spatial/spatial-encoding';
+import { sectionsOf } from './spatial/spatial-sections';
 import {
   observationsInSlice, volumeImageRef,
-} from './implementations/spatial/spatial-volume-image';
+} from './spatial/spatial-volume-image';
 import {
   emptySelection, selectByCategory, selectInRegions, selectInRegionsProjected,
-} from './implementations/spatial/spatial-selection';
+} from './spatial/spatial-selection';
 import { RegionStore } from './store/region-store.service';
 import { SpatialSelectionStore } from './store/spatial-selection.service';
 import { ViewerCapabilities } from './contracts/capabilities.contract';

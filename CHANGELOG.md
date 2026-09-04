@@ -133,6 +133,18 @@ file was added.
 
 ### Changed
 
+- **Spatial code moved out of `implementations/`.** That directory is for rendering
+  BACKENDS — a visualization library behind `IVisualizer`, each serving several
+  plot modes (OSD and Plotly both do Surface). Spatial omics is not a backend: it
+  is two plot modes, both rendered by the napari-js backend. The eight pure
+  domain modules now live in `src/lib/spatial/`, beside the `spatial-charts/` and
+  `spatial-controls/` that use them, and the data-port adapter and the wire format
+  it speaks moved to `src/lib/implementations/spatial-data-http/` — that one IS an
+  implementation, of `SPATIAL_DATA_PORT` rather than of a renderer.
+
+  Paths only: the package's exported symbols are unchanged, so nothing a host
+  imports from the entry point moves.
+
 - **Click-to-zoom is off in the spatial-omics modes.** napari's 2D controls zoom
   2× about the cursor on a plain click (OSD style), which now collides with the
   click that selects a class: one click would do two things, and the zoom would
