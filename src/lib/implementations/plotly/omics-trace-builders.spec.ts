@@ -1,5 +1,5 @@
 import {
-  buildCountTraces, countByCategory, countsLayout,
+  buildCountTraces, buildHeatmapTraces, countByCategory, countsLayout, heatmapLayout,
   OmicsGrouping, OmicsTraceInput, benefitsFromGrouping, buildOmicsTraces, omicsLayout,
 } from './omics-trace-builders';
 import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
@@ -239,4 +239,72 @@ describe('omics-trace-builders', () => {
       expect(traces[0].y).toEqual(['c0']);
     });
   });
+
+  describe('heatmap (genes x groups)', () => {
+    const input = {
+      rows: ['g1', 'g2'],
+      cols: ['A', 'B', 'C'],
+      // row-major: g1 across A,B,C then g2
+      values: Float32Array.from([1, 2, NaN, -1, 0, 3]),
+      counts: Uint32Array.from([10, 20, 30]),
+      zScored: true,
+      groupLabel: 'class',
+    };
+
+    it('flips the rows, because Plotly draws z[0] at the bottom', () => {
+      // The caller lists genes top-down; Plotly stacks upward. Without the flip
+      // the row labels and the values would disagree.
+      const [tr] = buildHeatmapTraces(input) as any[];
+      expect(tr.type).toBe('heatmap');
+      expect(tr.y).toEqual(['g2', 'g1']);
+      expect(tr.z[0]).toEqual([-1, 0, 3]); // g2
+      expect(tr.z[1]).toEqual([1, 2, null]); // g1, with the gap as null
+      expect(tr.x).toEqual(['A', 'B', 'C']);
+    });
+
+    it('draws an unmeasured cell as a gap, not as the scale bottom', () => {
+      const [tr] = buildHeatmapTraces(input) as any[];
+      // NaN became null and gaps are not coloured — "nothing was measured" is
+      // not the same statement as "a low mean".
+      expect(tr.z[1][2]).toBeNull();
+      expect(tr.hoverongaps).toBe(false);
+    });
+
+    it('centres the scale on zero when z-scored, since the sign is the reading', () => {
+      const [tr] = buildHeatmapTraces(input) as any[];
+      expect(tr.zmin).toBeCloseTo(-3, 5);
+      expect(tr.zmax).toBeCloseTo(3, 5);
+      expect(tr.colorscale[1][1]).toBe('#F7F7F7'); // white at the midpoint
+    });
+
+    it('uses a sequential scale and no forced centre for raw means', () => {
+      // Raw means have no meaningful zero crossing, so a diverging scale would
+      // imply one.
+      const [tr] = buildHeatmapTraces({ ...input, zScored: false }) as any[];
+      expect(tr.zmin).toBeUndefined();
+      expect(tr.zmax).toBeUndefined();
+      expect(tr.colorscale[0][1]).toBe('#F7FBFF');
+    });
+
+    it('puts the cell count behind each column in the hover', () => {
+      const [tr] = buildHeatmapTraces(input) as any[];
+      expect(tr.customdata[0]).toEqual(['A · 10 cells', 'B · 20 cells', 'C · 30 cells']);
+    });
+
+    it('draws nothing for an empty matrix', () => {
+      expect(buildHeatmapTraces({ ...input, rows: [], values: new Float32Array(0) })).toEqual([]);
+      expect(buildHeatmapTraces({ ...input, cols: [], values: new Float32Array(0) })).toEqual([]);
+    });
+
+    it('grows its height with the gene count', () => {
+      const short = heatmapLayout(input) as any;
+      const tall = heatmapLayout({
+        ...input,
+        rows: Array.from({ length: 20 }, (_, i) => `g${i}`),
+      }) as any;
+      expect(tall.height).toBeGreaterThan(short.height);
+      expect(short.xaxis.title.text).toBe('class');
+    });
+  });
+
 });

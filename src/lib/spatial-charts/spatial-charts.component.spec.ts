@@ -6,6 +6,7 @@ import { BehaviorSubject } from 'rxjs';
 import { SpatialChartsComponent } from './spatial-charts.component';
 import { VISUALIZER, ISpatialControls } from '../contracts/visualizer.contract';
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
+import { SpatialColorBy } from '../contracts/display-types';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../contracts/display-types';
 import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selection';
 
@@ -23,7 +24,7 @@ const dataset: SpatialDataset = {
     { kind: 'categorical', name: 'region', categories: ['A', 'B'] },
     { kind: 'continuous', name: 'total_counts' },
   ],
-  features: { count: 1, names: ['Ttr'] },
+  features: { count: 3, names: ['Ttr', 'Mbp', 'Snap25'] },
 };
 
 describe('SpatialChartsComponent', () => {
@@ -279,14 +280,18 @@ describe('SpatialChartsComponent', () => {
     });
 
     it('offers only the kinds a categorical subject can be drawn as', () => {
-      expect(component.kindOptions.map((k) => k.value)).toEqual(['counts']);
+      // A category code is a label, not a magnitude, so no histogram/violin/box.
+      // The heatmap is always offered: its subject is a gene LIST crossed with a
+      // grouping, not whatever the map happens to be coloured by.
+      expect(component.kindOptions.map((k) => k.value)).toEqual(['counts', 'heatmap']);
     });
 
     it('returns to a histogram when the source goes back to continuous', async () => {
       view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'total_counts' } });
       await flush();
       expect(component.kind).toBe('histogram');
-      expect(component.kindOptions.map((k) => k.value)).toEqual(['histogram', 'violin', 'box']);
+      expect(component.kindOptions.map((k) => k.value))
+        .toEqual(['histogram', 'violin', 'box', 'heatmap']);
       expect(lastPlot().traces[0].type).toBe('histogram');
     });
 
@@ -366,4 +371,124 @@ describe('SpatialChartsComponent', () => {
       expect(Plotly.purge).toHaveBeenCalledWith(component.chartDiv);
     });
   });
+
+  describe('heatmap (genes x groups)', () => {
+    /**
+     * Eight cells, four per category — the class view needs more than the
+     * default three-cell floor per group to draw at all, and a four-cell
+     * selection still sits far under the per-cell cap.
+     */
+    const geneValues: Record<string, number[]> = {
+      Ttr: [1, 1, 1, 1, 9, 9, 9, 9], // low in A, high in B
+      Mbp: [5, 5, 5, 5, 5, 5, 5, 5], // flat: distinguishes nothing
+    };
+
+    beforeEach(async () => {
+      controls.continuousValues = jest.fn(async (source: SpatialColorBy) =>
+        Float32Array.from(geneValues[source.name] ?? new Array(8).fill(0)));
+      controls.categoricalView = jest.fn(async (column: string) => ({
+        name: column, categories: ['A', 'B'], colors: ['#f00', '#00f'],
+        codes: Uint16Array.from([0, 0, 0, 0, 1, 1, 1, 1]),
+      }));
+      await build(controls);
+      await flush();
+    });
+
+    it('offers the dataset’s gene names as the rows to pick from', () => {
+      expect(component.geneOptions.map((o) => o.value)).toEqual(['Ttr', 'Mbp', 'Snap25']);
+    });
+
+    it('seeds with the gene already on screen, rather than opening empty', async () => {
+      view$.next({ ...view$.value, colorBy: { kind: 'feature', name: 'Ttr' } });
+      await flush();
+      component.onKind('heatmap');
+      await flush();
+      expect(component.heatmapGenes).toEqual(['Ttr']);
+      // …and it picked a grouping on its own: a heatmap with no columns is not
+      // a chart, so "No grouping" is not a usable default here.
+      expect(component.groupBy).toBe('region');
+      await flush();
+      expect(lastPlot().traces[0].type).toBe('heatmap');
+    });
+
+    it('draws one row per gene and one column per category', async () => {
+      component.onKind('heatmap');
+      await flush();
+      await component.onHeatmapGenes(['Ttr', 'Mbp']);
+      await flush();
+      const { traces, layout } = lastPlot();
+      expect(traces[0].type).toBe('heatmap');
+      expect(traces[0].x).toEqual(['A', 'B']);
+      // Rows are flipped for Plotly, so 'Mbp' is drawn first and 'Ttr' second.
+      expect(traces[0].y).toEqual(['Mbp', 'Ttr']);
+      // Ttr is low in A and high in B; z-scored that is -1 and +1.
+      expect(traces[0].z[1]).toEqual([-1, 1]);
+      // Mbp is flat, so it distinguishes nothing — zeros, not NaN.
+      expect(traces[0].z[0]).toEqual([0, 0]);
+      expect(layout.xaxis.title.text).toBe('region');
+    });
+
+    it('narrows to the selection, and switches to per-cell columns for a small one', async () => {
+      component.onKind('heatmap');
+      await flush();
+      await component.onHeatmapGenes(['Ttr']);
+      selection$.next({ mask: Uint8Array.from([1, 0, 1, 0, 0, 0, 0, 0]), count: 2 });
+      await flush();
+      const { traces } = lastPlot();
+      expect(traces[0].type).toBe('heatmap');
+      // Two selected cells is far under the per-cell cap, so the columns become
+      // the cells themselves — "what is in this region", not a 2-column class
+      // matrix.
+      expect(traces[0].x).toEqual(['#0', '#2']);
+      expect(component.heatmapNote).toContain('per selected cell');
+    });
+
+    it('z-scores by default and says so, and can be turned off', async () => {
+      component.onKind('heatmap');
+      await flush();
+      await component.onHeatmapGenes(['Ttr']);
+      await flush();
+      expect(component.heatmapZScore).toBe(true);
+      expect(lastPlot().traces[0].zmin).toBeLessThan(0); // symmetric about zero
+      expect(component.heatmapNote).toContain('z-scored');
+
+      component.onHeatmapZScore(false);
+      await flush();
+      expect(lastPlot().traces[0].zmin).toBeUndefined();
+      expect(component.heatmapNote).toContain('Raw means');
+    });
+
+    it('asks for genes when it has none, instead of drawing an empty grid', async () => {
+      view$.next({ ...view$.value, colorBy: null });
+      await flush();
+      component.onKind('heatmap');
+      await flush();
+      expect(component.heatmapGenes).toEqual([]);
+      expect(component.heatmapNote).toContain('Pick one or more genes');
+    });
+
+    it('fetches each gene once, however often it redraws', async () => {
+      component.onKind('heatmap');
+      await flush();
+      await component.onHeatmapGenes(['Ttr', 'Mbp']);
+      await flush();
+      const after = (controls.continuousValues as jest.Mock).mock.calls.length;
+      // Adding a third gene must not refetch the first two — each is a full
+      // per-observation vector.
+      await component.onHeatmapGenes(['Ttr', 'Mbp', 'Snap25']);
+      await flush();
+      expect((controls.continuousValues as jest.Mock).mock.calls.length).toBe(after + 1);
+    });
+
+    it('drops genes the new dataset does not have', async () => {
+      component.onKind('heatmap');
+      await flush();
+      await component.onHeatmapGenes(['Ttr', 'Mbp']);
+      dataset$.next({ ...dataset, id: 'other', features: { count: 1, names: ['Actb'] } });
+      await flush();
+      expect(component.heatmapGenes).toEqual([]);
+      expect(component.geneOptions.map((o) => o.value)).toEqual(['Actb']);
+    });
+  });
+
 });

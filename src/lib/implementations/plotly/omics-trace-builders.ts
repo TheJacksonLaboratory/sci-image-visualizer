@@ -13,7 +13,7 @@ import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
  * distribution and already carries both trace types.
  */
 
-export type OmicsChartKind = 'histogram' | 'violin' | 'box' | 'counts';
+export type OmicsChartKind = 'histogram' | 'violin' | 'box' | 'counts' | 'heatmap';
 
 /** Per-observation grouping for a violin/box, or an overlaid histogram. */
 export interface OmicsGrouping {
@@ -299,5 +299,108 @@ export function countsLayout(input: OmicsCountInput & { name: string }): unknown
     xaxis: { title: { text: 'observations' } },
     yaxis: { automargin: true, ticklabelposition: 'inside', tickfont: { size: 10 } },
     height: Math.max(180, 22 * labels.length + 60),
+  };
+}
+
+// ── heatmap ─────────────────────────────────────────────────────────────────
+
+/**
+ * Genes × groups mean expression, as a Plotly heatmap.
+ *
+ * The matrix itself is computed by the pure `heatmapMatrix` in
+ * `spatial/spatial-heatmap.ts`; this only shapes it for Plotly. Kept in the
+ * matrix's own row-major order and flipped once here, because Plotly draws
+ * `z[0]` at the BOTTOM of the y axis while the caller lists genes top-down.
+ *
+ * The colour scale is its own, NOT the map's `continuousColormap`. This is a
+ * different quantity — a z-scored mean per group, not a per-cell value — so
+ * sharing one scale would invite reading a heatmap cell as if it were a marker
+ * colour. Diverging and centred on zero, because after z-scoring the sign is
+ * the reading: above or below this gene's average across the groups.
+ */
+export interface OmicsHeatmapInput {
+  rows: string[];
+  cols: string[];
+  /** `rows.length × cols.length`, row-major; `NaN` where nothing was measured. */
+  values: Float32Array;
+  /** Cells behind each column, for the hover. */
+  counts?: Uint32Array;
+  /** True when `values` are z-scores, which sets the scale and the labels. */
+  zScored?: boolean;
+  /** Column axis title — the grouping column's name, or "cell". */
+  groupLabel?: string;
+}
+
+/** Diverging, centred: after z-scoring, the sign carries the meaning. */
+const HEATMAP_DIVERGING: [number, string][] = [
+  [0, '#2166AC'],
+  [0.5, '#F7F7F7'],
+  [1, '#B2182B'],
+];
+/** Sequential, for raw means where zero is the bottom rather than the middle. */
+const HEATMAP_SEQUENTIAL: [number, string][] = [
+  [0, '#F7FBFF'],
+  [0.5, '#6BAED6'],
+  [1, '#08306B'],
+];
+
+export function buildHeatmapTraces(input: OmicsHeatmapInput): unknown[] {
+  const { rows, cols, values, counts } = input;
+  if (rows.length === 0 || cols.length === 0) return [];
+  // Plotly wants z as an array of rows, bottom-up; NaN renders as a gap.
+  const z: (number | null)[][] = [];
+  for (let r = rows.length - 1; r >= 0; r--) {
+    const line: (number | null)[] = [];
+    for (let c = 0; c < cols.length; c++) {
+      const v = values[r * cols.length + c];
+      line.push(Number.isFinite(v) ? v : null);
+    }
+    z.push(line);
+  }
+  const y = rows.slice().reverse();
+  const unit = input.zScored ? 'z' : 'mean';
+  // Symmetric about zero when z-scored, so the same magnitude reads the same
+  // whichever side of the gene's average it falls on.
+  let zmin: number | undefined;
+  let zmax: number | undefined;
+  if (input.zScored) {
+    let peak = 0;
+    for (let i = 0; i < values.length; i++) {
+      const v = Math.abs(values[i]);
+      if (Number.isFinite(v) && v > peak) peak = v;
+    }
+    zmax = peak > 0 ? peak : 1;
+    zmin = -zmax;
+  }
+  const hover = counts
+    ? cols.map((label, c) => `${label} · ${counts[c]} cells`)
+    : cols;
+  return [{
+    type: 'heatmap',
+    z,
+    x: cols,
+    y,
+    customdata: z.map(() => hover),
+    colorscale: input.zScored ? HEATMAP_DIVERGING : HEATMAP_SEQUENTIAL,
+    ...(zmin !== undefined ? { zmin, zmax } : {}),
+    // A gap has no colour rather than the scale's bottom: nothing was measured
+    // there, which is not the same as a low mean.
+    hoverongaps: false,
+    colorbar: { title: { text: unit, side: 'right' }, thickness: 10, len: 0.9 },
+    hovertemplate: `%{y}<br>%{customdata}<br>${unit} %{z:.2f}<extra></extra>`,
+  }];
+}
+
+export function heatmapLayout(input: OmicsHeatmapInput): unknown {
+  return {
+    // Left margin grows with the longest gene name; the labels are the point.
+    margin: { t: 10, r: 10, b: 90, l: 8 },
+    autosize: true,
+    hovermode: 'closest',
+    xaxis: { automargin: true, tickangle: -45, tickfont: { size: 10 },
+      title: { text: input.groupLabel ?? '' } },
+    yaxis: { automargin: true, tickfont: { size: 10 } },
+    // Grows with the gene count so 3 rows are not stretched to 20 rows' height.
+    height: Math.max(180, 24 * input.rows.length + 110),
   };
 }

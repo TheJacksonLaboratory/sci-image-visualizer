@@ -6,10 +6,13 @@ import * as Plotly from 'plotly.js-dist-min';
 
 import { VISUALIZER, IVisualizer, ISpatialControls } from '../contracts/visualizer.contract';
 import { SpatialColorBy, SpatialViewState, DEFAULT_SPATIAL_VIEW } from '../contracts/display-types';
-import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selection';
 import {
-  OmicsChartKind, OmicsGrouping, benefitsFromGrouping, buildCountTraces, buildOmicsTraces,
-  countsLayout, omicsLayout,
+  SpatialSelectionMask, emptySelection, maskToIndices,
+} from '../spatial/spatial-selection';
+import { cellsAsGroups, heatmapMatrix } from '../spatial/spatial-heatmap';
+import {
+  OmicsChartKind, OmicsGrouping, benefitsFromGrouping, buildCountTraces, buildHeatmapTraces,
+  buildOmicsTraces, countsLayout, heatmapLayout, omicsLayout,
 } from '../implementations/plotly/omics-trace-builders';
 
 /** Per-instance chart-div id source — see {@link SpatialChartsComponent.chartDiv}. */
@@ -82,17 +85,44 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     { label: 'Counts', value: 'counts' },
   ];
 
+  /** Available whatever the map is coloured by: the heatmap's subject is a GENE
+   *  LIST crossed with a grouping, not the active colour source. */
+  private static readonly ALWAYS_KINDS: { label: string; value: OmicsChartKind }[] = [
+    { label: 'Heatmap', value: 'heatmap' },
+  ];
+
   /** The kinds the ACTIVE subject can be drawn as. A category code is a label,
    *  not a magnitude, so a histogram of it would be meaningless — what a
    *  categorical column has is a frequency distribution. */
   get kindOptions(): { label: string; value: OmicsChartKind }[] {
-    return this.categorical
-      ? SpatialChartsComponent.CATEGORICAL_KINDS
-      : SpatialChartsComponent.CONTINUOUS_KINDS;
+    return [
+      ...(this.categorical
+        ? SpatialChartsComponent.CATEGORICAL_KINDS
+        : SpatialChartsComponent.CONTINUOUS_KINDS),
+      ...SpatialChartsComponent.ALWAYS_KINDS,
+    ];
   }
 
   controls: ISpatialControls | null = null;
   kind: OmicsChartKind = 'histogram';
+  /**
+   * Genes the heatmap's rows are, and the vectors behind them.
+   *
+   * Local rather than in `SpatialViewState`, matching how the chart KIND is
+   * held: this is what the panel is charting, not what the map is drawing, and
+   * the renderer has no use for it.
+   */
+  heatmapGenes: string[] = [];
+  /** Z-score each gene across the groups. On by default: without it one loud
+   *  gene saturates the scale and the rest of the panel reads as blank. */
+  heatmapZScore = true;
+  /** Past this many selected cells the per-cell view is a texture, not a
+   *  readable panel, so the columns go back to being classes. */
+  private static readonly HEATMAP_CELL_COLUMNS = 200;
+  geneOptions: { label: string; value: string }[] = [];
+  /** Fetched vectors by gene name, so adding a fourth gene does not refetch the
+   *  first three — each is a full per-observation Float32Array. */
+  private readonly geneCache = new Map<string, Float32Array>();
   /** Categorical column the violin/box splits by; null = one trace for all. */
   groupBy: string | null = null;
   groupOptions: { label: string; value: string | null }[] = [];
@@ -149,7 +179,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       }
     }));
 
-    this.subs.add(this.controls.getDataset$().subscribe(() => {
+    this.subs.add(this.controls.getDataset$().subscribe((dataset) => {
       this.groupOptions = [
         { label: 'No grouping', value: null },
         ...(this.controls?.categoricalColumns() ?? []).map((n) => ({ label: n, value: n })),
@@ -159,6 +189,13 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
         this.groupBy = null;
         this.grouping = null;
       }
+      // The heatmap's rows come from the dataset's gene list. A dataset too wide
+      // to inline its names offers none here — the panel's typeahead is the way
+      // in for those, and the heatmap needs names it can list.
+      this.geneOptions = (dataset?.features?.names ?? []).map((n) => ({ label: n, value: n }));
+      const known = new Set(this.geneOptions.map((o) => o.value));
+      this.heatmapGenes = this.heatmapGenes.filter((n) => known.has(n));
+      this.geneCache.clear();
     }));
   }
 
@@ -193,7 +230,89 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
 
   onKind(kind: OmicsChartKind): void {
     this.kind = kind;
+    if (kind === 'heatmap') {
+      // Seed with the gene already on screen, so the chart says something the
+      // moment it opens rather than showing an empty grid and a prompt.
+      if (this.heatmapGenes.length === 0 && this.colorBy?.kind === 'feature') {
+        this.heatmapGenes = [this.colorBy.name];
+      }
+      void (async () => {
+        await this.ensureHeatmapGrouping();
+        await this.loadHeatmapGenes();
+        void this.render();
+      })();
+      return;
+    }
     void this.render();
+  }
+
+  /**
+   * The grouping the heatmap's columns come from, defaulting rather than
+   * demanding one: a heatmap with no columns is not a chart, and "No grouping"
+   * is a sensible answer for a violin but not for this.
+   */
+  private async ensureHeatmapGrouping(): Promise<void> {
+    if (this.grouping || !this.controls) return;
+    const first = this.groupOptions.find((o) => o.value)?.value;
+    if (!first) return;
+    await this.onGroupBy(first);
+  }
+
+  onHeatmapZScore(on: boolean): void {
+    this.heatmapZScore = on;
+    void this.render();
+  }
+
+  /** What the heatmap is currently showing, said plainly. */
+  get heatmapNote(): string {
+    if (this.heatmapGenes.length === 0) return 'Pick one or more genes for the rows.';
+    const perCell = this.selectionCount > 0
+      && this.selectionCount <= SpatialChartsComponent.HEATMAP_CELL_COLUMNS;
+    if (perCell) {
+      return `One column per selected cell (${this.selectionCount}). `
+        + 'Mean expression per cell, so the columns are cells rather than classes.';
+    }
+    const scope = this.selectionCount > 0 ? 'the selected cells' : 'all cells';
+    const scaled = this.heatmapZScore
+      ? ' Each gene is z-scored across the columns, so the colour is above or below that gene\'s own average.'
+      : ' Raw means, so a highly-expressed gene dominates the scale.';
+    return `Mean expression of each gene within each ${this.groupBy ?? 'group'}, over ${scope}.${scaled}`;
+  }
+
+  /** Gene rows for the heatmap. */
+  async onHeatmapGenes(names: string[]): Promise<void> {
+    this.heatmapGenes = names ?? [];
+    await this.loadHeatmapGenes();
+    void this.render();
+  }
+
+  /**
+   * Fetch any gene the heatmap needs and does not already hold.
+   *
+   * Sequenced on the same token the colour-source load uses: each vector is a
+   * separate request, and a slower one must not paint rows for a gene list the
+   * user has already moved on from.
+   */
+  private async loadHeatmapGenes(): Promise<void> {
+    const controls = this.controls;
+    if (!controls) return;
+    const missing = this.heatmapGenes.filter((n) => !this.geneCache.has(n));
+    if (missing.length === 0) return;
+    const mine = ++this.token;
+    this.busy = true;
+    try {
+      for (const name of missing) {
+        const values = await controls.continuousValues({ kind: 'feature', name });
+        if (mine !== this.token) return;
+        this.geneCache.set(name, values);
+      }
+      this.notice = null;
+    } catch (err) {
+      if (mine !== this.token) return;
+      this.notice = `A gene could not be charted: ${(err as Error)?.message ?? err}`;
+    } finally {
+      if (mine === this.token) this.busy = false;
+    }
   }
 
   async onGroupBy(name: string | null): Promise<void> {
@@ -281,6 +400,13 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     if (!this.isActive) return;
     const el = document.getElementById(this.chartDiv);
     if (!el) return;
+    // The heatmap answers a different question from the other kinds — which
+    // genes distinguish which groups — so it is driven by its own gene list and
+    // grouping rather than by whatever the map is coloured by.
+    if (this.kind === 'heatmap') {
+      await this.renderHeatmap();
+      return;
+    }
     if (!this.colorBy || (!this.values && !this.categorical)) {
       try {
         Plotly.purge(this.chartDiv);
@@ -308,5 +434,63 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     const traces = buildOmicsTraces(this.kind, input);
     await Plotly.react(this.chartDiv, traces as never, omicsLayout(this.kind, input) as never,
       CHART_CONFIG as never);
+  }
+
+  /**
+   * Genes × groups mean expression.
+   *
+   * Columns are the grouping column's categories — or, inside a SMALL
+   * selection, the selected cells themselves. A two-column class matrix is a
+   * poor answer for an ROI holding forty cells; "what is in front of me" is the
+   * question there, and each cell earns a column.
+   */
+  private async renderHeatmap(): Promise<void> {
+    const controls = this.controls;
+    const genes = this.heatmapGenes
+      .map((name) => ({ name, values: this.geneCache.get(name) }))
+      .filter((g): g is { name: string; values: Float32Array } => !!g.values);
+    if (!controls || genes.length === 0 || !this.grouping) {
+      try {
+        Plotly.purge(this.chartDiv);
+      } catch { /* nothing plotted */ }
+      return;
+    }
+
+    const selected = this.selection.count > 0 ? maskToIndices(this.selection.mask) : null;
+    const perCell = !!selected && selected.length <= SpatialChartsComponent.HEATMAP_CELL_COLUMNS;
+    const cells = perCell && selected
+      ? cellsAsGroups(selected, this.grouping.codes.length,
+        SpatialChartsComponent.HEATMAP_CELL_COLUMNS)
+      : null;
+
+    const matrix = heatmapMatrix(
+      genes,
+      cells ? cells.groups : { codes: this.grouping.codes, categories: this.grouping.categories },
+      {
+        ...(cells ? { indices: cells.indices, minCells: 1 } : {}),
+        // Outside the per-cell view a selection still narrows the means, the way
+        // the violin and box narrow rather than overlay.
+        ...(!cells && selected ? { indices: selected } : {}),
+        zScore: this.heatmapZScore,
+      },
+    );
+    if (!matrix) {
+      try {
+        Plotly.purge(this.chartDiv);
+      } catch { /* nothing plotted */ }
+      this.notice = 'No group has enough measured cells for a mean.';
+      return;
+    }
+    this.notice = null;
+    const input = {
+      rows: matrix.rows,
+      cols: matrix.cols,
+      values: matrix.values,
+      counts: matrix.counts,
+      zScored: this.heatmapZScore,
+      groupLabel: cells ? 'selected cells' : (this.groupBy ?? ''),
+    };
+    await Plotly.react(this.chartDiv, buildHeatmapTraces(input) as never,
+      heatmapLayout(input) as never, CHART_CONFIG as never);
   }
 }

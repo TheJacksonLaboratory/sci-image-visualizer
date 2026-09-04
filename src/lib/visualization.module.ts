@@ -21,6 +21,7 @@ import { OverlayPanelModule } from 'primeng/overlaypanel';
 import { ConfirmDialogModule } from 'primeng/confirmdialog';
 import { InputTextModule } from 'primeng/inputtext';
 import { CheckboxModule } from 'primeng/checkbox';
+import { MultiSelectModule } from 'primeng/multiselect';
 import { RadioButtonModule } from 'primeng/radiobutton';
 import { SelectButtonModule } from 'primeng/selectbutton';
 import { AutoCompleteModule } from 'primeng/autocomplete';
@@ -80,6 +81,7 @@ import { CHANNEL_HISTOGRAM_API } from './contracts/channel-histogram-api.contrac
     ConfirmDialogModule,
     InputTextModule,
     CheckboxModule,
+    MultiSelectModule,
     RadioButtonModule,
     SelectButtonModule,
     AutoCompleteModule,

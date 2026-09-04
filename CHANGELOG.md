@@ -11,6 +11,36 @@ file was added.
 
 ### Added
 
+- **A gene × class expression heatmap in the Distribution section.** Colouring the
+  map by one gene answers "where is this gene"; it cannot answer "which classes
+  express which genes", which is what a marker panel is read for. A new
+  **Heatmap** chart kind draws the mean expression of each picked gene within
+  each category of a grouping column — the standard mean-expression matrix
+  (scanpy's `matrixplot`), with its own gene multi-select for the rows since the
+  other kinds chart whatever single source the map is coloured by.
+
+  Offered whatever the map is coloured by, seeded with the gene already on
+  screen, and it picks a grouping itself: a heatmap with no columns is not a
+  chart, so "No grouping" is not a usable default here.
+
+  Three things it does so the panel is readable rather than merely plotted:
+
+  - **Z-scored per gene by default** (toggleable). Without it one
+    highly-expressed gene saturates the scale and the rest reads as blank — the
+    matrix would show which gene is loudest, not which class expresses what.
+    Z-scored, the scale is diverging and centred on zero, because the sign is
+    then the reading.
+  - **A cell with no measurement is skipped, not counted as zero**, and a group
+    with nothing measured is drawn as a **gap** rather than as a low mean.
+  - **Inside a small selection the columns become the cells themselves.** A
+    two-column class matrix is a poor answer for an ROI holding forty cells;
+    "what is in front of me" is the question there. Groups with too few cells
+    for a mean to mean anything are dropped.
+
+  Its colour scale is deliberately its own, not the map's `continuousColormap`:
+  a z-scored mean per group is a different quantity from a per-cell value, and
+  sharing one scale would invite reading a heatmap cell as a marker colour.
+
 - **Hover a marker to read its class; click to select that class.** A 34-entry
   legend cannot be read back from a dot — several classes get similar colours, and
   matching one to a swatch by eye is the task a tooltip removes. Hovering an
