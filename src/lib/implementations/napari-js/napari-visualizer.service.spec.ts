@@ -906,6 +906,98 @@ describe('NapariVisualizerService', () => {
       warn.mockRestore();
     });
 
+    describe('hover tooltip', () => {
+      const host = () => document.getElementById('spatial3d-host')!;
+      const tip = () => host().querySelector('div[style*="z-index: 6"]') as HTMLElement | null;
+
+      async function hover(clientX: number, clientY: number) {
+        host().dispatchEvent(new MouseEvent('pointermove', { clientX, clientY, bubbles: true }));
+        await new Promise((r) => setTimeout(r, 20));
+      }
+
+      /** Where the identity-projection stub puts observation `i` on the canvas. */
+      const screenOf = (i: number) => {
+        const p = (service as unknown as {
+          getSpatialScreenProjection(o: unknown): Float32Array;
+        }).getSpatialScreenProjection(spatialDataset3d(3).observations);
+        return [p[i * 2], p[i * 2 + 1]] as [number, number];
+      };
+
+      it('names the class under the cursor in the cloud', async () => {
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 1, 0]),
+        });
+        await mount3d();
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+
+        const [x, y] = screenOf(1);
+        await hover(x, y);
+        expect(tip()?.style.display).toBe('block');
+        expect(tip()?.textContent).toContain('Thalamus');
+      });
+
+      it('stops naming a cell once its section is hidden', async () => {
+        // The cached positions have to be invalidated when the DRAWN set changes,
+        // or the tooltip keeps reporting a cell that is no longer on screen.
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 1, 0]),
+        });
+        await mount3d();
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        const [x, y] = screenOf(1);
+        await hover(x, y);
+        expect(tip()?.textContent).toContain('Thalamus');
+
+        // Isolate section 0; observation 1 is on another section.
+        store.setSpatialView({ pointSection: 0 });
+        await flush();
+        await hover(x, y);
+        expect(tip()?.style.display).toBe('none');
+      });
+    });
+
+    describe('screen projection', () => {
+      const projected = () => (service as unknown as {
+        getSpatialScreenProjection(o: unknown): Float32Array | null;
+      }).getSpatialScreenProjection(spatialDataset3d(3).observations);
+
+      it('is indexed by OBSERVATION, not by draw order', async () => {
+        // The ROI selection reads this array as `[x0, y0, x1, y1, …]` per
+        // observation. Isolating a section shrinks the drawn geometry, so a
+        // projection walked in draw order attributes each point to the wrong cell
+        // — selecting a region would then pick cells that are not in it.
+        await mount3d();
+        const all = projected()!;
+        expect(all).toHaveLength(3 * 2);
+        expect(Number.isNaN(all[0])).toBe(false);
+        expect(Number.isNaN(all[4])).toBe(false);
+
+        // z = 0, 30, 60 -> three sections; isolate the LAST one.
+        store.setSpatialView({ pointSection: 2 });
+        await flush();
+        const one = projected()!;
+        expect(one).toHaveLength(3 * 2);
+        // Observation 2 is the one on screen, and it keeps its own slot…
+        expect(Number.isNaN(one[4])).toBe(false);
+        expect(one[4]).toBeCloseTo(all[4], 3);
+        expect(one[5]).toBeCloseTo(all[5], 3);
+        // …while the hidden ones are NaN, which every consumer skips, rather than
+        // holding some other observation's coordinates.
+        expect(Number.isNaN(one[0])).toBe(true);
+        expect(Number.isNaN(one[2])).toBe(true);
+      });
+    });
+
     describe('camera', () => {
       /** The pose a user would have set by orbiting and dollying the canvas. */
       const POSE = { azimuth: 1.1, elevation: 0.4, distance: 4242, target: [7, 8, 9] };
@@ -1929,6 +2021,10 @@ describe('NapariVisualizerService', () => {
 
     /** Mount the spatial mode with `dataset` published, and return the layer built. */
     async function mount(dataset: SpatialDataset | null = spatialDataset()) {
+      // Replace any host from an earlier mount, as the 3D helper does: overlays
+      // attach to it, and `getElementById` would keep returning the FIRST stale
+      // one — so a test would assert against a previous test's overlay.
+      document.getElementById('spatial-host')?.remove();
       const div = document.createElement('div');
       div.id = 'spatial-host';
       document.body.appendChild(div);
@@ -2199,6 +2295,318 @@ describe('NapariVisualizerService', () => {
         store.setSpatialView({ geneMap: false });
         await flush();
         expect(inScene()).toBe(0);
+      });
+    });
+
+    describe('hover tooltip', () => {
+      const host = () => document.getElementById('spatial-host')!;
+      const tip = () => host().querySelector('div[style*="z-index: 6"]') as HTMLElement | null;
+
+      /**
+       * Move the pointer and let the rAF-throttled hit-test run.
+       *
+       * jsdom has no PointerEvent, so — as the region-overlay spec does — the
+       * gesture is a MouseEvent typed `pointermove`, which the same listener sees.
+       */
+      async function hover(clientX: number, clientY: number) {
+        host().dispatchEvent(new MouseEvent('pointermove', {
+          clientX, clientY, bubbles: true,
+        }));
+        // The handler defers to requestAnimationFrame; jsdom runs it on a timer.
+        await new Promise((r) => setTimeout(r, 20));
+      }
+
+      beforeEach(() => {
+        // jsdom gives every element a zero rect, so the canvas origin is (0,0) and
+        // client coordinates are canvas coordinates.
+        jest.spyOn(Viewer.prototype, 'canvasToWorld').mockImplementation(
+          (cx: number, cy: number) => [cx, cy] as [number, number],
+        );
+      });
+
+      it('names the class under the cursor, over the column it came from', async () => {
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 1, 0]),
+        });
+        await mount();
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+
+        // Observations sit at (0,0), (10,20), (20,40) in data space, and this
+        // dataset has no imageRef, so world == data.
+        await hover(10, 20);
+        expect(tip()?.style.display).toBe('block');
+        expect(tip()?.textContent).toContain('Thalamus');
+        expect(tip()?.textContent).toContain('region');
+
+        await hover(0, 0);
+        expect(tip()?.textContent).toContain('Cortex');
+      });
+
+      it('says nothing over empty tissue', async () => {
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 1, 0]),
+        });
+        await mount();
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+
+        await hover(10, 20);
+        expect(tip()?.style.display).toBe('block');
+        // Far from every marker: the tooltip must not trail the cursor around.
+        await hover(500, 500);
+        expect(tip()?.style.display).toBe('none');
+      });
+
+      it('reports a gene value, with the dataset’s unit', async () => {
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1.5, 4.25, 9]));
+        await mount();
+        store.setSpatialView({ colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+
+        await hover(10, 20);
+        expect(tip()?.textContent).toContain('4.25');
+        expect(tip()?.textContent).toContain('Ttr');
+      });
+
+      it('stays silent when nothing is being said about the cells', async () => {
+        // No colour source: there is no cluster to name, so a tooltip would be
+        // inventing something to say.
+        await mount();
+        await hover(10, 20);
+        expect(tip()?.style.display).toBe('none');
+      });
+
+      it('hides when the pointer leaves the plot', async () => {
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 1, 0]),
+        });
+        await mount();
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        await hover(10, 20);
+        expect(tip()?.style.display).toBe('block');
+
+        host().dispatchEvent(new MouseEvent('pointerleave', { bubbles: true }));
+        expect(tip()?.style.display).toBe('none');
+      });
+
+      /** Press and release at one place: a click, not a drag. */
+      function click(clientX: number, clientY: number, moveTo?: [number, number]) {
+        host().dispatchEvent(new MouseEvent('pointerdown', { clientX, clientY, bubbles: true }));
+        const [ux, uy] = moveTo ?? [clientX, clientY];
+        host().dispatchEvent(new MouseEvent('pointerup', {
+          clientX: ux, clientY: uy, bubbles: true,
+        }));
+      }
+
+      const selection = () => TestBed.inject(SpatialSelectionStore).current();
+
+      async function mountColouredByRegion() {
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          // Observation 0 and 2 are Cortex, 1 is Thalamus.
+          codes: new Uint16Array([0, 1, 0]),
+        });
+        await mount();
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+      }
+
+      it('leaves click-to-zoom alone outside the spatial modes', async () => {
+        // It is a navigation affordance the rest of the library relies on; only
+        // the spatial modes give a click a different job.
+        document.getElementById('plain-host')?.remove();
+        const div = document.createElement('div');
+        div.id = 'plain-host';
+        document.body.appendChild(div);
+        const loaded = await service.load(imageInfo(), 0);
+        await service.plot('plain-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE);
+        await flush();
+        const viewer = (service as unknown as {
+          viewer: { options: { clickZoomFactor?: number } };
+        }).viewer;
+        expect(viewer.options.clickZoomFactor).toBeUndefined();
+      });
+
+      it('turns off napari’s click-to-zoom, so one click does not do two things', async () => {
+        // napari's 2D controls zoom 2x about the cursor on a plain click (OSD
+        // style). Left on, a selection click would also zoom — and the zoom would
+        // halve the world radius the NEXT click hit-tests with, so clicking cells
+        // would get steadily harder.
+        await mountColouredByRegion();
+        const viewer = (service as unknown as {
+          viewer: { options: { clickZoomFactor?: number } };
+        }).viewer;
+        expect(viewer.options.clickZoomFactor).toBe(0);
+      });
+
+      it('selects the whole class of the marker clicked, like the legend does', async () => {
+        await mountColouredByRegion();
+        // Observation 1 is the only Thalamus cell.
+        click(10, 20);
+        expect(selection().count).toBe(1);
+        expect(Array.from(selection().mask)).toEqual([0, 1, 0]);
+
+        // Observation 0 is Cortex, which has two cells — the CLASS is selected,
+        // not the one cell under the cursor.
+        click(0, 0);
+        expect(selection().count).toBe(2);
+        expect(Array.from(selection().mask)).toEqual([1, 0, 1]);
+      });
+
+      it('clicking the same class again clears, so a click is reversible', async () => {
+        await mountColouredByRegion();
+        click(10, 20);
+        expect(selection().count).toBe(1);
+        click(10, 20);
+        expect(selection().count).toBe(0);
+      });
+
+      it('leaves the selection alone for a drag, or a click on empty tissue', async () => {
+        await mountColouredByRegion();
+        // A drag is how the camera is panned and orbited. It ENDS on a marker
+        // here on purpose: a release position alone cannot tell a drag from a
+        // click, so this only passes if the travelled distance is what decides.
+        click(500, 500, [10, 20]);
+        expect(selection().count).toBe(0);
+        // …and the same release position as a real click does select.
+        click(10, 20);
+        expect(selection().count).toBe(1);
+
+        TestBed.inject(SpatialSelectionStore).clear();
+        // Nothing is under the cursor out here.
+        click(500, 500);
+        expect(selection().count).toBe(0);
+      });
+
+      it('does not select while a region tool owns the pointer', async () => {
+        // Placing a polygon vertex is also a click that does not move, and it must
+        // not change the selection behind the shape being drawn.
+        await mountColouredByRegion();
+        service.getRegionOverlay()?.setMode('drawpolygon');
+        click(10, 20);
+        expect(selection().count).toBe(0);
+
+        service.getRegionOverlay()?.setMode('none');
+        click(10, 20);
+        expect(selection().count).toBe(1);
+      });
+
+      it('does not select when the colour source is continuous', async () => {
+        // A gene has no set of cells that "is" a value, so there is no class to
+        // select — the tooltip still reports the value.
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1.5, 4.25, 9]));
+        await mount();
+        store.setSpatialView({ colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        click(10, 20);
+        expect(selection().count).toBe(0);
+      });
+
+      it('recovers when a slower resolution loses the race', async () => {
+        // The label is fetched asynchronously. If a superseded fetch were allowed
+        // to commit its cache key, the key would claim a source that was never
+        // stored — and since every later emission carries the same key, the
+        // tooltip would stay silent for the rest of the session.
+        const slow = { meta: {
+          kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+          colors: ['#ff0000', '#0000ff'],
+        }, codes: new Uint16Array([0, 1, 0]) };
+        // Typed through a holder so TypeScript does not narrow it to `never` from
+        // the assignment inside the executor.
+        const gate: { release: () => void } = { release: () => undefined };
+        spatialPort.getColumn.mockImplementationOnce(
+          () => new Promise((resolve) => { gate.release = () => resolve(slow); }),
+        );
+        spatialPort.getColumn.mockResolvedValue(slow);
+
+        await mount();
+        // First request hangs…
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        // …a second lands and supersedes it…
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3]));
+        store.setSpatialView({ colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        // …then the first finally returns. It lost the race, so it must not
+        // overwrite the newer source: the tooltip would otherwise name a class
+        // while the cloud is coloured by a gene.
+        gate.release();
+        await flush();
+        await hover(10, 20);
+        expect(tip()?.textContent).toContain('2'); // the gene's value
+        expect(tip()?.textContent).toContain('Ttr');
+        expect(tip()?.textContent).not.toContain('Thalamus');
+
+        // And going back to the column still resolves rather than short-circuiting
+        // on a key some abandoned fetch left behind.
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        await hover(10, 20);
+        expect(tip()?.textContent).toContain('Thalamus');
+      });
+
+      it('retries after a failed fetch instead of going permanently silent', async () => {
+        spatialPort.getColumn.mockRejectedValueOnce(new Error('offline'));
+        await mount();
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        await hover(10, 20);
+        expect(tip()?.style.display).toBe('none');
+
+        // The same colour source again: a failure must leave the key clear so this
+        // resolves rather than inheriting the earlier silence.
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 1, 0]),
+        });
+        store.setSpatialView({ pointScale: 2 });
+        await flush();
+        await hover(10, 20);
+        expect(tip()?.textContent).toContain('Thalamus');
+      });
+
+      it('follows the colour source when it changes', async () => {
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 1, 0]),
+        });
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1.5, 4.25, 9]));
+        await mount();
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        await hover(10, 20);
+        expect(tip()?.textContent).toContain('Thalamus');
+
+        // Recolouring by a gene has to change what the tooltip reports, or it and
+        // the legend would disagree.
+        store.setSpatialView({ colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        await hover(10, 20);
+        expect(tip()?.textContent).toContain('4.25');
+        expect(tip()?.textContent).not.toContain('Thalamus');
       });
     });
 

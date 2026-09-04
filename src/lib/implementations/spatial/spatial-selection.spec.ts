@@ -1,6 +1,6 @@
 import {
   countMask, emptySelection, maskToIndices, mutedFromSelection, pointInRing,
-  regionShapes, selectByCategory, selectInRegions, selectInRegionsProjected,
+  regionShapes, sameSelection, selectByCategory, selectInRegions, selectInRegionsProjected,
 } from './spatial-selection';
 import { MultiPolygon, Polygon, Rectangle, Region } from '../../models/region';
 import { SpatialObservations } from '../../contracts/spatial-dataset.contract';
@@ -253,5 +253,36 @@ describe('spatial-selection', () => {
         expect(Array.from(muted!)).toEqual([1, 0, 1]);
       });
     });
+  });
+});
+
+describe('sameSelection', () => {
+  const sel = (bytes: number[]) => ({
+    mask: Uint8Array.from(bytes),
+    count: bytes.filter((b) => b).length,
+  });
+
+  it('is true for the same observations', () => {
+    expect(sameSelection(sel([1, 0, 1]), sel([1, 0, 1]))).toBe(true);
+  });
+
+  it('is false for a different set of the same size', () => {
+    // The cheap count check cannot catch this one, which is the case that matters:
+    // two classes with equally many cells.
+    expect(sameSelection(sel([1, 0, 1]), sel([0, 1, 1]))).toBe(false);
+  });
+
+  it('is false for different sizes or different counts', () => {
+    expect(sameSelection(sel([1, 0]), sel([1, 0, 0]))).toBe(false);
+    expect(sameSelection(sel([1, 1, 0]), sel([1, 0, 0]))).toBe(false);
+  });
+
+  it('treats any non-zero flag as selected', () => {
+    // Writers are free to use any truthy value for "selected".
+    expect(sameSelection(sel([2, 0, 7]), sel([1, 0, 1]))).toBe(true);
+  });
+
+  it('is true for two empty selections', () => {
+    expect(sameSelection(emptySelection(), emptySelection())).toBe(true);
   });
 });

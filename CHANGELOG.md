@@ -11,6 +11,25 @@ file was added.
 
 ### Added
 
+- **Hover a marker to read its class; click to select that class.** A 34-entry
+  legend cannot be read back from a dot — several classes get similar colours, and
+  matching one to a swatch by eye is the task a tooltip removes. Hovering an
+  observation in either spatial mode now names it, over the column the name came
+  from; a click selects that whole class, exactly as clicking it in the legend
+  does, and clicking it again clears, so a click is always reversible.
+
+  It reports whatever the cloud is CURRENTLY coloured by, so it and the legend
+  cannot say different things: a categorical column gives the class, a gene or
+  numeric column gives the value with its unit. With no colour source it stays
+  silent — nothing is being said about the cells, so there is no cluster to name —
+  and a gene cannot be clicked to select, because no set of cells "is" a value.
+
+  Hit-testing runs at most once per animation frame against positions cached until
+  the scene or camera moves, so a pointermove does not cost a pass over 3.7M
+  observations. A drag is told from a click by how far the pointer travelled, and a
+  click is ignored while a region tool owns the pointer — placing a polygon vertex
+  is also a click that does not move.
+
 - **The continuous colour scale is pickable, from the library's own colormaps.**
   Gene expression (and any numeric column) followed the *image's* colormap, which
   is usually a grey ramp — so the scale was chosen for the tissue and inherited by
@@ -114,6 +133,13 @@ file was added.
 
 ### Changed
 
+- **Click-to-zoom is off in the spatial-omics modes.** napari's 2D controls zoom
+  2× about the cursor on a plain click (OSD style), which now collides with the
+  click that selects a class: one click would do two things, and the zoom would
+  then halve the pixel radius the next click hit-tests with, so clicking cells got
+  steadily harder. Zooming there is on the wheel, the zoom buttons and the zoom-box
+  tool. Every other mode keeps click-to-zoom.
+
 - **The gene picker is a searchable dropdown, not a free-text typeahead.** The old
   control was an empty box: you had to already know a gene name to type one, and
   nothing told you what the dataset carried. It is now a filterable `p-dropdown` —
@@ -142,6 +168,15 @@ file was added.
   column, so the right edges line up too.
 
 ### Fixed
+
+- **A region drawn in the 3D cloud selected the wrong cells while a section was
+  isolated.** The screen projection the ROI selection reads is indexed by
+  observation, but it was walked in DRAW order — and once the section control
+  shrank the drawn geometry the two stopped matching, so each projected point was
+  attributed to a different cell than the one it belonged to. Introduced by the
+  per-section drawing earlier in this branch; the projection now scatters each
+  drawn point back to its own observation and leaves the rest NaN, which every
+  consumer already skips.
 
 - **The gene map now recolours when the colour scale changes.** Both gene maps
   cache their coloured output, and the cache key left out the colour scale — so a

@@ -253,6 +253,25 @@ export function selectInRegionsProjected(
 }
 
 /** Every observation whose categorical code equals `code` — the legend click. */
+/**
+ * Whether two selections hold exactly the same observations.
+ *
+ * Lets a click toggle against the SELECTION rather than against a remembered
+ * click: picking a class in the legend and then clicking that same class on the
+ * canvas should clear it, and a remembered click cannot know about the legend.
+ * Counts are compared first, so two different selections usually cost nothing.
+ */
+export function sameSelection(a: SpatialSelectionMask, b: SpatialSelectionMask): boolean {
+  if (a.count !== b.count) return false;
+  if (a.mask.length !== b.mask.length) return false;
+  for (let i = 0; i < a.mask.length; i++) {
+    // Normalised to 0/1: the masks are flags, and a writer is free to use any
+    // non-zero value for "selected".
+    if ((a.mask[i] ? 1 : 0) !== (b.mask[i] ? 1 : 0)) return false;
+  }
+  return true;
+}
+
 export function selectByCategory(codes: Uint16Array, code: number): SpatialSelectionMask {
   const mask = new Uint8Array(codes.length);
   let count = 0;

@@ -268,6 +268,15 @@ observations — every cell on a slide shares that slide's registered z, so no
 section-label column is needed — and a dataset whose z is continuous rather than
 sectioned is offered no section control instead of having one invented for it.
 
+**Hover and click** — hovering an observation names it in a cursor tooltip: the
+class for a categorical column, the value with its unit for a gene or numeric one,
+and nothing at all when no colour source is set (there is no cluster to name).
+Clicking a marker selects that whole class, the same selection the legend's rows
+produce, and clicking it again clears. Because a click means "select" here,
+napari's click-to-zoom is off in the spatial modes — the wheel, the zoom buttons
+and the zoom-box tool still zoom. A gene cannot be clicked to select: no set of
+cells "is" a value.
+
 **Colormap** *(continuous colouring)* — the low→high gradient for a gene or a
 numeric column, chosen from the library's own `COLORMAP_OPTIONS` with the same
 swatch previews the image's colormap picker uses. It defaults to following the

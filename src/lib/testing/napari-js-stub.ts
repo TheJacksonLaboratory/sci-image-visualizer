@@ -385,7 +385,17 @@ export class Viewer {
     },
   };
 
-  constructor(_options: { canvas: HTMLCanvasElement }) {}
+  /** Construction options, kept so a test can assert what the adapter asked for —
+   *  `clickZoomFactor: 0` is what stops a selection click from also zooming. */
+  readonly options: {
+    canvas: HTMLCanvasElement;
+    clickZoomFactor?: number;
+    background?: unknown;
+  };
+
+  constructor(options: { canvas: HTMLCanvasElement; clickZoomFactor?: number }) {
+    this.options = options;
+  }
 
   /** Record a layer as mounted, and hand it back. */
   private mount<T>(layer: T): T {

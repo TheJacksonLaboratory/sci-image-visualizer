@@ -106,6 +106,18 @@ export class NapariRegionOverlay implements IRegionOverlay {
   }
 
   // ── IRegionOverlay ────────────────────────────────────────────────────────
+  /**
+   * Whether a region tool currently owns the pointer.
+   *
+   * Exposed so the spatial views can tell a bare click on the cloud (select the
+   * class under the cursor) from a click that belongs to a drawing gesture —
+   * placing a polygon vertex is also a click that does not move, and it must not
+   * change the selection behind the shape being drawn.
+   */
+  get toolActive(): boolean {
+    return this.mode !== 'none';
+  }
+
   setMode(mode: RegionToolMode): void {
     this.mode = mode;
     this.draftRect = null;
