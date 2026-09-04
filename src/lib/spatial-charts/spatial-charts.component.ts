@@ -1,5 +1,5 @@
 import {
-  AfterViewInit, Component, ElementRef, Inject, Input, OnDestroy, OnInit,
+  AfterViewInit, Component, ElementRef, HostBinding, Inject, Input, OnDestroy, OnInit,
 } from '@angular/core';
 import { Subscription, combineLatest } from 'rxjs';
 import * as Plotly from 'plotly.js-dist-min';
@@ -51,6 +51,20 @@ const CHART_CONFIG = {
   styleUrls: ['./spatial-charts.component.scss'],
 })
 export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy {
+  /**
+   * Load-bearing, not cosmetic: DO NOT REMOVE.
+   *
+   * A custom element defaults to `display: inline`, and ResizeObserver does not
+   * report inline elements — it reads their box as 0x0 and never delivers an
+   * entry when the panel is resized. Measured: with the host left unstyled the
+   * observer fired 0 times on a resize that grew the plot div from 448 to 800px.
+   *
+   * Declared here rather than in the stylesheet so it is visible to a test. This
+   * is exactly the kind of line that gets deleted as redundant styling, and the
+   * failure it causes is silent — the plot simply stops following the dialog,
+   * and still looks right whenever anything else forces a redraw.
+   */
+  @HostBinding('style.display') readonly hostDisplay = 'block';
   /**
    * Whether the host panel is on screen. The chart only draws when it is: the
    * enclosing dialog creates and destroys its content, so without this the

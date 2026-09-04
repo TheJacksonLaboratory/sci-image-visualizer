@@ -538,6 +538,19 @@ describe('SpatialChartsComponent', () => {
       return calls[calls.length - 1]?.[1];
     };
 
+    it('gives the host a block box, or the observer never fires at all', async () => {
+      // ResizeObserver does not report INLINE elements, and a custom element is
+      // inline unless told otherwise: measured in Firefox, an unstyled host got 0
+      // observer calls from a resize that grew the plot div from 448 to 800px,
+      // while the same host set to `display: block` got one.
+      //
+      // Every other test here fires the observer callback by hand, so they cover
+      // what happens once it fires and say nothing about whether it ever would.
+      // This assertion is the only thing standing between that and silence.
+      await build(null, true);
+      expect((fixture.nativeElement as HTMLElement).style.display).toBe('block');
+    });
+
     it('observes the component host, not the plot div', async () => {
       await build(controls);
       // The div lives behind `*ngIf="controls"` and is not in the document when
