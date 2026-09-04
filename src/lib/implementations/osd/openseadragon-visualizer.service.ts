@@ -5,6 +5,7 @@ import { timeout } from 'rxjs/operators';
 import { Image } from 'image-js';
 import * as OpenSeadragon from 'openseadragon';
 import { OSD } from './osd-lib';
+import { OSD_ZOOM_PER_SCROLL } from './osd-zoom';
 
 
 import { VisualizerStore } from '../../store/visualizer-store.service';
@@ -824,8 +825,9 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       ajaxHeaders: this.authHeaders, // bearer auth (Auth0), when available
       crossOriginPolicy: 'Anonymous',
       // Gentler zoom: the default (1.2) feels fast and big jumps cross several
-      // pyramid levels at once, firing a burst of tile requests.
-      zoomPerScroll: 1.1,
+      // pyramid levels at once, firing a burst of tile requests. Shared with the
+      // region overlay, which takes the wheel over while a tool is active.
+      zoomPerScroll: OSD_ZOOM_PER_SCROLL,
       // Click-to-zoom toward the clicked point (OpenSeadragon's default demo
       // behaviour). Only applies when no region tool is active — an active tool
       // disables OSD mouse-nav so clicks draw/select instead of zooming.

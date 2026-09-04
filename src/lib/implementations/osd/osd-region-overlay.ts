@@ -7,6 +7,7 @@ import { IRegionStore } from '../../contracts/visualizer.contract';
 import { IRegionEditApi } from '../../contracts/region-store.contract';
 import { IRegionOverlay, RegionToolMode } from '../../contracts/region-overlay.contract';
 import { elementToImage, imageToElement } from './osd-coords';
+import { OSD_ZOOM_PER_SCROLL } from './osd-zoom';
 
 /**
  * The shared region store as the overlay needs it: the cross-backend
@@ -28,8 +29,7 @@ const ZONE_CURSOR: Record<EditZone, string> = {
 };
 /** Screen-pixel tolerance for grabbing an edge/corner handle. */
 const EDIT_TOL = 8;
-/** Wheel zoom step per scroll tick — mirrors the viewer's `zoomPerScroll`. */
-const ZOOM_PER_SCROLL = 1.1;
+
 
 /**
  * OpenSeadragon implementation of {@link IRegionOverlay}.
@@ -155,7 +155,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
     e.preventDefault();
     const rect = el.getBoundingClientRect();
     const refPoint = vp.pointFromPixel(new this.osd.Point(e.clientX - rect.left, e.clientY - rect.top));
-    vp.zoomBy(e.deltaY < 0 ? ZOOM_PER_SCROLL : 1 / ZOOM_PER_SCROLL, refPoint);
+    vp.zoomBy(e.deltaY < 0 ? OSD_ZOOM_PER_SCROLL : 1 / OSD_ZOOM_PER_SCROLL, refPoint);
     vp.applyConstraints();
   };
 

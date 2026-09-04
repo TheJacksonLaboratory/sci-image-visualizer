@@ -54,6 +54,7 @@ import { defaultSigma, densityGrid, rasterizeDensity } from '../../spatial/spati
 import { observationsInSection, sectionsOf } from '../../spatial/spatial-sections';
 import { type HoverSource, hoverText, nearestObservation } from '../../spatial/spatial-hover';
 import { NapariSpatialTooltip } from './napari-spatial-tooltip';
+import { NAPARI_WHEEL_ZOOM_SPEED } from './napari-zoom';
 
 /**
  * A short, stable id for a colormap value, for cache keys.
@@ -809,6 +810,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       const viewer = new Viewer({
         canvas,
         background: { r: 0.07, g: 0.07, b: 0.09, a: 1 },
+        // Set here rather than left to napari-js's own default so the gentler
+        // step applies with the version currently installed. Chosen to match the
+        // OSD backend's step (see OSD_ZOOM_PER_SCROLL): the wheel should feel the
+        // same on an image whichever renderer is drawing it. The step applies per
+        // scroll EVENT, and a trackpad sends a burst of them per swipe, so a step
+        // tuned to a mouse notch runs away under a trackpad.
+        wheelZoomSpeed: NAPARI_WHEEL_ZOOM_SPEED,
         // In the spatial modes a plain click SELECTS the class under the cursor,
         // so napari's OSD-style click-to-zoom is turned off there: otherwise one
         // click would both select a class and zoom 2x about the cursor, and the
