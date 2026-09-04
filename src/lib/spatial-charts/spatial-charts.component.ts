@@ -1,5 +1,5 @@
 import {
-  AfterViewInit, Component, Inject, Input, OnDestroy, OnInit,
+  AfterViewInit, Component, ElementRef, Inject, Input, OnDestroy, OnInit,
 } from '@angular/core';
 import { Subscription, combineLatest } from 'rxjs';
 import * as Plotly from 'plotly.js-dist-min';
@@ -161,9 +161,25 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   /** Whether the first view emission has been handled. */
   private primed = false;
   private resizeObserver?: ResizeObserver;
+  /** Pending coalesced resize, so a drag does one relayout per frame. */
+  private resizeFrame: number | null = null;
+  /** Width the plot was last sized to, to skip observations that change nothing. */
+  private lastResizeWidth = 0;
+  /**
+   * The height the drawn layout asked for, or null where it autosizes.
+   *
+   * This decides HOW a resize is applied, and the two cases genuinely differ:
+   * the counts and heatmap layouts size their height to their content (one band
+   * per bar, per gene row), while the distribution kinds want to fill whatever
+   * height they are given.
+   */
+  private drawnHeight: number | null = null;
   private readonly subs = new Subscription();
 
-  constructor(@Inject(VISUALIZER) private readonly viz: IVisualizer) {}
+  constructor(
+    @Inject(VISUALIZER) private readonly viz: IVisualizer,
+    private readonly host: ElementRef<HTMLElement>,
+  ) {}
 
   ngOnInit(): void {
     this.controls = this.viz.getSpatialControls?.() ?? null;
@@ -214,6 +230,9 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   ngOnDestroy(): void {
     this.subs.unsubscribe();
     this.resizeObserver?.disconnect();
+    if (this.resizeFrame !== null && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(this.resizeFrame);
+    }
     try {
       Plotly.purge(this.chartDiv);
     } catch {
@@ -223,21 +242,77 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
 
   /** Keep the plot sized to the (resizable) host dialog. */
   ngAfterViewInit(): void {
-    const el = document.getElementById(this.chartDiv);
+    // Observe the HOST element, not the plot div. The div sits behind
+    // `*ngIf="controls"`, and `controls` arrives from the visualizer after this
+    // hook runs — so looking the div up here found nothing, installed no
+    // observer, and never retried, which is why dragging the dialog resized
+    // nothing at all. The host is always present.
+    //
     // ResizeObserver is browser-only; the component must still work where it is
     // absent (jsdom, SSR) — resize tracking is a nicety, drawing is not.
-    if (el && !this.resizeObserver && typeof ResizeObserver !== 'undefined') {
-      this.resizeObserver = new ResizeObserver(() => {
-        try {
-          Plotly.relayout(this.chartDiv, { autosize: true });
-        } catch {
-          // Not plotted yet.
-        }
-      });
-      this.resizeObserver.observe(el);
+    if (!this.resizeObserver && typeof ResizeObserver !== 'undefined') {
+      this.resizeObserver = new ResizeObserver(() => this.onHostResize());
+      this.resizeObserver.observe(this.host.nativeElement);
     }
     // The div exists only now, so this is the earliest a first draw can land.
     void this.reload();
+  }
+
+  /**
+   * Coalesce a burst of observations into one relayout per frame.
+   *
+   * Dragging a dialog edge fires the observer continuously, and each relayout
+   * is a full Plotly re-measure — without this the drag stutters.
+   */
+  private onHostResize(): void {
+    if (this.resizeFrame !== null) return;
+    if (typeof requestAnimationFrame !== 'function') {
+      this.resizePlot();
+      return;
+    }
+    this.resizeFrame = requestAnimationFrame(() => {
+      this.resizeFrame = null;
+      this.resizePlot();
+    });
+  }
+
+  /** Re-size the drawn plot to the width the panel now offers. */
+  private resizePlot(): void {
+    const el = document.getElementById(this.chartDiv);
+    if (!el) return;
+    const width = Math.round(el.clientWidth);
+    // Zero while the section is collapsed or the dialog is closed. Relaying out
+    // to a zero box makes Plotly compute a degenerate layout that survives the
+    // reopen, so leave the drawn size alone and let the redraw handle it.
+    if (width <= 0) return;
+    if (width === this.lastResizeWidth) return;
+    this.lastResizeWidth = width;
+    try {
+      // `autosize` takes BOTH dimensions from the container, which is only right
+      // where the layout did not fix its own height. Autosizing the counts or
+      // heatmap plot replaces its content height with the container's and
+      // squashes it — measured: an explicit height of 500 became 400. Setting
+      // the width alone moves the width and leaves that height standing.
+      Plotly.relayout(el, this.drawnHeight === null ? { autosize: true } : { width });
+    } catch {
+      // Nothing plotted yet.
+    }
+  }
+
+  /**
+   * Draw, remembering whether this layout fixed its own height.
+   *
+   * The builders return `unknown` on purpose — they keep Plotly's layout types
+   * out of the pure module — so the height is read back by narrowing rather
+   * than declared. `height` is Plotly's own key, not ours.
+   */
+  private async draw(traces: unknown, layout: unknown): Promise<void> {
+    const height = (layout as { height?: unknown } | null)?.height;
+    this.drawnHeight = typeof height === 'number' ? height : null;
+    this.lastResizeWidth = Math.round(
+      document.getElementById(this.chartDiv)?.clientWidth ?? 0,
+    );
+    await Plotly.react(this.chartDiv, traces as never, layout as never, CHART_CONFIG as never);
   }
 
   onKind(kind: OmicsChartKind): void {
@@ -438,8 +513,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
         selection: this.selection.count > 0 ? this.selection.mask : null,
         name: this.colorBy.name,
       };
-      await Plotly.react(this.chartDiv, buildCountTraces(counts) as never,
-        countsLayout(counts) as never, CHART_CONFIG as never);
+      await this.draw(buildCountTraces(counts), countsLayout(counts));
       return;
     }
     if (!this.values) return;
@@ -451,8 +525,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       log: this.view.logScale,
     };
     const traces = buildOmicsTraces(this.kind, input);
-    await Plotly.react(this.chartDiv, traces as never, omicsLayout(this.kind, input) as never,
-      CHART_CONFIG as never);
+    await this.draw(traces, omicsLayout(this.kind, input));
   }
 
   /**
@@ -513,7 +586,6 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       zScored: this.heatmapZScore,
       groupLabel: cells ? 'selected cells' : (this.groupBy ?? ''),
     };
-    await Plotly.react(this.chartDiv, buildHeatmapTraces(input) as never,
-      heatmapLayout(input) as never, CHART_CONFIG as never);
+    await this.draw(buildHeatmapTraces(input), heatmapLayout(input));
   }
 }

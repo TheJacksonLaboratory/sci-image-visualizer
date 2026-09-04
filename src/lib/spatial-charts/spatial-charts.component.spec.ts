@@ -491,4 +491,133 @@ describe('SpatialChartsComponent', () => {
     });
   });
 
+
+  /**
+   * Sizing the plot to the panel.
+   *
+   * The panel sits in a dialog the user can drag wider, and Plotly will not
+   * follow on its own: `responsive: true` listens for WINDOW resizes only, so a
+   * dialog drag reaches it through nothing at all.
+   */
+  describe('resizing with the panel', () => {
+    let callbacks: (() => void)[];
+    let observed: Element[];
+    let saved: unknown;
+
+    beforeEach(() => {
+      callbacks = [];
+      observed = [];
+      saved = (global as unknown as { ResizeObserver?: unknown }).ResizeObserver;
+      (global as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+        constructor(cb: () => void) { callbacks.push(cb); }
+        observe(el: Element) { observed.push(el); }
+        unobserve() { /* unused by the component */ }
+        disconnect() { /* nothing to release in the stub */ }
+      };
+      (Plotly.relayout as jest.Mock).mockClear();
+    });
+
+    afterEach(() => {
+      (global as unknown as { ResizeObserver?: unknown }).ResizeObserver = saved;
+    });
+
+    /** jsdom runs no layout, so a width has to be stated outright. */
+    const setWidth = (px: number) => Object.defineProperty(
+      chartHost as HTMLDivElement, 'clientWidth', { value: px, configurable: true },
+    );
+
+    /** Fire the observer and let its coalescing frame run. */
+    const resizeTo = async (px: number) => {
+      setWidth(px);
+      callbacks.forEach((cb) => cb());
+      await new Promise((r) => setTimeout(r, 40));
+    };
+
+    const lastRelayout = () => {
+      const calls = (Plotly.relayout as jest.Mock).mock.calls;
+      return calls[calls.length - 1]?.[1];
+    };
+
+    it('observes the component host, not the plot div', async () => {
+      await build(controls);
+      // The div lives behind `*ngIf="controls"` and is not in the document when
+      // ngAfterViewInit runs, so observing IT installed nothing at all and never
+      // retried — the bug that left the plot fixed at its first width.
+      expect(observed).toContain(fixture.nativeElement);
+      expect(observed).not.toContain(chartHost);
+    });
+
+    it('installs the observer even with no controls, when no div is ever drawn', async () => {
+      await build(null);
+      expect(callbacks).toHaveLength(1);
+    });
+
+    it('resizes the WIDTH ONLY where the layout fixed its own height', async () => {
+      controls.continuousValues = jest.fn(async (_source: SpatialColorBy) =>
+        Float32Array.from([1, 2, 3, 4]));
+      controls.categoricalView = jest.fn(async (column: string) => ({
+        name: column, categories: ['A', 'B'], colors: ['#f00', '#00f'],
+        codes: Uint16Array.from([0, 0, 1, 1]),
+      }));
+      await build(controls);
+      // A categorical subject selects the counts chart on its own.
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+      await flush();
+      expect(component.kind).toBe('counts');
+      // Guard: this test only means something if counts really does fix a height.
+      expect(typeof lastPlot().layout?.height).toBe('number');
+
+      await resizeTo(800);
+      // Autosizing here would take the height from the container and squash the
+      // bars; the height is deliberately one band per bar.
+      expect(lastRelayout()).toEqual({ width: 800 });
+    });
+
+    it('autosizes where the layout wants the container’s height', async () => {
+      controls.continuousValues = jest.fn(async (_source: SpatialColorBy) =>
+        Float32Array.from([1, 2, 3, 4]));
+      await build(controls);
+      component.onKind('histogram');
+      await flush();
+      // Guard: the distribution kinds must NOT be fixing a height.
+      expect(lastPlot().layout?.height).toBeUndefined();
+
+      await resizeTo(800);
+      expect(lastRelayout()).toEqual({ autosize: true });
+    });
+
+    it('ignores a zero width, so a collapsed panel cannot flatten the plot', async () => {
+      await build(controls);
+      // Reach a real width FIRST: at the initial 0 the unchanged-width guard
+      // would hide a missing zero guard and this would pass for the wrong reason.
+      await resizeTo(600);
+      (Plotly.relayout as jest.Mock).mockClear();
+      await resizeTo(0);
+      expect(Plotly.relayout).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when the width has not actually changed', async () => {
+      await build(controls);
+      await resizeTo(600);
+      (Plotly.relayout as jest.Mock).mockClear();
+      await resizeTo(600);
+      expect(Plotly.relayout).not.toHaveBeenCalled();
+    });
+
+    it('coalesces a drag’s burst of observations into one frame', async () => {
+      await build(controls);
+      const raf = jest.spyOn(global, 'requestAnimationFrame');
+      setWidth(700);
+      // A drag fires these continuously, and each relayout is a full Plotly
+      // re-measure. Asserting on the relayout COUNT would prove nothing: the
+      // unchanged-width guard collapses repeats on its own. The claim here is
+      // that the burst schedules one frame.
+      for (let i = 0; i < 20; i++) callbacks.forEach((cb) => cb());
+      expect(raf).toHaveBeenCalledTimes(1);
+      raf.mockRestore();
+      await new Promise((r) => setTimeout(r, 40));
+      expect((Plotly.relayout as jest.Mock).mock.calls).toHaveLength(1);
+    });
+  });
+
 });
