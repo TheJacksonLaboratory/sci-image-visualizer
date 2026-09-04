@@ -119,6 +119,18 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   /** Past this many selected cells the per-cell view is a texture, not a
    *  readable panel, so the columns go back to being classes. */
   private static readonly HEATMAP_CELL_COLUMNS = 200;
+  /**
+   * Column cap for the grouped heatmap.
+   *
+   * Any categorical column can be the x axis, and they are not the same size:
+   * `neurotransmitter` has 9 categories, `class` 34, `subclass` 338. At 338 the
+   * panel is a texture — columns a couple of pixels wide, no readable label —
+   * so past this many the strongest columns are kept and the note says how many
+   * were dropped. See `maxCols` in `spatial-heatmap.ts`.
+   */
+  private static readonly HEATMAP_MAX_COLUMNS = 40;
+  /** Columns the cap dropped from the last render, for the note. */
+  private heatmapHidden = 0;
   geneOptions: { label: string; value: string }[] = [];
   /** Fetched vectors by gene name, so adding a fourth gene does not refetch the
    *  first three — each is a full per-observation Float32Array. */
@@ -276,7 +288,14 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     const scaled = this.heatmapZScore
       ? ' Each gene is z-scored across the columns, so the colour is above or below that gene\'s own average.'
       : ' Raw means, so a highly-expressed gene dominates the scale.';
-    return `Mean expression of each gene within each ${this.groupBy ?? 'group'}, over ${scope}.${scaled}`;
+    // Saying so matters: without it the panel looks like the whole column.
+    const capped = this.heatmapHidden > 0
+      ? ` Showing the ${SpatialChartsComponent.HEATMAP_MAX_COLUMNS} strongest of `
+        + `${SpatialChartsComponent.HEATMAP_MAX_COLUMNS + this.heatmapHidden}, `
+        + 'ranked by the largest value any picked gene reaches.'
+      : '';
+    return `Mean expression of each gene within each ${this.groupBy ?? 'group'}, over ${scope}.`
+      + `${scaled}${capped}`;
   }
 
   /** Gene rows for the heatmap. */
@@ -471,6 +490,9 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
         // Outside the per-cell view a selection still narrows the means, the way
         // the violin and box narrow rather than overlay.
         ...(!cells && selected ? { indices: selected } : {}),
+        // Only the grouped view: `cellsAsGroups` already caps by even thinning,
+        // and re-ranking those columns would lose the selection's spread.
+        ...(cells ? {} : { maxCols: SpatialChartsComponent.HEATMAP_MAX_COLUMNS }),
         zScore: this.heatmapZScore,
       },
     );
@@ -482,6 +504,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       return;
     }
     this.notice = null;
+    this.heatmapHidden = matrix.hiddenCols;
     const input = {
       rows: matrix.rows,
       cols: matrix.cols,

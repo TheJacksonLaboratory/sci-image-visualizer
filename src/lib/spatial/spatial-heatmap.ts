@@ -52,11 +52,28 @@ export interface HeatmapMatrixOptions {
   /** Drop groups with fewer than this many measured cells. A mean over one or
    *  two cells is noise presented with the same weight as a real one. */
   minCells?: number;
+  /**
+   * Keep at most this many columns, chosen by the STRONGEST signal any picked
+   * gene shows in them.
+   *
+   * `subclass` has 338 categories. Drawn in full that is a texture rather than a
+   * panel — every column a couple of pixels wide, every label unreadable — and
+   * the question being asked ("which groups express my genes") is answered by
+   * the handful of groups where a gene actually stands out. Ranking by
+   * max |value| across the rows surfaces exactly those; ranking by cell count
+   * would instead surface the biggest groups, which is a different question.
+   *
+   * Unset keeps every column that cleared `minCells`.
+   */
+  maxCols?: number;
 }
 
 export interface HeatmapMatrix {
   /** Gene names, one per row, in the order given. */
   rows: string[];
+  /** Columns dropped by `maxCols`, so the caller can say how many are hidden
+   *  rather than silently showing a subset as if it were everything. */
+  hiddenCols: number;
   /** Group labels, one per column — only the groups that survived `minCells`. */
   cols: string[];
   /**
@@ -133,17 +150,53 @@ export function heatmapMatrix(
 
   if (opts.zScore !== false) zScoreRows(values, rows.length, cols.length);
 
+  // Ranked AFTER scaling, so "strongest signal" means strongest relative to each
+  // gene's own spread rather than to whichever gene has the largest units.
+  let hiddenCols = 0;
+  let outCols = cols;
+  let outValues = values;
+  let outCounts = counts;
+  if (opts.maxCols !== undefined && cols.length > opts.maxCols) {
+    const strength = cols.map((_, c) => {
+      let peak = 0;
+      for (let r = 0; r < rows.length; r++) {
+        const v = Math.abs(values[r * cols.length + c]);
+        if (Number.isFinite(v) && v > peak) peak = v;
+      }
+      return { c, peak };
+    });
+    // Strongest first, then original order for ties, so the choice is stable.
+    strength.sort((a, b) => (b.peak - a.peak) || (a.c - b.c));
+    const picked = strength.slice(0, opts.maxCols).map((s) => s.c).sort((a, b) => a - b);
+    hiddenCols = cols.length - picked.length;
+    outCols = picked.map((c) => cols[c]);
+    outCounts = Uint32Array.from(picked, (c) => counts[c]);
+    outValues = new Float32Array(rows.length * picked.length);
+    for (let r = 0; r < rows.length; r++) {
+      for (let k = 0; k < picked.length; k++) {
+        outValues[r * picked.length + k] = values[r * cols.length + picked[k]];
+      }
+    }
+  }
+
   let lo = Infinity;
   let hi = -Infinity;
-  for (let i = 0; i < values.length; i++) {
-    const v = values[i];
+  for (let i = 0; i < outValues.length; i++) {
+    const v = outValues[i];
     if (!Number.isFinite(v)) continue;
     if (v < lo) lo = v;
     if (v > hi) hi = v;
   }
   if (!Number.isFinite(lo)) return null;
 
-  return { rows, cols, values, counts, range: hi > lo ? [lo, hi] : [lo, lo + 1] };
+  return {
+    rows,
+    hiddenCols,
+    cols: outCols,
+    values: outValues,
+    counts: outCounts,
+    range: hi > lo ? [lo, hi] : [lo, lo + 1],
+  };
 }
 
 /**

@@ -117,6 +117,106 @@ describe('heatmapMatrix', () => {
     expect(all.cols).toEqual(['big', 'tiny']);
   });
 
+  describe('maxCols — a wide categorical column', () => {
+    /** Ten groups of three cells: the columns `subclass` would produce, in miniature. */
+    const wide: HeatmapGroups = {
+      codes: Uint16Array.from({ length: 30 }, (_, i) => Math.floor(i / 3)),
+      categories: ['g0', 'g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8', 'g9'],
+    };
+    /** Group `g` gets value `level[g]`, the same for all three of its cells. */
+    const byGroup = (name: string, level: number[]) =>
+      gene(name, Array.from({ length: 30 }, (_, i) => level[Math.floor(i / 3)]));
+
+    it('keeps the columns where a gene actually stands out', () => {
+      // g0 and g9 are the peaks; the middle eight sit flat at 1.
+      const m = heatmapMatrix(
+        [byGroup('g1', [9, 1, 1, 1, 1, 1, 1, 1, 1, 9])],
+        wide,
+        { maxCols: 3 },
+      )!;
+      expect(m.cols).toHaveLength(3);
+      expect(m.cols).toContain('g0');
+      expect(m.cols).toContain('g9');
+      expect(m.hiddenCols).toBe(7);
+    });
+
+    it('ranks across ALL the genes, not just the first', () => {
+      // Each gene peaks in a different group; both peaks must survive.
+      const m = heatmapMatrix(
+        [
+          byGroup('peaks-early', [9, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
+          byGroup('peaks-late', [1, 1, 1, 1, 1, 1, 1, 1, 1, 9]),
+        ],
+        wide,
+        { maxCols: 2 },
+      )!;
+      expect(m.cols).toEqual(['g0', 'g9']);
+    });
+
+    it('keeps a strong NEGATIVE column — absence is a marker too', () => {
+      // g5 is the only group where the gene is missing. On a z-scored panel that
+      // is a large negative, and it is exactly what a marker panel is read for.
+      const m = heatmapMatrix(
+        [byGroup('g1', [5, 5, 5, 5, 5, 0, 5, 5, 5, 5])],
+        wide,
+        { maxCols: 1 },
+      )!;
+      expect(m.cols).toEqual(['g5']);
+      expect(at(m, 0, 0)).toBeLessThan(0);
+    });
+
+    it('keeps the surviving columns in the column\'s own order, not by rank', () => {
+      // Ranked order would read g9, g0, g4 — jumbling the categories.
+      const m = heatmapMatrix(
+        [byGroup('g1', [7, 1, 1, 1, 5, 1, 1, 1, 1, 9])],
+        wide,
+        { maxCols: 3 },
+      )!;
+      expect(m.cols).toEqual(['g0', 'g4', 'g9']);
+    });
+
+    it('carries the right VALUES over to the kept columns', () => {
+      // The subset is rebuilt into a narrower matrix; a stride bug here would
+      // put a column's colour under a different label.
+      const m = heatmapMatrix(
+        [byGroup('a', [10, 1, 1, 1, 1, 1, 1, 1, 1, 20]),
+          byGroup('b', [30, 2, 2, 2, 2, 2, 2, 2, 2, 40])],
+        wide,
+        { maxCols: 2, zScore: false },
+      )!;
+      expect(m.cols).toEqual(['g0', 'g9']);
+      expect(at(m, 0, 0)).toBeCloseTo(10, 4);
+      expect(at(m, 0, 1)).toBeCloseTo(20, 4);
+      expect(at(m, 1, 0)).toBeCloseTo(30, 4);
+      expect(at(m, 1, 1)).toBeCloseTo(40, 4);
+      expect(Array.from(m.counts)).toEqual([3, 3]);
+    });
+
+    it('reports the range over the KEPT columns only', () => {
+      // A dropped column's extreme must not stretch the colour scale, or the
+      // panel is scaled to something it is not showing.
+      const m = heatmapMatrix(
+        [byGroup('g1', [1, 2, 3, 4, 5, 6, 7, 8, 9, 99])],
+        wide,
+        { maxCols: 1, zScore: false },
+      )!;
+      expect(m.cols).toEqual(['g9']);
+      expect(m.range).toEqual([99, 100]);
+    });
+
+    it('leaves a column narrower than the cap untouched', () => {
+      const m = heatmapMatrix([byGroup('g1', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])], wide,
+        { maxCols: 50 })!;
+      expect(m.cols).toHaveLength(10);
+      expect(m.hiddenCols).toBe(0);
+    });
+
+    it('reports no hidden columns when uncapped', () => {
+      const m = heatmapMatrix([gene('g1', [1, 2, 3, 10, 20, 30])], groups)!;
+      expect(m.hiddenCols).toBe(0);
+    });
+  });
+
   it('reports the value range over the finite entries', () => {
     const m = heatmapMatrix([gene('g1', [1, 2, 3, 10, 20, 30])], groups, { zScore: false })!;
     expect(m.range).toEqual([2, 20]);
