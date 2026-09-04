@@ -133,6 +133,16 @@ file was added.
 
 ### Changed
 
+- **napari-js 0.12.0.** Its `acquireDevice` now asks for the adapter's own buffer
+  limits instead of accepting the WebGPU spec defaults, which lifts this viewer's
+  ceiling from 256 MiB per buffer and 128 MiB per storage binding to whatever the
+  hardware offers — 2 GB for both on the dev machine, verified from the live
+  device rather than assumed. That matters because exceeding the old limits failed
+  ASYNCHRONOUSLY: the allocation was dropped, the buffer read as zeros, and
+  nothing threw, so it looked like a coordinate bug. The release also adds a
+  `ShapesLayer` (polygon rings in 2D), which this viewer does not use yet — it is
+  the layer a future cell-boundary overlay would draw through.
+
 - **Spatial code moved out of `implementations/`.** That directory is for rendering
   BACKENDS — a visualization library behind `IVisualizer`, each serving several
   plot modes (OSD and Plotly both do Surface). Spatial omics is not a backend: it
