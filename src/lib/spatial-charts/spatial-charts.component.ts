@@ -210,6 +210,40 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     }));
   }
 
+  /**
+   * The height the drawn layout asked for, or null where it autosizes.
+   *
+   * {@link resize} needs this: the counts and heatmap layouts size their height
+   * to their content — one band per bar, per gene row — while the distribution
+   * kinds want to fill whatever height they are given.
+   */
+  private drawnHeight: number | null = null;
+
+  /**
+   * Re-fit the plot to the panel's current width.
+   *
+   * Called by the host when the dialog finishes resizing. Plotly does not notice
+   * a container resize on its own — its `responsive` option listens for WINDOW
+   * resizes only, so dragging a dialog edge reaches it through nothing at all.
+   */
+  resize(): void {
+    const el = document.getElementById(this.chartDiv);
+    if (!el) return;
+    const width = Math.round(el.clientWidth);
+    // Zero while the section is collapsed or the dialog is closed; relaying out
+    // to a zero box makes Plotly compute a layout it does not recover from.
+    if (width <= 0) return;
+    try {
+      // `autosize` takes BOTH dimensions from the container, which is right only
+      // where the layout did not fix its own height. Measured: autosizing a
+      // layout with an explicit height of 500 replaced it with the container's
+      // 400. Setting the width alone moves the width and leaves the height.
+      Plotly.relayout(el, this.drawnHeight === null ? { autosize: true } : { width });
+    } catch {
+      // Nothing plotted yet.
+    }
+  }
+
   ngOnDestroy(): void {
     this.subs.unsubscribe();
     try {
@@ -399,6 +433,19 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     void this.render();
   }
 
+  /**
+   * Draw, remembering whether this layout fixed its own height.
+   *
+   * The layout builders return `unknown` on purpose — they keep Plotly's layout
+   * types out of the pure module — so the height is read back by narrowing
+   * rather than declared. `height` is Plotly's own key, not ours.
+   */
+  private async draw(traces: unknown, layout: unknown): Promise<void> {
+    const height = (layout as { height?: unknown } | null)?.height;
+    this.drawnHeight = typeof height === 'number' ? height : null;
+    await Plotly.react(this.chartDiv, traces as never, layout as never, CHART_CONFIG as never);
+  }
+
   private async render(): Promise<void> {
     if (!this.isActive) return;
     const el = document.getElementById(this.chartDiv);
@@ -422,8 +469,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
         selection: this.selection.count > 0 ? this.selection.mask : null,
         name: this.colorBy.name,
       };
-      await Plotly.react(this.chartDiv, buildCountTraces(counts) as never,
-        countsLayout(counts) as never, CHART_CONFIG as never);
+      await this.draw(buildCountTraces(counts), countsLayout(counts));
       return;
     }
     if (!this.values) return;
@@ -435,8 +481,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       log: this.view.logScale,
     };
     const traces = buildOmicsTraces(this.kind, input);
-    await Plotly.react(this.chartDiv, traces as never, omicsLayout(this.kind, input) as never,
-      CHART_CONFIG as never);
+    await this.draw(traces, omicsLayout(this.kind, input));
   }
 
   /**
@@ -497,7 +542,6 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       zScored: this.heatmapZScore,
       groupLabel: cells ? 'selected cells' : (this.groupBy ?? ''),
     };
-    await Plotly.react(this.chartDiv, buildHeatmapTraces(input) as never,
-      heatmapLayout(input) as never, CHART_CONFIG as never);
+    await this.draw(buildHeatmapTraces(input), heatmapLayout(input));
   }
 }

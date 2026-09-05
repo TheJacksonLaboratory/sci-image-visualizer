@@ -662,4 +662,43 @@ describe('SpatialControlsComponent', () => {
       expect(component.visible).toBe(false);
     });
   });
+
+  /**
+   * Re-fitting the chart when the dialog is resized.
+   *
+   * Plotly does not follow a container resize on its own — its `responsive`
+   * option listens for WINDOW resizes only — so the panel has to tell it. The
+   * signal is the dialog's own resize-end event rather than an observer watching
+   * boxes.
+   */
+  describe('resizing the dialog', () => {
+    it('re-fits the embedded chart', async () => {
+      await build(controls);
+      const resize = jest.fn();
+      // The chart is a ViewChild, which the behavioural tests do not render.
+      (component as unknown as { charts?: { resize: () => void } }).charts = { resize };
+      component.onResizeEnd();
+      expect(resize).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not blow up before the chart exists', async () => {
+      await build(controls);
+      // The charts section is collapsed until opened, so the ViewChild is unset.
+      expect(() => component.onResizeEnd()).not.toThrow();
+    });
+
+    it('is actually wired to the dialog in the template', async () => {
+      // The delegation above passes even if the binding was never written, or was
+      // misspelled — a template typo fails silently. Under NO_ERRORS_SCHEMA the
+      // p-dialog is an unknown element, so the output binding registers as a plain
+      // DOM listener and dispatching the event exercises the real wiring.
+      await build(null, true);
+      const spy = jest.spyOn(component, 'onResizeEnd');
+      const dialog = fixture.nativeElement.querySelector('p-dialog');
+      expect(dialog).toBeTruthy();
+      dialog.dispatchEvent(new Event('onResizeEnd'));
+      expect(spy).toHaveBeenCalled();
+    });
+  });
+
 });

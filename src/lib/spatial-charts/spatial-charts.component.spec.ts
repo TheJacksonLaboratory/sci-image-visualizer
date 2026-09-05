@@ -12,6 +12,7 @@ import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selecti
 
 jest.mock('plotly.js-dist-min', () => ({
   react: jest.fn().mockResolvedValue(undefined),
+  relayout: jest.fn(),
   purge: jest.fn(),
 }));
 import * as Plotly from 'plotly.js-dist-min';
@@ -487,6 +488,81 @@ describe('SpatialChartsComponent', () => {
       await flush();
       expect(component.heatmapGenes).toEqual([]);
       expect(component.geneOptions.map((o) => o.value)).toEqual(['Actb']);
+    });
+  });
+
+
+  /**
+   * Re-fitting the plot when the host dialog is resized.
+   *
+   * Plotly does not follow a container resize on its own: its `responsive` option
+   * listens for WINDOW resizes only. The host calls {@link SpatialChartsComponent.resize}
+   * from the dialog's own resize-end event.
+   */
+  describe('resize()', () => {
+    beforeEach(() => {
+      (Plotly.relayout as jest.Mock).mockClear();
+    });
+
+    /** jsdom runs no layout, so a width has to be stated outright. */
+    const setWidth = (px: number) => Object.defineProperty(
+      chartHost as HTMLDivElement, 'clientWidth', { value: px, configurable: true },
+    );
+
+    const lastRelayout = () => {
+      const calls = (Plotly.relayout as jest.Mock).mock.calls;
+      return calls[calls.length - 1]?.[1];
+    };
+
+    it('sets the WIDTH ONLY where the layout fixed its own height', async () => {
+      controls.continuousValues = jest.fn(async (_source: SpatialColorBy) =>
+        Float32Array.from([1, 2, 3, 4]));
+      controls.categoricalView = jest.fn(async (column: string) => ({
+        name: column, categories: ['A', 'B'], colors: ['#f00', '#00f'],
+        codes: Uint16Array.from([0, 0, 1, 1]),
+      }));
+      await build(controls);
+      // A categorical subject selects the counts chart on its own.
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+      await flush();
+      expect(component.kind).toBe('counts');
+      // Guard: this test only means something if counts really does fix a height.
+      expect(typeof lastPlot().layout?.height).toBe('number');
+
+      setWidth(800);
+      component.resize();
+      // Autosizing here would take the height from the container and squash the
+      // bars — the height is deliberately one band per bar.
+      expect(lastRelayout()).toEqual({ width: 800 });
+    });
+
+    it('autosizes where the layout wants the container’s height', async () => {
+      controls.continuousValues = jest.fn(async (_source: SpatialColorBy) =>
+        Float32Array.from([1, 2, 3, 4]));
+      await build(controls);
+      component.onKind('histogram');
+      await flush();
+      // Guard: the distribution kinds must NOT be fixing a height.
+      expect(lastPlot().layout?.height).toBeUndefined();
+
+      setWidth(800);
+      component.resize();
+      expect(lastRelayout()).toEqual({ autosize: true });
+    });
+
+    it('ignores a zero width, so a collapsed panel cannot flatten the plot', async () => {
+      await build(controls);
+      setWidth(0);
+      component.resize();
+      expect(Plotly.relayout).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when there is no plot div to fit', async () => {
+      await build(controls);
+      chartHost?.remove();
+      chartHost = null;
+      expect(() => component.resize()).not.toThrow();
+      expect(Plotly.relayout).not.toHaveBeenCalled();
     });
   });
 

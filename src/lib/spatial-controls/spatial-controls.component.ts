@@ -1,9 +1,10 @@
 import {
-  Component, EventEmitter, Inject, Input, OnDestroy, OnInit, Output,
+  Component, EventEmitter, Inject, Input, OnDestroy, OnInit, Output, ViewChild,
 } from '@angular/core';
 import { Subscription, combineLatest } from 'rxjs';
 
 import { VISUALIZER, IVisualizer, ISpatialControls } from '../contracts/visualizer.contract';
+import { SpatialChartsComponent } from '../spatial-charts/spatial-charts.component';
 import {
   CategoricalColumnMeta, SpatialColumnMeta, SpatialDataset,
 } from '../contracts/spatial-dataset.contract';
@@ -61,6 +62,22 @@ const CLIP_OPTIONS: { label: string; value: [number, number] }[] = [
   styleUrls: ['./spatial-controls.component.scss'],
 })
 export class SpatialControlsComponent implements OnInit, OnDestroy {
+  /** The embedded chart, so a dialog resize can re-fit it. */
+  @ViewChild(SpatialChartsComponent) private charts?: SpatialChartsComponent;
+
+  /**
+   * Re-fit the chart after the dialog is resized.
+   *
+   * Plotly does not follow a container resize on its own — its `responsive`
+   * option listens for WINDOW resizes only, so dragging the dialog's handle
+   * reaches it through nothing. PrimeNG tells us when the drag ends, which is a
+   * far more direct signal than watching boxes, and firing once on release means
+   * no relayout churn during the drag.
+   */
+  onResizeEnd(): void {
+    this.charts?.resize();
+  }
+
   /** Dialog visibility, two-way bound so a toolbar button can open it. */
   @Input() visible = false;
   /** Set while the 3D cloud is the active mode. Changes what the ROI selection
