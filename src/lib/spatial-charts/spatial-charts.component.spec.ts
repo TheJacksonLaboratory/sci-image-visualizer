@@ -12,7 +12,6 @@ import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selecti
 
 jest.mock('plotly.js-dist-min', () => ({
   react: jest.fn().mockResolvedValue(undefined),
-  relayout: jest.fn(),
   purge: jest.fn(),
 }));
 import * as Plotly from 'plotly.js-dist-min';

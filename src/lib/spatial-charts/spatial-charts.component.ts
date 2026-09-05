@@ -160,7 +160,6 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   private groupToken = 0;
   /** Whether the first view emission has been handled. */
   private primed = false;
-  private resizeObserver?: ResizeObserver;
   private readonly subs = new Subscription();
 
   constructor(@Inject(VISUALIZER) private readonly viz: IVisualizer) {}
@@ -213,7 +212,6 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
 
   ngOnDestroy(): void {
     this.subs.unsubscribe();
-    this.resizeObserver?.disconnect();
     try {
       Plotly.purge(this.chartDiv);
     } catch {
@@ -221,21 +219,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     }
   }
 
-  /** Keep the plot sized to the (resizable) host dialog. */
   ngAfterViewInit(): void {
-    const el = document.getElementById(this.chartDiv);
-    // ResizeObserver is browser-only; the component must still work where it is
-    // absent (jsdom, SSR) — resize tracking is a nicety, drawing is not.
-    if (el && !this.resizeObserver && typeof ResizeObserver !== 'undefined') {
-      this.resizeObserver = new ResizeObserver(() => {
-        try {
-          Plotly.relayout(this.chartDiv, { autosize: true });
-        } catch {
-          // Not plotted yet.
-        }
-      });
-      this.resizeObserver.observe(el);
-    }
     // The div exists only now, so this is the earliest a first draw can land.
     void this.reload();
   }
