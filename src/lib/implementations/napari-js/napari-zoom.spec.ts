@@ -1,4 +1,6 @@
-import { NAPARI_WHEEL_DELTA_CLAMP, NAPARI_WHEEL_ZOOM_SPEED } from './napari-zoom';
+import { WHEEL_DELTA_CLAMP } from 'napari-js';
+
+import { NAPARI_WHEEL_ZOOM_SPEED } from './napari-zoom';
 import { OSD_ZOOM_PER_SCROLL } from '../osd/osd-zoom';
 
 /**
@@ -9,7 +11,7 @@ import { OSD_ZOOM_PER_SCROLL } from '../osd/osd-zoom';
  */
 describe('the napari wheel-zoom speed', () => {
   /** What napari-js does with one clamped event: exp(-delta * speed). */
-  const stepAtClamp = () => Math.exp(NAPARI_WHEEL_DELTA_CLAMP * NAPARI_WHEEL_ZOOM_SPEED);
+  const stepAtClamp = () => Math.exp(WHEEL_DELTA_CLAMP * NAPARI_WHEEL_ZOOM_SPEED);
 
   it('gives the same per-notch step as the OSD backend', () => {
     // A mouse notch (~100px) and a trackpad momentum tick (several hundred) both
@@ -27,13 +29,15 @@ describe('the napari wheel-zoom speed', () => {
     // napari-js negates the delta, so a POSITIVE speed with a negative delta
     // (scroll up) must magnify. A sign slip here inverts the wheel.
     expect(NAPARI_WHEEL_ZOOM_SPEED).toBeGreaterThan(0);
-    expect(Math.exp(-(-NAPARI_WHEEL_DELTA_CLAMP) * NAPARI_WHEEL_ZOOM_SPEED)).toBeGreaterThan(1);
+    expect(Math.exp(-(-WHEEL_DELTA_CLAMP) * NAPARI_WHEEL_ZOOM_SPEED)).toBeGreaterThan(1);
   });
 
-  it('matches the clamp napari-js actually applies', () => {
-    // If napari-js changes its internal clamp, the derivation stops landing on the
-    // OSD step and this constant has to be revisited. 24 is WHEEL_DELTA_CLAMP in
-    // napari-js's camera/wheel module.
-    expect(NAPARI_WHEEL_DELTA_CLAMP).toBe(24);
+  it('takes the clamp from napari-js rather than a local copy', () => {
+    // The derivation only lands on the OSD step if this is the clamp the library
+    // really applies, so it is imported from napari-js. Asserting it is a usable
+    // positive number checks the import resolves to a real value — pinning 24
+    // here would just re-create the stale literal this replaced.
+    expect(Number.isFinite(WHEEL_DELTA_CLAMP)).toBe(true);
+    expect(WHEEL_DELTA_CLAMP).toBeGreaterThan(0);
   });
 });

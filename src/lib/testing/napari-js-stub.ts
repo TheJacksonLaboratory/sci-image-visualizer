@@ -176,6 +176,16 @@ export class Colormap {
  *  would verify arithmetic the renderer never does. */
 export const LUT_SIZE = 256;
 
+/**
+ * Mirrors napari-js's own per-event wheel-delta clamp.
+ *
+ * The value is only a stand-in: `napari-zoom.ts` derives its speed from whatever the library
+ * exports, and its tests check that derivation rather than this number, so a retune upstream does
+ * not need editing here. It exists because a missing export reads as `undefined`, and a derivation
+ * dividing by it would silently become NaN.
+ */
+export const WHEEL_DELTA_CLAMP = 24;
+
 /** Stand-in for napari-js colormapFromLut. Keeps the LUT so tests can assert that
  *  a category code lands on its own colour rather than a neighbour's blend. */
 export function colormapFromLut(name: string, lut: unknown, _maxValue = 255): Colormap {
