@@ -177,6 +177,22 @@ export function isSpatialOmics(type: PlotType): boolean {
 export function isSpatialOmics3d(type: PlotType): boolean {
   return type === PlotType.SPATIAL_OMICS_3D;
 }
+/**
+ * Whether the renderer, rather than the shell, should handle wheel zoom.
+ *
+ * The shell's wheel listener applies a FIXED step per event, which is far too sensitive for a
+ * renderer that reads the scroll delta: it works out at 30% per event against napari-js's 3%, and
+ * ignores the device normalization and easing the renderer does. So every plot type drawn by a
+ * renderer that owns the wheel has to opt out here.
+ *
+ * The image view always did. The spatial-omics modes did NOT, despite being drawn by the same
+ * napari-js viewer — the shell gated on an `isHeatmap` flag that defaults to true and only goes
+ * false for the 3D Plotly scenes, so it silently took the wheel for them too.
+ */
+export function rendererOwnsWheel(type: PlotType): boolean {
+  return type === PlotType.IMAGE || isSpatialOmics(type) || isSpatialOmics3d(type);
+}
+
 /** Any napari-js 3D plot type (volume, isosurface, surface, or 3D scatter). Resolution is a runtime
  *  decimate factor (Full / ½ / ¼ / ⅛) — see the service's `resolutionScale`. */
 export function isNapari3d(type: PlotType): boolean {

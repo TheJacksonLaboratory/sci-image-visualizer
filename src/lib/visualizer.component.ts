@@ -17,6 +17,7 @@ import {
   PlotTypeDescriptor,
   isNapari3d,
   isSpatialOmics3d,
+  rendererOwnsWheel,
   NAPARI_DEFAULT_DECIMATE,
 } from './contracts/plot-type';
 import { ViewerFeature } from './contracts/capabilities.contract';
@@ -1013,10 +1014,10 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.wheelListener = (event: WheelEvent) => {
       const plotEl = document.getElementById(this.plotDivName);
       if (!plotEl?.contains(event.target as Node)) return;
-      // The Image view handles scroll-zoom natively (it respects the scroll
-      // delta). Intercepting here would fire a fixed zoom step per wheel
-      // event — far too sensitive — so let the renderer own it.
-      if (this.isImageView) return;
+      // Intercepting here fires a FIXED zoom step per wheel event, which is far
+      // too sensitive for a renderer that reads the scroll delta — so anything
+      // drawn by such a renderer keeps its own wheel. See `rendererOwnsWheel`.
+      if (rendererOwnsWheel(this.selectedPlotType)) return;
       // 3D plot types (surface, scatter3d, isosurface) render in a Plotly scene
       // that orbits/zooms natively on scroll. The 2D step-zoom doesn't apply and
       // would throw (no xaxis on a scene), so let Plotly handle the wheel.
