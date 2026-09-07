@@ -318,6 +318,153 @@ export function countsLayout(input: OmicsCountInput & { name: string }): unknown
  * colour. Diverging and centred on zero, because after z-scoring the sign is
  * the reading: above or below this gene's average across the groups.
  */
+/**
+ * An embedding scatter — a UMAP, t-SNE or PCA plane over the same observations.
+ *
+ * Answers a different question from the map: the map says WHERE a population sits in the tissue,
+ * the embedding says which populations there are and how close they are in expression. Read side
+ * by side, and selecting in one highlighting the other, is the whole point of having both.
+ */
+export interface OmicsUmapInput {
+  /** Embedding coordinates, index-aligned with the observations. */
+  x: Float32Array;
+  y: Float32Array;
+  /** Axis label stem, e.g. "UMAP" — the axes become "UMAP 1" / "UMAP 2". */
+  label: string;
+  /** Colour by a categorical column: per-observation codes plus the category names/colours. */
+  categories?: {
+    codes: Uint16Array;
+    names: readonly string[];
+    colors: readonly string[];
+  };
+  /** Marker diameter in px. */
+  size?: number;
+  /**
+   * Selection mask over the observations. When present, unselected points are dimmed rather than
+   * dropped: the shape of the whole embedding is the context that makes a selection legible, and
+   * removing it would leave a handful of dots floating in an empty plane.
+   */
+  selection?: Uint8Array;
+  /** True when the coordinates were computed here rather than published with the dataset. */
+  derived?: boolean;
+}
+
+/**
+ * Past this many categories, one trace each stops being worth it.
+ *
+ * A trace per category buys a legend whose entries toggle — click one to isolate a population,
+ * which is how these plots are actually read. But Plotly holds per-trace state, and a legend of
+ * hundreds of entries is unreadable anyway (the ABC atlas has 338 subclasses), so beyond the cap
+ * everything goes into ONE trace with a per-point colour: no legend, but it still draws.
+ */
+export const UMAP_MAX_LEGEND_CATEGORIES = 40;
+
+/** Dimming applied to unselected points, matching the map's muted opacity. */
+const UMAP_MUTED_OPACITY = 0.15;
+
+const DEFAULT_UMAP_POINT_SIZE = 4;
+
+export function buildUmapTraces(input: OmicsUmapInput): unknown[] {
+  const { x, y, categories, selection } = input;
+  const n = Math.min(x.length, y.length);
+  if (n === 0) return [];
+  const size = input.size ?? DEFAULT_UMAP_POINT_SIZE;
+  // scattergl, not scatter: this is 10^4-10^6 points and the SVG renderer would not survive it.
+  const type = 'scattergl';
+  const opacityFor = (i: number): number =>
+    !selection || selection[i] ? 1 : UMAP_MUTED_OPACITY;
+
+  if (!categories || categories.names.length === 0) {
+    return [{
+      type,
+      mode: 'markers',
+      x: Array.from(x.subarray(0, n)),
+      y: Array.from(y.subarray(0, n)),
+      marker: {
+        size,
+        color: '#4c72b0',
+        ...(selection ? { opacity: Array.from({ length: n }, (_, i) => opacityFor(i)) } : {}),
+      },
+      hoverinfo: 'none',
+      showlegend: false,
+    }];
+  }
+
+  const { codes, names, colors } = categories;
+  if (names.length > UMAP_MAX_LEGEND_CATEGORIES) {
+    // One trace, per-point colour. Hover still names the category, which is the part that
+    // matters; the legend is what is lost.
+    return [{
+      type,
+      mode: 'markers',
+      x: Array.from(x.subarray(0, n)),
+      y: Array.from(y.subarray(0, n)),
+      marker: {
+        size,
+        color: Array.from({ length: n }, (_, i) => colors[codes[i]] ?? '#999999'),
+        ...(selection ? { opacity: Array.from({ length: n }, (_, i) => opacityFor(i)) } : {}),
+      },
+      text: Array.from({ length: n }, (_, i) => names[codes[i]] ?? 'unassigned'),
+      hovertemplate: '%{text}<extra></extra>',
+      showlegend: false,
+    }];
+  }
+
+  // One trace per category: the legend entries toggle, so a population can be isolated by
+  // clicking rather than by re-colouring the whole plot.
+  const buckets: number[][] = names.map(() => []);
+  for (let i = 0; i < n; i++) {
+    const c = codes[i];
+    // NO_CATEGORY, or a code past the list, is unassigned — dropped rather than drawn in a
+    // colour that would read as a population of its own.
+    if (c < buckets.length) buckets[c].push(i);
+  }
+  return buckets
+    .map((idx, c) => ({ idx, c }))
+    .filter(({ idx }) => idx.length > 0)
+    .map(({ idx, c }) => ({
+      type,
+      mode: 'markers',
+      name: names[c],
+      x: idx.map((i) => x[i]),
+      y: idx.map((i) => y[i]),
+      marker: {
+        size,
+        color: colors[c] ?? '#999999',
+        ...(selection ? { opacity: idx.map(opacityFor) } : {}),
+      },
+      hovertemplate: `${names[c]}<extra></extra>`,
+    }));
+}
+
+export function umapLayout(input: OmicsUmapInput): unknown {
+  const stem = input.label || 'UMAP';
+  return {
+    autosize: true,
+    margin: { l: 44, r: 8, t: input.derived ? 24 : 8, b: 40 },
+    // Equal aspect: an embedding's axes carry no units, so distances are only comparable if the
+    // two are scaled alike. Stretching one axis to fill the panel invents structure.
+    xaxis: { title: { text: `${stem} 1` }, zeroline: false, ticks: 'outside' },
+    yaxis: {
+      title: { text: `${stem} 2` }, zeroline: false, ticks: 'outside',
+      scaleanchor: 'x', scaleratio: 1,
+    },
+    legend: { itemsizing: 'constant', font: { size: 10 } },
+    hovermode: 'closest',
+    ...(input.derived
+      ? {
+        // Said on the plot, not just in a tooltip: a recomputed embedding is a different
+        // picture from the published one, and a reader comparing against a paper needs to know.
+        annotations: [{
+          text: 'computed here, not published with the dataset',
+          showarrow: false, xref: 'paper', yref: 'paper', x: 0, y: 1.04,
+          xanchor: 'left', font: { size: 10, color: '#888888' },
+        }],
+      }
+      : {}),
+  };
+}
+
 export interface OmicsHeatmapInput {
   rows: string[];
   cols: string[];
