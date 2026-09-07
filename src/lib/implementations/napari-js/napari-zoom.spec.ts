@@ -1,0 +1,43 @@
+import { WHEEL_DELTA_CLAMP } from 'napari-js';
+
+import { NAPARI_WHEEL_ZOOM_SPEED } from './napari-zoom';
+import { OSD_ZOOM_PER_SCROLL } from '../osd/osd-zoom';
+
+/**
+ * The two backends draw the same images, so the wheel must not zoom further under
+ * one than the other — a difference the user has no way to attribute to anything.
+ * The napari speed is therefore DERIVED from the OSD step, and this pins that the
+ * derivation actually lands on it.
+ */
+describe('the napari wheel-zoom speed', () => {
+  /** What napari-js does with one clamped event: exp(-delta * speed). */
+  const stepAtClamp = () => Math.exp(WHEEL_DELTA_CLAMP * NAPARI_WHEEL_ZOOM_SPEED);
+
+  it('gives the same per-notch step as the OSD backend', () => {
+    // A mouse notch (~100px) and a trackpad momentum tick (several hundred) both
+    // exceed the clamp, so the clamped step IS the per-notch step on both.
+    expect(stepAtClamp()).toBeCloseTo(OSD_ZOOM_PER_SCROLL, 10);
+  });
+
+  it('is gentle: a notch is a few percent, not a fifth', () => {
+    const percent = (stepAtClamp() - 1) * 100;
+    expect(percent).toBeGreaterThan(1);
+    expect(percent).toBeLessThan(5);
+  });
+
+  it('zooms in rather than out — the sign convention napari-js applies', () => {
+    // napari-js negates the delta, so a POSITIVE speed with a negative delta
+    // (scroll up) must magnify. A sign slip here inverts the wheel.
+    expect(NAPARI_WHEEL_ZOOM_SPEED).toBeGreaterThan(0);
+    expect(Math.exp(-(-WHEEL_DELTA_CLAMP) * NAPARI_WHEEL_ZOOM_SPEED)).toBeGreaterThan(1);
+  });
+
+  it('takes the clamp from napari-js rather than a local copy', () => {
+    // The derivation only lands on the OSD step if this is the clamp the library
+    // really applies, so it is imported from napari-js. Asserting it is a usable
+    // positive number checks the import resolves to a real value — pinning 24
+    // here would just re-create the stale literal this replaced.
+    expect(Number.isFinite(WHEEL_DELTA_CLAMP)).toBe(true);
+    expect(WHEEL_DELTA_CLAMP).toBeGreaterThan(0);
+  });
+});

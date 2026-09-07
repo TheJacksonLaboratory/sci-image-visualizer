@@ -21,14 +21,18 @@ import { OverlayPanelModule } from 'primeng/overlaypanel';
 import { ConfirmDialogModule } from 'primeng/confirmdialog';
 import { InputTextModule } from 'primeng/inputtext';
 import { CheckboxModule } from 'primeng/checkbox';
+import { MultiSelectModule } from 'primeng/multiselect';
 import { RadioButtonModule } from 'primeng/radiobutton';
 import { SelectButtonModule } from 'primeng/selectbutton';
+import { AutoCompleteModule } from 'primeng/autocomplete';
 
 import { VisualizerComponent } from './visualizer.component';
 import { ToolbarComponent } from './toolbar/toolbar.component';
 import { RegionEditorComponent } from './region-editor/region-editor.component';
 import { HexColorPickerComponent } from './hex-color-picker/hex-color-picker.component';
 import { ChannelHistogramComponent } from './channel-histogram/channel-histogram.component';
+import { SpatialControlsComponent } from './spatial-controls/spatial-controls.component';
+import { SpatialChartsComponent } from './spatial-charts/spatial-charts.component';
 import { RoutingVisualizerService } from './routing-visualizer.service';
 import { VISUALIZER } from './contracts/visualizer.contract';
 import { REGION_EDITOR_API } from './contracts/region-editor-api.contract';
@@ -52,6 +56,8 @@ import { CHANNEL_HISTOGRAM_API } from './contracts/channel-histogram-api.contrac
     RegionEditorComponent,
     HexColorPickerComponent,
     ChannelHistogramComponent,
+    SpatialControlsComponent,
+    SpatialChartsComponent,
   ],
   imports: [
     CommonModule,
@@ -75,10 +81,15 @@ import { CHANNEL_HISTOGRAM_API } from './contracts/channel-histogram-api.contrac
     ConfirmDialogModule,
     InputTextModule,
     CheckboxModule,
+    MultiSelectModule,
     RadioButtonModule,
     SelectButtonModule,
+    AutoCompleteModule,
   ],
-  exports: [VisualizerComponent, RegionEditorComponent, HexColorPickerComponent, ChannelHistogramComponent],
+  exports: [
+    VisualizerComponent, RegionEditorComponent, HexColorPickerComponent,
+    ChannelHistogramComponent, SpatialControlsComponent, SpatialChartsComponent,
+  ],
   providers: [
     // Internal backend wiring. All three host-facing contracts are served by the
     // RoutingVisualizerService (the Plotly/OpenSeadragon selector), so consumers

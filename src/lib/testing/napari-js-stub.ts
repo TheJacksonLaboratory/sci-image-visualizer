@@ -18,13 +18,25 @@ interface StubDims {
 interface StubCamera3D {
   frame(width: number, height: number, depth: number): void;
   viewProjection(vw: number, vh: number): number[];
+  azimuth: number;
+  elevation: number;
   target: [number, number, number];
   distance: number;
+  /** Vertical field of view in RADIANS, as napari-js has it. Needed by anything
+   *  deriving world-per-pixel at the pivot (the 3D scale bar); without it that
+   *  arithmetic silently goes NaN and the feature just does not appear. */
+  fov: number;
   changed: { connect(listener: () => void): () => void };
 }
 
 /** A mutable stand-in for napari-js VolumeLayer (the props the adapter sets). */
 export interface VolumeLayer {
+  opacity?: number;
+  name?: string;
+  data?: Uint8Array;
+  width?: number;
+  height?: number;
+  depth?: number;
   colormap: unknown;
   contrastLimits: [number, number];
   gamma: number;
@@ -46,11 +58,24 @@ export interface AxesLayer {
   depth: number;
 }
 
-/** Stand-in for napari-js PointsLayer (2D scatter markers — the adapter only creates/removes it). */
+/** Stand-in for napari-js PointsLayer (2D scatter markers).
+ *
+ *  Unlike the real layer this KEEPS the constructor arguments: the spatial-omics
+ *  adapter's whole job is deciding positions, per-point colours and sizes, so a
+ *  test that can only see "a layer exists" cannot check the part that matters. */
 export interface PointsLayer {
-  size: number;
+  size: number | Float32Array;
   opacity: number;
   blending: string;
+  /** Flat `[x, y, …]` in data coords, as handed to `addPoints`. */
+  positions?: Float32Array;
+  /** One RGBA tuple per point, or a single broadcast tuple. */
+  faceColor?: unknown;
+  borderWidth?: number;
+  name?: string;
+  /** Data->world affine, as handed to `addPoints`. */
+  scale?: [number, number];
+  translate?: [number, number];
 }
 
 /** Stand-in for napari-js Points3DLayer (the props/bounds the 3D-scatter adapter reads/sets). */
@@ -58,6 +83,16 @@ export interface Points3DLayer {
   colormap: unknown;
   contrastLimits: [number, number];
   size: number;
+  /** One value for the whole layer — the 3D layer has no per-point alpha, which
+   *  is why the spatial 3D path draws a selection as a second layer. */
+  opacity: number;
+  /** Layer-level visibility, from the real `Layer` base: what the 3D panel's
+   *  show/hide toggles drive, so a test can read what the scene would draw. */
+  visible: boolean;
+  name?: string;
+  /** Captured so tests can assert the interleaved x,y,z layout and the scalars. */
+  positions?: Float32Array;
+  values?: Float32Array;
   bounds(): {
     min: [number, number, number];
     max: [number, number, number];
@@ -107,6 +142,12 @@ export interface ImageLayer {
   visible: boolean;
   invert: boolean;
   blending: string;
+  /** Options the real `addImage` records on the layer. Kept because a scene with
+   *  several image layers is only distinguishable by them. */
+  name?: string;
+  opacity?: number;
+  scale?: [number, number];
+  translate?: [number, number];
 }
 
 /** Stand-in for napari-js histogramScalar (per-channel / volume intensity histogram). */
@@ -130,9 +171,25 @@ export class Colormap {
   }
 }
 
-/** Stand-in for napari-js colormapFromLut (grayscale LUT → Colormap). */
-export function colormapFromLut(name: string, _lut: unknown, _maxValue = 255): Colormap {
-  return new Colormap(name);
+/** Real napari-js LUT resolution. The spatial 3D path derives its categorical
+ *  block widths from this, so the stub must agree with the library or the tests
+ *  would verify arithmetic the renderer never does. */
+export const LUT_SIZE = 256;
+
+/**
+ * Mirrors napari-js's own per-event wheel-delta clamp.
+ *
+ * The value is only a stand-in: `napari-zoom.ts` derives its speed from whatever the library
+ * exports, and its tests check that derivation rather than this number, so a retune upstream does
+ * not need editing here. It exists because a missing export reads as `undefined`, and a derivation
+ * dividing by it would silently become NaN.
+ */
+export const WHEEL_DELTA_CLAMP = 24;
+
+/** Stand-in for napari-js colormapFromLut. Keeps the LUT so tests can assert that
+ *  a category code lands on its own colour rather than a neighbour's blend. */
+export function colormapFromLut(name: string, lut: unknown, _maxValue = 255): Colormap {
+  return new Colormap(name, Array.isArray(lut) ? lut : []);
 }
 
 /** Stand-in for napari-js tintColormap (black→hex ramp). */
@@ -299,48 +356,126 @@ export class Viewer {
     fit: () => undefined,
     changed: { connect: () => () => undefined },
   };
+  /** Faithful about the ONE behaviour the adapter has to work around: napari-js
+   *  re-frames this camera on every 3D layer it is handed, so a stubbed no-op
+   *  would make a "the camera did not move" test pass without proving anything. */
   readonly camera3d: StubCamera3D = {
-    frame: () => undefined,
+    // Mirrors napari-js Camera3D.frame: resets the pivot and the dolly, and
+    // leaves the orbit angles alone.
+    frame(width: number, height: number, depth: number) {
+      this.target = [0, 0, 0];
+      this.distance = Math.max(width, height, depth) * 1.8;
+    },
     viewProjection: () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+    azimuth: 0,
+    elevation: 0,
     target: [0, 0, 0],
     distance: 1,
+    fov: (45 * Math.PI) / 180,
     changed: { connect: () => () => undefined },
   };
   readonly dims: StubDims = { z: 0 };
-  readonly layers = { clear: (): void => undefined, remove: (): boolean => true };
+  /** Tracked for real, not stubbed away: napari's image view CLEARS the layer list
+   *  on every render, so whether a layer is still in the scene is exactly the kind
+   *  of thing a test has to be able to see. */
+  private readonly _layers: unknown[] = [];
+  readonly layers = {
+    items: this._layers as readonly unknown[],
+    get length(): number {
+      return (this.items as unknown[]).length;
+    },
+    clear: (): void => {
+      this._layers.length = 0;
+    },
+    remove: (layer: unknown): boolean => {
+      const i = this._layers.indexOf(layer);
+      if (i < 0) return false;
+      this._layers.splice(i, 1);
+      return true;
+    },
+  };
 
-  constructor(_options: { canvas: HTMLCanvasElement }) {}
+  /** Construction options, kept so a test can assert what the adapter asked for —
+   *  `clickZoomFactor: 0` is what stops a selection click from also zooming. */
+  readonly options: {
+    canvas: HTMLCanvasElement;
+    clickZoomFactor?: number;
+    background?: unknown;
+  };
 
-  addImage(): ImageLayer {
-    return {
+  constructor(options: { canvas: HTMLCanvasElement; clickZoomFactor?: number }) {
+    this.options = options;
+  }
+
+  /** Record a layer as mounted, and hand it back. */
+  private mount<T>(layer: T): T {
+    this._layers.push(layer);
+    return layer;
+  }
+
+  addImage(
+    _input?: unknown,
+    opts?: {
+      name?: string;
+      opacity?: number;
+      blending?: string;
+      scale?: [number, number];
+      translate?: [number, number];
+    },
+  ): ImageLayer {
+    return this.mount({
       colormap: 'gray',
       contrastLimits: [0, 255],
       gamma: 1,
       visible: true,
       invert: false,
-      blending: 'translucent',
-    };
+      blending: opts?.blending ?? 'translucent',
+      name: opts?.name,
+      opacity: opts?.opacity ?? 1,
+      scale: opts?.scale,
+      translate: opts?.translate,
+    });
   }
   addVolume(
-    _data?: Uint8Array,
-    _width?: number,
-    _height?: number,
-    _depth?: number,
-    opts?: { voxelSize?: readonly [number, number, number] },
+    data?: Uint8Array,
+    width?: number,
+    height?: number,
+    depth?: number,
+    opts?: {
+      voxelSize?: readonly [number, number, number];
+      name?: string;
+      colormap?: unknown;
+      rendering?: string;
+      opacity?: number;
+    },
   ): VolumeLayer {
-    return {
-      colormap: 'gray',
-      contrastLimits: [0, 255],
+    const layer = this.mount({
+      colormap: opts?.colormap ?? 'gray',
+      contrastLimits: [0, 255] as [number, number],
       gamma: 1,
       visible: true,
       blending: 'additive',
-      rendering: 'mip',
+      rendering: (opts?.rendering as VolumeLayer['rendering']) ?? 'mip',
       isoThreshold: 0.5,
       voxelSize: opts?.voxelSize ?? [1, 1, 1],
-    };
+      opacity: opts?.opacity ?? 1,
+      name: opts?.name,
+      // Captured so tests can assert the dimensions the adapter passed and that
+      // the byte count matches them.
+      data,
+      width,
+      height,
+      depth,
+    });
+    const [sx, sy, sz] = opts?.voxelSize ?? [1, 1, 1];
+    // The real Viewer frames on the world box (dims x voxelSize) here.
+    this.camera3d.frame((width ?? 1) * sx, (height ?? 1) * sy, (depth ?? 1) * sz);
+    return layer;
   }
   addAxes(width = 1, height = 1, depth = 1): AxesLayer {
-    return { visible: true, tickCount: 5, boundingBox: true, voxelSize: [1, 1, 1], width, height, depth };
+    return this.mount(
+      { visible: true, tickCount: 5, boundingBox: true, voxelSize: [1, 1, 1], width, height, depth },
+    );
   }
   addSurface(
     _vertices?: Float32Array,
@@ -354,7 +489,7 @@ export class Viewer {
     },
   ): SurfaceLayer {
     const o = opts ?? {};
-    return {
+    return this.mount({
       colormap: o.colormap ?? 'viridis',
       contrastLimits: o.contrastLimits ?? [0, 255],
       gamma: o.gamma ?? 1,
@@ -367,28 +502,63 @@ export class Viewer {
         center: [0.5, 0.5, 0.5],
         radius: 1,
       }),
-    };
+    });
   }
-  addPoints(): PointsLayer {
-    return { size: 10, opacity: 1, blending: 'translucent' };
+  addPoints(
+    positions?: Float32Array | number[][],
+    opts?: {
+      name?: string;
+      size?: number | Float32Array;
+      faceColor?: unknown;
+      borderWidth?: number;
+      opacity?: number;
+      scale?: [number, number];
+      translate?: [number, number];
+    },
+  ): PointsLayer {
+    const o = opts ?? {};
+    return this.mount({
+      size: o.size ?? 10,
+      opacity: o.opacity ?? 1,
+      blending: 'translucent',
+      positions: positions instanceof Float32Array ? positions : undefined,
+      faceColor: o.faceColor,
+      borderWidth: o.borderWidth,
+      name: o.name,
+      scale: o.scale,
+      translate: o.translate,
+    });
   }
   addPoints3D(
-    _positions?: Float32Array,
-    _values?: Float32Array,
-    opts?: { colormap?: unknown; contrastLimits?: [number, number]; size?: number },
+    positions?: Float32Array,
+    values?: Float32Array,
+    opts?: {
+      colormap?: unknown; contrastLimits?: [number, number]; size?: number;
+      opacity?: number; name?: string; visible?: boolean;
+    },
   ): Points3DLayer {
     const o = opts ?? {};
-    return {
+    const layer = this.mount({
       colormap: o.colormap ?? 'viridis',
       contrastLimits: o.contrastLimits ?? [0, 255],
       size: o.size ?? 6,
+      opacity: o.opacity ?? 1,
+      visible: o.visible ?? true,
+      name: o.name,
+      positions,
+      values,
       bounds: () => ({
-        min: [0, 0, 0],
-        max: [1, 1, 1],
-        center: [0.5, 0.5, 0.5],
+        min: [0, 0, 0] as [number, number, number],
+        max: [1, 1, 1] as [number, number, number],
+        center: [0.5, 0.5, 0.5] as [number, number, number],
         radius: 1,
       }),
-    };
+    });
+    // The real Viewer pivots on the point bounds and dollies to fit them here.
+    const b = layer.bounds();
+    this.camera3d.target = b.center;
+    this.camera3d.distance = Math.max(b.radius * 2.5, 1e-3);
+    return layer;
   }
   layerHistogram(): { counts: Uint32Array; bins: number; min: number; max: number } | null {
     return { counts: new Uint32Array(256), bins: 256, min: 0, max: 255 };

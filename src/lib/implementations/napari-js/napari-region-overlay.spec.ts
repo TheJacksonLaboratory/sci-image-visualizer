@@ -506,4 +506,15 @@ describe('NapariRegionOverlay', () => {
     ptr(overlay, 'pointerup', 5, 5);
     expect(store.getRegions()).toHaveLength(0);
   });
+
+  it('reports whether a tool owns the pointer', () => {
+    // The spatial views read this to tell a bare click on the cloud ("select this
+    // class") from a click that belongs to a drawing gesture — placing a polygon
+    // vertex is also a click that does not move.
+    expect(overlay.toolActive).toBe(false);
+    overlay.setMode('drawpolygon');
+    expect(overlay.toolActive).toBe(true);
+    overlay.setMode('none');
+    expect(overlay.toolActive).toBe(false);
+  });
 });

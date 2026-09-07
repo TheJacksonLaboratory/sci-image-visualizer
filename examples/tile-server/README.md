@@ -37,28 +37,282 @@ so it stays lightweight and stateless.
 > Histogram / export endpoints are only needed for >8-bit images. These demo
 > slides are 8-bit RGB brightfield, so they are intentionally omitted.
 
-## Quick start (local)
+### Spatial-omics endpoints
+
+The same server also implements the **spatial-omics data plane** — the wire
+format `SpatialDataHttpService` speaks (see
+[`src/lib/implementations/spatial-data-http/spatial-wire.ts`](../../src/lib/implementations/spatial-data-http/spatial-wire.ts)).
+
+| Method + path | Returns |
+|---|---|
+| `GET /spatial/datasets` | `{ datasets: [{ id, name, count }] }` |
+| `GET /spatial/:id/manifest` | manifest: count, column + feature metadata, radius, imageRef |
+| `GET /spatial/:id/coords` | `f32[N]` x, `f32[N]` y, `f32[N]` z? — one response |
+| `GET /spatial/:id/radius` | `f32[N]` (per-observation radius only) |
+| `GET /spatial/:id/ids` | `{ ids: [...] }` |
+| `GET /spatial/:id/column/:name` | `u16[N]` codes (categorical) or `f32[N]` values (continuous) |
+| `GET /spatial/:id/feature/:name` | `f32[N]` — one gene's expression vector |
+| `GET /spatial/:id/features?q=&limit=` | `{ names: [...] }` typeahead |
+| `GET /spatial/:id/embedding/:name` | `f32[N]` per dimension — a UMAP/t-SNE/PCA embedding (bundles only) |
+| `GET /spatial/:id/polygons` | `u32` count, `u32[count+1]` offsets, `f32` coords |
+
+A manifest sets `hasZ: true` when the observations carry a third axis, and
+`/coords` then returns three `f32[N]` blocks instead of two. A dataset with no
+single reference plane (a registered 3D cloud) has **no** `imageRef` — there is
+no one section to draw it over.
+
+Vectors are **raw little-endian bytes**, decoded by a typed-array view with no
+copy — JSON would cost ~8–12× the bytes and allocate a JS number per value.
+
+Two things the layout is built around:
+
+- **Nothing loads the whole matrix.** The manifest carries only metadata; a
+  column or gene vector is fetched when it is displayed. Visium ships ~31k
+  genes — the dense matrix is ~800 MB, so "load the dataset" can never mean
+  "load the matrix".
+- **The matrix is stored gene-major.** AnnData stores `X` observation-major
+  (CSR), so reading one gene means touching every row. The converter transposes
+  once, offline; serving a gene is then a contiguous ranged read at
+  `geneIndex * N * 4`, and the matrix is never held in server memory.
+
+#### Serving a SpatialData store LIVE
+
+Drop (or symlink) a `*.zarr` store into `./stores` and it appears on
+`/spatial/datasets` — no build step, no intermediate bundle:
 
 ```bash
-cd examples/tile-server
-npm install
-
-# 1. Produce a pyramid from a whole-slide image (needs: brew install vips)
-#    CMU-1 (CC0, ~1.5 Gpx):
-npm run make-cog -- .cache/CMU-1.svs cmu-1
-#    A JAX slide (~22 Gpx):
-npm run make-cog -- .cache/BC18_1.ndpi bc18
-
-# 2. Serve
-npm start                       # -> http://localhost:8090   (COG_DIR=./cogs)
-
-# 3. From the repo root, point the browser example at it (trailing slash matters —
-#    the library concatenates `${api}tile`):
-VITE_TILE_SERVER=http://localhost:8090/ npm run start:example
+curl -O https://s3.embl.de/spatialdata/spatialdata-sandbox/visium_spatialdata_0.7.1.zip
+unzip visium_spatialdata_0.7.1.zip
+ln -s "$PWD/data.zarr" stores/visium        # or just move it in
+npm start
 ```
 
-The gigapixel gallery entries only appear when `VITE_TILE_SERVER` is set, so the
-public Pages demo stays fully serverless until a server is wired in.
+Every `(store, table, region)` triple becomes a dataset. Ids stay short when
+they can — `hd.cell_segmentations` for a single-region table,
+`visium.table.ST8059048` when a table covers several sections — so the Visium
+store above yields **both** of its sections without being asked.
+
+The tissue image is materialised into `./cogs` the first time it is requested
+(0.1–0.8 s for these stores), so OSD's tile path is unchanged and only the first
+open pays.
+
+**Optional sidecar** at `stores/<name>.json`, carrying only what cannot be
+inferred from the store:
+
+```json
+{ "gridUm": 2 }
+```
+
+`gridUm` is the assay's grid pitch in µm. A segmentation traced on a binned
+assay steps one bin at a time, so the outlines measure the grid — but nothing in
+the store states the bin's physical size, and without it there is no µm/px and
+no scale bar. Visium needs no sidecar: its 100 µm spot pitch is fixed.
+
+#### What live serving costs
+
+The expression matrix is CSR over **observations**, so one gene's column is
+scattered across every row. Serving it means holding the matrix and scanning it:
+
+| request | cost, measured on these stores |
+|---|---|
+| manifest, coords, ids, columns | 2–30 ms |
+| first gene (reads X into memory) | 0.4–0.5 s, then 227 MB (Visium) / 331 MB (HD) resident |
+| subsequent genes | 13–40 ms |
+| derived `cluster` (k-means, on first request) | 0.3 s / 1.4 s |
+| tissue pyramid (first open) | 0.1 s / 0.8 s |
+
+It is deliberately **not** transposed to gene-major in memory — that would
+double the residency, and a scan is tens of milliseconds. A production server
+should serve a pre-transposed gene-major file instead, which is exactly the
+argument for keeping this ingest out of the browser.
+
+Derived columns (`total_counts`, `n_genes_by_counts`, `area`, `cluster`) are
+advertised in the manifest and computed on first request, so opening a dataset
+does not pay to cluster it. Columns that encode nothing are dropped:
+identifiers (a distinct integer per observation) and columns constant after
+filtering.
+
+#### Serving a LEGACY Spatial Transcriptomics dataset
+
+Pre-Visium ST data is a different shape: gzipped TSV count matrices, separate
+brightfield HE JPEGs, and "spot selection" tables mapping array coordinates to
+image pixels. `lib/spatial-st.mjs` serves those from `$ST_DIR` (default `./st`),
+one sub-directory per dataset.
+
+The reference case is the Andersson et al. HER2+ breast cancer deposition
+([Zenodo 4751624](https://zenodo.org/records/4751624)) — 36 sections, 8 of them
+carrying the **pathologist's annotation**, which is the richest categorical any
+of these demo datasets has:
+
+```bash
+mkdir -p st/her2 && cd st/her2
+for f in count-matrices spot-selections meta images; do
+  curl -LO "https://zenodo.org/records/4751624/files/$f.zip?download=1"
+done
+```
+
+The archives are **AES-encrypted**, with the passwords published in the authors'
+own [README](https://github.com/almaan/her2st) — note there are **two**, one per
+pair of archives (the Zenodo description lists only the first):
+
+```json
+// st/her2/config.json
+{
+  "dataPassword": "zNLXkYk3Q9znUseS",
+  "metaPassword": "yUx44SzG6NdB32gY"
+}
+```
+
+`lib/zip-aes.mjs` reads them: macOS's `unzip` refuses AES entries
+("need PK compat. v5.1") and 7-Zip is not always installed, but Node already has
+PBKDF2-HMAC-SHA1, AES and HMAC, so the WinZip-AES format is a short module. It
+reads entries by byte range, so pulling one JPEG out of the 592 MB `images.zip`
+does not load the archive.
+
+Each section becomes `her2.<SECTION>` — `her2.A1` … `her2.H3`. `radius` and
+`polygons` legitimately 404 there: ST spots are a uniform size and the format has
+no outlines.
+
+What it costs: the cheap index (spot keys, pixel positions, gene names) is read
+per request in ~25 ms; the count matrix is parsed on the first gene or derived
+column and kept **gene-major** (~21 MB for ~350 spots x ~15k genes), which a
+section can afford in a way 84k cells cannot.
+
+#### Serving a 3D dataset (Allen Brain Cell Atlas)
+
+Every source above serves a single plane. `lib/spatial-abc.mjs` serves the one
+genuinely **3D** dataset here: the Allen Brain Cell Atlas whole-mouse-brain
+MERFISH map — ~3.74M cells from 53 coronal sections, each affinely registered
+into the Allen CCFv3, so every cell has a real `(x, y, z)` in one anatomical
+frame.
+
+That registration is the whole difference. The HER2 sections above are also a
+series through a block, but they were never registered to each other — their
+extents disagree by up to ~850 µm in origin — so they cannot be stacked. These
+can.
+
+It also ships the **anatomy**: the CCF average template, resampled onto the same
+grid, is served as a `VolumeLayer` under the cloud, so a cluster can be located
+in the brain rather than floating in space.
+
+The sections sit on the template's own 200 µm grid, but not at every step of it:
+consecutive sections are 200 µm apart 41 times, 400 µm apart 9 times and 800 µm
+apart twice, over z 800–14 200 µm. So **23 of the volume's 76 planes hold no
+cells** — 15 interior gaps where the atlas has no section, plus 4 planes at each
+end where the template box extends past the sampled range. Scrubbing the 2D
+spatial view through those planes shows anatomy with no observations over it, and
+that is the data, not a dropped read: every populated plane holds exactly one
+section (never two), which is what a correctly aligned slab width looks like.
+
+```bash
+npm run fetch-abc        # ~2.0 GB from a public AWS Open Data bucket, resumable
+```
+
+Note the releases differ per artefact: the metadata tables were revised through
+`20231215`, the image volumes stop at `20230630`, and asking for a volume under
+the newer prefix is a 404.
+
+**Which coordinates, and how we know.** The deposit carries two frames per cell
+— `x/y/z_ccf` and `x/y/z_reconstructed` — and this source serves the
+**reconstructed** one, because that is the frame the reference volumes are on
+(their z pixdim is 0.2 mm, exactly the section spacing). Voxel index is then
+`coord / pixdim` per axis, with no offset, permutation or flip.
+
+That is measured, not reasoned. Every cell carries its own `parcellation_index`,
+and `resampled_annotation.nii.gz` holds the same labels per voxel, so a candidate
+alignment can be *scored against the data*:
+
+| candidate | agreement with the cells' own labels |
+|---|---|
+| reconstructed, axes as-is | **9000 / 9000** |
+| CCF, best of all 6 permutations × 8 flips | 126 / 9000 |
+
+The cost is that z is quantised to the 76 section planes instead of varying
+continuously as `z_ccf` does. That is the honest sampling — the cells really do
+come from serial sections — and exact registration to the anatomy is worth more
+than a continuous z synthesised by registering tilted sections.
+
+Bounding-box alignment would *not* have worked, which is why it is worth doing
+this properly: the cell cloud's extent and the template's differ by 5–14% per
+axis, because the cloud's extremes include stray segmentations and the template
+covers more than the sections do.
+
+No credentials and no signing — it is plain CSV over HTTPS. The fetch takes the
+two pre-joined "view" tables rather than joining `cell_metadata` +
+`ccf_coordinates` + the taxonomy ourselves: CSV is row-major, so a join would
+mean downloading ~820 MB and doing the work anyway, against 1.5 GB and no join.
+
+The first request transcodes the CSVs once into a compact binary cache under
+`abc/.cache/` (~20 s, ~1.9 GB peak heap, 8 s of it the coordinates and columns);
+every later request slices that. Two datasets come out of it:
+
+| id | observations |
+|---|---|
+| `abc.wholebrain` | 3,739,961 |
+| `abc.wholebrain.sub10` | 373,997 (deterministic 1-in-10 stride) |
+
+The subsample is the same cloud at the same extent, just thinner — 3.7M
+billboards is a lot to ask of integrated graphics. Both share one volume:
+striding thins the cloud, not the anatomy.
+
+The volume is downsampled 4× in the two 10 µm axes on the way into the cache.
+The source is 1100×1100×76 float32 = 351 MB, which is neither a sane response
+nor a sane 3D texture; at 40 µm it is 275×275×76 uint8 = 5.5 MB, still far finer
+than the 200 µm section spacing that actually limits the data. Each output voxel
+is a box-average of its 4×4 column rather than a picked sample, so the reduction
+does not alias fine anatomy into speckle.
+
+Two things are worth knowing about what it serves:
+
+- **Categoricals stop at ~96 values.** The 3D points layer has no per-point
+  RGBA: it maps a per-point *scalar* through a 256-entry LUT, so a palette is
+  encoded as one contiguous block of LUT entries per category. Measured against
+  napari-js, every K from 2..96 round-trips its colours exactly and K=97 is the
+  first that does not. So `class` (34), `neurotransmitter` (9),
+  `parcellation_division` (25) and `brain_section_label` (53) are served with
+  Allen's own deposited hex colours, and `subclass` (338),
+  `parcellation_structure` (~300), `supertype` (1,201) and `cluster` (5,322) are
+  deliberately not: they would render colours that are subtly wrong while the
+  legend claimed otherwise.
+- **Genes are 8, not 500.** The full panel ships only as `.h5ad` and there is no
+  HDF5 reader here. Eight marker genes (`Slc17a7`, `Slc32a1`, …) are published as
+  CSV and are joined on `cell_label` — a real hash join, since that file has
+  4,334,174 rows in a different order. Join on the label **verbatim**: about a
+  third of the labels on both sides carry a `-<n>` suffix that is part of the
+  identity, and stripping it collapses 3,739,961 cells into 2,648,427 keys.
+
+#### Pre-built bundles
+
+`$SPATIAL_DIR` still serves bundles in the same wire format, and a bundle **wins**
+when both sources offer the same id — so a deliberately-converted dataset can
+override a live one. `npm run make-spatial-demo` writes a synthetic
+Visium-geometry bundle plus its image, which needs no download and is what the
+smoke check runs against.
+
+#### Converting an AnnData `.h5ad` into a bundle
+
+`scripts/h5ad-to-spatial.py` writes a bundle from any `.h5ad` whose `X` is a CSC matrix. Python
+rather than Node, unlike its siblings: `.h5ad` is HDF5, and reading it from Node would mean a wasm
+HDF5 reader for a conversion that runs once, offline, and never at request time.
+
+```bash
+pip install h5py numpy
+curl -O https://exampledata.scverse.org/squidpy/seqfish.h5ad     # 31 MB, no auth
+python3 scripts/h5ad-to-spatial.py --h5ad seqfish.h5ad --out spatial/seqfish \
+    --id seqfish --name "Mouse embryo seqFISH · 19,416 cells (Lohoff et al)" \
+    --spatial-key spatial --embedding X_umap:UMAP \
+    --column celltype_mapped_refined:categorical --column Area:continuous
+```
+
+That one is worth having because it ships a **published** `X_umap` — 19,416 cells, 351 genes, 22
+cell types with the paper's own colours — so the embedding views can be built against real
+coordinates rather than something recomputed here.
+
+Two things to know about these coordinates. They are **normalized, not physical** (the extent is
+about 5 x 7 units), so the converter omits `micronsPerUnit` and no scale bar is drawn — a bar
+labelled in microns over unitless coordinates reads as a measurement and would be worse than none.
+And every embedding published with these datasets is **2D**; a 3D one has to be computed, which the
+manifest then marks `derived: true` so a reader knows it is not the published picture.
 
 ## Deploy (Cloud Run)
 

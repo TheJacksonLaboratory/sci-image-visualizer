@@ -9,6 +9,868 @@ file was added.
 
 ## [Unreleased]
 
+### Added
+
+- **A gene × class expression heatmap in the Distribution section.** Colouring the
+  map by one gene answers "where is this gene"; it cannot answer "which classes
+  express which genes", which is what a marker panel is read for. A new
+  **Heatmap** chart kind draws the mean expression of each picked gene within
+  each category of a grouping column — the standard mean-expression matrix
+  (scanpy's `matrixplot`), with its own gene multi-select for the rows since the
+  other kinds chart whatever single source the map is coloured by.
+
+  Offered whatever the map is coloured by, seeded with the gene already on
+  screen, and it picks a grouping itself: a heatmap with no columns is not a
+  chart, so "No grouping" is not a usable default here.
+
+  Three things it does so the panel is readable rather than merely plotted:
+
+  - **Z-scored per gene by default** (toggleable). Without it one
+    highly-expressed gene saturates the scale and the rest reads as blank — the
+    matrix would show which gene is loudest, not which class expresses what.
+    Z-scored, the scale is diverging and centred on zero, because the sign is
+    then the reading.
+  - **A cell with no measurement is skipped, not counted as zero**, and a group
+    with nothing measured is drawn as a **gap** rather than as a low mean.
+  - **Inside a small selection the columns become the cells themselves.** A
+    two-column class matrix is a poor answer for an ROI holding forty cells;
+    "what is in front of me" is the question there. Groups with too few cells
+    for a mean to mean anything are dropped.
+
+  Its colour scale is deliberately its own, not the map's `continuousColormap`:
+  a z-scored mean per group is a different quantity from a per-cell value, and
+  sharing one scale would invite reading a heatmap cell as a marker colour.
+
+- **Hover a marker to read its class; click to select that class.** A 34-entry
+  legend cannot be read back from a dot — several classes get similar colours, and
+  matching one to a swatch by eye is the task a tooltip removes. Hovering an
+  observation in either spatial mode now names it, over the column the name came
+  from; a click selects that whole class, exactly as clicking it in the legend
+  does, and clicking it again clears, so a click is always reversible.
+
+  It reports whatever the cloud is CURRENTLY coloured by, so it and the legend
+  cannot say different things: a categorical column gives the class, a gene or
+  numeric column gives the value with its unit. With no colour source it stays
+  silent — nothing is being said about the cells, so there is no cluster to name —
+  and a gene cannot be clicked to select, because no set of cells "is" a value.
+
+  Hit-testing runs at most once per animation frame against positions cached until
+  the scene or camera moves, so a pointermove does not cost a pass over 3.7M
+  observations. A drag is told from a click by how far the pointer travelled, and a
+  click is ignored while a region tool owns the pointer — placing a polygon vertex
+  is also a click that does not move.
+
+- **The continuous colour scale is pickable, from the library's own colormaps.**
+  Gene expression (and any numeric column) followed the *image's* colormap, which
+  is usually a grey ramp — so the scale was chosen for the tissue and inherited by
+  the measurement, with a Viridis fallback for the grey case. A `Colormap` picker
+  now sits under the colour bar in the `Spatial omics` panel, offering the
+  library's `COLORMAP_OPTIONS` with the same gradient swatches the image's picker
+  uses; clearing it goes back to following the image.
+
+  One setting drives the markers, the 2D gene map, the 3D gene map and the panel's
+  own colour bar, so none of them can disagree about what a colour means.
+
+- **The gene map works in 3D, as one field per imaged section.** Ticking `Gene map`
+  in `Spatial omics 3D` estimates the selected gene's expression over the whole
+  sectioned specimen and raymarches it: exactly the z planes that were imaged carry
+  that slide's own 2D field, and the gaps between sections stay empty. A stack of
+  measured fields at their true depth, rather than a smear.
+
+  `One map section at a time` restricts it to a single sheet — its own control,
+  separate from the cloud's, so all the sheets with one section's cells over them
+  and one sheet inside the whole cloud are both reachable.
+
+  `Volume rendering (interpolate along z)` smooths the sheets into a continuous
+  volume. That is a different object and the panel says so: the planes between the
+  sections then carry an ESTIMATE, smoothed from their neighbours' mean, and
+  nothing is drawn beyond the outermost section. It is the move the cluster density
+  volumes make, with the same caveat — a field may be interpolated between
+  sections, individual cells may not. The section restriction is ignored while
+  interpolating, because a volume built from one slide would smear it through the
+  specimen's whole depth and present that as an estimate.
+
+  Estimated on the reference volume's own lattice, coarsened in-plane but never
+  along z, so there is one plane per section and the field lands on the anatomy
+  with no offset to correct. The in-plane bandwidth is a physical length anchored
+  to the template's voxel, so a sheet and the 2D view of the same section are the
+  same field. Windowing, the log scale and the colormap are shared with the 2D map
+  and the markers, so the three cannot disagree about what a colour means.
+
+- **The 3D scene's three layers can be shown and hidden independently.** The
+  reference volume, the observation cloud and the cluster density volumes occupy
+  the same space, so any two of them hide each other — and 374k points drawn as a
+  stack of discs hide the density volumes almost completely, which is the one thing
+  the volumes exist to show. A **Show** group in the `Spatial omics 3D` panel now
+  carries `Reference volume` and `Observations` alongside the existing
+  `Cluster density volumes`, so every combination is reachable: the estimated
+  fields alone, the fields with the anatomy behind them, the anatomy on its own.
+
+  Visibility, not construction — the layers stay built, so a toggle is immediate
+  and never re-fetches a 100 MB template or re-runs a rasterisation. (The density
+  checkbox remains the exception: building six volumes is not free, so it still
+  gates the work.) Neither toggle re-frames the orbit camera.
+
+  **Volume opacity** is a slider of its own, separate from the markers' opacity:
+  the volume is a backdrop, so reading the cloud or a density field *through* the
+  anatomy means turning the anatomy down without touching the data drawn over it.
+  It reaches lower than the markers' slider (0.05) because a faint anatomical
+  hint is a useful setting for a backdrop and a useless one for a measurement.
+
+- **`One section at a time`** restricts the cloud to a single imaged section, with
+  a slider over the sections the dataset actually has (53 for the ABC 1-in-10
+  atlas). This is the view that answers whether the estimated field follows the
+  cells that were measured: one measured plane, drawn over the estimate, with the
+  volumes still readable between the sections. A selection highlight is restricted
+  to the same section, so it cannot float where its own cells are not drawn.
+
+  Sections come from the distinct z of the observations — every cell on a slide
+  shares that slide's registered z exactly, so no section-label column and no
+  binning is needed. A dataset whose z is continuous rather than sectioned is
+  reported as having no sections and is offered no section control, rather than
+  having one invented for it. `ISpatialControls.sampledSections()` exposes the
+  list; the scan is memoized, so the renderer and the panel share one pass.
+
+- **Gene map — a gene's expression drawn as a field under the cells.** A scatter
+  coloured by a gene answers "which cells express it"; the eye cannot integrate
+  thousands of small dots into a territory, so it does not answer "where is it
+  expressed". Ticking **Gene map** in the `Spatial omics` panel estimates that
+  gene's expression between the cells and draws it as an image layer beneath
+  them, so the region reads at a glance while the individual cells stay visible
+  on top.
+
+  The quantity is the kernel-weighted **mean per cell, not a sum**:
+  `mean(p) = Σᵢ w(p, xᵢ)·eᵢ / Σᵢ w(p, xᵢ)`. A sum conflates "many cells here"
+  with "high expression here" — a dense region would glow whatever its cells were
+  doing, which is the easiest way to misread a heat layer. Smoothing the numerator
+  and the denominator together (Nadaraya–Watson) spreads *where*, not *how much*.
+
+  The denominator is also what makes emptiness expressible. Where no cell was
+  measured the mean is undefined rather than zero, so the layer is **fully
+  transparent** there instead of painting the colormap's low end over unmeasured
+  tissue; alpha then ramps with local support up to the field's own median, so a
+  pixel backed by one distant cell reads as tentative and a properly sampled one
+  reads as solid. A cell with no measurement for the gene (`NaN`) is skipped, not
+  counted as absent.
+
+  **Smoothing** sets the kernel σ and **Map opacity** the layer's own opacity,
+  separate from the cells' — turn the cells down to read the field under them. The
+  contrast window and the log scale are shared with the point colouring, so the
+  field and the cells over it always agree. On a volume-backed dataset the field
+  is re-estimated per plane from that plane's cells. When the display colormap is
+  a grey ramp the field falls back to Viridis, because the tissue underneath it is
+  already grey.
+
+### Changed
+
+- **napari-js 0.12.0.** Its `acquireDevice` now asks for the adapter's own buffer
+  limits instead of accepting the WebGPU spec defaults, which lifts this viewer's
+  ceiling from 256 MiB per buffer and 128 MiB per storage binding to whatever the
+  hardware offers — 2 GB for both on the dev machine, verified from the live
+  device rather than assumed. That matters because exceeding the old limits failed
+  ASYNCHRONOUSLY: the allocation was dropped, the buffer read as zeros, and
+  nothing threw, so it looked like a coordinate bug. The release also adds a
+  `ShapesLayer` (polygon rings in 2D), which this viewer does not use yet — it is
+  the layer a future cell-boundary overlay would draw through.
+
+- **Spatial code moved out of `implementations/`.** That directory is for rendering
+  BACKENDS — a visualization library behind `IVisualizer`, each serving several
+  plot modes (OSD and Plotly both do Surface). Spatial omics is not a backend: it
+  is two plot modes, both rendered by the napari-js backend. The eight pure
+  domain modules now live in `src/lib/spatial/`, beside the `spatial-charts/` and
+  `spatial-controls/` that use them, and the data-port adapter and the wire format
+  it speaks moved to `src/lib/implementations/spatial-data-http/` — that one IS an
+  implementation, of `SPATIAL_DATA_PORT` rather than of a renderer.
+
+  Paths only: the package's exported symbols are unchanged, so nothing a host
+  imports from the entry point moves.
+
+- **Click-to-zoom is off in the spatial-omics modes.** napari's 2D controls zoom
+  2× about the cursor on a plain click (OSD style), which now collides with the
+  click that selects a class: one click would do two things, and the zoom would
+  then halve the pixel radius the next click hit-tests with, so clicking cells got
+  steadily harder. Zooming there is on the wheel, the zoom buttons and the zoom-box
+  tool. Every other mode keeps click-to-zoom.
+
+- **The gene picker is a searchable dropdown, not a free-text typeahead.** The old
+  control was an empty box: you had to already know a gene name to type one, and
+  nothing told you what the dataset carried. It is now a filterable `p-dropdown` —
+  the names are listed before anything is typed, and each keystroke narrows the
+  visible list (case-insensitive substring, so `17a7` finds `Slc17a7`).
+
+  Both dataset shapes keep the same control. A targeted panel inlines its names, so
+  the dropdown filters them locally with no round-trip; a whole-transcriptome
+  dataset does not ship its ~31k names, so there the query goes to
+  `searchFeatures` per keystroke and the answer becomes the option list. The empty
+  message says which case you are in ("Type to search genes" vs "No genes"), and a
+  remote lookup that fails says so without latching — the next keystroke clears it.
+
+- **The example ABC source inlines its gene names.** It served `features.count`
+  without `names`, alone among the sources (the ST source inlines below 2,000, the
+  Zarr source always does), which made the new dropdown open empty for a dataset
+  carrying all of 8 genes. Same 2,000-name limit as the ST source, so
+  whole-transcriptome data still stays out of the manifest.
+
+- **Every slider in the Spatial omics panel is the same size, in one column.** The
+  track used to start wherever the label happened to end, so its width varied row
+  to row and the controls read as a ragged edge. The label column is now exactly
+  half the dialog, putting every slider's left edge on the dialog's horizontal
+  centre, and the value readout has a fixed column so a long one ("27 of 53")
+  cannot steal width from its own track. The in-row dropdown follows the same
+  column, so the right edges line up too.
+
+### Fixed
+
+- **A region drawn in the 3D cloud selected the wrong cells while a section was
+  isolated.** The screen projection the ROI selection reads is indexed by
+  observation, but it was walked in DRAW order — and once the section control
+  shrank the drawn geometry the two stopped matching, so each projected point was
+  attributed to a different cell than the one it belonged to. Introduced by the
+  per-section drawing earlier in this branch; the projection now scatters each
+  drawn point back to its own observation and leaves the rest NaN, which every
+  consumer already skips.
+
+- **The gene map now recolours when the colour scale changes.** Both gene maps
+  cache their coloured output, and the cache key left out the colour scale — so a
+  colormap change recoloured the markers and left the field beneath them in the
+  previous colours. The spatial scene also never watched the display colormap at
+  all, which is why "follow the image" only ever took effect at whatever colormap
+  happened to be current when a layer was built.
+
+- **Changing the data no longer moves the 3D camera.** napari frames the orbit
+  camera on every 3D layer it is handed — `addVolume` calls `camera3d.frame()`,
+  `addPoints3D` writes the pivot and the dolly from the point bounds — so
+  recolouring by a class, picking a gene, drawing a gene map, isolating a section
+  and selecting a region each threw away whatever view you had orbited to. Worse,
+  where it landed depended on which layer was rebuilt, so stepping through
+  sections lurched to each section's own bounds in turn.
+
+  A scene's first layer still frames (the reference volume's box is the opening
+  view worth having); every later add restores the pose it found, captured and
+  restored synchronously around the add so a drag landing mid-rebuild cannot be
+  undone. The camera now changes only through the toolbar's camera tools and by
+  dragging or wheeling on the canvas. 2D was already correct — it fits once and
+  never again.
+
+
+## [0.4.0] — 2026-09-02
+
+The spatial-omics release. Two new plot modes:
+
+- **`Spatial omics`** — one marker per observation over the tissue image, coloured
+  by an annotation column or a gene, with ROI-linked distribution charts. For a
+  dataset whose 3D data is a registered volume, it draws the displayed plane's
+  anatomy with that plane's observations over it, and the toolbar's slice slider
+  scrubs depth.
+- **`Spatial omics 3D`** — the same observations as a point cloud under an orbit
+  camera, inside the dataset's reference volume, with screen-space region
+  selection and optional per-cluster **density volumes**.
+
+Both sit on a new spatial data plane (`SPATIAL_DATA_PORT`, `SpatialDataset`) that
+holds observations resident while column, feature and polygon values arrive one at
+a time. Volume and Isosurface now read the image stack and nothing else, and
+`IImageMetadata` gains **`mppZ`** so any stack that knows its slice spacing
+renders with true physical anisotropy.
+
+### Added
+
+- **A categorical colour source now charts, as counts per category.** The
+  distribution section charts whatever the map is coloured by, and a categorical
+  column used to get a notice instead of a chart — which for the ABC atlas is
+  every column anyone reaches for first (`class`, `subclass`, `neurotransmitter`,
+  `parcellation_division`, `brain_section_label`; the dataset serves exactly one
+  continuous column). A histogram of a category *code* would be meaningless, since
+  the codes are labels and not magnitudes — but "how many cells per class" is a
+  real question, and the one the legend implies without answering.
+
+  Horizontal bars, because taxonomy labels are long; sorted by count, because rank
+  is what the chart is read for; in the map's own category colours, so the chart
+  and the render cannot disagree. Ties keep category order, so bars do not
+  reshuffle between two datasets that happen to tie. Past 25 categories the tail
+  folds into one `other (N categories)` bar rather than being dropped — 338
+  subclasses do not fit a readable axis, but showing 25 of them silently would
+  misstate the whole. With a selection the bars show it against the total,
+  overlaid. The kind selector follows the subject: Counts for a categorical one,
+  Histogram / Violin / Box for a continuous one.
+
+### Fixed
+
+- **Expanding `Distribution` scrolls the chart into view.** The panel is taller
+  than the viewport once that section is open and the chart is its last row, so
+  expanding it drew a chart a few hundred pixels below the fold — the section read
+  as empty, on a panel that does scroll but says nothing about it.
+
+- **`subclass` (338 categories) is served by the example ABC source**, for the
+  density volumes. Cardinality decides which VIEWS a column can drive, not whether
+  it is worth serving, and the two had been conflated: the ceiling is a property of
+  the 3D points layer alone (a 256-entry LUT, measured to hold 96 categories
+  exactly), while the 2D markers carry per-point RGBA and a density volume is a
+  scalar field per cluster. Neither cares how many categories exist.
+
+  Subclass is the level most analysis is read at, so serving it makes the density
+  volumes answer a question worth asking. `supertype` (1,201) and `cluster` (5,274)
+  stay out on a different ground: no legend a human reads keeps that many apart.
+
+  The panel now says out loud when the active colouring is past what the cloud can
+  colour — how many categories, what the limit is, that the points are drawing
+  flat, and which views do render it. A console warning is not something anyone
+  sees. `SPATIAL_3D_MAX_CATEGORIES` moved to `spatial-encoding.ts` so the renderer
+  that enforces the limit and the panel that explains it cannot drift apart.
+
+  With many clusters the additive opacity budget is split (`0.9 / n`, so n fully
+  overlapping peaks stay inside the display range) rather than fixed per layer.
+  That only mitigates: a translucent raymarch integrates along the ray, and the six
+  LARGEST subclasses are non-neuronal types present throughout the brain, so they
+  overlap almost everywhere. At subclass level the readable view is one cluster at a
+  time — click a legend row, or select a region — which resolves individual nuclei
+  and layers cleanly. The multi-cluster view separates best at `class`.
+
+- **Cluster density volumes in the 3D spatial view** — a checkbox that raymarches
+  each cluster as a smooth density field alongside the point cloud, tinted with
+  its legend colour and blended additively, so overlapping territories both read
+  instead of the nearer one hiding the other.
+
+  This is what makes a serially sectioned dataset legible as an anatomical
+  distribution. The cloud shows measured cells and nothing else, but at 200 µm
+  section spacing the eye cannot integrate a stack of discs into a shape and every
+  gap reads as absence. A density field is a different object from a cell: an
+  estimate, defined between the imaged planes, drawn as a translucent cloud so it
+  cannot be taken for measurement — and the panel says so in as many words, with
+  the tip that lowering Opacity is what lets you see the fields under the cloud.
+
+  Individual cells are **never** interpolated, and that is deliberate. Consecutive
+  sections sample entirely different cells, so there is no correspondence to
+  interpolate along; synthesising positions would fabricate observations
+  indistinguishable from measured ones, which single-cell resolution asserts have a
+  measured transcriptome.
+
+  Two properties are what separate an honest estimate from a smear, and both are in
+  `spatial-density.ts`:
+
+  - the kernel is **anisotropic** — the default σ is 1.5 grid voxels per axis, and
+    the grid's z voxel *is* the section spacing, so σ along z clears one section gap
+    while staying tight in plane. An isotropic kernel leaves one disc per section:
+    a sampling artefact that looks like biology;
+  - the field is **coverage-normalised** along z (Nadaraya–Watson over the sampled
+    planes), or the 23 unimaged planes of the ABC atlas would read as genuinely
+    empty tissue rather than tissue nobody looked at. Amplification is capped at
+    2x, so the correction bridges interior gaps without inflating a trace of
+    smoothing leakage past the edge of the sampled range into a signal. Coverage
+    comes from the whole dataset, never the subset being drawn — a rare cluster is
+    sparse because it is rare.
+
+  Estimated on the reference volume's own grid, coarsened 2x (density is smooth by
+  construction, and an eighth of the voxels is an eighth of the work) with the
+  physical extent preserved exactly, so the fields sit inside the anatomy rather
+  than overhanging it. Without a reference volume the grid comes from the
+  observations, anchored at the coordinate origin so the same half-box offset
+  centres it. Measured cost on the ABC 1-in-10 subsample (373,997 cells,
+  138 x 138 x 38 grid): ~56 ms per field, ~290 ms for six — main-thread work, and no
+  worker needed at this size.
+
+  Follows the **selection** when there is one, so "draw a region, tick the box"
+  answers which clusters live there. Capped at the 6 largest clusters by cell
+  count: past a handful, additive translucent clouds stop being separable by eye.
+  With no categorical colouring it draws one total-density field, which is a real
+  question on its own. Because a field is scalar, this also sidesteps the
+  96-category LUT ceiling that keeps `subclass` (338), `supertype` (1201) and
+  `cluster` (5274) off the 3D points.
+
+- **The 2D `Spatial omics` view slices a 3D dataset.** Over a dataset whose image
+  is its registered volume, the view draws the displayed plane's anatomy with
+  *that plane's* observations over it, and the toolbar carries the Image view's
+  live slice **slider** — scrub, and the cells move with the section. Previously
+  the whole depth of the specimen piled onto whatever section was showing.
+
+  A plane is one voxel-slab thick (`voxelSize[2]`), which is the sampling the
+  volume itself has — for serial sections registered into a common frame, one
+  slab is one section. Coordinates reach the slice's pixel grid through the
+  affine the volume implies (`volumeImageRef`: divide out the voxel size, near
+  corner at the origin), shaped as a `SpatialImageRef` so the markers and the ROI
+  selection take the same transform they take for a dataset with a real
+  `imageRef`. Marker diameters have a **floor of 1.5 slice pixels**: the ABC
+  atlas serves 5 µm cell radii on a 40 µm/px template, so drawn strictly to scale
+  every cell would be a fifth of a pixel and the section would come up empty. The
+  point-size control scales up from there.
+
+  A region drawn in this view selects **that plane's** observations, not the
+  column of specimen behind them (`selectInRegions` takes the candidate indices).
+  The 3D cloud's screen-space lasso still cuts through the full depth, which is
+  the honest reading of a shape drawn against an orbit camera.
+
+- **A 3D omics dataset opens as its own image, sliceable.** A dataset with a
+  registered volume and no `imageRef` now publishes that volume AS the image —
+  one PNG per z plane — and opens the 2D Image view on it, with the toolbar's
+  slice bar scrubbing depth. The volume is a 3D image delivered in one file, so
+  this is what such a dataset actually has to show, and everything image-shaped
+  (contrast window, colormaps, region tools, the physical scale bar) works
+  because the volume genuinely *is* the image. The 3D cloud stays one menu pick
+  away.
+
+  Fixes a real symptom: with nothing published for such a dataset, the Image view
+  kept whatever slide was loaded before — open the synthetic Visium demo, then
+  the ABC atlas, and the Image mode showed the synthetic tissue under a
+  whole-brain cloud's controls.
+
+  It opens **mid-volume** (`depth >> 1`), not on slice 0: the end planes of an
+  anatomical volume are outside the specimen, and an empty first frame reads as a
+  failed load. `mppX`/`mppY` come from `voxelSize` x `micronsPerUnit`, and stay
+  null when `micronsPerUnit` is absent — the unit is then unknown, and a scale
+  bar drawn from a guess would read as a measurement. Keyed by dataset +
+  geometry, so a re-emitted dataset (a colour-column change does that) neither
+  refetches megabytes of voxels nor resets the user's scrub position. A volume
+  whose byte count contradicts its declared geometry is refused rather than
+  sliced into plausible-looking anatomy from the wrong depth.
+
+- **`Spatial omics 3D` plot mode** — spatial-omics observations as a 3D point
+  cloud under the orbit camera, alongside the existing 2D `Spatial omics` mode.
+  For assays whose observations carry a z: serial sections registered into a
+  common frame, or a genuinely volumetric assay. Gated by `requiresSpatial3d`, a
+  strictly narrower gate than `requiresSpatialData` — most spatial assays are a
+  single plane and have no z to render, so the mode stays hidden for them.
+
+  A dataset with no `imageRef` and no volume selects this mode automatically:
+  it has nothing to draw observations *over* — a cloud registered into an
+  anatomical frame has coordinates but no one section — so leaving the host on
+  an Image view would show an empty canvas. One that *does* carry a volume opens
+  on the Image view over that volume's slices instead (below).
+
+  Two constraints come from the 3D points layer having no per-point colour
+  channel, only a per-point scalar mapped through a 256-entry LUT:
+
+  - **Categorical colouring is exact up to 96 categories.** A palette is encoded
+    as one contiguous block of LUT entries per category. Measured against
+    napari-js, every K from 2..96 round-trips its colours exactly and K=97 is
+    the first that does not. Above the ceiling the renderer draws flat and warns,
+    rather than drawing colours that are subtly wrong next to a confident legend.
+  - **A selection cannot be an alpha ramp.** The layer has one opacity for all
+    points, so the selected subset becomes its own layer at full opacity while
+    the parent cloud drops to the muted level — reading the way the 2D
+    highlight-vs-mute does. Point size is in *screen* pixels here, not data
+    units, which is the layer's unit.
+
+- **A reference volume under the 3D cloud.** `SpatialDataset.volume` +
+  `SpatialDataPort.getVolume()` describe a 3D scalar field registered to the
+  observation coordinates — an atlas template, or an image z-stack — which the
+  3D mode draws as a translucent `VolumeLayer` beneath the points. Without it a
+  cloud floats in empty space and "where in the brain is this cluster" has no
+  answer.
+
+  napari-js centres a volume's box on the world origin and `VolumeLayer` has no
+  translate, so the contract puts the volume's near corner at the coordinate
+  origin and the renderer offsets the *points* by half the box. Both the cloud
+  and the selected-subset layer take that offset; a volume that fails to load
+  costs the backdrop, not the data.
+
+- **Observations survived the image they were drawn over.** napari's image view
+  CLEARS the whole layer list on every render, so each slice re-render took the
+  marker layer with it — a scrubbed plane came up with no observations on it at
+  all. The markers are now rebuilt *after* the render rather than before it (drawn
+  first, they were wiped by the very image meant to sit under them), and a cached
+  layer handle that is no longer in the scene is treated as absent instead of
+  mutated in place, which also covers a re-render from a contrast or colormap
+  change. The unit stub now tracks its layer list for real, since whether a layer
+  is still mounted is exactly what these tests have to see.
+
+- **Volume and Isosurface read the image stack, and only the image stack.** They
+  had grown a second voxel source — the spatial dataset's registered volume,
+  fetched through `SPATIAL_DATA_PORT` and preferred over the loaded image. That is
+  gone: a 3D omics dataset reaches these modes because its volume is *published as*
+  a grayscale z-stack image, so there is one voxel path, and the plot-type gates go
+  back to being about the loaded image and nothing else.
+
+  What the removed path did carry was the volume's real voxel size, and losing that
+  would render 40 x 40 x 200 µm anatomy as a cube-aspect brick. So `IImageMetadata`
+  gains **`mppZ`** — the spacing between slices, the z counterpart of `mppX`/`mppY`
+  — and a stack declaring all three gets its true physical extent as the world box.
+  A stack without it (a WSI z-series, which has no slice spacing to report) keeps
+  the resolution-invariant reference box, which is shape-only. Any z-stack that
+  knows its spacing benefits, not just a spatial volume.
+
+  The axis labels are measured from the image's own extent rather than from the
+  world box, which is what they always meant: reading a pixel count off a box that
+  is already in µm and multiplying by mpp scaled it twice, so 11 mm of mouse brain
+  was labelled `44.0 cm`. Z is physical too when `mppZ` is known (`Z · 1.5 cm`
+  instead of `Z · 76 px`), and still reads in slices when it is not — an unstated
+  thickness must not become a measurement.
+
+- **Region tools in the 3D cloud's toolbar.** They were hidden, because the
+  toolbar gates them on `isHeatmap`, which means "2D view" and is false for any
+  3D descriptor — so the screen-space overlay was installed with no way to arm
+  it. Gated on a separate `is3dRegions` input instead, leaving `isHeatmap` to go
+  on driving the zoom tools and the 3D camera controls. The brush and the open
+  polyline stay hidden there: the brush paints in image pixels and there is no
+  raster to sample, and an open polyline is a profile tool, not a closed region a
+  selection can test against.
+
+- **Scale bar in the 3D cloud**, measured at the orbit pivot — a perspective
+  camera has no single scale, so a bar can only be true at one depth, and the
+  pivot is what the camera is framing. Needs `SpatialDataset.micronsPerUnit`,
+  new: the 2D path reads `imageRef.mppX` because its coordinates are image
+  pixels, but a cloud has no image and must state its own unit. Absent means
+  unknown, and then no bar is drawn — one labelled in microns over pixel-space
+  coordinates would read as a measurement.
+
+- **Region selection in 3D.** The existing ROI tools — rectangle, polygon,
+  freehand — work on the cloud, by handing `NapariRegionOverlay` a screen-space
+  viewer whose transforms are identity. The drawn shape is a lasso in canvas
+  pixels, so every tool works with no 3D-specific drawing code. Selection then
+  projects each observation through the camera's view-projection and tests it in
+  that same screen space (`selectInRegionsProjected`).
+
+  A screen-space lasso cuts through the cloud's **full depth**, not a slab at a
+  chosen z — inherent to drawing on a flat screen, and what every orbit-camera
+  point picker does. The panel says so. An orbit clears the drawn outline, since
+  a screen-space shape stops meaning anything once the camera moves; the
+  selection it produced is kept, and stays highlighted from every angle.
+
+- **Allen Brain Cell Atlas source in the example server** (`lib/spatial-abc.mjs`,
+  `lib/nifti.mjs`, `npm run fetch-abc`) — the whole-mouse-brain MERFISH map,
+  3,739,961 cells from 53 coronal sections registered into a common frame, plus
+  the CCF average template as the anatomical backdrop. Plain CSV and NIfTI from a
+  public AWS Open Data bucket, transcoded once into a binary cache (~20 s).
+  Served with Allen's own deposited category colours, so the render matches the
+  atlas figures.
+
+  Serves the **reconstructed** coordinate frame, not the CCF one, because that is
+  the frame the reference volumes are on. Established by scoring candidate
+  alignments against each cell's own `parcellation_index`: reconstructed with
+  axes as-is agrees for 9000 of 9000 sampled cells, while the best of the CCF
+  frame's 48 permutation/flip combinations manages 126. Bounding-box alignment
+  would not have done — the cloud's extent and the template's differ by 5–14% per
+  axis. See the example server's README for what it does not serve: categoricals
+  above the LUT ceiling, and the 492 genes that ship only as h5ad.
+
+- **Spatial-omics data plane** — contracts for spatial-omics datasets (Visium
+  spots, segmented cells) so the library can hold N observations positioned in a
+  tissue image's pixel space, each with categorical and continuous annotations
+  and a lazily-fetched feature (gene) matrix. This is the data layer only; the
+  plot mode that renders it is designed but not built
+  ([docs/spatial-omics-plot-mode-design.md](docs/spatial-omics-plot-mode-design.md)).
+
+  - `SpatialDataset` and friends (`contracts/spatial-dataset.contract.ts`):
+    struct-of-arrays observations, `CategoricalColumnMeta` /
+    `ContinuousColumnMeta` descriptors, `SpatialFeatureMeta`, flat-ring
+    `SpatialPolygons`, and a `SpatialImageRef` affine. Typed arrays rather than
+    object-per-cell because datasets run 10³ (Visium) to 10⁶ (Xenium/CosMx)
+    observations.
+  - `SPATIAL_DATA_PORT` / `SpatialDataPort` (`contracts/ports/spatial-data.port.ts`):
+    the host-supplied accessor, mirroring `TILE_ACCESS_PORT`. Metadata is eager,
+    vectors are lazy — a Visium table is ~31k genes wide (~800 MB dense), so
+    loading a dataset can never mean loading its matrix.
+  - `SpatialDataHttpService` — an **optional** reference adapter (`@Injectable()`
+    with no `providedIn`, like `CellposeSegmenterService`) for the wire format
+    the bundled example server speaks. Requests go through `HttpClient` so host
+    interceptors apply; loaded vectors are cached with a bounded LRU and
+    concurrent requests for the same vector are coalesced.
+  - `spatial-wire.ts` — the wire format and its pure decoders, exported so a
+    host can reuse them over its own transport.
+  - `PlotDataSource` gains `'spatial'` alongside `'image'` and `'regions'`.
+  - `PlotTypeDescriptor.requiresSpatialData` — a declarative selector gate, in the
+    same shape as `requiresStack` and `requiresGrayscale`: a plot type that
+    renders a `SpatialDataset` is offered **only while one is published** on
+    `SPATIAL_DATA_PORT`, and is withdrawn (falling back to Image) when the
+    dataset is cleared. `VisualizerComponent` injects the port `@Optional()`, so
+    a host that never provides it simply never sees the spatial modes. No
+    shipped plot type sets the flag yet — the rendering mode is the next phase.
+
+- **Spatial-omics plot mode — renderer** (`PlotType.SPATIAL_OMICS`). Draws one
+  marker per observation over the tissue image through napari-js, coloured by an
+  annotation column or a gene. Gated by `requiresSpatialData`, so it appears in
+  the selector only while a dataset is loaded.
+
+  - `spatial-encoding.ts` — backend-neutral, pure encodings, exported for reuse:
+    `encodeCategorical` / `encodeContinuous` (flat `Float32Array` RGBA),
+    `resolveCategoryColors` (the column's authored palette first, then a
+    colour-blind-safe default, then a deterministic name hash),
+    `contrastWindow` (percentile clipping so outliers don't flatten the ramp),
+    `markerDiameters` (radius → the diameter napari sizes markers by), and
+    `lutFor`. Log scaling is applied for count-like columns, per the CosMx
+    guidance; `NaN` and unassigned categories render as muted grey rather than
+    as the ramp floor or a real category.
+  - `SpatialViewState` on `VisualizerStore` (`colorBy`, `pointScale`, `opacity`,
+    `logScale`, `percentileClip`) — editing it rebuilds the markers without
+    remounting the scene, the same way colormap edits recolor an image.
+  - The dataset's `imageRef` affine is applied as the layer's `scale`/`translate`,
+    so spot coordinates recorded in one frame land correctly on an image served
+    in another.
+  - An out-of-order guard: a gene fetch is a round-trip, so a superseded colour
+    change cannot attach its result to a newer scene, and a failed fetch falls
+    back to a flat colour rather than blanking the view.
+
+  Not yet built: legend and gene-picker UI, hover tooltips, selection, the linked
+  1D charts, and background subsampling. When napari-js is unavailable the
+  fallback renders the tissue image **without** the observation layer.
+
+- The browser example groups its discovered spatial-omics datasets into a
+  **`spatial-omics` folder**, alongside the bundled micro-CT series: with 41
+  datasets the root gallery was unreadable flat. Folders **nest** one level, so a
+  source with several sections gets its own — the HER2 deposition's 36 sections
+  would otherwise bury the two Visium and two Visium HD datasets beside them.
+  Grouping is by dataset-id prefix (`her2.A1` → `her2`), and a source with only a
+  couple stays a direct tile rather than costing a click for nothing.
+
+  `Folder` holds an image series, a set of spatial datasets, or sub-folders, and
+  navigation became a breadcrumb path since "up one level" and "back to the root"
+  are now different actions.
+
+  `folders` is assigned once when discovery completes rather than derived in a
+  getter: a getter returned a new `Folder` object every change-detection pass,
+  and because `*ngFor` tracks by identity that folder's button was destroyed and
+  recreated between mousedown and click — so clicking it did nothing, while the
+  micro-CT tile kept working precisely because its object was stable.
+
+- **Legacy Spatial Transcriptomics datasets are served live too**
+  (`lib/spatial-st.mjs`), from `$ST_DIR` (default `./st`). Pre-Visium ST is a
+  different shape from a SpatialData store — gzipped TSV count matrices, separate
+  HE JPEGs, and spot-selection tables joining array coordinates to image pixels,
+  with no Zarr, no AnnData and no coordinate transformations — so it is a third
+  source alongside Zarr stores and pre-built bundles rather than a branch inside
+  one.
+
+  Verified against the Andersson et al. HER2+ breast cancer deposition
+  ([Zenodo 4751624](https://zenodo.org/records/4751624)): **36 sections**, 8 of
+  them carrying the **pathologist's annotation** (`invasive cancer`,
+  `cancer in situ`, `connective tissue`, `adipose tissue`, `immune infiltrate`,
+  `undetermined`) — the richest categorical any of the demo datasets has, and a
+  real one rather than derived. Rendering section A1's spots over its HE image
+  shows the annotation tracking the histology and `ERBB2` high across the tumour,
+  low in the fat.
+
+  Two supporting pieces:
+  - `lib/zip-aes.mjs` — a dependency-free ZIP reader **including WinZip-AES**
+    (method 99). These archives are AES-encrypted with the password published in
+    the authors' README; macOS's `unzip` refuses them ("need PK compat. v5.1")
+    and 7-Zip is not always installed, but Node already has PBKDF2-HMAC-SHA1,
+    AES and HMAC. It reads by byte range, so pulling one JPEG out of the 592 MB
+    `images.zip` does not load the archive.
+  - Passwords live in a per-bundle `config.json` sidecar, not in source: they are
+    the depositor's to publish, not ours to embed.
+
+  A section's cheap index (spot keys, pixel positions, gene names) is read per
+  request in ~25 ms; the count matrix is parsed on the first gene or derived
+  column and kept **gene-major** (~21 MB per section), which is affordable here
+  in a way it is not for 84k cells.
+
+- **The example server now reads SpatialData Zarr stores LIVE** (`lib/spatial-zarr.mjs`).
+  Drop or symlink a `*.zarr` store into `$ZARR_DIR` (default `./stores`) and every
+  `(store, table, region)` triple appears on `/spatial/datasets` — no build step,
+  no intermediate bundle. The offline converter script is removed; `$SPATIAL_DIR`
+  bundles still work and win on an id clash, so a deliberately-converted dataset
+  can override a live one.
+
+  Zero-config discovery surfaces more than a converter run did: the Visium store
+  yields **both** of its sections, and the Visium HD store both its cell and
+  nucleus segmentations (84,031 and 83,153 observations).
+
+  The tissue image is materialised into `$COG_DIR` on first request (0.1–0.8 s),
+  so OSD's tile path is unchanged and only the dataset you open pays. Derived
+  columns are advertised in the manifest and computed on first request, so
+  opening a dataset does not pay to cluster it. An optional
+  `stores/<name>.json` sidecar carries only what the store cannot state —
+  `gridUm`, the assay's bin pitch in µm, without which a segmentation has no
+  µm/px and no scale bar.
+
+  **What it costs, measured:** the matrix is CSR over observations, so a gene's
+  column is scattered across every row. The first gene request reads X (0.4–0.5 s)
+  and keeps it resident (227 MB Visium / 331 MB HD); later genes are 13–40 ms.
+  It is deliberately not transposed to gene-major in memory — that would double
+  residency for tens of milliseconds saved. A production server should serve a
+  pre-transposed file, which is the same argument for keeping ingest out of the
+  browser.
+
+  `SpatialDataHttpService` gains `readManifest(id)`, so a host can inspect what a
+  server offers while building a picker instead of loading each dataset to find
+  out. The browser example now discovers its spatial gallery entries this way
+  rather than hardcoding them.
+
+- **Fixed: the example gallery skipped datasets with no tissue image.** It
+  required an `imageRef` to list a dataset at all, which excluded every dataset
+  that has no single reference plane.
+
+- **Fixed: the point-size and opacity sliders rendered as bare handles** — small
+  circles that read as radio buttons. PrimeNG puts `styleClass` on its *inner*
+  `.p-slider` div, so styling that left the `<p-slider>` HOST element at its
+  default `display: inline`, where it ignores flex sizing and collapses; only the
+  round handle was left to see. The hosts are now sized by element selector and
+  the track stretched to fill them, which is what `channel-histogram.component.scss`
+  already does — and says so in a comment I should have followed. Same fix for the
+  distribution panel's group dropdown.
+
+- **Fixed: the Opacity control did nothing in the spatial mode's default state.**
+  With no colour source and no selection the flat marker colour was a constant
+  RGBA tuple, so `view.opacity` was dropped — and that is the state the mode
+  opens in, before a column or gene is picked. It now falls back to a broadcast
+  tuple only when the colour genuinely is uniform (opacity 1, no selection) and
+  goes per-point otherwise, so a flat 84k-observation view still does not
+  allocate 84k tuples.
+
+- **Display-only changes now update the marker layer in place.** Point size,
+  colour, opacity and selection previously dropped and re-added the layer, which
+  rebuilt every position to change one number — 84k of them on the Visium HD
+  dataset. They now assign `size`/`faceColor` on the existing layer, whose
+  setters bump napari-js's `dataVersion` and trigger the redraw; the layer is
+  only rebuilt when the dataset itself changes.
+
+- **Linked distribution charts** — `<spatial-charts>` (`SpatialChartsComponent`):
+  **histogram**, **violin** and **box** over the values the map is coloured by,
+  embedded in the `<spatial-controls>` panel below the colour controls rather
+  than owning a dialog of its own, in a **collapsible** section (collapsed by
+  default — the panel's primary job is the colour controls, and the chart roughly
+  doubles its height; the collapsed header names what it would chart). The two are one workflow — change the colour
+  source, watch the distribution move — and splitting them across two floating
+  windows made that link harder to see, not easier. It remains a separate
+  component, so the pure trace builders and its own tests keep their boundary,
+  and takes an `active` input because the enclosing dialog creates and destroys
+  its content.
+
+  The chart's subject is the map's colour source rather than an independent
+  picker, so the two cannot disagree about what is being shown. It follows the
+  selection: the histogram overlays *Selected* on the full distribution (that
+  comparison is the point of linking them), while violin and box narrow to it —
+  a violin per category per selection state is unreadable. Violin and box split
+  by any categorical column, in the same colours the map uses.
+
+  `implementations/plotly/omics-trace-builders.ts` holds the trace building as
+  pure functions, deliberately separate from `plotly-trace-builders.ts`: that
+  module's `TraceBuildInput` is image-matrix shaped (`frames`, `ratios`,
+  `trueImageSize`) and cannot express "one value per observation". It drops
+  non-finite values, clamps negatives before `log1p`, skips `NO_CATEGORY` rather
+  than misbucketing it, omits empty categories (an empty violin reads as data),
+  and thins samples past 20k points — Plotly renders every point of a violin, and
+  84k cells per category is seconds of layout.
+
+  **Violin needed no bundling work**: `plotly.js-dist-min` is the full
+  distribution and already carries `violin` and `box`. `ISpatialControls` gains
+  `continuousValues`, `categoricalView` and `categoricalColumns`.
+
+- **Spatial-omics selection.** `SpatialSelectionStore` holds the selected
+  observations; `spatial-selection.ts` computes them. Selecting is driven from
+  the **existing ROI tools** — rectangle, polygon, freehand, magic wand, brush —
+  so no new canvas interaction was added: the controls panel's *Select from ROIs*
+  button tests every observation against the union of the drawn regions. Legend
+  rows are also clickable (click again to clear).
+
+  Unselected observations render muted while a selection is active, and nothing
+  is muted when it is empty — the CosMx highlight-vs-mute rule, applied to a flat
+  colouring as well, so selecting is visible before a colour source is chosen.
+
+  The geometry is a ray cast with a bounding-box pre-reject, honours polygon
+  holes (a point inside the exterior and inside a hole is outside), ignores
+  shapes that enclose no area (open polylines, profile-line ROIs, degenerate
+  rectangles), and applies the dataset's `imageRef` affine so the test happens in
+  the same world space the regions were drawn in. Changing dataset drops the
+  selection, since the masks are index-based.
+
+- **`<spatial-controls>` panel** (`SpatialControlsComponent`) — a non-modal,
+  resizable, draggable dialog for the spatial mode, opened from a toolbar button
+  that appears only while that mode is active. Offers a colour-by-column
+  dropdown, a gene typeahead over the feature panel, a clickable legend for
+  categorical colourings, a colour bar for continuous ones, selection from the
+  drawn ROIs, and point-size / opacity / log-scale / outlier-clip controls. Column and gene selection are mutually
+  exclusive, so what drives the colours is never ambiguous.
+
+  Depends only on `ISpatialControls`, reached through the `VISUALIZER` contract
+  token — never a concrete backend — mirroring `ChannelHistogramComponent`. With
+  no `SPATIAL_DATA_PORT` bound it renders an explanatory empty state rather than
+  dead controls. Legend swatches and the colour bar are built with the same
+  functions the renderer uses (`resolveCategoryColors`, `lutFor`), so the key
+  cannot drift from what is on screen.
+
+- **`ISpatialControls` via `IVisualizer.getSpatialControls()`** — the host-facing
+  surface for the spatial mode: colour by a column or a gene, read/patch the view
+  state, search features, and resolve legend swatches. Returns null unless a
+  `SPATIAL_DATA_PORT` is bound. Implemented on `RoutingVisualizerService` rather
+  than a backend, because the state is backend-neutral (it lives in the shared
+  store, like the colormap) — so it works before any backend has mounted and
+  survives a plot-type switch. Legend colours resolve through the same function
+  the renderer uses, so a swatch cannot disagree with the screen.
+
+- **Example server: spatial-omics endpoints** (`examples/tile-server`) —
+  `/spatial/datasets`, `/spatial/:id/{manifest,coords,radius,ids,polygons}`,
+  `/spatial/:id/column/:name`, `/spatial/:id/feature/:name` and
+  `/spatial/:id/features`. Vectors are served as raw little-endian bytes. The
+  feature matrix is stored **gene-major**, so serving one gene is a contiguous
+  ranged read rather than a scan of an observation-major (CSR) matrix.
+  - `npm run make-spatial-demo` generates a synthetic Visium-geometry dataset
+    (~2k spots on the real 100 µm hex grid, 12 mouse-brain marker genes) **and a
+    matching tissue-image pyramid**, so the endpoints and the viewer work with no
+    download and no Python. The image and the `region` column come from the same
+    region function, so they agree by construction; spot coordinates stay in the
+    full-resolution frame while the image is a ~0.31 downscale, giving the demo a
+    real `imageRef` affine rather than a trivial 1:1.
+  - `npm run smoke-spatial` boots the server and decodes every route end to end,
+    including a numeric check that every spot lands inside the image under that
+    affine.
+  - The browser example gains a **Spatial omics demo** gallery entry that loads
+    the image and the dataset together; selecting any other image clears the
+    dataset, which withdraws the plot type.
+  - `npm run make-spatial` converts a real **SpatialData Zarr store** into the
+    same bundle plus a tissue pyramid — in plain Node, with no Python and no
+    Zarr/Parquet libraries. These stores use Zarr v3 with `bytes` + `zstd`
+    codecs and `vlen-utf8` strings, and Node 24 ships zstd in `node:zlib`, so
+    `lib/zarr3.mjs` (a small read-only reader that throws by name on an
+    unsupported codec) is enough.
+
+    Verified against the scverse `visium_spatialdata_0.7.1` mouse brain: 2,987
+    spots for section ST8059048, the 2,000 most-expressed of 31,053 genes
+    written gene-major, and the H&E hires image at 3.96 µm/px. It filters the
+    **multi-sample** table by region before index-aligning anything, takes the
+    full-res → hires affine from the **spot shapes** transform (skipping it puts
+    every spot ~8.7× too far out), derives µm/px by using Visium's 100 µm pitch
+    as a ruler, and derives `total_counts` / `n_genes_by_counts` — a raw table
+    has only `array_row`/`array_col`/`in_tissue`/`spot_id`, nothing worth
+    colouring by.
+  - **Segmentation stores** (Visium HD, and by extension Xenium) are supported
+    alongside spot stores. These keep one table per segmentation and have an
+    **empty `obsm`**, so centroids, per-cell radii and the outlines all come from
+    the shapes **GeoParquet** — read via `hyparquet` (example-server dependency
+    only; the library gains nothing) and decoded from GeoJSON in
+    `lib/geoparquet.mjs`. Rows are joined to the table by id, not by position.
+
+    Verified against the Visium HD 4.0.1 mouse brain: 84,031 cells, all joined,
+    1.8M outline vertices served on `/polygons`, per-cell equivalent-circle radii
+    from the outline areas, and a derived `area` column. `--grid-um 2` turns the
+    outlines into a ruler — a segmentation traced on a binned assay steps one bin
+    at a time, so the modal vertex step (7.3 px here) is one 2 µm bin, giving
+    0.973 µm/px for the image and a correct scale bar.
+
+    Two spec details this shook out: Zarr v3 **omits a chunk that is entirely
+    `fill_value`** (a single-region table has no `region/codes` chunk, which the
+    reader previously treated as an error), and the pyramid level is **named by
+    the multiscales metadata** — `0` for Visium, `s0` for HD.
+  - **Derived `cluster` column** (`--cluster K`, default 8) — k-means on
+    log1p-normalised expression, because the sandbox stores are raw: their only
+    categorical is `in_tissue`, which is constant once out-of-tissue rows are
+    filtered, so there was nothing to put in a legend, split a violin by, or
+    select a category of.
+
+    Normalising each observation to a common total before `log1p` is what makes
+    this anatomy rather than an artefact — without it the clusters follow
+    sequencing depth and come out as concentric count bands. Verified on both
+    datasets: the Visium HD run resolves cortex, a layer tracing the cortical
+    surface and hippocampal pyramidal layer, a white-matter band and the
+    thalamus. Fits centroids on an even subsample (84k cells x k x dims is
+    minutes in plain JS otherwise), uses the 50 most variable genes, seeds with
+    k-means++ from a fixed seed so rebuilds are identical, and relabels
+    largest-first for stable legends. 84k cells cluster in 0.6 s.
+
+    It is a **demo-data convenience, not an analysis tool**: the column carries a
+    `description` saying so, and `<spatial-controls>` now surfaces column
+    descriptions so a derived column cannot read as measured data.
+  - Columns that carry no encoding are dropped: identifiers (a distinct integer
+    per observation, e.g. `spot_id`) and columns constant after filtering
+    (`in_tissue`).
+  - `--max-matrix-mb` (default 64) caps the gene-major matrix, which is
+    `genes x observations x 4` bytes — 84k cells at 2,000 genes would be 672 MB,
+    so it is reduced to 190 genes and says so.
+  - The server's manifest cache is now **mtime-aware**: re-running the converter
+    while the server is up used to serve the previous manifest until a restart.
+  - `scripts/make-pyramid.mjs` + `lib/pyramid.mjs` turn any sharp-readable image
+    into the tiled pyramid the server serves — the no-`vips` counterpart to
+    `make-cog.mjs`.
+
+
 ## [0.3.3] — 2026-08-31
 
 Backfilled: 0.3.3 was published without an entry.
@@ -643,7 +1505,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.0...v0.3.1

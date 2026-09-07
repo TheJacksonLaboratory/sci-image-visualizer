@@ -14,8 +14,15 @@ const HANDLE_HIT_PX = 9;
 /** Rendered handle size (screen px). */
 const HANDLE_SIZE = 7;
 
-/** The slice of the napari Viewer the overlay needs (coord transforms + control gating). */
-interface OverlayViewer {
+/**
+ * The slice of the napari Viewer the overlay needs (coord transforms + control gating).
+ *
+ * Exported because the 3D spatial mode supplies a SCREEN-SPACE implementation of it: there the
+ * drawn shape is a lasso in canvas pixels, not a rectangle in image space, so "world" is the
+ * canvas itself and both transforms collapse to identity. That lets the 3D view reuse this whole
+ * overlay — every tool, the handles, the store round-trip — with no 3D-specific drawing code.
+ */
+export interface OverlayViewer {
   canvasToWorld(clientX: number, clientY: number): [number, number];
   worldToCanvas(worldX: number, worldY: number): [number, number];
   setControlsEnabled(enabled: boolean): void;
@@ -99,6 +106,18 @@ export class NapariRegionOverlay implements IRegionOverlay {
   }
 
   // ── IRegionOverlay ────────────────────────────────────────────────────────
+  /**
+   * Whether a region tool currently owns the pointer.
+   *
+   * Exposed so the spatial views can tell a bare click on the cloud (select the
+   * class under the cursor) from a click that belongs to a drawing gesture —
+   * placing a polygon vertex is also a click that does not move, and it must not
+   * change the selection behind the shape being drawn.
+   */
+  get toolActive(): boolean {
+    return this.mode !== 'none';
+  }
+
   setMode(mode: RegionToolMode): void {
     this.mode = mode;
     this.draftRect = null;

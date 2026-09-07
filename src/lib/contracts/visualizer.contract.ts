@@ -8,7 +8,9 @@ import { PlotType, PlotTypeDescriptor } from './plot-type';
 import { ViewerCapabilities } from './capabilities.contract';
 import { IRegionOverlay } from './region-overlay.contract';
 import { IHistogram } from './channel-histogram-api.contract';
-import { ColormapNode, IWandOptions, IBrushOptions } from './display-types';
+import { ColormapNode, IWandOptions, IBrushOptions, SpatialViewState, SpatialColorBy } from './display-types';
+import { SpatialDataset } from './spatial-dataset.contract';
+import { SpatialSelectionMask } from '../spatial/spatial-selection';
 
 /**
  * Backend-neutral visualization contract. Plotly is one implementation;
@@ -289,6 +291,88 @@ export interface IIntensityControls {
   addProfileLine(): Region | null;
 }
 
+/** A categorical column resolved for charting: labels, codes and map colours. */
+export interface SpatialCategoricalView {
+  name: string;
+  categories: string[];
+  /** `#rrggbb` per category, index-aligned with {@link categories}. */
+  colors: string[];
+  /** Per-observation category index, or `NO_CATEGORY`. */
+  codes: Uint16Array;
+}
+
+/**
+ * Controls for the SPATIAL_OMICS plot type: what the observation markers are
+ * coloured by, and how they are drawn. Capability-gated like
+ * {@link IIsosurfaceControls} — `getSpatialControls()` returns null unless a
+ * host has bound `SPATIAL_DATA_PORT`.
+ *
+ * The view state is backend-neutral (it lives in the shared store, like the
+ * colormap), so these controls work whichever backend is on screen.
+ */
+export interface ISpatialControls {
+  /** The dataset being visualized, or null. Drives the column/gene pickers and
+   *  the legend. */
+  getDataset$(): Observable<SpatialDataset | null>;
+  /** Current display state (colour source, point scale, opacity, scaling). */
+  getViewState$(): Observable<SpatialViewState>;
+  /** Synchronous read, for seeding a control's initial value. */
+  viewState(): SpatialViewState;
+  /** Patch the display state; the markers rebuild without remounting the scene. */
+  setViewState(partial: Partial<SpatialViewState>): void;
+  /** Colour by an annotation column. Rejects for an unknown column. */
+  colorByColumn(name: string): void;
+  /** Colour by a gene; its vector is fetched on demand. */
+  colorByFeature(name: string): void;
+  /** Clear the colour source — every observation renders in one neutral colour. */
+  clearColorBy(): void;
+  /** Typeahead over feature names, for datasets too wide to inline the list. */
+  searchFeatures(query: string, limit?: number): Promise<string[]>;
+  /** Per-category display colours for a categorical column, index-aligned with
+   *  its `categories` — the legend's swatches, resolved the same way the
+   *  renderer resolves them so the two cannot disagree. */
+  categoryColors(name: string): Promise<string[]>;
+
+  // ── values, for the 1-D charts ────────────────────────────────────────
+  /**
+   * The values behind a colour source, index-aligned with the observations.
+   * Rejects for a categorical column — there is nothing continuous to chart.
+   */
+  continuousValues(source: SpatialColorBy): Promise<Float32Array>;
+  /**
+   * A categorical column's categories, per-observation codes and display
+   * colours — everything a grouped violin/box needs, with the colours resolved
+   * the same way the map resolves them.
+   */
+  categoricalView(column: string): Promise<SpatialCategoricalView>;
+  /** Names of the categorical columns available to group by. */
+  categoricalColumns(): string[];
+  /**
+   * The z positions of the sections the dataset was imaged at, ascending — or
+   * null when its z is continuous rather than sectioned (so there are no sections
+   * to offer) or when there is no dataset.
+   *
+   * Lets a panel offer "one section at a time" for the 3D cloud only where that
+   * means something, and label the chosen one. Scanned once per dataset.
+   */
+  sampledSections(): Float32Array | null;
+
+  // ── selection ─────────────────────────────────────────────────────────
+  /** The current selection. Empty means "nothing selected", in which case the
+   *  whole tissue renders normally rather than everything being muted. */
+  getSelection$(): Observable<SpatialSelectionMask>;
+  /**
+   * Select every observation inside the currently-drawn regions (their union).
+   * Reuses the existing ROI tools — rectangle, polygon, freehand, wand, brush —
+   * so there is no separate marquee to learn. Returns how many were selected.
+   */
+  selectFromRegions(): number;
+  /** Select every observation in one category of a categorical column — the
+   *  legend click. Rejects for an unknown or continuous column. */
+  selectCategory(column: string, categoryIndex: number): Promise<number>;
+  clearSelection(): void;
+}
+
 /** Display options (colormap/LUT, reverse scale, image metadata). */
 export interface IDisplayOptions {
   getColormap(): Observable<ColormapNode | null>;
@@ -339,6 +423,10 @@ export interface IVisualizer extends IDataRenderer, IRegionStore, IToolControlle
    *  the capability-gated replacement for the deprecated top-level
    *  `setSurfaceDragMode`/`resetSurfaceCamera`. */
   getSurface3dControls(): ISurface3dControls | null;
+  /** Spatial-omics controls when a `SPATIAL_DATA_PORT` is bound, else null.
+   *  Optional: only the routing service implements it, since the state is shared
+   *  rather than owned by any one backend. */
+  getSpatialControls?(): ISpatialControls | null;
   /** Binned intensity histogram for a channel from the currently-displayed
    *  pixels, or null when none are available. Feeds the Channels & Histogram
    *  pane. */

@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { HttpClient } from '@angular/common/http';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
-import { firstValueFrom, of } from 'rxjs';
+import { BehaviorSubject, firstValueFrom, of } from 'rxjs';
 
 import { Viewer } from 'napari-js';
 
@@ -10,13 +10,55 @@ import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
 import { VIZ_CONFIG } from '../../contracts/viz-config';
 import { TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
+import { SPATIAL_3D_MAX_CATEGORIES } from '../../spatial/spatial-encoding';
+import * as expressionModule from '../../spatial/spatial-expression';
 import { PlotType } from '../../contracts/plot-type';
 import { ViewerFeature } from '../../contracts/capabilities.contract';
 import { IImageInfo } from '../../contracts/image.contract';
 import { IChannelState } from '../../contracts/channel-histogram-api.contract';
+import { SPATIAL_DATA_PORT } from '../../contracts/ports/spatial-data.port';
+import {
+  CategoricalColumn, ContinuousColumn, SpatialDataset,
+} from '../../contracts/spatial-dataset.contract';
+import { DEFAULT_MUTED_OPACITY } from '../../spatial/spatial-encoding';
+import { SpatialSelectionStore } from '../../store/spatial-selection.service';
 
 const imageInfo = (over: Partial<IImageInfo> = {}): IImageInfo =>
   ({ urls: ['u0', 'u1'], isGrayscale: true, isStack: true, ...over }) as unknown as IImageInfo;
+
+/** A spatial dataset with `count` observations on a diagonal, 27.5 px spot radius. */
+const spatialDataset = (count = 3): SpatialDataset => ({
+  id: 'demo', name: 'Demo',
+  observations: {
+    count,
+    x: Float32Array.from({ length: count }, (_, i) => i * 10),
+    y: Float32Array.from({ length: count }, (_, i) => i * 20),
+    radius: 27.5,
+  },
+  columns: [
+    { kind: 'categorical', name: 'region', categories: ['A', 'B'], colors: ['#ff0000', '#0000ff'] },
+    { kind: 'continuous', name: 'total_counts', logScaleHint: true },
+  ],
+  features: { count: 1, names: ['Ttr'] },
+});
+
+/** The same dataset with a z, so it can be drawn as a cloud. */
+const spatialDataset3d = (count = 3): SpatialDataset => {
+  const base = spatialDataset(count);
+  return {
+    ...base,
+    observations: {
+      ...base.observations,
+      z: Float32Array.from({ length: count }, (_, i) => i * 30),
+    },
+  };
+};
+
+/** The 3D dataset plus a reference volume, for the anatomy-backdrop path. */
+const spatialDatasetVolume = (count = 3): SpatialDataset => ({
+  ...spatialDataset3d(count),
+  volume: { width: 4, height: 6, depth: 10, voxelSize: [100, 200, 400] },
+});
 
 const tilesPort = {
   getSelectedInfoB64: () => 'INFO',
@@ -30,8 +72,23 @@ describe('NapariVisualizerService', () => {
   let http: HttpTestingController;
   let regionStore: RegionStore;
   let store: VisualizerStore;
+  let dataset$: BehaviorSubject<SpatialDataset | null>;
+  let spatialPort: {
+    getDataset$: () => typeof dataset$;
+    getColumn: jest.Mock;
+    getFeatureVector: jest.Mock;
+    getVolume: jest.Mock;
+  };
 
   beforeEach(() => {
+    dataset$ = new BehaviorSubject<SpatialDataset | null>(null);
+    spatialPort = {
+      getDataset$: () => dataset$,
+      getColumn: jest.fn(),
+      getFeatureVector: jest.fn(),
+      // Rejects by default: a dataset with no volume must never be waiting on one.
+      getVolume: jest.fn().mockRejectedValue(new Error('no volume')),
+    };
     // The render path polls /tiles/info (descriptor JSON) then fetches /tile blobs, both via the
     // global fetch (no WebGPU). A single-level 64×48 pyramid keeps the stitch on the single-tile
     // path. createImageBitmap is stubbed since jsdom can't decode.
@@ -80,6 +137,7 @@ describe('NapariVisualizerService', () => {
         RegionStore,
         { provide: TILE_ACCESS_PORT, useValue: tilesPort },
         { provide: VIZ_CONFIG, useValue: { slideCropServer: 'http://srv/' } },
+        { provide: SPATIAL_DATA_PORT, useValue: spatialPort },
       ],
     });
     service = TestBed.inject(NapariVisualizerService);
@@ -108,6 +166,10 @@ describe('NapariVisualizerService', () => {
       PlotType.NAPARI_SCATTER3D,
       PlotType.NAPARI_VOLUME,
       PlotType.NAPARI_ISOSURFACE,
+      // Advertised unconditionally; the SELECTOR hides it until a dataset is
+      // published (`requiresSpatialData`), so a host with no spatial data never
+      // sees it even though the backend can render it.
+      PlotType.SPATIAL_OMICS,
     ]);
   });
 
@@ -406,6 +468,13 @@ describe('NapariVisualizerService', () => {
     expect(addPoints).toHaveBeenCalled();
     // The rectangle centroid (10+2, 20+3) is scattered as a point.
     expect(Array.from(addPoints.mock.calls[0][0] as Float32Array)).toEqual([12, 23]);
+
+    // REGRESSION: this mode plots REGION centroids, so without the region overlay
+    // there is no way to produce a point at all. The toolbar gates its region
+    // buttons on 2D-vs-3D, not on plot type, so they showed and did nothing.
+    const overlay = service.getRegionOverlay();
+    expect(overlay).not.toBeNull();
+    expect(() => overlay?.setMode('drawrect')).not.toThrow();
 
     service.unsubscribe();
     document.body.removeChild(div);
@@ -781,5 +850,1946 @@ describe('NapariVisualizerService', () => {
 
     service.unsubscribe();
     document.body.removeChild(div);
+  });
+
+  describe('SPATIAL_OMICS_3D mode', () => {
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    let addPoints3D: jest.SpyInstance;
+
+    /** Mount the 3D cloud with `dataset` published; returns every layer built. */
+    async function mount3d(dataset: SpatialDataset | null = spatialDataset3d()) {
+      // Replace any host from an earlier mount: overlays and the scale bar attach
+      // to it, and a leftover would be visible to the next test's DOM assertions.
+      document.getElementById('spatial3d-host')?.remove();
+      const div = document.createElement('div');
+      div.id = 'spatial3d-host';
+      document.body.appendChild(div);
+      dataset$.next(dataset);
+      const loaded = await service.load(imageInfo(), 0);
+      await service.plot('spatial3d-host', loaded, imageInfo(), 600, PlotType.SPATIAL_OMICS_3D);
+      await flush();
+      return addPoints3D.mock.results.map((r) => r.value);
+    }
+
+    const last = (layers: any[]) => layers.at(-1);
+    const named = (layers: any[], name: string) => layers.filter((l) => l.name === name).at(-1);
+
+    beforeEach(() => {
+      addPoints3D = jest.spyOn(Viewer.prototype, 'addPoints3D');
+    });
+
+    it('draws the cloud flat above the published category ceiling, and in colour at it', async () => {
+      // The enforced limit and the one the panel publishes have to be the same
+      // number: at 96 categories the encoder rejected while the panel warned only
+      // above 96, so the cloud drew flat with nothing said.
+      const palette = (n: number) => ({
+        meta: {
+          kind: 'categorical', name: 'wide',
+          categories: Array.from({ length: n }, (_, i) => `c${i}`),
+          colors: Array.from({ length: n }, () => '#123456'),
+        },
+        codes: new Uint16Array([0, 1, 2]),
+      });
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+      spatialPort.getColumn.mockResolvedValue(palette(SPATIAL_3D_MAX_CATEGORIES));
+      await mount3d(spatialDataset3d());
+      store.setSpatialView({ colorBy: { kind: 'column', name: 'wide' } });
+      await flush();
+      expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('exceeds'));
+
+      spatialPort.getColumn.mockResolvedValue(palette(SPATIAL_3D_MAX_CATEGORIES + 1));
+      store.setSpatialView({ colorBy: { kind: 'column', name: 'wider' } });
+      await flush();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('exceeds'));
+      warn.mockRestore();
+    });
+
+    describe('hover tooltip', () => {
+      const host = () => document.getElementById('spatial3d-host')!;
+      const tip = () => host().querySelector('div[style*="z-index: 6"]') as HTMLElement | null;
+
+      async function hover(clientX: number, clientY: number) {
+        host().dispatchEvent(new MouseEvent('pointermove', { clientX, clientY, bubbles: true }));
+        await new Promise((r) => setTimeout(r, 20));
+      }
+
+      /** Where the identity-projection stub puts observation `i` on the canvas. */
+      const screenOf = (i: number) => {
+        const p = (service as unknown as {
+          getSpatialScreenProjection(o: unknown): Float32Array;
+        }).getSpatialScreenProjection(spatialDataset3d(3).observations);
+        return [p[i * 2], p[i * 2 + 1]] as [number, number];
+      };
+
+      it('names the class under the cursor in the cloud', async () => {
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 1, 0]),
+        });
+        await mount3d();
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+
+        const [x, y] = screenOf(1);
+        await hover(x, y);
+        expect(tip()?.style.display).toBe('block');
+        expect(tip()?.textContent).toContain('Thalamus');
+      });
+
+      it('stops naming a cell once its section is hidden', async () => {
+        // The cached positions have to be invalidated when the DRAWN set changes,
+        // or the tooltip keeps reporting a cell that is no longer on screen.
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 1, 0]),
+        });
+        await mount3d();
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        const [x, y] = screenOf(1);
+        await hover(x, y);
+        expect(tip()?.textContent).toContain('Thalamus');
+
+        // Isolate section 0; observation 1 is on another section.
+        store.setSpatialView({ pointSection: 0 });
+        await flush();
+        await hover(x, y);
+        expect(tip()?.style.display).toBe('none');
+      });
+    });
+
+    describe('screen projection', () => {
+      const projected = () => (service as unknown as {
+        getSpatialScreenProjection(o: unknown): Float32Array | null;
+      }).getSpatialScreenProjection(spatialDataset3d(3).observations);
+
+      it('is indexed by OBSERVATION, not by draw order', async () => {
+        // The ROI selection reads this array as `[x0, y0, x1, y1, …]` per
+        // observation. Isolating a section shrinks the drawn geometry, so a
+        // projection walked in draw order attributes each point to the wrong cell
+        // — selecting a region would then pick cells that are not in it.
+        await mount3d();
+        const all = projected()!;
+        expect(all).toHaveLength(3 * 2);
+        expect(Number.isNaN(all[0])).toBe(false);
+        expect(Number.isNaN(all[4])).toBe(false);
+
+        // z = 0, 30, 60 -> three sections; isolate the LAST one.
+        store.setSpatialView({ pointSection: 2 });
+        await flush();
+        const one = projected()!;
+        expect(one).toHaveLength(3 * 2);
+        // Observation 2 is the one on screen, and it keeps its own slot…
+        expect(Number.isNaN(one[4])).toBe(false);
+        expect(one[4]).toBeCloseTo(all[4], 3);
+        expect(one[5]).toBeCloseTo(all[5], 3);
+        // …while the hidden ones are NaN, which every consumer skips, rather than
+        // holding some other observation's coordinates.
+        expect(Number.isNaN(one[0])).toBe(true);
+        expect(Number.isNaN(one[2])).toBe(true);
+      });
+    });
+
+    describe('camera', () => {
+      /** The pose a user would have set by orbiting and dollying the canvas. */
+      const POSE = { azimuth: 1.1, elevation: 0.4, distance: 4242, target: [7, 8, 9] };
+      const cam = () => (service as unknown as {
+        viewer: { camera3d: { azimuth: number; elevation: number; distance: number;
+          target: [number, number, number] } };
+      }).viewer.camera3d;
+      const setPose = () => {
+        const c = cam();
+        c.azimuth = POSE.azimuth;
+        c.elevation = POSE.elevation;
+        c.distance = POSE.distance;
+        c.target = [...POSE.target] as [number, number, number];
+      };
+      const pose = () => {
+        const c = cam();
+        return {
+          azimuth: c.azimuth, elevation: c.elevation, distance: c.distance,
+          target: [...c.target],
+        };
+      };
+
+      /** A volume-backed dataset with a categorical column and cells on 3 planes. */
+      const clustered3d = (): SpatialDataset => {
+        const base = spatialDatasetVolume(6);
+        return {
+          ...base,
+          observations: {
+            ...base.observations,
+            count: 6,
+            x: Float32Array.from({ length: 6 }, () => 150),
+            y: Float32Array.from({ length: 6 }, () => 500),
+            z: new Float32Array([400, 400, 1200, 1200, 2000, 2000]),
+          },
+        } as SpatialDataset;
+      };
+
+      it('frames once when the scene first appears', async () => {
+        // The opening view has to come from somewhere, and the reference volume's
+        // box is the framing worth having — the brain, not a stray segmentation.
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        await mount3d(spatialDatasetVolume(3));
+        // 4x6x10 voxels of 100x200x400 -> a 400 x 1200 x 4000 world box, framed at
+        // 1.8x its longest side. Suppressing every framing would leave the stub's
+        // initial distance of 1 and an unusable opening view.
+        expect(pose().distance).toBeCloseTo(4000 * 1.8, 5);
+        expect(pose().target).toEqual([0, 0, 0]);
+      });
+
+      it('keeps the camera when the colour column changes', async () => {
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical', name: 'region', categories: ['A', 'B'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 0, 0, 1, 1, 1]),
+        });
+        await mount3d(clustered3d());
+        setPose();
+
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        expect(pose()).toEqual({ ...POSE, target: [...POSE.target] });
+      });
+
+      it('keeps the camera when a gene is picked, and when its map is drawn', async () => {
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
+        await mount3d(clustered3d());
+        setPose();
+
+        store.setSpatialView({ colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        expect(pose()).toEqual({ ...POSE, target: [...POSE.target] });
+
+        // The gene map adds a VOLUME, which is the add that calls frame().
+        store.setSpatialView({ geneMap: true });
+        await flush();
+        expect(pose()).toEqual({ ...POSE, target: [...POSE.target] });
+
+        store.setSpatialView({ geneMapVolume: true });
+        await flush();
+        expect(pose()).toEqual({ ...POSE, target: [...POSE.target] });
+      });
+
+      it('keeps the camera when a section is isolated', async () => {
+        // The worst case: napari would pivot and dolly onto ONE section's bounds,
+        // so the view would lurch to a different place for every section.
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        await mount3d(clustered3d());
+        setPose();
+
+        store.setSpatialView({ pointSection: 1 });
+        await flush();
+        expect(pose()).toEqual({ ...POSE, target: [...POSE.target] });
+
+        store.setSpatialView({ pointSection: 2 });
+        await flush();
+        expect(pose()).toEqual({ ...POSE, target: [...POSE.target] });
+
+        store.setSpatialView({ pointSection: null });
+        await flush();
+        expect(pose()).toEqual({ ...POSE, target: [...POSE.target] });
+      });
+
+      it('keeps the camera when a selection is highlighted, and when volumes appear', async () => {
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical', name: 'region', categories: ['A', 'B'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 0, 0, 1, 1, 1]),
+        });
+        await mount3d(clustered3d());
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        setPose();
+
+        TestBed.inject(SpatialSelectionStore).set({
+          mask: new Uint8Array([1, 0, 1, 0, 1, 0]), count: 3,
+        });
+        await flush();
+        expect(pose()).toEqual({ ...POSE, target: [...POSE.target] });
+
+        store.setSpatialView({ densityVolume: true });
+        await flush();
+        expect(pose()).toEqual({ ...POSE, target: [...POSE.target] });
+      });
+    });
+
+    describe('scene visibility', () => {
+      const cloud = (layers: any[]) => named(layers, 'observations');
+
+      it('hides the cloud without discarding it, so it comes straight back', async () => {
+        const layers = await mount3d();
+        expect(cloud(layers).visible).toBe(true);
+        const built = addPoints3D.mock.calls.length;
+
+        store.setSpatialView({ showPoints: false });
+        await flush();
+        // The SAME layer, hidden — not a rebuild, and not removed from the scene.
+        expect(cloud(addPoints3D.mock.results.map((r) => r.value)).visible).toBe(false);
+        expect(addPoints3D.mock.calls.length).toBe(built);
+        const inScene = (service as unknown as {
+          viewer: { layers: { items: readonly { name?: string }[] } };
+        }).viewer.layers.items.filter((l) => l.name === 'observations');
+        expect(inScene).toHaveLength(1);
+
+        store.setSpatialView({ showPoints: true });
+        await flush();
+        expect(cloud(addPoints3D.mock.results.map((r) => r.value)).visible).toBe(true);
+        expect(addPoints3D.mock.calls.length).toBe(built);
+      });
+
+      it('hides the reference volume without re-fetching it', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        const getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getVolume = getVolume;
+        await mount3d(spatialDatasetVolume(3));
+        const volume = addVolume.mock.results.map((r) => r.value).at(-1);
+        expect(volume.visible).toBe(true);
+        expect(getVolume).toHaveBeenCalledTimes(1);
+
+        store.setSpatialView({ showVolume: false });
+        await flush();
+        // A 100 MB template must not be re-fetched to un-hide a checkbox, so the
+        // toggle is visibility and nothing else.
+        expect(volume.visible).toBe(false);
+        expect(getVolume).toHaveBeenCalledTimes(1);
+        expect(addVolume.mock.calls.length).toBe(1);
+
+        store.setSpatialView({ showVolume: true });
+        await flush();
+        expect(volume.visible).toBe(true);
+        expect(getVolume).toHaveBeenCalledTimes(1);
+      });
+
+      it('applies the reference volume opacity, at build and on a change', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        store.setSpatialView({ volumeOpacity: 0.2 });
+        await mount3d(spatialDatasetVolume(3));
+
+        // Built at the requested opacity, so the first painted frame is right
+        // rather than flashing the default and settling.
+        const volume = addVolume.mock.results.map((r) => r.value).at(-1);
+        expect(addVolume.mock.calls.at(-1)![4]!.opacity).toBe(0.2);
+        expect(volume.opacity).toBe(0.2);
+
+        store.setSpatialView({ volumeOpacity: 0.9 });
+        await flush();
+        expect(volume.opacity).toBe(0.9);
+        // The backdrop's opacity is its own — the cloud keeps the markers' value.
+        expect(named(addPoints3D.mock.results.map((r) => r.value), 'observations').opacity).toBe(1);
+        expect(addVolume.mock.calls.length).toBe(1); // a property, not a rebuild
+      });
+
+      it('draws one imaged section at a time, cells and scalars together', async () => {
+        // z = 0, 30, 60 — three sections, one observation each.
+        spatialPort.getColumn.mockResolvedValue({
+          meta: { kind: 'continuous', name: 'total_counts' },
+          values: new Float32Array([10, 20, 30]),
+        });
+        await mount3d();
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'total_counts' } });
+        await flush();
+        expect(cloud(addPoints3D.mock.results.map((r) => r.value)).positions).toHaveLength(9);
+
+        store.setSpatialView({ pointSection: 1 });
+        await flush();
+        const one = cloud(addPoints3D.mock.results.map((r) => r.value));
+        // The middle section's single cell: x=10, y=20, z=30.
+        expect(Array.from(one.positions)).toEqual([10, 20, 30]);
+        // …and ITS scalar, not the first observation's — a per-observation vector
+        // against one section's positions would colour each cell by a stranger.
+        expect(one.values).toHaveLength(1);
+
+        store.setSpatialView({ pointSection: null });
+        await flush();
+        expect(cloud(addPoints3D.mock.results.map((r) => r.value)).positions).toHaveLength(9);
+      });
+
+      it('clamps a section index the dataset no longer has', async () => {
+        // The view state outlives the dataset, so a stale index must not blank
+        // the cloud or read past the section list.
+        await mount3d();
+        store.setSpatialView({ pointSection: 99 });
+        await flush();
+        const layer = cloud(addPoints3D.mock.results.map((r) => r.value));
+        // The last section, drawn — not an empty layer.
+        expect(Array.from(layer.positions)).toEqual([20, 40, 60]);
+      });
+
+      it('restricts the selection highlight to the section on screen', async () => {
+        await mount3d();
+        // Select the first and last observations, then show only the middle one.
+        TestBed.inject(SpatialSelectionStore).set({ mask: new Uint8Array([1, 0, 1]), count: 2 });
+        await flush();
+        expect(named(addPoints3D.mock.results.map((r) => r.value), 'selected')).toBeDefined();
+
+        store.setSpatialView({ pointSection: 1 });
+        await flush();
+        // Nothing selected is on this section, so there is no highlight layer to
+        // leave floating where its own cells are not drawn.
+        const inScene = (service as unknown as {
+          viewer: { layers: { items: readonly { name?: string }[] } };
+        }).viewer.layers.items.filter((l) => l.name === 'selected');
+        expect(inScene).toHaveLength(0);
+      });
+    });
+
+    describe('gene map in 3D', () => {
+      /**
+       * A volume-backed dataset whose sections have GAPS between them: the 400-unit
+       * z voxel puts the cells on planes 1, 3 and 5, leaving 2 and 4 unimaged. The
+       * gap is the whole point — it is what separates the measured sheets from the
+       * interpolated volume, and a fixture with adjacent sections cannot tell them
+       * apart.
+       */
+      const sectioned = (): SpatialDataset => {
+        const base = spatialDatasetVolume(6);
+        return {
+          ...base,
+          observations: {
+            ...base.observations,
+            count: 6,
+            x: Float32Array.from({ length: 6 }, () => 150),
+            y: Float32Array.from({ length: 6 }, () => 500),
+            z: new Float32Array([400, 400, 1200, 1200, 2000, 2000]),
+          },
+        } as SpatialDataset;
+      };
+      const mapLayers = (addVolume: jest.SpyInstance) =>
+        addVolume.mock.results
+          .map((r) => r.value)
+          .filter((l) => typeof l?.name === 'string' && l.name.startsWith('gene map'));
+
+      it('draws nothing until the option is on AND a gene is the colour source', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
+        await mount3d(sectioned());
+
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        expect(mapLayers(addVolume)).toHaveLength(0);
+
+        store.setSpatialView({ colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        expect(mapLayers(addVolume)).toHaveLength(1);
+      });
+
+      it('draws the sheets additively on the reference volume’s own lattice', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
+        await mount3d(sectioned());
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+
+        const call = addVolume.mock.calls.find((c) => /gene map/.test(String(c[4]?.name)))!;
+        const [, w, h, d, opts] = call;
+        // Coarsened in-plane (the 4x6 template becomes 2x3) but the depth is the
+        // volume's own, so there is still one plane per imaged section.
+        expect([w, h, d]).toEqual([2, 3, 10]);
+        // The physical extent is unchanged, so the box still coincides with the
+        // reference volume's — a VolumeLayer has no translate to correct with.
+        expect(opts!.voxelSize).toEqual([200, 400, 400]);
+        expect([w * 200, h * 400, d * 400]).toEqual([4 * 100, 6 * 200, 10 * 400]);
+        // Additive, so the sheets read through each other and through the tissue.
+        expect(opts!.blending).toBe('additive');
+        // The encoding already applied the window; a second one would re-window it.
+        expect(opts!.contrastLimits).toEqual([0, 255]);
+        expect(opts!.name).toBe('gene map · Ttr');
+      });
+
+      it('fills only the imaged planes as sheets, and bridges them as a volume', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
+        await mount3d(sectioned());
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+
+        const plane = 2 * 3; // the coarsened lattice's in-plane size
+        const filled = (data: Uint8Array, k: number) =>
+          Array.from(data.slice(k * plane, (k + 1) * plane)).some((v) => v > 0);
+        const sheets = addVolume.mock.calls.find((c) => /gene map/.test(String(c[4]?.name)))![0];
+        // The imaged planes carry the measurement…
+        expect(filled(sheets, 1)).toBe(true);
+        expect(filled(sheets, 3)).toBe(true);
+        expect(filled(sheets, 5)).toBe(true);
+        // …and the gap between two sections stays EMPTY, which is what makes these
+        // sheets rather than a volume. Empty means invisible, since the raymarch
+        // takes alpha from the value.
+        expect(filled(sheets, 2)).toBe(false);
+        expect(filled(sheets, 4)).toBe(false);
+        expect(filled(sheets, 0)).toBe(false);
+
+        store.setSpatialView({ geneMapVolume: true });
+        await flush();
+        const vol = addVolume.mock.calls.filter((c) => /gene map/.test(String(c[4]?.name))).at(-1)!;
+        expect(String(vol[4]!.name)).toContain('volume');
+        const volData = vol[0] as Uint8Array;
+        // Now the gaps carry an interpolated estimate…
+        expect(filled(volData, 2)).toBe(true);
+        expect(filled(volData, 4)).toBe(true);
+        // …but nothing appears beyond the outermost imaged section.
+        expect(filled(volData, 0)).toBe(false);
+      });
+
+      it('ignores the section restriction while interpolating', async () => {
+        // A volume built from ONE section would smear that slide through the whole
+        // depth and present it as an estimate of the specimen.
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
+        await mount3d(sectioned());
+        store.setSpatialView({
+          geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' },
+          geneMapVolume: true, geneMapSection: 0,
+        });
+        await flush();
+
+        const plane = 2 * 3; // the coarsened lattice's in-plane size
+        const filled = (data: Uint8Array, k: number) =>
+          Array.from(data.slice(k * plane, (k + 1) * plane)).some((v) => v > 0);
+        const data = addVolume.mock.calls
+          .filter((c) => /gene map/.test(String(c[4]?.name))).at(-1)![0] as Uint8Array;
+        // Every imaged plane contributed, not just section 0: plane 5 is the last
+        // section, and with section 0 alone it would fall outside the sampled
+        // range and be zeroed.
+        expect(filled(data, 5)).toBe(true);
+        expect(filled(data, 3)).toBe(true);
+      });
+
+      it('draws one sheet when a section is picked, and clamps a stale index', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
+        await mount3d(sectioned());
+        store.setSpatialView({
+          geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' }, geneMapSection: 0,
+        });
+        await flush();
+
+        const plane = 2 * 3; // the coarsened lattice's in-plane size
+        const filled = (data: Uint8Array, k: number) =>
+          Array.from(data.slice(k * plane, (k + 1) * plane)).some((v) => v > 0);
+        const one = addVolume.mock.calls
+          .filter((c) => /gene map/.test(String(c[4]?.name))).at(-1)![0] as Uint8Array;
+        // Section 0 is z = 400 -> plane 1, and no other section is drawn.
+        expect(filled(one, 1)).toBe(true);
+        expect(filled(one, 3)).toBe(false);
+        expect(filled(one, 5)).toBe(false);
+
+        store.setSpatialView({ geneMapSection: 99 });
+        await flush();
+        const clamped = addVolume.mock.calls
+          .filter((c) => /gene map/.test(String(c[4]?.name))).at(-1)![0] as Uint8Array;
+        // The LAST section, drawn — not an empty volume.
+        expect(filled(clamped, 5)).toBe(true);
+        expect(filled(clamped, 1)).toBe(false);
+      });
+
+      it('does not re-estimate the field for a recolour, only for a new gene', async () => {
+        const estimate = jest.spyOn(expressionModule, 'expressionVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
+        await mount3d(sectioned());
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        expect(estimate).toHaveBeenCalledTimes(1);
+
+        // A window change recolours the cached field — re-estimating would be a
+        // full pass over the lattice for colours that come out of a LUT.
+        store.setSpatialView({ percentileClip: [0.05, 0.95] });
+        await flush();
+        expect(estimate).toHaveBeenCalledTimes(1);
+
+        store.setSpatialView({ geneMapOpacity: 0.4 });
+        await flush();
+        expect(estimate).toHaveBeenCalledTimes(1);
+
+        // Interpolating is a different field, and so is a different gene.
+        store.setSpatialView({ geneMapVolume: true });
+        await flush();
+        expect(estimate).toHaveBeenCalledTimes(2);
+        estimate.mockRestore();
+      });
+
+      it('honours the chosen colormap, and follows the image’s live without one', async () => {
+        // 3D mounts no display-state subscription of its own, so the spatial
+        // subscription is the ONLY thing that keeps the colour scale current here.
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
+        await mount3d(sectioned());
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        const first = mapLayers(addVolume).at(-1)!.colormap;
+
+        store.setSpatialView({ continuousColormap: 'Reds' });
+        await flush();
+        const chosen = mapLayers(addVolume).at(-1)!.colormap;
+        expect(chosen).not.toEqual(first);
+
+        // Back to following the image, then change the image's colormap.
+        store.setSpatialView({ continuousColormap: null });
+        await flush();
+        const following = mapLayers(addVolume).at(-1)!.colormap;
+        store.setColormap({ label: 'Reds', data: { value: 'Reds' } } as never);
+        await flush();
+        expect(mapLayers(addVolume).at(-1)!.colormap).not.toEqual(following);
+      });
+
+      it('removes the layer when the option is switched off', async () => {
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
+        await mount3d(sectioned());
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        const inScene = () =>
+          ((service as unknown as { viewer: { layers: { items: readonly { name?: string }[] } } })
+            .viewer.layers.items).filter((l) => l.name?.startsWith('gene map')).length;
+        expect(inScene()).toBe(1);
+
+        store.setSpatialView({ geneMap: false });
+        await flush();
+        expect(inScene()).toBe(0);
+      });
+    });
+
+    describe('cluster density volumes', () => {
+      /** A dataset with a volume, a categorical column, and cells on 3 planes. */
+      const clustered = (): SpatialDataset => {
+        const base = spatialDatasetVolume(6);
+        return {
+          ...base,
+          observations: {
+            ...base.observations,
+            count: 6,
+            x: Float32Array.from({ length: 6 }, () => 150),
+            y: Float32Array.from({ length: 6 }, () => 500),
+            z: new Float32Array([400, 400, 800, 800, 1200, 1200]),
+          },
+        } as SpatialDataset;
+      };
+
+      /** Three categories: A x3, B x2, C x1 — so the ranking is observable. */
+      const column = {
+        meta: {
+          kind: 'categorical', name: 'region', categories: ['A', 'B', 'C'],
+          colors: ['#ff0000', '#00ff00', '#0000ff'],
+        },
+        codes: new Uint16Array([0, 0, 0, 1, 1, 2]),
+      };
+
+      const densityLayers = (addVolume: jest.SpyInstance) =>
+        addVolume.mock.results
+          .map((r) => r.value)
+          .filter((l) => typeof l?.name === 'string' && l.name.startsWith('density · '));
+
+      it('draws nothing extra until the option is switched on', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        await mount3d(clustered());
+
+        expect(densityLayers(addVolume)).toHaveLength(0); // the reference volume only
+      });
+
+      it('draws one additive, tinted volume per cluster, biggest first', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getColumn.mockResolvedValue(column);
+        await mount3d(clustered());
+
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' }, densityVolume: true });
+        await flush();
+
+        const layers = densityLayers(addVolume);
+        // One per category, ranked by cell count — A (3), B (2), C (1).
+        expect(layers.map((l) => l.name)).toEqual([
+          'density · A', 'density · B', 'density · C',
+        ]);
+        // Additive so overlapping territories both read; translucent so the
+        // interior is visible rather than only the brightest shell.
+        expect(layers[0].blending).toBe('additive');
+        expect(layers[0].rendering).toBe('translucent');
+        // On the volume's grid, coarsened — same physical box, fewer voxels.
+        expect(layers[0].width * layers[0].voxelSize[0]).toBeCloseTo(4 * 100, 6);
+        expect(layers[0].depth * layers[0].voxelSize[2]).toBeCloseTo(10 * 400, 6);
+        expect(layers[0].width).toBeLessThan(4 * 100);
+      });
+
+      it('divides the opacity budget across the clusters so overlap does not blow out', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getColumn.mockResolvedValue(column);
+        await mount3d(clustered());
+
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' }, densityVolume: true });
+        await flush();
+        const many = densityLayers(addVolume);
+        expect(many).toHaveLength(3);
+        // Additive blending sums: three broad fields at full opacity saturate to
+        // white, so the budget is split.
+        expect(many.every((l) => l.opacity < 0.55)).toBe(true);
+        expect(many[0].opacity * many.length).toBeLessThanOrEqual(1.2);
+
+        // One cluster has nothing to blow out against, so it keeps the full value.
+        store.setSpatialView({ colorBy: null });
+        await flush();
+        expect(densityLayers(addVolume).at(-1).opacity).toBeCloseTo(0.55, 6);
+      });
+
+      it('rasterises total density when the colouring is not categorical', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        await mount3d(clustered());
+
+        store.setSpatialView({ colorBy: null, densityVolume: true });
+        await flush();
+
+        expect(densityLayers(addVolume).map((l) => l.name)).toEqual(['density · all cells']);
+      });
+
+      it('removes the volumes when the option is switched off', async () => {
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        await mount3d(clustered());
+        store.setSpatialView({ densityVolume: true });
+        await flush();
+        const inScene = () =>
+          ((service as unknown as { viewer: { layers: { items: readonly { name?: string }[] } } })
+            .viewer.layers.items).filter((l) => l.name?.startsWith('density · ')).length;
+        expect(inScene()).toBe(1);
+
+        store.setSpatialView({ densityVolume: false });
+        await flush();
+        expect(inScene()).toBe(0);
+      });
+
+      it('re-rasterises for a different selection of the same size', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        await mount3d(clustered());
+        store.setSpatialView({ densityVolume: true });
+        await flush();
+        const built = densityLayers(addVolume).length;
+
+        // Two DIFFERENT selections, same count: keyed on the count alone this
+        // looks unchanged, and the previous ROI's fields stay on screen.
+        TestBed.inject(SpatialSelectionStore)
+          .set({ mask: Uint8Array.from([1, 1, 0, 0, 0, 0]), count: 2 });
+        await flush();
+        const afterFirst = densityLayers(addVolume).length;
+        expect(afterFirst).toBeGreaterThan(built);
+
+        TestBed.inject(SpatialSelectionStore)
+          .set({ mask: Uint8Array.from([0, 0, 0, 0, 1, 1]), count: 2 });
+        await flush();
+        expect(densityLayers(addVolume).length).toBeGreaterThan(afterFirst);
+      });
+
+      it('does not re-rasterise for a change that cannot alter the field', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        await mount3d(clustered());
+        store.setSpatialView({ densityVolume: true });
+        await flush();
+        const built = densityLayers(addVolume).length;
+
+        // Point size is a cloud knob: rasterising again would cost seconds for a
+        // field that cannot have changed.
+        store.setSpatialView({ pointScale: 3 });
+        await flush();
+        expect(densityLayers(addVolume).length).toBe(built);
+
+        // Bandwidth does change it.
+        store.setSpatialView({ densitySmoothing: 3 });
+        await flush();
+        expect(densityLayers(addVolume).length).toBeGreaterThan(built);
+      });
+    });
+
+    it('draws the cloud with x, y and z interleaved', async () => {
+      const layers = await mount3d();
+      expect(addPoints3D).toHaveBeenCalled();
+      // x = i*10, y = i*20, z = i*30, laid out x-fastest.
+      expect(Array.from(named(layers, 'observations').positions)).toEqual([
+        0, 0, 0,
+        10, 20, 30,
+        20, 40, 60,
+      ]);
+    });
+
+    it('draws nothing when the observations have no z', async () => {
+      // The plot type is gated on `requiresSpatial3d`, but a host can set the
+      // type directly, and a 2D dataset must not be silently flattened onto z=0.
+      const layers = await mount3d(spatialDataset());
+      expect(layers).toHaveLength(0);
+    });
+
+    it('scales the marker size by pointScale', async () => {
+      const layers = await mount3d();
+      // Screen pixels here, not data units: the 3D layer sizes billboards in
+      // screen space, so the data-unit radius does not carry over.
+      expect(named(layers, 'observations').size).toBe(3);
+
+      store.setSpatialView({ pointScale: 2 });
+      await flush();
+      expect(last(addPoints3D.mock.results.map((r) => r.value)).size).toBe(6);
+    });
+
+    it('maps each category code onto its OWN colour in the LUT', async () => {
+      // The heart of the 3D categorical path. The layer has no per-point RGBA, so
+      // a palette is smuggled through a 256-entry scalar LUT as one block per
+      // category. This asserts the block arithmetic: with slot 0 reserved for
+      // "no category", code i must resolve to palette entry i and not a
+      // neighbour's blend.
+      const column: CategoricalColumn = {
+        meta: {
+          kind: 'categorical', name: 'region', categories: ['A', 'B'],
+          colors: ['#ff0000', '#0000ff'],
+        },
+        codes: new Uint16Array([0, 1, 0]),
+      };
+      spatialPort.getColumn.mockResolvedValue(column);
+
+      await mount3d();
+      store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+      await flush();
+
+      const layer = last(addPoints3D.mock.results.map((r) => r.value));
+      // Codes are shifted by one, keeping 0 free for the unassigned colour.
+      expect(Array.from(layer.values)).toEqual([1, 2, 1]);
+      const k = 3; // 2 categories + the reserved slot
+      expect(layer.contrastLimits).toEqual([-0.5, k - 0.5]);
+
+      // Resolve each code the way the shader does: normalise through
+      // contrastLimits, then index the LUT.
+      const lut = layer.colormap.stops as [number, number, number][];
+      expect(lut).toHaveLength(256);
+      const colourOf = (value: number) => {
+        const [lo, hi] = layer.contrastLimits;
+        const t = (value - lo) / (hi - lo);
+        return lut[Math.max(0, Math.min(255, Math.round(t * 255)))];
+      };
+      expect(colourOf(1)).toEqual([255, 0, 0]);   // category A
+      expect(colourOf(2)).toEqual([0, 0, 255]);   // category B
+    });
+
+    it('refuses to colour more categories than the LUT can hold apart', async () => {
+      // 96 is the measured ceiling; beyond it the colours would be subtly wrong
+      // while the legend stayed confident, so the renderer draws flat instead.
+      const categories = Array.from({ length: 200 }, (_, i) => `c${i}`);
+      const column: CategoricalColumn = {
+        meta: {
+          kind: 'categorical', name: 'many', categories,
+          colors: categories.map(() => '#ff0000'),
+        },
+        codes: new Uint16Array([0, 1, 2]),
+      };
+      spatialPort.getColumn.mockResolvedValue(column);
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+      await mount3d();
+      store.setSpatialView({ colorBy: { kind: 'column', name: 'many' } });
+      await flush();
+
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('256-entry LUT'));
+      const layer = last(addPoints3D.mock.results.map((r) => r.value));
+      // Flat: a two-stop colormap, every value resolving to the same colour.
+      expect((layer.colormap as any).name).toBe('spatial-flat');
+      warn.mockRestore();
+    });
+
+    it('windows a continuous column through the colormap', async () => {
+      const column: ContinuousColumn = {
+        meta: { kind: 'continuous', name: 'score' },
+        values: Float32Array.from([0, 5, 10]),
+      };
+      spatialPort.getColumn.mockResolvedValue(column);
+
+      await mount3d();
+      store.setSpatialView({ colorBy: { kind: 'column', name: 'score' }, percentileClip: [0, 1] });
+      await flush();
+
+      const layer = last(addPoints3D.mock.results.map((r) => r.value));
+      expect(Array.from(layer.values)).toEqual([0, 5, 10]);
+      expect(layer.contrastLimits).toEqual([0, 10]);
+    });
+
+    it('never hands the shader a degenerate window', async () => {
+      // Every value identical: a zero-width window would divide by zero when the
+      // shader normalises, so it has to be widened.
+      const column: ContinuousColumn = {
+        meta: { kind: 'continuous', name: 'flat' },
+        values: Float32Array.from([7, 7, 7]),
+      };
+      spatialPort.getColumn.mockResolvedValue(column);
+
+      await mount3d();
+      store.setSpatialView({ colorBy: { kind: 'column', name: 'flat' }, percentileClip: [0, 1] });
+      await flush();
+
+      const [lo, hi] = last(addPoints3D.mock.results.map((r) => r.value)).contrastLimits;
+      expect(hi).toBeGreaterThan(lo);
+    });
+
+    it('mounts the region overlay so the ROI tools work in 3D', async () => {
+      // REGRESSION: the 3D mount is deliberately thinner than the 2D one (no
+      // image, no scale bar, no readback), and an earlier revision dropped region
+      // drawing along with all that. The tools then showed in the toolbar and did
+      // nothing — exactly the failure the 2D spatial mode shipped with once.
+      await mount3d();
+      const overlay = service.getRegionOverlay();
+      expect(overlay).not.toBeNull();
+      expect(() => overlay?.setMode('drawrect')).not.toThrow();
+      expect(() => overlay?.setMode('none')).not.toThrow();
+    });
+
+    it('projects observations to canvas pixels through the 3D camera', async () => {
+      await mount3d();
+      const projected = service.getSpatialScreenProjection(spatialDataset3d().observations);
+      expect(projected).not.toBeNull();
+      expect(projected!.length).toBe(3 * 2);
+      // The stub camera is the identity, so clip == world and the mapping reduces
+      // to NDC -> canvas: x = (nx/2 + 0.5)*w, y = (1 - (ny/2 + 0.5))*h. The y flip
+      // is the part worth pinning: NDC points up, canvas points down, and getting
+      // it backwards would silently mirror every selection.
+      const w = 300;
+      const h = 150;
+      const obs = spatialDataset3d().observations;
+      for (let i = 0; i < obs.count; i++) {
+        expect(projected![i * 2]).toBeCloseTo((obs.x[i] * 0.5 + 0.5) * w, 3);
+        expect(projected![i * 2 + 1]).toBeCloseTo((1 - (obs.y[i] * 0.5 + 0.5)) * h, 3);
+      }
+    });
+
+    describe('reference volume', () => {
+      it('adds the volume with the declared dimensions and voxel size', async () => {
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+
+        await mount3d(spatialDatasetVolume());
+
+        expect(addVolume).toHaveBeenCalled();
+        const layer = addVolume.mock.results.at(-1)?.value;
+        expect([layer.width, layer.height, layer.depth]).toEqual([4, 6, 10]);
+        expect(layer.voxelSize).toEqual([100, 200, 400]);
+        // Translucent, not MIP: a maximum-intensity projection of an averaged
+        // template is a flat shell that hides the very points it is backing.
+        expect(layer.rendering).toBe('translucent');
+        expect(layer.opacity).toBeLessThan(1);
+      });
+
+      it('offsets the cloud by HALF THE BOX so it sits inside the volume', async () => {
+        // The load-bearing bit. napari-js centres a volume's box on the world
+        // origin, while observations are in the volume's frame with its near
+        // corner AT the origin — so the points have to move by half the box or
+        // the cloud floats outside the anatomy by half a brain.
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        const layers = await mount3d(spatialDatasetVolume());
+
+        const half = [(4 * 100) / 2, (6 * 200) / 2, (10 * 400) / 2];
+        const obs = spatialDataset3d().observations;
+        const z = obs.z!;
+        const positions = named(layers, 'observations').positions;
+        for (let i = 0; i < obs.count; i++) {
+          expect(positions[i * 3]).toBeCloseTo(obs.x[i] - half[0], 3);
+          expect(positions[i * 3 + 1]).toBeCloseTo(obs.y[i] - half[1], 3);
+          expect(positions[i * 3 + 2]).toBeCloseTo(z[i] - half[2], 3);
+        }
+      });
+
+      it('leaves the cloud at its own coordinates when there is no volume', async () => {
+        const layers = await mount3d(spatialDataset3d());
+        const obs = spatialDataset3d().observations;
+        const positions = named(layers, 'observations').positions;
+        expect(positions[3]).toBeCloseTo(obs.x[1], 3);
+      });
+
+      it('draws the cloud anyway when the volume fails to load', async () => {
+        // A backdrop is a nicety; losing it must not cost the data.
+        spatialPort.getVolume = jest.fn().mockRejectedValue(new Error('503'));
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+        const layers = await mount3d(spatialDatasetVolume());
+
+        expect(named(layers, 'observations')).toBeDefined();
+        // ...and unoffset, since there is no box to sit inside.
+        expect(named(layers, 'observations').positions[3])
+          .toBeCloseTo(spatialDataset3d().observations.x[1], 3);
+        expect(warn).toHaveBeenCalled();
+        warn.mockRestore();
+      });
+
+      it('applies the same offset to the selected-subset layer', async () => {
+        // Two layers drawn from one cloud: if only one is offset, a selection
+        // appears half a brain away from the points it selected.
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        await mount3d(spatialDatasetVolume());
+        TestBed.inject(SpatialSelectionStore).set({
+          mask: Uint8Array.from([0, 1, 0]), count: 1,
+        });
+        await flush();
+
+        const all = addPoints3D.mock.results.map((r) => r.value);
+        const selected = named(all, 'selected');
+        const obs = spatialDataset3d().observations;
+        expect(Array.from(selected.positions)).toEqual([
+          obs.x[1] - (4 * 100) / 2,
+          obs.y[1] - (6 * 200) / 2,
+          obs.z![1] - (10 * 400) / 2,
+        ]);
+      });
+    });
+
+    it('shows a scale bar when the dataset declares its unit', async () => {
+      const layers = await mount3d({ ...spatialDataset3d(), micronsPerUnit: 1 });
+      expect(layers.length).toBeGreaterThan(0);
+      // Rendered into the plot host, so its presence is observable from the DOM
+      // rather than through a private field.
+      expect(document.getElementById('spatial3d-host')?.textContent).toMatch(/µm|nm|mm|cm/);
+    });
+
+    it('shows NO scale bar when the coordinate unit is unknown', async () => {
+      // A bar labelled in microns over unknown units reads as a measurement, and
+      // is worse than no bar at all.
+      await mount3d(spatialDataset3d());
+      expect(document.getElementById('spatial3d-host')?.textContent ?? '')
+        .not.toMatch(/µm|nm|mm|cm/);
+    });
+
+    it('draws a selection as a second layer, muting the parent cloud', async () => {
+      // There is no per-point alpha in 3D, so the 2D highlight-vs-mute trick has
+      // to be rebuilt out of two layers.
+      const layers = await mount3d();
+      const before = named(layers, 'observations');
+      expect(before.opacity).toBe(1);
+
+      TestBed.inject(SpatialSelectionStore).set({
+        mask: Uint8Array.from([0, 1, 0]), count: 1,
+      });
+      await flush();
+
+      const all = addPoints3D.mock.results.map((r) => r.value);
+      const selected = named(all, 'selected');
+      expect(selected).toBeDefined();
+      // Only the selected observation, at its own coordinates.
+      expect(Array.from(selected.positions)).toEqual([10, 20, 30]);
+      expect(selected.opacity).toBe(1);
+      // ...and the parent drops to the muted level.
+      expect(named(all, 'observations').opacity).toBeCloseTo(DEFAULT_MUTED_OPACITY);
+    });
+  });
+
+  describe('Volume / Isosurface world box', () => {
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    /** Mount the volume view over `info` and return the volume layer built.
+     *  A `tiled: false` stack fetches each slice through SimpleSliceAccessService
+     *  (HttpClient), not the raw `globalThis.fetch` this suite mocks — so stub it
+     *  here, or the assembly awaits responses that never come. */
+    async function mountVolume(info: IImageInfo) {
+      jest.spyOn(TestBed.inject(HttpClient), 'get').mockReturnValue(of(new Blob()));
+      const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+      const div = document.createElement('div');
+      div.id = 'vol-box-host';
+      document.body.appendChild(div);
+      const loaded = await service.load(info, 0);
+      await service.plot('vol-box-host', loaded, info, 600, PlotType.NAPARI_VOLUME);
+      await flush();
+      const layer = addVolume.mock.results.at(-1)?.value;
+      document.body.removeChild(div);
+      return layer;
+    }
+
+    it('takes its voxels from the IMAGE STACK, not from a spatial dataset', async () => {
+      // These modes raymarch the stack and nothing else. A 3D omics dataset reaches
+      // them because its registered volume is published AS a grayscale z-stack
+      // image — not through a second voxel source behind the same modes.
+      spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+      dataset$.next(spatialDatasetVolume());
+
+      await mountVolume(imageInfo());
+
+      expect(spatialPort.getVolume).not.toHaveBeenCalled();
+    });
+
+    it('gives a stack that declares mppX/Y/Z its true physical proportions', async () => {
+      // 40 x 40 x 200 µm voxels: the box has to come out 11 x 11 x 15.2 mm, or the
+      // anatomy renders as a cube-aspect brick.
+      const layer = await mountVolume(imageInfo({
+        // `tiled: false` is the shape a published volume image has: complete
+        // per-slice images, no server pyramid to describe.
+        tiled: false,
+        urls: Array.from({ length: 76 }, (_, z) => `u${z}`),
+        imageMeta: [
+          { channelCount: 1, rgbChannels: 1, x: 275, y: 275, z: 76, mppX: 40, mppY: 40, mppZ: 200 },
+        ],
+      }));
+
+      // voxelSize maps the SAMPLED grid onto the world box, so the box itself is
+      // voxelSize x sampled dims — the assertion that survives any decimate factor.
+      const [vx, vy, vz] = layer.voxelSize;
+      expect(vx * layer.width).toBeCloseTo(275 * 40, 3);
+      expect(vy * layer.height).toBeCloseTo(275 * 40, 3);
+      expect(vz * layer.depth).toBeCloseTo(76 * 200, 3);
+      // Anisotropic, and in the right direction: z voxels are the long ones.
+      expect(vz / vx).toBeGreaterThan(1);
+    });
+
+    it('labels the axes from the physical extent, once — not the world box', async () => {
+      // Regression: the label maths read a pixel count off the world box and
+      // multiplied by mpp. Once the box is physical (µm) that scaled it twice —
+      // 11 mm of mouse brain came out as "44.0 cm" — and Z, never physical at all,
+      // read "76 px" for a volume that knows it is 15.2 mm deep.
+      await mountVolume(imageInfo({
+        tiled: false,
+        urls: Array.from({ length: 76 }, (_, z) => `u${z}`),
+        imageMeta: [
+          { channelCount: 1, rgbChannels: 1, x: 275, y: 275, z: 76, mppX: 40, mppY: 40, mppZ: 200 },
+        ],
+      }));
+
+      const labels = (service as unknown as {
+        buildAxesLabels: (v: { width: number; height: number; depth: number }) => { text: string }[];
+      }).buildAxesLabels({ width: 1, height: 1, depth: 1 }).map((l) => l.text);
+
+      // 275 x 40 µm = 11 000 µm and 76 x 200 µm = 15 200 µm, formatted in cm at
+      // this scale — a mouse brain, not the 44.0 cm the double-scaled label gave.
+      expect(labels[0]).toBe('X · 1.1 cm');
+      expect(labels[1]).toBe('Y · 1.1 cm');
+      expect(labels[2]).toBe('Z · 1.5 cm');
+    });
+
+    it('labels Z in slices when the stack declares no slice spacing', async () => {
+      await mountVolume(imageInfo({
+        tiled: false,
+        urls: Array.from({ length: 8 }, (_, z) => `u${z}`),
+        imageMeta: [
+          { channelCount: 1, rgbChannels: 1, x: 275, y: 275, z: 8, mppX: 40, mppY: 40 },
+        ],
+      }));
+
+      const labels = (service as unknown as {
+        buildAxesLabels: (v: { width: number; height: number; depth: number }) => { text: string }[];
+      }).buildAxesLabels({ width: 1, height: 1, depth: 1 }).map((l) => l.text);
+
+      expect(labels[0]).toBe('X · 1.1 cm');
+      expect(labels[2]).toBe('Z · 8 px'); // unknown thickness — say so, don't invent one
+    });
+
+    it('falls back to the shape-only reference box when no slice spacing is declared', async () => {
+      // Most stacks (a WSI z-series) have no mppZ to offer. The box is then chosen
+      // to be independent of the decimate factor rather than physically true.
+      const layer = await mountVolume(imageInfo({
+        tiled: false,
+        urls: Array.from({ length: 8 }, (_, z) => `u${z}`),
+        imageMeta: [
+          { channelCount: 1, rgbChannels: 1, x: 275, y: 275, z: 8, mppX: 40, mppY: 40 },
+        ],
+      }));
+
+      const [vx, , vz] = layer.voxelSize;
+      // Depth spans the slice count, not a physical extent.
+      expect(vz * layer.depth).toBeCloseTo(8, 3);
+      expect(vx * layer.width).not.toBeCloseTo(275 * 40, 3);
+    });
+  });
+
+  describe('SPATIAL_OMICS mode', () => {
+    /** Let the async colour resolution settle (a gene fetch is a round-trip). */
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    let addPoints: jest.SpyInstance;
+
+    /** Mount the spatial mode with `dataset` published, and return the layer built. */
+    async function mount(dataset: SpatialDataset | null = spatialDataset()) {
+      // Replace any host from an earlier mount, as the 3D helper does: overlays
+      // attach to it, and `getElementById` would keep returning the FIRST stale
+      // one — so a test would assert against a previous test's overlay.
+      document.getElementById('spatial-host')?.remove();
+      const div = document.createElement('div');
+      div.id = 'spatial-host';
+      document.body.appendChild(div);
+      dataset$.next(dataset);
+      const loaded = await service.load(imageInfo(), 0);
+      await service.plot('spatial-host', loaded, imageInfo(), 600, PlotType.SPATIAL_OMICS);
+      await flush();
+      return addPoints.mock.results.at(-1)?.value;
+    }
+
+    beforeEach(() => {
+      addPoints = jest.spyOn(Viewer.prototype, 'addPoints');
+    });
+
+    /** Layers currently in the stub viewer's scene. */
+    const viewerLayers = () =>
+      ((service as unknown as { viewer: { layers: { items: readonly unknown[] } } })
+        .viewer?.layers.items ?? []) as readonly unknown[];
+
+    /** Mount with the stack opened on slice `z`, as a volume-backed dataset does. */
+    async function mountAt(dataset: SpatialDataset, z: number) {
+      const div = document.createElement('div');
+      div.id = 'spatial-slice-host';
+      document.body.appendChild(div);
+      dataset$.next(dataset);
+      const loaded = await service.load(imageInfo(), z);
+      await service.plot('spatial-slice-host', loaded, imageInfo(), 600, PlotType.SPATIAL_OMICS);
+      await flush();
+      return addPoints.mock.results.at(-1)?.value;
+    }
+
+    describe('over a volume-backed 3D dataset', () => {
+      /** Observations at x/y (0,0), (10,20), (20,40) with z 0, 500, 900 — which on
+       *  400-deep planes is slice 0, 1 and 2. */
+      const sliced = (): SpatialDataset => {
+        const base = spatialDatasetVolume(3);
+        return {
+          ...base,
+          observations: { ...base.observations, z: new Float32Array([0, 500, 900]) },
+        };
+      };
+
+      it('draws only the displayed plane\'s observations, in the slice pixel grid', async () => {
+        const layer = await mountAt(sliced(), 1);
+
+        // Just observation 1 — the other two are other sections, and drawing them
+        // would pile the specimen's whole depth onto one plane.
+        expect(Array.from(layer.positions)).toEqual([10, 20]);
+        // Coordinates stay data-space; the volume's affine puts them in the
+        // slice's pixels (voxels are 100 x 200 wide, near corner at the origin).
+        expect(layer.scale).toEqual([1 / 100, 1 / 200]);
+        expect(layer.translate).toEqual([0, 0]);
+      });
+
+      it('follows a scrub to the new plane', async () => {
+        await mountAt(sliced(), 1);
+        service.setZIndex(2);
+        await flush();
+
+        expect(Array.from(addPoints.mock.results.at(-1)?.value.positions)).toEqual([20, 40]);
+      });
+
+      it('re-adds a marker layer the image render cleared out of the scene', async () => {
+        const layer = await mountAt(sliced(), 1);
+        expect(viewerLayers()).toContain(layer);
+
+        // What napari's image view does on EVERY render: empty the layer list. The
+        // service's cached handle is now detached, and mutating it draws nothing.
+        (service as unknown as { viewer: { layers: { clear(): void } } }).viewer.layers.clear();
+        expect(viewerLayers()).toHaveLength(0);
+
+        // A display-only change, so nothing about the marker key changed — the
+        // fast path would mutate the detached layer and leave the plane empty.
+        store.setSpatialView({ pointScale: 3 });
+        await flush();
+
+        const next = addPoints.mock.results.at(-1)?.value;
+        expect(next).not.toBe(layer);
+        expect(viewerLayers()).toContain(next);
+        expect(Array.from(next.positions)).toEqual([10, 20]);
+      });
+
+      it('redraws the markers only AFTER the image render that clears them', async () => {
+        await mountAt(sliced(), 1);
+        // The stitched branch, which is what a volume-backed dataset takes: its
+        // slices are blob images, not a server pyramid. (The tiled branch only
+        // moves `dims.z` — no render, so nothing clears the markers there.)
+        (service as unknown as { tiled: boolean }).tiled = false;
+        const order: string[] = [];
+        jest
+          .spyOn(service as unknown as { renderImage: (z: number, t?: number) => Promise<void> },
+            'renderImage')
+          .mockImplementation(async () => { order.push('image'); });
+        jest
+          .spyOn(service as unknown as { rebuildSpatialPoints: (...a: unknown[]) => Promise<void> },
+            'rebuildSpatialPoints')
+          .mockImplementation(async () => { order.push('markers'); });
+
+        service.setZIndex(2);
+        await flush();
+
+        // Markers first would put them under the clear the render performs, which
+        // is exactly how a scrubbed plane ended up with no observations on it.
+        expect(order).toEqual(['image', 'markers']);
+      });
+
+      it('floors the marker diameter so a sub-pixel cell still shows', async () => {
+        const ds = sliced();
+        // 2-unit radius on a 100-unit voxel grid: drawn to scale that is 1/25 of a
+        // pixel, and the section would come up empty.
+        const layer = await mountAt(
+          { ...ds, observations: { ...ds.observations, radius: 2 } }, 1,
+        );
+        expect(Array.from(layer.size as Float32Array)).toEqual([1.5 * 100]);
+      });
+
+      it('gathers per-point colours down to the drawn subset', async () => {
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical', name: 'region', categories: ['A', 'B', 'C'],
+            colors: ['#ff0000', '#00ff00', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 1, 2]),
+        });
+        await mountAt(sliced(), 1);
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+
+        const layer = addPoints.mock.results.at(-1)?.value;
+        // One colour, and it is observation 1's — a colour array still indexed by
+        // the whole dataset would paint this point red.
+        expect(layer.faceColor).toHaveLength(1);
+        expect(layer.faceColor[0].slice(0, 3)).toEqual([0, 1, 0]);
+      });
+
+      it('leaves a dataset with a real imageRef drawing every observation', async () => {
+        const ds = sliced();
+        const layer = await mountAt(
+          { ...ds, imageRef: { imageId: 'tissue', scale: [2, 2] } }, 1,
+        );
+        // Its coordinates are already the image's pixels and there is one section:
+        // nothing to filter, and the dataset's own affine still wins.
+        expect(Array.from(layer.positions)).toEqual([0, 0, 10, 20, 20, 40]);
+        expect(layer.scale).toEqual([2, 2]);
+      });
+    });
+
+    describe('gene map', () => {
+      const geneMapLayers = (addImage: jest.SpyInstance) =>
+        addImage.mock.calls.filter((c) => /gene map/.test(String((c[1] as { name?: string })?.name)));
+
+      it('draws nothing until the option is on AND a gene is the colour source', async () => {
+        const addImage = jest.spyOn(Viewer.prototype, 'addImage');
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 5, 9]));
+        await mount();
+
+        // On, but coloured by a column: there is no gene to map.
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        expect(geneMapLayers(addImage)).toHaveLength(0);
+
+        store.setSpatialView({ colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        expect(geneMapLayers(addImage)).toHaveLength(1);
+      });
+
+      it('hands napari an RGBA raster on the image grid, blended under the cells', async () => {
+        const addImage = jest.spyOn(Viewer.prototype, 'addImage');
+        const addPoints = jest.spyOn(Viewer.prototype, 'addPoints');
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 5, 9]));
+        await mount();
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+
+        const [source, opts] = geneMapLayers(addImage).at(-1)!;
+        const src = source as { kind: string; channels: number; dtype: string; data: Uint8Array };
+        expect(src.kind).toBe('typed');
+        // RGBA, so the layer can be transparent where nothing was measured.
+        expect(src.channels).toBe(4);
+        expect(src.dtype).toBe('uint8');
+        expect((opts as { blending?: string }).blending).toBe('translucent');
+        // The markers are re-added after it, so the cells stay on top of the field.
+        expect(addPoints.mock.invocationCallOrder.at(-1)).toBeGreaterThan(
+          addImage.mock.invocationCallOrder.at(-1)!,
+        );
+      });
+
+      it('does not re-estimate the field for a recolour, only for a new gene', async () => {
+        // Counted on the estimator itself, not on the fetch: the points path fetches
+        // the same vector to colour the markers, so a fetch count says nothing about
+        // whether the FIELD was rebuilt.
+        const estimate = jest.spyOn(expressionModule, 'expressionField');
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 5, 9]));
+        await mount();
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        expect(estimate).toHaveBeenCalledTimes(1);
+
+        // A window change recolours the cached field — re-estimating would be a full
+        // pass over the raster for colours that come out of a LUT.
+        store.setSpatialView({ percentileClip: [0.05, 0.95] });
+        await flush();
+        expect(estimate).toHaveBeenCalledTimes(1);
+
+        // A different gene is a different field.
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([9, 5, 1]));
+        store.setSpatialView({ colorBy: { kind: 'feature', name: 'Mbp' } });
+        await flush();
+        expect(estimate).toHaveBeenCalledTimes(2);
+        estimate.mockRestore();
+      });
+
+      it('colours the field with the chosen colormap, not the image’s', async () => {
+        // The display colormap belongs to the tissue image; the gene map's own
+        // choice has to override it, or picking a gradient does nothing.
+        const addImage = jest.spyOn(Viewer.prototype, 'addImage');
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 5, 9]));
+        await mount();
+        store.setSpatialView({
+          geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' },
+          continuousColormap: 'Reds',
+        });
+        await flush();
+        const reds = geneMapLayers(addImage).at(-1)![0] as { data: Uint8Array };
+
+        store.setSpatialView({ continuousColormap: 'Blues' });
+        await flush();
+        const blues = geneMapLayers(addImage).at(-1)![0] as { data: Uint8Array };
+        expect(Array.from(blues.data)).not.toEqual(Array.from(reds.data));
+
+        // Reds really is red-dominant and Blues blue-dominant, so this is the
+        // colormap reaching the pixels and not merely some byte changing.
+        const channelSums = (d: Uint8Array) => {
+          let r = 0; let b = 0;
+          for (let i = 0; i < d.length; i += 4) { r += d[i]; b += d[i + 2]; }
+          return { r, b };
+        };
+        expect(channelSums(reds.data).r).toBeGreaterThan(channelSums(reds.data).b);
+        expect(channelSums(blues.data).b).toBeGreaterThan(channelSums(blues.data).r);
+      });
+
+      it('follows the image’s colormap live while none is chosen', async () => {
+        // "Match the image" is the default, and a setting that only takes effect
+        // at the next unrelated rebuild is not a setting.
+        const addImage = jest.spyOn(Viewer.prototype, 'addImage');
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 5, 9]));
+        await mount();
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        const before = geneMapLayers(addImage).at(-1)![0] as { data: Uint8Array };
+
+        store.setColormap({ label: 'Reds', data: { value: 'Reds' } } as never);
+        await flush();
+        const after = geneMapLayers(addImage).at(-1)![0] as { data: Uint8Array };
+        expect(Array.from(after.data)).not.toEqual(Array.from(before.data));
+      });
+
+      it('removes the layer when the option is switched off', async () => {
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 5, 9]));
+        await mount();
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        const inScene = () =>
+          ((service as unknown as { viewer: { layers: { items: readonly { name?: string }[] } } })
+            .viewer.layers.items).filter((l) => l.name?.startsWith('gene map')).length;
+        expect(inScene()).toBe(1);
+
+        store.setSpatialView({ geneMap: false });
+        await flush();
+        expect(inScene()).toBe(0);
+      });
+    });
+
+    describe('hover tooltip', () => {
+      const host = () => document.getElementById('spatial-host')!;
+      const tip = () => host().querySelector('div[style*="z-index: 6"]') as HTMLElement | null;
+
+      /**
+       * Move the pointer and let the rAF-throttled hit-test run.
+       *
+       * jsdom has no PointerEvent, so — as the region-overlay spec does — the
+       * gesture is a MouseEvent typed `pointermove`, which the same listener sees.
+       */
+      async function hover(clientX: number, clientY: number) {
+        host().dispatchEvent(new MouseEvent('pointermove', {
+          clientX, clientY, bubbles: true,
+        }));
+        // The handler defers to requestAnimationFrame; jsdom runs it on a timer.
+        await new Promise((r) => setTimeout(r, 20));
+      }
+
+      beforeEach(() => {
+        // jsdom gives every element a zero rect, so the canvas origin is (0,0) and
+        // client coordinates are canvas coordinates.
+        jest.spyOn(Viewer.prototype, 'canvasToWorld').mockImplementation(
+          (cx: number, cy: number) => [cx, cy] as [number, number],
+        );
+      });
+
+      it('names the class under the cursor, over the column it came from', async () => {
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 1, 0]),
+        });
+        await mount();
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+
+        // Observations sit at (0,0), (10,20), (20,40) in data space, and this
+        // dataset has no imageRef, so world == data.
+        await hover(10, 20);
+        expect(tip()?.style.display).toBe('block');
+        expect(tip()?.textContent).toContain('Thalamus');
+        expect(tip()?.textContent).toContain('region');
+
+        await hover(0, 0);
+        expect(tip()?.textContent).toContain('Cortex');
+      });
+
+      it('says nothing over empty tissue', async () => {
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 1, 0]),
+        });
+        await mount();
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+
+        await hover(10, 20);
+        expect(tip()?.style.display).toBe('block');
+        // Far from every marker: the tooltip must not trail the cursor around.
+        await hover(500, 500);
+        expect(tip()?.style.display).toBe('none');
+      });
+
+      it('reports a gene value, with the dataset’s unit', async () => {
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1.5, 4.25, 9]));
+        await mount();
+        store.setSpatialView({ colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+
+        await hover(10, 20);
+        expect(tip()?.textContent).toContain('4.25');
+        expect(tip()?.textContent).toContain('Ttr');
+      });
+
+      it('stays silent when nothing is being said about the cells', async () => {
+        // No colour source: there is no cluster to name, so a tooltip would be
+        // inventing something to say.
+        await mount();
+        await hover(10, 20);
+        expect(tip()?.style.display).toBe('none');
+      });
+
+      it('hides when the pointer leaves the plot', async () => {
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 1, 0]),
+        });
+        await mount();
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        await hover(10, 20);
+        expect(tip()?.style.display).toBe('block');
+
+        host().dispatchEvent(new MouseEvent('pointerleave', { bubbles: true }));
+        expect(tip()?.style.display).toBe('none');
+      });
+
+      /** Press and release at one place: a click, not a drag. */
+      function click(clientX: number, clientY: number, moveTo?: [number, number]) {
+        host().dispatchEvent(new MouseEvent('pointerdown', { clientX, clientY, bubbles: true }));
+        const [ux, uy] = moveTo ?? [clientX, clientY];
+        host().dispatchEvent(new MouseEvent('pointerup', {
+          clientX: ux, clientY: uy, bubbles: true,
+        }));
+      }
+
+      const selection = () => TestBed.inject(SpatialSelectionStore).current();
+
+      async function mountColouredByRegion() {
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          // Observation 0 and 2 are Cortex, 1 is Thalamus.
+          codes: new Uint16Array([0, 1, 0]),
+        });
+        await mount();
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+      }
+
+      it('leaves click-to-zoom alone outside the spatial modes', async () => {
+        // It is a navigation affordance the rest of the library relies on; only
+        // the spatial modes give a click a different job.
+        document.getElementById('plain-host')?.remove();
+        const div = document.createElement('div');
+        div.id = 'plain-host';
+        document.body.appendChild(div);
+        const loaded = await service.load(imageInfo(), 0);
+        await service.plot('plain-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE);
+        await flush();
+        const viewer = (service as unknown as {
+          viewer: { options: { clickZoomFactor?: number } };
+        }).viewer;
+        expect(viewer.options.clickZoomFactor).toBeUndefined();
+      });
+
+      it('turns off napari’s click-to-zoom, so one click does not do two things', async () => {
+        // napari's 2D controls zoom 2x about the cursor on a plain click (OSD
+        // style). Left on, a selection click would also zoom — and the zoom would
+        // halve the world radius the NEXT click hit-tests with, so clicking cells
+        // would get steadily harder.
+        await mountColouredByRegion();
+        const viewer = (service as unknown as {
+          viewer: { options: { clickZoomFactor?: number } };
+        }).viewer;
+        expect(viewer.options.clickZoomFactor).toBe(0);
+      });
+
+      it('selects the whole class of the marker clicked, like the legend does', async () => {
+        await mountColouredByRegion();
+        // Observation 1 is the only Thalamus cell.
+        click(10, 20);
+        expect(selection().count).toBe(1);
+        expect(Array.from(selection().mask)).toEqual([0, 1, 0]);
+
+        // Observation 0 is Cortex, which has two cells — the CLASS is selected,
+        // not the one cell under the cursor.
+        click(0, 0);
+        expect(selection().count).toBe(2);
+        expect(Array.from(selection().mask)).toEqual([1, 0, 1]);
+      });
+
+      it('clicking the same class again clears, so a click is reversible', async () => {
+        await mountColouredByRegion();
+        click(10, 20);
+        expect(selection().count).toBe(1);
+        click(10, 20);
+        expect(selection().count).toBe(0);
+      });
+
+      it('leaves the selection alone for a drag, or a click on empty tissue', async () => {
+        await mountColouredByRegion();
+        // A drag is how the camera is panned and orbited. It ENDS on a marker
+        // here on purpose: a release position alone cannot tell a drag from a
+        // click, so this only passes if the travelled distance is what decides.
+        click(500, 500, [10, 20]);
+        expect(selection().count).toBe(0);
+        // …and the same release position as a real click does select.
+        click(10, 20);
+        expect(selection().count).toBe(1);
+
+        TestBed.inject(SpatialSelectionStore).clear();
+        // Nothing is under the cursor out here.
+        click(500, 500);
+        expect(selection().count).toBe(0);
+      });
+
+      it('does not select while a region tool owns the pointer', async () => {
+        // Placing a polygon vertex is also a click that does not move, and it must
+        // not change the selection behind the shape being drawn.
+        await mountColouredByRegion();
+        service.getRegionOverlay()?.setMode('drawpolygon');
+        click(10, 20);
+        expect(selection().count).toBe(0);
+
+        service.getRegionOverlay()?.setMode('none');
+        click(10, 20);
+        expect(selection().count).toBe(1);
+      });
+
+      it('does not select when the colour source is continuous', async () => {
+        // A gene has no set of cells that "is" a value, so there is no class to
+        // select — the tooltip still reports the value.
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1.5, 4.25, 9]));
+        await mount();
+        store.setSpatialView({ colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        click(10, 20);
+        expect(selection().count).toBe(0);
+      });
+
+      it('recovers when a slower resolution loses the race', async () => {
+        // The label is fetched asynchronously. If a superseded fetch were allowed
+        // to commit its cache key, the key would claim a source that was never
+        // stored — and since every later emission carries the same key, the
+        // tooltip would stay silent for the rest of the session.
+        const slow = { meta: {
+          kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+          colors: ['#ff0000', '#0000ff'],
+        }, codes: new Uint16Array([0, 1, 0]) };
+        // Typed through a holder so TypeScript does not narrow it to `never` from
+        // the assignment inside the executor.
+        const gate: { release: () => void } = { release: () => undefined };
+        spatialPort.getColumn.mockImplementationOnce(
+          () => new Promise((resolve) => { gate.release = () => resolve(slow); }),
+        );
+        spatialPort.getColumn.mockResolvedValue(slow);
+
+        await mount();
+        // First request hangs…
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        // …a second lands and supersedes it…
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3]));
+        store.setSpatialView({ colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        // …then the first finally returns. It lost the race, so it must not
+        // overwrite the newer source: the tooltip would otherwise name a class
+        // while the cloud is coloured by a gene.
+        gate.release();
+        await flush();
+        await hover(10, 20);
+        expect(tip()?.textContent).toContain('2'); // the gene's value
+        expect(tip()?.textContent).toContain('Ttr');
+        expect(tip()?.textContent).not.toContain('Thalamus');
+
+        // And going back to the column still resolves rather than short-circuiting
+        // on a key some abandoned fetch left behind.
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        await hover(10, 20);
+        expect(tip()?.textContent).toContain('Thalamus');
+      });
+
+      it('retries after a failed fetch instead of going permanently silent', async () => {
+        spatialPort.getColumn.mockRejectedValueOnce(new Error('offline'));
+        await mount();
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        await hover(10, 20);
+        expect(tip()?.style.display).toBe('none');
+
+        // The same colour source again: a failure must leave the key clear so this
+        // resolves rather than inheriting the earlier silence.
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 1, 0]),
+        });
+        store.setSpatialView({ pointScale: 2 });
+        await flush();
+        await hover(10, 20);
+        expect(tip()?.textContent).toContain('Thalamus');
+      });
+
+      it('follows the colour source when it changes', async () => {
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 1, 0]),
+        });
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1.5, 4.25, 9]));
+        await mount();
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        await hover(10, 20);
+        expect(tip()?.textContent).toContain('Thalamus');
+
+        // Recolouring by a gene has to change what the tooltip reports, or it and
+        // the legend would disagree.
+        store.setSpatialView({ colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        await hover(10, 20);
+        expect(tip()?.textContent).toContain('4.25');
+        expect(tip()?.textContent).not.toContain('Thalamus');
+      });
+    });
+
+    it('draws one marker per observation at its coordinates', async () => {
+      const layer = await mount();
+      expect(addPoints).toHaveBeenCalled();
+      expect(Array.from(layer.positions)).toEqual([0, 0, 10, 20, 20, 40]);
+    });
+
+    it('sizes markers by DIAMETER from the radius, scaled by pointScale', async () => {
+      const layer = await mount();
+      expect(layer.size).toBe(55); // 27.5 px radius -> 55 px diameter
+
+      store.setSpatialView({ pointScale: 2 });
+      await flush();
+      expect(addPoints.mock.results.at(-1)?.value.size).toBe(110);
+    });
+
+    it('uses one flat colour when nothing is selected to colour by', async () => {
+      const layer = await mount();
+      // A single RGBA tuple, broadcast — not a per-point array.
+      expect(Array.isArray(layer.faceColor)).toBe(true);
+      expect(layer.faceColor).toHaveLength(4);
+      expect(typeof layer.faceColor[0]).toBe('number');
+    });
+
+    it('colours by a categorical column using the column\'s own palette', async () => {
+      const column: CategoricalColumn = {
+        meta: {
+          kind: 'categorical', name: 'region', categories: ['A', 'B'],
+          colors: ['#ff0000', '#0000ff'],
+        },
+        codes: new Uint16Array([0, 1, 0]),
+      };
+      spatialPort.getColumn.mockResolvedValue(column);
+
+      await mount();
+      store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+      await flush();
+
+      const layer = addPoints.mock.results.at(-1)?.value;
+      expect(spatialPort.getColumn).toHaveBeenCalledWith('region');
+      expect(layer.faceColor).toHaveLength(3); // one tuple per observation
+      expect(layer.faceColor[0].slice(0, 3)).toEqual([1, 0, 0]);
+      expect(layer.faceColor[1].slice(0, 3)).toEqual([0, 0, 1]);
+    });
+
+    it('colours by a gene vector through the active colormap', async () => {
+      spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([0, 5, 10]));
+
+      await mount();
+      store.setSpatialView({ colorBy: { kind: 'feature', name: 'Ttr' } });
+      await flush();
+
+      const layer = addPoints.mock.results.at(-1)?.value;
+      expect(spatialPort.getFeatureVector).toHaveBeenCalledWith('Ttr');
+      expect(layer.faceColor).toHaveLength(3);
+      // Distinct values must map to distinct colours — a flat result would mean
+      // the contrast window collapsed.
+      expect(layer.faceColor[0]).not.toEqual(layer.faceColor[2]);
+    });
+
+    it('falls back to a flat colour when a gene fetch fails, rather than blanking the view', async () => {
+      spatialPort.getFeatureVector.mockRejectedValue(new Error('404'));
+      jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+      await mount();
+      store.setSpatialView({ colorBy: { kind: 'feature', name: 'Missing' } });
+      await flush();
+
+      const layer = addPoints.mock.results.at(-1)?.value;
+      expect(layer.faceColor).toHaveLength(4); // the broadcast tuple, so points still render
+    });
+
+    it('ignores a superseded colour fetch that resolves late', async () => {
+      await mount();
+      // 'slow' resolves AFTER 'fast', but 'fast' was requested second.
+      let releaseSlow: (v: Float32Array) => void = () => undefined;
+      spatialPort.getFeatureVector.mockImplementationOnce(
+        () => new Promise<Float32Array>((resolve) => { releaseSlow = resolve; }),
+      );
+      spatialPort.getFeatureVector.mockResolvedValueOnce(new Float32Array([9, 9, 9]));
+
+      store.setSpatialView({ colorBy: { kind: 'feature', name: 'slow' } });
+      store.setSpatialView({ colorBy: { kind: 'feature', name: 'fast' } });
+      await flush();
+      const afterFast = addPoints.mock.calls.length;
+
+      releaseSlow(new Float32Array([0, 0, 0]));
+      await flush();
+      // The stale response must not add another layer.
+      expect(addPoints.mock.calls.length).toBe(afterFast);
+    });
+
+    // REGRESSION: the mode's selection is driven by drawn ROIs, so mounting it
+    // without the region overlay left the region tools inert — the toolbar
+    // buttons showed (they gate on 2D, not on plot type) but did nothing.
+    it('mounts the region overlay, so the ROI tools work as they do on the image view', async () => {
+      await mount();
+      const overlay = service.getRegionOverlay();
+      expect(overlay).not.toBeNull();
+      expect(() => {
+        overlay?.setMode('drawrect');
+        overlay?.setMode('drawpolygon');
+        overlay?.setMode('none');
+      }).not.toThrow();
+    });
+
+    it('arms the pixel tools, so wand/brush work over the spots too', async () => {
+      await mount();
+      expect(() => {
+        service.setWandMode(true);
+        service.setBrushMode(true);
+        service.setZoomToBoxMode(true);
+        service.setVertexEraserMode(true);
+      }).not.toThrow();
+    });
+
+    // REGRESSION: the Opacity slider did nothing in the DEFAULT state. With no
+    // colour source and no selection the flat colour was a constant tuple, so
+    // `view.opacity` was dropped on the floor — and that is the state anyone
+    // lands in before picking a column or a gene.
+    it('honours opacity with no colour source selected', async () => {
+      const layer = await mount();
+      // Uniform at opacity 1: one broadcast tuple, so a flat 84k view does not
+      // allocate 84k of them.
+      expect(layer.faceColor).toHaveLength(4);
+
+      store.setSpatialView({ opacity: 0.3 });
+      await flush();
+      // No longer uniform, so it becomes per-point and the alpha carries it.
+      expect(layer.faceColor).toHaveLength(3);
+      expect((layer.faceColor as number[][])[0][3]).toBeCloseTo(0.3, 2);
+    });
+
+    it('updates size and colour IN PLACE, without rebuilding the layer', async () => {
+      await mount();
+      const calls = addPoints.mock.calls.length;
+      const layer = addPoints.mock.results.at(-1)?.value;
+
+      store.setSpatialView({ pointScale: 3 });
+      await flush();
+      // A display-only change must not re-add the layer: at 84k observations
+      // that would rebuild every position to change one number.
+      expect(addPoints.mock.calls.length).toBe(calls);
+      expect(layer.size).toBe(165); // 27.5 radius -> 55 diameter x 3
+    });
+
+    it('rebuilds the layer when the DATASET changes', async () => {
+      await mount();
+      const calls = addPoints.mock.calls.length;
+      dataset$.next({ ...spatialDataset(2), id: 'other' });
+      await flush();
+      expect(addPoints.mock.calls.length).toBe(calls + 1);
+    });
+
+    it('applies the dataset\'s data->world affine so spots land on the image', async () => {
+      const layer = await mount({
+        ...spatialDataset(),
+        imageRef: { scale: [0.5, 0.5], translate: [10, -4], mppX: 1 },
+      });
+      expect(layer.scale).toEqual([0.5, 0.5]);
+      expect(layer.translate).toEqual([10, -4]);
+    });
+
+    it('defaults the affine to identity when the dataset declares none', async () => {
+      const layer = await mount();
+      expect(layer.scale).toEqual([1, 1]);
+      expect(layer.translate).toEqual([0, 0]);
+    });
+
+    it('renders nothing extra for an empty dataset', async () => {
+      const layer = await mount({ ...spatialDataset(0), observations: {
+        count: 0, x: new Float32Array(0), y: new Float32Array(0),
+      } });
+      expect(layer).toBeUndefined();
+    });
+
+    it('stops tracking the dataset on reset', async () => {
+      await mount();
+      expect(dataset$.observed).toBe(true);
+      service.reset();
+      expect(dataset$.observed).toBe(false);
+    });
   });
 });

@@ -33,6 +33,15 @@ export enum PlotType {
   NAPARI_SCATTER = 'napari-scatter',
   /** WebGPU 3D scatter of the downsampled voxel cloud (napari-js analog of Plotly SCATTER3D). */
   NAPARI_SCATTER3D = 'napari-scatter3d',
+  /** Spatial-omics observations (Visium spots, segmented cells) drawn over the tissue image and
+   *  coloured by an annotation column or a gene. Needs a `SpatialDataset` on `SPATIAL_DATA_PORT`,
+   *  so it is gated by `requiresSpatialData` and never appears for an image-only host. */
+  SPATIAL_OMICS = 'spatial-omics',
+  /** Spatial-omics observations as a 3D point cloud, for assays whose observations carry a z —
+   *  serial sections registered into a common frame (e.g. the Allen CCF), or a genuinely
+   *  volumetric assay. Gated by `requiresSpatial3d`, a strictly narrower gate than
+   *  {@link SPATIAL_OMICS}: a single-plane dataset has no z to render. */
+  SPATIAL_OMICS_3D = 'spatial-omics-3d',
 }
 
 /** How many spatial dimensions a plot type renders in. */
@@ -42,8 +51,11 @@ export type PlotDimensions = '2d' | '3d';
  * Where a plot type pulls its data from:
  *  - `image`   — the loaded pixel matrices / z-stack (HEATMAP, SURFACE, …)
  *  - `regions` — the drawn/derived regions (SCATTER of region centroids, …)
+ *  - `spatial` — a `SpatialDataset` supplied through `SPATIAL_DATA_PORT`: N
+ *    observations (spots/cells) with categorical + continuous columns and a
+ *    lazily-fetched feature matrix, drawn over the tissue image they came from.
  */
-export type PlotDataSource = 'image' | 'regions';
+export type PlotDataSource = 'image' | 'regions' | 'spatial';
 
 /**
  * Backend-neutral metadata about a plot type. Drives UI affordances (which
@@ -79,6 +91,17 @@ export interface PlotTypeDescriptor {
    *  surface, intensity profile, isosurface) — only meaningful for grayscale.
    *  Image/Heatmap render RGB fine; Scatter uses regions. */
   requiresGrayscale?: boolean;
+  /** True when the type renders a `SpatialDataset` (`source: 'spatial'`) and is
+   *  therefore meaningless without one. The selector hides it until a dataset is
+   *  published on `SPATIAL_DATA_PORT` — the same shape of gate as
+   *  {@link requiresStack} for a z-stack, so a host with no spatial data never
+   *  sees the mode. */
+  requiresSpatialData?: boolean;
+  /** True when the type needs observations with a z coordinate, not merely a
+   *  `SpatialDataset`. Narrower than {@link requiresSpatialData}: most spatial
+   *  assays are a single plane, so this hides the 3D mode unless the published
+   *  dataset actually carries `observations.z`. */
+  requiresSpatial3d?: boolean;
 }
 
 /**
@@ -112,6 +135,9 @@ export const PLOT_TYPE_DESCRIPTORS: Partial<Record<PlotType, PlotTypeDescriptor>
   [PlotType.NAPARI_SCATTER3D]:  { type: PlotType.NAPARI_SCATTER3D,  label: 'Scatter 3D (napari · WebGPU)', icon: 'assets/plotting/3d-coordinates.svg', dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
   [PlotType.NAPARI_VOLUME]:     { type: PlotType.NAPARI_VOLUME,     label: 'Volume (napari · WebGPU)',     productionLabel: 'Volume',     icon: 'assets/plotting/cube-3d.svg',        dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
   [PlotType.NAPARI_ISOSURFACE]: { type: PlotType.NAPARI_ISOSURFACE, label: 'Isosurface (napari · WebGPU)', productionLabel: 'Isosurface', icon: 'assets/plotting/isosurface.svg',     dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
+  // ── Spatial omics ──
+  [PlotType.SPATIAL_OMICS]:     { type: PlotType.SPATIAL_OMICS,     label: 'Spatial omics (napari · WebGPU)', productionLabel: 'Spatial omics', icon: 'assets/plotting/spatial-omics.svg',  dimensions: '2d', source: 'spatial', requiresSpatialData: true },
+  [PlotType.SPATIAL_OMICS_3D]:  { type: PlotType.SPATIAL_OMICS_3D,  label: 'Spatial omics 3D (napari · WebGPU)', productionLabel: 'Spatial omics 3D', icon: 'assets/plotting/spatial-omics-3d.svg', dimensions: '3d', source: 'spatial', requiresSpatialData: true, requiresSpatial3d: true },
 };
 
 export function getPlotTypeDescriptor(type: PlotType): PlotTypeDescriptor | undefined {
@@ -143,6 +169,30 @@ export function isNapariScatter(type: PlotType): boolean {
 export function isNapariScatter3d(type: PlotType): boolean {
   return type === PlotType.NAPARI_SCATTER3D;
 }
+/** Spatial-omics observations over the tissue image. */
+export function isSpatialOmics(type: PlotType): boolean {
+  return type === PlotType.SPATIAL_OMICS;
+}
+/** Spatial-omics observations as a 3D point cloud. */
+export function isSpatialOmics3d(type: PlotType): boolean {
+  return type === PlotType.SPATIAL_OMICS_3D;
+}
+/**
+ * Whether the renderer, rather than the shell, should handle wheel zoom.
+ *
+ * The shell's wheel listener applies a FIXED step per event, which is far too sensitive for a
+ * renderer that reads the scroll delta: it works out at 30% per event against napari-js's 3%, and
+ * ignores the device normalization and easing the renderer does. So every plot type drawn by a
+ * renderer that owns the wheel has to opt out here.
+ *
+ * The image view always did. The spatial-omics modes did NOT, despite being drawn by the same
+ * napari-js viewer — the shell gated on an `isHeatmap` flag that defaults to true and only goes
+ * false for the 3D Plotly scenes, so it silently took the wheel for them too.
+ */
+export function rendererOwnsWheel(type: PlotType): boolean {
+  return type === PlotType.IMAGE || isSpatialOmics(type) || isSpatialOmics3d(type);
+}
+
 /** Any napari-js 3D plot type (volume, isosurface, surface, or 3D scatter). Resolution is a runtime
  *  decimate factor (Full / ½ / ¼ / ⅛) — see the service's `resolutionScale`. */
 export function isNapari3d(type: PlotType): boolean {

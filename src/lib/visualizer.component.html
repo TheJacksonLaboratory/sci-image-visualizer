@@ -42,6 +42,7 @@
   [maxIndex]="maxIndex"
   [zIndex]="zIndex"
   [isHeatmap]="isHeatmap"
+  [is3dRegions]="isSpatial3dMode"
   [activeDragMode]="activeDragMode"
   [activeSurface3dMode]="activeSurface3dMode"
   [axesVisible]="axesVisible"
@@ -64,6 +65,7 @@
   (addProfileLine)="addProfileLine()"
   (isoRangeChange)="onIsoRangeChange($event)"
   (openChannelHistogram)="openChannelHistogram()"
+  (openSpatialControls)="openSpatialControls()"
   (openRegionEditor)="openRegionEditor()"
   (selectStackOption)="selectStackOption($event)"
   (zScrub)="onZScrub($event)"
@@ -164,6 +166,10 @@
 
 <!-- Channels & Histogram: non-modal floating dialog opened from the toolbar. -->
 <channel-histogram [(visible)]="showChannelHistogram"></channel-histogram>
+
+<!-- Spatial-omics controls. Renders its own empty state when no dataset (or no
+     SPATIAL_DATA_PORT) is present, so it is always safe to host. -->
+<spatial-controls [(visible)]="showSpatialControls" [is3d]="isSpatial3dMode"></spatial-controls>
 
 <!-- Region Editor: non-modal, draggable, resizable floating dialog opened from
      the toolbar (formerly the right-panel Regions tab). Modeless so regions can

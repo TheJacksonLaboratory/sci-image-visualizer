@@ -201,6 +201,86 @@ No database, no state. At gigapixel scale the only thing that matters is a
 for `geotiff.js` (range-reading a COG straight from a bucket), or the local
 pyramid for a DeepZoom/IIIF source, as long as you keep the contract above.
 
+## Showing every plot mode
+
+`?test=1` on the example URL turns on the viewer's `testMode` input, which shows
+every backend's plot mode under its backend-suffixed label — `Image (OSD)` next
+to `Image (napari · WebGPU)`, both Surfaces, all the Scatters:
+
+```
+http://localhost:5173/?test=1
+```
+
+It lifts the `productionLabel` curation only. The capability gates still apply:
+a stack-only mode still needs a stack, a scalar mode still needs a grayscale
+image, and **Spatial omics** still needs a dataset loaded.
+
+## Spatial-omics demo
+
+The gallery's spatial entries are **discovered from the server**, not hardcoded:
+the example asks `/spatial/datasets` at startup, so dropping a SpatialData store
+(or a legacy ST bundle) into the server's data directories makes it appear here
+with no code change. They live in a **`spatial-omics` folder**, like the bundled
+micro-CT series — with 41 datasets the root gallery is unreadable flat. A 2D
+entry loads a tissue image *and* the spatial-omics dataset registered onto it; a
+**3D** entry (the ABC atlas ones, which have no `imageRef`) loads only the
+dataset, and the library then publishes that dataset's registered volume as the
+image, opening on the Image view over its slices.
+
+Image dimensions are fetched on **click**, not at startup — asking for a
+descriptor is what makes the server build that image's pyramid, so only the
+dataset you open pays for it. Selecting it makes the
+**Spatial omics** plot type appear in the plot-type selector (it is hidden
+whenever no dataset is loaded, like Volume is hidden without a z-stack); picking
+that mode draws ~2,000 spots over the tissue, coloured by anatomical region.
+
+A dataset whose observations carry a `z` also offers **Spatial omics 3D** — the
+cloud under an orbit camera inside the reference volume. Its slice slider scrubs
+the volume in the 2D mode (each plane drawing its own section's cells), and the
+panel's **Cluster density volumes** checkbox raymarches the largest clusters as
+smooth density fields alongside the cloud. `npm run fetch-abc` in the tile server
+populates the whole-mouse-brain MERFISH datasets those paths were built against.
+
+```bash
+cd examples/tile-server
+npm install
+# either: a synthetic dataset, no download
+npm run make-spatial-demo
+# or: drop a real SpatialData store in and it is served live
+#   ln -s /path/to/data.zarr stores/visium
+npm start
+
+# then, from the repo root:
+VITE_TILE_SERVER=http://localhost:8090/ npm run start:example
+```
+
+Wiring it into a host takes two things — a provider and a call:
+
+```ts
+providers: [
+  SpatialDataHttpService,
+  { provide: SPATIAL_DATA_PORT, useExisting: SpatialDataHttpService },
+]
+
+// then, when the user picks a dataset:
+this.spatialData.configure({ baseUrl: TILE_SERVER });
+await this.spatialData.selectDataset('demo-brain');
+this.viz.getSpatialControls()?.colorByColumn('region');
+```
+
+`getSpatialControls()` returns null unless a port is bound, and its view state
+lives in the shared store — so it works before any backend has mounted and
+survives a plot-type switch. The example calls `spatialData.clear()` whenever a
+non-spatial image is selected, which is what withdraws the plot type again.
+
+Once the mode is active, the **Spatial omics** toolbar button opens the controls
+panel: colour by any column or search the gene panel, with a legend for
+categorical colourings, a colour bar for continuous ones, point-size, opacity,
+log-scale and outlier-clip controls, and a **Distribution** section charting
+whatever the map is coloured by — counts per category for a categorical column,
+histogram / violin / box for a continuous one or a gene. The example sets an initial
+colour column in code only so the mode opens on something meaningful.
+
 ## Try it end-to-end
 
 ```bash

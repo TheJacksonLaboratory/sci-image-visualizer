@@ -1,5 +1,5 @@
-import { Inject, Injectable } from '@angular/core';
-import { Observable, combineLatest } from 'rxjs';
+import { Inject, Injectable, Optional } from '@angular/core';
+import { Observable, Subscription, combineLatest, firstValueFrom } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Image } from 'image-js';
 
@@ -8,8 +8,21 @@ import { Region } from './models/region';
 import { ClassPreset, PresetSet } from './models/class-preset';
 import { PlotlyService } from './implementations/plotly/plotly.service';
 import { OpenSeadragonVisualizerService } from './implementations/osd/openseadragon-visualizer.service';
-import { PlotType, PlotTypeDescriptor, isNapari3d, isNapariScatter } from './contracts/plot-type';
-import { IVisualizer, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls } from './contracts/visualizer.contract';
+import { PlotType, PlotTypeDescriptor, isNapari3d, isNapariScatter, isSpatialOmics, isSpatialOmics3d } from './contracts/plot-type';
+import { IVisualizer, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls, ISpatialControls } from './contracts/visualizer.contract';
+import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-data.port';
+import { SpatialColorBy } from './contracts/display-types';
+import { SpatialDataset, isCategoricalColumn } from './contracts/spatial-dataset.contract';
+import { resolveCategoryColors } from './spatial/spatial-encoding';
+import { sectionsOf } from './spatial/spatial-sections';
+import {
+  observationsInSlice, volumeImageRef,
+} from './spatial/spatial-volume-image';
+import {
+  emptySelection, selectByCategory, selectInRegions, selectInRegionsProjected,
+} from './spatial/spatial-selection';
+import { RegionStore } from './store/region-store.service';
+import { SpatialSelectionStore } from './store/spatial-selection.service';
 import { ViewerCapabilities } from './contracts/capabilities.contract';
 import { IRegionOverlay } from './contracts/region-overlay.contract';
 import { IRegionEditorApi } from './contracts/region-editor-api.contract';
@@ -89,21 +102,33 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
               private osd: OpenSeadragonVisualizerService,
               private napari: NapariVisualizerService,
               private store: VisualizerStore,
-              @Inject(VIZ_CONFIG) private config: VizConfig) {}
+              @Inject(VIZ_CONFIG) private config: VizConfig,
+              // Optional: a host that serves no spatial-omics data binds nothing,
+              // and `getSpatialControls()` then returns null.
+              private regionStore: RegionStore,
+              private selectionStore: SpatialSelectionStore,
+              @Optional() @Inject(SPATIAL_DATA_PORT)
+              private spatialData: SpatialDataPort | null = null) {}
 
   private isImageType(t: PlotType): boolean {
     return t === PlotType.IMAGE;
   }
 
-  /** The 2D napari types (image + region-centroid scatter) — a 2D fallback chain (OSD, then Plotly). */
+  /** The 2D napari types (image, region-centroid scatter, spatial omics) — a 2D fallback chain
+   *  (OSD, then Plotly).
+   *
+   *  NOTE for SPATIAL_OMICS: only napari-js draws the observation markers. If it fails (no WebGPU,
+   *  device loss) the fallback renders the tissue image ALONE — the spatial layer is absent, not
+   *  degraded. That is deliberate for now: showing the slide beats showing nothing, and a Plotly
+   *  `scattergl` spatial mode is the planned real fallback (see the plot-mode design doc). */
   private isNapariImageType(t: PlotType): boolean {
-    return t === PlotType.NAPARI_IMAGE || isNapariScatter(t);
+    return t === PlotType.NAPARI_IMAGE || isNapariScatter(t) || isSpatialOmics(t);
   }
 
-  /** The 3D napari types (volume/isosurface, either resolution) — no 2D fallback exists (OSD is
-   *  image-only), so they fall straight to Plotly. */
+  /** The 3D napari types (volume/isosurface/surface/scatter, plus the 3D spatial cloud) — no 2D
+   *  fallback exists (OSD is image-only), so they fall straight to Plotly. */
   private isNapari3dType(t: PlotType): boolean {
-    return isNapari3d(t);
+    return isNapari3d(t) || isSpatialOmics3d(t);
   }
 
   /**
@@ -144,6 +169,9 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
 
   // ── render / viewport → active renderer ──────────────────────────────
   async load(imageInfo: IImageInfo, zIndex: number): Promise<any> {
+    // A stack can open away from slice 0 (`initialZIndex` — a volume opens
+    // mid-specimen), and that arrives here rather than through setZIndex.
+    this.currentZIndex = zIndex;
     const backend = this.imageBackend();
     if (backend === this.napari) {
       try {
@@ -224,7 +252,10 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.plotly.setImageSmoothingEnabled(enabled);
   }
   setShowStack(showstack: boolean): void { this.renderer().setShowStack(showstack); }
-  setZIndex(zIndex: number): void { this.renderer().setZIndex(zIndex); }
+  setZIndex(zIndex: number): void {
+    this.currentZIndex = zIndex;
+    this.renderer().setZIndex(zIndex);
+  }
   getTrueImageSize(): { width: number; height: number } | null { return this.renderer().getTrueImageSize(); }
   getCurrentImage(): Promise<Image | null> { return this.renderer().getCurrentImage(); }
   getDisplayedPixelData(): PixelData | null { return this.renderer().getDisplayedPixelData(); }
@@ -521,6 +552,180 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   /** Intensity (line-ROI) controls — always Plotly's, since the line profiles
    *  render their inset on Plotly regardless of which backend draws the image. */
   getIntensityControls(): IIntensityControls | null { return this.plotly.getIntensityControls(); }
+
+  /**
+   * Spatial-omics controls, or null when no `SPATIAL_DATA_PORT` is bound.
+   *
+   * Implemented HERE rather than on a backend because the state is
+   * backend-neutral: the view state lives in the shared `VisualizerStore` (like
+   * the colormap), so the controls keep working across a plot-type switch and a
+   * host can drive them before any backend has mounted.
+   */
+  getSpatialControls(): ISpatialControls | null {
+    const port = this.spatialData;
+    if (!port) return null;
+    // Mirror the dataset (and drop a stale selection when it changes — the masks
+    // are index-based, so they are meaningless against different observations).
+    this.spatialDatasetSub ??= port.getDataset$().subscribe((dataset) => {
+      const changed = dataset?.id !== this.currentSpatialDataset?.id;
+      this.currentSpatialDataset = dataset;
+      if (!changed) return;
+      this.selectionStore.set(emptySelection(dataset?.observations.count ?? 0));
+      // A colour source the new dataset cannot satisfy would leave the map flat
+      // while the panel and the charts kept naming the old column — so drop it,
+      // and only it: point size, opacity and the rest are the user's preferences,
+      // not the previous dataset's state.
+      const by = this.store.currentSpatialView().colorBy;
+      if (by && !this.canColorBy(dataset, by)) this.store.setSpatialView({ colorBy: null });
+    });
+    this.spatialControls ??= {
+      getDataset$: () => port.getDataset$(),
+      getViewState$: () => this.store.getSpatialView$(),
+      viewState: () => this.store.currentSpatialView(),
+      setViewState: (partial) => this.store.setSpatialView(partial),
+      // The hint SEEDS the toggle when the source changes, and nothing consults it
+      // afterwards. It used to be ORed in at render time, which meant an unchecked
+      // box could not turn log scaling off for a hinted column — and the linked
+      // chart, which reads `logScale` alone, disagreed with the map about what it
+      // was showing. One authority, set once per source.
+      colorByColumn: (name: string) => {
+        const meta = this.currentSpatialDataset?.columns.find((c) => c.name === name);
+        const hint = meta?.kind === 'continuous' ? !!meta.logScaleHint : false;
+        this.store.setSpatialView({ colorBy: { kind: 'column', name }, logScale: hint });
+      },
+      colorByFeature: (name: string) =>
+        this.store.setSpatialView({
+          colorBy: { kind: 'feature', name },
+          logScale: !!this.currentSpatialDataset?.features?.logScaleHint,
+        }),
+      clearColorBy: () => this.store.setSpatialView({ colorBy: null }),
+      searchFeatures: async (query: string, limit = 50) => {
+        // Prefer the port's search (a 31k-gene dataset does not ship its names);
+        // otherwise filter whatever the manifest inlined.
+        if (port.searchFeatures) return port.searchFeatures(query, limit);
+        const dataset = await firstValueFrom(port.getDataset$());
+        const names = dataset?.features?.names ?? [];
+        const q = query.toLowerCase();
+        return names.filter((n) => n.toLowerCase().includes(q)).slice(0, limit);
+      },
+      categoryColors: async (name: string) => {
+        const column = await port.getColumn(name);
+        if (!isCategoricalColumn(column)) {
+          throw new Error(`[spatial] column "${name}" is continuous — it has no categories`);
+        }
+        // Resolved by the SAME function the renderer uses, so a legend swatch
+        // can never disagree with the colour on screen.
+        return resolveCategoryColors(column.meta);
+      },
+
+      continuousValues: async (source) => {
+        if (source.kind === 'feature') return port.getFeatureVector(source.name);
+        const column = await port.getColumn(source.name);
+        if (isCategoricalColumn(column)) {
+          throw new Error(
+            `[spatial] column "${source.name}" is categorical — it has no values to chart`,
+          );
+        }
+        return column.values;
+      },
+
+      categoricalView: async (name: string) => {
+        const column = await port.getColumn(name);
+        if (!isCategoricalColumn(column)) {
+          throw new Error(`[spatial] column "${name}" is continuous — it has no categories`);
+        }
+        return {
+          name,
+          categories: column.meta.categories,
+          colors: resolveCategoryColors(column.meta),
+          codes: column.codes,
+        };
+      },
+
+      categoricalColumns: () => (this.currentSpatialDataset?.columns ?? [])
+        .filter((c) => c.kind === 'categorical')
+        .map((c) => c.name),
+
+      // Memoized on the observations object, so the renderer's own lookup and
+      // this one are the same single scan of up to 3.7M z values.
+      sampledSections: () => {
+        const obs = this.currentSpatialDataset?.observations;
+        return obs ? sectionsOf(obs) : null;
+      },
+
+      getSelection$: () => this.selectionStore.getSelection$(),
+
+      selectFromRegions: () => {
+        const dataset = this.currentSpatialDataset;
+        if (!dataset) return 0;
+        const regions = this.regionStore.getRegions();
+        // The union of every drawn region — so every ROI tool the library
+        // already has doubles as a spatial selection tool.
+        //
+        // In the 3D cloud there is no data-space affine to push a drawn shape
+        // through, so the observations are projected to canvas pixels by the
+        // renderer (which owns the camera) and tested in screen space instead.
+        // Falls back to the 2D path whenever the cloud is not mounted.
+        const projected = isSpatialOmics3d(this.currentPlotType)
+          ? this.napari.getSpatialScreenProjection(dataset.observations)
+          : null;
+        // In the 2D view of a volume-backed dataset the shape was drawn over ONE
+        // section, in the volume's pixel grid: it selects the cells of that
+        // section, not the whole depth of brain standing behind them.
+        const volume = !dataset.imageRef ? dataset.volume : undefined;
+        const selection = projected
+          ? selectInRegionsProjected(projected, dataset.observations.count, regions)
+          : selectInRegions(
+              dataset.observations,
+              volume ? volumeImageRef(volume, dataset.micronsPerUnit) : dataset.imageRef,
+              regions,
+              volume
+                ? observationsInSlice(dataset.observations, volume, this.currentZIndex)
+                : undefined,
+            );
+        this.selectionStore.set(selection);
+        return selection.count;
+      },
+
+      selectCategory: async (column: string, categoryIndex: number) => {
+        const loaded = await port.getColumn(column);
+        if (!isCategoricalColumn(loaded)) {
+          throw new Error(`[spatial] column "${column}" is continuous — it has no categories`);
+        }
+        const selection = selectByCategory(loaded.codes, categoryIndex);
+        this.selectionStore.set(selection);
+        return selection.count;
+      },
+
+      clearSelection: () => this.selectionStore.clear(),
+    };
+    return this.spatialControls;
+  }
+
+  /**
+   * Whether `dataset` can answer this colour source.
+   *
+   * A column is checkable against the declared list. A gene is checkable only when
+   * the dataset inlines its feature names — a dataset too wide to inline them
+   * (typeahead-only) keeps the source, and a name that turns out not to exist
+   * surfaces as the chart's "could not be charted" rather than as a silent reset.
+   */
+  private canColorBy(dataset: SpatialDataset | null, by: SpatialColorBy): boolean {
+    if (!dataset) return false;
+    if (by.kind === 'column') return dataset.columns.some((c) => c.name === by.name);
+    const names = dataset.features?.names;
+    return !!dataset.features && (!names || names.includes(by.name));
+  }
+
+  /** Memoised so consumers can hold the object across calls. */
+  private spatialControls: ISpatialControls | null = null;
+  /** Latest dataset, mirrored so `selectFromRegions()` can answer synchronously
+   *  — it runs from a button click and must not await a round-trip. */
+  private currentSpatialDataset: SpatialDataset | null = null;
+  /** Displayed slice. Only a volume-backed spatial dataset reads it, to keep a
+   *  region drawn over one section from selecting the whole depth behind it. */
+  private currentZIndex = 0;
+  private spatialDatasetSub: Subscription | null = null;
 
   /** Load pixel frames for intensity sampling when OpenSeadragon owns the image
    *  (it doesn't feed Plotly's frame cache). No-op needed when Plotly renders. */

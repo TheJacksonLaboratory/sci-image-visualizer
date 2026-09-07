@@ -1,0 +1,254 @@
+:host ::ng-deep .spatial-controls-dialog .p-dialog-content {
+  padding: 0.75rem 1rem 1rem;
+}
+
+.sc-empty {
+  padding: 0.5rem 0;
+  font-size: 0.85rem;
+  color: var(--text-color-secondary, #6c757d);
+  line-height: 1.4;
+
+  code {
+    font-size: 0.8rem;
+  }
+}
+
+.sc-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.sc-dataset {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--surface-border, #dee2e6);
+}
+
+.sc-dataset-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.sc-dataset-count,
+.sc-hint {
+  font-size: 0.75rem;
+  color: var(--text-color-secondary, #6c757d);
+}
+
+.sc-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.sc-lbl {
+  font-size: 0.78rem;
+  color: var(--text-color-secondary, #6c757d);
+  white-space: nowrap;
+}
+
+.sc-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+
+  // The <p-slider> and <p-dropdown> HOST elements are inline by default, so
+  // they ignore flex sizing. `styleClass` does not help: PrimeNG puts that
+  // class on its inner div, so styling it leaves the host collapsed — which
+  // renders a slider as nothing but its round handle, and reads as a radio
+  // button. Size the hosts here and stretch the track below.
+  p-slider,
+  p-dropdown,
+  p-treeSelect {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
+
+:host ::ng-deep .sc-row p-slider .p-slider {
+  width: 100%;
+}
+:host ::ng-deep .sc-row p-dropdown .p-dropdown,
+:host ::ng-deep .sc-row p-treeSelect .p-treeselect {
+  width: 100%;
+}
+
+// Every slider (and the one in-row dropdown) starts at the SAME x — the dialog's
+// horizontal centre — so the controls read as one column instead of a ragged edge
+// whose width depends on how long each label happens to be.
+//
+// The row spans the dialog's content box, which is inset by equal padding, so the
+// row's 50% mark IS the dialog's 50% mark. The gap is subtracted from the label
+// rather than left to push the track right, which would put every slider at
+// 50% + one gap instead of at 50%.
+.sc-row .sc-lbl {
+  flex: 0 0 calc(50% - 0.6rem);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+// FIXED, not a minimum: the readouts are not all the same length ("0.85" against
+// "27 of 53"), and a min-width lets the longest one steal from its own slider —
+// which is exactly the ragged-width problem the label column above fixes. Wide
+// enough for "27 of 53" at this size.
+// A colormap option is its own gradient plus its name: the swatch is the part
+// that actually answers "is this the ramp I want".
+.sc-cmap-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.sc-cmap-swatch {
+  width: 3.5rem;
+  height: 0.7rem;
+  border-radius: 2px;
+  display: block;
+}
+
+.sc-val {
+  flex: 0 0 4rem;
+  text-align: right;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+:host ::ng-deep .sc-full,
+:host ::ng-deep .sc-full .p-dropdown,
+:host ::ng-deep .sc-full .p-autocomplete,
+:host ::ng-deep .sc-full input {
+  width: 100%;
+}
+
+
+
+/* Key: legend or colour bar. Scrolls rather than growing the dialog — a
+   40-cluster column must not push the sliders off screen. */
+.sc-key {
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--surface-border, #dee2e6);
+  border-bottom: 1px solid var(--surface-border, #dee2e6);
+}
+
+.sc-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 11rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+
+  li {
+    display: flex;
+  }
+}
+
+.sc-legend-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.15rem 0.3rem;
+  font: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  color: inherit;
+
+  &:hover {
+    background: var(--surface-hover, rgba(0, 0, 0, 0.04));
+  }
+
+  &.selected {
+    border-color: var(--primary-color, #3b82f6);
+    background: var(--surface-hover, rgba(59, 130, 246, 0.08));
+    font-weight: 600;
+  }
+}
+
+.sc-selection .sc-row {
+  gap: 0.4rem;
+}
+
+.sc-swatch {
+  width: 0.85rem;
+  height: 0.85rem;
+  flex: 0 0 auto;
+  border-radius: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+.sc-legend-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sc-colorbar {
+  height: 0.75rem;
+  border-radius: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+.sc-colorbar-ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--text-color-secondary, #6c757d);
+  margin-top: 0.2rem;
+}
+
+.sc-btns {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* The embedded distribution panel. Separated by a rule so the dialog reads as
+   "controls, then the chart they drive" rather than one long form. */
+.sc-charts {
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--surface-border, #dee2e6);
+  gap: 0;
+}
+
+.sc-disclosure {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.2rem 0;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  color: inherit;
+
+  i {
+    font-size: 0.7rem;
+    color: var(--text-color-secondary, #6c757d);
+  }
+
+  small {
+    font-weight: 400;
+    color: var(--text-color-secondary, #6c757d);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &:hover {
+    color: var(--primary-color, #3b82f6);
+  }
+}

@@ -5,6 +5,7 @@ import { OpenSeadragonVisualizerService } from './openseadragon-visualizer.servi
 import { VIZ_PORT_STUBS } from '../../testing/viz-port-stubs';
 import { TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
 import { PlotType } from '../../contracts/plot-type';
+import { OSD_ZOOM_PER_SCROLL } from './osd-zoom';
 
 /**
  * Viewer-option coverage.
@@ -131,5 +132,25 @@ describe('OpenSeadragonVisualizerService — viewer options', () => {
     const o = optionsFromPlot();
     expect(o.maxZoomPixelRatio).toBe(20);
     expect(o.minZoomImageRatio).toBe(0.01);
+  });
+
+  it('scrolls at the step the region overlay also uses', () => {
+    // The wheel is handled by OSD or by the overlay depending on whether a region
+    // tool is active. If these two drift apart, the zoom changes pace the moment a
+    // tool is picked up — which is why the value is one shared constant rather
+    // than a number written in both places, as it was.
+    expect(optionsFromPlot().zoomPerScroll).toBe(OSD_ZOOM_PER_SCROLL);
+  });
+
+  it('scrolls gently enough that a trackpad burst does not fly', () => {
+    // The step applies per scroll EVENT, and a trackpad swipe is a burst of them,
+    // so this compounds: at OSD's default 1.2 a 20-event swipe is 38x. Pinned as a
+    // ceiling rather than an exact value so the number stays tunable.
+    expect(OSD_ZOOM_PER_SCROLL).toBeGreaterThan(1);
+    expect(OSD_ZOOM_PER_SCROLL).toBeLessThanOrEqual(1.05);
+    // ~24 notches to double, which is where the napari-js backend sits for the
+    // same image — the wheel should not depend on which renderer is active.
+    const notchesToDouble = Math.log(2) / Math.log(OSD_ZOOM_PER_SCROLL);
+    expect(notchesToDouble).toBeGreaterThan(15);
   });
 });

@@ -1,4 +1,8 @@
 node_modules/
 .cache/
 cogs/
+spatial/
 *.log
+stores/
+st/
+abc/

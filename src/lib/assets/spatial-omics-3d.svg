@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 512 512">
+  <!-- Spatial omics in 3D: the same observations as spatial-omics.svg — dots
+       whose SIZE varies with the value they carry — but arranged on a cube
+       lattice instead of a flat grid. Two square planes of four, the back one
+       offset up-right and drawn smaller, which is the whole 3D cue: no edges,
+       no perspective lines, nothing that needs a stroke to survive.
+
+       Sized for a 16px toolbar icon (1rem in the toolbar, 1.1rem in the
+       plot-mode dropdown), which drives every choice, exactly as in the 2D
+       icon it sits beside:
+        - Solid fills only. Both call sites tint with `filter: brightness(0) …`,
+          which flattens every colour to one — tone cannot carry meaning, so
+          the arrangement has to.
+        - Ink at 6-14% of the viewBox and 23% of the box overall, matching
+          spatial-omics.svg so the pair reads at one weight in the toolbar.
+        - Eight dots, not the 2D icon's nine plus a second layer: at 16px the
+          gaps are what make a lattice legible, and 4+4 keeps every gap above
+          2px where an 18-dot stack would silt up into a blob. -->
+  <g fill="#000000">
+    <!-- front plane -->
+    <circle cx="77" cy="180" r="59"/>
+    <circle cx="331" cy="180" r="42"/>
+    <circle cx="77" cy="434" r="71"/>
+    <circle cx="331" cy="434" r="50"/>
+    <!-- back plane, offset (+127, -127) and scaled to 0.78 -->
+    <circle cx="204" cy="53" r="38"/>
+    <circle cx="458" cy="53" r="48"/>
+    <circle cx="204" cy="307" r="33"/>
+    <circle cx="458" cy="307" r="43"/>
+  </g>
+</svg>

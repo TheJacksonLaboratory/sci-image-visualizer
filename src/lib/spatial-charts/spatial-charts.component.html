@@ -1,0 +1,60 @@
+<div class="sx-body" *ngIf="controls">
+
+  <!-- The chart follows whatever the map is coloured by, so the two can never
+       disagree about what is being shown. -->
+  <div class="sx-head">
+    <span class="sx-subject" *ngIf="subject">{{ subject }}</span>
+    <span class="sx-subject sx-muted" *ngIf="!subject">nothing selected to chart</span>
+    <span class="sx-badge" *ngIf="selectionCount">
+      {{ selectionCount | number }} selected
+    </span>
+    <i class="pi pi-spin pi-spinner sx-busy" *ngIf="busy" aria-label="loading"></i>
+  </div>
+
+  <div class="sx-controls">
+    <p-selectButton [options]="kindOptions" optionLabel="label" optionValue="value"
+                    [ngModel]="kind" (ngModelChange)="onKind($event)"
+                    styleClass="sx-kind"></p-selectButton>
+    <p-dropdown [options]="groupOptions" optionLabel="label" optionValue="value"
+                [ngModel]="groupBy" (ngModelChange)="onGroupBy($event)"
+                placeholder="No grouping" appendTo="body"
+                [disabled]="kind === 'histogram'"
+                [pTooltip]="kind === 'heatmap'
+                  ? 'The categorical column the heatmap\'s columns come from'
+                  : 'Split a violin or box by a categorical column'"
+                tooltipPosition="top"></p-dropdown>
+  </div>
+
+  <!-- The heatmap's rows are a gene LIST, so it needs its own picker: the other
+       kinds chart whatever single source the map is coloured by. -->
+  <div class="sx-controls" *ngIf="kind === 'heatmap'">
+    <p-multiSelect [options]="geneOptions" optionLabel="label" optionValue="value"
+                   [ngModel]="heatmapGenes" (ngModelChange)="onHeatmapGenes($event)"
+                   [filter]="true" filterBy="label" appendTo="body"
+                   [showToggleAll]="false" [maxSelectedLabels]="3"
+                   selectedItemsLabel="{0} genes"
+                   placeholder="Pick genes for the rows"
+                   pTooltip="One row per gene, averaged within each group"
+                   tooltipPosition="top" styleClass="sx-genes"></p-multiSelect>
+    <p-checkbox [binary]="true" [ngModel]="heatmapZScore"
+                (onChange)="onHeatmapZScore($event.checked)"
+                label="z-score"
+                pTooltip="Scale each gene across the groups. Without it one highly-expressed gene saturates the colour scale and the rest reads as blank"
+                tooltipPosition="top"></p-checkbox>
+  </div>
+
+  <div [id]="chartDiv" class="sx-plot"></div>
+
+  <small class="sx-hint" *ngIf="notice">{{ notice }}</small>
+  <small class="sx-hint" *ngIf="!notice && suggestsGrouping">
+    Pick a grouping to compare categories.
+  </small>
+  <small class="sx-hint" *ngIf="!notice && selectionCount && kind === 'histogram'">
+    The selection is overlaid on the full distribution.
+  </small>
+  <small class="sx-hint" *ngIf="!notice && selectionCount && kind !== 'histogram' && kind !== 'heatmap'">
+    Showing the selection only.
+  </small>
+  <small class="sx-hint" *ngIf="!notice && kind === 'heatmap'">{{ heatmapNote }}</small>
+
+</div>
