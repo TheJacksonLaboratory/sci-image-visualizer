@@ -49,6 +49,7 @@ import {
   SpatialSelectionMask, emptySelection, maskToIndices, mutedFromSelection, sameSelection,
   selectByCategory,
 } from '../../spatial/spatial-selection';
+import { framePositions } from '../../spatial/spatial-framing';
 import { observationsInSlice, volumeImageRef } from '../../spatial/spatial-volume-image';
 import { defaultSigma, densityGrid, rasterizeDensity } from '../../spatial/spatial-density';
 import { observationsInSection, sectionsOf } from '../../spatial/spatial-sections';
@@ -407,6 +408,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private spatialDrawn3d: Uint32Array | null = null;
   /** The (viewer, dataset) whose 3D scene has already had its opening framing. */
   private spatialFramed: { viewer: Viewer; datasetId: string } | null = null;
+  /** Whose 2D observations the camera has been framed on — see {@link frameSpatialPointsOnce}. */
+  private spatial2dFramed: { viewer: Viewer; datasetId: string } | null = null;
   /** Dataset the 3D scale bar was built for. */
   private spatialScaleBarKey: string | null = null;
   private spatialSub: Subscription | null = null;
@@ -1731,7 +1734,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    */
   private async mountSpatialOmics(viewer: Viewer, host: HTMLElement, z: number): Promise<void> {
     await this.renderImage(z);
-    this.fitCameraSoon();
+    // Only fit to the image when this dataset actually has one. Otherwise there is
+    // nothing to fit, `imageW`/`imageH` still hold the LAST image's dimensions, and
+    // this fits to those — and because it defers to a frame, it lands AFTER the points
+    // are added and overwrites the framing they set. That is what left an image-less
+    // dataset as a ten-pixel speck off to one side.
+    if (this.spatialLatest?.[0]?.imageRef) this.fitCameraSoon();
     this.subscribeDisplayState();
     this.installScaleBar();
     this.install2dInteraction(viewer, host);
@@ -2254,6 +2262,47 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       scale: ref?.scale ?? [1, 1],
       translate: ref?.translate ?? [0, 0],
     });
+    this.frameSpatialPointsOnce(viewer, dataset.id, positions, !!ref);
+  }
+
+  /**
+   * Frame the 2D camera on the observations, for a dataset that brings no image.
+   *
+   * The 2D camera is normally fitted to the IMAGE, because the observations are in that
+   * image's pixel space and framing the image frames them too. A dataset with no
+   * reference image has coordinates in its own units instead — seqFISH's span about
+   * 5x7 — so the image framing left over from whatever was on screen before puts the
+   * whole cloud offscreen: measured at 9.7 x 13.4 PIXELS, centred 256px from where the
+   * camera was looking. The points are all there and drawn; they are a speck. Which
+   * looks exactly like the dataset having failed to load.
+   *
+   * Once per dataset, like {@link addFramingOnce} does for the cloud: re-colouring,
+   * slicing or picking a gene re-adds this layer, and re-framing on those would move
+   * the camera under the user — the camera tools and the canvas drag are meant to be
+   * the only things that do.
+   */
+  private frameSpatialPointsOnce(
+    viewer: Viewer, datasetId: string, positions: Float32Array, registered: boolean,
+  ): void {
+    // Gated on whether THIS dataset registers onto an image, not on `imageW`/`imageH`:
+    // those keep the last plotted image's dimensions after the host clears it, so a
+    // stale 512x383 read as "there is an image" and skipped the framing entirely.
+    if (registered) return;
+    // Once per dataset, like `addFramingOnce` does for the cloud: re-colouring, slicing
+    // or picking a gene re-adds this layer, and re-framing on those would move the
+    // camera under the user — the camera tools and the canvas drag are meant to be the
+    // only things that do.
+    if (this.spatial2dFramed?.viewer === viewer
+      && this.spatial2dFramed.datasetId === datasetId) return;
+
+    const fit = framePositions(
+      positions, this.canvas?.clientWidth ?? 0, this.canvas?.clientHeight ?? 0,
+    );
+    // Null means there is nothing to frame on; leave the camera where it is rather
+    // than moving the view for a dataset we cannot fit.
+    if (!fit) return;
+    viewer.camera.set(fit.center, fit.zoom ?? viewer.camera.zoom);
+    this.spatial2dFramed = { viewer, datasetId };
   }
 
   /**
@@ -3098,6 +3147,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.densityLayers = [];
     this.densityKey = null;
     this.spatialFramed = null;
+    this.spatial2dFramed = null;
     this.spatialVolume = null;
     this.spatialVolumeKey = null;
     this.spatialOrigin3d = [0, 0, 0];

@@ -438,9 +438,20 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
         // is on screen. Forget it, or coming BACK to the volume dataset would
         // short-circuit on a matching key and leave the other dataset's slide up.
         this.dropVolumeImage();
-        if (has3d && !dataset?.imageRef && !isSpatialOmics3d(this.selectedPlotType)) {
-          // No volume to slice: the cloud is the only thing that can be drawn.
-          this.onSelectPlotType(PlotType.SPATIAL_OMICS_3D);
+        if (dataset && !dataset.imageRef) {
+          // No reference image and no volume to slice: the observations are the only
+          // thing there is to draw, so open on whichever spatial mode their
+          // coordinates support. Leaving the type alone strands the host on an Image
+          // view showing whatever slide was loaded BEFORE — the observations never
+          // appear, and the previous dataset's tissue does, which reads as this
+          // dataset failing to load.
+          //
+          // Gated on the coordinates, not on the dataset merely existing: a
+          // one-plane assay has no z and cannot be a cloud. That case only turned up
+          // with an image-less 2D dataset, which is why it went unhandled — before
+          // it, image-less meant 3D.
+          const target = has3d ? PlotType.SPATIAL_OMICS_3D : PlotType.SPATIAL_OMICS;
+          if (this.selectedPlotType !== target) this.onSelectPlotType(target);
         }
       }
       // Clearing the dataset while a spatial mode is active leaves a type that is

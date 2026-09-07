@@ -511,6 +511,45 @@ describe('VisualizerComponent (UI shell)', () => {
         expect(plotService.setPlotType).toHaveBeenCalledWith(PlotType.SPATIAL_OMICS_3D);
       });
 
+      it('opens the 2D scatter for a one-plane dataset with no image', async () => {
+        // The case that went unhandled: before an image-less 2D assay existed,
+        // "no reference image" implied a cloud, so this branch was gated on the z
+        // and a dataset without one selected nothing. The host was then stranded on
+        // an Image view showing whatever slide was loaded before — the observations
+        // never appeared and someone else's tissue did, which reads as a failure to
+        // load rather than a missing mode.
+        const c = makeComponent(plotService, port);
+        (c as any).watchSpatialDataset();
+        dataset$.next({
+          id: 'seqfish',
+          name: 'Mouse embryo seqFISH',
+          observations: { count: 3 }, // no z: one plane
+          columns: [],
+        });
+        await flush();
+
+        expect(plotService.setPlotType).toHaveBeenCalledWith(PlotType.SPATIAL_OMICS);
+        expect(plotService.setPlotType).not.toHaveBeenCalledWith(PlotType.SPATIAL_OMICS_3D);
+      });
+
+      it('leaves a dataset that HAS an image alone, to be drawn over it', async () => {
+        // With a tissue image the host has already opened on it, and the observations
+        // register onto that section — switching the type here would fight the host.
+        const c = makeComponent(plotService, port);
+        (c as any).watchSpatialDataset();
+        dataset$.next({
+          id: 'demo-brain',
+          name: 'Demo',
+          observations: { count: 3 },
+          columns: [],
+          imageRef: { imageId: 'slide-1' },
+        });
+        await flush();
+
+        expect(plotService.setPlotType).not.toHaveBeenCalledWith(PlotType.SPATIAL_OMICS);
+        expect(plotService.setPlotType).not.toHaveBeenCalledWith(PlotType.SPATIAL_OMICS_3D);
+      });
+
     });
   });
 
