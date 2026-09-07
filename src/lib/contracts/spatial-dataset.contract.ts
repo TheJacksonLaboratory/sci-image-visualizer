@@ -192,6 +192,42 @@ export interface SpatialImageRef {
  * feature *values*, and polygon *geometry*, are fetched through
  * {@link SpatialDataPort} as they are displayed.
  */
+/**
+ * A precomputed low-dimensional embedding over the SAME observations — UMAP, t-SNE, PCA.
+ *
+ * Announced in the dataset and fetched on demand, exactly like a column or a gene: the
+ * coordinates are another per-observation vector, and a dataset may carry several.
+ */
+export interface SpatialEmbeddingMeta {
+  /** Key as the source names it, e.g. `X_umap`. */
+  name: string;
+  /** Short label for menus; falls back to {@link name}. */
+  label?: string;
+  /** 2 for a plane, 3 for a cloud. */
+  dims: 2 | 3;
+  /**
+   * True when the coordinates were COMPUTED for this bundle rather than published with the
+   * dataset. Worth surfacing: a UMAP recomputed with different parameters is a different picture,
+   * and a reader comparing against a paper's figure needs to know which they are looking at.
+   */
+  derived?: boolean;
+}
+
+/**
+ * One embedding's coordinates.
+ *
+ * Deliberately shaped like {@link SpatialObservations}' `x`/`y`/`z` rather than an (N, D) matrix:
+ * the point of an embedding here is to be swapped in as the scatter's coordinate source, and
+ * matching that shape means the renderer, the hover hit-test and the selection code need no
+ * variant for it.
+ */
+export interface SpatialEmbedding {
+  meta: SpatialEmbeddingMeta;
+  x: Float32Array;
+  y: Float32Array;
+  z?: Float32Array;
+}
+
 export interface SpatialDataset {
   /** Stable id — the key the port's lazy accessors are scoped to. */
   id: string;
@@ -205,6 +241,8 @@ export interface SpatialDataset {
   imageRef?: SpatialImageRef;
   /** Presence + geometry of a reference volume the observations sit inside. */
   volume?: SpatialVolumeMeta;
+  /** Embeddings available for these observations, whose coordinates are fetched on demand. */
+  embeddings?: SpatialEmbeddingMeta[];
   /**
    * Microns per observation coordinate unit — what makes a scale bar possible.
    *

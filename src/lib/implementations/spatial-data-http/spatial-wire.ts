@@ -1,6 +1,17 @@
 import {
-  CategoricalColumnMeta, ContinuousColumnMeta, NO_CATEGORY, SpatialColumn, SpatialColumnMeta, SpatialDataset,
-  SpatialFeatureMeta, SpatialImageRef, SpatialObservations, SpatialPolygons, SpatialVolumeMeta,
+  CategoricalColumnMeta,
+  ContinuousColumnMeta,
+  NO_CATEGORY,
+  SpatialColumn,
+  SpatialColumnMeta,
+  SpatialDataset,
+  SpatialEmbedding,
+  SpatialEmbeddingMeta,
+  SpatialFeatureMeta,
+  SpatialImageRef,
+  SpatialObservations,
+  SpatialPolygons,
+  SpatialVolumeMeta,
 } from '../../contracts/spatial-dataset.contract';
 
 /**
@@ -63,6 +74,7 @@ export interface SpatialManifest {
   polygons?: { count: number };
   imageRef?: SpatialImageRef;
   volume?: SpatialVolumeMeta;
+  embeddings?: SpatialEmbeddingMeta[];
   micronsPerUnit?: number;
 }
 
@@ -133,6 +145,25 @@ export function decodeRadius(buf: ArrayBuffer, count: number): Float32Array {
 }
 
 /** `GET /feature/{name}` → one gene's expression vector. */
+/**
+ * `GET /spatial/{id}/embedding/{name}` — one plane per dimension, same layout as coords.
+ *
+ * Struct of arrays, not interleaved: every dimension is contiguous, so an axis can be handed to
+ * the renderer as a view with no copy and no stride.
+ */
+export function decodeEmbedding(
+  buf: ArrayBuffer, meta: SpatialEmbeddingMeta, count: number,
+): SpatialEmbedding {
+  assertLittleEndian();
+  assertByteLength(buf, count * meta.dims * 4, `embedding "${meta.name}"`);
+  return {
+    meta,
+    x: new Float32Array(buf, 0, count),
+    y: new Float32Array(buf, count * 4, count),
+    ...(meta.dims === 3 ? { z: new Float32Array(buf, count * 8, count) } : {}),
+  };
+}
+
 export function decodeFeatureVector(buf: ArrayBuffer, count: number): Float32Array {
   assertLittleEndian();
   assertByteLength(buf, count * 4, 'feature vector');
@@ -212,6 +243,7 @@ export function datasetFromManifest(
     ...(manifest.polygons ? { polygons: manifest.polygons } : {}),
     ...(manifest.imageRef ? { imageRef: manifest.imageRef } : {}),
     ...(manifest.volume ? { volume: manifest.volume } : {}),
+    ...(manifest.embeddings?.length ? { embeddings: manifest.embeddings } : {}),
     ...(manifest.micronsPerUnit !== undefined
       ? { micronsPerUnit: manifest.micronsPerUnit }
       : {}),

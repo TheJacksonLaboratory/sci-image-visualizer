@@ -314,4 +314,61 @@ describe('SpatialDataHttpService', () => {
       await again; // cache was cleared, so the request happened again
     });
   });
+
+  /**
+   * Embeddings, fetched lazily like a column or a gene.
+   *
+   * `getEmbedding` is OPTIONAL on the port, so a host with none omits it; this adapter has it, and
+   * gates on the manifest so an unknown name fails loudly rather than plotting nothing.
+   */
+  describe('getEmbedding', () => {
+    const withUmap: SpatialManifest = {
+      ...MANIFEST,
+      embeddings: [{ name: 'X_umap', label: 'UMAP', dims: 2 }],
+    };
+
+    it('fetches the coordinates and decodes them per dimension', async () => {
+      await loadDataset(withUmap);
+      const promise = service.getEmbedding('X_umap');
+      // count=3, dims=2 -> every d0 then every d1.
+      http.expectOne(`${BASE}/spatial/${withUmap.id}/embedding/X_umap`)
+        .flush(f32(1, 2, 3, 40, 50, 60));
+      const e = await promise;
+      expect(Array.from(e.x)).toEqual([1, 2, 3]);
+      expect(Array.from(e.y)).toEqual([40, 50, 60]);
+      expect(e.meta.label).toBe('UMAP');
+    });
+
+    it('rejects an embedding the manifest does not advertise, without a request', () => {
+      // http.verify() in afterEach is what proves no request went out: a typo must not
+      // reach the network and come back as a 404 the user has to interpret.
+      return loadDataset(withUmap).then(async () => {
+        await expect(service.getEmbedding('X_tsne')).rejects.toThrow(/unknown embedding "X_tsne"/);
+      });
+    });
+
+    it('rejects when the dataset advertises no embeddings at all', async () => {
+      await loadDataset();
+      await expect(service.getEmbedding('X_umap')).rejects.toThrow(/unknown embedding/);
+    });
+
+    it('fetches once, however often it is asked', async () => {
+      await loadDataset(withUmap);
+      const first = service.getEmbedding('X_umap');
+      // Asked again while the first is still in flight: one request, both resolve.
+      const second = service.getEmbedding('X_umap');
+      http.expectOne(`${BASE}/spatial/${withUmap.id}/embedding/X_umap`)
+        .flush(f32(1, 2, 3, 40, 50, 60));
+      await Promise.all([first, second]);
+      const third = await service.getEmbedding('X_umap');
+      expect(Array.from(third.x)).toEqual([1, 2, 3]);
+      // No further expectOne; afterEach's verify() fails if another request was made.
+    });
+
+    it('carries the embeddings through onto the dataset', async () => {
+      const ds = await loadDataset(withUmap);
+      expect(ds?.embeddings).toEqual([{ name: 'X_umap', label: 'UMAP', dims: 2 }]);
+    });
+  });
+
 });

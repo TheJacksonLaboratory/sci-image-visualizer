@@ -135,6 +135,19 @@ async function featureNames(spatialDir, id) {
  * One gene's expression vector, as a ranged read into the gene-major matrix.
  * O(N) bytes moved, independent of how many genes the dataset has.
  */
+/**
+ * One embedding's coordinates, in the same struct-of-arrays layout as coords.bin.
+ *
+ * Addressed by INDEX in the manifest, like columns: the request name is looked up rather than
+ * joined into a path, so no caller-supplied string reaches the filesystem.
+ */
+export async function readEmbedding(spatialDir, id, name) {
+  const manifest = await loadManifest(spatialDir, id);
+  const index = (manifest.embeddings ?? []).findIndex((e) => e.name === name);
+  if (index < 0) throw new RangeError(`unknown embedding: ${name}`);
+  return readFile(path.join(datasetDir(spatialDir, id), 'embeddings', `${index}.bin`));
+}
+
 export async function readFeatureVector(spatialDir, id, name) {
   const manifest = await loadManifest(spatialDir, id);
   const names = await featureNames(spatialDir, id);

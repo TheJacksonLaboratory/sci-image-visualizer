@@ -1,7 +1,8 @@
 import { NO_CATEGORY, SpatialColumnMeta, isCategoricalColumn, isContinuousColumn } from '../../contracts/spatial-dataset.contract';
 import {
   SPATIAL_WIRE_VERSION, SpatialManifest, assertManifestVersion, datasetFromManifest,
-  decodeColumn, decodeCoords, decodeFeatureVector, decodePolygons, decodeRadius, isLittleEndian,
+  decodeColumn, decodeCoords, decodeEmbedding, decodeFeatureVector, decodePolygons, decodeRadius,
+  isLittleEndian,
 } from './spatial-wire';
 
 /** Concatenate typed arrays into one little-endian ArrayBuffer. */
@@ -136,7 +137,51 @@ describe('spatial-wire', () => {
     });
   });
 
-  describe('datasetFromManifest', () => {
+  /**
+ * Embeddings ride the same struct-of-arrays layout as coords, deliberately: the point is to swap
+ * one in as the scatter's coordinate source, so it must arrive in the shape that path already
+ * takes.
+ */
+describe('decodeEmbedding', () => {
+  const meta2 = { name: 'X_umap', dims: 2 as const };
+  const meta3 = { name: 'X_umap3', dims: 3 as const };
+
+  it('reads a 2D embedding as one contiguous plane per dimension', () => {
+    // Struct of arrays: every d0, THEN every d1 — not interleaved pairs.
+    const buf = concat(Float32Array.from([1, 2, 3]), Float32Array.from([10, 20, 30]));
+    const e = decodeEmbedding(buf, meta2, 3);
+    expect(Array.from(e.x)).toEqual([1, 2, 3]);
+    expect(Array.from(e.y)).toEqual([10, 20, 30]);
+    expect(e.z).toBeUndefined();
+    expect(e.meta).toBe(meta2);
+  });
+
+  it('reads the third plane only when the metadata says 3 dims', () => {
+    const buf = concat(
+      Float32Array.from([1, 2]), Float32Array.from([3, 4]), Float32Array.from([5, 6]),
+    );
+    const e = decodeEmbedding(buf, meta3, 2);
+    expect(Array.from(e.z!)).toEqual([5, 6]);
+  });
+
+  it('views the buffer rather than copying it', () => {
+    // These are 10^5-10^6 rows; a copy per axis would be pure waste.
+    const buf = concat(Float32Array.from([1, 2]), Float32Array.from([3, 4]));
+    const e = decodeEmbedding(buf, meta2, 2);
+    expect(e.x.buffer).toBe(buf);
+    expect(e.y.byteOffset).toBe(8);
+  });
+
+  it('rejects a buffer that is the wrong size for the declared dims', () => {
+    // A 2D payload read as 3D would silently hand back garbage z values sliced from
+    // beyond the data, so the length is checked against dims rather than assumed.
+    const twoDims = concat(Float32Array.from([1, 2]), Float32Array.from([3, 4]));
+    expect(() => decodeEmbedding(twoDims, meta3, 2)).toThrow(/embedding "X_umap3"/);
+    expect(() => decodeEmbedding(twoDims, meta2, 3)).toThrow(/embedding "X_umap"/);
+  });
+});
+
+describe('datasetFromManifest', () => {
     const coords = { x: new Float32Array([1, 2, 3]), y: new Float32Array([4, 5, 6]) };
 
     it('carries a uniform radius from the manifest', () => {

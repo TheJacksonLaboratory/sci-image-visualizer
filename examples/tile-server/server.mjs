@@ -14,6 +14,7 @@
 //   GET  /spatial/:id/ids                     -> { ids: [...] }
 //   GET  /spatial/:id/column/:name            -> u16 codes | f32 values
 //   GET  /spatial/:id/feature/:name           -> f32 vector (ranged read)
+//   GET  /spatial/:id/embedding/:name         -> f32[N] per dim (bundle only)
 //   GET  /spatial/:id/features?q=&limit=      -> { names: [...] }
 //
 // The `info` param is an OPAQUE, URL-safe base64 token minted by the browser
@@ -35,6 +36,7 @@ const sharpFor = (raw, width, height) => sharp(raw, { raw: { width, height, chan
 import { loadDescriptor, readTile, readRegion, readPreview, listImages } from './lib/cog.mjs';
 import {
   listSpatialDatasets, loadManifest, openWireFile, readIds, readColumn,
+  readEmbedding,
   readFeatureVector, searchFeatures,
 } from './lib/spatial.mjs';
 import {
@@ -374,6 +376,15 @@ app.get('/spatial/:id/feature/:name', async (req, res) => {
     zarr: async () => octet(res).send(await zarrFeature(ZARR_DIR, id, name)),
     st: async () => octet(res).send(await stFeature(ST_DIR, id, name)),
     abc: async () => octet(res).send(await abcFeature(ABC_DIR, id, name)),
+  });
+});
+
+// Only the bundle source: an embedding is a precomputed artifact that has to be written
+// alongside the dataset, and the zarr/st/abc sources carry none.
+app.get('/spatial/:id/embedding/:name', async (req, res) => {
+  const { id, name } = req.params;
+  await fromSource(res, id, {
+    bundle: async () => octet(res).send(await readEmbedding(SPATIAL_DIR, id, name)),
   });
 });
 

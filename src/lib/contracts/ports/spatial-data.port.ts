@@ -2,7 +2,7 @@ import { InjectionToken } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import {
-  SpatialColumn, SpatialDataset, SpatialPolygons,
+  SpatialColumn, SpatialDataset, SpatialEmbedding, SpatialPolygons,
 } from '../spatial-dataset.contract';
 
 /**
@@ -51,6 +51,16 @@ export interface SpatialDataPort {
    * observations. Rejects for an unknown feature.
    */
   getFeatureVector(name: string): Promise<Float32Array>;
+
+  /**
+   * One embedding's coordinates, index-aligned with the observations.
+   *
+   * The name must be one advertised in `SpatialDataset.embeddings`; rejects otherwise, for the
+   * same reason `getColumn` does — a typo should surface rather than render as an empty plot.
+   *
+   * Optional: a host with no embeddings simply omits it, and the UI offers no embedding views.
+   */
+  getEmbedding?(name: string): Promise<SpatialEmbedding>;
 
   /**
    * Typeahead over feature names, for datasets too wide to inline the list

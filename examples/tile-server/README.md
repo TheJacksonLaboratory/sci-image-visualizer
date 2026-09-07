@@ -53,6 +53,7 @@ format `SpatialDataHttpService` speaks (see
 | `GET /spatial/:id/column/:name` | `u16[N]` codes (categorical) or `f32[N]` values (continuous) |
 | `GET /spatial/:id/feature/:name` | `f32[N]` — one gene's expression vector |
 | `GET /spatial/:id/features?q=&limit=` | `{ names: [...] }` typeahead |
+| `GET /spatial/:id/embedding/:name` | `f32[N]` per dimension — a UMAP/t-SNE/PCA embedding (bundles only) |
 | `GET /spatial/:id/polygons` | `u32` count, `u32[count+1]` offsets, `f32` coords |
 
 A manifest sets `hasZ: true` when the observations carry a third axis, and
@@ -287,6 +288,31 @@ when both sources offer the same id — so a deliberately-converted dataset can
 override a live one. `npm run make-spatial-demo` writes a synthetic
 Visium-geometry bundle plus its image, which needs no download and is what the
 smoke check runs against.
+
+#### Converting an AnnData `.h5ad` into a bundle
+
+`scripts/h5ad-to-spatial.py` writes a bundle from any `.h5ad` whose `X` is a CSC matrix. Python
+rather than Node, unlike its siblings: `.h5ad` is HDF5, and reading it from Node would mean a wasm
+HDF5 reader for a conversion that runs once, offline, and never at request time.
+
+```bash
+pip install h5py numpy
+curl -O https://exampledata.scverse.org/squidpy/seqfish.h5ad     # 31 MB, no auth
+python3 scripts/h5ad-to-spatial.py --h5ad seqfish.h5ad --out spatial/seqfish \
+    --id seqfish --name "Mouse embryo seqFISH · 19,416 cells (Lohoff et al)" \
+    --spatial-key spatial --embedding X_umap:UMAP \
+    --column celltype_mapped_refined:categorical --column Area:continuous
+```
+
+That one is worth having because it ships a **published** `X_umap` — 19,416 cells, 351 genes, 22
+cell types with the paper's own colours — so the embedding views can be built against real
+coordinates rather than something recomputed here.
+
+Two things to know about these coordinates. They are **normalized, not physical** (the extent is
+about 5 x 7 units), so the converter omits `micronsPerUnit` and no scale bar is drawn — a bar
+labelled in microns over unitless coordinates reads as a measurement and would be worse than none.
+And every embedding published with these datasets is **2D**; a 3D one has to be computed, which the
+manifest then marks `derived: true` so a reader knows it is not the published picture.
 
 ## Deploy (Cloud Run)
 

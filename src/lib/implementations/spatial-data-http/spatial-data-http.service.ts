@@ -5,11 +5,23 @@ import { timeout } from 'rxjs/operators';
 
 import { SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import {
-  SpatialColumn, SpatialDataset, SpatialPolygons, findColumnMeta,
+  SpatialColumn,
+  SpatialDataset,
+  SpatialEmbedding,
+  SpatialPolygons,
+  findColumnMeta,
 } from '../../contracts/spatial-dataset.contract';
 import {
-  SpatialDatasetSummary, SpatialManifest, assertManifestVersion, datasetFromManifest,
-  decodeColumn, decodeCoords, decodeFeatureVector, decodePolygons, decodeRadius,
+  SpatialDatasetSummary,
+  SpatialManifest,
+  assertManifestVersion,
+  datasetFromManifest,
+  decodeColumn,
+  decodeCoords,
+  decodeEmbedding,
+  decodeFeatureVector,
+  decodePolygons,
+  decodeRadius,
 } from './spatial-wire';
 
 /**
@@ -48,6 +60,12 @@ export class SupersededError extends Error {
   }
 }
 
+/**
+ * What the LRU can hold. One alias rather than a union repeated at each use, so adding a payload
+ * kind is a single edit instead of four that can drift apart.
+ */
+type CachedPayload = SpatialColumn | Float32Array | SpatialEmbedding;
+
 @Injectable()
 export class SpatialDataHttpService implements SpatialDataPort {
   /** Server root, normalised to end with exactly one `/`. */
@@ -68,11 +86,11 @@ export class SpatialDataHttpService implements SpatialDataPort {
    * afternoon of browsing genes must not grow without limit either (one vector
    * is `4·N` bytes — 2 MB at 500k cells).
    */
-  private readonly cache = new Map<string, SpatialColumn | Float32Array>();
+  private readonly cache = new Map<string, CachedPayload>();
   private static readonly CACHE_LIMIT = 32;
 
   /** In-flight requests, so double-clicking a gene issues one fetch. */
-  private readonly inFlight = new Map<string, Promise<SpatialColumn | Float32Array>>();
+  private readonly inFlight = new Map<string, Promise<CachedPayload>>();
 
   private volumePromise: Promise<Uint8Array> | null = null;
   private polygonsPromise: Promise<SpatialPolygons> | null = null;
@@ -183,6 +201,20 @@ export class SpatialDataHttpService implements SpatialDataPort {
     ) as Promise<SpatialColumn>;
   }
 
+  getEmbedding(name: string): Promise<SpatialEmbedding> {
+    const manifest = this.requireManifest();
+    const meta = manifest.embeddings?.find((e) => e.name === name);
+    if (!meta) {
+      return Promise.reject(new Error(`[spatial] unknown embedding "${name}"`));
+    }
+    return this.fetchCached(
+      `embedding:${name}`,
+      () => this.getBinary(
+        `spatial/${encodeURIComponent(manifest.id)}/embedding/${encodeURIComponent(name)}`,
+      ).then((buf) => decodeEmbedding(buf, meta, manifest.count)),
+    ) as Promise<SpatialEmbedding>;
+  }
+
   getFeatureVector(name: string): Promise<Float32Array> {
     const manifest = this.requireManifest();
     const names = manifest.features?.names;
@@ -264,9 +296,7 @@ export class SpatialDataHttpService implements SpatialDataPort {
   }
 
   /** Cache + single-flight around a vector fetch. */
-  private fetchCached(
-    key: string, load: () => Promise<SpatialColumn | Float32Array>,
-  ): Promise<SpatialColumn | Float32Array> {
+  private fetchCached(key: string, load: () => Promise<CachedPayload>): Promise<CachedPayload> {
     const hit = this.cache.get(key);
     if (hit) {
       // Re-insert to mark most-recently-used (Map preserves insertion order).
