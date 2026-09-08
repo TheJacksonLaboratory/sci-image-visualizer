@@ -708,7 +708,13 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   get embeddingNote(): string {
     const meta = this.embedding;
     if (!meta) return 'This dataset publishes no embedding.';
-    const derived = meta.derived ? ' Computed here, not published with the dataset.' : '';
+    // A derived embedding says so, and says HOW when the parameters are known: a t-SNE or
+    // UMAP at different settings is a different picture of the same cells, so "computed
+    // here" alone leaves a reader unable to reproduce or compare it.
+    const derived = meta.derived
+      ? ` Computed here${meta.params ? ` (${meta.params})` : ''}, `
+        + 'not published with the dataset.'
+      : '';
     const coloured = this.categorical
       ? ' Coloured to match the map.'
       : ' Colour the map by a categorical column to colour these points.';

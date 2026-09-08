@@ -70,6 +70,12 @@ def main() -> None:
             if key in f["obsm"]:
                 del f["obsm"][key]
             f["obsm"].create_dataset(key, data=np.ascontiguousarray(scores[:, :dims], dtype=np.float32))
+            pkey = f"{key}_params"
+            if pkey in f["uns"]:
+                del f["uns"][pkey]
+            # PCA is deterministic up to a sign flip, so there is no seed to record —
+            # only what it was run on.
+            f["uns"].create_dataset(pkey, data=np.bytes_("centred expression, exact SVD"))
             name = f"{key}_variance_ratio"
             if name in f["uns"]:
                 del f["uns"][name]

@@ -308,6 +308,45 @@ That one is worth having because it ships a **published** `X_umap` — 19,416 ce
 cell types with the paper's own colours — so the embedding views can be built against real
 coordinates rather than something recomputed here.
 
+#### Computing embeddings
+
+Every embedding published with a spatial dataset is **2-D** — a UMAP is made to be looked at — so
+anything else has to be computed. Three scripts do that, writing into the `.h5ad` in place so the
+published coordinates stay alongside the derived ones:
+
+```bash
+pip install h5py numpy umap-learn scikit-learn
+python3 scripts/compute-umap3d.py --h5ad seqfish.h5ad   # obsm/X_umap3d
+python3 scripts/compute-pca.py    --h5ad seqfish.h5ad   # obsm/X_pca, X_pca3d + variance ratios
+python3 scripts/compute-tsne.py   --h5ad seqfish.h5ad   # obsm/X_tsne, X_tsne3d
+```
+
+Then pass them all to the converter, naming which are derived so the panel can say so:
+
+```bash
+python3 scripts/h5ad-to-spatial.py --h5ad seqfish.h5ad --out spatial/seqfish \
+    --id seqfish --name "Mouse embryo seqFISH · 19,416 cells (Lohoff et al)" \
+    --spatial-key spatial \
+    --embedding X_umap:UMAP     --embedding X_umap3d:"UMAP 3D" \
+    --embedding X_pca:PCA       --embedding X_pca3d:"PCA 3D" \
+    --embedding X_tsne:t-SNE    --embedding X_tsne3d:"t-SNE 3D" \
+    --derived X_umap3d --derived X_pca --derived X_pca3d \
+    --derived X_tsne --derived X_tsne3d \
+    --column celltype_mapped_refined:categorical --column Area:continuous
+```
+
+**Only PCA reports variance per axis**, and that asymmetry is deliberate. PCA's axes are ordered
+and each explains a measurable share, so `compute-pca.py` writes
+`uns/<key>_variance_ratio` and the converter turns it into a `varianceRatio` the axis labels use —
+"PCA 1 (18.2%)". UMAP and t-SNE coordinates are arbitrary outputs of an optimisation: unordered,
+unitless, and reproducible only up to a rotation. They get no ratio, and their axes stay bare,
+because a percentage there would be invented.
+
+UMAP and t-SNE are both worth having. Both preserve local neighbourhoods; t-SNE is stricter about
+that and less trustworthy about anything global, tending to spread clusters into evenly-sized
+islands whose separations mean little. A structure both agree on is more likely real than one only
+one of them shows.
+
 Two things to know about these coordinates. They are **normalized, not physical** (the extent is
 about 5 x 7 units), so the converter omits `micronsPerUnit` and no scale bar is drawn — a bar
 labelled in microns over unitless coordinates reads as a measurement and would be worse than none.

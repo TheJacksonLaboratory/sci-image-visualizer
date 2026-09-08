@@ -185,6 +185,13 @@ def main() -> None:
             ratios = f["uns"].get(f"{key}_variance_ratio") if "uns" in f else None
             if ratios is not None:
                 meta["varianceRatio"] = [float(v) for v in ratios[: emb.shape[1]]]
+            # How it was computed, written by the compute-* scripts. A stochastic
+            # embedding's picture changes with its parameters, so "computed here" without
+            # them leaves a reader unable to reproduce or compare it.
+            params = f["uns"].get(f"{key}_params") if "uns" in f else None
+            if params is not None:
+                raw = params[()]
+                meta["params"] = raw.decode() if isinstance(raw, bytes) else str(raw)
             embeddings.append(meta)
 
         # --- manifest --------------------------------------------------------

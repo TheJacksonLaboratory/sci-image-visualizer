@@ -55,8 +55,12 @@ def main() -> None:
             raise SystemExit(f"X is {enc or 'dense'}; this script reads csc_matrix only")
         n_obs, n_vars = (int(v) for v in x.attrs["shape"])
         matrix = dense_from_csc(x, n_obs, n_vars)
+        # Overwritten rather than refused: re-running to record the parameters, or with a
+        # different neighbours/seed, is a normal thing to want, and the sibling scripts
+        # replace their keys too. The published coordinates live under other keys and are
+        # never touched.
         if args.key in f["obsm"]:
-            raise SystemExit(f"obsm/{args.key} already exists; pick another --key")
+            print(f"  replacing existing obsm/{args.key}")
 
     print(f"  matrix {matrix.shape}")
     # PCA first, as the standard workflow does: UMAP straight off the genes follows noise.
@@ -75,9 +79,18 @@ def main() -> None:
     print(f"  embedded {embedded.shape}, "
           f"extent {np.round(embedded.max(0) - embedded.min(0), 2)}")
 
+    note = (f"PCA({comps}) then UMAP, n_neighbors {args.neighbors}, "
+            f"min_dist {args.min_dist:g}, seed {args.seed}")
     with h5py.File(args.h5ad, "a") as f:
+        if args.key in f["obsm"]:
+            del f["obsm"][args.key]
         f["obsm"].create_dataset(args.key, data=np.asarray(embedded, dtype=np.float32))
-    print(f"  wrote obsm/{args.key} into {args.h5ad}")
+        # Recorded so the panel can say HOW, not just that it was computed here.
+        pkey = f"{args.key}_params"
+        if pkey in f["uns"]:
+            del f["uns"][pkey]
+        f["uns"].create_dataset(pkey, data=np.bytes_(note))
+    print(f"  wrote obsm/{args.key} — {note}")
 
 
 if __name__ == "__main__":

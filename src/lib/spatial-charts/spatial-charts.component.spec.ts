@@ -778,6 +778,38 @@ describe('SpatialChartsComponent', () => {
       expect(lastPlot().layout.annotations).toBeUndefined();
     });
 
+    it('says HOW a derived embedding was computed, when that is known', async () => {
+      // "Computed here" alone leaves a reader unable to reproduce or compare it: a t-SNE
+      // at perplexity 5 and one at 50 are different pictures of the same cells, and
+      // neither is more correct.
+      const meta = {
+        name: 'X_tsne', label: 't-SNE', dims: 2 as const, derived: true,
+        params: 'PCA(50) then t-SNE, perplexity 30, seed 0',
+      };
+      controls.getEmbedding = jest.fn(async () => ({ meta, x: f32(1, 2), y: f32(3, 4) }));
+      dataset$.next({ ...dataset, embeddings: [meta] });
+      await build(controls);
+      await flush();
+      component.onKind('embedding');
+      await flush();
+
+      expect(component.embeddingNote).toContain('perplexity 30');
+      expect(component.embeddingNote).toMatch(/[Cc]omputed here/);
+    });
+
+    it('does not invent parameters for a published embedding', async () => {
+      // The published one's parameters belong to whoever published it; claiming ours
+      // would be wrong.
+      dataset$.next({ ...dataset, embeddings: [umapMeta] });
+      await build(controls);
+      await flush();
+      component.onKind('embedding');
+      await flush();
+
+      expect(component.embeddingNote).not.toMatch(/[Cc]omputed here/);
+      expect(component.embeddingNote).not.toContain('(');
+    });
+
     it('fetches the coordinates once, not per redraw', async () => {
       // A selection change redraws; the coordinates have not changed and are a
       // per-observation vector, so refetching them would be pure waste.

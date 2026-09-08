@@ -221,6 +221,17 @@ export interface SpatialEmbeddingMeta {
    * there rather than being faked.
    */
   varianceRatio?: number[];
+  /**
+   * How a derived embedding was computed, in a few words — e.g. "PCA(50) then perplexity 30,
+   * seed 0".
+   *
+   * Not decoration. A t-SNE or UMAP is stochastic, and its picture changes materially with
+   * perplexity or `n_neighbors`; two runs at different settings are different pictures of the same
+   * cells, and neither is more correct. Saying "computed here" without saying HOW leaves a reader
+   * unable to reproduce or compare it. Absent for a published embedding, whose parameters belong
+   * to whoever published it.
+   */
+  params?: string;
 }
 
 /**
