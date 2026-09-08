@@ -92,6 +92,18 @@ they can — `hd.cell_segmentations` for a single-region table,
 `visium.table.ST8059048` when a table covers several sections — so the Visium
 store above yields **both** of its sections without being asked.
 
+**Embeddings come across too.** Every `obsm` array of 2 or 3 columns except the coordinates
+themselves is advertised in the manifest and served from
+`/spatial/<id>/embedding/<key>`, in the same struct-of-arrays layout a bundle uses — so an
+`.h5ad` converted to SpatialData keeps its `X_umap` and needs no conversion step here at
+all. Anything wider is skipped rather than truncated: `X_pca` is routinely 50 components,
+and showing its first two as "the PCA" would be a different picture from the one the label
+promises.
+
+No store to hand? `node scripts/make-zarr-demo.mjs` writes a small synthetic one into
+`./stores`, with `obsm/spatial`, `X_umap` and `X_umap3d`, so the path can be exercised
+with no download.
+
 The tissue image is materialised into `./cogs` the first time it is requested
 (0.1–0.8 s for these stores), so OSD's tile path is unchanged and only the first
 open pays.
@@ -291,23 +303,25 @@ smoke check runs against.
 
 #### Converting an AnnData `.h5ad` into a bundle
 
-`scripts/h5ad-to-spatial.py` writes a bundle from any `.h5ad` whose `X` is a CSC or CSR matrix. Python
-rather than Node, unlike its siblings: `.h5ad` is HDF5, and reading it from Node would mean a wasm
-HDF5 reader for a conversion that runs once, offline, and never at request time.
+`scripts/h5ad-to-spatial.mjs` writes a bundle from any `.h5ad` whose `X` is a CSC or CSR matrix.
+Node, like everything else here — `.h5ad` is HDF5, which Node cannot read natively, so
+`lib/h5ad.mjs` leans on `h5wasm` (libhdf5 compiled to wasm). Its node entrypoint reads host paths
+directly, so a 329 MB file is not copied into a virtual filesystem first.
 
-Reading `X` lives in `scripts/anndata_x.py`, shared with the three compute scripts. It matters that
-it handles **both** layouts: a gene is a column, so CSC is what every caller here wants, but
-**scanpy writes CSR by default** — so a CSC-only reader rejects most `.h5ad` files in existence.
-Sorting the nonzeros by column once produces the CSC and needs no second code path. That sort is
-guarded by densifying sample columns both ways and comparing them elementwise, because the failure
-is silent: a permutation applied to `indices` but not to `data` writes a full matrix of entirely
-plausible expression attributed to the wrong cells, and neither a nonzero count nor a value total
-can tell — both are preserved by exactly that misalignment.
+Handling **both** matrix layouts matters: a gene is a column, so CSC is what every caller wants,
+but **scanpy writes CSR by default** — a CSC-only reader rejects most `.h5ad` files in existence.
+The transpose is a counting sort (bucket by column, prefix-sum, place), which is O(nnz) with no
+comparison sort over 15 million elements and is stable by construction, since walking the CSR in
+row order hands each destination column its rows already ascending. It is guarded by densifying
+sample columns both ways and comparing them elementwise, because the failure is silent: a value
+placed under the wrong row writes a full matrix of entirely plausible expression attributed to the
+wrong cells, and neither a nonzero count nor a value total can tell — both survive exactly that
+misalignment.
 
 ```bash
-pip install h5py numpy
+npm install                                                      # h5wasm comes with it
 curl -O https://exampledata.scverse.org/squidpy/seqfish.h5ad     # 31 MB, no auth
-python3 scripts/h5ad-to-spatial.py --h5ad seqfish.h5ad --out spatial/seqfish \
+node scripts/h5ad-to-spatial.mjs --h5ad seqfish.h5ad --out spatial/seqfish \
     --id seqfish --name "Mouse embryo seqFISH · 19,416 cells (Lohoff et al)" \
     --spatial-key spatial --embedding X_umap:UMAP \
     --column celltype_mapped_refined:categorical --column Area:continuous
@@ -320,29 +334,40 @@ coordinates rather than something recomputed here.
 #### Computing embeddings
 
 Every embedding published with a spatial dataset is **2-D** — a UMAP is made to be looked at — so
-anything else has to be computed. Three scripts do that, writing into the `.h5ad` in place so the
-published coordinates stay alongside the derived ones:
+anything else has to be computed. One script does that, and it reads the **bundle** rather than the
+`.h5ad`: `features/matrix.f32` is a flat gene-major f32 file, so there is nothing to parse and no
+HDF5 writer to depend on. It also works on bundles that never came from an `.h5ad`.
 
 ```bash
-pip install h5py numpy umap-learn scikit-learn
-python3 scripts/compute-umap3d.py --h5ad seqfish.h5ad   # obsm/X_umap3d
-python3 scripts/compute-pca.py    --h5ad seqfish.h5ad   # obsm/X_pca, X_pca3d + variance ratios
-python3 scripts/compute-tsne.py   --h5ad seqfish.h5ad   # obsm/X_tsne, X_tsne3d
+node scripts/compute-embeddings.mjs --bundle spatial/seqfish
+# or a subset:  --only pca      --only tsne,umap3d
 ```
 
-Then pass them all to the converter, naming which are derived so the panel can say so:
+Existing embeddings are **preserved and keep their slot**. A published `X_umap` is the authors' own
+picture and nothing here overwrites it; recomputed coordinates go under their own keys (`X_pca2d`,
+`X_pca3d`, `X_tsne`, `X_tsne3d`, `X_umap3d`) and are marked `derived: true`, so a reader comparing
+against a paper's figure knows which they are looking at.
 
-```bash
-python3 scripts/h5ad-to-spatial.py --h5ad seqfish.h5ad --out spatial/seqfish \
-    --id seqfish --name "Mouse embryo seqFISH · 19,416 cells (Lohoff et al)" \
-    --spatial-key spatial \
-    --embedding X_umap:UMAP     --embedding X_umap3d:"UMAP 3D" \
-    --embedding X_pca:PCA       --embedding X_pca3d:"PCA 3D" \
-    --embedding X_tsne:t-SNE    --embedding X_tsne3d:"t-SNE 3D" \
-    --derived X_umap3d --derived X_pca --derived X_pca3d \
-    --derived X_tsne --derived X_tsne3d \
-    --column celltype_mapped_refined:categorical --column Area:continuous
-```
+PCA is computed once and reused: it is both an embedding in its own right and the input the other
+methods want, since UMAP or t-SNE straight off 18,078 genes follows noise. `lib/pca.mjs` uses
+**randomized subspace iteration** rather than a full SVD — the same approach scanpy takes at this
+size, and the only tractable one in JS, since an exact SVD of 2,688 x 18,078 computes 2,688
+singular triples to use three. It reproduces numpy's exact variance ratios (Visium 7.3%, 2.9%,
+2.1%) and takes 23 s at 50 components; UMAP 3D on those components takes 3 s.
+
+**t-SNE is opt-in, and that is a real limitation rather than a preference.** `tsne-js` implements
+the exact formulation only — its own README puts Barnes-Hut under "planned (contributions
+welcome!)" — so both the setup and every iteration are O(dN²) against scikit-learn's
+O(dN log N). Measured at 50 iterations: 3.9 s for 500 observations, 16.8 s for 1,000, 65.2 s for
+2,000, four times the cost for twice the points exactly as quadratic predicts. On top of that the
+joint-probability matrix is built once up front, so at 2,688 observations even `--iterations 1`
+costs two minutes. A full run on the Visium bundle is over half an hour and seqFISH's 19,416
+observations are out of reach; scikit-learn did seqFISH in 31 seconds.
+
+So `--only tsne` opts in and prints what it will cost first, rather than starting a job that
+cannot be told apart from a hang. If you need t-SNE at this scale, compute it wherever
+scikit-learn lives and add it to the `.h5ad` as an `obsm` key before converting — the converter
+takes any 2- or 3-column `obsm` array, whatever produced it.
 
 **Only PCA reports variance per axis**, and that asymmetry is deliberate. PCA's axes are ordered
 and each explains a measurable share, so `compute-pca.py` writes
@@ -371,15 +396,15 @@ has **both** — a real H&E section and the authors' own `X_umap` — which is w
 that exercises the image path and the embedding path together.
 
 ```bash
-pip install h5py numpy pillow
+npm install
 curl -O https://exampledata.scverse.org/squidpy/visium_hne_adata.h5ad   # 329 MB, no auth
 
 # 1. the tissue image, and the registration numbers it implies
-python3 scripts/visium-image.py --h5ad visium_hne_adata.h5ad --out visium-hne.png
+node scripts/visium-image.mjs --h5ad visium_hne_adata.h5ad --out visium-hne.png
 node scripts/make-pyramid.mjs visium-hne.png visium-hne-tissue --mpp 4.2646
 
 # 2. the bundle, registered onto that image
-python3 scripts/h5ad-to-spatial.py --h5ad visium_hne_adata.h5ad --out spatial/visium-hne \
+node scripts/h5ad-to-spatial.mjs --h5ad visium_hne_adata.h5ad --out spatial/visium-hne \
     --id visium-hne --name "Adult mouse brain Visium H&E · 2,688 spots (10x V1)" \
     --spatial-key spatial --embedding X_umap:UMAP \
     --column cluster:categorical \
@@ -389,33 +414,15 @@ python3 scripts/h5ad-to-spatial.py --h5ad visium_hne_adata.h5ad --out spatial/vi
     --image-mpp 4.2646,4.2646 --microns-per-unit 0.725456 --radius 37.91
 ```
 
-The three compute scripts then give it the same six embeddings seqFISH has:
+One more command gives it the same six embeddings seqFISH has:
 
 ```bash
-python3 scripts/compute-pca.py    --h5ad visium_hne_adata.h5ad --key2d X_pca2d --key3d X_pca3d
-python3 scripts/compute-tsne.py   --h5ad visium_hne_adata.h5ad
-python3 scripts/compute-umap3d.py --h5ad visium_hne_adata.h5ad
+node scripts/compute-embeddings.mjs --bundle spatial/visium-hne
 ```
 
-`--key2d X_pca2d` rather than the default `X_pca`, and that override is the point: this file
-already HAS an `obsm/X_pca`, of 50 components, and it is the basis scanpy built the neighbour
-graph and the published UMAP from. Writing a 2-component PCA over that key would silently discard
-the provenance of the very embedding this dataset was chosen for. Whenever a source ships its own
-`X_pca`, pick a different key.
-
-Then re-run the converter with all six, marking which are computed here:
-
-```bash
-    --embedding X_umap:UMAP       --embedding X_umap3d:"UMAP 3D" \
-    --embedding X_pca2d:PCA       --embedding X_pca3d:"PCA 3D" \
-    --embedding X_tsne:t-SNE      --embedding X_tsne3d:"t-SNE 3D" \
-    --derived X_umap3d --derived X_pca2d --derived X_pca3d \
-    --derived X_tsne --derived X_tsne3d
-```
-
-`X_umap` is **not** in the `--derived` list, and that is the difference from seqFISH's line: here
-the 2-D UMAP is the authors' own, so it carries no "computed here" caption. Everything beside it
-does.
+The published `X_umap` keeps slot 0 and its caption stays clean — it is the authors' own picture,
+and that is the difference from seqFISH's derived five. Nothing needs re-converting: the script
+appends to the bundle and rewrites its manifest.
 
 Nothing else is wired: the example gallery reads `imageRef.imageId` out of the manifest, so a
 bundle that names an image appears over it with no code change. 18,078 genes come through, which

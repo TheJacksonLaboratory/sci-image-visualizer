@@ -15,6 +15,10 @@ const PORT = 8791;
 const BASE = `http://127.0.0.1:${PORT}`;
 const ID = 'demo-brain';
 const SPATIAL_DIR = new URL('./spatial', import.meta.url).pathname;
+// The zarr path serves the same wire format from a store with NO build step, so it has to
+// be covered by the same checks. `make-zarr-demo.mjs` writes one that needs no download.
+const ZARR_DIR = new URL('./stores', import.meta.url).pathname;
+const ZARR_ID = 'demo-zarr.table';
 
 let failures = 0;
 function check(label, ok, detail = '') {
@@ -35,7 +39,7 @@ async function getBuffer(pathname) {
 }
 
 const server = spawn(process.execPath, [path.join(import.meta.dirname, 'server.mjs')], {
-  env: { ...process.env, PORT: String(PORT), SPATIAL_DIR },
+  env: { ...process.env, PORT: String(PORT), SPATIAL_DIR, ZARR_DIR },
   stdio: ['ignore', 'pipe', 'inherit'],
 });
 // Wait for the listen line before hitting the socket.
@@ -223,6 +227,40 @@ try {
     }
     const noVol = await fetch(`${BASE}/spatial/${ID}/volume`);
     check('a dataset without a volume 404s', noVol.status === 404, `got ${noVol.status}`);
+  }
+
+  // ── the zarr path, when a store is present ────────────────────────────────
+  const zarrManifest = await fetch(`${BASE}/spatial/${ZARR_ID}/manifest`)
+    .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  if (!zarrManifest) {
+    console.log('zarr store (skipped — run `node scripts/make-zarr-demo.mjs`)');
+  } else {
+    console.log('zarr store, read directly');
+    const embeddings = zarrManifest.embeddings ?? [];
+    // The whole point of the zarr path: what the source published is already there, so an
+    // `obsm/X_umap` needs no conversion step to reach the client.
+    check('obsm arrays are advertised as embeddings', embeddings.length >= 2,
+      embeddings.map((e) => `${e.name}(${e.dims}D)`).join(', ') || 'none');
+    check('the coordinates are not offered as one',
+      !embeddings.some((e) => e.name === 'spatial'));
+    for (const emb of embeddings) {
+      const buf = await getBuffer(`/spatial/${ZARR_ID}/embedding/${emb.name}`);
+      // Struct of arrays, f32, one plane per dimension — byte for byte what a bundle
+      // serves, so the client cannot tell which source answered.
+      check(`${emb.name} is ${emb.dims} f32 planes of ${zarrManifest.count}`,
+        buf.byteLength === zarrManifest.count * emb.dims * 4,
+        `${buf.byteLength} bytes`);
+      const values = new Float32Array(buf);
+      check(`${emb.name} coordinates are finite`,
+        values.every((v) => Number.isFinite(v)));
+    }
+    const badEmbedding = await fetch(`${BASE}/spatial/${ZARR_ID}/embedding/X_nope`);
+    check('unknown embedding is 404', badEmbedding.status === 404, `got ${badEmbedding.status}`);
+    // A store column and a derived column of the same name would otherwise both be
+    // declared, and the second would shadow real data with a k-means the server invented.
+    const names = (zarrManifest.columns ?? []).map((c) => c.name);
+    check('no column is declared twice', new Set(names).size === names.length,
+      names.join(', '));
   }
 
   console.log('error handling');

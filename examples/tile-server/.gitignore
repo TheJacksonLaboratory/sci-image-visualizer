@@ -9,4 +9,3 @@ abc/
 # conversion inputs: downloaded .h5ad and the images extracted from them
 *.h5ad
 visium-*.png
-__pycache__/

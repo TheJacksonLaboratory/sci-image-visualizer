@@ -85,6 +85,49 @@ const DERIVED = {
       + 'derived on demand, not an analysis result' },
 };
 
+/**
+ * Pretty label for an `obsm` key, matching what the bundle converter writes.
+ *
+ * The key is the source's own name and stays the identifier; this is only what a menu
+ * shows. A dataset served from a store and the same dataset converted to a bundle must
+ * not label their embeddings differently — the reader cannot tell which path served it,
+ * and should not have to.
+ */
+function embeddingLabel(key) {
+  const stem = key.replace(/^X_/, '');
+  const dims3 = /3d$/i.test(stem);
+  const base = stem.replace(/3d$/i, '');
+  const known = { umap: 'UMAP', pca: 'PCA', tsne: 't-SNE', diffmap: 'Diffusion map' };
+  const label = known[base.toLowerCase()] ?? base;
+  return dims3 ? `${label} 3D` : label;
+}
+
+/**
+ * Embeddings this table publishes: every `obsm` array of 2 or 3 columns except the
+ * coordinates themselves.
+ *
+ * The store already holds them — an `.h5ad` converted to SpatialData keeps its `X_umap` —
+ * so serving them needs no conversion step and no compute. That is the whole argument for
+ * the zarr path: what the source published is already here.
+ *
+ * Anything wider is skipped rather than truncated. `X_pca` is routinely 50 components,
+ * and showing its first two as "the PCA" would be a different picture from the one the
+ * label promises; a 2-D PCA has to be asked for deliberately.
+ */
+async function listEmbeddings(root, table) {
+  const base = `tables/${table}`;
+  const keys = await listDirs(path.join(root, base, 'obsm'));
+  const out = [];
+  for (const key of keys) {
+    if (key === 'spatial' || key.startsWith('.')) continue;
+    const meta = await readMeta(root, `${base}/obsm/${key}`).catch(() => null);
+    const dims = meta?.shape?.length === 2 ? meta.shape[1] : 0;
+    if (dims !== 2 && dims !== 3) continue;
+    out.push({ name: key, label: embeddingLabel(key), dims });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 // ── discovery ───────────────────────────────────────────────────────────────
 
 /**
@@ -397,6 +440,7 @@ export async function zarrManifest(zarrDir, id) {
   const { spec, columns, regionCol, keep, count } = await loadObs(zarrDir, id);
   const geometry = await loadGeometry(zarrDir, id);
   const names = (await loadMatrixNames(zarrDir, id));
+  const embeddings = await listEmbeddings(spec.root, spec.table);
 
   const declared = [];
   for (const col of columns) {
@@ -429,8 +473,14 @@ export async function zarrManifest(zarrDir, id) {
 
   // Derived columns are ADVERTISED here and computed on first request, so
   // opening a dataset does not pay to cluster it.
+  const declaredNames = new Set(declared.map((c) => c.name));
   for (const [name, d] of Object.entries(DERIVED)) {
     if (d.needs === 'geometry' && !geometry.radius) continue;
+    // The store's own column wins. Any scanpy-processed table already carries
+    // `total_counts`, and often `cluster` — advertising both put two entries with one
+    // name in the picker, where the second silently shadowed real data with a k-means
+    // this server invented.
+    if (declaredNames.has(name)) continue;
     declared.push(d.kind === 'categorical'
       ? {
         kind: 'categorical', name,
@@ -466,8 +516,37 @@ export async function zarrManifest(zarrDir, id) {
       ...(geometry.mpp ? { mppX: geometry.mpp, mppY: geometry.mpp } : {}),
     },
     ...(geometry.polygons ? { polygons: { count } } : {}),
+    ...(embeddings.length ? { embeddings } : {}),
   };
   return s.manifest;
+}
+
+/**
+ * One embedding's coordinates, as the wire format's struct of arrays.
+ *
+ * `f32[N] dim0`, then `f32[N] dim1`, then `f32[N] dim2` when there is one — byte for byte
+ * what `embeddings/<index>.bin` holds for a bundle, so the client cannot tell which source
+ * served it.
+ *
+ * Restricted to this dataset's ROWS. A table can cover several regions and each is its own
+ * dataset, so handing back the whole `obsm` array would return coordinates for cells the
+ * caller is not looking at, silently misaligned with everything else it holds.
+ */
+export async function zarrEmbedding(zarrDir, id, name) {
+  const { spec, keep, count } = await loadObs(zarrDir, id);
+  const available = await listEmbeddings(spec.root, spec.table);
+  const meta = available.find((e) => e.name === name);
+  if (!meta) throw new RangeError(`unknown embedding: ${name}`);
+
+  const arr = await readArray(spec.root, `tables/${spec.table}/obsm/${name}`);
+  const { dims } = meta;
+  const out = new Float32Array(count * dims);
+  for (let d = 0; d < dims; d++) {
+    for (let i = 0; i < count; i++) {
+      out[d * count + i] = Number(arr.data[keep[i] * dims + d]);
+    }
+  }
+  return Buffer.from(out.buffer, out.byteOffset, out.byteLength);
 }
 
 /** Gene names only — reads `var/_index`, not the matrix. */

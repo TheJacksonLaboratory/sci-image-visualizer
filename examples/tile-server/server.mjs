@@ -40,7 +40,7 @@ import {
   readFeatureVector, searchFeatures,
 } from './lib/spatial.mjs';
 import {
-  listZarrDatasets, zarrManifest, zarrCoords, zarrRadius, zarrIds, zarrColumn,
+  listZarrDatasets, zarrManifest, zarrCoords, zarrRadius, zarrIds, zarrColumn, zarrEmbedding,
   zarrFeature, zarrFeatureSearch, zarrPolygons, zarrImageSource,
 } from './lib/spatial-zarr.mjs';
 import {
@@ -385,6 +385,7 @@ app.get('/spatial/:id/embedding/:name', async (req, res) => {
   const { id, name } = req.params;
   await fromSource(res, id, {
     bundle: async () => octet(res).send(await readEmbedding(SPATIAL_DIR, id, name)),
+    zarr: async () => octet(res).send(await zarrEmbedding(ZARR_DIR, id, name)),
   });
 });
 
