@@ -137,6 +137,69 @@ describe('buildUmapTraces', () => {
   });
 });
 
+describe('a 3D embedding', () => {
+  const f32 = (...v: number[]) => Float32Array.from(v);
+  const cats = (names: string[], colors: string[], codes: number[]) =>
+    ({ names, colors, codes: Uint16Array.from(codes) });
+
+  it('switches to a rotatable 3D scatter when a third dimension is given', () => {
+    // Not a `scattergl` with a z: `scatter3d` is a different trace type with its own
+    // scene, which is why the third dimension cannot simply be added to the plane.
+    const traces = buildUmapTraces({
+      x: f32(1, 2), y: f32(3, 4), z: f32(5, 6), label: 'UMAP',
+    }) as any[];
+    expect(traces[0].type).toBe('scatter3d');
+    expect(traces[0].z).toEqual([5, 6]);
+  });
+
+  it('stays a 2D scattergl with no third dimension', () => {
+    const traces = buildUmapTraces({ x: f32(1), y: f32(2), label: 'UMAP' }) as any[];
+    expect(traces[0].type).toBe('scattergl');
+    expect(traces[0].z).toBeUndefined();
+  });
+
+  it('carries the third dimension per category, index-aligned with x and y', () => {
+    // The per-category split takes a SUBSET of points, so z has to be subset the same
+    // way — a mismatch would place cells at another cell's depth.
+    const traces = buildUmapTraces({
+      x: f32(10, 20, 30, 40), y: f32(11, 21, 31, 41), z: f32(12, 22, 32, 42),
+      label: 'UMAP',
+      categories: cats(['A', 'B'], ['#f00', '#00f'], [0, 1, 0, 1]),
+    }) as any[];
+    const a = traces.find((tr) => tr.name === 'A');
+    expect(a.x).toEqual([10, 30]);
+    expect(a.y).toEqual([11, 31]);
+    expect(a.z).toEqual([12, 32]);
+    expect(a.customdata).toEqual([0, 2]);
+  });
+
+  it('keeps observation indices on the 3D traces, so a pick still resolves', () => {
+    const traces = buildUmapTraces({
+      x: f32(1, 2), y: f32(3, 4), z: f32(5, 6), label: 'UMAP',
+    }) as any[];
+    expect(traces[0].customdata).toEqual([0, 1]);
+  });
+
+  it('lays out a scene with three named axes and true proportions', () => {
+    const l = umapLayout({
+      x: f32(1), y: f32(2), z: f32(3), label: 'UMAP', derived: true,
+    }) as any;
+    expect(l.scene.xaxis.title.text).toBe('UMAP 1');
+    expect(l.scene.zaxis.title.text).toBe('UMAP 3');
+    // The axes carry no units, so all three must be scaled alike or distances lie.
+    expect(l.scene.aspectmode).toBe('data');
+    // No 2D axes on a 3D plot.
+    expect(l.xaxis).toBeUndefined();
+  });
+
+  it('says it was computed here, which a 3D embedding always is', () => {
+    // Nothing published with a spatial dataset is 3D, so this note is not optional
+    // decoration — it is the difference between the paper's figure and ours.
+    const l = umapLayout({ x: f32(1), y: f32(2), z: f32(3), label: 'UMAP', derived: true }) as any;
+    expect(l.annotations[0].text).toMatch(/computed here/);
+  });
+});
+
 describe('umapLayout', () => {
   it('locks the axes to equal scale', () => {
     // An embedding's axes carry no units, so distances only compare if both are scaled

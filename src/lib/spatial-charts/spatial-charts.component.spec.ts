@@ -611,6 +611,29 @@ describe('SpatialChartsComponent', () => {
       expect(layout.xaxis.title.text).toBe('UMAP 1');
     });
 
+    it('draws a 3D embedding as a rotatable scatter', async () => {
+      // The wiring this pins: the builder switches on a third dimension being PRESENT,
+      // so the component has to pass it. It did not at first, and the 3D embedding
+      // silently drew as a flat scattergl with the depth thrown away.
+      const meta3d = { name: 'X_umap3d', label: 'UMAP 3D', dims: 3 as const, derived: true };
+      controls.getEmbedding = jest.fn(async () => ({
+        meta: meta3d,
+        x: f32(1, 2, 3, 4),
+        y: f32(5, 6, 7, 8),
+        z: f32(9, 10, 11, 12),
+      }));
+      dataset$.next({ ...dataset, embeddings: [meta3d] });
+      await build(controls);
+      await flush();
+      component.onKind('umap');
+      await flush();
+
+      const { traces, layout } = lastPlot();
+      expect(traces[0].type).toBe('scatter3d');
+      expect(traces[0].z).toBeDefined();
+      expect(layout.scene.zaxis.title.text).toBe('UMAP 3D 3');
+    });
+
     it('fetches the coordinates once, not per redraw', async () => {
       // A selection change redraws; the coordinates have not changed and are a
       // per-observation vector, so refetching them would be pure waste.

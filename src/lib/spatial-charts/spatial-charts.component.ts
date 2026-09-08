@@ -527,6 +527,10 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     const input = {
       x: coords.x,
       y: coords.y,
+      // The third dimension when the embedding has one — what switches the plot to a
+      // rotatable 3D scatter. Decoded only for a 3-dim embedding, so its presence here
+      // is the same question as `meta.dims === 3`.
+      ...(coords.z ? { z: coords.z } : {}),
       label: meta.label ?? meta.name,
       derived: meta.derived,
       ...(this.categorical

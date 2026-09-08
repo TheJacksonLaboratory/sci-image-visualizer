@@ -329,6 +329,14 @@ export interface OmicsUmapInput {
   /** Embedding coordinates, index-aligned with the observations. */
   x: Float32Array;
   y: Float32Array;
+  /**
+   * Third dimension, when the embedding has one.
+   *
+   * Its presence is what switches the plot to a rotatable 3D scatter. A 3D embedding is
+   * always COMPUTED — every embedding published with a spatial dataset is 2D, because a
+   * UMAP exists to be looked at — so `derived` is expected alongside it.
+   */
+  z?: Float32Array;
   /** Axis label stem, e.g. "UMAP" — the axes become "UMAP 1" / "UMAP 2". */
   label: string;
   /** Colour by a categorical column: per-observation codes plus the category names/colours. */
@@ -379,9 +387,14 @@ export function buildUmapTraces(input: OmicsUmapInput): unknown[] {
   const { x, y, categories, selection } = input;
   const n = Math.min(x.length, y.length);
   if (n === 0) return [];
-  const size = input.size ?? DEFAULT_UMAP_POINT_SIZE;
-  // scattergl, not scatter: this is 10^4-10^6 points and the SVG renderer would not survive it.
-  const type = 'scattergl';
+  const z = input.z;
+  // `scattergl` for the plane — 10^4-10^6 points, which the SVG renderer would not
+  // survive. `scatter3d` for the cloud: WebGL too, but a different trace type with its
+  // own scene, which is why a third dimension cannot just be added to the former. It
+  // costs more per point, so it suits this scale and not millions.
+  const type = z ? 'scatter3d' : 'scattergl';
+  const markerSize = z ? Math.max(1, (input.size ?? DEFAULT_UMAP_POINT_SIZE) - 2)
+    : (input.size ?? DEFAULT_UMAP_POINT_SIZE);
   const opacityFor = (i: number): number =>
     !selection || selection[i] ? 1 : UMAP_MUTED_OPACITY;
 
@@ -391,12 +404,13 @@ export function buildUmapTraces(input: OmicsUmapInput): unknown[] {
       mode: 'markers',
       x: Array.from(x.subarray(0, n)),
       y: Array.from(y.subarray(0, n)),
+      ...(z ? { z: Array.from(z.subarray(0, n)) } : {}),
       // The OBSERVATION index per point, carried through so a lasso can be turned back
       // into a selection. Plotly reports a selected point by its position within its
       // trace, which is not the observation index once the points are split by category.
       customdata: Array.from({ length: n }, (_, i) => i),
       marker: {
-        size,
+        size: markerSize,
         color: '#4c72b0',
         ...(selection ? { opacity: Array.from({ length: n }, (_, i) => opacityFor(i)) } : {}),
       },
@@ -414,8 +428,9 @@ export function buildUmapTraces(input: OmicsUmapInput): unknown[] {
       mode: 'markers',
       x: Array.from(x.subarray(0, n)),
       y: Array.from(y.subarray(0, n)),
+      ...(z ? { z: Array.from(z.subarray(0, n)) } : {}),
       marker: {
-        size,
+        size: markerSize,
         color: Array.from({ length: n }, (_, i) => colors[codes[i]] ?? '#999999'),
         ...(selection ? { opacity: Array.from({ length: n }, (_, i) => opacityFor(i)) } : {}),
       },
@@ -444,11 +459,12 @@ export function buildUmapTraces(input: OmicsUmapInput): unknown[] {
       name: names[c],
       x: idx.map((i) => x[i]),
       y: idx.map((i) => y[i]),
+      ...(z ? { z: idx.map((i) => z[i]) } : {}),
       // This trace's points ARE a subset, so the observation index has to travel with
       // them; `pointIndex` alone would address the wrong cell.
       customdata: idx,
       marker: {
-        size,
+        size: markerSize,
         color: colors[c] ?? '#999999',
         ...(selection ? { opacity: idx.map(opacityFor) } : {}),
       },
@@ -461,6 +477,39 @@ export function buildUmapTraces(input: OmicsUmapInput): unknown[] {
 
 export function umapLayout(input: OmicsUmapInput): unknown {
   const stem = input.label || 'UMAP';
+  const derivedNote = input.derived
+    ? {
+      // Said on the plot, not just in a tooltip: a recomputed embedding is a different
+      // picture from the published one, and a reader comparing against a paper's figure
+      // needs to know. For a 3D embedding it is always true — none are published.
+      annotations: [{
+        text: 'computed here, not published with the dataset',
+        showarrow: false, xref: 'paper', yref: 'paper', x: 0, y: 1.04,
+        xanchor: 'left', font: { size: 10, color: '#888888' },
+      }],
+    }
+    : {};
+
+  if (input.z) {
+    return {
+      autosize: true,
+      // A 3D scene has no margins to speak of; the axes live inside it.
+      margin: { l: 0, r: 0, t: input.derived ? 24 : 0, b: 0 },
+      scene: {
+        xaxis: { title: { text: `${stem} 1` } },
+        yaxis: { title: { text: `${stem} 2` } },
+        zaxis: { title: { text: `${stem} 3` } },
+        // Equal aspect for the same reason as the plane: the axes carry no units, so
+        // distances only compare if all three are scaled alike. `data` keeps the cloud's
+        // own proportions instead of stretching it into the cube.
+        aspectmode: 'data',
+      },
+      showlegend: false,
+      hovermode: 'closest',
+      ...derivedNote,
+    };
+  }
+
   return {
     autosize: true,
     // Bottom margin carries the legend: laid out BELOW the plot rather than beside it.
@@ -489,17 +538,7 @@ export function umapLayout(input: OmicsUmapInput): unknown {
       yanchor: 'top', y: -0.16, xanchor: 'left', x: 0,
     },
     hovermode: 'closest',
-    ...(input.derived
-      ? {
-        // Said on the plot, not just in a tooltip: a recomputed embedding is a different
-        // picture from the published one, and a reader comparing against a paper needs to know.
-        annotations: [{
-          text: 'computed here, not published with the dataset',
-          showarrow: false, xref: 'paper', yref: 'paper', x: 0, y: 1.04,
-          xanchor: 'left', font: { size: 10, color: '#888888' },
-        }],
-      }
-      : {}),
+    ...derivedNote,
   };
 }
 
