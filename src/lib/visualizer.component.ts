@@ -421,6 +421,10 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       this.spatialDatasetKey = key;
       this.hasSpatialDataset = has;
       this.hasSpatial3dDataset = has3d;
+      // Whether the dataset says it registers onto a tissue image. Distinct from an
+      // image being LOADED: a registered dataset's image may still be on its way, and
+      // the pixel modes must not flicker out of the selector while it arrives.
+      this.spatialDatasetRegistered = !!dataset?.imageRef;
       this.hasSpatialVolume = hasVolume;
       this.computePlotTypeOptions();
       // A dataset with no reference image has nothing to draw observations OVER:
@@ -552,6 +556,16 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
         if (d.requiresGrayscale && !isGrayscale && !isMultichannel) return false;
         if (d.requiresSpatialData && !this.hasSpatialDataset) return false;
         if (d.requiresSpatial3d && !this.hasSpatial3dDataset) return false;
+        // An image-sourced mode reads PIXELS. A spatial dataset that brings no tissue
+        // image (seqFISH records unitless coordinates, not a section) leaves nothing for
+        // one to draw, so offering Image / Heatmap / Surface there offers modes that can
+        // only come up blank — or worse, showing whatever slide was loaded before.
+        //
+        // Narrowed to "a dataset is up AND there is no image": with no dataset at all,
+        // Image stays on offer, because a host that has not loaded anything yet needs a
+        // default and an empty selector would be worse than a blank view.
+        if (d.source === 'image' && this.hasSpatialDataset
+          && !this.spatialDatasetRegistered && !this.imageInfo) return false;
         return true;
       })
       // Default selector shows the suffix-free productionLabel; test mode keeps
@@ -574,13 +588,37 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   /** If the active plot type is no longer in the offered options (e.g. test mode
    *  turned off while a test-only type was active, or a scalar type carried onto
    *  an RGB image), fall back to the default 2D Image view. */
+  /** Whether the live spatial dataset registers onto a tissue image. */
+  private spatialDatasetRegistered = false;
+
+  /**
+   * The host published NO image — a spatial dataset that brings none does this.
+   *
+   * Without handling the empty emission, `imageInfo` keeps the LAST image's metadata: the
+   * selector goes on offering pixel modes for pixels that are gone, and every
+   * `isStack`/`isGrayscale` decision is made against a file that is no longer loaded.
+   */
+  private onImageCleared(): void {
+    this.imageInfo = undefined;
+    this.loadedFileName = undefined;
+    this.computePlotTypeOptions();
+    this.reconcileSelectedPlotType();
+    this.cdr.detectChanges();
+  }
+
   private reconcileSelectedPlotType(): void {
-    if (!this.plotTypeOptions.some((d) => d.type === this.selectedPlotType)) {
-      this.selectedPlotType = PlotType.IMAGE;
-      this.plotType = PlotType.IMAGE;
-      this.isHeatmap = true;
-      this.plotService.setPlotType(PlotType.IMAGE);
-    }
+    if (this.plotTypeOptions.some((d) => d.type === this.selectedPlotType)) return;
+    // Image is the usual fallback, but it is not always ON OFFER: with no image loaded
+    // the pixel modes are gone, and falling back to one would select a mode the selector
+    // does not list and nothing can draw. Take the first type still offered instead.
+    const fallback = this.plotTypeOptions.some((d) => d.type === PlotType.IMAGE)
+      ? PlotType.IMAGE
+      : this.plotTypeOptions[0]?.type;
+    if (!fallback) return;
+    this.selectedPlotType = fallback;
+    this.plotType = fallback;
+    this.isHeatmap = fallback === PlotType.IMAGE;
+    this.plotService.setPlotType(fallback);
   }
 
   ngOnInit(): void {
@@ -712,6 +750,10 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     });
     this.previewSubscription = this.state.getImageInfo$().subscribe({
       next: (imgInfo) => {
+        if (!imgInfo) {
+          this.onImageCleared();
+          return;
+        }
         if (imgInfo) {
           this.imageInfo = imgInfo;
           // Stack-only plot types (isosurface, scatter3d) depend on whether this

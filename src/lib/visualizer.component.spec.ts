@@ -511,6 +511,68 @@ describe('VisualizerComponent (UI shell)', () => {
         expect(plotService.setPlotType).toHaveBeenCalledWith(PlotType.SPATIAL_OMICS_3D);
       });
 
+      it('stops offering the pixel modes for a dataset that brings no image', async () => {
+        // Image / Heatmap / Surface all read PIXELS. A dataset like seqFISH records
+        // unitless coordinates and no section, so those modes can only come up blank —
+        // or worse, showing whichever slide was loaded before.
+        const c = makeComponent(plotService, port);
+        (c as any).watchSpatialDataset();
+        dataset$.next({
+          id: 'seqfish', name: 'seqFISH', observations: { count: 3 }, columns: [],
+        });
+        await flush();
+
+        const sources = c.plotTypeOptions.map((d) => d.source);
+        expect(sources).not.toContain('image');
+        // …and the spatial mode it CAN draw is still there.
+        expect(c.plotTypeOptions.some((d) => d.type === PlotType.SPATIAL_OMICS)).toBe(true);
+      });
+
+      it('keeps the pixel modes while a REGISTERED dataset waits for its image', async () => {
+        // A dataset declaring an imageRef has an image on the way. Dropping the modes
+        // until it lands would make the selector flicker for a state that is transient.
+        const c = makeComponent(plotService, port);
+        (c as any).watchSpatialDataset();
+        dataset$.next({
+          id: 'demo', name: 'Demo', observations: { count: 3 }, columns: [],
+          imageRef: { imageId: 'slide-1' },
+        });
+        await flush();
+
+        expect(c.plotTypeOptions.some((d) => d.type === PlotType.IMAGE)).toBe(true);
+      });
+
+      it('drops the pixel modes when a loaded image is cleared under a dataset', async () => {
+        // The sequence that actually happens: a slide is open, then an image-less
+        // spatial dataset is picked and the host clears the image. Keeping the stale
+        // `imageInfo` would leave the pixel modes on offer for pixels that are gone.
+        const c = makeComponent(plotService, port);
+        (c as any).watchSpatialDataset();
+        dataset$.next({
+          id: 'seqfish', name: 'seqFISH', observations: { count: 3 }, columns: [],
+        });
+        await flush();
+        c.imageInfo = { fileName: '002_img.png', isStack: false, isGrayscale: false } as any;
+        (c as any).computePlotTypeOptions();
+        expect(c.plotTypeOptions.some((d) => d.source === 'image')).toBe(true);
+
+        (c as any).onImageCleared();
+
+        expect(c.imageInfo).toBeUndefined();
+        expect(c.plotTypeOptions.some((d) => d.source === 'image')).toBe(false);
+      });
+
+      it('keeps Image on offer when there is no dataset at all', async () => {
+        // A host that has loaded nothing yet still needs a default; an empty selector
+        // would be worse than a blank view.
+        const c = makeComponent(plotService, port);
+        (c as any).watchSpatialDataset();
+        dataset$.next(null);
+        await flush();
+
+        expect(c.plotTypeOptions.some((d) => d.type === PlotType.IMAGE)).toBe(true);
+      });
+
       it('opens the 2D scatter for a one-plane dataset with no image', async () => {
         // The case that went unhandled: before an image-less 2D assay existed,
         // "no reference image" implied a cloud, so this branch was gated on the z
