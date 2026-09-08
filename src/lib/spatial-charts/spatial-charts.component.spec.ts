@@ -758,10 +758,10 @@ describe('SpatialChartsComponent', () => {
         win.remove();
       });
 
-      it('remembers detachment per kind, so switching tabs does not undo it', async () => {
-        // One flag for the whole panel would drag every other tab into the window the
-        // moment one of them was detached — and drop the embedding back inline as soon
-        // as you glanced at the counts.
+      it('keeps the window across a change of kind, and draws the new kind into it', async () => {
+        // Where the window is, is a property of the workspace someone arranged, not of
+        // the tab they are on. Re-attaching on every switch made them detach it again
+        // each time they looked at another chart.
         dataset$.next({ ...dataset, embeddings: [umapMeta] });
         await build(controls);
         view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
@@ -769,17 +769,61 @@ describe('SpatialChartsComponent', () => {
         component.onKind('embedding');
         await flush();
 
+        const win = enterWindow();
         component.toggleDetached();
-        expect(component.isDetached('embedding')).toBe(true);
+        component.onDetachedWindowShown();
+        await flush();
+        expect(component.detached).toBe(true);
+        expect((Plotly.react as jest.Mock).mock.calls.at(-1)?.[0]).toBe(component.detachedDiv);
 
+        // Switching tabs swaps what the window shows; it does not close it. The inline
+        // div stays absent, as the template leaves it while detached.
         component.onKind('counts');
         await flush();
-        expect(component.detached).toBe(false);
-        expect(component.isDetached('counts')).toBe(false);
+        expect(component.detached).toBe(true);
+        const call = (Plotly.react as jest.Mock).mock.calls.at(-1);
+        expect(call?.[0]).toBe(component.detachedDiv);
+        expect((call?.[1] as Record<string, unknown>[])[0].type).toBe('bar');
 
+        // And back, still detached.
         component.onKind('embedding');
         await flush();
         expect(component.detached).toBe(true);
+        expect((Plotly.react as jest.Mock).mock.calls.at(-1)?.[0]).toBe(component.detachedDiv);
+        win.remove();
+      });
+
+      it('drops the embedding lasso handlers when another kind takes the div', async () => {
+        // The window outlives any one kind, so the div does too. `plotly_deselect` fires
+        // on a plain click in ANY Plotly chart — left bound, the first click on a bar
+        // would clear the map's selection for no reason the user can see.
+        dataset$.next({ ...dataset, embeddings: [umapMeta] });
+        await build(controls);
+        view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        component.onKind('embedding');
+        await flush();
+
+        const win = enterWindow();
+        // Stand in Plotly's event surface: jsdom divs have neither `on` nor
+        // `removeAllListeners`, so without these the binding is a silent no-op and the
+        // test would pass against a component that never unbinds.
+        const bound = new Set<string>();
+        (win as unknown as Record<string, unknown>).on =
+          (name: string) => { bound.add(name); };
+        (win as unknown as Record<string, unknown>).removeAllListeners =
+          (name: string) => { bound.delete(name); };
+
+        component.toggleDetached();
+        component.onDetachedWindowShown();
+        await flush();
+        expect(bound.has('plotly_selected')).toBe(true);
+
+        component.onKind('counts');
+        await flush();
+        expect(bound.has('plotly_selected')).toBe(false);
+        expect(bound.has('plotly_deselect')).toBe(false);
+        win.remove();
       });
 
       it('purges the window, not the panel, when a detached chart has nothing to draw', async () => {

@@ -112,17 +112,18 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   readonly detachedDiv = `spatial-charts-detached-${this.seq}`;
 
   /**
-   * Which kinds are shown in their own window rather than inline.
+   * Whether the chart is shown in its own window rather than inline.
    *
-   * Detached, a chart sits ALONGSIDE the spatial-omics dialog instead of inside it —
-   * which is the point: these are read against the map and against each other, not
-   * instead of them. The dialog is only so wide, and picking another tab otherwise
-   * replaces whatever was on screen.
+   * Detached, it sits ALONGSIDE the spatial-omics dialog instead of inside it — which is
+   * the point: these are read against the map, not instead of it. The dialog is only so
+   * wide.
    *
-   * Per KIND rather than one flag for the panel, so the preference survives switching
-   * tabs: a UMAP parked beside the map is still parked after a glance at the counts.
+   * One flag for the PANEL, not one per kind. Where the window is, is a property of the
+   * workspace someone has arranged, not of the tab they happen to be on: having put the
+   * charts beside the map, switching from the heatmap to the counts should swap what the
+   * window shows, not yank it back into the dialog and make them detach it again.
    */
-  private readonly detachedKinds = new Set<OmicsChartKind>();
+  detached = false;
   private static readonly CONTINUOUS_KINDS: { label: string; value: OmicsChartKind }[] = [
     { label: 'Histogram', value: 'histogram' },
     { label: 'Violin', value: 'violin' },
@@ -643,6 +644,21 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   }
 
   /**
+   * Drop the embedding's selection handlers from a div another kind is about to use.
+   *
+   * The detached window outlives any one kind — switching tabs swaps its content and
+   * keeps the div — so without this the lasso handlers bound for a UMAP stay live under
+   * the counts plot that replaces it. `plotly_deselect` fires on a plain click in ANY
+   * Plotly chart, so the first click on a bar would silently clear the map's selection.
+   */
+  private unbindEmbeddingSelection(div: string): void {
+    const el = document.getElementById(div) as (Plotly.PlotlyHTMLElement | null);
+    if (!el?.removeAllListeners) return;
+    el.removeAllListeners('plotly_selected');
+    el.removeAllListeners('plotly_deselect');
+  }
+
+  /**
    * The view the user has set up on the live plot, to carry across a redraw.
    *
    * `Plotly.react` resets a 3D scene camera and any zoomed 2D range unless the layout
@@ -683,16 +699,6 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     return this.drawnHeight !== null;
   }
 
-  /** Whether `kind` is shown in its own window rather than inline. */
-  isDetached(kind: OmicsChartKind): boolean {
-    return this.detachedKinds.has(kind);
-  }
-
-  /** Whether the ACTIVE kind is shown in its own window. */
-  get detached(): boolean {
-    return this.detachedKinds.has(this.kind);
-  }
-
   /** Where the active kind draws: its own window, or the shared chart div. */
   get plotTarget(): string {
     return this.detached ? this.detachedDiv : this.chartDiv;
@@ -721,8 +727,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    */
   toggleDetached(): void {
     const leaving = this.plotTarget;
-    if (this.detached) this.detachedKinds.delete(this.kind);
-    else this.detachedKinds.add(this.kind);
+    this.detached = !this.detached;
     try {
       Plotly.purge(leaving);
     } catch {
@@ -806,6 +811,8 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     // bailed here and the detached window never got a plot.
     const target = this.plotTarget;
     if (!document.getElementById(target)) return;
+    // Anything but the embedding inherits a div the embedding may have bound handlers on.
+    if (this.kind !== 'embedding') this.unbindEmbeddingSelection(target);
     // The heatmap answers a different question from the other kinds — which
     // genes distinguish which groups — so it is driven by its own gene list and
     // grouping rather than by whatever the map is coloured by.
