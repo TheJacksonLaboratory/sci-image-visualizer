@@ -33,6 +33,7 @@ import { HexColorPickerComponent } from './hex-color-picker/hex-color-picker.com
 import { ChannelHistogramComponent } from './channel-histogram/channel-histogram.component';
 import { SpatialControlsComponent } from './spatial-controls/spatial-controls.component';
 import { SpatialChartsComponent } from './spatial-charts/spatial-charts.component';
+import { SpatialEmbeddingComponent } from './spatial-embedding/spatial-embedding.component';
 import { RoutingVisualizerService } from './routing-visualizer.service';
 import { VISUALIZER } from './contracts/visualizer.contract';
 import { REGION_EDITOR_API } from './contracts/region-editor-api.contract';
@@ -58,6 +59,7 @@ import { CHANNEL_HISTOGRAM_API } from './contracts/channel-histogram-api.contrac
     ChannelHistogramComponent,
     SpatialControlsComponent,
     SpatialChartsComponent,
+    SpatialEmbeddingComponent,
   ],
   imports: [
     CommonModule,
@@ -89,6 +91,7 @@ import { CHANNEL_HISTOGRAM_API } from './contracts/channel-histogram-api.contrac
   exports: [
     VisualizerComponent, RegionEditorComponent, HexColorPickerComponent,
     ChannelHistogramComponent, SpatialControlsComponent, SpatialChartsComponent,
+    SpatialEmbeddingComponent,
   ],
   providers: [
     // Internal backend wiring. All three host-facing contracts are served by the

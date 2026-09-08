@@ -16,6 +16,7 @@ import {
   PlotType,
   PlotTypeDescriptor,
   isNapari3d,
+  isSpatialOmics,
   isSpatialOmics3d,
   rendererOwnsWheel,
   NAPARI_DEFAULT_DECIMATE,
@@ -429,6 +430,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       // exist, so the pixel modes stay on offer — Volume and Isosurface are exactly how
       // a 3D omics dataset is read.
       this.spatialDatasetHasPixels = !!dataset?.imageRef || hasVolume;
+      // Whether there is an embedding to show at all. The panel takes width from the
+      // canvas, so it must not appear as an empty rail for a dataset that has none.
+      this.datasetHasEmbedding = !!dataset?.embeddings?.length;
       this.hasSpatialVolume = hasVolume;
       this.computePlotTypeOptions();
       // A dataset with no reference image has nothing to draw observations OVER:
@@ -595,6 +599,20 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   /** Whether the live spatial dataset brings pixels of its own — a tissue image it
    *  registers onto, or a volume that is published as a z-stack image. */
   private spatialDatasetHasPixels = false;
+
+  /** Whether the live dataset publishes an embedding (UMAP / t-SNE / PCA). */
+  private datasetHasEmbedding = false;
+
+  /**
+   * Whether to dock the embedding panel beside the canvas.
+   *
+   * Only in a spatial mode: the embedding is a view OF the observations, so beside a
+   * plain image it would be a rail showing something unrelated to what is on screen.
+   */
+  get showEmbeddingPanel(): boolean {
+    return this.datasetHasEmbedding
+      && (isSpatialOmics(this.selectedPlotType) || isSpatialOmics3d(this.selectedPlotType));
+  }
 
   /**
    * The host published NO image — a spatial dataset that brings none does this.

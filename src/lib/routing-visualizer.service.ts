@@ -642,6 +642,14 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
         };
       },
 
+      // Spread rather than always defined: `getEmbedding` is optional on both the port
+      // and this facade, and a panel checks for its presence to decide whether the view
+      // is offered at all. Defining it as a function that rejects would make an
+      // embedding-less source look like a broken one.
+      ...(port.getEmbedding
+        ? { getEmbedding: (name: string) => port.getEmbedding!(name) }
+        : {}),
+
       categoricalColumns: () => (this.currentSpatialDataset?.columns ?? [])
         .filter((c) => c.kind === 'categorical')
         .map((c) => c.name),

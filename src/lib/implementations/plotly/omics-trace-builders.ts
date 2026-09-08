@@ -359,6 +359,17 @@ export interface OmicsUmapInput {
  */
 export const UMAP_MAX_LEGEND_CATEGORIES = 40;
 
+/**
+ * Categories past which the legend is not DRAWN, though the traces stay split.
+ *
+ * A legend is only worth its space if it fits. seqFISH's 22 cell types stack into one tall
+ * column in a docked panel, overlapping the axis title and running off the bottom — and
+ * the colours already match the map, whose own panel lists them, while hover names the
+ * category under the cursor. So past this the plot takes the whole panel and the legend
+ * is dropped rather than shown badly.
+ */
+export const UMAP_MAX_LEGEND_SHOWN = 10;
+
 /** Dimming applied to unselected points, matching the map's muted opacity. */
 const UMAP_MUTED_OPACITY = 0.15;
 
@@ -433,6 +444,9 @@ export function buildUmapTraces(input: OmicsUmapInput): unknown[] {
         color: colors[c] ?? '#999999',
         ...(selection ? { opacity: idx.map(opacityFor) } : {}),
       },
+      // Split per category regardless, so hover names it and a future isolate control
+      // has something to toggle; only the legend's VISIBILITY depends on the count.
+      showlegend: names.length <= UMAP_MAX_LEGEND_SHOWN,
       hovertemplate: `${names[c]}<extra></extra>`,
     }));
 }
@@ -441,7 +455,18 @@ export function umapLayout(input: OmicsUmapInput): unknown {
   const stem = input.label || 'UMAP';
   return {
     autosize: true,
-    margin: { l: 44, r: 8, t: input.derived ? 24 : 8, b: 40 },
+    // Bottom margin carries the legend: laid out BELOW the plot rather than beside it.
+    // A vertical legend of 22 cell types took half a docked panel's width and squeezed
+    // the embedding into a corner — and the shapes of the clusters are the thing being
+    // read here, while the labels are a lookup.
+    margin: {
+      l: 44,
+      r: 8,
+      t: input.derived ? 24 : 8,
+      // Room for the legend only when one is drawn; otherwise the axis title alone.
+      b: (input.categories?.names.length ?? 0) > 0
+        && (input.categories?.names.length ?? 0) <= UMAP_MAX_LEGEND_SHOWN ? 64 : 40,
+    },
     // Equal aspect: an embedding's axes carry no units, so distances are only comparable if the
     // two are scaled alike. Stretching one axis to fill the panel invents structure.
     xaxis: { title: { text: `${stem} 1` }, zeroline: false, ticks: 'outside' },
@@ -449,7 +474,12 @@ export function umapLayout(input: OmicsUmapInput): unknown {
       title: { text: `${stem} 2` }, zeroline: false, ticks: 'outside',
       scaleanchor: 'x', scaleratio: 1,
     },
-    legend: { itemsizing: 'constant', font: { size: 10 } },
+    legend: {
+      orientation: 'h',
+      itemsizing: 'constant',
+      font: { size: 9 },
+      yanchor: 'top', y: -0.16, xanchor: 'left', x: 0,
+    },
     hovermode: 'closest',
     ...(input.derived
       ? {

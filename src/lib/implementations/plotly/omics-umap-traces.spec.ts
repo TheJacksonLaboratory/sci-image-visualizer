@@ -1,5 +1,5 @@
 import {
-  UMAP_MAX_LEGEND_CATEGORIES, buildUmapTraces, umapLayout,
+  UMAP_MAX_LEGEND_CATEGORIES, UMAP_MAX_LEGEND_SHOWN, buildUmapTraces, umapLayout,
 } from './omics-trace-builders';
 import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
 
@@ -79,6 +79,33 @@ describe('buildUmapTraces', () => {
     expect(Array.isArray(traces[0].marker.color)).toBe(true);
     expect(traces[0].hovertemplate).toContain('%{text}');
     expect(traces[0].text[3]).toBe('c3');
+  });
+
+  it('draws a legend for a handful of categories', () => {
+    const traces = buildUmapTraces({
+      x: f32(1, 2), y: f32(1, 2), label: 'UMAP',
+      categories: cats(['A', 'B'], ['#f00', '#00f'], [0, 1]),
+    }) as any[];
+    expect(traces.every((t) => t.showlegend === true)).toBe(true);
+  });
+
+  it('drops the legend past what a docked panel can fit, keeping the traces split', () => {
+    // seqFISH's 22 cell types stack into one tall column, overlapping the axis title and
+    // running off the panel. The colours already match the map, which lists them, and
+    // hover names the one under the cursor — so the plot takes the space instead.
+    const n = UMAP_MAX_LEGEND_SHOWN + 1;
+    const names = Array.from({ length: n }, (_, i) => `c${i}`);
+    const traces = buildUmapTraces({
+      x: f32(...Array.from({ length: n }, (_, i) => i)),
+      y: f32(...Array.from({ length: n }, (_, i) => i)),
+      label: 'UMAP',
+      categories: cats(names, names.map(() => '#123456'),
+        Array.from({ length: n }, (_, i) => i)),
+    }) as any[];
+    // Still one trace each — hover keeps naming the category.
+    expect(traces).toHaveLength(n);
+    expect(traces.every((t) => t.showlegend === false)).toBe(true);
+    expect(traces[0].hovertemplate).toContain('c0');
   });
 
   it('dims unselected points rather than removing them', () => {

@@ -9,7 +9,10 @@ import { ViewerCapabilities } from './capabilities.contract';
 import { IRegionOverlay } from './region-overlay.contract';
 import { IHistogram } from './channel-histogram-api.contract';
 import { ColormapNode, IWandOptions, IBrushOptions, SpatialViewState, SpatialColorBy } from './display-types';
-import { SpatialDataset } from './spatial-dataset.contract';
+import {
+  SpatialDataset,
+  SpatialEmbedding,
+} from './spatial-dataset.contract';
 import { SpatialSelectionMask } from '../spatial/spatial-selection';
 
 /**
@@ -345,6 +348,15 @@ export interface ISpatialControls {
    * the same way the map resolves them.
    */
   categoricalView(column: string): Promise<SpatialCategoricalView>;
+
+  /**
+   * One embedding's coordinates — a UMAP, t-SNE or PCA plane over the same observations.
+   *
+   * Optional, and absent when the data source serves none: `SpatialDataPort.getEmbedding`
+   * is itself optional, so a panel must be able to ask whether this exists rather than
+   * calling it and catching.
+   */
+  getEmbedding?(name: string): Promise<SpatialEmbedding>;
   /** Names of the categorical columns available to group by. */
   categoricalColumns(): string[];
   /**
