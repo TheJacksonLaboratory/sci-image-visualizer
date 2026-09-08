@@ -2263,6 +2263,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       translate: ref?.translate ?? [0, 0],
     });
     this.frameSpatialPointsOnce(viewer, dataset.id, positions, !!ref);
+    this.hideForeignImage(viewer, !!ref || !!dataset.volume);
   }
 
   /**
@@ -2281,6 +2282,33 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    * the camera under the user — the camera tools and the canvas drag are meant to be
    * the only things that do.
    */
+  /**
+   * Hide the image layer for a dataset that brings no image of its own.
+   *
+   * The host's viewer keeps whatever image was last loaded, and for a dataset that
+   * registers onto none that picture belongs to something else entirely — the example's
+   * default slide, say. It is not merely irrelevant: the two live in different coordinate
+   * spaces (image pixels against the embedding's own units), so the leftover is magnified
+   * roughly a hundredfold. At the fitted zoom the camera sits inside its corner, where it
+   * reads as blank background, and it appears only once you zoom out far enough to find
+   * it — which is exactly how it gets noticed.
+   *
+   * Hidden rather than removed, and hidden HERE rather than by clearing the host's image
+   * state: that state drives the whole render pipeline, including a Plotly backend whose
+   * fields are declared with definite-assignment assertions, so emptying it throws from
+   * whichever field the next path happens to read. This touches one layer's visibility
+   * and nothing else.
+   */
+  private hideForeignImage(viewer: Viewer, datasetHasPixels: boolean): void {
+    for (const layer of viewer.layers.items) {
+      if (layer.kind !== 'image') continue;
+      // Re-shown when a dataset that owns an image comes back, so switching between
+      // datasets does not leave the tissue permanently hidden.
+      layer.visible = datasetHasPixels;
+    }
+    viewer.requestRender();
+  }
+
   private frameSpatialPointsOnce(
     viewer: Viewer, datasetId: string, positions: Float32Array, registered: boolean,
   ): void {

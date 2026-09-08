@@ -2056,6 +2056,87 @@ describe('NapariVisualizerService', () => {
       return addPoints.mock.results.at(-1)?.value;
     }
 
+    describe('a dataset that brings no image', () => {
+      /**
+       * Exercised directly against a stub scene rather than through a mount: this suite's
+       * image fixture carries no urls, so no image layer is ever built and an assertion
+       * over "the image layers" would pass on an empty list — which is how the first
+       * version of these tests passed while proving nothing.
+       */
+      const scene = () => {
+        const layers = [
+          { kind: 'image', visible: true },
+          { kind: 'points', visible: true },
+          { kind: 'image', visible: true },
+        ];
+        return {
+          layers,
+          viewer: { layers: { items: layers }, requestRender: jest.fn() },
+        };
+      };
+      const hide = (viewer: unknown, hasPixels: boolean) =>
+        (service as unknown as {
+          hideForeignImage(v: unknown, p: boolean): void;
+        }).hideForeignImage(viewer, hasPixels);
+
+      it('hides every image layer for a dataset that brings none', () => {
+        // The host's viewer keeps whatever was last loaded, and for a dataset that
+        // registers onto no image that picture is unrelated. Being in image PIXELS
+        // against coordinates in the dataset's own units it is magnified about a
+        // hundredfold, so it hides in its own corner at the fitted zoom and turns up
+        // only when you zoom out.
+        const { layers, viewer } = scene();
+        hide(viewer, false);
+        expect(layers.filter((l) => l.kind === 'image').map((l) => l.visible))
+          .toEqual([false, false]);
+      });
+
+      it('leaves the observations alone', () => {
+        const { layers, viewer } = scene();
+        hide(viewer, false);
+        expect(layers.find((l) => l.kind === 'points')!.visible).toBe(true);
+      });
+
+      it('shows the image for a dataset that owns one', () => {
+        // The observations belong ON that tissue; hiding it would remove the point of
+        // the mode. Hidden rather than removed, so this can restore it when a
+        // registered dataset follows an unregistered one.
+        const { layers, viewer } = scene();
+        hide(viewer, false);
+        hide(viewer, true);
+        expect(layers.filter((l) => l.kind === 'image').map((l) => l.visible))
+          .toEqual([true, true]);
+      });
+
+      it('is actually invoked when the observations are drawn', async () => {
+        // The tests above exercise the method directly, because this suite's image
+        // fixture has no urls and so builds no image layer to assert over. That leaves
+        // the WIRING uncovered — deleting the call kept them all green — so pin it.
+        const spy = jest.spyOn(
+          service as unknown as { hideForeignImage(v: unknown, p: boolean): void },
+          'hideForeignImage',
+        );
+        await mount();
+        expect(spy).toHaveBeenCalled();
+        // …and told that this dataset brings no pixels of its own.
+        expect(spy.mock.calls.at(-1)?.[1]).toBe(false);
+
+        spy.mockClear();
+        await mount({
+          ...spatialDataset(),
+          imageRef: { imageId: 'demo-brain-tissue', scale: [1, 1], translate: [0, 0] },
+        });
+        expect(spy.mock.calls.at(-1)?.[1]).toBe(true);
+        spy.mockRestore();
+      });
+
+      it('asks for a redraw, or the change would not be on screen until something else did', () => {
+        const { viewer } = scene();
+        hide(viewer, false);
+        expect(viewer.requestRender).toHaveBeenCalled();
+      });
+    });
+
     describe('over a volume-backed 3D dataset', () => {
       /** Observations at x/y (0,0), (10,20), (20,40) with z 0, 500, 900 — which on
        *  400-deep planes is slice 0, 1 and 2. */
