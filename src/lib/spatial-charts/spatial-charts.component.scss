@@ -118,4 +118,14 @@
   // A 3D scene's tick labels can be drawn past the plot's own box and then sit over the
   // caption below it.
   overflow: hidden;
+
+  // A layout that fixed its own height — counts and the heatmap, both sized to their row
+  // count — must occupy that height and let the window's content box scroll. Left as
+  // `flex: 1` with `min-height: 0` it would instead be squeezed into the window and
+  // clipped, losing the bottom rows with nothing to scroll to.
+  &.sx-plot-fixed {
+    flex: 0 0 auto;
+    min-height: auto;
+    overflow: visible;
+  }
 }

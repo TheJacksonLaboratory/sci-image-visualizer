@@ -651,18 +651,18 @@ describe('SpatialChartsComponent', () => {
       // earlier version of this test pass against a component that could not draw
       // detached at all.
       const win = document.createElement('div');
-      win.id = component.embeddingDiv;
+      win.id = component.detachedDiv;
       document.body.appendChild(win);
       chartHost?.remove();
-      component.toggleEmbeddingDetached();
+      component.toggleDetached();
       // Detaching does NOT draw on a timer: the window's div does not exist until
       // PrimeNG has mounted the dialog, so its `onShow` drives that draw. The template
       // wires it; here it is called directly.
-      component.onEmbeddingWindowShown();
+      component.onDetachedWindowShown();
       await flush();
 
-      expect(component.embeddingDetached).toBe(true);
-      expect((Plotly.react as jest.Mock).mock.calls.at(-1)?.[0]).toBe(component.embeddingDiv);
+      expect(component.detached).toBe(true);
+      expect((Plotly.react as jest.Mock).mock.calls.at(-1)?.[0]).toBe(component.detachedDiv);
       win.remove();
     });
 
@@ -674,20 +674,182 @@ describe('SpatialChartsComponent', () => {
       await flush();
       (Plotly.purge as jest.Mock).mockClear();
 
-      component.toggleEmbeddingDetached();
+      component.toggleDetached();
       // Plotly keeps per-div state; a graph left in a div Angular then removes leaks its
       // WebGL context.
       expect(Plotly.purge).toHaveBeenCalledWith(component.chartDiv);
     });
 
-    it('gives the two divs different ids per instance', async () => {
+    it('gives the inline and detached divs different ids per instance', async () => {
       // They must not collide, and two mounted charts must not share either — the same
       // reason `chartDiv` is per-instance at all.
       await build(controls);
-      expect(component.chartDiv).not.toBe(component.embeddingDiv);
+      expect(component.chartDiv).not.toBe(component.detachedDiv);
       const first = component.chartDiv;
       await build(controls);
       expect(component.chartDiv).not.toBe(first);
+    });
+
+    /**
+     * Detaching is not embedding-only. The dialog is only so wide, and a counts plot read
+     * beside a heatmap is the same argument that earned the embedding its own window.
+     *
+     * These drive the component directly, so the window's div is stood in and the inline
+     * one removed — which is what the template does while detached. Leaving the inline div
+     * present is what let an earlier version of this suite pass against a component that
+     * could not draw detached at all.
+     */
+    describe('detaching the other kinds', () => {
+      /** Stand in the window's div and take away the panel's, as the template does. */
+      function enterWindow(): HTMLDivElement {
+        const win = document.createElement('div');
+        win.id = component.detachedDiv;
+        document.body.appendChild(win);
+        chartHost?.remove();
+        return win;
+      }
+
+      it('draws the counts plot into its own window', async () => {
+        await build(controls);
+        view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        expect(component.kind).toBe('counts');
+        expect((Plotly.react as jest.Mock).mock.calls.at(-1)?.[0]).toBe(component.chartDiv);
+
+        const win = enterWindow();
+        component.toggleDetached();
+        component.onDetachedWindowShown();
+        await flush();
+
+        expect(component.detached).toBe(true);
+        const call = (Plotly.react as jest.Mock).mock.calls.at(-1);
+        expect(call?.[0]).toBe(component.detachedDiv);
+        // Still a counts plot, not whatever was last drawn elsewhere.
+        expect((call?.[1] as Record<string, unknown>[])[0].type).toBe('bar');
+        win.remove();
+      });
+
+      it('draws the heatmap into its own window', async () => {
+        // Eight cells, four per category: the class view needs more than the default
+        // three-cell floor per group to produce a matrix at all, so the four-cell
+        // fixture the other tests here use would return no chart and prove nothing.
+        controls.continuousValues = jest.fn(async (_source: SpatialColorBy) =>
+          Float32Array.from([1, 1, 1, 1, 9, 9, 9, 9]));
+        controls.categoricalView = jest.fn(async (column: string) => ({
+          name: column, categories: ['A', 'B'], colors: ['#f00', '#00f'],
+          codes: Uint16Array.from([0, 0, 0, 0, 1, 1, 1, 1]),
+        }));
+        await build(controls);
+        view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        component.onKind('heatmap');
+        await flush();
+        await component.onHeatmapGenes(['Ttr', 'Mbp']);
+        await flush();
+
+        const win = enterWindow();
+        component.toggleDetached();
+        component.onDetachedWindowShown();
+        await flush();
+
+        const call = (Plotly.react as jest.Mock).mock.calls.at(-1);
+        expect(call?.[0]).toBe(component.detachedDiv);
+        expect((call?.[1] as Record<string, unknown>[])[0].type).toBe('heatmap');
+        win.remove();
+      });
+
+      it('remembers detachment per kind, so switching tabs does not undo it', async () => {
+        // One flag for the whole panel would drag every other tab into the window the
+        // moment one of them was detached — and drop the embedding back inline as soon
+        // as you glanced at the counts.
+        dataset$.next({ ...dataset, embeddings: [umapMeta] });
+        await build(controls);
+        view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        component.onKind('embedding');
+        await flush();
+
+        component.toggleDetached();
+        expect(component.isDetached('embedding')).toBe(true);
+
+        component.onKind('counts');
+        await flush();
+        expect(component.detached).toBe(false);
+        expect(component.isDetached('counts')).toBe(false);
+
+        component.onKind('embedding');
+        await flush();
+        expect(component.detached).toBe(true);
+      });
+
+      it('purges the window, not the panel, when a detached chart has nothing to draw', async () => {
+        // The purge sites named `chartDiv` outright. Detached, that clears a div the
+        // template has removed while the window keeps showing a plot the component
+        // believes it has cleared.
+        controls.continuousValues = jest.fn(async (_source: SpatialColorBy) =>
+          Float32Array.from([1, 1, 1, 1, 9, 9, 9, 9]));
+        controls.categoricalView = jest.fn(async (column: string) => ({
+          name: column, categories: ['A', 'B'], colors: ['#f00', '#00f'],
+          codes: Uint16Array.from([0, 0, 0, 0, 1, 1, 1, 1]),
+        }));
+        await build(controls);
+        view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        component.onKind('heatmap');
+        await flush();
+        await component.onHeatmapGenes(['Ttr']);
+        await flush();
+
+        const win = enterWindow();
+        component.toggleDetached();
+        component.onDetachedWindowShown();
+        await flush();
+        (Plotly.purge as jest.Mock).mockClear();
+
+        // No genes: nothing to draw, so whatever is plotted must be cleared.
+        await component.onHeatmapGenes([]);
+        await flush();
+        expect(Plotly.purge).toHaveBeenCalledWith(component.detachedDiv);
+        expect(Plotly.purge).not.toHaveBeenCalledWith(component.chartDiv);
+        win.remove();
+      });
+
+      it('refits a self-sized layout by width alone, and an autosized one by both', async () => {
+        // `autosize` takes BOTH dimensions from the container. The counts and heatmap
+        // layouts size themselves to their row count, so autosizing one in the window
+        // would replace its height with the window's and clip the bottom rows.
+        await build(controls);
+        view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+
+        const win = enterWindow();
+        Object.defineProperty(win, 'clientWidth', { value: 640, configurable: true });
+        component.toggleDetached();
+        component.onDetachedWindowShown();
+        await flush();
+
+        expect(component.hasFixedHeight).toBe(true);
+        (Plotly.relayout as jest.Mock).mockClear();
+        component.onDetachedResizeEnd();
+        expect(Plotly.relayout).toHaveBeenCalledWith(win, { width: 640 });
+        win.remove();
+      });
+
+      it('names the window for what it is showing', async () => {
+        dataset$.next({ ...dataset, embeddings: [umapMeta] });
+        await build(controls);
+        view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        // A tab label alone would leave two windows both headed "Embedding"; the
+        // embedding names the embedding.
+        component.onKind('embedding');
+        await flush();
+        expect(component.detachedTitle).toBe('UMAP');
+
+        component.onKind('counts');
+        await flush();
+        expect(component.detachedTitle).toContain('Counts');
+      });
     });
 
     it('keeps the 3D camera when a category is selected', async () => {

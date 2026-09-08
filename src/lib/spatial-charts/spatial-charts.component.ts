@@ -100,23 +100,29 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   private readonly seq = ++chartInstanceSeq;
   readonly chartDiv = `spatial-charts-plot-${this.seq}`;
   /**
-   * The embedding's own div, used when it is detached into its own window.
+   * The div inside the detached window.
    *
    * A separate id rather than moving the existing div: Angular destroys and recreates a
    * div across an `*ngIf`, so Plotly would be left holding a detached node. Two divs and
    * a redraw is both simpler and correct.
+   *
+   * ONE is enough for every kind, because only the active kind is ever plotted. Detaching
+   * is remembered per kind, but at most one window is open at a time.
    */
-  readonly embeddingDiv = `spatial-embedding-plot-${this.seq}`;
+  readonly detachedDiv = `spatial-charts-detached-${this.seq}`;
 
   /**
-   * Whether the embedding is shown in its own window rather than inline.
+   * Which kinds are shown in their own window rather than inline.
    *
-   * Detached, it can sit ALONGSIDE the spatial-omics dialog instead of inside it — which
-   * is the point of an embedding: it is read against the map and the other charts, not
-   * instead of them. The dialog is only so wide, and picking the UMAP tab otherwise
-   * replaces whichever distribution was on screen.
+   * Detached, a chart sits ALONGSIDE the spatial-omics dialog instead of inside it —
+   * which is the point: these are read against the map and against each other, not
+   * instead of them. The dialog is only so wide, and picking another tab otherwise
+   * replaces whatever was on screen.
+   *
+   * Per KIND rather than one flag for the panel, so the preference survives switching
+   * tabs: a UMAP parked beside the map is still parked after a glance at the counts.
    */
-  embeddingDetached = false;
+  private readonly detachedKinds = new Set<OmicsChartKind>();
   private static readonly CONTINUOUS_KINDS: { label: string; value: OmicsChartKind }[] = [
     { label: 'Histogram', value: 'histogram' },
     { label: 'Violin', value: 'violin' },
@@ -297,17 +303,27 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    * resizes only, so dragging a dialog edge reaches it through nothing at all.
    */
   resize(): void {
-    const el = document.getElementById(this.chartDiv);
+    this.refit(this.chartDiv);
+  }
+
+  /**
+   * Re-fit whatever is plotted in `div` to its container.
+   *
+   * Shared by the panel and the detached window because the rule is the same and getting
+   * it wrong is invisible until it is not: `autosize` takes BOTH dimensions from the
+   * container, which is right only where the layout did not fix its own height. Measured:
+   * autosizing a layout with an explicit height of 500 replaced it with the container's
+   * 400. The counts and heatmap layouts size themselves to their row count, so the
+   * window resize has to set the width ALONE for them and let the height stand.
+   */
+  private refit(div: string): void {
+    const el = document.getElementById(div);
     if (!el) return;
     const width = Math.round(el.clientWidth);
     // Zero while the section is collapsed or the dialog is closed; relaying out
     // to a zero box makes Plotly compute a layout it does not recover from.
     if (width <= 0) return;
     try {
-      // `autosize` takes BOTH dimensions from the container, which is right only
-      // where the layout did not fix its own height. Measured: autosizing a
-      // layout with an explicit height of 500 replaced it with the container's
-      // 400. Setting the width alone moves the width and leaves the height.
       Plotly.relayout(el, this.drawnHeight === null ? { autosize: true } : { width });
     } catch {
       // Nothing plotted yet.
@@ -316,10 +332,14 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
 
   ngOnDestroy(): void {
     this.subs.unsubscribe();
-    try {
-      Plotly.purge(this.chartDiv);
-    } catch {
-      // The div may already be gone with the dialog; nothing to clean up.
+    // BOTH divs: a chart left detached at teardown holds its WebGL context in the
+    // window's div, which the inline id would never reach.
+    for (const div of [this.chartDiv, this.detachedDiv]) {
+      try {
+        Plotly.purge(div);
+      } catch {
+        // The div may already be gone with the dialog; nothing to clean up.
+      }
     }
   }
 
@@ -549,7 +569,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     const coords = this.embeddingCoords;
     if (!coords) return;
 
-    const target = this.embeddingTarget;
+    const target = this.plotTarget;
     const el = document.getElementById(target);
     if (!el) return; // the window is closed, or not rendered yet
     const view = this.liveView(el);
@@ -651,21 +671,58 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     return null;
   }
 
-  /** Where the embedding currently draws: its own window, or the shared chart div. */
-  get embeddingTarget(): string {
-    return this.embeddingDetached ? this.embeddingDiv : this.chartDiv;
+  /**
+   * Whether the plot on screen fixed its own height.
+   *
+   * The counts and heatmap layouts size themselves to their row count, so in the detached
+   * window they can be TALLER than the window — which has to scroll rather than clip. An
+   * embedding fixes no height and fills the window instead. The template needs to know
+   * which, because the two want opposite `flex` and `overflow`.
+   */
+  get hasFixedHeight(): boolean {
+    return this.drawnHeight !== null;
+  }
+
+  /** Whether `kind` is shown in its own window rather than inline. */
+  isDetached(kind: OmicsChartKind): boolean {
+    return this.detachedKinds.has(kind);
+  }
+
+  /** Whether the ACTIVE kind is shown in its own window. */
+  get detached(): boolean {
+    return this.detachedKinds.has(this.kind);
+  }
+
+  /** Where the active kind draws: its own window, or the shared chart div. */
+  get plotTarget(): string {
+    return this.detached ? this.detachedDiv : this.chartDiv;
   }
 
   /**
-   * Move the embedding between its own window and the panel.
+   * Header for the detached window — what it is showing, named as its tab is.
+   *
+   * The embedding names the embedding rather than the tab, because "Embedding" beside a
+   * window drawing a t-SNE says less than "t-SNE" does.
+   */
+  get detachedTitle(): string {
+    if (this.kind === 'embedding') {
+      return this.embedding?.label ?? this.embedding?.name ?? 'Embedding';
+    }
+    const label = this.kindOptions.find((k) => k.value === this.kind)?.label ?? 'Chart';
+    return this.subject ? `${label} · ${this.subject}` : label;
+  }
+
+  /**
+   * Move the active kind between its own window and the panel.
    *
    * Purges the div it is LEAVING first. Plotly keeps per-div state, and a graph left
    * behind in a div that Angular then removes leaks its WebGL context — and if the div
    * comes back, react would resize a plot whose data belongs to the other place.
    */
-  toggleEmbeddingDetached(): void {
-    const leaving = this.embeddingTarget;
-    this.embeddingDetached = !this.embeddingDetached;
+  toggleDetached(): void {
+    const leaving = this.plotTarget;
+    if (this.detached) this.detachedKinds.delete(this.kind);
+    else this.detachedKinds.add(this.kind);
     try {
       Plotly.purge(leaving);
     } catch {
@@ -675,24 +732,17 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     // enough. Going OUT, the window's div does not exist yet — PrimeNG mounts the dialog
     // with a transition — so the dialog's own `onShow` drives that draw instead. A single
     // deferred attempt drew nothing and never retried.
-    if (!this.embeddingDetached) setTimeout(() => void this.render(), 0);
+    if (!this.detached) setTimeout(() => void this.render(), 0);
   }
 
   /** The detached window is up and its div exists — now the plot can be drawn into it. */
-  onEmbeddingWindowShown(): void {
+  onDetachedWindowShown(): void {
     void this.render();
   }
 
   /** Re-fit the detached window's plot after it is resized. */
-  onEmbeddingResizeEnd(): void {
-    const el = document.getElementById(this.embeddingDiv);
-    if (!el || el.clientWidth <= 0) return;
-    try {
-      // No fixed height here, so both dimensions come from the window.
-      Plotly.relayout(el, { autosize: true });
-    } catch {
-      // Nothing plotted yet.
-    }
+  onDetachedResizeEnd(): void {
+    this.refit(this.detachedDiv);
   }
 
   /** Which embedding to draw, when the dataset publishes more than one. */
@@ -726,7 +776,9 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
 
   private purgePlot(): void {
     try {
-      Plotly.purge(this.chartDiv);
+      // The ACTIVE target: purging the inline div while detached would leave the
+      // window showing a plot the component believes it has cleared.
+      Plotly.purge(this.plotTarget);
     } catch {
       // Nothing plotted.
     }
@@ -740,7 +792,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    * rather than declared. `height` is Plotly's own key, not ours.
    */
   private async draw(
-    traces: unknown, layout: unknown, config: unknown = CHART_CONFIG, div = this.chartDiv,
+    traces: unknown, layout: unknown, config: unknown = CHART_CONFIG, div = this.plotTarget,
   ): Promise<void> {
     const height = (layout as { height?: unknown } | null)?.height;
     this.drawnHeight = typeof height === 'number' ? height : null;
@@ -749,10 +801,10 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
 
   private async render(): Promise<void> {
     if (!this.isActive) return;
-    // Guard on the div the ACTIVE kind will draw into, not always the shared one. While
-    // the embedding is detached the inline div is removed by its `*ngIf`, so checking
-    // that one bailed here and the detached window never got a plot.
-    const target = this.kind === 'embedding' ? this.embeddingTarget : this.chartDiv;
+    // Guard on the div the ACTIVE kind will draw into, not always the shared one. While a
+    // kind is detached the inline div is removed by its `*ngIf`, so checking that one
+    // bailed here and the detached window never got a plot.
+    const target = this.plotTarget;
     if (!document.getElementById(target)) return;
     // The heatmap answers a different question from the other kinds — which
     // genes distinguish which groups — so it is driven by its own gene list and
@@ -768,9 +820,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       return;
     }
     if (!this.colorBy || (!this.values && !this.categorical)) {
-      try {
-        Plotly.purge(this.chartDiv);
-      } catch { /* nothing plotted */ }
+      this.purgePlot();
       return;
     }
     if (this.categorical) {
@@ -808,9 +858,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       .map((name) => ({ name, values: this.geneCache.get(name) }))
       .filter((g): g is { name: string; values: Float32Array } => !!g.values);
     if (!controls || genes.length === 0 || !this.grouping) {
-      try {
-        Plotly.purge(this.chartDiv);
-      } catch { /* nothing plotted */ }
+      this.purgePlot();
       return;
     }
 
@@ -836,9 +884,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       },
     );
     if (!matrix) {
-      try {
-        Plotly.purge(this.chartDiv);
-      } catch { /* nothing plotted */ }
+      this.purgePlot();
       this.notice = 'No group has enough measured cells for a mean.';
       return;
     }

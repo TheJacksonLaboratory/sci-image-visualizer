@@ -43,33 +43,41 @@
                 tooltipPosition="top"></p-checkbox>
   </div>
 
-  <div class="sx-controls" *ngIf="kind === 'embedding'">
+  <!-- Detach applies to EVERY kind: the dialog is only so wide, and a counts plot read
+       against a heatmap is the same argument as a UMAP read against the map. -->
+  <div class="sx-controls">
     <!-- A picker only when the dataset publishes more than one embedding. -->
-    <p-dropdown *ngIf="embeddings.length > 1"
+    <p-dropdown *ngIf="kind === 'embedding' && embeddings.length > 1"
                 [options]="embeddings" optionLabel="label" optionValue="name"
                 [ngModel]="embedding?.name" (ngModelChange)="onEmbedding($event)"
                 appendTo="body"
                 pTooltip="Which embedding to draw" tooltipPosition="top"></p-dropdown>
-    <!-- Detach so the embedding can sit ALONGSIDE this panel: it is read against the map
-         and the other charts, not instead of them. -->
-    <p-button [icon]="embeddingDetached ? 'pi pi-window-minimize' : 'pi pi-external-link'"
+    <p-button [icon]="detached ? 'pi pi-window-minimize' : 'pi pi-external-link'"
               size="small" [text]="true"
-              [label]="embeddingDetached ? 'Put back' : 'Detach'"
-              [pTooltip]="embeddingDetached
-                ? 'Show the embedding in this panel again'
-                : 'Open the embedding in its own window, alongside this panel'"
+              [label]="detached ? 'Put back' : 'Detach'"
+              [pTooltip]="detached
+                ? 'Show this chart in the panel again'
+                : 'Open this chart in its own window, alongside this panel'"
               tooltipPosition="top"
-              (onClick)="toggleEmbeddingDetached()"></p-button>
+              (onClick)="toggleDetached()"></p-button>
   </div>
 
-  <div [id]="chartDiv" class="sx-plot" *ngIf="!(kind === 'embedding' && embeddingDetached)"></div>
+  <div [id]="chartDiv" class="sx-plot" *ngIf="!detached"></div>
 
-  <!-- Detached: the embedding keeps drawing, in its own window. Says so rather than
+  <!-- Detached: the chart keeps drawing, in its own window. Says so rather than
        leaving a blank panel that looks broken. -->
-  <div class="sx-detached" *ngIf="kind === 'embedding' && embeddingDetached">
+  <div class="sx-detached" *ngIf="detached">
     Shown in its own window.
   </div>
 
+  <ng-container *ngTemplateOutlet="hints"></ng-container>
+
+</div>
+
+<!-- Declared once and rendered in both the panel and the detached window: the ladder is
+     deliberately not mutually exclusive (a heatmap still needs its grouping prompt), so
+     collapsing it to a single expression would drop a hint rather than move it. -->
+<ng-template #hints>
   <small class="sx-hint" *ngIf="notice">{{ notice }}</small>
   <small class="sx-hint" *ngIf="!notice && suggestsGrouping">
     Pick a grouping to compare categories.
@@ -82,27 +90,26 @@
   </small>
   <small class="sx-hint" *ngIf="!notice && kind === 'heatmap'">{{ heatmapNote }}</small>
   <small class="sx-hint" *ngIf="!notice && kind === 'embedding'">{{ embeddingNote }}</small>
+</ng-template>
 
-</div>
-
-<!-- The detached embedding. Its own non-modal, draggable, resizable window so it can be
-     put beside the spatial-omics dialog. `appendTo="body"` keeps it out of the dialog's
+<!-- The detached chart. Its own non-modal, draggable, resizable window so it can be put
+     beside the spatial-omics dialog. `appendTo="body"` keeps it out of the dialog's
      stacking context, or it would be clipped by the panel it is meant to sit next to. -->
-<p-dialog *ngIf="kind === 'embedding' && embeddingDetached"
-          [header]="(embedding?.label ?? embedding?.name ?? 'Embedding') + ''"
-          [visible]="true" (visibleChange)="toggleEmbeddingDetached()"
+<p-dialog *ngIf="detached"
+          [header]="detachedTitle"
+          [visible]="true" (visibleChange)="toggleDetached()"
           [modal]="false" [resizable]="true" [draggable]="true"
           position="right" appendTo="body"
-          (onShow)="onEmbeddingWindowShown()"
-          (onResizeEnd)="onEmbeddingResizeEnd()"
+          (onShow)="onDetachedWindowShown()"
+          (onResizeEnd)="onDetachedResizeEnd()"
           [style]="{ width: '34rem', height: '30rem' }"
           [contentStyle]="{
             display: 'flex', flexDirection: 'column', gap: '0.25rem',
             padding: '0.4rem 0.6rem 0.5rem', flex: '1 1 auto', minHeight: '0',
-            overflow: 'hidden'
+            overflow: 'auto'
           }"
-          styleClass="spatial-embedding-dialog">
-  <div [id]="embeddingDiv" class="sx-detached-plot"></div>
-  <small class="sx-hint" *ngIf="notice">{{ notice }}</small>
-  <small class="sx-hint" *ngIf="!notice">{{ embeddingNote }}</small>
+          styleClass="spatial-detached-dialog">
+  <div [id]="detachedDiv" class="sx-detached-plot"
+       [class.sx-plot-fixed]="hasFixedHeight"></div>
+  <ng-container *ngTemplateOutlet="hints"></ng-container>
 </p-dialog>
