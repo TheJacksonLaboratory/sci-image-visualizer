@@ -1,6 +1,15 @@
 import {
-  countMask, emptySelection, maskToIndices, mutedFromSelection, pointInRing,
-  regionShapes, sameSelection, selectByCategory, selectInRegions, selectInRegionsProjected,
+  countMask,
+  emptySelection,
+  maskToIndices,
+  mutedFromSelection,
+  pointInRing,
+  regionShapes,
+  sameSelection,
+  selectByCategory,
+  selectByIndices,
+  selectInRegions,
+  selectInRegionsProjected,
 } from './spatial-selection';
 import { MultiPolygon, Polygon, Rectangle, Region } from '../models/region';
 import { SpatialObservations } from '../contracts/spatial-dataset.contract';
@@ -284,5 +293,49 @@ describe('sameSelection', () => {
 
   it('is true for two empty selections', () => {
     expect(sameSelection(emptySelection(), emptySelection())).toBe(true);
+  });
+});
+
+/**
+ * A selection from an explicit index list — what a lasso in a linked plot produces.
+ *
+ * The plot knows which points were drawn around; the map needs that as a mask over ALL
+ * observations, so brushing one view lights up the other.
+ */
+describe('selectByIndices', () => {
+  it('marks exactly the given observations', () => {
+    const sel = selectByIndices([1, 3], 5);
+    expect(Array.from(sel.mask)).toEqual([0, 1, 0, 1, 0]);
+    expect(sel.count).toBe(2);
+  });
+
+  it('counts a repeated index once', () => {
+    // Plotly can report the same point twice across overlapping selections; a count that
+    // exceeded the number of selected cells would be shown to the user as a wrong total.
+    const sel = selectByIndices([2, 2, 2], 4);
+    expect(sel.count).toBe(1);
+    expect(Array.from(sel.mask)).toEqual([0, 0, 1, 0]);
+  });
+
+  it('ignores an index outside the dataset instead of throwing', () => {
+    // A plot drawn before a dataset change can hand back a stale index, and that must
+    // not throw in the middle of a selection gesture. Index 0 is deliberately NOT in
+    // this list — it is a perfectly good observation, and an earlier version of this
+    // test wrongly expected it to be dropped.
+    const sel = selectByIndices([-1, 99, 1.5, NaN], 3);
+    expect(Array.from(sel.mask)).toEqual([0, 0, 0]);
+    expect(sel.count).toBe(0);
+  });
+
+  it('keeps index 0, which is a real observation', () => {
+    const sel = selectByIndices([0], 3);
+    expect(Array.from(sel.mask)).toEqual([1, 0, 0]);
+    expect(sel.count).toBe(1);
+  });
+
+  it('is empty for an empty list', () => {
+    const sel = selectByIndices([], 3);
+    expect(sel.count).toBe(0);
+    expect(sel.mask).toHaveLength(3);
   });
 });

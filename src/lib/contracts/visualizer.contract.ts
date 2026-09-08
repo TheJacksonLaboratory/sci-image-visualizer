@@ -382,6 +382,15 @@ export interface ISpatialControls {
   /** Select every observation in one category of a categorical column — the
    *  legend click. Rejects for an unknown or continuous column. */
   selectCategory(column: string, categoryIndex: number): Promise<number>;
+
+  /**
+   * Select an explicit set of observations, replacing any current selection.
+   *
+   * For a linked plot: lassoing points in an embedding is a selection OF observations,
+   * and every other view — the map, the distributions — reads the same mask, so brushing
+   * one lights up the rest. Returns how many were selected.
+   */
+  selectIndices(indices: Iterable<number>): number;
   clearSelection(): void;
 }
 

@@ -30,6 +30,20 @@ const CHART_CONFIG = {
 };
 
 /**
+ * Config for the embedding, which unlike the distributions is a plot you SELECT in.
+ *
+ * The lasso and box-select are kept — drawing round a cluster is how a population gets
+ * picked out of a UMAP — and the wheel zooms, because exploring an embedding means
+ * zooming into a cluster and reaching for a toolbar button to do it breaks that.
+ */
+const EMBEDDING_CONFIG = {
+  displaylogo: false,
+  responsive: true,
+  scrollZoom: true,
+  modeBarButtonsToRemove: ['autoScale2d'],
+};
+
+/**
  * Distribution charts over the spatial-omics values — histogram, violin, box —
  * **linked to the map**: they chart whatever the map is coloured by, and narrow
  * to the current selection.
@@ -526,7 +540,46 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
         : {}),
       ...(this.selection.count > 0 ? { selection: this.selection.mask } : {}),
     };
-    await this.draw(buildUmapTraces(input), umapLayout(input));
+    await this.draw(buildUmapTraces(input), umapLayout(input), EMBEDDING_CONFIG);
+    this.bindEmbeddingSelection();
+  }
+
+  /**
+   * Turn a lasso in the embedding into a selection of observations.
+   *
+   * This is what makes two views of one dataset worth having side by side: draw round a
+   * cluster here and those cells light up on the tissue, because every view reads the
+   * same mask.
+   *
+   * Bound after each draw, and the previous listener removed first: `Plotly.react`
+   * preserves handlers, so re-binding without removing would fire the selection once per
+   * redraw the plot had ever had.
+   */
+  private bindEmbeddingSelection(): void {
+    const el = document.getElementById(this.chartDiv) as (Plotly.PlotlyHTMLElement | null);
+    if (!el?.on) return;
+    el.removeAllListeners?.('plotly_selected');
+    el.removeAllListeners?.('plotly_deselect');
+    el.on('plotly_selected', (ev) => {
+      // A lasso that selects nothing arrives as an event with no points; treat it as a
+      // clear, which is what dragging an empty patch looks like it should do.
+      const points = (ev as { points?: readonly unknown[] } | undefined)?.points ?? [];
+      const indices: number[] = [];
+      for (const p of points) {
+        // The observation index rides on `customdata` — see `buildUmapTraces`. A point's
+        // index within its trace is not the observation once the points are split by
+        // category, so this is the only correct source.
+        const id = (p as { customdata?: unknown }).customdata;
+        if (typeof id === 'number') indices.push(id);
+      }
+      if (indices.length === 0) {
+        this.controls?.clearSelection();
+        return;
+      }
+      this.controls?.selectIndices(indices);
+    });
+    // The modebar's deselect, and a plain click on empty space.
+    el.on('plotly_deselect', () => this.controls?.clearSelection());
   }
 
   /** Which embedding to draw, when the dataset publishes more than one. */
@@ -567,10 +620,12 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    * types out of the pure module — so the height is read back by narrowing
    * rather than declared. `height` is Plotly's own key, not ours.
    */
-  private async draw(traces: unknown, layout: unknown): Promise<void> {
+  private async draw(
+    traces: unknown, layout: unknown, config: unknown = CHART_CONFIG,
+  ): Promise<void> {
     const height = (layout as { height?: unknown } | null)?.height;
     this.drawnHeight = typeof height === 'number' ? height : null;
-    await Plotly.react(this.chartDiv, traces as never, layout as never, CHART_CONFIG as never);
+    await Plotly.react(this.chartDiv, traces as never, layout as never, config as never);
   }
 
   private async render(): Promise<void> {

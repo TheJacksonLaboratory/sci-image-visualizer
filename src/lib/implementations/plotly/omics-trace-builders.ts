@@ -391,6 +391,10 @@ export function buildUmapTraces(input: OmicsUmapInput): unknown[] {
       mode: 'markers',
       x: Array.from(x.subarray(0, n)),
       y: Array.from(y.subarray(0, n)),
+      // The OBSERVATION index per point, carried through so a lasso can be turned back
+      // into a selection. Plotly reports a selected point by its position within its
+      // trace, which is not the observation index once the points are split by category.
+      customdata: Array.from({ length: n }, (_, i) => i),
       marker: {
         size,
         color: '#4c72b0',
@@ -415,6 +419,7 @@ export function buildUmapTraces(input: OmicsUmapInput): unknown[] {
         color: Array.from({ length: n }, (_, i) => colors[codes[i]] ?? '#999999'),
         ...(selection ? { opacity: Array.from({ length: n }, (_, i) => opacityFor(i)) } : {}),
       },
+      customdata: Array.from({ length: n }, (_, i) => i),
       text: Array.from({ length: n }, (_, i) => names[codes[i]] ?? 'unassigned'),
       hovertemplate: '%{text}<extra></extra>',
       showlegend: false,
@@ -439,6 +444,9 @@ export function buildUmapTraces(input: OmicsUmapInput): unknown[] {
       name: names[c],
       x: idx.map((i) => x[i]),
       y: idx.map((i) => y[i]),
+      // This trace's points ARE a subset, so the observation index has to travel with
+      // them; `pointIndex` alone would address the wrong cell.
+      customdata: idx,
       marker: {
         size,
         color: colors[c] ?? '#999999',

@@ -19,7 +19,11 @@ import {
   observationsInSlice, volumeImageRef,
 } from './spatial/spatial-volume-image';
 import {
-  emptySelection, selectByCategory, selectInRegions, selectInRegionsProjected,
+  emptySelection,
+  selectByCategory,
+  selectByIndices,
+  selectInRegions,
+  selectInRegionsProjected,
 } from './spatial/spatial-selection';
 import { RegionStore } from './store/region-store.service';
 import { SpatialSelectionStore } from './store/spatial-selection.service';
@@ -701,6 +705,14 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
           throw new Error(`[spatial] column "${column}" is continuous — it has no categories`);
         }
         const selection = selectByCategory(loaded.codes, categoryIndex);
+        this.selectionStore.set(selection);
+        return selection.count;
+      },
+
+      selectIndices: (indices: Iterable<number>) => {
+        const count = this.currentSpatialDataset?.observations.count ?? 0;
+        if (count === 0) return 0;
+        const selection = selectByIndices(indices, count);
         this.selectionStore.set(selection);
         return selection.count;
       },

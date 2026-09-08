@@ -173,6 +173,29 @@ export function regionShapes(region: Region): Shape[] {
  * indexed by observation, so every consumer (charts, legend, the 3D cloud) reads it
  * the same way.
  */
+/**
+ * A selection from an explicit list of observation indices.
+ *
+ * What a lasso in a linked plot produces: the plot knows which points the user drew
+ * around, and the map needs that as a mask over ALL observations. Out-of-range and
+ * duplicate indices are ignored rather than rejected — a plot may hand back the same
+ * point twice, and a stale index from a plot drawn before a dataset change must not
+ * throw in the middle of a selection gesture.
+ */
+export function selectByIndices(
+  indices: Iterable<number>, observationCount: number,
+): SpatialSelectionMask {
+  const mask = new Uint8Array(observationCount);
+  let count = 0;
+  for (const i of indices) {
+    if (!Number.isInteger(i) || i < 0 || i >= observationCount) continue;
+    if (mask[i]) continue;
+    mask[i] = 1;
+    count++;
+  }
+  return { mask, count };
+}
+
 export function selectInRegions(
   observations: SpatialObservations,
   imageRef: SpatialImageRef | undefined,
