@@ -43,6 +43,14 @@
                 tooltipPosition="top"></p-checkbox>
   </div>
 
+  <!-- The embedding needs a picker only when the dataset publishes more than one. -->
+  <div class="sx-controls" *ngIf="kind === 'umap' && embeddings.length > 1">
+    <p-dropdown [options]="embeddings" optionLabel="label" optionValue="name"
+                [ngModel]="embedding?.name" (ngModelChange)="onEmbedding($event)"
+                appendTo="body"
+                pTooltip="Which embedding to draw" tooltipPosition="top"></p-dropdown>
+  </div>
+
   <div [id]="chartDiv" class="sx-plot"></div>
 
   <small class="sx-hint" *ngIf="notice">{{ notice }}</small>
@@ -56,5 +64,6 @@
     Showing the selection only.
   </small>
   <small class="sx-hint" *ngIf="!notice && kind === 'heatmap'">{{ heatmapNote }}</small>
+  <small class="sx-hint" *ngIf="!notice && kind === 'umap'">{{ embeddingNote }}</small>
 
 </div>

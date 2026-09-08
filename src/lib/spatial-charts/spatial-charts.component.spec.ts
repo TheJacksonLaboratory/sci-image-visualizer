@@ -566,4 +566,91 @@ describe('SpatialChartsComponent', () => {
     });
   });
 
+
+  /**
+   * The embedding view, as a kind alongside the distributions.
+   *
+   * A UMAP lives here rather than in a panel of its own because it is one more way of
+   * looking at the same observations — and because this dialog already resizes its plot,
+   * so it gets whatever room it is given.
+   */
+  describe('the UMAP kind', () => {
+    const umapMeta = { name: 'X_umap', label: 'UMAP', dims: 2 as const };
+    const f32 = (...v: number[]) => Float32Array.from(v);
+
+    beforeEach(() => {
+      controls.getEmbedding = jest.fn(async () => ({
+        meta: umapMeta,
+        x: f32(1, 2, 3, 4),
+        y: f32(5, 6, 7, 8),
+      }));
+    });
+
+    it('is not offered for a dataset that publishes no embedding', async () => {
+      await build(controls);
+      expect(component.kindOptions.map((k) => k.value)).not.toContain('umap');
+    });
+
+    it('is offered once the dataset publishes one', async () => {
+      dataset$.next({ ...dataset, embeddings: [umapMeta] });
+      await build(controls);
+      await flush();
+      expect(component.kindOptions.map((k) => k.value)).toContain('umap');
+    });
+
+    it('draws the served coordinates', async () => {
+      dataset$.next({ ...dataset, embeddings: [umapMeta] });
+      await build(controls);
+      await flush();
+      component.onKind('umap');
+      await flush();
+
+      expect(controls.getEmbedding).toHaveBeenCalledWith('X_umap');
+      const { traces, layout } = lastPlot();
+      expect(traces[0].type).toBe('scattergl');
+      expect(layout.xaxis.title.text).toBe('UMAP 1');
+    });
+
+    it('fetches the coordinates once, not per redraw', async () => {
+      // A selection change redraws; the coordinates have not changed and are a
+      // per-observation vector, so refetching them would be pure waste.
+      dataset$.next({ ...dataset, embeddings: [umapMeta] });
+      await build(controls);
+      await flush();
+      component.onKind('umap');
+      await flush();
+      const calls = (controls.getEmbedding as jest.Mock).mock.calls.length;
+
+      selection$.next({ mask: Uint8Array.from([1, 0, 0, 0]), count: 1 });
+      await flush();
+      expect((controls.getEmbedding as jest.Mock).mock.calls.length).toBe(calls);
+    });
+
+    it('falls back when a new dataset publishes no embedding', async () => {
+      // Otherwise the view sits on a kind it cannot draw, showing the previous
+      // dataset's plot over these observations.
+      dataset$.next({ ...dataset, embeddings: [umapMeta] });
+      await build(controls);
+      await flush();
+      component.onKind('umap');
+      await flush();
+      expect(component.kind).toBe('umap');
+
+      dataset$.next({ ...dataset, id: 'other', embeddings: undefined });
+      await flush();
+      expect(component.kind).not.toBe('umap');
+    });
+
+    it('says when the source serves no embeddings at all', async () => {
+      dataset$.next({ ...dataset, embeddings: [umapMeta] });
+      await build(controls);
+      await flush();
+      // A host may advertise an embedding without implementing the accessor.
+      (controls as { getEmbedding?: unknown }).getEmbedding = undefined;
+      component.onKind('umap');
+      await flush();
+      expect(component.notice).toMatch(/does not serve embeddings/);
+    });
+  });
+
 });

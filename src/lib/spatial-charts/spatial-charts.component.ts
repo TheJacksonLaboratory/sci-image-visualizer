@@ -5,6 +5,10 @@ import { Subscription, combineLatest } from 'rxjs';
 import * as Plotly from 'plotly.js-dist-min';
 
 import { VISUALIZER, IVisualizer, ISpatialControls } from '../contracts/visualizer.contract';
+import {
+  SpatialEmbedding,
+  SpatialEmbeddingMeta,
+} from '../contracts/spatial-dataset.contract';
 import { SpatialColorBy, SpatialViewState, DEFAULT_SPATIAL_VIEW } from '../contracts/display-types';
 import {
   SpatialSelectionMask, emptySelection, maskToIndices,
@@ -12,7 +16,7 @@ import {
 import { cellsAsGroups, heatmapMatrix } from '../spatial/spatial-heatmap';
 import {
   OmicsChartKind, OmicsGrouping, benefitsFromGrouping, buildCountTraces, buildHeatmapTraces,
-  buildOmicsTraces, countsLayout, heatmapLayout, omicsLayout,
+  buildOmicsTraces, buildUmapTraces, countsLayout, heatmapLayout, omicsLayout, umapLayout,
 } from '../implementations/plotly/omics-trace-builders';
 
 /** Per-instance chart-div id source — see {@link SpatialChartsComponent.chartDiv}. */
@@ -91,6 +95,11 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     { label: 'Heatmap', value: 'heatmap' },
   ];
 
+  /** Offered only when the dataset publishes an embedding to draw. */
+  private static readonly EMBEDDING_KINDS: { label: string; value: OmicsChartKind }[] = [
+    { label: 'UMAP', value: 'umap' },
+  ];
+
   /** The kinds the ACTIVE subject can be drawn as. A category code is a label,
    *  not a magnitude, so a histogram of it would be meaningless — what a
    *  categorical column has is a frequency distribution. */
@@ -100,11 +109,22 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
         ? SpatialChartsComponent.CATEGORICAL_KINDS
         : SpatialChartsComponent.CONTINUOUS_KINDS),
       ...SpatialChartsComponent.ALWAYS_KINDS,
+      // An embedding is a property of the DATASET, not of the active colour source, so
+      // it is offered whenever one is published and never otherwise — a tab that draws
+      // nothing is worse than an absent one.
+      ...(this.embeddings.length > 0 ? SpatialChartsComponent.EMBEDDING_KINDS : []),
     ];
   }
 
   controls: ISpatialControls | null = null;
   kind: OmicsChartKind = 'histogram';
+  /** Embeddings the dataset publishes, and which of them is drawn. */
+  embeddings: SpatialEmbeddingMeta[] = [];
+  embedding: SpatialEmbeddingMeta | null = null;
+  private embeddingCoords: SpatialEmbedding | null = null;
+  /** The categorical colouring behind the embedding's colours, kept so a redraw for a
+   *  selection change does not refetch the column. */
+  private embeddingCodes: { codes: Uint16Array; names: string[]; colors: string[] } | null = null;
   /**
    * Genes the heatmap's rows are, and the vectors behind them.
    *
@@ -207,6 +227,16 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       const known = new Set(this.geneOptions.map((o) => o.value));
       this.heatmapGenes = this.heatmapGenes.filter((n) => known.has(n));
       this.geneCache.clear();
+
+      // Embeddings belong to the dataset, so they are re-read with it and the loaded
+      // coordinates dropped: a UMAP from the previous dataset over these observations
+      // would be a plot of two different things at once.
+      this.embeddings = dataset?.embeddings ? [...dataset.embeddings] : [];
+      this.embedding = this.embeddings[0] ?? null;
+      this.embeddingCoords = null;
+      this.embeddingCodes = null;
+      // Nothing to draw for the kind that was selected; fall back rather than sit blank.
+      if (this.kind === 'umap' && this.embeddings.length === 0) this.kind = 'histogram';
     }));
   }
 
@@ -434,6 +464,103 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   }
 
   /**
+   * The embedding scatter — a UMAP over the same observations.
+   *
+   * Answers what the map cannot: the map says WHERE a population sits, this says which
+   * populations there are and how close they are in expression.
+   *
+   * Linked to the map without asking for anything: it reuses `this.categorical`, the same
+   * loaded colouring the counts chart draws from, so the two cannot disagree about what a
+   * colour means and no second fetch happens. A selection dims the rest rather than
+   * dropping it — the embedding's shape is the context that makes a selection legible.
+   */
+  private async renderEmbedding(): Promise<void> {
+    const controls = this.controls;
+    const meta = this.embedding;
+    if (!controls || !meta) {
+      this.purgePlot();
+      return;
+    }
+    if (!controls.getEmbedding) {
+      this.notice = 'This data source does not serve embeddings.';
+      this.purgePlot();
+      return;
+    }
+
+    // Sequenced on the shared token: the coordinates are a round-trip, and a slower one
+    // must not paint over a kind the user has already moved on from.
+    const mine = ++this.token;
+    if (!this.embeddingCoords || this.embeddingCoords.meta.name !== meta.name) {
+      this.busy = true;
+      try {
+        const loaded = await controls.getEmbedding(meta.name);
+        if (mine !== this.token) return;
+        this.embeddingCoords = loaded;
+      } catch (err) {
+        if (mine !== this.token) return;
+        this.notice = `Could not load ${meta.label ?? meta.name}: `
+          + `${(err as Error)?.message ?? err}`;
+        this.purgePlot();
+        return;
+      } finally {
+        if (mine === this.token) this.busy = false;
+      }
+    }
+    const coords = this.embeddingCoords;
+    if (!coords) return;
+
+    this.notice = null;
+    const input = {
+      x: coords.x,
+      y: coords.y,
+      label: meta.label ?? meta.name,
+      derived: meta.derived,
+      ...(this.categorical
+        ? {
+          categories: {
+            codes: this.categorical.codes,
+            names: this.categorical.categories,
+            colors: this.categorical.colors,
+          },
+        }
+        : {}),
+      ...(this.selection.count > 0 ? { selection: this.selection.mask } : {}),
+    };
+    await this.draw(buildUmapTraces(input), umapLayout(input));
+  }
+
+  /** Which embedding to draw, when the dataset publishes more than one. */
+  onEmbedding(name: string): void {
+    const next = this.embeddings.find((e) => e.name === name);
+    if (!next || next.name === this.embedding?.name) return;
+    this.embedding = next;
+    this.embeddingCoords = null;
+    void this.render();
+  }
+
+  /** What the embedding view is showing, said plainly. */
+  get embeddingNote(): string {
+    const meta = this.embedding;
+    if (!meta) return 'This dataset publishes no embedding.';
+    const derived = meta.derived ? ' Computed here, not published with the dataset.' : '';
+    const coloured = this.categorical
+      ? ' Coloured to match the map.'
+      : ' Colour the map by a categorical column to colour these points.';
+    const sel = this.selection.count > 0
+      ? ` ${this.selection.count.toLocaleString()} selected are highlighted.`
+      : '';
+    return `${meta.label ?? meta.name}.${coloured}${sel}${derived}`;
+  }
+
+  private purgePlot(): void {
+    try {
+      Plotly.purge(this.chartDiv);
+    } catch {
+      // Nothing plotted.
+    }
+  }
+
+  /**
    * Draw, remembering whether this layout fixed its own height.
    *
    * The layout builders return `unknown` on purpose — they keep Plotly's layout
@@ -455,6 +582,12 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     // grouping rather than by whatever the map is coloured by.
     if (this.kind === 'heatmap') {
       await this.renderHeatmap();
+      return;
+    }
+    // Also independent of the active colour source: the coordinates are the dataset's,
+    // and the colouring merely follows whatever the map is using.
+    if (this.kind === 'umap') {
+      await this.renderEmbedding();
       return;
     }
     if (!this.colorBy || (!this.values && !this.categorical)) {

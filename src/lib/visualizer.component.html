@@ -107,10 +107,6 @@
      the whole host, so under the docked toolbar its bottom toolbar-height strip
      (incl. the OSD scale bar at bottom-left) was clipped by the host's
      overflow:hidden. The component stylesheet sizes it (.viz-plot { flex: 1 }). -->
-<!-- The canvas and the docked analysis panel sit side by side, so docking TAKES width
-     from the image rather than covering it. The stage owns the row; `.viz-plot` keeps
-     `flex: 1` and now flexes horizontally within it. -->
-<div class="viz-stage">
 <div class="w-full relative viz-plot" [id]="plotDivName">
   <div *ngIf="imgLoading || stackLoading || isCaching" id="overlay">
     <!-- Determinate stack/volume progress takes precedence: while it's active show ONLY the
@@ -153,12 +149,6 @@
     <span class="text-loading">Sharpening preview...</span>
   </div>
 
-</div>
-
-  <!-- The docked analysis panel. Rendered only when the live dataset publishes an
-       embedding, so a plain image or an embedding-less dataset gives back the full
-       canvas rather than an empty rail. Its width is its own, dragged by its splitter. -->
-  <spatial-embedding *ngIf="showEmbeddingPanel"></spatial-embedding>
 </div>
 
 <!-- Floating, draggable intensity-profile inset. Shown in LINE mode; the chart

@@ -5,23 +5,8 @@
   overflow: hidden;
 }
 
-// The row that holds the canvas and the docked analysis panel. It takes the column's
-// leftover height (`flex: 1`), and inside it `.viz-plot` flexes horizontally — so docking
-// the panel SHRINKS the canvas instead of covering it, which is the difference between a
-// dock and the charts dialog that floats over the view at a fixed width.
-.viz-stage {
-  display: flex;
-  flex-direction: row;
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
-}
-
 .viz-plot {
   flex: 1;
-  // Without this a wide plot refuses to shrink below its content and pushes the docked
-  // panel off the edge: a flex item's default `min-width: auto` is its content size.
-  min-width: 0;
   min-height: 0;
   // Guard against utility classes re-imposing height:100% (the docked-toolbar
   // clipping bug): the flex row above (toolbar) plus height:100% pushed the

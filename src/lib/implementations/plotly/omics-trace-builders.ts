@@ -13,7 +13,7 @@ import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
  * distribution and already carries both trace types.
  */
 
-export type OmicsChartKind = 'histogram' | 'violin' | 'box' | 'counts' | 'heatmap';
+export type OmicsChartKind = 'histogram' | 'violin' | 'box' | 'counts' | 'heatmap' | 'umap';
 
 /** Per-observation grouping for a violin/box, or an overlaid histogram. */
 export interface OmicsGrouping {
