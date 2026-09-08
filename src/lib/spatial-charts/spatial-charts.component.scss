@@ -129,3 +129,18 @@
     overflow: visible;
   }
 }
+
+// The `?` beside the chart tabs. Pushed to the end of the row so it reads as an aside to
+// the whole control group rather than as an option in it.
+.sx-help {
+  margin-left: auto;
+  align-self: center;
+  font-size: 0.95rem;
+  color: var(--text-color-secondary, #6c757d);
+  cursor: help;
+
+  &:hover,
+  &:focus-visible {
+    color: var(--primary-color, #3b82f6);
+  }
+}

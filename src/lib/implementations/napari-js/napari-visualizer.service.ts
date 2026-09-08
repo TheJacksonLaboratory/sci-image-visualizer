@@ -50,6 +50,7 @@ import {
   selectByCategory,
 } from '../../spatial/spatial-selection';
 import { framePositions } from '../../spatial/spatial-framing';
+import { PIXEL_WORLD_QUANTUM, worldQuantumForExtent } from '../../spatial/world-grid';
 import { observationsInSlice, volumeImageRef } from '../../spatial/spatial-volume-image';
 import { defaultSigma, densityGrid, rasterizeDensity } from '../../spatial/spatial-density';
 import { observationsInSection, sectionsOf } from '../../spatial/spatial-sections';
@@ -2264,6 +2265,41 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     });
     this.frameSpatialPointsOnce(viewer, dataset.id, positions, !!ref);
     this.hideForeignImage(viewer, !!ref || !!dataset.volume);
+    this.setRegionGridFor(dataset, positions);
+  }
+
+  /**
+   * Tell the region overlay how finely a drawn vertex may be placed.
+   *
+   * Region geometry is stored in whole world units, which is right when the world IS
+   * pixels — a region should align to them. It is wrong for a dataset that registers onto
+   * no image: seqFISH's observations span about 5 x 7 units in total, so whole-unit
+   * vertices leave roughly six by eight placeable positions across the entire sample and
+   * an ROI cannot be drawn at any zoom. Nothing errors; the tool just cannot express the
+   * shape.
+   *
+   * Keyed on whether the dataset brings PIXELS rather than on the extent, because the
+   * extent cannot tell the two apart — 2,000 units is a small slide or a large section
+   * depending only on what the units are, and only the dataset knows.
+   */
+  private setRegionGridFor(dataset: SpatialDataset, positions: Float32Array): void {
+    const overlay = this.regionOverlay;
+    if (!overlay?.setWorldQuantum) return;
+    if (dataset.imageRef || dataset.volume) {
+      overlay.setWorldQuantum(PIXEL_WORLD_QUANTUM);
+      return;
+    }
+    let minX = Infinity; let maxX = -Infinity; let minY = Infinity; let maxY = -Infinity;
+    for (let i = 0; i < positions.length; i += 2) {
+      const x = positions[i];
+      const y = positions[i + 1];
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+    overlay.setWorldQuantum(worldQuantumForExtent(maxX - minX, maxY - minY));
   }
 
   /**

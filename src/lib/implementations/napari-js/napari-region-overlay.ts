@@ -3,10 +3,30 @@ import { Subscription } from 'rxjs';
 import { IRegionOverlay, RegionToolMode } from '../../contracts/region-overlay.contract';
 import { Region, Rectangle, Polygon } from '../../models/region';
 import { RegionStore } from '../../store/region-store.service';
+import { PIXEL_WORLD_QUANTUM, snapToWorldGrid } from '../../spatial/world-grid';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
-/** Min drag (image px) before a freehand path records another point. */
-const FREEHAND_STEP = 2;
+/**
+ * Min drag before a freehand path records another point, in SCREEN pixels.
+ *
+ * Screen rather than world, which is what "2 image px" always meant in practice: at 100%
+ * zoom over an image the two are the same thing. Taken as world units it breaks on any
+ * dataset whose world is small — seqFISH's sample spans about 5 units, so a 2-unit
+ * threshold records a point every 40% of the way across and a freehand ROI comes out as a
+ * triangle. Against the screen it also does the right thing under zoom: drawing zoomed in
+ * records a finer path, because that is exactly when the extra detail is visible.
+ */
+const FREEHAND_STEP_PX = 2;
+/**
+ * Smallest committed rectangle, in SCREEN pixels on each side.
+ *
+ * Its job is to throw away a click that was not a drag. Held in world units — which it was
+ * — it instead throws away real drags on any dataset whose world is small: in seqFISH's
+ * ~5 x 7 unit sample a rectangle had to cover 40% of the width to commit at all, and
+ * anything smaller vanished with no feedback. That was the direct cause of ROIs being
+ * impossible to create there.
+ */
+const MIN_RECT_DRAG_PX = 2;
 /** Click-distance (screen px) within which a polygon click snaps closed onto the first vertex. */
 const CLOSE_SNAP_PX = 10;
 /** Screen-px hit radius for grabbing a vertex / rectangle corner handle. */
@@ -139,6 +159,22 @@ export class NapariRegionOverlay implements IRegionOverlay {
     if (sel?.id != null) this.store.setBezier(sel.id, bezier);
   }
 
+  /**
+   * How finely a drawn vertex may be placed, in world units.
+   *
+   * One by default, because for an image the world IS pixels and a region should align to
+   * them. A dataset whose coordinates are not pixels sets it finer — seqFISH's whole
+   * sample spans about 5 x 7 units, where whole-unit vertices leave roughly six by eight
+   * placeable positions and no ROI can be drawn at all.
+   */
+  private worldQuantum = PIXEL_WORLD_QUANTUM;
+
+  setWorldQuantum(quantum: number): void {
+    this.worldQuantum = Number.isFinite(quantum) && quantum > 0
+      ? quantum
+      : PIXEL_WORLD_QUANTUM;
+  }
+
   destroy(): void {
     this.svg.removeEventListener('pointerdown', this.onPointerDown);
     this.svg.removeEventListener('pointermove', this.onPointerMove);
@@ -150,10 +186,28 @@ export class NapariRegionOverlay implements IRegionOverlay {
   }
 
   // ── coordinate transforms ─────────────────────────────────────────────────
-  /** Pointer client coords → rounded image coords. */
+  /** Pointer client coords → world coords, snapped to {@link worldQuantum}. */
   private toImage(clientX: number, clientY: number): [number, number] {
     const [wx, wy] = this.viewer.canvasToWorld(clientX, clientY);
-    return [Math.round(wx), Math.round(wy)];
+    return [
+      snapToWorldGrid(wx, this.worldQuantum),
+      snapToWorldGrid(wy, this.worldQuantum),
+    ];
+  }
+
+  /**
+   * World units spanned by one screen pixel, measured through the viewer's own transform.
+   *
+   * Read from the transform rather than from the camera, so it holds for both the 2D and
+   * the 3D screen-space adapters without either having to expose a zoom. Falls back to 1
+   * if the transform gives nothing usable, which keeps the established pixel behaviour
+   * rather than collapsing the threshold to zero and recording a point per event.
+   */
+  private worldPerCanvasPixel(): number {
+    const [x0] = this.viewer.canvasToWorld(0, 0);
+    const [x1] = this.viewer.canvasToWorld(1, 0);
+    const per = Math.abs(x1 - x0);
+    return Number.isFinite(per) && per > 0 ? per : 1;
   }
 
   /** Image coords → SVG-local px (the svg overlays the canvas at the same client rect). */
@@ -206,8 +260,9 @@ export class NapariRegionOverlay implements IRegionOverlay {
       this.draftRect.x1 = ix;
       this.draftRect.y1 = iy;
     } else if (this.draftPath) {
+      const step = FREEHAND_STEP_PX * this.worldPerCanvasPixel();
       const last = this.draftPath[this.draftPath.length - 1];
-      if (Math.abs(ix - last[0]) >= FREEHAND_STEP || Math.abs(iy - last[1]) >= FREEHAND_STEP) {
+      if (Math.abs(ix - last[0]) >= step || Math.abs(iy - last[1]) >= step) {
         this.draftPath.push([ix, iy]);
       }
     }
@@ -252,7 +307,8 @@ export class NapariRegionOverlay implements IRegionOverlay {
       const w = Math.abs(x1 - x0);
       const h = Math.abs(y1 - y0);
       this.draftRect = null;
-      if (w >= 2 && h >= 2) this.commitRectangle(x, y, w, h);
+      const min = MIN_RECT_DRAG_PX * this.worldPerCanvasPixel();
+      if (w >= min && h >= min) this.commitRectangle(x, y, w, h);
     } else if (this.draftPath) {
       const pts = this.draftPath;
       this.draftPath = null;

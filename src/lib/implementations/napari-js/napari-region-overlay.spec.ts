@@ -200,6 +200,68 @@ describe('NapariRegionOverlay', () => {
     expect(b.height).toBe(10);
   });
 
+  /**
+   * seqFISH's whole sample spans about 5 x 7 world units, so a canvas of ~800 px shows
+   * roughly 0.006 world units per screen pixel. Everything the overlay measures in world
+   * units has to cope with that, and two things did not.
+   */
+  describe('a world only a few units across', () => {
+    const PER_PX = 0.00634; // 5.07 units across an ~800 px canvas
+
+    function tinyWorldOverlay(quantum: number) {
+      const v = fakeViewer();
+      v.canvasToWorld = (cx: number, cy: number) => [cx * PER_PX, cy * PER_PX];
+      v.worldToCanvas = (wx: number, wy: number) => [wx / PER_PX, wy / PER_PX];
+      const o = new NapariRegionOverlay(host, v as any, store);
+      o.setWorldQuantum(quantum);
+      return o;
+    }
+
+    it('keeps two nearby presses apart instead of snapping them together', () => {
+      // On the pixel grid, 400 px and 410 px both land on world 3 — every rectangle in
+      // the sample collapses onto the same few boxes, which is why an ROI could not be
+      // drawn. Reported as "roi creation is not possible".
+      const coarse = tinyWorldOverlay(1);
+      coarse.setMode('drawrect');
+      ptr(coarse, 'pointerdown', 400, 400);
+      ptr(coarse, 'pointermove', 410, 410);
+      ptr(coarse, 'pointerup', 410, 410);
+      const collapsed = store.getRegions();
+      expect((collapsed[0]?.bounds as Rectangle | undefined)?.width ?? 0).toBe(0);
+      coarse.destroy();
+      store.setRegions([]);
+
+      const fine = tinyWorldOverlay(0.001);
+      fine.setMode('drawrect');
+      ptr(fine, 'pointerdown', 400, 400);
+      ptr(fine, 'pointermove', 410, 410);
+      ptr(fine, 'pointerup', 410, 410);
+      const drawn = store.getRegions();
+      expect(drawn).toHaveLength(1);
+      const b = drawn[0].bounds as Rectangle;
+      // 10 screen px is 0.063 world units, which the fine grid can express.
+      expect(b.width).toBeCloseTo(10 * PER_PX, 3);
+      expect(b.height).toBeCloseTo(10 * PER_PX, 3);
+      fine.destroy();
+    });
+
+    it('records a freehand path from the screen, not from world units', () => {
+      // The threshold was 2 WORLD units — 40% of this sample — so a drag across it
+      // recorded about three points and any traced shape came out as a triangle.
+      const o = tinyWorldOverlay(0.001);
+      o.setMode('drawclosedpath');
+      ptr(o, 'pointerdown', 100, 100);
+      for (let px = 110; px <= 400; px += 10) ptr(o, 'pointermove', px, 100 + px / 4);
+      ptr(o, 'pointerup', 400, 200);
+      const regions = store.getRegions();
+      expect(regions).toHaveLength(1);
+      const poly = regions[0].bounds as Polygon;
+      // ~30 moves at 10 screen px each: every one clears a 2-screen-pixel threshold.
+      expect(poly.npoints).toBeGreaterThan(20);
+      o.destroy();
+    });
+  });
+
   it('drawrect: a degenerate (sub-2px) drag commits nothing', () => {
     overlay.setMode('drawrect');
     ptr(overlay, 'pointerdown', 5, 5);

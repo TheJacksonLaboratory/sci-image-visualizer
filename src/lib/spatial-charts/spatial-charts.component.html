@@ -23,6 +23,13 @@
                   ? 'The categorical column the heatmap\'s columns come from'
                   : 'Split a violin or box by a categorical column'"
                 tooltipPosition="top"></p-dropdown>
+    <!-- What the chart on screen shows, and what it must NOT be read for. Each of these
+         answers a different question and two are routinely over-read, so the caveat
+         travels with the explanation. -->
+    <i class="pi pi-question-circle sx-help"
+       [pTooltip]="kindHelp" [escape]="false" tooltipPosition="left"
+       tooltipStyleClass="sx-help-tip"
+       [attr.aria-label]="'About the ' + kind + ' chart'" tabindex="0"></i>
   </div>
 
   <!-- The heatmap's rows are a gene LIST, so it needs its own picker: the other

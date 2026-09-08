@@ -20,6 +20,27 @@ import {
   buildOmicsTraces, buildEmbeddingTraces, countsLayout, heatmapLayout, omicsLayout, embeddingLayout,
 } from '../implementations/plotly/omics-trace-builders';
 
+/**
+ * Widen the help tooltip, once per document.
+ *
+ * PrimeNG caps `.p-tooltip` at 12.5rem and appends it to `<body>`, so a component
+ * stylesheet cannot reach it — the same reason the detached dialog is sized inline. At
+ * 200 px the chart explanations render as a tall thread of two-word lines, which is worse
+ * than not showing them. The library ships no global stylesheet to put this in, so one
+ * rule is injected instead: scoped to this component's own tooltip class, idempotent, and
+ * skipped where there is no document.
+ */
+const HELP_TIP_STYLE_ID = 'sx-help-tip-style';
+function ensureHelpTipStyle(): void {
+  if (typeof document === 'undefined') return;
+  if (document.getElementById(HELP_TIP_STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = HELP_TIP_STYLE_ID;
+  style.textContent = '.sx-help-tip .p-tooltip-text { max-width: none; width: 24rem; '
+    + 'line-height: 1.45; }\n.sx-help-tip { max-width: none; }';
+  document.head.appendChild(style);
+}
+
 /** Per-instance chart-div id source — see {@link SpatialChartsComponent.chartDiv}. */
 let chartInstanceSeq = 0;
 
@@ -240,6 +261,9 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   constructor(@Inject(VISUALIZER) private readonly viz: IVisualizer) {}
 
   ngOnInit(): void {
+    // Before the port check: the help icon is in the template either way, and a panel
+    // with no data source is exactly where someone reads it.
+    ensureHelpTipStyle();
     this.controls = this.viz.getSpatialControls?.() ?? null;
     if (!this.controls) return;
 
@@ -789,6 +813,82 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     this.embedding = next;
     this.embeddingCoords = null;
     void this.render();
+  }
+
+  /**
+   * What the chart on screen actually shows, and what it cannot be read for.
+   *
+   * Shown on hover from a `?` beside the tabs. Each of these plots answers a different
+   * question and two of them are routinely over-read — a UMAP's distances and a heatmap's
+   * unscaled colours — so the caveat is part of the explanation rather than a footnote.
+   *
+   * HTML, because the tooltip renders with `[escape]="false"`: a paragraph and a caveat
+   * read as two thoughts, and a single run-on line is skipped rather than read.
+   */
+  get kindHelp(): string {
+    switch (this.kind) {
+      case 'counts':
+        return '<b>Counts</b> — how many observations fall in each category of the column '
+          + 'the map is coloured by, largest first.<br><br>A category code is a label, not '
+          + 'a magnitude, so a frequency is the only distribution it has: there is no '
+          + 'histogram of a cell type.';
+      case 'histogram':
+        return '<b>Histogram</b> — how the active value is distributed over all '
+          + 'observations.<br><br>With a selection, it is overlaid on the full '
+          + 'distribution rather than replacing it, so you can see where the selected '
+          + 'cells sit within the whole.';
+      case 'violin':
+        return '<b>Violin</b> — the active value\'s distribution within each category of '
+          + 'the grouping column, drawn as a smoothed density.<br><br>Shows shape a box '
+          + 'plot hides: two groups with the same median can be one peak or two.';
+      case 'box':
+        return '<b>Box</b> — median, quartiles and range of the active value within each '
+          + 'category of the grouping column.<br><br>Compact and comparable across many '
+          + 'groups, at the cost of hiding whether a group is bimodal.';
+      case 'heatmap':
+        return '<b>Heatmap</b> — mean expression of each picked gene within each group: '
+          + 'genes down, groups across.<br><br>Each gene is <b>z-scored across the '
+          + 'groups</b> by default, so a colour says "above or below this gene\'s own '
+          + 'average", not "highly expressed". Without that one loud gene saturates the '
+          + 'scale and the rest of the panel reads as blank. Turning it off compares '
+          + 'genes on their raw scale instead.';
+      case 'embedding':
+        return this.embeddingHelp;
+      default:
+        return '';
+    }
+  }
+
+  /**
+   * What the embedding on screen is, and how far its geometry can be trusted.
+   *
+   * Per METHOD, because that is the part people get wrong: a PCA's axes are ordered and
+   * measurable while a UMAP's are neither, and the same picture read the two ways supports
+   * opposite conclusions.
+   */
+  private get embeddingHelp(): string {
+    const shared = '<br><br>Every cell is in all views at once: lasso a group here and '
+      + 'those cells light up on the tissue, because both read the same selection.';
+    const name = (this.embedding?.label ?? this.embedding?.name ?? '').toLowerCase();
+    if (name.includes('pca')) {
+      return '<b>PCA</b> — a <b>linear</b> projection onto the directions of greatest '
+        + 'variance, in order.<br><br>Alone among these, its axes mean something '
+        + 'measurable: each reports the share of total variance it explains, which is why '
+        + 'the labels carry a percentage. Distances are real, and a low percentage tells '
+        + 'you the picture is a thin slice of the variation.' + shared;
+    }
+    if (name.includes('t-sne') || name.includes('tsne')) {
+      return '<b>t-SNE</b> — cells placed so that close neighbours in expression stay '
+        + 'close.<br><br>Stricter about local neighbourhoods than UMAP and less '
+        + 'trustworthy about anything global: it tends to spread clusters into '
+        + 'evenly-sized islands whose sizes and separations mean little. Read which cells '
+        + 'group together, not how far apart the groups are.' + shared;
+    }
+    return '<b>UMAP</b> — cells placed so that close neighbours in expression stay '
+      + 'close.<br><br>The axes are arbitrary: unordered, unitless, and reproducible only '
+      + 'up to a rotation, which is why they carry no percentage. Read which cells group '
+      + 'together and which groups touch; do not read the distance between distant '
+      + 'clusters, or the direction of an axis.' + shared;
   }
 
   /** What the embedding view is showing, said plainly. */

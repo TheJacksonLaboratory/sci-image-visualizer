@@ -373,6 +373,52 @@ describe('SpatialChartsComponent', () => {
     });
   });
 
+  describe('the "?" help', () => {
+    it('explains the chart on screen, not charts in general', async () => {
+      await build(controls);
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+      await flush();
+      expect(component.kind).toBe('counts');
+      expect(component.kindHelp).toContain('Counts');
+
+      component.onKind('heatmap');
+      await flush();
+      expect(component.kindHelp).toContain('Heatmap');
+      // The caveat is the point of the help, not a footnote: a z-scored colour says
+      // "above this gene's own average", which is routinely read as "highly expressed".
+      expect(component.kindHelp).toContain('z-scored');
+    });
+
+    it('names the embedding METHOD, because they cannot be read the same way', async () => {
+      // A PCA's axes are ordered and measurable; a UMAP's are neither. The same picture
+      // read the two ways supports opposite conclusions, so one generic blurb would be
+      // worse than none.
+      const metas = [
+        { name: 'X_umap', label: 'UMAP', dims: 2 as const },
+        { name: 'X_pca2d', label: 'PCA', dims: 2 as const, derived: true },
+        { name: 'X_tsne', label: 't-SNE', dims: 2 as const, derived: true },
+      ];
+      dataset$.next({ ...dataset, embeddings: metas });
+      await build(controls);
+      await flush();
+      component.onKind('embedding');
+      await flush();
+      expect(component.kindHelp).toContain('UMAP');
+      expect(component.kindHelp).toContain('arbitrary');
+
+      component.onEmbedding('X_pca2d');
+      await flush();
+      expect(component.kindHelp).toContain('PCA');
+      expect(component.kindHelp).toContain('variance');
+      // Only PCA may promise measurable distance.
+      expect(component.kindHelp).not.toContain('arbitrary');
+
+      component.onEmbedding('X_tsne');
+      await flush();
+      expect(component.kindHelp).toContain('t-SNE');
+    });
+  });
+
   describe('heatmap (genes x groups)', () => {
     /**
      * Eight cells, four per category — the class view needs more than the
