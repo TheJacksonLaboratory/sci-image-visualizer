@@ -293,6 +293,43 @@ Two things are worth knowing about what it serves:
   third of the labels on both sides carry a `-<n>` suffix that is part of the
   identity, and stripping it collapses 3,739,961 cells into 2,648,427 keys.
 
+#### Serving a plain `.h5ad` LIVE
+
+Drop (or symlink) a `*.h5ad` into `./h5ad` and it appears on `/spatial/datasets` with its
+columns, genes and embeddings **inferred from the file** — no conversion command, no flags:
+
+```bash
+ln -s "$PWD/visium_hne_adata.h5ad" h5ad/visium.h5ad
+npm start
+```
+
+A categorical obs column is one with categories (its published `uns/<name>_colors` palette
+comes with it), a continuous one is anything else numeric, and an embedding is any `obsm`
+array of 2 or 3 columns other than the coordinates. A Visium file also gets its tissue
+image: `uns/spatial/<lib>/images/hires` is materialised into `./cogs` on first request, and
+`imageRef` is derived from the measured spot lattice, exactly as `visium-image.mjs` does.
+
+**How `X` is stored decides what this costs**, and it is the whole design of the adapter:
+
+| `X` | served | one gene |
+|---|---|---|
+| CSC | directly out of the file | two hyperslab reads, a few kB — measured sub-ms |
+| CSR | via a bundle built on first open | 10.7 kB ranged read, after a one-off convert |
+
+Gene `j` is contiguous in a CSC matrix (`indptr[j]..indptr[j+1]`), so nothing needs
+preparing and only the 72 kB `indptr` is cached. In a CSR matrix it is scattered across
+every row: reading one gene means walking the whole `indices` array, measured at **122 ms
+and 118 MB** on the Visium file. Caching the matrix instead would hold those 118 MB per
+dataset resident and still scan 15 M entries per gene, so a CSR file is converted once
+into `.cache/h5ad/<id>` — 1.0 s for Visium — and served from there. scanpy writes CSR by
+default, so that is the common branch, which is why it happens automatically rather than
+as an error telling you to go and run a script.
+
+The conversion is rebuilt if the `.h5ad` is newer than it, and the source file is never
+modified. Inference is the trade against the CLI: `h5ad-to-spatial.mjs` gives you exactly
+the columns you name, while this offers every numeric obs column it finds — including
+`array_row` and `in_tissue`, which are real but not interesting colourings.
+
 #### Pre-built bundles
 
 `$SPATIAL_DIR` still serves bundles in the same wire format, and a bundle **wins**

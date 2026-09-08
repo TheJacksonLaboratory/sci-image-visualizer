@@ -48,6 +48,10 @@ import {
 } from './lib/spatial-st.mjs';
 import { writePyramid } from './lib/pyramid.mjs';
 import {
+  listH5adDatasets, h5adManifest, h5adCoords, h5adIds, h5adColumn, h5adFeature,
+  h5adFeatureSearch, h5adEmbedding, h5adImageSource, h5adHas,
+} from './lib/spatial-h5ad.mjs';
+import {
   listAbcDatasets, abcManifest, abcCoords, abcColumn, abcFeature, abcFeatureSearch, abcVolume,
 } from './lib/spatial-abc.mjs';
 import { readArray } from './lib/zarr3.mjs';
@@ -61,6 +65,11 @@ const SPATIAL_DIR = process.env.SPATIAL_DIR
   : new URL('./spatial', import.meta.url).pathname;
 // Directory of SpatialData *.zarr stores, served LIVE — no build step. Each
 // (store, table, region) triple becomes a dataset.
+// A plain `.h5ad` dropped in here is served with no conversion command: CSC directly,
+// CSR through a bundle built on first open. See lib/spatial-h5ad.mjs.
+const H5AD_DIR = process.env.H5AD_DIR
+  ? process.env.H5AD_DIR
+  : new URL('./h5ad', import.meta.url).pathname;
 const ZARR_DIR = process.env.ZARR_DIR
   ? process.env.ZARR_DIR
   : new URL('./stores', import.meta.url).pathname;
@@ -114,7 +123,12 @@ async function ensureZarrImage(imageId) {
       try {
         source = { kind: 'zarr', ...(await zarrImageSource(ZARR_DIR, datasetId)) };
       } catch {
-        source = { kind: 'st', ...(await stImage(ST_DIR, datasetId)) };
+        try {
+          source = { kind: 'st', ...(await stImage(ST_DIR, datasetId)) };
+        } catch {
+          // A Visium `.h5ad` carries its tissue image in `uns/spatial/<lib>/images`.
+          source = { kind: 'h5ad', ...(await h5adImageSource(H5AD_DIR, datasetId)) };
+        }
       }
       console.log(`[tile-server] building pyramid for ${imageId} from ${source.kind}`);
 
@@ -134,6 +148,12 @@ async function ensureZarrImage(imageId) {
           rgb[p * 3 + 2] = bands > 2 ? img.data[2 * plane + p] : img.data[p];
         }
         input = sharpFor(rgb, width, height);
+      } else if (source.kind === 'h5ad') {
+        // Already RGB bytes from `uns/spatial/<lib>/images/hires`, not an encoded file, so
+        // it goes to sharp as a raw buffer the way the zarr planes do.
+        width = source.width;
+        height = source.height;
+        input = sharpFor(source.rgb, width, height);
       } else {
         input = sharp(source.bytes, { limitInputPixels: false });
         const meta = await input.metadata();
@@ -257,6 +277,11 @@ async function resolveSource(id) {
     ['zarr', () => zarrManifest(ZARR_DIR, id)],
     ['st', () => stManifest(ST_DIR, id)],
     ['abc', () => abcManifest(ABC_DIR, id)],
+    // Probed by whether the file exists, NOT by building its manifest: for a CSR file
+    // that would start the conversion just to answer "is this yours?".
+    ['h5ad', async () => {
+      if (!(await h5adHas(H5AD_DIR, id))) throw new RangeError(`not an h5ad: ${id}`);
+    }],
   ]) {
     try {
       await probe();
@@ -287,16 +312,17 @@ async function fromSource(res, id, handlers) {
 
 app.get('/spatial/datasets', async (_req, res) => {
   try {
-    const [bundles, stores, st, abc] = await Promise.all([
+    const [bundles, stores, st, abc, h5ads] = await Promise.all([
       listSpatialDatasets(SPATIAL_DIR),
       listZarrDatasets(ZARR_DIR).catch(() => []),
       listStDatasets(ST_DIR).catch(() => []),
       listAbcDatasets(ABC_DIR).catch(() => []),
+      listH5adDatasets(H5AD_DIR).catch(() => []),
     ]);
     const seen = new Set();
     const datasets = [];
     // Priority order, first id wins.
-    for (const list of [bundles, stores, st, abc]) {
+    for (const list of [bundles, stores, st, abc, h5ads]) {
       for (const d of list) {
         if (seen.has(d.id)) continue;
         seen.add(d.id);
@@ -317,6 +343,7 @@ app.get('/spatial/:id/manifest', async (req, res) => {
     zarr: async () => res.json(await zarrManifest(ZARR_DIR, id)),
     st: async () => res.json(await stManifest(ST_DIR, id)),
     abc: async () => res.json(await abcManifest(ABC_DIR, id)),
+    h5ad: async () => res.json(await h5adManifest(H5AD_DIR, id)),
   });
 });
 
@@ -326,14 +353,16 @@ app.get('/spatial/:id/manifest', async (req, res) => {
 // A legacy ST dataset has uniform spot radii and no outlines, so it answers
 // only `coords` — `radius` and `polygons` legitimately 404 there.
 const WIRE_FILES = {
-  coords: { file: 'coords.bin', zarr: zarrCoords, st: stCoords, abc: abcCoords },
+  coords: {
+    file: 'coords.bin', zarr: zarrCoords, st: stCoords, abc: abcCoords, h5ad: h5adCoords,
+  },
   // The anatomical volume a 3D cloud sits inside: uint8 scalar field, x-fastest.
   // Only the ABC source has one, so every other source legitimately 404s here.
   volume: { file: 'volume.bin', abc: abcVolume },
   radius: { file: 'radius.bin', zarr: zarrRadius },
   polygons: { file: 'polygons.bin', zarr: zarrPolygons },
 };
-for (const [route, { file, zarr, st, abc }] of Object.entries(WIRE_FILES)) {
+for (const [route, { file, zarr, st, abc, h5ad }] of Object.entries(WIRE_FILES)) {
   app.get(`/spatial/:id/${route}`, async (req, res) => {
     const { id } = req.params;
     await fromSource(res, id, {
@@ -345,6 +374,7 @@ for (const [route, { file, zarr, st, abc }] of Object.entries(WIRE_FILES)) {
       zarr: async () => octet(res).send(await zarr(ZARR_DIR, id)),
       ...(st ? { st: async () => octet(res).send(await st(ST_DIR, id)) } : {}),
       ...(abc ? { abc: async () => octet(res).send(await abc(ABC_DIR, id)) } : {}),
+      ...(h5ad ? { h5ad: async () => octet(res).send(await h5ad(H5AD_DIR, id)) } : {}),
     });
   });
 }
@@ -356,6 +386,7 @@ app.get('/spatial/:id/ids', async (req, res) => {
       .json(await readIds(SPATIAL_DIR, id)),
     zarr: async () => res.json(await zarrIds(ZARR_DIR, id)),
     st: async () => res.json(await stIds(ST_DIR, id)),
+    h5ad: async () => res.json(await h5adIds(H5AD_DIR, id)),
   });
 });
 
@@ -366,6 +397,7 @@ app.get('/spatial/:id/column/:name', async (req, res) => {
     zarr: async () => octet(res).send(await zarrColumn(ZARR_DIR, id, name)),
     st: async () => octet(res).send(await stColumn(ST_DIR, id, name)),
     abc: async () => octet(res).send(await abcColumn(ABC_DIR, id, name)),
+    h5ad: async () => octet(res).send(await h5adColumn(H5AD_DIR, id, name)),
   });
 });
 
@@ -376,16 +408,18 @@ app.get('/spatial/:id/feature/:name', async (req, res) => {
     zarr: async () => octet(res).send(await zarrFeature(ZARR_DIR, id, name)),
     st: async () => octet(res).send(await stFeature(ST_DIR, id, name)),
     abc: async () => octet(res).send(await abcFeature(ABC_DIR, id, name)),
+    h5ad: async () => octet(res).send(await h5adFeature(H5AD_DIR, id, name)),
   });
 });
 
-// Only the bundle source: an embedding is a precomputed artifact that has to be written
-// alongside the dataset, and the zarr/st/abc sources carry none.
+// Three sources carry embeddings: a bundle has them written alongside it, and the zarr and
+// h5ad sources read them straight out of `obsm`. The st and abc sources have none.
 app.get('/spatial/:id/embedding/:name', async (req, res) => {
   const { id, name } = req.params;
   await fromSource(res, id, {
     bundle: async () => octet(res).send(await readEmbedding(SPATIAL_DIR, id, name)),
     zarr: async () => octet(res).send(await zarrEmbedding(ZARR_DIR, id, name)),
+    h5ad: async () => octet(res).send(await h5adEmbedding(H5AD_DIR, id, name)),
   });
 });
 
@@ -397,6 +431,9 @@ app.get('/spatial/:id/features', async (req, res) => {
     zarr: async () => res.json({ names: await zarrFeatureSearch(ZARR_DIR, id, req.query.q, limit) }),
     st: async () => res.json({ names: await stFeatureSearch(ST_DIR, id, req.query.q, limit) }),
     abc: async () => res.json({ names: await abcFeatureSearch(ABC_DIR, id, req.query.q, limit) }),
+    h5ad: async () => res.json({
+      names: await h5adFeatureSearch(H5AD_DIR, id, req.query.q, limit),
+    }),
   });
 });
 

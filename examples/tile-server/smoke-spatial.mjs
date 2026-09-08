@@ -19,6 +19,8 @@ const SPATIAL_DIR = new URL('./spatial', import.meta.url).pathname;
 // be covered by the same checks. `make-zarr-demo.mjs` writes one that needs no download.
 const ZARR_DIR = new URL('./stores', import.meta.url).pathname;
 const ZARR_ID = 'demo-zarr.table';
+// A plain `.h5ad` needs no preparation at all, so it gets the same checks.
+const H5AD_DIR = new URL('./h5ad', import.meta.url).pathname;
 
 let failures = 0;
 function check(label, ok, detail = '') {
@@ -39,13 +41,22 @@ async function getBuffer(pathname) {
 }
 
 const server = spawn(process.execPath, [path.join(import.meta.dirname, 'server.mjs')], {
-  env: { ...process.env, PORT: String(PORT), SPATIAL_DIR, ZARR_DIR },
+  env: { ...process.env, PORT: String(PORT), SPATIAL_DIR, ZARR_DIR, H5AD_DIR },
   stdio: ['ignore', 'pipe', 'inherit'],
 });
-// Wait for the listen line before hitting the socket.
-for await (const chunk of server.stdout) {
-  if (String(chunk).includes('listening')) break;
-}
+// Wait for the listen line before hitting the socket, then KEEP DRAINING the pipe.
+//
+// A plain `data` listener rather than `for await ... break`: breaking out of a for-await
+// calls `return()` on the iterator, which DESTROYS the stream. The server logs while
+// serving — building a pyramid, converting a CSR `.h5ad` — and writing to a destroyed or
+// unread pipe kills it with EPIPE mid-request, which reads as the request failing rather
+// than as the harness having shut the pipe.
+await new Promise((resolve) => {
+  const onData = (chunk) => {
+    if (String(chunk).includes('listening')) resolve();
+  };
+  server.stdout.on('data', onData);
+});
 
 try {
   console.log('discovery');
@@ -261,6 +272,55 @@ try {
     const names = (zarrManifest.columns ?? []).map((c) => c.name);
     check('no column is declared twice', new Set(names).size === names.length,
       names.join(', '));
+  }
+
+  // ── a plain .h5ad, when one is present ───────────────────────────────────
+  const h5adEntries = (await getJson('/spatial/datasets')).datasets
+    .filter((d) => d.source === 'h5ad');
+  if (h5adEntries.length === 0) {
+    console.log('h5ad drop-in (skipped — no .h5ad in ./h5ad)');
+  }
+  // EVERY one of them: a CSC file is served straight out of the file and a CSR file
+  // through a bundle built on first open, and the two must answer identically.
+  for (const h5adEntry of h5adEntries) {
+    const hid = h5adEntry.id;
+    console.log(`h5ad drop-in (${hid})`);
+    const m = await getJson(`/spatial/${hid}/manifest`);
+    // Everything is INFERRED from the file: nothing was named on a command line.
+    check('columns are inferred from obs', (m.columns ?? []).length > 0,
+      `${m.columns.length} columns`);
+    check('a categorical column carries its categories',
+      (m.columns ?? []).some((c) => c.kind === 'categorical' && c.categories?.length > 0));
+    check('genes are inferred from var', (m.features?.count ?? 0) > 0,
+      `${m.features?.count} genes`);
+
+    const coords = await getBuffer(`/spatial/${hid}/coords`);
+    const dims = m.hasZ ? 3 : 2;
+    check('coords are the declared dims of f32', coords.byteLength === m.count * dims * 4,
+      `${coords.byteLength} bytes for ${m.count} x ${dims}`);
+    if (m.hasIds) {
+      const { ids } = await getJson(`/spatial/${hid}/ids`);
+      // The labels are in every `.h5ad` as `obs/_index`; a converted bundle used to lose
+      // them and 404 here while a directly-read one served them.
+      check('ids are served, one per observation', ids?.length === m.count,
+        `${ids?.length} of ${m.count}`);
+    }
+    for (const emb of m.embeddings ?? []) {
+      const buf = await getBuffer(`/spatial/${hid}/embedding/${emb.name}`);
+      check(`${emb.name} is ${emb.dims} f32 planes`,
+        buf.byteLength === m.count * emb.dims * 4, `${buf.byteLength} bytes`);
+    }
+    const gene = m.features.names?.[0] ?? (await getJson(`/spatial/${hid}/features?limit=1`)).names[0];
+    const vec = await getBuffer(`/spatial/${hid}/feature/${gene}`);
+    check(`one gene is f32[N] — ${gene}`, vec.byteLength === m.count * 4,
+      `${vec.byteLength} bytes`);
+    // Prefix-first, so the two drop-in paths and the bundle rank suggestions alike.
+    const hits = (await getJson(`/spatial/${hid}/features?q=${gene.slice(0, 2)}&limit=5`)).names;
+    check('feature search returns prefix matches first',
+      hits.length > 0 && hits[0].toLowerCase().startsWith(gene.slice(0, 2).toLowerCase()),
+      hits.join(', '));
+    const badGene = await fetch(`${BASE}/spatial/${hid}/feature/NotAGene`);
+    check('unknown gene is 404', badGene.status === 404, `got ${badGene.status}`);
   }
 
   console.log('error handling');
