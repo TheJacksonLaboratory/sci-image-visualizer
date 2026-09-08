@@ -13,7 +13,8 @@ import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
  * distribution and already carries both trace types.
  */
 
-export type OmicsChartKind = 'histogram' | 'violin' | 'box' | 'counts' | 'heatmap' | 'umap';
+export type OmicsChartKind =
+  | 'histogram' | 'violin' | 'box' | 'counts' | 'heatmap' | 'embedding';
 
 /** Per-observation grouping for a violin/box, or an overlaid histogram. */
 export interface OmicsGrouping {
@@ -325,7 +326,7 @@ export function countsLayout(input: OmicsCountInput & { name: string }): unknown
  * the embedding says which populations there are and how close they are in expression. Read side
  * by side, and selecting in one highlighting the other, is the whole point of having both.
  */
-export interface OmicsUmapInput {
+export interface OmicsEmbeddingInput {
   /** Embedding coordinates, index-aligned with the observations. */
   x: Float32Array;
   y: Float32Array;
@@ -356,6 +357,16 @@ export interface OmicsUmapInput {
   /** True when the coordinates were computed here rather than published with the dataset. */
   derived?: boolean;
   /**
+   * Fraction of variance per axis, for a LINEAR embedding.
+   *
+   * Present for a PCA and absent for a UMAP, and that difference is the point of showing
+   * a PCA at all: its axes are ordered and each explains a measurable share of the
+   * variance, so "PC1 (23%)" says something a reader can act on. A UMAP's coordinates are
+   * an arbitrary output of an optimisation — unordered, unitless, and reproducible only
+   * up to a rotation — so there is nothing to label them with.
+   */
+  varianceRatio?: number[];
+  /**
    * The view to keep across a redraw.
    *
    * `Plotly.react` resets the 3D scene camera and any zoomed 2D axis range unless the
@@ -378,7 +389,7 @@ export interface OmicsUmapInput {
  * hundreds of entries is unreadable anyway (the ABC atlas has 338 subclasses), so beyond the cap
  * everything goes into ONE trace with a per-point colour: no legend, but it still draws.
  */
-export const UMAP_MAX_LEGEND_CATEGORIES = 40;
+export const EMBEDDING_MAX_LEGEND_CATEGORIES = 40;
 
 /**
  * Categories past which the legend is not DRAWN, though the traces stay split.
@@ -389,10 +400,10 @@ export const UMAP_MAX_LEGEND_CATEGORIES = 40;
  * category under the cursor. So past this the plot takes the whole panel and the legend
  * is dropped rather than shown badly.
  */
-export const UMAP_MAX_LEGEND_SHOWN = 10;
+export const EMBEDDING_MAX_LEGEND_SHOWN = 10;
 
 /** Dimming applied to unselected points, matching the map's muted opacity. */
-const UMAP_MUTED_OPACITY = 0.15;
+const EMBEDDING_MUTED_OPACITY = 0.15;
 
 /**
  * Mix a hex colour toward white by `amount`.
@@ -417,9 +428,9 @@ function towardPaper(hex: string, amount: number): string {
   return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
 }
 
-const DEFAULT_UMAP_POINT_SIZE = 4;
+const DEFAULT_EMBEDDING_POINT_SIZE = 4;
 
-export function buildUmapTraces(input: OmicsUmapInput): unknown[] {
+export function buildEmbeddingTraces(input: OmicsEmbeddingInput): unknown[] {
   const { x, y, categories, selection } = input;
   const n = Math.min(x.length, y.length);
   if (n === 0) return [];
@@ -429,10 +440,10 @@ export function buildUmapTraces(input: OmicsUmapInput): unknown[] {
   // own scene, which is why a third dimension cannot just be added to the former. It
   // costs more per point, so it suits this scale and not millions.
   const type = z ? 'scatter3d' : 'scattergl';
-  const markerSize = z ? Math.max(1, (input.size ?? DEFAULT_UMAP_POINT_SIZE) - 2)
-    : (input.size ?? DEFAULT_UMAP_POINT_SIZE);
+  const markerSize = z ? Math.max(1, (input.size ?? DEFAULT_EMBEDDING_POINT_SIZE) - 2)
+    : (input.size ?? DEFAULT_EMBEDDING_POINT_SIZE);
   const opacityFor = (i: number): number =>
-    !selection || selection[i] ? 1 : UMAP_MUTED_OPACITY;
+    !selection || selection[i] ? 1 : EMBEDDING_MUTED_OPACITY;
   const isSelected = (i: number): boolean => !selection || selection[i] === 1;
   // In 3D the dimming has to be in the COLOUR, since a per-point opacity array is
   // ignored there. Cached per input colour: 19k lookups of the same few categories.
@@ -441,7 +452,7 @@ export function buildUmapTraces(input: OmicsUmapInput): unknown[] {
     if (!z || isSelected(i)) return hex;
     const hit = dimCache.get(hex);
     if (hit) return hit;
-    const dimmed = towardPaper(hex, 1 - UMAP_MUTED_OPACITY);
+    const dimmed = towardPaper(hex, 1 - EMBEDDING_MUTED_OPACITY);
     dimCache.set(hex, dimmed);
     return dimmed;
   };
@@ -477,7 +488,7 @@ export function buildUmapTraces(input: OmicsUmapInput): unknown[] {
   }
 
   const { codes, names, colors } = categories;
-  if (names.length > UMAP_MAX_LEGEND_CATEGORIES) {
+  if (names.length > EMBEDDING_MAX_LEGEND_CATEGORIES) {
     // One trace, per-point colour. Hover still names the category, which is the part that
     // matters; the legend is what is lost.
     return [{
@@ -531,13 +542,26 @@ export function buildUmapTraces(input: OmicsUmapInput): unknown[] {
       },
       // Split per category regardless, so hover names it and a future isolate control
       // has something to toggle; only the legend's VISIBILITY depends on the count.
-      showlegend: names.length <= UMAP_MAX_LEGEND_SHOWN,
+      showlegend: names.length <= EMBEDDING_MAX_LEGEND_SHOWN,
       hovertemplate: `${names[c]}<extra></extra>`,
     }));
 }
 
-export function umapLayout(input: OmicsUmapInput): unknown {
-  const stem = input.label || 'UMAP';
+/**
+ * Axis title: the embedding's name, the axis number, and its variance share when there is
+ * one to report.
+ */
+function axisTitle(stem: string, axis: number, varianceRatio?: number[]): string {
+  const share = varianceRatio?.[axis - 1];
+  if (share === undefined || !Number.isFinite(share)) return `${stem} ${axis}`;
+  // One decimal: the difference between 23.4% and 23% is worth seeing when comparing
+  // components, and more digits than that is noise from the estimate.
+  return `${stem} ${axis} (${(share * 100).toFixed(1)}%)`;
+}
+
+export function embeddingLayout(input: OmicsEmbeddingInput): unknown {
+  const stem = input.label || 'Embedding';
+  const vr = input.varianceRatio;
   // No annotation for a derived embedding. That a recomputed UMAP is not the published
   // picture does need saying — but the panel's caption already says it, and repeating it
   // over the plot cost a strip of the panel's height and, in the 3D scene, sat on top of
@@ -549,9 +573,9 @@ export function umapLayout(input: OmicsUmapInput): unknown {
       // A 3D scene has no margins to speak of; the axes live inside it.
       margin: { l: 0, r: 0, t: 0, b: 0 },
       scene: {
-        xaxis: { title: { text: `${stem} 1` } },
-        yaxis: { title: { text: `${stem} 2` } },
-        zaxis: { title: { text: `${stem} 3` } },
+        xaxis: { title: { text: axisTitle(stem, 1, vr) } },
+        yaxis: { title: { text: axisTitle(stem, 2, vr) } },
+        zaxis: { title: { text: axisTitle(stem, 3, vr) } },
         // Carried across the redraw, or every recolour snaps the cloud back to its
         // default orientation.
         ...(input.view?.camera ? { camera: input.view.camera } : {}),
@@ -577,16 +601,16 @@ export function umapLayout(input: OmicsUmapInput): unknown {
       t: 8,
       // Room for the legend only when one is drawn; otherwise the axis title alone.
       b: (input.categories?.names.length ?? 0) > 0
-        && (input.categories?.names.length ?? 0) <= UMAP_MAX_LEGEND_SHOWN ? 64 : 40,
+        && (input.categories?.names.length ?? 0) <= EMBEDDING_MAX_LEGEND_SHOWN ? 64 : 40,
     },
     // Equal aspect: an embedding's axes carry no units, so distances are only comparable if the
     // two are scaled alike. Stretching one axis to fill the panel invents structure.
     xaxis: {
-      title: { text: `${stem} 1` }, zeroline: false, ticks: 'outside',
+      title: { text: axisTitle(stem, 1, vr) }, zeroline: false, ticks: 'outside',
       ...(input.view?.ranges ? { range: input.view.ranges.x, autorange: false } : {}),
     },
     yaxis: {
-      title: { text: `${stem} 2` }, zeroline: false, ticks: 'outside',
+      title: { text: axisTitle(stem, 2, vr) }, zeroline: false, ticks: 'outside',
       scaleanchor: 'x', scaleratio: 1,
       ...(input.view?.ranges ? { range: input.view.ranges.y, autorange: false } : {}),
     },

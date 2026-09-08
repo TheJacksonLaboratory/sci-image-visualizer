@@ -211,6 +211,16 @@ export interface SpatialEmbeddingMeta {
    * and a reader comparing against a paper's figure needs to know which they are looking at.
    */
   derived?: boolean;
+  /**
+   * Fraction of total variance each axis accounts for, index-aligned with the dimensions.
+   *
+   * Only meaningful for a LINEAR embedding — PCA. Its axes are ordered, and each one explains a
+   * measurable share of the variance, which is the whole reason to look at a PCA rather than a
+   * UMAP: "PC1 (23%)" says something, where "UMAP 1" says nothing at all. A UMAP's coordinates
+   * are an arbitrary output of an optimisation with no variance to report, so this stays absent
+   * there rather than being faked.
+   */
+  varianceRatio?: number[];
 }
 
 /**

@@ -16,7 +16,7 @@ import {
 import { cellsAsGroups, heatmapMatrix } from '../spatial/spatial-heatmap';
 import {
   OmicsChartKind, OmicsGrouping, benefitsFromGrouping, buildCountTraces, buildHeatmapTraces,
-  buildOmicsTraces, buildUmapTraces, countsLayout, heatmapLayout, omicsLayout, umapLayout,
+  buildOmicsTraces, buildEmbeddingTraces, countsLayout, heatmapLayout, omicsLayout, embeddingLayout,
 } from '../implementations/plotly/omics-trace-builders';
 
 /** Per-instance chart-div id source — see {@link SpatialChartsComponent.chartDiv}. */
@@ -133,8 +133,11 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   ];
 
   /** Offered only when the dataset publishes an embedding to draw. */
+  // Labelled for what it is rather than for one instance of it: this view draws whatever
+  // embedding the dataset publishes — a UMAP, a PCA, a t-SNE — and calling the tab "UMAP"
+  // while it showed a PCA would be a lie the picker beneath it immediately contradicts.
   private static readonly EMBEDDING_KINDS: { label: string; value: OmicsChartKind }[] = [
-    { label: 'UMAP', value: 'umap' },
+    { label: 'Embedding', value: 'embedding' },
   ];
 
   /** The kinds the ACTIVE subject can be drawn as. A category code is a label,
@@ -273,7 +276,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       this.embeddingCoords = null;
       this.embeddingCodes = null;
       // Nothing to draw for the kind that was selected; fall back rather than sit blank.
-      if (this.kind === 'umap' && this.embeddings.length === 0) this.kind = 'histogram';
+      if (this.kind === 'embedding' && this.embeddings.length === 0) this.kind = 'histogram';
     }));
   }
 
@@ -561,6 +564,8 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       ...(coords.z ? { z: coords.z } : {}),
       label: meta.label ?? meta.name,
       derived: meta.derived,
+      // Present for a PCA, absent for a UMAP — see `varianceRatio` on the meta.
+      ...(meta.varianceRatio ? { varianceRatio: meta.varianceRatio } : {}),
       ...(this.categorical
         ? {
           categories: {
@@ -575,7 +580,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       // rotating and zooming leave it.
       ...(view ? { view } : {}),
     };
-    await this.draw(buildUmapTraces(input), umapLayout(input), EMBEDDING_CONFIG, target);
+    await this.draw(buildEmbeddingTraces(input), embeddingLayout(input), EMBEDDING_CONFIG, target);
     this.bindEmbeddingSelection(target);
   }
 
@@ -601,7 +606,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       const points = (ev as { points?: readonly unknown[] } | undefined)?.points ?? [];
       const indices: number[] = [];
       for (const p of points) {
-        // The observation index rides on `customdata` — see `buildUmapTraces`. A point's
+        // The observation index rides on `customdata` — see `buildEmbeddingTraces`. A point's
         // index within its trace is not the observation once the points are split by
         // category, so this is the only correct source.
         const id = (p as { customdata?: unknown }).customdata;
@@ -741,7 +746,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     // Guard on the div the ACTIVE kind will draw into, not always the shared one. While
     // the embedding is detached the inline div is removed by its `*ngIf`, so checking
     // that one bailed here and the detached window never got a plot.
-    const target = this.kind === 'umap' ? this.embeddingTarget : this.chartDiv;
+    const target = this.kind === 'embedding' ? this.embeddingTarget : this.chartDiv;
     if (!document.getElementById(target)) return;
     // The heatmap answers a different question from the other kinds — which
     // genes distinguish which groups — so it is driven by its own gene list and
@@ -752,7 +757,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     }
     // Also independent of the active colour source: the coordinates are the dataset's,
     // and the colouring merely follows whatever the map is using.
-    if (this.kind === 'umap') {
+    if (this.kind === 'embedding') {
       await this.renderEmbedding();
       return;
     }

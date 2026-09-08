@@ -179,6 +179,12 @@ def main() -> None:
                 meta["label"] = label
             if key in args.derived:
                 meta["derived"] = True
+            # Variance per axis, for a LINEAR embedding. Written by compute-pca.py as
+            # `uns/<key>_variance_ratio`; absent for a UMAP, which has no variance to
+            # report because its axes are an arbitrary output of an optimisation.
+            ratios = f["uns"].get(f"{key}_variance_ratio") if "uns" in f else None
+            if ratios is not None:
+                meta["varianceRatio"] = [float(v) for v in ratios[: emb.shape[1]]]
             embeddings.append(meta)
 
         # --- manifest --------------------------------------------------------

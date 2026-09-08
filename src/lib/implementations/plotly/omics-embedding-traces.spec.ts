@@ -1,5 +1,5 @@
 import {
-  UMAP_MAX_LEGEND_CATEGORIES, UMAP_MAX_LEGEND_SHOWN, buildUmapTraces, umapLayout,
+  EMBEDDING_MAX_LEGEND_CATEGORIES, EMBEDDING_MAX_LEGEND_SHOWN, buildEmbeddingTraces, embeddingLayout,
 } from './omics-trace-builders';
 import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
 
@@ -11,7 +11,7 @@ import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
  * keeps its colour and its name, that a selection dims rather than deletes context, and that the
  * axes cannot invent structure.
  */
-describe('buildUmapTraces', () => {
+describe('buildEmbeddingTraces', () => {
   const f32 = (...v: number[]) => Float32Array.from(v);
   const cats = (names: string[], colors: string[], codes: number[]) =>
     ({ names, colors, codes: Uint16Array.from(codes) });
@@ -19,7 +19,7 @@ describe('buildUmapTraces', () => {
   it('draws one trace per category, so the legend can isolate one', () => {
     // A trace each is what makes the legend entries toggle — clicking a population to
     // isolate it is how these plots are read.
-    const traces = buildUmapTraces({
+    const traces = buildEmbeddingTraces({
       x: f32(1, 2, 3, 4), y: f32(5, 6, 7, 8), label: 'UMAP',
       categories: cats(['A', 'B'], ['#f00', '#00f'], [0, 1, 0, 1]),
     }) as any[];
@@ -32,12 +32,12 @@ describe('buildUmapTraces', () => {
 
   it('uses scattergl, not svg', () => {
     // 10^4-10^6 points: the SVG renderer would not survive it.
-    const traces = buildUmapTraces({ x: f32(1), y: f32(2), label: 'UMAP' }) as any[];
+    const traces = buildEmbeddingTraces({ x: f32(1), y: f32(2), label: 'UMAP' }) as any[];
     expect(traces[0].type).toBe('scattergl');
   });
 
   it('names the category in the hover', () => {
-    const traces = buildUmapTraces({
+    const traces = buildEmbeddingTraces({
       x: f32(1, 2), y: f32(3, 4), label: 'UMAP',
       categories: cats(['Gut tube', 'Endothelium'], ['#f00', '#00f'], [0, 1]),
     }) as any[];
@@ -47,7 +47,7 @@ describe('buildUmapTraces', () => {
   it('drops unassigned observations rather than colouring them as a population', () => {
     // NO_CATEGORY is "we do not know", which must not acquire a colour and a legend
     // entry of its own — that reads as a real class.
-    const traces = buildUmapTraces({
+    const traces = buildEmbeddingTraces({
       x: f32(1, 2, 3), y: f32(4, 5, 6), label: 'UMAP',
       categories: cats(['A'], ['#f00'], [0, NO_CATEGORY, 0]),
     }) as any[];
@@ -56,7 +56,7 @@ describe('buildUmapTraces', () => {
   });
 
   it('omits a category with no points instead of an empty legend entry', () => {
-    const traces = buildUmapTraces({
+    const traces = buildEmbeddingTraces({
       x: f32(1), y: f32(2), label: 'UMAP',
       categories: cats(['present', 'absent'], ['#f00', '#00f'], [0]),
     }) as any[];
@@ -66,10 +66,10 @@ describe('buildUmapTraces', () => {
   it('collapses to a single trace past the legend cap', () => {
     // 338 subclasses would be 338 traces and an unreadable legend. One trace with a
     // per-point colour still draws, and the hover still names the category.
-    const n = UMAP_MAX_LEGEND_CATEGORIES + 1;
+    const n = EMBEDDING_MAX_LEGEND_CATEGORIES + 1;
     const names = Array.from({ length: n }, (_, i) => `c${i}`);
     const colors = Array.from({ length: n }, () => '#123456');
-    const traces = buildUmapTraces({
+    const traces = buildEmbeddingTraces({
       x: f32(...Array.from({ length: n }, (_, i) => i)),
       y: f32(...Array.from({ length: n }, (_, i) => i)),
       label: 'UMAP',
@@ -82,7 +82,7 @@ describe('buildUmapTraces', () => {
   });
 
   it('draws a legend for a handful of categories', () => {
-    const traces = buildUmapTraces({
+    const traces = buildEmbeddingTraces({
       x: f32(1, 2), y: f32(1, 2), label: 'UMAP',
       categories: cats(['A', 'B'], ['#f00', '#00f'], [0, 1]),
     }) as any[];
@@ -93,9 +93,9 @@ describe('buildUmapTraces', () => {
     // seqFISH's 22 cell types stack into one tall column, overlapping the axis title and
     // running off the panel. The colours already match the map, which lists them, and
     // hover names the one under the cursor — so the plot takes the space instead.
-    const n = UMAP_MAX_LEGEND_SHOWN + 1;
+    const n = EMBEDDING_MAX_LEGEND_SHOWN + 1;
     const names = Array.from({ length: n }, (_, i) => `c${i}`);
-    const traces = buildUmapTraces({
+    const traces = buildEmbeddingTraces({
       x: f32(...Array.from({ length: n }, (_, i) => i)),
       y: f32(...Array.from({ length: n }, (_, i) => i)),
       label: 'UMAP',
@@ -111,7 +111,7 @@ describe('buildUmapTraces', () => {
   it('dims unselected points rather than removing them', () => {
     // The shape of the whole embedding is the context that makes a selection legible;
     // dropping it would leave a few dots floating in an empty plane.
-    const traces = buildUmapTraces({
+    const traces = buildEmbeddingTraces({
       x: f32(1, 2, 3, 4), y: f32(1, 2, 3, 4), label: 'UMAP',
       categories: cats(['A'], ['#f00'], [0, 0, 0, 0]),
       selection: Uint8Array.from([1, 0, 1, 0]),
@@ -125,7 +125,7 @@ describe('buildUmapTraces', () => {
 
   it('sets no per-point opacity when nothing is selected', () => {
     // An opacity array per point costs memory and gains nothing with no selection.
-    const traces = buildUmapTraces({
+    const traces = buildEmbeddingTraces({
       x: f32(1, 2), y: f32(1, 2), label: 'UMAP',
       categories: cats(['A'], ['#f00'], [0, 0]),
     }) as any[];
@@ -133,7 +133,7 @@ describe('buildUmapTraces', () => {
   });
 
   it('returns nothing to draw for an empty embedding', () => {
-    expect(buildUmapTraces({ x: f32(), y: f32(), label: 'UMAP' })).toEqual([]);
+    expect(buildEmbeddingTraces({ x: f32(), y: f32(), label: 'UMAP' })).toEqual([]);
   });
 });
 
@@ -145,7 +145,7 @@ describe('a 3D embedding', () => {
   it('switches to a rotatable 3D scatter when a third dimension is given', () => {
     // Not a `scattergl` with a z: `scatter3d` is a different trace type with its own
     // scene, which is why the third dimension cannot simply be added to the plane.
-    const traces = buildUmapTraces({
+    const traces = buildEmbeddingTraces({
       x: f32(1, 2), y: f32(3, 4), z: f32(5, 6), label: 'UMAP',
     }) as any[];
     expect(traces[0].type).toBe('scatter3d');
@@ -153,7 +153,7 @@ describe('a 3D embedding', () => {
   });
 
   it('stays a 2D scattergl with no third dimension', () => {
-    const traces = buildUmapTraces({ x: f32(1), y: f32(2), label: 'UMAP' }) as any[];
+    const traces = buildEmbeddingTraces({ x: f32(1), y: f32(2), label: 'UMAP' }) as any[];
     expect(traces[0].type).toBe('scattergl');
     expect(traces[0].z).toBeUndefined();
   });
@@ -161,7 +161,7 @@ describe('a 3D embedding', () => {
   it('carries the third dimension per category, index-aligned with x and y', () => {
     // The per-category split takes a SUBSET of points, so z has to be subset the same
     // way — a mismatch would place cells at another cell's depth.
-    const traces = buildUmapTraces({
+    const traces = buildEmbeddingTraces({
       x: f32(10, 20, 30, 40), y: f32(11, 21, 31, 41), z: f32(12, 22, 32, 42),
       label: 'UMAP',
       categories: cats(['A', 'B'], ['#f00', '#00f'], [0, 1, 0, 1]),
@@ -174,14 +174,14 @@ describe('a 3D embedding', () => {
   });
 
   it('keeps observation indices on the 3D traces, so a pick still resolves', () => {
-    const traces = buildUmapTraces({
+    const traces = buildEmbeddingTraces({
       x: f32(1, 2), y: f32(3, 4), z: f32(5, 6), label: 'UMAP',
     }) as any[];
     expect(traces[0].customdata).toEqual([0, 1]);
   });
 
   it('lays out a scene with three named axes and true proportions', () => {
-    const l = umapLayout({
+    const l = embeddingLayout({
       x: f32(1), y: f32(2), z: f32(3), label: 'UMAP', derived: true,
     }) as any;
     expect(l.scene.xaxis.title.text).toBe('UMAP 1');
@@ -196,7 +196,7 @@ describe('a 3D embedding', () => {
     // Verified against the bundled Plotly: `scatter3d` collapses a per-point
     // `marker.opacity` array to a scalar, so the dimming that works in 2D did nothing in
     // 3D and a selection appeared to highlight nothing. Colour arrays ARE honoured.
-    const traces = buildUmapTraces({
+    const traces = buildEmbeddingTraces({
       x: f32(1, 2), y: f32(3, 4), z: f32(5, 6), label: 'UMAP',
       categories: cats(['A'], ['#000000'], [0, 0]),
       selection: Uint8Array.from([1, 0]),
@@ -211,7 +211,7 @@ describe('a 3D embedding', () => {
   });
 
   it('still dims by opacity in 2D, where it is honoured and keeps the true colour', () => {
-    const traces = buildUmapTraces({
+    const traces = buildEmbeddingTraces({
       x: f32(1, 2), y: f32(3, 4), label: 'UMAP',
       categories: cats(['A'], ['#000000'], [0, 0]),
       selection: Uint8Array.from([1, 0]),
@@ -222,7 +222,7 @@ describe('a 3D embedding', () => {
 
   it('leaves 3D colours flat when nothing is selected', () => {
     // No selection means no dimming, and a flat colour is cheaper than 19k strings.
-    const traces = buildUmapTraces({
+    const traces = buildEmbeddingTraces({
       x: f32(1, 2), y: f32(3, 4), z: f32(5, 6), label: 'UMAP',
       categories: cats(['A'], ['#123456'], [0, 0]),
     }) as any[];
@@ -233,11 +233,11 @@ describe('a 3D embedding', () => {
     // Dimming must preserve which category a point belongs to — a muted red and a muted
     // blue have to stay distinguishable, or the plot loses its meaning when anything is
     // selected.
-    const red = buildUmapTraces({
+    const red = buildEmbeddingTraces({
       x: f32(1), y: f32(1), z: f32(1), label: 'U',
       categories: cats(['A'], ['#ff0000'], [0]), selection: Uint8Array.from([0]),
     }) as any[];
-    const blue = buildUmapTraces({
+    const blue = buildEmbeddingTraces({
       x: f32(1), y: f32(1), z: f32(1), label: 'U',
       categories: cats(['A'], ['#0000ff'], [0]), selection: Uint8Array.from([0]),
     }) as any[];
@@ -249,7 +249,7 @@ describe('a 3D embedding', () => {
     // plot useless for the thing it is for. Plotly.react resets the camera unless the
     // layout carries it.
     const camera = { eye: { x: 1.5, y: -0.5, z: 0.2 } };
-    const l = umapLayout({
+    const l = embeddingLayout({
       x: f32(1), y: f32(2), z: f32(3), label: 'UMAP', view: { camera },
     }) as any;
     expect(l.scene.camera).toBe(camera);
@@ -258,7 +258,7 @@ describe('a 3D embedding', () => {
   it('omits the camera when there is none to keep', () => {
     // A first draw has no camera yet, and passing undefined would pin Plotly's default
     // rather than letting it choose.
-    const l = umapLayout({ x: f32(1), y: f32(2), z: f32(3), label: 'UMAP' }) as any;
+    const l = embeddingLayout({ x: f32(1), y: f32(2), z: f32(3), label: 'UMAP' }) as any;
     expect('camera' in l.scene).toBe(false);
   });
 
@@ -266,31 +266,80 @@ describe('a 3D embedding', () => {
     // That a recomputed UMAP is not the published picture does need saying, and the
     // panel's caption says it. Repeating it over the plot cost a strip of the panel's
     // height and, in a 3D scene, sat on top of the cloud.
-    const l = umapLayout({ x: f32(1), y: f32(2), z: f32(3), label: 'UMAP', derived: true }) as any;
+    const l = embeddingLayout({ x: f32(1), y: f32(2), z: f32(3), label: 'UMAP', derived: true }) as any;
     expect(l.annotations).toBeUndefined();
     // …and no top margin reserved for one.
     expect(l.margin.t).toBe(0);
   });
 });
 
-describe('umapLayout', () => {
+describe('embeddingLayout', () => {
   it('locks the axes to equal scale', () => {
     // An embedding's axes carry no units, so distances only compare if both are scaled
     // alike. Stretching one to fill the panel invents structure that is not in the data.
-    const l = umapLayout({ x: Float32Array.of(1), y: Float32Array.of(1), label: 'UMAP' }) as any;
+    const l = embeddingLayout({ x: Float32Array.of(1), y: Float32Array.of(1), label: 'UMAP' }) as any;
     expect(l.yaxis.scaleanchor).toBe('x');
     expect(l.yaxis.scaleratio).toBe(1);
   });
 
+  it('labels each axis with the variance it explains, for a PCA', () => {
+    // The whole reason to show a PCA beside a UMAP: its axes are ordered and each
+    // explains a measurable share, so the label is a statement a reader can act on.
+    const l = embeddingLayout({
+      x: Float32Array.of(1), y: Float32Array.of(1), label: 'PCA',
+      varianceRatio: [0.182, 0.071],
+    }) as any;
+    expect(l.xaxis.title.text).toBe('PCA 1 (18.2%)');
+    expect(l.yaxis.title.text).toBe('PCA 2 (7.1%)');
+  });
+
+  it('labels a 3D PCA scene the same way', () => {
+    const l = embeddingLayout({
+      x: Float32Array.of(1), y: Float32Array.of(1), z: Float32Array.of(1),
+      label: 'PCA 3D', varianceRatio: [0.182, 0.071, 0.05],
+    }) as any;
+    expect(l.scene.zaxis.title.text).toBe('PCA 3D 3 (5.0%)');
+  });
+
+  it('leaves a UMAP axis unlabelled, having no variance to report', () => {
+    // A UMAP's coordinates are an arbitrary output of an optimisation — unordered and
+    // unitless — so a percentage there would be an invention.
+    const l = embeddingLayout({
+      x: Float32Array.of(1), y: Float32Array.of(1), label: 'UMAP',
+    }) as any;
+    expect(l.xaxis.title.text).toBe('UMAP 1');
+  });
+
+  it('ignores a variance list shorter than the dimensions', () => {
+    const l = embeddingLayout({
+      x: Float32Array.of(1), y: Float32Array.of(1), z: Float32Array.of(1),
+      label: 'PCA', varianceRatio: [0.2],
+    }) as any;
+    expect(l.scene.xaxis.title.text).toBe('PCA 1 (20.0%)');
+    expect(l.scene.yaxis.title.text).toBe('PCA 2');
+    expect(l.scene.zaxis.title.text).toBe('PCA 3');
+  });
+
+  it('ignores a non-finite entry rather than printing "(NaN%)"', () => {
+    // A truncated list is caught by being undefined; an actual NaN inside it is not, and
+    // needs its own guard. Testing only the short list left that guard unexercised.
+    const l = embeddingLayout({
+      x: Float32Array.of(1), y: Float32Array.of(1),
+      label: 'PCA', varianceRatio: [Number.NaN, 0.07],
+    }) as any;
+    expect(l.xaxis.title.text).toBe('PCA 1');
+    expect(l.yaxis.title.text).toBe('PCA 2 (7.0%)');
+  });
+
   it('names the axes after the embedding', () => {
-    const l = umapLayout({ x: Float32Array.of(1), y: Float32Array.of(1), label: 't-SNE' }) as any;
+    const l = embeddingLayout({ x: Float32Array.of(1), y: Float32Array.of(1), label: 't-SNE' }) as any;
     expect(l.xaxis.title.text).toBe('t-SNE 1');
     expect(l.yaxis.title.text).toBe('t-SNE 2');
   });
 
   it('carries a zoomed 2D range across the redraw', () => {
     const ranges = { x: [-1, 1], y: [-2, 2] };
-    const l = umapLayout({
+    const l = embeddingLayout({
       x: Float32Array.of(1), y: Float32Array.of(1), label: 'UMAP', view: { ranges },
     }) as any;
     expect(l.xaxis.range).toBe(ranges.x);
@@ -303,7 +352,7 @@ describe('umapLayout', () => {
   it('leaves the axes autoranging when the user has not zoomed', () => {
     // Freezing an autoranged axis would stop the plot re-fitting when the data changes —
     // switching embedding, or a new dataset.
-    const l = umapLayout({
+    const l = embeddingLayout({
       x: Float32Array.of(1), y: Float32Array.of(1), label: 'UMAP',
     }) as any;
     expect(l.xaxis.range).toBeUndefined();
@@ -314,7 +363,7 @@ describe('umapLayout', () => {
     // The derived/published distinction is carried by the panel's caption, not by text
     // over the plot — two statements of one fact, and the plot is the scarcer space.
     for (const derived of [true, false]) {
-      const l = umapLayout({
+      const l = embeddingLayout({
         x: Float32Array.of(1), y: Float32Array.of(1), label: 'UMAP', derived,
       }) as any;
       expect(l.annotations).toBeUndefined();

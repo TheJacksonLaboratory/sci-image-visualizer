@@ -588,21 +588,21 @@ describe('SpatialChartsComponent', () => {
 
     it('is not offered for a dataset that publishes no embedding', async () => {
       await build(controls);
-      expect(component.kindOptions.map((k) => k.value)).not.toContain('umap');
+      expect(component.kindOptions.map((k) => k.value)).not.toContain('embedding');
     });
 
     it('is offered once the dataset publishes one', async () => {
       dataset$.next({ ...dataset, embeddings: [umapMeta] });
       await build(controls);
       await flush();
-      expect(component.kindOptions.map((k) => k.value)).toContain('umap');
+      expect(component.kindOptions.map((k) => k.value)).toContain('embedding');
     });
 
     it('draws the served coordinates', async () => {
       dataset$.next({ ...dataset, embeddings: [umapMeta] });
       await build(controls);
       await flush();
-      component.onKind('umap');
+      component.onKind('embedding');
       await flush();
 
       expect(controls.getEmbedding).toHaveBeenCalledWith('X_umap');
@@ -625,7 +625,7 @@ describe('SpatialChartsComponent', () => {
       dataset$.next({ ...dataset, embeddings: [meta3d] });
       await build(controls);
       await flush();
-      component.onKind('umap');
+      component.onKind('embedding');
       await flush();
 
       const { traces, layout } = lastPlot();
@@ -641,7 +641,7 @@ describe('SpatialChartsComponent', () => {
       dataset$.next({ ...dataset, embeddings: [umapMeta] });
       await build(controls);
       await flush();
-      component.onKind('umap');
+      component.onKind('embedding');
       await flush();
       expect((Plotly.react as jest.Mock).mock.calls.at(-1)?.[0]).toBe(component.chartDiv);
 
@@ -670,7 +670,7 @@ describe('SpatialChartsComponent', () => {
       dataset$.next({ ...dataset, embeddings: [umapMeta] });
       await build(controls);
       await flush();
-      component.onKind('umap');
+      component.onKind('embedding');
       await flush();
       (Plotly.purge as jest.Mock).mockClear();
 
@@ -701,7 +701,7 @@ describe('SpatialChartsComponent', () => {
       dataset$.next({ ...dataset, embeddings: [meta3d] });
       await build(controls);
       await flush();
-      component.onKind('umap');
+      component.onKind('embedding');
       await flush();
 
       // Stand in for the user having rotated it: Plotly keeps the live camera here.
@@ -723,7 +723,7 @@ describe('SpatialChartsComponent', () => {
       dataset$.next({ ...dataset, embeddings: [umapMeta] });
       await build(controls);
       await flush();
-      component.onKind('umap');
+      component.onKind('embedding');
       await flush();
 
       const el = document.getElementById(component.chartDiv) as unknown as
@@ -744,7 +744,7 @@ describe('SpatialChartsComponent', () => {
       dataset$.next({ ...dataset, embeddings: [umapMeta] });
       await build(controls);
       await flush();
-      component.onKind('umap');
+      component.onKind('embedding');
       await flush();
 
       const el = document.getElementById(component.chartDiv) as unknown as
@@ -771,7 +771,7 @@ describe('SpatialChartsComponent', () => {
       dataset$.next({ ...dataset, embeddings: [meta3d] });
       await build(controls);
       await flush();
-      component.onKind('umap');
+      component.onKind('embedding');
       await flush();
 
       expect(component.embeddingNote).toMatch(/[Cc]omputed here/);
@@ -784,7 +784,7 @@ describe('SpatialChartsComponent', () => {
       dataset$.next({ ...dataset, embeddings: [umapMeta] });
       await build(controls);
       await flush();
-      component.onKind('umap');
+      component.onKind('embedding');
       await flush();
       const calls = (controls.getEmbedding as jest.Mock).mock.calls.length;
 
@@ -799,13 +799,13 @@ describe('SpatialChartsComponent', () => {
       dataset$.next({ ...dataset, embeddings: [umapMeta] });
       await build(controls);
       await flush();
-      component.onKind('umap');
+      component.onKind('embedding');
       await flush();
-      expect(component.kind).toBe('umap');
+      expect(component.kind).toBe('embedding');
 
       dataset$.next({ ...dataset, id: 'other', embeddings: undefined });
       await flush();
-      expect(component.kind).not.toBe('umap');
+      expect(component.kind).not.toBe('embedding');
     });
 
     it('says when the source serves no embeddings at all', async () => {
@@ -814,7 +814,7 @@ describe('SpatialChartsComponent', () => {
       await flush();
       // A host may advertise an embedding without implementing the accessor.
       (controls as { getEmbedding?: unknown }).getEmbedding = undefined;
-      component.onKind('umap');
+      component.onKind('embedding');
       await flush();
       expect(component.notice).toMatch(/does not serve embeddings/);
     });
