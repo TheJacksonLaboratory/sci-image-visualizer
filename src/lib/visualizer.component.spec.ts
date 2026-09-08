@@ -542,24 +542,19 @@ describe('VisualizerComponent (UI shell)', () => {
         expect(c.plotTypeOptions.some((d) => d.type === PlotType.IMAGE)).toBe(true);
       });
 
-      it('drops the pixel modes when a loaded image is cleared under a dataset', async () => {
-        // The sequence that actually happens: a slide is open, then an image-less
-        // spatial dataset is picked and the host clears the image. Keeping the stale
-        // `imageInfo` would leave the pixel modes on offer for pixels that are gone.
+      it('keeps the pixel modes for a volume-backed dataset with no imageRef', async () => {
+        // The ABC 3D dataset registers onto no section, but publishes its VOLUME as a
+        // grayscale z-stack image — and Volume / Isosurface are exactly how it is read.
+        // Hiding pixel modes for "declares no imageRef" alone took those away.
         const c = makeComponent(plotService, port);
         (c as any).watchSpatialDataset();
         dataset$.next({
-          id: 'seqfish', name: 'seqFISH', observations: { count: 3 }, columns: [],
+          ...VOLUME_DATASET,
+          volume: { width: 4, height: 4, depth: 4, voxelSize: [1, 1, 1] },
         });
         await flush();
-        c.imageInfo = { fileName: '002_img.png', isStack: false, isGrayscale: false } as any;
-        (c as any).computePlotTypeOptions();
+
         expect(c.plotTypeOptions.some((d) => d.source === 'image')).toBe(true);
-
-        (c as any).onImageCleared();
-
-        expect(c.imageInfo).toBeUndefined();
-        expect(c.plotTypeOptions.some((d) => d.source === 'image')).toBe(false);
       });
 
       it('keeps Image on offer when there is no dataset at all', async () => {

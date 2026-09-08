@@ -424,7 +424,11 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       // Whether the dataset says it registers onto a tissue image. Distinct from an
       // image being LOADED: a registered dataset's image may still be on its way, and
       // the pixel modes must not flicker out of the selector while it arrives.
-      this.spatialDatasetRegistered = !!dataset?.imageRef;
+      // A registered dataset draws over a tissue image; a volume-backed one publishes its
+      // volume AS a grayscale z-stack image (`buildVolumeStackImage`). Either way pixels
+      // exist, so the pixel modes stay on offer — Volume and Isosurface are exactly how
+      // a 3D omics dataset is read.
+      this.spatialDatasetHasPixels = !!dataset?.imageRef || hasVolume;
       this.hasSpatialVolume = hasVolume;
       this.computePlotTypeOptions();
       // A dataset with no reference image has nothing to draw observations OVER:
@@ -565,7 +569,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
         // Image stays on offer, because a host that has not loaded anything yet needs a
         // default and an empty selector would be worse than a blank view.
         if (d.source === 'image' && this.hasSpatialDataset
-          && !this.spatialDatasetRegistered && !this.imageInfo) return false;
+          && !this.spatialDatasetHasPixels) return false;
         return true;
       })
       // Default selector shows the suffix-free productionLabel; test mode keeps
@@ -588,8 +592,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   /** If the active plot type is no longer in the offered options (e.g. test mode
    *  turned off while a test-only type was active, or a scalar type carried onto
    *  an RGB image), fall back to the default 2D Image view. */
-  /** Whether the live spatial dataset registers onto a tissue image. */
-  private spatialDatasetRegistered = false;
+  /** Whether the live spatial dataset brings pixels of its own — a tissue image it
+   *  registers onto, or a volume that is published as a z-stack image. */
+  private spatialDatasetHasPixels = false;
 
   /**
    * The host published NO image — a spatial dataset that brings none does this.
@@ -602,7 +607,15 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.imageInfo = undefined;
     this.loadedFileName = undefined;
     this.computePlotTypeOptions();
-    this.reconcileSelectedPlotType();
+    // Deliberately NOT reconciling the selected type here. Reconciling calls
+    // `setPlotType`, which drives a re-plot — and there is nothing to plot, so the
+    // Plotly backend read its own now-unset `imageInfo` and threw
+    // ("can't access property isGrayscale"), aborting the load with no observations
+    // drawn. Ignoring the empty emission entirely is what used to avoid that.
+    //
+    // Nothing is left stranded: an image is cleared because a spatial dataset that
+    // brings none is being opened, and that dataset's own subscription selects the
+    // mode its coordinates support a moment later.
     this.cdr.detectChanges();
   }
 
@@ -765,8 +778,14 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
           // reset stack options selection
           this.selectedStackOption = imgInfo.showStack ? this.stackOptions[1] : this.stackOptions[0];
 
-          this.isGrayscaleEvent.emit(this.imageInfo.isGrayscale);
-          this.isStackEvent.emit(this.imageInfo.isStack);
+          // Read from `imgInfo`, the value this emission carried, rather than from the
+          // field. Handling the empty emission means the field CAN be nulled part-way
+          // through this branch: `reconcileSelectedPlotType` may call `setPlotType`,
+          // which can make the host publish a new image state, re-entering this very
+          // subscription. Reading the field then threw on `isGrayscale` and aborted the
+          // handler, so the observations were never drawn.
+          this.isGrayscaleEvent.emit(imgInfo.isGrayscale);
+          this.isStackEvent.emit(imgInfo.isStack);
           // Reset to the default 2D Image view when a different image is
           // selected while a 3D type is active.
           if (!this.isHeatmap && imgInfo.fileName !== this.loadedFileName) {
@@ -777,7 +796,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
             this.activeSurface3dMode = 'turntable';
           }
           this.loadedFileName = imgInfo.fileName;
-          this.plotService.setImageMeta(this.imageInfo.imageMeta);
+          this.plotService.setImageMeta(imgInfo.imageMeta);
           const urls = imgInfo.urls;
           // A newer image ALWAYS preempts an in-flight render. This was
           // `if (!this.running)`, which DROPPED the new image while the old one

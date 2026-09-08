@@ -769,13 +769,13 @@ export class AppComponent implements OnDestroy {
           desc.mppX ?? 1, desc.mppY ?? 1, 3, 1,
         );
       }
-      if (!entry.imageId) {
-        // This dataset has no tissue image, so drop whatever slide is open. Leaving it
-        // up draws the observations over an unrelated image, which reads as them being
-        // registered onto it — and with a big fluorescence slide behind them, as the
-        // dataset having failed to load at all.
-        this.imageState.clearImage();
-      }
+      // NOT clearing the image for a dataset that brings none, deliberately. The Plotly
+      // backend assumes an image throughout — `imageInfo`, `trueImgSize` and others are
+      // declared with definite-assignment assertions — so leaving it with none set
+      // throws from whichever field the next render path happens to read. The
+      // observations are framed on their own coordinates regardless, and the pixel modes
+      // are no longer offered for such a dataset, so the leftover slide is not reachable;
+      // it is only visible if you zoom far enough out to find it.
       // With no reference image the visualizer picks the spatial mode itself, from
       // whether the coordinates carry a z — the cloud for a 3D dataset, the scatter
       // for one plane — so the host does not have to know which.
