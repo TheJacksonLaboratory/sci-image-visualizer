@@ -291,7 +291,7 @@ smoke check runs against.
 
 #### Converting an AnnData `.h5ad` into a bundle
 
-`scripts/h5ad-to-spatial.py` writes a bundle from any `.h5ad` whose `X` is a CSC matrix. Python
+`scripts/h5ad-to-spatial.py` writes a bundle from any `.h5ad` whose `X` is a CSC or CSR matrix. Python
 rather than Node, unlike its siblings: `.h5ad` is HDF5, and reading it from Node would mean a wasm
 HDF5 reader for a conversion that runs once, offline, and never at request time.
 
@@ -352,6 +352,59 @@ about 5 x 7 units), so the converter omits `micronsPerUnit` and no scale bar is 
 labelled in microns over unitless coordinates reads as a measurement and would be worse than none.
 And every embedding published with these datasets is **2D**; a 3D one has to be computed, which the
 manifest then marks `derived: true` so a reader knows it is not the published picture.
+
+#### A dataset with both an image and a published UMAP
+
+The two datasets above each cover one half. seqFISH ships a real UMAP but no tissue image;
+`demo-brain` has an image but fabricated expression, so an embedding of it would resolve five
+clean blobs purely because that is how the numbers were generated. The squidpy Visium H&E brain
+has **both** — a real H&E section and the authors' own `X_umap` — which is what makes it the one
+that exercises the image path and the embedding path together.
+
+```bash
+pip install h5py numpy pillow
+curl -O https://exampledata.scverse.org/squidpy/visium_hne_adata.h5ad   # 329 MB, no auth
+
+# 1. the tissue image, and the registration numbers it implies
+python3 scripts/visium-image.py --h5ad visium_hne_adata.h5ad --out visium-hne.png
+node scripts/make-pyramid.mjs visium-hne.png visium-hne-tissue --mpp 4.2646
+
+# 2. the bundle, registered onto that image
+python3 scripts/h5ad-to-spatial.py --h5ad visium_hne_adata.h5ad --out spatial/visium-hne \
+    --id visium-hne --name "Adult mouse brain Visium H&E · 2,688 spots (10x V1)" \
+    --spatial-key spatial --embedding X_umap:UMAP \
+    --column cluster:categorical \
+    --column total_counts:continuous --column n_genes_by_counts:continuous \
+    --features-unit "log1p normalized" \
+    --image-id visium-hne-tissue --image-scale 0.17011142,0.17011142 \
+    --image-mpp 4.2646,4.2646 --microns-per-unit 0.725456 --radius 37.91
+```
+
+Nothing else is wired: the example gallery reads `imageRef.imageId` out of the manifest, so a
+bundle that names an image appears over it with no code change. 18,078 genes come through, which
+is the point of a whole-transcriptome assay next to seqFISH's 351-plex panel — the gene picker
+then has to work at a realistic scale rather than a curated one.
+
+**The physical scale is measured, not read out of `scalefactors`.** The obvious source is
+`spot_diameter_fullres` against the 55 µm Visium spot, and it is wrong: on this dataset that
+field is 89.44 px, which against the measured lattice works out at 65.0 µm rather than 55 µm — an
+18% error in every distance on screen, with nothing to give it away because the picture stays
+entirely plausible. What is dependable is the spot **pitch**: Visium spots sit on a regular
+hexagonal lattice 100 µm centre-to-centre, a property of the slide rather than of the sample or of
+whichever spaceranger wrote the file. `array_row`/`array_col` say where each spot sits on it, so
+fitting the coordinates against them recovers the pitch to a fraction of a pixel (0.46 px here)
+and the hex regularity becomes a *check* on the whole assumption rather than something to hope
+for. `visium-image.py` does that fit, prints what the other route would have claimed, and refuses
+to proceed if the lattice is not hexagonal or the spots fall outside the image.
+
+Note which number does which job. The **pitch** sets the scale; the 55 µm **diameter** only sizes
+the drawn marker, via `--radius`. Sizing the marker from `spot_diameter_fullres` instead would
+draw 65 µm spots over a 55 µm reality — more overlap between neighbours than the assay has.
+
+Two frames are in play and they must not be confused. `obsm/spatial` is in FULL-RESOLUTION pixels
+while the image in the file is the 2000 px `hires` tier, so `imageRef.scale` is
+`tissue_hires_scalef` — that is what aligns the spots — and `--mpp` on the pyramid is µm per
+*served* pixel, which is what the scale bar reads. They differ by exactly that scale factor.
 
 ## Deploy (Cloud Run)
 

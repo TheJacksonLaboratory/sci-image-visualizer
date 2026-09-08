@@ -13,6 +13,14 @@ or cares which language wrote it.
         --spatial-key spatial --embedding X_umap:UMAP \
         --column celltype_mapped_refined:categorical --column Area:continuous
 
+`X` may be CSR or CSC. A dataset registered onto a tissue image adds the affine that places
+its coordinates in that image, which `visium-image.py` derives and prints:
+
+    python3 scripts/h5ad-to-spatial.py --h5ad visium_hne.h5ad --out spatial/visium-hne \
+        --id visium-hne --name "..." --column cluster:categorical \
+        --image-id visium-hne-tissue --image-scale 0.17011142,0.17011142 \
+        --image-mpp 3.6146,3.6146 --microns-per-unit 0.6149 --radius 44.72
+
 Layout written (see lib/spatial.mjs for the reader):
 
     manifest.json            served verbatim
@@ -86,6 +94,65 @@ def dense_gene_column(x: h5py.Group, n_obs: int, j: int) -> np.ndarray:
     return out
 
 
+def csc_from_csr(x: h5py.Group, n_obs: int, n_var: int) -> dict[str, np.ndarray]:
+    """A CSR matrix's nonzeros re-sorted into column order, in memory.
+
+    A gene is a COLUMN and the matrix is written one gene at a time, so CSR is the wrong way
+    round: collecting a single column from it means touching every row, once per gene. Sorting
+    the nonzeros by column instead is one pass, and what it produces IS the CSC of the same
+    matrix — so the per-gene write below needs no second code path.
+
+    The sort must be STABLE. `indices` within a CSR row are ascending in the row's own
+    positions, so a stable sort by column leaves each resulting column's row indices ascending
+    too, which is what CSC means. An unstable sort would still round-trip through
+    `dense_gene_column` (it scatters by index), but the result would no longer be a valid CSC
+    for anything else that read it.
+    """
+    indptr = x["indptr"][:]
+    col = x["indices"][:]
+    data = x["data"][:]
+    # int32 for the row ids: an AnnData with >2^31 observations is not a thing this converts.
+    row = np.repeat(np.arange(n_obs, dtype=np.int32), np.diff(indptr))
+    order = np.argsort(col, kind="stable")
+    counts = np.bincount(col, minlength=n_var)
+    out = {
+        "indptr": np.concatenate(([0], np.cumsum(counts))),
+        "indices": row[order],
+        "data": data[order],
+    }
+    if int(out["indptr"][-1]) != len(data):
+        raise SystemExit(f"CSR->CSC lost nonzeros: {int(out['indptr'][-1])} of {len(data)}")
+
+    # Densify a few columns BOTH ways and require them equal, because the failure this
+    # guards against is silent: a permutation applied to `indices` but not to `data`
+    # writes a full matrix of entirely plausible expression, attributed to the wrong
+    # cells. Nothing downstream can detect that, and neither can a nonzero count or a
+    # value total — both are preserved by exactly the misalignment in question. Actual
+    # columns, compared elementwise, are the only check that distinguishes them.
+    rng = np.random.default_rng(0)
+    nonempty = np.flatnonzero(counts)
+    if len(nonempty) > 0:
+        for j in rng.choice(nonempty, min(8, len(nonempty)), replace=False):
+            want = np.zeros(n_obs, dtype=np.float64)
+            here = col == j
+            want[row[here]] = data[here]
+            if not np.array_equal(want, dense_gene_column(out, n_obs, int(j)).astype(np.float64)):
+                raise SystemExit(f"CSR->CSC misplaced values in column {int(j)}")
+    return out
+
+
+def parse_pair(text: str, flag: str) -> list[float]:
+    """`--flag a,b` as two floats. Comma-separated rather than `nargs=2` so a negative
+    translate reads as a value and not as another flag."""
+    parts = text.split(",")
+    if len(parts) != 2:
+        raise SystemExit(f"{flag}: expected two comma-separated numbers, got {text!r}")
+    try:
+        return [float(v) for v in parts]
+    except ValueError:
+        raise SystemExit(f"{flag}: not a number pair: {text!r}")
+
+
 def write_soa(path: str, arr: np.ndarray) -> None:
     """Write an (N, D) array as D contiguous f32 planes — the coords/embedding layout."""
     with open(path, "wb") as fh:
@@ -108,6 +175,20 @@ def main() -> None:
                     help="uniform marker radius; default is half the mean point spacing")
     ap.add_argument("--derived", action="append", default=[],
                     help="embedding keys computed here rather than published with the dataset")
+    ap.add_argument("--features-unit", default=None,
+                    help="what the expression values are, e.g. 'log1p normalized'")
+    # Registration onto a tissue image. `world = coord * scale + translate`, so the scale is
+    # the ratio between the coordinates' frame and the SERVED image's — for Visium, spots
+    # recorded in full-resolution pixels drawn over the hires tier.
+    ap.add_argument("--image-id", default=None,
+                    help="tile-server image id these coordinates register onto")
+    ap.add_argument("--image-scale", default=None, metavar="SX,SY",
+                    help="data->world scale; omit when the coordinates are already image pixels")
+    ap.add_argument("--image-translate", default=None, metavar="TX,TY")
+    ap.add_argument("--image-mpp", default=None, metavar="MPPX,MPPY",
+                    help="microns per pixel of the served image")
+    ap.add_argument("--microns-per-unit", type=float, default=None,
+                    help="microns per coordinate unit; omit when the coordinates are not physical")
     args = ap.parse_args()
 
     with h5py.File(args.h5ad, "r") as f:
@@ -153,8 +234,10 @@ def main() -> None:
         x = f["X"]
         enc = x.attrs.get("encoding-type", b"")
         enc = enc.decode() if isinstance(enc, bytes) else enc
-        if enc != "csc_matrix":
-            raise SystemExit(f"X is {enc or 'dense'}; this script reads csc_matrix only")
+        if enc == "csr_matrix":
+            x = csc_from_csr(x, n, len(genes))
+        elif enc != "csc_matrix":
+            raise SystemExit(f"X is {enc or 'dense'}; this script reads csc_matrix and csr_matrix")
         with open(os.path.join(args.out, "features", "matrix.f32"), "wb") as fh:
             for j in range(len(genes)):
                 fh.write(dense_gene_column(x, n, j).tobytes())
@@ -210,12 +293,29 @@ def main() -> None:
             "columns": columns,
             "features": {"count": len(genes), "names": genes},
         }
+        if args.features_unit:
+            manifest["features"]["unit"] = args.features_unit
         if dims == 3:
             manifest["hasZ"] = True
         if embeddings:
             manifest["embeddings"] = embeddings
-        # micronsPerUnit is deliberately absent: these coordinates are normalized, not physical,
-        # so claiming a micron scale would put a scale bar on the screen that means nothing.
+        if args.image_id or args.image_scale:
+            ref = {}
+            if args.image_id:
+                ref["imageId"] = args.image_id
+            if args.image_scale:
+                ref["scale"] = parse_pair(args.image_scale, "--image-scale")
+            if args.image_translate:
+                ref["translate"] = parse_pair(args.image_translate, "--image-translate")
+            if args.image_mpp:
+                mpp = parse_pair(args.image_mpp, "--image-mpp")
+                ref["mppX"], ref["mppY"] = mpp[0], mpp[1]
+            manifest["imageRef"] = ref
+        # Absent unless given: coordinates that are NOT physical (normalized, or an
+        # embedding-like frame) would get a scale bar that means nothing, which is worse than
+        # no bar at all — it looks like a measurement.
+        if args.microns_per_unit is not None:
+            manifest["micronsPerUnit"] = args.microns_per_unit
         with open(os.path.join(args.out, "manifest.json"), "w") as fh:
             json.dump(manifest, fh, indent=2)
 
