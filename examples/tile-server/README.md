@@ -295,6 +295,15 @@ smoke check runs against.
 rather than Node, unlike its siblings: `.h5ad` is HDF5, and reading it from Node would mean a wasm
 HDF5 reader for a conversion that runs once, offline, and never at request time.
 
+Reading `X` lives in `scripts/anndata_x.py`, shared with the three compute scripts. It matters that
+it handles **both** layouts: a gene is a column, so CSC is what every caller here wants, but
+**scanpy writes CSR by default** — so a CSC-only reader rejects most `.h5ad` files in existence.
+Sorting the nonzeros by column once produces the CSC and needs no second code path. That sort is
+guarded by densifying sample columns both ways and comparing them elementwise, because the failure
+is silent: a permutation applied to `indices` but not to `data` writes a full matrix of entirely
+plausible expression attributed to the wrong cells, and neither a nonzero count nor a value total
+can tell — both are preserved by exactly that misalignment.
+
 ```bash
 pip install h5py numpy
 curl -O https://exampledata.scverse.org/squidpy/seqfish.h5ad     # 31 MB, no auth
@@ -379,6 +388,34 @@ python3 scripts/h5ad-to-spatial.py --h5ad visium_hne_adata.h5ad --out spatial/vi
     --image-id visium-hne-tissue --image-scale 0.17011142,0.17011142 \
     --image-mpp 4.2646,4.2646 --microns-per-unit 0.725456 --radius 37.91
 ```
+
+The three compute scripts then give it the same six embeddings seqFISH has:
+
+```bash
+python3 scripts/compute-pca.py    --h5ad visium_hne_adata.h5ad --key2d X_pca2d --key3d X_pca3d
+python3 scripts/compute-tsne.py   --h5ad visium_hne_adata.h5ad
+python3 scripts/compute-umap3d.py --h5ad visium_hne_adata.h5ad
+```
+
+`--key2d X_pca2d` rather than the default `X_pca`, and that override is the point: this file
+already HAS an `obsm/X_pca`, of 50 components, and it is the basis scanpy built the neighbour
+graph and the published UMAP from. Writing a 2-component PCA over that key would silently discard
+the provenance of the very embedding this dataset was chosen for. Whenever a source ships its own
+`X_pca`, pick a different key.
+
+Then re-run the converter with all six, marking which are computed here:
+
+```bash
+    --embedding X_umap:UMAP       --embedding X_umap3d:"UMAP 3D" \
+    --embedding X_pca2d:PCA       --embedding X_pca3d:"PCA 3D" \
+    --embedding X_tsne:t-SNE      --embedding X_tsne3d:"t-SNE 3D" \
+    --derived X_umap3d --derived X_pca2d --derived X_pca3d \
+    --derived X_tsne --derived X_tsne3d
+```
+
+`X_umap` is **not** in the `--derived` list, and that is the difference from seqFISH's line: here
+the 2-D UMAP is the authors' own, so it carries no "computed here" caption. Everything beside it
+does.
 
 Nothing else is wired: the example gallery reads `imageRef.imageId` out of the manifest, so a
 bundle that names an image appears over it with no code change. 18,078 genes come through, which

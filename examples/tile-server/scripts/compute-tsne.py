@@ -25,17 +25,7 @@ import sys
 import h5py
 import numpy as np
 
-
-def dense_from_csc(x: h5py.Group, n_obs: int, n_vars: int) -> np.ndarray:
-    out = np.zeros((n_obs, n_vars), dtype=np.float32)
-    indptr = x["indptr"][:]
-    indices = x["indices"][:]
-    data = x["data"][:]
-    for j in range(n_vars):
-        lo, hi = int(indptr[j]), int(indptr[j + 1])
-        if hi > lo:
-            out[indices[lo:hi], j] = data[lo:hi]
-    return out
+from anndata_x import dense_matrix, shape_of
 
 
 def main() -> None:
@@ -53,12 +43,8 @@ def main() -> None:
 
     with h5py.File(args.h5ad, "r") as f:
         x = f["X"]
-        enc = x.attrs.get("encoding-type", b"")
-        enc = enc.decode() if isinstance(enc, bytes) else enc
-        if enc != "csc_matrix":
-            raise SystemExit(f"X is {enc or 'dense'}; this script reads csc_matrix only")
-        n_obs, n_vars = (int(v) for v in x.attrs["shape"])
-        matrix = dense_from_csc(x, n_obs, n_vars)
+        n_obs, n_vars = shape_of(f, x)
+        matrix = dense_matrix(x, n_obs, n_vars)
 
     print(f"  matrix {matrix.shape}")
     centred = matrix - matrix.mean(axis=0, keepdims=True)
