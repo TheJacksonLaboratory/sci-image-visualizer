@@ -192,6 +192,24 @@ describe('a 3D embedding', () => {
     expect(l.xaxis).toBeUndefined();
   });
 
+  it('carries a scene camera across the redraw', () => {
+    // Rotating a cloud to see a structure and losing it on the next recolour makes the
+    // plot useless for the thing it is for. Plotly.react resets the camera unless the
+    // layout carries it.
+    const camera = { eye: { x: 1.5, y: -0.5, z: 0.2 } };
+    const l = umapLayout({
+      x: f32(1), y: f32(2), z: f32(3), label: 'UMAP', view: { camera },
+    }) as any;
+    expect(l.scene.camera).toBe(camera);
+  });
+
+  it('omits the camera when there is none to keep', () => {
+    // A first draw has no camera yet, and passing undefined would pin Plotly's default
+    // rather than letting it choose.
+    const l = umapLayout({ x: f32(1), y: f32(2), z: f32(3), label: 'UMAP' }) as any;
+    expect('camera' in l.scene).toBe(false);
+  });
+
   it('says it was computed here, which a 3D embedding always is', () => {
     // Nothing published with a spatial dataset is 3D, so this note is not optional
     // decoration — it is the difference between the paper's figure and ours.
@@ -213,6 +231,28 @@ describe('umapLayout', () => {
     const l = umapLayout({ x: Float32Array.of(1), y: Float32Array.of(1), label: 't-SNE' }) as any;
     expect(l.xaxis.title.text).toBe('t-SNE 1');
     expect(l.yaxis.title.text).toBe('t-SNE 2');
+  });
+
+  it('carries a zoomed 2D range across the redraw', () => {
+    const ranges = { x: [-1, 1], y: [-2, 2] };
+    const l = umapLayout({
+      x: Float32Array.of(1), y: Float32Array.of(1), label: 'UMAP', view: { ranges },
+    }) as any;
+    expect(l.xaxis.range).toBe(ranges.x);
+    expect(l.yaxis.range).toBe(ranges.y);
+    // Autorange must be off, or Plotly re-fits and the range is ignored.
+    expect(l.xaxis.autorange).toBe(false);
+    expect(l.yaxis.autorange).toBe(false);
+  });
+
+  it('leaves the axes autoranging when the user has not zoomed', () => {
+    // Freezing an autoranged axis would stop the plot re-fitting when the data changes —
+    // switching embedding, or a new dataset.
+    const l = umapLayout({
+      x: Float32Array.of(1), y: Float32Array.of(1), label: 'UMAP',
+    }) as any;
+    expect(l.xaxis.range).toBeUndefined();
+    expect(l.xaxis.autorange).toBeUndefined();
   });
 
   it('says on the plot when the embedding was computed here', () => {

@@ -90,3 +90,32 @@
   color: var(--text-color-secondary, #6c757d);
   line-height: 1.35;
 }
+
+// Detached: the panel says where the plot went rather than showing a blank area that
+// reads as a failure to draw.
+.sx-detached {
+  flex: 1;
+  min-height: 6rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  color: var(--text-color-secondary, #6c757d);
+}
+
+// The detached window's plot fills the dialog's content box, which is sized INLINE via
+// the dialog's `contentStyle` — not from here. `appendTo="body"` moves the dialog out of
+// this component's subtree, so a `:host ::ng-deep` rule cannot reach it: those compile to
+// a selector requiring the host as an ancestor. An earlier version of this file styled it
+// that way and the rule silently never matched, which is what left the plot 0px tall.
+//
+// This class still applies, because component styles attach to elements the template
+// created, wherever they end up in the document.
+.sx-detached-plot {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  // A 3D scene's tick labels can be drawn past the plot's own box and then sit over the
+  // caption below it.
+  overflow: hidden;
+}

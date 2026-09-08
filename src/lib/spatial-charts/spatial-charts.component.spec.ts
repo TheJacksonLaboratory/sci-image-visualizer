@@ -634,6 +634,133 @@ describe('SpatialChartsComponent', () => {
       expect(layout.scene.zaxis.title.text).toBe('UMAP 3D 3');
     });
 
+    it('draws into its own div once detached', async () => {
+      // Detached, the embedding must be plotted into the WINDOW's div. Drawing into the
+      // panel's div would leave the window blank while the panel showed a plot it is no
+      // longer meant to hold.
+      dataset$.next({ ...dataset, embeddings: [umapMeta] });
+      await build(controls);
+      await flush();
+      component.onKind('umap');
+      await flush();
+      expect((Plotly.react as jest.Mock).mock.calls.at(-1)?.[0]).toBe(component.chartDiv);
+
+      // The window's div only exists once it is rendered; this suite drives the
+      // component directly, so stand it in — and REMOVE the inline div, because the
+      // template does exactly that while detached. Leaving it present is what let an
+      // earlier version of this test pass against a component that could not draw
+      // detached at all.
+      const win = document.createElement('div');
+      win.id = component.embeddingDiv;
+      document.body.appendChild(win);
+      chartHost?.remove();
+      component.toggleEmbeddingDetached();
+      // Detaching does NOT draw on a timer: the window's div does not exist until
+      // PrimeNG has mounted the dialog, so its `onShow` drives that draw. The template
+      // wires it; here it is called directly.
+      component.onEmbeddingWindowShown();
+      await flush();
+
+      expect(component.embeddingDetached).toBe(true);
+      expect((Plotly.react as jest.Mock).mock.calls.at(-1)?.[0]).toBe(component.embeddingDiv);
+      win.remove();
+    });
+
+    it('purges the div it leaves, so no plot is stranded there', async () => {
+      dataset$.next({ ...dataset, embeddings: [umapMeta] });
+      await build(controls);
+      await flush();
+      component.onKind('umap');
+      await flush();
+      (Plotly.purge as jest.Mock).mockClear();
+
+      component.toggleEmbeddingDetached();
+      // Plotly keeps per-div state; a graph left in a div Angular then removes leaks its
+      // WebGL context.
+      expect(Plotly.purge).toHaveBeenCalledWith(component.chartDiv);
+    });
+
+    it('gives the two divs different ids per instance', async () => {
+      // They must not collide, and two mounted charts must not share either — the same
+      // reason `chartDiv` is per-instance at all.
+      await build(controls);
+      expect(component.chartDiv).not.toBe(component.embeddingDiv);
+      const first = component.chartDiv;
+      await build(controls);
+      expect(component.chartDiv).not.toBe(first);
+    });
+
+    it('keeps the 3D camera when a category is selected', async () => {
+      // The reported behaviour: rotate the cloud, pick a category, and the view snapped
+      // back. Plotly.react resets the scene camera unless the layout carries it, so the
+      // component has to read the LIVE camera and pass it back.
+      const meta3d = { name: 'X_umap3d', label: 'UMAP 3D', dims: 3 as const, derived: true };
+      controls.getEmbedding = jest.fn(async () => ({
+        meta: meta3d, x: f32(1, 2, 3, 4), y: f32(5, 6, 7, 8), z: f32(9, 10, 11, 12),
+      }));
+      dataset$.next({ ...dataset, embeddings: [meta3d] });
+      await build(controls);
+      await flush();
+      component.onKind('umap');
+      await flush();
+
+      // Stand in for the user having rotated it: Plotly keeps the live camera here.
+      const camera = { eye: { x: 2.1, y: 0.3, z: -1.2 } };
+      const el = document.getElementById(component.chartDiv) as unknown as
+        { _fullLayout: { scene: { camera: unknown } } };
+      el._fullLayout = { scene: { camera } };
+
+      selection$.next({ mask: Uint8Array.from([1, 0, 0, 0]), count: 1 });
+      await flush();
+
+      expect(lastPlot().layout.scene.camera).toBe(camera);
+    });
+
+    it('does not freeze a 2D plot the user has not zoomed', async () => {
+      // The other half of keeping the view: handing back an AUTORANGED range would pin
+      // the axes, so the plot would stop re-fitting when the data changes — switching
+      // embedding, or a new dataset, would draw into the old plot's window.
+      dataset$.next({ ...dataset, embeddings: [umapMeta] });
+      await build(controls);
+      await flush();
+      component.onKind('umap');
+      await flush();
+
+      const el = document.getElementById(component.chartDiv) as unknown as
+        { _fullLayout: unknown };
+      el._fullLayout = {
+        xaxis: { range: [-5, 5], autorange: true },
+        yaxis: { range: [-5, 5], autorange: true },
+      };
+
+      selection$.next({ mask: Uint8Array.from([1, 0, 0, 0]), count: 1 });
+      await flush();
+
+      expect(lastPlot().layout.xaxis.autorange).toBeUndefined();
+      expect(lastPlot().layout.xaxis.range).toBeUndefined();
+    });
+
+    it('keeps a 2D range the user HAS zoomed to', async () => {
+      dataset$.next({ ...dataset, embeddings: [umapMeta] });
+      await build(controls);
+      await flush();
+      component.onKind('umap');
+      await flush();
+
+      const el = document.getElementById(component.chartDiv) as unknown as
+        { _fullLayout: unknown };
+      el._fullLayout = {
+        xaxis: { range: [-1, 1], autorange: false },
+        yaxis: { range: [-2, 2], autorange: false },
+      };
+
+      selection$.next({ mask: Uint8Array.from([1, 0, 0, 0]), count: 1 });
+      await flush();
+
+      expect(lastPlot().layout.xaxis.range).toEqual([-1, 1]);
+      expect(lastPlot().layout.xaxis.autorange).toBe(false);
+    });
+
     it('fetches the coordinates once, not per redraw', async () => {
       // A selection change redraws; the coordinates have not changed and are a
       // per-observation vector, so refetching them would be pure waste.

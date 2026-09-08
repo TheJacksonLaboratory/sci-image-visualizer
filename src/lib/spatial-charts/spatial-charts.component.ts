@@ -22,6 +22,7 @@ import {
 /** Per-instance chart-div id source — see {@link SpatialChartsComponent.chartDiv}. */
 let chartInstanceSeq = 0;
 
+
 /** Plotly config: a static-ish analysis chart, not an editable figure. */
 const CHART_CONFIG = {
   displaylogo: false,
@@ -93,7 +94,29 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    *  (`visualizer.component.ts`): two mounted charts sharing one DOM id means
    *  `getElementById` hands both of them the first element, so one instance draws
    *  into — or purges — the other's canvas. */
-  readonly chartDiv = `spatial-charts-plot-${++chartInstanceSeq}`;
+  /** One increment per INSTANCE — a static initializer would run once per class and
+   *  hand every instance the same id, which is the bug this id exists to avoid. Declared
+   *  before the ids because field initializers run in order. */
+  private readonly seq = ++chartInstanceSeq;
+  readonly chartDiv = `spatial-charts-plot-${this.seq}`;
+  /**
+   * The embedding's own div, used when it is detached into its own window.
+   *
+   * A separate id rather than moving the existing div: Angular destroys and recreates a
+   * div across an `*ngIf`, so Plotly would be left holding a detached node. Two divs and
+   * a redraw is both simpler and correct.
+   */
+  readonly embeddingDiv = `spatial-embedding-plot-${this.seq}`;
+
+  /**
+   * Whether the embedding is shown in its own window rather than inline.
+   *
+   * Detached, it can sit ALONGSIDE the spatial-omics dialog instead of inside it — which
+   * is the point of an embedding: it is read against the map and the other charts, not
+   * instead of them. The dialog is only so wide, and picking the UMAP tab otherwise
+   * replaces whichever distribution was on screen.
+   */
+  embeddingDetached = false;
   private static readonly CONTINUOUS_KINDS: { label: string; value: OmicsChartKind }[] = [
     { label: 'Histogram', value: 'histogram' },
     { label: 'Violin', value: 'violin' },
@@ -523,6 +546,11 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     const coords = this.embeddingCoords;
     if (!coords) return;
 
+    const target = this.embeddingTarget;
+    const el = document.getElementById(target);
+    if (!el) return; // the window is closed, or not rendered yet
+    const view = this.liveView(el);
+
     this.notice = null;
     const input = {
       x: coords.x,
@@ -543,9 +571,12 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
         }
         : {}),
       ...(this.selection.count > 0 ? { selection: this.selection.mask } : {}),
+      // Whatever view the user has set up, read from the LIVE plot — which is where
+      // rotating and zooming leave it.
+      ...(view ? { view } : {}),
     };
-    await this.draw(buildUmapTraces(input), umapLayout(input), EMBEDDING_CONFIG);
-    this.bindEmbeddingSelection();
+    await this.draw(buildUmapTraces(input), umapLayout(input), EMBEDDING_CONFIG, target);
+    this.bindEmbeddingSelection(target);
   }
 
   /**
@@ -559,8 +590,8 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    * preserves handlers, so re-binding without removing would fire the selection once per
    * redraw the plot had ever had.
    */
-  private bindEmbeddingSelection(): void {
-    const el = document.getElementById(this.chartDiv) as (Plotly.PlotlyHTMLElement | null);
+  private bindEmbeddingSelection(div: string): void {
+    const el = document.getElementById(div) as (Plotly.PlotlyHTMLElement | null);
     if (!el?.on) return;
     el.removeAllListeners?.('plotly_selected');
     el.removeAllListeners?.('plotly_deselect');
@@ -584,6 +615,79 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     });
     // The modebar's deselect, and a plain click on empty space.
     el.on('plotly_deselect', () => this.controls?.clearSelection());
+  }
+
+  /**
+   * The view the user has set up on the live plot, to carry across a redraw.
+   *
+   * `Plotly.react` resets a 3D scene camera and any zoomed 2D range unless the layout
+   * carries them, so selecting a category or recolouring would throw away an orientation
+   * that took work to find. Rotating a cloud to see a structure and losing it on the next
+   * click makes the plot useless for what it is for.
+   */
+  private liveView(
+    el: HTMLElement,
+  ): { camera?: unknown; ranges?: { x: unknown; y: unknown } } | null {
+    const full = (el as {
+      _fullLayout?: {
+        scene?: { camera?: unknown };
+        xaxis?: { range?: unknown; autorange?: boolean };
+        yaxis?: { range?: unknown; autorange?: boolean };
+      };
+    })._fullLayout;
+    if (!full) return null; // nothing drawn here yet
+    if (full.scene?.camera) return { camera: full.scene.camera };
+    // 2D: only once the user has actually zoomed. Passing an autoranged range back would
+    // freeze the axes and stop the plot re-fitting when the data changes.
+    const zoomed = full.xaxis?.autorange === false && full.yaxis?.autorange === false;
+    if (zoomed && full.xaxis?.range && full.yaxis?.range) {
+      return { ranges: { x: full.xaxis.range, y: full.yaxis.range } };
+    }
+    return null;
+  }
+
+  /** Where the embedding currently draws: its own window, or the shared chart div. */
+  get embeddingTarget(): string {
+    return this.embeddingDetached ? this.embeddingDiv : this.chartDiv;
+  }
+
+  /**
+   * Move the embedding between its own window and the panel.
+   *
+   * Purges the div it is LEAVING first. Plotly keeps per-div state, and a graph left
+   * behind in a div that Angular then removes leaks its WebGL context — and if the div
+   * comes back, react would resize a plot whose data belongs to the other place.
+   */
+  toggleEmbeddingDetached(): void {
+    const leaving = this.embeddingTarget;
+    this.embeddingDetached = !this.embeddingDetached;
+    try {
+      Plotly.purge(leaving);
+    } catch {
+      // Nothing was plotted there.
+    }
+    // Going back INLINE, the div appears with the next change detection, so a task is
+    // enough. Going OUT, the window's div does not exist yet — PrimeNG mounts the dialog
+    // with a transition — so the dialog's own `onShow` drives that draw instead. A single
+    // deferred attempt drew nothing and never retried.
+    if (!this.embeddingDetached) setTimeout(() => void this.render(), 0);
+  }
+
+  /** The detached window is up and its div exists — now the plot can be drawn into it. */
+  onEmbeddingWindowShown(): void {
+    void this.render();
+  }
+
+  /** Re-fit the detached window's plot after it is resized. */
+  onEmbeddingResizeEnd(): void {
+    const el = document.getElementById(this.embeddingDiv);
+    if (!el || el.clientWidth <= 0) return;
+    try {
+      // No fixed height here, so both dimensions come from the window.
+      Plotly.relayout(el, { autosize: true });
+    } catch {
+      // Nothing plotted yet.
+    }
   }
 
   /** Which embedding to draw, when the dataset publishes more than one. */
@@ -625,17 +729,20 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    * rather than declared. `height` is Plotly's own key, not ours.
    */
   private async draw(
-    traces: unknown, layout: unknown, config: unknown = CHART_CONFIG,
+    traces: unknown, layout: unknown, config: unknown = CHART_CONFIG, div = this.chartDiv,
   ): Promise<void> {
     const height = (layout as { height?: unknown } | null)?.height;
     this.drawnHeight = typeof height === 'number' ? height : null;
-    await Plotly.react(this.chartDiv, traces as never, layout as never, config as never);
+    await Plotly.react(div, traces as never, layout as never, config as never);
   }
 
   private async render(): Promise<void> {
     if (!this.isActive) return;
-    const el = document.getElementById(this.chartDiv);
-    if (!el) return;
+    // Guard on the div the ACTIVE kind will draw into, not always the shared one. While
+    // the embedding is detached the inline div is removed by its `*ngIf`, so checking
+    // that one bailed here and the detached window never got a plot.
+    const target = this.kind === 'umap' ? this.embeddingTarget : this.chartDiv;
+    if (!document.getElementById(target)) return;
     // The heatmap answers a different question from the other kinds — which
     // genes distinguish which groups — so it is driven by its own gene list and
     // grouping rather than by whatever the map is coloured by.

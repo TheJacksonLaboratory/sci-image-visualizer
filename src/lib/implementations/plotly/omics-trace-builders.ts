@@ -355,6 +355,19 @@ export interface OmicsUmapInput {
   selection?: Uint8Array;
   /** True when the coordinates were computed here rather than published with the dataset. */
   derived?: boolean;
+  /**
+   * The view to keep across a redraw.
+   *
+   * `Plotly.react` resets the 3D scene camera and any zoomed 2D axis range unless the
+   * layout carries them, so recolouring or selecting would throw away an orientation the
+   * user had set up. Rotating a cloud to see a structure and losing it on the next click
+   * makes the plot unusable for the thing it is for.
+   *
+   * `camera` is a 3D scene camera; `ranges` are 2D axis ranges, and are only passed when
+   * the user has actually zoomed — freezing an autoranged axis would stop the plot
+   * re-fitting when the data changes.
+   */
+  view?: { camera?: unknown; ranges?: { x: unknown; y: unknown } };
 }
 
 /**
@@ -499,6 +512,9 @@ export function umapLayout(input: OmicsUmapInput): unknown {
         xaxis: { title: { text: `${stem} 1` } },
         yaxis: { title: { text: `${stem} 2` } },
         zaxis: { title: { text: `${stem} 3` } },
+        // Carried across the redraw, or every recolour snaps the cloud back to its
+        // default orientation.
+        ...(input.view?.camera ? { camera: input.view.camera } : {}),
         // Equal aspect for the same reason as the plane: the axes carry no units, so
         // distances only compare if all three are scaled alike. `data` keeps the cloud's
         // own proportions instead of stretching it into the cube.
@@ -526,10 +542,14 @@ export function umapLayout(input: OmicsUmapInput): unknown {
     },
     // Equal aspect: an embedding's axes carry no units, so distances are only comparable if the
     // two are scaled alike. Stretching one axis to fill the panel invents structure.
-    xaxis: { title: { text: `${stem} 1` }, zeroline: false, ticks: 'outside' },
+    xaxis: {
+      title: { text: `${stem} 1` }, zeroline: false, ticks: 'outside',
+      ...(input.view?.ranges ? { range: input.view.ranges.x, autorange: false } : {}),
+    },
     yaxis: {
       title: { text: `${stem} 2` }, zeroline: false, ticks: 'outside',
       scaleanchor: 'x', scaleratio: 1,
+      ...(input.view?.ranges ? { range: input.view.ranges.y, autorange: false } : {}),
     },
     legend: {
       orientation: 'h',

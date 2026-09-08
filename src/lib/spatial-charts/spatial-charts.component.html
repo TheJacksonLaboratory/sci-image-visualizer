@@ -43,15 +43,32 @@
                 tooltipPosition="top"></p-checkbox>
   </div>
 
-  <!-- The embedding needs a picker only when the dataset publishes more than one. -->
-  <div class="sx-controls" *ngIf="kind === 'umap' && embeddings.length > 1">
-    <p-dropdown [options]="embeddings" optionLabel="label" optionValue="name"
+  <div class="sx-controls" *ngIf="kind === 'umap'">
+    <!-- A picker only when the dataset publishes more than one embedding. -->
+    <p-dropdown *ngIf="embeddings.length > 1"
+                [options]="embeddings" optionLabel="label" optionValue="name"
                 [ngModel]="embedding?.name" (ngModelChange)="onEmbedding($event)"
                 appendTo="body"
                 pTooltip="Which embedding to draw" tooltipPosition="top"></p-dropdown>
+    <!-- Detach so the embedding can sit ALONGSIDE this panel: it is read against the map
+         and the other charts, not instead of them. -->
+    <p-button [icon]="embeddingDetached ? 'pi pi-window-minimize' : 'pi pi-external-link'"
+              size="small" [text]="true"
+              [label]="embeddingDetached ? 'Put back' : 'Detach'"
+              [pTooltip]="embeddingDetached
+                ? 'Show the embedding in this panel again'
+                : 'Open the embedding in its own window, alongside this panel'"
+              tooltipPosition="top"
+              (onClick)="toggleEmbeddingDetached()"></p-button>
   </div>
 
-  <div [id]="chartDiv" class="sx-plot"></div>
+  <div [id]="chartDiv" class="sx-plot" *ngIf="!(kind === 'umap' && embeddingDetached)"></div>
+
+  <!-- Detached: the embedding keeps drawing, in its own window. Says so rather than
+       leaving a blank panel that looks broken. -->
+  <div class="sx-detached" *ngIf="kind === 'umap' && embeddingDetached">
+    Shown in its own window.
+  </div>
 
   <small class="sx-hint" *ngIf="notice">{{ notice }}</small>
   <small class="sx-hint" *ngIf="!notice && suggestsGrouping">
@@ -67,3 +84,25 @@
   <small class="sx-hint" *ngIf="!notice && kind === 'umap'">{{ embeddingNote }}</small>
 
 </div>
+
+<!-- The detached embedding. Its own non-modal, draggable, resizable window so it can be
+     put beside the spatial-omics dialog. `appendTo="body"` keeps it out of the dialog's
+     stacking context, or it would be clipped by the panel it is meant to sit next to. -->
+<p-dialog *ngIf="kind === 'umap' && embeddingDetached"
+          [header]="(embedding?.label ?? embedding?.name ?? 'Embedding') + ''"
+          [visible]="true" (visibleChange)="toggleEmbeddingDetached()"
+          [modal]="false" [resizable]="true" [draggable]="true"
+          position="right" appendTo="body"
+          (onShow)="onEmbeddingWindowShown()"
+          (onResizeEnd)="onEmbeddingResizeEnd()"
+          [style]="{ width: '34rem', height: '30rem' }"
+          [contentStyle]="{
+            display: 'flex', flexDirection: 'column', gap: '0.25rem',
+            padding: '0.4rem 0.6rem 0.5rem', flex: '1 1 auto', minHeight: '0',
+            overflow: 'hidden'
+          }"
+          styleClass="spatial-embedding-dialog">
+  <div [id]="embeddingDiv" class="sx-detached-plot"></div>
+  <small class="sx-hint" *ngIf="notice">{{ notice }}</small>
+  <small class="sx-hint" *ngIf="!notice">{{ embeddingNote }}</small>
+</p-dialog>
