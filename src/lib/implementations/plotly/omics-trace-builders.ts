@@ -394,6 +394,29 @@ export const UMAP_MAX_LEGEND_SHOWN = 10;
 /** Dimming applied to unselected points, matching the map's muted opacity. */
 const UMAP_MUTED_OPACITY = 0.15;
 
+/**
+ * Mix a hex colour toward white by `amount`.
+ *
+ * How unselected points are dimmed in 3D. `scatter3d` accepts `marker.opacity` only as a
+ * SCALAR — a per-point array is silently collapsed to the first value, verified against
+ * the bundled Plotly — so the per-point opacity that dims the 2D plot does nothing there,
+ * and a selection appeared to highlight nothing in 3D. Colour arrays ARE honoured, so
+ * the same effect is produced by mixing toward the paper instead.
+ */
+function towardPaper(hex: string, amount: number): string {
+  const clean = hex.replace('#', '');
+  const full = clean.length === 3
+    ? clean.split('').map((c) => c + c).join('')
+    : clean;
+  const n = Number.parseInt(full, 16);
+  if (!Number.isFinite(n) || full.length !== 6) return hex;
+  const mix = (c: number): number => Math.round(c + (255 - c) * amount);
+  const r = mix((n >> 16) & 0xff);
+  const g = mix((n >> 8) & 0xff);
+  const b = mix(n & 0xff);
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
+}
+
 const DEFAULT_UMAP_POINT_SIZE = 4;
 
 export function buildUmapTraces(input: OmicsUmapInput): unknown[] {
@@ -410,6 +433,21 @@ export function buildUmapTraces(input: OmicsUmapInput): unknown[] {
     : (input.size ?? DEFAULT_UMAP_POINT_SIZE);
   const opacityFor = (i: number): number =>
     !selection || selection[i] ? 1 : UMAP_MUTED_OPACITY;
+  const isSelected = (i: number): boolean => !selection || selection[i] === 1;
+  // In 3D the dimming has to be in the COLOUR, since a per-point opacity array is
+  // ignored there. Cached per input colour: 19k lookups of the same few categories.
+  const dimCache = new Map<string, string>();
+  const shade = (hex: string, i: number): string => {
+    if (!z || isSelected(i)) return hex;
+    const hit = dimCache.get(hex);
+    if (hit) return hit;
+    const dimmed = towardPaper(hex, 1 - UMAP_MUTED_OPACITY);
+    dimCache.set(hex, dimmed);
+    return dimmed;
+  };
+  /** Per-point opacity, which only the 2D trace types honour. */
+  const opacityArray = (indices: readonly number[]): number[] | undefined =>
+    selection && !z ? indices.map(opacityFor) : undefined;
 
   if (!categories || categories.names.length === 0) {
     return [{
@@ -424,8 +462,14 @@ export function buildUmapTraces(input: OmicsUmapInput): unknown[] {
       customdata: Array.from({ length: n }, (_, i) => i),
       marker: {
         size: markerSize,
-        color: '#4c72b0',
-        ...(selection ? { opacity: Array.from({ length: n }, (_, i) => opacityFor(i)) } : {}),
+        // A flat colour normally; per point once a selection has to dim some of them in
+        // 3D, where opacity arrays are ignored.
+        color: selection && z
+          ? Array.from({ length: n }, (_, i) => shade('#4c72b0', i))
+          : '#4c72b0',
+        ...(opacityArray(Array.from({ length: n }, (_, i) => i))
+          ? { opacity: Array.from({ length: n }, (_, i) => opacityFor(i)) }
+          : {}),
       },
       hoverinfo: 'none',
       showlegend: false,
@@ -444,8 +488,10 @@ export function buildUmapTraces(input: OmicsUmapInput): unknown[] {
       ...(z ? { z: Array.from(z.subarray(0, n)) } : {}),
       marker: {
         size: markerSize,
-        color: Array.from({ length: n }, (_, i) => colors[codes[i]] ?? '#999999'),
-        ...(selection ? { opacity: Array.from({ length: n }, (_, i) => opacityFor(i)) } : {}),
+        color: Array.from({ length: n }, (_, i) => shade(colors[codes[i]] ?? '#999999', i)),
+        ...(opacityArray(Array.from({ length: n }, (_, i) => i))
+          ? { opacity: Array.from({ length: n }, (_, i) => opacityFor(i)) }
+          : {}),
       },
       customdata: Array.from({ length: n }, (_, i) => i),
       text: Array.from({ length: n }, (_, i) => names[codes[i]] ?? 'unassigned'),
@@ -478,8 +524,10 @@ export function buildUmapTraces(input: OmicsUmapInput): unknown[] {
       customdata: idx,
       marker: {
         size: markerSize,
-        color: colors[c] ?? '#999999',
-        ...(selection ? { opacity: idx.map(opacityFor) } : {}),
+        color: selection && z
+          ? idx.map((i) => shade(colors[c] ?? '#999999', i))
+          : (colors[c] ?? '#999999'),
+        ...(opacityArray(idx) ? { opacity: idx.map(opacityFor) } : {}),
       },
       // Split per category regardless, so hover names it and a future isolate control
       // has something to toggle; only the legend's VISIBILITY depends on the count.
@@ -490,24 +538,16 @@ export function buildUmapTraces(input: OmicsUmapInput): unknown[] {
 
 export function umapLayout(input: OmicsUmapInput): unknown {
   const stem = input.label || 'UMAP';
-  const derivedNote = input.derived
-    ? {
-      // Said on the plot, not just in a tooltip: a recomputed embedding is a different
-      // picture from the published one, and a reader comparing against a paper's figure
-      // needs to know. For a 3D embedding it is always true — none are published.
-      annotations: [{
-        text: 'computed here, not published with the dataset',
-        showarrow: false, xref: 'paper', yref: 'paper', x: 0, y: 1.04,
-        xanchor: 'left', font: { size: 10, color: '#888888' },
-      }],
-    }
-    : {};
+  // No annotation for a derived embedding. That a recomputed UMAP is not the published
+  // picture does need saying — but the panel's caption already says it, and repeating it
+  // over the plot cost a strip of the panel's height and, in the 3D scene, sat on top of
+  // the cloud. One statement, in the caption.
 
   if (input.z) {
     return {
       autosize: true,
       // A 3D scene has no margins to speak of; the axes live inside it.
-      margin: { l: 0, r: 0, t: input.derived ? 24 : 0, b: 0 },
+      margin: { l: 0, r: 0, t: 0, b: 0 },
       scene: {
         xaxis: { title: { text: `${stem} 1` } },
         yaxis: { title: { text: `${stem} 2` } },
@@ -522,7 +562,6 @@ export function umapLayout(input: OmicsUmapInput): unknown {
       },
       showlegend: false,
       hovermode: 'closest',
-      ...derivedNote,
     };
   }
 
@@ -535,7 +574,7 @@ export function umapLayout(input: OmicsUmapInput): unknown {
     margin: {
       l: 44,
       r: 8,
-      t: input.derived ? 24 : 8,
+      t: 8,
       // Room for the legend only when one is drawn; otherwise the axis title alone.
       b: (input.categories?.names.length ?? 0) > 0
         && (input.categories?.names.length ?? 0) <= UMAP_MAX_LEGEND_SHOWN ? 64 : 40,
@@ -558,7 +597,6 @@ export function umapLayout(input: OmicsUmapInput): unknown {
       yanchor: 'top', y: -0.16, xanchor: 'left', x: 0,
     },
     hovermode: 'closest',
-    ...derivedNote,
   };
 }
 

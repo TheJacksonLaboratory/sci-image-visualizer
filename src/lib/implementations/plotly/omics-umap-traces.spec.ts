@@ -192,6 +192,58 @@ describe('a 3D embedding', () => {
     expect(l.xaxis).toBeUndefined();
   });
 
+  it('dims by COLOUR in 3D, because opacity arrays are ignored there', () => {
+    // Verified against the bundled Plotly: `scatter3d` collapses a per-point
+    // `marker.opacity` array to a scalar, so the dimming that works in 2D did nothing in
+    // 3D and a selection appeared to highlight nothing. Colour arrays ARE honoured.
+    const traces = buildUmapTraces({
+      x: f32(1, 2), y: f32(3, 4), z: f32(5, 6), label: 'UMAP',
+      categories: cats(['A'], ['#000000'], [0, 0]),
+      selection: Uint8Array.from([1, 0]),
+    }) as any[];
+    const colours = traces[0].marker.color;
+    expect(Array.isArray(colours)).toBe(true);
+    // The selected point keeps its colour; the other is mixed toward the paper.
+    expect(colours[0]).toBe('#000000');
+    expect(colours[1]).not.toBe('#000000');
+    // …and no opacity array, which would be silently dropped anyway.
+    expect(traces[0].marker.opacity).toBeUndefined();
+  });
+
+  it('still dims by opacity in 2D, where it is honoured and keeps the true colour', () => {
+    const traces = buildUmapTraces({
+      x: f32(1, 2), y: f32(3, 4), label: 'UMAP',
+      categories: cats(['A'], ['#000000'], [0, 0]),
+      selection: Uint8Array.from([1, 0]),
+    }) as any[];
+    expect(traces[0].marker.color).toBe('#000000');
+    expect(traces[0].marker.opacity).toEqual([1, 0.15]);
+  });
+
+  it('leaves 3D colours flat when nothing is selected', () => {
+    // No selection means no dimming, and a flat colour is cheaper than 19k strings.
+    const traces = buildUmapTraces({
+      x: f32(1, 2), y: f32(3, 4), z: f32(5, 6), label: 'UMAP',
+      categories: cats(['A'], ['#123456'], [0, 0]),
+    }) as any[];
+    expect(traces[0].marker.color).toBe('#123456');
+  });
+
+  it('mixes toward the paper rather than to an arbitrary grey', () => {
+    // Dimming must preserve which category a point belongs to — a muted red and a muted
+    // blue have to stay distinguishable, or the plot loses its meaning when anything is
+    // selected.
+    const red = buildUmapTraces({
+      x: f32(1), y: f32(1), z: f32(1), label: 'U',
+      categories: cats(['A'], ['#ff0000'], [0]), selection: Uint8Array.from([0]),
+    }) as any[];
+    const blue = buildUmapTraces({
+      x: f32(1), y: f32(1), z: f32(1), label: 'U',
+      categories: cats(['A'], ['#0000ff'], [0]), selection: Uint8Array.from([0]),
+    }) as any[];
+    expect(red[0].marker.color[0]).not.toBe(blue[0].marker.color[0]);
+  });
+
   it('carries a scene camera across the redraw', () => {
     // Rotating a cloud to see a structure and losing it on the next recolour makes the
     // plot useless for the thing it is for. Plotly.react resets the camera unless the
@@ -210,11 +262,14 @@ describe('a 3D embedding', () => {
     expect('camera' in l.scene).toBe(false);
   });
 
-  it('says it was computed here, which a 3D embedding always is', () => {
-    // Nothing published with a spatial dataset is 3D, so this note is not optional
-    // decoration — it is the difference between the paper's figure and ours.
+  it('puts no annotation over the cloud', () => {
+    // That a recomputed UMAP is not the published picture does need saying, and the
+    // panel's caption says it. Repeating it over the plot cost a strip of the panel's
+    // height and, in a 3D scene, sat on top of the cloud.
     const l = umapLayout({ x: f32(1), y: f32(2), z: f32(3), label: 'UMAP', derived: true }) as any;
-    expect(l.annotations[0].text).toMatch(/computed here/);
+    expect(l.annotations).toBeUndefined();
+    // …and no top margin reserved for one.
+    expect(l.margin.t).toBe(0);
   });
 });
 
@@ -255,17 +310,14 @@ describe('umapLayout', () => {
     expect(l.xaxis.autorange).toBeUndefined();
   });
 
-  it('says on the plot when the embedding was computed here', () => {
-    // A recomputed embedding is a different picture from the published one; a reader
-    // comparing against a paper's figure has to be told, and a tooltip is not enough.
-    const derived = umapLayout({
-      x: Float32Array.of(1), y: Float32Array.of(1), label: 'UMAP', derived: true,
-    }) as any;
-    expect(derived.annotations[0].text).toMatch(/computed here/);
-
-    const published = umapLayout({
-      x: Float32Array.of(1), y: Float32Array.of(1), label: 'UMAP',
-    }) as any;
-    expect(published.annotations).toBeUndefined();
+  it('annotates neither a derived nor a published embedding', () => {
+    // The derived/published distinction is carried by the panel's caption, not by text
+    // over the plot — two statements of one fact, and the plot is the scarcer space.
+    for (const derived of [true, false]) {
+      const l = umapLayout({
+        x: Float32Array.of(1), y: Float32Array.of(1), label: 'UMAP', derived,
+      }) as any;
+      expect(l.annotations).toBeUndefined();
+    }
   });
 });

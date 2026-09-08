@@ -761,6 +761,23 @@ describe('SpatialChartsComponent', () => {
       expect(lastPlot().layout.xaxis.autorange).toBe(false);
     });
 
+    it('carries the derived warning in the caption, not over the plot', async () => {
+      // The fact still has to be stated — a recomputed UMAP is not the published picture
+      // — but once, in the caption, since the plot is the scarcer space.
+      const meta3d = { name: 'X_umap3d', label: 'UMAP 3D', dims: 3 as const, derived: true };
+      controls.getEmbedding = jest.fn(async () => ({
+        meta: meta3d, x: f32(1, 2), y: f32(3, 4), z: f32(5, 6),
+      }));
+      dataset$.next({ ...dataset, embeddings: [meta3d] });
+      await build(controls);
+      await flush();
+      component.onKind('umap');
+      await flush();
+
+      expect(component.embeddingNote).toMatch(/[Cc]omputed here/);
+      expect(lastPlot().layout.annotations).toBeUndefined();
+    });
+
     it('fetches the coordinates once, not per redraw', async () => {
       // A selection change redraws; the coordinates have not changed and are a
       // per-observation vector, so refetching them would be pure waste.
