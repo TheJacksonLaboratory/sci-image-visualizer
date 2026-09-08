@@ -14,6 +14,7 @@ import {
   SpatialSelectionMask, emptySelection, maskToIndices,
 } from '../spatial/spatial-selection';
 import { cellsAsGroups, heatmapMatrix } from '../spatial/spatial-heatmap';
+import { geneOptionsFor } from '../spatial/gene-search';
 import {
   OmicsChartKind, OmicsGrouping, benefitsFromGrouping, buildCountTraces, buildHeatmapTraces,
   buildOmicsTraces, buildEmbeddingTraces, countsLayout, heatmapLayout, omicsLayout, embeddingLayout,
@@ -199,6 +200,13 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   /** Columns the cap dropped from the last render, for the note. */
   private heatmapHidden = 0;
   geneOptions: { label: string; value: string }[] = [];
+  /** Every gene the dataset inlined. `geneOptions` is only ever the best few hundred of
+   *  these — see `gene-search.ts` for why a whole-transcriptome list cannot be handed to
+   *  the control whole. */
+  private geneNames: string[] = [];
+  /** What is typed in the picker's filter box, so the options can be rebuilt when the
+   *  selection changes without losing the query. */
+  private geneQuery = '';
   /** Fetched vectors by gene name, so adding a fourth gene does not refetch the
    *  first three — each is a full per-observation Float32Array. */
   private readonly geneCache = new Map<string, Float32Array>();
@@ -270,9 +278,13 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       // The heatmap's rows come from the dataset's gene list. A dataset too wide
       // to inline its names offers none here — the panel's typeahead is the way
       // in for those, and the heatmap needs names it can list.
-      this.geneOptions = (dataset?.features?.names ?? []).map((n) => ({ label: n, value: n }));
-      const known = new Set(this.geneOptions.map((o) => o.value));
+      this.geneNames = [...(dataset?.features?.names ?? [])];
+      this.geneQuery = '';
+      // Validated against the WHOLE list, not the visible options: those are capped, and
+      // filtering the selection by them would drop genes the dataset still has.
+      const known = new Set(this.geneNames);
       this.heatmapGenes = this.heatmapGenes.filter((n) => known.has(n));
+      this.refreshGeneOptions();
       this.geneCache.clear();
 
       // Embeddings belong to the dataset, so they are re-read with it and the loaded
@@ -410,6 +422,8 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   /** Gene rows for the heatmap. */
   async onHeatmapGenes(names: string[]): Promise<void> {
     this.heatmapGenes = names ?? [];
+    // Chosen genes must stay in the options or the control cannot label its chips.
+    this.refreshGeneOptions();
     await this.loadHeatmapGenes();
     void this.render();
   }
@@ -748,6 +762,24 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   /** Re-fit the detached window's plot after it is resized. */
   onDetachedResizeEnd(): void {
     this.refit(this.detachedDiv);
+  }
+
+  /**
+   * Rebuild the visible options: the best matches for what is typed, plus what is chosen.
+   *
+   * A capped multi-select that drops its own selections cannot resolve their labels, and
+   * the model loses them on the next change — the chips vanish for no reason the user
+   * can see.
+   */
+  private refreshGeneOptions(): void {
+    this.geneOptions = geneOptionsFor(this.geneNames, this.geneQuery, this.heatmapGenes)
+      .map((n) => ({ label: n, value: n }));
+  }
+
+  /** The gene picker's filter box changed: search the resident names, show the best. */
+  onGeneFilter(query: string): void {
+    this.geneQuery = query ?? '';
+    this.refreshGeneOptions();
   }
 
   /** Which embedding to draw, when the dataset publishes more than one. */

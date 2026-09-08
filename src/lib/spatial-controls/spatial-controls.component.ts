@@ -17,6 +17,7 @@ import {
 import {
   SpatialSelectionMask, emptySelection,
 } from '../spatial/spatial-selection';
+import { searchGeneNames } from '../spatial/gene-search';
 
 /** One legend row for a categorical colouring. */
 export interface SpatialLegendEntry {
@@ -112,6 +113,14 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
    * search returned and filtering is server-side — same control either way.
    */
   geneOptions: { label: string; value: string }[] = [];
+  /**
+   * Every gene the dataset inlined, whether or not it is currently an option.
+   *
+   * Held as plain strings and searched per keystroke. A whole-transcriptome dataset
+   * inlines ~18k names — cheap to keep, ruinous to hand a dropdown all at once — so
+   * {@link geneOptions} is only ever the best few hundred of these.
+   */
+  private geneNames: string[] = [];
   selectedGene: string | null = null;
   /** True when the options come from the port per keystroke rather than a resident
    *  list, which changes what an empty list means (nothing matched *yet*). */
@@ -183,7 +192,9 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       this.geneSearchFailed = false;
       const names = dataset?.features?.names;
       this.genesAreRemote = !!dataset?.features && !names;
-      this.geneOptions = names ? names.map(geneOption) : [];
+      this.geneNames = names ? [...names] : [];
+      // The head of the list, not all of it: see `geneNames`.
+      this.geneOptions = searchGeneNames(this.geneNames, '').map(geneOption);
       this.sections = this.controls?.sampledSections() ?? null;
       void this.refreshKey();
     }));
@@ -245,7 +256,14 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
    */
   async onGeneFilter(query: string): Promise<void> {
     this.geneSearchFailed = false;
-    if (!this.controls || !this.genesAreRemote) return;
+    if (!this.genesAreRemote) {
+      // Resident names: search them here and materialise only the top matches. The
+      // dropdown's own filter then runs over those and agrees — they were chosen by the
+      // same query — so the control behaves as if it still held the whole list.
+      this.geneOptions = searchGeneNames(this.geneNames, query).map(geneOption);
+      return;
+    }
+    if (!this.controls) return;
     // Typing outruns the lookup, so a slow answer for an earlier query would
     // replace the options for the text now in the box — including a failure, which
     // would wrongly mark the current query as failed.

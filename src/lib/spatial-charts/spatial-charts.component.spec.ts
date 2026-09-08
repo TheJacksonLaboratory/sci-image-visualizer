@@ -9,6 +9,7 @@ import { SpatialDataset } from '../contracts/spatial-dataset.contract';
 import { SpatialColorBy } from '../contracts/display-types';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../contracts/display-types';
 import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selection';
+import { GENE_OPTIONS_MAX } from '../spatial/gene-search';
 
 jest.mock('plotly.js-dist-min', () => ({
   react: jest.fn().mockResolvedValue(undefined),
@@ -396,6 +397,43 @@ describe('SpatialChartsComponent', () => {
 
     it('offers the dataset’s gene names as the rows to pick from', () => {
       expect(component.geneOptions.map((o) => o.value)).toEqual(['Ttr', 'Mbp', 'Snap25']);
+    });
+
+    it('caps the options for a whole-transcriptome list, and keeps what is picked', async () => {
+      // The reported freeze came from handing the control every name. 18,078 of them is
+      // the real case; what must not happen is 18,078 options.
+      const names = Array.from({ length: 18078 }, (_, i) => `Gene${i}`);
+      dataset$.next({ ...dataset, features: { count: names.length, names } });
+      await flush();
+      expect(component.geneOptions.length).toBe(GENE_OPTIONS_MAX);
+
+      // Typing reaches past the cap, because the search runs over the whole list.
+      component.onGeneFilter('Gene9001');
+      expect(component.geneOptions.map((o) => o.value)).toEqual(['Gene9001']);
+
+      // A picked gene must survive a query that excludes it: a multi-select that loses
+      // its own selection from the options cannot label the chip, and drops the value on
+      // the next change.
+      await component.onHeatmapGenes(['Gene9001']);
+      component.onGeneFilter('Gene5');
+      const shown = component.geneOptions.map((o) => o.value);
+      expect(shown[0]).toBe('Gene9001');
+      expect(shown).toContain('Gene5');
+    });
+
+    it('validates a carried-over selection against every gene, not the visible ones', async () => {
+      // The options are capped, so filtering the selection by them would drop genes the
+      // new dataset still has — silently, and only for wide datasets.
+      const names = Array.from({ length: 18078 }, (_, i) => `Gene${i}`);
+      dataset$.next({ ...dataset, features: { count: names.length, names } });
+      await flush();
+      await component.onHeatmapGenes(['Gene17000']);
+      expect(component.heatmapGenes).toEqual(['Gene17000']);
+
+      // Same wide dataset again: the gene is real and must be kept.
+      dataset$.next({ ...dataset, features: { count: names.length, names } });
+      await flush();
+      expect(component.heatmapGenes).toEqual(['Gene17000']);
     });
 
     it('seeds with the gene already on screen, rather than opening empty', async () => {

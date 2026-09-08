@@ -4,6 +4,7 @@ import { NO_ERRORS_SCHEMA } from '@angular/core';
 import { BehaviorSubject, of } from 'rxjs';
 
 import { SpatialControlsComponent } from './spatial-controls.component';
+import { GENE_OPTIONS_MAX } from '../spatial/gene-search';
 import { VISUALIZER, ISpatialControls } from '../contracts/visualizer.contract';
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../contracts/display-types';
@@ -166,11 +167,30 @@ describe('SpatialControlsComponent', () => {
       expect(component.genesAreRemote).toBe(false);
     });
 
-    it('filters resident names in the dropdown, without hitting the port', async () => {
+    it('narrows resident names itself, without hitting the port', async () => {
       await component.onGeneFilter('tt');
-      // Nothing to fetch: the dropdown narrows the list it already has.
+      // Nothing to fetch: the names are already here.
       expect(controls.searchFeatures).not.toHaveBeenCalled();
-      expect(component.geneOptions.map((o) => o.value)).toEqual(['Ttr', 'Mbp']);
+      // And the component does the narrowing rather than handing the control every name
+      // and letting it filter — which is what made an 18,078-gene dataset lock the UI on
+      // each keystroke.
+      expect(component.geneOptions.map((o) => o.value)).toEqual(['Ttr']);
+    });
+
+    it('shows only the head of a whole-transcriptome list, not all of it', async () => {
+      // The reported freeze: opening the picker on the Visium bundle's 18,078 genes.
+      // What must not happen is those becoming 18,078 options.
+      const names = Array.from({ length: 18078 }, (_, i) => `Gene${i}`);
+      dataset$.next({ ...dataset, features: { count: names.length, names } });
+      await flush();
+      expect(component.genesAreRemote).toBe(false);
+      expect(component.geneOptions.length).toBe(GENE_OPTIONS_MAX);
+
+      // Typing still reaches a name far past the cap, because the search runs over the
+      // whole resident list rather than over what happens to be on screen.
+      await component.onGeneFilter('Gene17999');
+      expect(component.geneOptions.map((o) => o.value)).toEqual(['Gene17999']);
+      expect(controls.searchFeatures).not.toHaveBeenCalled();
     });
 
     it('searches the port per keystroke when the dataset inlines no names', async () => {

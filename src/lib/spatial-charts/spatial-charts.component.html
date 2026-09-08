@@ -30,7 +30,8 @@
   <div class="sx-controls" *ngIf="kind === 'heatmap'">
     <p-multiSelect [options]="geneOptions" optionLabel="label" optionValue="value"
                    [ngModel]="heatmapGenes" (ngModelChange)="onHeatmapGenes($event)"
-                   [filter]="true" filterBy="label" appendTo="body"
+                   [filter]="true" filterBy="label" (onFilter)="onGeneFilter($event.filter)"
+                   [virtualScroll]="true" [virtualScrollItemSize]="30" appendTo="body"
                    [showToggleAll]="false" [maxSelectedLabels]="3"
                    selectedItemsLabel="{0} genes"
                    placeholder="Pick genes for the rows"
