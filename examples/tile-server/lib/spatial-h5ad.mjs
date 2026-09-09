@@ -33,6 +33,8 @@ import {
   shapeOf, unsValue,
 } from './h5ad.mjs';
 import { defaultRadius, writeBundle } from './h5ad-bundle.mjs';
+import { asCsc, denseColumn } from './h5ad.mjs';
+import { pcaScores } from './pca.mjs';
 import {
   loadManifest, readColumn, readEmbedding, readFeatureVector, readIds,
   searchFeatures as bundleSearchFeatures,
@@ -303,6 +305,88 @@ function slope(index, coords, axis) {
   return denom === 0 ? 0 : (n * sxy - sx * sy) / denom;
 }
 
+// ── PCA the source does not carry ────────────────────────────────────────────
+
+/**
+ * PCA is ADVERTISED up front and COMPUTED ON FIRST REQUEST.
+ *
+ * A dropped-in file usually has a published UMAP and nothing else — the squidpy Visium
+ * H&E carries `X_umap` and a 50-component `X_pca`, and 50 components are not an
+ * embedding. So PCA is offered here the same way the zarr adapter treats its derived
+ * columns: opening a dataset should not pay to reduce it, but the option should be
+ * visible without the reader having to know it is possible.
+ *
+ * On the SERVER rather than in the browser, deliberately. PCA needs the whole expression
+ * matrix — 185 MB for this Visium file — while everything downstream of it needs only the
+ * scores, 0.51 MB. Shipping the matrix to a browser to save two seconds of arithmetic
+ * would be 362x the transfer for a slower answer. t-SNE is the opposite case and belongs
+ * on the client: it consumes the scores alone.
+ */
+const DERIVED_PCA = [
+  { key: 'X_pca2d', label: 'PCA', dims: 2 },
+  { key: 'X_pca3d', label: 'PCA 3D', dims: 3 },
+];
+
+/** Scores, cached per dataset: both dimensionalities come from one decomposition. */
+const pcaCache = new Map();
+
+/** What the source publishes, plus the PCA it does not. */
+function offeredEmbeddings(described) {
+  const have = new Set(described.embeddings.map((e) => e.key));
+  return [
+    ...described.embeddings,
+    ...DERIVED_PCA.filter((d) => !have.has(d.key)).map((d) => ({ ...d, derived: true })),
+  ];
+}
+
+/**
+ * The expression matrix, gene-major, as `pcaScores` wants it.
+ *
+ * A CSR file already has a converted bundle, so its matrix is read from disk. A CSC file
+ * is served directly and has none, so it is densified here — the one place this source
+ * needs the whole matrix at once.
+ */
+async function geneMajorMatrix(dir, id) {
+  const described = await describe(dir, id);
+  if (isCsr(described)) {
+    const file = path.join(await bundleDir(dir, id), id, 'features', 'matrix.f32');
+    const buf = await readFile(file);
+    return new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
+  }
+  const f = await openH5ad(described.file);
+  try {
+    const csc = asCsc(f, described.count, described.nVar);
+    const out = new Float32Array(described.count * described.nVar);
+    for (let j = 0; j < described.nVar; j++) {
+      out.set(denseColumn(csc, described.count, j), j * described.count);
+    }
+    return out;
+  } finally {
+    f.close();
+  }
+}
+
+/** PCA scores for this dataset, computed once and kept. */
+async function pcaFor(dir, id) {
+  if (!pcaCache.has(id)) {
+    pcaCache.set(id, (async () => {
+      const described = await describe(dir, id);
+      console.log(`[tile-server] computing PCA for ${id} `
+        + `(${described.count} x ${described.nVar})`);
+      const started = Date.now();
+      const matrix = await geneMajorMatrix(dir, id);
+      const result = await pcaScores(matrix, described.count, described.nVar, 3, { seed: 0 });
+      console.log(`[tile-server] PCA for ${id} in ${((Date.now() - started) / 1000).toFixed(1)}s`);
+      return result;
+    })().catch((err) => {
+      // A failed computation must not be cached, or the dataset stays broken until restart.
+      pcaCache.delete(id);
+      throw err;
+    }));
+  }
+  return pcaCache.get(id);
+}
+
 // ── the endpoints ────────────────────────────────────────────────────────────
 
 /** Summaries for `/spatial/datasets`. */
@@ -322,7 +406,17 @@ export async function listH5adDatasets(dir) {
 
 export async function h5adManifest(dir, id) {
   const described = await describe(dir, id);
-  if (isCsr(described)) return loadManifest(await bundleDir(dir, id), id);
+  const offered = offeredEmbeddings(described);
+  const asMeta = (e) => ({
+    name: e.key, label: e.label, dims: e.dims, ...(e.derived ? { derived: true } : {}),
+  });
+  if (isCsr(described)) {
+    // The converted bundle records what the FILE had. The derived PCA is served from this
+    // module, so it is added to the manifest rather than written into the bundle — a
+    // bundle rebuilt from a newer `.h5ad` would otherwise silently drop it.
+    const manifest = await loadManifest(await bundleDir(dir, id), id);
+    return { ...manifest, embeddings: offered.map(asMeta) };
+  }
 
   const s = slot(id);
   if (s.manifest) return s.manifest;
@@ -336,13 +430,7 @@ export async function h5adManifest(dir, id) {
     columns: await describedColumns(dir, id),
     features: { count: described.genes.length, names: described.genes },
     ...(described.dims === 3 ? { hasZ: true } : {}),
-    ...(described.embeddings.length
-      ? {
-        embeddings: described.embeddings.map((e) => ({
-          name: e.key, label: e.label, dims: e.dims,
-        })),
-      }
-      : {}),
+    ...(offered.length ? { embeddings: offered.map(asMeta) } : {}),
     ...((await imageRefFor(dir, id)) ? { imageRef: await imageRefFor(dir, id) } : {}),
   };
   return s.manifest;
@@ -459,6 +547,19 @@ export async function h5adFeatureSearch(dir, id, query, limit = 50) {
 
 export async function h5adEmbedding(dir, id, name) {
   const described = await describe(dir, id);
+
+  const derived = DERIVED_PCA.find((d) => d.key === name);
+  if (derived && !described.embeddings.some((e) => e.key === name)) {
+    const { scores, components } = await pcaFor(dir, id);
+    const out = new Float32Array(described.count * derived.dims);
+    for (let d = 0; d < derived.dims; d++) {
+      for (let i = 0; i < described.count; i++) {
+        out[d * described.count + i] = scores[i * components + d];
+      }
+    }
+    return Buffer.from(out.buffer, out.byteOffset, out.byteLength);
+  }
+
   if (isCsr(described)) return readEmbedding(await bundleDir(dir, id), id, name);
   const meta = described.embeddings.find((e) => e.key === name);
   if (!meta) throw new RangeError(`unknown embedding: ${name}`);
