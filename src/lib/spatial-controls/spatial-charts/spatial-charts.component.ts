@@ -178,6 +178,24 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   /** The menu suffix that says a click will start work; not part of the name. */
   private static readonly COMPUTE_SUFFIX = ' (compute)';
 
+  /**
+   * Largest dataset this will offer to embed in the browser.
+   *
+   * t-SNE is O(N²) per iteration — vectorised on the GPU, but not approximated — so the
+   * cost is quadratic in observations. Measured end to end in Firefox on WebGPU: 2,688
+   * points took 95 s. That scales to roughly five and a half minutes at this threshold,
+   * and to about 76 minutes at seqFISH's 19,416, which was also measured offline.
+   *
+   * Past this the option is WITHDRAWN rather than offered with a warning. An hour-long
+   * job started from a button is not a choice a reader can meaningfully consent to in a
+   * dialog, and a t-SNE that large belongs in the offline pipeline, where it can run
+   * once and be served to everyone.
+   */
+  static readonly BROWSER_TSNE_MAX_OBSERVATIONS = 5000;
+
+  /** Measured anchor for the estimate: seconds for 2,688 points on WebGPU. */
+  private static readonly TSNE_SECONDS_AT = { seconds: 95, observations: 2688 };
+
   /** Coordinates computed in this browser, by name. Not persisted: a reload recomputes. */
   private readonly computed = new Map<string, SpatialEmbedding>();
 
@@ -193,6 +211,12 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   computeMessage: string | null = null;
 
   computeError: string | null = null;
+
+  /** True when a t-SNE is missing but the dataset is too big to embed here. */
+  tsneTooLarge = false;
+
+  /** Observations in the live dataset, kept for the cost estimate. */
+  private observationCount = 0;
 
   /** Offered only when the dataset publishes an embedding to draw. */
   // Labelled for what it is rather than for one instance of it: this view draws whatever
@@ -356,7 +380,10 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       // what is already served.
       const hasPca = published.some((e) => /pca/i.test(e.label ?? e.name));
       const hasTsne = published.some((e) => /tsne|t-sne/i.test(e.label ?? e.name));
-      this.embeddings = hasPca && !hasTsne
+      this.observationCount = dataset?.observations.count ?? 0;
+      this.tsneTooLarge = hasPca && !hasTsne
+        && this.observationCount > SpatialChartsComponent.BROWSER_TSNE_MAX_OBSERVATIONS;
+      this.embeddings = hasPca && !hasTsne && !this.tsneTooLarge
         ? [...published, ...SpatialChartsComponent.COMPUTABLE]
         : published;
       this.embedding = this.embeddings[0] ?? null;
@@ -859,6 +886,33 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   onGeneFilter(query: string): void {
     this.geneQuery = query ?? '';
     this.refreshGeneOptions();
+  }
+
+  /**
+   * Roughly how long a run will take, in seconds, from the measured anchor.
+   *
+   * Shown before the click. A progress bar tells you a job is going; only an estimate
+   * tells you whether to start it.
+   */
+  get computeEstimateSeconds(): number {
+    const n = this.observationCount;
+    const { seconds, observations } = SpatialChartsComponent.TSNE_SECONDS_AT;
+    return Math.max(1, Math.round(seconds * (n / observations) ** 2));
+  }
+
+  /** That estimate as something to put on a button. */
+  get computeEstimateLabel(): string {
+    const secs = this.computeEstimateSeconds;
+    if (secs < 90) return `~${secs}s`;
+    return `~${Math.round(secs / 60)} min`;
+  }
+
+  /** Why the option is absent, when a dataset is past the threshold. */
+  get tsneTooLargeNote(): string {
+    const n = this.observationCount;
+    return `t-SNE is not offered here for ${n.toLocaleString()} observations — it is `
+      + `quadratic, so it would take roughly ${this.computeEstimateLabel} in the browser. `
+      + 'Compute it offline and serve it with the dataset.';
   }
 
   /** Whether the selected embedding is one this browser would have to compute. */

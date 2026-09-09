@@ -373,6 +373,80 @@ describe('SpatialChartsComponent', () => {
     });
   });
 
+  describe('computing a missing t-SNE', () => {
+    const pca = { name: 'X_pca2d', label: 'PCA', dims: 2 as const, derived: true };
+
+    /** A dataset with PCA, no t-SNE, and `count` observations. */
+    function withPca(count: number) {
+      return {
+        ...dataset,
+        observations: { count, x: new Float32Array(count), y: new Float32Array(count) },
+        embeddings: [{ name: 'X_umap', label: 'UMAP', dims: 2 as const }, pca],
+      };
+    }
+
+    it('offers to compute one when the dataset is small enough', async () => {
+      dataset$.next(withPca(2688));
+      await build(controls);
+      await flush();
+      const labels = component.embeddings.map((e) => e.label);
+      expect(labels).toContain('t-SNE (compute)');
+      expect(labels).toContain('t-SNE 3D (compute)');
+      expect(component.tsneTooLarge).toBe(false);
+    });
+
+    it('withholds the option past the size threshold, and says why', async () => {
+      // t-SNE is quadratic. Measured: 2,688 points take 95 s in the browser, so 19,416
+      // would be over an hour — not a choice a reader can consent to from a button.
+      dataset$.next(withPca(19416));
+      await build(controls);
+      await flush();
+      expect(component.embeddings.map((e) => e.label)).not.toContain('t-SNE (compute)');
+      expect(component.tsneTooLarge).toBe(true);
+      expect(component.tsneTooLargeNote).toContain('19,416');
+      expect(component.tsneTooLargeNote).toContain('offline');
+    });
+
+    it('estimates the cost quadratically, from the measured anchor', async () => {
+      // The estimate is what makes the button honest — a progress bar says a job is
+      // running, only an estimate says whether to start it.
+      dataset$.next(withPca(2688));
+      await build(controls);
+      await flush();
+      expect(component.computeEstimateSeconds).toBe(95);
+
+      dataset$.next(withPca(2688 * 2));
+      await flush();
+      // Four times the work for twice the points.
+      expect(component.computeEstimateSeconds).toBe(95 * 4);
+      expect(component.computeEstimateLabel).toBe('~6 min');
+    });
+
+    it('does not offer one when the dataset already has a t-SNE', async () => {
+      dataset$.next({
+        ...withPca(1000),
+        embeddings: [pca, { name: 'X_tsne', label: 't-SNE', dims: 2 as const, derived: true }],
+      });
+      await build(controls);
+      await flush();
+      expect(component.embeddings.filter((e) => /compute/.test(e.label ?? '')))
+        .toHaveLength(0);
+    });
+
+    it('does not offer one without a PCA to embed', async () => {
+      // t-SNE runs on the PCA scores; with no PCA the button would start work that
+      // cannot begin.
+      dataset$.next({
+        ...withPca(1000),
+        embeddings: [{ name: 'X_umap', label: 'UMAP', dims: 2 as const }],
+      });
+      await build(controls);
+      await flush();
+      expect(component.embeddings.map((e) => e.label)).toEqual(['UMAP']);
+      expect(component.tsneTooLarge).toBe(false);
+    });
+  });
+
   describe('the "?" help', () => {
     it('explains the chart on screen, not charts in general', async () => {
       await build(controls);

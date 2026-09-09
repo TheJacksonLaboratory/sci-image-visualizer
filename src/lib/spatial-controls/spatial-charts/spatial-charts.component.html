@@ -63,8 +63,9 @@
     <!-- Offered only for an embedding this dataset does not publish. It runs in a Web
          Worker on the GPU, so the panel stays usable while it goes. -->
     <p-button *ngIf="kind === 'embedding' && isComputable && !isComputed && !isComputing"
-              icon="pi pi-play" size="small" [text]="true" label="Compute"
-              pTooltip="Run t-SNE here, in the background, from this dataset's PCA"
+              icon="pi pi-play" size="small" [text]="true"
+              [label]="'Compute (' + computeEstimateLabel + ')'"
+              pTooltip="Run t-SNE here, in a background worker on the GPU, from this dataset's PCA. The panel stays usable, and it can be cancelled."
               tooltipPosition="top"
               (onClick)="computeEmbedding()"></p-button>
     <p-button *ngIf="isComputing"
@@ -96,6 +97,9 @@
     <small class="sx-hint sx-warn" *ngIf="computeMessage">{{ computeMessage }}</small>
   </div>
   <small class="sx-hint sx-warn" *ngIf="computeError">{{ computeError }}</small>
+  <!-- Withheld rather than offered with a warning: an hour-long job is not a choice a
+       reader can meaningfully consent to from a dialog. -->
+  <small class="sx-hint" *ngIf="kind === 'embedding' && tsneTooLarge">{{ tsneTooLargeNote }}</small>
 
   <div [id]="chartDiv" class="sx-plot" *ngIf="!detached"></div>
 
