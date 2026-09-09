@@ -202,6 +202,18 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   /** The live run, when one is going. */
   private computeRun: EmbeddingComputeRun | null = null;
 
+  /**
+   * Bumped by every dataset change and by teardown, so a computation in progress can tell
+   * that what it is computing is no longer what is on screen.
+   *
+   * A run is several awaits long — the PCA scores arrive over HTTP, then the worker takes
+   * a minute or more — and the dataset can change at any of them, including BEFORE
+   * `computeRun` exists to be terminated. Without a token, the scores fetched for one
+   * dataset get embedded and drawn over another's observations: a plot of two datasets at
+   * once, which reads as a strange-looking t-SNE rather than as a bug.
+   */
+  private computeToken = 0;
+
   /** 0..1 while running, or null before the first report. Drives the progress bar. */
   computeFraction: number | null = null;
 
@@ -372,8 +384,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       // coordinates dropped: a UMAP from the previous dataset over these observations
       // would be a plot of two different things at once.
       this.computed.clear();
-      this.computeRun?.terminate();
-      this.computeRun = null;
+      this.abandonCompute();
       const published = dataset?.embeddings ? [...dataset.embeddings] : [];
       // Offer to compute a t-SNE only where the dataset has PCA to embed and no t-SNE of
       // its own — otherwise the menu advertises work that cannot start, or duplicates
@@ -440,6 +451,10 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
 
   ngOnDestroy(): void {
     this.subs.unsubscribe();
+    // A worker outlives the component that started it: closing the panel mid-run would
+    // otherwise leave a t-SNE saturating a GPU for minutes with nothing left to receive
+    // the answer.
+    this.abandonCompute();
     // BOTH divs: a chart left detached at teardown holds its WebGL context in the
     // window's div, which the inline id would never reach.
     for (const div of [this.chartDiv, this.detachedDiv]) {
@@ -946,16 +961,26 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     this.computeFraction = null;
     this.computeBackend = null;
 
+    // Every early return and every await below is checked against this. `run` is held
+    // locally as well as on the instance: after an await `this.computeRun` may already be
+    // a newer run's, and clearing or terminating that one is how a fresh computation gets
+    // killed by the tail of the one it replaced.
+    const mine = ++this.computeToken;
+    const superseded = () => mine !== this.computeToken;
+    let run: EmbeddingComputeRun | null = null;
+
     try {
       // Prefer the 3-D scores: they carry a third component for free, and t-SNE on more
       // components than it needs is not better — the PCA basis is the input either way.
       const source = await this.loadPcaScores(controls);
+      if (superseded()) return;
       if (!source) {
         this.computeError = 'This dataset serves no PCA to embed.';
         return;
       }
-      this.computeRun = new EmbeddingComputeRun();
-      const result = await this.computeRun.run(
+      run = new EmbeddingComputeRun();
+      this.computeRun = run;
+      const result = await run.run(
         {
           scores: source.scores,
           nObs: source.nObs,
@@ -968,28 +993,55 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
             .replace(SpatialChartsComponent.COMPUTE_SUFFIX, ''),
         },
         (progress: ComputeProgress) => {
+          // Progress from a superseded run must not drive the bar a newer one is using.
+          if (superseded()) return;
           this.computeFraction = progress.fraction;
           this.computeBackend = progress.backend ?? this.computeBackend;
           if (progress.message) this.computeMessage = progress.message;
         },
       );
-      if (result) {
+      // A terminated run resolves null, so this covers abandonment as well as Cancel —
+      // but the token is still checked, because the dataset can change between the
+      // worker's `done` and this line.
+      if (result && !superseded()) {
         this.computed.set(meta.name, result);
         this.embeddingCoords = result;
         await this.render();
       }
     } catch (err) {
-      this.computeError = (err as Error)?.message ?? String(err);
+      if (!superseded()) this.computeError = (err as Error)?.message ?? String(err);
     } finally {
-      this.computeRun?.terminate();
-      this.computeRun = null;
-      this.computeFraction = null;
+      run?.terminate();
+      // Only if it is still ours: a dataset switch has already terminated this run and
+      // may have started another, and `this.computeRun = null` here would orphan it —
+      // leaving a worker nothing can cancel and a Cancel button that does nothing.
+      if (this.computeRun === run) {
+        this.computeRun = null;
+        this.computeFraction = null;
+      }
     }
   }
 
   /** Stop a run. It settles shortly after, leaving no embedding. */
   cancelCompute(): void {
     this.computeRun?.cancel();
+  }
+
+  /**
+   * Drop any computation in progress, because what it is computing no longer applies.
+   *
+   * Distinct from {@link cancelCompute}, which is the user's Cancel and asks the worker to
+   * stop politely. This one does not wait: the run is settled and the worker killed, so a
+   * dataset switch or a teardown cannot leave a t-SNE grinding on in the background over
+   * observations nothing is showing any more.
+   */
+  private abandonCompute(): void {
+    this.computeToken++;
+    this.computeRun?.terminate();
+    this.computeRun = null;
+    this.computeFraction = null;
+    this.computeBackend = null;
+    this.computeMessage = null;
   }
 
   /**

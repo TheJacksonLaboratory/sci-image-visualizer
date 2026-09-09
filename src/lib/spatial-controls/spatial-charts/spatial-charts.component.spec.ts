@@ -10,6 +10,7 @@ import { SpatialColorBy } from '../../contracts/display-types';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../../contracts/display-types';
 import { SpatialSelectionMask, emptySelection } from '../../spatial/spatial-selection';
 import { GENE_OPTIONS_MAX } from '../../spatial/gene-search';
+import { EmbeddingComputeRun } from '../../spatial/embedding-compute';
 
 jest.mock('plotly.js-dist-min', () => ({
   react: jest.fn().mockResolvedValue(undefined),
@@ -444,6 +445,159 @@ describe('SpatialChartsComponent', () => {
       await flush();
       expect(component.embeddings.map((e) => e.label)).toEqual(['UMAP']);
       expect(component.tsneTooLarge).toBe(false);
+    });
+
+    /**
+     * What happens when the dataset changes mid-computation.
+     *
+     * A run is minutes long and several awaits deep, so this is not a narrow window — it
+     * is most of the run. The failure it guards against is not a crash: it is one
+     * dataset's t-SNE drawn over another's observations, which looks like a result.
+     */
+    describe('while the dataset changes underneath it', () => {
+      /** A `run()` the test settles by hand, so the switch can be timed against it. */
+      function pendingRun() {
+        let settle: (value: unknown) => void = () => undefined;
+        let spy!: jest.SpyInstance;
+        const started = new Promise<void>((ready) => {
+          spy = jest.spyOn(EmbeddingComputeRun.prototype, 'run').mockImplementation(() => {
+            ready();
+            return new Promise((resolve) => { settle = resolve; }) as never;
+          });
+        });
+        return {
+          started,
+          settle: (value: unknown) => settle(value),
+          /**
+           * Which run object the component built for THIS call.
+           *
+           * The most recent receiver rather than the first: `jest.spyOn` hands back the
+           * existing mock when the property is already spied, so a second `pendingRun()`
+           * shares one call log with the first.
+           */
+          get instance() {
+            const seen = spy.mock.instances;
+            return seen[seen.length - 1] as EmbeddingComputeRun;
+          },
+        };
+      }
+
+      const coords = {
+        meta: { name: 'local:tsne', label: 't-SNE', dims: 2 as const },
+        x: new Float32Array([1, 2]), y: new Float32Array([3, 4]),
+      };
+
+      afterEach(() => jest.restoreAllMocks());
+
+      async function armed() {
+        dataset$.next(withPca(2688));
+        await build(controls);
+        controls.getEmbedding = jest.fn(async () => ({
+          meta: pca, x: new Float32Array([0, 1]), y: new Float32Array([2, 3]),
+        }));
+        await flush();
+        component.onEmbedding('local:tsne');
+        await flush();
+        return component;
+      }
+
+      it('never starts a worker when the switch lands during the PCA fetch', async () => {
+        await armed();
+        // The scores are still in the air when the dataset changes. `computeRun` does not
+        // exist yet at that moment, so terminating it is not what saves this.
+        let deliver: (v: unknown) => void = () => undefined;
+        controls.getEmbedding = jest.fn(() => new Promise((r) => { deliver = r; }) as never);
+        const run = jest.spyOn(EmbeddingComputeRun.prototype, 'run');
+
+        const computing = component.computeEmbedding();
+        await flush();
+        dataset$.next({ ...withPca(2688), id: 'other' });
+        deliver({ meta: pca, x: new Float32Array([0, 1]), y: new Float32Array([2, 3]) });
+        await computing;
+
+        expect(run).not.toHaveBeenCalled();
+      });
+
+      it('discards a result that arrives after the switch', async () => {
+        await armed();
+        const { started, settle } = pendingRun();
+        const computing = component.computeEmbedding();
+        await started;
+
+        // The new dataset also offers a t-SNE to compute, so the panel comes back to the
+        // same selection — which is what makes the stale result look adoptable.
+        dataset$.next({ ...withPca(2688), id: 'other' });
+        await flush();
+        component.onEmbedding('local:tsne');
+        await flush();
+        const drawn = (Plotly.react as jest.Mock).mock.calls.length;
+
+        settle(coords);
+        await computing;
+        await flush();
+
+        // Keeping it would mark the NEW dataset's t-SNE as computed, and plot 2,688 of
+        // the old one's points over the new one's observations.
+        expect(component.isComputed).toBe(false);
+        expect((Plotly.react as jest.Mock).mock.calls.length).toBe(drawn);
+      });
+
+      it('terminates the run rather than leaving it computing for nobody', async () => {
+        await armed();
+        const terminate = jest.spyOn(EmbeddingComputeRun.prototype, 'terminate');
+        const { started, settle } = pendingRun();
+        const computing = component.computeEmbedding();
+        await started;
+
+        dataset$.next({ ...withPca(2688), id: 'other' });
+        expect(terminate).toHaveBeenCalled();
+        settle(null);
+        await computing;
+      });
+
+      it('lets the superseded run finish without disowning the one that replaced it',
+        async () => {
+          await armed();
+          const first = pendingRun();
+          const computing = component.computeEmbedding();
+          await first.started;
+
+          // A switch, then a fresh computation on the new dataset — which the old run's
+          // `finally` must not clear out from under.
+          dataset$.next({ ...withPca(2688), id: 'other' });
+          await flush();
+          component.onEmbedding('local:tsne');
+          await flush();
+          const second = pendingRun();
+          void component.computeEmbedding();
+          await second.started;
+
+          const cancel = jest.spyOn(EmbeddingComputeRun.prototype, 'cancel');
+          first.settle(null);
+          await computing;
+
+          // Cancel must still reach the LIVE run. If the departing one had cleared the
+          // shared slot, this would be a no-op and the button would do nothing.
+          component.cancelCompute();
+          expect(cancel).toHaveBeenCalledTimes(1);
+          expect(cancel.mock.instances[0]).toBe(second.instance);
+          second.settle(null);
+        });
+
+      it('terminates an active run when the panel is destroyed', async () => {
+        // Otherwise the worker keeps a GPU busy for minutes with nothing left to receive
+        // the answer.
+        await armed();
+        const terminate = jest.spyOn(EmbeddingComputeRun.prototype, 'terminate');
+        const { started, settle } = pendingRun();
+        const computing = component.computeEmbedding();
+        await started;
+
+        fixture.destroy();
+        expect(terminate).toHaveBeenCalled();
+        settle(null);
+        await computing;
+      });
     });
   });
 

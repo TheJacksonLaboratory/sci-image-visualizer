@@ -127,6 +127,40 @@ describe('EmbeddingComputeRun', () => {
     await expect(promise).resolves.toBeNull();
   });
 
+  it('settles with null when terminated from outside, instead of hanging', async () => {
+    // `terminate()` is what a dataset switch and a component teardown call. Killing the
+    // worker removes the only thing that could settle the run, so without this the caller
+    // awaits for ever and its whole closure is retained with it — a leak that shows up as
+    // a progress bar frozen on a panel nobody is looking at.
+    const promise = run.run(request(), META, () => undefined);
+    await Promise.resolve();
+    run.terminate();
+    expect(fake.terminated).toBe(true);
+    await expect(promise).resolves.toBeNull();
+    expect(run.running).toBe(false);
+  });
+
+  it('is safe to terminate twice, and before anything has started', async () => {
+    expect(() => run.terminate()).not.toThrow();
+    const promise = run.run(request(), META, () => undefined);
+    await Promise.resolve();
+    run.terminate();
+    run.terminate();
+    await expect(promise).resolves.toBeNull();
+  });
+
+  it('does not overwrite a real result when terminated after it arrives', async () => {
+    // The component terminates in a `finally`, i.e. right after the result. That must not
+    // turn a finished computation into a cancelled one.
+    const promise = run.run(request(3), META, () => undefined);
+    await Promise.resolve();
+    fake.emit(donePayload(3, 2));
+    run.terminate();
+    const result = await promise;
+    expect(result).not.toBeNull();
+    expect(Array.from(result!.x)).toEqual([1, 3, 5]);
+  });
+
   it('rejects when the worker reports a failure', async () => {
     const promise = run.run(request(), META, () => undefined);
     await Promise.resolve();

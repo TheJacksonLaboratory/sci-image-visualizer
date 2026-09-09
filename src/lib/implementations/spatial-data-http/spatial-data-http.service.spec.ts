@@ -258,6 +258,56 @@ describe('SpatialDataHttpService', () => {
     });
   });
 
+  /**
+   * A vector still in the air when the dataset changes.
+   *
+   * `clear()` empties the caches but cannot cancel an HTTP request, so the response still
+   * lands — and the keys are logical (`feature:Ttr`), so it lands on a key the NEW dataset
+   * reads. Two datasets sharing a gene name is the ordinary case, and the result would be
+   * one dataset's expression drawn over another's cells: a plausible-looking plot, which
+   * is the worst kind of wrong.
+   */
+  describe('a dataset switch during a fetch', () => {
+    /** A second dataset with the same gene names, which is what makes the collision real. */
+    const OTHER: SpatialManifest = { ...MANIFEST, id: 'other-brain', name: 'Other' };
+
+    it('does not let the old dataset\'s vector become the new one\'s cache entry', async () => {
+      await loadDataset();
+      const stale = service.getFeatureVector('Ttr');
+      const request = http.expectOne(`${BASE}/spatial/visium-brain/feature/Ttr`);
+
+      // B is selected while A's gene is still outstanding, and only then does A answer.
+      await loadDataset(OTHER);
+      request.flush(f32(111, 111, 111));
+      expect(Array.from(await stale)).toEqual([111, 111, 111]); // the asker still gets it
+
+      // The next read of that gene must go to the wire, not to A's leftovers.
+      const fresh = service.getFeatureVector('Ttr');
+      http.expectOne(`${BASE}/spatial/other-brain/feature/Ttr`).flush(f32(7, 8, 9));
+      expect(Array.from(await fresh)).toEqual([7, 8, 9]);
+    });
+
+    it('does not let a late arrival evict a newer request sharing its key', async () => {
+      await loadDataset();
+      const stale = service.getFeatureVector('Ttr');
+      const first = http.expectOne(`${BASE}/spatial/visium-brain/feature/Ttr`);
+
+      await loadDataset(OTHER);
+      // B asks for the same gene, then A's request finally completes.
+      const b1 = service.getFeatureVector('Ttr');
+      const second = http.expectOne(`${BASE}/spatial/other-brain/feature/Ttr`);
+      first.flush(f32(111, 111, 111));
+      await stale;
+
+      // If A's `finally` had deleted the in-flight slot by key, B's own second caller
+      // would issue a duplicate request instead of joining the one already running.
+      const b2 = service.getFeatureVector('Ttr');
+      second.flush(f32(7, 8, 9));
+      expect(await b2).toBe(await b1);
+      http.verify();
+    });
+  });
+
   describe('searchFeatures', () => {
     it('filters inlined names locally, with no round-trip', async () => {
       await loadDataset();

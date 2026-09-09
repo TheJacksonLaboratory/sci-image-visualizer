@@ -5,7 +5,7 @@
     "coverage/**",
     "node_modules/**",
     "*.config.ts",
-    "examples/**"
+    "examples/browser-image/**"
   ],
   "overrides": [
     {
@@ -88,6 +88,45 @@
         "plugin:@angular-eslint/template/recommended"
       ],
       "rules": {}
+    },
+    {
+      "files": [
+        "examples/tile-server/**/*.mjs"
+      ],
+      "env": {
+        "node": true,
+        "es2022": true
+      },
+      "parserOptions": {
+        "ecmaVersion": 2022,
+        "sourceType": "module"
+      },
+      "extends": [
+        "eslint:recommended"
+      ],
+      "rules": {
+        "object-curly-spacing": [
+          "error",
+          "always"
+        ],
+        "quotes": [
+          "error",
+          "single",
+          {
+            "avoidEscape": true
+          }
+        ],
+        "max-len": [
+          "error",
+          {
+            "code": 115,
+            "ignoreUrls": true,
+            "ignoreStrings": true,
+            "ignoreTemplateLiterals": true,
+            "ignoreRegExpLiterals": true
+          }
+        ]
+      }
     }
   ]
 }

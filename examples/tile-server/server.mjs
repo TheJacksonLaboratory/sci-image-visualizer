@@ -284,11 +284,25 @@ const octet = (res) => res
  * Which source owns an id, resolved by asking each for a manifest in priority
  * order and cached. Priority is bundle > zarr > st, so a deliberately-converted
  * bundle can override a live source of the same name.
+ *
+ * The cache EXPIRES, and that is the point rather than a tuning detail. Ownership is not
+ * fixed here: these sources are directories someone drops files into while the server is
+ * running, and the priority order exists precisely so a bundle generated later can
+ * override the live source it shadows. A permanent entry defeats that — convert a dataset
+ * and the server keeps answering from the store until someone restarts it, which presents
+ * as the app showing data that is no longer what is on disk. That is the same class of
+ * confusion the `no-cache` policy above was introduced to stop, and it cost real debugging
+ * time when it was an HTTP header rather than a Map.
+ *
+ * Seconds rather than minutes: one page load asks for a manifest and then a dozen vectors,
+ * so the window still collapses that burst into a single round of probes, while a
+ * regenerated dataset becomes visible in about the time it takes to reload the tab.
  */
+const SOURCE_TTL_MS = Number(process.env.SOURCE_TTL_MS ?? 5_000);
 const sourceOf = new Map();
 async function resolveSource(id) {
   const cached = sourceOf.get(id);
-  if (cached) return cached;
+  if (cached && cached.expires > Date.now()) return cached.name;
   for (const [name, probe] of [
     ['bundle', () => loadManifest(SPATIAL_DIR, id)],
     ['zarr', () => zarrManifest(ZARR_DIR, id)],
@@ -302,12 +316,15 @@ async function resolveSource(id) {
   ]) {
     try {
       await probe();
-      sourceOf.set(id, name);
+      sourceOf.set(id, { name, expires: Date.now() + SOURCE_TTL_MS });
       return name;
     } catch {
       // Not this one; try the next.
     }
   }
+  // Nothing owns it now, so drop any expired entry rather than leaving a name that would
+  // be re-probed on every request for an id that has gone away.
+  sourceOf.delete(id);
   throw new RangeError(`unknown dataset: ${id}`);
 }
 

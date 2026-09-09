@@ -204,5 +204,5 @@ await numeric(path.join(base, 'obsm', 'X_umap3d'), [SPOTS, 3], 'float32', umap3d
 
 console.log(`[make-zarr-demo] ${OUT}`);
 console.log(`  ${SPOTS} spots x ${GENES} genes, ${data.length} nonzeros`);
-console.log(`  obsm: spatial, X_umap (2D), X_umap3d (3D)`);
+console.log('  obsm: spatial, X_umap (2D), X_umap3d (3D)');
 console.log(`  serve with:  ZARR_DIR=${path.dirname(OUT)} npm start`);

@@ -8,6 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "test": "node --test test/*.test.mjs",
     "start": "node server.mjs",
     "dev": "node --watch server.mjs",
     "make-cog": "node scripts/make-cog.mjs",

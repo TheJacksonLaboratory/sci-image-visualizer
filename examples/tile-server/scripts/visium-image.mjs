@@ -39,7 +39,7 @@
 
 import sharp from 'sharp';
 
-import { attr, obsmArray, openH5ad } from '../lib/h5ad.mjs';
+import { obsmArray, openH5ad } from '../lib/h5ad.mjs';
 
 /** Centre-to-centre spot spacing on a Visium slide, in µm. Fixes the physical scale. */
 const SPOT_PITCH_UM = 100;
@@ -209,7 +209,10 @@ try {
   const stated = sf.keys().includes('spot_diameter_fullres')
     ? Number(f.get(`${base}/scalefactors/spot_diameter_fullres`).value) : null;
 
-  report = { width, height, lib, pitchPx, how, scalef, tierKey, umPerFullres, umPerServed, radius, lo, hi, fits, stated };
+  report = {
+    width, height, lib, pitchPx, how, scalef, tierKey,
+    umPerFullres, umPerServed, radius, lo, hi, fits, stated,
+  };
 } finally {
   f.close();
 }

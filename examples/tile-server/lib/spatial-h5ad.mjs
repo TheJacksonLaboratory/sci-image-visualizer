@@ -29,7 +29,7 @@ import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
-  attr, categoriesFor, encodingOf, geneNames, indexKey, obsCount, obsmArray, openH5ad,
+  categoriesFor, encodingOf, geneNames, indexKey, obsCount, obsmArray, openH5ad,
   shapeOf, unsValue,
 } from './h5ad.mjs';
 import { defaultRadius, writeBundle } from './h5ad-bundle.mjs';

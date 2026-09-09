@@ -295,7 +295,21 @@ export class SpatialDataHttpService implements SpatialDataPort {
     return this.manifest;
   }
 
-  /** Cache + single-flight around a vector fetch. */
+  /**
+   * Cache + single-flight around a vector fetch.
+   *
+   * Keys are LOGICAL — `feature:GAPDH`, not `<dataset>/feature:GAPDH` — because `clear()`
+   * empties the maps on every switch, so two datasets never hold entries at once. What
+   * that does not cover is a request still in the air when the switch happens: `clear()`
+   * cannot cancel an HTTP call, so a vector fetched for dataset A can resolve after B has
+   * been selected and write itself into B's cache under a key B would read. Both datasets
+   * having a gene of that name is the common case, not the unlucky one, and the result is
+   * a plot of A's expression over B's cells — which looks like data, not like a fault.
+   *
+   * So the generation is checked after the await, and the in-flight slot is cleared only
+   * when the promise still sitting in it is this one: a late arrival must not evict the
+   * entry a newer request for the same key is already sharing.
+   */
   private fetchCached(key: string, load: () => Promise<CachedPayload>): Promise<CachedPayload> {
     const hit = this.cache.get(key);
     if (hit) {
@@ -307,13 +321,21 @@ export class SpatialDataHttpService implements SpatialDataPort {
     const pending = this.inFlight.get(key);
     if (pending) return pending;
 
-    const promise = load()
+    const mine = this.selectToken;
+    const promise: Promise<CachedPayload> = load()
       .then((value) => {
-        this.cache.set(key, value);
-        this.evict();
+        // Still returned to the caller that asked: it may well be a component that is
+        // itself being torn down, and rejecting here would surface a switch as an error.
+        // What must not happen is the value being kept for whoever comes next.
+        if (mine === this.selectToken) {
+          this.cache.set(key, value);
+          this.evict();
+        }
         return value;
       })
-      .finally(() => this.inFlight.delete(key));
+      .finally(() => {
+        if (this.inFlight.get(key) === promise) this.inFlight.delete(key);
+      });
     this.inFlight.set(key, promise);
     return promise;
   }

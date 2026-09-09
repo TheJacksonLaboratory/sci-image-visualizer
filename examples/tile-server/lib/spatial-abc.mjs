@@ -23,7 +23,7 @@
  */
 import { createReadStream } from 'node:fs';
 import { readNifti } from './nifti.mjs';
-import { readFile, writeFile, mkdir, rename, stat, readdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename, stat } from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline';
 

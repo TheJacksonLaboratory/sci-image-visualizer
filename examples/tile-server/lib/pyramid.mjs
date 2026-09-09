@@ -7,7 +7,6 @@
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import sharp from 'sharp';
 
 export const DEFAULT_TILE_SIZE = 512;
 

@@ -41,6 +41,17 @@ export class EmbeddingComputeRun {
   private settled = false;
 
   /**
+   * Settles a run that is still waiting, set for as long as one is.
+   *
+   * `terminate()` is called from outside — a dataset switch, a component being destroyed —
+   * and killing the worker on its own leaves the promise `run()` returned pending FOR
+   * EVER, because the settlement it was waiting for arrives as a worker message. The
+   * awaiting closure, and everything it captured, is retained with it. So termination
+   * settles the run itself.
+   */
+  private abandon: (() => void) | null = null;
+
+  /**
    * `factory` is optional: without one the real worker module is imported on demand.
    *
    * Dynamically, and that is not laziness for its own sake — the module holds an
@@ -78,9 +89,16 @@ export class EmbeddingComputeRun {
       const finish = (fn: () => void) => {
         if (this.settled) return;
         this.settled = true;
+        // Cleared BEFORE terminating: `terminate()` calls it, and this is what keeps the
+        // two from calling each other round in a circle.
+        this.abandon = null;
         this.terminate();
         fn();
       };
+      // An abandoned run resolves NULL, exactly as a cancelled one does. It is the same
+      // event from the caller's side — the answer was no longer wanted — and rejecting
+      // would make a routine dataset switch look like a failed computation.
+      this.abandon = () => finish(() => resolve(null));
 
       worker.onmessage = (event: MessageEvent) => {
         const data = event.data ?? {};
@@ -158,10 +176,18 @@ export class EmbeddingComputeRun {
     this.worker?.postMessage({ type: 'cancel' });
   }
 
-  /** Stop immediately, abandoning any result. Safe to call twice. */
+  /**
+   * Stop immediately, abandoning any result. Safe to call twice.
+   *
+   * Unlike {@link cancel}, this does not wait for the worker to acknowledge — the run is
+   * settled here, with null, because nothing is left to deliver the answer.
+   */
   terminate(): void {
+    const abandon = this.abandon;
+    this.abandon = null;
     this.worker?.terminate();
     this.worker = null;
+    abandon?.();
   }
 
   get running(): boolean {
