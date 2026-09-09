@@ -4,12 +4,12 @@ import { NO_ERRORS_SCHEMA } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
 
 import { SpatialChartsComponent } from './spatial-charts.component';
-import { VISUALIZER, ISpatialControls } from '../contracts/visualizer.contract';
-import { SpatialDataset } from '../contracts/spatial-dataset.contract';
-import { SpatialColorBy } from '../contracts/display-types';
-import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../contracts/display-types';
-import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selection';
-import { GENE_OPTIONS_MAX } from '../spatial/gene-search';
+import { VISUALIZER, ISpatialControls } from '../../contracts/visualizer.contract';
+import { SpatialDataset } from '../../contracts/spatial-dataset.contract';
+import { SpatialColorBy } from '../../contracts/display-types';
+import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../../contracts/display-types';
+import { SpatialSelectionMask, emptySelection } from '../../spatial/spatial-selection';
+import { GENE_OPTIONS_MAX } from '../../spatial/gene-search';
 
 jest.mock('plotly.js-dist-min', () => ({
   react: jest.fn().mockResolvedValue(undefined),

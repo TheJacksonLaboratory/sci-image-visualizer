@@ -4,7 +4,7 @@ import {
 import { Subscription, combineLatest } from 'rxjs';
 
 import { VISUALIZER, IVisualizer, ISpatialControls } from '../contracts/visualizer.contract';
-import { SpatialChartsComponent } from '../spatial-charts/spatial-charts.component';
+import { SpatialChartsComponent } from './spatial-charts/spatial-charts.component';
 import {
   CategoricalColumnMeta, SpatialColumnMeta, SpatialDataset,
 } from '../contracts/spatial-dataset.contract';

@@ -32,7 +32,7 @@ import { RegionEditorComponent } from './region-editor/region-editor.component';
 import { HexColorPickerComponent } from './hex-color-picker/hex-color-picker.component';
 import { ChannelHistogramComponent } from './channel-histogram/channel-histogram.component';
 import { SpatialControlsComponent } from './spatial-controls/spatial-controls.component';
-import { SpatialChartsComponent } from './spatial-charts/spatial-charts.component';
+import { SpatialChartsComponent } from './spatial-controls/spatial-charts/spatial-charts.component';
 import { RoutingVisualizerService } from './routing-visualizer.service';
 import { VISUALIZER } from './contracts/visualizer.contract';
 import { REGION_EDITOR_API } from './contracts/region-editor-api.contract';

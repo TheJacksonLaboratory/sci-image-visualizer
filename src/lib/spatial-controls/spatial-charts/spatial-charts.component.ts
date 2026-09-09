@@ -4,21 +4,21 @@ import {
 import { Subscription, combineLatest } from 'rxjs';
 import * as Plotly from 'plotly.js-dist-min';
 
-import { VISUALIZER, IVisualizer, ISpatialControls } from '../contracts/visualizer.contract';
+import { VISUALIZER, IVisualizer, ISpatialControls } from '../../contracts/visualizer.contract';
 import {
   SpatialEmbedding,
   SpatialEmbeddingMeta,
-} from '../contracts/spatial-dataset.contract';
-import { SpatialColorBy, SpatialViewState, DEFAULT_SPATIAL_VIEW } from '../contracts/display-types';
+} from '../../contracts/spatial-dataset.contract';
+import { SpatialColorBy, SpatialViewState, DEFAULT_SPATIAL_VIEW } from '../../contracts/display-types';
 import {
   SpatialSelectionMask, emptySelection, maskToIndices,
-} from '../spatial/spatial-selection';
-import { cellsAsGroups, heatmapMatrix } from '../spatial/spatial-heatmap';
-import { geneOptionsFor } from '../spatial/gene-search';
+} from '../../spatial/spatial-selection';
+import { cellsAsGroups, heatmapMatrix } from '../../spatial/spatial-heatmap';
+import { geneOptionsFor } from '../../spatial/gene-search';
 import {
   OmicsChartKind, OmicsGrouping, benefitsFromGrouping, buildCountTraces, buildHeatmapTraces,
   buildOmicsTraces, buildEmbeddingTraces, countsLayout, heatmapLayout, omicsLayout, embeddingLayout,
-} from '../implementations/plotly/omics-trace-builders';
+} from '../../implementations/plotly/omics-trace-builders';
 
 /**
  * Widen the help tooltip, once per document.
