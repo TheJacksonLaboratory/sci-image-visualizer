@@ -388,9 +388,32 @@ against a paper's figure knows which they are looking at.
 PCA is computed once and reused: it is both an embedding in its own right and the input the other
 methods want, since UMAP or t-SNE straight off 18,078 genes follows noise. `lib/pca.mjs` uses
 **randomized subspace iteration** rather than a full SVD — the same approach scanpy takes at this
-size, and the only tractable one in JS, since an exact SVD of 2,688 x 18,078 computes 2,688
-singular triples to use three. It reproduces numpy's exact variance ratios (Visium 7.3%, 2.9%,
-2.1%) and takes 23 s at 50 components; UMAP 3D on those components takes 3 s.
+size, and the only tractable one here, since an exact SVD of 2,688 x 18,078 computes 2,688
+singular triples to use three. It reproduces numpy's exact variance ratios on both datasets
+(18.2/7.1/5.0 and 7.3/2.9/2.1).
+
+The linear algebra is **[`@jax-js/jax`](https://github.com/ekzhang/jax-js)**, which carries a real
+`linalg` (`svd`, `eigh`) and a Wasm SIMD backend. On the product this is dominated by —
+2688x18078 @ 18078x60 — it takes **0.59 s against 4.21 s** for the hand-written loop it replaced,
+so PCA at 50 components went from 23 s to **2.2 s** and the whole Visium compute step from 26 s to
+**5.6 s**. It also retired a hand-rolled Jacobi eigensolver in favour of the library's `svd`.
+
+WebGPU is deliberately *not* requested. Node has none, and `init('webgpu')` there silently returns
+the CPU and Wasm backends, so asking would imply an acceleration that is not happening. If this
+ever moves into the browser that is where the device already exists — napari-js holds a
+`GPUDevice` — and where the request belongs.
+
+Two jax-js rules the code must obey, both silent when broken. **Move semantics**: an array is
+consumed by the operation that reads it, and reusing one needs `.ref` (a getter, not a method).
+**Ordering**: `eigh` returns eigenvalues ascending while `svd` returns them descending, and mixing
+the conventions reports the smallest component as PC1. `npm run verify-pca` catches both — it
+cross-checks the leading components against [`pca-js`](https://github.com/bitanath/pca), an
+independent exact implementation, and a dropped `.ref` throws outright.
+
+`pca-js` verifies rather than computes because it cannot scale, not because it is wrong: it
+reproduces 18.2%, 7.1%, 5.0% on seqFISH exactly, but it eigendecomposes a genes x genes covariance
+matrix, so its cost is **cubic in gene count** — measured at 2,000 observations, 2.2 s for 175
+genes, 12.0 s for 351, 80.5 s for 700. A whole-transcriptome dataset is thousands of hours.
 
 **t-SNE is opt-in, and that is a real limitation rather than a preference.** `tsne-js` implements
 the exact formulation only — its own README puts Barnes-Hut under "planned (contributions
@@ -398,8 +421,13 @@ welcome!)" — so both the setup and every iteration are O(dN²) against scikit-
 O(dN log N). Measured at 50 iterations: 3.9 s for 500 observations, 16.8 s for 1,000, 65.2 s for
 2,000, four times the cost for twice the points exactly as quadratic predicts. On top of that the
 joint-probability matrix is built once up front, so at 2,688 observations even `--iterations 1`
-costs two minutes. A full run on the Visium bundle is over half an hour and seqFISH's 19,416
-observations are out of reach; scikit-learn did seqFISH in 31 seconds.
+costs two minutes. Measured end to end on the Visium bundle, the 2-D pass alone took **1,253 s —
+nearly 21 minutes** — putting 2-D plus 3-D at about three quarters of an hour, and seqFISH's
+19,416 observations are out of reach; scikit-learn did seqFISH in 31 seconds.
+
+Changing CPU library does not help: `karpathy/tsnejs` is 375 lines with no quadtree at all, the
+same exact formulation. The credible route is a GPU implementation of the linear-time optimisation
+(`tfjs-tsne`), which needs the computation to run in a browser.
 
 So `--only tsne` opts in and prints what it will cost first, rather than starting a job that
 cannot be told apart from a hang. If you need t-SNE at this scale, compute it wherever

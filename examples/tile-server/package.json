@@ -18,9 +18,11 @@
     "h5ad-to-spatial": "node scripts/h5ad-to-spatial.mjs",
     "compute-embeddings": "node scripts/compute-embeddings.mjs",
     "visium-image": "node scripts/visium-image.mjs",
-    "make-zarr-demo": "node scripts/make-zarr-demo.mjs"
+    "make-zarr-demo": "node scripts/make-zarr-demo.mjs",
+    "verify-pca": "node scripts/verify-pca.mjs"
   },
   "dependencies": {
+    "@jax-js/jax": "^0.1.24",
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "h5wasm": "^0.10.3",
@@ -28,5 +30,8 @@
     "sharp": "^0.33.5",
     "tsne-js": "^1.0.3",
     "umap-js": "^1.4.0"
+  },
+  "devDependencies": {
+    "pca-js": "^2.0.6"
   }
 }

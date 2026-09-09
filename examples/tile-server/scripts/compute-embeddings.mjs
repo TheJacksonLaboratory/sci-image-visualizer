@@ -104,7 +104,7 @@ const k = Math.max(needsReduction ? pcs : 0, wantPca ? 3 : 0);
 if (k === 0) die(`--only ${[...only].join(',')}: nothing to compute`);
 
 const t0 = Date.now();
-const { scores, varianceRatio, components } = pcaScores(matrix, nObs, nGenes, k, { seed });
+const { scores, varianceRatio, components } = await pcaScores(matrix, nObs, nGenes, k, { seed });
 console.log(`  PCA(${components}) in ${((Date.now() - t0) / 1000).toFixed(1)}s`
   + `  — PC1 ${(varianceRatio[0] * 100).toFixed(1)}%, PC2 ${(varianceRatio[1] * 100).toFixed(1)}%`);
 
