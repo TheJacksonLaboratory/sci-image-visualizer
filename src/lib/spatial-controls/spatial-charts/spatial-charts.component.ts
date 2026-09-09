@@ -15,6 +15,7 @@ import {
 } from '../../spatial/spatial-selection';
 import { cellsAsGroups, heatmapMatrix } from '../../spatial/spatial-heatmap';
 import { geneOptionsFor } from '../../spatial/gene-search';
+import { ComputeProgress, EmbeddingComputeRun } from '../../spatial/embedding-compute';
 import {
   OmicsChartKind, OmicsGrouping, benefitsFromGrouping, buildCountTraces, buildHeatmapTraces,
   buildOmicsTraces, buildEmbeddingTraces, countsLayout, heatmapLayout, omicsLayout, embeddingLayout,
@@ -160,6 +161,38 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   private static readonly ALWAYS_KINDS: { label: string; value: OmicsChartKind }[] = [
     { label: 'Heatmap', value: 'heatmap' },
   ];
+
+  /**
+   * A t-SNE the dataset does not publish, offered so it can be computed here.
+   *
+   * A dropped-in `.h5ad` typically carries one UMAP and a PCA, and no t-SNE — the two
+   * views answer different questions, so having only one is a real gap. Computing it
+   * needs no expression data: t-SNE runs on the PCA scores, which is why this can happen
+   * in the browser at all while PCA cannot.
+   */
+  private static readonly COMPUTABLE: SpatialEmbeddingMeta[] = [
+    { name: 'local:tsne', label: 't-SNE (compute)', dims: 2, derived: true },
+    { name: 'local:tsne3d', label: 't-SNE 3D (compute)', dims: 3, derived: true },
+  ];
+
+  /** The menu suffix that says a click will start work; not part of the name. */
+  private static readonly COMPUTE_SUFFIX = ' (compute)';
+
+  /** Coordinates computed in this browser, by name. Not persisted: a reload recomputes. */
+  private readonly computed = new Map<string, SpatialEmbedding>();
+
+  /** The live run, when one is going. */
+  private computeRun: EmbeddingComputeRun | null = null;
+
+  /** 0..1 while running, or null before the first report. Drives the progress bar. */
+  computeFraction: number | null = null;
+
+  /** Which backend the worker got — 'webgpu', 'wasm' or 'cpu'. Shown while running. */
+  computeBackend: string | null = null;
+
+  computeMessage: string | null = null;
+
+  computeError: string | null = null;
 
   /** Offered only when the dataset publishes an embedding to draw. */
   // Labelled for what it is rather than for one instance of it: this view draws whatever
@@ -314,7 +347,18 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       // Embeddings belong to the dataset, so they are re-read with it and the loaded
       // coordinates dropped: a UMAP from the previous dataset over these observations
       // would be a plot of two different things at once.
-      this.embeddings = dataset?.embeddings ? [...dataset.embeddings] : [];
+      this.computed.clear();
+      this.computeRun?.terminate();
+      this.computeRun = null;
+      const published = dataset?.embeddings ? [...dataset.embeddings] : [];
+      // Offer to compute a t-SNE only where the dataset has PCA to embed and no t-SNE of
+      // its own — otherwise the menu advertises work that cannot start, or duplicates
+      // what is already served.
+      const hasPca = published.some((e) => /pca/i.test(e.label ?? e.name));
+      const hasTsne = published.some((e) => /tsne|t-sne/i.test(e.label ?? e.name));
+      this.embeddings = hasPca && !hasTsne
+        ? [...published, ...SpatialChartsComponent.COMPUTABLE]
+        : published;
       this.embedding = this.embeddings[0] ?? null;
       this.embeddingCoords = null;
       this.embeddingCodes = null;
@@ -589,7 +633,18 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     // Sequenced on the shared token: the coordinates are a round-trip, and a slower one
     // must not paint over a kind the user has already moved on from.
     const mine = ++this.token;
-    if (!this.embeddingCoords || this.embeddingCoords.meta.name !== meta.name) {
+    // Computed here, not served: a local result is the same shape as a fetched one, so
+    // everything downstream — colouring, lasso selection, the camera — is unchanged.
+    const local = this.computed.get(meta.name);
+    if (local) {
+      this.embeddingCoords = local;
+    } else if (this.isComputable) {
+      // Offered but not yet computed. The panel shows the Compute button; drawing nothing
+      // is right, and an error would be wrong — there is no failure here.
+      this.purgePlot();
+      this.notice = null;
+      return;
+    } else if (!this.embeddingCoords || this.embeddingCoords.meta.name !== meta.name) {
       this.busy = true;
       try {
         const loaded = await controls.getEmbedding(meta.name);
@@ -806,6 +861,113 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     this.refreshGeneOptions();
   }
 
+  /** Whether the selected embedding is one this browser would have to compute. */
+  get isComputable(): boolean {
+    return !!this.embedding && this.embedding.name.startsWith('local:');
+  }
+
+  /** Whether it has already been computed in this session. */
+  get isComputed(): boolean {
+    return !!this.embedding && this.computed.has(this.embedding.name);
+  }
+
+  get isComputing(): boolean {
+    return !!this.computeRun?.running;
+  }
+
+  /**
+   * Compute the selected embedding here, in a worker.
+   *
+   * The PCA scores come from the port as an ordinary embedding — the server derives them,
+   * because PCA needs the whole expression matrix (185 MB for a Visium dataset) while
+   * t-SNE needs only the scores (0.51 MB). Sending the matrix to the browser to save a
+   * few seconds of arithmetic would be a far slower answer.
+   */
+  async computeEmbedding(): Promise<void> {
+    const meta = this.embedding;
+    const controls = this.controls;
+    if (!meta || !controls?.getEmbedding || this.isComputing) return;
+    this.computeError = null;
+    this.computeMessage = null;
+    this.computeFraction = null;
+    this.computeBackend = null;
+
+    try {
+      // Prefer the 3-D scores: they carry a third component for free, and t-SNE on more
+      // components than it needs is not better — the PCA basis is the input either way.
+      const source = await this.loadPcaScores(controls);
+      if (!source) {
+        this.computeError = 'This dataset serves no PCA to embed.';
+        return;
+      }
+      this.computeRun = new EmbeddingComputeRun();
+      const result = await this.computeRun.run(
+        {
+          scores: source.scores,
+          nObs: source.nObs,
+          nDims: source.nDims,
+          dims: meta.dims,
+        },
+        {
+          ...meta,
+          label: (meta.label ?? meta.name)
+            .replace(SpatialChartsComponent.COMPUTE_SUFFIX, ''),
+        },
+        (progress: ComputeProgress) => {
+          this.computeFraction = progress.fraction;
+          this.computeBackend = progress.backend ?? this.computeBackend;
+          if (progress.message) this.computeMessage = progress.message;
+        },
+      );
+      if (result) {
+        this.computed.set(meta.name, result);
+        this.embeddingCoords = result;
+        await this.render();
+      }
+    } catch (err) {
+      this.computeError = (err as Error)?.message ?? String(err);
+    } finally {
+      this.computeRun?.terminate();
+      this.computeRun = null;
+      this.computeFraction = null;
+    }
+  }
+
+  /** Stop a run. It settles shortly after, leaving no embedding. */
+  cancelCompute(): void {
+    this.computeRun?.cancel();
+  }
+
+  /**
+   * The dataset's PCA, as row-major scores.
+   *
+   * Assembled from whichever PCA the source offers, widest first — a 3-D one gives t-SNE
+   * three components instead of two for the same request.
+   */
+  private async loadPcaScores(
+    controls: ISpatialControls,
+  ): Promise<{ scores: Float32Array; nObs: number; nDims: number } | null> {
+    const candidates = this.embeddings
+      .filter((e) => /pca/i.test(e.label ?? e.name) && !e.name.startsWith('local:'))
+      .sort((a, b) => b.dims - a.dims);
+    for (const candidate of candidates) {
+      try {
+        const pca = await controls.getEmbedding!(candidate.name);
+        const planes = [pca.x, pca.y, ...(pca.z ? [pca.z] : [])];
+        const nObs = pca.x.length;
+        const nDims = planes.length;
+        const scores = new Float32Array(nObs * nDims);
+        for (let i = 0; i < nObs; i++) {
+          for (let d = 0; d < nDims; d++) scores[i * nDims + d] = planes[d][i];
+        }
+        return { scores, nObs, nDims };
+      } catch {
+        // Try the next; a source may advertise one it cannot actually serve.
+      }
+    }
+    return null;
+  }
+
   /** Which embedding to draw, when the dataset publishes more than one. */
   onEmbedding(name: string): void {
     const next = this.embeddings.find((e) => e.name === name);
@@ -893,7 +1055,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
 
   /** What the embedding view is showing, said plainly. */
   get embeddingNote(): string {
-    const meta = this.embedding;
+    const meta = this.embeddingCoords?.meta ?? this.embedding;
     if (!meta) return 'This dataset publishes no embedding.';
     // A derived embedding says so, and says HOW when the parameters are known: a t-SNE or
     // UMAP at different settings is a different picture of the same cells, so "computed

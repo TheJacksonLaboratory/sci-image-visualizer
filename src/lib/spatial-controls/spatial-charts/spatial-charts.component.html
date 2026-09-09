@@ -60,6 +60,16 @@
                 [ngModel]="embedding?.name" (ngModelChange)="onEmbedding($event)"
                 appendTo="body"
                 pTooltip="Which embedding to draw" tooltipPosition="top"></p-dropdown>
+    <!-- Offered only for an embedding this dataset does not publish. It runs in a Web
+         Worker on the GPU, so the panel stays usable while it goes. -->
+    <p-button *ngIf="kind === 'embedding' && isComputable && !isComputed && !isComputing"
+              icon="pi pi-play" size="small" [text]="true" label="Compute"
+              pTooltip="Run t-SNE here, in the background, from this dataset's PCA"
+              tooltipPosition="top"
+              (onClick)="computeEmbedding()"></p-button>
+    <p-button *ngIf="isComputing"
+              icon="pi pi-times" size="small" [text]="true" severity="secondary"
+              label="Cancel" (onClick)="cancelCompute()"></p-button>
     <p-button [icon]="detached ? 'pi pi-window-minimize' : 'pi pi-external-link'"
               size="small" [text]="true"
               [label]="detached ? 'Put back' : 'Detach'"
@@ -69,6 +79,23 @@
               tooltipPosition="top"
               (onClick)="toggleDetached()"></p-button>
   </div>
+
+  <!-- Progress while a computation runs. `mode="indeterminate"` until the first report,
+       because the run starts with a neighbour graph and there is nothing honest to show
+       as a percentage yet. -->
+  <div class="sx-compute" *ngIf="isComputing">
+    <p-progressBar
+      [mode]="computeFraction === null ? 'indeterminate' : 'determinate'"
+      [value]="computeFraction === null ? 0 : (computeFraction * 100)"
+      [showValue]="computeFraction !== null"
+      [style]="{ height: '0.6rem' }"></p-progressBar>
+    <small class="sx-hint">
+      {{ computeFraction === null ? 'Building the neighbour graph…' : 'Optimising…' }}
+      <ng-container *ngIf="computeBackend"> on {{ computeBackend }}</ng-container>
+    </small>
+    <small class="sx-hint sx-warn" *ngIf="computeMessage">{{ computeMessage }}</small>
+  </div>
+  <small class="sx-hint sx-warn" *ngIf="computeError">{{ computeError }}</small>
 
   <div [id]="chartDiv" class="sx-plot" *ngIf="!detached"></div>
 

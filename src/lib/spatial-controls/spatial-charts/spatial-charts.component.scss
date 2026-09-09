@@ -144,3 +144,16 @@
     color: var(--primary-color, #3b82f6);
   }
 }
+
+// The compute progress block. Sits where the plot will be, so the panel does not jump
+// when the result arrives.
+.sx-compute {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.5rem 0;
+}
+
+.sx-warn {
+  color: var(--orange-600, #c2410c);
+}
