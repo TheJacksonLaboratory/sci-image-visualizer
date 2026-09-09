@@ -30,8 +30,5 @@
     "sharp": "^0.33.5",
     "tsne-js": "^1.0.3",
     "umap-js": "^1.4.0"
-  },
-  "devDependencies": {
-    "pca-js": "^2.0.6"
   }
 }

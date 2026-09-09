@@ -404,16 +404,24 @@ ever moves into the browser that is where the device already exists — napari-j
 `GPUDevice` — and where the request belongs.
 
 Two jax-js rules the code must obey, both silent when broken. **Move semantics**: an array is
-consumed by the operation that reads it, and reusing one needs `.ref` (a getter, not a method).
-**Ordering**: `eigh` returns eigenvalues ascending while `svd` returns them descending, and mixing
-the conventions reports the smallest component as PC1. `npm run verify-pca` catches both — it
-cross-checks the leading components against [`pca-js`](https://github.com/bitanath/pca), an
-independent exact implementation, and a dropped `.ref` throws outright.
+consumed by the operation that reads it, and reusing one needs `.ref` (a getter, not a method) — a
+dropped one throws outright, which is the good case. **Ordering**: `eigh` returns eigenvalues
+ascending while `svd` returns them descending, and mixing the conventions reports the smallest
+component as PC1.
 
-`pca-js` verifies rather than computes because it cannot scale, not because it is wrong: it
-reproduces 18.2%, 7.1%, 5.0% on seqFISH exactly, but it eigendecomposes a genes x genes covariance
-matrix, so its cost is **cubic in gene count** — measured at 2,000 observations, 2.2 s for 175
-genes, 12.0 s for 351, 80.5 s for 700. A whole-transcriptome dataset is thousands of hours.
+`npm run verify-pca` checks the approximation against two independent anchors: an **exact SVD** of
+a small fixture, and the variance ratios **numpy** reported for the real bundles (18.2/7.1/5.0 and
+7.3/2.9/2.1). The fixture's reference does its own centring rather than calling `centreByGene`, so
+that function is under test too — a mean subtracted along the wrong axis still produces a
+plausible-looking result. Four mutations fail it: removed power iterations, reversed
+singular-value order, dropped orthonormalisation, and centring that subtracts nothing.
+
+The exact reference is jax-js's own `svd` rather than a second PCA library.
+[`pca-js`](https://github.com/bitanath/pca) was used to establish that this is safe — it agrees
+with jax-js's exact SVD to four decimals, 16.0963% / 15.0340% / 10.2403% — and then removed, since
+it cannot scale anyway: it eigendecomposes a genes x genes covariance matrix, so its cost is
+**cubic in gene count** (at 2,000 observations: 2.2 s for 175 genes, 12.0 s for 351, 80.5 s for
+700), putting whole-transcriptome data thousands of hours out of reach.
 
 **t-SNE is opt-in, and that is a real limitation rather than a preference.** `tsne-js` implements
 the exact formulation only — its own README puts Barnes-Hut under "planned (contributions
