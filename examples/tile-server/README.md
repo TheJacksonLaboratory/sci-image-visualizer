@@ -423,30 +423,42 @@ it cannot scale anyway: it eigendecomposes a genes x genes covariance matrix, so
 **cubic in gene count** (at 2,000 observations: 2.2 s for 175 genes, 12.0 s for 351, 80.5 s for
 700), putting whole-transcriptome data thousands of hours out of reach.
 
-**t-SNE is opt-in, and that is a real limitation rather than a preference.** `tsne-js` implements
-the exact formulation only — its own README puts Barnes-Hut under "planned (contributions
-welcome!)" — so both the setup and every iteration are O(dN²) against scikit-learn's
-O(dN log N). Measured at 50 iterations: 3.9 s for 500 observations, 16.8 s for 1,000, 65.2 s for
-2,000, four times the cost for twice the points exactly as quadratic predicts. On top of that the
-joint-probability matrix is built once up front, so at 2,688 observations even `--iterations 1`
-costs two minutes. Measured end to end on the Visium bundle, the 2-D pass alone took **1,253 s —
-nearly 21 minutes** — putting 2-D plus 3-D at about three quarters of an hour, and seqFISH's
-19,416 observations are out of reach; scikit-learn did seqFISH in 31 seconds.
+**t-SNE is implemented here**, in `lib/tsne.mjs`, because no JS library can do it at these
+sizes. Every pure-JS t-SNE — `tsne-js`, `karpathy/tsnejs`, `druidjs` — is the exact
+formulation with no space-partitioning, and `tensorflow/tfjs-tsne`, which did have a
+linear-time GPU optimisation, was archived in February 2021. The one Barnes-Hut option on
+npm (`bhtsne`) wraps van der Maaten's C++ and reintroduces a native toolchain.
 
-Changing CPU library does not help: `karpathy/tsnejs` is 375 lines with no quadtree at all, the
-same exact formulation. The credible route is a GPU implementation of the linear-time optimisation
-(`tfjs-tsne`), which needs the computation to run in a browser.
+Measured against the `tsne-js` it replaced:
 
-So `--only tsne` opts in and prints what it will cost first, rather than starting a job that
-cannot be told apart from a hang. If you need t-SNE at this scale, compute it wherever
-scikit-learn lives and add it to the `.h5ad` as an `obsm` key before converting — the converter
-takes any 2- or 3-column `obsm` array, whatever produced it.
+| | 2,688 spots (Visium) | 19,416 cells (seqFISH) |
+|---|---|---|
+| `tsne-js` | 39 min (2-D pass alone) | ~34 hours |
+| `lib/tsne.mjs` | **95 s** (2-D), 137 s (3-D) | ~67 min per dimension |
 
-**So neither example dataset ships a t-SNE**, and that is a deliberate consequence rather than
-an oversight: seqFISH's 19,416 observations are out of reach entirely, and the Visium bundle's
-2,688 would take over half an hour for a demo embedding. Both carry four — the published `X_umap`
-plus `X_pca2d`, `X_pca3d` and `X_umap3d` — which is exactly what the commands above produce, so
-a fresh clone reproduces what the server serves.
+Same arithmetic, restructured rather than approximated. The **attractive** term uses a
+sparse P over each point's nearest neighbours — dense P at 19,416 points is 377 million
+entries, 1.5 GB, and the entries outside a neighbourhood are ~0 anyway — and runs in plain
+JS at about 1.7 M pairs. The **repulsive** term is genuinely all-pairs, so it is evaluated
+on jax-js in tiles of 2,048 rows and the full N x N matrix is never materialised.
+
+It is still O(N²) per iteration: fast because the inner loop is vectorised, not because
+the algorithm changed. Barnes-Hut or an interpolation scheme would make it O(N log N) and
+is the next thing to do if an hour is too long.
+
+Two things measured while building it, both worth keeping. The tile size is **not** free to
+raise — 4,096 rows exceeds the Wasm backend's hard 4 GiB allocation limit, and a matmul
+formulation of the distances is *slower* here (5.87 s against 4.03 s), so the plain
+difference tensor stays. And `npm run verify-tsne` checks the parts of t-SNE that have a
+right answer: the kNN graph against brute force, the perplexity calibration against its own
+definition (each row's entropy must be log(perplexity)), and neighbourhood preservation on
+planted clusters. That last one is not sufficient on its own — a mutation fixing the
+bandwidth at 1 still scored 90.7% purity, which is why the calibration is checked directly.
+
+**Both example datasets carry six embeddings** — the published `X_umap` plus `X_pca2d`,
+`X_pca3d`, `X_tsne`, `X_tsne3d` and `X_umap3d` — which is exactly what the commands above
+produce, so a fresh clone reproduces what the server serves. The Visium bundle takes about
+four minutes end to end; seqFISH's t-SNE is the long pole at roughly an hour per dimension.
 
 **Only PCA reports variance per axis**, and that asymmetry is deliberate. PCA's axes are ordered
 and each explains a measurable share, so `compute-pca.py` writes

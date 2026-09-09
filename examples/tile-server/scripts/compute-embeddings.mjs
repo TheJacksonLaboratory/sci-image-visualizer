@@ -28,27 +28,11 @@ import path from 'node:path';
 import { pcaScores } from '../lib/pca.mjs';
 
 /**
- * t-SNE is OPT-IN, not part of the default set, and this is why.
+ * Past this many observations, a t-SNE run says what it will cost before spending it.
  *
- * `tsne-js` implements the exact formulation only — its own README puts Barnes-Hut under
- * "planned (contributions welcome!)" — so the gradient is O(dN^2) per iteration against
- * scikit-learn's O(dN log N) default. Measured here at 50 iterations, 50 input dimensions:
- *
- *     n =   500    3.9 s for 50 iterations
- *     n = 1,000   16.8 s
- *     n = 2,000   65.2 s      — four times the cost for twice the points, as quadratic predicts
- *
- * And the per-iteration cost is not the whole of it: the joint-probability matrix is built
- * once up front, also O(N^2), so at n=2,688 even `--iterations 1` costs two minutes before
- * the first gradient step. A full run on the Visium bundle is over half an hour, and
- * seqFISH's 19,416 observations are out of reach entirely. scikit-learn, using Barnes-Hut,
- * did seqFISH in 31 seconds.
- *
- * So `--only` excludes t-SNE by default: asking a bundle for embeddings should not start a
- * job indistinguishable from a hang. `--only tsne` opts in, and past
- * {@link TSNE_WARN_OBSERVATIONS} it says what it is about to cost. UMAP has no such
- * problem — `umap-js` builds an approximate neighbour graph and took 2.8 s on the same
- * data.
+ * `lib/tsne.mjs` is O(N²) per iteration — vectorised, not approximated — so the cost is
+ * real and worth stating: measured, about 1.3 minutes for 2,688 observations and an hour
+ * for 19,416. Silence for an hour is indistinguishable from a hang.
  */
 const TSNE_WARN_OBSERVATIONS = 1500;
 
@@ -66,8 +50,7 @@ const neighbors = Number(flag('neighbors', 15));
 const minDist = Number(flag('min-dist', 0.3));
 const seed = Number(flag('seed', 0));
 const iterations = Number(flag('iterations', 1000));
-// t-SNE is deliberately absent from the default: see TSNE_WARN_OBSERVATIONS.
-const only = new Set((flag('only', 'pca,umap3d')).split(',').map((s) => s.trim()));
+const only = new Set((flag('only', 'pca,tsne,umap3d')).split(',').map((s) => s.trim()));
 
 const manifestPath = path.join(bundle, 'manifest.json');
 const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
@@ -149,28 +132,36 @@ if (wantPca) {
 }
 
 if (only.has('tsne') && nObs > TSNE_WARN_OBSERVATIONS) {
-  // Say what it will cost BEFORE spending it. The run is single-threaded and prints
-  // nothing until it finishes, so without this it is indistinguishable from a hang.
-  console.log(`  t-SNE: ${nObs.toLocaleString()} observations. tsne-js is the exact`);
-  console.log('    O(dN^2) formulation, not Barnes-Hut — both the setup and every iteration');
-  console.log('    scale quadratically. Measured: 2,688 observations cost ~2 min before the');
-  console.log(`    first step and ~40 min for a full 1,000. This is 2D + 3D at ${iterations}.`);
-  console.log('    Ctrl-C and use --iterations, or compute it elsewhere as an obsm key.');
+  // The per-iteration cost is quadratic and measurable, so quote it rather than warn.
+  const perIter = 4.03 * (nObs / 19416) ** 2;
+  console.log(`  t-SNE: ${nObs.toLocaleString()} observations, 2D + 3D at ${iterations} `
+    + `iterations — roughly ${((perIter * iterations * 2) / 60).toFixed(0)} minutes.`);
 }
 if (only.has('tsne')) {
-  const { default: TSNE } = await import('tsne-js');
-  const reduced = asPoints(Math.min(pcs, components));
+  const { tsneEmbed } = await import('../lib/tsne.mjs');
+  const reducedDims = Math.min(pcs, components);
+  // The PCA scores, row-major — the same input UMAP gets.
+  const input = new Float32Array(nObs * reducedDims);
+  for (let i = 0; i < nObs; i++) {
+    for (let d = 0; d < reducedDims; d++) input[i * reducedDims + d] = scores[i * components + d];
+  }
   for (const dims of [2, 3]) {
     const t = Date.now();
-    const model = new TSNE({
-      dim: dims, perplexity, earlyExaggeration: 4, learningRate: 100,
-      nIter: iterations, metric: 'euclidean',
+    const { embedding, perplexity: used } = await tsneEmbed(input, nObs, reducedDims, {
+      dims,
+      perplexity,
+      iterations,
+      seed,
+      onProgress: (done, total) => {
+        if (done % 250 === 0) console.log(`    ${dims}D  ${done}/${total} iterations`);
+      },
     });
-    model.init({ data: reduced, type: 'dense' });
-    model.run();
+    const points = Array.from({ length: nObs }, (_, i) => (
+      Array.from({ length: dims }, (_, d) => embedding[i * dims + d])
+    ));
     addFromPoints(`X_tsne${dims === 3 ? '3d' : ''}`, `t-SNE${dims === 3 ? ' 3D' : ''}`, dims,
-      model.getOutputScaled(),
-      `PCA(${Math.min(pcs, components)}) then t-SNE, perplexity ${perplexity}`);
+      points,
+      `PCA(${reducedDims}) then t-SNE, perplexity ${used}, ${iterations} iterations, seed ${seed}`);
     console.log(`  t-SNE ${dims}D in ${((Date.now() - t) / 1000).toFixed(1)}s`);
   }
 }
