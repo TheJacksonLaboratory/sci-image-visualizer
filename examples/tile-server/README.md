@@ -406,6 +406,12 @@ cannot be told apart from a hang. If you need t-SNE at this scale, compute it wh
 scikit-learn lives and add it to the `.h5ad` as an `obsm` key before converting — the converter
 takes any 2- or 3-column `obsm` array, whatever produced it.
 
+**So neither example dataset ships a t-SNE**, and that is a deliberate consequence rather than
+an oversight: seqFISH's 19,416 observations are out of reach entirely, and the Visium bundle's
+2,688 would take over half an hour for a demo embedding. Both carry four — the published `X_umap`
+plus `X_pca2d`, `X_pca3d` and `X_umap3d` — which is exactly what the commands above produce, so
+a fresh clone reproduces what the server serves.
+
 **Only PCA reports variance per axis**, and that asymmetry is deliberate. PCA's axes are ordered
 and each explains a measurable share, so `compute-pca.py` writes
 `uns/<key>_variance_ratio` and the converter turns it into a `varianceRatio` the axis labels use —
