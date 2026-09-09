@@ -21,29 +21,17 @@ export interface AxesLabelCamera3D {
 }
 
 /**
- * Project a world point through a column-major 4×4 MVP to CSS-pixel screen coordinates.
- * Returns `visible: false` when the point is at/behind the camera (w ≤ 0). Pure — unit-tested.
+ * Re-exported from napari-js, which owns the projection now.
+ *
+ * This used to be a local copy: the same column-major multiply, perspective divide and y-flip
+ * that {@link NapariVisualizerService.getSpatialScreenProjection} ALSO carried, written twice
+ * with two different behind-the-eye conventions. The renderer owns the camera and the clip
+ * convention, so it owns the projection; kept as a named export here only so the overlays that
+ * import it from this module do not all have to change.
  */
-export function projectPoint(
-  mvp: ArrayLike<number>,
-  p: [number, number, number],
-  vw: number,
-  vh: number,
-): { x: number; y: number; visible: boolean } {
-  const [x, y, z] = p;
-  // Column-major: clip[r] = Σ_c M[c*4+r] * v[c].
-  const cx = mvp[0] * x + mvp[4] * y + mvp[8] * z + mvp[12];
-  const cy = mvp[1] * x + mvp[5] * y + mvp[9] * z + mvp[13];
-  const cw = mvp[3] * x + mvp[7] * y + mvp[11] * z + mvp[15];
-  if (cw <= 0) return { x: 0, y: 0, visible: false };
-  const ndcX = cx / cw;
-  const ndcY = cy / cw;
-  return {
-    x: (ndcX * 0.5 + 0.5) * vw,
-    y: (0.5 - ndcY * 0.5) * vh,
-    visible: true,
-  };
-}
+import { projectPoint } from 'napari-js';
+
+export { projectPoint };
 
 export class NapariAxesLabels {
   private readonly els: HTMLSpanElement[] = [];

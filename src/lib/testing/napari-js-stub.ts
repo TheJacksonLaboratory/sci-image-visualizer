@@ -83,9 +83,16 @@ export interface Points3DLayer {
   colormap: unknown;
   contrastLimits: [number, number];
   size: number;
-  /** One value for the whole layer — the 3D layer has no per-point alpha, which
-   *  is why the spatial 3D path draws a selection as a second layer. */
+  /** Layer-wide opacity, which per-point {@link Points3DLayer.alphas} multiplies. */
   opacity: number;
+  /** Per-point opacity multiplier, or null when the cloud is uniform (napari-js ≥ 0.14). */
+  alphas: Float32Array | null;
+  /** Per-point size multiplier, or null when every marker is `size` (napari-js ≥ 0.14). */
+  sizes: Float32Array | null;
+  /** Bumped by every instance-data change, so a recolour is a mutation not a new layer. */
+  dataVersion: number;
+  /** Replace the scalars in place, keeping the geometry — and so the camera. */
+  setValues(next: Float32Array): void;
   /** Layer-level visibility, from the real `Layer` base: what the 3D panel's
    *  show/hide toggles drive, so a test can read what the scene would draw. */
   visible: boolean;
@@ -174,6 +181,111 @@ export class Colormap {
 /** Real napari-js LUT resolution. The spatial 3D path derives its categorical
  *  block widths from this, so the stub must agree with the library or the tests
  *  would verify arithmetic the renderer never does. */
+/**
+ * napari-js ≥ 0.14 owns the 3D projection and the depth-aware pick. They are pure and
+ * dependency-free, so this stub implements them for real rather than faking them — a stub
+ * that returned made-up screen positions would make every overlay and tooltip test
+ * meaningless. The authoritative tests for this maths are napari-js's own; these exist so
+ * the ADAPTER's use of them (scattering into observation order, the hover radius, the
+ * section subset) is exercised against correct behaviour.
+ */
+export type Fit3D = 'always' | 'once' | 'never';
+
+export interface ProjectedPoint {
+  x: number;
+  y: number;
+  depth: number;
+  visible: boolean;
+}
+
+export interface ProjectedPoints {
+  screen: Float32Array;
+  depth: Float32Array;
+}
+
+export function projectPoint(
+  mvp: ArrayLike<number>,
+  p: readonly [number, number, number],
+  vw: number,
+  vh: number,
+): ProjectedPoint {
+  const [x, y, z] = p;
+  const cx = mvp[0] * x + mvp[4] * y + mvp[8] * z + mvp[12];
+  const cy = mvp[1] * x + mvp[5] * y + mvp[9] * z + mvp[13];
+  const cw = mvp[3] * x + mvp[7] * y + mvp[11] * z + mvp[15];
+  if (!(cw > 0)) return { x: 0, y: 0, depth: NaN, visible: false };
+  return {
+    x: ((cx / cw) * 0.5 + 0.5) * vw,
+    y: (1 - ((cy / cw) * 0.5 + 0.5)) * vh,
+    depth: cw,
+    visible: true,
+  };
+}
+
+export function projectPoints(
+  mvp: ArrayLike<number>,
+  positions: Float32Array,
+  vw: number,
+  vh: number,
+  out?: Partial<ProjectedPoints>,
+): ProjectedPoints {
+  const n = Math.floor(positions.length / 3);
+  const screen = out?.screen && out.screen.length === n * 2 ? out.screen : new Float32Array(n * 2);
+  const depth = out?.depth && out.depth.length === n ? out.depth : new Float32Array(n);
+  screen.fill(NaN);
+  depth.fill(NaN);
+  for (let i = 0; i < n; i++) {
+    const one = projectPoint(
+      mvp,
+      [positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]],
+      vw,
+      vh,
+    );
+    if (!one.visible) continue;
+    screen[i * 2] = one.x;
+    screen[i * 2 + 1] = one.y;
+    depth[i] = one.depth;
+  }
+  return { screen, depth };
+}
+
+export function nearestProjectedIndex(
+  screen: Float32Array,
+  x: number,
+  y: number,
+  radius: number,
+  depth?: Float32Array | null,
+): number {
+  const n = screen.length >> 1;
+  const r2 = radius * radius;
+  let best = -1;
+  let bestDepth = Infinity;
+  let bestD2 = Infinity;
+  for (let i = 0; i < n; i++) {
+    const dx = screen[i * 2] - x;
+    const dy = screen[i * 2 + 1] - y;
+    const d2 = dx * dx + dy * dy;
+    if (!(d2 <= r2)) continue;
+    if (!depth) {
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        best = i;
+      }
+      continue;
+    }
+    const z = depth[i];
+    if (z < bestDepth) {
+      bestDepth = z;
+      bestD2 = d2;
+      best = i;
+    } else if (z === bestDepth && d2 < bestD2) {
+      bestD2 = d2;
+      best = i;
+    }
+  }
+  return best;
+}
+
 export const LUT_SIZE = 256;
 
 /**
@@ -403,7 +515,34 @@ export class Viewer {
     background?: unknown;
   };
 
-  constructor(options: { canvas: HTMLCanvasElement; clickZoomFactor?: number }) {
+  /** Mirrors napari-js's fit policy, because the adapter now relies on it: a stub that
+   *  always framed would make `fit: 'once'` look broken, and one that never framed would
+   *  make it look like it worked when it did not. */
+  private readonly fit3dPolicy: Fit3D;
+  private fitted3d = false;
+
+  private shouldFit3D(override?: Fit3D): boolean {
+    const policy = override ?? this.fit3dPolicy;
+    if (policy === 'never') return false;
+    if (policy === 'once' && this.fitted3d) return false;
+    this.fitted3d = true;
+    return true;
+  }
+
+  resetFit3D(): void {
+    this.fitted3d = false;
+  }
+
+  fitToLayers(): boolean {
+    return false;
+  }
+
+  constructor(options: {
+    canvas: HTMLCanvasElement;
+    clickZoomFactor?: number;
+    fit3d?: Fit3D;
+  }) {
+    this.fit3dPolicy = options.fit3d ?? 'always';
     this.options = options;
   }
 
@@ -447,6 +586,7 @@ export class Viewer {
       colormap?: unknown;
       rendering?: string;
       opacity?: number;
+      fit?: Fit3D;
     },
   ): VolumeLayer {
     const layer = this.mount({
@@ -469,7 +609,9 @@ export class Viewer {
     });
     const [sx, sy, sz] = opts?.voxelSize ?? [1, 1, 1];
     // The real Viewer frames on the world box (dims x voxelSize) here.
-    this.camera3d.frame((width ?? 1) * sx, (height ?? 1) * sy, (depth ?? 1) * sz);
+    if (this.shouldFit3D(opts?.fit)) {
+      this.camera3d.frame((width ?? 1) * sx, (height ?? 1) * sy, (depth ?? 1) * sz);
+    }
     return layer;
   }
   addAxes(width = 1, height = 1, depth = 1): AxesLayer {
@@ -535,10 +677,11 @@ export class Viewer {
     opts?: {
       colormap?: unknown; contrastLimits?: [number, number]; size?: number;
       opacity?: number; name?: string; visible?: boolean;
+      alphas?: Float32Array; sizes?: Float32Array; fit?: 'always' | 'once' | 'never';
     },
   ): Points3DLayer {
     const o = opts ?? {};
-    const layer = this.mount({
+    const layer: Points3DLayer = this.mount({
       colormap: o.colormap ?? 'viridis',
       contrastLimits: o.contrastLimits ?? [0, 255],
       size: o.size ?? 6,
@@ -547,6 +690,13 @@ export class Viewer {
       name: o.name,
       positions,
       values,
+      alphas: o.alphas ?? null,
+      sizes: o.sizes ?? null,
+      dataVersion: 0,
+      setValues(next: Float32Array) {
+        layer.values = next;
+        layer.dataVersion++;
+      },
       bounds: () => ({
         min: [0, 0, 0] as [number, number, number],
         max: [1, 1, 1] as [number, number, number],
@@ -554,14 +704,24 @@ export class Viewer {
         radius: 1,
       }),
     });
-    // The real Viewer pivots on the point bounds and dollies to fit them here.
-    const b = layer.bounds();
-    this.camera3d.target = b.center;
-    this.camera3d.distance = Math.max(b.radius * 2.5, 1e-3);
+    // The real Viewer pivots on the point bounds and dollies to fit them here — but only
+    // when the fit policy says so.
+    if (this.shouldFit3D(o.fit)) {
+      const b = layer.bounds();
+      this.camera3d.target = b.center;
+      this.camera3d.distance = Math.max(b.radius * 2.5, 1e-3);
+    }
     return layer;
   }
   layerHistogram(): { counts: Uint32Array; bins: number; min: number; max: number } | null {
     return { counts: new Uint32Array(256), bins: 256, min: 0, max: 255 };
+  }
+  projectPoints(positions: Float32Array, out?: Partial<ProjectedPoints>): ProjectedPoints | null {
+    const canvas = this.options.canvas;
+    const vw = canvas?.clientWidth || canvas?.width || 0;
+    const vh = canvas?.clientHeight || canvas?.height || 0;
+    if (!vw || !vh) return null;
+    return projectPoints(this.camera3d.viewProjection(vw, vh), positions, vw, vh, out);
   }
   requestRender(): void {}
   setCameraDragMode(): void {}

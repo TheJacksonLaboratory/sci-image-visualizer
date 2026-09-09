@@ -56,7 +56,7 @@
     "@jax-js/jax": "^0.1.24",
     "cellpose-js": "^0.6.0",
     "fast-png": "^6.4.0",
-    "napari-js": "^0.13.0",
+    "napari-js": "^0.14.0",
     "openseadragon": "^6.0.2",
     "plotly.js-dist-min": "^3.0.1",
     "tslib": "^2.3.0"

@@ -159,7 +159,7 @@ automated `test` or `lint` script.
 validation, source dispatch, invalid parameters, cache invalidation, and malformed binary metadata.
 Run these checks in the main CI workflow.
 
-### P3 — Decompose the Napari backend
+### P3 — Revisit Napari ownership before decomposing the backend
 
 - **Severity:** INFO
 - **File:**
@@ -175,8 +175,53 @@ isolate.
 export class NapariVisualizerService extends BaseStoreVisualizer implements IVisualizer {
 ```
 
-**TODO:** Extract focused 2D and 3D spatial renderers, an expression-layer manager, and hover and
-selection controllers. Keep the service responsible for top-level viewer lifecycle and orchestration.
+The original review treated `napari-js` as a fixed dependency and recommended only internal
+extraction inside sci-image-visualizer. That boundary is too narrow: `napari-js` is modifiable, and
+several workarounds in this service exist because generic renderer capabilities are absent from its
+current API. Moving those capabilities upstream removes the abstraction leaks instead of merely
+moving them into different files.
+
+#### Ownership split
+
+| Move to `napari-js`                                         | Keep in sci-image-visualizer                     |
+| ----------------------------------------------------------- | ------------------------------------------------ |
+| 3D world-to-screen projection and point picking             | Spatial dataset contracts and the HTTP data port |
+| Per-point 3D RGBA, opacity, or selection-mask styling       | Gene, cluster, and annotation semantics          |
+| Explicit camera framing policy and `fitToLayers()` behavior | Linked map/chart selection state                 |
+| Generic scale bars and 3D axis-label overlays               | Spatial controls and Angular integration         |
+| Layer replacement/group lifecycle primitives                | Density and expression-field computation         |
+| Generic canvas hover/pick events                            | Tooltip content and class-selection behavior     |
+| Reusable 3D lasso/polygon selection primitives              | Cross-backend ROI semantics and persistence      |
+
+The strongest upstream candidates are:
+
+1. **3D projection and picking.**
+   [`getSpatialScreenProjection()`](../src/lib/implementations/napari-js/napari-visualizer.service.ts)
+   manually multiplies `Camera3D.viewProjection()` and scans projected points. Projection, clipping,
+   depth awareness, and accelerated picking belong to the viewer that owns the camera and viewport.
+   `napari-js` already exposes 2D `nearestPointIndex`; the 3D equivalent is missing.
+2. **Per-point styling in `Points3DLayer`.** The 2D points layer supports per-point RGBA, while the
+   3D layer accepts only one scalar mapped through a colormap. sci-image-visualizer consequently
+   maintains a second 3D layer for selected points. Per-point color/alpha or a selection mask belongs
+   in the layer API.
+3. **Camera framing policy.** [`addFramingOnce()`](../src/lib/implementations/napari-js/napari-visualizer.service.ts)
+   saves and restores camera internals because adding a 3D layer reframes the scene. `napari-js`
+   should expose an explicit policy such as `fit: 'once' | 'always' | 'never'` and a deliberate
+   `fitToLayers()` operation.
+4. **Renderer-aware overlays.** [`NapariScaleBar`](../src/lib/implementations/napari-js/napari-scale-bar.ts)
+   and [`NapariAxesLabels`](../src/lib/implementations/napari-js/napari-axes-labels.ts) are generic
+   viewer capabilities. If the core package should stay headless, they could live in an optional
+   `napari-js/ui` entry point.
+5. **Generic picking events.** Tooltip DOM and observation text should remain here, but napari-js
+   should emit generic hover/pick results rather than requiring its consumer to reconstruct renderer
+   state.
+
+**TODO:** Before splitting this service internally, inventory its renderer workarounds and upstream
+the generic projection, picking, point-styling, framing, and overlay capabilities into `napari-js`
+with renderer-level tests. Release and adopt that version, reduce this service to a thin Napari
+adapter, and only then extract the remaining spatial-domain orchestration into focused internal
+collaborators. `napari-js` should gain rendering capabilities, not knowledge of genes, clusters, or
+spatial-omics datasets.
 
 ### P3 — Establish a clean toolchain baseline
 
@@ -196,13 +241,13 @@ warning budget incrementally on changed files.
 
 ## Five-pass summary
 
-| Pass        | Result      | Main concerns                                                                                                  |
-| ----------- | ----------- | -------------------------------------------------------------------------------------------------------------- |
-| Correctness | Fail        | Production worker build; cross-dataset cache pollution; stale t-SNE results; stale source ownership            |
-| Security    | Fail        | `..` escapes the configured COG directory; example-server paths lack regression coverage                       |
-| Performance | Conditional | Terminated worker promises can remain pending and retain component state                                       |
-| Readability | Conditional | The Napari service has accumulated too many spatial responsibilities                                           |
-| Consistency | Fail        | Packaged-consumer build is not a PR gate; examples bypass lint/test; tool versions are not aligned at the root |
+| Pass        | Result      | Main concerns                                                                                                           |
+| ----------- | ----------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Correctness | Fail        | Production worker build; cross-dataset cache pollution; stale t-SNE results; stale source ownership                     |
+| Security    | Fail        | `..` escapes the configured COG directory; example-server paths lack regression coverage                                |
+| Performance | Conditional | Terminated worker promises can remain pending and retain component state                                                |
+| Readability | Conditional | The Napari service mixes domain orchestration with renderer workarounds that should be evaluated for upstream ownership |
+| Consistency | Fail        | Packaged-consumer build is not a PR gate; examples bypass lint/test; tool versions are not aligned at the root          |
 
 ## Validation evidence
 
@@ -227,7 +272,8 @@ dependency transformation and exposed the actual worker-format failure documente
 3. Fix dataset generation and t-SNE lifecycle races with targeted tests.
 4. Make source ownership refreshable.
 5. Bring the example server under lint and automated test coverage.
-6. Split the Napari spatial responsibilities.
+6. Upstream generic renderer capabilities into `napari-js`, then split the remaining spatial-domain
+   responsibilities in sci-image-visualizer.
 7. Normalize the Node, lint, and formatting baseline.
 
 ---
@@ -246,7 +292,7 @@ passed under the reverted fix, the test was rewritten rather than kept.
 | P1  | t-SNE cancellation and dataset-switch races | **Fixed**                    |
 | P2  | Revalidate cached dataset ownership         | **Fixed**                    |
 | P2  | Automated checks for the example server     | **Fixed**                    |
-| P3  | Decompose the Napari backend                | **Deferred** — see below     |
+| P3  | Revisit Napari ownership and decomposition  | **Deferred** — see below     |
 | P3  | Clean toolchain baseline                    | **Partly fixed** — see below |
 
 ### P0 — worker packaging
@@ -309,11 +355,37 @@ against a real server on a real socket — the bugs here live in what express de
 `examples/browser-image/**` remains excluded: it is an Angular app, and bringing it in is a
 separate piece of work from the request-handling code this finding is about.
 
-### P3 — Napari decomposition (deferred)
+### P3 — Napari ownership and decomposition (in progress)
 
-Accurate, and worth doing. Not done here on purpose: it is a pure refactor of ~4,500 lines
-with real regression risk, and folding it into a change that also carries a security fix and
-four race fixes would make both halves harder to review and harder to revert independently.
+The ownership audit was done first, as the revised finding asks, and it found four capabilities
+that sci-image-visualizer was working around rather than four files to move. All four are now in
+`napari-js` (branch `feat/renderer-owned-3d-projection-picking-styling`, version 0.14.0), each with
+renderer-level tests: napari-js goes from 229 to 267 tests.
+
+| Capability                             | The workaround it removes                                                                                                                                                                       |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `projectPoint`/`projectPoints`         | The column-major multiply, perspective divide and y-flip, written out TWICE here — in `getSpatialScreenProjection` and in `napari-axes-labels` — with two different behind-the-eye conventions. |
+| `nearestProjectedIndex`                | Picking on projected coordinates by nearest centre, with no depth. The renderer depth-tests the billboards, so the tooltip could name a point drawn behind another.                             |
+| Per-point `alphas` / `sizes`           | A whole second `Points3DLayer` for the selected subset, kept in step through every colormap, window and size change, and depth-sorted against the parent as a separate draw.                    |
+| `fit3d` + `resetFit3D` + `fitToLayers` | `addFramingOnce`, which saved and restored five camera fields around every 3D add because napari-js reframed unconditionally.                                                                   |
+| `dataVersion` / `setValues`            | Rebuilding the whole point layer to change what it is coloured by — which, because adding a layer reframed, also caused the camera jump above.                                                  |
+
+Adopted here: the duplicate projection is gone, the hover pick is depth-aware, the selection
+highlight is a per-point alpha in one layer, and `addFramingOnce` and the second layer are deleted.
+1,551 tests pass; the three specs that pinned the two-layer behaviour were rewritten to pin the new
+one.
+
+**This does not build against a published dependency yet.** `package.json` now requires
+`napari-js@^0.14.0`, and npm's latest is 0.13.0 — everything above was verified against a locally
+built 0.14.0 staged into `node_modules`. Merging the napari-js branch and publishing 0.14.0 is a
+prerequisite for this branch's CI, and is deliberately left to a human: publishing is outward-facing
+and not something to do on the model's own initiative.
+
+Still to do, and unchanged in principle: reduce `NapariVisualizerService` to a thin renderer adapter
+and split the remaining domain orchestration into focused collaborators. Removing the workarounds
+took roughly 130 lines out of the service, which is not the point — the point is that five renderer
+concerns are no longer its business, so the split that follows is now a split along domain lines
+rather than an attempt to file renderer workarounds under new headings.
 
 ### P3 — toolchain baseline (partly fixed)
 

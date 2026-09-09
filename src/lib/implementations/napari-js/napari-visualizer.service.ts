@@ -28,7 +28,9 @@ import type {
   ChannelView,
   VolumeChannel,
   Colormap,
+  ProjectedPoints,
 } from 'napari-js';
+import { nearestProjectedIndex } from 'napari-js';
 
 import { IImageInfo } from '../../contracts/image.contract';
 import { IChannelState } from '../../contracts/channel-histogram-api.contract';
@@ -348,9 +350,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private scatter3dLayer: Points3DLayer | null = null;
   /** Spatial-omics observation markers + the dataset/view subscription driving them. */
   private spatialPoints: PointsLayer | null = null;
-  /** The 3D point cloud, and a second layer holding just the selected subset. */
+  /** The 3D point cloud. One layer: selection is a per-point alpha on it, not a second. */
   private spatialPoints3d: Points3DLayer | null = null;
-  private spatialPoints3dSel: Points3DLayer | null = null;
   private spatialLayerKey3d: string | null = null;
   /** Interleaved x,y,z, cached so a colour change does not re-walk 3.7M observations. */
   private spatialPositions3d: Float32Array | null = null;
@@ -407,8 +408,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    *  positions is indexed by DRAWN order and silently attributes each point to
    *  the wrong observation as soon as a section is isolated. */
   private spatialDrawn3d: Uint32Array | null = null;
+
+  /** Reused projection buffers — see {@link getSpatialScreenProjection}. */
+  private spatialProjection3d: ProjectedPoints | undefined = undefined;
+
+  /** Per-observation depth from the last projection, for the depth-aware hover pick. */
+  private spatialDepths3d: Float32Array | null = null;
   /** The (viewer, dataset) whose 3D scene has already had its opening framing. */
-  private spatialFramed: { viewer: Viewer; datasetId: string } | null = null;
   /** Whose 2D observations the camera has been framed on — see {@link frameSpatialPointsOnce}. */
   private spatial2dFramed: { viewer: Viewer; datasetId: string } | null = null;
   /** Dataset the 3D scale bar was built for. */
@@ -821,6 +827,14 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         // scroll EVENT, and a trackpad sends a burst of them per swipe, so a step
         // tuned to a mouse notch runs away under a trackpad.
         wheelZoomSpeed: NAPARI_WHEEL_ZOOM_SPEED,
+        // The FIRST 3D layer of a scene frames the orbit camera; every later one leaves the
+        // pose alone. A spatial scene is built from several layers and rebuilt constantly —
+        // recolouring by a class, picking a gene, stepping a section — and with napari-js's
+        // previous unconditional framing each of those threw away an orbit the user had set.
+        // The pose it snapped back to depended on WHICH layer was rebuilt, so isolating one
+        // section zoomed to that section's bounds. `resetFit3D()` on a dataset change is what
+        // lets the next scene frame itself.
+        fit3d: 'once',
         // In the spatial modes a plain click SELECTS the class under the cursor,
         // so napari's OSD-style click-to-zoom is turned off there: otherwise one
         // click would both select a class and zoom 2x about the cursor, and the
@@ -1721,6 +1735,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private static readonly DENSITY_MAX_CLUSTERS = 6;
   /** Colour for observations when nothing is selected to colour by: visible, neutral, and
    *  obviously not encoding anything. */
+  /** How much larger a selected marker is drawn, so a small selection is findable inside a
+   *  3.7M-point cloud rather than merely brighter. */
+  private static readonly SPATIAL_SELECTED_SIZE_SCALE = 1.6;
+
   private static readonly SPATIAL_NEUTRAL_COLOR: [number, number, number, number] =
     [0.35, 0.72, 0.95, 0.9];
 
@@ -1913,7 +1931,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       [x, y] = world;
     }
 
-    const hit = nearestObservation(positions, x, y, radius);
+    const hit = this.pickObservation(positions, x, y, radius, is3d);
     const lines = hoverText(this.hoverSource, hit);
     if (!lines) {
       tip.hide();
@@ -1970,6 +1988,30 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       return;
     }
     store.set(next);
+  }
+
+  /**
+   * Which observation is under the cursor.
+   *
+   * In 3D this defers to napari-js's {@link nearestProjectedIndex} WITH the depths the
+   * projection produced, so the front-most candidate wins. That matters more than it
+   * sounds: the renderer depth-tests the billboards, and in a 3.7M-point cloud the cursor
+   * covers many of them — picking the one nearest the cursor's centre regularly names a
+   * cell that something else is drawn over, which reads as a wrong tooltip rather than as
+   * a subtlety of picking.
+   *
+   * In 2D the positions are WORLD coordinates on one plane, so there is no depth to break
+   * ties with and the existing nearest-marker rule is the right one.
+   */
+  private pickObservation(
+    positions: Float32Array,
+    x: number,
+    y: number,
+    radius: number,
+    is3d: boolean,
+  ): number {
+    if (!is3d) return nearestObservation(positions, x, y, radius);
+    return nearestProjectedIndex(positions, x, y, radius, this.spatialDepths3d);
   }
 
   /**
@@ -2084,43 +2126,44 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   /**
    * Project every observation to canvas pixels under the current 3D camera.
    *
-   * The renderer owns the camera, so it owns the projection; the pure selection maths then lives
-   * in {@link selectInRegionsProjected}. Returns `[x0, y0, x1, y1, …]`, with NaN for anything at
-   * or behind the eye plane (a perspective divide by a non-positive w), which the selector skips.
-   * Null when the 3D cloud is not mounted, so the caller can fall back to the 2D affine path.
+   * The projection itself is the renderer's: `viewer.projectPoints` owns the camera, the
+   * viewport in CSS pixels, the perspective divide and the y-flip. This used to be fifteen
+   * lines of column-major matrix arithmetic here, duplicating a second copy in
+   * `napari-axes-labels` — and the two had drifted on what to do with a NaN w.
+   *
+   * What is left is the part that is genuinely this adapter's: SCATTERING the drawn subset
+   * back into observation order. The cloud holds only the points of the displayed section,
+   * in its own packing; every consumer indexes by observation. NaN stands for "not on
+   * screen", which is also the right answer for an observation whose section is hidden.
+   *
+   * Null when the 3D cloud is not mounted, so the caller falls back to the 2D affine path.
    */
   getSpatialScreenProjection(obs: SpatialObservations): Float32Array | null {
     const viewer = this.viewer;
-    const canvas = this.canvas;
-    if (!viewer || !canvas || !this.spatialPositions3d) return null;
+    if (!viewer || !this.spatialPositions3d) return null;
 
-    const w = canvas.clientWidth || canvas.width;
-    const h = canvas.clientHeight || canvas.height;
-    if (!w || !h) return null;
-    const m = viewer.camera3d.viewProjection(w, h);
-    const pos = this.spatialPositions3d;
+    const projected = viewer.projectPoints(this.spatialPositions3d, this.spatialProjection3d);
+    if (!projected) return null;
+    // Reused across camera changes: at 3.7M observations this is a 30 MB allocation that
+    // would otherwise happen on every orbit.
+    this.spatialProjection3d = projected;
+
     const drawn = this.spatialDrawn3d;
-    const count = Math.floor(pos.length / 3);
-    // NaN means "not on screen", which every consumer already skips — and it is
-    // the right answer for an observation that is not currently DRAWN, either
-    // because its section is hidden or because it is behind the eye.
+    const { screen, depth } = projected;
+    const count = screen.length >> 1;
     const out = new Float32Array(obs.count * 2).fill(NaN);
-
+    const depths = new Float32Array(obs.count).fill(NaN);
     for (let k = 0; k < count; k++) {
       const i = drawn ? drawn[k] : k;
       if (i >= obs.count) continue;
-      const x = pos[k * 3];
-      const y = pos[k * 3 + 1];
-      const z = pos[k * 3 + 2];
-      // Column-major mat4 · vec4(x, y, z, 1).
-      const cx = m[0] * x + m[4] * y + m[8] * z + m[12];
-      const cy = m[1] * x + m[5] * y + m[9] * z + m[13];
-      const cw = m[3] * x + m[7] * y + m[11] * z + m[15];
-      if (!(cw > 0)) continue;
-      // Clip → NDC → canvas pixels. NDC y points up, canvas y points down.
-      out[i * 2] = ((cx / cw) * 0.5 + 0.5) * w;
-      out[i * 2 + 1] = (1 - ((cy / cw) * 0.5 + 0.5)) * h;
+      out[i * 2] = screen[k * 2];
+      out[i * 2 + 1] = screen[k * 2 + 1];
+      depths[i] = depth[k];
     }
+    // Kept beside the screen positions so the hover pick can prefer the FRONT-most point
+    // under the cursor rather than the one nearest its centre — which in a dense cloud is
+    // regularly something the renderer drew another point over.
+    this.spatialDepths3d = depths;
     return out;
   }
 
@@ -2313,7 +2356,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    * camera was looking. The points are all there and drawn; they are a speck. Which
    * looks exactly like the dataset having failed to load.
    *
-   * Once per dataset, like {@link addFramingOnce} does for the cloud: re-colouring,
+   * Once per dataset, as napari-js's `fit3d: 'once'` does for the cloud: re-colouring,
    * slicing or picking a gene re-adds this layer, and re-framing on those would move
    * the camera under the user — the camera tools and the canvas drag are meant to be
    * the only things that do.
@@ -2352,7 +2395,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // those keep the last plotted image's dimensions after the host clears it, so a
     // stale 512x383 read as "there is an image" and skipped the framing entirely.
     if (registered) return;
-    // Once per dataset, like `addFramingOnce` does for the cloud: re-colouring, slicing
+    // Once per dataset, as napari-js's `fit3d: 'once'` does for the cloud: re-colouring, slicing
     // or picking a gene re-adds this layer, and re-framing on those would move the
     // camera under the user — the camera tools and the canvas drag are meant to be the
     // only things that do.
@@ -2625,7 +2668,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
 
     // Anatomy first: on a scene's FIRST layer napari frames the orbit camera, and
     // the reference volume is the framing we want — the brain, not the outermost
-    // stray segmentation. Every later add keeps the pose instead (addFramingOnce).
+    // stray segmentation. Every later add keeps the pose instead (napari-js `fit3d: 'once'`).
     await this.ensureSpatialVolume(viewer, dataset, view);
     if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
     // Then the cluster density volumes, which can set the centring offset when
@@ -2699,75 +2742,65 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       this.spatialDrawn3d = shown;
     }
 
-    if (!this.spatialPoints3d || scalarKey !== this.spatialScalarKey3d) {
+    // The scalars have to follow the geometry: a per-observation vector against one
+    // section's positions would colour each cell by a stranger's value.
+    const valuesFor = () => (shown ? Float32Array.from(shown, (i) => scalars[i]) : scalars);
+
+    if (!this.spatialPoints3d || key !== this.spatialLayerKey3d) {
+      // New GEOMETRY — a different dataset, or a different section — so a new layer.
       if (this.spatialPoints3d) viewer.layers.remove(this.spatialPoints3d);
       this.spatialLayerKey3d = key;
       this.spatialScalarKey3d = scalarKey;
-      // The scalars have to follow the geometry: a per-observation vector against
-      // one section's positions would colour each cell by a stranger's value.
-      const values = shown ? Float32Array.from(shown, (i) => scalars[i]) : scalars;
-      this.spatialPoints3d = this.addFramingOnce(viewer, dataset.id, () =>
-        viewer.addPoints3D(this.spatialPositions3d!, values, {
-          name: 'observations',
-          colormap,
-          contrastLimits,
-          size,
-        }));
+      this.spatialPoints3d = viewer.addPoints3D(this.spatialPositions3d!, valuesFor(), {
+        name: 'observations',
+        colormap,
+        contrastLimits,
+        size,
+      });
     } else {
-      // Same scalars — a size or window change only.
+      if (scalarKey !== this.spatialScalarKey3d) {
+        // A change of colour SOURCE, which used to mean discarding the layer and building
+        // another — and, because adding a 3D layer reframes, a camera jump to undo as well.
+        // napari-js ≥ 0.14 lets the scalars be replaced in place; the positions have not
+        // moved, so there is nothing for the camera to reframe.
+        this.spatialScalarKey3d = scalarKey;
+        this.spatialPoints3d.setValues(valuesFor());
+      }
       this.spatialPoints3d.colormap = colormap;
       this.spatialPoints3d.contrastLimits = contrastLimits;
       this.spatialPoints3d.size = size;
     }
 
-    // Selection cannot be an alpha ramp here — the layer has ONE opacity for all
-    // points, not one per point. So the selected subset becomes its own layer at
-    // full opacity while the parent cloud drops to the muted level, which reads
-    // the same way the 2D highlight-vs-mute does.
+    // Selection is a PER-POINT alpha, in the one layer.
+    //
+    // It used to be a second layer: with a single opacity for the whole cloud, the only way
+    // to highlight a subset was to draw it again on top at full opacity while the parent
+    // dropped to the muted level. That second layer had to be kept in step through every
+    // colormap, window and size change, and the two then depth-sorted against each other as
+    // separate draws. Per-point alphas and sizes give the same reading — muted cloud, bright
+    // selection, slightly larger so a small one is findable inside 3.7M points — in one.
     const hasSelection = selection.count > 0 && selection.mask.length === obs.count;
-    if (this.spatialPoints3d) {
-      this.spatialPoints3d.opacity = view.opacity * (hasSelection ? DEFAULT_MUTED_OPACITY : 1);
-    }
-    if (this.spatialPoints3dSel) {
-      viewer.layers.remove(this.spatialPoints3dSel);
-      this.spatialPoints3dSel = null;
-    }
-    if (hasSelection) {
-      // Restricted to the shown section like the cloud is: a highlight floating
-      // where its own section is not drawn would be a selection of nothing visible.
-      const [sx, sy, sz] = this.spatialOrigin3d;
-      const picks = new Uint32Array(shownCount);
-      let n = 0;
-      for (let k = 0; k < shownCount; k++) {
-        const i = shown ? shown[k] : k;
-        if (selection.mask[i]) picks[n++] = i;
-      }
-      if (n > 0) {
-        const positions = new Float32Array(n * 3);
-        const picked = new Float32Array(n);
-        for (let k = 0; k < n; k++) {
-          const i = picks[k];
-          positions[k * 3] = obs.x[i] + sx;
-          positions[k * 3 + 1] = obs.y[i] + sy;
-          positions[k * 3 + 2] = obs.z[i] + sz;
-          picked[k] = scalars[i];
+    const cloud = this.spatialPoints3d;
+    if (cloud) {
+      cloud.opacity = view.opacity;
+      if (!hasSelection) {
+        cloud.alphas = null;
+        cloud.sizes = null;
+      } else {
+        const alphas = new Float32Array(shownCount);
+        const sizes = new Float32Array(shownCount);
+        for (let k = 0; k < shownCount; k++) {
+          const i = shown ? shown[k] : k;
+          const picked = !!selection.mask[i];
+          alphas[k] = picked ? 1 : DEFAULT_MUTED_OPACITY;
+          sizes[k] = picked ? NapariVisualizerService.SPATIAL_SELECTED_SIZE_SCALE : 1;
         }
-        this.spatialPoints3dSel = this.addFramingOnce(viewer, dataset.id, () =>
-          viewer.addPoints3D(positions, picked, {
-            name: 'selected',
-            colormap,
-            contrastLimits,
-            // A touch larger, so a small selection is findable inside a 3.7M-point
-            // cloud rather than merely brighter.
-            size: size * 1.6,
-            opacity: view.opacity,
-          }));
+        cloud.alphas = alphas;
+        cloud.sizes = sizes;
       }
     }
-
-    // Last, so it also covers the layers this pass just created.
+    // Last, so it also covers a layer this pass just created.
     if (this.spatialPoints3d) this.spatialPoints3d.visible = view.showPoints;
-    if (this.spatialPoints3dSel) this.spatialPoints3dSel.visible = view.showPoints;
     viewer.requestRender();
   }
 
@@ -2887,7 +2920,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const lut = spatialContinuousLut(
       node?.data?.value, this.currentReverse, view.continuousColormap,
     );
-    this.geneMapVolumeLayer = this.addFramingOnce(viewer, dataset.id, () => viewer.addVolume(
+    this.geneMapVolumeLayer = viewer.addVolume(
       data, field.width, field.height, field.depth,
       {
         name: `gene map · ${gene}${interpolate ? ' · volume' : ''}`,
@@ -2903,7 +2936,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         opacity: view.geneMapOpacity,
         voxelSize: grid.voxelSize,
       },
-    ));
+    );
     viewer.requestRender();
   }
 
@@ -2989,7 +3022,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       if (!data) continue;
       if (this.viewer !== viewer || this.densityKey !== key) return;
       this.densityLayers.push(
-        this.addFramingOnce(viewer, dataset.id, () =>
+        (
           viewer.addVolume(data, grid.width, grid.height, grid.depth, {
             name: `density · ${group.name}`,
             colormap: this.channelTintColormap(group.color),
@@ -3138,7 +3171,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
 
     const [vx, vy, vz] = meta.voxelSize;
     this.spatialVolumeKey = key;
-    this.spatialVolume = this.addFramingOnce(viewer, dataset.id, () =>
+    this.spatialVolume = (
       viewer.addVolume(voxels, meta.width, meta.height, meta.depth, {
       name: 'reference volume',
       colormap: 'gray',
@@ -3161,45 +3194,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.spatialLayerKey3d = null;
   }
 
-  /**
-   * Add a 3D layer, letting napari frame the camera only on the FIRST layer of a
-   * scene.
-   *
-   * napari frames on every 3D layer it is handed: `addVolume` calls
-   * `camera3d.frame()`, and `addPoints3D` writes `target` and `distance` from the
-   * point bounds. That is what you want when a scene first appears and wrong every
-   * time after — recolouring by a class, picking a gene, stepping a section and
-   * selecting a region all rebuild a layer, and each one would throw away an orbit
-   * the user had set. Worse, the pose it snaps back to depends on WHICH layer was
-   * rebuilt, so isolating one section would zoom to that section's bounds.
-   *
-   * The camera belongs to the toolbar's camera tools and to dragging on the canvas.
-   * So the first add of a scene frames, and every later add restores the pose it
-   * found. Captured and restored SYNCHRONOUSLY around the add, so a drag that
-   * lands mid-rebuild cannot be undone by a pose read before some earlier await.
-   */
-  private addFramingOnce<T>(viewer: Viewer, datasetId: string, add: () => T): T {
-    if (this.spatialFramed?.viewer !== viewer || this.spatialFramed.datasetId !== datasetId) {
-      // Nothing worth keeping yet — and the flag is set here, at a real add, so a
-      // reference volume that failed to load does not spend the scene's one framing.
-      this.spatialFramed = { viewer, datasetId };
-      return add();
-    }
-    const cam = viewer.camera3d;
-    const { azimuth, elevation, fov, distance } = cam;
-    const target = cam.target;
-    const layer = add();
-    cam.azimuth = azimuth;
-    cam.elevation = elevation;
-    cam.fov = fov;
-    cam.distance = distance;
-    cam.target = target;
-    return layer;
-  }
-
   private removeSpatial3dLayers(viewer: Viewer): void {
     for (const layer of [
-      this.spatialPoints3d, this.spatialPoints3dSel, this.spatialVolume,
+      this.spatialPoints3d, this.spatialVolume,
       this.geneMapVolumeLayer, ...this.densityLayers,
     ]) {
       if (layer) viewer.layers.remove(layer);
@@ -3210,13 +3207,15 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.geneMapVolumeFieldKey = null;
     this.densityLayers = [];
     this.densityKey = null;
-    this.spatialFramed = null;
+    // The scene is gone, so the next 3D layer should frame itself again. That used to be
+    // `spatialFramed = null` next to a hand-rolled save/restore; the renderer owns the
+    // policy now, and this is the same statement addressed to it.
+    viewer.resetFit3D();
     this.spatial2dFramed = null;
     this.spatialVolume = null;
     this.spatialVolumeKey = null;
     this.spatialOrigin3d = [0, 0, 0];
     this.spatialPoints3d = null;
-    this.spatialPoints3dSel = null;
     this.spatialLayerKey3d = null;
     this.spatialScalarKey3d = null;
     this.spatialPositions3d = null;
@@ -3831,7 +3830,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.spatialPoints = null;
     this.spatialLayerKey = null;
     this.spatialPoints3d = null;
-    this.spatialPoints3dSel = null;
     this.spatialLayerKey3d = null;
     this.spatialScalarKey3d = null;
     this.spatialVolume = null;

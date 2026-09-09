@@ -1238,16 +1238,20 @@ describe('NapariVisualizerService', () => {
         // Select the first and last observations, then show only the middle one.
         TestBed.inject(SpatialSelectionStore).set({ mask: new Uint8Array([1, 0, 1]), count: 2 });
         await flush();
-        expect(named(addPoints3D.mock.results.map((r) => r.value), 'selected')).toBeDefined();
+        const whole = cloud(addPoints3D.mock.results.map((r) => r.value));
+        expect(whole.alphas![0]).toBe(1);
+        expect(whole.alphas![1]).toBeCloseTo(DEFAULT_MUTED_OPACITY, 6);
+        expect(whole.alphas![2]).toBe(1);
 
         store.setSpatialView({ pointSection: 1 });
         await flush();
-        // Nothing selected is on this section, so there is no highlight layer to
-        // leave floating where its own cells are not drawn.
-        const inScene = (service as unknown as {
-          viewer: { layers: { items: readonly { name?: string }[] } };
-        }).viewer.layers.items.filter((l) => l.name === 'selected');
-        expect(inScene).toHaveLength(0);
+        // The alphas follow the DRAWN subset, not the observation list: one point on
+        // screen, and it is not one of the selected ones. Indexing the full mask here
+        // would highlight whichever cell happened to sit at that position.
+        const section = cloud(addPoints3D.mock.results.map((r) => r.value));
+        expect(section.positions!.length).toBe(3);
+        expect(section.alphas!.length).toBe(1);
+        expect(section.alphas![0]).toBeCloseTo(DEFAULT_MUTED_OPACITY, 6);
       });
     });
 
@@ -1838,9 +1842,11 @@ describe('NapariVisualizerService', () => {
         warn.mockRestore();
       });
 
-      it('applies the same offset to the selected-subset layer', async () => {
-        // Two layers drawn from one cloud: if only one is offset, a selection
-        // appears half a brain away from the points it selected.
+      it('keeps the highlight on the offset geometry, not beside it', async () => {
+        // When the highlight was its own layer, it had to be offset into the volume's
+        // centred box independently — and if only one of the two was, a selection appeared
+        // half a brain away from the points it selected. A per-point alpha cannot drift:
+        // it indexes the same positions the cloud is drawn from.
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
         await mount3d(spatialDatasetVolume());
         TestBed.inject(SpatialSelectionStore).set({
@@ -1848,10 +1854,11 @@ describe('NapariVisualizerService', () => {
         });
         await flush();
 
-        const all = addPoints3D.mock.results.map((r) => r.value);
-        const selected = named(all, 'selected');
+        const cloud = named(addPoints3D.mock.results.map((r) => r.value), 'observations');
         const obs = spatialDataset3d().observations;
-        expect(Array.from(selected.positions)).toEqual([
+        // The highlighted point is entry 1 of the SAME position array.
+        expect(cloud.alphas![1]).toBe(1);
+        expect(Array.from(cloud.positions!.slice(3, 6))).toEqual([
           obs.x[1] - (4 * 100) / 2,
           obs.y[1] - (6 * 200) / 2,
           obs.z![1] - (10 * 400) / 2,
@@ -1875,12 +1882,15 @@ describe('NapariVisualizerService', () => {
         .not.toMatch(/µm|nm|mm|cm/);
     });
 
-    it('draws a selection as a second layer, muting the parent cloud', async () => {
-      // There is no per-point alpha in 3D, so the 2D highlight-vs-mute trick has
-      // to be rebuilt out of two layers.
+    it('highlights a selection with a per-point alpha, in the one layer', async () => {
+      // This used to be two layers — the selected subset drawn again on top at full
+      // opacity while the parent dropped to the muted level — because napari-js had one
+      // opacity for the whole cloud. napari-js >= 0.14 has per-point alpha and size, so
+      // the same reading comes out of a single layer and a single draw.
       const layers = await mount3d();
-      const before = named(layers, 'observations');
-      expect(before.opacity).toBe(1);
+      const cloud = named(layers, 'observations');
+      expect(cloud.opacity).toBe(1);
+      expect(cloud.alphas).toBeNull(); // nothing selected: uniformly opaque
 
       TestBed.inject(SpatialSelectionStore).set({
         mask: Uint8Array.from([0, 1, 0]), count: 1,
@@ -1888,13 +1898,18 @@ describe('NapariVisualizerService', () => {
       await flush();
 
       const all = addPoints3D.mock.results.map((r) => r.value);
-      const selected = named(all, 'selected');
-      expect(selected).toBeDefined();
-      // Only the selected observation, at its own coordinates.
-      expect(Array.from(selected.positions)).toEqual([10, 20, 30]);
-      expect(selected.opacity).toBe(1);
-      // ...and the parent drops to the muted level.
-      expect(named(all, 'observations').opacity).toBeCloseTo(DEFAULT_MUTED_OPACITY);
+      expect(named(all, 'selected')).toBeUndefined(); // no second layer any more
+      const after = named(all, 'observations');
+      // The layer-wide opacity stays the view's; the muting is per point.
+      expect(after.opacity).toBe(1);
+      // toBeCloseTo per element: the alphas live in a Float32Array, and the muted
+      // constant is not f32-exact.
+      expect(after.alphas![0]).toBeCloseTo(DEFAULT_MUTED_OPACITY, 6);
+      expect(after.alphas![1]).toBe(1);
+      expect(after.alphas![2]).toBeCloseTo(DEFAULT_MUTED_OPACITY, 6);
+      // ...and the selected marker is drawn larger, so a small selection is findable
+      // inside a large cloud rather than merely brighter.
+      expect(after.sizes![1]).toBeGreaterThan(after.sizes![0]);
     });
   });
 
