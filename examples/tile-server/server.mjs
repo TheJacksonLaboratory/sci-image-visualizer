@@ -259,9 +259,26 @@ function spatialError(res, err) {
   return res.status(400).json({ error: String(err?.message || err) });
 }
 
+/**
+ * Freshness policy for the SPATIAL routes.
+ *
+ * `no-cache` does not mean "do not cache" — it means "revalidate before reuse", so a
+ * client keeps its copy and gets a cheap 304 while the data is unchanged. That is the
+ * right answer for data that is REGENERATED: with the hour-long freshness window this
+ * replaces, a rebuilt bundle stayed invisible to an already-open page, and the symptom is
+ * an app showing embeddings that are no longer there — which reads as a bug in the app
+ * rather than as a stale cache. It cost real debugging time more than once.
+ *
+ * Express attaches an ETag, so revalidation is one conditional request and no body.
+ *
+ * The TILE routes deliberately keep their long max-age: pixels for a given pyramid level
+ * do not change, and those are the requests that actually benefit from not asking.
+ */
+const REVALIDATE = 'no-cache';
+
 const octet = (res) => res
   .set('Content-Type', 'application/octet-stream')
-  .set('Cache-Control', 'public, max-age=3600');
+  .set('Cache-Control', REVALIDATE);
 
 /**
  * Which source owns an id, resolved by asking each for a manifest in priority
@@ -338,7 +355,7 @@ app.get('/spatial/datasets', async (_req, res) => {
 app.get('/spatial/:id/manifest', async (req, res) => {
   const { id } = req.params;
   await fromSource(res, id, {
-    bundle: async () => res.set('Cache-Control', 'public, max-age=3600')
+    bundle: async () => res.set('Cache-Control', REVALIDATE)
       .json(await loadManifest(SPATIAL_DIR, id)),
     zarr: async () => res.json(await zarrManifest(ZARR_DIR, id)),
     st: async () => res.json(await stManifest(ST_DIR, id)),
@@ -382,7 +399,7 @@ for (const [route, { file, zarr, st, abc, h5ad }] of Object.entries(WIRE_FILES))
 app.get('/spatial/:id/ids', async (req, res) => {
   const { id } = req.params;
   await fromSource(res, id, {
-    bundle: async () => res.set('Cache-Control', 'public, max-age=3600')
+    bundle: async () => res.set('Cache-Control', REVALIDATE)
       .json(await readIds(SPATIAL_DIR, id)),
     zarr: async () => res.json(await zarrIds(ZARR_DIR, id)),
     st: async () => res.json(await stIds(ST_DIR, id)),
