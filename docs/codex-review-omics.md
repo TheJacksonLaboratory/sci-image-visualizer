@@ -284,16 +284,16 @@ Every finding was reproduced against the code before being acted on, and each fi
 checked by reverting it and confirming the new test fails. Where a first attempt at a test
 passed under the reverted fix, the test was rewritten rather than kept.
 
-| #   | Finding                                     | Status                       |
-| --- | ------------------------------------------- | ---------------------------- |
-| P0  | t-SNE worker production packaging           | **Fixed**                    |
-| P0  | Tile-server path traversal                  | **Fixed**                    |
-| P1  | Dataset-generation-aware vector caches      | **Fixed**                    |
-| P1  | t-SNE cancellation and dataset-switch races | **Fixed**                    |
-| P2  | Revalidate cached dataset ownership         | **Fixed**                    |
-| P2  | Automated checks for the example server     | **Fixed**                    |
-| P3  | Revisit Napari ownership and decomposition  | **Deferred** — see below     |
-| P3  | Clean toolchain baseline                    | **Partly fixed** — see below |
+| #   | Finding                                     | Status                              |
+| --- | ------------------------------------------- | ----------------------------------- |
+| P0  | t-SNE worker production packaging           | **Fixed**                           |
+| P0  | Tile-server path traversal                  | **Fixed**                           |
+| P1  | Dataset-generation-aware vector caches      | **Fixed**                           |
+| P1  | t-SNE cancellation and dataset-switch races | **Fixed**                           |
+| P2  | Revalidate cached dataset ownership         | **Fixed**                           |
+| P2  | Automated checks for the example server     | **Fixed**                           |
+| P3  | Revisit Napari ownership and decomposition  | **In progress** — PR #5 conditional |
+| P3  | Clean toolchain baseline                    | **Partly fixed** — see below        |
 
 ### P0 — worker packaging
 
@@ -357,10 +357,10 @@ separate piece of work from the request-handling code this finding is about.
 
 ### P3 — Napari ownership and decomposition (in progress)
 
-The ownership audit was done first, as the revised finding asks, and it found four capabilities
-that sci-image-visualizer was working around rather than four files to move. All four are now in
-`napari-js` (branch `feat/renderer-owned-3d-projection-picking-styling`, version 0.14.0), each with
-renderer-level tests: napari-js goes from 229 to 267 tests.
+The ownership audit was done first, as the revised finding asks, and it found five capabilities
+that sci-image-visualizer was working around rather than five files to move. All five are now in
+`napari-js` (branch `feat/renderer-owned-3d-projection-picking-styling`, version 0.14.0), with
+renderer-level tests: napari-js goes from 229 to 279 tests at the current PR head.
 
 | Capability                             | The workaround it removes                                                                                                                                                                       |
 | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -368,18 +368,58 @@ renderer-level tests: napari-js goes from 229 to 267 tests.
 | `nearestProjectedIndex`                | Picking on projected coordinates by nearest centre, with no depth. The renderer depth-tests the billboards, so the tooltip could name a point drawn behind another.                             |
 | Per-point `alphas` / `sizes`           | A whole second `Points3DLayer` for the selected subset, kept in step through every colormap, window and size change, and depth-sorted against the parent as a separate draw.                    |
 | `fit3d` + `resetFit3D` + `fitToLayers` | `addFramingOnce`, which saved and restored five camera fields around every 3D add because napari-js reframed unconditionally.                                                                   |
-| `dataVersion` / `setValues`            | Rebuilding the whole point layer to change what it is coloured by — which, because adding a layer reframed, also caused the camera jump above.                                                  |
+| `dataVersion` / the `values` setter    | Rebuilding the whole point layer to change what it is coloured by — which, because adding a layer reframed, also caused the camera jump above.                                                  |
 
 Adopted here: the duplicate projection is gone, the hover pick is depth-aware, the selection
 highlight is a per-point alpha in one layer, and `addFramingOnce` and the second layer are deleted.
 1,551 tests pass; the three specs that pinned the two-layer behaviour were rewritten to pin the new
 one.
 
-**This does not build against a published dependency yet.** `package.json` now requires
-`napari-js@^0.14.0`, and npm's latest is 0.13.0 — everything above was verified against a locally
-built 0.14.0 staged into `node_modules`. Merging the napari-js branch and publishing 0.14.0 is a
-prerequisite for this branch's CI, and is deliberately left to a human: publishing is outward-facing
-and not something to do on the model's own initiative.
+#### PR #5 follow-up review — 2026-09-10
+
+[`napari-js` PR #5](https://github.com/TheJacksonLaboratory/napari-js/pull/5) was re-reviewed at
+head `ffe6f36551c594b71c26ef17d0c33b21bf752240`. GitHub reports it mergeable with a green
+`typecheck · lint · format · test · build` check; it is blocked only because review approval is
+required.
+
+The corrective commit is valid and closes four concrete defects from the first implementation:
+
+- `unionBounds()` now validates the result of `bounds()` and skips nullable/2D bounds, preventing a
+  `ShapesLayer` from producing a NaN camera target.
+- replacing `Points3DLayer.values` now goes through an accessor that validates, increments
+  `dataVersion`, and emits a change, so the GPU cannot silently retain the old scalar data;
+- hidden single-point and batch projection now use the same NaN screen-coordinate sentinel; and
+- an explicit `fitToLayers()` records the fit, so the next add under the `once` policy cannot undo
+  the union framing.
+
+The PR is nevertheless **CONDITIONAL**, not ready for approval as-is: 0 critical, 6 warnings, and
+2 informational findings remain.
+
+##### Resolution — all eight addressed at `0ccc6e6`
+
+Every one reproduced first, and each fix checked by reverting it and confirming its test fails.
+The reported measurements reproduced closely — 88.8 MB exactly, 32.9 ms against ~34, and a pick
+scan of 12.6–13.9 ms against 8.8–9.1.
+
+| Finding                         | Outcome                                                                                                                                                                                                                                                                     |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Clip planes ignored             | **Fixed.** Reachable by ordinary dollying, since `Camera3D` derives near and far FROM the distance: at distance 100 a 100-unit cloud's near points return clip z ≈ -1.5e7, and below distance 50 the far side crosses z = 1. Both paths now require `0 ≤ z/w ≤ 1`.          |
+| `framingFor` ignores FOV/aspect | **Fixed.** Confirmed at 2.0 and 5.1                                                                                                                                                                                                                                         | NDC | in portrait — and the old factor was already tight in landscape (2.5 against the 2.61 the vertical half-angle needs), so it fails the corner test at 800×600 too. Distance now derives from both half-angles; the viewer supplies them. |
+| Stale `contrastLimits`          | **Fixed**, mirroring `ShapesLayer`'s existing `_contrastExplicit` — a derived window follows the values, a pinned one does not.                                                                                                                                             |
+| Picking ignores per-point style | **Fixed.** This PR introduced the incoherence: it added per-point size and alpha, then picked with a flat radius and no visibility test. `radiusAt` / `pickable`, matching `nearestPointIndex`'s existing `sizeAt`.                                                         |
+| O(N) pick scan                  | **Fixed.** `ScreenIndex` buckets the projection into a flat CSR grid: 0.066 ms against 12.6 ms, about 190×, for a 43.5 ms build — which only pays off built LAZILY, on the first pick after the projection changed. Documented, with a threshold below which it is skipped. |
+| Whole-instance style re-upload  | **Fixed.** Two buffers on two version counters: a selection click now costs 21.5 ms / 29.6 MB instead of 32.9 ms / 88.8 MB, leaving the static 59.2 MB alone.                                                                                                               |
+| Reversed near/far test comment  | **Fixed** — the comment was wrong, the test was right.                                                                                                                                                                                                                      |
+| Stale lockfile root metadata    | **Fixed** — regenerated; root now reads 0.14.0.                                                                                                                                                                                                                             |
+
+napari-js goes to 308 tests (from 279). Downstream adopted the same round: the hover pick now
+uses the enlarged radius the renderer draws selected markers at, and builds a `ScreenIndex` in the
+existing lazy hover slot.
+
+**The duplicate dependency is fixed.** `napari-js` was declared in both `dependencies` (`^0.14.0`)
+and `devDependencies` (`^0.13.0`); the dev copy is removed. The lockfile still resolves 0.13.0 and
+cannot be regenerated against 0.14.0 until it is published — everything here was verified against a
+locally built 0.14.0 staged into `node_modules`. Publishing remains an outward-facing human action.
 
 Still to do, and unchanged in principle: reduce `NapariVisualizerService` to a thin renderer adapter
 and split the remaining domain orchestration into focused collaborators. Removing the workarounds

@@ -30,7 +30,7 @@ import type {
   Colormap,
   ProjectedPoints,
 } from 'napari-js';
-import { nearestProjectedIndex } from 'napari-js';
+import { nearestProjectedIndex, ScreenIndex, SCREEN_INDEX_MIN_POINTS } from 'napari-js';
 
 import { IImageInfo } from '../../contracts/image.contract';
 import { IChannelState } from '../../contracts/channel-histogram-api.contract';
@@ -397,6 +397,18 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    *  scales, so the pointer is converted instead of 374k points). */
   private hoverPositions: Float32Array | null = null;
   private hoverPositionsRev = -1;
+
+  /**
+   * Screen-space bucket index over the 3D projection, built on the first hover after the
+   * scene moved rather than when it moves.
+   *
+   * Lazily, and that is the whole design: an orbit drag changes the camera every frame, so
+   * building eagerly would spend tens of milliseconds a frame indexing for picks nobody is
+   * making. Deferred, it is built once when the drag stops and the pointer next moves —
+   * measured upstream at 3.7M points, that turns a 12.6 ms scan per pointermove into
+   * 0.066 ms.
+   */
+  private hoverIndex: ScreenIndex | null = null;
   /** Bumped whenever the cached positions go stale: a marker rebuild, or — in 3D
    *  only, where the projection depends on it — a camera move. */
   private spatialSceneRev = 0;
@@ -1901,6 +1913,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.spatialTooltip = null;
     this.hoverPositions = null;
     this.hoverPositionsRev = -1;
+    this.hoverIndex = null;
   }
 
   /** Hit-test the last pointer position and show or hide the tooltip. */
@@ -2011,7 +2024,19 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     is3d: boolean,
   ): number {
     if (!is3d) return nearestObservation(positions, x, y, radius);
-    return nearestProjectedIndex(positions, x, y, radius, this.spatialDepths3d);
+    // The cloud draws a selected marker LARGER, so the pick has to use the same radius the
+    // renderer used — otherwise the highlighted cells, the ones a reader is most likely to
+    // be pointing at, are the hardest to hover.
+    const scale = NapariVisualizerService.SPATIAL_SELECTED_SIZE_SCALE;
+    const mask = this.selectionStore?.current()?.mask;
+    const opts = mask?.length
+      ? { radiusAt: (i: number) => (mask[i] ? radius * scale : radius) }
+      : undefined;
+    // `radius` still bounds which buckets are visited, so it has to be the LARGEST any
+    // point can claim, not the base one.
+    const reach = mask?.length ? radius * scale : radius;
+    if (this.hoverIndex) return this.hoverIndex.pick(x, y, reach, opts);
+    return nearestProjectedIndex(positions, x, y, reach, this.spatialDepths3d, opts);
   }
 
   /**
@@ -2024,11 +2049,27 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     if (this.hoverPositions && this.hoverPositionsRev === this.spatialSceneRev) {
       return this.hoverPositions;
     }
-    const built = isSpatialOmics3d(this.currentPlotType)
+    const is3d = isSpatialOmics3d(this.currentPlotType);
+    const built = is3d
       ? this.getSpatialScreenProjection(obs)
       : this.hoverWorldPositions(obs);
     this.hoverPositions = built;
     this.hoverPositionsRev = this.spatialSceneRev;
+    // Built here, in the same lazy slot, so it is paid for on the first hover after the
+    // scene moved and not on every frame of an orbit. Only worth it past the point where
+    // the linear scan stops being free; below that the build costs more than it saves.
+    this.hoverIndex = null;
+    if (is3d && built && this.canvas && built.length / 2 >= SCREEN_INDEX_MIN_POINTS) {
+      const w = this.canvas.clientWidth || this.canvas.width;
+      const h = this.canvas.clientHeight || this.canvas.height;
+      if (w && h) {
+        this.hoverIndex = new ScreenIndex(
+          { screen: built, depth: this.spatialDepths3d ?? new Float32Array(built.length / 2) },
+          w,
+          h,
+        );
+      }
+    }
     return built;
   }
 

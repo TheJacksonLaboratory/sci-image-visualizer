@@ -89,8 +89,10 @@ export interface Points3DLayer {
   alphas: Float32Array | null;
   /** Per-point size multiplier, or null when every marker is `size` (napari-js ≥ 0.14). */
   sizes: Float32Array | null;
-  /** Bumped by every instance-data change, so a recolour is a mutation not a new layer. */
+  /** Bumped by every change to the static half (geometry + values). */
   dataVersion: number;
+  /** Bumped separately by alpha/size changes, so a selection click re-uploads only those. */
+  styleVersion: number;
   /** Layer-level visibility, from the real `Layer` base: what the 3D panel's
    *  show/hide toggles drive, so a test can read what the scene would draw. */
   visible: boolean;
@@ -253,8 +255,11 @@ export function nearestProjectedIndex(
   y: number,
   radius: number,
   depth?: Float32Array | null,
+  opts?: { radiusAt?: (i: number) => number; pickable?: (i: number) => boolean },
 ): number {
   const n = screen.length >> 1;
+  const radiusAt = opts?.radiusAt;
+  const pickable = opts?.pickable;
   const r2 = radius * radius;
   let best = -1;
   let bestDepth = Infinity;
@@ -263,7 +268,11 @@ export function nearestProjectedIndex(
     const dx = screen[i * 2] - x;
     const dy = screen[i * 2 + 1] - y;
     const d2 = dx * dx + dy * dy;
-    if (!(d2 <= r2)) continue;
+    if (radiusAt) {
+      const r = radiusAt(i);
+      if (!(d2 <= r * r)) continue;
+    } else if (!(d2 <= r2)) continue;
+    if (pickable && !pickable(i)) continue;
     if (!depth) {
       if (d2 < bestD2) {
         bestD2 = d2;
@@ -282,6 +291,29 @@ export function nearestProjectedIndex(
     }
   }
   return best;
+}
+
+/** Mirrors napari-js's screen-space pick index. Real, not faked: a stub that invented
+ *  answers here would make every hover test meaningless. */
+export const SCREEN_INDEX_MIN_POINTS = 50_000;
+
+export class ScreenIndex {
+  constructor(
+    private readonly projected: { screen: Float32Array; depth?: Float32Array | null },
+    _vw: number,
+    _vh: number,
+  ) {}
+
+  pick(
+    x: number,
+    y: number,
+    radius: number,
+    opts?: { radiusAt?: (i: number) => number; pickable?: (i: number) => boolean },
+  ): number {
+    return nearestProjectedIndex(
+      this.projected.screen, x, y, radius, this.projected.depth ?? null, opts,
+    );
+  }
 }
 
 export const LUT_SIZE = 256;
@@ -691,6 +723,7 @@ export class Viewer {
       alphas: o.alphas ?? null,
       sizes: o.sizes ?? null,
       dataVersion: 0,
+      styleVersion: 0,
       bounds: () => ({
         min: [0, 0, 0] as [number, number, number],
         max: [1, 1, 1] as [number, number, number],

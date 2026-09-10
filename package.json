@@ -108,7 +108,6 @@
     "jest-canvas-mock": "^2.5.2",
     "jest-environment-jsdom": "^29.7.0",
     "jest-preset-angular": "^13.1.6",
-    "napari-js": "^0.13.0",
     "ng-mocks": "^14.5.0",
     "ng-packagr": "^17.3.0",
     "onnxruntime-web": "~1.26.0",
