@@ -91,8 +91,6 @@ export interface Points3DLayer {
   sizes: Float32Array | null;
   /** Bumped by every instance-data change, so a recolour is a mutation not a new layer. */
   dataVersion: number;
-  /** Replace the scalars in place, keeping the geometry — and so the camera. */
-  setValues(next: Float32Array): void;
   /** Layer-level visibility, from the real `Layer` base: what the 3D panel's
    *  show/hide toggles drive, so a test can read what the scene would draw. */
   visible: boolean;
@@ -213,7 +211,7 @@ export function projectPoint(
   const cx = mvp[0] * x + mvp[4] * y + mvp[8] * z + mvp[12];
   const cy = mvp[1] * x + mvp[5] * y + mvp[9] * z + mvp[13];
   const cw = mvp[3] * x + mvp[7] * y + mvp[11] * z + mvp[15];
-  if (!(cw > 0)) return { x: 0, y: 0, depth: NaN, visible: false };
+  if (!(cw > 0)) return { x: NaN, y: NaN, depth: NaN, visible: false };
   return {
     x: ((cx / cw) * 0.5 + 0.5) * vw,
     y: (1 - ((cy / cw) * 0.5 + 0.5)) * vh,
@@ -693,10 +691,6 @@ export class Viewer {
       alphas: o.alphas ?? null,
       sizes: o.sizes ?? null,
       dataVersion: 0,
-      setValues(next: Float32Array) {
-        layer.values = next;
-        layer.dataVersion++;
-      },
       bounds: () => ({
         min: [0, 0, 0] as [number, number, number],
         max: [1, 1, 1] as [number, number, number],

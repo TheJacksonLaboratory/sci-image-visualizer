@@ -2761,10 +2761,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       if (scalarKey !== this.spatialScalarKey3d) {
         // A change of colour SOURCE, which used to mean discarding the layer and building
         // another — and, because adding a 3D layer reframes, a camera jump to undo as well.
-        // napari-js ≥ 0.14 lets the scalars be replaced in place; the positions have not
-        // moved, so there is nothing for the camera to reframe.
+        // napari-js ≥ 0.14 lets the scalars be replaced in place — the setter bumps the
+        // layer's dataVersion so the visual re-uploads — and the positions have not moved,
+        // so there is nothing for the camera to reframe.
         this.spatialScalarKey3d = scalarKey;
-        this.spatialPoints3d.setValues(valuesFor());
+        this.spatialPoints3d.values = valuesFor();
       }
       this.spatialPoints3d.colormap = colormap;
       this.spatialPoints3d.contrastLimits = contrastLimits;
