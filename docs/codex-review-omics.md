@@ -4,6 +4,8 @@
 > Branch: `feat/add-spatial-omics-plotmode`  
 > Comparison base: `origin/main`  
 > Verdict: **FAIL — 2 critical, 4 warning, and 2 informational findings**
+>
+> Response: [`codex-review-omics-response.md`](./codex-review-omics-response.md)
 
 ## Scope
 
