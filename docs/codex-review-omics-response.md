@@ -1,6 +1,8 @@
 # Response to the Codex review — spatial-omics branch
 
 > Responding to: [`codex-review-omics.md`](./codex-review-omics.md)
+> PR-level review at the merge head: [`codex-review-pr-24.md`](./codex-review-pr-24.md) — **PASS**,
+> 0 critical / 0 warning / 5 informational
 > Branch: `feat/add-spatial-omics-plotmode` · Upstream: [`napari-js` PR #5](https://github.com/TheJacksonLaboratory/napari-js/pull/5)
 > PR head reviewed: `aa508ba2efdcd3dc6df1df77fa508bdb1d0a465a`
 > Last updated: 2026-09-11
@@ -459,7 +461,12 @@ release step.
 
 ## Deviations from the recommended fix
 
-Three, each a departure in means rather than in ends.
+Three, each a departure in means rather than in ends. A fourth point of difference is not a
+deviation but a scope correction, recorded here because it qualifies something I wrote: the final
+review accepts `ScreenIndex` as a **canvas-picking** index, so its parity contract covers cursors
+inside the viewport including the boundary. I had justified the corner test's off-canvas cursor by
+appeal to pointer capture; that is true of the DOM but out of scope for this contract, so the test
+stands as coverage of the last bucket rather than as a claim about off-canvas picking.
 
 ### 1 · `values` as an accessor pair rather than getter + `setValues()`
 
@@ -519,12 +526,13 @@ to review and harder to revert independently.
 
 ## Open items
 
-| Item                                                | Owner            | Blocking                                                                                                                                                                                                                                                                                        |
-| --------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Publish `napari-js` 0.14.0                          | **Human**        | This branch's CI. `package.json` requires `^0.14.0`; npm's latest is 0.13.0, so the lockfile cannot be regenerated. Everything here was verified against a locally built 0.14.0 staged into `node_modules`. Publishing is outward-facing and not something to do on the model's own initiative. |
-| Split `NapariVisualizerService` along domain lines  | Follow-up change | Nothing                                                                                                                                                                                                                                                                                         |
-| Prettier normalization (171 files) + warning budget | Follow-up change | Nothing                                                                                                                                                                                                                                                                                         |
-| `examples/browser-image` under lint                 | Follow-up change | Nothing                                                                                                                                                                                                                                                                                         |
+| Item                                                               | Owner            | Blocking                                                                        |
+| ------------------------------------------------------------------ | ---------------- | ------------------------------------------------------------------------------- |
+| Split `NapariVisualizerService` along domain lines                 | Follow-up change | Nothing — PR-review INFO-1; the service is 4,545 lines                          |
+| Split `SpatialChartsComponent` into orchestration and presentation | Follow-up change | Nothing — PR-review INFO-2; the component is 1,310 lines                        |
+| Prettier normalization (171 files) + warning budget                | Follow-up change | Nothing — PR-review INFO-4; ratchet the 717 warnings, then gate `format:check`  |
+| `examples/browser-image` under lint                                | Follow-up change | Nothing — PR-review INFO-3                                                      |
+| Browser bundle-size budget in CI                                   | Follow-up change | Nothing — PR-review INFO-5; the example's main chunk is 8,267 kB / 2.27 MB gzip |
 
 ---
 
