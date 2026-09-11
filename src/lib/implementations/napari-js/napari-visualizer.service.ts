@@ -2067,6 +2067,14 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
           { screen: built, depth: this.spatialDepths3d ?? new Float32Array(built.length / 2) },
           w,
           h,
+          // The largest radius any pick here can claim: the base hover radius, times the
+          // scale a SELECTED marker is drawn at. Stated rather than left to the default,
+          // because it is what decides whether a marker straddling the canvas edge is
+          // found — its centre is off screen while part of it is not.
+          {
+            maxReach: NapariVisualizerService.HOVER_RADIUS_PX
+              * NapariVisualizerService.SPATIAL_SELECTED_SIZE_SCALE,
+          },
         );
       }
     }

@@ -2,11 +2,15 @@
 
 > Responding to: [`codex-review-omics.md`](./codex-review-omics.md)
 > Branch: `feat/add-spatial-omics-plotmode` · Upstream: [`napari-js` PR #5](https://github.com/TheJacksonLaboratory/napari-js/pull/5)
+> PR head reviewed: `0ccc6e603953076b51f24cbd170237823c88e2c3`
 > Last updated: 2026-09-10
 
-Three rounds of review, eighteen findings. **All eighteen were real. None is disputed.**
-Fifteen are fixed; three are deliberately deferred with reasons given below, and one of those
-is blocked on a human action rather than on a decision.
+Four rounds of review produced nineteen warning-level findings plus two informational findings.
+**All were real. None is disputed.** Sixteen warning-level findings are fixed — including the
+canvas-boundary regression the acceleration for the indexed-picking finding introduced — and two
+original P3 areas remain deliberately incomplete. Both informational findings are fixed.
+Publishing 0.14.0 is additionally blocked on a human action rather than on an engineering
+decision.
 
 This document consolidates the responses; the resolution notes appended inline to the review
 file are the same conclusions recorded as they happened.
@@ -168,7 +172,9 @@ first round — all real, all mine.
 
 All eight real. **Four of the six warnings were introduced by this PR** rather than inherited.
 The reported measurements reproduced closely — 88.8 MB exactly, 32.9 ms against ~34, and a pick
-scan of 12.6–13.9 ms against 8.8–9.1.
+scan of 12.6–13.9 ms against 8.8–9.1. Five warning fixes and both informational fixes were correct
+at `0ccc6e6`; the `ScreenIndex` introduced for the sixth carried a canvas-boundary regression,
+found in a fourth round and fixed below.
 
 ### P1 · Projection ignores the near and far planes — **Fixed**
 
@@ -214,7 +220,7 @@ rather than arrays to match `nearestPointIndex`'s existing `sizeAt` — the call
 the styling in some form already and should not have to materialise a second copy per pointer
 move.
 
-### P2 · O(N) pick scan per pointer move — **Fixed**
+### P2 · O(N) pick scan per pointer move — **Fixed** (after a boundary regression)
 
 Confirmed at **12.6 ms**. `ScreenIndex` buckets the projection into a flat CSR-style grid
 (counting sort into two typed arrays — a few million small arrays is its own problem at this
@@ -232,6 +238,65 @@ built **lazily**, on the first pick after the projection changed. That is now th
 class docstring, alongside `SCREEN_INDEX_MIN_POINTS` for the size below which the grid costs more
 than every pick it would serve. The downstream builds it in its existing lazy hover slot, keyed
 on the scene revision.
+
+An independent follow-up review found that the index is not yet behaviorally equivalent to the
+linear picker. `ScreenIndex` excludes every point whose **center** is outside the canvas, on the
+premise that it can never be under the cursor. A finite-size marker can cross the canvas edge while
+its center remains outside, so part of it is rendered and pickable:
+
+```text
+point center: (-2, 100)
+cursor:       (1, 100)
+radius:       6
+
+linear pick:   0
+indexed pick: -1
+```
+
+This affects all four edges, including centers exactly at `x = viewportWidth` or
+`y = viewportHeight`. The existing randomized parity test generates centers only inside the canvas,
+so it cannot expose the disagreement.
+
+**Required fix:** give `ScreenIndex` an explicit maximum marker reach; retain finite centers within
+that margin and clamp them into the nearest border bucket. Add parity tests against the linear picker
+for markers crossing the left, right, top, and bottom edges, plus exact width/height boundaries. The
+performance result is useful, but this item is not complete until the indexed and linear paths return
+the same answer for those cases.
+
+#### Round 4 resolution — **fixed**
+
+Correct, and my fault twice over: the bug, and a parity test too weak to see it. Reproduced on
+every edge before changing anything:
+
+| marker centre | cursor       | linear | indexed |
+| ------------- | ------------ | ------ | ------- |
+| `(-2, 100)`   | `(1, 100)`   | 0      | **-1**  |
+| `(802, 100)`  | `(799, 100)` | 0      | **-1**  |
+| `(100, -2)`   | `(100, 1)`   | 0      | **-1**  |
+| `(800, 100)`  | `(797, 100)` | 0      | **-1**  |
+| `(100, 602)`  | `(100, 599)` | 0      | 0       |
+| `(100, 600)`  | `(100, 597)` | 0      | 0       |
+
+**One thing to add to the finding: the bottom edge passed by accident, not by design.**
+`ceil(600 / 32) = 19` rows overhang to 608 px and hid the bug there, while `ceil(800 / 32)` is
+exact and exposed it on the right. Whether a given edge was broken depended on whether the
+viewport divided evenly by the cell size — an index that is accidentally correct on two edges out
+of four is the harder kind of wrong, because it survives casual testing.
+
+Fixed by giving the grid an **origin at `-margin`** and sizing it to cover the canvas plus the
+margin on both sides, rather than clamping stray centres into border buckets as suggested. Both
+reach parity; the origin shift keeps the invariant "a point is in the cell that contains it", so
+nothing depends on the viewport arithmetic and the border buckets do not accumulate distant
+points. `maxReach` is an explicit option (default 32 px); the adapter passes its own — the hover
+radius times the scale a selected marker is drawn at.
+
+The randomised parity test now draws centres from a box **40 px outside the canvas on every
+side**, which is precisely what it failed to do before; it catches the regression on its own.
+Seven explicit edge cases cover all four edges, both exact `width`/`height` boundaries and a
+corner, plus that a centre too far out is still excluded and that a larger `maxReach` reaches
+further. Reverting the margin fails eight tests, including the randomised one.
+
+napari-js: **318 tests**, was 308.
 
 ### P2 · Whole-instance rebuild for a style-only change — **Fixed**
 
@@ -340,15 +405,18 @@ to review and harder to revert independently.
 
 Current state of both repositories.
 
-| Check                                         | Result                                                                                                             |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `npm run typecheck`                           | Clean                                                                                                              |
-| `npm run lint`                                | **0 errors**, 717 warnings — unchanged from the review's own baseline, with the tile server now included and clean |
-| `npm test`                                    | 76 suites, **1,551 tests**                                                                                         |
-| `npm run test:server`                         | **19 tests** (new)                                                                                                 |
-| `npm run build`                               | Passes                                                                                                             |
-| `npm run build:example`                       | **Passes** — was the P0 failure                                                                                    |
-| `napari-js` `npm test`                        | 34 files, **308 tests** (229 at 0.13.0)                                                                            |
-| `napari-js` typecheck · lint · format · build | Clean                                                                                                              |
+| Check                                         | Result                                                                                                                                  |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run typecheck`                           | Clean                                                                                                                                   |
+| `npm run lint`                                | **0 errors**, 717 warnings — unchanged from the review's own baseline, with the tile server now included and clean                      |
+| `npm test`                                    | 76 suites, **1,551 tests**                                                                                                              |
+| `npm run test:server`                         | **19 tests** (new)                                                                                                                      |
+| `npm run build`                               | Passes                                                                                                                                  |
+| `npm run build:example`                       | **Passes** — was the P0 failure                                                                                                         |
+| `napari-js` `npm test`                        | 34 files, **318 tests** (229 at 0.13.0)                                                                                                 |
+| `napari-js` typecheck · lint · format · build | Clean                                                                                                                                   |
+| `ScreenIndex` edge parity with linear picking | **Passes** — all four edges, both exact `width`/`height` boundaries, a corner, and a randomised cloud whose centres overhang the canvas |
 
-Every fix above was additionally checked by reverting it and confirming its test fails.
+Every fix above was checked by reverting it and confirming its test fails — the boundary fix
+included: reverting the margin fails eight tests, among them the randomised parity test that was
+previously too narrow to notice.

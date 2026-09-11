@@ -302,6 +302,7 @@ export class ScreenIndex {
     private readonly projected: { screen: Float32Array; depth?: Float32Array | null },
     _vw: number,
     _vh: number,
+    _opts?: { cell?: number; maxReach?: number },
   ) {}
 
   pick(
