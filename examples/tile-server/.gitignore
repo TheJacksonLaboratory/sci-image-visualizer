@@ -1,4 +1,12 @@
 node_modules/
 .cache/
 cogs/
+spatial/
 *.log
+stores/
+st/
+abc/
+# conversion inputs: downloaded .h5ad and the images extracted from them
+*.h5ad
+visium-*.png
+h5ad/

@@ -266,6 +266,15 @@ export class ExampleImageStateAdapter implements ImageStatePort, OnDestroy {
     this.filename$.next(fileName);
   }
 
+  /**
+   * Drop whatever image is open, leaving no image at all.
+   *
+   * For a spatial-omics dataset that brings no tissue image of its own: without this the
+   * observations are drawn over whichever slide happened to be loaded before, which looks like
+   * they are registered onto it.
+   */
+  clearImage(): void { this.clear(); }
+
   private clear(): void { this.revoke(); this.imageInfo$.next(null); this.filename$.next(undefined); }
   private revoke(): void { for (const u of this.ownedUrls) URL.revokeObjectURL(u); this.ownedUrls = []; this.currentInfoB64 = null; }
   ngOnDestroy(): void { this.revoke(); }

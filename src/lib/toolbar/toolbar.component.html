@@ -68,6 +68,16 @@
       <img src="assets/plotting/invert.svg" class="toolbar-icon-dark" style="width: 1rem"/>
     </p-button>
 
+    <!-- Spatial-omics controls. Only meaningful in the spatial mode, which is
+         itself only offered while a dataset is loaded — so this button appears
+         exactly when there is something for it to control. -->
+    <p-button *ngIf="tools.specialTools && isSpatialMode" pRipple size="small" [text]="true"
+              pTooltip="Spatial omics (colour by column or gene, legend, selection, distributions)"
+              tooltipPosition="bottom"
+              (onClick)="openSpatialControls.emit()">
+      <img src="assets/plotting/spatial-omics.svg" class="toolbar-icon-dark" style="width: 1rem"/>
+    </p-button>
+
     <!-- Smoothen toggle: bilinear smoothing vs nearest-neighbour raw pixels (Image
          view only — it's an OpenSeadragon drawer setting). Highlighted when smoothing on. -->
     <p-button *ngIf="tools.specialTools && isImageView" size="small"
@@ -91,8 +101,10 @@
         <span class="flex align-items-center mx-1 toolbar-text">{{zIndex}} of {{maxIndex}}</span>
       </ng-container>
       <!-- Heatmap view: single-image (high-def zoom) vs stack (frame slider). Plotly-only —
-           hidden for napari, which has no single/stack toggle or per-frame fetch. -->
-      <ng-container *ngIf="!showsLiveSliceScrubber && !isNapariMode">
+           hidden for napari, which has no single/stack toggle or per-frame fetch, and for the
+           spatial-omics modes: a 3D omics dataset publishes its reference volume as a z-stack
+           image, and these modes draw observations, not one of its slices. -->
+      <ng-container *ngIf="!showsLiveSliceScrubber && !isNapariMode && !isSpatialMode">
       <p-button icon="pi pi-image" size="small"
                 [text]="imageInfo?.showStack"
                 pTooltip="Single image mode: enables high-def zoom" tooltipPosition="bottom"
@@ -220,7 +232,7 @@
       </ng-container>
     </ng-container>
 
-    <ng-container *ngIf="isHeatmap && tools.regionTools">
+    <ng-container *ngIf="(isHeatmap || is3dRegions) && tools.regionTools">
       <span class="toolbar-separator"></span>
       <!-- Region Editor: opens the editor as a floating dialog (formerly the
            right-panel Regions tab). Sits with the region drawing tools. -->
@@ -242,7 +254,7 @@
                 tooltipPosition="bottom"
                 (onClick)="toggleDragMode.emit('drawrect')">
       </p-button>
-      <p-button size="small"
+      <p-button *ngIf="!is3dRegions" size="small"
                 [text]="activeDragMode !== 'drawopenpath'"
                 pTooltip="Draw a polyline (<kbd>l</kbd>)" [escape]="false"
                 tooltipPosition="bottom"
@@ -259,7 +271,10 @@
       </p-button>
       <!-- Brush: paint a region by dragging a disc of the given size; the Size
            slider appears while it's active. Hold Shift to erase (subtract). -->
-      <p-button size="small"
+      <!-- Brush and polyline are absent from a 3D cloud: the brush paints in IMAGE
+                 pixels and there is no raster to sample, and an open polyline is a
+                 profile tool, not a closed region a selection can test against. -->
+            <p-button *ngIf="!is3dRegions" size="small"
                 [text]="activeDragMode !== 'brush'"
                 pTooltip="Brush: click and drag to paint a region.
                 <br>Hold <kbd>Shift</kbd> while painting to erase from a region."
@@ -547,12 +562,23 @@
   <h3>Plot-type dropdown</h3>
   <p>
     The <b>plot-type dropdown</b> switches how the file is visualized:
-    <b>Image</b>, <b>Contour</b>, <b>Scatter (regions)</b>, <b>Surface (3D)</b>,
-    <b>Scatter 3D</b>, and <b>Isosurface (3D)</b>. Scalar and 3D types require a grayscale
-    image (the 3D volume types also require a z-stack). The non-image views render with
-    Plotly and support "real zooming" (a downscaled overview that re-fetches higher
-    resolution as you zoom in).
+    <b>Image</b>, <b>Heatmap</b>, <b>Contour</b>, <b>Surface</b>, <b>Volume</b>,
+    <b>Isosurface</b>, and — when a spatial-omics dataset is open —
+    <b>Spatial omics</b> and <b>Spatial omics 3D</b>.
   </p>
+  <p>
+    <b>Only the modes the data can actually support are offered</b>, so the list changes
+    with what is loaded rather than showing entries that would come up blank:
+  </p>
+  <ul>
+    <li><b>Contour</b>, <b>Volume</b> and <b>Isosurface</b> need a grayscale image; the
+      two 3D ones also need a z-stack.</li>
+    <li><b>Spatial omics</b> needs a published dataset, and <b>Spatial omics 3D</b> needs
+      one whose coordinates carry a z.</li>
+    <li>The pixel modes (<b>Image</b>, <b>Heatmap</b>, <b>Surface</b>) are withheld for a
+      dataset that brings no tissue image — seqFISH records coordinates and no section, so
+      there is nothing for them to draw.</li>
+  </ul>
   <ul>
     <li>"<b>Isosurface band</b>" slider (Isosurface): sets the intensity band the surfaces are
       drawn for, mapped onto the volume's real intensity range.</li>
@@ -714,6 +740,45 @@
     <ng-container *ngFor="let tool of contributedTools">
       <li *ngIf="tool.help" [innerHTML]="tool.help.body"></li>
     </ng-container>
+  </ul>
+
+  <h3>Spatial omics</h3>
+  <p>
+    In <b>Spatial omics</b> mode each observation — a cell or a Visium spot — is drawn at
+    its own coordinates, over the tissue image where the dataset registers onto one. The
+    <img src="assets/plotting/spatial-omics.svg" width="14" height="14" alt="Spatial omics"/>
+    panel colours them by a <b>column</b> (a cell type, a cluster) or by a <b>gene</b>, and
+    the two are exclusive so what drives the colours is never ambiguous.
+  </p>
+  <ul>
+    <li>"<b>Select from ROIs</b>": turns the regions you have drawn into a selection of
+      observations. Everything else then follows that selection.</li>
+    <li>"<b>Point size</b>" / "<b>Opacity</b>": how the markers are drawn, not what is
+      selected.</li>
+  </ul>
+
+  <h3>Distribution charts</h3>
+  <p>
+    The <b>Distribution</b> section of the spatial-omics panel charts whatever the map is
+    coloured by, so the two can never disagree. Each tab answers a different question, and
+    the <i class="pi pi-question-circle"></i> beside them explains the one on screen —
+    including what it must <em>not</em> be read for.
+  </p>
+  <ul>
+    <li>"<b>Counts</b>": how many observations per category. A category is a label, not a
+      magnitude, so a frequency is the only distribution it has.</li>
+    <li>"<b>Histogram</b>" / "<b>Violin</b>" / "<b>Box</b>": how a continuous value is
+      distributed — over everything, or split by a grouping column.</li>
+    <li>"<b>Heatmap</b>": mean expression of the genes you pick within each group.
+      Z-scored per gene by default, so a colour means "above or below this gene's own
+      average" rather than "highly expressed".</li>
+    <li>"<b>Embedding</b>": a UMAP, PCA or t-SNE over the same cells. <b>Lasso it to
+      select on the map</b> — both views read the same selection. Only PCA labels its axes
+      with a percentage, because only its axes explain a measurable share of the variance;
+      UMAP and t-SNE coordinates are arbitrary, so distance between distant clusters
+      should not be read.</li>
+    <li>"<b>Detach</b>": moves the charts into their own window so they can sit beside the
+      map instead of inside the panel. Switching tabs keeps the window where it is.</li>
   </ul>
 
   <h3>Help</h3>

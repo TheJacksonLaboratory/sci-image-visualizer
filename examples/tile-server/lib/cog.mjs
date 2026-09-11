@@ -24,7 +24,7 @@ export async function loadDescriptor(cogDir, imageId) {
   const key = `${cogDir}::${imageId}`;
   const hit = descCache.get(key);
   if (hit) return hit;
-  const p = path.join(cogDir, safeId(imageId), 'descriptor.json');
+  const p = cogPath(cogDir, imageId, 'descriptor.json');
   const desc = JSON.parse(await readFile(p, 'utf8'));
   descCache.set(key, desc);
   return desc;
@@ -91,7 +91,8 @@ export async function readRegion(cogDir, imageId, roi, screen, z) {
   const width = clampInt(roi.width * scale, 1, chosen.width - left);
   const height = clampInt(roi.height * scale, 1, chosen.height - top);
 
-  return sharp(levelFile(cogDir, imageId, chosen.res, channelOf(desc), sliceOf(desc, z)), { limitInputPixels: false })
+  const file = levelFile(cogDir, imageId, chosen.res, channelOf(desc), sliceOf(desc, z));
+  return sharp(file, { limitInputPixels: false })
     .extract({ left, top, width, height })
     .resize(outW, outH, { fit: 'fill' })
     .flatten({ background: '#ffffff' })
@@ -119,7 +120,8 @@ export async function readPreview(cogDir, imageId, tier, z) {
   // single-slice image — fall back to the MIDDLE slice, the usual most-in-focus
   // plane, so a stack's thumbnail isn't a blurry end of the stack.
   const which = Number.isInteger(Number(z)) ? z : desc.z > 1 ? Math.floor(desc.z / 2) : undefined;
-  return sharp(levelFile(cogDir, imageId, chosen.res, channelOf(desc), sliceOf(desc, which)), { limitInputPixels: false })
+  const file = levelFile(cogDir, imageId, chosen.res, channelOf(desc), sliceOf(desc, which));
+  return sharp(file, { limitInputPixels: false })
     .resize(outW, outH, { fit: 'inside' })
     .flatten({ background: '#ffffff' })
     .png()
@@ -157,15 +159,41 @@ function levelFile(cogDir, imageId, res, channel, z) {
   const cKey = channel === null || channel === undefined ? '' : `_c${channel}`;
   // A flat brightfield COG is plain `L{res}.tif`; per-channel adds `_c`, a stack
   // adds `_z` — matching make-cog's naming.
-  return path.join(cogDir, safeId(imageId), `L${res}${zKey}${cKey}.tif`);
+  return cogPath(cogDir, imageId, `L${res}${zKey}${cKey}.tif`);
 }
 
 // The imageId comes from the client's opaque info token; never let it escape the
 // COG dir.
-function safeId(imageId) {
+//
+// The leading `[A-Za-z0-9]` is the part that matters: a character class holding `.` and a
+// `+` quantifier accepts the whole id `..`, which `path.join` then resolves to the PARENT
+// of the COG dir — where the server would go looking for a `descriptor.json` or an
+// `L0.tif`. Requiring the first character to be alphanumeric rejects `.` and `..` (and any
+// dotfile) while still allowing the `a.b-c_1` shapes real ids use. Matches
+// `spatial.mjs`'s SAFE_ID, so the two entry points cannot drift.
+const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+export function safeId(imageId) {
   const id = String(imageId || '');
-  if (!/^[A-Za-z0-9._-]+$/.test(id)) throw new Error(`bad image id: ${id}`);
+  if (!SAFE_ID.test(id) || id.includes('..')) throw new Error(`bad image id: ${id}`);
   return id;
+}
+
+/**
+ * Join a validated id (and any fixed trailing parts) under the COG dir.
+ *
+ * The resolved result is checked against the resolved root as well. `safeId` already makes
+ * an escape unreachable, but the check costs nothing and it is what keeps a future edit to
+ * the regex from quietly reopening the hole — the containment property is the one that
+ * actually matters, so it is worth stating in code rather than only in the pattern.
+ */
+export function cogPath(cogDir, imageId, ...rest) {
+  const root = path.resolve(cogDir);
+  const full = path.resolve(root, safeId(imageId), ...rest);
+  if (full !== root && !full.startsWith(root + path.sep)) {
+    throw new Error(`bad image id: ${imageId}`);
+  }
+  return full;
 }
 
 function clampInt(v, lo, hi) {

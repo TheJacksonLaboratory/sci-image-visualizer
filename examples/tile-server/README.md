@@ -37,28 +37,509 @@ so it stays lightweight and stateless.
 > Histogram / export endpoints are only needed for >8-bit images. These demo
 > slides are 8-bit RGB brightfield, so they are intentionally omitted.
 
-## Quick start (local)
+### Spatial-omics endpoints
+
+The same server also implements the **spatial-omics data plane** — the wire
+format `SpatialDataHttpService` speaks (see
+[`src/lib/implementations/spatial-data-http/spatial-wire.ts`](../../src/lib/implementations/spatial-data-http/spatial-wire.ts)).
+
+| Method + path | Returns |
+|---|---|
+| `GET /spatial/datasets` | `{ datasets: [{ id, name, count }] }` |
+| `GET /spatial/:id/manifest` | manifest: count, column + feature metadata, radius, imageRef |
+| `GET /spatial/:id/coords` | `f32[N]` x, `f32[N]` y, `f32[N]` z? — one response |
+| `GET /spatial/:id/radius` | `f32[N]` (per-observation radius only) |
+| `GET /spatial/:id/ids` | `{ ids: [...] }` |
+| `GET /spatial/:id/column/:name` | `u16[N]` codes (categorical) or `f32[N]` values (continuous) |
+| `GET /spatial/:id/feature/:name` | `f32[N]` — one gene's expression vector |
+| `GET /spatial/:id/features?q=&limit=` | `{ names: [...] }` typeahead |
+| `GET /spatial/:id/embedding/:name` | `f32[N]` per dimension — a UMAP/t-SNE/PCA embedding (bundles only) |
+| `GET /spatial/:id/polygons` | `u32` count, `u32[count+1]` offsets, `f32` coords |
+
+A manifest sets `hasZ: true` when the observations carry a third axis, and
+`/coords` then returns three `f32[N]` blocks instead of two. A dataset with no
+single reference plane (a registered 3D cloud) has **no** `imageRef` — there is
+no one section to draw it over.
+
+Vectors are **raw little-endian bytes**, decoded by a typed-array view with no
+copy — JSON would cost ~8–12× the bytes and allocate a JS number per value.
+
+Two things the layout is built around:
+
+- **Nothing loads the whole matrix.** The manifest carries only metadata; a
+  column or gene vector is fetched when it is displayed. Visium ships ~31k
+  genes — the dense matrix is ~800 MB, so "load the dataset" can never mean
+  "load the matrix".
+- **The matrix is stored gene-major.** AnnData stores `X` observation-major
+  (CSR), so reading one gene means touching every row. The converter transposes
+  once, offline; serving a gene is then a contiguous ranged read at
+  `geneIndex * N * 4`, and the matrix is never held in server memory.
+
+#### Serving a SpatialData store LIVE
+
+Drop (or symlink) a `*.zarr` store into `./stores` and it appears on
+`/spatial/datasets` — no build step, no intermediate bundle:
 
 ```bash
-cd examples/tile-server
-npm install
-
-# 1. Produce a pyramid from a whole-slide image (needs: brew install vips)
-#    CMU-1 (CC0, ~1.5 Gpx):
-npm run make-cog -- .cache/CMU-1.svs cmu-1
-#    A JAX slide (~22 Gpx):
-npm run make-cog -- .cache/BC18_1.ndpi bc18
-
-# 2. Serve
-npm start                       # -> http://localhost:8090   (COG_DIR=./cogs)
-
-# 3. From the repo root, point the browser example at it (trailing slash matters —
-#    the library concatenates `${api}tile`):
-VITE_TILE_SERVER=http://localhost:8090/ npm run start:example
+curl -O https://s3.embl.de/spatialdata/spatialdata-sandbox/visium_spatialdata_0.7.1.zip
+unzip visium_spatialdata_0.7.1.zip
+ln -s "$PWD/data.zarr" stores/visium        # or just move it in
+npm start
 ```
 
-The gigapixel gallery entries only appear when `VITE_TILE_SERVER` is set, so the
-public Pages demo stays fully serverless until a server is wired in.
+Every `(store, table, region)` triple becomes a dataset. Ids stay short when
+they can — `hd.cell_segmentations` for a single-region table,
+`visium.table.ST8059048` when a table covers several sections — so the Visium
+store above yields **both** of its sections without being asked.
+
+**Embeddings come across too.** Every `obsm` array of 2 or 3 columns except the coordinates
+themselves is advertised in the manifest and served from
+`/spatial/<id>/embedding/<key>`, in the same struct-of-arrays layout a bundle uses — so an
+`.h5ad` converted to SpatialData keeps its `X_umap` and needs no conversion step here at
+all. Anything wider is skipped rather than truncated: `X_pca` is routinely 50 components,
+and showing its first two as "the PCA" would be a different picture from the one the label
+promises.
+
+No store to hand? `node scripts/make-zarr-demo.mjs` writes a small synthetic one into
+`./stores`, with `obsm/spatial`, `X_umap` and `X_umap3d`, so the path can be exercised
+with no download.
+
+The tissue image is materialised into `./cogs` the first time it is requested
+(0.1–0.8 s for these stores), so OSD's tile path is unchanged and only the first
+open pays.
+
+**Optional sidecar** at `stores/<name>.json`, carrying only what cannot be
+inferred from the store:
+
+```json
+{ "gridUm": 2 }
+```
+
+`gridUm` is the assay's grid pitch in µm. A segmentation traced on a binned
+assay steps one bin at a time, so the outlines measure the grid — but nothing in
+the store states the bin's physical size, and without it there is no µm/px and
+no scale bar. Visium needs no sidecar: its 100 µm spot pitch is fixed.
+
+#### What live serving costs
+
+The expression matrix is CSR over **observations**, so one gene's column is
+scattered across every row. Serving it means holding the matrix and scanning it:
+
+| request | cost, measured on these stores |
+|---|---|
+| manifest, coords, ids, columns | 2–30 ms |
+| first gene (reads X into memory) | 0.4–0.5 s, then 227 MB (Visium) / 331 MB (HD) resident |
+| subsequent genes | 13–40 ms |
+| derived `cluster` (k-means, on first request) | 0.3 s / 1.4 s |
+| tissue pyramid (first open) | 0.1 s / 0.8 s |
+
+It is deliberately **not** transposed to gene-major in memory — that would
+double the residency, and a scan is tens of milliseconds. A production server
+should serve a pre-transposed gene-major file instead, which is exactly the
+argument for keeping this ingest out of the browser.
+
+Derived columns (`total_counts`, `n_genes_by_counts`, `area`, `cluster`) are
+advertised in the manifest and computed on first request, so opening a dataset
+does not pay to cluster it. Columns that encode nothing are dropped:
+identifiers (a distinct integer per observation) and columns constant after
+filtering.
+
+#### Serving a LEGACY Spatial Transcriptomics dataset
+
+Pre-Visium ST data is a different shape: gzipped TSV count matrices, separate
+brightfield HE JPEGs, and "spot selection" tables mapping array coordinates to
+image pixels. `lib/spatial-st.mjs` serves those from `$ST_DIR` (default `./st`),
+one sub-directory per dataset.
+
+The reference case is the Andersson et al. HER2+ breast cancer deposition
+([Zenodo 4751624](https://zenodo.org/records/4751624)) — 36 sections, 8 of them
+carrying the **pathologist's annotation**, which is the richest categorical any
+of these demo datasets has:
+
+```bash
+mkdir -p st/her2 && cd st/her2
+for f in count-matrices spot-selections meta images; do
+  curl -LO "https://zenodo.org/records/4751624/files/$f.zip?download=1"
+done
+```
+
+The archives are **AES-encrypted**, with the passwords published in the authors'
+own [README](https://github.com/almaan/her2st) — note there are **two**, one per
+pair of archives (the Zenodo description lists only the first):
+
+```json
+// st/her2/config.json
+{
+  "dataPassword": "zNLXkYk3Q9znUseS",
+  "metaPassword": "yUx44SzG6NdB32gY"
+}
+```
+
+`lib/zip-aes.mjs` reads them: macOS's `unzip` refuses AES entries
+("need PK compat. v5.1") and 7-Zip is not always installed, but Node already has
+PBKDF2-HMAC-SHA1, AES and HMAC, so the WinZip-AES format is a short module. It
+reads entries by byte range, so pulling one JPEG out of the 592 MB `images.zip`
+does not load the archive.
+
+Each section becomes `her2.<SECTION>` — `her2.A1` … `her2.H3`. `radius` and
+`polygons` legitimately 404 there: ST spots are a uniform size and the format has
+no outlines.
+
+What it costs: the cheap index (spot keys, pixel positions, gene names) is read
+per request in ~25 ms; the count matrix is parsed on the first gene or derived
+column and kept **gene-major** (~21 MB for ~350 spots x ~15k genes), which a
+section can afford in a way 84k cells cannot.
+
+#### Serving a 3D dataset (Allen Brain Cell Atlas)
+
+Every source above serves a single plane. `lib/spatial-abc.mjs` serves the one
+genuinely **3D** dataset here: the Allen Brain Cell Atlas whole-mouse-brain
+MERFISH map — ~3.74M cells from 53 coronal sections, each affinely registered
+into the Allen CCFv3, so every cell has a real `(x, y, z)` in one anatomical
+frame.
+
+That registration is the whole difference. The HER2 sections above are also a
+series through a block, but they were never registered to each other — their
+extents disagree by up to ~850 µm in origin — so they cannot be stacked. These
+can.
+
+It also ships the **anatomy**: the CCF average template, resampled onto the same
+grid, is served as a `VolumeLayer` under the cloud, so a cluster can be located
+in the brain rather than floating in space.
+
+The sections sit on the template's own 200 µm grid, but not at every step of it:
+consecutive sections are 200 µm apart 41 times, 400 µm apart 9 times and 800 µm
+apart twice, over z 800–14 200 µm. So **23 of the volume's 76 planes hold no
+cells** — 15 interior gaps where the atlas has no section, plus 4 planes at each
+end where the template box extends past the sampled range. Scrubbing the 2D
+spatial view through those planes shows anatomy with no observations over it, and
+that is the data, not a dropped read: every populated plane holds exactly one
+section (never two), which is what a correctly aligned slab width looks like.
+
+```bash
+npm run fetch-abc        # ~2.0 GB from a public AWS Open Data bucket, resumable
+```
+
+Note the releases differ per artefact: the metadata tables were revised through
+`20231215`, the image volumes stop at `20230630`, and asking for a volume under
+the newer prefix is a 404.
+
+**Which coordinates, and how we know.** The deposit carries two frames per cell
+— `x/y/z_ccf` and `x/y/z_reconstructed` — and this source serves the
+**reconstructed** one, because that is the frame the reference volumes are on
+(their z pixdim is 0.2 mm, exactly the section spacing). Voxel index is then
+`coord / pixdim` per axis, with no offset, permutation or flip.
+
+That is measured, not reasoned. Every cell carries its own `parcellation_index`,
+and `resampled_annotation.nii.gz` holds the same labels per voxel, so a candidate
+alignment can be *scored against the data*:
+
+| candidate | agreement with the cells' own labels |
+|---|---|
+| reconstructed, axes as-is | **9000 / 9000** |
+| CCF, best of all 6 permutations × 8 flips | 126 / 9000 |
+
+The cost is that z is quantised to the 76 section planes instead of varying
+continuously as `z_ccf` does. That is the honest sampling — the cells really do
+come from serial sections — and exact registration to the anatomy is worth more
+than a continuous z synthesised by registering tilted sections.
+
+Bounding-box alignment would *not* have worked, which is why it is worth doing
+this properly: the cell cloud's extent and the template's differ by 5–14% per
+axis, because the cloud's extremes include stray segmentations and the template
+covers more than the sections do.
+
+No credentials and no signing — it is plain CSV over HTTPS. The fetch takes the
+two pre-joined "view" tables rather than joining `cell_metadata` +
+`ccf_coordinates` + the taxonomy ourselves: CSV is row-major, so a join would
+mean downloading ~820 MB and doing the work anyway, against 1.5 GB and no join.
+
+The first request transcodes the CSVs once into a compact binary cache under
+`abc/.cache/` (~20 s, ~1.9 GB peak heap, 8 s of it the coordinates and columns);
+every later request slices that. Two datasets come out of it:
+
+| id | observations |
+|---|---|
+| `abc.wholebrain` | 3,739,961 |
+| `abc.wholebrain.sub10` | 373,997 (deterministic 1-in-10 stride) |
+
+The subsample is the same cloud at the same extent, just thinner — 3.7M
+billboards is a lot to ask of integrated graphics. Both share one volume:
+striding thins the cloud, not the anatomy.
+
+The volume is downsampled 4× in the two 10 µm axes on the way into the cache.
+The source is 1100×1100×76 float32 = 351 MB, which is neither a sane response
+nor a sane 3D texture; at 40 µm it is 275×275×76 uint8 = 5.5 MB, still far finer
+than the 200 µm section spacing that actually limits the data. Each output voxel
+is a box-average of its 4×4 column rather than a picked sample, so the reduction
+does not alias fine anatomy into speckle.
+
+Two things are worth knowing about what it serves:
+
+- **Categoricals stop at ~96 values.** The 3D points layer has no per-point
+  RGBA: it maps a per-point *scalar* through a 256-entry LUT, so a palette is
+  encoded as one contiguous block of LUT entries per category. Measured against
+  napari-js, every K from 2..96 round-trips its colours exactly and K=97 is the
+  first that does not. So `class` (34), `neurotransmitter` (9),
+  `parcellation_division` (25) and `brain_section_label` (53) are served with
+  Allen's own deposited hex colours, and `subclass` (338),
+  `parcellation_structure` (~300), `supertype` (1,201) and `cluster` (5,322) are
+  deliberately not: they would render colours that are subtly wrong while the
+  legend claimed otherwise.
+- **Genes are 8, not 500.** The full panel ships only as `.h5ad` and there is no
+  HDF5 reader here. Eight marker genes (`Slc17a7`, `Slc32a1`, …) are published as
+  CSV and are joined on `cell_label` — a real hash join, since that file has
+  4,334,174 rows in a different order. Join on the label **verbatim**: about a
+  third of the labels on both sides carry a `-<n>` suffix that is part of the
+  identity, and stripping it collapses 3,739,961 cells into 2,648,427 keys.
+
+#### Serving a plain `.h5ad` LIVE
+
+Drop (or symlink) a `*.h5ad` into `./h5ad` and it appears on `/spatial/datasets` with its
+columns, genes and embeddings **inferred from the file** — no conversion command, no flags:
+
+```bash
+ln -s "$PWD/visium_hne_adata.h5ad" h5ad/visium.h5ad
+npm start
+```
+
+A categorical obs column is one with categories (its published `uns/<name>_colors` palette
+comes with it), a continuous one is anything else numeric, and an embedding is any `obsm`
+array of 2 or 3 columns other than the coordinates. A Visium file also gets its tissue
+image: `uns/spatial/<lib>/images/hires` is materialised into `./cogs` on first request, and
+`imageRef` is derived from the measured spot lattice, exactly as `visium-image.mjs` does.
+
+**How `X` is stored decides what this costs**, and it is the whole design of the adapter:
+
+| `X` | served | one gene |
+|---|---|---|
+| CSC | directly out of the file | two hyperslab reads, a few kB — measured sub-ms |
+| CSR | via a bundle built on first open | 10.7 kB ranged read, after a one-off convert |
+
+Gene `j` is contiguous in a CSC matrix (`indptr[j]..indptr[j+1]`), so nothing needs
+preparing and only the 72 kB `indptr` is cached. In a CSR matrix it is scattered across
+every row: reading one gene means walking the whole `indices` array, measured at **122 ms
+and 118 MB** on the Visium file. Caching the matrix instead would hold those 118 MB per
+dataset resident and still scan 15 M entries per gene, so a CSR file is converted once
+into `.cache/h5ad/<id>` — 1.0 s for Visium — and served from there. scanpy writes CSR by
+default, so that is the common branch, which is why it happens automatically rather than
+as an error telling you to go and run a script.
+
+The conversion is rebuilt if the `.h5ad` is newer than it, and the source file is never
+modified. Inference is the trade against the CLI: `h5ad-to-spatial.mjs` gives you exactly
+the columns you name, while this offers every numeric obs column it finds — including
+`array_row` and `in_tissue`, which are real but not interesting colourings.
+
+#### Pre-built bundles
+
+`$SPATIAL_DIR` still serves bundles in the same wire format, and a bundle **wins**
+when both sources offer the same id — so a deliberately-converted dataset can
+override a live one. `npm run make-spatial-demo` writes a synthetic
+Visium-geometry bundle plus its image, which needs no download and is what the
+smoke check runs against.
+
+#### Converting an AnnData `.h5ad` into a bundle
+
+`scripts/h5ad-to-spatial.mjs` writes a bundle from any `.h5ad` whose `X` is a CSC or CSR matrix.
+Node, like everything else here — `.h5ad` is HDF5, which Node cannot read natively, so
+`lib/h5ad.mjs` leans on `h5wasm` (libhdf5 compiled to wasm). Its node entrypoint reads host paths
+directly, so a 329 MB file is not copied into a virtual filesystem first.
+
+Handling **both** matrix layouts matters: a gene is a column, so CSC is what every caller wants,
+but **scanpy writes CSR by default** — a CSC-only reader rejects most `.h5ad` files in existence.
+The transpose is a counting sort (bucket by column, prefix-sum, place), which is O(nnz) with no
+comparison sort over 15 million elements and is stable by construction, since walking the CSR in
+row order hands each destination column its rows already ascending. It is guarded by densifying
+sample columns both ways and comparing them elementwise, because the failure is silent: a value
+placed under the wrong row writes a full matrix of entirely plausible expression attributed to the
+wrong cells, and neither a nonzero count nor a value total can tell — both survive exactly that
+misalignment.
+
+```bash
+npm install                                                      # h5wasm comes with it
+curl -O https://exampledata.scverse.org/squidpy/seqfish.h5ad     # 31 MB, no auth
+node scripts/h5ad-to-spatial.mjs --h5ad seqfish.h5ad --out spatial/seqfish \
+    --id seqfish --name "Mouse embryo seqFISH · 19,416 cells (Lohoff et al)" \
+    --spatial-key spatial --embedding X_umap:UMAP \
+    --column celltype_mapped_refined:categorical --column Area:continuous
+```
+
+That one is worth having because it ships a **published** `X_umap` — 19,416 cells, 351 genes, 22
+cell types with the paper's own colours — so the embedding views can be built against real
+coordinates rather than something recomputed here.
+
+#### Computing embeddings
+
+Every embedding published with a spatial dataset is **2-D** — a UMAP is made to be looked at — so
+anything else has to be computed. One script does that, and it reads the **bundle** rather than the
+`.h5ad`: `features/matrix.f32` is a flat gene-major f32 file, so there is nothing to parse and no
+HDF5 writer to depend on. It also works on bundles that never came from an `.h5ad`.
+
+```bash
+node scripts/compute-embeddings.mjs --bundle spatial/seqfish
+# or a subset:  --only pca      --only tsne,umap3d
+```
+
+Existing embeddings are **preserved and keep their slot**. A published `X_umap` is the authors' own
+picture and nothing here overwrites it; recomputed coordinates go under their own keys (`X_pca2d`,
+`X_pca3d`, `X_tsne`, `X_tsne3d`, `X_umap3d`) and are marked `derived: true`, so a reader comparing
+against a paper's figure knows which they are looking at.
+
+PCA is computed once and reused: it is both an embedding in its own right and the input the other
+methods want, since UMAP or t-SNE straight off 18,078 genes follows noise. `lib/pca.mjs` uses
+**randomized subspace iteration** rather than a full SVD — the same approach scanpy takes at this
+size, and the only tractable one here, since an exact SVD of 2,688 x 18,078 computes 2,688
+singular triples to use three. It reproduces numpy's exact variance ratios on both datasets
+(18.2/7.1/5.0 and 7.3/2.9/2.1).
+
+The linear algebra is **[`@jax-js/jax`](https://github.com/ekzhang/jax-js)**, which carries a real
+`linalg` (`svd`, `eigh`) and a Wasm SIMD backend. On the product this is dominated by —
+2688x18078 @ 18078x60 — it takes **0.59 s against 4.21 s** for the hand-written loop it replaced,
+so PCA at 50 components went from 23 s to **2.2 s** and the whole Visium compute step from 26 s to
+**5.6 s**. It also retired a hand-rolled Jacobi eigensolver in favour of the library's `svd`.
+
+WebGPU is deliberately *not* requested. Node has none, and `init('webgpu')` there silently returns
+the CPU and Wasm backends, so asking would imply an acceleration that is not happening. If this
+ever moves into the browser that is where the device already exists — napari-js holds a
+`GPUDevice` — and where the request belongs.
+
+Two jax-js rules the code must obey, both silent when broken. **Move semantics**: an array is
+consumed by the operation that reads it, and reusing one needs `.ref` (a getter, not a method) — a
+dropped one throws outright, which is the good case. **Ordering**: `eigh` returns eigenvalues
+ascending while `svd` returns them descending, and mixing the conventions reports the smallest
+component as PC1.
+
+`npm run verify-pca` checks the approximation against two independent anchors: an **exact SVD** of
+a small fixture, and the variance ratios **numpy** reported for the real bundles (18.2/7.1/5.0 and
+7.3/2.9/2.1). The fixture's reference does its own centring rather than calling `centreByGene`, so
+that function is under test too — a mean subtracted along the wrong axis still produces a
+plausible-looking result. Four mutations fail it: removed power iterations, reversed
+singular-value order, dropped orthonormalisation, and centring that subtracts nothing.
+
+The exact reference is jax-js's own `svd` rather than a second PCA library.
+[`pca-js`](https://github.com/bitanath/pca) was used to establish that this is safe — it agrees
+with jax-js's exact SVD to four decimals, 16.0963% / 15.0340% / 10.2403% — and then removed, since
+it cannot scale anyway: it eigendecomposes a genes x genes covariance matrix, so its cost is
+**cubic in gene count** (at 2,000 observations: 2.2 s for 175 genes, 12.0 s for 351, 80.5 s for
+700), putting whole-transcriptome data thousands of hours out of reach.
+
+**t-SNE is implemented here**, in `lib/tsne.mjs`, because no JS library can do it at these
+sizes. Every pure-JS t-SNE — `tsne-js`, `karpathy/tsnejs`, `druidjs` — is the exact
+formulation with no space-partitioning, and `tensorflow/tfjs-tsne`, which did have a
+linear-time GPU optimisation, was archived in February 2021. The one Barnes-Hut option on
+npm (`bhtsne`) wraps van der Maaten's C++ and reintroduces a native toolchain.
+
+Measured against the `tsne-js` it replaced:
+
+| | 2,688 spots (Visium) | 19,416 cells (seqFISH) |
+|---|---|---|
+| `tsne-js` | 39 min (2-D pass alone) | ~34 hours |
+| `lib/tsne.mjs` | **95 s** (2-D), 137 s (3-D) | ~67 min per dimension |
+
+Same arithmetic, restructured rather than approximated. The **attractive** term uses a
+sparse P over each point's nearest neighbours — dense P at 19,416 points is 377 million
+entries, 1.5 GB, and the entries outside a neighbourhood are ~0 anyway — and runs in plain
+JS at about 1.7 M pairs. The **repulsive** term is genuinely all-pairs, so it is evaluated
+on jax-js in tiles of 2,048 rows and the full N x N matrix is never materialised.
+
+It is still O(N²) per iteration: fast because the inner loop is vectorised, not because
+the algorithm changed. Barnes-Hut or an interpolation scheme would make it O(N log N) and
+is the next thing to do if an hour is too long.
+
+Two things measured while building it, both worth keeping. The tile size is **not** free to
+raise — 4,096 rows exceeds the Wasm backend's hard 4 GiB allocation limit, and a matmul
+formulation of the distances is *slower* here (5.87 s against 4.03 s), so the plain
+difference tensor stays. And `npm run verify-tsne` checks the parts of t-SNE that have a
+right answer: the kNN graph against brute force, the perplexity calibration against its own
+definition (each row's entropy must be log(perplexity)), and neighbourhood preservation on
+planted clusters. That last one is not sufficient on its own — a mutation fixing the
+bandwidth at 1 still scored 90.7% purity, which is why the calibration is checked directly.
+
+**Both example datasets carry six embeddings** — the published `X_umap` plus `X_pca2d`,
+`X_pca3d`, `X_tsne`, `X_tsne3d` and `X_umap3d` — which is exactly what the commands above
+produce, so a fresh clone reproduces what the server serves. The Visium bundle takes about
+four minutes end to end; seqFISH's t-SNE is the long pole at roughly an hour per dimension.
+
+**Only PCA reports variance per axis**, and that asymmetry is deliberate. PCA's axes are ordered
+and each explains a measurable share, so `compute-pca.py` writes
+`uns/<key>_variance_ratio` and the converter turns it into a `varianceRatio` the axis labels use —
+"PCA 1 (18.2%)". UMAP and t-SNE coordinates are arbitrary outputs of an optimisation: unordered,
+unitless, and reproducible only up to a rotation. They get no ratio, and their axes stay bare,
+because a percentage there would be invented.
+
+UMAP and t-SNE are both worth having. Both preserve local neighbourhoods; t-SNE is stricter about
+that and less trustworthy about anything global, tending to spread clusters into evenly-sized
+islands whose separations mean little. A structure both agree on is more likely real than one only
+one of them shows.
+
+Two things to know about these coordinates. They are **normalized, not physical** (the extent is
+about 5 x 7 units), so the converter omits `micronsPerUnit` and no scale bar is drawn — a bar
+labelled in microns over unitless coordinates reads as a measurement and would be worse than none.
+And every embedding published with these datasets is **2D**; a 3D one has to be computed, which the
+manifest then marks `derived: true` so a reader knows it is not the published picture.
+
+#### A dataset with both an image and a published UMAP
+
+The two datasets above each cover one half. seqFISH ships a real UMAP but no tissue image;
+`demo-brain` has an image but fabricated expression, so an embedding of it would resolve five
+clean blobs purely because that is how the numbers were generated. The squidpy Visium H&E brain
+has **both** — a real H&E section and the authors' own `X_umap` — which is what makes it the one
+that exercises the image path and the embedding path together.
+
+```bash
+npm install
+curl -O https://exampledata.scverse.org/squidpy/visium_hne_adata.h5ad   # 329 MB, no auth
+
+# 1. the tissue image, and the registration numbers it implies
+node scripts/visium-image.mjs --h5ad visium_hne_adata.h5ad --out visium-hne.png
+node scripts/make-pyramid.mjs visium-hne.png visium-hne-tissue --mpp 4.2646
+
+# 2. the bundle, registered onto that image
+node scripts/h5ad-to-spatial.mjs --h5ad visium_hne_adata.h5ad --out spatial/visium-hne \
+    --id visium-hne --name "Adult mouse brain Visium H&E · 2,688 spots (10x V1)" \
+    --spatial-key spatial --embedding X_umap:UMAP \
+    --column cluster:categorical \
+    --column total_counts:continuous --column n_genes_by_counts:continuous \
+    --features-unit "log1p normalized" \
+    --image-id visium-hne-tissue --image-scale 0.17011142,0.17011142 \
+    --image-mpp 4.2646,4.2646 --microns-per-unit 0.725456 --radius 37.91
+```
+
+One more command gives it the same six embeddings seqFISH has:
+
+```bash
+node scripts/compute-embeddings.mjs --bundle spatial/visium-hne
+```
+
+The published `X_umap` keeps slot 0 and its caption stays clean — it is the authors' own picture,
+and that is the difference from seqFISH's derived five. Nothing needs re-converting: the script
+appends to the bundle and rewrites its manifest.
+
+Nothing else is wired: the example gallery reads `imageRef.imageId` out of the manifest, so a
+bundle that names an image appears over it with no code change. 18,078 genes come through, which
+is the point of a whole-transcriptome assay next to seqFISH's 351-plex panel — the gene picker
+then has to work at a realistic scale rather than a curated one.
+
+**The physical scale is measured, not read out of `scalefactors`.** The obvious source is
+`spot_diameter_fullres` against the 55 µm Visium spot, and it is wrong: on this dataset that
+field is 89.44 px, which against the measured lattice works out at 65.0 µm rather than 55 µm — an
+18% error in every distance on screen, with nothing to give it away because the picture stays
+entirely plausible. What is dependable is the spot **pitch**: Visium spots sit on a regular
+hexagonal lattice 100 µm centre-to-centre, a property of the slide rather than of the sample or of
+whichever spaceranger wrote the file. `array_row`/`array_col` say where each spot sits on it, so
+fitting the coordinates against them recovers the pitch to a fraction of a pixel (0.46 px here)
+and the hex regularity becomes a *check* on the whole assumption rather than something to hope
+for. `visium-image.py` does that fit, prints what the other route would have claimed, and refuses
+to proceed if the lattice is not hexagonal or the spots fall outside the image.
+
+Note which number does which job. The **pitch** sets the scale; the 55 µm **diameter** only sizes
+the drawn marker, via `--radius`. Sizing the marker from `spot_diameter_fullres` instead would
+draw 65 µm spots over a 55 µm reality — more overlap between neighbours than the assay has.
+
+Two frames are in play and they must not be confused. `obsm/spatial` is in FULL-RESOLUTION pixels
+while the image in the file is the 2000 px `hires` tier, so `imageRef.scale` is
+`tissue_hires_scalef` — that is what aligns the spots — and `--mpp` on the pyramid is µm per
+*served* pixel, which is what the scale bar reads. They differ by exactly that scale factor.
 
 ## Deploy (Cloud Run)
 

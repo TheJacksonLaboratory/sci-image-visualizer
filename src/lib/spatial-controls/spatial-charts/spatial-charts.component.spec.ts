@@ -1,0 +1,1373 @@
+import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { FormsModule } from '@angular/forms';
+import { NO_ERRORS_SCHEMA } from '@angular/core';
+import { BehaviorSubject } from 'rxjs';
+
+import { SpatialChartsComponent } from './spatial-charts.component';
+import { VISUALIZER, ISpatialControls } from '../../contracts/visualizer.contract';
+import { SpatialDataset } from '../../contracts/spatial-dataset.contract';
+import { SpatialColorBy } from '../../contracts/display-types';
+import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../../contracts/display-types';
+import { SpatialSelectionMask, emptySelection } from '../../spatial/spatial-selection';
+import { GENE_OPTIONS_MAX } from '../../spatial/gene-search';
+import { EmbeddingComputeRun } from '../../spatial/embedding-compute';
+
+jest.mock('plotly.js-dist-min', () => ({
+  react: jest.fn().mockResolvedValue(undefined),
+  relayout: jest.fn(),
+  purge: jest.fn(),
+}));
+import * as Plotly from 'plotly.js-dist-min';
+
+const dataset: SpatialDataset = {
+  id: 'demo', name: 'Demo',
+  observations: { count: 4, x: new Float32Array(4), y: new Float32Array(4) },
+  columns: [
+    { kind: 'categorical', name: 'region', categories: ['A', 'B'] },
+    { kind: 'continuous', name: 'total_counts' },
+  ],
+  features: { count: 3, names: ['Ttr', 'Mbp', 'Snap25'] },
+};
+
+describe('SpatialChartsComponent', () => {
+  let component: SpatialChartsComponent;
+  let chartHost: HTMLDivElement | null = null;
+  let fixture: ComponentFixture<SpatialChartsComponent>;
+  let view$: BehaviorSubject<SpatialViewState>;
+  let selection$: BehaviorSubject<SpatialSelectionMask>;
+  let dataset$: BehaviorSubject<SpatialDataset | null>;
+  let controls: jest.Mocked<ISpatialControls>;
+
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  /** The last (traces, layout) pair handed to Plotly. */
+  const lastPlot = () => {
+    const calls = (Plotly.react as jest.Mock).mock.calls;
+    const call = calls[calls.length - 1];
+    return { traces: (call?.[1] ?? []) as Record<string, any>[], layout: call?.[2] as any };
+  };
+
+  /** Behavioural tests drive ngOnInit directly: rendering the populated body
+   *  under NO_ERRORS_SCHEMA gives the ngModel inputs no value accessor. */
+  async function build(spatial: ISpatialControls | null, render = false) {
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      declarations: [SpatialChartsComponent],
+      imports: [FormsModule],
+      schemas: [NO_ERRORS_SCHEMA],
+      providers: [{ provide: VISUALIZER, useValue: { getSpatialControls: () => spatial } }],
+    }).compileComponents();
+    fixture = TestBed.createComponent(SpatialChartsComponent);
+    component = fixture.componentInstance;
+    // The component draws into a div it looks up by its OWN per-instance id, so
+    // the host element can only be made once that id exists.
+    chartHost = document.createElement('div');
+    chartHost.id = component.chartDiv;
+    document.body.appendChild(chartHost);
+    if (render) {
+      fixture.detectChanges();
+    } else {
+      component.ngOnInit();
+      component.ngAfterViewInit();
+    }
+    await flush();
+    return component;
+  }
+
+  beforeEach(() => {
+    (Plotly.react as jest.Mock).mockClear();
+    (Plotly.purge as jest.Mock).mockClear();
+    view$ = new BehaviorSubject<SpatialViewState>({ ...DEFAULT_SPATIAL_VIEW });
+    selection$ = new BehaviorSubject<SpatialSelectionMask>(emptySelection());
+    dataset$ = new BehaviorSubject<SpatialDataset | null>(dataset);
+    controls = {
+      getDataset$: jest.fn(() => dataset$),
+      getViewState$: jest.fn(() => view$),
+      getSelection$: jest.fn(() => selection$),
+      viewState: jest.fn(() => view$.value),
+      setViewState: jest.fn(),
+      colorByColumn: jest.fn(), colorByFeature: jest.fn(), clearColorBy: jest.fn(),
+      searchFeatures: jest.fn(), categoryColors: jest.fn(),
+      selectFromRegions: jest.fn(), selectCategory: jest.fn(), clearSelection: jest.fn(),
+      continuousValues: jest.fn(async () => new Float32Array([1, 2, 3, 4])),
+      categoricalView: jest.fn(async () => ({
+        name: 'region', categories: ['A', 'B'], colors: ['#f00', '#00f'],
+        codes: new Uint16Array([0, 0, 1, 1]),
+      })),
+      categoricalColumns: jest.fn(() => ['region']),
+    } as unknown as jest.Mocked<ISpatialControls>;
+
+  });
+
+  afterEach(() => {
+    chartHost?.remove();
+    chartHost = null;
+  });
+
+  it('stays inert without a SPATIAL_DATA_PORT (the host panel explains why)', async () => {
+    // The empty state lives in the enclosing <spatial-controls> dialog now, so
+    // this component simply does nothing rather than repeating the message.
+    await build(null, true);
+    expect(component.controls).toBeNull();
+    expect(Plotly.react).not.toHaveBeenCalled();
+  });
+
+  describe('active', () => {
+    it('draws when the host panel becomes visible', async () => {
+      await build(controls);
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'total_counts' } });
+      await flush();
+      (Plotly.react as jest.Mock).mockClear();
+
+      component.active = true;
+      await flush();
+      // The enclosing dialog creates and destroys its content, so an explicit
+      // trigger is what guarantees a first draw with no state change.
+      expect(Plotly.react).toHaveBeenCalled();
+    });
+
+    it('defers the draw when a collapsed section expands', async () => {
+      await build(controls);
+      component.active = false;
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'total_counts' } });
+      await flush();
+      (Plotly.react as jest.Mock).mockClear();
+
+      // The host is still `hidden` at the moment the setter runs, so drawing
+      // synchronously would size the chart to a zero-height div.
+      component.active = true;
+      expect(Plotly.react).not.toHaveBeenCalled();
+      await flush();
+      expect(Plotly.react).toHaveBeenCalled();
+    });
+
+    it('does not draw while the host panel is hidden', async () => {
+      await build(controls);
+      component.active = false;
+      (Plotly.react as jest.Mock).mockClear();
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'total_counts' } });
+      await flush();
+      expect(Plotly.react).not.toHaveBeenCalled();
+    });
+  });
+
+  it('says what to do when nothing is coloured by', async () => {
+    await build(controls);
+    expect(component.notice).toMatch(/Colour the map by a column or a gene/);
+    expect(Plotly.react).not.toHaveBeenCalled();
+  });
+
+  describe('with a continuous colour source', () => {
+    beforeEach(async () => {
+      await build(controls);
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'total_counts' } });
+      await flush();
+    });
+
+    it('charts what the map is coloured by', () => {
+      expect(controls.continuousValues).toHaveBeenCalledWith({ kind: 'column', name: 'total_counts' });
+      const { traces, layout } = lastPlot();
+      expect(traces[0].type).toBe('histogram');
+      expect(traces[0].x).toEqual([1, 2, 3, 4]);
+      expect(layout.xaxis.title.text).toBe('total_counts');
+      expect(component.subject).toBe('total_counts');
+      expect(component.notice).toBeNull();
+    });
+
+    it('labels a gene source as a gene', async () => {
+      view$.next({ ...view$.value, colorBy: { kind: 'feature', name: 'Ttr' } });
+      await flush();
+      expect(component.subject).toBe('gene Ttr');
+    });
+
+    it('overlays the selection on the histogram', async () => {
+      selection$.next({ mask: new Uint8Array([0, 1, 1, 0]), count: 2 });
+      await flush();
+      const { traces } = lastPlot();
+      expect(traces).toHaveLength(2);
+      expect(traces[1].name).toBe('Selected');
+      expect(traces[1].x).toEqual([2, 3]);
+      expect(component.selectionCount).toBe(2);
+    });
+
+    it('re-renders on a log-scale change without refetching the vector', async () => {
+      const before = controls.continuousValues.mock.calls.length;
+      view$.next({ ...view$.value, logScale: true });
+      await flush();
+      expect(controls.continuousValues.mock.calls.length).toBe(before);
+      expect(lastPlot().layout.xaxis.title.text).toBe('log1p(total_counts)');
+    });
+
+    it('switches chart kind without refetching', async () => {
+      const before = controls.continuousValues.mock.calls.length;
+      component.onKind('violin');
+      await flush();
+      expect(controls.continuousValues.mock.calls.length).toBe(before);
+      expect(lastPlot().traces[0].type).toBe('violin');
+    });
+
+    it('groups a violin by a categorical column, in the map colours', async () => {
+      component.onKind('violin');
+      await component.onGroupBy('region');
+      await flush();
+      expect(controls.categoricalView).toHaveBeenCalledWith('region');
+      const { traces } = lastPlot();
+      expect(traces).toHaveLength(2);
+      expect(traces[0]).toEqual(expect.objectContaining({ name: 'A', y: [1, 2] }));
+      expect(traces[0].marker.color).toBe('#f00');
+    });
+
+    it('ignores the grouping for a histogram', async () => {
+      await component.onGroupBy('region');
+      component.onKind('histogram');
+      await flush();
+      expect(lastPlot().traces[0].type).toBe('histogram');
+    });
+
+    it('suggests a grouping for a violin that has none', () => {
+      component.onKind('violin');
+      expect(component.suggestsGrouping).toBe(true);
+      component.onKind('histogram');
+      expect(component.suggestsGrouping).toBe(false);
+    });
+
+    it('recovers from a failed grouping fetch instead of half-applying it', async () => {
+      controls.categoricalView.mockRejectedValueOnce(new Error('not loaded'));
+      component.onKind('violin');
+      await component.onGroupBy('region');
+      expect(component.groupBy).toBeNull();
+      expect(lastPlot().traces[0].name).toBe('All');
+    });
+
+    it('ignores a superseded vector that resolves late', async () => {
+      let release: (v: Float32Array) => void = () => undefined;
+      controls.continuousValues
+        .mockImplementationOnce(() => new Promise<Float32Array>((r) => { release = r; }))
+        .mockResolvedValueOnce(new Float32Array([9, 9]));
+
+      view$.next({ ...view$.value, colorBy: { kind: 'feature', name: 'slow' } });
+      view$.next({ ...view$.value, colorBy: { kind: 'feature', name: 'fast' } });
+      await flush();
+      const afterFast = (Plotly.react as jest.Mock).mock.calls.length;
+
+      release(new Float32Array([1, 1]));
+      await flush();
+      expect((Plotly.react as jest.Mock).mock.calls.length).toBe(afterFast);
+    });
+  });
+
+  describe('with a categorical colour source', () => {
+    beforeEach(async () => {
+      await build(controls);
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+      await flush();
+    });
+
+    it('charts counts per category instead of refusing', () => {
+      // A category CODE is a label, not a magnitude, so a histogram of it would be
+      // meaningless — but "how many cells per class" is the question the legend
+      // implies and never answers.
+      expect(controls.categoricalView).toHaveBeenCalledWith('region');
+      expect(controls.continuousValues).not.toHaveBeenCalled();
+      expect(component.notice).toBeNull();
+      expect(component.kind).toBe('counts');
+
+      const { traces, layout } = lastPlot();
+      expect(traces[0].type).toBe('bar');
+      expect(traces[0].orientation).toBe('h');
+      // A x2, B x2, biggest first — and reversed, since Plotly draws the first
+      // horizontal category at the bottom.
+      expect(traces[0].y).toEqual(['B', 'A']);
+      expect(traces[0].x).toEqual([2, 2]);
+      expect(layout.xaxis.title.text).toBe('observations');
+    });
+
+    it('offers only the kinds a categorical subject can be drawn as', () => {
+      // A category code is a label, not a magnitude, so no histogram/violin/box.
+      // The heatmap is always offered: its subject is a gene LIST crossed with a
+      // grouping, not whatever the map happens to be coloured by.
+      expect(component.kindOptions.map((k) => k.value)).toEqual(['counts', 'heatmap']);
+    });
+
+    it('returns to a histogram when the source goes back to continuous', async () => {
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'total_counts' } });
+      await flush();
+      expect(component.kind).toBe('histogram');
+      expect(component.kindOptions.map((k) => k.value))
+        .toEqual(['histogram', 'violin', 'box', 'heatmap']);
+      expect(lastPlot().traces[0].type).toBe('histogram');
+    });
+
+    it('reports a genuine failure rather than swallowing it', async () => {
+      controls.categoricalView.mockRejectedValueOnce(new Error('column blew up'));
+      view$.next({ ...view$.value, colorBy: null });
+      await flush();
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+      await flush();
+      expect(component.notice).toMatch(/could not be charted/);
+      expect(Plotly.purge).toHaveBeenCalled();
+    });
+  });
+
+  it('ignores a grouping response that a later choice overtook', async () => {
+    await build(controls);
+    view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'total_counts' } });
+    await flush();
+    component.onKind('violin');
+
+    // A slow 'region' and a fast 'other': without sequencing the slow one lands
+    // last and charts region's categories under a dropdown that says other.
+    type CatView = Awaited<ReturnType<ISpatialControls['categoricalView']>>;
+    let resolveSlow: (v: CatView) => void = () => undefined;
+    controls.categoricalView
+      .mockImplementationOnce(() => new Promise<CatView>((r) => { resolveSlow = r; }))
+      .mockResolvedValueOnce({
+        name: 'other', categories: ['X'], colors: ['#0f0'], codes: new Uint16Array([0, 0, 0, 0]),
+      });
+
+    const slow = component.onGroupBy('region');
+    await component.onGroupBy('other');
+    resolveSlow({
+      name: 'region', categories: ['A', 'B'], colors: ['#f00', '#00f'],
+      codes: new Uint16Array([0, 0, 1, 1]),
+    });
+    await slow;
+    await flush();
+
+    expect(component.groupBy).toBe('other');
+    expect(lastPlot().traces.map((t: Record<string, unknown>) => t.name)).toEqual(['X']);
+  });
+
+  it('gives each instance its own chart div, so two panels cannot draw into one', async () => {
+    // Two exported visualizers on a page (the main diagram + a modal preview) mean
+    // two charts; a shared DOM id hands both the first element.
+    await build(controls);
+    const first = component.chartDiv;
+    await build(controls);
+    expect(component.chartDiv).not.toBe(first);
+    expect(document.getElementById(component.chartDiv)).not.toBeNull();
+  });
+
+  describe('lifecycle', () => {
+    it('lists the dataset\'s categorical columns to group by', async () => {
+      await build(controls);
+      expect(component.groupOptions).toEqual([
+        { label: 'No grouping', value: null },
+        { label: 'region', value: 'region' },
+      ]);
+    });
+
+    it('drops a grouping that the new dataset does not have', async () => {
+      await build(controls);
+      await component.onGroupBy('region');
+      controls.categoricalColumns.mockReturnValue([]);
+      dataset$.next({ ...dataset, id: 'other', columns: [] });
+      expect(component.groupBy).toBeNull();
+    });
+
+    it('tears down its subscriptions and the plot', async () => {
+      await build(controls);
+      expect(view$.observed).toBe(true);
+      fixture.destroy();
+      expect(view$.observed).toBe(false);
+      expect(selection$.observed).toBe(false);
+      expect(Plotly.purge).toHaveBeenCalledWith(component.chartDiv);
+    });
+  });
+
+  describe('computing a missing t-SNE', () => {
+    const pca = { name: 'X_pca2d', label: 'PCA', dims: 2 as const, derived: true };
+
+    /** A dataset with PCA, no t-SNE, and `count` observations. */
+    function withPca(count: number) {
+      return {
+        ...dataset,
+        observations: { count, x: new Float32Array(count), y: new Float32Array(count) },
+        embeddings: [{ name: 'X_umap', label: 'UMAP', dims: 2 as const }, pca],
+      };
+    }
+
+    it('offers to compute one when the dataset is small enough', async () => {
+      dataset$.next(withPca(2688));
+      await build(controls);
+      await flush();
+      const labels = component.embeddings.map((e) => e.label);
+      expect(labels).toContain('t-SNE (compute)');
+      expect(labels).toContain('t-SNE 3D (compute)');
+      expect(component.tsneTooLarge).toBe(false);
+    });
+
+    it('withholds the option past the size threshold, and says why', async () => {
+      // t-SNE is quadratic. Measured: 2,688 points take 95 s in the browser, so 19,416
+      // would be over an hour — not a choice a reader can consent to from a button.
+      dataset$.next(withPca(19416));
+      await build(controls);
+      await flush();
+      expect(component.embeddings.map((e) => e.label)).not.toContain('t-SNE (compute)');
+      expect(component.tsneTooLarge).toBe(true);
+      expect(component.tsneTooLargeNote).toContain('19,416');
+      expect(component.tsneTooLargeNote).toContain('offline');
+    });
+
+    it('estimates the cost quadratically, from the measured anchor', async () => {
+      // The estimate is what makes the button honest — a progress bar says a job is
+      // running, only an estimate says whether to start it.
+      dataset$.next(withPca(2688));
+      await build(controls);
+      await flush();
+      expect(component.computeEstimateSeconds).toBe(95);
+
+      dataset$.next(withPca(2688 * 2));
+      await flush();
+      // Four times the work for twice the points.
+      expect(component.computeEstimateSeconds).toBe(95 * 4);
+      expect(component.computeEstimateLabel).toBe('~6 min');
+    });
+
+    it('does not offer one when the dataset already has a t-SNE', async () => {
+      dataset$.next({
+        ...withPca(1000),
+        embeddings: [pca, { name: 'X_tsne', label: 't-SNE', dims: 2 as const, derived: true }],
+      });
+      await build(controls);
+      await flush();
+      expect(component.embeddings.filter((e) => /compute/.test(e.label ?? '')))
+        .toHaveLength(0);
+    });
+
+    it('does not offer one without a PCA to embed', async () => {
+      // t-SNE runs on the PCA scores; with no PCA the button would start work that
+      // cannot begin.
+      dataset$.next({
+        ...withPca(1000),
+        embeddings: [{ name: 'X_umap', label: 'UMAP', dims: 2 as const }],
+      });
+      await build(controls);
+      await flush();
+      expect(component.embeddings.map((e) => e.label)).toEqual(['UMAP']);
+      expect(component.tsneTooLarge).toBe(false);
+    });
+
+    /**
+     * What happens when the dataset changes mid-computation.
+     *
+     * A run is minutes long and several awaits deep, so this is not a narrow window — it
+     * is most of the run. The failure it guards against is not a crash: it is one
+     * dataset's t-SNE drawn over another's observations, which looks like a result.
+     */
+    describe('while the dataset changes underneath it', () => {
+      /** A `run()` the test settles by hand, so the switch can be timed against it. */
+      function pendingRun() {
+        let settle: (value: unknown) => void = () => undefined;
+        let spy!: jest.SpyInstance;
+        const started = new Promise<void>((ready) => {
+          spy = jest.spyOn(EmbeddingComputeRun.prototype, 'run').mockImplementation(() => {
+            ready();
+            return new Promise((resolve) => { settle = resolve; }) as never;
+          });
+        });
+        return {
+          started,
+          settle: (value: unknown) => settle(value),
+          /**
+           * Which run object the component built for THIS call.
+           *
+           * The most recent receiver rather than the first: `jest.spyOn` hands back the
+           * existing mock when the property is already spied, so a second `pendingRun()`
+           * shares one call log with the first.
+           */
+          get instance() {
+            const seen = spy.mock.instances;
+            return seen[seen.length - 1] as EmbeddingComputeRun;
+          },
+        };
+      }
+
+      const coords = {
+        meta: { name: 'local:tsne', label: 't-SNE', dims: 2 as const },
+        x: new Float32Array([1, 2]), y: new Float32Array([3, 4]),
+      };
+
+      afterEach(() => jest.restoreAllMocks());
+
+      async function armed() {
+        dataset$.next(withPca(2688));
+        await build(controls);
+        controls.getEmbedding = jest.fn(async () => ({
+          meta: pca, x: new Float32Array([0, 1]), y: new Float32Array([2, 3]),
+        }));
+        await flush();
+        component.onEmbedding('local:tsne');
+        await flush();
+        return component;
+      }
+
+      it('never starts a worker when the switch lands during the PCA fetch', async () => {
+        await armed();
+        // The scores are still in the air when the dataset changes. `computeRun` does not
+        // exist yet at that moment, so terminating it is not what saves this.
+        let deliver: (v: unknown) => void = () => undefined;
+        controls.getEmbedding = jest.fn(() => new Promise((r) => { deliver = r; }) as never);
+        const run = jest.spyOn(EmbeddingComputeRun.prototype, 'run');
+
+        const computing = component.computeEmbedding();
+        await flush();
+        dataset$.next({ ...withPca(2688), id: 'other' });
+        deliver({ meta: pca, x: new Float32Array([0, 1]), y: new Float32Array([2, 3]) });
+        await computing;
+
+        expect(run).not.toHaveBeenCalled();
+      });
+
+      it('discards a result that arrives after the switch', async () => {
+        await armed();
+        const { started, settle } = pendingRun();
+        const computing = component.computeEmbedding();
+        await started;
+
+        // The new dataset also offers a t-SNE to compute, so the panel comes back to the
+        // same selection — which is what makes the stale result look adoptable.
+        dataset$.next({ ...withPca(2688), id: 'other' });
+        await flush();
+        component.onEmbedding('local:tsne');
+        await flush();
+        const drawn = (Plotly.react as jest.Mock).mock.calls.length;
+
+        settle(coords);
+        await computing;
+        await flush();
+
+        // Keeping it would mark the NEW dataset's t-SNE as computed, and plot 2,688 of
+        // the old one's points over the new one's observations.
+        expect(component.isComputed).toBe(false);
+        expect((Plotly.react as jest.Mock).mock.calls.length).toBe(drawn);
+      });
+
+      it('terminates the run rather than leaving it computing for nobody', async () => {
+        await armed();
+        const terminate = jest.spyOn(EmbeddingComputeRun.prototype, 'terminate');
+        const { started, settle } = pendingRun();
+        const computing = component.computeEmbedding();
+        await started;
+
+        dataset$.next({ ...withPca(2688), id: 'other' });
+        expect(terminate).toHaveBeenCalled();
+        settle(null);
+        await computing;
+      });
+
+      it('lets the superseded run finish without disowning the one that replaced it',
+        async () => {
+          await armed();
+          const first = pendingRun();
+          const computing = component.computeEmbedding();
+          await first.started;
+
+          // A switch, then a fresh computation on the new dataset — which the old run's
+          // `finally` must not clear out from under.
+          dataset$.next({ ...withPca(2688), id: 'other' });
+          await flush();
+          component.onEmbedding('local:tsne');
+          await flush();
+          const second = pendingRun();
+          void component.computeEmbedding();
+          await second.started;
+
+          const cancel = jest.spyOn(EmbeddingComputeRun.prototype, 'cancel');
+          first.settle(null);
+          await computing;
+
+          // Cancel must still reach the LIVE run. If the departing one had cleared the
+          // shared slot, this would be a no-op and the button would do nothing.
+          component.cancelCompute();
+          expect(cancel).toHaveBeenCalledTimes(1);
+          expect(cancel.mock.instances[0]).toBe(second.instance);
+          second.settle(null);
+        });
+
+      it('terminates an active run when the panel is destroyed', async () => {
+        // Otherwise the worker keeps a GPU busy for minutes with nothing left to receive
+        // the answer.
+        await armed();
+        const terminate = jest.spyOn(EmbeddingComputeRun.prototype, 'terminate');
+        const { started, settle } = pendingRun();
+        const computing = component.computeEmbedding();
+        await started;
+
+        fixture.destroy();
+        expect(terminate).toHaveBeenCalled();
+        settle(null);
+        await computing;
+      });
+    });
+  });
+
+  describe('the "?" help', () => {
+    it('explains the chart on screen, not charts in general', async () => {
+      await build(controls);
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+      await flush();
+      expect(component.kind).toBe('counts');
+      expect(component.kindHelp).toContain('Counts');
+
+      component.onKind('heatmap');
+      await flush();
+      expect(component.kindHelp).toContain('Heatmap');
+      // The caveat is the point of the help, not a footnote: a z-scored colour says
+      // "above this gene's own average", which is routinely read as "highly expressed".
+      expect(component.kindHelp).toContain('z-scored');
+    });
+
+    it('names the embedding METHOD, because they cannot be read the same way', async () => {
+      // A PCA's axes are ordered and measurable; a UMAP's are neither. The same picture
+      // read the two ways supports opposite conclusions, so one generic blurb would be
+      // worse than none.
+      const metas = [
+        { name: 'X_umap', label: 'UMAP', dims: 2 as const },
+        { name: 'X_pca2d', label: 'PCA', dims: 2 as const, derived: true },
+        { name: 'X_tsne', label: 't-SNE', dims: 2 as const, derived: true },
+      ];
+      dataset$.next({ ...dataset, embeddings: metas });
+      await build(controls);
+      await flush();
+      component.onKind('embedding');
+      await flush();
+      expect(component.kindHelp).toContain('UMAP');
+      expect(component.kindHelp).toContain('arbitrary');
+
+      component.onEmbedding('X_pca2d');
+      await flush();
+      expect(component.kindHelp).toContain('PCA');
+      expect(component.kindHelp).toContain('variance');
+      // Only PCA may promise measurable distance.
+      expect(component.kindHelp).not.toContain('arbitrary');
+
+      component.onEmbedding('X_tsne');
+      await flush();
+      expect(component.kindHelp).toContain('t-SNE');
+    });
+  });
+
+  describe('heatmap (genes x groups)', () => {
+    /**
+     * Eight cells, four per category — the class view needs more than the
+     * default three-cell floor per group to draw at all, and a four-cell
+     * selection still sits far under the per-cell cap.
+     */
+    const geneValues: Record<string, number[]> = {
+      Ttr: [1, 1, 1, 1, 9, 9, 9, 9], // low in A, high in B
+      Mbp: [5, 5, 5, 5, 5, 5, 5, 5], // flat: distinguishes nothing
+    };
+
+    beforeEach(async () => {
+      controls.continuousValues = jest.fn(async (source: SpatialColorBy) =>
+        Float32Array.from(geneValues[source.name] ?? new Array(8).fill(0)));
+      controls.categoricalView = jest.fn(async (column: string) => ({
+        name: column, categories: ['A', 'B'], colors: ['#f00', '#00f'],
+        codes: Uint16Array.from([0, 0, 0, 0, 1, 1, 1, 1]),
+      }));
+      await build(controls);
+      await flush();
+    });
+
+    it('offers the dataset’s gene names as the rows to pick from', () => {
+      expect(component.geneOptions.map((o) => o.value)).toEqual(['Ttr', 'Mbp', 'Snap25']);
+    });
+
+    it('caps the options for a whole-transcriptome list, and keeps what is picked', async () => {
+      // The reported freeze came from handing the control every name. 18,078 of them is
+      // the real case; what must not happen is 18,078 options.
+      const names = Array.from({ length: 18078 }, (_, i) => `Gene${i}`);
+      dataset$.next({ ...dataset, features: { count: names.length, names } });
+      await flush();
+      expect(component.geneOptions.length).toBe(GENE_OPTIONS_MAX);
+
+      // Typing reaches past the cap, because the search runs over the whole list.
+      component.onGeneFilter('Gene9001');
+      expect(component.geneOptions.map((o) => o.value)).toEqual(['Gene9001']);
+
+      // A picked gene must survive a query that excludes it: a multi-select that loses
+      // its own selection from the options cannot label the chip, and drops the value on
+      // the next change.
+      await component.onHeatmapGenes(['Gene9001']);
+      component.onGeneFilter('Gene5');
+      const shown = component.geneOptions.map((o) => o.value);
+      expect(shown[0]).toBe('Gene9001');
+      expect(shown).toContain('Gene5');
+    });
+
+    it('validates a carried-over selection against every gene, not the visible ones', async () => {
+      // The options are capped, so filtering the selection by them would drop genes the
+      // new dataset still has — silently, and only for wide datasets.
+      const names = Array.from({ length: 18078 }, (_, i) => `Gene${i}`);
+      dataset$.next({ ...dataset, features: { count: names.length, names } });
+      await flush();
+      await component.onHeatmapGenes(['Gene17000']);
+      expect(component.heatmapGenes).toEqual(['Gene17000']);
+
+      // Same wide dataset again: the gene is real and must be kept.
+      dataset$.next({ ...dataset, features: { count: names.length, names } });
+      await flush();
+      expect(component.heatmapGenes).toEqual(['Gene17000']);
+    });
+
+    it('seeds with the gene already on screen, rather than opening empty', async () => {
+      view$.next({ ...view$.value, colorBy: { kind: 'feature', name: 'Ttr' } });
+      await flush();
+      component.onKind('heatmap');
+      await flush();
+      expect(component.heatmapGenes).toEqual(['Ttr']);
+      // …and it picked a grouping on its own: a heatmap with no columns is not
+      // a chart, so "No grouping" is not a usable default here.
+      expect(component.groupBy).toBe('region');
+      await flush();
+      expect(lastPlot().traces[0].type).toBe('heatmap');
+    });
+
+    it('draws one row per gene and one column per category', async () => {
+      component.onKind('heatmap');
+      await flush();
+      await component.onHeatmapGenes(['Ttr', 'Mbp']);
+      await flush();
+      const { traces, layout } = lastPlot();
+      expect(traces[0].type).toBe('heatmap');
+      expect(traces[0].x).toEqual(['A', 'B']);
+      // Rows are flipped for Plotly, so 'Mbp' is drawn first and 'Ttr' second.
+      expect(traces[0].y).toEqual(['Mbp', 'Ttr']);
+      // Ttr is low in A and high in B; z-scored that is -1 and +1.
+      expect(traces[0].z[1]).toEqual([-1, 1]);
+      // Mbp is flat, so it distinguishes nothing — zeros, not NaN.
+      expect(traces[0].z[0]).toEqual([0, 0]);
+      expect(layout.xaxis.title.text).toBe('region');
+    });
+
+    it('narrows to the selection, and switches to per-cell columns for a small one', async () => {
+      component.onKind('heatmap');
+      await flush();
+      await component.onHeatmapGenes(['Ttr']);
+      selection$.next({ mask: Uint8Array.from([1, 0, 1, 0, 0, 0, 0, 0]), count: 2 });
+      await flush();
+      const { traces } = lastPlot();
+      expect(traces[0].type).toBe('heatmap');
+      // Two selected cells is far under the per-cell cap, so the columns become
+      // the cells themselves — "what is in this region", not a 2-column class
+      // matrix.
+      expect(traces[0].x).toEqual(['#0', '#2']);
+      expect(component.heatmapNote).toContain('per selected cell');
+    });
+
+    it('z-scores by default and says so, and can be turned off', async () => {
+      component.onKind('heatmap');
+      await flush();
+      await component.onHeatmapGenes(['Ttr']);
+      await flush();
+      expect(component.heatmapZScore).toBe(true);
+      expect(lastPlot().traces[0].zmin).toBeLessThan(0); // symmetric about zero
+      expect(component.heatmapNote).toContain('z-scored');
+
+      component.onHeatmapZScore(false);
+      await flush();
+      expect(lastPlot().traces[0].zmin).toBeUndefined();
+      expect(component.heatmapNote).toContain('Raw means');
+    });
+
+    it('asks for genes when it has none, instead of drawing an empty grid', async () => {
+      view$.next({ ...view$.value, colorBy: null });
+      await flush();
+      component.onKind('heatmap');
+      await flush();
+      expect(component.heatmapGenes).toEqual([]);
+      expect(component.heatmapNote).toContain('Pick one or more genes');
+    });
+
+    it('fetches each gene once, however often it redraws', async () => {
+      component.onKind('heatmap');
+      await flush();
+      await component.onHeatmapGenes(['Ttr', 'Mbp']);
+      await flush();
+      const after = (controls.continuousValues as jest.Mock).mock.calls.length;
+      // Adding a third gene must not refetch the first two — each is a full
+      // per-observation vector.
+      await component.onHeatmapGenes(['Ttr', 'Mbp', 'Snap25']);
+      await flush();
+      expect((controls.continuousValues as jest.Mock).mock.calls.length).toBe(after + 1);
+    });
+
+    it('drops genes the new dataset does not have', async () => {
+      component.onKind('heatmap');
+      await flush();
+      await component.onHeatmapGenes(['Ttr', 'Mbp']);
+      dataset$.next({ ...dataset, id: 'other', features: { count: 1, names: ['Actb'] } });
+      await flush();
+      expect(component.heatmapGenes).toEqual([]);
+      expect(component.geneOptions.map((o) => o.value)).toEqual(['Actb']);
+    });
+  });
+
+
+  /**
+   * Re-fitting the plot when the host dialog is resized.
+   *
+   * Plotly does not follow a container resize on its own: its `responsive` option
+   * listens for WINDOW resizes only. The host calls {@link SpatialChartsComponent.resize}
+   * from the dialog's own resize-end event.
+   */
+  describe('resize()', () => {
+    beforeEach(() => {
+      (Plotly.relayout as jest.Mock).mockClear();
+    });
+
+    /** jsdom runs no layout, so a width has to be stated outright. */
+    const setWidth = (px: number) => Object.defineProperty(
+      chartHost as HTMLDivElement, 'clientWidth', { value: px, configurable: true },
+    );
+
+    const lastRelayout = () => {
+      const calls = (Plotly.relayout as jest.Mock).mock.calls;
+      return calls[calls.length - 1]?.[1];
+    };
+
+    it('sets the WIDTH ONLY where the layout fixed its own height', async () => {
+      controls.continuousValues = jest.fn(async (_source: SpatialColorBy) =>
+        Float32Array.from([1, 2, 3, 4]));
+      controls.categoricalView = jest.fn(async (column: string) => ({
+        name: column, categories: ['A', 'B'], colors: ['#f00', '#00f'],
+        codes: Uint16Array.from([0, 0, 1, 1]),
+      }));
+      await build(controls);
+      // A categorical subject selects the counts chart on its own.
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+      await flush();
+      expect(component.kind).toBe('counts');
+      // Guard: this test only means something if counts really does fix a height.
+      expect(typeof lastPlot().layout?.height).toBe('number');
+
+      setWidth(800);
+      component.resize();
+      // Autosizing here would take the height from the container and squash the
+      // bars — the height is deliberately one band per bar.
+      expect(lastRelayout()).toEqual({ width: 800 });
+    });
+
+    it('autosizes where the layout wants the container’s height', async () => {
+      controls.continuousValues = jest.fn(async (_source: SpatialColorBy) =>
+        Float32Array.from([1, 2, 3, 4]));
+      await build(controls);
+      component.onKind('histogram');
+      await flush();
+      // Guard: the distribution kinds must NOT be fixing a height.
+      expect(lastPlot().layout?.height).toBeUndefined();
+
+      setWidth(800);
+      component.resize();
+      expect(lastRelayout()).toEqual({ autosize: true });
+    });
+
+    it('ignores a zero width, so a collapsed panel cannot flatten the plot', async () => {
+      await build(controls);
+      setWidth(0);
+      component.resize();
+      expect(Plotly.relayout).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when there is no plot div to fit', async () => {
+      await build(controls);
+      chartHost?.remove();
+      chartHost = null;
+      expect(() => component.resize()).not.toThrow();
+      expect(Plotly.relayout).not.toHaveBeenCalled();
+    });
+  });
+
+
+  /**
+   * The embedding view, as a kind alongside the distributions.
+   *
+   * A UMAP lives here rather than in a panel of its own because it is one more way of
+   * looking at the same observations — and because this dialog already resizes its plot,
+   * so it gets whatever room it is given.
+   */
+  describe('the UMAP kind', () => {
+    const umapMeta = { name: 'X_umap', label: 'UMAP', dims: 2 as const };
+    const f32 = (...v: number[]) => Float32Array.from(v);
+
+    beforeEach(() => {
+      controls.getEmbedding = jest.fn(async () => ({
+        meta: umapMeta,
+        x: f32(1, 2, 3, 4),
+        y: f32(5, 6, 7, 8),
+      }));
+    });
+
+    it('is not offered for a dataset that publishes no embedding', async () => {
+      await build(controls);
+      expect(component.kindOptions.map((k) => k.value)).not.toContain('embedding');
+    });
+
+    it('is offered once the dataset publishes one', async () => {
+      dataset$.next({ ...dataset, embeddings: [umapMeta] });
+      await build(controls);
+      await flush();
+      expect(component.kindOptions.map((k) => k.value)).toContain('embedding');
+    });
+
+    it('draws the served coordinates', async () => {
+      dataset$.next({ ...dataset, embeddings: [umapMeta] });
+      await build(controls);
+      await flush();
+      component.onKind('embedding');
+      await flush();
+
+      expect(controls.getEmbedding).toHaveBeenCalledWith('X_umap');
+      const { traces, layout } = lastPlot();
+      expect(traces[0].type).toBe('scattergl');
+      expect(layout.xaxis.title.text).toBe('UMAP 1');
+    });
+
+    it('draws a 3D embedding as a rotatable scatter', async () => {
+      // The wiring this pins: the builder switches on a third dimension being PRESENT,
+      // so the component has to pass it. It did not at first, and the 3D embedding
+      // silently drew as a flat scattergl with the depth thrown away.
+      const meta3d = { name: 'X_umap3d', label: 'UMAP 3D', dims: 3 as const, derived: true };
+      controls.getEmbedding = jest.fn(async () => ({
+        meta: meta3d,
+        x: f32(1, 2, 3, 4),
+        y: f32(5, 6, 7, 8),
+        z: f32(9, 10, 11, 12),
+      }));
+      dataset$.next({ ...dataset, embeddings: [meta3d] });
+      await build(controls);
+      await flush();
+      component.onKind('embedding');
+      await flush();
+
+      const { traces, layout } = lastPlot();
+      expect(traces[0].type).toBe('scatter3d');
+      expect(traces[0].z).toBeDefined();
+      expect(layout.scene.zaxis.title.text).toBe('UMAP 3D 3');
+    });
+
+    it('draws into its own div once detached', async () => {
+      // Detached, the embedding must be plotted into the WINDOW's div. Drawing into the
+      // panel's div would leave the window blank while the panel showed a plot it is no
+      // longer meant to hold.
+      dataset$.next({ ...dataset, embeddings: [umapMeta] });
+      await build(controls);
+      await flush();
+      component.onKind('embedding');
+      await flush();
+      expect((Plotly.react as jest.Mock).mock.calls.at(-1)?.[0]).toBe(component.chartDiv);
+
+      // The window's div only exists once it is rendered; this suite drives the
+      // component directly, so stand it in — and REMOVE the inline div, because the
+      // template does exactly that while detached. Leaving it present is what let an
+      // earlier version of this test pass against a component that could not draw
+      // detached at all.
+      const win = document.createElement('div');
+      win.id = component.detachedDiv;
+      document.body.appendChild(win);
+      chartHost?.remove();
+      component.toggleDetached();
+      // Detaching does NOT draw on a timer: the window's div does not exist until
+      // PrimeNG has mounted the dialog, so its `onShow` drives that draw. The template
+      // wires it; here it is called directly.
+      component.onDetachedWindowShown();
+      await flush();
+
+      expect(component.detached).toBe(true);
+      expect((Plotly.react as jest.Mock).mock.calls.at(-1)?.[0]).toBe(component.detachedDiv);
+      win.remove();
+    });
+
+    it('purges the div it leaves, so no plot is stranded there', async () => {
+      dataset$.next({ ...dataset, embeddings: [umapMeta] });
+      await build(controls);
+      await flush();
+      component.onKind('embedding');
+      await flush();
+      (Plotly.purge as jest.Mock).mockClear();
+
+      component.toggleDetached();
+      // Plotly keeps per-div state; a graph left in a div Angular then removes leaks its
+      // WebGL context.
+      expect(Plotly.purge).toHaveBeenCalledWith(component.chartDiv);
+    });
+
+    it('gives the inline and detached divs different ids per instance', async () => {
+      // They must not collide, and two mounted charts must not share either — the same
+      // reason `chartDiv` is per-instance at all.
+      await build(controls);
+      expect(component.chartDiv).not.toBe(component.detachedDiv);
+      const first = component.chartDiv;
+      await build(controls);
+      expect(component.chartDiv).not.toBe(first);
+    });
+
+    /**
+     * Detaching is not embedding-only. The dialog is only so wide, and a counts plot read
+     * beside a heatmap is the same argument that earned the embedding its own window.
+     *
+     * These drive the component directly, so the window's div is stood in and the inline
+     * one removed — which is what the template does while detached. Leaving the inline div
+     * present is what let an earlier version of this suite pass against a component that
+     * could not draw detached at all.
+     */
+    describe('detaching the other kinds', () => {
+      /** Stand in the window's div and take away the panel's, as the template does. */
+      function enterWindow(): HTMLDivElement {
+        const win = document.createElement('div');
+        win.id = component.detachedDiv;
+        document.body.appendChild(win);
+        chartHost?.remove();
+        return win;
+      }
+
+      it('draws the counts plot into its own window', async () => {
+        await build(controls);
+        view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        expect(component.kind).toBe('counts');
+        expect((Plotly.react as jest.Mock).mock.calls.at(-1)?.[0]).toBe(component.chartDiv);
+
+        const win = enterWindow();
+        component.toggleDetached();
+        component.onDetachedWindowShown();
+        await flush();
+
+        expect(component.detached).toBe(true);
+        const call = (Plotly.react as jest.Mock).mock.calls.at(-1);
+        expect(call?.[0]).toBe(component.detachedDiv);
+        // Still a counts plot, not whatever was last drawn elsewhere.
+        expect((call?.[1] as Record<string, unknown>[])[0].type).toBe('bar');
+        win.remove();
+      });
+
+      it('draws the heatmap into its own window', async () => {
+        // Eight cells, four per category: the class view needs more than the default
+        // three-cell floor per group to produce a matrix at all, so the four-cell
+        // fixture the other tests here use would return no chart and prove nothing.
+        controls.continuousValues = jest.fn(async (_source: SpatialColorBy) =>
+          Float32Array.from([1, 1, 1, 1, 9, 9, 9, 9]));
+        controls.categoricalView = jest.fn(async (column: string) => ({
+          name: column, categories: ['A', 'B'], colors: ['#f00', '#00f'],
+          codes: Uint16Array.from([0, 0, 0, 0, 1, 1, 1, 1]),
+        }));
+        await build(controls);
+        view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        component.onKind('heatmap');
+        await flush();
+        await component.onHeatmapGenes(['Ttr', 'Mbp']);
+        await flush();
+
+        const win = enterWindow();
+        component.toggleDetached();
+        component.onDetachedWindowShown();
+        await flush();
+
+        const call = (Plotly.react as jest.Mock).mock.calls.at(-1);
+        expect(call?.[0]).toBe(component.detachedDiv);
+        expect((call?.[1] as Record<string, unknown>[])[0].type).toBe('heatmap');
+        win.remove();
+      });
+
+      it('keeps the window across a change of kind, and draws the new kind into it', async () => {
+        // Where the window is, is a property of the workspace someone arranged, not of
+        // the tab they are on. Re-attaching on every switch made them detach it again
+        // each time they looked at another chart.
+        dataset$.next({ ...dataset, embeddings: [umapMeta] });
+        await build(controls);
+        view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        component.onKind('embedding');
+        await flush();
+
+        const win = enterWindow();
+        component.toggleDetached();
+        component.onDetachedWindowShown();
+        await flush();
+        expect(component.detached).toBe(true);
+        expect((Plotly.react as jest.Mock).mock.calls.at(-1)?.[0]).toBe(component.detachedDiv);
+
+        // Switching tabs swaps what the window shows; it does not close it. The inline
+        // div stays absent, as the template leaves it while detached.
+        component.onKind('counts');
+        await flush();
+        expect(component.detached).toBe(true);
+        const call = (Plotly.react as jest.Mock).mock.calls.at(-1);
+        expect(call?.[0]).toBe(component.detachedDiv);
+        expect((call?.[1] as Record<string, unknown>[])[0].type).toBe('bar');
+
+        // And back, still detached.
+        component.onKind('embedding');
+        await flush();
+        expect(component.detached).toBe(true);
+        expect((Plotly.react as jest.Mock).mock.calls.at(-1)?.[0]).toBe(component.detachedDiv);
+        win.remove();
+      });
+
+      it('drops the embedding lasso handlers when another kind takes the div', async () => {
+        // The window outlives any one kind, so the div does too. `plotly_deselect` fires
+        // on a plain click in ANY Plotly chart — left bound, the first click on a bar
+        // would clear the map's selection for no reason the user can see.
+        dataset$.next({ ...dataset, embeddings: [umapMeta] });
+        await build(controls);
+        view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        component.onKind('embedding');
+        await flush();
+
+        const win = enterWindow();
+        // Stand in Plotly's event surface: jsdom divs have neither `on` nor
+        // `removeAllListeners`, so without these the binding is a silent no-op and the
+        // test would pass against a component that never unbinds.
+        const bound = new Set<string>();
+        (win as unknown as Record<string, unknown>).on =
+          (name: string) => { bound.add(name); };
+        (win as unknown as Record<string, unknown>).removeAllListeners =
+          (name: string) => { bound.delete(name); };
+
+        component.toggleDetached();
+        component.onDetachedWindowShown();
+        await flush();
+        expect(bound.has('plotly_selected')).toBe(true);
+
+        component.onKind('counts');
+        await flush();
+        expect(bound.has('plotly_selected')).toBe(false);
+        expect(bound.has('plotly_deselect')).toBe(false);
+        win.remove();
+      });
+
+      it('purges the window, not the panel, when a detached chart has nothing to draw', async () => {
+        // The purge sites named `chartDiv` outright. Detached, that clears a div the
+        // template has removed while the window keeps showing a plot the component
+        // believes it has cleared.
+        controls.continuousValues = jest.fn(async (_source: SpatialColorBy) =>
+          Float32Array.from([1, 1, 1, 1, 9, 9, 9, 9]));
+        controls.categoricalView = jest.fn(async (column: string) => ({
+          name: column, categories: ['A', 'B'], colors: ['#f00', '#00f'],
+          codes: Uint16Array.from([0, 0, 0, 0, 1, 1, 1, 1]),
+        }));
+        await build(controls);
+        view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        component.onKind('heatmap');
+        await flush();
+        await component.onHeatmapGenes(['Ttr']);
+        await flush();
+
+        const win = enterWindow();
+        component.toggleDetached();
+        component.onDetachedWindowShown();
+        await flush();
+        (Plotly.purge as jest.Mock).mockClear();
+
+        // No genes: nothing to draw, so whatever is plotted must be cleared.
+        await component.onHeatmapGenes([]);
+        await flush();
+        expect(Plotly.purge).toHaveBeenCalledWith(component.detachedDiv);
+        expect(Plotly.purge).not.toHaveBeenCalledWith(component.chartDiv);
+        win.remove();
+      });
+
+      it('refits a self-sized layout by width alone, and an autosized one by both', async () => {
+        // `autosize` takes BOTH dimensions from the container. The counts and heatmap
+        // layouts size themselves to their row count, so autosizing one in the window
+        // would replace its height with the window's and clip the bottom rows.
+        await build(controls);
+        view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+
+        const win = enterWindow();
+        Object.defineProperty(win, 'clientWidth', { value: 640, configurable: true });
+        component.toggleDetached();
+        component.onDetachedWindowShown();
+        await flush();
+
+        expect(component.hasFixedHeight).toBe(true);
+        (Plotly.relayout as jest.Mock).mockClear();
+        component.onDetachedResizeEnd();
+        expect(Plotly.relayout).toHaveBeenCalledWith(win, { width: 640 });
+        win.remove();
+      });
+
+      it('names the window for what it is showing', async () => {
+        dataset$.next({ ...dataset, embeddings: [umapMeta] });
+        await build(controls);
+        view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        // A tab label alone would leave two windows both headed "Embedding"; the
+        // embedding names the embedding.
+        component.onKind('embedding');
+        await flush();
+        expect(component.detachedTitle).toBe('UMAP');
+
+        component.onKind('counts');
+        await flush();
+        expect(component.detachedTitle).toContain('Counts');
+      });
+    });
+
+    it('keeps the 3D camera when a category is selected', async () => {
+      // The reported behaviour: rotate the cloud, pick a category, and the view snapped
+      // back. Plotly.react resets the scene camera unless the layout carries it, so the
+      // component has to read the LIVE camera and pass it back.
+      const meta3d = { name: 'X_umap3d', label: 'UMAP 3D', dims: 3 as const, derived: true };
+      controls.getEmbedding = jest.fn(async () => ({
+        meta: meta3d, x: f32(1, 2, 3, 4), y: f32(5, 6, 7, 8), z: f32(9, 10, 11, 12),
+      }));
+      dataset$.next({ ...dataset, embeddings: [meta3d] });
+      await build(controls);
+      await flush();
+      component.onKind('embedding');
+      await flush();
+
+      // Stand in for the user having rotated it: Plotly keeps the live camera here.
+      const camera = { eye: { x: 2.1, y: 0.3, z: -1.2 } };
+      const el = document.getElementById(component.chartDiv) as unknown as
+        { _fullLayout: { scene: { camera: unknown } } };
+      el._fullLayout = { scene: { camera } };
+
+      selection$.next({ mask: Uint8Array.from([1, 0, 0, 0]), count: 1 });
+      await flush();
+
+      expect(lastPlot().layout.scene.camera).toBe(camera);
+    });
+
+    it('does not freeze a 2D plot the user has not zoomed', async () => {
+      // The other half of keeping the view: handing back an AUTORANGED range would pin
+      // the axes, so the plot would stop re-fitting when the data changes — switching
+      // embedding, or a new dataset, would draw into the old plot's window.
+      dataset$.next({ ...dataset, embeddings: [umapMeta] });
+      await build(controls);
+      await flush();
+      component.onKind('embedding');
+      await flush();
+
+      const el = document.getElementById(component.chartDiv) as unknown as
+        { _fullLayout: unknown };
+      el._fullLayout = {
+        xaxis: { range: [-5, 5], autorange: true },
+        yaxis: { range: [-5, 5], autorange: true },
+      };
+
+      selection$.next({ mask: Uint8Array.from([1, 0, 0, 0]), count: 1 });
+      await flush();
+
+      expect(lastPlot().layout.xaxis.autorange).toBeUndefined();
+      expect(lastPlot().layout.xaxis.range).toBeUndefined();
+    });
+
+    it('keeps a 2D range the user HAS zoomed to', async () => {
+      dataset$.next({ ...dataset, embeddings: [umapMeta] });
+      await build(controls);
+      await flush();
+      component.onKind('embedding');
+      await flush();
+
+      const el = document.getElementById(component.chartDiv) as unknown as
+        { _fullLayout: unknown };
+      el._fullLayout = {
+        xaxis: { range: [-1, 1], autorange: false },
+        yaxis: { range: [-2, 2], autorange: false },
+      };
+
+      selection$.next({ mask: Uint8Array.from([1, 0, 0, 0]), count: 1 });
+      await flush();
+
+      expect(lastPlot().layout.xaxis.range).toEqual([-1, 1]);
+      expect(lastPlot().layout.xaxis.autorange).toBe(false);
+    });
+
+    it('carries the derived warning in the caption, not over the plot', async () => {
+      // The fact still has to be stated — a recomputed UMAP is not the published picture
+      // — but once, in the caption, since the plot is the scarcer space.
+      const meta3d = { name: 'X_umap3d', label: 'UMAP 3D', dims: 3 as const, derived: true };
+      controls.getEmbedding = jest.fn(async () => ({
+        meta: meta3d, x: f32(1, 2), y: f32(3, 4), z: f32(5, 6),
+      }));
+      dataset$.next({ ...dataset, embeddings: [meta3d] });
+      await build(controls);
+      await flush();
+      component.onKind('embedding');
+      await flush();
+
+      expect(component.embeddingNote).toMatch(/[Cc]omputed here/);
+      expect(lastPlot().layout.annotations).toBeUndefined();
+    });
+
+    it('says HOW a derived embedding was computed, when that is known', async () => {
+      // "Computed here" alone leaves a reader unable to reproduce or compare it: a t-SNE
+      // at perplexity 5 and one at 50 are different pictures of the same cells, and
+      // neither is more correct.
+      const meta = {
+        name: 'X_tsne', label: 't-SNE', dims: 2 as const, derived: true,
+        params: 'PCA(50) then t-SNE, perplexity 30, seed 0',
+      };
+      controls.getEmbedding = jest.fn(async () => ({ meta, x: f32(1, 2), y: f32(3, 4) }));
+      dataset$.next({ ...dataset, embeddings: [meta] });
+      await build(controls);
+      await flush();
+      component.onKind('embedding');
+      await flush();
+
+      expect(component.embeddingNote).toContain('perplexity 30');
+      expect(component.embeddingNote).toMatch(/[Cc]omputed here/);
+    });
+
+    it('does not invent parameters for a published embedding', async () => {
+      // The published one's parameters belong to whoever published it; claiming ours
+      // would be wrong.
+      dataset$.next({ ...dataset, embeddings: [umapMeta] });
+      await build(controls);
+      await flush();
+      component.onKind('embedding');
+      await flush();
+
+      expect(component.embeddingNote).not.toMatch(/[Cc]omputed here/);
+      expect(component.embeddingNote).not.toContain('(');
+    });
+
+    it('fetches the coordinates once, not per redraw', async () => {
+      // A selection change redraws; the coordinates have not changed and are a
+      // per-observation vector, so refetching them would be pure waste.
+      dataset$.next({ ...dataset, embeddings: [umapMeta] });
+      await build(controls);
+      await flush();
+      component.onKind('embedding');
+      await flush();
+      const calls = (controls.getEmbedding as jest.Mock).mock.calls.length;
+
+      selection$.next({ mask: Uint8Array.from([1, 0, 0, 0]), count: 1 });
+      await flush();
+      expect((controls.getEmbedding as jest.Mock).mock.calls.length).toBe(calls);
+    });
+
+    it('falls back when a new dataset publishes no embedding', async () => {
+      // Otherwise the view sits on a kind it cannot draw, showing the previous
+      // dataset's plot over these observations.
+      dataset$.next({ ...dataset, embeddings: [umapMeta] });
+      await build(controls);
+      await flush();
+      component.onKind('embedding');
+      await flush();
+      expect(component.kind).toBe('embedding');
+
+      dataset$.next({ ...dataset, id: 'other', embeddings: undefined });
+      await flush();
+      expect(component.kind).not.toBe('embedding');
+    });
+
+    it('says when the source serves no embeddings at all', async () => {
+      dataset$.next({ ...dataset, embeddings: [umapMeta] });
+      await build(controls);
+      await flush();
+      // A host may advertise an embedding without implementing the accessor.
+      (controls as { getEmbedding?: unknown }).getEmbedding = undefined;
+      component.onKind('embedding');
+      await flush();
+      expect(component.notice).toMatch(/does not serve embeddings/);
+    });
+  });
+
+});

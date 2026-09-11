@@ -2,16 +2,7 @@ import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges } from
 import { MenuItem } from 'primeng/api';
 
 import { IImageInfo } from '../contracts/image.contract';
-import {
-  PlotType,
-  PlotTypeDescriptor,
-  isNapari3d,
-  isNapariIsosurface,
-  isNapariSurface,
-  isNapariScatter,
-  NAPARI_DECIMATE_OPTIONS,
-  NAPARI_DEFAULT_DECIMATE,
-} from '../contracts/plot-type';
+import { PlotType, PlotTypeDescriptor, isNapari3d, isNapariIsosurface, isNapariSurface, isNapariScatter, NAPARI_DECIMATE_OPTIONS, NAPARI_DEFAULT_DECIMATE, isSpatialOmics, isSpatialOmics3d } from '../contracts/plot-type';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from '../contracts/toolbar-config';
 import { ToolbarToolContribution } from '../contracts/toolbar-tool.contract';
 import { MODEL_INFO } from './model-info';
@@ -48,6 +39,13 @@ export class ToolbarComponent implements OnChanges {
   @Input() zIndex = 0;
   /** True for any 2D (non Surface-3D) plot type. */
   @Input() isHeatmap = true;
+  /**
+   * Region tools apply even though this is a 3D view, because they draw a
+   * SCREEN-SPACE lasso (the 3D spatial cloud). Separate from {@link isHeatmap},
+   * which means "2D view" and also drives the zoom tools and the 3D camera
+   * controls — flipping that would show 2D pan/zoom and hide the orbit controls.
+   */
+  @Input() is3dRegions = false;
   @Input() activeDragMode: string | null = null;
   @Input() activeSurface3dMode = 'turntable';
   /** Whether the napari 3D axes/scale gizmo is currently shown (drives the toggle's look). */
@@ -96,6 +94,8 @@ export class ToolbarComponent implements OnChanges {
   @Output() isoRangeChange = new EventEmitter<number[] | undefined>();
   /** Open the Channels & Histogram dialog (brightness/contrast, colormap, …). */
   @Output() openChannelHistogram = new EventEmitter<void>();
+  /** Open the spatial-omics controls (colour-by, legend, point display). */
+  @Output() openSpatialControls = new EventEmitter<void>();
   @Output() openRegionEditor = new EventEmitter<void>();
   @Output() selectStackOption = new EventEmitter<{ name: string; val: string }>();
   @Output() zScrub = new EventEmitter<number | undefined>();
@@ -242,6 +242,14 @@ export class ToolbarComponent implements OnChanges {
     return this.selectedPlotType === PlotType.IMAGE;
   }
 
+  /** Either spatial-omics mode is active, so its controls are worth offering.
+   *  The 3D cloud needs the panel MORE than the 2D view does, not less: colouring,
+   *  the legend and category show/hide are the only way to make sense of a
+   *  million overlapping points. */
+  get isSpatialMode(): boolean {
+    return isSpatialOmics(this.selectedPlotType) || isSpatialOmics3d(this.selectedPlotType);
+  }
+
   /** A plot-type icon is a PrimeNG font glyph (e.g. `pi pi-image`) rather than an
    *  SVG asset path — drives which element the selector item template renders. */
   isPiIcon(icon: string | undefined): boolean {
@@ -258,14 +266,17 @@ export class ToolbarComponent implements OnChanges {
   }
 
   /** Plot types that scrub a z-stack live (the renderer swaps the slice in place): the OSD Image
-   *  view, the napari-js WebGPU image, and the napari-js surface — which rebuilds the height field
-   *  from the picked slice (jit-ui#102). Drives the per-slice slider. */
+   *  view, the napari-js WebGPU image, the napari-js surface — which rebuilds the height field
+   *  from the picked slice (jit-ui#102) — and the 2D spatial-omics view, where a 3D dataset's
+   *  registered volume is the image and the slider picks the section whose observations are
+   *  drawn. Drives the per-slice slider. */
   get showsLiveSliceScrubber(): boolean {
     return (
       this.selectedPlotType === PlotType.IMAGE ||
       this.selectedPlotType === PlotType.NAPARI_IMAGE ||
       isNapariSurface(this.selectedPlotType) ||
-      isNapariScatter(this.selectedPlotType)
+      isNapariScatter(this.selectedPlotType) ||
+      isSpatialOmics(this.selectedPlotType)
     );
   }
 

@@ -33,6 +33,13 @@ export interface IImageMetadata {
   /** Physical pixel size in µm; null/undefined when the format reports none. */
   mppX?: number | null;
   mppY?: number | null;
+  /** Physical spacing BETWEEN slices in µm — the z counterpart of `mppX`/`mppY`,
+   *  for a stack that knows it (a resampled volume, a confocal stack). It is what
+   *  lets the 3D volume view render true anisotropy: with all three present the
+   *  world box is the image's real physical extent, so 40 x 40 x 200 µm voxels
+   *  read as a brain and not as a cube-aspect brick. Absent, the view falls back
+   *  to its resolution-invariant reference box, which is shape-only. */
+  mppZ?: number | null;
   /** Per-channel name/color/LUT for multichannel (non-RGB) images, when known. */
   channelInfo?: IChannelInfo[] | null;
 }

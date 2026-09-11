@@ -16,6 +16,8 @@ import {
   PlotType,
   PlotTypeDescriptor,
   isNapari3d,
+  isSpatialOmics3d,
+  rendererOwnsWheel,
   NAPARI_DEFAULT_DECIMATE,
 } from './contracts/plot-type';
 import { ViewerFeature } from './contracts/capabilities.contract';
@@ -35,6 +37,9 @@ import {
 import { RegionToolMode } from './contracts/region-overlay.contract';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from './contracts/toolbar-config';
 import { VIZ_CONFIG, VizConfig } from './contracts/viz-config';
+import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-data.port';
+import { SpatialDataset } from './contracts/spatial-dataset.contract';
+import { buildVolumeStackImage } from './spatial/spatial-volume-image';
 
 /** Per-instance plot-div id source. The mount element's id must be unique so two
  *  live viewers (e.g. the main diagram + a modal preview) don't collide on the
@@ -233,6 +238,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   selectedColormap!: any;
   /** Channels & Histogram dialog visibility (opened from the toolbar). */
   showChannelHistogram = false;
+  /** Spatial-omics controls dialog visibility (toolbar button). */
+  showSpatialControls = false;
   /** Region Editor dialog visibility (opened from the toolbar). */
   showRegionEditor = false;
   /** Region Editor dialog width. On open it is set to the configured host
@@ -281,6 +288,13 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   private profileDragUpListener?: () => void;
   private profileResizeListener?: () => void;
 
+  /** True while the 3D spatial cloud is the active mode. The controls drop the ROI
+   *  selection there: region tools are screen-space, and against an orbiting
+   *  camera a drawn rectangle has no fixed meaning in the data. */
+  get isSpatial3dMode(): boolean {
+    return isSpatialOmics3d(this.selectedPlotType);
+  }
+
   /** LINE plot type shows the image + draggable line ROI + intensity inset. */
   get isProfileMode(): boolean {
     return this.selectedPlotType === PlotType.LINE;
@@ -296,6 +310,25 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   /** Isosurface band as a 0–255 slider position, mapped onto the volume's real
    *  intensity range by the renderer. Defaults to the full range. */
   isoRange: number[] = [0, 255];
+
+  /** Whether a spatial-omics dataset is currently published on
+   *  `SPATIAL_DATA_PORT` — gates the spatial plot types in the selector. */
+  private hasSpatialDataset = false;
+  /** Whether that dataset's observations carry a z, gating the 3D spatial mode. */
+  private hasSpatial3dDataset = false;
+  /** Whether it carries a registered volume. Change detection only: a volume
+   *  appearing is what publishes it as the image, and the plot-type gates then
+   *  see an ordinary grayscale stack. */
+  private hasSpatialVolume = false;
+  /** Dataset identity + capability shape the last emission was handled at, so a
+   *  switch between two datasets of the same shape is not mistaken for a repeat. */
+  private spatialDatasetKey: string | null = null;
+  /** Dataset + geometry the currently published volume image was built from, so a
+   *  re-emitted dataset doesn't re-fetch megabytes or reset the user's scrub. */
+  private volumeImageKey: string | null = null;
+  /** Blob URLs backing that image — ours to revoke. */
+  private volumeImageUrls: string[] = [];
+  private spatialDatasetSubscription?: Subscription;
 
   plotWidthSubscription?: Subscription;
   imageLoadingSubscription?: Subscription;
@@ -333,6 +366,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // also constructed directly with `new` in its own specs, which is outside
     // an injection context and would throw NG0203 on a field initializer.
     @Optional() @Inject(TOOLBAR_TOOLS) toolContributions?: readonly ToolbarToolContribution[],
+    // Optional like the rest: a host that shows only images never provides it,
+    // and the spatial plot types simply stay hidden.
+    @Optional() @Inject(SPATIAL_DATA_PORT) private spatialData?: SpatialDataPort,
   ) {
     this.contributedTools = visibleToolContributions(toolContributions);
     this.colormapsOptions = plotService.getColormapOptions();
@@ -351,7 +387,155 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    *  - scalar-intensity types (contour, surface, isosurface) hidden for RGB
    *    images — they map a single intensity per pixel. Image and Heatmap render
    *    any image.
+   *  - spatial-omics types hidden until a `SpatialDataset` is published on
+   *    `SPATIAL_DATA_PORT` — the mode has nothing to draw without observations,
+   *    exactly as a volume has nothing to draw without a stack.
    */
+  /**
+   * Track whether a spatial-omics dataset is available. A dataset appearing (or
+   * being cleared) changes which plot types make sense, so it drives the same
+   * recompute + reconcile that the image stream and the test-mode toggle do.
+   *
+   * No-op when the host provides no `SPATIAL_DATA_PORT` — the spatial types then
+   * stay hidden for the life of the component.
+   */
+  private watchSpatialDataset(): void {
+    this.spatialDatasetSubscription = this.spatialData?.getDataset$().subscribe((dataset) => {
+      const has = !!dataset;
+      // Only a dataset whose observations carry a z can be drawn as a cloud, so
+      // the 3D mode is gated on the coordinates, not merely on a dataset being
+      // present. Most spatial assays are one plane.
+      const has3d = !!dataset?.observations.z;
+      const hasVolume = !!dataset?.volume;
+      // The port publishes its current value on subscribe, so the initial `null`
+      // would otherwise recompute the selector for no change. Keyed by dataset
+      // IDENTITY as well as capability shape: two 3D datasets that both carry a
+      // volume have the same shape, and comparing only that skipped the switch —
+      // leaving the previous dataset's volume image on screen underneath the new
+      // one's observations.
+      const key = dataset
+        ? `${dataset.id}|${has3d}|${hasVolume}|${dataset.volume
+          ? `${dataset.volume.width}x${dataset.volume.height}x${dataset.volume.depth}` : ''}`
+        : null;
+      if (key === this.spatialDatasetKey) return;
+      this.spatialDatasetKey = key;
+      this.hasSpatialDataset = has;
+      this.hasSpatial3dDataset = has3d;
+      // Whether the dataset says it registers onto a tissue image. Distinct from an
+      // image being LOADED: a registered dataset's image may still be on its way, and
+      // the pixel modes must not flicker out of the selector while it arrives.
+      // A registered dataset draws over a tissue image; a volume-backed one publishes its
+      // volume AS a grayscale z-stack image (`buildVolumeStackImage`). Either way pixels
+      // exist, so the pixel modes stay on offer — Volume and Isosurface are exactly how
+      // a 3D omics dataset is read.
+      this.spatialDatasetHasPixels = !!dataset?.imageRef || hasVolume;
+      this.hasSpatialVolume = hasVolume;
+      this.computePlotTypeOptions();
+      // A dataset with no reference image has nothing to draw observations OVER:
+      // a cloud registered into a common frame (the Allen CCF) has coordinates
+      // but no one section. What it does have is its registered VOLUME, which is
+      // a 3D image in one file — so make that the image and open on it, slice bar
+      // and all, rather than leaving the host on an Image view showing whatever
+      // slide was loaded before. Ordered after computePlotTypeOptions so the type
+      // is on offer before it is selected.
+      if (dataset && !dataset.imageRef && hasVolume) {
+        void this.showVolumeAsImage(dataset);
+      } else {
+        // Anything else — a dataset with its own section image, a volume-less
+        // cloud, or none at all — means a published volume image is no longer what
+        // is on screen. Forget it, or coming BACK to the volume dataset would
+        // short-circuit on a matching key and leave the other dataset's slide up.
+        this.dropVolumeImage();
+        if (dataset && !dataset.imageRef) {
+          // No reference image and no volume to slice: the observations are the only
+          // thing there is to draw, so open on whichever spatial mode their
+          // coordinates support. Leaving the type alone strands the host on an Image
+          // view showing whatever slide was loaded BEFORE — the observations never
+          // appear, and the previous dataset's tissue does, which reads as this
+          // dataset failing to load.
+          //
+          // Gated on the coordinates, not on the dataset merely existing: a
+          // one-plane assay has no z and cannot be a cloud. That case only turned up
+          // with an image-less 2D dataset, which is why it went unhandled — before
+          // it, image-less meant 3D.
+          const target = has3d ? PlotType.SPATIAL_OMICS_3D : PlotType.SPATIAL_OMICS;
+          if (this.selectedPlotType !== target) this.onSelectPlotType(target);
+        }
+      }
+      // Clearing the dataset while a spatial mode is active leaves a type that is
+      // no longer offered — fall back to Image, as turning test mode off does.
+      this.reconcileSelectedPlotType();
+      this.cdr.detectChanges();
+    });
+  }
+
+  /**
+   * Publish a dataset's reference volume AS the image, and open the 2D Image view
+   * on it.
+   *
+   * The volume is a 3D image delivered in one file, so for a dataset that has no
+   * section image it is the honest thing to put on screen: the slice bar scrubs z,
+   * and the contrast window, colormaps and region tools all work because the
+   * volume genuinely is the image now. The 3D cloud stays one menu pick away.
+   *
+   * Keyed by dataset + geometry: the dataset stream re-emits on things like a
+   * colour-column change, and rebuilding then would re-fetch the voxels and throw
+   * the user back to the middle slice.
+   */
+  private async showVolumeAsImage(dataset: SpatialDataset): Promise<void> {
+    const meta = dataset.volume;
+    if (!meta || !this.spatialData?.getVolume) return;
+    const key = `${dataset.id}:${meta.width}x${meta.height}x${meta.depth}`;
+    if (key === this.volumeImageKey) return;
+    // Claim the key BEFORE awaiting: the stream can emit again while the voxels
+    // are in flight, and two builds of the same volume would race to publish.
+    this.volumeImageKey = key;
+    this.state.setImageLoading(true);
+    try {
+      const built = await buildVolumeStackImage(dataset, await this.spatialData.getVolume());
+      // A different dataset was selected while this one encoded — its image is the
+      // one that belongs on screen, so drop what we just built.
+      if (this.volumeImageKey !== key) {
+        built?.urls.forEach((u) => URL.revokeObjectURL(u));
+        return;
+      }
+      if (!built) {
+        this.volumeImageKey = null;
+        return;
+      }
+      // Pick the mode first so the image lands in the view that will show it,
+      // instead of rendering once into whatever mode the last dataset left active.
+      if (this.selectedPlotType !== PlotType.IMAGE) this.onSelectPlotType(PlotType.IMAGE);
+      this.revokeVolumeImageUrls();
+      this.volumeImageUrls = built.urls;
+      this.state.setImageInfo(built.info);
+    } catch (err) {
+      // No volume served after all: the cloud is still renderable, so fall back to
+      // it rather than leaving the host on an Image view with nothing in it.
+      console.warn('[visualizer] reference volume unavailable — falling back to the 3D cloud', err);
+      this.volumeImageKey = null;
+      if (this.hasSpatial3dDataset && !isSpatialOmics3d(this.selectedPlotType)) {
+        this.onSelectPlotType(PlotType.SPATIAL_OMICS_3D);
+      }
+    } finally {
+      this.state.setImageLoading(false);
+      this.cdr.detectChanges();
+    }
+  }
+
+  /** Forget the published volume image so re-selecting the dataset rebuilds it.
+   *  The URLs deliberately stay alive: the host may still be displaying that image
+   *  at this instant, and revoking under it would break every later tile read. They
+   *  are freed when the next volume replaces them, or on destroy. */
+  private dropVolumeImage(): void {
+    this.volumeImageKey = null;
+  }
+
+  private revokeVolumeImageUrls(): void {
+    this.volumeImageUrls.forEach((u) => URL.revokeObjectURL(u));
+    this.volumeImageUrls = [];
+  }
+
   private computePlotTypeOptions() {
     const caps = this.plotService.capabilities;
     const isStack = !!this.imageInfo?.isStack;
@@ -367,8 +551,25 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
         // is offered; test mode exposes every backend's type.
         if (!this.testMode && !d.productionLabel) return false;
         if (d.dimensions === '3d' && !caps.has(ViewerFeature.Surface3D)) return false;
+        // Volume and Isosurface raymarch the IMAGE STACK, and nothing else: these
+        // two gates are about the loaded image, full stop. A 3D omics dataset
+        // reaches them because its registered volume is published AS a grayscale
+        // z-stack image (`buildVolumeStackImage`), not through a second voxel
+        // source hiding behind the same modes.
         if (d.requiresStack && !isStack) return false;
         if (d.requiresGrayscale && !isGrayscale && !isMultichannel) return false;
+        if (d.requiresSpatialData && !this.hasSpatialDataset) return false;
+        if (d.requiresSpatial3d && !this.hasSpatial3dDataset) return false;
+        // An image-sourced mode reads PIXELS. A spatial dataset that brings no tissue
+        // image (seqFISH records unitless coordinates, not a section) leaves nothing for
+        // one to draw, so offering Image / Heatmap / Surface there offers modes that can
+        // only come up blank — or worse, showing whatever slide was loaded before.
+        //
+        // Narrowed to "a dataset is up AND there is no image": with no dataset at all,
+        // Image stays on offer, because a host that has not loaded anything yet needs a
+        // default and an empty selector would be worse than a blank view.
+        if (d.source === 'image' && this.hasSpatialDataset
+          && !this.spatialDatasetHasPixels) return false;
         return true;
       })
       // Default selector shows the suffix-free productionLabel; test mode keeps
@@ -391,13 +592,46 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   /** If the active plot type is no longer in the offered options (e.g. test mode
    *  turned off while a test-only type was active, or a scalar type carried onto
    *  an RGB image), fall back to the default 2D Image view. */
+  /** Whether the live spatial dataset brings pixels of its own — a tissue image it
+   *  registers onto, or a volume that is published as a z-stack image. */
+  private spatialDatasetHasPixels = false;
+
+  /**
+   * The host published NO image — a spatial dataset that brings none does this.
+   *
+   * Without handling the empty emission, `imageInfo` keeps the LAST image's metadata: the
+   * selector goes on offering pixel modes for pixels that are gone, and every
+   * `isStack`/`isGrayscale` decision is made against a file that is no longer loaded.
+   */
+  private onImageCleared(): void {
+    this.imageInfo = undefined;
+    this.loadedFileName = undefined;
+    this.computePlotTypeOptions();
+    // Deliberately NOT reconciling the selected type here. Reconciling calls
+    // `setPlotType`, which drives a re-plot — and there is nothing to plot, so the
+    // Plotly backend read its own now-unset `imageInfo` and threw
+    // ("can't access property isGrayscale"), aborting the load with no observations
+    // drawn. Ignoring the empty emission entirely is what used to avoid that.
+    //
+    // Nothing is left stranded: an image is cleared because a spatial dataset that
+    // brings none is being opened, and that dataset's own subscription selects the
+    // mode its coordinates support a moment later.
+    this.cdr.detectChanges();
+  }
+
   private reconcileSelectedPlotType(): void {
-    if (!this.plotTypeOptions.some((d) => d.type === this.selectedPlotType)) {
-      this.selectedPlotType = PlotType.IMAGE;
-      this.plotType = PlotType.IMAGE;
-      this.isHeatmap = true;
-      this.plotService.setPlotType(PlotType.IMAGE);
-    }
+    if (this.plotTypeOptions.some((d) => d.type === this.selectedPlotType)) return;
+    // Image is the usual fallback, but it is not always ON OFFER: with no image loaded
+    // the pixel modes are gone, and falling back to one would select a mode the selector
+    // does not list and nothing can draw. Take the first type still offered instead.
+    const fallback = this.plotTypeOptions.some((d) => d.type === PlotType.IMAGE)
+      ? PlotType.IMAGE
+      : this.plotTypeOptions[0]?.type;
+    if (!fallback) return;
+    this.selectedPlotType = fallback;
+    this.plotType = fallback;
+    this.isHeatmap = fallback === PlotType.IMAGE;
+    this.plotService.setPlotType(fallback);
   }
 
   ngOnInit(): void {
@@ -412,6 +646,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       { name: 'Stack', val: 'true' },
     ];
     this.selectedStackOption = this.stackOptions[0];
+    this.watchSpatialDataset();
     this.autoscaleSubscription = this.plotService.getAutoscaleEvent().subscribe(() => {
       // reset the image mode to single image
       this.selectedStackOption = { name: 'Single image', val: 'false' };
@@ -528,6 +763,10 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     });
     this.previewSubscription = this.state.getImageInfo$().subscribe({
       next: (imgInfo) => {
+        if (!imgInfo) {
+          this.onImageCleared();
+          return;
+        }
         if (imgInfo) {
           this.imageInfo = imgInfo;
           // Stack-only plot types (isosurface, scatter3d) depend on whether this
@@ -539,8 +778,14 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
           // reset stack options selection
           this.selectedStackOption = imgInfo.showStack ? this.stackOptions[1] : this.stackOptions[0];
 
-          this.isGrayscaleEvent.emit(this.imageInfo.isGrayscale);
-          this.isStackEvent.emit(this.imageInfo.isStack);
+          // Read from `imgInfo`, the value this emission carried, rather than from the
+          // field. Handling the empty emission means the field CAN be nulled part-way
+          // through this branch: `reconcileSelectedPlotType` may call `setPlotType`,
+          // which can make the host publish a new image state, re-entering this very
+          // subscription. Reading the field then threw on `isGrayscale` and aborted the
+          // handler, so the observations were never drawn.
+          this.isGrayscaleEvent.emit(imgInfo.isGrayscale);
+          this.isStackEvent.emit(imgInfo.isStack);
           // Reset to the default 2D Image view when a different image is
           // selected while a 3D type is active.
           if (!this.isHeatmap && imgInfo.fileName !== this.loadedFileName) {
@@ -551,7 +796,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
             this.activeSurface3dMode = 'turntable';
           }
           this.loadedFileName = imgInfo.fileName;
-          this.plotService.setImageMeta(this.imageInfo.imageMeta);
+          this.plotService.setImageMeta(imgInfo.imageMeta);
           const urls = imgInfo.urls;
           // A newer image ALWAYS preempts an in-flight render. This was
           // `if (!this.running)`, which DROPPED the new image while the old one
@@ -841,10 +1086,10 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.wheelListener = (event: WheelEvent) => {
       const plotEl = document.getElementById(this.plotDivName);
       if (!plotEl?.contains(event.target as Node)) return;
-      // The Image view handles scroll-zoom natively (it respects the scroll
-      // delta). Intercepting here would fire a fixed zoom step per wheel
-      // event — far too sensitive — so let the renderer own it.
-      if (this.isImageView) return;
+      // Intercepting here fires a FIXED zoom step per wheel event, which is far
+      // too sensitive for a renderer that reads the scroll delta — so anything
+      // drawn by such a renderer keeps its own wheel. See `rendererOwnsWheel`.
+      if (rendererOwnsWheel(this.selectedPlotType)) return;
       // 3D plot types (surface, scatter3d, isosurface) render in a Plotly scene
       // that orbits/zooms natively on scroll. The 2D step-zoom doesn't apply and
       // would throw (no xaxis on a scene), so let Plotly handle the wheel.
@@ -967,6 +1212,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   ngOnDestroy() {
     // Leave the live set so the next-oldest visualizer picks up the outlets.
     VisualizerComponent.liveInstances.delete(this);
+    this.revokeVolumeImageUrls();
     this.scrubber.cancel();
     this.samPointSub.unsubscribe();
     if (this.plotContextMenuListener) {
@@ -997,6 +1243,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.unsub.complete();
     if (this.previewSubscription) {
       this.previewSubscription.unsubscribe();
+    }
+    if (this.spatialDatasetSubscription) {
+      this.spatialDatasetSubscription.unsubscribe();
     }
     if (this.plotWidthSubscription) {
       this.plotWidthSubscription.unsubscribe();
@@ -1055,6 +1304,11 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   /** Open the Channels & Histogram dialog (toolbar button). */
   openChannelHistogram() {
     this.showChannelHistogram = true;
+  }
+
+  /** Toolbar → open the spatial-omics controls. */
+  openSpatialControls(): void {
+    this.showSpatialControls = true;
   }
 
   /** Open the Region Editor dialog (toolbar button). The editor stays linked to

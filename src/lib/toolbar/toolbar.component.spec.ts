@@ -67,12 +67,20 @@ describe('ToolbarComponent', () => {
   });
 
   it('showsLiveSliceScrubber for the live-scrub views incl. the napari surface (stack slider)', () => {
-    for (const t of [PlotType.IMAGE, PlotType.NAPARI_IMAGE, PlotType.NAPARI_SURFACE]) {
+    // The 2D spatial view scrubs too: over a 3D dataset the registered volume IS
+    // the image, and the slider picks the section whose observations are drawn.
+    for (const t of [
+      PlotType.IMAGE, PlotType.NAPARI_IMAGE, PlotType.NAPARI_SURFACE, PlotType.SPATIAL_OMICS,
+    ]) {
       component.selectedPlotType = t;
       expect(component.showsLiveSliceScrubber).toBe(true);
     }
-    // Volume/isosurface render the whole stack at once — no per-slice scrubber.
-    for (const t of [PlotType.NAPARI_VOLUME, PlotType.NAPARI_ISOSURFACE, PlotType.HEATMAP]) {
+    // Volume/isosurface render the whole stack at once — no per-slice scrubber —
+    // and the 3D cloud has no plane to pick.
+    for (const t of [
+      PlotType.NAPARI_VOLUME, PlotType.NAPARI_ISOSURFACE, PlotType.HEATMAP,
+      PlotType.SPATIAL_OMICS_3D,
+    ]) {
       component.selectedPlotType = t;
       expect(component.showsLiveSliceScrubber).toBe(false);
     }
@@ -161,6 +169,27 @@ describe('ToolbarComponent', () => {
     component.samModels = [{ id: 'some-unregistered-model', label: 'Unknown' }];
     component.ngOnChanges({ samModels: {} as never });
     expect(component.samMenuItems[0].tooltip).toBeUndefined();
+  });
+  describe('spatial-omics controls button', () => {
+    it('offers the panel in BOTH spatial modes', () => {
+      // REGRESSION: the gate matched only the 2D type, so adding the 3D mode left
+      // its toolbar button hidden — and with it the only route to the legend,
+      // colouring and category selection. The 3D cloud needs that panel more than
+      // the 2D view does, not less: a million overlapping points are unreadable
+      // without a colour source.
+      component.selectedPlotType = PlotType.SPATIAL_OMICS;
+      expect(component.isSpatialMode).toBe(true);
+
+      component.selectedPlotType = PlotType.SPATIAL_OMICS_3D;
+      expect(component.isSpatialMode).toBe(true);
+    });
+
+    it('hides it for every non-spatial mode', () => {
+      for (const t of [PlotType.IMAGE, PlotType.NAPARI_VOLUME, PlotType.SCATTER]) {
+        component.selectedPlotType = t;
+        expect(component.isSpatialMode).toBe(false);
+      }
+    });
   });
 });
 

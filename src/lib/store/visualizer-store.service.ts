@@ -8,6 +8,7 @@ import { PREFERENCES_PORT, PreferencesPort } from '../contracts/ports/preference
 
 import { IImageMetadata } from '../contracts/image.contract';
 import { IChannelState } from '../contracts/channel-histogram-api.contract';
+import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../contracts/display-types';
 import { COLORMAP_OPTIONS } from '../plot.utilities';
 
 /**
@@ -74,6 +75,11 @@ export class VisualizerStore {
   // null when none is active. The single source of truth for tool state across
   // the toolbar and whichever backend's overlay handles the pointer.
   private readonly activeTool$ = new BehaviorSubject<string | null>(null);
+
+  /** Spatial-omics display state (colour source, point size, alpha, scaling).
+   *  Held here, next to the colormap/channel state, so the active backend reacts
+   *  to an edit exactly as it does for an image. */
+  private readonly spatialView$ = new BehaviorSubject<SpatialViewState>({ ...DEFAULT_SPATIAL_VIEW });
 
   // Optional + null defaults so the store can be constructed both via DI and
   // directly (`new VisualizerStore()` in unit tests); the LUT fetch and preset
@@ -359,6 +365,27 @@ export class VisualizerStore {
   /** Force a (debounced) write-back of the current preset set. */
   persistPresets(): void {
     this.queuePresetSave();
+  }
+
+  // ── spatial-omics view state ──────────────────────────────────────────
+  getSpatialView$(): Observable<SpatialViewState> {
+    return this.spatialView$.asObservable();
+  }
+
+  /** Synchronous read, for a renderer building its first frame. */
+  currentSpatialView(): SpatialViewState {
+    return this.spatialView$.value;
+  }
+
+  /** Patch the spatial view state; emits once with the merged value. */
+  setSpatialView(partial: Partial<SpatialViewState>): void {
+    this.spatialView$.next({ ...this.spatialView$.value, ...partial });
+  }
+
+  /** Reset to defaults — e.g. when a different dataset is selected, where the
+   *  previous colour column almost certainly does not exist. */
+  resetSpatialView(): void {
+    this.spatialView$.next({ ...DEFAULT_SPATIAL_VIEW });
   }
 
   getActiveTool$(): Observable<string | null> {

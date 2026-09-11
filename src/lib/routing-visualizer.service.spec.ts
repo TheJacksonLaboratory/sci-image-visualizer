@@ -9,6 +9,12 @@ import { VisualizerStore } from './store/visualizer-store.service';
 import { VIZ_CONFIG } from './contracts/viz-config';
 import { PlotType } from './contracts/plot-type';
 import { IChannelState, IHistogram } from './contracts/channel-histogram-api.contract';
+import { SPATIAL_DATA_PORT } from './contracts/ports/spatial-data.port';
+import { CategoricalColumn, SpatialDataset } from './contracts/spatial-dataset.contract';
+import { RegionStore } from './store/region-store.service';
+import { SpatialSelectionStore } from './store/spatial-selection.service';
+import { Rectangle, Region } from './models/region';
+import { BehaviorSubject } from 'rxjs';
 
 /**
  * CHARACTERIZATION TESTS (refactoring plan, Step 0).
@@ -504,5 +510,321 @@ describe('RoutingVisualizerService (characterization)', () => {
     const chans = await firstValueFrom(router.getChannels$());
     expect(chans).toHaveLength(1);
     expect(chans[0].name).toBe('Intensity');
+  });
+});
+
+/**
+ * The spatial controls are implemented on the ROUTER rather than a backend
+ * because the state is backend-neutral (it lives in the shared store, like the
+ * colormap) — so they must work with no backend mounted and survive a plot-type
+ * switch. These pin that, plus the two pieces with real logic: the feature
+ * search fallback and the legend colours.
+ */
+describe('RoutingVisualizerService — spatial controls', () => {
+  const dataset: SpatialDataset = {
+    id: 'demo', name: 'Demo',
+    observations: { count: 2, x: new Float32Array(2), y: new Float32Array(2) },
+    columns: [
+      { kind: 'categorical', name: 'region', categories: ['A', 'B'], colors: ['#ff0000', '#0000ff'] },
+      { kind: 'continuous', name: 'counts' },
+    ],
+    features: { count: 3, names: ['Ttr', 'Fth1', 'Mbp'] },
+  };
+
+  function build(port: unknown | null) {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        RoutingVisualizerService,
+        VisualizerStore,
+        { provide: PlotlyService, useValue: mockBackend() },
+        { provide: OpenSeadragonVisualizerService, useValue: mockBackend() },
+        { provide: NapariVisualizerService, useValue: mockBackend() },
+        { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
+        ...(port ? [{ provide: SPATIAL_DATA_PORT, useValue: port }] : []),
+      ],
+    });
+    return {
+      router: TestBed.inject(RoutingVisualizerService),
+      store: TestBed.inject(VisualizerStore),
+    };
+  }
+
+  function mockPort(over: Record<string, unknown> = {}) {
+    return {
+      getDataset$: () => new BehaviorSubject<SpatialDataset | null>(dataset),
+      getColumn: jest.fn(),
+      getFeatureVector: jest.fn(),
+      ...over,
+    };
+  }
+
+  /** A rectangle ROI in world coordinates. */
+  function roi(x: number, y: number, w: number, h: number): Region {
+    const r = new Region();
+    const b = new Rectangle();
+    b.x = x; b.y = y; b.width = w; b.height = h;
+    r.bounds = b;
+    return r;
+  }
+
+  describe('log scaling', () => {
+    it('seeds the toggle from the source hint, and lets an explicit off win', () => {
+      // The hint used to be ORed in at render time, so an unchecked box could not
+      // turn log scaling off for a hinted column — and the linked chart, which
+      // reads `logScale` alone, disagreed with the map about what it showed.
+      const hinted: SpatialDataset = {
+        ...dataset,
+        columns: [{ kind: 'continuous', name: 'total_counts', logScaleHint: true }],
+        features: { count: 1, names: ['Ttr'], logScaleHint: true },
+      };
+      const { router, store } = build(mockPort({
+        getDataset$: () => new BehaviorSubject<SpatialDataset | null>(hinted),
+      }));
+      const controls = router.getSpatialControls()!;
+
+      controls.colorByColumn('total_counts');
+      expect(store.currentSpatialView().logScale).toBe(true);
+
+      // Explicitly off, and it stays off — nothing consults the hint again.
+      controls.setViewState({ logScale: false });
+      expect(store.currentSpatialView().logScale).toBe(false);
+
+      // A gene carries its own hint, and re-seeds on the switch.
+      controls.colorByFeature('Ttr');
+      expect(store.currentSpatialView().logScale).toBe(true);
+    });
+
+    it('clears the toggle for a source with no hint', () => {
+      const { router, store } = build(mockPort());
+      const controls = router.getSpatialControls()!;
+      controls.setViewState({ logScale: true });
+
+      controls.colorByColumn('counts'); // continuous, no hint
+      expect(store.currentSpatialView().logScale).toBe(false);
+    });
+  });
+
+  describe('on a dataset change', () => {
+    it('drops a colour source the new dataset cannot satisfy, and keeps the rest', async () => {
+      const dataset$ = new BehaviorSubject<SpatialDataset | null>(dataset);
+      const { router, store } = build(mockPort({ getDataset$: () => dataset$ }));
+      const controls = router.getSpatialControls()!;
+
+      controls.colorByColumn('region');
+      controls.setViewState({ pointScale: 3 });
+      expect(store.currentSpatialView().colorBy).toEqual({ kind: 'column', name: 'region' });
+
+      // A different dataset with no `region`: keeping the source would leave the
+      // map flat while the panel and the charts kept naming it.
+      dataset$.next({
+        ...dataset, id: 'other',
+        columns: [{ kind: 'categorical', name: 'zone', categories: ['Z'] }],
+      });
+
+      expect(store.currentSpatialView().colorBy).toBeNull();
+      // Display preferences are the user's, not the previous dataset's state.
+      expect(store.currentSpatialView().pointScale).toBe(3);
+    });
+
+    it('keeps a colour source the new dataset still has', () => {
+      const dataset$ = new BehaviorSubject<SpatialDataset | null>(dataset);
+      const { router, store } = build(mockPort({ getDataset$: () => dataset$ }));
+      router.getSpatialControls()!.colorByColumn('region');
+
+      dataset$.next({ ...dataset, id: 'other' }); // same columns
+
+      expect(store.currentSpatialView().colorBy).toEqual({ kind: 'column', name: 'region' });
+    });
+
+    it('keeps a gene when the new dataset is too wide to inline its names', () => {
+      const dataset$ = new BehaviorSubject<SpatialDataset | null>(dataset);
+      const { router, store } = build(mockPort({ getDataset$: () => dataset$ }));
+      router.getSpatialControls()!.colorByFeature('Ttr');
+
+      // Typeahead-only: the names are not there to check against, so a name that
+      // turns out not to exist should surface as a failed fetch, not a silent reset.
+      dataset$.next({ ...dataset, id: 'wide', features: { count: 31_000 } });
+
+      expect(store.currentSpatialView().colorBy).toEqual({ kind: 'feature', name: 'Ttr' });
+    });
+  });
+
+  describe('selection', () => {
+    /** Three observations: two inside a 0..10 box, one far away. */
+    const spatial: SpatialDataset = {
+      ...dataset,
+      observations: {
+        count: 3,
+        x: Float32Array.from([1, 5, 500]),
+        y: Float32Array.from([1, 5, 500]),
+      },
+    };
+
+    function withDataset(over: Record<string, unknown> = {}) {
+      const built = build(mockPort({
+        getDataset$: () => new BehaviorSubject<SpatialDataset | null>(spatial),
+        ...over,
+      }));
+      return {
+        ...built,
+        regions: TestBed.inject(RegionStore),
+        selection: TestBed.inject(SpatialSelectionStore),
+      };
+    }
+
+    it('selects observations inside the drawn ROIs — every ROI tool becomes a selector', () => {
+      const { router, regions, selection } = withDataset();
+      regions.setRegions([roi(0, 0, 10, 10)]);
+
+      const count = router.getSpatialControls()!.selectFromRegions();
+      expect(count).toBe(2);
+      expect(Array.from(selection.current().mask)).toEqual([1, 1, 0]);
+    });
+
+    it('reports zero (and publishes an empty selection) when the ROIs match nothing', () => {
+      const { router, regions, selection } = withDataset();
+      regions.setRegions([roi(900, 900, 10, 10)]);
+      expect(router.getSpatialControls()!.selectFromRegions()).toBe(0);
+      expect(selection.isEmpty()).toBe(true);
+    });
+
+    it('selects a whole category from the legend', async () => {
+      const column: CategoricalColumn = {
+        meta: { kind: 'categorical', name: 'region', categories: ['A', 'B'] },
+        codes: new Uint16Array([0, 1, 1]),
+      };
+      const { router, selection } = withDataset({
+        getColumn: jest.fn().mockResolvedValue(column),
+      });
+      const count = await router.getSpatialControls()!.selectCategory('region', 1);
+      expect(count).toBe(2);
+      expect(Array.from(selection.current().mask)).toEqual([0, 1, 1]);
+    });
+
+    it('rejects a category selection on a continuous column', async () => {
+      const { router } = withDataset({
+        getColumn: jest.fn().mockResolvedValue({
+          meta: { kind: 'continuous', name: 'counts' }, values: new Float32Array(3),
+        }),
+      });
+      await expect(router.getSpatialControls()!.selectCategory('counts', 0))
+        .rejects.toThrow(/continuous/);
+    });
+
+    it('clears the selection', () => {
+      const { router, regions, selection } = withDataset();
+      regions.setRegions([roi(0, 0, 10, 10)]);
+      router.getSpatialControls()!.selectFromRegions();
+      router.getSpatialControls()!.clearSelection();
+      expect(selection.isEmpty()).toBe(true);
+    });
+
+    it('drops the selection when the dataset changes — masks are index-based', () => {
+      const dataset$ = new BehaviorSubject<SpatialDataset | null>(spatial);
+      const built = build(mockPort({ getDataset$: () => dataset$ }));
+      const regions = TestBed.inject(RegionStore);
+      const selection = TestBed.inject(SpatialSelectionStore);
+      regions.setRegions([roi(0, 0, 10, 10)]);
+      built.router.getSpatialControls()!.selectFromRegions();
+      expect(selection.current().count).toBe(2);
+
+      dataset$.next({ ...spatial, id: 'other' });
+      expect(selection.isEmpty()).toBe(true);
+    });
+
+    it('selects nothing when no dataset is loaded', () => {
+      const { router } = build(mockPort({
+        getDataset$: () => new BehaviorSubject<SpatialDataset | null>(null),
+      }));
+      expect(router.getSpatialControls()!.selectFromRegions()).toBe(0);
+    });
+  });
+
+  it('returns null when the host binds no SPATIAL_DATA_PORT', () => {
+    const { router } = build(null);
+    expect(router.getSpatialControls()).toBeNull();
+  });
+
+  it('returns the same object across calls, so a consumer can hold it', () => {
+    const { router } = build(mockPort());
+    expect(router.getSpatialControls()).toBe(router.getSpatialControls());
+  });
+
+  it('reads and writes the shared view state', async () => {
+    const { router, store } = build(mockPort());
+    const controls = router.getSpatialControls()!;
+
+    expect(controls.viewState().colorBy).toBeNull();
+    controls.colorByColumn('region');
+    expect(store.currentSpatialView().colorBy).toEqual({ kind: 'column', name: 'region' });
+    expect(await firstValueFrom(controls.getViewState$())).toEqual(
+      expect.objectContaining({ colorBy: { kind: 'column', name: 'region' } }),
+    );
+
+    controls.colorByFeature('Ttr');
+    expect(store.currentSpatialView().colorBy).toEqual({ kind: 'feature', name: 'Ttr' });
+
+    controls.clearColorBy();
+    expect(store.currentSpatialView().colorBy).toBeNull();
+
+    controls.setViewState({ pointScale: 3, opacity: 0.5 });
+    expect(store.currentSpatialView()).toEqual(
+      expect.objectContaining({ pointScale: 3, opacity: 0.5 }),
+    );
+  });
+
+  it('exposes the dataset stream for pickers and legends', async () => {
+    const { router } = build(mockPort());
+    expect(await firstValueFrom(router.getSpatialControls()!.getDataset$())).toBe(dataset);
+  });
+
+  describe('searchFeatures', () => {
+    it('delegates to the port when it can search (a 31k-gene dataset ships no names)', async () => {
+      const searchFeatures = jest.fn().mockResolvedValue(['Ttr']);
+      const { router } = build(mockPort({ searchFeatures }));
+      expect(await router.getSpatialControls()!.searchFeatures('tt', 5)).toEqual(['Ttr']);
+      expect(searchFeatures).toHaveBeenCalledWith('tt', 5);
+    });
+
+    it('falls back to filtering the inlined names when the port cannot search', async () => {
+      const { router } = build(mockPort()); // no searchFeatures on the port
+      // Case-insensitive substring over ['Ttr', 'Fth1', 'Mbp'] — 'Mbp' has no 't'.
+      expect(await router.getSpatialControls()!.searchFeatures('t')).toEqual(['Ttr', 'Fth1']);
+      expect(await router.getSpatialControls()!.searchFeatures('mb')).toEqual(['Mbp']);
+    });
+
+    it('returns nothing rather than throwing when neither is available', async () => {
+      const port = mockPort({
+        getDataset$: () => new BehaviorSubject<SpatialDataset | null>(null),
+      });
+      const { router } = build(port);
+      expect(await router.getSpatialControls()!.searchFeatures('t')).toEqual([]);
+    });
+  });
+
+  describe('categoryColors', () => {
+    it('resolves legend swatches with the same function the renderer uses', async () => {
+      const column: CategoricalColumn = {
+        meta: {
+          kind: 'categorical', name: 'region', categories: ['A', 'B'],
+          colors: ['#ff0000', '#0000ff'],
+        },
+        codes: new Uint16Array([0, 1]),
+      };
+      const { router } = build(mockPort({ getColumn: jest.fn().mockResolvedValue(column) }));
+      expect(await router.getSpatialControls()!.categoryColors('region'))
+        .toEqual(['#ff0000', '#0000ff']);
+    });
+
+    it('rejects for a continuous column instead of returning an empty legend', async () => {
+      const column = {
+        meta: { kind: 'continuous', name: 'counts' },
+        values: new Float32Array(2),
+      };
+      const { router } = build(mockPort({ getColumn: jest.fn().mockResolvedValue(column) }));
+      await expect(router.getSpatialControls()!.categoryColors('counts'))
+        .rejects.toThrow(/continuous .* no categories/);
+    });
   });
 });

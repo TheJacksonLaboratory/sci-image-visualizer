@@ -97,6 +97,15 @@ export class PlotlyService implements IVisualizer {
   // metadata and classification colours live in the shared VisualizerStore
   // (injected as `this.store`).
   private urls!: string[];
+  /**
+   * The image currently plotted.
+   *
+   * The `!` is a definite-assignment ASSERTION, not a guarantee: nothing sets this until
+   * an image loads, and a host can clear its image while these paths still run — a
+   * spatial-omics dataset that brings no tissue section does exactly that. So reads here
+   * are optional and assignments guarded; an unguarded one threw
+   * "can't access property isGrayscale" and aborted the load.
+   */
   imageInfo!: IImageInfo;
   private plotUtilities = new PlotUtilities();
   private plotType!: PlotType;
@@ -380,7 +389,10 @@ export class PlotlyService implements IVisualizer {
     // Region-based line ROIs, available in HEATMAP/IMAGE mode.
     const impl = PLOTLY_PLOT_TYPE_IMPLS[plotType];
     if (impl) {
-      this.imageInfo.isGrayscale = !!imageInfo.isGrayscale;
+      // Guarded: `imageInfo` is declared with a definite-assignment assertion, so
+      // nothing stops it being unset at runtime — a plot driven while no image is
+      // loaded reached here and threw on the assignment.
+      if (this.imageInfo) this.imageInfo.isGrayscale = !!imageInfo.isGrayscale;
       return this.plotViaRegistry(
         plotDiv, impl, this.buildTraceInput(imageInfo, imageLoaded, trueImageSize),
         screenHeight, inPlace);
@@ -1064,7 +1076,7 @@ export class PlotlyService implements IVisualizer {
   }
 
   private setEvents(plotDiv: string, isGrayscale: boolean, screenHeight: number) {
-    this.imageInfo.isGrayscale = isGrayscale;
+    if (this.imageInfo) this.imageInfo.isGrayscale = isGrayscale;
     this.screenHeight = screenHeight;
     const plot: any = document.getElementById(plotDiv);
     if (plot) {
@@ -1120,7 +1132,7 @@ export class PlotlyService implements IVisualizer {
         }
       });
       this.zoomCoordinates = coordinates;
-      if (!this.imageInfo.showStack) {
+      if (!this.imageInfo?.showStack) {
         this.triggerZoom(coordinates);
       }
     }
@@ -1420,7 +1432,7 @@ export class PlotlyService implements IVisualizer {
         const xRatio = rect.width / image.width;
         const yRatio = rect.height / image.height;
         if (this.fileName === reqName) {
-          const isGray = this.imageInfo.isGrayscale;
+          const isGray = this.imageInfo?.isGrayscale;
           const frame = isGray
             ? this.plotUtilities.arrayToMatrix(image.grey().data, image.width)
             : this.plotUtilities.arrayToMatrix(image.getPixelsArray(), image.width);
@@ -1477,7 +1489,7 @@ export class PlotlyService implements IVisualizer {
   private setImageInfo(showStack?: boolean, scaleratio?: boolean) {
     // Build a partial image descriptor and push it to the host via the port.
     const imgInfo: Partial<IImageInfo> = {
-      isGrayscale: this.imageInfo.isGrayscale,
+      isGrayscale: this.imageInfo?.isGrayscale,
       trueImageSize: [this.trueImgSize[1], this.trueImgSize[3]],
       urls: this.urls,
       isStack: this.urls.length > 1,
@@ -2046,7 +2058,7 @@ export class PlotlyService implements IVisualizer {
     if (!showstack) {
       this.zIndex.next(0);
     }
-    this.imageInfo.showStack = showstack;
+    if (this.imageInfo) this.imageInfo.showStack = showstack;
     this.stackLoading$.next(showstack);
     Plotly.relayout(this.plotDiv, { 'showstack': showstack } as any);
   }

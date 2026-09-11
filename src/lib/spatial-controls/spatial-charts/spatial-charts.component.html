@@ -1,0 +1,154 @@
+<div class="sx-body" *ngIf="controls">
+
+  <!-- The chart follows whatever the map is coloured by, so the two can never
+       disagree about what is being shown. -->
+  <div class="sx-head">
+    <span class="sx-subject" *ngIf="subject">{{ subject }}</span>
+    <span class="sx-subject sx-muted" *ngIf="!subject">nothing selected to chart</span>
+    <span class="sx-badge" *ngIf="selectionCount">
+      {{ selectionCount | number }} selected
+    </span>
+    <i class="pi pi-spin pi-spinner sx-busy" *ngIf="busy" aria-label="loading"></i>
+  </div>
+
+  <div class="sx-controls">
+    <p-selectButton [options]="kindOptions" optionLabel="label" optionValue="value"
+                    [ngModel]="kind" (ngModelChange)="onKind($event)"
+                    styleClass="sx-kind"></p-selectButton>
+    <p-dropdown [options]="groupOptions" optionLabel="label" optionValue="value"
+                [ngModel]="groupBy" (ngModelChange)="onGroupBy($event)"
+                placeholder="No grouping" appendTo="body"
+                [disabled]="kind === 'histogram'"
+                [pTooltip]="kind === 'heatmap'
+                  ? 'The categorical column the heatmap\'s columns come from'
+                  : 'Split a violin or box by a categorical column'"
+                tooltipPosition="top"></p-dropdown>
+    <!-- What the chart on screen shows, and what it must NOT be read for. Each of these
+         answers a different question and two are routinely over-read, so the caveat
+         travels with the explanation. -->
+    <i class="pi pi-question-circle sx-help"
+       [pTooltip]="kindHelp" [escape]="false" tooltipPosition="left"
+       tooltipStyleClass="sx-help-tip"
+       [attr.aria-label]="'About the ' + kind + ' chart'" tabindex="0"></i>
+  </div>
+
+  <!-- The heatmap's rows are a gene LIST, so it needs its own picker: the other
+       kinds chart whatever single source the map is coloured by. -->
+  <div class="sx-controls" *ngIf="kind === 'heatmap'">
+    <p-multiSelect [options]="geneOptions" optionLabel="label" optionValue="value"
+                   [ngModel]="heatmapGenes" (ngModelChange)="onHeatmapGenes($event)"
+                   [filter]="true" filterBy="label" (onFilter)="onGeneFilter($event.filter)"
+                   [virtualScroll]="true" [virtualScrollItemSize]="30" appendTo="body"
+                   [showToggleAll]="false" [maxSelectedLabels]="3"
+                   selectedItemsLabel="{0} genes"
+                   placeholder="Pick genes for the rows"
+                   pTooltip="One row per gene, averaged within each group"
+                   tooltipPosition="top" styleClass="sx-genes"></p-multiSelect>
+    <p-checkbox [binary]="true" [ngModel]="heatmapZScore"
+                (onChange)="onHeatmapZScore($event.checked)"
+                label="z-score"
+                pTooltip="Scale each gene across the groups. Without it one highly-expressed gene saturates the colour scale and the rest reads as blank"
+                tooltipPosition="top"></p-checkbox>
+  </div>
+
+  <!-- Detach applies to EVERY kind: the dialog is only so wide, and a counts plot read
+       against a heatmap is the same argument as a UMAP read against the map. -->
+  <div class="sx-controls">
+    <!-- A picker only when the dataset publishes more than one embedding. -->
+    <p-dropdown *ngIf="kind === 'embedding' && embeddings.length > 1"
+                [options]="embeddings" optionLabel="label" optionValue="name"
+                [ngModel]="embedding?.name" (ngModelChange)="onEmbedding($event)"
+                appendTo="body"
+                pTooltip="Which embedding to draw" tooltipPosition="top"></p-dropdown>
+    <!-- Offered only for an embedding this dataset does not publish. It runs in a Web
+         Worker on the GPU, so the panel stays usable while it goes. -->
+    <p-button *ngIf="kind === 'embedding' && isComputable && !isComputed && !isComputing"
+              icon="pi pi-play" size="small" [text]="true"
+              [label]="'Compute (' + computeEstimateLabel + ')'"
+              pTooltip="Run t-SNE here, in a background worker on the GPU, from this dataset's PCA. The panel stays usable, and it can be cancelled."
+              tooltipPosition="top"
+              (onClick)="computeEmbedding()"></p-button>
+    <p-button *ngIf="isComputing"
+              icon="pi pi-times" size="small" [text]="true" severity="secondary"
+              label="Cancel" (onClick)="cancelCompute()"></p-button>
+    <p-button [icon]="detached ? 'pi pi-window-minimize' : 'pi pi-external-link'"
+              size="small" [text]="true"
+              [label]="detached ? 'Put back' : 'Detach'"
+              [pTooltip]="detached
+                ? 'Show this chart in the panel again'
+                : 'Open this chart in its own window, alongside this panel'"
+              tooltipPosition="top"
+              (onClick)="toggleDetached()"></p-button>
+  </div>
+
+  <!-- Progress while a computation runs. `mode="indeterminate"` until the first report,
+       because the run starts with a neighbour graph and there is nothing honest to show
+       as a percentage yet. -->
+  <div class="sx-compute" *ngIf="isComputing">
+    <p-progressBar
+      [mode]="computeFraction === null ? 'indeterminate' : 'determinate'"
+      [value]="computeFraction === null ? 0 : (computeFraction * 100)"
+      [showValue]="computeFraction !== null"
+      [style]="{ height: '0.6rem' }"></p-progressBar>
+    <small class="sx-hint">
+      {{ computeFraction === null ? 'Building the neighbour graph…' : 'Optimising…' }}
+      <ng-container *ngIf="computeBackend"> on {{ computeBackend }}</ng-container>
+    </small>
+    <small class="sx-hint sx-warn" *ngIf="computeMessage">{{ computeMessage }}</small>
+  </div>
+  <small class="sx-hint sx-warn" *ngIf="computeError">{{ computeError }}</small>
+  <!-- Withheld rather than offered with a warning: an hour-long job is not a choice a
+       reader can meaningfully consent to from a dialog. -->
+  <small class="sx-hint" *ngIf="kind === 'embedding' && tsneTooLarge">{{ tsneTooLargeNote }}</small>
+
+  <div [id]="chartDiv" class="sx-plot" *ngIf="!detached"></div>
+
+  <!-- Detached: the chart keeps drawing, in its own window. Says so rather than
+       leaving a blank panel that looks broken. -->
+  <div class="sx-detached" *ngIf="detached">
+    Shown in its own window.
+  </div>
+
+  <ng-container *ngTemplateOutlet="hints"></ng-container>
+
+</div>
+
+<!-- Declared once and rendered in both the panel and the detached window: the ladder is
+     deliberately not mutually exclusive (a heatmap still needs its grouping prompt), so
+     collapsing it to a single expression would drop a hint rather than move it. -->
+<ng-template #hints>
+  <small class="sx-hint" *ngIf="notice">{{ notice }}</small>
+  <small class="sx-hint" *ngIf="!notice && suggestsGrouping">
+    Pick a grouping to compare categories.
+  </small>
+  <small class="sx-hint" *ngIf="!notice && selectionCount && kind === 'histogram'">
+    The selection is overlaid on the full distribution.
+  </small>
+  <small class="sx-hint" *ngIf="!notice && selectionCount && kind !== 'histogram' && kind !== 'heatmap'">
+    Showing the selection only.
+  </small>
+  <small class="sx-hint" *ngIf="!notice && kind === 'heatmap'">{{ heatmapNote }}</small>
+  <small class="sx-hint" *ngIf="!notice && kind === 'embedding'">{{ embeddingNote }}</small>
+</ng-template>
+
+<!-- The detached chart. Its own non-modal, draggable, resizable window so it can be put
+     beside the spatial-omics dialog. `appendTo="body"` keeps it out of the dialog's
+     stacking context, or it would be clipped by the panel it is meant to sit next to. -->
+<p-dialog *ngIf="detached"
+          [header]="detachedTitle"
+          [visible]="true" (visibleChange)="toggleDetached()"
+          [modal]="false" [resizable]="true" [draggable]="true"
+          position="right" appendTo="body"
+          (onShow)="onDetachedWindowShown()"
+          (onResizeEnd)="onDetachedResizeEnd()"
+          [style]="{ width: '34rem', height: '30rem' }"
+          [contentStyle]="{
+            display: 'flex', flexDirection: 'column', gap: '0.25rem',
+            padding: '0.4rem 0.6rem 0.5rem', flex: '1 1 auto', minHeight: '0',
+            overflow: 'auto'
+          }"
+          styleClass="spatial-detached-dialog">
+  <div [id]="detachedDiv" class="sx-detached-plot"
+       [class.sx-plot-fixed]="hasFixedHeight"></div>
+  <ng-container *ngTemplateOutlet="hints"></ng-container>
+</p-dialog>
