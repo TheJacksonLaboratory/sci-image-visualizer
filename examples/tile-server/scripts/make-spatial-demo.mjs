@@ -304,7 +304,11 @@ const columns = [
 const manifest = {
   version: 1,
   id: ID,
-  name: 'Synthetic Visium-geometry mouse brain (demo)',
+  // The label leads with what a reader most needs to know. "Synthetic … (demo)" read as
+  // a provenance note; the expression here is spatially structured NOISE, and the real
+  // geometry and real marker-gene names are exactly what make it plausible enough to be
+  // mistaken for measurements on a shared demo.
+  name: 'SYNTHETIC · fabricated expression · Visium geometry (demo)',
   count: N,
   hasIds: true,
   radius: { mode: 'uniform', value: RADIUS_PX },
