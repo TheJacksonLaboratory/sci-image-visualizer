@@ -3,7 +3,8 @@
 > Review date: 2026-09-09  
 > Branch: `feat/add-spatial-omics-plotmode`  
 > Comparison base: `origin/main`  
-> Verdict: **FAIL — 2 critical, 4 warning, and 2 informational findings**
+> Initial verdict: **FAIL — 2 critical, 4 warning, and 2 informational findings**
+> Final disposition (2026-09-11): **PASS — all merge-blocking findings resolved**
 >
 > Response: [`codex-review-omics-response.md`](./codex-review-omics-response.md)
 
@@ -362,7 +363,7 @@ separate piece of work from the request-handling code this finding is about.
 The ownership audit was done first, as the revised finding asks, and it found five capabilities
 that sci-image-visualizer was working around rather than five files to move. All five are now in
 `napari-js` (branch `feat/renderer-owned-3d-projection-picking-styling`, version 0.14.0), with
-renderer-level tests: napari-js goes from 229 to 279 tests at the current PR head.
+renderer-level tests: napari-js went from 229 to 279 tests at that review snapshot.
 
 | Capability                             | The workaround it removes                                                                                                                                                                       |
 | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -403,16 +404,16 @@ Every one reproduced first, and each fix checked by reverting it and confirming 
 The reported measurements reproduced closely — 88.8 MB exactly, 32.9 ms against ~34, and a pick
 scan of 12.6–13.9 ms against 8.8–9.1.
 
-| Finding                         | Outcome                                                                                                                                                                                                                                                                     |
-| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Clip planes ignored             | **Fixed.** Reachable by ordinary dollying, since `Camera3D` derives near and far FROM the distance: at distance 100 a 100-unit cloud's near points return clip z ≈ -1.5e7, and below distance 50 the far side crosses z = 1. Both paths now require `0 ≤ z/w ≤ 1`.          |
-| `framingFor` ignores FOV/aspect | **Fixed.** Confirmed at 2.0 and 5.1                                                                                                                                                                                                                                         | NDC | in portrait — and the old factor was already tight in landscape (2.5 against the 2.61 the vertical half-angle needs), so it fails the corner test at 800×600 too. Distance now derives from both half-angles; the viewer supplies them. |
-| Stale `contrastLimits`          | **Fixed**, mirroring `ShapesLayer`'s existing `_contrastExplicit` — a derived window follows the values, a pinned one does not.                                                                                                                                             |
-| Picking ignores per-point style | **Fixed.** This PR introduced the incoherence: it added per-point size and alpha, then picked with a flat radius and no visibility test. `radiusAt` / `pickable`, matching `nearestPointIndex`'s existing `sizeAt`.                                                         |
-| O(N) pick scan                  | **Fixed.** `ScreenIndex` buckets the projection into a flat CSR grid: 0.066 ms against 12.6 ms, about 190×, for a 43.5 ms build — which only pays off built LAZILY, on the first pick after the projection changed. Documented, with a threshold below which it is skipped. |
-| Whole-instance style re-upload  | **Fixed.** Two buffers on two version counters: a selection click now costs 21.5 ms / 29.6 MB instead of 32.9 ms / 88.8 MB, leaving the static 59.2 MB alone.                                                                                                               |
-| Reversed near/far test comment  | **Fixed** — the comment was wrong, the test was right.                                                                                                                                                                                                                      |
-| Stale lockfile root metadata    | **Fixed** — regenerated; root now reads 0.14.0.                                                                                                                                                                                                                             |
+| Finding                         | Outcome                                                                                                                                                                                                                                                                                            |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Clip planes ignored             | **Fixed.** Reachable by ordinary dollying, since `Camera3D` derives near and far FROM the distance: at distance 100 a 100-unit cloud's near points return clip z ≈ -1.5e7, and below distance 50 the far side crosses z = 1. Both paths now require `0 ≤ z/w ≤ 1`.                                 |
+| `framingFor` ignores FOV/aspect | **Fixed.** Confirmed at absolute NDC values of 2.0 and 5.1 in portrait — and the old factor was already tight in landscape (2.5 against the 2.61 the vertical half-angle needs), so it fails the corner test at 800×600 too. Distance now derives from both half-angles; the viewer supplies them. |
+| Stale `contrastLimits`          | **Fixed**, mirroring `ShapesLayer`'s existing `_contrastExplicit` — a derived window follows the values, a pinned one does not.                                                                                                                                                                    |
+| Picking ignores per-point style | **Fixed.** This PR introduced the incoherence: it added per-point size and alpha, then picked with a flat radius and no visibility test. `radiusAt` / `pickable`, matching `nearestPointIndex`'s existing `sizeAt`.                                                                                |
+| O(N) pick scan                  | **Fixed.** `ScreenIndex` buckets the projection into a flat CSR grid: 0.066 ms against 12.6 ms, about 190×, for a 43.5 ms build — which only pays off built LAZILY, on the first pick after the projection changed. Documented, with a threshold below which it is skipped.                        |
+| Whole-instance style re-upload  | **Fixed.** Two buffers on two version counters: a selection click now costs 21.5 ms / 29.6 MB instead of 32.9 ms / 88.8 MB, leaving the static 59.2 MB alone.                                                                                                                                      |
+| Reversed near/far test comment  | **Fixed** — the comment was wrong, the test was right.                                                                                                                                                                                                                                             |
+| Stale lockfile root metadata    | **Fixed** — regenerated; root now reads 0.14.0.                                                                                                                                                                                                                                                    |
 
 napari-js goes to 308 tests (from 279). Downstream adopted the same round: the hover pick now
 uses the enlarged radius the renderer draws selected markers at, and builds a `ScreenIndex` in the
@@ -451,3 +452,33 @@ functional work, and that applies to this change too.
 | `npm run build`         | Passed                                                                 |
 | `npm run build:example` | **Passed** (was failing)                                               |
 | `npm run test:server`   | Passed: 19 tests                                                       |
+
+## Final disposition — PASS (2026-09-11)
+
+The final `napari-js` review was performed against PR #5 head
+`aa508ba2efdcd3dc6df1df77fa508bdb1d0a465a`. The exact positive `maxReach` endpoint mismatch found
+at `02dd6e6` is closed: the grid now includes the endpoint by construction, nine focused parity
+tests cover divisible and non-divisible spans on both axes and corners, and reverting the sizing
+change fails the three divisible-span cases. `ScreenIndexOptions` is also exported from the package
+root and was verified through a built-package consumer import.
+
+| Final check                                   | Result                          |
+| --------------------------------------------- | ------------------------------- |
+| `napari-js` typecheck, lint, format and build | **Passed**                      |
+| `napari-js` tests                             | **327 passed in 34 files**      |
+| GitHub CI                                     | **Passed**                      |
+| Exact positive and negative reach endpoints   | **Passed**                      |
+| `ScreenIndexOptions` public import            | **Passed**                      |
+| Review disposition                            | **PASS — approved technically** |
+
+The acceptance contract for `ScreenIndex` is canvas picking: cursor coordinates are evaluated in
+the viewport, including its boundary. Arbitrary pointer-captured coordinates outside the canvas are
+not a merge requirement for this PR. The cell-aligned final bucket can retain a thin strip of
+otherwise irrelevant centres, but the exact-distance check prevents them from becoming false picks
+for in-viewport queries; tightening that storage bound is optional follow-up work, not a correctness
+blocker.
+
+The remaining P3 service decomposition, formatting normalization, warning-budget work and
+`examples/browser-image` lint coverage remain worthwhile follow-ups. They do not change the final
+PASS disposition. Publishing `napari-js` 0.14.0 and regenerating the downstream lockfile remain
+human release actions rather than unresolved implementation findings.
