@@ -2,15 +2,14 @@
 
 > Responding to: [`codex-review-omics.md`](./codex-review-omics.md)
 > Branch: `feat/add-spatial-omics-plotmode` · Upstream: [`napari-js` PR #5](https://github.com/TheJacksonLaboratory/napari-js/pull/5)
-> PR head reviewed: `0ccc6e603953076b51f24cbd170237823c88e2c3`
-> Last updated: 2026-09-10
+> PR head reviewed: `02dd6e694f1675ede58873bae530c0aa13ae8c90` · fixes at `aa508ba`
+> Last updated: 2026-09-11
 
-Four rounds of review produced nineteen warning-level findings plus two informational findings.
-**All were real. None is disputed.** Sixteen warning-level findings are fixed — including the
-canvas-boundary regression the acceleration for the indexed-picking finding introduced — and two
-original P3 areas remain deliberately incomplete. Both informational findings are fixed.
-Publishing 0.14.0 is additionally blocked on a human action rather than on an engineering
-decision.
+Five rounds of review account for twenty warning-level findings plus three informational
+findings. **All were real. None is disputed.** Eighteen warning-level findings are fixed —
+including both `ScreenIndex` parity defects — and two original P3 areas remain deliberately
+incomplete. All three informational findings are fixed. Publishing 0.14.0 is additionally blocked
+on a human action rather than on an engineering decision.
 
 This document consolidates the responses; the resolution notes appended inline to the review
 file are the same conclusions recorded as they happened.
@@ -220,7 +219,7 @@ rather than arrays to match `nearestPointIndex`'s existing `sizeAt` — the call
 the styling in some form already and should not have to materialise a second copy per pointer
 move.
 
-### P2 · O(N) pick scan per pointer move — **Fixed** (after a boundary regression)
+### P2 · O(N) pick scan per pointer move — **Fixed** (after two parity defects)
 
 Confirmed at **12.6 ms**. `ScreenIndex` buckets the projection into a flat CSR-style grid
 (counting sort into two typed arrays — a few million small arrays is its own problem at this
@@ -263,7 +262,7 @@ for markers crossing the left, right, top, and bottom edges, plus exact width/he
 performance result is useful, but this item is not complete until the indexed and linear paths return
 the same answer for those cases.
 
-#### Round 4 resolution — **fixed**
+#### Round 4 resolution — **fixed for the reported cases**
 
 Correct, and my fault twice over: the bug, and a parity test too weak to see it. Reproduced on
 every edge before changing anything:
@@ -283,12 +282,11 @@ exact and exposed it on the right. Whether a given edge was broken depended on w
 viewport divided evenly by the cell size — an index that is accidentally correct on two edges out
 of four is the harder kind of wrong, because it survives casual testing.
 
-Fixed by giving the grid an **origin at `-margin`** and sizing it to cover the canvas plus the
-margin on both sides, rather than clamping stray centres into border buckets as suggested. Both
-reach parity; the origin shift keeps the invariant "a point is in the cell that contains it", so
-nothing depends on the viewport arithmetic and the border buckets do not accumulate distant
-points. `maxReach` is an explicit option (default 32 px); the adapter passes its own — the hover
-radius times the scale a selected marker is drawn at.
+Fixed for these cases by giving the grid an **origin at `-margin`** and sizing it to cover the
+canvas plus the margin on both sides, rather than clamping stray centres into border buckets as
+suggested. The origin shift keeps the invariant "a point is in the cell that contains it", and the
+border buckets do not accumulate distant points. `maxReach` is an explicit option (default 32 px);
+the adapter passes its own — the hover radius times the scale a selected marker is drawn at.
 
 The randomised parity test now draws centres from a box **40 px outside the canvas on every
 side**, which is precisely what it failed to do before; it catches the regression on its own.
@@ -296,7 +294,9 @@ Seven explicit edge cases cover all four edges, both exact `width`/`height` boun
 corner, plus that a centre too far out is still excluded and that a larger `maxReach` reaches
 further. Reverting the margin fails eight tests, including the randomised one.
 
-napari-js: **318 tests**, was 308.
+napari-js: **318 tests**, was 308. A fifth review then found one exact positive-margin endpoint
+these tests did not cover — recorded below rather than retroactively folded into the Round 4
+regression, because it is a distinct defect with a distinct cause.
 
 ### P2 · Whole-instance rebuild for a style-only change — **Fixed**
 
@@ -310,7 +310,7 @@ vertex buffers on two version counters (`dataVersion` / `styleVersion`) — the 
 
 The static 59.2 MB is no longer touched.
 
-### Informational — both **Fixed**
+### Round 3 informational — both **Fixed**
 
 - The picking fixture's comment had near and far backwards. The fixture and the assertions were
   right; the comment was not.
@@ -327,6 +327,107 @@ draws selected markers at (it was enlarging selected markers to 1.6× and then h
 point at the same flat radius, so the highlighted cells — the ones a reader is most likely to be
 pointing at — were the hardest to hover), and it builds a `ScreenIndex` in the existing lazy
 hover slot.
+
+---
+
+## Round 5 — `napari-js` PR #5, exact-margin follow-up (1 warning + 1 informational)
+
+The Round 4 change fixes the reported centres just outside the canvas and the exact canvas
+boundaries (`x = width`, `y = height`). A narrower asymmetry remains at the **positive outer edge
+of the configured reach** when the expanded grid span divides evenly by the cell size. This does
+not invalidate the acceleration or its ordinary edge fix, but it means the indexed and linear
+pickers are not yet behaviorally equivalent over the full documented domain.
+
+### P2 · Positive outer `maxReach` endpoint is excluded — **Fixed**
+
+Reproduced against PR head `02dd6e6` with the downstream adapter's actual reach:
+
+```text
+viewport:      800 × 600
+cell:          32
+maxReach:      16
+point centre:  (816, 100)       # width + maxReach
+cursor:        (800, 100)
+pick radius:   16
+
+linear pick:   0
+indexed count: 0
+indexed pick: -1
+```
+
+The arithmetic explains the one-sided miss:
+
+```text
+expanded width = 800 + 2 × 16 = 832
+cols           = ceil(832 / 32) = 26       # valid columns 0…25
+shifted x      = 816 - (-16) = 832
+column         = floor(832 / 32) = 26      # excluded
+```
+
+The negative endpoint `x = -16` maps to column 0 and is included. The corresponding positive
+endpoint maps one past the allocated grid, so the implementation's statement that nothing depends
+on divisibility is still too strong. The default `maxReach = 32` has the same issue for an
+800-pixel viewport: a centre at `x = 832` under a cursor at `x = 800` is excluded.
+
+The randomised overhang test cannot reliably cover an exact floating-point endpoint, and the seven
+explicit Round 4 cases stop at `x = width` / `y = height`; they do not test
+`width + maxReach` / `height + maxReach`.
+
+**Required fix:** make the positive endpoint inclusive, for example by sizing each axis with
+`floor(expandedSpan / cell) + 1`, or by explicitly mapping an exact upper endpoint into a valid
+final cell. Add parity tests for the positive right, bottom and corner endpoints, plus the negative
+endpoints to pin the intended symmetry. Until those tests pass, the correct status is that common
+canvas-edge parity passes while full `ScreenIndex` parity remains open.
+
+#### Resolution — **fixed**
+
+Correct on every point, including the one aimed at my own wording. Reproduced first:
+
+| viewport | maxReach | span / cell        | centre       | cursor       | linear | indexed |
+| -------- | -------- | ------------------ | ------------ | ------------ | ------ | ------- |
+| 800×600  | 16       | 832/32 = **26.00** | `(816, 100)` | `(800, 100)` | 0      | **-1**  |
+| 800×600  | 32       | 864/32 = **27.00** | `(832, 100)` | `(800, 100)` | 0      | **-1**  |
+| 790×600  | 16       | 822/32 = 25.69     | `(806, 100)` | `(790, 100)` | 0      | 0       |
+| 800×600  | 16       | 832/32 = 26.00     | `(-16, 100)` | `(0, 100)`   | 0      | 0       |
+
+The third row is the important one: the non-divisible span **passes**, which is exactly the
+divisibility dependence the finding says my Round 4 note denied. **That claim of mine was wrong.**
+The origin shift removed the asymmetry _between edges_; it did not make the upper endpoint
+inclusive, and those are separate properties. The finding's correction of the wording has been
+kept above rather than reverted.
+
+Sized with `floor(span / cell) + 1` as suggested, in preference to special-casing the endpoint —
+one extra cell per axis, and the inclusivity then holds by construction rather than by a branch
+that a later edit could miss.
+
+Nine parity tests: `width + maxReach` at **both** a divisible and a non-divisible viewport width,
+`height + maxReach`, `-maxReach` on each axis, both corners, the default reach, and that the first
+point beyond the reach is still excluded. Reverting to `ceil` fails three of them — precisely the
+divisible-span cases, with the non-divisible one passing either way.
+
+One test correction of my own while writing these: the corner probe first asserted a hit from the
+canvas corner to `(width + 16, height + 16)`, which is 22.6 px away and outside a 16 px radius, so
+it would have proved nothing. The cursor is offset diagonally instead.
+
+napari-js: **327 tests**, was 318.
+
+### Informational · `ScreenIndexOptions` is not exported from the package root — **Fixed**
+
+`ScreenIndexOptions` is part of the public constructor contract, but `src/index.ts` exports only
+the `ScreenIndex`, `pickLinear` and `SCREEN_INDEX_MIN_POINTS` values. Because the package exposes
+only its root entry point, a consumer cannot name the options type through a supported import.
+
+**Required fix:** add:
+
+```ts
+export type { ScreenIndexOptions } from './picking/screen-index';
+```
+
+This is API polish rather than a merge-blocking behavioral defect.
+
+**Fixed**, and verified the way the gap was found — by compiling a consumer against the built
+package: `import { ScreenIndex, type ScreenIndexOptions } from 'napari-js'` now typechecks, where
+before the type had no supported import path.
 
 ---
 
@@ -405,18 +506,25 @@ to review and harder to revert independently.
 
 Current state of both repositories.
 
-| Check                                         | Result                                                                                                                                  |
-| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `npm run typecheck`                           | Clean                                                                                                                                   |
-| `npm run lint`                                | **0 errors**, 717 warnings — unchanged from the review's own baseline, with the tile server now included and clean                      |
-| `npm test`                                    | 76 suites, **1,551 tests**                                                                                                              |
-| `npm run test:server`                         | **19 tests** (new)                                                                                                                      |
-| `npm run build`                               | Passes                                                                                                                                  |
-| `npm run build:example`                       | **Passes** — was the P0 failure                                                                                                         |
-| `napari-js` `npm test`                        | 34 files, **318 tests** (229 at 0.13.0)                                                                                                 |
-| `napari-js` typecheck · lint · format · build | Clean                                                                                                                                   |
-| `ScreenIndex` edge parity with linear picking | **Passes** — all four edges, both exact `width`/`height` boundaries, a corner, and a randomised cloud whose centres overhang the canvas |
+| Check                                         | Result                                                                                                                              |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run typecheck`                           | Clean                                                                                                                               |
+| `npm run lint`                                | **0 errors**, 717 warnings — unchanged from the review's own baseline, with the tile server now included and clean                  |
+| `npm test`                                    | 76 suites, **1,551 tests**                                                                                                          |
+| `npm run test:server`                         | **19 tests** (new)                                                                                                                  |
+| `npm run build`                               | Passes                                                                                                                              |
+| `npm run build:example`                       | **Passes** — was the P0 failure                                                                                                     |
+| `napari-js` `npm test`                        | 34 files, **327 tests** (229 at 0.13.0)                                                                                             |
+| `napari-js` typecheck · lint · format · build | Clean                                                                                                                               |
+| `ScreenIndex` ordinary edge parity            | **Passes** — all four edges, exact `width`/`height` boundaries, a corner, and a randomised cloud whose centres overhang the canvas  |
+| `ScreenIndex` outer-reach endpoints           | **Passes** — `width + maxReach` and `height + maxReach` at divisible and non-divisible spans, both negative endpoints, both corners |
+| `ScreenIndexOptions` importable by a consumer | **Passes** — verified by compiling against the built package                                                                        |
 
-Every fix above was checked by reverting it and confirming its test fails — the boundary fix
-included: reverting the margin fails eight tests, among them the randomised parity test that was
-previously too narrow to notice.
+Every fix above was checked by reverting it and confirming its test fails. Reverting the Round 4
+margin fails eight tests; reverting the Round 5 endpoint sizing to `ceil` fails three — the
+divisible-span cases only, which is the dependence the finding identified.
+
+Two of the five rounds found defects that the _previous_ round's fix introduced or left behind.
+Both times the gap was in the tests as much as the code: a randomised parity test drawn only from
+inside the viewport, then an expanded one that still could not land on an exact floating-point
+endpoint. Randomised parity is worth having, but it does not replace naming the boundaries.
