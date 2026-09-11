@@ -9,7 +9,88 @@ file was added.
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.4.0] — 2026-09-11
+
+The spatial-omics release. Two new plot modes:
+
+- **`Spatial omics`** — one marker per observation over the tissue image, coloured
+  by an annotation column or a gene, with ROI-linked distribution charts. For a
+  dataset whose 3D data is a registered volume, it draws the displayed plane's
+  anatomy with that plane's observations over it, and the toolbar's slice slider
+  scrubs depth.
+- **`Spatial omics 3D`** — the same observations as a point cloud under an orbit
+  camera, inside the dataset's reference volume, with screen-space region
+  selection and optional per-cluster **density volumes**.
+
+Both sit on a new spatial data plane (`SPATIAL_DATA_PORT`, `SpatialDataset`) that
+holds observations resident while column, feature and polygon values arrive one at
+a time. Volume and Isosurface now read the image stack and nothing else, and
+`IImageMetadata` gains **`mppZ`** so any stack that knows its slice spacing
+renders with true physical anisotropy.
+
 ### Added
+
+- **Dimensionality-reduction charts — UMAP, PCA and t-SNE, in 2D and 3D.** The
+  Distribution section gains an **Embedding** chart kind: the same observations
+  laid out by a reduction rather than by their position in the tissue. A map
+  answers "where", an embedding answers "what is like what", and reading a marker
+  panel needs both.
+
+  Whatever the dataset publishes is offered, and each derived embedding records
+  **how it was made** — the PCA it was computed from, the perplexity, the
+  iteration count, the seed — because an embedding whose parameters are unknown
+  cannot be compared with anything. PCA additionally reports the variance each
+  axis explains.
+
+  The scatter is **linked to the map both ways**: lasso the embedding to select
+  those cells on the tissue, and a class selected anywhere is highlighted here
+  too. A 3-D embedding keeps its camera across a redraw, so recolouring does not
+  throw away an orientation the reader set.
+
+- **Compute a missing t-SNE in the browser, on the GPU.** A dropped-in dataset
+  usually carries one UMAP and nothing else. Where the dataset publishes a PCA
+  but no t-SNE, the panel offers to compute one: in a Web Worker so the tab stays
+  responsive, through WebGPU where available and WebAssembly SIMD otherwise, with
+  a progress bar, a cancel button, and the backend named so a long wait has a
+  visible reason.
+
+  It runs on the PCA **scores**, not the expression matrix — 0.51 MB against
+  185 MB for a whole-transcriptome dataset — so the server reduces and the
+  browser embeds.
+
+  **Gated by size, with the cost shown before you start.** t-SNE is quadratic;
+  2,688 points measured 95 s on WebGPU, so the estimate is extrapolated from that
+  anchor and the button reads `Compute (~95s)`. Past 5,000 observations the offer
+  is withdrawn rather than left to be discovered — about 5–6 minutes is the most
+  a reader can reasonably consent to from a button, and 19,416 points would be
+  over an hour.
+
+- **A `?` beside each chart kind, and a Plotting help dialog.** Counts, the
+  heatmap and the three embeddings each answer a different question, and two of
+  them are routinely over-read — a UMAP's distances and a heatmap's unscaled
+  colours — so the caveat is part of the explanation rather than a footnote.
+
+- **Detach the whole distribution area into its own window.** Charts are read
+  beside the map, not instead of it. The detach state belongs to the area rather
+  than to each chart, so switching from a heatmap to counts to an embedding keeps
+  the window it is already in.
+
+- **Example tile server: a plain `.h5ad` is now a source, with no conversion
+  command.** CSC files are read directly; a CSR file is converted into the wire
+  format on first open and the conversion is reused while it is newer than the
+  file it came from. Dropping a file into `h5ad/` is the whole setup.
+
+- **Example tile server: PCA and t-SNE for a dataset that publishes neither.**
+  PCA is computed on first request (randomized SVD, Halko et al.); t-SNE is
+  available offline for the datasets where the browser's size gate declines.
+
+- **Example tile server: the Visium H&E brain**, an image and a published UMAP
+  together — the case that exercises registration and embeddings at once. Its
+  scale is **fitted from the 100 µm spot lattice** rather than taken from
+  `spot_diameter_fullres`, which corresponds to 65 µm on this slide and would put
+  every marker 18% out.
 
 - **A gene × class expression heatmap in the Distribution section.** Colouring the
   map by one gene answers "where is this gene"; it cannot answer "which classes
@@ -61,7 +142,7 @@ file was added.
   is also a click that does not move.
 
 - **The continuous colour scale is pickable, from the library's own colormaps.**
-  Gene expression (and any numeric column) followed the *image's* colormap, which
+  Gene expression (and any numeric column) followed the _image's_ colormap, which
   is usually a grey ramp — so the scale was chosen for the tissue and inherited by
   the measurement, with a Viridis fallback for the grey case. A `Colormap` picker
   now sits under the colour bar in the `Spatial omics` panel, offering the
@@ -112,7 +193,7 @@ file was added.
   gates the work.) Neither toggle re-frames the orbit camera.
 
   **Volume opacity** is a slider of its own, separate from the markers' opacity:
-  the volume is a backdrop, so reading the cloud or a density field *through* the
+  the volume is a backdrop, so reading the cloud or a density field _through_ the
   anatomy means turning the anatomy down without touching the data drawn over it.
   It reaches lower than the markers' slider (0.05) because a faint anatomical
   hint is a useful setting for a backdrop and a useless one for a measurement.
@@ -143,7 +224,7 @@ file was added.
   `mean(p) = Σᵢ w(p, xᵢ)·eᵢ / Σᵢ w(p, xᵢ)`. A sum conflates "many cells here"
   with "high expression here" — a dense region would glow whatever its cells were
   doing, which is the easiest way to misread a heat layer. Smoothing the numerator
-  and the denominator together (Nadaraya–Watson) spreads *where*, not *how much*.
+  and the denominator together (Nadaraya–Watson) spreads _where_, not _how much_.
 
   The denominator is also what makes emptiness expressible. Where no cell was
   measured the mean is undefined rather than zero, so the layer is **fully
@@ -161,7 +242,55 @@ file was added.
   a grey ramp the field falls back to Viridis, because the tissue underneath it is
   already grey.
 
+- **A categorical colour source now charts, as counts per category.** The
+  distribution section charts whatever the map is coloured by, and a categorical
+  column used to get a notice instead of a chart — which for the ABC atlas is
+  every column anyone reaches for first (`class`, `subclass`, `neurotransmitter`,
+  `parcellation_division`, `brain_section_label`; the dataset serves exactly one
+  continuous column). A histogram of a category _code_ would be meaningless, since
+  the codes are labels and not magnitudes — but "how many cells per class" is a
+  real question, and the one the legend implies without answering.
+
+  Horizontal bars, because taxonomy labels are long; sorted by count, because rank
+  is what the chart is read for; in the map's own category colours, so the chart
+  and the render cannot disagree. Ties keep category order, so bars do not
+  reshuffle between two datasets that happen to tie. Past 25 categories the tail
+  folds into one `other (N categories)` bar rather than being dropped — 338
+  subclasses do not fit a readable axis, but showing 25 of them silently would
+  misstate the whole. With a selection the bars show it against the total,
+  overlaid. The kind selector follows the subject: Counts for a categorical one,
+  Histogram / Violin / Box for a continuous one.
+
 ### Changed
+
+- **napari-js 0.14.0**, which now owns the renderer concerns this adapter used to
+  work around: 3-D projection and depth-aware picking, per-point alpha and size on
+  the 3-D points layer, and an explicit camera-framing policy. Five workarounds
+  went upstream and were deleted here — including a duplicated projection written
+  twice in two files, and a second points layer that existed only because the
+  layer had one opacity for every point.
+
+- **The example tile server has no Python.** Embeddings are served from the Zarr
+  store directly, and what has to be computed is computed in Node — the PCA port
+  to jax-js is 8.5x faster than the hand-written implementation it replaces, and
+  t-SNE on jax-js takes a Visium dataset from 39 minutes to 95 seconds. The five
+  `.py` scripts are gone; the library is a browser environment and its example
+  server should not need an interpreter to set up.
+
+- **The gene pickers hand over 500 options, not all 18,078.** Opening a dropdown
+  with the whole transcriptome in it stalled the UI for seconds. Matches are
+  ranked prefix-first, mirroring the server's own ranking, and anything already
+  selected is kept regardless of the current query.
+
+- **The spatial routes revalidate instead of caching for an hour.** `no-cache`
+  means "check before reuse", not "do not cache", so a client keeps its copy and
+  gets a cheap 304 while the data is unchanged. With the previous hour-long
+  window, a regenerated bundle stayed invisible to an already-open page — which
+  reads as a bug in the app rather than as a stale cache. Tile routes keep their
+  long `max-age`: pixels for a pyramid level do not change.
+
+- `spatial-charts` now lives inside `spatial-controls`, which is the only thing
+  that uses it.
 
 - **napari-js 0.12.0.** Its `acquireDevice` now asks for the adapter's own buffer
   limits instead of accepting the WebGPU spec defaults, which lifts this viewer's
@@ -221,6 +350,40 @@ file was added.
 
 ### Fixed
 
+- **Regions are drawable on a dataset whose world is not pixels.** Three
+  constants in the region overlay assumed one world unit was one screen pixel, so
+  on a micrometre-scale section the minimum drag never registered and no ROI could
+  be created at all. The snap quantum and the drag thresholds are now derived from
+  the world-per-canvas-pixel scale.
+
+- **The t-SNE worker ships as a self-contained bundle.** It was the only worker
+  carrying a _dynamic_ import, which forces a second chunk — and a consuming Vite
+  build defaults workers to IIFE, which cannot code-split. The staged package
+  therefore failed every consumer production build. The bundler now inlines that
+  dependency and asserts no dynamic import survives, and the example build is a
+  CI gate so it cannot regress silently.
+
+- **A vector fetched for one dataset can no longer land in the next one's cache.**
+  Clearing a dataset cannot cancel an HTTP request, and the cache keys are
+  logical, so a gene vector arriving after a switch was committed under a key the
+  new dataset reads. Two datasets sharing a gene name is the ordinary case, so the
+  result was one dataset's expression drawn over another's cells.
+
+- **A t-SNE run is abandoned properly on cancel, dataset switch and teardown.**
+  Terminating the worker used to leave the awaiting promise pending for ever; a
+  dataset could change before the run existed to terminate; and closing the panel
+  left a worker computing for nobody.
+
+- **The charts re-fit when the panel is resized.** They are drawn into a dialog the
+  reader can drag wider, and Plotly does not reflow on its own — so a resized panel
+  left the plot at its old size, clipped or floating in white space. Driven by the
+  dialog's resize-END event rather than a `ResizeObserver`: observing the host fired
+  continuously through the drag, which re-laid out the plot on every frame of it.
+
+- **The example server re-checks which source owns a dataset id.** It remembered
+  the first answer for the life of the process, so a bundle generated later never
+  took over from the live source it was meant to override.
+
 - **A region drawn in the 3D cloud selected the wrong cells while a section was
   isolated.** The screen projection the ROI selection reads is indexed by
   observation, but it was walked in DRAW order — and once the section control
@@ -251,49 +414,6 @@ file was added.
   undone. The camera now changes only through the toolbar's camera tools and by
   dragging or wheeling on the canvas. 2D was already correct — it fits once and
   never again.
-
-
-## [0.4.0] — 2026-09-02
-
-The spatial-omics release. Two new plot modes:
-
-- **`Spatial omics`** — one marker per observation over the tissue image, coloured
-  by an annotation column or a gene, with ROI-linked distribution charts. For a
-  dataset whose 3D data is a registered volume, it draws the displayed plane's
-  anatomy with that plane's observations over it, and the toolbar's slice slider
-  scrubs depth.
-- **`Spatial omics 3D`** — the same observations as a point cloud under an orbit
-  camera, inside the dataset's reference volume, with screen-space region
-  selection and optional per-cluster **density volumes**.
-
-Both sit on a new spatial data plane (`SPATIAL_DATA_PORT`, `SpatialDataset`) that
-holds observations resident while column, feature and polygon values arrive one at
-a time. Volume and Isosurface now read the image stack and nothing else, and
-`IImageMetadata` gains **`mppZ`** so any stack that knows its slice spacing
-renders with true physical anisotropy.
-
-### Added
-
-- **A categorical colour source now charts, as counts per category.** The
-  distribution section charts whatever the map is coloured by, and a categorical
-  column used to get a notice instead of a chart — which for the ABC atlas is
-  every column anyone reaches for first (`class`, `subclass`, `neurotransmitter`,
-  `parcellation_division`, `brain_section_label`; the dataset serves exactly one
-  continuous column). A histogram of a category *code* would be meaningless, since
-  the codes are labels and not magnitudes — but "how many cells per class" is a
-  real question, and the one the legend implies without answering.
-
-  Horizontal bars, because taxonomy labels are long; sorted by count, because rank
-  is what the chart is read for; in the map's own category colours, so the chart
-  and the render cannot disagree. Ties keep category order, so bars do not
-  reshuffle between two datasets that happen to tie. Past 25 categories the tail
-  folds into one `other (N categories)` bar rather than being dropped — 338
-  subclasses do not fit a readable axis, but showing 25 of them silently would
-  misstate the whole. With a selection the bars show it against the total,
-  overlaid. The kind selector follows the subject: Counts for a categorical one,
-  Histogram / Violin / Box for a continuous one.
-
-### Fixed
 
 - **Expanding `Distribution` scrolls the chart into view.** The panel is taller
   than the viewport once that section is open and the chart is its last row, so
@@ -348,7 +468,7 @@ renders with true physical anisotropy.
   `spatial-density.ts`:
 
   - the kernel is **anisotropic** — the default σ is 1.5 grid voxels per axis, and
-    the grid's z voxel *is* the section spacing, so σ along z clears one section gap
+    the grid's z voxel _is_ the section spacing, so σ along z clears one section gap
     while staying tight in plane. An isotropic kernel leaves one disc per section:
     a sampling artefact that looks like biology;
   - the field is **coverage-normalised** along z (Nadaraya–Watson over the sampled
@@ -378,7 +498,7 @@ renders with true physical anisotropy.
 
 - **The 2D `Spatial omics` view slices a 3D dataset.** Over a dataset whose image
   is its registered volume, the view draws the displayed plane's anatomy with
-  *that plane's* observations over it, and the toolbar carries the Image view's
+  _that plane's_ observations over it, and the toolbar carries the Image view's
   live slice **slider** — scrub, and the cells move with the section. Previously
   the whole depth of the specimen piled onto whatever section was showing.
 
@@ -404,7 +524,7 @@ renders with true physical anisotropy.
   slice bar scrubbing depth. The volume is a 3D image delivered in one file, so
   this is what such a dataset actually has to show, and everything image-shaped
   (contrast window, colormaps, region tools, the physical scale bar) works
-  because the volume genuinely *is* the image. The 3D cloud stays one menu pick
+  because the volume genuinely _is_ the image. The 3D cloud stays one menu pick
   away.
 
   Fixes a real symptom: with nothing published for such a dataset, the Image view
@@ -430,9 +550,9 @@ renders with true physical anisotropy.
   single plane and have no z to render, so the mode stays hidden for them.
 
   A dataset with no `imageRef` and no volume selects this mode automatically:
-  it has nothing to draw observations *over* — a cloud registered into an
+  it has nothing to draw observations _over_ — a cloud registered into an
   anatomical frame has coordinates but no one section — so leaving the host on
-  an Image view would show an empty canvas. One that *does* carry a volume opens
+  an Image view would show an empty canvas. One that _does_ carry a volume opens
   on the Image view over that volume's slices instead (below).
 
   Two constraints come from the 3D points layer having no per-point colour
@@ -446,7 +566,7 @@ renders with true physical anisotropy.
   - **A selection cannot be an alpha ramp.** The layer has one opacity for all
     points, so the selected subset becomes its own layer at full opacity while
     the parent cloud drops to the muted level — reading the way the 2D
-    highlight-vs-mute does. Point size is in *screen* pixels here, not data
+    highlight-vs-mute does. Point size is in _screen_ pixels here, not data
     units, which is the layer's unit.
 
 - **A reference volume under the 3D cloud.** `SpatialDataset.volume` +
@@ -458,14 +578,14 @@ renders with true physical anisotropy.
 
   napari-js centres a volume's box on the world origin and `VolumeLayer` has no
   translate, so the contract puts the volume's near corner at the coordinate
-  origin and the renderer offsets the *points* by half the box. Both the cloud
+  origin and the renderer offsets the _points_ by half the box. Both the cloud
   and the selected-subset layer take that offset; a volume that fails to load
   costs the backdrop, not the data.
 
 - **Observations survived the image they were drawn over.** napari's image view
   CLEARS the whole layer list on every render, so each slice re-render took the
   marker layer with it — a scrubbed plane came up with no observations on it at
-  all. The markers are now rebuilt *after* the render rather than before it (drawn
+  all. The markers are now rebuilt _after_ the render rather than before it (drawn
   first, they were wiped by the very image meant to sit under them), and a cached
   layer handle that is no longer in the scene is treated as absent instead of
   mutated in place, which also covers a re-render from a contrast or colormap
@@ -475,7 +595,7 @@ renders with true physical anisotropy.
 - **Volume and Isosurface read the image stack, and only the image stack.** They
   had grown a second voxel source — the spatial dataset's registered volume,
   fetched through `SPATIAL_DATA_PORT` and preferred over the loaded image. That is
-  gone: a 3D omics dataset reaches these modes because its volume is *published as*
+  gone: a 3D omics dataset reaches these modes because its volume is _published as_
   a grayscale z-stack image, so there is one voxel path, and the plot-type gates go
   back to being about the loaded image and nothing else.
 
@@ -689,7 +809,7 @@ renders with true physical anisotropy.
   that has no single reference plane.
 
 - **Fixed: the point-size and opacity sliders rendered as bare handles** — small
-  circles that read as radio buttons. PrimeNG puts `styleClass` on its *inner*
+  circles that read as radio buttons. PrimeNG puts `styleClass` on its _inner_
   `.p-slider` div, so styling that left the `<p-slider>` HOST element at its
   default `display: inline`, where it ignores flex sizing and collapses; only the
   round handle was left to see. The hosts are now sized by element selector and
@@ -726,7 +846,7 @@ renders with true physical anisotropy.
 
   The chart's subject is the map's colour source rather than an independent
   picker, so the two cannot disagree about what is being shown. It follows the
-  selection: the histogram overlays *Selected* on the full distribution (that
+  selection: the histogram overlays _Selected_ on the full distribution (that
   comparison is the point of linking them), while violin and box narrow to it —
   a violin per category per selection state is unreadable. Violin and box split
   by any categorical column, in the same colours the map uses.
@@ -747,7 +867,7 @@ renders with true physical anisotropy.
 - **Spatial-omics selection.** `SpatialSelectionStore` holds the selected
   observations; `spatial-selection.ts` computes them. Selecting is driven from
   the **existing ROI tools** — rectangle, polygon, freehand, magic wand, brush —
-  so no new canvas interaction was added: the controls panel's *Select from ROIs*
+  so no new canvas interaction was added: the controls panel's _Select from ROIs_
   button tests every observation against the union of the drawn regions. Legend
   rows are also clickable (click again to clear).
 
@@ -821,6 +941,7 @@ renders with true physical anisotropy.
     as a ruler, and derives `total_counts` / `n_genes_by_counts` — a raw table
     has only `array_row`/`array_col`/`in_tissue`/`spot_id`, nothing worth
     colouring by.
+
   - **Segmentation stores** (Visium HD, and by extension Xenium) are supported
     alongside spot stores. These keep one table per segmentation and have an
     **empty `obsm`**, so centroids, per-cell radii and the outlines all come from
@@ -839,6 +960,7 @@ renders with true physical anisotropy.
     `fill_value`** (a single-region table has no `region/codes` chunk, which the
     reader previously treated as an error), and the pyramid level is **named by
     the multiscales metadata** — `0` for Visium, `s0` for HD.
+
   - **Derived `cluster` column** (`--cluster K`, default 8) — k-means on
     log1p-normalised expression, because the sandbox stores are raw: their only
     categorical is `in_tissue`, which is constant once out-of-tissue rows are
@@ -858,6 +980,7 @@ renders with true physical anisotropy.
     It is a **demo-data convenience, not an analysis tool**: the column carries a
     `description` saying so, and `<spatial-controls>` now surfaces column
     descriptions so a derived column cannot read as measured data.
+
   - Columns that carry no encoding are dropped: identifiers (a distinct integer
     per observation, e.g. `spot_id`) and columns constant after filtering
     (`in_tissue`).
@@ -870,6 +993,14 @@ renders with true physical anisotropy.
     into the tiled pyramid the server serves — the no-`vips` counterpart to
     `make-cog.mjs`.
 
+### Security
+
+- **Example tile server: closed a path traversal on the tile routes.** The image
+  id arrives inside a client-supplied token, and its validation pattern accepted
+  the id `..` — which `path.join` resolved to the parent of the configured COG
+  directory. Ids now require a leading alphanumeric, and the resolved path is
+  additionally confirmed to be inside the resolved root. Route-level tests plant a
+  file outside the root and prove it cannot be read.
 
 ## [0.3.3] — 2026-08-31
 
@@ -901,12 +1032,12 @@ Backfilled: 0.3.3 was published without an entry.
   prototype, and the renderers disagreed about whether that is acceptable:
   `Region.getShape()` (Plotly) and the napari overlay duck-type the bounds,
   while the OpenSeadragon overlay discriminates with `bounds instanceof
-  Rectangle`. So a JSON region drew in Heatmap mode and silently vanished in
+Rectangle`. So a JSON region drew in Heatmap mode and silently vanished in
   Image mode.
 
   `instanceof` also gates the store's geometry de-duplication, `moveRegion`,
   and the GeoJSON export, so the same regions were undraggable, re-appended on
-  every repeat, and missing from a save — in *every* mode, unreported because
+  every repeat, and missing from a save — in _every_ mode, unreported because
   they were at least visible.
 
   `RegionStore` now normalizes on the way in (`setRegions`, `addRegion`,
@@ -949,7 +1080,7 @@ Backfilled: 0.3.1 was published without an entry.
   not from this package.
 
   What made the coupling small was that the contracts were already clean. The
-  only thing pulling either package in was the *default factory* on
+  only thing pulling either package in was the _default factory_ on
   `INSTANCE_SEGMENTER` / `SEMANTIC_SEGMENTER`, which fell back to an in-library
   service. Both tokens now have **no default**: unprovided means the capability
   is absent.
@@ -1009,7 +1140,7 @@ Backfilled: 0.3.1 was published without an entry.
 - **Purpose-built icons for the two SAM prompt tools**, `sam-box-prompt.svg` and
   `sam-point-prompt.svg`. The box tool wore a generic "crop a photo" glyph (a
   house behind a dashed marquee) and the point tool a stock cursor-with-sparkles;
-  neither said *segmentation*, and nothing tied the two tools together.
+  neither said _segmentation_, and nothing tied the two tools together.
 
   Both show the same subject — an outlined blob holding three cells, which is
   `cells.svg`'s vocabulary — so the only difference between the icons is the
@@ -1032,7 +1163,7 @@ Backfilled: 0.3.1 was published without an entry.
   rather than swinging it around the canvas origin. Stacking is document order —
   the cursor paints over the blob — rather than the winding interactions a single
   path would need. One thing stays merged: a ring (frame, blob) keeps its outer
-  and inner contour in one path, because the inner contour *is* its hole and
+  and inner contour in one path, because the inner contour _is_ its hole and
   separating them turns the ring into a slab.
 
   A thin gap separates the cursor and rays from what they overlap. It is a hole
@@ -1046,7 +1177,7 @@ Backfilled: 0.3.1 was published without an entry.
 
   The paths use **nonzero** winding with inner contours reversed, rather than the
   `evenodd` the other icons use. That is load-bearing:
-  the arrow overlaps the blob outline, and under evenodd an overlap *cancels* —
+  the arrow overlaps the blob outline, and under evenodd an overlap _cancels_ —
   an earlier attempt rendered a checkerboard where the two crossed. Under nonzero
   the overlap fuses while the holes still read (hole = +1−1 = 0; a cell inside it
   = +1; arrow over the ring = +2). Rings are explicit outer+inner contours, so
