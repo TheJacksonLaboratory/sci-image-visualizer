@@ -1,6 +1,15 @@
 // Headless smoke test: build the example first (`npm run build:example`), then
 // `node examples/browser-image/smoke.mjs`. Serves the built dist and loads it in
 // chromium, failing on any console/page error or if <visualizer> doesn't render.
+//
+// One exception, and it is deliberate: a 4xx from the configured TILE SERVER on a
+// `spatial/` path is TOLERATED. The example's spatial gallery is data-driven — it asks
+// `/spatial/datasets` at startup and shows whatever the server reports, catching a failure
+// and simply offering no spatial entries. A tile server older than the spatial data plane
+// is therefore a SUPPORTED configuration, not a broken build; the browser still logs the
+// 404 as a console error, and failing on it blocks the Pages deploy over something the
+// application handles by design. Anything else from that origin, and any 4xx from the
+// locally served bundle, still fails.
 // Catches white-page runtime failures (JIT-unavailable, CJS-interop, wrong Pages
 // base) that a green build hides. Honors PAGES_BASE so it probes the SAME subpath
 // the public deploy uses.
@@ -13,6 +22,19 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const PORT = 4173;
 const BASE = process.env.PAGES_BASE || '/';
 const URL_ = `http://localhost:${PORT}${BASE}`;
+/** Origin of the tile server the built example talks to, if one is configured. */
+const TILE_ORIGIN = (() => {
+  try { return new URL(process.env.VITE_TILE_SERVER ?? '').origin; } catch { return null; }
+})();
+
+/** A spatial-data-plane request the example is designed to survive losing. */
+function toleratedSpatial(url) {
+  if (!TILE_ORIGIN || !url) return false;
+  try {
+    const u = new URL(url);
+    return u.origin === TILE_ORIGIN && /(^|\/)spatial(\/|$)/.test(u.pathname);
+  } catch { return false; }
+}
 
 const preview = spawn(
   'npx', ['vite', 'preview', '--config', config, '--port', String(PORT), '--strictPort'],
@@ -34,7 +56,15 @@ try {
   const browser = await chromium.launch();
   const page = await browser.newPage();
   const errors = [];
-  page.on('console', (m) => m.type() === 'error' && errors.push('console: ' + m.text()));
+  const tolerated = [];
+  page.on('console', (m) => {
+    if (m.type() !== 'error') return;
+    // Playwright reports the failing request's URL as the message's location, which is
+    // what lets an expected spatial 404 be told apart from a real script error.
+    const at = m.location?.()?.url ?? '';
+    if (toleratedSpatial(at)) { tolerated.push(at); return; }
+    errors.push('console: ' + m.text());
+  });
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   const bad = [];
   page.on('response', (r) => {
@@ -101,6 +131,12 @@ try {
   await page.screenshot({ path: '/tmp/smoke.png', fullPage: true }).catch(() => {});
   await browser.close();
   console.log(`base: ${BASE} | rendered: ${rendered} | tiles: ${tiles} | dropdown: ${overlayOpts} | resize Δ: ${resizeDelta}px | h-overflow: ${hOverflow}px | col skew: ${colSkew}px | dcm tiles: ${dcmTiles} | dcm slice ok: ${dcmSliceOk}`);
+  if (tolerated.length) {
+    // Reported, not silenced: the demo will show no spatial-omics folder until the tile
+    // server serves these routes, and that is worth seeing in the build log.
+    console.log('TOLERATED (tile server has no spatial data plane):\n  '
+      + [...new Set(tolerated)].join('\n  '));
+  }
   if (errors.length) { console.log('ERRORS:\n  ' + errors.join('\n  ')); failed = true; }
   if (bad.length) { console.log('BAD RESPONSES (missing assets):\n  ' + [...new Set(bad)].join('\n  ')); failed = true; }
   if (!rendered) { console.log('FAIL: <visualizer> did not render'); failed = true; }
