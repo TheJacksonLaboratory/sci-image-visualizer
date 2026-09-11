@@ -2,14 +2,15 @@
 
 > Responding to: [`codex-review-omics.md`](./codex-review-omics.md)
 > Branch: `feat/add-spatial-omics-plotmode` · Upstream: [`napari-js` PR #5](https://github.com/TheJacksonLaboratory/napari-js/pull/5)
-> PR head reviewed: `02dd6e694f1675ede58873bae530c0aa13ae8c90` · fixes at `aa508ba`
+> PR head reviewed: `aa508ba2efdcd3dc6df1df77fa508bdb1d0a465a`
 > Last updated: 2026-09-11
+> Final disposition: **PASS — all merge-blocking findings resolved**
 
 Five rounds of review account for twenty warning-level findings plus three informational
 findings. **All were real. None is disputed.** Eighteen warning-level findings are fixed —
 including both `ScreenIndex` parity defects — and two original P3 areas remain deliberately
-incomplete. All three informational findings are fixed. Publishing 0.14.0 is additionally blocked
-on a human action rather than on an engineering decision.
+incomplete. All three informational findings are fixed. `napari-js` 0.14.0 is released and
+published, so this branch now builds against a real dependency rather than a staged one.
 
 This document consolidates the responses; the resolution notes appended inline to the review
 file are the same conclusions recorded as they happened.
@@ -428,6 +429,31 @@ This is API polish rather than a merge-blocking behavioral defect.
 **Fixed**, and verified the way the gap was found — by compiling a consumer against the built
 package: `import { ScreenIndex, type ScreenIndexOptions } from 'napari-js'` now typechecks, where
 before the type had no supported import path.
+
+---
+
+## Final review disposition — **PASS**
+
+Codex re-reviewed PR #5 at `aa508ba`, checked the updated response, and reran the complete
+`napari-js` Node 22 validation path. Typecheck, lint, all 327 tests in 34 files, formatting and the
+production build pass locally; the live GitHub CI check is green. The exact positive endpoint
+reproduction now returns the same point from the indexed and linear pickers, and the public options
+type is present in the generated root declarations.
+
+The final review also examined two narrower observations around the last grid bucket:
+
+- `ScreenIndex` is accepted here as a **canvas-picking** index. Its parity guarantee applies to
+  cursor coordinates inside the viewport, including the viewport boundary. Arbitrary pointer-capture
+  excursions outside the canvas are not part of this PR's acceptance contract.
+- `floor(span / cell) + 1` can retain centres in the unused remainder of its last cell. For an
+  in-viewport cursor and a pick radius no larger than `maxReach`, the exact-distance check prevents
+  those centres from becoming false picks. An explicit storage-bound check could reduce that padding,
+  but it is an optional optimization rather than a correctness or merge blocker.
+
+The final disposition is therefore **PASS**. No further `napari-js` implementation change is
+required by this review before approval. The P3 decomposition and toolchain cleanup listed below
+remain independent follow-up work in `sci-image-visualizer`; publishing 0.14.0 remains a human
+release step.
 
 ---
 
