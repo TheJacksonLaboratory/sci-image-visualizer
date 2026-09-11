@@ -5,7 +5,7 @@
   "version": "0.0.0",
   "description": "Lightweight example server for @jax-data-science/sci-image-visualizer: the tiled (Mode A) image path over tiles/info + tile + zoom/region, plus the spatial-omics data plane (SpatialDataPort) served LIVE from SpatialData Zarr stores in ./stores.",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.15.0"
   },
   "scripts": {
     "test": "node --test test/*.test.mjs",
