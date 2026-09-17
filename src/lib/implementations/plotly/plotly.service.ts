@@ -31,11 +31,8 @@ import { PlotType, PLOT_TYPE_DESCRIPTORS, PlotTypeDescriptor } from '../../contr
 import {
   PLOTLY_PLOT_TYPE_IMPLS,
   PlotlyPlotTypeImpl,
-  SURFACE_MAX_SAMPLES,
   TraceBuildInput,
-  downsampleMatrix,
-  strideFor,
-  toScalarMatrix,
+  prepareSurfaceGrid,
 } from './plotly-trace-builders';
 import { IVisualizer, IntensityProfile, IIsosurfaceControls, IIntensityControls } from '../../contracts/visualizer.contract';
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
@@ -486,18 +483,9 @@ export class PlotlyService implements IVisualizer {
       // scalar mode handing Plotly the FULL preview grid (~1000² ≈ 1M vertices);
       // CONTOUR caps at 400/axis and SCATTER3D / ISOSURFACE at 40-48, precisely
       // because a whole-preview grid is too much for the renderer.
-      //
-      // One stride for both axes, not strideFor() per axis: this trace carries no
-      // x0/dx/y0/dy, so the mesh sits on an implicit index grid and an uneven
-      // stride would silently change its proportions.
-      const scalar = toScalarMatrix(dataset);
-      const rows = scalar.length;
-      const cols = rows > 0 ? scalar[0].length : 0;
-      const stride = Math.max(
-        strideFor(rows, SURFACE_MAX_SAMPLES),
-        strideFor(cols, SURFACE_MAX_SAMPLES));
+      // See prepareSurfaceGrid for why one stride covers both axes.
       const trace = {
-        z: downsampleMatrix(scalar, stride, stride),
+        z: prepareSurfaceGrid(dataset),
         type: 'surface',
         // hoverinfo: 'none',
         colorscale: this.store.currentColormap().data.value,

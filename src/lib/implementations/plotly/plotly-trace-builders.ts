@@ -19,8 +19,10 @@ import { bt601Luminance } from '../../contracts/intensity';
  * `PLOTLY_PLOT_TYPE_IMPLS`, and add a descriptor in `contracts/plot-type.ts`.
  *
  * The original HEATMAP/SURFACE/RGB types intentionally keep their dedicated
- * renderers in `PlotlyService` (they are also reused by the high-def zoom
- * re-fetch path), so they are NOT registered here.
+ * renderers in `PlotlyService`, so they are NOT registered here. Note the
+ * high-def zoom re-fetch reuses only `plotHeatmap` and `plotRGBHeatmap` (see
+ * `triggerZoom`): for a non-registry type it picks one of those two by
+ * `isGrayscale`, so SURFACE is never re-rendered through the zoom path.
  */
 
 /** Normalised input for a trace builder. Frames are per-z-plane matrices:
@@ -109,6 +111,27 @@ const CONTOUR_MAX_SAMPLES = 400;
  *  mode ever asks Plotly's gl3d renderer for. Matches CONTOUR deliberately: both
  *  are whole-image derived views of the same preview. */
 export const SURFACE_MAX_SAMPLES = 400;
+
+/**
+ * The `z` matrix a SURFACE trace is given: projected to scalars, then capped.
+ *
+ * <p>This is the whole composition `plotSurface` applies, kept here as one
+ * function so the service and its tests exercise the same code rather than two
+ * copies of the same recipe.
+ *
+ * <p>One stride for both axes, deliberately not {@link strideFor} per axis: a
+ * surface trace carries no `x0`/`dx`/`y0`/`dy`, so the mesh sits on an implicit
+ * index grid and an uneven stride would silently change its proportions.
+ */
+export function prepareSurfaceGrid(frame: any[]): number[][] {
+  const scalar = toScalarMatrix(frame);
+  const rows = scalar.length;
+  const cols = rows > 0 ? scalar[0].length : 0;
+  const stride = Math.max(
+    strideFor(rows, SURFACE_MAX_SAMPLES),
+    strideFor(cols, SURFACE_MAX_SAMPLES));
+  return downsampleMatrix(scalar, stride, stride);
+}
 
 /** Every `sx`-th column / `sy`-th row of a scalar matrix. */
 export function downsampleMatrix(matrix: number[][], sx: number, sy: number): number[][] {
