@@ -76,8 +76,23 @@ function toScalarFrame(frame: any[], isGrayscale: boolean): number[][] {
 }
 
 /** Even stride that keeps an axis under `maxSamples` sample points. */
-function strideFor(length: number, maxSamples: number): number {
+export function strideFor(length: number, maxSamples: number): number {
   return Math.max(1, Math.ceil(length / maxSamples));
+}
+
+/**
+ * Project a frame to a scalar matrix whatever shape its cells are: `[r, g, b]`
+ * triplets become BT.601 luminance, scalars pass through. Unlike
+ * {@link toScalarFrame} this does not need to be told which it is — it probes
+ * the first cell — so a caller that only has the frames (the SURFACE renderer in
+ * `PlotlyService`) cannot desynchronise from a stale `isGrayscale` flag and hand
+ * Plotly `[r, g, b]` arrays where it expects numbers.
+ */
+export function toScalarMatrix(frame: any[]): number[][] {
+  if (!frame?.length || !Array.isArray(frame[0]) || !Array.isArray(frame[0][0])) {
+    return frame as number[][];
+  }
+  return frame.map((row: any[]) => row.map(luminance));
 }
 
 // ── builders ─────────────────────────────────────────────────────────────
@@ -88,8 +103,15 @@ function strideFor(length: number, maxSamples: number): number {
  *  interpolate, so a coarser grid looks the same while rendering near-instantly. */
 const CONTOUR_MAX_SAMPLES = 400;
 
+/** Max cells per axis the SURFACE mesh is downsampled to. A surface is a visual
+ *  height field, not a measurement, so a coarser grid reads the same — while the
+ *  full preview grid (~1000² ≈ 1M vertices) is the one grid size no other scalar
+ *  mode ever asks Plotly's gl3d renderer for. Matches CONTOUR deliberately: both
+ *  are whole-image derived views of the same preview. */
+export const SURFACE_MAX_SAMPLES = 400;
+
 /** Every `sx`-th column / `sy`-th row of a scalar matrix. */
-function downsampleMatrix(matrix: number[][], sx: number, sy: number): number[][] {
+export function downsampleMatrix(matrix: number[][], sx: number, sy: number): number[][] {
   if (sx <= 1 && sy <= 1) return matrix;
   const out: number[][] = [];
   for (let r = 0; r < matrix.length; r += sy) {
