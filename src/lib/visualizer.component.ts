@@ -632,7 +632,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     const builtIn = this.plotService.getPlotTypeDescriptors()
       .filter((d) => curated(d) && passesGates(d));
     // Contributed modes come after every built-in one, under the same label rule
-    // and their own stack/grayscale gates. A mode also needs whatever its base
+    // and their own stack/grayscale/spatial gates. A mode also needs whatever its base
     // view needs (pixels, a 3D-capable backend), so the base type's gates apply
     // too — a contributed Image-based mode goes wherever Image goes.
     const contributed: PlotTypeOption[] = [];
@@ -640,6 +640,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       if (!curated(d)) continue;
       if (d.requiresStack && !isStack) continue;
       if (d.requiresGrayscale && !isGrayscale && !isMultichannel) continue;
+      if (d.requiresSpatialData && !this.hasSpatialDataset) continue;
+      if (d.requiresSpatial3d && !this.hasSpatial3dDataset) continue;
       const base = getPlotTypeDescriptor(d.baseType);
       if (base && passesGates(base)) contributed.push(contributedPlotTypeOption(d, base));
     }
@@ -2206,6 +2208,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       console.warn(`[visualizer] unknown plot type '${selected}' — showing '${PlotType.IMAGE}' instead.`);
       selected = PlotType.IMAGE;
     }
+    // An explicit choice retries a mode whose earlier cleanup failed; only
+    // automatic re-activations (re-render, image switch) fall back for that.
+    this.plotModes.clearCleanupFailures();
     // Whatever was selected before, a contributed session ends before the next
     // mode draws. (Re-selecting the same contributed mode re-plots, so it gets a
     // fresh session too.)

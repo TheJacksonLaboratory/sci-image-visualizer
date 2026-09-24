@@ -267,6 +267,27 @@ describe('contributed plot types — the selector', () => {
     expect(types(component)).toContain('stack');
   });
 
+  it('applies requiresSpatialData and requiresSpatial3d to contributed modes', () => {
+    const spatial = dianne();
+    spatial.descriptor = { ...spatial.descriptor, type: 'spatial', requiresSpatialData: true };
+    const spatial3d = dianne();
+    spatial3d.descriptor = { ...spatial3d.descriptor, type: 'spatial3d', requiresSpatial3d: true };
+    const { component } = harness([spatial, spatial3d]);
+    const c = component as any;
+    expect(types(component)).not.toContain('spatial');
+    expect(types(component)).not.toContain('spatial3d');
+
+    c.hasSpatialDataset = true;
+    c.spatialDatasetHasPixels = true; // a tissue image under the observations
+    c.computePlotTypeOptions();
+    expect(types(component)).toContain('spatial');
+    expect(types(component)).not.toContain('spatial3d');
+
+    c.hasSpatial3dDataset = true;
+    c.computePlotTypeOptions();
+    expect(types(component)).toContain('spatial3d');
+  });
+
   it('hides an Image-based mode wherever Image itself is hidden (a spatial dataset without pixels)', () => {
     const { component } = harness([dianne()]);
     (component as any).hasSpatialDataset = true;
@@ -373,6 +394,16 @@ describe('contributed plot types — routing and lifecycle', () => {
     imageInfo$.next(infoFor('b.tif'));
     stale.finished(false, 'stale');
     expect(mode.activate).not.toHaveBeenCalled();
+  });
+
+  it('an explicit selection clears recorded cleanup failures before re-activating', () => {
+    const { component } = harness([dianne()]);
+    const modes = (component as any).plotModes;
+    const clear = jest.spyOn(modes, 'clearCleanupFailures');
+    const deactivate = jest.spyOn(modes, 'deactivate');
+    component.onSelectPlotType('dianne');
+    expect(clear).toHaveBeenCalled();
+    expect(clear.mock.invocationCallOrder[0]).toBeLessThan(deactivate.mock.invocationCallOrder[0]!);
   });
 
   it('falls back to Image for a stale contributed id (its provider is gone)', () => {

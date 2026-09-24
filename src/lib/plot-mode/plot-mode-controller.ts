@@ -107,6 +107,10 @@ export class PlotModeController {
    *  tell it has been superseded. */
   private generation = 0;
   private readyFrame: number | null = null;
+  /** Contributions whose last cleanup (panel teardown / `deactivate()`) threw or
+   *  rejected. Their next automatic re-activation (base re-render, image switch)
+   *  falls back to the base type instead; an explicit selection clears the mark. */
+  private readonly failedCleanup = new Map<string, unknown>();
   private readyCb: ((ready: boolean) => void) | null = null;
 
   constructor(
@@ -156,8 +160,16 @@ export class PlotModeController {
    */
   activate(contribution: PlotTypeContribution, ctx: PlotModeContext): Promise<void> {
     this.deactivate();
+    const id = contribution.descriptor.type;
+    if (this.failedCleanup.has(id)) {
+      // Its previous session did not end cleanly; do not stack a new one on top.
+      const err = this.failedCleanup.get(id);
+      this.failedCleanup.delete(id);
+      this.fail(contribution, err);
+      return Promise.resolve();
+    }
     const gen = ++this.generation;
-    this.pendingId = contribution.descriptor.type;
+    this.pendingId = id;
     return new Promise<void>((resolve) => {
       this.whenReady(ctx, gen, (ready) => {
         if (gen !== this.generation) return resolve();
@@ -206,9 +218,18 @@ export class PlotModeController {
     this.teardown = null;
     const id = a.contribution.descriptor.type;
     this.guard(`'${id}' panel removal`, () => this.hooks.onDeactivating(a));
-    if (teardown) this.guard(`'${id}' panel teardown`, teardown);
-    this.guard(`'${id}' deactivate()`, () => a.session.deactivate());
+    if (teardown) this.cleanup(a.contribution, 'panel teardown', teardown);
+    this.cleanup(a.contribution, 'deactivate()', () => a.session.deactivate());
     a.panelHost?.remove();
+  }
+
+  /**
+   * Forget recorded cleanup failures. The host calls this when the USER picks a
+   * plot type: an explicit choice gets a fresh attempt, only automatic
+   * re-activations fall back.
+   */
+  clearCleanupFailures(): void {
+    this.failedCleanup.clear();
   }
 
   // ── internals ──────────────────────────────────────────────────────────
@@ -225,7 +246,7 @@ export class PlotModeController {
     if (gen !== this.generation) {
       // Superseded while activate() was in flight — the user already left. The
       // session still gets its single deactivate(), just late.
-      this.guard(`'${id}' deactivate()`, () => session.deactivate());
+      this.guardLogged(`'${id}' deactivate() of a superseded session`, () => session.deactivate());
       return;
     }
     this.pendingId = null;
@@ -240,7 +261,7 @@ export class PlotModeController {
         teardown = typeof t === 'function' ? t : null;
       } catch (err) {
         panelHost.remove();
-        this.guard(`'${id}' deactivate()`, () => session.deactivate());
+        this.guardLogged(`'${id}' deactivate()`, () => session.deactivate());
         this.fail(contribution, err);
         return;
       }
@@ -266,6 +287,45 @@ export class PlotModeController {
       fn();
     } catch (err) {
       this.log.error(`${TAG} ${what} threw.`, err);
+    }
+  }
+
+  /** Like `guard`, for a contribution callback typed `void` that may still return a
+   *  promise: a rejection is logged instead of escaping as an unhandled rejection. */
+  private guardLogged(what: string, fn: () => unknown): void {
+    try {
+      const r = fn();
+      if (isThenable(r)) r.then(undefined, (err) => this.log.error(`${TAG} ${what} rejected.`, err));
+    } catch (err) {
+      this.log.error(`${TAG} ${what} threw.`, err);
+    }
+  }
+
+  /** Run a live session's cleanup; a throw OR a rejection goes to `cleanupFailed`. */
+  private cleanup(contribution: PlotTypeContribution, what: string, fn: () => unknown): void {
+    try {
+      const r = fn();
+      if (isThenable(r)) r.then(undefined, (err) => this.cleanupFailed(contribution, what, err));
+    } catch (err) {
+      this.cleanupFailed(contribution, what, err);
+    }
+  }
+
+  /**
+   * A contribution's cleanup failed. If that same contribution is live or starting
+   * again (a base re-render / image switch re-activated it — or, for an async
+   * rejection, already has), end it and fall back to its base type. Otherwise the
+   * user has moved on: remember it, so the next automatic re-activation falls back.
+   */
+  private cleanupFailed(contribution: PlotTypeContribution, what: string, err: unknown): void {
+    const id = contribution.descriptor.type;
+    this.log.error(`${TAG} '${id}' ${what} failed.`, err);
+    const again = this.active?.contribution === contribution || this.pendingId === id;
+    if (again) {
+      this.deactivate();
+      this.fail(contribution, err);
+    } else {
+      this.failedCleanup.set(id, err);
     }
   }
 
@@ -303,6 +363,6 @@ export class PlotModeController {
   }
 }
 
-function isThenable<T>(v: T | Promise<T>): v is Promise<T> {
+function isThenable<T>(v: T | Promise<T> | unknown): v is Promise<T> {
   return !!v && typeof (v as Promise<T>).then === 'function';
 }

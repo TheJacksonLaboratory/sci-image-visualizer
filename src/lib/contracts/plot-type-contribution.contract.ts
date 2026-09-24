@@ -37,8 +37,12 @@
  *     when the new image has plotted, a fresh session is activated for it.
  *  4. `panel` is shown only while a session is live.
  *  5. A thrown error or rejected promise from `activate`, `deactivate`, `mount`
- *     or a mount's teardown is caught and logged, and the visualizer falls back
- *     to `baseType`. A contribution cannot break the viewer.
+ *     or a mount's teardown is caught and logged; none escapes, so a contribution
+ *     cannot break the viewer. Failing to start (`activate` / `mount`) falls back
+ *     to `baseType`. Failing to clean up falls back when that same mode is being
+ *     re-activated (base re-render, image switch) — immediately if it already is
+ *     live again — and is only logged when the user has moved to another mode; the
+ *     user explicitly selecting it again gets a fresh attempt.
  *  6. {@link PLOT_TYPE_CONTRIBUTIONS} has no factory: no providers, no modes.
  */
 import { InjectionToken, Type } from '@angular/core';
@@ -70,9 +74,13 @@ export interface ContributedPlotTypeDescriptor {
   dimensions: '2d';
   /** Built-in type whose backend renders the base image. v1 supports PlotType.IMAGE (OSD). */
   baseType: PlotType;
-  /** Same gates as PlotTypeDescriptor. */
+  /** Same gates as PlotTypeDescriptor, evaluated in addition to the base type's own. */
   requiresGrayscale?: boolean;
   requiresStack?: boolean;
+  /** Hidden until a `SpatialDataset` is published on SPATIAL_DATA_PORT (an overlay of spatial observations). */
+  requiresSpatialData?: boolean;
+  /** Hidden unless the published dataset carries `observations.z`. */
+  requiresSpatial3d?: boolean;
 }
 
 /** The base view's viewport, as a contributed mode sees it. */

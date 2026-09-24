@@ -216,6 +216,77 @@ describe('PlotModeController', () => {
       expect(log.error).toHaveBeenCalled();
     });
 
+    it('logs a rejected async deactivate() instead of leaving it unhandled', async () => {
+      const d = deferred<void>();
+      const session = { deactivate: jest.fn(() => d.promise) } as unknown as PlotModeSession;
+      const mode = contribution('dianne', { activate: () => session });
+      const c = new PlotModeController([mode], h, log);
+      await c.activate(mode, ctx());
+      c.deactivate();
+      d.reject(new Error('async teardown'));
+      await Promise.resolve(); await Promise.resolve();
+      expect(log.error).toHaveBeenCalledWith(expect.stringContaining('deactivate() failed'), expect.any(Error));
+      expect(h.onFailed).not.toHaveBeenCalled(); // the user left: only logged
+    });
+
+    it('a failed cleanup during a re-render falls back instead of re-activating the mode', async () => {
+      const first = { deactivate: jest.fn(() => { throw new Error('bad teardown'); }) };
+      const activate = jest.fn().mockReturnValueOnce(first).mockReturnValue({ deactivate: jest.fn() });
+      const mode = contribution('dianne', { activate });
+      const c = new PlotModeController([mode], h, log);
+      await c.activate(mode, ctx());
+      c.deactivate(); // base view re-rendering underneath
+      await c.activate(mode, ctx()); // …and the still-selected mode would come back
+      expect(activate).toHaveBeenCalledTimes(1);
+      expect(h.onFailed).toHaveBeenCalledTimes(1);
+      expect(c.current).toBeNull();
+    });
+
+    it('an async cleanup rejection that lands after the mode came back ends it and falls back', async () => {
+      const d = deferred<void>();
+      const second = { deactivate: jest.fn() };
+      const activate = jest.fn()
+        .mockReturnValueOnce({ deactivate: () => d.promise })
+        .mockReturnValue(second);
+      const mode = contribution('dianne', { activate: activate as any });
+      const c = new PlotModeController([mode], h, log);
+      await c.activate(mode, ctx());
+      await c.activate(mode, ctx()); // re-render: old session ends (pending), new one starts
+      expect(c.current?.session).toBe(second);
+      d.reject(new Error('late'));
+      await Promise.resolve(); await Promise.resolve();
+      expect(second.deactivate).toHaveBeenCalledTimes(1);
+      expect(h.onFailed).toHaveBeenCalledTimes(1);
+      expect(c.current).toBeNull();
+    });
+
+    it('an explicit re-selection retries a mode whose cleanup failed', async () => {
+      const activate = jest.fn()
+        .mockReturnValueOnce({ deactivate: () => { throw new Error('bad'); } })
+        .mockReturnValue({ deactivate: jest.fn() });
+      const mode = contribution('dianne', { activate });
+      const c = new PlotModeController([mode], h, log);
+      await c.activate(mode, ctx());
+      c.deactivate();
+      c.clearCleanupFailures(); // the user picked it in the dropdown
+      await c.activate(mode, ctx());
+      expect(activate).toHaveBeenCalledTimes(2);
+      expect(h.onFailed).not.toHaveBeenCalled();
+      expect(c.current).not.toBeNull();
+    });
+
+    it('a rejecting deactivate() of a superseded session is only logged', async () => {
+      const d = deferred<PlotModeSession>();
+      const mode = contribution('dianne', { activate: () => d.promise });
+      const c = new PlotModeController([mode], h, log);
+      const p = c.activate(mode, ctx());
+      c.deactivate(); // user left before activate resolved
+      d.resolve({ deactivate: () => Promise.reject(new Error('stale')) } as unknown as PlotModeSession);
+      await p; await Promise.resolve(); await Promise.resolve();
+      expect(log.error).toHaveBeenCalledWith(expect.stringContaining('superseded session rejected'), expect.any(Error));
+      expect(h.onFailed).not.toHaveBeenCalled();
+    });
+
     it('swallows a throwing hook', async () => {
       h.onFailed.mockImplementation(() => { throw new Error('host broke'); });
       const mode = contribution('dianne', { activate: () => { throw new Error('boom'); } });

@@ -632,7 +632,11 @@ region tools and wheel handling), then calls `activate(ctx)` once the viewport
 is ready. `session.deactivate()` runs exactly once when the user leaves the
 mode, when the image changes (a fresh session starts for the new image), or
 when the visualizer is destroyed. Anything a contribution throws or rejects is
-caught and logged, and the viewer falls back to `baseType`. The full contract
+caught and logged. Failing to start falls back to `baseType`, and so does failing
+to clean up when the same mode is about to be re-activated (re-render, image
+switch). Contributed descriptors take the same `requiresGrayscale`,
+`requiresStack`, `requiresSpatialData` and `requiresSpatial3d` gates as the
+built-ins. The full contract
 and its guarantees are documented in
 [`plot-type-contribution.contract.ts`](./src/lib/contracts/plot-type-contribution.contract.ts).
 

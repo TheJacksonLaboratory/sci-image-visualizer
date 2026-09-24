@@ -20,8 +20,11 @@ file was added.
   and wheel handling. Then `activate(ctx)` hands it the public `IVisualizer`, a
   `PlotModeViewport` and the image stream. Its session is deactivated exactly
   once when the user leaves the mode, when the image changes or when the
-  visualizer is destroyed. A failing contribution is logged and falls back to
-  its base type, so it cannot break the viewer. An optional side panel can be
+  visualizer is destroyed. A failing contribution is logged, and falls back to
+  its base type when it fails to start, or fails to clean up as it is being
+  re-activated, so it cannot break the viewer. Async cleanup rejections are
+  caught as well. Descriptors take the `requiresGrayscale` / `requiresStack` /
+  `requiresSpatialData` / `requiresSpatial3d` gates. An optional side panel can be
   an Angular component, which injects `PLOT_MODE_CONTEXT` / `PLOT_MODE_SESSION`,
   or a framework-agnostic `mount(host, ctx, session)` function. The panel sits
   in the right-hand panel area. New exports: `PLOT_TYPE_CONTRIBUTIONS`,
