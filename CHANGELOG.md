@@ -9,7 +9,38 @@ file was added.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+
+- **Contributed plot types (`PLOT_TYPE_CONTRIBUTIONS`).** Another package can
+  add a mode to the plot-type selector at runtime, through a multi-provider
+  token with no factory. Nothing registers at import time, and a host that
+  provides nothing sees no change. A contributed mode rides on a built-in
+  `baseType` (in this version only `PlotType.IMAGE`, the OpenSeadragon view): it
+  is plotted exactly as that type would be and gets its toolbar, region tools
+  and wheel handling. Then `activate(ctx)` hands it the public `IVisualizer`, a
+  `PlotModeViewport` and the image stream. Its session is deactivated exactly
+  once when the user leaves the mode, when the image changes or when the
+  visualizer is destroyed. A failing contribution is logged and falls back to
+  its base type, so it cannot break the viewer. An optional side panel can be
+  an Angular component, which injects `PLOT_MODE_CONTEXT` / `PLOT_MODE_SESSION`,
+  or a framework-agnostic `mount(host, ctx, session)` function. The panel sits
+  in the right-hand panel area. New exports: `PLOT_TYPE_CONTRIBUTIONS`,
+  `PLOT_MODE_CONTEXT`, `PLOT_MODE_SESSION`, `PlotTypeContribution`,
+  `ContributedPlotTypeDescriptor`, `PlotModeContext`, `PlotModeViewport`,
+  `PlotModeSession`, `PlotModePanel`, `PlotModeRect`, `PlotTypeOption`,
+  `PlotTypeId` and `isBuiltinPlotType`.
+- The OpenSeadragon backend exposes that viewport: `dataToClient` (image px to
+  client px) alongside `clientToData`, a per-redraw `frame$` (coalesced to one
+  emission per animation frame, and idle while nothing listens), and `settled$`
+  (the existing `getViewportChange$`). `IVisualizer` gains an optional
+  `getPlotModeViewport()`.
+
+### Changed
+
+- The plot-type selector's values, the toolbar's `selectedPlotType` input and
+  its `selectPlotType` output are now `PlotTypeId` (`PlotType | string`). The
+  toolbar also takes a `basePlotType` input. Every rendering and tool decision
+  still takes a `PlotType`: a contributed id is resolved to its base type first.
 
 ## [0.4.0] — 2026-09-11
 
