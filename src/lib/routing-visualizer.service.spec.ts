@@ -162,6 +162,17 @@ describe('RoutingVisualizerService (characterization)', () => {
     },
   );
 
+  // ── contributed plot modes ride on the backend on screen ─────────────
+  it('hands a contributed plot mode the viewport of the backend on screen, or null', async () => {
+    const viewport = { kind: 'osd-viewport' };
+    osd.getPlotModeViewport = jest.fn().mockReturnValue(viewport);
+    expect(router.getPlotModeViewport()).toBeNull(); // Plotly before any plot: none
+    await router.plot('div', {}, IMAGE_INFO, 600, PlotType.IMAGE);
+    expect(router.getPlotModeViewport()).toBe(viewport);
+    await router.plot('div', {}, IMAGE_INFO, 600, PlotType.HEATMAP);
+    expect(router.getPlotModeViewport()).toBeNull();
+  });
+
   it('always applies the per-image region cache through Plotly (setActiveImage), whichever backend renders', async () => {
     await router.plot('div', {}, IMAGE_INFO, 600, PlotType.IMAGE);
     expect(plotly.setActiveImage).toHaveBeenCalledWith(IMAGE_INFO);

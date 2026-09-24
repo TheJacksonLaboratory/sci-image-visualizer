@@ -14,6 +14,7 @@ import {
   SpatialEmbedding,
 } from './spatial-dataset.contract';
 import { SpatialSelectionMask } from '../spatial/spatial-selection';
+import type { PlotModeViewport } from './plot-type-contribution.contract';
 
 /**
  * Backend-neutral visualization contract. Plotly is one implementation;
@@ -448,6 +449,10 @@ export interface IVisualizer extends IDataRenderer, IRegionStore, IToolControlle
    *  Optional: only the routing service implements it, since the state is shared
    *  rather than owned by any one backend. */
   getSpatialControls?(): ISpatialControls | null;
+  /** The viewport a contributed plot mode draws over, when the backend on
+   *  screen can provide one (OpenSeadragon), else null. Optional: backends that
+   *  no contributed mode rides on need not implement it. */
+  getPlotModeViewport?(): PlotModeViewport | null;
   /** Binned intensity histogram for a channel from the currently-displayed
    *  pixels, or null when none are available. Feeds the Channels & Histogram
    *  pane. */

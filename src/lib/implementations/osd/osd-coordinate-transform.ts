@@ -20,6 +20,14 @@ export class OsdCoordinateTransform implements ICoordinateTransform {
     return elementToImage(this.viewer, clientX - rect.left, clientY - rect.top);
   }
 
+  /** Data (image-pixel) coordinates -> client (mouse event) pixel. The inverse
+   *  of {@link clientToData}. */
+  dataToClient(x: number, y: number): { x: number; y: number } {
+    const rect = this.viewer.canvas.getBoundingClientRect();
+    const p = imageToElement(this.viewer, x, y);
+    return { x: p.x + rect.left, y: p.y + rect.top };
+  }
+
   dataLengthToScreen(dataLength: number): number {
     const a = imageToElement(this.viewer, 0, 0);
     const b = imageToElement(this.viewer, dataLength, 0);
