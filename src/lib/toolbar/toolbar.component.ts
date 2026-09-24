@@ -2,9 +2,10 @@ import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges } from
 import { MenuItem } from 'primeng/api';
 
 import { IImageInfo } from '../contracts/image.contract';
-import { PlotType, PlotTypeDescriptor, isNapari3d, isNapariIsosurface, isNapariSurface, isNapariScatter, NAPARI_DECIMATE_OPTIONS, NAPARI_DEFAULT_DECIMATE, isSpatialOmics, isSpatialOmics3d } from '../contracts/plot-type';
+import { PlotType, PlotTypeId, isBuiltinPlotType, isNapari3d, isNapariIsosurface, isNapariSurface, isNapariScatter, NAPARI_DECIMATE_OPTIONS, NAPARI_DEFAULT_DECIMATE, isSpatialOmics, isSpatialOmics3d } from '../contracts/plot-type';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from '../contracts/toolbar-config';
 import { ToolbarToolContribution } from '../contracts/toolbar-tool.contract';
+import { PlotTypeOption } from '../contracts/plot-type-contribution.contract';
 import { MODEL_INFO } from './model-info';
 
 /**
@@ -29,9 +30,18 @@ import { MODEL_INFO } from './model-info';
 export class ToolbarComponent implements OnChanges {
   /** Current image (gates which control groups are shown). */
   @Input() imageInfo: IImageInfo | undefined;
-  /** Plot types the active backend advertises. */
-  @Input() plotTypeOptions: PlotTypeDescriptor[] = [];
-  @Input() selectedPlotType: PlotType = PlotType.IMAGE;
+  /** Plot types the active backend advertises, then any contributed modes. */
+  @Input() plotTypeOptions: PlotTypeOption[] = [];
+  /** The selector's value: a built-in type or a contributed mode's id. */
+  @Input() selectedPlotType: PlotTypeId = PlotType.IMAGE;
+  /**
+   * The built-in type that renders {@link selectedPlotType} — its `baseType`
+   * for a contributed mode. Every tool/control decision below reads
+   * {@link effectivePlotType}, so a contributed mode gets exactly its base
+   * type's toolbar. When unbound, a built-in selection is its own base and
+   * anything else is treated as the default Image view.
+   */
+  @Input() basePlotType: PlotType | null = null;
   /** Isosurface band as a 0–255 slider position (mapped onto the volume's real
    *  intensity range by the renderer). Defaults to the full range. */
   @Input() isoRange: number[] = [0, 255];
@@ -84,7 +94,7 @@ export class ToolbarComponent implements OnChanges {
   /** Active checkpoint per contributed tool, keyed by tool id. */
   @Input() toolModelIds: Record<string, string> = {};
 
-  @Output() selectPlotType = new EventEmitter<PlotType>();
+  @Output() selectPlotType = new EventEmitter<PlotTypeId>();
   /** Intensity (LINE) mode: add another colored line ROI + inset trace. */
   @Output() addProfileLine = new EventEmitter<void>();
   /** Toggle image smoothing (bilinear) vs nearest-neighbour (crisp pixels). */
@@ -236,10 +246,16 @@ export class ToolbarComponent implements OnChanges {
     return tool.id;
   }
 
+  /** The built-in type whose tools and controls apply to the current selection. */
+  get effectivePlotType(): PlotType {
+    if (this.basePlotType) return this.basePlotType;
+    return isBuiltinPlotType(this.selectedPlotType) ? this.selectedPlotType : PlotType.IMAGE;
+  }
+
   /** The Image plot type renders as a natively pan/zoom-able raster, so the
    *  generic zoom/pan tools are hidden. */
   get isImageView(): boolean {
-    return this.selectedPlotType === PlotType.IMAGE;
+    return this.effectivePlotType === PlotType.IMAGE;
   }
 
   /** Either spatial-omics mode is active, so its controls are worth offering.
@@ -247,7 +263,7 @@ export class ToolbarComponent implements OnChanges {
    *  the legend and category show/hide are the only way to make sense of a
    *  million overlapping points. */
   get isSpatialMode(): boolean {
-    return isSpatialOmics(this.selectedPlotType) || isSpatialOmics3d(this.selectedPlotType);
+    return isSpatialOmics(this.effectivePlotType) || isSpatialOmics3d(this.effectivePlotType);
   }
 
   /** A plot-type icon is a PrimeNG font glyph (e.g. `pi pi-image`) rather than an
@@ -260,8 +276,8 @@ export class ToolbarComponent implements OnChanges {
    *  (jit-ui#102). Gates the polygon / add-vertex / delete-vertex / Bézier-convert tools. */
   get supportsRegionVertexTools(): boolean {
     return (
-      this.selectedPlotType === PlotType.IMAGE ||
-      this.selectedPlotType === PlotType.NAPARI_IMAGE
+      this.effectivePlotType === PlotType.IMAGE ||
+      this.effectivePlotType === PlotType.NAPARI_IMAGE
     );
   }
 
@@ -272,11 +288,11 @@ export class ToolbarComponent implements OnChanges {
    *  drawn. Drives the per-slice slider. */
   get showsLiveSliceScrubber(): boolean {
     return (
-      this.selectedPlotType === PlotType.IMAGE ||
-      this.selectedPlotType === PlotType.NAPARI_IMAGE ||
-      isNapariSurface(this.selectedPlotType) ||
-      isNapariScatter(this.selectedPlotType) ||
-      isSpatialOmics(this.selectedPlotType)
+      this.effectivePlotType === PlotType.IMAGE ||
+      this.effectivePlotType === PlotType.NAPARI_IMAGE ||
+      isNapariSurface(this.effectivePlotType) ||
+      isNapariScatter(this.effectivePlotType) ||
+      isSpatialOmics(this.effectivePlotType)
     );
   }
 
@@ -284,33 +300,33 @@ export class ToolbarComponent implements OnChanges {
    *  Plotly-only stack controls, so they're hidden for napari (jit-ui#102). */
   get isNapariMode(): boolean {
     return (
-      this.selectedPlotType === PlotType.NAPARI_IMAGE ||
-      isNapariScatter(this.selectedPlotType) ||
-      isNapari3d(this.selectedPlotType)
+      this.effectivePlotType === PlotType.NAPARI_IMAGE ||
+      isNapariScatter(this.effectivePlotType) ||
+      isNapari3d(this.effectivePlotType)
     );
   }
 
   /** ISOSURFACE (Plotly or napari-js WebGPU, either resolution) shows the isovalue range slider. */
   get isIsosurfaceMode(): boolean {
     return (
-      this.selectedPlotType === PlotType.ISOSURFACE || isNapariIsosurface(this.selectedPlotType)
+      this.effectivePlotType === PlotType.ISOSURFACE || isNapariIsosurface(this.effectivePlotType)
     );
   }
 
   /** The napari-js WebGPU surface — shows the wireframe toggle. */
   get isNapariSurfaceMode(): boolean {
-    return isNapariSurface(this.selectedPlotType);
+    return isNapariSurface(this.effectivePlotType);
   }
 
   /** Any napari-js WebGPU 3D type (volume/isosurface/surface) — shows the Resolution control. */
   get isNapari3dMode(): boolean {
-    return isNapari3d(this.selectedPlotType);
+    return isNapari3d(this.effectivePlotType);
   }
 
   /** Intensity profile lines are Region-based and available in the Heatmap and
    *  Image plot types, which show the Intensity tool group. */
   get isIntensityCapable(): boolean {
-    return this.selectedPlotType === PlotType.HEATMAP || this.selectedPlotType === PlotType.IMAGE;
+    return this.effectivePlotType === PlotType.HEATMAP || this.effectivePlotType === PlotType.IMAGE;
   }
 
   showHelp(): void {

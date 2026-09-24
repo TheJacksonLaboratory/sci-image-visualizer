@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, AfterViewInit, EventEmitter, HostListener, Inject, Input, NgZone, OnChanges, OnDestroy, OnInit, Optional, Output, SimpleChanges, ViewChild } from '@angular/core';
+import { ChangeDetectorRef, Component, AfterViewInit, ElementRef, EventEmitter, HostListener, Inject, Injector, Input, NgZone, OnChanges, OnDestroy, OnInit, Optional, Output, SimpleChanges, Type, ViewChild } from '@angular/core';
 
 import { BehaviorSubject, Observable, Subject, Subscription } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
@@ -15,11 +15,24 @@ import { RenderOrchestrator, SliceScrubber } from './render-orchestrator';
 import {
   PlotType,
   PlotTypeDescriptor,
+  PlotTypeId,
+  getPlotTypeDescriptor,
+  isBuiltinPlotType,
   isNapari3d,
   isSpatialOmics3d,
   rendererOwnsWheel,
   NAPARI_DEFAULT_DECIMATE,
 } from './contracts/plot-type';
+import {
+  PLOT_MODE_CONTEXT,
+  PLOT_MODE_SESSION,
+  PLOT_TYPE_CONTRIBUTIONS,
+  PlotModeContext,
+  PlotTypeContribution,
+  PlotTypeOption,
+  contributedPlotTypeOption,
+} from './contracts/plot-type-contribution.contract';
+import { ActivePlotMode, PlotModeController } from './plot-mode/plot-mode-controller';
 import { ViewerFeature } from './contracts/capabilities.contract';
 import { IntensityProfile, IVisualizer, VISUALIZER } from './contracts/visualizer.contract';
 import { SAM_MODELS, getDefaultSamModelId, isSamModelReady } from './toolbar/segmentation/sam-model-registry';
@@ -261,9 +274,43 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   /** napari 3D decimate factor (1 = Full … 8 = ⅛; default ½); changing it re-plots. */
   resolutionScale = NAPARI_DEFAULT_DECIMATE;
 
-  /** Plot types the active backend advertises (3D gated by capability). */
-  plotTypeOptions: PlotTypeDescriptor[] = [];
-  selectedPlotType: PlotType = PlotType.IMAGE;
+  /** Plot types the active backend advertises (3D gated by capability), then
+   *  any contributed modes ({@link PLOT_TYPE_CONTRIBUTIONS}). */
+  plotTypeOptions: PlotTypeOption[] = [];
+  /**
+   * What the selector shows: a built-in type or a contributed mode's id. Every
+   * rendering and tool decision goes through {@link basePlotType} instead, so a
+   * contributed mode behaves exactly like the built-in type it rides on.
+   */
+  selectedPlotType: PlotTypeId = PlotType.IMAGE;
+
+  /** Contributed plot modes and their single live session. */
+  readonly plotModes: PlotModeController;
+  /**
+   * The live contributed mode's side panel, as the template renders it: an
+   * Angular component with its own injector, or a plain host element a `mount`
+   * panel rendered into. Null while no contributed session is live.
+   */
+  plotModePanel: {
+    title: string;
+    component: Type<unknown> | null;
+    injector: Injector | null;
+    host: HTMLElement | null;
+  } | null = null;
+  private destroying = false;
+
+  /** Where a `mount` panel's host element is attached once the dialog renders. */
+  @ViewChild('plotModePanelSlot')
+  set plotModePanelSlot(ref: ElementRef<HTMLElement> | undefined) {
+    const host = this.plotModePanel?.host;
+    if (ref && host && host.parentElement !== ref.nativeElement) ref.nativeElement.appendChild(host);
+  }
+
+  /** The built-in type actually rendered for {@link selectedPlotType}: itself
+   *  for a built-in type, `baseType` for a contributed mode. */
+  get basePlotType(): PlotType {
+    return this.plotModes.baseTypeOf(this.selectedPlotType);
+  }
 
   /** Floating intensity-profile inset (LINE mode). */
   readonly intensityInsetDiv = 'intensity-inset-plot';
@@ -292,19 +339,19 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    *  selection there: region tools are screen-space, and against an orbiting
    *  camera a drawn rectangle has no fixed meaning in the data. */
   get isSpatial3dMode(): boolean {
-    return isSpatialOmics3d(this.selectedPlotType);
+    return isSpatialOmics3d(this.basePlotType);
   }
 
   /** LINE plot type shows the image + draggable line ROI + intensity inset. */
   get isProfileMode(): boolean {
-    return this.selectedPlotType === PlotType.LINE;
+    return this.basePlotType === PlotType.LINE;
   }
 
   /** True for the Image plot type, which renders as a natively pan/zoom-able
    *  raster — so the backend-agnostic zoom/pan toolbar tools are hidden. The
    *  component drives this off the plot type, not the active backend. */
   get isImageView(): boolean {
-    return this.selectedPlotType === PlotType.IMAGE;
+    return this.basePlotType === PlotType.IMAGE;
   }
 
   /** Isosurface band as a 0–255 slider position, mapped onto the volume's real
@@ -369,7 +416,18 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // Optional like the rest: a host that shows only images never provides it,
     // and the spatial plot types simply stay hidden.
     @Optional() @Inject(SPATIAL_DATA_PORT) private spatialData?: SpatialDataPort,
+    // Contributed plot modes. Like TOOLBAR_TOOLS the token has no factory, so a
+    // host that provides none gets null here and the selector is unchanged.
+    @Optional() @Inject(PLOT_TYPE_CONTRIBUTIONS) plotTypeContributions?: readonly PlotTypeContribution[],
+    // Parent of a contributed panel component's injector. Optional only so the
+    // specs can construct this component with `new`.
+    @Optional() private injector?: Injector,
   ) {
+    this.plotModes = new PlotModeController(plotTypeContributions, {
+      onActivated: (active) => this.showPlotModePanel(active),
+      onDeactivating: () => this.hidePlotModePanel(),
+      onFailed: (contribution) => this.fallBackFromPlotMode(contribution),
+    });
     this.contributedTools = visibleToolContributions(toolContributions);
     this.colormapsOptions = plotService.getColormapOptions();
     this.computePlotTypeOptions();
@@ -514,7 +572,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       // it rather than leaving the host on an Image view with nothing in it.
       console.warn('[visualizer] reference volume unavailable — falling back to the 3D cloud', err);
       this.volumeImageKey = null;
-      if (this.hasSpatial3dDataset && !isSpatialOmics3d(this.selectedPlotType)) {
+      if (this.hasSpatial3dDataset && !isSpatialOmics3d(this.basePlotType)) {
         this.onSelectPlotType(PlotType.SPATIAL_OMICS_3D);
       }
     } finally {
@@ -545,33 +603,47 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // though the RGB composite isn't grayscale — don't gate them out.
     const m0 = this.imageInfo?.imageMeta?.[0];
     const isMultichannel = (m0?.channelCount ?? 1) > 1 && (m0?.rgbChannels ?? 1) < 3;
-    this.plotTypeOptions = this.plotService.getPlotTypeDescriptors()
-      .filter((d) => {
-        // Outside test mode, only the curated set (those with a productionLabel)
-        // is offered; test mode exposes every backend's type.
-        if (!this.testMode && !d.productionLabel) return false;
-        if (d.dimensions === '3d' && !caps.has(ViewerFeature.Surface3D)) return false;
-        // Volume and Isosurface raymarch the IMAGE STACK, and nothing else: these
-        // two gates are about the loaded image, full stop. A 3D omics dataset
-        // reaches them because its registered volume is published AS a grayscale
-        // z-stack image (`buildVolumeStackImage`), not through a second voxel
-        // source hiding behind the same modes.
-        if (d.requiresStack && !isStack) return false;
-        if (d.requiresGrayscale && !isGrayscale && !isMultichannel) return false;
-        if (d.requiresSpatialData && !this.hasSpatialDataset) return false;
-        if (d.requiresSpatial3d && !this.hasSpatial3dDataset) return false;
-        // An image-sourced mode reads PIXELS. A spatial dataset that brings no tissue
-        // image (seqFISH records unitless coordinates, not a section) leaves nothing for
-        // one to draw, so offering Image / Heatmap / Surface there offers modes that can
-        // only come up blank — or worse, showing whatever slide was loaded before.
-        //
-        // Narrowed to "a dataset is up AND there is no image": with no dataset at all,
-        // Image stays on offer, because a host that has not loaded anything yet needs a
-        // default and an empty selector would be worse than a blank view.
-        if (d.source === 'image' && this.hasSpatialDataset
-          && !this.spatialDatasetHasPixels) return false;
-        return true;
-      })
+    const passesGates = (d: PlotTypeDescriptor): boolean => {
+      if (d.dimensions === '3d' && !caps.has(ViewerFeature.Surface3D)) return false;
+      // Volume and Isosurface raymarch the IMAGE STACK, and nothing else: these
+      // two gates are about the loaded image, full stop. A 3D omics dataset
+      // reaches them because its registered volume is published AS a grayscale
+      // z-stack image (`buildVolumeStackImage`), not through a second voxel
+      // source hiding behind the same modes.
+      if (d.requiresStack && !isStack) return false;
+      if (d.requiresGrayscale && !isGrayscale && !isMultichannel) return false;
+      if (d.requiresSpatialData && !this.hasSpatialDataset) return false;
+      if (d.requiresSpatial3d && !this.hasSpatial3dDataset) return false;
+      // An image-sourced mode reads PIXELS. A spatial dataset that brings no tissue
+      // image (seqFISH records unitless coordinates, not a section) leaves nothing for
+      // one to draw, so offering Image / Heatmap / Surface there offers modes that can
+      // only come up blank — or worse, showing whatever slide was loaded before.
+      //
+      // Narrowed to "a dataset is up AND there is no image": with no dataset at all,
+      // Image stays on offer, because a host that has not loaded anything yet needs a
+      // default and an empty selector would be worse than a blank view.
+      if (d.source === 'image' && this.hasSpatialDataset
+        && !this.spatialDatasetHasPixels) return false;
+      return true;
+    };
+    // Outside test mode, only the curated set (those with a productionLabel)
+    // is offered; test mode exposes every backend's type.
+    const curated = (d: { productionLabel?: string }): boolean => this.testMode || !!d.productionLabel;
+    const builtIn = this.plotService.getPlotTypeDescriptors()
+      .filter((d) => curated(d) && passesGates(d));
+    // Contributed modes come after every built-in one, under the same label rule
+    // and their own stack/grayscale gates. A mode also needs whatever its base
+    // view needs (pixels, a 3D-capable backend), so the base type's gates apply
+    // too — a contributed Image-based mode goes wherever Image goes.
+    const contributed: PlotTypeOption[] = [];
+    for (const d of this.plotModes.descriptors()) {
+      if (!curated(d)) continue;
+      if (d.requiresStack && !isStack) continue;
+      if (d.requiresGrayscale && !isGrayscale && !isMultichannel) continue;
+      const base = getPlotTypeDescriptor(d.baseType);
+      if (base && passesGates(base)) contributed.push(contributedPlotTypeOption(d, base));
+    }
+    this.plotTypeOptions = [...builtIn, ...contributed]
       // Default selector shows the suffix-free productionLabel; test mode keeps
       // the full backend-suffixed label so same-named modes stay distinguishable.
       .map((d) => (this.testMode ? d : { ...d, label: d.productionLabel! }));
@@ -604,6 +676,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * `isStack`/`isGrayscale` decision is made against a file that is no longer loaded.
    */
   private onImageCleared(): void {
+    // The image a contributed mode was drawing over is gone.
+    this.plotModes.deactivate();
     this.imageInfo = undefined;
     this.loadedFileName = undefined;
     this.computePlotTypeOptions();
@@ -628,10 +702,14 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       ? PlotType.IMAGE
       : this.plotTypeOptions[0]?.type;
     if (!fallback) return;
+    // Leaving a contributed mode (its gates stopped passing, or its provider is
+    // gone): its session ends before anything else draws.
+    this.plotModes.deactivate();
+    const base = this.plotModes.baseTypeOf(fallback);
     this.selectedPlotType = fallback;
-    this.plotType = fallback;
-    this.isHeatmap = fallback === PlotType.IMAGE;
-    this.plotService.setPlotType(fallback);
+    this.plotType = base;
+    this.isHeatmap = base === PlotType.IMAGE;
+    this.plotService.setPlotType(base);
   }
 
   ngOnInit(): void {
@@ -819,6 +897,11 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
             // image size — measure the plot div directly so the toolbar height is excluded
             const plotDiv: HTMLElement | null = document.getElementById(this.plotDivName);
             const screenHeight = plotDiv?.offsetHeight || 500;
+            // A contributed mode's session is bound to the base view about to be
+            // torn down, so it ends here — before reset(), before anything new
+            // draws. If the mode is still selected once this render lands, a
+            // fresh session starts for it (see activateSelectedPlotMode).
+            this.plotModes.deactivate();
             this.plotService.reset();
             this.stackLoading = imgInfo.isStack && imgInfo.showStack;
             // set max index of stack — computed before updateZIndex so a
@@ -977,6 +1060,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
                 releaseOverlay();
                 this.running = false;
                 applyRoi();
+                this.activateSelectedPlotMode();
                 console.log(logTag);
               },
               sharpenFailed: (err: any) => {
@@ -992,6 +1076,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
                 });
                 this.running = false;
                 applyRoi();
+                this.activateSelectedPlotMode();
               },
             }).render(imgInfo, smallImgInfo);
           }
@@ -1089,7 +1174,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       // Intercepting here fires a FIXED zoom step per wheel event, which is far
       // too sensitive for a renderer that reads the scroll delta — so anything
       // drawn by such a renderer keeps its own wheel. See `rendererOwnsWheel`.
-      if (rendererOwnsWheel(this.selectedPlotType)) return;
+      if (rendererOwnsWheel(this.basePlotType)) return;
       // 3D plot types (surface, scatter3d, isosurface) render in a Plotly scene
       // that orbits/zooms natively on scroll. The 2D step-zoom doesn't apply and
       // would throw (no xaxis on a scene), so let Plotly handle the wheel.
@@ -1210,6 +1295,10 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   }
 
   ngOnDestroy() {
+    // A contributed mode's session ends first, while the viewer it drew over
+    // still exists. The panel goes with this view, so no change detection.
+    this.destroying = true;
+    this.plotModes.deactivate();
     // Leave the live set so the next-oldest visualizer picks up the outlets.
     VisualizerComponent.liveInstances.delete(this);
     this.revokeVolumeImageUrls();
@@ -1910,7 +1999,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     }
     // Bézier conversions are vertex-level edits — Image (OpenSeadragon) view
     // only — gated on the selection's current form.
-    if (this.selectedPlotType === PlotType.IMAGE) {
+    if (this.basePlotType === PlotType.IMAGE) {
       const hasStraight = selAll.some((r) =>
         (r.bounds instanceof Polygon && !r.bounds.bezier) || r.bounds instanceof Rectangle);
       const hasBezier = selAll.some((r) => r.bounds instanceof Polygon && r.bounds.bezier);
@@ -2045,7 +2134,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       // Vertex editing runs on the OpenSeadragon overlay, which
       // backs the Image plot type. Hidden for other 2D types (Plotly), where
       // these modes are no-ops.
-      if (this.selectedPlotType === PlotType.IMAGE) {
+      if (this.basePlotType === PlotType.IMAGE) {
         items.push(
           {
             label: 'Polygon (click vertices)',
@@ -2110,10 +2199,25 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * the toolbar/context-menu logic relies on, deactivates 2D-only tools when
    * moving to a 3D type, then re-plots.
    */
-  onSelectPlotType(type: PlotType) {
+  onSelectPlotType(selected: PlotTypeId) {
+    // A contributed id whose provider is gone (e.g. restored from a previous
+    // session) has nothing to activate — take the default Image view instead.
+    if (!isBuiltinPlotType(selected) && !this.plotModes.find(selected)) {
+      console.warn(`[visualizer] unknown plot type '${selected}' — showing '${PlotType.IMAGE}' instead.`);
+      selected = PlotType.IMAGE;
+    }
+    // Whatever was selected before, a contributed session ends before the next
+    // mode draws. (Re-selecting the same contributed mode re-plots, so it gets a
+    // fresh session too.)
+    this.plotModes.deactivate();
+    // Everything below decides how to RENDER, so it works on the built-in type
+    // that draws `selected`: a contributed mode behaves exactly like its base.
+    const type = this.plotModes.baseTypeOf(selected);
     this.plotType = type;
-    this.selectedPlotType = type;
-    const descriptor = this.plotTypeOptions.find((d) => d.type === type);
+    this.selectedPlotType = selected;
+    const descriptor = isBuiltinPlotType(selected)
+      ? this.plotTypeOptions.find((d) => d.type === type)
+      : getPlotTypeDescriptor(type);
     const is3d = descriptor?.dimensions === '3d';
     this.isHeatmap = !is3d;
     this.plotService.setPlotType(type);
@@ -2147,6 +2251,96 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       return;
     }
     this.reloadAndPlot();
+  }
+
+  // ── contributed plot modes ─────────────────────────────────────────────
+
+  /**
+   * Start the selected contributed mode's session, once its base view has
+   * plotted. No-op for a built-in type, or when the base on screen is not the
+   * one the mode rides on. A backend that cannot provide a viewport for it
+   * (e.g. OSD fell back to Plotly) counts as a failed activation.
+   */
+  private activateSelectedPlotMode(): void {
+    const contribution = this.plotModes.find(this.selectedPlotType);
+    if (!contribution || this.plotType !== contribution.descriptor.baseType) return;
+    const viewport = this.plotService.getPlotModeViewport?.() ?? null;
+    if (!viewport) {
+      console.error(`[visualizer] plot-type contribution '${contribution.descriptor.type}': the backend `
+        + 'on screen provides no viewport to draw over — falling back.');
+      this.fallBackFromPlotMode(contribution);
+      return;
+    }
+    const ctx: PlotModeContext = {
+      visualizer: this.plotService,
+      viewport,
+      imageInfo$: this.state.getImageInfo$(),
+    };
+    void this.plotModes.activate(contribution, ctx);
+  }
+
+  /** Render the live mode's panel. Activation can resolve outside Angular (an
+   *  OSD callback, a contribution's own promise), hence the zone re-entry. */
+  private showPlotModePanel(active: ActivePlotMode): void {
+    const panel = active.contribution.panel;
+    if (!panel) return;
+    this.ngZone.run(() => {
+      if ('component' in panel && panel.component) {
+        this.plotModePanel = {
+          title: panel.title,
+          component: panel.component,
+          injector: Injector.create({
+            providers: [
+              { provide: PLOT_MODE_CONTEXT, useValue: active.ctx },
+              { provide: PLOT_MODE_SESSION, useValue: active.session },
+            ],
+            parent: this.injector,
+          }),
+          host: null,
+        };
+      } else if (active.panelHost) {
+        this.plotModePanel = { title: panel.title, component: null, injector: null, host: active.panelHost };
+      } else {
+        return;
+      }
+      this.detectChangesSafely();
+    });
+  }
+
+  /** Drop the panel (destroying a component panel) before the session ends. */
+  private hidePlotModePanel(): void {
+    if (!this.plotModePanel) return;
+    this.plotModePanel = null;
+    this.detectChangesSafely();
+  }
+
+  /**
+   * A contributed mode could not start. Its base type is already on screen —
+   * the base plotted first — so just select it: nothing needs to re-plot.
+   */
+  private fallBackFromPlotMode(contribution: PlotTypeContribution): void {
+    if (this.destroying || this.selectedPlotType !== contribution.descriptor.type) return;
+    this.ngZone.run(() => {
+      const base = contribution.descriptor.baseType;
+      this.selectedPlotType = base;
+      this.plotType = base;
+      this.messageService.add({
+        key: this.resultToastKey,
+        severity: 'warn',
+        summary: `${contribution.descriptor.productionLabel ?? contribution.descriptor.label} is unavailable`,
+        detail: 'The plot mode could not start, so the plain image is shown instead. See the browser console for details.',
+      });
+      this.detectChangesSafely();
+    });
+  }
+
+  private detectChangesSafely(): void {
+    if (this.destroying) return;
+    try {
+      this.cdr.detectChanges();
+    } catch (err) {
+      console.error('[visualizer] change detection failed while updating a contributed plot mode panel.', err);
+    }
   }
 
   /** Deactivate whatever tool is armed and clear every tool mode. */
