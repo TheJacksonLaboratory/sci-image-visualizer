@@ -36,8 +36,9 @@
   </div>
 <plotting-toolbar
   [imageInfo]="imageInfo"
-  [plotTypeOptions]="plotTypeOptions"
-  [selectedPlotType]="selectedPlotType"
+  [plotTypeOptions]="plotTypeMenu"
+  [selectedPlotType]="selectedPlotTypeId"
+  [basePlotType]="basePlotType"
   [isoRange]="isoRange"
   [maxIndex]="maxIndex"
   [zIndex]="zIndex"
@@ -170,6 +171,23 @@
 <!-- Spatial-omics controls. Renders its own empty state when no dataset (or no
      SPATIAL_DATA_PORT) is present, so it is always safe to host. -->
 <spatial-controls [(visible)]="showSpatialControls" [is3d]="isSpatial3dMode" ></spatial-controls>
+
+<!-- Side panel of the active contributed plot mode (PLOT_TYPE_CONTRIBUTIONS),
+     in the same right-hand area as the spatial controls and the Region Editor.
+     Exists only while the mode's session is live; there is no close button,
+     because leaving the mode is what ends it. A component panel gets
+     PLOT_MODE_CONTEXT / PLOT_MODE_SESSION from its injector; a `mount` panel's
+     host element is attached to the slot below (see plotModePanelSlot). -->
+<p-dialog *ngIf="plotModePanel as panel" [header]="panel.title" [visible]="true"
+          [modal]="false" [closable]="false" [resizable]="true" [draggable]="true"
+          appendTo="body" position="right" styleClass="plot-mode-panel"
+          [style]="{ width: '22rem', maxHeight: '85vh' }"
+          [contentStyle]="{ overflow: 'auto' }">
+  <ng-container *ngIf="panel.component">
+    <ng-container *ngComponentOutlet="panel.component; injector: panel.injector ?? undefined"></ng-container>
+  </ng-container>
+  <div *ngIf="panel.host" #plotModePanelSlot class="plot-mode-panel-slot"></div>
+</p-dialog>
 
 <!-- Region Editor: non-modal, draggable, resizable floating dialog opened from
      the toolbar (formerly the right-panel Regions tab). Modeless so regions can

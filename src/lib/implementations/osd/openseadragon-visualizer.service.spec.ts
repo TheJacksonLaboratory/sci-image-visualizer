@@ -6,6 +6,7 @@ import { OpenSeadragonVisualizerService } from './openseadragon-visualizer.servi
 import { VIZ_PORT_STUBS } from '../../testing/viz-port-stubs';
 import { TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
 import { saveAs } from 'file-saver';
+import { OsdCoordinateTransform } from './osd-coordinate-transform';
 
 jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
 
@@ -504,5 +505,135 @@ describe('OpenSeadragonVisualizerService (tiled load via /tiles/info)', () => {
     expect(loaded.infoB64).toBe('INFO64');
     expect(loaded.z).toBe(2);
     expect(loaded.simple).toBeUndefined(); // tiled path, not simple-image
+  });
+});
+
+/**
+ * The viewport a contributed plot mode draws over (PlotModeViewport). A real
+ * viewer needs a canvas, so a minimal fake stands in for OpenSeadragon: an
+ * empty world (the viewport-direct conversion path) and a linear image<->element
+ * map.
+ */
+describe('OpenSeadragonVisualizerService — plot-mode viewport', () => {
+  let service: OpenSeadragonVisualizerService;
+  let http: HttpTestingController;
+
+  function fakeViewer(zoom = 0.5, bounds = { x: 100, y: 50, width: 400, height: 300 }) {
+    return {
+      canvas: { getBoundingClientRect: () => ({ left: 10, top: 20 }) },
+      world: { getItemCount: () => 1, getItemAt: () => null },
+      viewport: {
+        getBounds: () => bounds,
+        viewportToImageRectangle: (r: any) => r,
+        imageToViewerElementCoordinates: (p: any) => ({ x: p.x * zoom, y: p.y * zoom }),
+        viewerElementToImageCoordinates: (p: any) => ({ x: p.x / zoom, y: p.y / zoom }),
+      },
+    };
+  }
+
+  function mountFake(viewer: any) {
+    const s = service as any;
+    s.viewer = viewer;
+    s.descriptor = { width: 1000, height: 800 };
+    s.coordTransform = new OsdCoordinateTransform(viewer);
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule],
+      providers: [OpenSeadragonVisualizerService, ...VIZ_PORT_STUBS],
+    });
+    service = TestBed.inject(OpenSeadragonVisualizerService);
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => {
+    (service as any).viewer = null;
+    (service as any).coordTransform = null;
+    service.unsubscribe();
+    http.match(() => true).forEach((r) => r.flush({}));
+    jest.useRealTimers();
+  });
+
+  it('is one stable object that reports not-ready (and NaN, not a throw) with no viewer', () => {
+    const vp = service.getPlotModeViewport();
+    expect(service.getPlotModeViewport()).toBe(vp);
+    expect(vp.isReady()).toBe(false);
+    expect(vp.dataToClient(1, 2)).toEqual({ x: NaN, y: NaN });
+    expect(vp.clientToData(1, 2)).toEqual({ x: NaN, y: NaN });
+    expect(vp.dataLengthToScreen(10)).toBeNaN();
+  });
+
+  it('converts through the current viewer once one is mounted, both ways', () => {
+    const vp = service.getPlotModeViewport();
+    mountFake(fakeViewer(0.5));
+    expect(vp.isReady()).toBe(true);
+    const c = vp.dataToClient(200, 100);
+    expect(c).toEqual({ x: 110, y: 70 }); // (200*.5+10, 100*.5+20)
+    expect(vp.clientToData(c.x, c.y)).toEqual({ x: 200, y: 100 });
+    expect(vp.dataLengthToScreen(10)).toBe(5);
+  });
+
+  it('frame$ emits the visible image rect once per animation frame, however many redraws', () => {
+    const vp = service.getPlotModeViewport();
+    mountFake(fakeViewer());
+    const seen: any[] = [];
+    const sub = vp.frame$.subscribe((r) => seen.push(r));
+    const s = service as any;
+    const rect = { x: 100, y: 50, width: 400, height: 300 };
+    expect(seen).toEqual([rect]); // the current rect, on subscribe
+    s.scheduleFrame();
+    s.scheduleFrame();
+    s.scheduleFrame();
+    expect(seen).toHaveLength(1);
+    jest.advanceTimersByTime(20);
+    expect(seen).toEqual([rect, rect]);
+    s.scheduleFrame();
+    jest.advanceTimersByTime(20);
+    expect(seen).toHaveLength(3);
+    sub.unsubscribe();
+  });
+
+  it('frame$ does no work while nothing listens', () => {
+    mountFake(fakeViewer());
+    const raf = jest.spyOn(window, 'requestAnimationFrame');
+    (service as any).scheduleFrame();
+    expect(raf).not.toHaveBeenCalled();
+    raf.mockRestore();
+  });
+
+  it('frame$ clamps the rect to the image, like settled$', () => {
+    const vp = service.getPlotModeViewport();
+    mountFake(fakeViewer(1, { x: -50, y: 700, width: 2000, height: 500 }));
+    const frames: any[] = [];
+    const settled: any[] = [];
+    vp.frame$.subscribe((r) => frames.push(r));
+    vp.settled$.subscribe((r) => settled.push(r));
+    (service as any).scheduleFrame();
+    jest.advanceTimersByTime(20);
+    (service as any).emitViewportChange();
+    const clamped = { x: 0, y: 700, width: 1000, height: 100 };
+    expect(frames).toEqual([clamped, clamped]); // initial + one frame
+    expect(settled).toEqual([clamped, clamped]); // initial + one settle
+  });
+
+  it('a subscriber arriving after the viewport went idle gets the current rect without another event', () => {
+    const vp = service.getPlotModeViewport();
+    mountFake(fakeViewer());
+    const frames: any[] = [];
+    const settled: any[] = [];
+    vp.frame$.subscribe((r) => frames.push(r));
+    vp.settled$.subscribe((r) => settled.push(r));
+    expect(frames).toEqual([{ x: 100, y: 50, width: 400, height: 300 }]);
+    expect(settled).toEqual(frames);
+  });
+
+  it('gives no initial rect before a viewer is mounted', () => {
+    const vp = service.getPlotModeViewport();
+    const seen: any[] = [];
+    vp.frame$.subscribe((r) => seen.push(r));
+    vp.settled$.subscribe((r) => seen.push(r));
+    expect(seen).toEqual([]);
   });
 });

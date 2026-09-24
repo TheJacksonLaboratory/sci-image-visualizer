@@ -4,7 +4,7 @@ import { NO_ERRORS_SCHEMA } from '@angular/core';
 import { EventEmitter } from '@angular/core';
 
 import { ToolbarComponent } from './toolbar.component';
-import { PlotType } from '../contracts/plot-type';
+import { PlotType, PlotTypeId } from '../contracts/plot-type';
 import { ToolbarToolContribution } from '../contracts/toolbar-tool.contract';
 
 /** A contributed tool with two checkpoints, enough to exercise the menu. */
@@ -51,6 +51,22 @@ describe('ToolbarComponent', () => {
     expect(component.isImageView).toBe(true);
     component.selectedPlotType = PlotType.HEATMAP;
     expect(component.isImageView).toBe(false);
+  });
+
+  it('a contributed plot mode gets exactly its base type\'s tools', () => {
+    component.selectedPlotType = 'dianne';
+    component.basePlotType = PlotType.IMAGE;
+    expect(component.effectivePlotType).toBe(PlotType.IMAGE);
+    expect(component.isImageView).toBe(true);
+    expect(component.supportsRegionVertexTools).toBe(true);
+    expect(component.showsLiveSliceScrubber).toBe(true);
+    expect(component.isIntensityCapable).toBe(true);
+    expect(component.isNapariMode).toBe(false);
+    // Unbound base: a non-built-in selection is treated as the default Image view.
+    component.basePlotType = null;
+    expect(component.effectivePlotType).toBe(PlotType.IMAGE);
+    component.selectedPlotType = PlotType.HEATMAP;
+    expect(component.effectivePlotType).toBe(PlotType.HEATMAP);
   });
 
   it('isPiIcon distinguishes PrimeNG glyphs from SVG asset paths', () => {
@@ -116,7 +132,7 @@ describe('ToolbarComponent', () => {
   });
 
   it('emits the chosen plot type to the host', () => {
-    const seen: PlotType[] = [];
+    const seen: PlotTypeId[] = [];
     component.selectPlotType.subscribe((t) => seen.push(t));
     component.selectPlotType.emit(PlotType.SURFACE);
     expect(seen).toEqual([PlotType.SURFACE]);

@@ -34,6 +34,7 @@ import { IChannelHistogramApi, IChannelState, IHistogram } from './contracts/cha
 import { VisualizerStore } from './store/visualizer-store.service';
 import { NapariVisualizerService } from './implementations/napari-js/napari-visualizer.service';
 import { VIZ_CONFIG, VizConfig } from './contracts/viz-config';
+import { PlotModeViewport } from './contracts/plot-type-contribution.contract';
 
 /**
  * Backend selector. Routes per plot type:
@@ -277,6 +278,11 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   resetSurfaceCamera(): void { this.renderer().resetSurfaceCamera(); }
   setResolutionScale(scale: number): void { this.renderer().setResolutionScale?.(scale); }
   getResolutionScale(): number { return this.renderer().getResolutionScale?.() ?? 1; }
+  /** The viewport of the backend on screen, for a contributed plot mode. Null
+   *  when that backend cannot provide one (e.g. OSD fell back to Plotly). */
+  getPlotModeViewport(): PlotModeViewport | null {
+    return this.renderer().getPlotModeViewport?.() ?? null;
+  }
   getPlotTypeDescriptors(): PlotTypeDescriptor[] {
     // Plotly enumerates the full PLOT_TYPE_DESCRIPTORS map, which already includes the
     // napari-js WebGPU types (jit-ui#102) — so this single source covers them (no duplicates).
