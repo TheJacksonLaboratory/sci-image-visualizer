@@ -287,6 +287,30 @@ describe('PlotModeController', () => {
       expect(h.onFailed).not.toHaveBeenCalled();
     });
 
+    it('a throwing onActivated (the host could not show it) ends the session and falls back', async () => {
+      h.onActivated.mockImplementation(() => { throw new Error('panel render failed'); });
+      const session = { deactivate: jest.fn() };
+      const mode = contribution('dianne', { activate: () => session });
+      const c = new PlotModeController([mode], h, log);
+      await c.activate(mode, ctx());
+      expect(session.deactivate).toHaveBeenCalledTimes(1);
+      expect(h.onFailed).toHaveBeenCalledWith(mode, expect.any(Error));
+      expect(c.current).toBeNull();
+    });
+
+    it('failActive() ends the live session once and reports it; a no-op when idle', async () => {
+      const session = { deactivate: jest.fn() };
+      const mode = contribution('dianne', { activate: () => session });
+      const c = new PlotModeController([mode], h, log);
+      c.failActive(new Error('nothing live'));
+      expect(h.onFailed).not.toHaveBeenCalled();
+      await c.activate(mode, ctx());
+      c.failActive(new Error('render'));
+      c.failActive(new Error('again'));
+      expect(session.deactivate).toHaveBeenCalledTimes(1);
+      expect(h.onFailed).toHaveBeenCalledTimes(1);
+    });
+
     it('swallows a throwing hook', async () => {
       h.onFailed.mockImplementation(() => { throw new Error('host broke'); });
       const mode = contribution('dianne', { activate: () => { throw new Error('boom'); } });

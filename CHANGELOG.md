@@ -24,7 +24,9 @@ file was added.
   its base type when it fails to start, or fails to clean up as it is being
   re-activated, so it cannot break the viewer. Async cleanup rejections are
   caught as well. Descriptors take the `requiresGrayscale` / `requiresStack` /
-  `requiresSpatialData` / `requiresSpatial3d` gates. An optional side panel can be
+  `requiresSpatialData` / `requiresSpatial3d` gates. A component panel that throws while
+  it is created falls back too. The viewport's `frame$` / `settled$` start with
+  the current visible rect, so an overlay draws without waiting for a pan. An optional side panel can be
   an Angular component, which injects `PLOT_MODE_CONTEXT` / `PLOT_MODE_SESSION`,
   or a framework-agnostic `mount(host, ctx, session)` function. The panel sits
   in the right-hand panel area. New exports: `PLOT_TYPE_CONTRIBUTIONS`,

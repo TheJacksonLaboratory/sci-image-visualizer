@@ -38,7 +38,8 @@
  *  4. `panel` is shown only while a session is live.
  *  5. A thrown error or rejected promise from `activate`, `deactivate`, `mount`
  *     or a mount's teardown is caught and logged; none escapes, so a contribution
- *     cannot break the viewer. Failing to start (`activate` / `mount`) falls back
+ *     cannot break the viewer. Failing to start (`activate`, `mount`, or a panel
+ *     component throwing while it is created / first rendered) falls back
  *     to `baseType`. Failing to clean up falls back when that same mode is being
  *     re-activated (base re-render, image switch) — immediately if it already is
  *     live again — and is only logged when the user has moved to another mode; the
@@ -93,9 +94,11 @@ export interface PlotModeViewport {
   /** Screen px per image px at the current zoom. */
   dataLengthToScreen(len: number): number;
   isReady(): boolean;
-  /** Visible image rect in level-0 px, emitted on every redraw frame (pan/zoom animation). */
+  /** Visible image rect in level-0 px, emitted on every redraw frame (pan/zoom animation).
+   *  A new subscriber first receives the current rect when the viewport is ready. */
   frame$: Observable<PlotModeRect>;
-  /** Same rect, emitted once the viewport settles (existing getViewportChange$ semantics). */
+  /** Same rect, emitted once the viewport settles (existing getViewportChange$ semantics).
+   *  A new subscriber first receives the current rect when the viewport is ready. */
   settled$: Observable<PlotModeRect>;
 }
 

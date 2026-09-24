@@ -2308,7 +2308,10 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       } else {
         return;
       }
-      this.detectChangesSafely();
+      // A component panel is created and first rendered right here; if that throws,
+      // the mode is not usable — end it and fall back rather than leave it selected.
+      const err = this.detectChangesSafely();
+      if (err !== null) this.plotModes.failActive(err);
     });
   }
 
@@ -2339,12 +2342,15 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     });
   }
 
-  private detectChangesSafely(): void {
-    if (this.destroying) return;
+  /** Run change detection; returns what it threw (logged), or null. */
+  private detectChangesSafely(): unknown | null {
+    if (this.destroying) return null;
     try {
       this.cdr.detectChanges();
+      return null;
     } catch (err) {
       console.error('[visualizer] change detection failed while updating a contributed plot mode panel.', err);
+      return err ?? new Error('change detection failed');
     }
   }
 

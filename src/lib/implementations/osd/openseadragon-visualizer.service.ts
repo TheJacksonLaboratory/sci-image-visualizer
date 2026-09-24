@@ -1,7 +1,7 @@
 import { Injectable, Inject, Optional } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, Observable, Subject, Subscription, combineLatest, firstValueFrom, of } from 'rxjs';
-import { timeout } from 'rxjs/operators';
+import { BehaviorSubject, Observable, Subject, Subscription, combineLatest, defer, firstValueFrom, of } from 'rxjs';
+import { startWith, timeout } from 'rxjs/operators';
 import { Image } from 'image-js';
 import * as OpenSeadragon from 'openseadragon';
 import { OSD } from './osd-lib';
@@ -1497,10 +1497,21 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       clientToData: (cx, cy) => (ready() ? this.coordTransform!.clientToData(cx, cy) : nan),
       dataLengthToScreen: (len) => (ready() ? this.coordTransform!.dataLengthToScreen(len) : NaN),
       isReady: ready,
-      frame$: this.frame$.asObservable(),
-      settled$: this.viewportChange$.asObservable(),
+      // Both start with the current visible rect when the viewport is ready: a mode
+      // activates after the base render has gone idle, so without it an overlay
+      // following `frame$.subscribe(redraw)` would stay blank until the next pan/zoom.
+      frame$: this.withCurrentRect(this.frame$, ready),
+      settled$: this.withCurrentRect(this.viewportChange$, ready),
     };
     return this.plotModeViewport;
+  }
+
+  /** `source`, preceded by the current visible rect for each subscriber (when ready). */
+  private withCurrentRect(source: Subject<PlotModeRect>, ready: () => boolean): Observable<PlotModeRect> {
+    return defer(() => {
+      const rect = ready() ? this.visibleImageRect() : null;
+      return rect ? source.pipe(startWith(rect)) : source.asObservable();
+    });
   }
 
   /** OSD targets the image display; the scalar/3D plot types belong to Plotly. */

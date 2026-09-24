@@ -581,15 +581,17 @@ describe('OpenSeadragonVisualizerService — plot-mode viewport', () => {
     const seen: any[] = [];
     const sub = vp.frame$.subscribe((r) => seen.push(r));
     const s = service as any;
+    const rect = { x: 100, y: 50, width: 400, height: 300 };
+    expect(seen).toEqual([rect]); // the current rect, on subscribe
     s.scheduleFrame();
     s.scheduleFrame();
     s.scheduleFrame();
-    expect(seen).toHaveLength(0);
+    expect(seen).toHaveLength(1);
     jest.advanceTimersByTime(20);
-    expect(seen).toEqual([{ x: 100, y: 50, width: 400, height: 300 }]);
+    expect(seen).toEqual([rect, rect]);
     s.scheduleFrame();
     jest.advanceTimersByTime(20);
-    expect(seen).toHaveLength(2);
+    expect(seen).toHaveLength(3);
     sub.unsubscribe();
   });
 
@@ -611,7 +613,27 @@ describe('OpenSeadragonVisualizerService — plot-mode viewport', () => {
     (service as any).scheduleFrame();
     jest.advanceTimersByTime(20);
     (service as any).emitViewportChange();
-    expect(frames).toEqual([{ x: 0, y: 700, width: 1000, height: 100 }]);
+    const clamped = { x: 0, y: 700, width: 1000, height: 100 };
+    expect(frames).toEqual([clamped, clamped]); // initial + one frame
+    expect(settled).toEqual([clamped, clamped]); // initial + one settle
+  });
+
+  it('a subscriber arriving after the viewport went idle gets the current rect without another event', () => {
+    const vp = service.getPlotModeViewport();
+    mountFake(fakeViewer());
+    const frames: any[] = [];
+    const settled: any[] = [];
+    vp.frame$.subscribe((r) => frames.push(r));
+    vp.settled$.subscribe((r) => settled.push(r));
+    expect(frames).toEqual([{ x: 100, y: 50, width: 400, height: 300 }]);
     expect(settled).toEqual(frames);
+  });
+
+  it('gives no initial rect before a viewer is mounted', () => {
+    const vp = service.getPlotModeViewport();
+    const seen: any[] = [];
+    vp.frame$.subscribe((r) => seen.push(r));
+    vp.settled$.subscribe((r) => seen.push(r));
+    expect(seen).toEqual([]);
   });
 });

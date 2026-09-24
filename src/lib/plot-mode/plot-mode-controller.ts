@@ -268,7 +268,24 @@ export class PlotModeController {
     }
     this.active = { contribution, ctx, session, panelHost };
     this.teardown = teardown;
-    this.guard(`'${id}' panel`, () => this.hooks.onActivated(this.active!));
+    try {
+      this.hooks.onActivated(this.active);
+    } catch (err) {
+      // The host could not show it (e.g. its panel failed to render): not a usable mode.
+      this.failActive(err);
+    }
+  }
+
+  /**
+   * The host could not make the live mode usable (its panel threw while being
+   * created or first rendered): end the session once, then fall back to its base.
+   * No-op when nothing is live.
+   */
+  failActive(err: unknown): void {
+    const a = this.active;
+    if (!a) return;
+    this.deactivate();
+    this.fail(a.contribution, err);
   }
 
   private fail(contribution: PlotTypeContribution, err: unknown): void {

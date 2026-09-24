@@ -526,6 +526,10 @@ describe('contributed plot types — panel rendering', () => {
   }
 
   async function mount(panel: PlotTypeContribution['panel']) {
+    return mountWith([], panel);
+  }
+
+  async function mountWith(extra: any[], panel: PlotTypeContribution['panel']) {
     const mode = dianne({ panel });
     const plot = selfCompleting(plotBase(mockViewport()));
     const imageInfo$ = new BehaviorSubject<any>(null);
@@ -536,7 +540,7 @@ describe('contributed plot types — panel rendering', () => {
       getImageLoadingMessage$: () => new BehaviorSubject(''),
     });
     await TestBed.configureTestingModule({
-      declarations: [VisualizerComponent, ModePanelComponent],
+      declarations: [VisualizerComponent, ModePanelComponent, ...extra],
       imports: [CommonModule, DialogModule, NoopAnimationsModule],
       providers: [
         { provide: IMAGE_STATE_PORT, useValue: state },
@@ -577,6 +581,22 @@ describe('contributed plot types — panel rendering', () => {
     await fixture.whenStable();
     expect(document.body.querySelector('.probe')).toBeNull();
     expect(mode.sessions[0].deactivate).toHaveBeenCalledTimes(1);
+    fixture.destroy();
+  });
+
+  it('falls back to Image when the component panel throws while it is created', async () => {
+    @Component({ selector: 'test-broken-panel', template: '<i></i>' })
+    class BrokenPanelComponent {
+      constructor() { throw new Error('panel constructor failed'); }
+    }
+    const errors = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { fixture, component, mode } = await mountWith([BrokenPanelComponent], {
+      title: 'Broken', component: BrokenPanelComponent,
+    });
+    expect(component.selectedPlotType).toBe(PlotType.IMAGE);
+    expect(mode.sessions[0].deactivate).toHaveBeenCalledTimes(1);
+    expect(document.body.querySelector('.plot-mode-panel')).toBeNull();
+    errors.mockRestore();
     fixture.destroy();
   });
 
