@@ -21,6 +21,7 @@ export * from './lib/contracts/image.contract';
 export * from './lib/contracts/plot-type';
 export * from './lib/contracts/toolbar-config';
 export * from './lib/contracts/toolbar-tool.contract';
+export * from './lib/contracts/plot-type-contribution.contract';
 export * from './lib/contracts/capabilities.contract';
 export * from './lib/contracts/region-overlay.contract';
 export * from './lib/contracts/display-types';

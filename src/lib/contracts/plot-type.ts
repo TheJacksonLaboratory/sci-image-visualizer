@@ -44,6 +44,22 @@ export enum PlotType {
   SPATIAL_OMICS_3D = 'spatial-omics-3d',
 }
 
+/**
+ * A value the plot-type selector can hold: a built-in {@link PlotType}, or the
+ * `type` of a contributed mode (`ContributedPlotTypeDescriptor.type`, see
+ * `plot-type-contribution.contract.ts`). Everything that decides HOW to render
+ * keeps taking a {@link PlotType}; a contributed id is resolved to its
+ * `baseType` first, so no rendering switch ever sees one.
+ */
+export type PlotTypeId = PlotType | string;
+
+const BUILTIN_PLOT_TYPES: ReadonlySet<string> = new Set(Object.values(PlotType));
+
+/** Whether an id names a built-in plot type (as opposed to a contributed one). */
+export function isBuiltinPlotType(id: PlotTypeId | null | undefined): id is PlotType {
+  return typeof id === 'string' && BUILTIN_PLOT_TYPES.has(id);
+}
+
 /** How many spatial dimensions a plot type renders in. */
 export type PlotDimensions = '2d' | '3d';
 
