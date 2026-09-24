@@ -9,49 +9,84 @@ file was added.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-09-24
+
+The contributed-plot-types release: another package can add a mode to the
+plot-type selector at runtime. The first one is dianne-js's
+**Digital Pathology - DIANNE** (freehand DIANNE labelling over the image view).
+Backwards compatible: no public type changes shape, and a host that provides no
+contributions sees no change.
+
 ### Added
 
-- **Contributed plot types (`PLOT_TYPE_CONTRIBUTIONS`).** Another package can
-  add a mode to the plot-type selector at runtime, through a multi-provider
-  token with no factory. Nothing registers at import time, and a host that
-  provides nothing sees no change. A contributed mode rides on a built-in
-  `baseType` (in this version only `PlotType.IMAGE`, the OpenSeadragon view): it
-  is plotted exactly as that type would be and gets its toolbar, region tools
-  and wheel handling. Then `activate(ctx)` hands it the public `IVisualizer`, a
-  `PlotModeViewport` and the image stream. Its session is deactivated exactly
-  once when the user leaves the mode, when the image changes or when the
-  visualizer is destroyed. A failing contribution is logged, and falls back to
-  its base type when it fails to start, or fails to clean up as it is being
-  re-activated, so it cannot break the viewer. Async cleanup rejections are
-  caught as well. Descriptors take the `requiresGrayscale` / `requiresStack` /
-  `requiresSpatialData` / `requiresSpatial3d` gates. A component panel that throws while
-  it is created falls back too. The viewport's `frame$` / `settled$` start with
-  the current visible rect, so an overlay draws without waiting for a pan.
-  Backwards compatible: no public type changes shape. `VisualizerComponent.
-  plotTypeOptions` stays `PlotTypeDescriptor[]` (built-in types only) and
-  `selectedPlotType` stays `PlotType` (the built-in type on screen); the
-  selector's full list and id are the new `plotTypeMenu` / `selectedPlotTypeId`.
-  `IVisualizer.getPlotModeViewport` is optional. With no contributions provided,
-  behaviour is unchanged. An optional side panel can be
-  an Angular component, which injects `PLOT_MODE_CONTEXT` / `PLOT_MODE_SESSION`,
-  or a framework-agnostic `mount(host, ctx, session)` function. The panel sits
-  in the right-hand panel area. New exports: `PLOT_TYPE_CONTRIBUTIONS`,
-  `PLOT_MODE_CONTEXT`, `PLOT_MODE_SESSION`, `PlotTypeContribution`,
-  `ContributedPlotTypeDescriptor`, `PlotModeContext`, `PlotModeViewport`,
-  `PlotModeSession`, `PlotModePanel`, `PlotModeRect`, `PlotTypeOption`,
-  `PlotTypeId` and `isBuiltinPlotType`.
-- The OpenSeadragon backend exposes that viewport: `dataToClient` (image px to
-  client px) alongside `clientToData`, a per-redraw `frame$` (coalesced to one
-  emission per animation frame, and idle while nothing listens), and `settled$`
-  (the existing `getViewportChange$`). `IVisualizer` gains an optional
-  `getPlotModeViewport()`.
+- **Contributed plot types (`PLOT_TYPE_CONTRIBUTIONS`).** A multi-provider token
+  with no factory: nothing registers at import time, and a contribution is a
+  plain object, so the contributing package needs neither decorators nor the
+  Angular compiler.
+  - **Base type:** a contributed mode rides on a built-in `baseType` (in this
+    version only `PlotType.IMAGE`, the OpenSeadragon view). It is plotted
+    exactly as that type would be, with its toolbar, region tools and wheel
+    handling.
+  - **Activation:** once the viewport is ready, `activate(ctx)` receives the
+    public `IVisualizer`, a `PlotModeViewport` and the image stream.
+  - **Deactivation:** the session is deactivated exactly once, when the user
+    leaves the mode, the image changes or the base view re-renders, or the
+    visualizer is destroyed.
+  - **Gates:** descriptors take the `requiresGrayscale` / `requiresStack` /
+    `requiresSpatialData` / `requiresSpatial3d` gates, on top of their base
+    type's own.
+  - **Side panel (optional):** either an Angular component, which injects
+    `PLOT_MODE_CONTEXT` / `PLOT_MODE_SESSION`, or a framework-agnostic
+    `mount(host, ctx, session)` function. It sits in the right-hand panel area.
+  - **Isolation:** nothing a contribution throws or rejects escapes. Failing to
+    start (`activate`, `mount`, a panel component throwing as it is first
+    rendered) falls back to the base type with a warning toast. So does failing
+    to clean up (throw *or* async rejection) while the same mode is being
+    re-activated. An explicit re-selection in the dropdown retries it.
+- **A viewport to draw over, on the OpenSeadragon backend.**
+  - `dataToClient` (image px to client px) alongside `clientToData`.
+  - A per-redraw `frame$`, coalesced to one emission per animation frame and
+    idle while nothing listens, and `settled$` (the existing
+    `getViewportChange$`). Each starts with the current visible rect, so an
+    overlay draws without waiting for a pan.
+  - `IVisualizer` gains an optional `getPlotModeViewport()`.
+- **`VisualizerComponent` fields:** `plotTypeMenu` (the selector's full list:
+  built-ins, then contributed modes) and `selectedPlotTypeId` (the selector's
+  id, a built-in type or a contributed one).
+- **New exports:** `PLOT_TYPE_CONTRIBUTIONS`, `PLOT_MODE_CONTEXT`,
+  `PLOT_MODE_SESSION`, `PlotTypeContribution`, `ContributedPlotTypeDescriptor`,
+  `PlotModeContext`, `PlotModeViewport`, `PlotModeSession`, `PlotModePanel`,
+  `PlotModeRect`, `PlotTypeOption`, `PlotTypeId` and `isBuiltinPlotType`.
 
 ### Changed
 
-- The plot-type selector's values, the toolbar's `selectedPlotType` input and
-  its `selectPlotType` output are now `PlotTypeId` (`PlotType | string`). The
-  toolbar also takes a `basePlotType` input. Every rendering and tool decision
-  still takes a `PlotType`: a contributed id is resolved to its base type first.
+- **Unchanged public types:** `VisualizerComponent.plotTypeOptions` remains
+  `PlotTypeDescriptor[]` (the built-in types on offer) and `selectedPlotType`
+  remains `PlotType`. The latter is the built-in type on screen: the selection
+  itself, or a contributed mode's `baseType` while one is active. The selector
+  now binds to `plotTypeMenu` / `selectedPlotTypeId`.
+- **Internal:** the unexported toolbar's plot-type input and output now carry
+  `PlotTypeId`, and it takes a `basePlotType` input. Every rendering and tool
+  decision still takes a `PlotType`: a contributed id is resolved to its base
+  type first.
+
+### Fixed
+
+These three are in the example app and tile server, which are not part of the
+npm package.
+
+- **Tile-server container:** runs on Node 22. `lib/zarr3.mjs` needs
+  `zstdDecompressSync` from `node:zlib`, which does not exist before Node 22.15,
+  so the `node:20-slim` image died on import. `engines.node` now says
+  `>=22.15.0`.
+- **Pages smoke test:** no longer fails the deploy against a tile server that
+  predates the spatial routes. The app already handles that server by offering
+  no spatial entries. A 4xx on that server's `spatial/` paths is tolerated and
+  named in the build log; every other 4xx still fails the test.
+- **Demo dataset label:** the synthetic demo dataset's gallery label now says
+  the expression is fabricated ("SYNTHETIC · fabricated expression · Visium
+  geometry (demo)"), so it is not taken for measurements next to the real
+  datasets.
 
 ## [0.4.0] — 2026-09-11
 
@@ -1678,7 +1713,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.1...v0.3.2
