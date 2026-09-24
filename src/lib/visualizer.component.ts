@@ -274,15 +274,34 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   /** napari 3D decimate factor (1 = Full … 8 = ⅛; default ½); changing it re-plots. */
   resolutionScale = NAPARI_DEFAULT_DECIMATE;
 
-  /** Plot types the active backend advertises (3D gated by capability), then
-   *  any contributed modes ({@link PLOT_TYPE_CONTRIBUTIONS}). */
-  plotTypeOptions: PlotTypeOption[] = [];
+  /** The selector's entries: the built-in plot types the active backend
+   *  advertises (3D gated by capability), then any contributed modes
+   *  ({@link PLOT_TYPE_CONTRIBUTIONS}). */
+  plotTypeMenu: PlotTypeOption[] = [];
+  /**
+   * The built-in plot types on offer — {@link plotTypeMenu} without contributed
+   * modes. Kept with its original type so existing readers are unaffected.
+   */
+  plotTypeOptions: PlotTypeDescriptor[] = [];
   /**
    * What the selector shows: a built-in type or a contributed mode's id. Every
    * rendering and tool decision goes through {@link basePlotType} instead, so a
    * contributed mode behaves exactly like the built-in type it rides on.
    */
-  selectedPlotType: PlotTypeId = PlotType.IMAGE;
+  selectedPlotTypeId: PlotTypeId = PlotType.IMAGE;
+
+  /**
+   * The built-in plot type being rendered. With no contributed mode active this
+   * is the selection itself; during one it is the mode's `baseType`. Kept with its
+   * original `PlotType` type for existing readers — use {@link selectedPlotTypeId}
+   * for the selector's id. Assigning selects that built-in type.
+   */
+  get selectedPlotType(): PlotType {
+    return this.basePlotType;
+  }
+  set selectedPlotType(type: PlotType) {
+    this.selectedPlotTypeId = type;
+  }
 
   /** Contributed plot modes and their single live session. */
   readonly plotModes: PlotModeController;
@@ -306,10 +325,10 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     if (ref && host && host.parentElement !== ref.nativeElement) ref.nativeElement.appendChild(host);
   }
 
-  /** The built-in type actually rendered for {@link selectedPlotType}: itself
+  /** The built-in type actually rendered for {@link selectedPlotTypeId}: itself
    *  for a built-in type, `baseType` for a contributed mode. */
   get basePlotType(): PlotType {
-    return this.plotModes.baseTypeOf(this.selectedPlotType);
+    return this.plotModes.baseTypeOf(this.selectedPlotTypeId);
   }
 
   /** Floating intensity-profile inset (LINE mode). */
@@ -517,7 +536,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
           // with an image-less 2D dataset, which is why it went unhandled — before
           // it, image-less meant 3D.
           const target = has3d ? PlotType.SPATIAL_OMICS_3D : PlotType.SPATIAL_OMICS;
-          if (this.selectedPlotType !== target) this.onSelectPlotType(target);
+          if (this.selectedPlotTypeId !== target) this.onSelectPlotType(target);
         }
       }
       // Clearing the dataset while a spatial mode is active leaves a type that is
@@ -563,7 +582,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       }
       // Pick the mode first so the image lands in the view that will show it,
       // instead of rendering once into whatever mode the last dataset left active.
-      if (this.selectedPlotType !== PlotType.IMAGE) this.onSelectPlotType(PlotType.IMAGE);
+      if (this.selectedPlotTypeId !== PlotType.IMAGE) this.onSelectPlotType(PlotType.IMAGE);
       this.revokeVolumeImageUrls();
       this.volumeImageUrls = built.urls;
       this.state.setImageInfo(built.info);
@@ -645,10 +664,12 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       const base = getPlotTypeDescriptor(d.baseType);
       if (base && passesGates(base)) contributed.push(contributedPlotTypeOption(d, base));
     }
-    this.plotTypeOptions = [...builtIn, ...contributed]
-      // Default selector shows the suffix-free productionLabel; test mode keeps
-      // the full backend-suffixed label so same-named modes stay distinguishable.
-      .map((d) => (this.testMode ? d : { ...d, label: d.productionLabel! }));
+    // Default selector shows the suffix-free productionLabel; test mode keeps
+    // the full backend-suffixed label so same-named modes stay distinguishable.
+    const labelled = <T extends { label: string; productionLabel?: string }>(d: T): T =>
+      (this.testMode ? d : { ...d, label: d.productionLabel! });
+    this.plotTypeOptions = builtIn.map(labelled);
+    this.plotTypeMenu = [...this.plotTypeOptions, ...contributed.map(labelled)];
   }
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -696,19 +717,19 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   }
 
   private reconcileSelectedPlotType(): void {
-    if (this.plotTypeOptions.some((d) => d.type === this.selectedPlotType)) return;
+    if (this.plotTypeMenu.some((d) => d.type === this.selectedPlotTypeId)) return;
     // Image is the usual fallback, but it is not always ON OFFER: with no image loaded
     // the pixel modes are gone, and falling back to one would select a mode the selector
     // does not list and nothing can draw. Take the first type still offered instead.
-    const fallback = this.plotTypeOptions.some((d) => d.type === PlotType.IMAGE)
+    const fallback = this.plotTypeMenu.some((d) => d.type === PlotType.IMAGE)
       ? PlotType.IMAGE
-      : this.plotTypeOptions[0]?.type;
+      : this.plotTypeMenu[0]?.type;
     if (!fallback) return;
     // Leaving a contributed mode (its gates stopped passing, or its provider is
     // gone): its session ends before anything else draws.
     this.plotModes.deactivate();
     const base = this.plotModes.baseTypeOf(fallback);
-    this.selectedPlotType = fallback;
+    this.selectedPlotTypeId = fallback;
     this.plotType = base;
     this.isHeatmap = base === PlotType.IMAGE;
     this.plotService.setPlotType(base);
@@ -871,7 +892,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
           if (!this.isHeatmap && imgInfo.fileName !== this.loadedFileName) {
             this.isHeatmap = true;
             this.plotType = PlotType.IMAGE;
-            this.selectedPlotType = PlotType.IMAGE;
+            this.selectedPlotTypeId = PlotType.IMAGE;
             this.plotService.setPlotType(this.plotType);
             this.activeSurface3dMode = 'turntable';
           }
@@ -1432,7 +1453,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     if (!this.isHeatmap) {
       this.isHeatmap = true;
       this.plotType = PlotType.HEATMAP;
-      this.selectedPlotType = PlotType.HEATMAP;
+      this.selectedPlotTypeId = PlotType.HEATMAP;
       this.plotService.setPlotType(this.plotType);
     }
     this.plotService.setShowStack(showstack);
@@ -2219,9 +2240,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // that draws `selected`: a contributed mode behaves exactly like its base.
     const type = this.plotModes.baseTypeOf(selected);
     this.plotType = type;
-    this.selectedPlotType = selected;
+    this.selectedPlotTypeId = selected;
     const descriptor = isBuiltinPlotType(selected)
-      ? this.plotTypeOptions.find((d) => d.type === type)
+      ? this.plotTypeMenu.find((d) => d.type === type)
       : getPlotTypeDescriptor(type);
     const is3d = descriptor?.dimensions === '3d';
     this.isHeatmap = !is3d;
@@ -2267,7 +2288,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * (e.g. OSD fell back to Plotly) counts as a failed activation.
    */
   private activateSelectedPlotMode(): void {
-    const contribution = this.plotModes.find(this.selectedPlotType);
+    const contribution = this.plotModes.find(this.selectedPlotTypeId);
     if (!contribution || this.plotType !== contribution.descriptor.baseType) return;
     const viewport = this.plotService.getPlotModeViewport?.() ?? null;
     if (!viewport) {
@@ -2327,10 +2348,10 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * the base plotted first — so just select it: nothing needs to re-plot.
    */
   private fallBackFromPlotMode(contribution: PlotTypeContribution): void {
-    if (this.destroying || this.selectedPlotType !== contribution.descriptor.type) return;
+    if (this.destroying || this.selectedPlotTypeId !== contribution.descriptor.type) return;
     this.ngZone.run(() => {
       const base = contribution.descriptor.baseType;
-      this.selectedPlotType = base;
+      this.selectedPlotTypeId = base;
       this.plotType = base;
       this.messageService.add({
         key: this.resultToastKey,

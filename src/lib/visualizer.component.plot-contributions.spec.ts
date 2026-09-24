@@ -217,22 +217,22 @@ describe('PLOT_TYPE_CONTRIBUTIONS', () => {
 });
 
 describe('contributed plot types — the selector', () => {
-  const types = (c: VisualizerComponent) => c.plotTypeOptions.map((d) => d.type);
+  const types = (c: VisualizerComponent) => c.plotTypeMenu.map((d) => d.type);
 
   it('is unchanged when nothing is contributed', () => {
     const withNone = harness(undefined).component;
     const withEmpty = harness([]).component;
     expect(types(withNone)).toContain(PlotType.IMAGE);
     expect(types(withNone).every((t) => (Object.values(PlotType) as string[]).includes(t))).toBe(true);
-    expect(withEmpty.plotTypeOptions).toEqual(withNone.plotTypeOptions);
+    expect(withEmpty.plotTypeMenu).toEqual(withNone.plotTypeMenu);
     // …and a contribution only ever adds to the end of that list.
     const withOne = harness([dianne()]).component;
-    expect(withOne.plotTypeOptions.slice(0, -1)).toEqual(withNone.plotTypeOptions);
+    expect(withOne.plotTypeMenu.slice(0, -1)).toEqual(withNone.plotTypeMenu);
   });
 
   it('appends contributed modes after every built-in one, under the production label', () => {
     const { component } = harness([dianne()]);
-    const opts = component.plotTypeOptions;
+    const opts = component.plotTypeMenu;
     expect(opts[opts.length - 1]).toEqual(expect.objectContaining({
       type: 'dianne', label: 'DIANNE', baseType: PlotType.IMAGE, source: 'image', dimensions: '2d',
     }));
@@ -247,7 +247,7 @@ describe('contributed plot types — the selector', () => {
 
     component.testMode = true;
     component.ngOnChanges({ testMode: {} as any });
-    expect(component.plotTypeOptions.find((d) => d.type === 'dianne')?.label)
+    expect(component.plotTypeMenu.find((d) => d.type === 'dianne')?.label)
       .toBe('Digital Pathology - DIANNE');
   });
 
@@ -297,12 +297,29 @@ describe('contributed plot types — the selector', () => {
     expect(types(component)).not.toContain('dianne');
   });
 
+  it('keeps plotTypeOptions / selectedPlotType with their original types and meaning', () => {
+    const none = harness([]).component;
+    const { component } = harness([dianne()]);
+    // plotTypeOptions: still exactly the built-in list, as before contributions existed.
+    expect(component.plotTypeOptions).toEqual(none.plotTypeOptions);
+    expect(component.plotTypeOptions.every((d) => Object.values(PlotType).includes(d.type))).toBe(true);
+    expect(component.plotTypeMenu.map((d) => d.type)).toContain('dianne');
+    // selectedPlotType: the built-in type on screen; equals the selection for built-ins.
+    component.onSelectPlotType(PlotType.HEATMAP);
+    expect(component.selectedPlotType).toBe(PlotType.HEATMAP);
+    component.onSelectPlotType('dianne');
+    expect(component.selectedPlotTypeId).toBe('dianne');
+    expect(component.selectedPlotType).toBe(PlotType.IMAGE); // its baseType
+    component.selectedPlotType = PlotType.HEATMAP; // writing still selects a built-in
+    expect(component.selectedPlotTypeId).toBe(PlotType.HEATMAP);
+  });
+
   it('drops a contribution whose id clashes with a built-in type', () => {
     const clash = dianne();
     clash.descriptor = { ...clash.descriptor, type: PlotType.HEATMAP, label: 'Impostor' };
     const { component } = harness([clash]);
-    expect(component.plotTypeOptions.filter((d) => d.type === PlotType.HEATMAP)).toHaveLength(1);
-    expect(component.plotTypeOptions.find((d) => d.type === PlotType.HEATMAP)?.label).toBe('Heatmap');
+    expect(component.plotTypeMenu.filter((d) => d.type === PlotType.HEATMAP)).toHaveLength(1);
+    expect(component.plotTypeMenu.find((d) => d.type === PlotType.HEATMAP)?.label).toBe('Heatmap');
   });
 });
 
@@ -312,7 +329,7 @@ describe('contributed plot types — routing and lifecycle', () => {
     imageInfo$.next(infoFor('a.tif'));
     component.onSelectPlotType('dianne');
 
-    expect(component.selectedPlotType).toBe('dianne');
+    expect(component.selectedPlotTypeId).toBe('dianne');
     expect(component.plotType).toBe(PlotType.IMAGE);
     expect(component.basePlotType).toBe(PlotType.IMAGE);
     expect(plot.setPlotType).toHaveBeenLastCalledWith(PlotType.IMAGE);
@@ -368,7 +385,7 @@ describe('contributed plot types — routing and lifecycle', () => {
     imageInfo$.next(infoFor('b.tif'));
     expect(events.slice(0, 2)).toEqual(['deactivate', 'reset']);
     expect(mode.sessions[0].deactivate).toHaveBeenCalledTimes(1);
-    expect(component.selectedPlotType).toBe('dianne');
+    expect(component.selectedPlotTypeId).toBe('dianne');
 
     finish();
     expect(mode.activate).toHaveBeenCalledTimes(2);
@@ -410,19 +427,19 @@ describe('contributed plot types — routing and lifecycle', () => {
     const { component, plot, imageInfo$ } = harness([]);
     imageInfo$.next(infoFor('a.tif'));
     component.onSelectPlotType('dianne');
-    expect(component.selectedPlotType).toBe(PlotType.IMAGE);
+    expect(component.selectedPlotTypeId).toBe(PlotType.IMAGE);
     expect(plot.setPlotType).toHaveBeenLastCalledWith(PlotType.IMAGE);
 
     // …and a selection restored behind the component's back is reconciled too.
-    component.selectedPlotType = 'dianne';
+    component.selectedPlotTypeId = 'dianne';
     (component as any).reconcileSelectedPlotType();
-    expect(component.selectedPlotType).toBe(PlotType.IMAGE);
+    expect(component.selectedPlotTypeId).toBe(PlotType.IMAGE);
   });
 });
 
 describe('contributed plot types — isolation', () => {
   function expectFellBack(h: ReturnType<typeof harness>) {
-    expect(h.component.selectedPlotType).toBe(PlotType.IMAGE);
+    expect(h.component.selectedPlotTypeId).toBe(PlotType.IMAGE);
     expect(h.component.plotType).toBe(PlotType.IMAGE);
     expect(h.component.plotModePanel).toBeNull();
     expect(h.messages.add).toHaveBeenCalledWith(expect.objectContaining({ severity: 'warn' }));
@@ -456,7 +473,7 @@ describe('contributed plot types — isolation', () => {
     h.component.onSelectPlotType('dianne');
     h.finish();
     expect(() => h.component.onSelectPlotType(PlotType.HEATMAP)).not.toThrow();
-    expect(h.component.selectedPlotType).toBe(PlotType.HEATMAP);
+    expect(h.component.selectedPlotTypeId).toBe(PlotType.HEATMAP);
   });
 
   it('falls back when the backend on screen offers no viewport (e.g. OSD fell back to Plotly)', () => {
@@ -593,7 +610,7 @@ describe('contributed plot types — panel rendering', () => {
     const { fixture, component, mode } = await mountWith([BrokenPanelComponent], {
       title: 'Broken', component: BrokenPanelComponent,
     });
-    expect(component.selectedPlotType).toBe(PlotType.IMAGE);
+    expect(component.selectedPlotTypeId).toBe(PlotType.IMAGE);
     expect(mode.sessions[0].deactivate).toHaveBeenCalledTimes(1);
     expect(document.body.querySelector('.plot-mode-panel')).toBeNull();
     errors.mockRestore();

@@ -26,7 +26,13 @@ file was added.
   caught as well. Descriptors take the `requiresGrayscale` / `requiresStack` /
   `requiresSpatialData` / `requiresSpatial3d` gates. A component panel that throws while
   it is created falls back too. The viewport's `frame$` / `settled$` start with
-  the current visible rect, so an overlay draws without waiting for a pan. An optional side panel can be
+  the current visible rect, so an overlay draws without waiting for a pan.
+  Backwards compatible: no public type changes shape. `VisualizerComponent.
+  plotTypeOptions` stays `PlotTypeDescriptor[]` (built-in types only) and
+  `selectedPlotType` stays `PlotType` (the built-in type on screen); the
+  selector's full list and id are the new `plotTypeMenu` / `selectedPlotTypeId`.
+  `IVisualizer.getPlotModeViewport` is optional. With no contributions provided,
+  behaviour is unchanged. An optional side panel can be
   an Angular component, which injects `PLOT_MODE_CONTEXT` / `PLOT_MODE_SESSION`,
   or a framework-agnostic `mount(host, ctx, session)` function. The panel sits
   in the right-hand panel area. New exports: `PLOT_TYPE_CONTRIBUTIONS`,
