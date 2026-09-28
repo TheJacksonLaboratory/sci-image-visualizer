@@ -1570,7 +1570,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     this.brushTool.setMode(true, (options ?? {}) as BrushOptions);
   }
   setBrushOptions(options: any): void {
-    this.brushTool.setSize((options as BrushOptions)?.size ?? 0);
+    this.brushTool.setOptions((options ?? {}) as BrushOptions);
   }
   setVertexEraserMode(active: boolean): void {
     if (active) {

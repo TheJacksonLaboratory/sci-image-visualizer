@@ -40,6 +40,16 @@ export interface IWandOptions {
 export interface IBrushOptions {
   /** Brush diameter in matrix (image) pixels. */
   size?: number;
+  /**
+   * Paint as one class: new regions take this label, and a stroke only extends
+   * or merges regions with the same label. Unset = the plain brush (label
+   * `'Region'`, extends any region). `setBrushMode(true, …)` sets the class in
+   * full; `setBrushOptions` changes it only when `label` or `color` is passed,
+   * so a size-only update keeps it.
+   */
+  label?: string;
+  /** Colour for the painted regions instead of the shape colour. Kept against preset re-apply. */
+  color?: string;
 }
 
 /** What drives point colour in the spatial-omics mode: an annotation column

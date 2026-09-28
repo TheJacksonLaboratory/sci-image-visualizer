@@ -633,3 +633,73 @@ describe('contributed plot types — panel rendering', () => {
     fixture.destroy();
   });
 });
+
+describe('contributed plot types — toolbar tools (ctx.tools)', () => {
+  function activeCtx() {
+    const mode = dianne();
+    const h = harness([mode]);
+    h.imageInfo$.next(infoFor('a.tif'));
+    h.component.onSelectPlotType('dianne');
+    h.finish();
+    const ctx = (mode.activate as jest.Mock).mock.calls[0][0] as PlotModeContext;
+    const tools = ctx.tools!;
+    const armed: (string | null)[] = [];
+    tools.activeTool$.subscribe((t) => armed.push(t));
+    return { ...h, tools, armed };
+  }
+
+  it('armBrush arms the toolbar brush with the class, and activeTool$ follows', () => {
+    const { component, plot, tools, armed } = activeCtx();
+
+    tools.armBrush({ label: 'dianne:positive', color: '#1E88E5' });
+
+    expect(component.activeDragMode).toBe('brush');
+    expect(plot.setBrushMode).toHaveBeenLastCalledWith(true, {
+      size: component.brushSize, label: 'dianne:positive', color: '#1E88E5',
+    });
+    expect(armed[armed.length - 1]).toBe('brush');
+  });
+
+  it('arming again while the brush is armed switches class without re-arming', () => {
+    const { component, plot, tools } = activeCtx();
+    tools.armBrush({ label: 'pos', color: '#00f' });
+    const armCalls = plot.setBrushMode.mock.calls.length;
+
+    tools.armBrush({ label: 'neg', color: '#f00' });
+
+    expect(plot.setBrushMode.mock.calls.length).toBe(armCalls);
+    expect(plot.setBrushOptions).toHaveBeenLastCalledWith({ size: component.brushSize, label: 'neg', color: '#f00' });
+    expect(component.activeDragMode).toBe('brush');
+  });
+
+  it('the size slider keeps the class (size-only update)', () => {
+    const { component, plot, tools } = activeCtx();
+    tools.armBrush({ label: 'pos', color: '#00f' });
+
+    component.onBrushSizeChange(12);
+
+    expect(plot.setBrushOptions).toHaveBeenLastCalledWith({ size: 12 });
+  });
+
+  it('a tool picked from the toolbar is the plain tool again', () => {
+    const { component, plot, tools, armed } = activeCtx();
+    tools.armBrush({ label: 'pos', color: '#00f' });
+
+    component.toggleDragMode('pan');
+    expect(armed[armed.length - 1]).toBe('pan');
+    component.toggleDragMode('brush');
+
+    expect(plot.setBrushMode).toHaveBeenLastCalledWith(true, { size: component.brushSize });
+  });
+
+  it('disarm clears the armed tool', () => {
+    const { component, plot, tools, armed } = activeCtx();
+    tools.armBrush({ label: 'pos' });
+
+    tools.disarm();
+
+    expect(component.activeDragMode).toBeNull();
+    expect(plot.setBrushMode).toHaveBeenLastCalledWith(false, { size: component.brushSize });
+    expect(armed[armed.length - 1]).toBeNull();
+  });
+});

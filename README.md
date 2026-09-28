@@ -607,6 +607,8 @@ const myMode: PlotTypeContribution = {
     // ctx.visualizer — the public IVisualizer (regions, region overlay, undo…)
     // ctx.viewport  — overlay container, dataToClient / clientToData, frame$ / settled$
     // ctx.imageInfo$ — the current image
+    // ctx.tools     — arm the toolbar brush for a class (0.5.1+):
+    //                 ctx.tools?.armBrush({ label: 'tumour', color: '#1E88E5' })
     const sub = ctx.viewport.frame$.subscribe((visible) => redraw(visible));
     return { deactivate: () => sub.unsubscribe() };
   },

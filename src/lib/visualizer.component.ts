@@ -27,7 +27,9 @@ import {
   PLOT_MODE_CONTEXT,
   PLOT_MODE_SESSION,
   PLOT_TYPE_CONTRIBUTIONS,
+  PlotModeBrushClass,
   PlotModeContext,
+  PlotModeTools,
   PlotTypeContribution,
   PlotTypeOption,
   contributedPlotTypeOption,
@@ -190,6 +192,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   wandSensitivity = 2.0;
   /** Brush diameter in image-pixel coordinates (drives the painted disc size). */
   brushSize = 40;
+  /** Class the brush paints while a plot mode armed it (PlotModeTools.armBrush); null = plain brush. */
+  private brushClass: PlotModeBrushClass | null = null;
   /** SAM model picker options + current selection (jit-ui#90 P1). Only models
    *  with a hosted ONNX pair (configured via setSamModelUrls at app init) are
    *  offered, so the picker can't select a model that can't run. */
@@ -1573,8 +1577,16 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   }
 
   toggleDragMode(mode: string) {
+    // A tool picked by the user is always the plain tool, never a plot mode's
+    // brush class.
+    this.brushClass = null;
     // Toggle off if the same mode is re-selected.
-    this.activeDragMode = this.activeDragMode === mode ? null : mode;
+    this.applyDragMode(this.activeDragMode === mode ? null : mode);
+  }
+
+  /** Arm `mode` (or nothing) across every tool, keeping the toolbar in step. */
+  private applyDragMode(mode: string | null) {
+    this.activeDragMode = mode;
     const active = this.activeDragMode;
     // Record the armed tool in the shared session store.
     this.session.setActiveTool(active);
@@ -1594,7 +1606,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // On-canvas tool overlays.
     this.plotService.setZoomToBoxMode(active === 'zoomToBox');
     this.plotService.setWandMode(active === 'wand', { sensitivity: this.wandSensitivity });
-    this.plotService.setBrushMode(active === 'brush', { size: this.brushSize });
+    this.plotService.setBrushMode(active === 'brush', { size: this.brushSize, ...this.brushClass });
     this.plotService.setSamPointMode(active === 'samPoint');
     // Leaving point mode dismisses any lingering status toast.
     if (active !== 'samPoint') this.hideSamToast();
@@ -2301,6 +2313,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       visualizer: this.plotService,
       viewport,
       imageInfo$: this.state.getImageInfo$(),
+      tools: this.plotModeTools,
     };
     void this.plotModes.activate(contribution, ctx);
   }
@@ -2375,8 +2388,28 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     }
   }
 
+  /** Toolbar tools for contributed modes. Calls can come from outside Angular, hence the zone. */
+  private readonly plotModeTools: PlotModeTools = {
+    armBrush: (brushClass?: PlotModeBrushClass) => this.ngZone.run(() => {
+      this.brushClass = { label: brushClass?.label, color: brushClass?.color };
+      if (this.activeDragMode === 'brush') {
+        this.plotService.setBrushOptions({ size: this.brushSize, ...this.brushClass });
+      } else {
+        this.applyDragMode('brush');
+      }
+      this.cdr.markForCheck();
+    }),
+    disarm: () => this.ngZone.run(() => {
+      this.brushClass = null;
+      if (this.activeDragMode !== null) this.applyDragMode(null);
+      this.cdr.markForCheck();
+    }),
+    activeTool$: this.session.getActiveTool$(),
+  };
+
   /** Deactivate whatever tool is armed and clear every tool mode. */
   private deactivateActiveTool() {
+    this.brushClass = null;
     this.activeDragMode = null;
     this.session.setActiveTool(null);
     this.plotService.getRegionOverlay()?.setMode('none');

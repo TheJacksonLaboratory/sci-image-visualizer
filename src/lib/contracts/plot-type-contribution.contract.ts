@@ -102,6 +102,33 @@ export interface PlotModeViewport {
   settled$: Observable<PlotModeRect>;
 }
 
+/** The class a {@link PlotModeTools.armBrush} stroke paints. */
+export interface PlotModeBrushClass {
+  /** Label for the painted regions; the stroke only extends or merges regions with it. */
+  label?: string;
+  /** Colour for the painted regions (instead of the toolbar's shape colour). */
+  color?: string;
+}
+
+/**
+ * The visualizer's own toolbar tools, armed on a mode's behalf. Going through
+ * this rather than {@link IVisualizer} keeps the toolbar in step: the armed
+ * tool's button is highlighted and its controls (e.g. the brush size) show.
+ */
+export interface PlotModeTools {
+  /**
+   * Arm the toolbar brush, painting `brushClass`. Calling it again while the
+   * brush is armed switches class; the next stroke starts a region of it.
+   * The user picking any tool from the toolbar (including the brush) replaces
+   * this with the plain tool.
+   */
+  armBrush(brushClass?: PlotModeBrushClass): void;
+  /** Disarm whatever tool is armed, as if the user toggled it off. */
+  disarm(): void;
+  /** The armed toolbar tool id ('brush', 'pan', … or null). Replays the current value. */
+  activeTool$: Observable<string | null>;
+}
+
 /** Everything a contributed mode gets to work with while it is active. */
 export interface PlotModeContext {
   /** Full public visualizer API: regions, region overlay (tool modes), undo, etc. */
@@ -109,6 +136,8 @@ export interface PlotModeContext {
   viewport: PlotModeViewport;
   /** Current image info from IMAGE_STATE_PORT (null until an image is loaded). */
   imageInfo$: Observable<IImageInfo | null>;
+  /** Toolbar tools (since 0.5.1). Optional so a context built for 0.5.0 still type-checks. */
+  tools?: PlotModeTools;
 }
 
 /** A live activation of a contributed mode. */

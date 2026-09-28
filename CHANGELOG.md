@@ -9,6 +9,30 @@ file was added.
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-09-28
+
+A contributed plot mode can now paint its own classes with the toolbar brush.
+Additive and backwards compatible: nothing changes for a host or mode that
+does not use the new options.
+
+### Added
+
+- **Brush classes (`IBrushOptions.label` / `color`).** With a label set, the
+  brush paints regions of that one class:
+  - New regions take the label and colour. The colour is marked
+    `colorOverridden`, so a preset re-apply keeps it.
+  - A stroke only extends or merges regions with the same label, so painting
+    one class never grows another.
+  - `setBrushMode(true, …)` sets the class in full. `setBrushOptions` changes it
+    only when `label` or `color` is passed, so the size slider keeps it.
+  - Switching class drops the active region; the next stroke starts a new one.
+  - With neither set, the brush behaves exactly as before.
+- **Toolbar tools for plot modes (`PlotModeContext.tools`).** `armBrush(class)`,
+  `disarm()` and `activeTool$` go through the same path as the toolbar, so the
+  brush button shows as active and its size control appears. Picking any tool
+  from the toolbar gives the plain tool again. `tools` is optional in the type,
+  so a context built against 0.5.0 still type-checks.
+
 ## [0.5.0] — 2026-09-24
 
 The contributed-plot-types release: another package can add a mode to the
@@ -1713,7 +1737,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.2...v0.3.3
