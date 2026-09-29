@@ -8,6 +8,15 @@ import { Region, Polygon } from '../../models/region';
 /** Brush parameters. `size` is the brush *diameter* in matrix (image) pixels. */
 export interface BrushOptions {
   size?: number;
+  /**
+   * Paint as one class. With `label` set, new regions take this label, and the
+   * stroke only adopts or merges regions that already have it, so painting one
+   * class never grows another class's region. `color` colours the painted
+   * regions instead of the toolbar's shape colour. Leave both unset for the
+   * plain toolbar brush.
+   */
+  label?: string;
+  color?: string;
 }
 
 /** Default brush diameter (matrix pixels) if none is supplied. */
@@ -70,6 +79,8 @@ export class BrushToolService {
   private lastMatrix: { x: number; y: number } | null = null;
   private dragging = false;
   private size = DEFAULT_BRUSH_SIZE;
+  /** The class being painted ({@link BrushOptions.label} / `color`); null = plain brush. */
+  private paintClass: { label?: string; color?: string } | null = null;
 
   private readonly boundMouseDown: (e: MouseEvent) => void;
   private readonly boundMouseMove: (e: MouseEvent) => void;
@@ -91,12 +102,35 @@ export class BrushToolService {
   /** Toggle the brush on/off. */
   setMode(active: boolean, options: BrushOptions = {}) {
     this.active = active;
+    // Size applies whether arming or not, as before brush classes: a host may set it
+    // while the brush is off, and the next arm without options keeps it.
     if (options.size != null) this.setSize(options.size);
     if (active) {
+      // Arming sets the class in full: no label/color means the plain brush.
+      this.setOptions({ label: undefined, color: undefined, ...options });
       this.createOverlay();
     } else {
       this.destroyOverlay();
+      this.paintClass = null;
     }
+  }
+
+  /**
+   * Update size and/or class while armed. The class changes only when `label`
+   * or `color` is passed (as a key, even `undefined`), so a size-only update
+   * keeps it. Switching class drops the active region, so the next stroke
+   * starts a region of the new class.
+   */
+  setOptions(options: BrushOptions = {}) {
+    if (options.size != null) this.setSize(options.size);
+    if (!('label' in options) && !('color' in options)) return;
+    const next = options.label != null || options.color != null
+      ? { label: options.label, color: options.color }
+      : null;
+    if (next?.label !== this.paintClass?.label || next?.color !== this.paintClass?.color) {
+      this.resetStroke();
+    }
+    this.paintClass = next;
   }
 
   /** Live-update the brush size (matrix-pixel diameter). */
@@ -382,6 +416,13 @@ export class BrushToolService {
     this.strokeExtraIds = [];
   }
 
+  /** Whether the stroke may adopt or merge `region`: always for the plain brush,
+   *  otherwise only a region of the class being painted. */
+  private paintsInto(region: Region): boolean {
+    const label = this.paintClass?.label;
+    return label == null || region?.label === label;
+  }
+
   /** A region's closed-polygon vertices (image/data coords), or null when it
    *  isn't a fillable closed polygon (rectangles, open polylines). */
   private regionVerts(
@@ -437,6 +478,7 @@ export class BrushToolService {
     if (!regions || regions.length === 0) return false;
     // Most-recently-added regions are on top — check them first.
     for (let i = regions.length - 1; i >= 0; i--) {
+      if (!this.paintsInto(regions[i])) continue; // another class's region
       const verts = this.regionVerts(regions[i]);
       if (!verts) continue;
       if (!this.fitsForEdit(verts, rx, ry)) continue; // too large at this zoom → don't adopt
@@ -472,6 +514,7 @@ export class BrushToolService {
       for (let i = regions.length - 1; i >= 0; i--) {
         const region = regions[i];
         if (region.id != null && region.id === this.strokeRegionId) continue;
+        if (!this.paintsInto(region)) continue; // never fold another class in
 
         const verts = this.regionVerts(region);
         if (!verts) continue;
@@ -568,14 +611,18 @@ export class BrushToolService {
 
     const region = new Region();
     region.bounds = poly;
-    region.color = this.host.getShapeColor();
+    const paint = this.paintClass;
+    region.color = paint?.color ?? this.host.getShapeColor();
+    // An explicit class colour must survive a preset (re)apply, like a colour
+    // picked in the region editor (jit-ui#70).
+    if (paint?.color != null) region.colorOverridden = true;
     if (existing) {
       region.id = existing.id;
       region.name = existing.name;
     }
     // Default class/annotation name, matching the overlay-drawn regions and the
     // wand so a brush region isn't left unlabeled.
-    region.label = existing?.label ?? 'Region';
+    region.label = existing?.label ?? paint?.label ?? 'Region';
 
     if (existing) {
       const idx = regions.findIndex((r) => r.id === id);

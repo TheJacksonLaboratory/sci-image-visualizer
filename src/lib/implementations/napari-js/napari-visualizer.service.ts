@@ -4277,7 +4277,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.brushTool.setMode(true, (options ?? {}) as unknown as BrushOptions);
   }
   setBrushOptions(options: IBrushOptions): void {
-    if (options?.size != null) this.brushTool.setSize(options.size);
+    this.brushTool.setOptions(options ?? {});
   }
   setVertexEraserMode(active: boolean): void {
     if (!this.viewer) return;

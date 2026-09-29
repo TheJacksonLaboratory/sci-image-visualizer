@@ -1206,7 +1206,7 @@ export class PlotlyService implements IVisualizer {
   }
 
   public setBrushOptions(options: BrushOptions) {
-    if (options.size != null) this.brushTool.setSize(options.size);
+    this.brushTool.setOptions(options);
   }
 
   public setVertexEraserMode(active: boolean) {

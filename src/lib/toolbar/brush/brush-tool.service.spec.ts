@@ -275,4 +275,130 @@ describe('BrushToolService', () => {
     tool.setMode(true, { size: 12 });
     expect(() => tool.setSize(40)).not.toThrow();
   });
+
+  describe('painting a class (label / color)', () => {
+    function labelled(r: Region, label: string): Region {
+      r.label = label;
+      return r;
+    }
+
+    it('new regions take the class label and colour, kept against preset re-apply', () => {
+      const { host, container, state } = makeHost();
+      tool.bindHost(host);
+      tool.setMode(true, { size: 12, label: 'pos', color: '#1E88E5' });
+
+      cv(container).dispatchEvent(mouse('mousedown', 30, 30));
+
+      expect(state.regions).toHaveLength(1);
+      expect(state.regions[0].label).toBe('pos');
+      expect(state.regions[0].color).toBe('#1E88E5');
+      expect(state.regions[0].colorOverridden).toBe(true);
+    });
+
+    it('does not adopt a region of another class under the cursor', () => {
+      const other = labelled(boxRegion(20, 20, 40, 40, 7), 'neg');
+      const { host, container, state } = makeHost({ regions: [other] });
+      tool.bindHost(host);
+      tool.setMode(true, { size: 6, label: 'pos', color: '#00f' });
+
+      cv(container).dispatchEvent(mouse('mousedown', 30, 30));
+
+      expect(state.regions).toHaveLength(2);
+      expect(state.regions.find((r) => r.id === 7)?.label).toBe('neg');
+      expect(state.regions.find((r) => r.id !== 7)?.label).toBe('pos');
+    });
+
+    it('does not merge a region of another class it paints across', () => {
+      const other = labelled(boxRegion(28, 5, 34, 55, 7), 'neg');
+      const { host, container, state } = makeHost({ regions: [other] });
+      tool.bindHost(host);
+      tool.setMode(true, { size: 6, label: 'pos' });
+      const canvas = cv(container);
+
+      canvas.dispatchEvent(mouse('mousedown', 10, 30));
+      canvas.dispatchEvent(mouse('mousemove', 50, 30));
+
+      expect(state.regions.map((r) => r.label).sort()).toEqual(['neg', 'pos']);
+      expect(state.regions.find((r) => r.id === 7)?.bounds).toBe(other.bounds);
+    });
+
+    it('adopts and extends a region of the same class', () => {
+      const same = labelled(boxRegion(20, 20, 40, 40, 7), 'pos');
+      const { host, container, state } = makeHost({ regions: [same] });
+      tool.bindHost(host);
+      tool.setMode(true, { size: 6, label: 'pos' });
+
+      cv(container).dispatchEvent(mouse('mousedown', 30, 30));
+
+      expect(state.regions).toHaveLength(1);
+      expect(state.regions[0].id).toBe(7);
+      expect(state.regions[0].label).toBe('pos');
+    });
+
+    it('switching class drops the active region, so the next stroke starts a new one', () => {
+      const { host, container, state } = makeHost();
+      tool.bindHost(host);
+      tool.setMode(true, { size: 12, label: 'pos' });
+      const canvas = cv(container);
+      canvas.dispatchEvent(mouse('mousedown', 30, 30));
+      canvas.dispatchEvent(mouse('mouseup', 30, 30));
+
+      tool.setOptions({ label: 'neg', color: '#f00' });
+      canvas.dispatchEvent(mouse('mousedown', 30, 30));
+
+      expect(state.regions.map((r) => r.label).sort()).toEqual(['neg', 'pos']);
+    });
+
+    it('a size-only update keeps the class', () => {
+      const { host, container, state } = makeHost();
+      tool.bindHost(host);
+      tool.setMode(true, { size: 12, label: 'pos', color: '#00f' });
+      tool.setOptions({ size: 20 });
+
+      cv(container).dispatchEvent(mouse('mousedown', 30, 30));
+
+      expect(state.regions[0].label).toBe('pos');
+      expect(state.regions[0].color).toBe('#00f');
+    });
+
+    it('re-arming without a class is the plain brush again', () => {
+      const { host, container, state } = makeHost();
+      tool.bindHost(host);
+      tool.setMode(true, { size: 12, label: 'pos', color: '#00f' });
+      tool.setMode(false);
+      tool.setMode(true, { size: 12 });
+
+      cv(container).dispatchEvent(mouse('mousedown', 30, 30));
+
+      expect(state.regions[0].label).toBe('Region');
+      expect(state.regions[0].color).toBe('#ffffff');
+      expect(state.regions[0].colorOverridden).toBeUndefined();
+    });
+
+    it('a size passed while disarming still applies to the next arm', () => {
+      const { host, container, state } = makeHost();
+      tool.bindHost(host);
+      tool.setMode(true, { size: 4 });
+      tool.setMode(false, { size: 20 });
+      tool.setMode(true);
+
+      cv(container).dispatchEvent(mouse('mousedown', 30, 30));
+
+      const b = state.regions[0].bounds as Polygon;
+      expect(Math.max(...b.xpoints) - Math.min(...b.xpoints)).toBeGreaterThan(12);
+    });
+
+    it('the plain brush still adopts a labelled region', () => {
+      const same = labelled(boxRegion(20, 20, 40, 40, 7), 'pos');
+      const { host, container, state } = makeHost({ regions: [same] });
+      tool.bindHost(host);
+      tool.setMode(true, { size: 6 });
+
+      cv(container).dispatchEvent(mouse('mousedown', 30, 30));
+
+      expect(state.regions).toHaveLength(1);
+      expect(state.regions[0].id).toBe(7);
+      expect(state.regions[0].label).toBe('pos');
+    });
+  });
 });

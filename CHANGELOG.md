@@ -9,6 +9,58 @@ file was added.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-09-28
+
+Interactive toolbar tools, and brush classes. The first user is dianne-js: its
+DIANNE tool is a toolbar button next to the host's own actions, and it paints
+positive and negative strokes with the brush in blue and red.
+
+### Changed
+
+- **`TOOLBAR_TOOLS` is typed `readonly ToolbarContribution[]`**, the union of the
+  run tools (`ToolbarToolContribution`, unchanged) and the new dialog tools.
+  Providing tools is unaffected. Code that *injects* the token and reads run-tool
+  members directly must narrow first, for example with `visibleToolContributions()`
+  or `isDialogToolContribution()`. That is a type-level break, so this is a minor
+  bump under 0.x.
+- `visibleToolContributions` skips dialog tools (and anything without `models()`),
+  and `sortToolContributions` is generic.
+
+### Added
+
+- **Dialog tools on `TOOLBAR_TOOLS` (`kind: 'dialog'`,
+  `ToolbarDialogToolContribution`).**
+  - **Button:** placed right after the host's projected toolbar buttons, and
+    shown in the Image view only. It is highlighted while its dialog is open.
+  - **Dialog:** clicking opens a floating, non-modal dialog. The tool fills it
+    through `mount(host, ctx, session)`, with a `ToolDialogContext`: the plot-mode
+    context, with `tools` always present. `mount` runs once the dialog has rendered
+    and `host` is in the document, so the body can measure itself.
+  - **Lifecycle:** the same as plot modes, sharing the same controller.
+    - Closing the dialog, or clicking the button again, tears the body down and
+      calls `deactivate()` once.
+    - A re-render restarts the session with the dialog still open.
+    - Leaving the Image view closes the dialog.
+    - A failed start closes it with a warning.
+  - **Helpers:** `dialogToolContributions()` validates and sorts them, and help
+    entries are listed with the other tools.
+
+- **Brush classes (`IBrushOptions.label` / `color`).** With a label set, the
+  brush paints regions of that one class:
+  - New regions take the label and colour. The colour is marked
+    `colorOverridden`, so a preset re-apply keeps it.
+  - A stroke only extends or merges regions with the same label, so painting
+    one class never grows another.
+  - `setBrushMode(true, …)` sets the class in full. `setBrushOptions` changes it
+    only when `label` or `color` is passed, so the size slider keeps it.
+  - Switching class drops the active region; the next stroke starts a new one.
+  - With neither set, the brush behaves exactly as before.
+- **Toolbar tools for plot modes (`PlotModeContext.tools`).** `armBrush(class)`,
+  `disarm()` and `activeTool$` go through the same path as the toolbar, so the
+  brush button shows as active and its size control appears. Picking any tool
+  from the toolbar gives the plain tool again. `tools` is optional in the type,
+  so a context built against 0.5.0 still type-checks.
+
 ## [0.5.0] — 2026-09-24
 
 The contributed-plot-types release: another package can add a mode to the
@@ -1713,7 +1765,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.2...v0.3.3

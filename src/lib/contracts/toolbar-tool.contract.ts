@@ -35,6 +35,17 @@
  * than an escape hatch that returns a component — the moment one tool draws
  * itself, the toolbar stops being able to lay tools out consistently.
  *
+ * DIALOG TOOLS
+ * Some tools are not "set parameters, run once" but an interactive session: the
+ * user paints, the tool retrains and redraws, over and over (DIANNE). A schema
+ * cannot describe that, so {@link ToolbarDialogToolContribution} is the one
+ * variant that renders its own body. The toolbar still owns the button, its
+ * placement and the dialog chrome; the tool only fills the dialog, with plain
+ * DOM (`mount`), so it needs neither Angular nor this library's PrimeNG version.
+ * Its button sits with the host's own actions at the start of the toolbar, and
+ * shows only in the Image view, the view its context ({@link ToolDialogContext})
+ * draws over.
+ *
  * WHY AN EMPTY MODEL LIST HIDES THE TOOL
  * {@link ToolbarToolContribution.models} returning `[]` removes the tool from
  * the toolbar entirely. This preserves the behaviour the built-in tools already
@@ -46,6 +57,7 @@ import { InjectionToken } from '@angular/core';
 import type { Observable } from 'rxjs';
 
 import type { IVisualizer } from './visualizer.contract';
+import type { PlotModeContext, PlotModeSession, PlotModeTools } from './plot-type-contribution.contract';
 
 /** A number field. Rendered as a stepper, matching the built-in dialogs. */
 export interface NumberParamSpec {
@@ -183,18 +195,77 @@ export interface ToolbarToolContribution {
 }
 
 /**
- * Multi-provider token for contributed tools.
+ * What a dialog tool gets while its dialog is open: the same surface a
+ * contributed plot mode gets (the public visualizer, the Image view's viewport
+ * and the current image), with the toolbar tools always present.
+ */
+export type ToolDialogContext = PlotModeContext & { tools: PlotModeTools };
+
+/** A live dialog-tool session. `deactivate()` runs exactly once, after the body's teardown. */
+export type ToolDialogSession = PlotModeSession;
+
+/**
+ * A toolbar tool that opens a dialog instead of running once (see DIALOG TOOLS
+ * above). Clicking its button opens the dialog and starts a session; clicking it
+ * again, or closing the dialog, ends it.
+ *
+ * The session is bound to the Image view on screen. When that view is re-rendered
+ * (another image, another slice) the session ends and, with the dialog still
+ * open, a fresh one starts once the new view is ready. Leaving the Image view
+ * closes the dialog. As with plot modes, nothing the tool throws or rejects
+ * escapes: a failed start closes the dialog with a warning.
+ */
+export interface ToolbarDialogToolContribution {
+  kind: 'dialog';
+  /** Stable identity. Must not clash with another toolbar tool. */
+  id: string;
+  /** Short name; the dialog title unless `dialog.title` is set. */
+  label: string;
+  icon: ToolIcon;
+  /** Tooltip on the button. */
+  tooltip: string;
+  /** Order among the dialog tools. Lower sorts first; ties keep registration order. */
+  order?: number;
+  dialog?: {
+    title?: string;
+    /** CSS width of the dialog. Default `'22rem'`. */
+    width?: string;
+  };
+  /** Entry for the help dialog's tool list, rendered as HTML (trusted content). */
+  help?: { body: string };
+  /** Start a session, once the Image view's viewport is ready. */
+  activate(ctx: ToolDialogContext): ToolDialogSession | Promise<ToolDialogSession>;
+  /**
+   * Render the dialog body into `host`; return its teardown (called before
+   * `deactivate()`). Called after `activate` resolves, once the dialog has rendered and
+   * `host` is in the document, so the body can measure itself.
+   */
+  mount(host: HTMLElement, ctx: ToolDialogContext, session: ToolDialogSession): () => void;
+}
+
+/** Anything provided on {@link TOOLBAR_TOOLS}. A run tool has no `kind`. */
+export type ToolbarContribution = ToolbarToolContribution | ToolbarDialogToolContribution;
+
+/** Whether a contribution is a {@link ToolbarDialogToolContribution}. */
+export function isDialogToolContribution(c: unknown): c is ToolbarDialogToolContribution {
+  return !!c && (c as { kind?: unknown }).kind === 'dialog';
+}
+
+/**
+ * Multi-provider token for contributed tools: run tools
+ * ({@link ToolbarToolContribution}) and, since 0.6.0, dialog tools
+ * ({@link ToolbarDialogToolContribution}).
  *
  * Deliberately has no `factory`: unregistered means no tools, which is what
  * makes this library shippable without the closed model packages. Inject it
  * `{ optional: true }` and treat null as empty.
  */
-export const TOOLBAR_TOOLS = new InjectionToken<readonly ToolbarToolContribution[]>('TOOLBAR_TOOLS');
+export const TOOLBAR_TOOLS = new InjectionToken<readonly ToolbarContribution[]>('TOOLBAR_TOOLS');
 
 /** Sort contributed tools into display order. */
-export function sortToolContributions(
-  tools: readonly ToolbarToolContribution[],
-): ToolbarToolContribution[] {
+export function sortToolContributions<T extends { order?: number }>(
+  tools: readonly T[],
+): T[] {
   // Stable: equal `order` keeps registration order, so a host controls ties by
   // provider order without having to invent numbers.
   return tools.map((t, i) => ({ t, i })).sort((a, b) =>
@@ -202,9 +273,41 @@ export function sortToolContributions(
   ).map(({ t }) => t);
 }
 
-/** The tools a toolbar should actually show: those with at least one model. */
+/** The run tools a toolbar should actually show: those with at least one model.
+ *  Dialog tools are left out (see {@link dialogToolContributions}). */
 export function visibleToolContributions(
-  tools: readonly ToolbarToolContribution[] | null | undefined,
+  tools: readonly ToolbarContribution[] | null | undefined,
 ): ToolbarToolContribution[] {
-  return sortToolContributions(tools ?? []).filter((t) => t.models().length > 0);
+  const run = (tools ?? []).filter(
+    (t): t is ToolbarToolContribution =>
+      !isDialogToolContribution(t) && typeof (t as ToolbarToolContribution)?.models === 'function',
+  );
+  return sortToolContributions(run).filter((t) => t.models().length > 0);
+}
+
+/**
+ * The dialog tools, in display order. A malformed one (no string `id`, no
+ * `activate` or `mount` function) or a repeated `id` is dropped with a warning
+ * rather than breaking the toolbar.
+ */
+export function dialogToolContributions(
+  tools: readonly ToolbarContribution[] | null | undefined,
+  log: { warn(...args: unknown[]): void } = console,
+): ToolbarDialogToolContribution[] {
+  const seen = new Set<string>();
+  const out: ToolbarDialogToolContribution[] = [];
+  for (const t of (tools ?? []).filter(isDialogToolContribution)) {
+    if (typeof t.id !== 'string' || !t.id || typeof t.activate !== 'function'
+        || typeof t.mount !== 'function') {
+      log.warn('[visualizer] dialog tool ignored: it needs a string `id` and `activate` and `mount` functions.', t);
+      continue;
+    }
+    if (seen.has(t.id)) {
+      log.warn(`[visualizer] dialog tool '${t.id}' ignored: another dialog tool already uses that id.`);
+      continue;
+    }
+    seen.add(t.id);
+    out.push(t);
+  }
+  return sortToolContributions(out);
 }

@@ -1,11 +1,11 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { FormsModule } from '@angular/forms';
-import { NO_ERRORS_SCHEMA } from '@angular/core';
+import { Component, NO_ERRORS_SCHEMA } from '@angular/core';
 import { EventEmitter } from '@angular/core';
 
 import { ToolbarComponent } from './toolbar.component';
 import { PlotType, PlotTypeId } from '../contracts/plot-type';
-import { ToolbarToolContribution } from '../contracts/toolbar-tool.contract';
+import { ToolbarDialogToolContribution, ToolbarToolContribution } from '../contracts/toolbar-tool.contract';
 
 /** A contributed tool with two checkpoints, enough to exercise the menu. */
 function contributedTool(): ToolbarToolContribution {
@@ -226,5 +226,70 @@ describe('ToolbarComponent — model info accessibility', () => {
     const c = new ToolbarComponent();
     expect(c.plainText('')).toBe('');
     expect(c.plainText(undefined as never)).toBe('');
+  });
+});
+
+describe('ToolbarComponent — dialog tools', () => {
+  @Component({
+    template: `
+      <plotting-toolbar [selectedPlotType]="type" [dialogTools]="dialogTools"
+                        [openDialogToolId]="openId" (toggleDialogTool)="toggled.push($event)">
+        <button class="host-pipeline">pipeline</button>
+      </plotting-toolbar>`,
+  })
+  class HostComponent {
+    type: PlotTypeId = PlotType.IMAGE;
+    openId: string | null = null;
+    toggled: string[] = [];
+    dialogTools: ToolbarDialogToolContribution[] = [{
+      kind: 'dialog', id: 'dianne', label: 'DIANNE', icon: { pi: 'pi-pencil' },
+      tooltip: 'Digital Pathology - DIANNE',
+      activate: () => ({ deactivate: () => undefined }),
+      mount: () => () => undefined,
+    }];
+  }
+
+  let fixture: ComponentFixture<HostComponent>;
+  // Only a dialog tool's button carries aria-pressed.
+  const button = (): HTMLElement | null => fixture.nativeElement.querySelector('p-button[aria-pressed]');
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      declarations: [ToolbarComponent, HostComponent],
+      imports: [FormsModule],
+      schemas: [NO_ERRORS_SCHEMA],
+    }).compileComponents();
+    fixture = TestBed.createComponent(HostComponent);
+    fixture.detectChanges();
+  });
+
+  it('shows the button in the Image view, right after the host\'s own buttons', () => {
+    const b = button();
+    expect(b).not.toBeNull();
+    const pipeline = fixture.nativeElement.querySelector('.host-pipeline') as HTMLElement;
+    // Next element after the projected host content is the dialog tool.
+    expect(pipeline.nextElementSibling).toBe(b);
+    expect(b!.querySelector('i.pi-pencil')).not.toBeNull();
+  });
+
+  it('gives the icon-only button an accessible name', () => {
+    const de = fixture.debugElement.query((d) => d.nativeElement === button());
+    expect(de.properties['ariaLabel']).toBe('DIANNE');
+  });
+
+  it('hides it outside the Image view', () => {
+    fixture.componentInstance.type = PlotType.HEATMAP;
+    fixture.detectChanges();
+    expect(button()).toBeNull();
+  });
+
+  it('marks it pressed while its dialog is open, and emits its id on click', () => {
+    expect(button()!.getAttribute('aria-pressed')).toBe('false');
+    fixture.componentInstance.openId = 'dianne';
+    fixture.detectChanges();
+    expect(button()!.getAttribute('aria-pressed')).toBe('true');
+
+    button()!.dispatchEvent(new CustomEvent('onClick'));
+    expect(fixture.componentInstance.toggled).toEqual(['dianne']);
   });
 });
