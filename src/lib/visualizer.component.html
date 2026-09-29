@@ -54,6 +54,9 @@
   [samModels]="samModels"
   [samModelId]="samModelId"
   [contributedTools]="contributedTools"
+  [dialogTools]="dialogTools"
+  [openDialogToolId]="openDialogToolId"
+  (toggleDialogTool)="toggleDialogTool($event)"
   [toolModelIds]="toolModelIds"
   [vertexEraserRadius]="vertexEraserRadius"
   [canUndo]="canUndoRegion"
@@ -187,6 +190,19 @@
     <ng-container *ngComponentOutlet="panel.component; injector: panel.injector ?? undefined"></ng-container>
   </ng-container>
   <div *ngIf="panel.host" #plotModePanelSlot class="plot-mode-panel-slot"></div>
+</p-dialog>
+
+<!-- An open dialog tool (TOOLBAR_TOOLS, kind: 'dialog'). Non-modal so the user can
+     keep working on the image, e.g. painting with the brush the tool armed. The
+     tool renders its body into a host element attached to the slot below (see
+     toolDialogSlot); closing the dialog ends the tool's session. -->
+<p-dialog *ngIf="toolDialog as dlg" [header]="dlg.title" [visible]="true"
+          (visibleChange)="$event || closeDialogTool()"
+          [modal]="false" [closable]="true" [resizable]="true" [draggable]="true"
+          appendTo="body" position="right" styleClass="tool-dialog"
+          [style]="{ width: dlg.width, maxHeight: '85vh' }"
+          [contentStyle]="{ overflow: 'auto' }">
+  <div #toolDialogSlot class="tool-dialog-slot"></div>
 </p-dialog>
 
 <!-- Region Editor: non-modal, draggable, resizable floating dialog opened from

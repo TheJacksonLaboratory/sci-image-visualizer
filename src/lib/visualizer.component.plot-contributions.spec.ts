@@ -33,6 +33,7 @@ import {
   PlotTypeContribution,
 } from './contracts/plot-type-contribution.contract';
 import { IMAGE_STATE_PORT } from './contracts/ports/image-state.port';
+import { TOOLBAR_TOOLS, ToolbarDialogToolContribution } from './contracts/toolbar-tool.contract';
 import { VISUALIZER } from './contracts/visualizer.contract';
 import { VisualizerStore } from './store/visualizer-store.service';
 import { RegionOpsService } from './region-ops.service';
@@ -146,7 +147,8 @@ function plotBase(viewport: PlotModeViewport | null): any {
   };
 }
 
-function harness(contributions: unknown[] | undefined, viewport: PlotModeViewport | null = mockViewport()) {
+function harness(contributions: unknown[] | undefined, viewport: PlotModeViewport | null = mockViewport(),
+                 toolContributions?: unknown[]) {
   const plot = selfCompleting(plotBase(viewport));
   const imageInfo$ = new BehaviorSubject<any>(null);
   const state = selfCompleting({
@@ -171,7 +173,7 @@ function harness(contributions: unknown[] | undefined, viewport: PlotModeViewpor
     toolFeeds(), toolFeeds(), toolFeeds(),
     new RegionOpsService(new WandService()),
     undefined, // VIZ_CONFIG
-    undefined, // TOOLBAR_TOOLS
+    toolContributions as any, // TOOLBAR_TOOLS
     undefined, // SPATIAL_DATA_PORT
     contributions as any, // PLOT_TYPE_CONTRIBUTIONS
     Injector.create({ providers: [] }),
@@ -701,5 +703,175 @@ describe('contributed plot types — toolbar tools (ctx.tools)', () => {
     expect(component.activeDragMode).toBeNull();
     expect(plot.setBrushMode).toHaveBeenLastCalledWith(false, { size: component.brushSize });
     expect(armed[armed.length - 1]).toBeNull();
+  });
+});
+
+describe('dialog tools (TOOLBAR_TOOLS, kind: dialog)', () => {
+  function dialogTool(over: Partial<ToolbarDialogToolContribution> = {}) {
+    const sessions: PlotModeSession[] = [];
+    const teardowns: jest.Mock[] = [];
+    const tool: ToolbarDialogToolContribution = {
+      kind: 'dialog',
+      id: 'dianne',
+      label: 'DIANNE',
+      icon: { pi: 'pi-pencil' },
+      tooltip: 'Digital Pathology - DIANNE',
+      activate: jest.fn(() => {
+        events.push('activate');
+        const s = { deactivate: jest.fn(() => events.push('deactivate')) };
+        sessions.push(s);
+        return s;
+      }),
+      mount: jest.fn((host: HTMLElement) => {
+        host.textContent = 'body';
+        const t = jest.fn(() => events.push('teardown'));
+        teardowns.push(t);
+        return t;
+      }),
+      ...over,
+    };
+    return { tool, sessions, teardowns };
+  }
+
+  function opened(over: Partial<ToolbarDialogToolContribution> = {}) {
+    const d = dialogTool(over);
+    const h = harness(undefined, mockViewport(), [d.tool]);
+    h.imageInfo$.next(infoFor('a.tif'));
+    h.finish();
+    h.component.toggleDialogTool('dianne');
+    return { ...h, ...d };
+  }
+
+  it('lists dialog tools apart from the run tools', () => {
+    const { component } = opened();
+    expect(component.dialogTools.map((t) => t.id)).toEqual(['dianne']);
+    expect(component.contributedTools).toEqual([]);
+  });
+
+  it('opening starts a session with the Image view context and mounts the body in the dialog', () => {
+    const { component, plot, tool } = opened();
+    expect(tool.activate).toHaveBeenCalledTimes(1);
+    const ctx = (tool.activate as jest.Mock).mock.calls[0][0];
+    expect(ctx.visualizer).toBe(plot);
+    expect(typeof ctx.tools.armBrush).toBe('function');
+    expect(component.openDialogToolId).toBe('dianne');
+    expect(component.toolDialog?.title).toBe('DIANNE');
+    expect(component.toolDialog?.host.textContent).toBe('body');
+  });
+
+  it('clicking again closes it: body torn down, then the session ends, once', () => {
+    const { component, sessions } = opened();
+    events = [];
+    component.toggleDialogTool('dianne');
+    expect(events).toEqual(['teardown', 'deactivate']);
+    expect(sessions[0].deactivate).toHaveBeenCalledTimes(1);
+    expect(component.openDialogToolId).toBeNull();
+    expect(component.toolDialog).toBeNull();
+  });
+
+  it('closing the dialog (X) ends the session', () => {
+    const { component, sessions } = opened();
+    component.closeDialogTool();
+    expect(sessions[0].deactivate).toHaveBeenCalledTimes(1);
+    expect(component.toolDialog).toBeNull();
+  });
+
+  it('an image switch ends the session and starts a fresh one once the new view has plotted', async () => {
+    const { component, imageInfo$, tool, sessions, finish, renderPhase } = opened();
+    imageInfo$.next(infoFor('b.tif'));
+    await renderPhase();
+    expect(sessions[0].deactivate).toHaveBeenCalledTimes(1);
+    expect(component.openDialogToolId).toBe('dianne'); // still open
+    finish();
+    expect(tool.activate).toHaveBeenCalledTimes(2);
+    expect(component.toolDialog).not.toBeNull();
+  });
+
+  it('leaving the Image view closes the dialog', () => {
+    const { component, sessions } = opened();
+    component.onSelectPlotType(PlotType.HEATMAP);
+    expect(sessions[0].deactivate).toHaveBeenCalledTimes(1);
+    expect(component.openDialogToolId).toBeNull();
+  });
+
+  it('a throwing activate() closes it with a warning, and the viewer keeps working', () => {
+    const { component, messages } = opened({ activate: jest.fn(() => { throw new Error('boom'); }) });
+    expect(component.openDialogToolId).toBeNull();
+    expect(component.toolDialog).toBeNull();
+    expect(messages.add).toHaveBeenCalledWith(expect.objectContaining({ summary: 'DIANNE is unavailable' }));
+  });
+
+  it('does not open over a backend with no viewport', () => {
+    const d = dialogTool();
+    const h = harness(undefined, null, [d.tool]);
+    h.imageInfo$.next(infoFor('a.tif'));
+    h.finish();
+    h.component.toggleDialogTool('dianne');
+    expect(d.tool.activate).not.toHaveBeenCalled();
+    expect(h.component.openDialogToolId).toBeNull();
+  });
+
+  it('ends the session on destroy, once', () => {
+    const { component, sessions } = opened();
+    component.ngOnDestroy();
+    expect(sessions[0].deactivate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('dialog tools — rendering', () => {
+  afterEach(() => {
+    TestBed.resetTestingModule();
+    document.body.querySelectorAll('.p-dialog').forEach((el) => el.remove());
+  });
+
+  it('renders the body inside a titled, closable dialog, and removes it on close', async () => {
+    const teardown = jest.fn();
+    const tool: ToolbarDialogToolContribution = {
+      kind: 'dialog', id: 'dianne', label: 'DIANNE', icon: { pi: 'pi-pencil' }, tooltip: 't',
+      dialog: { title: 'Digital Pathology - DIANNE' },
+      activate: () => ({ deactivate: jest.fn() }),
+      mount: (host) => { host.innerHTML = '<b class="dialog-body">hi</b>'; return teardown; },
+    };
+    const plot = selfCompleting(plotBase(mockViewport()));
+    const imageInfo$ = new BehaviorSubject<any>(null);
+    const state = selfCompleting({
+      getImageInfo$: () => imageInfo$,
+      getCacheProgress$: () => new BehaviorSubject(null),
+      getFilename$: () => new BehaviorSubject(undefined),
+      getImageLoadingMessage$: () => new BehaviorSubject(''),
+    });
+    await TestBed.configureTestingModule({
+      declarations: [VisualizerComponent],
+      imports: [CommonModule, DialogModule, NoopAnimationsModule],
+      providers: [
+        { provide: IMAGE_STATE_PORT, useValue: state },
+        { provide: VISUALIZER, useValue: plot },
+        { provide: TOOLBAR_TOOLS, useValue: tool, multi: true },
+        { provide: MessageService, useValue: { add: jest.fn(), clear: jest.fn() } },
+        { provide: SamToolService, useValue: toolFeeds() },
+        { provide: SamPointToolService, useValue: toolFeeds() },
+        { provide: CellSegmentToolService, useValue: toolFeeds() },
+      ],
+      schemas: [NO_ERRORS_SCHEMA],
+    }).compileComponents();
+    const fixture = TestBed.createComponent(VisualizerComponent);
+    fixture.detectChanges();
+    const component = fixture.componentInstance;
+    imageInfo$.next(infoFor('a.tif'));
+    orchestratorHosts[orchestratorHosts.length - 1].finished(false, 'done');
+    component.toggleDialogTool('dianne');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const dialog = document.body.querySelector('.tool-dialog');
+    expect(dialog?.textContent).toContain('Digital Pathology - DIANNE');
+    expect(dialog?.querySelector('.tool-dialog-slot .dialog-body')?.textContent).toBe('hi');
+
+    component.closeDialogTool();
+    fixture.detectChanges();
+    expect(teardown).toHaveBeenCalledTimes(1);
+    expect(document.body.querySelector('.dialog-body')).toBeNull();
+    fixture.destroy();
   });
 });

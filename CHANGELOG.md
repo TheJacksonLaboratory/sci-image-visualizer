@@ -9,13 +9,40 @@ file was added.
 
 ## [Unreleased]
 
-## [0.5.1] — 2026-09-28
+## [0.6.0] — 2026-09-28
 
-A contributed plot mode can now paint its own classes with the toolbar brush.
-Additive and backwards compatible: nothing changes for a host or mode that
-does not use the new options.
+Interactive toolbar tools, and brush classes. The first user is dianne-js: its
+DIANNE tool is a toolbar button next to the host's own actions, and it paints
+positive and negative strokes with the brush in blue and red.
+
+### Changed
+
+- **`TOOLBAR_TOOLS` is typed `readonly ToolbarContribution[]`**, the union of the
+  run tools (`ToolbarToolContribution`, unchanged) and the new dialog tools.
+  Providing tools is unaffected. Code that *injects* the token and reads run-tool
+  members directly must narrow first, for example with `visibleToolContributions()`
+  or `isDialogToolContribution()`. That is a type-level break, so this is a minor
+  bump under 0.x.
+- `visibleToolContributions` skips dialog tools (and anything without `models()`),
+  and `sortToolContributions` is generic.
 
 ### Added
+
+- **Dialog tools on `TOOLBAR_TOOLS` (`kind: 'dialog'`,
+  `ToolbarDialogToolContribution`).**
+  - **Button:** placed right after the host's projected toolbar buttons, and
+    shown in the Image view only. It is highlighted while its dialog is open.
+  - **Dialog:** clicking opens a floating, non-modal dialog. The tool fills it
+    through `mount(host, ctx, session)`, with a `ToolDialogContext`: the plot-mode
+    context, with `tools` always present.
+  - **Lifecycle:** the same as plot modes, sharing the same controller.
+    - Closing the dialog, or clicking the button again, tears the body down and
+      calls `deactivate()` once.
+    - A re-render restarts the session with the dialog still open.
+    - Leaving the Image view closes the dialog.
+    - A failed start closes it with a warning.
+  - **Helpers:** `dialogToolContributions()` validates and sorts them, and help
+    entries are listed with the other tools.
 
 - **Brush classes (`IBrushOptions.label` / `color`).** With a label set, the
   brush paints regions of that one class:
@@ -1737,8 +1764,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.5.1...HEAD
-[0.5.1]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.5.0...v0.5.1
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.2...v0.3.3

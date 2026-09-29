@@ -46,7 +46,11 @@ import {
   NumberParamSpec,
   SelectParamSpec,
   ToolParamSpec,
+  ToolbarContribution,
+  ToolbarDialogToolContribution,
   ToolbarToolContribution,
+  ToolDialogContext,
+  dialogToolContributions,
   visibleToolContributions,
 } from './contracts/toolbar-tool.contract';
 import { RegionToolMode } from './contracts/region-overlay.contract';
@@ -207,6 +211,18 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * and help dialog simply omit that group.
    */
   contributedTools: ToolbarToolContribution[] = [];
+  /**
+   * Dialog tools registered through {@link TOOLBAR_TOOLS} (`kind: 'dialog'`),
+   * sorted. Their buttons sit with the host's own actions and show in the Image
+   * view only; each opens a floating dialog the tool fills.
+   */
+  dialogTools: ToolbarDialogToolContribution[] = [];
+  /** The dialog tool the user has open (its session may be between renders). */
+  openDialogToolId: string | null = null;
+  /** The open dialog tool's live dialog, as the template renders it. */
+  toolDialog: { title: string; width: string; host: HTMLElement } | null = null;
+  /** Dialog-tool sessions: the same lifecycle and isolation as contributed plot modes. */
+  private readonly toolDialogs: PlotModeController;
   /** Active checkpoint per contributed tool. */
   toolModelIds: Record<string, string> = {};
   /**
@@ -435,7 +451,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // A constructor parameter rather than a field `inject()`: this component is
     // also constructed directly with `new` in its own specs, which is outside
     // an injection context and would throw NG0203 on a field initializer.
-    @Optional() @Inject(TOOLBAR_TOOLS) toolContributions?: readonly ToolbarToolContribution[],
+    @Optional() @Inject(TOOLBAR_TOOLS) toolContributions?: readonly ToolbarContribution[],
     // Optional like the rest: a host that shows only images never provides it,
     // and the spatial plot types simply stay hidden.
     @Optional() @Inject(SPATIAL_DATA_PORT) private spatialData?: SpatialDataPort,
@@ -452,6 +468,24 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       onFailed: (contribution) => this.fallBackFromPlotMode(contribution),
     });
     this.contributedTools = visibleToolContributions(toolContributions);
+    this.dialogTools = dialogToolContributions(toolContributions);
+    // A dialog tool is run by the plot-mode lifecycle, adapted: its "base type" is
+    // the Image view it draws over, and its panel is the dialog body.
+    this.toolDialogs = new PlotModeController(
+      this.dialogTools.map((t): PlotTypeContribution => ({
+        descriptor: { type: t.id, label: t.label, dimensions: '2d', baseType: PlotType.IMAGE },
+        activate: (ctx) => t.activate(ctx as ToolDialogContext),
+        panel: {
+          title: t.dialog?.title ?? t.label,
+          mount: (host, ctx, session) => t.mount(host, ctx as ToolDialogContext, session),
+        },
+      })),
+      {
+        onActivated: (active) => this.showToolDialog(active),
+        onDeactivating: () => this.hideToolDialog(),
+        onFailed: (contribution) => this.dialogToolFailed(contribution.descriptor.type),
+      },
+    );
     this.colormapsOptions = plotService.getColormapOptions();
     this.computePlotTypeOptions();
   }
@@ -703,8 +737,10 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * `isStack`/`isGrayscale` decision is made against a file that is no longer loaded.
    */
   private onImageCleared(): void {
-    // The image a contributed mode was drawing over is gone.
+    // The image a contributed mode was drawing over is gone. An open dialog
+    // tool stays open and restarts once the next image has plotted.
     this.plotModes.deactivate();
+    this.toolDialogs.deactivate();
     this.imageInfo = undefined;
     this.loadedFileName = undefined;
     this.computePlotTypeOptions();
@@ -733,6 +769,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // gone): its session ends before anything else draws.
     this.plotModes.deactivate();
     const base = this.plotModes.baseTypeOf(fallback);
+    if (base !== PlotType.IMAGE) this.closeDialogTool();
     this.selectedPlotTypeId = fallback;
     this.plotType = base;
     this.isHeatmap = base === PlotType.IMAGE;
@@ -929,6 +966,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
             // draws. If the mode is still selected once this render lands, a
             // fresh session starts for it (see activateSelectedPlotMode).
             this.plotModes.deactivate();
+            this.toolDialogs.deactivate();
             this.plotService.reset();
             this.stackLoading = imgInfo.isStack && imgInfo.showStack;
             // set max index of stack — computed before updateZIndex so a
@@ -1088,6 +1126,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
                 this.running = false;
                 applyRoi();
                 this.activateSelectedPlotMode();
+                this.activateOpenDialogTool();
                 console.log(logTag);
               },
               sharpenFailed: (err: any) => {
@@ -1104,6 +1143,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
                 this.running = false;
                 applyRoi();
                 this.activateSelectedPlotMode();
+                this.activateOpenDialogTool();
               },
             }).render(imgInfo, smallImgInfo);
           }
@@ -1326,6 +1366,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // still exists. The panel goes with this view, so no change detection.
     this.destroying = true;
     this.plotModes.deactivate();
+    this.toolDialogs.deactivate();
     // Leave the live set so the next-oldest visualizer picks up the outlets.
     VisualizerComponent.liveInstances.delete(this);
     this.revokeVolumeImageUrls();
@@ -2251,6 +2292,10 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // Everything below decides how to RENDER, so it works on the built-in type
     // that draws `selected`: a contributed mode behaves exactly like its base.
     const type = this.plotModes.baseTypeOf(selected);
+    // A dialog tool draws over the Image view: leaving it closes the dialog. Staying
+    // on it, the session ends here and restarts once the re-plot lands.
+    if (type === PlotType.IMAGE) this.toolDialogs.deactivate();
+    else this.closeDialogTool();
     this.plotType = type;
     this.selectedPlotTypeId = selected;
     const descriptor = isBuiltinPlotType(selected)
@@ -2386,6 +2431,91 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       console.error('[visualizer] change detection failed while updating a contributed plot mode panel.', err);
       return err ?? new Error('change detection failed');
     }
+  }
+
+  // ── dialog tools (TOOLBAR_TOOLS, kind: 'dialog') ─────────────────────────
+
+  /** The toolbar button: open the tool's dialog, or close it if it is open. */
+  toggleDialogTool(id: string): void {
+    if (this.openDialogToolId === id) {
+      this.closeDialogTool();
+      return;
+    }
+    this.closeDialogTool();
+    if (!this.dialogTools.some((t) => t.id === id)) return;
+    this.openDialogToolId = id;
+    this.toolDialogs.clearCleanupFailures(); // an explicit open gets a fresh attempt
+    this.activateOpenDialogTool();
+  }
+
+  /** Close the open dialog tool: its body is torn down, then its session ends. */
+  closeDialogTool(): void {
+    this.openDialogToolId = null;
+    this.toolDialogs.deactivate();
+  }
+
+  /** Start (or restart, after a re-render) the open dialog tool's session. */
+  private activateOpenDialogTool(): void {
+    const id = this.openDialogToolId;
+    const contribution = id ? this.toolDialogs.find(id) : undefined;
+    if (!contribution || this.plotType !== PlotType.IMAGE) return;
+    if (this.toolDialogs.current?.contribution === contribution || this.toolDialogs.pending) return;
+    const viewport = this.plotService.getPlotModeViewport?.() ?? null;
+    if (!viewport) {
+      console.error(`[visualizer] dialog tool '${id}': the backend on screen provides no viewport to draw over.`);
+      this.dialogToolFailed(id!);
+      return;
+    }
+    const ctx: ToolDialogContext = {
+      visualizer: this.plotService,
+      viewport,
+      imageInfo$: this.state.getImageInfo$(),
+      tools: this.plotModeTools,
+    };
+    void this.toolDialogs.activate(contribution, ctx);
+  }
+
+  private showToolDialog(active: ActivePlotMode): void {
+    const tool = this.dialogTools.find((t) => t.id === active.contribution.descriptor.type);
+    if (!tool || !active.panelHost) return;
+    this.ngZone.run(() => {
+      this.toolDialog = {
+        title: tool.dialog?.title ?? tool.label,
+        width: tool.dialog?.width ?? '22rem',
+        host: active.panelHost!,
+      };
+      const err = this.detectChangesSafely();
+      if (err !== null) this.toolDialogs.failActive(err);
+    });
+  }
+
+  private hideToolDialog(): void {
+    if (!this.toolDialog) return;
+    this.toolDialog = null;
+    if (!this.destroying) this.detectChangesSafely();
+  }
+
+  /** A dialog tool could not start: close it and say so. */
+  private dialogToolFailed(id: string): void {
+    if (this.destroying || this.openDialogToolId !== id) return;
+    this.ngZone.run(() => {
+      this.openDialogToolId = null;
+      const tool = this.dialogTools.find((t) => t.id === id);
+      this.messageService.add({
+        key: this.resultToastKey,
+        severity: 'warn',
+        summary: `${tool?.label ?? id} is unavailable`,
+        detail: 'The tool could not start. See the browser console for details.',
+      });
+      this.detectChangesSafely();
+    });
+  }
+
+  /** Where the open dialog tool's host element is attached once its dialog renders. */
+  @ViewChild('toolDialogSlot')
+  set toolDialogSlot(ref: ElementRef<HTMLElement> | undefined) {
+    const host = this.toolDialog?.host;
+    if (ref && host && host.parentElement !== ref.nativeElement) ref.nativeElement.appendChild(host);
   }
 
   /** Toolbar tools for contributed modes. Calls can come from outside Angular, hence the zone. */
