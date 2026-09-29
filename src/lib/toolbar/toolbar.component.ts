@@ -4,7 +4,7 @@ import { MenuItem } from 'primeng/api';
 import { IImageInfo } from '../contracts/image.contract';
 import { PlotType, PlotTypeId, isBuiltinPlotType, isNapari3d, isNapariIsosurface, isNapariSurface, isNapariScatter, NAPARI_DECIMATE_OPTIONS, NAPARI_DEFAULT_DECIMATE, isSpatialOmics, isSpatialOmics3d } from '../contracts/plot-type';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from '../contracts/toolbar-config';
-import { ToolbarToolContribution } from '../contracts/toolbar-tool.contract';
+import { ToolbarDialogToolContribution, ToolbarToolContribution } from '../contracts/toolbar-tool.contract';
 import { PlotTypeOption } from '../contracts/plot-type-contribution.contract';
 import { MODEL_INFO } from './model-info';
 
@@ -91,6 +91,10 @@ export class ToolbarComponent implements OnChanges {
    * per-tool parameter state; this component only draws them.
    */
   @Input() contributedTools: ToolbarToolContribution[] = [];
+  /** Dialog tools (TOOLBAR_TOOLS, kind: 'dialog'), sorted; shown in the Image view. */
+  @Input() dialogTools: ToolbarDialogToolContribution[] = [];
+  /** Id of the dialog tool whose dialog is open, or null. */
+  @Input() openDialogToolId: string | null = null;
   /** Active checkpoint per contributed tool, keyed by tool id. */
   @Input() toolModelIds: Record<string, string> = {};
 
@@ -136,6 +140,8 @@ export class ToolbarComponent implements OnChanges {
   @Output() segmentCellpose = new EventEmitter<void>();
   /** Run a contributed tool over the current view, by tool id. */
   @Output() runTool = new EventEmitter<string>();
+  /** A dialog tool's button was clicked: open its dialog, or close it if open. */
+  @Output() toggleDialogTool = new EventEmitter<string>();
   /** Pick a contributed tool's checkpoint. */
   @Output() toolModelChange = new EventEmitter<{ toolId: string; modelId: string }>();
   /** Open a contributed tool's parameter dialog, by tool id. */
@@ -242,7 +248,7 @@ export class ToolbarComponent implements OnChanges {
 
   /** Keeps each contributed tool's `p-menu` overlay alive across CD ticks —
    *  re-creating it mid-interaction swallows the click on a menu item. */
-  trackToolById(_index: number, tool: ToolbarToolContribution): string {
+  trackToolById(_index: number, tool: { id: string }): string {
     return tool.id;
   }
 

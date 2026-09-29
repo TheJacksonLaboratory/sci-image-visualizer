@@ -136,7 +136,7 @@ export interface PlotModeContext {
   viewport: PlotModeViewport;
   /** Current image info from IMAGE_STATE_PORT (null until an image is loaded). */
   imageInfo$: Observable<IImageInfo | null>;
-  /** Toolbar tools (since 0.5.1). Optional so a context built for 0.5.0 still type-checks. */
+  /** Toolbar tools (since 0.6.0). Optional so a context built for 0.5.0 still type-checks. */
   tools?: PlotModeTools;
 }
 

@@ -5,6 +5,21 @@
          actions the visualization view itself doesn't own). -->
     <ng-content></ng-content>
 
+    <!-- Contributed dialog tools (TOOLBAR_TOOLS, kind: 'dialog'): app-level actions
+         like the host's own buttons above, so they sit right beside them. Image view
+         only, the view their dialog draws over. Highlighted while the dialog is open. -->
+    <ng-container *ngIf="isImageView">
+      <p-button *ngFor="let tool of dialogTools; trackBy: trackToolById"
+                size="small" [text]="openDialogToolId !== tool.id"
+                [pTooltip]="tool.tooltip" tooltipPosition="bottom"
+                [attr.aria-pressed]="openDialogToolId === tool.id"
+                (onClick)="toggleDialogTool.emit(tool.id)">
+        <img *ngIf="tool.icon.src" [src]="tool.icon.src" style="width: 1rem" [alt]="tool.label"
+             [class]="openDialogToolId === tool.id ? 'toolbar-icon-active' : 'toolbar-icon-dark'" />
+        <i *ngIf="tool.icon.pi" class="pi {{ tool.icon.pi }}"></i>
+      </p-button>
+    </ng-container>
+
     <!-- Plot type: available for any image (grayscale or RGB). -->
     <ng-container *ngIf="imageInfo && tools.specialTools">
       <span class="toolbar-separator"></span>
@@ -738,6 +753,9 @@
          open build's help lists only the prompted tools above — the text no
          longer promises buttons that are not there. -->
     <ng-container *ngFor="let tool of contributedTools">
+      <li *ngIf="tool.help" [innerHTML]="tool.help.body"></li>
+    </ng-container>
+    <ng-container *ngFor="let tool of dialogTools">
       <li *ngIf="tool.help" [innerHTML]="tool.help.body"></li>
     </ng-container>
   </ul>

@@ -1,5 +1,8 @@
 import {
+  ToolbarDialogToolContribution,
   ToolbarToolContribution,
+  dialogToolContributions,
+  isDialogToolContribution,
   sortToolContributions,
   visibleToolContributions,
 } from './toolbar-tool.contract';
@@ -69,5 +72,59 @@ describe('sortToolContributions', () => {
     sortToolContributions(tools);
 
     expect(tools.map((t) => t.id)).toEqual(before);
+  });
+});
+
+function dialogTool(id: string, over: Partial<ToolbarDialogToolContribution> = {}): ToolbarDialogToolContribution {
+  return {
+    kind: 'dialog',
+    id,
+    label: id,
+    icon: { pi: 'pi-pencil' },
+    tooltip: `open ${id}`,
+    activate: () => ({ deactivate: () => undefined }),
+    mount: () => () => undefined,
+    ...over,
+  };
+}
+
+describe('dialog tools on TOOLBAR_TOOLS', () => {
+  it('visibleToolContributions leaves dialog tools out, without calling models()', () => {
+    const tools = [tool('yolo'), dialogTool('dianne')];
+    expect(visibleToolContributions(tools).map((t) => t.id)).toEqual(['yolo']);
+  });
+
+  it('dialogToolContributions keeps only dialog tools, in order', () => {
+    const tools = [
+      dialogTool('b', { order: 200 }),
+      tool('yolo'),
+      dialogTool('a', { order: 100 }),
+      dialogTool('c', { order: 200 }),
+    ];
+    expect(dialogToolContributions(tools).map((t) => t.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('drops a malformed or repeated dialog tool with a warning', () => {
+    const log = { warn: jest.fn() };
+    const tools = [
+      dialogTool('ok'),
+      dialogTool('ok'),
+      dialogTool('', {}),
+      dialogTool('no-mount', { mount: undefined as never }),
+      dialogTool('no-activate', { activate: undefined as never }),
+    ];
+    expect(dialogToolContributions(tools, log).map((t) => t.id)).toEqual(['ok']);
+    expect(log.warn).toHaveBeenCalledTimes(4);
+  });
+
+  it('treats an unregistered token as no dialog tools', () => {
+    expect(dialogToolContributions(null)).toEqual([]);
+    expect(dialogToolContributions(undefined)).toEqual([]);
+  });
+
+  it('isDialogToolContribution tells the two kinds apart', () => {
+    expect(isDialogToolContribution(dialogTool('d'))).toBe(true);
+    expect(isDialogToolContribution(tool('r'))).toBe(false);
+    expect(isDialogToolContribution(null)).toBe(false);
   });
 });
