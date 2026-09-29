@@ -235,7 +235,11 @@ export interface ToolbarDialogToolContribution {
   help?: { body: string };
   /** Start a session, once the Image view's viewport is ready. */
   activate(ctx: ToolDialogContext): ToolDialogSession | Promise<ToolDialogSession>;
-  /** Render the dialog body into `host`; return its teardown (called before `deactivate()`). */
+  /**
+   * Render the dialog body into `host`; return its teardown (called before
+   * `deactivate()`). Called after `activate` resolves, once the dialog has rendered and
+   * `host` is in the document, so the body can measure itself.
+   */
   mount(host: HTMLElement, ctx: ToolDialogContext, session: ToolDialogSession): () => void;
 }
 

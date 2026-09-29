@@ -707,6 +707,23 @@ describe('contributed plot types — toolbar tools (ctx.tools)', () => {
 });
 
 describe('dialog tools (TOOLBAR_TOOLS, kind: dialog)', () => {
+  // No template in these specs, so nothing attaches the dialog body's host: `attach()`
+  // does what the rendered dialog does, then runs the frame the component waits on.
+  let frames: FrameRequestCallback[] = [];
+  beforeEach(() => {
+    frames = [];
+    jest.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => frames.push(cb));
+    jest.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined);
+  });
+  afterEach(() => document.body.querySelectorAll('.tool-dialog-body').forEach((el) => el.remove()));
+  function runFrames(n = 1) {
+    for (let i = 0; i < n; i++) {
+      const pending = frames;
+      frames = [];
+      pending.forEach((cb) => cb(0));
+    }
+  }
+
   function dialogTool(over: Partial<ToolbarDialogToolContribution> = {}) {
     const sessions: PlotModeSession[] = [];
     const teardowns: jest.Mock[] = [];
@@ -723,6 +740,7 @@ describe('dialog tools (TOOLBAR_TOOLS, kind: dialog)', () => {
         return s;
       }),
       mount: jest.fn((host: HTMLElement) => {
+        events.push(`mount:${host.isConnected ? 'connected' : 'detached'}`);
         host.textContent = 'body';
         const t = jest.fn(() => events.push('teardown'));
         teardowns.push(t);
@@ -733,13 +751,19 @@ describe('dialog tools (TOOLBAR_TOOLS, kind: dialog)', () => {
     return { tool, sessions, teardowns };
   }
 
-  function opened(over: Partial<ToolbarDialogToolContribution> = {}) {
+  function opened(over: Partial<ToolbarDialogToolContribution> = {}, attach = true) {
     const d = dialogTool(over);
     const h = harness(undefined, mockViewport(), [d.tool]);
     h.imageInfo$.next(infoFor('a.tif'));
     h.finish();
     h.component.toggleDialogTool('dianne');
-    return { ...h, ...d };
+    const attachHost = () => {
+      const host = h.component.toolDialog?.host;
+      if (host) document.body.appendChild(host);
+      runFrames();
+    };
+    if (attach) attachHost();
+    return { ...h, ...d, attachHost };
   }
 
   it('lists dialog tools apart from the run tools', () => {
@@ -757,6 +781,57 @@ describe('dialog tools (TOOLBAR_TOOLS, kind: dialog)', () => {
     expect(component.openDialogToolId).toBe('dianne');
     expect(component.toolDialog?.title).toBe('DIANNE');
     expect(component.toolDialog?.host.textContent).toBe('body');
+  });
+
+  it('mounts the body only once its host is in the document', () => {
+    const { component, tool, attachHost } = opened({}, false);
+    expect(tool.activate).toHaveBeenCalledTimes(1);
+    expect(component.toolDialog).not.toBeNull(); // the dialog renders first
+    expect(tool.mount).not.toHaveBeenCalled();
+    runFrames(3); // still detached: keeps waiting
+    expect(tool.mount).not.toHaveBeenCalled();
+
+    attachHost();
+
+    expect(tool.mount).toHaveBeenCalledTimes(1);
+    expect(events).toContain('mount:connected');
+  });
+
+  it('mounts anyway, with a warning, if the host never attaches', () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { tool } = opened({}, false);
+    runFrames(61);
+    expect(tool.mount).toHaveBeenCalledTimes(1);
+    expect(events).toContain('mount:detached');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('never attached'));
+  });
+
+  it('closing before the host attaches never mounts, and ends the session once', () => {
+    const { component, tool, sessions } = opened({}, false);
+    component.closeDialogTool();
+    runFrames(61);
+    expect(tool.mount).not.toHaveBeenCalled();
+    expect(sessions[0].deactivate).toHaveBeenCalledTimes(1);
+  });
+
+  it('a throwing mount() closes it with a warning and ends the session once', () => {
+    const { component, sessions, messages } = opened({
+      mount: jest.fn(() => { throw new Error('mount failed'); }),
+    });
+    expect(component.openDialogToolId).toBeNull();
+    expect(component.toolDialog).toBeNull();
+    expect(sessions[0].deactivate).toHaveBeenCalledTimes(1);
+    expect(messages.add).toHaveBeenCalledWith(expect.objectContaining({ summary: 'DIANNE is unavailable' }));
+  });
+
+  it('a throwing teardown is logged and the session still ends', () => {
+    const errors = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { component, sessions } = opened({
+      mount: jest.fn(() => () => { throw new Error('teardown failed'); }),
+    });
+    component.closeDialogTool();
+    expect(sessions[0].deactivate).toHaveBeenCalledTimes(1);
+    expect(errors).toHaveBeenCalledWith(expect.stringContaining('teardown threw'), expect.any(Error));
   });
 
   it('clicking again closes it: body torn down, then the session ends, once', () => {
@@ -777,13 +852,16 @@ describe('dialog tools (TOOLBAR_TOOLS, kind: dialog)', () => {
   });
 
   it('an image switch ends the session and starts a fresh one once the new view has plotted', async () => {
-    const { component, imageInfo$, tool, sessions, finish, renderPhase } = opened();
+    const { component, imageInfo$, tool, sessions, finish, renderPhase, teardowns, attachHost } = opened();
     imageInfo$.next(infoFor('b.tif'));
     await renderPhase();
+    expect(teardowns[0]).toHaveBeenCalledTimes(1);
     expect(sessions[0].deactivate).toHaveBeenCalledTimes(1);
     expect(component.openDialogToolId).toBe('dianne'); // still open
     finish();
+    attachHost();
     expect(tool.activate).toHaveBeenCalledTimes(2);
+    expect(tool.mount).toHaveBeenCalledTimes(2);
     expect(component.toolDialog).not.toBeNull();
   });
 
@@ -826,11 +904,16 @@ describe('dialog tools — rendering', () => {
 
   it('renders the body inside a titled, closable dialog, and removes it on close', async () => {
     const teardown = jest.fn();
+    let connectedAtMount: boolean | null = null;
     const tool: ToolbarDialogToolContribution = {
       kind: 'dialog', id: 'dianne', label: 'DIANNE', icon: { pi: 'pi-pencil' }, tooltip: 't',
       dialog: { title: 'Digital Pathology - DIANNE' },
       activate: () => ({ deactivate: jest.fn() }),
-      mount: (host) => { host.innerHTML = '<b class="dialog-body">hi</b>'; return teardown; },
+      mount: (host) => {
+        connectedAtMount = host.isConnected && !!host.closest('.tool-dialog');
+        host.innerHTML = '<b class="dialog-body">hi</b>';
+        return teardown;
+      },
     };
     const plot = selfCompleting(plotBase(mockViewport()));
     const imageInfo$ = new BehaviorSubject<any>(null);
@@ -863,7 +946,12 @@ describe('dialog tools — rendering', () => {
     fixture.detectChanges();
     await fixture.whenStable();
     fixture.detectChanges();
+    // The body is mounted on an animation frame once the dialog has attached its host.
+    for (let i = 0; i < 10 && connectedAtMount === null; i++) {
+      await new Promise((r) => requestAnimationFrame(() => r(undefined)));
+    }
 
+    expect(connectedAtMount).toBe(true); // in the document, inside the dialog, at mount()
     const dialog = document.body.querySelector('.tool-dialog');
     expect(dialog?.textContent).toContain('Digital Pathology - DIANNE');
     expect(dialog?.querySelector('.tool-dialog-slot .dialog-body')?.textContent).toBe('hi');

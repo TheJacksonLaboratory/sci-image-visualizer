@@ -469,16 +469,15 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     });
     this.contributedTools = visibleToolContributions(toolContributions);
     this.dialogTools = dialogToolContributions(toolContributions);
-    // A dialog tool is run by the plot-mode lifecycle, adapted: its "base type" is
-    // the Image view it draws over, and its panel is the dialog body.
+    // A dialog tool's session is run by the plot-mode lifecycle, adapted: its "base
+    // type" is the Image view it draws over. Its body is NOT a controller panel: the
+    // controller would mount into a detached host, and a body must be able to measure
+    // itself. The dialog is rendered first and the body mounted once its host is in the
+    // document (showToolDialog).
     this.toolDialogs = new PlotModeController(
       this.dialogTools.map((t): PlotTypeContribution => ({
         descriptor: { type: t.id, label: t.label, dimensions: '2d', baseType: PlotType.IMAGE },
         activate: (ctx) => t.activate(ctx as ToolDialogContext),
-        panel: {
-          title: t.dialog?.title ?? t.label,
-          mount: (host, ctx, session) => t.mount(host, ctx as ToolDialogContext, session),
-        },
       })),
       {
         onActivated: (active) => this.showToolDialog(active),
@@ -2475,22 +2474,81 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     void this.toolDialogs.activate(contribution, ctx);
   }
 
+  /** The live dialog body's teardown, and a pending wait for its host to connect. */
+  private toolDialogTeardown: (() => void) | null = null;
+  private toolDialogFrame: number | null = null;
+
+  /**
+   * The session is live: render the dialog, then mount the tool's body once the host
+   * element is in the document, so `mount()` can measure it and start widgets that need
+   * a connected element.
+   */
   private showToolDialog(active: ActivePlotMode): void {
     const tool = this.dialogTools.find((t) => t.id === active.contribution.descriptor.type);
-    if (!tool || !active.panelHost) return;
+    if (!tool) return;
+    const host = document.createElement('div');
+    host.className = 'tool-dialog-body';
     this.ngZone.run(() => {
       this.toolDialog = {
         title: tool.dialog?.title ?? tool.label,
         width: tool.dialog?.width ?? '22rem',
-        host: active.panelHost!,
+        host,
       };
       const err = this.detectChangesSafely();
-      if (err !== null) this.toolDialogs.failActive(err);
+      if (err !== null) {
+        this.toolDialogs.failActive(err);
+        return;
+      }
+      this.mountToolDialogBody(tool, active, host, 0);
     });
   }
 
+  /** How many animation frames to wait for the dialog to attach the body's host. */
+  private static readonly TOOL_DIALOG_ATTACH_FRAMES = 60;
+
+  /**
+   * Mount `tool`'s body into `host` once it is connected (the dialog may attach it a
+   * frame later, when it moves itself to `<body>`). If it never connects within
+   * {@link TOOL_DIALOG_ATTACH_FRAMES} it is mounted anyway, with a warning, rather than
+   * leaving an empty dialog. A throwing `mount()` fails the session like a failed start.
+   */
+  private mountToolDialogBody(tool: ToolbarDialogToolContribution, active: ActivePlotMode,
+                              host: HTMLElement, frames: number): void {
+    this.toolDialogFrame = null;
+    // The session ended (or was replaced) while waiting: nothing to mount into.
+    if (this.toolDialogs.current !== active || this.toolDialog?.host !== host) return;
+    if (!host.isConnected) {
+      if (frames < VisualizerComponent.TOOL_DIALOG_ATTACH_FRAMES) {
+        this.toolDialogFrame = requestAnimationFrame(
+          () => this.mountToolDialogBody(tool, active, host, frames + 1));
+        return;
+      }
+      console.warn(`[visualizer] dialog tool '${tool.id}': the dialog body never attached; mounting it detached.`);
+    }
+    try {
+      const teardown = tool.mount(host, active.ctx as ToolDialogContext, active.session);
+      this.toolDialogTeardown = typeof teardown === 'function' ? teardown : null;
+    } catch (err) {
+      console.error(`[visualizer] dialog tool '${tool.id}' mount() threw.`, err);
+      this.toolDialogs.failActive(err);
+    }
+  }
+
+  /** The session is about to end: tear the body down first, then drop the dialog. */
   private hideToolDialog(): void {
+    if (this.toolDialogFrame !== null) cancelAnimationFrame(this.toolDialogFrame);
+    this.toolDialogFrame = null;
+    const teardown = this.toolDialogTeardown;
+    this.toolDialogTeardown = null;
+    if (teardown) {
+      try {
+        teardown();
+      } catch (err) {
+        console.error('[visualizer] dialog tool body teardown threw.', err);
+      }
+    }
     if (!this.toolDialog) return;
+    this.toolDialog.host.remove();
     this.toolDialog = null;
     if (!this.destroying) this.detectChangesSafely();
   }

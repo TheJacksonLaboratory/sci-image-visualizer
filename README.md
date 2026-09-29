@@ -669,6 +669,8 @@ const myTool: ToolbarDialogToolContribution = {
     const sub = ctx.viewport.frame$.subscribe((visible) => redraw(visible));
     return { deactivate: () => sub.unsubscribe() };
   },
+  // After activate(), once the dialog has rendered: `host` is in the document here,
+  // so the body can measure itself.
   mount(host, ctx, session) {
     host.textContent = 'Hello';
     return () => { host.textContent = ''; };   // teardown, before deactivate()

@@ -34,7 +34,8 @@ positive and negative strokes with the brush in blue and red.
     shown in the Image view only. It is highlighted while its dialog is open.
   - **Dialog:** clicking opens a floating, non-modal dialog. The tool fills it
     through `mount(host, ctx, session)`, with a `ToolDialogContext`: the plot-mode
-    context, with `tools` always present.
+    context, with `tools` always present. `mount` runs once the dialog has rendered
+    and `host` is in the document, so the body can measure itself.
   - **Lifecycle:** the same as plot modes, sharing the same controller.
     - Closing the dialog, or clicking the button again, tears the body down and
       calls `deactivate()` once.
