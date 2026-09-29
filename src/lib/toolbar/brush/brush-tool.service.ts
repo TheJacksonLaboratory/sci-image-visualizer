@@ -102,6 +102,9 @@ export class BrushToolService {
   /** Toggle the brush on/off. */
   setMode(active: boolean, options: BrushOptions = {}) {
     this.active = active;
+    // Size applies whether arming or not, as before brush classes: a host may set it
+    // while the brush is off, and the next arm without options keeps it.
+    if (options.size != null) this.setSize(options.size);
     if (active) {
       // Arming sets the class in full: no label/color means the plain brush.
       this.setOptions({ label: undefined, color: undefined, ...options });

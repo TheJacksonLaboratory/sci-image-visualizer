@@ -12,6 +12,7 @@
       <p-button *ngFor="let tool of dialogTools; trackBy: trackToolById"
                 size="small" [text]="openDialogToolId !== tool.id"
                 [pTooltip]="tool.tooltip" tooltipPosition="bottom"
+                [ariaLabel]="tool.label"
                 [attr.aria-pressed]="openDialogToolId === tool.id"
                 (onClick)="toggleDialogTool.emit(tool.id)">
         <img *ngIf="tool.icon.src" [src]="tool.icon.src" style="width: 1rem" [alt]="tool.label"

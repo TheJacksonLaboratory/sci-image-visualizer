@@ -272,6 +272,11 @@ describe('ToolbarComponent — dialog tools', () => {
     expect(b!.querySelector('i.pi-pencil')).not.toBeNull();
   });
 
+  it('gives the icon-only button an accessible name', () => {
+    const de = fixture.debugElement.query((d) => d.nativeElement === button());
+    expect(de.properties['ariaLabel']).toBe('DIANNE');
+  });
+
   it('hides it outside the Image view', () => {
     fixture.componentInstance.type = PlotType.HEATMAP;
     fixture.detectChanges();

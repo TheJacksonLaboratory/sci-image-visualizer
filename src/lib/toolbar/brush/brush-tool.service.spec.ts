@@ -375,6 +375,19 @@ describe('BrushToolService', () => {
       expect(state.regions[0].colorOverridden).toBeUndefined();
     });
 
+    it('a size passed while disarming still applies to the next arm', () => {
+      const { host, container, state } = makeHost();
+      tool.bindHost(host);
+      tool.setMode(true, { size: 4 });
+      tool.setMode(false, { size: 20 });
+      tool.setMode(true);
+
+      cv(container).dispatchEvent(mouse('mousedown', 30, 30));
+
+      const b = state.regions[0].bounds as Polygon;
+      expect(Math.max(...b.xpoints) - Math.min(...b.xpoints)).toBeGreaterThan(12);
+    });
+
     it('the plain brush still adopts a labelled region', () => {
       const same = labelled(boxRegion(20, 20, 40, 40, 7), 'pos');
       const { host, container, state } = makeHost({ regions: [same] });
