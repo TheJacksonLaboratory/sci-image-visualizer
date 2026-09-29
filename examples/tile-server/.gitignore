@@ -10,3 +10,4 @@ abc/
 *.h5ad
 visium-*.png
 h5ad/
+/xenium/

@@ -1,8 +1,8 @@
 import { NO_CATEGORY, SpatialColumnMeta, isCategoricalColumn, isContinuousColumn } from '../../contracts/spatial-dataset.contract';
 import {
   SPATIAL_WIRE_VERSION, SpatialManifest, assertManifestVersion, datasetFromManifest,
-  decodeColumn, decodeCoords, decodeEmbedding, decodeFeatureVector, decodePolygons, decodeRadius,
-  isLittleEndian,
+  decodeColumn, decodeCoords, decodeDensity, decodeEmbedding, decodeFeatureVector, decodePolygonTile,
+  decodePolygons, decodeRadius, decodeTranscriptTile, isLittleEndian,
 } from './spatial-wire';
 
 /** Concatenate typed arrays into one little-endian ArrayBuffer. */
@@ -222,5 +222,85 @@ describe('datasetFromManifest', () => {
       expect(ds.imageRef?.scale).toEqual([2, 2]);
       expect(ds.observations.ids).toEqual(['a', 'b', 'c']);
     });
+  });
+});
+
+describe('spatial-wire — tiled geometry', () => {
+  it('decodes a polygon tile with its owning observations', () => {
+    const buf = concat(
+      Uint32Array.from([2]), // count
+      Uint32Array.from([7, 42]), // observation per ring
+      Uint32Array.from([0, 3, 7]), // offsets
+      Float32Array.from([0, 0, 1, 0, 1, 1, 5, 5, 6, 5, 6, 6, 5, 6]),
+    );
+    const t = decodePolygonTile(buf);
+    expect(t.count).toBe(2);
+    expect(Array.from(t.observation)).toEqual([7, 42]);
+    expect(Array.from(t.offsets)).toEqual([0, 3, 7]);
+    expect(t.coords.length).toBe(14);
+    expect(t.coords[6]).toBe(5);
+  });
+
+  it('decodes an empty polygon tile — an empty tile is an answer, not an error', () => {
+    const t = decodePolygonTile(concat(Uint32Array.from([0, 0])));
+    expect(t.count).toBe(0);
+    expect(t.coords.length).toBe(0);
+  });
+
+  it('rejects a truncated polygon tile', () => {
+    const buf = concat(Uint32Array.from([1, 0, 0, 3]), Float32Array.from([0, 0, 1]));
+    expect(() => decodePolygonTile(buf)).toThrow(/polygon tile/);
+  });
+
+  it('decodes a transcript tile, padding the gene codes to 4 bytes', () => {
+    const n = 3;
+    const buf = concat(
+      Uint32Array.from([n, 1]),
+      Float32Array.from([1, 2, 3]), Float32Array.from([4, 5, 6]), Float32Array.from([7, 8, 9]),
+      Uint32Array.from([10, 1, 5]), Uint32Array.from([0, 0xffffffff, 2]),
+      Uint16Array.from([0, 1, 1, 0]), // 3 codes + 1 pad
+    );
+    const t = decodeTranscriptTile(buf);
+    expect(t.count).toBe(3);
+    expect(t.aggregated).toBe(true);
+    expect(Array.from(t.y)).toEqual([4, 5, 6]);
+    expect(Array.from(t.weight)).toEqual([10, 1, 5]);
+    expect(t.observation[1]).toBe(0xffffffff);
+    expect(Array.from(t.gene)).toEqual([0, 1, 1]);
+  });
+
+  it('decodes an empty transcript tile', () => {
+    const t = decodeTranscriptTile(concat(Uint32Array.from([0, 0])));
+    expect(t.count).toBe(0);
+    expect(t.aggregated).toBe(false);
+  });
+
+  it('decodes a density raster and checks its size against the metadata', () => {
+    const meta = { gridSize: [10, 10] as [number, number], origin: [0, 0] as [number, number], rows: 2, cols: 3 };
+    const r = decodeDensity(Float32Array.from([0, 1, 2, 3, 4, 5]).buffer, meta, ['EPCAM']);
+    expect(r.values[5]).toBe(5);
+    expect(r.genes).toEqual(['EPCAM']);
+    expect(() => decodeDensity(new Float32Array(5).buffer, meta, [])).toThrow(/density/);
+  });
+
+  it('passes the tiled metadata from the manifest through to the dataset', () => {
+    const polygonTiles = {
+      bounds: [0, 0, 10, 10] as [number, number, number, number],
+      sets: [{ name: 'cell', label: 'Cells' }], levels: [{ tileSize: 250 }],
+    };
+    const transcriptTiles = {
+      bounds: [0, 0, 10, 10] as [number, number, number, number], geneCount: 5, hasZ: true,
+      levels: [{ tileSize: 250, aggregated: false }],
+    };
+    const density = {
+      gridSize: [10, 10] as [number, number], origin: [0, 0] as [number, number], rows: 1, cols: 1,
+    };
+    const ds = datasetFromManifest(
+      manifest({ polygonTiles, transcriptTiles, density }),
+      decodeCoords(new Float32Array(6).buffer, 3),
+    );
+    expect(ds.polygonTiles).toEqual(polygonTiles);
+    expect(ds.transcriptTiles).toEqual(transcriptTiles);
+    expect(ds.density).toEqual(density);
   });
 });

@@ -127,6 +127,143 @@
       </div>
     </div>
 
+    <!-- Cells and transcripts: level-of-detail geometry for segmented / imaging
+         datasets. Outlines coarsen as the camera zooms out and disappear once a cell
+         is a few pixels wide (the markers draw it as a dot then); transcripts
+         aggregate into count-sized circles when zoomed out and resolve to one per
+         transcript at the finest zoom. 2D only for now. -->
+    <div class="sc-section" *ngIf="hasCells && !is3d">
+      <div class="sc-row">
+        <p-checkbox [binary]="true" [ngModel]="view.showCells" inputId="sc-cells"
+                    (onChange)="onShowCells($event.checked)"></p-checkbox>
+        <label class="sc-lbl" for="sc-cells">Show cells</label>
+      </div>
+      <ng-container *ngIf="view.showCells">
+        <div class="sc-row" *ngIf="cellSetOptions.length > 1">
+          <span class="sc-lbl">Boundaries</span>
+          <p-selectButton [options]="cellSetOptions" optionLabel="label" optionValue="value"
+                          [ngModel]="activeCellSet" (ngModelChange)="onCellSet($event)"
+                          [allowEmpty]="false"></p-selectButton>
+        </div>
+        <div class="sc-row">
+          <span class="sc-lbl">Draw</span>
+          <p-selectButton [options]="cellDrawOptions" optionLabel="label" optionValue="value"
+                          [ngModel]="view.cellDraw" (ngModelChange)="onCellDraw($event)"
+                          [allowEmpty]="false"></p-selectButton>
+        </div>
+        <div class="sc-row" *ngIf="view.cellDraw !== 'outline'">
+          <span class="sc-lbl">Fill opacity</span>
+          <p-slider [ngModel]="view.cellOpacity" [min]="0.1" [max]="1" [step]="0.05"
+                    (onChange)="onCellOpacity($event.value)"></p-slider>
+          <span class="sc-val">{{ view.cellOpacity }}</span>
+        </div>
+      </ng-container>
+    </div>
+
+    <!-- What TYPE a cell is: colours the cells when no other colour source is chosen,
+         and colours each transcript by the cell it falls in. -->
+    <div class="sc-section" *ngIf="(hasCells || hasTranscripts) && cellTypeOptions.length && !is3d">
+      <label class="sc-lbl" for="sc-celltype">Cell types</label>
+      <p-dropdown inputId="sc-celltype" [options]="cellTypeOptions"
+                  optionLabel="label" optionValue="value"
+                  [ngModel]="activeCellTypeColumn" (ngModelChange)="onCellTypeColumn($event)"
+                  appendTo="body" styleClass="sc-full"></p-dropdown>
+      <div class="sc-row" *ngIf="curatedColumn">
+        <p-checkbox [binary]="true" [ngModel]="usingCurated" inputId="sc-curated"
+                    (onChange)="onUseCurated($event.checked)"></p-checkbox>
+        <label class="sc-lbl" for="sc-curated">Use curated cell types</label>
+      </div>
+      <ul class="sc-legend" *ngIf="cellTypeLegend.length && !view.colorBy">
+        <li *ngFor="let entry of cellTypeLegend">
+          <span class="sc-legend-btn sc-legend-static">
+            <span class="sc-swatch" [style.background]="entry.color"></span>
+            <span class="sc-legend-label">{{ entry.label }}</span>
+          </span>
+        </li>
+      </ul>
+    </div>
+
+    <div class="sc-section" *ngIf="hasTranscripts && !is3d">
+      <span class="sc-lbl">Transcripts</span>
+      <p-selectButton [options]="transcriptModeOptions" optionLabel="label" optionValue="value"
+                      [ngModel]="view.transcriptMode" (ngModelChange)="onTranscriptMode($event)"
+                      [allowEmpty]="false"></p-selectButton>
+      <ng-container *ngIf="view.transcriptMode !== 'off'">
+        <label class="sc-lbl" for="sc-tx-genes">Genes</label>
+        <p-autoComplete inputId="sc-tx-genes" [multiple]="true"
+                        [ngModel]="view.transcriptGenes" (ngModelChange)="onTranscriptGenes($event)"
+                        [suggestions]="transcriptGeneSuggestions"
+                        (completeMethod)="onTranscriptGeneSearch($event.query)"
+                        [forceSelection]="true" appendTo="body"
+                        placeholder="Add genes…" styleClass="sc-full"></p-autoComplete>
+        <small class="sc-hint" *ngIf="!view.transcriptGenes.length">
+          Pick one or more genes to draw their transcripts.
+        </small>
+
+        <ng-container *ngIf="view.transcriptMode !== 'density'">
+          <div class="sc-row">
+            <span class="sc-lbl">Colour by</span>
+            <p-selectButton [options]="transcriptColorOptions" optionLabel="label" optionValue="value"
+                            [ngModel]="view.transcriptColorBy"
+                            (ngModelChange)="onTranscriptColorBy($event)"
+                            [allowEmpty]="false"></p-selectButton>
+          </div>
+          <!-- One row per gene: its icon (glyph mode) and, when colouring by gene, its colour. -->
+          <ul class="sc-legend" *ngIf="view.transcriptGenes.length">
+            <li *ngFor="let gene of view.transcriptGenes; index as i" class="sc-tx-gene">
+              <span class="sc-swatch" *ngIf="view.transcriptColorBy === 'gene'"
+                    [style.background]="geneColor(i)"></span>
+              <span class="sc-legend-label">{{ gene }}</span>
+              <p-dropdown *ngIf="view.transcriptMode === 'glyphs'"
+                          [options]="glyphOptions" optionLabel="label" optionValue="value"
+                          [ngModel]="glyphOf(gene, i)" (ngModelChange)="onGlyph(gene, $event)"
+                          appendTo="body" styleClass="sc-glyph-pick">
+                <ng-template let-opt pTemplate="item">
+                  <span class="sc-glyph-option">
+                    <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg"><polygon [attr.points]="opt.points"></polygon></svg>
+                    {{ opt.label }}
+                  </span>
+                </ng-template>
+                <ng-template let-opt pTemplate="selectedItem">
+                  <span class="sc-glyph-option">
+                    <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg"><polygon [attr.points]="opt?.points"></polygon></svg>
+                  </span>
+                </ng-template>
+              </p-dropdown>
+            </li>
+          </ul>
+          <div class="sc-row">
+            <span class="sc-lbl">Size</span>
+            <p-slider [ngModel]="view.transcriptScale" [min]="0.5" [max]="3" [step]="0.25"
+                      (onChange)="onTranscriptScale($event.value)"></p-slider>
+            <span class="sc-val">{{ view.transcriptScale }}×</span>
+          </div>
+          <div class="sc-row">
+            <span class="sc-lbl">Opacity</span>
+            <p-slider [ngModel]="view.transcriptOpacity" [min]="0.1" [max]="1" [step]="0.05"
+                      (onChange)="onTranscriptOpacity($event.value)"></p-slider>
+            <span class="sc-val">{{ view.transcriptOpacity }}</span>
+          </div>
+          <div class="sc-row">
+            <p-checkbox [binary]="true" [ngModel]="view.transcriptQuality === 'all'" inputId="sc-tx-lowq"
+                        (onChange)="onTranscriptQuality($event.checked)"></p-checkbox>
+            <label class="sc-lbl" for="sc-tx-lowq">Include low-quality calls</label>
+          </div>
+          <small class="sc-hint">
+            Zoomed out, each circle stands for many transcripts of a gene and grows with the
+            count; zoom in and they split until each is a single transcript.
+          </small>
+        </ng-container>
+
+        <div class="sc-row" *ngIf="view.transcriptMode === 'density'">
+          <span class="sc-lbl">Opacity</span>
+          <p-slider [ngModel]="view.densityOpacity" [min]="0.1" [max]="1" [step]="0.05"
+                    (onChange)="onDensityOpacity($event.value)"></p-slider>
+          <span class="sc-val">{{ view.densityOpacity }}</span>
+        </div>
+      </ng-container>
+    </div>
+
     <!-- Only for a gene: the map draws that gene's expression as a field. In 2D
          it goes under the cells of the displayed plane; in 3D it is one sheet per
          imaged section, optionally smoothed along z into a volume. -->

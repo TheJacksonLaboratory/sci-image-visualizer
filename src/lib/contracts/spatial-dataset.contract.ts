@@ -249,6 +249,96 @@ export interface SpatialEmbedding {
   z?: Float32Array;
 }
 
+/**
+ * Level-of-detail geometry, served one grid tile at a time.
+ *
+ * Whole-dataset vectors stop working somewhere past 10^5 observations: 717k Xenium cell
+ * outlines are ~140 MB, and a whole-transcriptome run has ~10^9 transcripts. What scales
+ * is what map tiles do — a square grid in the observations' coordinate space, one grid
+ * per level, each level's tiles twice the size of the one below and carrying coarser
+ * geometry. The renderer asks only for the tiles on screen, at the level the zoom needs.
+ *
+ * Tile `(gx, gy)` at level `l` covers `[gx·s, (gx+1)·s) × [gy·s, (gy+1)·s)` with
+ * `s = levels[l].tileSize`, in the same units as {@link SpatialObservations.x}.
+ */
+export interface SpatialTileLevel {
+  /** Edge length of one tile, in observation coordinate units. */
+  tileSize: number;
+}
+
+/** Axis-aligned extent `[minX, minY, maxX, maxY]` in observation coordinates. */
+export type SpatialBounds = [number, number, number, number];
+
+/** Tiled cell/nucleus boundaries. Level 0 is the finest (every vertex). */
+export interface SpatialPolygonTilesMeta {
+  bounds: SpatialBounds;
+  /** Boundary sets on offer — typically `cell` and `nucleus`. */
+  sets: { name: string; label: string }[];
+  /** The set to draw when the user has not chosen. */
+  defaultSet?: string;
+  levels: SpatialTileLevel[];
+}
+
+/** Tiled transcripts. Level 0 is one entry per transcript; coarser levels aggregate. */
+export interface SpatialTranscriptTilesMeta {
+  bounds: SpatialBounds;
+  /** Total transcripts, for display. */
+  count?: number;
+  /** Genes that can be requested. Names come from the feature search. */
+  geneCount: number;
+  hasZ: boolean;
+  levels: (SpatialTileLevel & {
+    /** True when an entry stands for several transcripts (see {@link SpatialTranscriptTile.weight}). */
+    aggregated: boolean;
+  })[];
+  /**
+   * Levels up to and including this one assign each entry to the cell it lies in
+   * exactly; above it the assignment names the cell nearest an aggregate's centroid.
+   */
+  exactCellLevel?: number;
+}
+
+/** A per-gene transcript-count raster covering the section. */
+export interface SpatialDensityMeta {
+  /** Size of one raster cell, in observation units, `[x, y]`. */
+  gridSize: [number, number];
+  /** Observation-space position of raster cell (0, 0)'s near corner. */
+  origin: [number, number];
+  rows: number;
+  cols: number;
+}
+
+/** "No observation" in {@link SpatialTranscriptTile.observation}. */
+export const NO_OBSERVATION = 0xffffffff;
+
+/** One tile of boundaries: rings as in {@link SpatialPolygons}, plus who owns each ring. */
+export interface SpatialPolygonTile extends SpatialPolygons {
+  /** Observation index of ring `i` — the join key to columns and features. */
+  observation: Uint32Array;
+}
+
+/** One tile of transcripts (or aggregates of them). Every array has length {@link count}. */
+export interface SpatialTranscriptTile {
+  readonly count: number;
+  aggregated: boolean;
+  x: Float32Array;
+  y: Float32Array;
+  z: Float32Array;
+  /** Transcripts each entry stands for — 1 at an unaggregated level. */
+  weight: Uint32Array;
+  /** Observation (cell) the entry falls in, or {@link NO_OBSERVATION}. */
+  observation: Uint32Array;
+  /** Index into the `genes` list the tile was requested with. */
+  gene: Uint16Array;
+}
+
+/** A summed density raster for a list of genes; `values` is row-major `rows × cols`. */
+export interface SpatialDensityRaster {
+  meta: SpatialDensityMeta;
+  genes: string[];
+  values: Float32Array;
+}
+
 export interface SpatialDataset {
   /** Stable id — the key the port's lazy accessors are scoped to. */
   id: string;
@@ -264,6 +354,12 @@ export interface SpatialDataset {
   volume?: SpatialVolumeMeta;
   /** Embeddings available for these observations, whose coordinates are fetched on demand. */
   embeddings?: SpatialEmbeddingMeta[];
+  /** Level-of-detail boundaries, fetched per tile — see {@link SpatialPolygonTilesMeta}. */
+  polygonTiles?: SpatialPolygonTilesMeta;
+  /** Level-of-detail transcripts, fetched per tile — see {@link SpatialTranscriptTilesMeta}. */
+  transcriptTiles?: SpatialTranscriptTilesMeta;
+  /** A served per-gene transcript density raster. */
+  density?: SpatialDensityMeta;
   /**
    * Microns per observation coordinate unit — what makes a scale bar possible.
    *

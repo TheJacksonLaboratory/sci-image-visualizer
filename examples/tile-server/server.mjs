@@ -55,6 +55,10 @@ import {
   listAbcDatasets, abcManifest, abcCoords, abcColumn, abcFeature, abcFeatureSearch, abcVolume,
 } from './lib/spatial-abc.mjs';
 import { readArray } from './lib/zarr3.mjs';
+import {
+  listXeniumDatasets, xeniumManifest, xeniumCoords, xeniumRadius, xeniumColumn, xeniumFeature,
+  xeniumFeatureSearch, xeniumPolygonTile, xeniumTranscriptTile, xeniumDensity,
+} from './lib/spatial-xenium.mjs';
 
 const PORT = Number(process.env.PORT || 8090);
 const COG_DIR = process.env.COG_DIR
@@ -83,6 +87,11 @@ const ST_DIR = process.env.ST_DIR
 const ABC_DIR = process.env.ABC_DIR
   ? process.env.ABC_DIR
   : new URL('./abc', import.meta.url).pathname;
+// 10x Xenium output bundles read IN PLACE — a local `*_xe_outs.zip`, an unzipped `outs/`,
+// or a `<id>.json` pointing at an HTTP(S)/gs:// URL. See lib/spatial-xenium.mjs.
+const XENIUM_DIR = process.env.XENIUM_DIR
+  ? process.env.XENIUM_DIR
+  : new URL('./xenium', import.meta.url).pathname;
 
 const app = express();
 
@@ -308,6 +317,7 @@ async function resolveSource(id) {
     ['zarr', () => zarrManifest(ZARR_DIR, id)],
     ['st', () => stManifest(ST_DIR, id)],
     ['abc', () => abcManifest(ABC_DIR, id)],
+    ['xenium', () => xeniumManifest(XENIUM_DIR, id)],
     // Probed by whether the file exists, NOT by building its manifest: for a CSR file
     // that would start the conversion just to answer "is this yours?".
     ['h5ad', async () => {
@@ -346,17 +356,18 @@ async function fromSource(res, id, handlers) {
 
 app.get('/spatial/datasets', async (_req, res) => {
   try {
-    const [bundles, stores, st, abc, h5ads] = await Promise.all([
+    const [bundles, stores, st, abc, h5ads, xenium] = await Promise.all([
       listSpatialDatasets(SPATIAL_DIR),
       listZarrDatasets(ZARR_DIR).catch(() => []),
       listStDatasets(ST_DIR).catch(() => []),
       listAbcDatasets(ABC_DIR).catch(() => []),
       listH5adDatasets(H5AD_DIR).catch(() => []),
+      listXeniumDatasets(XENIUM_DIR).catch(() => []),
     ]);
     const seen = new Set();
     const datasets = [];
     // Priority order, first id wins.
-    for (const list of [bundles, stores, st, abc, h5ads]) {
+    for (const list of [bundles, stores, st, abc, h5ads, xenium]) {
       for (const d of list) {
         if (seen.has(d.id)) continue;
         seen.add(d.id);
@@ -378,6 +389,7 @@ app.get('/spatial/:id/manifest', async (req, res) => {
     st: async () => res.json(await stManifest(ST_DIR, id)),
     abc: async () => res.json(await abcManifest(ABC_DIR, id)),
     h5ad: async () => res.json(await h5adManifest(H5AD_DIR, id)),
+    xenium: async () => res.json(await xeniumManifest(XENIUM_DIR, id, { imageExists })),
   });
 });
 
@@ -389,14 +401,15 @@ app.get('/spatial/:id/manifest', async (req, res) => {
 const WIRE_FILES = {
   coords: {
     file: 'coords.bin', zarr: zarrCoords, st: stCoords, abc: abcCoords, h5ad: h5adCoords,
+    xenium: xeniumCoords,
   },
   // The anatomical volume a 3D cloud sits inside: uint8 scalar field, x-fastest.
   // Only the ABC source has one, so every other source legitimately 404s here.
   volume: { file: 'volume.bin', abc: abcVolume },
-  radius: { file: 'radius.bin', zarr: zarrRadius },
+  radius: { file: 'radius.bin', zarr: zarrRadius, xenium: xeniumRadius },
   polygons: { file: 'polygons.bin', zarr: zarrPolygons },
 };
-for (const [route, { file, zarr, st, abc, h5ad }] of Object.entries(WIRE_FILES)) {
+for (const [route, { file, zarr, st, abc, h5ad, xenium }] of Object.entries(WIRE_FILES)) {
   app.get(`/spatial/:id/${route}`, async (req, res) => {
     const { id } = req.params;
     await fromSource(res, id, {
@@ -409,6 +422,7 @@ for (const [route, { file, zarr, st, abc, h5ad }] of Object.entries(WIRE_FILES))
       ...(st ? { st: async () => octet(res).send(await st(ST_DIR, id)) } : {}),
       ...(abc ? { abc: async () => octet(res).send(await abc(ABC_DIR, id)) } : {}),
       ...(h5ad ? { h5ad: async () => octet(res).send(await h5ad(H5AD_DIR, id)) } : {}),
+      ...(xenium ? { xenium: async () => octet(res).send(await xenium(XENIUM_DIR, id)) } : {}),
     });
   });
 }
@@ -432,6 +446,7 @@ app.get('/spatial/:id/column/:name', async (req, res) => {
     st: async () => octet(res).send(await stColumn(ST_DIR, id, name)),
     abc: async () => octet(res).send(await abcColumn(ABC_DIR, id, name)),
     h5ad: async () => octet(res).send(await h5adColumn(H5AD_DIR, id, name)),
+    xenium: async () => octet(res).send(await xeniumColumn(XENIUM_DIR, id, name)),
   });
 });
 
@@ -443,6 +458,7 @@ app.get('/spatial/:id/feature/:name', async (req, res) => {
     st: async () => octet(res).send(await stFeature(ST_DIR, id, name)),
     abc: async () => octet(res).send(await abcFeature(ABC_DIR, id, name)),
     h5ad: async () => octet(res).send(await h5adFeature(H5AD_DIR, id, name)),
+    xenium: async () => octet(res).send(await xeniumFeature(XENIUM_DIR, id, name)),
   });
 });
 
@@ -468,12 +484,61 @@ app.get('/spatial/:id/features', async (req, res) => {
     h5ad: async () => res.json({
       names: await h5adFeatureSearch(H5AD_DIR, id, req.query.q, limit),
     }),
+    xenium: async () => res.json({
+      names: await xeniumFeatureSearch(XENIUM_DIR, id, req.query.q, limit),
+    }),
+  });
+});
+
+// Level-of-detail geometry: cell/nucleus outlines and transcripts, one grid tile at a time.
+// Advertised in the manifest (`polygonTiles`, `transcriptTiles`, `density`) so a client
+// only asks a dataset for what it has.
+app.get('/spatial/:id/polygon-tile/:set/:level/:gx/:gy', async (req, res) => {
+  const { id, set } = req.params;
+  const [level, gx, gy] = ['level', 'gx', 'gy'].map((k) => intParam(req.params[k], NaN));
+  await fromSource(res, id, {
+    xenium: async () => octet(res).send(await xeniumPolygonTile(XENIUM_DIR, id, set, level, gx, gy)),
+  });
+});
+
+/** `?genes=A,B,C` — capped, since each gene is a separate row range per tile. */
+function genesParam(v) {
+  const genes = String(v ?? '').split(',').map((g) => g.trim()).filter(Boolean);
+  if (genes.length > 64) throw new RangeError('at most 64 genes per request');
+  return genes;
+}
+
+app.get('/spatial/:id/transcript-tile/:level/:gx/:gy', async (req, res) => {
+  const { id } = req.params;
+  const [level, gx, gy] = ['level', 'gx', 'gy'].map((k) => intParam(req.params[k], NaN));
+  await fromSource(res, id, {
+    xenium: async () => octet(res).send(await xeniumTranscriptTile(XENIUM_DIR, id, level, gx, gy, {
+      genes: genesParam(req.query.genes),
+      quality: req.query.quality === 'all' ? 'all' : 'high',
+    })),
+  });
+});
+
+app.get('/spatial/:id/density', async (req, res) => {
+  const { id } = req.params;
+  await fromSource(res, id, {
+    xenium: async () => octet(res).send(await xeniumDensity(XENIUM_DIR, id, genesParam(req.query.genes))),
   });
 });
 
 // Health + discovery (handy for the example / smoke checks).
 app.get('/', (_req, res) => res.json({ ok: true, service: 'tile-server' }));
 app.get('/images', async (_req, res) => res.json({ images: await listImages(COG_DIR) }));
+
+/** Whether a tile pyramid for `imageId` has been built into $COG_DIR. */
+async function imageExists(imageId) {
+  try {
+    await loadDescriptor(COG_DIR, imageId);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function intParam(v, dflt) {
   const n = Number.parseInt(v, 10);
@@ -486,4 +551,5 @@ app.listen(PORT, () => {
   console.log(`  SPATIAL_DIR=${SPATIAL_DIR}  (pre-built bundles)`);
   console.log(`  ZARR_DIR=${ZARR_DIR}  (SpatialData stores, read live)`);
   console.log(`  ST_DIR=${ST_DIR}  (legacy Spatial Transcriptomics bundles)`);
+  console.log(`  XENIUM_DIR=${XENIUM_DIR}  (10x Xenium bundles, read in place)`);
 });

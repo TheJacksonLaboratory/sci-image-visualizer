@@ -2,8 +2,17 @@ import { InjectionToken } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import {
-  SpatialColumn, SpatialDataset, SpatialEmbedding, SpatialPolygons,
+  SpatialColumn, SpatialDataset, SpatialDensityRaster, SpatialEmbedding, SpatialPolygonTile,
+  SpatialPolygons, SpatialTranscriptTile,
 } from '../spatial-dataset.contract';
+
+/** Options for {@link SpatialDataPort.getTranscriptTile}. */
+export interface TranscriptTileQuery {
+  /** Genes to include, by name. The tile's `gene` codes index this list. */
+  genes: string[];
+  /** `high` (default) keeps only confidently decoded transcripts. */
+  quality?: 'high' | 'all';
+}
 
 /**
  * Spatial-omics data access, inverted as a port so the visualization library
@@ -75,6 +84,27 @@ export interface SpatialDataPort {
    * `polygons`. Optional — a spot-based assay (Visium) has no segmentation.
    */
   getPolygons?(): Promise<SpatialPolygons>;
+
+  /**
+   * One tile of boundaries from `polygonTiles`. An empty tile resolves with `count` 0 —
+   * a tile outside the tissue is an answer, not an error. Optional: only datasets that
+   * advertise `polygonTiles` need it.
+   */
+  getPolygonTile?(set: string, level: number, gx: number, gy: number): Promise<SpatialPolygonTile>;
+
+  /**
+   * One tile of transcripts from `transcriptTiles`, restricted to `query.genes`.
+   * Optional: only datasets that advertise `transcriptTiles` need it.
+   */
+  getTranscriptTile?(
+    level: number, gx: number, gy: number, query: TranscriptTileQuery,
+  ): Promise<SpatialTranscriptTile>;
+
+  /**
+   * The summed transcript density of `genes` on the dataset's `density` raster.
+   * Optional: only datasets that advertise `density` need it.
+   */
+  getDensity?(genes: string[]): Promise<SpatialDensityRaster>;
 
   /**
    * The reference volume's voxels: a uint8 scalar field, x-fastest, of exactly

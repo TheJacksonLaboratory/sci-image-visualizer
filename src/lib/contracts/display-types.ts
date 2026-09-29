@@ -182,7 +182,52 @@ export interface SpatialViewState {
    *  the markers: turning the cells down to read the field underneath must not
    *  turn the field down with them. */
   geneMapOpacity: number;
+  /**
+   * Draw cell boundaries (for a dataset with `polygonTiles` or `polygons`).
+   *
+   * Outlines are level-of-detail: coarse rings when zoomed out, every vertex at the
+   * finest zoom, and none at all once a cell is a few pixels wide — there the
+   * observation markers already draw it as a dot.
+   */
+  showCells: boolean;
+  /** Which boundary set (`cell`, `nucleus`); null takes the dataset's default. */
+  cellSet: string | null;
+  /** Fill the cells with their colour, outline them, or both. */
+  cellDraw: 'fill' | 'outline' | 'both';
+  /** Opacity of the cell fill (outlines draw opaque). */
+  cellOpacity: number;
+  /**
+   * The categorical column that says what TYPE each cell is: it colours the cells
+   * whenever nothing else is chosen, and it colours every transcript by the cell it
+   * falls in. Null picks the dataset's first categorical column. Swapping between a
+   * pipeline's clustering and a curated annotation is swapping this.
+   */
+  cellTypeColumn: string | null;
+  /** Genes whose transcripts are drawn. */
+  transcriptGenes: string[];
+  /**
+   * How transcripts are drawn: `circles` sized by how many transcripts each stands for,
+   * `glyphs` (one icon shape per gene), or a `density` raster. Circles and glyphs are
+   * level-of-detail — aggregated when zoomed out, one per transcript at the finest zoom.
+   */
+  transcriptMode: 'off' | 'circles' | 'glyphs' | 'density';
+  /** Colour transcripts by the type of the cell they fall in, or by gene. */
+  transcriptColorBy: 'cellType' | 'gene';
+  /** Glyph per gene for `glyphs` mode; genes not listed take one by position. */
+  transcriptGlyphs: Record<string, TranscriptGlyphName>;
+  /** Multiplier on transcript marker size. */
+  transcriptScale: number;
+  transcriptOpacity: number;
+  /** `high` keeps only confidently decoded transcripts. */
+  transcriptQuality: 'high' | 'all';
+  /** Opacity of the transcript density raster. */
+  densityOpacity: number;
 }
+
+/** Transcript glyph names — see `TRANSCRIPT_GLYPHS` in `spatial/spatial-tiles.ts`. */
+export type TranscriptGlyphName =
+  | 'circle' | 'star' | 'triangle' | 'square' | 'diamond' | 'cross' | 'hexagon'
+  | 'triangle-down' | 'pentagon' | 'x';
 
 export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
   colorBy: null,
@@ -202,4 +247,17 @@ export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
   geneMapVolume: false,
   geneMapSmoothing: 1,
   geneMapOpacity: 0.85,
+  showCells: false,
+  cellSet: null,
+  cellDraw: 'fill',
+  cellOpacity: 0.55,
+  cellTypeColumn: null,
+  transcriptGenes: [],
+  transcriptMode: 'off',
+  transcriptColorBy: 'cellType',
+  transcriptGlyphs: {},
+  transcriptScale: 1,
+  transcriptOpacity: 0.9,
+  transcriptQuality: 'high',
+  densityOpacity: 0.8,
 };

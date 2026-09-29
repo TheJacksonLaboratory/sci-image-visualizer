@@ -1,5 +1,5 @@
 import {
-  Component, EventEmitter, Inject, Input, OnDestroy, OnInit, Output, ViewChild,
+  Component, EventEmitter, Inject, Input, NgZone, OnDestroy, OnInit, Output, ViewChild,
 } from '@angular/core';
 import { Subscription, combineLatest } from 'rxjs';
 
@@ -9,11 +9,14 @@ import {
   CategoricalColumnMeta, SpatialColumnMeta, SpatialDataset,
 } from '../contracts/spatial-dataset.contract';
 import {
-  ColormapNode, ColormapValue, SpatialViewState, DEFAULT_SPATIAL_VIEW,
+  ColormapNode, ColormapValue, SpatialViewState, DEFAULT_SPATIAL_VIEW, TranscriptGlyphName,
 } from '../contracts/display-types';
 import {
-  SPATIAL_3D_MAX_CATEGORIES, spatialContinuousLut,
+  DEFAULT_CATEGORICAL_PALETTE, SPATIAL_3D_MAX_CATEGORIES, spatialContinuousLut,
 } from '../spatial/spatial-encoding';
+import {
+  TRANSCRIPT_GLYPHS, cellTypeColumnFor, defaultGlyphFor, glyphOutline, isCuratedColumn,
+} from '../spatial/spatial-tiles';
 import {
   SpatialSelectionMask, emptySelection,
 } from '../spatial/spatial-selection';
@@ -34,6 +37,14 @@ const geneOption = (name: string): { label: string; value: string } => ({
 
 /** Per-instance id source — see {@link SpatialControlsComponent.chartsBodyId}. */
 let controlsInstanceSeq = 0;
+
+/** Glyph choices with an SVG `points` string for the preview. */
+const GLYPH_OPTIONS = TRANSCRIPT_GLYPHS.map((g) => {
+  const o = glyphOutline(g);
+  const pts: string[] = [];
+  for (let i = 0; i < o.length; i += 2) pts.push(`${o[i].toFixed(3)},${o[i + 1].toFixed(3)}`);
+  return { label: g.replace('-', ' '), value: g as TranscriptGlyphName, points: pts.join(' ') };
+});
 
 /** Outlier clipping presets, as `[lo, hi]` percentile fractions. */
 const CLIP_OPTIONS: { label: string; value: [number, number] }[] = [
@@ -174,7 +185,10 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   private keyToken = 0;
   private readonly subs = new Subscription();
 
-  constructor(@Inject(VISUALIZER) private readonly viz: IVisualizer) {}
+  constructor(
+    @Inject(VISUALIZER) private readonly viz: IVisualizer,
+    private readonly zone: NgZone,
+  ) {}
 
   ngOnInit(): void {
     this.controls = this.viz.getSpatialControls?.() ?? null;
@@ -196,7 +210,10 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       // The head of the list, not all of it: see `geneNames`.
       this.geneOptions = searchGeneNames(this.geneNames, '').map(geneOption);
       this.sections = this.controls?.sampledSections() ?? null;
+      this.buildTileOptions(dataset);
+      this.cellTypeLegendFor = null;
       void this.refreshKey();
+      void this.refreshCellTypeLegend();
     }));
 
     this.subs.add(this.controls.getViewState$().subscribe((view) => {
@@ -205,6 +222,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       this.selectedGene = view.colorBy?.kind === 'feature' ? view.colorBy.name : null;
       this.selectedColormapNode = this.colormapNodeFor(view.continuousColormap);
       void this.refreshKey();
+      void this.refreshCellTypeLegend();
     }));
 
     this.subs.add(this.controls.getSelection$().subscribe((selection) => {
@@ -516,6 +534,186 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   onClip(value: [number, number]): void {
     this.controls?.setViewState({ percentileClip: value });
   }
+  // ── cells & transcripts ────────────────────────────────────────────────
+
+  readonly cellDrawOptions = [
+    { label: 'Fill', value: 'fill' }, { label: 'Outline', value: 'outline' }, { label: 'Both', value: 'both' },
+  ];
+  readonly transcriptColorOptions = [
+    { label: 'Cell type', value: 'cellType' }, { label: 'Gene', value: 'gene' },
+  ];
+  readonly glyphOptions = GLYPH_OPTIONS;
+  transcriptGeneSuggestions: string[] = [];
+  cellTypeLegend: SpatialLegendEntry[] = [];
+  private cellTypeLegendFor: string | null = null;
+
+  /** Boundaries on offer: tiled (level-of-detail) or whole-dataset rings. */
+  get hasCells(): boolean {
+    return !!(this.dataset?.polygonTiles || this.dataset?.polygons);
+  }
+
+  get hasTranscripts(): boolean {
+    return !!this.dataset?.transcriptTiles || !!this.dataset?.density;
+  }
+
+
+  get activeCellSet(): string | null {
+    const tiles = this.dataset?.polygonTiles;
+    return this.view.cellSet ?? tiles?.defaultSet ?? tiles?.sets[0]?.name ?? null;
+  }
+
+  /**
+   * Option lists for the cell/transcript controls. Built once per dataset rather than in
+   * getters: a getter returns a fresh array on every change-detection pass, and PrimeNG
+   * re-renders its buttons whenever the array identity changes — which made them
+   * impossible to click.
+   */
+  cellSetOptions: { label: string; value: string }[] = [];
+  transcriptModeOptions: { label: string; value: SpatialViewState['transcriptMode'] }[] = [];
+  cellTypeOptions: { label: string; value: string }[] = [];
+
+  private buildTileOptions(ds: SpatialDataset | null): void {
+    this.cellSetOptions = (ds?.polygonTiles?.sets ?? []).map((s) => ({ label: s.label, value: s.name }));
+    this.transcriptModeOptions = [
+      { label: 'Off', value: 'off' },
+      ...(ds?.transcriptTiles ? [
+        { label: 'Circles', value: 'circles' as const },
+        { label: 'Icons', value: 'glyphs' as const },
+      ] : []),
+      ...(ds?.density ? [{ label: 'Density', value: 'density' as const }] : []),
+    ];
+    this.cellTypeOptions = (ds?.columns ?? [])
+      .filter((c) => c.kind === 'categorical')
+      .map((c) => ({ label: this.columnLabel(c), value: c.name }));
+  }
+
+  get activeCellTypeColumn(): string | null {
+    return this.dataset ? cellTypeColumnFor(this.dataset, this.view) : null;
+  }
+
+  /** A curated annotation column, when the dataset carries one. */
+  get curatedColumn(): string | null {
+    return this.dataset?.columns.find((c) => c.kind === 'categorical' && isCuratedColumn(c.name))?.name
+      ?? null;
+  }
+
+  get usingCurated(): boolean {
+    const active = this.activeCellTypeColumn;
+    return !!active && isCuratedColumn(active);
+  }
+
+  onShowCells(on: boolean): void {
+    this.controls?.setViewState({ showCells: on });
+  }
+
+  onCellSet(set: string): void {
+    this.controls?.setViewState({ cellSet: set });
+  }
+
+  onCellDraw(draw: SpatialViewState['cellDraw']): void {
+    this.controls?.setViewState({ cellDraw: draw });
+  }
+
+  onCellOpacity(value: number | undefined): void {
+    if (value === undefined) return;
+    this.controls?.setViewState({ cellOpacity: value });
+  }
+
+  onCellTypeColumn(name: string | null): void {
+    this.controls?.setViewState({ cellTypeColumn: name });
+  }
+
+  /** The curated switch: on picks the curated column, off returns to the pipeline's. */
+  onUseCurated(on: boolean): void {
+    if (!this.dataset) return;
+    const curated = this.curatedColumn;
+    if (on && curated) {
+      this.controls?.setViewState({ cellTypeColumn: curated });
+      return;
+    }
+    const pipeline = this.dataset.columns.find((c) => c.kind === 'categorical' && !isCuratedColumn(c.name));
+    this.controls?.setViewState({ cellTypeColumn: pipeline?.name ?? null });
+  }
+
+  onTranscriptMode(mode: SpatialViewState['transcriptMode']): void {
+    // Seed the gene list from the gene being coloured by, so switching transcripts on
+    // shows something straight away.
+    const seed = !this.view.transcriptGenes.length && this.view.colorBy?.kind === 'feature'
+      ? [this.view.colorBy.name] : null;
+    this.controls?.setViewState({ transcriptMode: mode, ...(seed ? { transcriptGenes: seed } : {}) });
+  }
+
+  async onTranscriptGeneSearch(query: string): Promise<void> {
+    const names = this.dataset?.features?.names;
+    const found = names
+      ? searchGeneNames(names, query)
+      : await (this.controls?.searchFeatures(query, 30) ?? Promise.resolve([]));
+    const chosen = new Set(this.view.transcriptGenes);
+    // The answer lands after a native `await`, which zone.js does not always follow back
+    // into Angular — and the autocomplete spins until it sees the new suggestions.
+    this.zone.run(() => {
+      this.transcriptGeneSuggestions = found.filter((g) => !chosen.has(g));
+    });
+  }
+
+  onTranscriptGenes(genes: string[] | null): void {
+    this.controls?.setViewState({ transcriptGenes: [...(genes ?? [])] });
+  }
+
+  onTranscriptColorBy(by: SpatialViewState['transcriptColorBy']): void {
+    this.controls?.setViewState({ transcriptColorBy: by });
+  }
+
+  onTranscriptScale(value: number | undefined): void {
+    if (value === undefined) return;
+    this.controls?.setViewState({ transcriptScale: value });
+  }
+
+  onTranscriptOpacity(value: number | undefined): void {
+    if (value === undefined) return;
+    this.controls?.setViewState({ transcriptOpacity: value });
+  }
+
+  onTranscriptQuality(includeLow: boolean): void {
+    this.controls?.setViewState({ transcriptQuality: includeLow ? 'all' : 'high' });
+  }
+
+  onDensityOpacity(value: number | undefined): void {
+    if (value === undefined) return;
+    this.controls?.setViewState({ densityOpacity: value });
+  }
+
+  glyphOf(gene: string, slot: number): TranscriptGlyphName {
+    return this.view.transcriptGlyphs[gene] ?? defaultGlyphFor(slot);
+  }
+
+  onGlyph(gene: string, glyph: TranscriptGlyphName): void {
+    this.controls?.setViewState({ transcriptGlyphs: { ...this.view.transcriptGlyphs, [gene]: glyph } });
+  }
+
+  /** The colour gene `slot` is drawn in when transcripts are coloured by gene. */
+  geneColor(slot: number): string {
+    return DEFAULT_CATEGORICAL_PALETTE[slot % DEFAULT_CATEGORICAL_PALETTE.length];
+  }
+
+  /** Legend for the cell-type column, shown when it is what colours the cells. */
+  private async refreshCellTypeLegend(): Promise<void> {
+    const name = this.activeCellTypeColumn;
+    const meta = name ? this.dataset?.columns.find((c) => c.name === name) : undefined;
+    if (!name || !meta || meta.kind !== 'categorical' || !this.controls) {
+      this.cellTypeLegend = [];
+      this.cellTypeLegendFor = null;
+      return;
+    }
+    if (name === this.cellTypeLegendFor) return;
+    this.cellTypeLegendFor = name;
+    const colors = await this.controls.categoryColors(name).catch(() => [] as string[]);
+    if (this.cellTypeLegendFor !== name) return;
+    this.zone.run(() => {
+      this.cellTypeLegend = meta.categories.map((label, i) => ({ label, color: colors[i] ?? '#999' }));
+    });
+  }
+
   reset(): void {
     this.controls?.setViewState({ ...DEFAULT_SPATIAL_VIEW });
     this.clearSelection();

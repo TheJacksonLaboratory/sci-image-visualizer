@@ -5,12 +5,18 @@ import {
   SpatialColumn,
   SpatialColumnMeta,
   SpatialDataset,
+  SpatialDensityMeta,
+  SpatialDensityRaster,
   SpatialEmbedding,
   SpatialEmbeddingMeta,
   SpatialFeatureMeta,
   SpatialImageRef,
   SpatialObservations,
+  SpatialPolygonTile,
+  SpatialPolygonTilesMeta,
   SpatialPolygons,
+  SpatialTranscriptTile,
+  SpatialTranscriptTilesMeta,
   SpatialVolumeMeta,
 } from '../../contracts/spatial-dataset.contract';
 
@@ -48,7 +54,16 @@ import {
  * GET {base}/spatial/{id}/feature/{name}   -> f32[N]
  * GET {base}/spatial/{id}/features?q=&limit= -> { names: string[] }
  * GET {base}/spatial/{id}/polygons         -> u32 count, u32[count+1] offsets, f32[2*rings] coords
+ * GET {base}/spatial/{id}/polygon-tile/{set}/{level}/{gx}/{gy}
+ *                                          -> u32 count, u32[count] obs, u32[count+1] offsets, f32 coords
+ * GET {base}/spatial/{id}/transcript-tile/{level}/{gx}/{gy}?genes=A,B&quality=high|all
+ *                                          -> see decodeTranscriptTile
+ * GET {base}/spatial/{id}/density?genes=A,B -> f32[rows*cols]
  * ```
+ *
+ * The three tiled routes are optional and advertised in the manifest
+ * (`polygonTiles`, `transcriptTiles`, `density`); a server without them never
+ * sees them requested.
  */
 
 /** Bumped when the layout changes incompatibly; the client refuses anything else. */
@@ -76,6 +91,9 @@ export interface SpatialManifest {
   volume?: SpatialVolumeMeta;
   embeddings?: SpatialEmbeddingMeta[];
   micronsPerUnit?: number;
+  polygonTiles?: SpatialPolygonTilesMeta;
+  transcriptTiles?: SpatialTranscriptTilesMeta;
+  density?: SpatialDensityMeta;
 }
 
 /** `GET /spatial/datasets` */
@@ -213,6 +231,61 @@ export function decodePolygons(buf: ArrayBuffer): SpatialPolygons {
 }
 
 /**
+ * `GET /polygon-tile/...` → one tile of rings with their owning observations. Layout
+ * `[u32 count][u32 obs × count][u32 offsets × (count+1)][f32 coords × 2·offsets[count]]`.
+ */
+export function decodePolygonTile(buf: ArrayBuffer): SpatialPolygonTile {
+  assertLittleEndian();
+  if (buf.byteLength < 8) {
+    throw new Error('[spatial] polygon tile: response too short for a header');
+  }
+  const count = new Uint32Array(buf, 0, 1)[0];
+  const observation = new Uint32Array(buf, 4, count);
+  const offsets = new Uint32Array(buf, 4 + count * 4, count + 1);
+  const vertexCount = offsets[count];
+  const coordsByteOffset = 4 + count * 4 + (count + 1) * 4;
+  assertByteLength(buf, coordsByteOffset + vertexCount * 8, 'polygon tile');
+  return {
+    count, observation, offsets,
+    coords: new Float32Array(buf, coordsByteOffset, vertexCount * 2),
+  };
+}
+
+/**
+ * `GET /transcript-tile/...` → transcripts or aggregates. Layout, 4-byte aligned:
+ * `[u32 n][u32 flags][f32 x·n][f32 y·n][f32 z·n][u32 weight·n][u32 obs·n][u16 gene·n, padded]`;
+ * flags bit 0 marks an aggregated level.
+ */
+export function decodeTranscriptTile(buf: ArrayBuffer): SpatialTranscriptTile {
+  assertLittleEndian();
+  if (buf.byteLength < 8) {
+    throw new Error('[spatial] transcript tile: response too short for a header');
+  }
+  const [n, flags] = new Uint32Array(buf, 0, 2);
+  const genePad = Math.ceil((n * 2) / 4) * 4;
+  assertByteLength(buf, 8 + n * 20 + genePad, 'transcript tile');
+  return {
+    count: n,
+    aggregated: (flags & 1) === 1,
+    x: new Float32Array(buf, 8, n),
+    y: new Float32Array(buf, 8 + n * 4, n),
+    z: new Float32Array(buf, 8 + n * 8, n),
+    weight: new Uint32Array(buf, 8 + n * 12, n),
+    observation: new Uint32Array(buf, 8 + n * 16, n),
+    gene: new Uint16Array(buf, 8 + n * 20, n),
+  };
+}
+
+/** `GET /density?genes=` → the summed raster, row-major. */
+export function decodeDensity(
+  buf: ArrayBuffer, meta: SpatialDensityMeta, genes: string[],
+): SpatialDensityRaster {
+  assertLittleEndian();
+  assertByteLength(buf, meta.rows * meta.cols * 4, 'density');
+  return { meta, genes, values: new Float32Array(buf) };
+}
+
+/**
  * Fold a manifest plus its fetched coordinate/id/radius vectors into the
  * library-facing {@link SpatialDataset}. Column and feature *values* are not
  * part of this — they stay lazy behind the port.
@@ -247,5 +320,8 @@ export function datasetFromManifest(
     ...(manifest.micronsPerUnit !== undefined
       ? { micronsPerUnit: manifest.micronsPerUnit }
       : {}),
+    ...(manifest.polygonTiles ? { polygonTiles: manifest.polygonTiles } : {}),
+    ...(manifest.transcriptTiles ? { transcriptTiles: manifest.transcriptTiles } : {}),
+    ...(manifest.density ? { density: manifest.density } : {}),
   };
 }

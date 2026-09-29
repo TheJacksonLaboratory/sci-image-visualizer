@@ -58,6 +58,7 @@ import { defaultSigma, densityGrid, rasterizeDensity } from '../../spatial/spati
 import { observationsInSection, sectionsOf } from '../../spatial/spatial-sections';
 import { type HoverSource, hoverText, nearestObservation } from '../../spatial/spatial-hover';
 import { NapariSpatialTooltip } from './napari-spatial-tooltip';
+import { NapariSpatialTileLayers } from './napari-spatial-tiles';
 import { NAPARI_WHEEL_ZOOM_SPEED } from './napari-zoom';
 
 /**
@@ -432,6 +433,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   /** Dataset the 3D scale bar was built for. */
   private spatialScaleBarKey: string | null = null;
   private spatialSub: Subscription | null = null;
+  /** Level-of-detail cell outlines, transcripts and density over the 2D view — created on
+   *  first use, and only when a spatial port is bound. */
+  private spatialTilesMgr: NapariSpatialTileLayers | null = null;
   /** Latest (dataset, view, selection) the spatial subscription saw, so a slice
    *  change can rebuild the markers for the new plane. */
   private spatialLatest: [SpatialDataset | null, SpatialViewState, SpatialSelectionMask] | null =
@@ -1775,8 +1779,32 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.installScaleBar();
     this.install2dInteraction(viewer, host);
     this.installSpatialHover(host);
+    this.spatialTiles()?.attach(viewer);
     this.subscribeSpatial();
     this.scheduleReadback();
+  }
+
+  /**
+   * The tiled-geometry manager, built on first use. Its host callbacks read this
+   * service's live state, so it never holds a stale dataset or colormap.
+   */
+  private spatialTiles(): NapariSpatialTileLayers | null {
+    const port = this.spatialData;
+    if (!port) return null;
+    this.spatialTilesMgr ??= new NapariSpatialTileLayers(port, {
+      latest: () => this.spatialLatest,
+      canvasSize: () => [this.canvas?.clientWidth ?? 0, this.canvas?.clientHeight ?? 0],
+      continuousLut: (view) => {
+        const node = this.currentColormap as { data?: { value?: unknown } } | null;
+        return spatialContinuousLut(node?.data?.value, this.currentReverse, view.continuousColormap);
+      },
+      polygonsShownChanged: (shown) => {
+        // While outlines are drawn a cell IS its outline; a dot on top of it is noise.
+        if (this.spatialPoints) this.spatialPoints.visible = !shown;
+        this.viewer?.requestRender();
+      },
+    });
+    return this.spatialTilesMgr;
   }
 
   /**
@@ -2241,6 +2269,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       void (isSpatialOmics3d(this.currentPlotType)
         ? this.rebuildSpatialPoints3d(dataset, view, selection)
         : this.rebuildSpatialPoints(dataset, view, selection));
+      if (!isSpatialOmics3d(this.currentPlotType)) this.spatialTilesMgr?.refresh();
     });
   }
 
@@ -2354,7 +2383,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       // the coordinates are already in the image's pixel space.
       scale: ref?.scale ?? [1, 1],
       translate: ref?.translate ?? [0, 0],
+      visible: !this.spatialTilesMgr?.outlinesShown,
     });
+    // Outlines, density and transcripts go back over the markers just added.
+    this.spatialTilesMgr?.afterObservations();
     this.frameSpatialPointsOnce(viewer, dataset.id, positions, !!ref);
     this.hideForeignImage(viewer, !!ref || !!dataset.volume);
     this.setRegionGridFor(dataset, positions);
@@ -3859,6 +3891,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.cameraReadbackOff?.();
     this.cameraReadbackOff = null;
     this.channelView = null;
+    this.spatialTilesMgr?.detach();
     this.viewer?.dispose();
     this.viewer = null;
     if (this.canvas && this.host?.contains(this.canvas)) this.host.removeChild(this.canvas);

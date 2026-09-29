@@ -721,4 +721,106 @@ describe('SpatialControlsComponent', () => {
     });
   });
 
+
+  describe('cells and transcripts', () => {
+    const tiled: SpatialDataset = {
+      ...dataset,
+      columns: [
+        { kind: 'categorical', name: 'graphclust', categories: ['A', 'B'] },
+        { kind: 'categorical', name: 'curated_cell_type', categories: ['T cell', 'Tumour'] },
+        { kind: 'continuous', name: 'cell_area' },
+      ],
+      features: { count: 27000 },
+      polygonTiles: {
+        bounds: [0, 0, 100, 100],
+        sets: [{ name: 'nucleus', label: 'Nuclei' }, { name: 'cell', label: 'Cells' }],
+        defaultSet: 'cell',
+        levels: [{ tileSize: 250 }],
+      },
+      transcriptTiles: {
+        bounds: [0, 0, 100, 100], geneCount: 27000, hasZ: true,
+        levels: [{ tileSize: 250, aggregated: false }],
+      },
+      density: { gridSize: [10, 10], origin: [0, 0], rows: 10, cols: 10 },
+    };
+
+    it('offers the controls only for a dataset that has the geometry', async () => {
+      await build(controls);
+      expect(component.hasCells).toBe(false);
+      expect(component.hasTranscripts).toBe(false);
+      dataset$.next(tiled);
+      expect(component.hasCells).toBe(true);
+      expect(component.hasTranscripts).toBe(true);
+      expect(component.cellSetOptions.map((o) => o.value)).toEqual(['nucleus', 'cell']);
+      expect(component.activeCellSet).toBe('cell');
+      expect(component.transcriptModeOptions.map((o) => o.value))
+        .toEqual(['off', 'circles', 'glyphs', 'density']);
+    });
+
+    it('keeps option lists stable between change-detection passes', async () => {
+      dataset$.next(tiled);
+      await build(controls);
+      // A fresh array per read made PrimeNG re-render the buttons until they were unclickable.
+      expect(component.transcriptModeOptions).toBe(component.transcriptModeOptions);
+      expect(component.cellTypeOptions).toBe(component.cellTypeOptions);
+    });
+
+    it('defaults cell types to the pipeline clustering and switches to the curated table', async () => {
+      dataset$.next(tiled);
+      await build(controls);
+      expect(component.cellTypeOptions.map((o) => o.value)).toEqual(['graphclust', 'curated_cell_type']);
+      expect(component.activeCellTypeColumn).toBe('graphclust');
+      expect(component.curatedColumn).toBe('curated_cell_type');
+      expect(component.usingCurated).toBe(false);
+      component.onUseCurated(true);
+      expect(view$.value.cellTypeColumn).toBe('curated_cell_type');
+      expect(component.usingCurated).toBe(true);
+      component.onUseCurated(false);
+      expect(view$.value.cellTypeColumn).toBe('graphclust');
+    });
+
+    it('seeds the transcript genes from the gene being coloured by', async () => {
+      dataset$.next(tiled);
+      await build(controls);
+      component.onGene('EPCAM');
+      component.onTranscriptMode('circles');
+      expect(view$.value.transcriptMode).toBe('circles');
+      expect(view$.value.transcriptGenes).toEqual(['EPCAM']);
+    });
+
+    it('searches genes remotely for a whole-transcriptome panel, excluding chosen ones', async () => {
+      dataset$.next(tiled);
+      await build(controls);
+      controls.searchFeatures.mockResolvedValueOnce(['EPCAM', 'EPHA2']);
+      component.onTranscriptGenes(['EPCAM']);
+      await component.onTranscriptGeneSearch('EP');
+      expect(controls.searchFeatures).toHaveBeenCalledWith('EP', 30);
+      expect(component.transcriptGeneSuggestions).toEqual(['EPHA2']);
+    });
+
+    it('gives each gene a glyph by position until one is chosen', async () => {
+      dataset$.next(tiled);
+      await build(controls);
+      expect(component.glyphOf('A', 0)).toBe('circle');
+      expect(component.glyphOf('B', 1)).toBe('star');
+      component.onGlyph('B', 'hexagon');
+      expect(view$.value.transcriptGlyphs).toEqual({ B: 'hexagon' });
+      expect(component.glyphOf('B', 1)).toBe('hexagon');
+    });
+
+    it('patches the display settings', async () => {
+      dataset$.next(tiled);
+      await build(controls);
+      component.onShowCells(true);
+      component.onCellSet('nucleus');
+      component.onCellDraw('both');
+      component.onCellOpacity(0.3);
+      component.onTranscriptQuality(true);
+      component.onTranscriptColorBy('gene');
+      expect(view$.value).toEqual(expect.objectContaining({
+        showCells: true, cellSet: 'nucleus', cellDraw: 'both', cellOpacity: 0.3,
+        transcriptQuality: 'all', transcriptColorBy: 'gene',
+      }));
+    });
+  });
 });

@@ -3,12 +3,15 @@ import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable, firstValueFrom } from 'rxjs';
 import { timeout } from 'rxjs/operators';
 
-import { SpatialDataPort } from '../../contracts/ports/spatial-data.port';
+import { SpatialDataPort, TranscriptTileQuery } from '../../contracts/ports/spatial-data.port';
 import {
   SpatialColumn,
   SpatialDataset,
+  SpatialDensityRaster,
   SpatialEmbedding,
+  SpatialPolygonTile,
   SpatialPolygons,
+  SpatialTranscriptTile,
   findColumnMeta,
 } from '../../contracts/spatial-dataset.contract';
 import {
@@ -18,10 +21,13 @@ import {
   datasetFromManifest,
   decodeColumn,
   decodeCoords,
+  decodeDensity,
   decodeEmbedding,
   decodeFeatureVector,
+  decodePolygonTile,
   decodePolygons,
   decodeRadius,
+  decodeTranscriptTile,
 } from './spatial-wire';
 
 /**
@@ -64,7 +70,7 @@ export class SupersededError extends Error {
  * What the LRU can hold. One alias rather than a union repeated at each use, so adding a payload
  * kind is a single edit instead of four that can drift apart.
  */
-type CachedPayload = SpatialColumn | Float32Array | SpatialEmbedding;
+type CachedPayload = SpatialColumn | Float32Array | SpatialEmbedding | SpatialDensityRaster;
 
 @Injectable()
 export class SpatialDataHttpService implements SpatialDataPort {
@@ -91,6 +97,13 @@ export class SpatialDataHttpService implements SpatialDataPort {
 
   /** In-flight requests, so double-clicking a gene issues one fetch. */
   private readonly inFlight = new Map<string, Promise<CachedPayload>>();
+
+  /**
+   * Tiles get their own, larger cache: panning revisits them constantly, and one screen
+   * of a zoomed-out section is dozens of them — far past the vector cache's limit.
+   */
+  private readonly tileCache = new Map<string, Promise<SpatialPolygonTile | SpatialTranscriptTile>>();
+  private static readonly TILE_CACHE_LIMIT = 384;
 
   private volumePromise: Promise<Uint8Array> | null = null;
   private polygonsPromise: Promise<SpatialPolygons> | null = null;
@@ -172,6 +185,7 @@ export class SpatialDataHttpService implements SpatialDataPort {
     this.manifest = null;
     this.cache.clear();
     this.inFlight.clear();
+    this.tileCache.clear();
     this.polygonsPromise = null;
     this.volumePromise = null;
     if (this.dataset$.value !== null) this.dataset$.next(null);
@@ -254,6 +268,68 @@ export class SpatialDataHttpService implements SpatialDataPort {
       .then(decodePolygons)
       .catch((err) => { this.polygonsPromise = null; throw err; });
     return this.polygonsPromise;
+  }
+
+  getPolygonTile(set: string, level: number, gx: number, gy: number): Promise<SpatialPolygonTile> {
+    const manifest = this.requireManifest();
+    if (!manifest.polygonTiles) {
+      return Promise.reject(new Error('[spatial] this dataset has no tiled polygons'));
+    }
+    const path = `spatial/${encodeURIComponent(manifest.id)}/polygon-tile/`
+      + `${encodeURIComponent(set)}/${level}/${gx}/${gy}`;
+    return this.cachedTile(path, () => this.getBinary(path).then(decodePolygonTile)) as
+      Promise<SpatialPolygonTile>;
+  }
+
+  getTranscriptTile(
+    level: number, gx: number, gy: number, query: TranscriptTileQuery,
+  ): Promise<SpatialTranscriptTile> {
+    const manifest = this.requireManifest();
+    if (!manifest.transcriptTiles) {
+      return Promise.reject(new Error('[spatial] this dataset has no tiled transcripts'));
+    }
+    const genes = query.genes.map(encodeURIComponent).join(',');
+    const path = `spatial/${encodeURIComponent(manifest.id)}/transcript-tile/${level}/${gx}/${gy}`
+      + `?genes=${genes}&quality=${query.quality ?? 'high'}`;
+    return this.cachedTile(path, () => this.getBinary(path).then(decodeTranscriptTile)) as
+      Promise<SpatialTranscriptTile>;
+  }
+
+  getDensity(genes: string[]): Promise<SpatialDensityRaster> {
+    const manifest = this.requireManifest();
+    const meta = manifest.density;
+    if (!meta) return Promise.reject(new Error('[spatial] this dataset has no density raster'));
+    const list = [...genes];
+    return this.fetchCached(
+      `density:${list.join(',')}`,
+      () => this.getBinary(
+        `spatial/${encodeURIComponent(manifest.id)}/density?genes=${list.map(encodeURIComponent).join(',')}`,
+      ).then((buf) => decodeDensity(buf, meta, list)),
+    ) as Promise<SpatialDensityRaster>;
+  }
+
+  /** LRU over tile promises, so concurrent asks share one request and a failure is not kept. */
+  private cachedTile<T extends SpatialPolygonTile | SpatialTranscriptTile>(
+    key: string, load: () => Promise<T>,
+  ): Promise<T> {
+    const hit = this.tileCache.get(key);
+    if (hit) {
+      this.tileCache.delete(key);
+      this.tileCache.set(key, hit);
+      return hit as Promise<T>;
+    }
+    const mine = this.selectToken;
+    const promise = load().catch((err) => {
+      if (this.tileCache.get(key) === promise) this.tileCache.delete(key);
+      throw err;
+    });
+    if (mine === this.selectToken) {
+      this.tileCache.set(key, promise);
+      while (this.tileCache.size > SpatialDataHttpService.TILE_CACHE_LIMIT) {
+        this.tileCache.delete(this.tileCache.keys().next().value!);
+      }
+    }
+    return promise;
   }
 
   /**
