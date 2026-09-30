@@ -13,7 +13,8 @@ import {
 } from '../../spatial/spatial-encoding';
 import { SpatialSelectionMask } from '../../spatial/spatial-selection';
 import {
-  DataRect, POLYGON_LEVEL_MIN_CELL_PX, TileKey, TranscriptGlyph, cellTypeColumnFor, colorDensity,
+  DataRect, POLYGON_LEVEL_MIN_CELL_PX, TileKey, TranscriptGlyph, cellTypeColumnFor, cellsShown,
+  colorDensity,
   defaultGlyphFor, discreteColormapStops, glyphOutline, glyphRings, pixelsPerDataUnit,
   polygonLevelFor, smoothRaster, tileId, tilesInRect, transcriptLevelFor, transcriptMarkerPx,
   typicalCellDiameter, visibleDataRect,
@@ -179,7 +180,7 @@ export class NapariSpatialTileLayers {
   ): Promise<void> {
     const tiled = dataset.polygonTiles;
     const whole = !tiled && dataset.polygons && this.port.getPolygons;
-    if (!view.showCells || (!tiled && !whole)) {
+    if (!cellsShown(dataset, view) || (!tiled && !whole)) {
       this.dropCells();
       return;
     }

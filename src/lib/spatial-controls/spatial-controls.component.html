@@ -113,6 +113,15 @@
 
     <!-- Display -->
     <div class="sc-section">
+      <!-- The circles: one per observation. Hidden, the tissue, the outlines and the
+           transcripts read on their own. (The 3D panel has its own switch below.) -->
+      <div class="sc-row" *ngIf="!is3d">
+        <p-checkbox [binary]="true" [ngModel]="view.showPoints" inputId="sc-points"
+                    (onChange)="onShowPoints($event.checked)"></p-checkbox>
+        <label class="sc-lbl" for="sc-points"
+               pTooltip="One circle per observation. With cell outlines on, circles are only drawn where cells are too small on screen to outline"
+               tooltipPosition="top">Show observations</label>
+      </div>
       <div class="sc-row">
         <span class="sc-lbl">Point size</span>
         <p-slider [ngModel]="view.pointScale" [min]="0.25" [max]="5" [step]="0.25"
@@ -134,11 +143,11 @@
          transcript at the finest zoom. 2D only for now. -->
     <div class="sc-section" *ngIf="hasCells && !is3d">
       <div class="sc-row">
-        <p-checkbox [binary]="true" [ngModel]="view.showCells" inputId="sc-cells"
+        <p-checkbox [binary]="true" [ngModel]="cellsOn" inputId="sc-cells"
                     (onChange)="onShowCells($event.checked)"></p-checkbox>
         <label class="sc-lbl" for="sc-cells">Show cells</label>
       </div>
-      <ng-container *ngIf="view.showCells">
+      <ng-container *ngIf="cellsOn">
         <div class="sc-row" *ngIf="cellSetOptions.length > 1">
           <span class="sc-lbl">Boundaries</span>
           <p-selectButton [options]="cellSetOptions" optionLabel="label" optionValue="value"

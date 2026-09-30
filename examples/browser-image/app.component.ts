@@ -163,6 +163,10 @@ const TILED_IMAGES: TiledImage[] = TILE_SERVER
  */
 async function fetchTileDescriptor(base: string, imageId: string): Promise<{
   width: number; height: number; mppX?: number; mppY?: number;
+  /** Bands: 3 for an RGB tissue image, N for a multichannel one (Xenium morphology: 4). */
+  channels?: number;
+  /** Slices in a z-stack. */
+  z?: number;
 }> {
   const info = btoa(JSON.stringify({ image: imageId }))
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -766,7 +770,9 @@ export class AppComponent implements OnDestroy {
         const desc = await fetchTileDescriptor(TILE_SERVER, entry.imageId);
         this.imageState.setTiledImage(
           entry.imageId, entry.name, desc.width, desc.height,
-          desc.mppX ?? 1, desc.mppY ?? 1, 3, 1,
+          // The descriptor's own band count: hard-coding 3 cut a multichannel image (a
+          // Xenium morphology stack has 4) down to its first three in the histogram.
+          desc.mppX ?? 1, desc.mppY ?? 1, desc.channels ?? 3, desc.z ?? 1,
         );
       }
       // NOT clearing the image for a dataset that brings none, deliberately. The Plotly

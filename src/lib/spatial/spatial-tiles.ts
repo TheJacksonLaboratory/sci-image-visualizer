@@ -35,6 +35,15 @@ export interface TileKey {
   gy: number;
 }
 
+/** Whether cell outlines are drawn: the user's choice, else on when the dataset has any. */
+export function cellsShown(
+  dataset: Pick<SpatialDataset, 'polygonTiles' | 'polygons'> | null,
+  view: Pick<SpatialViewState, 'showCells'>,
+): boolean {
+  const available = !!(dataset?.polygonTiles || dataset?.polygons);
+  return available && (view.showCells ?? true);
+}
+
 /** A column holding a hand-curated cell-type annotation, by naming convention. */
 export function isCuratedColumn(name: string): boolean {
   return /curated/i.test(name);

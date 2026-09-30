@@ -1,7 +1,7 @@
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
 import {
   POLYGON_LEVEL_MIN_CELL_PX, TRANSCRIPT_GLYPHS, TRANSCRIPT_MAX_PX, TRANSCRIPT_MIN_PX,
-  cellTypeColumnFor, colorDensity, discreteColormapStops, glyphOutline, glyphRings, pixelsPerDataUnit,
+  cellTypeColumnFor, cellsShown, colorDensity, discreteColormapStops, glyphOutline, glyphRings, pixelsPerDataUnit,
   smoothRaster,
   polygonLevelFor, tileId, tilesInRect, transcriptLevelFor, transcriptMarkerPx,
   typicalCellDiameter, visibleDataRect,
@@ -256,5 +256,26 @@ describe('smoothRaster / colorDensity', () => {
     expect(rgba[3]).toBe(0); // zero → transparent
     expect(rgba[8 + 3]).toBe(255); // top of window → opaque
     expect(rgba[8]).toBe(255);
+  });
+});
+
+describe('cellsShown', () => {
+  const tiled = { polygonTiles: { bounds: [0, 0, 1, 1], sets: [], levels: [] } } as never;
+  const whole = { polygons: { count: 3 } } as never;
+  const none = {} as never;
+
+  it('is on by default for any dataset with outlines', () => {
+    expect(cellsShown(tiled, { showCells: null })).toBe(true);
+    expect(cellsShown(whole, { showCells: null })).toBe(true);
+  });
+
+  it('honours an explicit choice', () => {
+    expect(cellsShown(tiled, { showCells: false })).toBe(false);
+    expect(cellsShown(tiled, { showCells: true })).toBe(true);
+  });
+
+  it('is off for a dataset with nothing to outline, whatever the setting', () => {
+    expect(cellsShown(none, { showCells: true })).toBe(false);
+    expect(cellsShown(null, { showCells: null })).toBe(false);
   });
 });

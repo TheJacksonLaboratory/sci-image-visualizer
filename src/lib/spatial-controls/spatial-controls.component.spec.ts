@@ -751,6 +751,10 @@ describe('SpatialControlsComponent', () => {
       dataset$.next(tiled);
       expect(component.hasCells).toBe(true);
       expect(component.hasTranscripts).toBe(true);
+      // Outlines are on by default for data that has them, until the user says otherwise.
+      expect(component.cellsOn).toBe(true);
+      component.onShowCells(false);
+      expect(component.cellsOn).toBe(false);
       expect(component.cellSetOptions.map((o) => o.value)).toEqual(['nucleus', 'cell']);
       expect(component.activeCellSet).toBe('cell');
       expect(component.transcriptModeOptions.map((o) => o.value))

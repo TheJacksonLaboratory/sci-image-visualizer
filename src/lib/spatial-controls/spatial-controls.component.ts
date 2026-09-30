@@ -15,7 +15,7 @@ import {
   DEFAULT_CATEGORICAL_PALETTE, SPATIAL_3D_MAX_CATEGORIES, spatialContinuousLut,
 } from '../spatial/spatial-encoding';
 import {
-  TRANSCRIPT_GLYPHS, cellTypeColumnFor, defaultGlyphFor, glyphOutline, isCuratedColumn,
+  TRANSCRIPT_GLYPHS, cellTypeColumnFor, cellsShown, defaultGlyphFor, glyphOutline, isCuratedColumn,
 } from '../spatial/spatial-tiles';
 import {
   SpatialSelectionMask, emptySelection,
@@ -556,6 +556,11 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     return !!this.dataset?.transcriptTiles || !!this.dataset?.density;
   }
 
+
+  /** Whether outlines are on — the explicit choice, or automatically for data that has them. */
+  get cellsOn(): boolean {
+    return cellsShown(this.dataset, this.view);
+  }
 
   get activeCellSet(): string | null {
     const tiles = this.dataset?.polygonTiles;

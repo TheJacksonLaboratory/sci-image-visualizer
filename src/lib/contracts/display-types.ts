@@ -117,7 +117,8 @@ export interface SpatialViewState {
    * setting for a backdrop and a useless one for the measurement.
    */
   volumeOpacity: number;
-  /** Draw the observation cloud (3D). */
+  /** Draw the observation markers — the 3D cloud, or the 2D circles. In 2D they also
+   *  stand in for cells too small on screen to outline. */
   showPoints: boolean;
   /**
    * Restrict the cloud to ONE imaged section, by index into the dataset's sampled
@@ -188,8 +189,12 @@ export interface SpatialViewState {
    * Outlines are level-of-detail: coarse rings when zoomed out, every vertex at the
    * finest zoom, and none at all once a cell is a few pixels wide — there the
    * observation markers already draw it as a dot.
+   *
+   * `null` (the default) means automatic: on for any dataset that has outlines, since a
+   * segmented cell is better shown as its shape than as a circle. A boolean is the
+   * user's explicit choice.
    */
-  showCells: boolean;
+  showCells: boolean | null;
   /** Which boundary set (`cell`, `nucleus`); null takes the dataset's default. */
   cellSet: string | null;
   /** Fill the cells with their colour, outline them, or both. */
@@ -247,7 +252,7 @@ export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
   geneMapVolume: false,
   geneMapSmoothing: 1,
   geneMapOpacity: 0.85,
-  showCells: false,
+  showCells: null,
   cellSet: null,
   cellDraw: 'fill',
   cellOpacity: 0.55,

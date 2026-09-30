@@ -1785,6 +1785,16 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   }
 
   /**
+   * Whether the 2D observation markers are drawn: when the user wants them, and not while
+   * cell outlines are on screen — then a cell IS its outline, and a circle on top of it is
+   * noise. Zoomed out past the outline threshold, the circles stand in for the cells.
+   */
+  private spatialPointsVisible(): boolean {
+    const view = this.spatialLatest?.[1];
+    return (view?.showPoints ?? true) && !this.spatialTilesMgr?.outlinesShown;
+  }
+
+  /**
    * The tiled-geometry manager, built on first use. Its host callbacks read this
    * service's live state, so it never holds a stale dataset or colormap.
    */
@@ -1798,9 +1808,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         const node = this.currentColormap as { data?: { value?: unknown } } | null;
         return spatialContinuousLut(node?.data?.value, this.currentReverse, view.continuousColormap);
       },
-      polygonsShownChanged: (shown) => {
-        // While outlines are drawn a cell IS its outline; a dot on top of it is noise.
-        if (this.spatialPoints) this.spatialPoints.visible = !shown;
+      polygonsShownChanged: () => {
+        if (this.spatialPoints) this.spatialPoints.visible = this.spatialPointsVisible();
         this.viewer?.requestRender();
       },
     });
@@ -2350,6 +2359,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const key = `${dataset.id}:${obs.count}:${slab?.slice ?? ''}`;
     if (this.spatialPoints && key === this.spatialLayerKey) {
       this.spatialPoints.size = size;
+      this.spatialPoints.visible = this.spatialPointsVisible();
       this.spatialPoints.faceColor = this.gatherColors(faceColor, slab?.indices) as never;
       viewer.requestRender();
       return;
@@ -2383,7 +2393,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       // the coordinates are already in the image's pixel space.
       scale: ref?.scale ?? [1, 1],
       translate: ref?.translate ?? [0, 0],
-      visible: !this.spatialTilesMgr?.outlinesShown,
+      visible: this.spatialPointsVisible(),
     });
     // Outlines, density and transcripts go back over the markers just added.
     this.spatialTilesMgr?.afterObservations();
