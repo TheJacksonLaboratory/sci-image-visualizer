@@ -284,3 +284,18 @@
   height: 1rem;
   fill: currentColor;
 }
+
+// Button groups beside their label: compact buttons, so "Nucleus / Cell", "Fill /
+// Outline / Both" and the four transcript modes each fit on the label's row.
+:host ::ng-deep .sc-row-buttons .p-selectbutton .p-button {
+  padding: 0.35rem 0.6rem;
+  font-size: 0.85rem;
+}
+:host ::ng-deep .sc-row-buttons .p-selectbutton {
+  display: flex;
+  flex-wrap: nowrap;
+}
+// A short label with a long button group: let the buttons take the room.
+.sc-row-wide .sc-lbl {
+  flex: 0 0 auto;
+}

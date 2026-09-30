@@ -796,14 +796,41 @@ describe('SpatialControlsComponent', () => {
       expect(view$.value.transcriptGenes).toEqual(['EPCAM']);
     });
 
-    it('searches genes remotely for a whole-transcriptome panel, excluding chosen ones', async () => {
+    it('loads a whole-transcriptome gene list lazily, once, on first open', async () => {
       dataset$.next(tiled);
       await build(controls);
-      controls.searchFeatures.mockResolvedValueOnce(['EPCAM', 'EPHA2']);
+      expect(component.genesAreRemote).toBe(true);
+      controls.searchFeatures.mockResolvedValue(['A1BG', 'EPCAM', 'EPHA2', 'KRT5']);
+      await component.ensureGeneList();
+      expect(controls.searchFeatures).toHaveBeenCalledWith('', 100_000);
+      expect(component.genesAreRemote).toBe(false);
+      // Resident now: filtering is local, no further requests.
+      controls.searchFeatures.mockClear();
+      await component.onGeneFilter('EP');
+      expect(controls.searchFeatures).not.toHaveBeenCalled();
+      expect(component.geneOptions.map((o) => o.value)).toEqual(['EPCAM', 'EPHA2']);
+      await component.ensureGeneList();
+      expect(controls.searchFeatures).not.toHaveBeenCalled();
+    });
+
+    it('keeps chosen transcript genes among the options, so their chips show', async () => {
+      dataset$.next(tiled);
+      await build(controls);
+      controls.searchFeatures.mockResolvedValue(['A1BG', 'KRT5']);
       component.onTranscriptGenes(['EPCAM']);
-      await component.onTranscriptGeneSearch('EP');
-      expect(controls.searchFeatures).toHaveBeenCalledWith('EP', 30);
-      expect(component.transcriptGeneSuggestions).toEqual(['EPHA2']);
+      await component.ensureGeneList();
+      expect(component.geneOptions.map((o) => o.value)).toContain('EPCAM');
+    });
+
+    it('labels the boundary sets briefly, to fit one row', async () => {
+      dataset$.next({
+        ...tiled,
+        polygonTiles: { ...tiled.polygonTiles!, sets: [
+          { name: 'nucleus', label: 'Nucleus boundaries' }, { name: 'cell', label: 'Cell boundaries' },
+        ] },
+      });
+      await build(controls);
+      expect(component.cellSetOptions.map((o) => o.label)).toEqual(['Nucleus', 'Cell']);
     });
 
     it('gives each gene a glyph by position until one is chosen', async () => {

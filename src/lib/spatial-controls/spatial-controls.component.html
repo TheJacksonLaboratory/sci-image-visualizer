@@ -44,7 +44,7 @@
                   optionLabel="label" optionValue="value"
                   [ngModel]="selectedGene" (ngModelChange)="onGene($event)"
                   [filter]="true" filterBy="label" [resetFilterOnHide]="true"
-                  (onFilter)="onGeneFilter($event.filter)"
+                  (onFilter)="onGeneFilter($event.filter)" (onShow)="ensureGeneList()"
                   [showClear]="true"
                   [virtualScroll]="geneOptions.length > geneVirtualScrollFrom"
                   [virtualScrollItemSize]="30"
@@ -148,13 +148,13 @@
         <label class="sc-lbl" for="sc-cells">Show cells</label>
       </div>
       <ng-container *ngIf="cellsOn">
-        <div class="sc-row" *ngIf="cellSetOptions.length > 1">
+        <div class="sc-row sc-row-buttons" *ngIf="cellSetOptions.length > 1">
           <span class="sc-lbl">Boundaries</span>
           <p-selectButton [options]="cellSetOptions" optionLabel="label" optionValue="value"
                           [ngModel]="activeCellSet" (ngModelChange)="onCellSet($event)"
                           [allowEmpty]="false"></p-selectButton>
         </div>
-        <div class="sc-row">
+        <div class="sc-row sc-row-buttons">
           <span class="sc-lbl">Draw</span>
           <p-selectButton [options]="cellDrawOptions" optionLabel="label" optionValue="value"
                           [ngModel]="view.cellDraw" (ngModelChange)="onCellDraw($event)"
@@ -193,10 +193,12 @@
     </div>
 
     <div class="sc-section" *ngIf="hasTranscripts && !is3d">
-      <span class="sc-lbl">Transcripts</span>
-      <p-selectButton [options]="transcriptModeOptions" optionLabel="label" optionValue="value"
-                      [ngModel]="view.transcriptMode" (ngModelChange)="onTranscriptMode($event)"
-                      [allowEmpty]="false"></p-selectButton>
+      <div class="sc-row sc-row-buttons sc-row-wide">
+        <span class="sc-lbl">Transcripts</span>
+        <p-selectButton [options]="transcriptModeOptions" optionLabel="label" optionValue="value"
+                        [ngModel]="view.transcriptMode" (ngModelChange)="onTranscriptMode($event)"
+                        [allowEmpty]="false"></p-selectButton>
+      </div>
       <ng-container *ngIf="view.transcriptMode !== 'off'">
         <!-- Every gene at once: grouped into bins sized by how many transcripts they hold,
              finer as the camera zooms in, one marker per transcript once they fit. -->
@@ -210,12 +212,18 @@
         </small>
         <ng-container *ngIf="!showingAllGenes">
         <label class="sc-lbl" for="sc-tx-genes">Genes</label>
-        <p-autoComplete inputId="sc-tx-genes" [multiple]="true"
-                        [ngModel]="view.transcriptGenes" (ngModelChange)="onTranscriptGenes($event)"
-                        [suggestions]="transcriptGeneSuggestions"
-                        (completeMethod)="onTranscriptGeneSearch($event.query)"
-                        [forceSelection]="true" appendTo="body"
-                        placeholder="Add genes…" styleClass="sc-full"></p-autoComplete>
+        <!-- The same list, search and virtual scroll as "Colour by gene", as a multi-select. -->
+        <p-multiSelect inputId="sc-tx-genes" [options]="geneOptions"
+                       optionLabel="label" optionValue="value"
+                       [ngModel]="view.transcriptGenes" (onChange)="onTranscriptGenes($event.value)"
+                       [filter]="true" filterBy="label" [resetFilterOnHide]="true"
+                       (onFilter)="onGeneFilter($event.filter)" (onPanelShow)="ensureGeneList()"
+                       [virtualScroll]="geneOptions.length > geneVirtualScrollFrom"
+                       [virtualScrollItemSize]="30" [showToggleAll]="false" display="chip"
+                       [emptyFilterMessage]="genesAreRemote ? 'No match — keep typing' : 'No match'"
+                       [emptyMessage]="genesAreRemote ? 'Type to search genes' : 'No genes'"
+                       appendTo="body" placeholder="Add genes…"
+                       styleClass="sc-full"></p-multiSelect>
         <small class="sc-hint" *ngIf="!view.transcriptGenes.length">
           Pick one or more genes to draw their transcripts.
         </small>

@@ -278,7 +278,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       // Resident names: search them here and materialise only the top matches. The
       // dropdown's own filter then runs over those and agrees — they were chosen by the
       // same query — so the control behaves as if it still held the whole list.
-      this.geneOptions = searchGeneNames(this.geneNames, query).map(geneOption);
+      this.geneOptions = this.withSelected(searchGeneNames(this.geneNames, query));
       return;
     }
     if (!this.controls) return;
@@ -293,13 +293,61 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     try {
       const names = await this.controls.searchFeatures(query, 50);
       if (mine !== this.geneSearchToken) return;
-      this.geneOptions = names.map(geneOption);
+      this.zone.run(() => { this.geneOptions = this.withSelected(names); });
     } catch {
       if (mine !== this.geneSearchToken) return;
       // A failed lookup must not wedge the control — show none and say so.
-      this.geneOptions = [];
-      this.geneSearchFailed = true;
+      this.zone.run(() => {
+        this.geneOptions = this.withSelected([]);
+        this.geneSearchFailed = true;
+      });
     }
+  }
+
+  /**
+   * Opening either gene dropdown — "Colour by gene" or the transcript genes. Both share
+   * one list and one search, so each opens on the head of the full list rather than on
+   * whatever the other was last filtered to.
+   *
+   * A whole-transcriptome dataset does not inline its ~30k names; they are fetched here,
+   * once, on first open — the list is then resident and every keystroke filters locally,
+   * exactly as for a targeted panel. Until it arrives the dropdown falls back to asking
+   * the server per keystroke.
+   */
+  async ensureGeneList(): Promise<void> {
+    if (this.genesAreRemote && this.controls && !this.geneListLoading) {
+      this.geneListLoading = true;
+      try {
+        const names = await this.controls.searchFeatures('', SpatialControlsComponent.GENE_LIST_MAX);
+        if (names.length && this.genesAreRemote) {
+          this.zone.run(() => {
+            this.geneNames = names;
+            this.genesAreRemote = false;
+          });
+        }
+      } catch {
+        // Keep the per-keystroke search; the list is a convenience, not a requirement.
+      } finally {
+        this.geneListLoading = false;
+      }
+    }
+    this.zone.run(() => {
+      this.geneOptions = this.withSelected(
+        this.genesAreRemote ? [] : searchGeneNames(this.geneNames, ''),
+      );
+    });
+  }
+
+  /** Most names fetched for the lazy list — well above any panel, whole-transcriptome included. */
+  private static readonly GENE_LIST_MAX = 100_000;
+  private geneListLoading = false;
+
+  /** Options for `names`, plus the genes already chosen (a multi-select shows a chip only
+   *  for a value it can find among its options). */
+  private withSelected(names: readonly string[]): { label: string; value: string }[] {
+    const chosen = [...(this.view?.transcriptGenes ?? []), ...(this.selectedGene ? [this.selectedGene] : [])];
+    const seen = new Set(names);
+    return [...chosen.filter((g) => !seen.has(g)), ...names].map(geneOption);
   }
 
   /** A gene was picked; it supersedes any column selection. */
@@ -545,7 +593,6 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   readonly glyphOptions = GLYPH_OPTIONS;
   readonly budgetOptions = [25_000, 50_000, 100_000, 200_000, 400_000]
     .map((n) => ({ label: n.toLocaleString(), value: n }));
-  transcriptGeneSuggestions: string[] = [];
   cellTypeLegend: SpatialLegendEntry[] = [];
   private cellTypeLegendFor: string | null = null;
 
@@ -580,7 +627,9 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   cellTypeOptions: { label: string; value: string }[] = [];
 
   private buildTileOptions(ds: SpatialDataset | null): void {
-    this.cellSetOptions = (ds?.polygonTiles?.sets ?? []).map((s) => ({ label: s.label, value: s.name }));
+    // Short labels ("Nucleus" / "Cell") so the buttons share one row.
+    this.cellSetOptions = (ds?.polygonTiles?.sets ?? [])
+      .map((s) => ({ label: s.label.replace(/\s*boundar(y|ies)$/i, ''), value: s.name }));
     this.transcriptModeOptions = [
       { label: 'Off', value: 'off' },
       ...(ds?.transcriptTiles ? [
@@ -648,19 +697,6 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     const seed = !this.view.transcriptGenes.length && this.view.colorBy?.kind === 'feature'
       ? [this.view.colorBy.name] : null;
     this.controls?.setViewState({ transcriptMode: mode, ...(seed ? { transcriptGenes: seed } : {}) });
-  }
-
-  async onTranscriptGeneSearch(query: string): Promise<void> {
-    const names = this.dataset?.features?.names;
-    const found = names
-      ? searchGeneNames(names, query)
-      : await (this.controls?.searchFeatures(query, 30) ?? Promise.resolve([]));
-    const chosen = new Set(this.view.transcriptGenes);
-    // The answer lands after a native `await`, which zone.js does not always follow back
-    // into Angular — and the autocomplete spins until it sees the new suggestions.
-    this.zone.run(() => {
-      this.transcriptGeneSuggestions = found.filter((g) => !chosen.has(g));
-    });
   }
 
   onTranscriptGenes(genes: string[] | null): void {
