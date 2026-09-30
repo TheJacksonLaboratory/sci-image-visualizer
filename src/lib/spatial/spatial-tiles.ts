@@ -206,18 +206,35 @@ export function transcriptLevelFor(
 
 /** Smallest and largest transcript marker, in canvas pixels. */
 export const TRANSCRIPT_MIN_PX = 4;
-export const TRANSCRIPT_MAX_PX = 24;
+export const TRANSCRIPT_MAX_PX = 32;
+/**
+ * Physical diameter a single transcript is drawn at, in µm — clearly larger than the
+ * imaged spot (~0.3 µm) so it stays legible, and small enough that neighbouring
+ * molecules inside one cell stay apart.
+ */
+export const TRANSCRIPT_PHYSICAL_UM = 1.2;
 
 /**
  * Marker diameter in canvas pixels for an entry standing for `weight` transcripts.
  *
- * Grows with the cube root of the count: area ∝ count would let one dense aggregate
- * swallow its neighbours, while the cube root keeps a 1000-transcript cluster clearly
- * larger than a 10-transcript one without covering the tile. Level 0 (weight 1) draws at
- * the minimum — one small circle per transcript.
+ * The convention spatial viewers share (deck.gl's `radiusMinPixels`/`radiusMaxPixels`,
+ * Xenium Explorer's transcript size): a PHYSICAL size, clamped to a screen-pixel range.
+ * Zoomed out, markers sit at the minimum and never vanish; zoomed in, they grow with the
+ * tissue instead of shrinking to specks next to cells hundreds of pixels wide. A fixed
+ * screen size does the opposite at high zoom, which is what made transcripts disappear
+ * at pixel-level zoom.
+ *
+ * Aggregates grow with the cube root of their count: area ∝ count would let one dense
+ * aggregate swallow its neighbours, the cube root keeps a 1000-transcript cluster clearly
+ * larger than a 10-transcript one without covering the tile.
+ *
+ * `pxPerMicron` is omitted for data with no known physical unit; the marker is then
+ * screen-sized only.
  */
-export function transcriptMarkerPx(weight: number, scale = 1): number {
-  const px = TRANSCRIPT_MIN_PX * Math.cbrt(Math.max(1, weight)) * scale;
+export function transcriptMarkerPx(weight: number, scale = 1, pxPerMicron?: number): number {
+  const counted = TRANSCRIPT_MIN_PX * Math.cbrt(Math.max(1, weight));
+  const physical = pxPerMicron ? TRANSCRIPT_PHYSICAL_UM * pxPerMicron : 0;
+  const px = Math.max(counted, physical) * scale;
   return Math.min(TRANSCRIPT_MAX_PX * Math.max(scale, 1), Math.max(TRANSCRIPT_MIN_PX * scale, px));
 }
 

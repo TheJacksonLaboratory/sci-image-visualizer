@@ -363,15 +363,16 @@ export class NapariSpatialTileLayers {
 
     // Marker size is chosen in SCREEN pixels and converted at the current zoom; a
     // camera change re-plans, so markers keep their on-screen size across zooms.
+    // Physical where the unit is known (µm), clamped to a screen-pixel range.
+    const pxPerMicron = dataset.micronsPerUnit ? pxPerUnit / dataset.micronsPerUnit : undefined;
     const diam = new Float32Array(merged.count);
     for (let i = 0; i < merged.count; i++) {
-      diam[i] = transcriptMarkerPx(merged.weight[i], view.transcriptScale) / pxPerUnit;
+      diam[i] = transcriptMarkerPx(merged.weight[i], view.transcriptScale, pxPerMicron) / pxPerUnit;
     }
     const ref = dataset.imageRef;
     this.keys.set('transcripts', planKey);
     const scale: [number, number] = ref?.scale ?? [1, 1];
     const translate: [number, number] = ref?.translate ?? [0, 0];
-
     if (mode === 'circles') {
       this.drop('transcriptOutline');
       const positions = new Float32Array(merged.count * 2);
@@ -383,7 +384,10 @@ export class NapariSpatialTileLayers {
         name: 'transcripts',
         size: diam,
         faceColor: faces.rgba,
-        borderWidth: 0,
+        // A dark rim: a transcript coloured by its cell's type is otherwise the same
+        // colour as the cell fill it sits on, and vanishes into it.
+        borderColor: [0.04, 0.04, 0.05, 0.9],
+        borderWidth: 0.18 * median(diam),
         opacity: view.transcriptOpacity,
         scale,
         translate,
@@ -572,6 +576,15 @@ export class NapariSpatialTileLayers {
     this.polygonsShown = shown;
     this.host.polygonsShownChanged(shown);
   }
+}
+
+function median(v: Float32Array): number {
+  if (!v.length) return 0;
+  const step = Math.max(1, Math.floor(v.length / 1024));
+  const sample: number[] = [];
+  for (let i = 0; i < v.length; i += step) sample.push(v[i]);
+  sample.sort((a, b) => a - b);
+  return sample[sample.length >> 1];
 }
 
 /** Concatenate tiles' rings into one set, dropping rings already seen (a cell straddling

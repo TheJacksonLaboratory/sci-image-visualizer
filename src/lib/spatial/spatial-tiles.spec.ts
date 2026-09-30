@@ -1,6 +1,7 @@
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
 import {
   POLYGON_LEVEL_MIN_CELL_PX, TRANSCRIPT_GLYPHS, TRANSCRIPT_MAX_PX, TRANSCRIPT_MIN_PX,
+  TRANSCRIPT_PHYSICAL_UM,
   cellTypeColumnFor, cellsShown, colorDensity, discreteColormapStops, glyphOutline, glyphRings, pixelsPerDataUnit,
   smoothRaster,
   polygonLevelFor, tileId, tilesInRect, transcriptLevelFor, transcriptMarkerPx,
@@ -132,6 +133,15 @@ describe('transcriptMarkerPx', () => {
 
   it('scales with the size control', () => {
     expect(transcriptMarkerPx(1, 2)).toBe(2 * TRANSCRIPT_MIN_PX);
+  });
+
+  it('grows with the tissue when zoomed in, instead of shrinking to a speck', () => {
+    // Zoomed out (0.5 px/µm): the physical size is sub-pixel, so the floor holds.
+    expect(transcriptMarkerPx(1, 1, 0.5)).toBe(TRANSCRIPT_MIN_PX);
+    // Pixel-level zoom (20 px/µm): drawn at its physical size.
+    expect(transcriptMarkerPx(1, 1, 20)).toBeCloseTo(TRANSCRIPT_PHYSICAL_UM * 20, 6);
+    // Extreme zoom: capped.
+    expect(transcriptMarkerPx(1, 1, 1000)).toBe(TRANSCRIPT_MAX_PX);
   });
 });
 
