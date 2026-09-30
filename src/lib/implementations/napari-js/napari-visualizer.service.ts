@@ -2016,12 +2016,30 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const dataset = this.spatialLatest?.[0];
     if (!tip || !pointer || !dataset) return;
 
+    const is3d = isSpatialOmics3d(this.currentPlotType);
+    // Transcript markers sit on top of everything, so they are asked first.
+    if (!is3d && this.spatialTilesMgr && this.viewer) {
+      const world = this.viewer.canvasToWorld(pointer.clientX, pointer.clientY);
+      const zoom = this.viewer.camera.zoom;
+      const radius = NapariVisualizerService.HOVER_RADIUS_PX / (zoom > 0 ? zoom : 1);
+      const lines = world ? this.spatialTilesMgr.hoverAt(world[0], world[1], radius, (details) => {
+        const p = this.hoverPointer;
+        if (!p || !this.spatialTooltip) return;
+        const r = host.getBoundingClientRect();
+        this.spatialTooltip.show(details, p.clientX - r.left, p.clientY - r.top);
+      }) : null;
+      if (lines) {
+        const rect = host.getBoundingClientRect();
+        tip.show(lines, pointer.clientX - rect.left, pointer.clientY - rect.top);
+        return;
+      }
+    }
+
     const positions = this.hoverPositionsFor(dataset.observations);
     if (!positions) {
       tip.hide();
       return;
     }
-    const is3d = isSpatialOmics3d(this.currentPlotType);
     // 3D compares screen pixels directly; 2D holds world positions, so the radius
     // is converted once instead of projecting the whole cloud.
     const zoom = is3d ? 1 : (this.viewer?.camera.zoom ?? 1);

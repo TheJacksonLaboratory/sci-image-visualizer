@@ -83,4 +83,15 @@ describe('NapariSpatialTooltip', () => {
     tip.dispose();
     expect(host.children.length).toBe(0);
   });
+
+  it('shows every detail line after the first, one per row', () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const tip = new NapariSpatialTooltip(host);
+    tip.show(['412 transcripts · all genes', '3.9 × 3.9 µm area', 'top genes: KRT5 9'], 10, 10);
+    const [primary, secondary] = Array.from(host.querySelectorAll('span'));
+    expect(primary.textContent).toBe('412 transcripts · all genes');
+    expect(secondary.textContent).toBe('3.9 × 3.9 µm area\ntop genes: KRT5 9');
+    tip.dispose();
+  });
 });

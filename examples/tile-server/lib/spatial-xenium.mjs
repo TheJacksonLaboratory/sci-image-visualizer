@@ -818,6 +818,68 @@ export async function xeniumTranscriptBins(xeniumDir, id, level, tx, ty) {
   }, true);
 }
 
+/** Largest box `transcript-summary` will scan, per side (observation units = µm). */
+const SUMMARY_MAX_SIDE = 300;
+
+/**
+ * What is in a box: the transcripts (optionally only `genes`), how many distinct genes and
+ * cells they belong to, the most frequent of each, and the 10x id strings of the cells in
+ * `cells`. Backs the hover details of a transcript marker or a grouped bin.
+ *
+ * `box` may be omitted when only `cells` are asked for (a cell-id lookup).
+ */
+export async function xeniumTranscriptSummary(xeniumDir, id, { box, genes, cells = [], top = 6 }) {
+  const ds = await dataset(xeniumDir, id);
+  const cellIdStr = await cellIdStrings(ds, cells);
+  if (!box) return { cellIds: cellIdStr };
+  if (box[2] - box[0] > SUMMARY_MAX_SIDE || box[3] - box[1] > SUMMARY_MAX_SIDE) {
+    throw new RangeError(`summary box larger than ${SUMMARY_MAX_SIDE} per side`);
+  }
+  const wanted = genes?.length ? new Set(genes.map((g) => ds.geneIndex.get(g))) : null;
+  const size = SOURCE_TILE_SIZE;
+  const geneCount = new Map();
+  const cellCount = new Map();
+  let n = 0;
+  let unassigned = 0;
+  for (let gy = Math.floor(box[1] / size); gy * size < box[3]; gy++) {
+    for (let gx = Math.floor(box[0] / size); gx * size < box[2]; gx++) {
+      const t = await readAllTranscripts(ds, gx, gy, box);
+      for (let i = 0; i < t.n; i++) {
+        if (wanted && !wanted.has(t.gene[i])) continue;
+        n++;
+        geneCount.set(t.gene[i], (geneCount.get(t.gene[i]) ?? 0) + 1);
+        if (t.cell[i] === NO_CELL) unassigned++;
+        else cellCount.set(t.cell[i], (cellCount.get(t.cell[i]) ?? 0) + 1);
+      }
+    }
+  }
+  const topOf = (m) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, top);
+  const topCells = topOf(cellCount);
+  const ids = await cellIdStrings(ds, topCells.map(([c]) => c));
+  return {
+    transcripts: n,
+    genes: geneCount.size,
+    topGenes: topOf(geneCount).map(([g, count]) => ({ name: ds.geneNames[g], count })),
+    cells: cellCount.size,
+    unassigned,
+    topCells: topCells.map(([index, count]) => ({ index, id: ids[index], count })),
+    cellIds: cellIdStr,
+  };
+}
+
+const SOURCE_TILE_SIZE = 250;
+
+/** 10x cell id strings (`aaabbbcc-1`) for observation indices. */
+async function cellIdStrings(ds, indices) {
+  if (!indices.length) return {};
+  const ids = await chunkCache.get(`${ds.cfg.source}|cell_id`, async () => (await ds.cells.read('cell_id')).data);
+  const out = {};
+  for (const i of indices) {
+    if (i >= 0 && i < ds.count) out[i] = xeniumCellId(ids[2 * i], ids[2 * i + 1]);
+  }
+  return out;
+}
+
 /** Bytes per bin record in a pyramid level file: f32 cx, f32 cy, u32 count, u32 cell. */
 export const BIN_RECORD = 16;
 

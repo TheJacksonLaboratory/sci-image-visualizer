@@ -56,6 +56,8 @@ export class NapariSpatialTooltip {
       display: 'block',
       opacity: '0.7',
       fontSize: '11px',
+      // Every line after the first is a detail line, one per row.
+      whiteSpace: 'pre',
     } as Partial<CSSStyleDeclaration>);
 
     this.el.append(this.primary, this.secondary);
@@ -74,8 +76,9 @@ export class NapariSpatialTooltip {
       return;
     }
     this.primary.textContent = lines[0];
-    this.secondary.textContent = lines[1] ?? '';
-    this.secondary.style.display = lines[1] ? 'block' : 'none';
+    const details = lines.slice(1).filter(Boolean);
+    this.secondary.textContent = details.join('\n');
+    this.secondary.style.display = details.length ? 'block' : 'none';
     // Measured while visible: offsetWidth is 0 on a `display: none` element, so
     // the flip below would always think the box fits.
     this.el.style.display = 'block';

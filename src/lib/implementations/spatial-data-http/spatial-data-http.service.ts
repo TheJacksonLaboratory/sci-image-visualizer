@@ -11,6 +11,7 @@ import {
   SpatialEmbedding,
   SpatialPolygonTile,
   SpatialPolygons,
+  SpatialTranscriptSummary,
   SpatialTranscriptTile,
   findColumnMeta,
 } from '../../contracts/spatial-dataset.contract';
@@ -186,6 +187,7 @@ export class SpatialDataHttpService implements SpatialDataPort {
     this.cache.clear();
     this.inFlight.clear();
     this.tileCache.clear();
+    this.summaryCache.clear();
     this.polygonsPromise = null;
     this.volumePromise = null;
     if (this.dataset$.value !== null) this.dataset$.next(null);
@@ -304,6 +306,28 @@ export class SpatialDataHttpService implements SpatialDataPort {
     const path = `spatial/${encodeURIComponent(manifest.id)}/transcript-bins/${level}/${tx}/${ty}`;
     return this.cachedTile(path, () => this.getBinary(path).then(decodeTranscriptTile)) as
       Promise<SpatialTranscriptTile>;
+  }
+
+  /** Small JSON answers, keyed by URL — hovering back and forth must not refetch. */
+  private readonly summaryCache = new Map<string, Promise<SpatialTranscriptSummary>>();
+
+  getTranscriptSummary(query: {
+    box?: [number, number, number, number]; genes?: string[]; cells?: number[];
+  }): Promise<SpatialTranscriptSummary> {
+    const manifest = this.requireManifest();
+    const params: string[] = [];
+    if (query.box) params.push(`box=${query.box.map((v) => +v.toFixed(3)).join(',')}`);
+    if (query.genes?.length) params.push(`genes=${query.genes.map(encodeURIComponent).join(',')}`);
+    if (query.cells?.length) params.push(`cells=${query.cells.join(',')}`);
+    const url = `spatial/${encodeURIComponent(manifest.id)}/transcript-summary?${params.join('&')}`;
+    let hit = this.summaryCache.get(url);
+    if (!hit) {
+      hit = this.getJson<SpatialTranscriptSummary>(url);
+      hit.catch(() => this.summaryCache.delete(url));
+      this.summaryCache.set(url, hit);
+      if (this.summaryCache.size > 256) this.summaryCache.delete(this.summaryCache.keys().next().value!);
+    }
+    return hit;
   }
 
   getDensity(genes: string[]): Promise<SpatialDensityRaster> {

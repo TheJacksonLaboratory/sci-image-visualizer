@@ -326,6 +326,21 @@ export interface SpatialTranscriptBinsStatus {
   message?: string;
 }
 
+/** What is in an area — the hover details of a transcript marker or grouped bin. */
+export interface SpatialTranscriptSummary {
+  /** Absent for a pure cell-id lookup. */
+  transcripts?: number;
+  /** Distinct genes among them. */
+  genes?: number;
+  topGenes?: { name: string; count: number }[];
+  /** Distinct cells they fall in, and how many fall in none. */
+  cells?: number;
+  unassigned?: number;
+  topCells?: { index: number; id?: string; count: number }[];
+  /** Display ids of the cells asked for, by observation index. */
+  cellIds?: Record<number, string>;
+}
+
 /** A per-gene transcript-count raster covering the section. */
 export interface SpatialDensityMeta {
   /** Size of one raster cell, in observation units, `[x, y]`. */

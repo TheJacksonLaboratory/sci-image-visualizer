@@ -58,6 +58,7 @@ import { readArray } from './lib/zarr3.mjs';
 import {
   listXeniumDatasets, xeniumManifest, xeniumCoords, xeniumRadius, xeniumColumn, xeniumFeature,
   xeniumFeatureSearch, xeniumPolygonTile, xeniumTranscriptTile, xeniumTranscriptBins, xeniumDensity,
+  xeniumTranscriptSummary,
 } from './lib/spatial-xenium.mjs';
 
 const PORT = Number(process.env.PORT || 8090);
@@ -535,6 +536,20 @@ app.get('/spatial/:id/transcript-bins/:level/:tx/:ty', async (req, res) => {
   const [level, tx, ty] = ['level', 'tx', 'ty'].map((k) => intParam(req.params[k], NaN));
   await fromSource(res, id, {
     xenium: async () => octet(res).send(await xeniumTranscriptBins(XENIUM_DIR, id, level, tx, ty)),
+  });
+});
+
+// What a transcript marker or grouped bin stands for — hover details. JSON, small.
+app.get('/spatial/:id/transcript-summary', async (req, res) => {
+  const { id } = req.params;
+  const cells = String(req.query.cells ?? '').split(',').filter(Boolean).map(Number)
+    .filter(Number.isInteger).slice(0, 32);
+  await fromSource(res, id, {
+    xenium: async () => res.set('Cache-Control', REVALIDATE).json(await xeniumTranscriptSummary(XENIUM_DIR, id, {
+      box: boxParam(req.query.box),
+      genes: req.query.genes ? genesParam(req.query.genes) : undefined,
+      cells,
+    })),
   });
 });
 
