@@ -59,6 +59,7 @@ import { observationsInSection, sectionsOf } from '../../spatial/spatial-section
 import { type HoverSource, hoverText, nearestObservation } from '../../spatial/spatial-hover';
 import { NapariSpatialTooltip } from './napari-spatial-tooltip';
 import { NapariSpatialTileLayers } from './napari-spatial-tiles';
+import { NapariNavigator } from './napari-navigator';
 import { NAPARI_WHEEL_ZOOM_SPEED } from './napari-zoom';
 
 /**
@@ -495,6 +496,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private invertEnabled = false;
   /** Physical scale bar overlay for the 2D image (null when 3D or the image has no µm/pixel). */
   private scaleBar: NapariScaleBar | null = null;
+  /** Overview minimap (bottom-right), as OSD's navigator. */
+  private navigator: NapariNavigator | null = null;
+  /** Whether the navigator is shown — the same host setting OSD's navigator honours. */
+  private navigatorVisible = true;
+  /** Bumped per thumbnail request, so a slow one cannot overwrite a newer slice's. */
+  private navigatorToken = 0;
   /** SVG region-drawing overlay for the 2D image (null until a 2D image is plotted). */
   private regionOverlay: NapariRegionOverlay | null = null;
   /** Pixel-tool plumbing: the plot div id, coord transform, and bound tool hosts. */
@@ -880,6 +887,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         this.fitCameraSoon();
         this.subscribeDisplayState();
         this.installScaleBar();
+        this.installNavigator(z);
         this.install2dInteraction(viewer, host);
       }
       this.scheduleReadback();
@@ -1309,6 +1317,52 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     }
   }
 
+  /**
+   * The overview navigator for a 2D view with an image: a coarse thumbnail of the whole
+   * image with the viewport on it; click or drag to pan at the current zoom (as OSD).
+   */
+  private installNavigator(z: number): void {
+    this.navigator?.destroy();
+    this.navigator = null;
+    if (!this.viewer || !this.host || !this.imageW || !this.imageH) return;
+    this.navigator = new NapariNavigator(
+      this.host, this.viewer.camera, this.imageW, this.imageH, () => this.spatialTooltip?.hide(),
+    );
+    this.navigator.setVisible(this.navigatorVisible);
+    void this.refreshNavigatorImage(z);
+  }
+
+  /**
+   * Draw the navigator's thumbnail from the coarsest pyramid level. A multichannel image
+   * is composited from its channels in their display colours, so the overview looks like
+   * the view rather than like channel 0 in grey.
+   */
+  private async refreshNavigatorImage(z: number): Promise<void> {
+    const nav = this.navigator;
+    if (!nav) return;
+    const token = ++this.navigatorToken;
+    try {
+      const desc = await this.ensureDescriptor();
+      const channels = desc?.multichannel ? desc.channelInfo ?? [] : [];
+      let image: CanvasImageSource;
+      if (channels.length > 1) {
+        const bitmaps = await Promise.all(channels.map((_c, c) => this.fetchSlice(z, c, 1)));
+        image = tintedComposite(bitmaps, channels.map((c) => c.color ?? '#ffffff'));
+      } else {
+        image = await this.fetchSlice(z, undefined, 1);
+      }
+      if (token === this.navigatorToken && this.navigator === nav) nav.setImage(image);
+    } catch (err) {
+      console.warn('[napari-js] navigator thumbnail unavailable', err);
+    }
+  }
+
+  /** Show/hide the overview navigator (same setting as OSD's). */
+  setNavigatorVisible(visible: boolean): void {
+    this.navigatorVisible = visible;
+    this.navigator?.setVisible(visible);
+  }
+
   /** Convert a napari-js `Histogram` (bin count + min/max) to the pane's `IHistogram` (bin edges). */
   private toIHistogram(h: { counts: Uint32Array; bins: number; min: number; max: number }): IHistogram {
     const span = h.max - h.min || 1;
@@ -1653,6 +1707,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.fitCameraSoon();
     this.subscribeDisplayState();
     this.installScaleBar();
+    this.installNavigator(z);
     // This mode plots REGION centroids, so without the region tools there is no
     // way to produce a point — drawing a region now adds one immediately.
     this.install2dInteraction(viewer, host);
@@ -1777,6 +1832,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     if (this.spatialLatest?.[0]?.imageRef) this.fitCameraSoon();
     this.subscribeDisplayState();
     this.installScaleBar();
+    this.installNavigator(z);
     this.install2dInteraction(viewer, host);
     this.installSpatialHover(host);
     this.spatialTiles()?.attach(viewer);
@@ -2470,6 +2526,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    * and nothing else.
    */
   private hideForeignImage(viewer: Viewer, datasetHasPixels: boolean): void {
+    // No image of its own → nothing for an overview to show either.
+    this.navigator?.setVisible(datasetHasPixels && this.navigatorVisible);
     for (const layer of viewer.layers.items) {
       if (layer.kind !== 'image') continue;
       // Re-shown when a dataset that owns an image comes back, so switching between
@@ -2707,6 +2765,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private installSpatial3dScaleBar(viewer: Viewer, dataset: SpatialDataset | null): void {
     this.scaleBar?.destroy();
     this.scaleBar = null;
+    this.navigator?.destroy();
+    this.navigator = null;
     const micronsPerUnit = dataset?.micronsPerUnit;
     if (!this.host || !micronsPerUnit || micronsPerUnit <= 0) return;
 
@@ -3881,6 +3941,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.displaySub = null;
     this.scaleBar?.destroy();
     this.scaleBar = null;
+    this.navigator?.destroy();
+    this.navigator = null;
     this.regionOverlay?.destroy();
     this.regionOverlay = null;
     this.axesLabels?.destroy();
@@ -3970,10 +4032,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // would fight that — the host calls setDragMode(false) alongside overlay.setMode(<tool>).
   }
 
-  setNavigatorVisible(_visible: boolean): void {
-    /* napari-js has no minimap; no-op */
-  }
-
   setImageSmoothingEnabled(enabled: boolean): void {
     this.imageSmoothing = enabled;
     // Apply live to the rendered image layers; baked into the next render too.
@@ -3988,6 +4046,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     if (this.loaded) this.loaded.z = zIndex;
     const v = this.viewer;
     if (!v) return;
+    if (this.navigator) void this.refreshNavigatorImage(zIndex);
     // Surface: one slice → one mesh, so re-build the height field for the new slice.
     if (this.surfaceLayer) {
       void this.buildSurface(v, zIndex).catch((err) =>
@@ -4585,4 +4644,33 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   unsubscribe(): void {
     this.reset();
   }
+}
+
+/**
+ * Additively composite grayscale channel images, each tinted with its display colour —
+ * the navigator's picture of a multichannel image.
+ */
+function tintedComposite(images: ImageBitmap[], colors: string[]): HTMLCanvasElement {
+  const w = images[0]?.width ?? 1;
+  const h = images[0]?.height ?? 1;
+  const out = document.createElement('canvas');
+  out.width = w;
+  out.height = h;
+  const ctx = out.getContext('2d')!;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, w, h);
+  const tmp = document.createElement('canvas');
+  tmp.width = w;
+  tmp.height = h;
+  const t = tmp.getContext('2d')!;
+  images.forEach((img, i) => {
+    t.globalCompositeOperation = 'source-over';
+    t.drawImage(img, 0, 0, w, h);
+    t.globalCompositeOperation = 'multiply';
+    t.fillStyle = colors[i];
+    t.fillRect(0, 0, w, h);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.drawImage(tmp, 0, 0);
+  });
+  return out;
 }

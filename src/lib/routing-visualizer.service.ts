@@ -249,6 +249,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   setNavigatorVisible(visible: boolean): void {
     this.osd.setNavigatorVisible(visible);
     this.plotly.setNavigatorVisible(visible);
+    this.napari.setNavigatorVisible(visible);
   }
   // Set on both backends (see setNavigatorVisible): consumers may set it before
   // the first render, when the active renderer is still Plotly.
