@@ -57,7 +57,7 @@ import {
 import { readArray } from './lib/zarr3.mjs';
 import {
   listXeniumDatasets, xeniumManifest, xeniumCoords, xeniumRadius, xeniumColumn, xeniumFeature,
-  xeniumFeatureSearch, xeniumPolygonTile, xeniumTranscriptTile, xeniumDensity,
+  xeniumFeatureSearch, xeniumPolygonTile, xeniumTranscriptTile, xeniumTranscriptBins, xeniumDensity,
 } from './lib/spatial-xenium.mjs';
 
 const PORT = Number(process.env.PORT || 8090);
@@ -515,7 +515,26 @@ app.get('/spatial/:id/transcript-tile/:level/:gx/:gy', async (req, res) => {
     xenium: async () => octet(res).send(await xeniumTranscriptTile(XENIUM_DIR, id, level, gx, gy, {
       genes: genesParam(req.query.genes),
       quality: req.query.quality === 'all' ? 'all' : 'high',
+      box: boxParam(req.query.box),
     })),
+  });
+});
+
+/** `?box=x0,y0,x1,y1` in observation units, or undefined. */
+function boxParam(v) {
+  if (v === undefined) return undefined;
+  const b = String(v).split(',').map(Number);
+  if (b.length !== 4 || b.some((n) => !Number.isFinite(n))) throw new RangeError('box must be x0,y0,x1,y1');
+  return b;
+}
+
+// The all-gene grouping pyramid: one tile of bins (count, centroid, dominant cell),
+// in the transcript-tile layout. Advertised as `transcriptBins` when it has been built.
+app.get('/spatial/:id/transcript-bins/:level/:tx/:ty', async (req, res) => {
+  const { id } = req.params;
+  const [level, tx, ty] = ['level', 'tx', 'ty'].map((k) => intParam(req.params[k], NaN));
+  await fromSource(res, id, {
+    xenium: async () => octet(res).send(await xeniumTranscriptBins(XENIUM_DIR, id, level, tx, ty)),
   });
 });
 

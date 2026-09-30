@@ -543,6 +543,8 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     { label: 'Cell type', value: 'cellType' }, { label: 'Gene', value: 'gene' },
   ];
   readonly glyphOptions = GLYPH_OPTIONS;
+  readonly budgetOptions = [25_000, 50_000, 100_000, 200_000, 400_000]
+    .map((n) => ({ label: n.toLocaleString(), value: n }));
   transcriptGeneSuggestions: string[] = [];
   cellTypeLegend: SpatialLegendEntry[] = [];
   private cellTypeLegendFor: string | null = null;
@@ -663,6 +665,32 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
 
   onTranscriptGenes(genes: string[] | null): void {
     this.controls?.setViewState({ transcriptGenes: [...(genes ?? [])] });
+  }
+
+  /** "All genes" needs the grouping pyramid, or at least tiles to draw individually. */
+  get canShowAllGenes(): boolean {
+    return !!this.dataset?.transcriptBins;
+  }
+
+  /** Why "All genes" is not offered yet, while the server builds its pyramid. */
+  get allGenesPreparing(): string | null {
+    const st = this.dataset?.transcriptBinsStatus;
+    if (!st || this.canShowAllGenes) return null;
+    if (st.state === 'failed') return `"All genes" is unavailable: preparing it failed (${st.message ?? 'unknown error'}).`;
+    const pct = st.total ? ` — ${Math.floor((100 * (st.done ?? 0)) / st.total)}% when this dataset was opened` : '';
+    return `"All genes" is being prepared on the server${pct}; reopen the dataset once it is done.`;
+  }
+
+  get showingAllGenes(): boolean {
+    return this.canShowAllGenes && this.view.transcriptAllGenes && this.view.transcriptMode !== 'density';
+  }
+
+  onTranscriptAllGenes(on: boolean): void {
+    this.controls?.setViewState({ transcriptAllGenes: on });
+  }
+
+  onTranscriptBudget(n: number): void {
+    this.controls?.setViewState({ transcriptBudget: n });
   }
 
   onTranscriptColorBy(by: SpatialViewState['transcriptColorBy']): void {

@@ -28,7 +28,7 @@
 //   Every coordinate served is in MICRONS, the bundle's native unit. `imageRef.scale`
 //   (1 / pixel_size) maps microns onto the morphology image's pixel grid.
 
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { open as openFile, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import { openByteSource } from './xenium/byte-source.mjs';
@@ -64,13 +64,26 @@ async function discover(xeniumDir) {
         const id = e.name.slice(0, -'.json'.length);
         if (!cfg.source || !SAFE_ID.test(id)) continue;
         const rel = (p) => (p && !/^(https?|gs):/.test(p) && !path.isAbsolute(p) ? path.join(xeniumDir, p) : p);
-        out.set(id, { id, name: cfg.name ?? id, source: rel(cfg.source), cellTypes: rel(cfg.cellTypes) });
+        out.set(id, {
+          id, name: cfg.name ?? id, source: rel(cfg.source), cellTypes: rel(cfg.cellTypes),
+          transcriptIndex: rel(cfg.transcriptIndex) ?? path.join(xeniumDir, `${id}.transcripts`),
+        });
       } else if (e.isFile() && e.name.endsWith('_xe_outs.zip')) {
         const id = e.name.slice(0, -'_xe_outs.zip'.length).toLowerCase().replace(/[^a-z0-9._-]/g, '-');
-        if (!out.has(id)) out.set(id, { id, name: e.name.slice(0, -'_xe_outs.zip'.length).replace(/_/g, ' '), source: full });
+        if (!out.has(id)) {
+          out.set(id, {
+            id, name: e.name.slice(0, -'_xe_outs.zip'.length).replace(/_/g, ' '), source: full,
+            transcriptIndex: path.join(xeniumDir, `${id}.transcripts`),
+          });
+        }
       } else if (e.isDirectory() && SAFE_ID.test(e.name)) {
         await stat(path.join(full, 'experiment.xenium'));
-        if (!out.has(e.name)) out.set(e.name, { id: e.name, name: e.name, source: full });
+        if (!out.has(e.name)) {
+          out.set(e.name, {
+            id: e.name, name: e.name, source: full,
+            transcriptIndex: path.join(xeniumDir, `${e.name}.transcripts`),
+          });
+        }
       }
     } catch {
       // Not a Xenium entry — ignore it rather than break discovery.
@@ -143,6 +156,11 @@ async function openBundle(source) {
 // ---------------------------------------------------------------------------
 
 const datasets = new Map();
+
+/** Open a bundle by location alone — for offline tools (the transcript index builder). */
+export function openXeniumSource(source) {
+  return openDataset({ id: 'offline', name: 'offline', source });
+}
 
 /** Open (once) and cache everything cheap enough to keep resident. */
 function openDataset(cfg) {
@@ -217,6 +235,15 @@ async function loadDataset(cfg) {
   ds.transcriptLevels = ds.gridAttrs.grid_keys.map((keys) => new Set(keys));
   ds.geneNames = ds.txAttrs.gene_names;
   ds.geneIndex = new Map(ds.geneNames.map((n, i) => [n, i]));
+  // Real genes only: a third of the codeword "genes" are negative-control probes.
+  ds.geneIsReal = new Uint8Array(ds.geneNames.length).fill(1);
+  const categories = await transcripts.read('gene_category').catch(() => null);
+  if (categories) {
+    const cols = categories.shape[1];
+    for (let g = 0; g < categories.shape[0]; g++) ds.geneIsReal[g] = categories.data[g * cols];
+  }
+  ds.transcriptIndex = await loadTranscriptIndex(cfg.transcriptIndex);
+  if (!ds.transcriptIndex) scheduleTranscriptIndex(ds);
   ds.bounds = boundsOf(ds.x, ds.y);
 
   ds.columns = await buildColumns(ds);
@@ -412,6 +439,17 @@ export async function xeniumManifest(xeniumDir, id, { imageExists } = {}) {
       // it the cell is the one nearest the aggregate's centroid.
       exactCellLevel: EXACT_CELL_MAX_LEVEL,
     },
+    ...(!ds.transcriptIndex && ds.transcriptIndexStatus ? {
+      transcriptBinsStatus: { ...ds.transcriptIndexStatus },
+    } : {}),
+    ...(ds.transcriptIndex ? {
+      transcriptBins: {
+        bounds: ds.bounds,
+        origin: ds.transcriptIndex.origin,
+        count: ds.transcriptIndex.total,
+        levels: ds.transcriptIndex.levels.map((l) => ({ binSize: l.bin, tileSize: l.tileSize })),
+      },
+    } : {}),
     ...(ds.densityAttrs ? {
       density: {
         gridSize: ds.densityAttrs.grid_size,
@@ -569,9 +607,16 @@ const EXACT_CELL_MAX_LEVEL = 1;
  *   u32 cell[n]       observation index of the cell it falls in, or 0xffffffff
  *   u16 gene[n]       index into the REQUESTED `genes` list, padded to 4 bytes
  */
-export async function xeniumTranscriptTile(xeniumDir, id, level, gx, gy, { genes, quality = 'high' }) {
+export async function xeniumTranscriptTile(xeniumDir, id, level, gx, gy, { genes, quality = 'high', box }) {
   const ds = await dataset(xeniumDir, id);
   if (!(level >= 0 && level < ds.transcriptLevels.length)) throw new RangeError(`bad level ${level}`);
+  if (genes.length === 1 && genes[0] === '*') {
+    // Every real gene, unaggregated — only affordable for a small window, so it is
+    // clipped to `box` and served at level 0 only. `gene` carries the global gene index.
+    if (level !== 0) throw new RangeError('all-gene transcripts are served at level 0 only');
+    const t = await readAllTranscripts(ds, gx, gy, box);
+    return encodeTranscripts({ ...t, count: new Uint32Array(t.n).fill(1) }, false);
+  }
   const geneIdx = genes.map((g) => {
     const i = ds.geneIndex.get(g);
     if (i === undefined) throw new RangeError(`unknown gene: ${g}`);
@@ -621,6 +666,160 @@ export async function xeniumTranscriptTile(xeniumDir, id, level, gx, gy, { genes
     : await cellsNearest(ds, x, y);
   return encodeTranscripts({ n, x, y, z, count, cell, gene }, level > 0);
 }
+
+/**
+ * Every high-quality transcript of a real gene in one level-0 tile, optionally clipped to
+ * `box = [x0, y0, x1, y1]`, with its gene index and the cell it lies in.
+ *
+ * Rows are grouped by gene with each gene's high-quality run given by `gene_offset`, so
+ * the filter is a run-length mask rather than a per-row test of the quality score.
+ */
+export async function readAllTranscripts(ds, gx, gy, box) {
+  const key = `${gx},${gy}`;
+  const empty = { n: 0, x: new Float32Array(0), y: new Float32Array(0), z: new Float32Array(0),
+    cell: new Uint32Array(0), gene: new Uint16Array(0) };
+  if (!ds.transcriptLevels[0].has(key)) return empty;
+  const base = `grids/0/${key}`;
+  const cacheKey = `${ds.cfg.source}|tx`;
+  const meta = await ds.transcripts.meta(`${base}/location`);
+  const rows = meta.shape[0];
+  const offsets = await chunkCache.get(`${cacheKey}|${base}/gene_offset`,
+    async () => (await ds.transcripts.read(`${base}/gene_offset`)).data);
+  const keep = new Uint8Array(rows);
+  const geneOf = new Uint16Array(rows);
+  for (let g = 0; g < offsets.length / 4; g++) {
+    const hs = offsets[4 * g + 2];
+    const he = offsets[4 * g + 3];
+    if (he > hs) {
+      geneOf.fill(g, hs, he);
+      if (ds.geneIsReal[g]) keep.fill(1, hs, he);
+    }
+  }
+  const [lx, ly, lz] = await readRows(ds.transcripts, `${base}/location`, 0, rows, 3, cacheKey);
+  let n = 0;
+  for (let i = 0; i < rows; i++) {
+    if (!keep[i]) continue;
+    if (box && (lx[i] < box[0] || ly[i] < box[1] || lx[i] >= box[2] || ly[i] >= box[3])) continue;
+    n++;
+  }
+  const x = new Float32Array(n);
+  const y = new Float32Array(n);
+  const z = new Float32Array(n);
+  const gene = new Uint16Array(n);
+  let o = 0;
+  for (let i = 0; i < rows; i++) {
+    if (!keep[i]) continue;
+    if (box && (lx[i] < box[0] || ly[i] < box[1] || lx[i] >= box[2] || ly[i] >= box[3])) continue;
+    x[o] = lx[i];
+    y[o] = ly[i];
+    z[o] = lz[i];
+    gene[o] = geneOf[i];
+    o++;
+  }
+  const cell = await cellsAtExact(ds, x, y);
+  return { n, x, y, z, cell, gene };
+}
+
+// ---------------------------------------------------------------------------
+// Transcript bins — the all-gene grouping pyramid (built by prepare-xenium)
+// ---------------------------------------------------------------------------
+
+/**
+ * FALLBACK: build the pyramid in the background when a dataset is opened without one.
+ *
+ * The intended path is `prepare-xenium --transcripts`, run once next to the data. This
+ * makes a dataset added without that step become complete on its own: every other
+ * feature works immediately, and "All genes" appears once the build finishes (the
+ * manifest reports progress meanwhile as `transcriptBinsStatus`).
+ *
+ * Builds into `<dir>.partial` and renames on success, so an interrupted build never
+ * leaves a half-written pyramid that looks finished. One build at a time — each is a
+ * full pass over the transcripts. `XENIUM_AUTO_INDEX=0` turns it off.
+ */
+let indexQueue = Promise.resolve();
+function scheduleTranscriptIndex(ds) {
+  const dir = ds.cfg.transcriptIndex;
+  if (!dir || process.env.XENIUM_AUTO_INDEX === '0' || ds.transcriptIndexStatus) return;
+  ds.transcriptIndexStatus = { state: 'queued', done: 0, total: ds.transcriptLevels[0].size };
+  indexQueue = indexQueue.then(async () => {
+    const partial = `${dir}.partial`;
+    ds.transcriptIndexStatus.state = 'building';
+    console.log(`[xenium] ${ds.cfg.id}: no transcript pyramid — building it in the background ` +
+      '(run prepare-xenium --transcripts to do this ahead of time)');
+    try {
+      await rm(partial, { recursive: true, force: true });
+      const { buildTranscriptIndex } = await import('./xenium/transcript-index.mjs');
+      await buildTranscriptIndex(ds.cfg.source, partial, {
+        dataset: ds,
+        concurrency: 2,
+        log: () => {},
+        onProgress: (done, total) => Object.assign(ds.transcriptIndexStatus, { done, total }),
+      });
+      await rm(dir, { recursive: true, force: true });
+      await rename(partial, dir);
+      ds.transcriptIndex = await loadTranscriptIndex(dir);
+      ds.transcriptIndexStatus = null;
+      console.log(`[xenium] ${ds.cfg.id}: transcript pyramid ready (${dir})`);
+    } catch (err) {
+      ds.transcriptIndexStatus = { state: 'failed', message: String(err?.message ?? err) };
+      console.warn(`[xenium] ${ds.cfg.id}: transcript pyramid build failed: ${err?.message ?? err}`);
+    }
+  });
+}
+
+/** The pyramid's `index.json`, or null when it has not been built. */
+async function loadTranscriptIndex(dir) {
+  if (!dir) return null;
+  try {
+    const index = JSON.parse(await readFile(path.join(dir, 'index.json'), 'utf8'));
+    index.dir = dir;
+    return index;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One tile of the pyramid in the transcript-tile wire layout: each bin is an entry at its
+ * centroid, `count` transcripts, owned by the cell that contributed most of them.
+ */
+export async function xeniumTranscriptBins(xeniumDir, id, level, tx, ty) {
+  const ds = await dataset(xeniumDir, id);
+  const index = ds.transcriptIndex;
+  if (!index) throw new RangeError('no transcript index for this dataset (run prepare-xenium --transcripts)');
+  const lv = index.levels[level];
+  if (!lv) throw new RangeError(`bad level ${level}`);
+  const entry = lv.tiles[`${tx},${ty}`];
+  if (!entry) return encodeTranscripts([], true);
+  const [offset, count] = entry;
+  const buf = await chunkCache.get(`${index.dir}|${level}|${tx},${ty}`, async () => {
+    const fh = await openFile(path.join(index.dir, lv.file), 'r');
+    try {
+      const b = Buffer.alloc(count * BIN_RECORD);
+      await fh.read(b, 0, b.length, offset * BIN_RECORD);
+      return b;
+    } finally {
+      await fh.close();
+    }
+  });
+  const x = new Float32Array(count);
+  const y = new Float32Array(count);
+  const w = new Uint32Array(count);
+  const cell = new Uint32Array(count);
+  for (let i = 0; i < count; i++) {
+    const o = i * BIN_RECORD;
+    x[i] = buf.readFloatLE(o);
+    y[i] = buf.readFloatLE(o + 4);
+    w[i] = buf.readUInt32LE(o + 8);
+    cell[i] = buf.readUInt32LE(o + 12);
+  }
+  return encodeTranscripts({
+    n: count, x, y, z: new Float32Array(count), count: w, cell, gene: new Uint16Array(count),
+  }, true);
+}
+
+/** Bytes per bin record in a pyramid level file: f32 cx, f32 cy, u32 count, u32 cell. */
+export const BIN_RECORD = 16;
 
 /** Rows `[start,end)` of an F-order N×cols array → one typed array per column. */
 async function readRows(store, arrPath, start, end, cols, cacheKey) {
@@ -673,7 +872,7 @@ function encodeTranscripts(t, aggregated) {
  * Exact cell assignment: look the transcript's position up in the cell label mask
  * (`masks/1`, one u32 label per morphology pixel, 0 = background, else cell index + 1).
  */
-async function cellsAtExact(ds, x, y) {
+export async function cellsAtExact(ds, x, y) {
   const setIdx = ds.polygonGrids.find((g) => g.name === 'cell')?.index ?? 1;
   const arrPath = `masks/${setIdx}`;
   const meta = await ds.cells.meta(arrPath);

@@ -19,6 +19,11 @@
 //   3. write descriptor.json, so the tissue appears as `<id>-tissue` in $COG_DIR, which
 //      is the image id the dataset's manifest points at.
 //
+// With --transcripts it also builds the ALL-GENE transcript grouping pyramid (see
+// lib/xenium/transcript-index.mjs): 10x groups transcripts per gene only, and across all
+// genes even its coarsest level is far too many markers to draw. That is a derived index,
+// not a copy of the data — one pass over every transcript, a few hundred MB out.
+//
 // The tiles are JPEG-2000 (TIFF compression 34712), which libtiff — and so vips and
 // sharp — cannot decode: they open the file and return zeros. They are decoded here with
 // openjpeg (WebAssembly) on a pool of worker threads, and written with sharp.
@@ -32,6 +37,9 @@
 //   --percentile  window top, in percent of non-zero pixels (default 99.8)
 //   --register    also write $XENIUM_DIR/<id>.json pointing at --source
 //   --keep        keep the extracted OME-TIFFs (default: delete after building)
+//   --transcripts build the all-gene transcript pyramid into --index-out
+//   --index-out   default $XENIUM_DIR/<id>.transcripts (where the server looks for it)
+//   --no-images   skip the image pyramid (e.g. to build only the transcript pyramid)
 
 import { createWriteStream } from 'node:fs';
 import { mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -43,6 +51,7 @@ import sharp from 'sharp';
 import { openByteSource } from '../lib/xenium/byte-source.mjs';
 import { readZipDirectory, streamMember } from '../lib/xenium/zip.mjs';
 import { readTiffPyramid } from '../lib/xenium/ome-tiff.mjs';
+import { buildTranscriptIndex } from '../lib/xenium/transcript-index.mjs';
 
 const TILE = 512;
 const CHANNEL_COLORS = ['#3b6cff', '#34d058', '#ff4d4d', '#ff66ff', '#ffd33d', '#00d1d1'];
@@ -54,7 +63,7 @@ export function channelName(file) {
 }
 
 function parseArgs(argv) {
-  const o = { out: 'cogs', percentile: 99.8 };
+  const o = { out: 'cogs', percentile: 99.8, images: true };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => argv[++i];
@@ -66,6 +75,10 @@ function parseArgs(argv) {
     else if (a === '--percentile') o.percentile = Number(next());
     else if (a === '--register') o.register = true;
     else if (a === '--keep') o.keep = true;
+    else if (a === '--transcripts') o.transcripts = true;
+    else if (a === '--index-out') o.indexOut = next();
+    else if (a === '--no-images') o.images = false;
+    else if (a === '--limit-tiles') o.limitTiles = Number(next());
     else throw new Error(`unknown option ${a}`);
   }
   if (!o.source || !o.id) {
@@ -254,6 +267,21 @@ async function buildChannel(pool, file, c, outDir, percentile) {
 
 async function main() {
   const o = parseArgs(process.argv.slice(2));
+  if (o.transcripts) {
+    const out = o.indexOut ?? path.join(process.env.XENIUM_DIR || 'xenium', `${o.id}.transcripts`);
+    await buildTranscriptIndex(o.source, out, { limitTiles: o.limitTiles ?? Infinity });
+  }
+  if (o.images) await buildImages(o);
+  if (o.register) {
+    const dir = process.env.XENIUM_DIR || 'xenium';
+    await mkdir(dir, { recursive: true });
+    const cfg = path.join(dir, `${o.id}.json`);
+    await writeFile(cfg, JSON.stringify({ name: o.id, source: o.source }, null, 2));
+    console.log(`[prepare-xenium] registered ${cfg}`);
+  }
+}
+
+async function buildImages(o) {
   const { files, extracted } = await focusImages(o);
   const channels = o.channels ?? files.map((_f, i) => i);
   const outDir = path.join(o.out, `${o.id}-tissue`);
@@ -292,14 +320,6 @@ async function main() {
   };
   await writeFile(path.join(outDir, 'descriptor.json'), JSON.stringify(descriptor, null, 2));
   console.log(`[prepare-xenium] pyramid ready: ${outDir}`);
-
-  if (o.register) {
-    const dir = process.env.XENIUM_DIR || 'xenium';
-    await mkdir(dir, { recursive: true });
-    const cfg = path.join(dir, `${o.id}.json`);
-    await writeFile(cfg, JSON.stringify({ name: o.id, source: o.source }, null, 2));
-    console.log(`[prepare-xenium] registered ${cfg}`);
-  }
   if (extracted && !o.keep) await rm(o.work, { recursive: true, force: true });
 }
 

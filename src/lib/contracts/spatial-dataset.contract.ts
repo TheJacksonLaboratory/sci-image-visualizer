@@ -298,6 +298,34 @@ export interface SpatialTranscriptTilesMeta {
   exactCellLevel?: number;
 }
 
+/**
+ * The all-gene transcript grouping pyramid: square bins, four times coarser per level,
+ * each holding a count, a centroid and the cell that contributed most of its transcripts.
+ * Served per tile, in the {@link SpatialTranscriptTile} layout (one entry per bin).
+ *
+ * Tile `(tx, ty)` of level `l` covers `origin + [tx·s, (tx+1)·s) × [ty·s, (ty+1)·s)` with
+ * `s = levels[l].tileSize` — note the origin, which the per-gene tiles do not have.
+ */
+export interface SpatialTranscriptBinsMeta {
+  bounds: SpatialBounds;
+  origin: [number, number];
+  /** Transcripts the pyramid was built from. */
+  count: number;
+  levels: { binSize: number; tileSize: number }[];
+}
+
+/**
+ * A grouping pyramid the server is still building (it builds one itself when a dataset
+ * arrives without it). "All genes" becomes available once it is done.
+ */
+export interface SpatialTranscriptBinsStatus {
+  state: 'queued' | 'building' | 'failed';
+  /** Source tiles processed so far, of `total`. */
+  done?: number;
+  total?: number;
+  message?: string;
+}
+
 /** A per-gene transcript-count raster covering the section. */
 export interface SpatialDensityMeta {
   /** Size of one raster cell, in observation units, `[x, y]`. */
@@ -360,6 +388,10 @@ export interface SpatialDataset {
   transcriptTiles?: SpatialTranscriptTilesMeta;
   /** A served per-gene transcript density raster. */
   density?: SpatialDensityMeta;
+  /** The all-gene transcript grouping pyramid, when it has been built. */
+  transcriptBins?: SpatialTranscriptBinsMeta;
+  /** Present while the server is still building {@link transcriptBins}. */
+  transcriptBinsStatus?: SpatialTranscriptBinsStatus;
   /**
    * Microns per observation coordinate unit — what makes a scale bar possible.
    *

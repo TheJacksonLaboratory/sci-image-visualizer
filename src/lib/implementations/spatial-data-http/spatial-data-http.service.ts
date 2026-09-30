@@ -289,8 +289,19 @@ export class SpatialDataHttpService implements SpatialDataPort {
       return Promise.reject(new Error('[spatial] this dataset has no tiled transcripts'));
     }
     const genes = query.genes.map(encodeURIComponent).join(',');
+    const box = query.box ? `&box=${query.box.join(',')}` : '';
     const path = `spatial/${encodeURIComponent(manifest.id)}/transcript-tile/${level}/${gx}/${gy}`
-      + `?genes=${genes}&quality=${query.quality ?? 'high'}`;
+      + `?genes=${genes}&quality=${query.quality ?? 'high'}${box}`;
+    return this.cachedTile(path, () => this.getBinary(path).then(decodeTranscriptTile)) as
+      Promise<SpatialTranscriptTile>;
+  }
+
+  getTranscriptBins(level: number, tx: number, ty: number): Promise<SpatialTranscriptTile> {
+    const manifest = this.requireManifest();
+    if (!manifest.transcriptBins) {
+      return Promise.reject(new Error('[spatial] this dataset has no transcript pyramid'));
+    }
+    const path = `spatial/${encodeURIComponent(manifest.id)}/transcript-bins/${level}/${tx}/${ty}`;
     return this.cachedTile(path, () => this.getBinary(path).then(decodeTranscriptTile)) as
       Promise<SpatialTranscriptTile>;
   }

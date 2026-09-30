@@ -22,7 +22,8 @@
     "make-zarr-demo": "node scripts/make-zarr-demo.mjs",
     "verify-pca": "node scripts/verify-pca.mjs",
     "verify-tsne": "node scripts/verify-tsne.mjs",
-    "prepare-xenium": "node scripts/prepare-xenium.mjs"
+    "prepare-xenium": "node scripts/prepare-xenium.mjs",
+    "build-transcript-index": "node scripts/prepare-xenium.mjs --no-images --transcripts"
   },
   "dependencies": {
     "@cornerstonejs/codec-openjpeg": "^1.3.6",

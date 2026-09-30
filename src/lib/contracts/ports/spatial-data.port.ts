@@ -8,11 +8,20 @@ import {
 
 /** Options for {@link SpatialDataPort.getTranscriptTile}. */
 export interface TranscriptTileQuery {
-  /** Genes to include, by name. The tile's `gene` codes index this list. */
+  /**
+   * Genes to include, by name; the tile's `gene` codes index this list. `[ALL_GENES]`
+   * asks for every gene, unaggregated, at level 0 only and clipped to {@link box} — the
+   * `gene` codes are then the dataset's own gene indices.
+   */
   genes: string[];
   /** `high` (default) keeps only confidently decoded transcripts. */
   quality?: 'high' | 'all';
+  /** Clip to `[x0, y0, x1, y1]` in observation units. */
+  box?: [number, number, number, number];
 }
+
+/** {@link TranscriptTileQuery.genes} value meaning "every gene". */
+export const ALL_GENES = '*';
 
 /**
  * Spatial-omics data access, inverted as a port so the visualization library
@@ -99,6 +108,12 @@ export interface SpatialDataPort {
   getTranscriptTile?(
     level: number, gx: number, gy: number, query: TranscriptTileQuery,
   ): Promise<SpatialTranscriptTile>;
+
+  /**
+   * One tile of the all-gene grouping pyramid (`transcriptBins`): an entry per bin, with
+   * `weight` its transcript count and `observation` its dominant cell.
+   */
+  getTranscriptBins?(level: number, tx: number, ty: number): Promise<SpatialTranscriptTile>;
 
   /**
    * The summed transcript density of `genes` on the dataset's `density` raster.

@@ -58,6 +58,11 @@ format `SpatialDataHttpService` speaks (see
 | `GET /spatial/:id/polygon-tile/:set/:level/:gx/:gy` | one grid tile of boundaries: `u32` count, `u32[count]` owning observation, `u32[count+1]` offsets, `f32` coords |
 | `GET /spatial/:id/transcript-tile/:level/:gx/:gy?genes=A,B&quality=high\|all` | one grid tile of transcripts (level 0) or pre-aggregated clusters (levels ≥ 1): x, y, z, count, owning cell, gene |
 | `GET /spatial/:id/density?genes=A,B` | `f32[rows·cols]` — summed per-gene transcript density raster |
+| `GET /spatial/:id/transcript-bins/:level/:tx/:ty` | one tile of the all-gene grouping pyramid, in the transcript-tile layout (one entry per bin: centroid, count, dominant cell) |
+
+`transcript-tile` also accepts `genes=*` (every real gene, unaggregated, level 0) with
+`box=x0,y0,x1,y1` to clip it — how the viewer draws every transcript once they fit its
+marker budget.
 
 The three **tiled** routes are optional and advertised by the manifest (`polygonTiles`,
 `transcriptTiles`, `density`), so the viewer only asks a dataset for what it has. They are
@@ -358,12 +363,39 @@ JPEG-2000 tiles with openjpeg on a worker pool, windows each channel's 16-bit si
 pyramid (no re-downsampling) — about 2.5 min per channel on 8 cores. The manifest then
 carries `imageRef.imageId = <id>-tissue` and the viewer draws the overlays over the tissue.
 
+**All genes at once** needs one more derived index. 10x groups transcripts per *gene*;
+across all genes even its coarsest level is ~32 million clusters — far too many markers.
+`--transcripts` builds a gene-independent grouping pyramid: bins of 1.95 µm up to 125 µm,
+each with its transcript count, centroid and the cell contributing most of them. The
+viewer picks the finest level whose bins on screen fit its marker budget and are at least
+~14 px apart, and switches to the transcripts themselves once those fit.
+
+```bash
+npm run prepare-xenium -- --source <bundle> --id xenium-cervical --no-images --transcripts
+# → xenium/xenium-cervical.transcripts/ (index.json + L0..L6.bin), picked up by the server
+```
+
+(`npm run build-transcript-index -- --source <bundle> --id <id>` is the same, spelled out.)
+It is one pass over every transcript (~1.2 billion rows) — about 40 minutes on 32 cores next
+to the data — and a few hundred MB out.
+
+**Fallback:** a dataset registered without it is not left incomplete. The first time the
+server opens it, it builds the pyramid itself in the background — into
+`<id>.transcripts.partial`, renamed only when finished, one build at a time. Every other
+feature works meanwhile; the manifest reports `transcriptBinsStatus` (tiles done of total)
+and the panel says "All genes" is being prepared. Set `XENIUM_AUTO_INDEX=0` to turn this
+off (for example on a server that should never spend an hour of CPU unasked). Running the
+step ahead of time, next to the data, remains the intended path.
+
 The cervical-cancer preview is already prepared in the sample-data bucket:
 
 ```bash
 gcloud storage rsync -r \
   gs://jax-cimg-sample-data/Demonstrations/omics/xenium-wta-ffpe-cervical-cancer/xenium-cervical-tissue \
   cogs/xenium-cervical-tissue
+gcloud storage rsync -r \
+  gs://jax-cimg-sample-data/Demonstrations/omics/xenium-wta-ffpe-cervical-cancer/xenium-cervical.transcripts \
+  xenium/xenium-cervical.transcripts
 ```
 
 #### Serving a plain `.h5ad` LIVE

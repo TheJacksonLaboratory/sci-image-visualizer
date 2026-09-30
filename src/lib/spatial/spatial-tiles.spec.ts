@@ -2,7 +2,8 @@ import { SpatialDataset } from '../contracts/spatial-dataset.contract';
 import {
   POLYGON_LEVEL_MIN_CELL_PX, TRANSCRIPT_GLYPHS, TRANSCRIPT_MAX_PX, TRANSCRIPT_MIN_PX,
   TRANSCRIPT_PHYSICAL_UM,
-  cellTypeColumnFor, cellsShown, colorDensity, discreteColormapStops, glyphOutline, glyphRings, pixelsPerDataUnit,
+  allGenesPlan, cellTypeColumnFor, cellsShown, colorDensity, groupedMarkerPx, quantileOf, tilesInRectFrom,
+  visibleArea, discreteColormapStops, glyphOutline, glyphRings, pixelsPerDataUnit,
   smoothRaster,
   polygonLevelFor, tileId, tilesInRect, transcriptLevelFor, transcriptMarkerPx,
   typicalCellDiameter, visibleDataRect,
@@ -287,5 +288,70 @@ describe('cellsShown', () => {
   it('is off for a dataset with nothing to outline, whatever the setting', () => {
     expect(cellsShown(none, { showCells: true })).toBe(false);
     expect(cellsShown(null, { showCells: null })).toBe(false);
+  });
+});
+
+describe('all-gene grouping', () => {
+  // The cervical bundle: ~9 mm square, ~1.04 billion transcripts (~13 per µm²).
+  const bounds: [number, number, number, number] = [0, 0, 9000, 9000];
+  const total = 1.04e9;
+  const levels = Array.from({ length: 7 }, (_v, m) => ({ binSize: (250 / 128) * 2 ** m }));
+  const view = (w: number) => ({ x0: 4000, y0: 4000, x1: 4000 + w, y1: 4000 + w * 0.65 });
+  const plan = (w: number, budget = 100_000) => allGenesPlan({
+    rect: view(w), bounds, total, pxPerUnit: 1260 / w, levels, budget, canIndividual: true,
+  });
+
+  it('draws every transcript once those in view fit the budget', () => {
+    // 60 µm wide: ~30k transcripts.
+    expect(plan(60)).toEqual({ kind: 'individual' });
+  });
+
+  it('groups into the finest readable bins when they do not', () => {
+    // 250 µm wide: ~500k transcripts — too many, so bins. 1.95 µm bins would be ~10 px
+    // apart, under the 14 px floor, so the 3.9 µm level (~20 px) is the finest readable.
+    expect(plan(250)).toEqual({ kind: 'bins', level: 1 });
+  });
+
+  it('coarsens as the camera zooms out, never exceeding the budget or crowding the screen', () => {
+    let previous = -1;
+    for (const w of [500, 1000, 2000, 4000, 9000]) {
+      const p = plan(w);
+      expect(p.kind).toBe('bins');
+      const level = (p as { level: number }).level;
+      expect(level).toBeGreaterThanOrEqual(previous);
+      const bin = levels[level].binSize;
+      expect(bin * (1260 / w)).toBeGreaterThanOrEqual(14); // groups ≥ 14 px apart
+      previous = level;
+    }
+  });
+
+  it('a smaller budget switches to groups sooner', () => {
+    expect(plan(60, 10_000).kind).toBe('bins');
+  });
+
+  it('draws nothing for a view outside the tissue', () => {
+    expect(allGenesPlan({
+      rect: { x0: -500, y0: -500, x1: -100, y1: -100 }, bounds, total, pxPerUnit: 1,
+      levels, budget: 1e5, canIndividual: true,
+    })).toEqual({ kind: 'none' });
+    expect(visibleArea({ x0: -10, y0: 0, x1: 10, y1: 10 }, bounds)).toBe(100);
+  });
+
+  it('sizes a group by its share of a busy bin, within the bin', () => {
+    expect(groupedMarkerPx(100, 100, 20)).toBeCloseTo(20 * 1.1, 6);
+    expect(groupedMarkerPx(25, 100, 20)).toBeCloseTo(20 * (0.35 + 0.75 * 0.5), 6);
+    expect(groupedMarkerPx(1, 100, 4)).toBeGreaterThanOrEqual(4); // never below the floor
+    expect(groupedMarkerPx(10_000, 100, 20)).toBeLessThanOrEqual(24); // outliers capped
+  });
+
+  it('quantileOf picks a high percentile of the counts', () => {
+    const v = Uint32Array.from({ length: 100 }, (_v, i) => i + 1);
+    expect(quantileOf(v, 0.95)).toBe(96);
+    expect(quantileOf(new Uint32Array(0), 0.95)).toBe(0);
+  });
+
+  it('tilesInRectFrom honours a grid origin', () => {
+    const keys = tilesInRectFrom([-250, 0], { x0: -240, y0: 10, x1: -10, y1: 20 }, 0, [{ tileSize: 125 }]);
+    expect(keys.map((k) => k.gx).sort()).toEqual([0, 1]);
   });
 });

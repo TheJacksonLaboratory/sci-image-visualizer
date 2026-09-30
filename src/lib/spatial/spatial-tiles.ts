@@ -433,3 +433,88 @@ export function colorDensity(
   }
   return rgba;
 }
+
+// ── All-gene transcripts: grouping under a marker budget ─────────────────────────────
+
+/** Smallest on-screen spacing between groups, in px — below it groups read as noise. */
+export const GROUP_MIN_SPACING_PX = 14;
+
+/** Area of `rect` inside `bounds` (the whole rect when there are none). */
+export function visibleArea(rect: DataRect, bounds?: SpatialBounds | null): number {
+  const x0 = bounds ? Math.max(rect.x0, bounds[0]) : rect.x0;
+  const y0 = bounds ? Math.max(rect.y0, bounds[1]) : rect.y0;
+  const x1 = bounds ? Math.min(rect.x1, bounds[2]) : rect.x1;
+  const y1 = bounds ? Math.min(rect.y1, bounds[3]) : rect.y1;
+  return Math.max(0, x1 - x0) * Math.max(0, y1 - y0);
+}
+
+export type AllGenesPlan = { kind: 'individual' } | { kind: 'bins'; level: number } | { kind: 'none' };
+
+/**
+ * How to draw every transcript in view without exceeding `budget` markers.
+ *
+ * - The transcripts themselves, once the estimated count in view fits the budget.
+ * - Otherwise the finest pyramid level whose bins are at least `minSpacingPx` apart on
+ *   screen and number no more than the budget — groups big enough to read, few enough
+ *   to draw.
+ *
+ * The count in view is estimated from the average density, which over- or under-shoots
+ * locally; the renderer still caps what it draws, so an estimate is enough to choose.
+ */
+export function allGenesPlan(o: {
+  rect: DataRect; bounds: SpatialBounds; total: number; pxPerUnit: number;
+  levels: readonly { binSize: number }[]; budget: number; canIndividual: boolean;
+  minSpacingPx?: number;
+}): AllGenesPlan {
+  const area = visibleArea(o.rect, o.bounds);
+  if (!(area > 0)) return { kind: 'none' };
+  const b = o.bounds;
+  const density = o.total / Math.max(1, (b[2] - b[0]) * (b[3] - b[1]));
+  if (o.canIndividual && density * area <= o.budget) return { kind: 'individual' };
+  if (!o.levels.length) return { kind: 'none' };
+  const spacing = o.minSpacingPx ?? GROUP_MIN_SPACING_PX;
+  for (let l = 0; l < o.levels.length; l++) {
+    const bin = o.levels[l].binSize;
+    // Tissue rarely fills the view; 0.7 of the bins occupied is a fair guess.
+    if (bin * o.pxPerUnit >= spacing && (area / (bin * bin)) * 0.7 <= o.budget) {
+      return { kind: 'bins', level: l };
+    }
+  }
+  return { kind: 'bins', level: o.levels.length - 1 };
+}
+
+/**
+ * Diameter in px of a group of `count` transcripts in a bin `binPx` wide, where
+ * `refCount` is a typical busy bin in view (its 95th percentile).
+ *
+ * Area grows with the count — a bin with a quarter of the transcripts gets half the
+ * diameter — between a third of the bin (so a sparse bin is still visible) and a little
+ * over the full bin (so dense neighbours just touch rather than pile up).
+ */
+export function groupedMarkerPx(count: number, refCount: number, binPx: number, scale = 1): number {
+  const f = Math.sqrt(Math.min(1, count / Math.max(1, refCount)));
+  const d = binPx * (0.35 + 0.75 * f) * scale;
+  return Math.max(TRANSCRIPT_MIN_PX * scale, Math.min(d, binPx * 1.2 * Math.max(scale, 1)));
+}
+
+/** The `p` quantile (0..1) of a count vector — a sample of it for large vectors. */
+export function quantileOf(values: ArrayLike<number>, p: number): number {
+  const n = values.length;
+  if (!n) return 0;
+  const step = Math.max(1, Math.floor(n / 4096));
+  const sample: number[] = [];
+  for (let i = 0; i < n; i += step) sample.push(values[i]);
+  sample.sort((a, b) => a - b);
+  return sample[Math.min(sample.length - 1, Math.floor(p * sample.length))];
+}
+
+/** {@link tilesInRect} for a grid whose tile (0, 0) starts at `origin`. */
+export function tilesInRectFrom(
+  origin: readonly [number, number], rect: DataRect, level: number,
+  levels: readonly SpatialTileLevel[], bounds?: SpatialBounds | null, limit = Infinity,
+): TileKey[] {
+  const [ox, oy] = origin;
+  const shifted = { x0: rect.x0 - ox, y0: rect.y0 - oy, x1: rect.x1 - ox, y1: rect.y1 - oy };
+  const b: SpatialBounds | null = bounds ? [bounds[0] - ox, bounds[1] - oy, bounds[2] - ox, bounds[3] - oy] : null;
+  return tilesInRect(shifted, level, levels, b, limit);
+}

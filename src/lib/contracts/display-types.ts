@@ -211,6 +211,17 @@ export interface SpatialViewState {
   /** Genes whose transcripts are drawn. */
   transcriptGenes: string[];
   /**
+   * Draw EVERY gene's transcripts instead of {@link transcriptGenes}: grouped into bins
+   * sized by how many transcripts they hold, finer as the camera zooms in, down to one
+   * marker per transcript once those fit {@link transcriptBudget}.
+   */
+  transcriptAllGenes: boolean;
+  /**
+   * Most transcript markers drawn at once. The level of detail is chosen to stay under it,
+   * which is what keeps pan and zoom responsive however dense the data is.
+   */
+  transcriptBudget: number;
+  /**
    * How transcripts are drawn: `circles` sized by how many transcripts each stands for,
    * `glyphs` (one icon shape per gene), or a `density` raster. Circles and glyphs are
    * level-of-detail — aggregated when zoomed out, one per transcript at the finest zoom.
@@ -258,6 +269,8 @@ export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
   cellOpacity: 0.55,
   cellTypeColumn: null,
   transcriptGenes: [],
+  transcriptAllGenes: false,
+  transcriptBudget: 100_000,
   transcriptMode: 'off',
   transcriptColorBy: 'cellType',
   transcriptGlyphs: {},

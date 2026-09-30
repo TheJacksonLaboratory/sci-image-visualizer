@@ -198,6 +198,17 @@
                       [ngModel]="view.transcriptMode" (ngModelChange)="onTranscriptMode($event)"
                       [allowEmpty]="false"></p-selectButton>
       <ng-container *ngIf="view.transcriptMode !== 'off'">
+        <!-- Every gene at once: grouped into bins sized by how many transcripts they hold,
+             finer as the camera zooms in, one marker per transcript once they fit. -->
+        <div class="sc-row" *ngIf="canShowAllGenes && view.transcriptMode !== 'density'">
+          <p-checkbox [binary]="true" [ngModel]="view.transcriptAllGenes" inputId="sc-tx-all"
+                      (onChange)="onTranscriptAllGenes($event.checked)"></p-checkbox>
+          <label class="sc-lbl" for="sc-tx-all">All genes (grouped by area)</label>
+        </div>
+        <small class="sc-hint" *ngIf="allGenesPreparing && view.transcriptMode !== 'density'">
+          {{ allGenesPreparing }}
+        </small>
+        <ng-container *ngIf="!showingAllGenes">
         <label class="sc-lbl" for="sc-tx-genes">Genes</label>
         <p-autoComplete inputId="sc-tx-genes" [multiple]="true"
                         [ngModel]="view.transcriptGenes" (ngModelChange)="onTranscriptGenes($event)"
@@ -208,6 +219,7 @@
         <small class="sc-hint" *ngIf="!view.transcriptGenes.length">
           Pick one or more genes to draw their transcripts.
         </small>
+        </ng-container>
 
         <ng-container *ngIf="view.transcriptMode !== 'density'">
           <div class="sc-row">
@@ -218,7 +230,27 @@
                             [allowEmpty]="false"></p-selectButton>
           </div>
           <!-- One row per gene: its icon (glyph mode) and, when colouring by gene, its colour. -->
-          <ul class="sc-legend" *ngIf="view.transcriptGenes.length">
+          <ul class="sc-legend" *ngIf="showingAllGenes && view.transcriptMode === 'glyphs'">
+            <li class="sc-tx-gene">
+              <span class="sc-legend-label">All genes</span>
+              <p-dropdown [options]="glyphOptions" optionLabel="label" optionValue="value"
+                          [ngModel]="glyphOf('*', 0)" (ngModelChange)="onGlyph('*', $event)"
+                          appendTo="body" styleClass="sc-glyph-pick">
+                <ng-template let-opt pTemplate="item">
+                  <span class="sc-glyph-option">
+                    <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg"><polygon [attr.points]="opt.points"></polygon></svg>
+                    {{ opt.label }}
+                  </span>
+                </ng-template>
+                <ng-template let-opt pTemplate="selectedItem">
+                  <span class="sc-glyph-option">
+                    <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg"><polygon [attr.points]="opt?.points"></polygon></svg>
+                  </span>
+                </ng-template>
+              </p-dropdown>
+            </li>
+          </ul>
+          <ul class="sc-legend" *ngIf="!showingAllGenes && view.transcriptGenes.length">
             <li *ngFor="let gene of view.transcriptGenes; index as i" class="sc-tx-gene">
               <span class="sc-swatch" *ngIf="view.transcriptColorBy === 'gene'"
                     [style.background]="geneColor(i)"></span>
@@ -254,13 +286,26 @@
             <span class="sc-val">{{ view.transcriptOpacity }}</span>
           </div>
           <div class="sc-row">
+            <span class="sc-lbl"
+                  pTooltip="The most markers drawn at once; grouping gets coarser to stay under it. Lower is faster."
+                  tooltipPosition="top">Max markers</span>
+            <p-dropdown [options]="budgetOptions" optionLabel="label" optionValue="value"
+                        [ngModel]="view.transcriptBudget" (ngModelChange)="onTranscriptBudget($event)"
+                        appendTo="body"></p-dropdown>
+          </div>
+          <div class="sc-row" *ngIf="!showingAllGenes">
             <p-checkbox [binary]="true" [ngModel]="view.transcriptQuality === 'all'" inputId="sc-tx-lowq"
                         (onChange)="onTranscriptQuality($event.checked)"></p-checkbox>
             <label class="sc-lbl" for="sc-tx-lowq">Include low-quality calls</label>
           </div>
-          <small class="sc-hint">
+          <small class="sc-hint" *ngIf="!showingAllGenes">
             Zoomed out, each circle stands for many transcripts of a gene and grows with the
             count; zoom in and they split until each is a single transcript.
+          </small>
+          <small class="sc-hint" *ngIf="showingAllGenes">
+            Every gene: each marker groups the transcripts in an area, larger where there are
+            more; zoom in and the groups get finer until each marker is one transcript.
+            Coloured by the cell contributing most of them.
           </small>
         </ng-container>
 

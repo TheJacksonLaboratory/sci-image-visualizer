@@ -742,6 +742,10 @@ describe('SpatialControlsComponent', () => {
         levels: [{ tileSize: 250, aggregated: false }],
       },
       density: { gridSize: [10, 10], origin: [0, 0], rows: 10, cols: 10 },
+      transcriptBins: {
+        bounds: [0, 0, 100, 100], origin: [0, 0], count: 1000,
+        levels: [{ binSize: 2, tileSize: 128 }],
+      },
     };
 
     it('offers the controls only for a dataset that has the geometry', async () => {
@@ -826,5 +830,33 @@ describe('SpatialControlsComponent', () => {
         transcriptQuality: 'all', transcriptColorBy: 'gene',
       }));
     });
-  });
+      it('offers every gene, grouped, for a dataset with the pyramid', async () => {
+      dataset$.next(tiled);
+      await build(controls);
+      expect(component.canShowAllGenes).toBe(true);
+      expect(component.showingAllGenes).toBe(false);
+      component.onTranscriptMode('circles');
+      component.onTranscriptAllGenes(true);
+      expect(component.showingAllGenes).toBe(true);
+      // Density is per gene: the switch does not apply there.
+      component.onTranscriptMode('density');
+      expect(component.showingAllGenes).toBe(false);
+      component.onTranscriptBudget(50_000);
+      expect(view$.value.transcriptBudget).toBe(50_000);
+      dataset$.next(dataset);
+      expect(component.canShowAllGenes).toBe(false);
+    });
+    it('says when "All genes" is still being prepared on the server', async () => {
+      const { transcriptBins: _bins, ...rest } = tiled;
+      void _bins;
+      dataset$.next({ ...rest, transcriptBinsStatus: { state: 'building', done: 25, total: 100 } });
+      await build(controls);
+      expect(component.canShowAllGenes).toBe(false);
+      expect(component.allGenesPreparing).toContain('25%');
+      dataset$.next({ ...rest, transcriptBinsStatus: { state: 'failed', message: 'disk full' } });
+      expect(component.allGenesPreparing).toContain('disk full');
+      dataset$.next(tiled);
+      expect(component.allGenesPreparing).toBeNull();
+    });
+});
 });

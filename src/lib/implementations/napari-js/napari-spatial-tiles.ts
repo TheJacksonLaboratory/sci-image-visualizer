@@ -2,7 +2,7 @@ import { Colormap, colormapFromLut } from 'napari-js';
 import type { ImageLayer, Layer, RGBA, ShapesLayer, Viewer } from 'napari-js';
 
 import type { Rgb } from '../../contracts/colormap-lut';
-import type { SpatialDataPort } from '../../contracts/ports/spatial-data.port';
+import { ALL_GENES, type SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import type { SpatialViewState } from '../../contracts/display-types';
 import {
   NO_CATEGORY, NO_OBSERVATION, SpatialColumn, SpatialDataset, SpatialPolygonTile, SpatialPolygons,
@@ -13,8 +13,8 @@ import {
 } from '../../spatial/spatial-encoding';
 import { SpatialSelectionMask } from '../../spatial/spatial-selection';
 import {
-  DataRect, POLYGON_LEVEL_MIN_CELL_PX, TileKey, TranscriptGlyph, cellTypeColumnFor, cellsShown,
-  colorDensity,
+  DataRect, POLYGON_LEVEL_MIN_CELL_PX, TranscriptGlyph, allGenesPlan, cellTypeColumnFor,
+  cellsShown, colorDensity, groupedMarkerPx, quantileOf, tilesInRectFrom,
   defaultGlyphFor, discreteColormapStops, glyphOutline, glyphRings, pixelsPerDataUnit,
   polygonLevelFor, smoothRaster, tileId, tilesInRect, transcriptLevelFor, transcriptMarkerPx,
   typicalCellDiameter, visibleDataRect,
@@ -65,6 +65,15 @@ const ORDER: Group[] = ['cellFill', 'cellOutline', 'density', 'transcripts', 'tr
 const MAX_TRANSCRIPTS = 400_000;
 const MAX_CELL_TILES = 48;
 const MAX_TRANSCRIPT_TILES = 36;
+const MAX_BIN_TILES = 64;
+
+/** A transcript fetch the planner can key before running. */
+interface TranscriptJob {
+  /** Identifies what will be drawn, so an unchanged plan is a no-op. */
+  key: string;
+  /** Fetch and merge; `px` is each entry's marker diameter in screen pixels. */
+  load(): Promise<{ merged: SpatialTranscriptTile; px: Float32Array }>;
+}
 const CAMERA_IDLE_MS = 120;
 
 const UNASSIGNED_RGBA: RGBA = [0.62, 0.62, 0.62, 0.55];
@@ -331,48 +340,39 @@ export class NapariSpatialTileLayers {
     dataset: SpatialDataset, view: SpatialViewState, rect: DataRect, pxPerUnit: number,
     stale: () => boolean,
   ): Promise<void> {
-    const meta = dataset.transcriptTiles;
     const mode = view.transcriptMode;
-    const genes = view.transcriptGenes;
-    if (!meta || !this.port.getTranscriptTile || (mode !== 'circles' && mode !== 'glyphs') || !genes.length) {
+    const job = (mode === 'circles' || mode === 'glyphs') && this.port.getTranscriptTile
+      ? (view.transcriptAllGenes
+        ? this.allGenesJob(dataset, view, rect, pxPerUnit)
+        : this.geneJob(dataset, view, rect, pxPerUnit))
+      : null;
+    if (!job) {
       this.drop('transcripts');
       this.drop('transcriptOutline');
       return;
     }
-    const level = transcriptLevelFor(pxPerUnit, meta.levels);
-    const keys = tilesInRect(rect, level, meta.levels, meta.bounds, MAX_TRANSCRIPT_TILES);
     // Marker sizes follow the zoom, so the zoom is part of the key; a pan that keeps
     // the same tiles on screen changes nothing.
     const planKey = [
-      dataset.id, mode, genes.join(','), view.transcriptQuality, view.transcriptColorBy,
-      this.cellTypeColumnName(dataset, view), view.transcriptScale, view.transcriptOpacity,
-      JSON.stringify(view.transcriptGlyphs), pxPerUnit.toPrecision(4), keys.map(tileId).join(','),
+      dataset.id, mode, job.key, view.transcriptColorBy, this.cellTypeColumnName(dataset, view),
+      view.transcriptScale, view.transcriptOpacity, JSON.stringify(view.transcriptGlyphs),
+      pxPerUnit.toPrecision(4),
     ].join('|');
     const current = this.layers.get('transcripts');
     if (planKey === this.keys.get('transcripts') && current && this.viewer!.layers.items.includes(current)) {
       return;
     }
-    const query = { genes, quality: view.transcriptQuality };
-    const tiles = await this.fetchAll(keys, (k) => this.port.getTranscriptTile!(k.level, k.gx, k.gy, query));
+    const { merged, px } = await job.load();
     if (stale()) return;
-    const merged = mergeTranscriptTiles(tiles, MAX_TRANSCRIPTS);
-
-    // Colours: the cell type of the owning cell, or the gene.
     const faces = await this.transcriptColors(dataset, view, merged);
     if (stale()) return;
 
-    // Marker size is chosen in SCREEN pixels and converted at the current zoom; a
-    // camera change re-plans, so markers keep their on-screen size across zooms.
-    // Physical where the unit is known (µm), clamped to a screen-pixel range.
-    const pxPerMicron = dataset.micronsPerUnit ? pxPerUnit / dataset.micronsPerUnit : undefined;
-    const diam = new Float32Array(merged.count);
-    for (let i = 0; i < merged.count; i++) {
-      diam[i] = transcriptMarkerPx(merged.weight[i], view.transcriptScale, pxPerMicron) / pxPerUnit;
-    }
-    const ref = dataset.imageRef;
     this.keys.set('transcripts', planKey);
+    const diam = px.map((d) => d / pxPerUnit);
+    const ref = dataset.imageRef;
     const scale: [number, number] = ref?.scale ?? [1, 1];
     const translate: [number, number] = ref?.translate ?? [0, 0];
+
     if (mode === 'circles') {
       this.drop('transcriptOutline');
       const positions = new Float32Array(merged.count * 2);
@@ -397,12 +397,19 @@ export class NapariSpatialTileLayers {
     }
 
     // Glyphs: each entry becomes its gene's icon polygon, filled through a discrete
-    // colormap and outlined dark so small icons stay readable over the tissue.
+    // colormap and outlined dark so small icons stay readable over the tissue. With every
+    // gene drawn there is one icon for all of them — 18,000 shapes would say nothing.
+    const genes = view.transcriptGenes;
     const glyphFor = (slot: number): TranscriptGlyph =>
       (view.transcriptGlyphs[genes[slot]] as TranscriptGlyph | undefined) ?? defaultGlyphFor(slot);
-    const outlines = genes.map((_g, slot) => glyphOutline(glyphFor(slot)));
+    const single = view.transcriptAllGenes
+      ? glyphOutline((view.transcriptGlyphs[ALL_GENES] as TranscriptGlyph | undefined) ?? 'circle')
+      : null;
+    const outlines = single ? [] : genes.map((_g, slot) => glyphOutline(glyphFor(slot)));
     const radius = diam.map((d) => d / 2);
-    const { coords, offsets } = glyphRings(merged.x, merged.y, radius, (i) => outlines[merged.gene[i]]);
+    const { coords, offsets } = glyphRings(
+      merged.x, merged.y, radius, (i) => single ?? outlines[merged.gene[i]],
+    );
     const fill = this.viewer!.addShapes(coords, offsets, {
       name: 'transcripts',
       draw: 'fill',
@@ -425,6 +432,110 @@ export class NapariSpatialTileLayers {
     this.replace('transcriptOutline', edge);
   }
 
+  /** Physical marker size needs µm; null when the dataset's unit is unknown. */
+  private pxPerMicron(dataset: SpatialDataset, pxPerUnit: number): number | undefined {
+    return dataset.micronsPerUnit ? pxPerUnit / dataset.micronsPerUnit : undefined;
+  }
+
+  /**
+   * The chosen genes, at the level the zoom calls for — or coarser, while the markers in
+   * view would exceed the budget.
+   */
+  private geneJob(
+    dataset: SpatialDataset, view: SpatialViewState, rect: DataRect, pxPerUnit: number,
+  ): TranscriptJob | null {
+    const meta = dataset.transcriptTiles;
+    const genes = view.transcriptGenes;
+    if (!meta || !genes.length) return null;
+    const first = transcriptLevelFor(pxPerUnit, meta.levels);
+    const keysAt = (l: number) => tilesInRect(rect, l, meta.levels, meta.bounds, MAX_TRANSCRIPT_TILES);
+    const query = { genes, quality: view.transcriptQuality };
+    const pxPerMicron = this.pxPerMicron(dataset, pxPerUnit);
+    return {
+      key: `genes|${genes.join(',')}|${view.transcriptQuality}|${view.transcriptBudget}|${keysAt(first).map(tileId)}`,
+      load: async () => {
+        let level = first;
+        let merged: SpatialTranscriptTile;
+        for (;;) {
+          const tiles = await this.fetchAll(keysAt(level),
+            (k) => this.port.getTranscriptTile!(k.level, k.gx, k.gy, query));
+          merged = mergeTranscriptTiles(tiles, MAX_TRANSCRIPTS);
+          if (merged.count <= view.transcriptBudget || level >= meta.levels.length - 1) break;
+          level++;
+        }
+        const px = new Float32Array(merged.count);
+        for (let i = 0; i < merged.count; i++) {
+          px[i] = transcriptMarkerPx(merged.weight[i], view.transcriptScale, pxPerMicron);
+        }
+        return { merged, px };
+      },
+    };
+  }
+
+  /**
+   * Every gene: the transcripts themselves once they fit the budget, else bins of the
+   * all-gene pyramid sized by how many transcripts each holds.
+   */
+  private allGenesJob(
+    dataset: SpatialDataset, view: SpatialViewState, rect: DataRect, pxPerUnit: number,
+  ): TranscriptJob | null {
+    const bins = dataset.transcriptBins;
+    const tiles = dataset.transcriptTiles;
+    const bounds = bins?.bounds ?? tiles?.bounds;
+    if (!bounds) return null;
+    const plan = allGenesPlan({
+      rect, bounds, pxPerUnit, budget: view.transcriptBudget,
+      total: bins?.count ?? tiles?.count ?? 0,
+      levels: bins && this.port.getTranscriptBins ? bins.levels : [],
+      canIndividual: !!tiles,
+    });
+
+    if (plan.kind === 'individual' && tiles) {
+      const keys = tilesInRect(rect, 0, tiles.levels, tiles.bounds, MAX_TRANSCRIPT_TILES);
+      // Each tile clipped to the view, rounded outward to 10 units so small pans hit cache.
+      const r10 = (v: number, up: boolean) => (up ? Math.ceil(v / 10) : Math.floor(v / 10)) * 10;
+      const size = tiles.levels[0].tileSize;
+      const boxes = keys.map((k): [number, number, number, number] => [
+        Math.max(k.gx * size, r10(rect.x0, false)), Math.max(k.gy * size, r10(rect.y0, false)),
+        Math.min((k.gx + 1) * size, r10(rect.x1, true)), Math.min((k.gy + 1) * size, r10(rect.y1, true)),
+      ]);
+      const pxPerMicron = this.pxPerMicron(dataset, pxPerUnit);
+      return {
+        key: `all|individual|${view.transcriptBudget}|${boxes.map((b) => b.join(',')).join(';')}`,
+        load: async () => {
+          const got = await this.fetchAll(keys.map((k, i) => ({ ...k, box: boxes[i] })),
+            (k) => this.port.getTranscriptTile!(0, k.gx, k.gy, { genes: [ALL_GENES], box: k.box }));
+          const merged = mergeTranscriptTiles(got, Math.max(view.transcriptBudget * 1.5, 1));
+          const px = new Float32Array(merged.count);
+          for (let i = 0; i < merged.count; i++) px[i] = transcriptMarkerPx(1, view.transcriptScale, pxPerMicron);
+          return { merged, px };
+        },
+      };
+    }
+
+    if (plan.kind === 'bins' && bins && this.port.getTranscriptBins) {
+      const level = plan.level;
+      const lv = bins.levels[level];
+      const keys = tilesInRectFrom(bins.origin, rect, level,
+        bins.levels.map((l) => ({ tileSize: l.tileSize })), bounds, MAX_BIN_TILES);
+      return {
+        key: `all|bins|${level}|${view.transcriptBudget}|${keys.map(tileId)}`,
+        load: async () => {
+          const got = await this.fetchAll(keys, (k) => this.port.getTranscriptBins!(k.level, k.gx, k.gy));
+          const merged = mergeTranscriptTiles(got, Math.max(view.transcriptBudget * 1.5, 1));
+          const refCount = quantileOf(merged.weight, 0.95);
+          const binPx = lv.binSize * pxPerUnit;
+          const px = new Float32Array(merged.count);
+          for (let i = 0; i < merged.count; i++) {
+            px[i] = groupedMarkerPx(merged.weight[i], refCount, binPx, view.transcriptScale);
+          }
+          return { merged, px };
+        },
+      };
+    }
+    return null;
+  }
+
   /** Per-entry colours both as RGBA (points) and as colormap values (glyph shapes). */
   private async transcriptColors(
     dataset: SpatialDataset, view: SpatialViewState, t: SpatialTranscriptTile,
@@ -432,9 +543,11 @@ export class NapariSpatialTileLayers {
     let rgb: Rgb[];
     let codeOf: (i: number) => number;
     if (view.transcriptColorBy === 'gene') {
-      rgb = view.transcriptGenes.map((_g, i) =>
+      // All genes: codes are the dataset's gene indices, folded onto the palette.
+      const n = view.transcriptAllGenes ? DEFAULT_CATEGORICAL_PALETTE.length : view.transcriptGenes.length;
+      rgb = Array.from({ length: n }, (_g, i) =>
         parseHex(DEFAULT_CATEGORICAL_PALETTE[i % DEFAULT_CATEGORICAL_PALETTE.length]));
-      codeOf = (i) => t.gene[i];
+      codeOf = view.transcriptAllGenes ? (i) => t.gene[i] % n : (i) => t.gene[i];
     } else {
       const name = this.cellTypeColumnName(dataset, view);
       const codes = name ? await this.categoricalCodes(name) : null;
@@ -500,7 +613,7 @@ export class NapariSpatialTileLayers {
 
   // ── layer bookkeeping ─────────────────────────────────────────────────────────────
 
-  private async fetchAll<T>(keys: TileKey[], load: (k: TileKey) => Promise<T>): Promise<T[]> {
+  private async fetchAll<K, T>(keys: K[], load: (k: K) => Promise<T>): Promise<T[]> {
     const settled = await Promise.allSettled(keys.map(load));
     const out: T[] = [];
     for (const s of settled) {

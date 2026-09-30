@@ -15,6 +15,8 @@ import {
   SpatialPolygonTile,
   SpatialPolygonTilesMeta,
   SpatialPolygons,
+  SpatialTranscriptBinsMeta,
+  SpatialTranscriptBinsStatus,
   SpatialTranscriptTile,
   SpatialTranscriptTilesMeta,
   SpatialVolumeMeta,
@@ -59,6 +61,8 @@ import {
  * GET {base}/spatial/{id}/transcript-tile/{level}/{gx}/{gy}?genes=A,B&quality=high|all
  *                                          -> see decodeTranscriptTile
  * GET {base}/spatial/{id}/density?genes=A,B -> f32[rows*cols]
+ * GET {base}/spatial/{id}/transcript-bins/{level}/{tx}/{ty}
+ *                                          -> transcript-tile layout, one entry per bin
  * ```
  *
  * The three tiled routes are optional and advertised in the manifest
@@ -94,6 +98,8 @@ export interface SpatialManifest {
   polygonTiles?: SpatialPolygonTilesMeta;
   transcriptTiles?: SpatialTranscriptTilesMeta;
   density?: SpatialDensityMeta;
+  transcriptBins?: SpatialTranscriptBinsMeta;
+  transcriptBinsStatus?: SpatialTranscriptBinsStatus;
 }
 
 /** `GET /spatial/datasets` */
@@ -323,5 +329,7 @@ export function datasetFromManifest(
     ...(manifest.polygonTiles ? { polygonTiles: manifest.polygonTiles } : {}),
     ...(manifest.transcriptTiles ? { transcriptTiles: manifest.transcriptTiles } : {}),
     ...(manifest.density ? { density: manifest.density } : {}),
+    ...(manifest.transcriptBins ? { transcriptBins: manifest.transcriptBins } : {}),
+    ...(manifest.transcriptBinsStatus ? { transcriptBinsStatus: manifest.transcriptBinsStatus } : {}),
   };
 }
