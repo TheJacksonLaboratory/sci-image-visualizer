@@ -24,6 +24,399 @@
       <span class="sc-dataset-count">{{ ds.observations.count | number }} observations</span>
     </div>
 
+    <!-- Organised as Xenium Explorer's side panel: one collapsible section per layer,
+         each with its own on/off switch in the header. -->
+
+    <!-- Images -->
+    <div class="sc-panel" *ngIf="ds.imageRef && !is3d" [class.open]="open.images">
+      <div class="sc-panel-head" (click)="toggleSection('images')">
+        <p-checkbox [binary]="true" [ngModel]="view.showImage" (click)="$event.stopPropagation()"
+                    (onChange)="onShowImage($event.checked)"></p-checkbox>
+        <span class="sc-panel-title">Images</span>
+        <i class="pi" [class.pi-chevron-down]="open.images" [class.pi-chevron-right]="!open.images"></i>
+      </div>
+      <div class="sc-panel-body" *ngIf="open.images">
+        <small class="sc-hint">
+          Channels, colours and contrast are in the Channels &amp; Histogram dialog.
+        </small>
+      </div>
+    </div>
+
+    <!-- Cells -->
+    <div class="sc-panel" *ngIf="hasCells && !is3d" [class.open]="open.cells">
+      <div class="sc-panel-head" (click)="toggleSection('cells')">
+        <p-checkbox [binary]="true" [ngModel]="cellsOn" (click)="$event.stopPropagation()"
+                    (onChange)="onShowCells($event.checked)"></p-checkbox>
+        <span class="sc-panel-title">Cells</span>
+        <i class="pi" [class.pi-chevron-down]="open.cells" [class.pi-chevron-right]="!open.cells"></i>
+      </div>
+      <div class="sc-panel-body" *ngIf="open.cells">
+        <ng-container *ngIf="cellSetOptions.length > 1">
+          <div class="sc-subhead">Boundaries</div>
+          <p-selectButton [options]="cellSetOptions" optionLabel="label" optionValue="value"
+                          [ngModel]="activeCellSet" (ngModelChange)="onCellSet($event)"
+                          [allowEmpty]="false" styleClass="sc-buttons"></p-selectButton>
+        </ng-container>
+
+        <div class="sc-subhead">Coloring</div>
+        <div class="sc-row">
+          <span class="sc-lbl">Cell Color</span>
+          <p-dropdown [options]="cellColorOptions" optionLabel="label" optionValue="value"
+                      [ngModel]="view.cellColorMode" (ngModelChange)="onCellColorMode($event)"
+                      appendTo="body"></p-dropdown>
+        </div>
+        <small class="sc-hint" *ngIf="view.cellColorMode === 'group'">
+          Adjust cell color in the groups section below.
+        </small>
+        <div class="sc-row" *ngIf="view.cellColorMode === 'gene' && ds.features">
+          <span class="sc-lbl">Gene</span>
+          <p-dropdown [options]="geneOptions" optionLabel="label" optionValue="value"
+                      [ngModel]="view.cellColorGene" (ngModelChange)="onCellColorGene($event)"
+                      [filter]="true" filterBy="label" [resetFilterOnHide]="true"
+                      (onFilter)="onGeneFilter($event.filter)" (onShow)="ensureGeneList()"
+                      [virtualScroll]="geneOptions.length > geneVirtualScrollFrom"
+                      [virtualScrollItemSize]="30" appendTo="body"
+                      placeholder="Search genes…"></p-dropdown>
+        </div>
+        <div class="sc-row" *ngIf="view.cellColorMode === 'single'">
+          <span class="sc-lbl">Color</span>
+          <input type="color" class="sc-color-input" [value]="view.cellSingleColor"
+                 (change)="onCellSingleColor($any($event.target).value)" />
+        </div>
+        <div *ngIf="view.cellColorMode === 'gene' || view.cellColorMode === 'transcriptDensity'">
+          <div class="sc-colorbar" [style.background]="colorBarCss || densityColorBarCss"></div>
+        </div>
+
+        <ng-container *ngIf="groupOptions.length">
+          <div class="sc-subhead">Groups</div>
+          <div class="sc-row sc-row-picker">
+            <p-dropdown [options]="groupOptions" [group]="true" optionLabel="label" optionValue="value"
+                        optionGroupLabel="label" optionGroupChildren="items"
+                        [ngModel]="activeGroupEntry" (ngModelChange)="onGroupEntry($event)"
+                        appendTo="body" styleClass="sc-full">
+              <ng-template let-group pTemplate="group">
+                <span class="sc-group-heading">{{ group.label }}</span>
+              </ng-template>
+            </p-dropdown>
+            <p-dropdown *ngIf="groupVariantOptions.length" [options]="groupVariantOptions"
+                        optionLabel="label" optionValue="value" styleClass="sc-variant"
+                        [ngModel]="activeCellTypeColumn" (ngModelChange)="onGroupVariant($event)"
+                        appendTo="body"></p-dropdown>
+            <button *ngIf="canImportGroups" type="button" class="sc-icon-btn" [disabled]="groupImporting"
+                    (click)="groupFile.click()" title="Import cell groups (CSV of cell_id, group)">
+              <i class="pi" [class.pi-plus-circle]="!groupImporting" [class.pi-spin]="groupImporting"
+                 [class.pi-spinner]="groupImporting"></i>
+            </button>
+            <input #groupFile type="file" accept=".csv,.tsv,.txt" hidden
+                   (change)="onImportGroupsFile(groupFile)" />
+          </div>
+          <small class="sc-hint sc-error" *ngIf="groupImportError">{{ groupImportError }}</small>
+
+          <div class="sc-group-list" *ngIf="groupRows.length">
+            <div class="sc-group-row sc-group-all">
+              <p-checkbox [binary]="true" [ngModel]="allGroupsShown"
+                          (onChange)="onAllGroupsShown($event.checked)"></p-checkbox>
+              <span class="sc-group-label">All groups</span>
+              <span class="sc-count">({{ groupTotal | number }})</span>
+              <button type="button" class="sc-icon-btn" (click)="groupsExpanded = !groupsExpanded">
+                <i class="pi" [class.pi-chevron-down]="groupsExpanded" [class.pi-chevron-right]="!groupsExpanded"></i>
+              </button>
+            </div>
+            <ng-container *ngIf="groupsExpanded">
+              <div class="sc-group-row" *ngFor="let row of groupRows; trackBy: trackByLabel">
+                <p-checkbox [binary]="true" [ngModel]="isGroupShown(row.label)"
+                            (onChange)="onGroupShown(row.label, $event.checked)"></p-checkbox>
+                <span class="sc-dot" [style.background]="row.color"></span>
+                <span class="sc-group-label" [title]="row.label">{{ row.label }}</span>
+                <span class="sc-count">({{ row.count | number }})</span>
+              </div>
+            </ng-container>
+          </div>
+        </ng-container>
+
+        <div class="sc-subhead">Visibility</div>
+        <span class="sc-lbl">View cells as</span>
+        <p-selectButton [options]="cellDrawOptions" optionLabel="label" optionValue="value"
+                        [ngModel]="view.cellDraw" (ngModelChange)="onCellDraw($event)"
+                        [allowEmpty]="false" styleClass="sc-buttons"></p-selectButton>
+        <ng-container *ngIf="view.cellDraw !== 'outline'">
+          <span class="sc-lbl">Cell fill opacity</span>
+          <div class="sc-row sc-row-number">
+            <p-slider [ngModel]="view.cellOpacity" [min]="0.05" [max]="1" [step]="0.05"
+                      (onChange)="onCellOpacity($event.value)"></p-slider>
+            <p-inputNumber [ngModel]="cellOpacityPercent" (ngModelChange)="onCellOpacityPercent($event)"
+                           [min]="5" [max]="100" [showButtons]="false" inputStyleClass="sc-num"></p-inputNumber>
+          </div>
+        </ng-container>
+      </div>
+    </div>
+
+    <!-- Transcripts -->
+    <div class="sc-panel" *ngIf="hasTranscripts && !is3d" [class.open]="open.transcripts">
+      <div class="sc-panel-head" (click)="toggleSection('transcripts')">
+        <p-checkbox [binary]="true" [ngModel]="view.transcriptMode !== 'off'" (click)="$event.stopPropagation()"
+                    (onChange)="onTranscriptsOn($event.checked)"></p-checkbox>
+        <span class="sc-panel-title">Transcripts</span>
+        <i class="pi" [class.pi-chevron-down]="open.transcripts" [class.pi-chevron-right]="!open.transcripts"></i>
+      </div>
+      <div class="sc-panel-body" *ngIf="open.transcripts">
+        <div class="sc-row sc-row-picker">
+          <p-multiSelect inputId="sc-tx-genes" [options]="geneOptions"
+                         optionLabel="label" optionValue="value"
+                         [ngModel]="view.transcriptGenes" (onChange)="onTranscriptGenes($event.value)"
+                         [filter]="true" filterBy="label" [resetFilterOnHide]="true"
+                         (onFilter)="onGeneFilter($event.filter)" (onPanelShow)="ensureGeneList()"
+                         [virtualScroll]="geneOptions.length > geneVirtualScrollFrom"
+                         [virtualScrollItemSize]="30" [showToggleAll]="false"
+                         [emptyFilterMessage]="genesAreRemote ? 'No match — keep typing' : 'No match'"
+                         [emptyMessage]="genesAreRemote ? 'Type to search genes' : 'No genes'"
+                         appendTo="body" placeholder="Search for genes to visualize…"
+                         [selectedItemsLabel]="'{0} genes selected'" [maxSelectedLabels]="0"
+                         styleClass="sc-full"></p-multiSelect>
+          <button type="button" class="sc-icon-btn" *ngIf="canShowAllGenes" (click)="onToggleAllGenes()"
+                  [class.active]="view.transcriptAllGenes"
+                  [title]="view.transcriptAllGenes ? 'Back to the selected genes' : 'Select all genes'">±</button>
+          <button type="button" class="sc-icon-btn" (click)="geneMenuRef.toggle($event)" title="More">
+            <i class="pi pi-ellipsis-v"></i>
+          </button>
+          <p-menu #geneMenuRef [model]="geneMenu" [popup]="true" appendTo="body"></p-menu>
+          <input #geneGroupFile type="file" accept=".csv,.tsv,.txt" hidden
+                 (change)="onImportGeneGroups(geneGroupFile)" />
+        </div>
+        <small class="sc-hint sc-error" *ngIf="geneGroupError">{{ geneGroupError }}</small>
+        <small class="sc-hint" *ngIf="allGenesPreparing">{{ allGenesPreparing }}</small>
+
+        <div class="sc-subhead">Selected genes</div>
+        <div class="sc-gene-tree">
+          <div class="sc-gene-row sc-gene-root">
+            <button type="button" class="sc-eye"
+                    (click)="view.transcriptAllGenes ? onToggleAllGenes() : onGenesShown(view.transcriptGenes, !areGenesShown(view.transcriptGenes))">
+              <i class="pi" [class.pi-eye]="view.transcriptAllGenes || areGenesShown(view.transcriptGenes)"
+                 [class.pi-eye-slash]="!view.transcriptAllGenes && !areGenesShown(view.transcriptGenes)"></i>
+            </button>
+            <span class="sc-group-label">Genes</span>
+            <span class="sc-count">({{ (view.transcriptAllGenes ? geneTotal : view.transcriptGenes.length) | number }}/{{ geneTotal | number }})</span>
+            <button type="button" class="sc-icon-btn" (click)="geneTreeOpen = !geneTreeOpen"
+                    *ngIf="!view.transcriptAllGenes && view.transcriptGenes.length">
+              <i class="pi" [class.pi-chevron-down]="geneTreeOpen" [class.pi-chevron-right]="!geneTreeOpen"></i>
+            </button>
+          </div>
+          <ng-container *ngIf="geneTreeOpen && !view.transcriptAllGenes">
+            <ng-container *ngFor="let node of geneTree; trackBy: trackByNode">
+              <div class="sc-gene-row sc-gene-group" *ngIf="node.name">
+                <button type="button" class="sc-eye" (click)="onGenesShown(node.genes, !areGenesShown(node.genes))">
+                  <i class="pi" [class.pi-eye]="areGenesShown(node.genes)" [class.pi-eye-slash]="!areGenesShown(node.genes)"></i>
+                </button>
+                <span class="sc-group-label" [title]="node.name">{{ node.name }}</span>
+                <span class="sc-count">({{ node.genes.length }})</span>
+                <button type="button" class="sc-icon-btn" (click)="toggleGeneGroup(node.name)">
+                  <i class="pi" [class.pi-chevron-down]="!collapsedGeneGroups.has(node.name)"
+                     [class.pi-chevron-right]="collapsedGeneGroups.has(node.name)"></i>
+                </button>
+              </div>
+              <ng-container *ngIf="!node.name || !collapsedGeneGroups.has(node.name)">
+                <div class="sc-gene-row sc-gene-leaf" [class.nested]="!!node.name"
+                     *ngFor="let gene of node.genes; trackBy: trackByLabelString">
+                  <button type="button" class="sc-eye" (click)="onGenesShown([gene], !isGeneShown(gene))">
+                    <i class="pi" [class.pi-eye]="isGeneShown(gene)" [class.pi-eye-slash]="!isGeneShown(gene)"></i>
+                  </button>
+                  <label class="sc-dot sc-dot-pick" [style.background]="geneColorOf(gene)" title="Colour">
+                    <input type="color" [value]="geneColorOf(gene)" (change)="onGeneColor(gene, $any($event.target).value)" />
+                  </label>
+                  <span class="sc-group-label">{{ gene }}</span>
+                  <p-dropdown *ngIf="view.transcriptMode === 'glyphs'"
+                              [options]="glyphOptions" optionLabel="label" optionValue="value"
+                              [ngModel]="glyphOf(gene, view.transcriptGenes.indexOf(gene))"
+                              (ngModelChange)="onGlyph(gene, $event)"
+                              appendTo="body" styleClass="sc-glyph-pick">
+                      <ng-template let-opt pTemplate="item">
+                        <span class="sc-glyph-option">
+                          <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg"><polygon [attr.points]="opt.points"></polygon></svg>
+                          {{ opt.label }}
+                        </span>
+                      </ng-template>
+                      <ng-template let-opt pTemplate="selectedItem">
+                        <span class="sc-glyph-option">
+                          <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg"><polygon [attr.points]="opt?.points"></polygon></svg>
+                        </span>
+                      </ng-template>
+                  </p-dropdown>
+                </div>
+              </ng-container>
+            </ng-container>
+          </ng-container>
+          <div class="sc-gene-footer">
+            {{ (view.transcriptAllGenes ? geneTotal : view.transcriptGenes.length) | number }}/{{ geneTotal | number }} genes selected
+          </div>
+        </div>
+
+        <div class="sc-subhead">Transcript controls</div>
+        <span class="sc-lbl">View transcripts as</span>
+        <p-selectButton [options]="transcriptModeOptions" optionLabel="label" optionValue="value"
+                        [ngModel]="view.transcriptMode === 'off' ? null : view.transcriptMode"
+                        (ngModelChange)="onTranscriptMode($event)"
+                        [allowEmpty]="false" styleClass="sc-buttons"></p-selectButton>
+
+        <ng-container *ngIf="estimate">
+          <div class="sc-row">
+            <span class="sc-lbl" pTooltip="Transcripts of the visible genes estimated to be in view, against the most markers drawn at once"
+                  tooltipPosition="top">Estimated Transcript Points</span>
+            <button type="button" class="sc-small-btn" (click)="editingMax = !editingMax">Edit Max</button>
+          </div>
+          <div class="sc-meter"><div class="sc-meter-fill" [class.over]="estimateOverMax" [style.width.%]="estimatePercent"></div></div>
+          <div class="sc-meter-ends">
+            <span>{{ estimate.points | number }} points</span>
+            <span>{{ estimate.max | number }} max{{ estimateOverMax ? ' reached' : '' }}</span>
+          </div>
+          <div class="sc-row" *ngIf="editingMax">
+            <span class="sc-lbl">Max markers</span>
+            <p-dropdown [options]="budgetOptions" optionLabel="label" optionValue="value"
+                        [ngModel]="view.transcriptBudget" (ngModelChange)="onTranscriptBudget($event)"
+                        appendTo="body"></p-dropdown>
+          </div>
+          <small class="sc-hint" *ngIf="estimateOverMax && view.transcriptMode !== 'density'">
+            Max points reached: transcripts are grouped by area, circles sized by how many they hold.
+            Zoom in or select fewer genes to see individual points.
+          </small>
+        </ng-container>
+
+        <ng-container *ngIf="view.transcriptMode === 'circles' || view.transcriptMode === 'glyphs'">
+          <div class="sc-row">
+            <span class="sc-lbl">Colour by</span>
+            <p-selectButton [options]="transcriptColorOptions" optionLabel="label" optionValue="value"
+                            [ngModel]="view.transcriptColorBy" (ngModelChange)="onTranscriptColorBy($event)"
+                            [allowEmpty]="false" styleClass="sc-buttons"></p-selectButton>
+          </div>
+          <div class="sc-row" *ngIf="view.transcriptAllGenes && view.transcriptMode === 'glyphs'">
+            <span class="sc-lbl">Icon</span>
+            <p-dropdown [options]="glyphOptions" optionLabel="label" optionValue="value"
+                        [ngModel]="glyphOf('*', 0)" (ngModelChange)="onGlyph('*', $event)"
+                        appendTo="body" styleClass="sc-glyph-pick">
+              <ng-template let-opt pTemplate="item">
+                        <span class="sc-glyph-option">
+                          <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg"><polygon [attr.points]="opt.points"></polygon></svg>
+                          {{ opt.label }}
+                        </span>
+                      </ng-template>
+                      <ng-template let-opt pTemplate="selectedItem">
+                        <span class="sc-glyph-option">
+                          <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg"><polygon [attr.points]="opt?.points"></polygon></svg>
+                        </span>
+                      </ng-template>
+            </p-dropdown>
+          </div>
+          <div class="sc-row">
+            <span class="sc-lbl">Size</span>
+            <p-slider [ngModel]="view.transcriptScale" [min]="0.5" [max]="3" [step]="0.25"
+                      (onChange)="onTranscriptScale($event.value)"></p-slider>
+            <span class="sc-val">{{ view.transcriptScale }}×</span>
+          </div>
+          <div class="sc-row">
+            <span class="sc-lbl">Opacity</span>
+            <p-slider [ngModel]="view.transcriptOpacity" [min]="0.1" [max]="1" [step]="0.05"
+                      (onChange)="onTranscriptOpacity($event.value)"></p-slider>
+            <span class="sc-val">{{ view.transcriptOpacity }}</span>
+          </div>
+          <div class="sc-row" *ngIf="!showingAllGenes">
+            <p-checkbox [binary]="true" [ngModel]="view.transcriptQuality === 'all'" inputId="sc-tx-lowq"
+                        (onChange)="onTranscriptQuality($event.checked)"></p-checkbox>
+            <label class="sc-lbl" for="sc-tx-lowq">Include low-quality calls</label>
+          </div>
+        </ng-container>
+
+        <ng-container *ngIf="view.transcriptMode === 'density'">
+          <span class="sc-lbl">Density map opacity</span>
+          <div class="sc-row sc-row-number">
+            <p-slider [ngModel]="view.densityOpacity" [min]="0.05" [max]="1" [step]="0.05"
+                      (onChange)="onDensityOpacity($event.value)"></p-slider>
+            <p-inputNumber [ngModel]="densityOpacityPercent" (ngModelChange)="onDensityOpacityPercent($event)"
+                           [min]="5" [max]="100" inputStyleClass="sc-num"></p-inputNumber>
+          </div>
+          <span class="sc-lbl" pTooltip="Edge of each density bin" tooltipPosition="top">Density map bin size</span>
+          <p-slider [ngModel]="densityBinIndex" [min]="0" [max]="3" [step]="1"
+                    (onChange)="onDensityBinIndex($event.value)" styleClass="sc-bin-slider"></p-slider>
+          <div class="sc-ticks">
+            <span *ngFor="let b of densityBins">{{ b }}×{{ b }}µm</span>
+          </div>
+          <span class="sc-lbl" pTooltip="Transcripts per µm² at which the colour scale starts and saturates"
+                tooltipPosition="top">Density map scale threshold</span>
+          <div class="sc-row sc-row-range">
+            <p-inputNumber [ngModel]="densityWindow[0]" (ngModelChange)="onDensityRangeEnd(0, $event)"
+                           mode="decimal" [minFractionDigits]="3" [maxFractionDigits]="3"
+                           inputStyleClass="sc-num"></p-inputNumber>
+            <p-slider [ngModel]="densityWindow" [range]="true" [min]="0" [max]="densitySliderMax"
+                      [step]="densityStep" (onChange)="onDensityRange($event.values)"></p-slider>
+            <p-inputNumber [ngModel]="densityWindow[1]" (ngModelChange)="onDensityRangeEnd(1, $event)"
+                           mode="decimal" [minFractionDigits]="3" [maxFractionDigits]="3"
+                           inputStyleClass="sc-num"></p-inputNumber>
+          </div>
+          <div class="sc-row">
+            <small class="sc-hint">{{ view.densityRange ? 'Set by hand.' : 'Derived from the data.' }}</small>
+            <button type="button" class="sc-small-btn" *ngIf="view.densityRange" (click)="onDensityAuto()">Auto</button>
+          </div>
+          <span class="sc-lbl">Density map bin coloring</span>
+          <div class="sc-row sc-row-picker">
+            <div class="sc-colorbar sc-full" [style.background]="densityColorBarCss"></div>
+            <p-treeSelect [options]="colormapOptions" [ngModel]="selectedDensityColormapNode"
+                          selectionMode="single" [showClear]="true" placeholder="Inferno"
+                          [scrollHeight]="'260px'" appendTo="body" styleClass="sc-palette"
+                          (onNodeSelect)="onDensityColormap($event.node)" (onClear)="onDensityColormap(null)">
+              <ng-template let-node pTemplate="default">
+                <span class="sc-cmap-option">
+                  <img *ngIf="!node.children && node.data?.src" [src]="node.data.src" class="sc-cmap-swatch" alt="" />
+                  <span>{{ node.label }}</span>
+                </span>
+              </ng-template>
+            </p-treeSelect>
+          </div>
+          <div class="sc-colorbar-ends"><span>{{ densityWindow[0] | number: '1.0-3' }}</span><span>{{ densityWindow[1] | number: '1.0-3' }}</span></div>
+        </ng-container>
+      </div>
+    </div>
+
+    <!-- Annotations: the drawn regions, and selecting what they enclose. -->
+    <div class="sc-panel" [class.open]="open.annotations">
+      <div class="sc-panel-head" (click)="toggleSection('annotations')">
+        <span class="sc-panel-title">Annotations</span>
+        <i class="pi" [class.pi-chevron-down]="open.annotations" [class.pi-chevron-right]="!open.annotations"></i>
+      </div>
+      <div class="sc-panel-body" *ngIf="open.annotations">
+        <div class="sc-row">
+          <p-button label="Select from ROIs" icon="pi pi-object-group" size="small"
+                    [outlined]="true" (onClick)="selectFromRegions()"
+                    pTooltip="Select every observation inside the drawn regions"
+                    tooltipPosition="top"></p-button>
+          <p-button *ngIf="hasSelection" label="Clear" size="small" [text]="true"
+                    (onClick)="clearSelection()"></p-button>
+        </div>
+        <small class="sc-hint" *ngIf="hasSelection">
+          {{ selection.count | number }} of {{ ds.observations.count | number }} selected —
+          the rest are muted.
+        </small>
+        <small class="sc-hint" *ngIf="selectionMissed">
+          No observations fell inside the drawn regions.
+        </small>
+        <small class="sc-hint" *ngIf="is3d">
+          In 3D a region cuts through the cloud's full depth. Orbit and draw again
+          to cut from another angle.
+        </small>
+      </div>
+    </div>
+
+    <!-- Observations: one marker per observation (cell centroid, Visium spot), and what
+         colours them. The lead section for datasets without cell outlines. -->
+    <div class="sc-panel" [class.open]="open.observations">
+      <div class="sc-panel-head" (click)="toggleSection('observations')">
+        <p-checkbox [binary]="true" [ngModel]="view.showPoints" (click)="$event.stopPropagation()"
+                    (onChange)="onShowPoints($event.checked)"></p-checkbox>
+        <span class="sc-panel-title">Observations</span>
+        <i class="pi" [class.pi-chevron-down]="open.observations" [class.pi-chevron-right]="!open.observations"></i>
+      </div>
+      <div class="sc-panel-body" *ngIf="open.observations">
+        <small class="sc-hint" *ngIf="hasCells && !is3d">
+          One circle per cell. With cell outlines on, circles are only drawn where cells
+          are too small on screen to outline.
+        </small>
     <!-- Colour source. Column and gene are mutually exclusive: picking one
          clears the other, so what drives the colours is never ambiguous. -->
     <div class="sc-section">
@@ -113,15 +506,6 @@
 
     <!-- Display -->
     <div class="sc-section">
-      <!-- The circles: one per observation. Hidden, the tissue, the outlines and the
-           transcripts read on their own. (The 3D panel has its own switch below.) -->
-      <div class="sc-row" *ngIf="!is3d">
-        <p-checkbox [binary]="true" [ngModel]="view.showPoints" inputId="sc-points"
-                    (onChange)="onShowPoints($event.checked)"></p-checkbox>
-        <label class="sc-lbl" for="sc-points"
-               pTooltip="One circle per observation. With cell outlines on, circles are only drawn where cells are too small on screen to outline"
-               tooltipPosition="top">Show observations</label>
-      </div>
       <div class="sc-row">
         <span class="sc-lbl">Point size</span>
         <p-slider [ngModel]="view.pointScale" [min]="0.25" [max]="5" [step]="0.25"
@@ -136,194 +520,7 @@
       </div>
     </div>
 
-    <!-- Cells and transcripts: level-of-detail geometry for segmented / imaging
-         datasets. Outlines coarsen as the camera zooms out and disappear once a cell
-         is a few pixels wide (the markers draw it as a dot then); transcripts
-         aggregate into count-sized circles when zoomed out and resolve to one per
-         transcript at the finest zoom. 2D only for now. -->
-    <div class="sc-section" *ngIf="hasCells && !is3d">
-      <div class="sc-row">
-        <p-checkbox [binary]="true" [ngModel]="cellsOn" inputId="sc-cells"
-                    (onChange)="onShowCells($event.checked)"></p-checkbox>
-        <label class="sc-lbl" for="sc-cells">Show cells</label>
       </div>
-      <ng-container *ngIf="cellsOn">
-        <div class="sc-row sc-row-buttons" *ngIf="cellSetOptions.length > 1">
-          <span class="sc-lbl">Boundaries</span>
-          <p-selectButton [options]="cellSetOptions" optionLabel="label" optionValue="value"
-                          [ngModel]="activeCellSet" (ngModelChange)="onCellSet($event)"
-                          [allowEmpty]="false"></p-selectButton>
-        </div>
-        <div class="sc-row sc-row-buttons">
-          <span class="sc-lbl">Draw</span>
-          <p-selectButton [options]="cellDrawOptions" optionLabel="label" optionValue="value"
-                          [ngModel]="view.cellDraw" (ngModelChange)="onCellDraw($event)"
-                          [allowEmpty]="false"></p-selectButton>
-        </div>
-        <div class="sc-row" *ngIf="view.cellDraw !== 'outline'">
-          <span class="sc-lbl">Fill opacity</span>
-          <p-slider [ngModel]="view.cellOpacity" [min]="0.1" [max]="1" [step]="0.05"
-                    (onChange)="onCellOpacity($event.value)"></p-slider>
-          <span class="sc-val">{{ view.cellOpacity }}</span>
-        </div>
-      </ng-container>
-    </div>
-
-    <!-- What TYPE a cell is: colours the cells when no other colour source is chosen,
-         and colours each transcript by the cell it falls in. -->
-    <div class="sc-section" *ngIf="(hasCells || hasTranscripts) && cellTypeOptions.length && !is3d">
-      <label class="sc-lbl" for="sc-celltype">Cell types</label>
-      <p-dropdown inputId="sc-celltype" [options]="cellTypeOptions"
-                  optionLabel="label" optionValue="value"
-                  [ngModel]="activeCellTypeColumn" (ngModelChange)="onCellTypeColumn($event)"
-                  appendTo="body" styleClass="sc-full"></p-dropdown>
-      <div class="sc-row" *ngIf="curatedColumn">
-        <p-checkbox [binary]="true" [ngModel]="usingCurated" inputId="sc-curated"
-                    (onChange)="onUseCurated($event.checked)"></p-checkbox>
-        <label class="sc-lbl" for="sc-curated">Use curated cell types</label>
-      </div>
-      <ul class="sc-legend" *ngIf="cellTypeLegend.length && !view.colorBy">
-        <li *ngFor="let entry of cellTypeLegend">
-          <span class="sc-legend-btn sc-legend-static">
-            <span class="sc-swatch" [style.background]="entry.color"></span>
-            <span class="sc-legend-label">{{ entry.label }}</span>
-          </span>
-        </li>
-      </ul>
-    </div>
-
-    <div class="sc-section" *ngIf="hasTranscripts && !is3d">
-      <div class="sc-row sc-row-buttons sc-row-wide">
-        <span class="sc-lbl">Transcripts</span>
-        <p-selectButton [options]="transcriptModeOptions" optionLabel="label" optionValue="value"
-                        [ngModel]="view.transcriptMode" (ngModelChange)="onTranscriptMode($event)"
-                        [allowEmpty]="false"></p-selectButton>
-      </div>
-      <ng-container *ngIf="view.transcriptMode !== 'off'">
-        <!-- Every gene at once: grouped into bins sized by how many transcripts they hold,
-             finer as the camera zooms in, one marker per transcript once they fit. -->
-        <div class="sc-row" *ngIf="canShowAllGenes && view.transcriptMode !== 'density'">
-          <p-checkbox [binary]="true" [ngModel]="view.transcriptAllGenes" inputId="sc-tx-all"
-                      (onChange)="onTranscriptAllGenes($event.checked)"></p-checkbox>
-          <label class="sc-lbl" for="sc-tx-all">All genes (grouped by area)</label>
-        </div>
-        <small class="sc-hint" *ngIf="allGenesPreparing && view.transcriptMode !== 'density'">
-          {{ allGenesPreparing }}
-        </small>
-        <ng-container *ngIf="!showingAllGenes">
-        <label class="sc-lbl" for="sc-tx-genes">Genes</label>
-        <!-- The same list, search and virtual scroll as "Colour by gene", as a multi-select. -->
-        <p-multiSelect inputId="sc-tx-genes" [options]="geneOptions"
-                       optionLabel="label" optionValue="value"
-                       [ngModel]="view.transcriptGenes" (onChange)="onTranscriptGenes($event.value)"
-                       [filter]="true" filterBy="label" [resetFilterOnHide]="true"
-                       (onFilter)="onGeneFilter($event.filter)" (onPanelShow)="ensureGeneList()"
-                       [virtualScroll]="geneOptions.length > geneVirtualScrollFrom"
-                       [virtualScrollItemSize]="30" [showToggleAll]="false" display="chip"
-                       [emptyFilterMessage]="genesAreRemote ? 'No match — keep typing' : 'No match'"
-                       [emptyMessage]="genesAreRemote ? 'Type to search genes' : 'No genes'"
-                       appendTo="body" placeholder="Add genes…"
-                       styleClass="sc-full"></p-multiSelect>
-        <small class="sc-hint" *ngIf="!view.transcriptGenes.length">
-          Pick one or more genes to draw their transcripts.
-        </small>
-        </ng-container>
-
-        <ng-container *ngIf="view.transcriptMode !== 'density'">
-          <div class="sc-row">
-            <span class="sc-lbl">Colour by</span>
-            <p-selectButton [options]="transcriptColorOptions" optionLabel="label" optionValue="value"
-                            [ngModel]="view.transcriptColorBy"
-                            (ngModelChange)="onTranscriptColorBy($event)"
-                            [allowEmpty]="false"></p-selectButton>
-          </div>
-          <!-- One row per gene: its icon (glyph mode) and, when colouring by gene, its colour. -->
-          <ul class="sc-legend" *ngIf="showingAllGenes && view.transcriptMode === 'glyphs'">
-            <li class="sc-tx-gene">
-              <span class="sc-legend-label">All genes</span>
-              <p-dropdown [options]="glyphOptions" optionLabel="label" optionValue="value"
-                          [ngModel]="glyphOf('*', 0)" (ngModelChange)="onGlyph('*', $event)"
-                          appendTo="body" styleClass="sc-glyph-pick">
-                <ng-template let-opt pTemplate="item">
-                  <span class="sc-glyph-option">
-                    <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg"><polygon [attr.points]="opt.points"></polygon></svg>
-                    {{ opt.label }}
-                  </span>
-                </ng-template>
-                <ng-template let-opt pTemplate="selectedItem">
-                  <span class="sc-glyph-option">
-                    <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg"><polygon [attr.points]="opt?.points"></polygon></svg>
-                  </span>
-                </ng-template>
-              </p-dropdown>
-            </li>
-          </ul>
-          <ul class="sc-legend" *ngIf="!showingAllGenes && view.transcriptGenes.length">
-            <li *ngFor="let gene of view.transcriptGenes; index as i" class="sc-tx-gene">
-              <span class="sc-swatch" *ngIf="view.transcriptColorBy === 'gene'"
-                    [style.background]="geneColor(i)"></span>
-              <span class="sc-legend-label">{{ gene }}</span>
-              <p-dropdown *ngIf="view.transcriptMode === 'glyphs'"
-                          [options]="glyphOptions" optionLabel="label" optionValue="value"
-                          [ngModel]="glyphOf(gene, i)" (ngModelChange)="onGlyph(gene, $event)"
-                          appendTo="body" styleClass="sc-glyph-pick">
-                <ng-template let-opt pTemplate="item">
-                  <span class="sc-glyph-option">
-                    <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg"><polygon [attr.points]="opt.points"></polygon></svg>
-                    {{ opt.label }}
-                  </span>
-                </ng-template>
-                <ng-template let-opt pTemplate="selectedItem">
-                  <span class="sc-glyph-option">
-                    <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg"><polygon [attr.points]="opt?.points"></polygon></svg>
-                  </span>
-                </ng-template>
-              </p-dropdown>
-            </li>
-          </ul>
-          <div class="sc-row">
-            <span class="sc-lbl">Size</span>
-            <p-slider [ngModel]="view.transcriptScale" [min]="0.5" [max]="3" [step]="0.25"
-                      (onChange)="onTranscriptScale($event.value)"></p-slider>
-            <span class="sc-val">{{ view.transcriptScale }}×</span>
-          </div>
-          <div class="sc-row">
-            <span class="sc-lbl">Opacity</span>
-            <p-slider [ngModel]="view.transcriptOpacity" [min]="0.1" [max]="1" [step]="0.05"
-                      (onChange)="onTranscriptOpacity($event.value)"></p-slider>
-            <span class="sc-val">{{ view.transcriptOpacity }}</span>
-          </div>
-          <div class="sc-row">
-            <span class="sc-lbl"
-                  pTooltip="The most markers drawn at once; grouping gets coarser to stay under it. Lower is faster."
-                  tooltipPosition="top">Max markers</span>
-            <p-dropdown [options]="budgetOptions" optionLabel="label" optionValue="value"
-                        [ngModel]="view.transcriptBudget" (ngModelChange)="onTranscriptBudget($event)"
-                        appendTo="body"></p-dropdown>
-          </div>
-          <div class="sc-row" *ngIf="!showingAllGenes">
-            <p-checkbox [binary]="true" [ngModel]="view.transcriptQuality === 'all'" inputId="sc-tx-lowq"
-                        (onChange)="onTranscriptQuality($event.checked)"></p-checkbox>
-            <label class="sc-lbl" for="sc-tx-lowq">Include low-quality calls</label>
-          </div>
-          <small class="sc-hint" *ngIf="!showingAllGenes">
-            Zoomed out, each circle stands for many transcripts of a gene and grows with the
-            count; zoom in and they split until each is a single transcript.
-          </small>
-          <small class="sc-hint" *ngIf="showingAllGenes">
-            Every gene: each marker groups the transcripts in an area, larger where there are
-            more; zoom in and the groups get finer until each marker is one transcript.
-            Coloured by the cell contributing most of them.
-          </small>
-        </ng-container>
-
-        <div class="sc-row" *ngIf="view.transcriptMode === 'density'">
-          <span class="sc-lbl">Opacity</span>
-          <p-slider [ngModel]="view.densityOpacity" [min]="0.1" [max]="1" [step]="0.05"
-                    (onChange)="onDensityOpacity($event.value)"></p-slider>
-          <span class="sc-val">{{ view.densityOpacity }}</span>
-        </div>
-      </ng-container>
     </div>
 
     <!-- Only for a gene: the map draws that gene's expression as a field. In 2D
@@ -473,32 +670,6 @@
              control's right edge lines up with every slider's. -->
         <span class="sc-val"></span>
       </div>
-    </div>
-
-    <!-- Selection. Regions come from the existing ROI tools (rectangle, polygon,
-         freehand, wand, brush), so there is no separate marquee to learn. -->
-    <div class="sc-section sc-selection">
-      <div class="sc-row">
-        <p-button label="Select from ROIs" icon="pi pi-object-group" size="small"
-                  [outlined]="true" (onClick)="selectFromRegions()"
-                  pTooltip="Select every observation inside the drawn regions"
-                  tooltipPosition="top"></p-button>
-        <p-button *ngIf="hasSelection" label="Clear" size="small" [text]="true"
-                  (onClick)="clearSelection()"></p-button>
-      </div>
-      <small class="sc-hint" *ngIf="hasSelection">
-        {{ selection.count | number }} of {{ ds.observations.count | number }} selected —
-        the rest are muted.
-      </small>
-      <small class="sc-hint" *ngIf="selectionMissed">
-        No observations fell inside the drawn regions.
-      </small>
-      <!-- A lasso on a 2D screen cannot pick a depth, so say what it does pick
-           rather than letting the count look like a mistake. -->
-      <small class="sc-hint" *ngIf="is3d">
-        In 3D a region cuts through the cloud's full depth. Orbit and draw again
-        to cut from another angle.
-      </small>
     </div>
 
     <!-- Distributions of whatever the map is coloured by. In the SAME dialog as

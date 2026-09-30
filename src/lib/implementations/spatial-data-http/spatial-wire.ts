@@ -282,13 +282,19 @@ export function decodeTranscriptTile(buf: ArrayBuffer): SpatialTranscriptTile {
   };
 }
 
-/** `GET /density?genes=` → the summed raster, row-major. */
-export function decodeDensity(
-  buf: ArrayBuffer, meta: SpatialDensityMeta, genes: string[],
-): SpatialDensityRaster {
+/**
+ * `GET /density?genes=&bin=` → the summed raster. Layout
+ * `[u32 rows][u32 cols][f32 cellW][f32 cellH][f32 originX][f32 originY][f32 rows·cols]`:
+ * the geometry travels with the values because re-binning changes it.
+ */
+export function decodeDensity(buf: ArrayBuffer, genes: string[]): SpatialDensityRaster {
   assertLittleEndian();
-  assertByteLength(buf, meta.rows * meta.cols * 4, 'density');
-  return { meta, genes, values: new Float32Array(buf) };
+  if (buf.byteLength < 24) throw new Error('[spatial] density: response too short for a header');
+  const [rows, cols] = new Uint32Array(buf, 0, 2);
+  const [cw, ch, ox, oy] = new Float32Array(buf, 8, 4);
+  assertByteLength(buf, 24 + rows * cols * 4, 'density');
+  const meta: SpatialDensityMeta = { rows, cols, gridSize: [cw, ch], origin: [ox, oy] };
+  return { meta, genes, values: new Float32Array(buf, 24, rows * cols) };
 }
 
 /**

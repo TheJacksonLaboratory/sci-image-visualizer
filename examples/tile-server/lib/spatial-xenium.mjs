@@ -28,7 +28,7 @@
 //   Every coordinate served is in MICRONS, the bundle's native unit. `imageRef.scale`
 //   (1 / pixel_size) maps microns onto the morphology image's pixel grid.
 
-import { open as openFile, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, open as openFile, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { openByteSource } from './xenium/byte-source.mjs';
@@ -67,6 +67,7 @@ async function discover(xeniumDir) {
         out.set(id, {
           id, name: cfg.name ?? id, source: rel(cfg.source), cellTypes: rel(cfg.cellTypes),
           transcriptIndex: rel(cfg.transcriptIndex) ?? path.join(xeniumDir, `${id}.transcripts`),
+          derivedDir: path.join(xeniumDir, `${id}.derived`),
         });
       } else if (e.isFile() && e.name.endsWith('_xe_outs.zip')) {
         const id = e.name.slice(0, -'_xe_outs.zip'.length).toLowerCase().replace(/[^a-z0-9._-]/g, '-');
@@ -74,6 +75,7 @@ async function discover(xeniumDir) {
           out.set(id, {
             id, name: e.name.slice(0, -'_xe_outs.zip'.length).replace(/_/g, ' '), source: full,
             transcriptIndex: path.join(xeniumDir, `${id}.transcripts`),
+            derivedDir: path.join(xeniumDir, `${id}.derived`),
           });
         }
       } else if (e.isDirectory() && SAFE_ID.test(e.name)) {
@@ -82,6 +84,7 @@ async function discover(xeniumDir) {
           out.set(e.name, {
             id: e.name, name: e.name, source: full,
             transcriptIndex: path.join(xeniumDir, `${e.name}.transcripts`),
+            derivedDir: path.join(xeniumDir, `${e.name}.derived`),
           });
         }
       }
@@ -273,12 +276,21 @@ function boundsOf(x, y) {
 // ---------------------------------------------------------------------------
 
 const GROUPING_LABELS = {
-  gene_expression_graphclust: 'Graph-based clusters (10x)',
+  gene_expression_graphclust: 'Graph-Based Clustering (GEX)',
 };
+/** Where 10x's own groupings are listed — Xenium Explorer's heading for them. */
+const ONBOARD_SECTION = 'Xenium Onboard Analysis groups';
+
 function groupingLabel(name) {
   if (GROUPING_LABELS[name]) return GROUPING_LABELS[name];
   const k = /kmeans_(\d+)_clusters/.exec(name);
-  return k ? `K-means, k=${k[1]} (10x)` : name;
+  return k ? `K-Means Clustering (GEX), k=${k[1]}` : name;
+}
+
+/** The k-means runs are one choice with a k picker, as in Xenium Explorer. */
+function groupingFamily(name) {
+  const k = /kmeans_(\d+)_clusters/.exec(name);
+  return k ? { id: 'kmeans', label: 'K-Means Clustering (GEX)', variant: `k = ${k[1]}` } : undefined;
 }
 
 async function buildColumns(ds) {
@@ -288,8 +300,12 @@ async function buildColumns(ds) {
     for (let g = 0; g < (ga?.number_groupings ?? 0); g++) {
       const name = ga.grouping_names[g];
       const categories = ga.group_names[g];
+      const family = groupingFamily(name);
       cols.push({
-        meta: { kind: 'categorical', name, description: groupingLabel(name), categories },
+        meta: {
+          kind: 'categorical', name, description: groupingLabel(name), categories,
+          section: ONBOARD_SECTION, ...(family ? { family } : {}),
+        },
         load: async () => {
           const [indices, indptr] = await Promise.all([
             ds.analysis.read(`cell_groups/${g}/indices`),
@@ -317,7 +333,195 @@ async function buildColumns(ds) {
   metric('cell_area', 'Cell area', ds.area, 'µm²');
   metric('nucleus_area', 'Nucleus area', ds.nucleusArea, 'µm²');
   metric('nucleus_count', 'Nuclei per cell', ds.nucleusCount);
+
+  // How each cell was segmented (boundary stain, interior stain, nucleus expansion, …).
+  const methods = ds.cellsAttrs.segmentation_methods;
+  const cellSet = ds.polygonGrids.find((g) => g.name === 'cell')?.index;
+  if (methods?.length && cellSet !== undefined && ds.cells.has(`polygon_sets/${cellSet}/method/.zarray`)) {
+    cols.push({
+      meta: {
+        kind: 'categorical', name: 'segmentation_method', description: 'Segmentation method',
+        categories: methods, section: 'Segmentation',
+      },
+      load: async () => {
+        const [method, owner] = await Promise.all([
+          ds.cells.read(`polygon_sets/${cellSet}/method`),
+          ds.cells.read(`polygon_sets/${cellSet}/cell_index`),
+        ]);
+        const codes = new Uint16Array(ds.count).fill(NO_CATEGORY);
+        for (let i = 0; i < owner.data.length; i++) codes[owner.data[i]] = method.data[i];
+        return codes;
+      },
+    });
+  }
+
+  // Transcripts per cell and per µm², summed from the cell-major matrix on first use and
+  // cached next to the dataset — one pass over ~600 M counts.
+  if (ds.features) {
+    const counts = () => derived(ds, 'transcript_count', () => cellTranscriptCounts(ds));
+    cols.push({
+      meta: { kind: 'continuous', name: 'transcript_count', description: 'Transcripts per cell', unit: 'transcripts', logScaleHint: true },
+      load: counts,
+    });
+    cols.push({
+      meta: { kind: 'continuous', name: 'transcript_density', description: 'Transcript density', unit: 'transcripts / µm²' },
+      load: async () => {
+        const c = await counts();
+        const d = new Float32Array(ds.count);
+        for (let i = 0; i < ds.count; i++) d[i] = ds.area[i] > 0 ? c[i] / ds.area[i] : 0;
+        return d;
+      },
+    });
+  }
+
+  // Groups imported through the viewer ('+'), persisted next to the dataset.
+  for (const imported of await loadImportedGroups(ds)) cols.push(imported);
   return cols;
+}
+
+/**
+ * A derived per-cell vector, computed once and cached as `<derivedDir>/<name>.f32` — so a
+ * server restart does not redo a full pass over the matrix.
+ */
+async function derived(ds, name, compute) {
+  return chunkCache.get(`${ds.cfg.source}|derived|${name}`, async () => {
+    const file = ds.cfg.derivedDir ? path.join(ds.cfg.derivedDir, `${name}.f32`) : null;
+    if (file) {
+      try {
+        const buf = await readFile(file);
+        if (buf.length === ds.count * 4) return new Float32Array(buf.buffer, buf.byteOffset, ds.count);
+      } catch { /* not cached yet */ }
+    }
+    const t0 = Date.now();
+    const v = await compute();
+    console.log(`[xenium] ${ds.cfg.id}: computed ${name} in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    if (file) {
+      await mkdir(ds.cfg.derivedDir, { recursive: true });
+      await writeFile(`${file}.partial`, Buffer.from(v.buffer, v.byteOffset, v.byteLength));
+      await rename(`${file}.partial`, file);
+    }
+    return v;
+  });
+}
+
+/** Sum of every feature's count per cell, from the cell-major (CSC) matrix. */
+async function cellTranscriptCounts(ds) {
+  const indptr = (await ds.features.read('cell_features/csc/indptr')).data;
+  const meta = await ds.features.meta('cell_features/csc/data');
+  const cs = meta.chunks[0];
+  const out = new Float32Array(ds.count);
+  let cell = 0;
+  for (let c = 0; c * cs < meta.shape[0]; c++) {
+    const chunk = await ds.features.chunk('cell_features/csc/data', meta, [c]);
+    const base = c * cs;
+    const end = Math.min(meta.shape[0], base + cs);
+    for (let k = base; k < end; k++) {
+      while (cell < ds.count && k >= indptr[cell + 1]) cell++;
+      out[cell] += chunk[k - base];
+    }
+  }
+  return out;
+}
+
+/** Parse a `cell_id,group` table and join it onto the observations. */
+async function joinCellGroups(ds, text, name, description, section) {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 2) throw new RangeError('the table needs a header row and at least one cell');
+  const split = (l) => l.split(/,|\t/).map((f) => f.trim().replace(/^"|"$/g, ''));
+  const header = split(lines[0]);
+  const idCol = header.findIndex((h) => /^(cell_id|cell|barcode)$/i.test(h));
+  let labelCol = header.findIndex((h) => /^(cell_?type|group|label|annotation|cluster)$/i.test(h));
+  if (labelCol < 0) labelCol = header.findIndex((_, i) => i !== idCol);
+  if (idCol < 0 || labelCol < 0) throw new RangeError('the table needs a cell_id column and a group column');
+  const byId = new Map();
+  for (let i = 1; i < lines.length; i++) {
+    const f = split(lines[i]);
+    if (f[idCol]) byId.set(f[idCol], f[labelCol]);
+  }
+  const ids = await chunkCache.get(`${ds.cfg.source}|cell_id`, async () => (await ds.cells.read('cell_id')).data);
+  // Categories ordered by size, largest first — how Xenium Explorer lists groups.
+  const sizes = new Map();
+  for (const v of byId.values()) sizes.set(v, (sizes.get(v) ?? 0) + 1);
+  const categories = [...sizes.keys()].sort((a, b) => sizes.get(b) - sizes.get(a) || a.localeCompare(b));
+  const code = new Map(categories.map((c, i) => [c, i]));
+  const codes = new Uint16Array(ds.count).fill(NO_CATEGORY);
+  let matched = 0;
+  for (let i = 0; i < ds.count; i++) {
+    const label = byId.get(xeniumCellId(ids[2 * i], ids[2 * i + 1]));
+    if (label !== undefined) {
+      codes[i] = code.get(label);
+      matched++;
+    }
+  }
+  if (!matched) throw new RangeError('no cell ids in the table match this dataset');
+  return {
+    meta: { kind: 'categorical', name, description, categories, section },
+    load: async () => codes,
+    matched,
+  };
+}
+
+async function loadImportedGroups(ds) {
+  if (!ds.cfg.derivedDir) return [];
+  const dir = path.join(ds.cfg.derivedDir, 'groups');
+  let files;
+  try {
+    files = (await readdir(dir)).filter((f) => f.endsWith('.csv')).sort();
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const f of files) {
+    try {
+      const label = f.slice(0, -4);
+      out.push(await joinCellGroups(ds, await readFile(path.join(dir, f), 'utf8'),
+        `imported:${label}`, label, 'Imported groups'));
+    } catch (err) {
+      console.warn(`[xenium] ${ds.cfg.id}: skipping imported group ${f}: ${err.message}`);
+    }
+  }
+  return out;
+}
+
+/**
+ * Import a cell grouping (CSV/TSV of `cell_id,group`) under `label`: joined now, added to
+ * the dataset's columns, and saved so it is there after a restart.
+ */
+export async function xeniumImportGroups(xeniumDir, id, label, text) {
+  const ds = await dataset(xeniumDir, id);
+  const clean = String(label ?? '').trim().replace(/[^\w .()-]/g, '').slice(0, 60);
+  if (!clean) throw new RangeError('a group name is required');
+  const name = `imported:${clean}`;
+  const col = await joinCellGroups(ds, text, name, clean, 'Imported groups');
+  ds.columns = ds.columns.filter((c) => c.meta.name !== name).concat(col);
+  if (ds.cfg.derivedDir) {
+    const dir = path.join(ds.cfg.derivedDir, 'groups');
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, `${clean}.csv`), text);
+  }
+  return { column: col.meta, matched: col.matched, count: ds.count };
+}
+
+/** Total transcripts per gene (all qualities), and the dataset total — for estimates. */
+export async function xeniumTranscriptCounts(xeniumDir, id, genes) {
+  const ds = await dataset(xeniumDir, id);
+  if (!ds.geneTotals) {
+    const perCodeword = ds.gridAttrs.codeword_to_transcript_counts ?? [];
+    const mapping = ds.txAttrs.codeword_gene_mapping ?? [];
+    ds.geneTotals = new Float64Array(ds.geneNames.length);
+    for (let c = 0; c < perCodeword.length; c++) {
+      const g = mapping[c];
+      if (g >= 0 && g < ds.geneTotals.length) ds.geneTotals[g] += perCodeword[c];
+    }
+  }
+  const counts = {};
+  for (const g of genes) {
+    const i = ds.geneIndex.get(g);
+    if (i !== undefined) counts[g] = ds.geneTotals[i];
+  }
+  let real = 0;
+  for (let g = 0; g < ds.geneTotals.length; g++) if (ds.geneIsReal[g]) real += ds.geneTotals[g];
+  return { counts, total: real, bounds: ds.bounds };
 }
 
 function minMax(v) {
@@ -346,49 +550,16 @@ export function xeniumCellId(prefix, suffix) {
  * id string, so it works with tables exported from Xenium Explorer or scanpy alike.
  */
 async function loadCuratedCellTypes(ds) {
-  let text;
   try {
-    text = (await readFile(ds.cfg.cellTypes, 'utf8'));
+    const text = await readFile(ds.cfg.cellTypes, 'utf8');
+    const col = await joinCellGroups(ds, text, 'curated_cell_type',
+      `Curated cell types (${path.basename(ds.cfg.cellTypes)})`, 'Imported groups');
+    console.log(`[xenium] ${ds.cfg.id}: curated cell types matched ${col.matched}/${ds.count} cells`);
+    return col;
   } catch (err) {
-    console.warn(`[xenium] ${ds.cfg.id}: cannot read cellTypes ${ds.cfg.cellTypes}: ${err.message}`);
+    console.warn(`[xenium] ${ds.cfg.id}: cannot use cellTypes ${ds.cfg.cellTypes}: ${err.message}`);
     return null;
   }
-  const lines = text.split(/\r?\n/).filter(Boolean);
-  const header = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, ''));
-  const idCol = header.findIndex((h) => /^(cell_id|cell|barcode)$/i.test(h));
-  let labelCol = header.findIndex((h) => /^(cell_?type|group|label|annotation)$/i.test(h));
-  if (labelCol < 0) labelCol = header.findIndex((_, i) => i !== idCol);
-  if (idCol < 0 || labelCol < 0) {
-    console.warn(`[xenium] ${ds.cfg.id}: cellTypes needs a cell_id column and a label column`);
-    return null;
-  }
-  const byId = new Map();
-  for (let i = 1; i < lines.length; i++) {
-    const f = lines[i].split(',').map((s) => s.trim().replace(/^"|"$/g, ''));
-    byId.set(f[idCol], f[labelCol]);
-  }
-  const ids = await ds.cells.read('cell_id');
-  const categories = [...new Set(byId.values())].sort();
-  const code = new Map(categories.map((c, i) => [c, i]));
-  const codes = new Uint16Array(ds.count).fill(NO_CATEGORY);
-  let matched = 0;
-  for (let i = 0; i < ds.count; i++) {
-    const label = byId.get(xeniumCellId(ids.data[2 * i], ids.data[2 * i + 1]));
-    if (label !== undefined) {
-      codes[i] = code.get(label);
-      matched++;
-    }
-  }
-  console.log(`[xenium] ${ds.cfg.id}: curated cell types matched ${matched}/${ds.count} cells`);
-  return {
-    meta: {
-      kind: 'categorical',
-      name: 'curated_cell_type',
-      description: `Curated cell types (${path.basename(ds.cfg.cellTypes)})`,
-      categories,
-    },
-    load: async () => codes,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -432,7 +603,8 @@ export async function xeniumManifest(xeniumDir, id, { imageExists } = {}) {
     transcriptTiles: {
       bounds: ds.bounds,
       count: ds.experiment.num_transcripts_high_quality || undefined,
-      geneCount: ds.geneNames.length,
+      // Real genes — Xenium Explorer's denominator; the rest are control codewords.
+      geneCount: ds.geneIsReal.reduce((n, v) => n + v, 0),
       hasZ: true,
       levels: ds.transcriptLevels.map((_, l) => ({ tileSize: levels0 * 2 ** l, aggregated: l > 0 })),
       // Levels at or below this one carry an exact per-transcript cell assignment; above
@@ -1014,10 +1186,39 @@ function buildCellGrid(ds) {
 // Density
 // ---------------------------------------------------------------------------
 
-/** Summed per-gene transcript counts on the bundle's density grid, as `f32[rows × cols]`. */
-export async function xeniumDensity(xeniumDir, id, genes) {
+/**
+ * Summed transcript counts on the bundle's 10 µm density grid, re-binned to `bin` µm
+ * (10, 20, 40 or 80 — whole multiples of the grid), for `genes` or `['*']` for every real
+ * gene. Layout: `[u32 rows][u32 cols][f32 cellW][f32 cellH][f32 originX][f32 originY]`
+ * then `f32[rows × cols]`.
+ */
+export async function xeniumDensity(xeniumDir, id, genes, bin = 10) {
   const ds = await dataset(xeniumDir, id);
   if (!ds.densityAttrs) throw new RangeError('no density grid in this bundle');
+  const { rows, cols } = ds.densityAttrs;
+  const base = ds.densityAttrs.grid_size[0];
+  const f = Math.max(1, Math.round(bin / base));
+  if (![1, 2, 4, 8].includes(f)) throw new RangeError('bin must be 10, 20, 40 or 80 µm');
+  const fine = genes.length === 1 && genes[0] === '*'
+    ? await derived(ds, 'density_all_genes', () => allGenesDensity(ds))
+    : await genesDensity(ds, genes);
+  const R = Math.ceil(rows / f);
+  const C = Math.ceil(cols / f);
+  const out = Buffer.alloc(24 + R * C * 4);
+  out.writeUInt32LE(R, 0);
+  out.writeUInt32LE(C, 4);
+  out.writeFloatLE(base * f, 8);
+  out.writeFloatLE(ds.densityAttrs.grid_size[1] * f, 12);
+  out.writeFloatLE(ds.densityAttrs.origin.x, 16);
+  out.writeFloatLE(ds.densityAttrs.origin.y, 20);
+  const v = new Float32Array(out.buffer, out.byteOffset + 24, R * C);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) v[Math.floor(r / f) * C + Math.floor(c / f)] += fine[r * cols + c];
+  }
+  return out;
+}
+
+async function genesDensity(ds, genes) {
   const { rows, cols } = ds.densityAttrs;
   const densityNames = ds.densityAttrs.gene_names;
   const indptr = await chunkCache.get(`${ds.cfg.source}|density-indptr`,
@@ -1039,5 +1240,32 @@ export async function xeniumDensity(xeniumDir, id, genes) {
       }
     }
   }
-  return Buffer.from(out.buffer);
+  return out;
+}
+
+/** Every real gene's density summed, streaming the CSR once, chunk by chunk. */
+async function allGenesDensity(ds) {
+  const { rows, cols } = ds.densityAttrs;
+  const names = ds.densityAttrs.gene_names;
+  const real = names.map((n) => ds.geneIsReal[ds.geneIndex.get(n)] ?? 0);
+  const indptr = (await ds.transcripts.read('density/gene/indptr')).data;
+  const im = await ds.transcripts.meta('density/gene/indices');
+  const dm = await ds.transcripts.meta('density/gene/data');
+  const cs = im.chunks[0];
+  const out = new Float32Array(rows * cols);
+  let row = 0; // CSR row = gene * rows + r
+  for (let c = 0; c * cs < im.shape[0]; c++) {
+    const [idx, dat] = await Promise.all([
+      ds.transcripts.chunk('density/gene/indices', im, [c]),
+      ds.transcripts.chunk('density/gene/data', dm, [c]),
+    ]);
+    const base = c * cs;
+    const end = Math.min(im.shape[0], base + cs);
+    for (let k = base; k < end; k++) {
+      while (k >= indptr[row + 1]) row++;
+      if (!real[Math.floor(row / rows)]) continue;
+      out[(row % rows) * cols + idx[k - base]] += dat[k - base];
+    }
+  }
+  return out;
 }

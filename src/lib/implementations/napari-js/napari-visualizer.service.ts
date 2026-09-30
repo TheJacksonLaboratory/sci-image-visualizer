@@ -58,8 +58,9 @@ import { defaultSigma, densityGrid, rasterizeDensity } from '../../spatial/spati
 import { observationsInSection, sectionsOf } from '../../spatial/spatial-sections';
 import { type HoverSource, hoverText, nearestObservation } from '../../spatial/spatial-hover';
 import { NapariSpatialTooltip } from './napari-spatial-tooltip';
-import { NapariSpatialTileLayers } from './napari-spatial-tiles';
+import { NapariSpatialTileLayers, TranscriptEstimate } from './napari-spatial-tiles';
 import { NapariNavigator } from './napari-navigator';
+import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
 import { NAPARI_WHEEL_ZOOM_SPEED } from './napari-zoom';
 
 /**
@@ -437,6 +438,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   /** Level-of-detail cell outlines, transcripts and density over the 2D view — created on
    *  first use, and only when a spatial port is bound. */
   private spatialTilesMgr: NapariSpatialTileLayers | null = null;
+  /** For the panel: the transcripts-in-view estimate and the density window in use. */
+  readonly transcriptEstimate$ = new BehaviorSubject<TranscriptEstimate | null>(null);
+  readonly densityStats$ = new BehaviorSubject<{ lo: number; hi: number; max: number } | null>(null);
   /** Latest (dataset, view, selection) the spatial subscription saw, so a slice
    *  change can rebuild the markers for the new plane. */
   private spatialLatest: [SpatialDataset | null, SpatialViewState, SpatialSelectionMask] | null =
@@ -1864,6 +1868,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         const node = this.currentColormap as { data?: { value?: unknown } } | null;
         return spatialContinuousLut(node?.data?.value, this.currentReverse, view.continuousColormap);
       },
+      estimateChanged: (e) => this.transcriptEstimate$.next(e),
+      densityChanged: (d) => this.densityStats$.next(d),
       polygonsShownChanged: () => {
         if (this.spatialPoints) this.spatialPoints.visible = this.spatialPointsVisible();
         this.viewer?.requestRender();
@@ -2435,6 +2441,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       this.spatialPoints.size = size;
       this.spatialPoints.visible = this.spatialPointsVisible();
       this.spatialPoints.faceColor = this.gatherColors(faceColor, slab?.indices) as never;
+      this.hideForeignImage(viewer, (!!ref || !!dataset.volume) && view.showImage !== false);
       viewer.requestRender();
       return;
     }
@@ -2472,7 +2479,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // Outlines, density and transcripts go back over the markers just added.
     this.spatialTilesMgr?.afterObservations();
     this.frameSpatialPointsOnce(viewer, dataset.id, positions, !!ref);
-    this.hideForeignImage(viewer, !!ref || !!dataset.volume);
+    this.hideForeignImage(viewer, (!!ref || !!dataset.volume) && view.showImage !== false);
     this.setRegionGridFor(dataset, positions);
   }
 
@@ -3521,11 +3528,23 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     if (colorBy.kind === 'column') {
       const column: SpatialColumn = await port.getColumn(colorBy.name);
       if (isCategoricalColumn(column)) {
-        return toRgbaTuples(encodeCategorical(column.codes, {
+        const rgba = encodeCategorical(column.codes, {
           colors: resolveCategoryColors(column.meta),
           opacity: view.opacity,
           muted,
-        }));
+        });
+        // Groups switched off in the Cells panel hide their dots too, when the dots are
+        // coloured by that same grouping.
+        const groupColumn = cellTypeColumnFor(dataset, view);
+        if (view.hiddenGroups?.length && groupColumn === colorBy.name) {
+          const off = new Set(view.hiddenGroups);
+          const hide = column.meta.categories.map((c) => off.has(c));
+          for (let i = 0; i < column.codes.length; i++) {
+            const c = column.codes[i];
+            if (c !== NO_CATEGORY && hide[c]) rgba[4 * i + 3] = 0;
+          }
+        }
+        return toRgbaTuples(rgba);
       }
       // A continuous column may carry its own log hint (counts); the view's
       // toggle wins once the user has set it.

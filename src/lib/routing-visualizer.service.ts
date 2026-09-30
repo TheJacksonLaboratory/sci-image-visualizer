@@ -619,6 +619,14 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
         const q = query.toLowerCase();
         return names.filter((n) => n.toLowerCase().includes(q)).slice(0, limit);
       },
+      ...(port.importGroups ? {
+        importGroups: (label: string, table: string) => port.importGroups!(label, table),
+      } : {}),
+      ...(port.getTranscriptCounts ? {
+        transcriptCounts: (genes: string[]) => port.getTranscriptCounts!(genes),
+      } : {}),
+      getTranscriptEstimate$: () => this.napari.transcriptEstimate$.asObservable(),
+      getDensityStats$: () => this.napari.densityStats$.asObservable(),
       categoryColors: async (name: string) => {
         const column = await port.getColumn(name);
         if (!isCategoricalColumn(column)) {

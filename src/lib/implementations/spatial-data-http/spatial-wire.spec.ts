@@ -275,12 +275,15 @@ describe('spatial-wire — tiled geometry', () => {
     expect(t.aggregated).toBe(false);
   });
 
-  it('decodes a density raster and checks its size against the metadata', () => {
-    const meta = { gridSize: [10, 10] as [number, number], origin: [0, 0] as [number, number], rows: 2, cols: 3 };
-    const r = decodeDensity(Float32Array.from([0, 1, 2, 3, 4, 5]).buffer, meta, ['EPCAM']);
+  it('decodes a density raster with the geometry it carries (re-binning changes it)', () => {
+    const buf = concat(Uint32Array.from([2, 3]), Float32Array.from([40, 40, -10, -10]),
+      Float32Array.from([0, 1, 2, 3, 4, 5]));
+    const r = decodeDensity(buf, ['EPCAM']);
+    expect(r.meta).toEqual({ rows: 2, cols: 3, gridSize: [40, 40], origin: [-10, -10] });
     expect(r.values[5]).toBe(5);
     expect(r.genes).toEqual(['EPCAM']);
-    expect(() => decodeDensity(new Float32Array(5).buffer, meta, [])).toThrow(/density/);
+    const short = concat(Uint32Array.from([2, 3]), Float32Array.from([40, 40, 0, 0]), new Float32Array(5));
+    expect(() => decodeDensity(short, [])).toThrow(/density/);
   });
 
   it('passes the tiled metadata from the manifest through to the dataset', () => {

@@ -11,6 +11,8 @@ import {
   SpatialEmbedding,
   SpatialPolygonTile,
   SpatialPolygons,
+  CategoricalColumnMeta,
+  SpatialTranscriptCounts,
   SpatialTranscriptSummary,
   SpatialTranscriptTile,
   findColumnMeta,
@@ -330,17 +332,42 @@ export class SpatialDataHttpService implements SpatialDataPort {
     return hit;
   }
 
-  getDensity(genes: string[]): Promise<SpatialDensityRaster> {
+  getDensity(genes: string[], binSize?: number): Promise<SpatialDensityRaster> {
     const manifest = this.requireManifest();
-    const meta = manifest.density;
-    if (!meta) return Promise.reject(new Error('[spatial] this dataset has no density raster'));
+    if (!manifest.density) return Promise.reject(new Error('[spatial] this dataset has no density raster'));
     const list = [...genes];
+    const bin = binSize ? `&bin=${binSize}` : '';
     return this.fetchCached(
-      `density:${list.join(',')}`,
+      `density:${list.join(',')}:${binSize ?? ''}`,
       () => this.getBinary(
-        `spatial/${encodeURIComponent(manifest.id)}/density?genes=${list.map(encodeURIComponent).join(',')}`,
-      ).then((buf) => decodeDensity(buf, meta, list)),
+        `spatial/${encodeURIComponent(manifest.id)}/density?genes=${list.map(encodeURIComponent).join(',')}${bin}`,
+      ).then((buf) => decodeDensity(buf, list)),
     ) as Promise<SpatialDensityRaster>;
+  }
+
+  async importGroups(label: string, table: string): Promise<{ column: CategoricalColumnMeta; matched: number }> {
+    const manifest = this.requireManifest();
+    const url = `${this.baseUrl}spatial/${encodeURIComponent(manifest.id)}/groups?name=${encodeURIComponent(label)}`;
+    const res = await fetch(url, { method: 'POST', body: table, headers: { 'Content-Type': 'text/csv' } });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body?.error ?? `[spatial] import failed (HTTP ${res.status})`);
+    const column = body.column as CategoricalColumnMeta;
+    // The new column joins the dataset: re-emit so every panel sees it.
+    const current = this.dataset$.value;
+    if (current && this.manifest?.id === manifest.id) {
+      const columns = current.columns.filter((c) => c.name !== column.name).concat(column);
+      this.manifest = { ...this.manifest, columns };
+      this.cache.delete(`column:${column.name}`);
+      this.dataset$.next({ ...current, columns });
+    }
+    return { column, matched: body.matched };
+  }
+
+  getTranscriptCounts(genes: string[]): Promise<SpatialTranscriptCounts> {
+    const manifest = this.requireManifest();
+    return this.getJson<SpatialTranscriptCounts>(
+      `spatial/${encodeURIComponent(manifest.id)}/transcript-counts?genes=${genes.map(encodeURIComponent).join(',')}`,
+    );
   }
 
   /** LRU over tile promises, so concurrent asks share one request and a failure is not kept. */

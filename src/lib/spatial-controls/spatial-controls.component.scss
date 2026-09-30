@@ -299,3 +299,224 @@
 .sc-row-wide .sc-lbl {
   flex: 0 0 auto;
 }
+
+// ── Xenium Explorer-style collapsible sections ─────────────────────────────────────
+.sc-panel {
+  border: 1px solid var(--surface-border, #dee2e6);
+  border-radius: 6px;
+  margin-bottom: 0.5rem;
+  overflow: hidden;
+}
+
+.sc-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.7rem;
+  cursor: pointer;
+  user-select: none;
+  background: var(--surface-100, #f5f6f7);
+
+  .sc-panel-title {
+    flex: 1;
+    font-weight: 600;
+  }
+}
+
+// The open section's header takes the accent, as Explorer highlights it.
+.sc-panel.open > .sc-panel-head {
+  background: var(--primary-color, #2196f3);
+  color: var(--primary-color-text, #fff);
+}
+
+.sc-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.6rem 0.75rem 0.75rem;
+}
+
+// Section sub-heading with a rule: BOUNDARIES ───────
+.sc-subhead {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-color-secondary, #6c757d);
+
+  &::after {
+    content: '';
+    flex: 1;
+    border-top: 1px solid var(--surface-border, #dee2e6);
+  }
+}
+
+:host ::ng-deep .sc-buttons .p-button {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+// Picker + side buttons on one line: [ dropdown ][k][+]
+.sc-row-picker {
+  p-dropdown, p-multiSelect, p-treeSelect { flex: 1 1 0; min-width: 0; }
+  :host ::ng-deep & .sc-variant { width: 6.5rem; }
+}
+:host ::ng-deep .sc-row-picker p-multiselect .p-multiselect { width: 100%; }
+:host ::ng-deep .sc-row-picker p-dropdown:has(.sc-variant) { flex: 0 0 6.5rem; }
+:host ::ng-deep .sc-row-picker p-treeselect:has(.sc-palette) { flex: 0 0 3rem; }
+:host ::ng-deep .sc-palette .p-treeselect-label { width: 0; padding: 0; }
+
+.sc-icon-btn {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 0.25rem 0.35rem;
+  font: inherit;
+  font-size: 1.05rem;
+  color: var(--text-color, #333);
+  border-radius: 4px;
+
+  &:hover { background: var(--surface-200, #e9ecef); }
+  &.active { color: var(--primary-color, #2196f3); font-weight: 700; }
+  &:disabled { opacity: 0.5; cursor: default; }
+}
+
+.sc-small-btn {
+  margin-left: auto;
+  border: 1px solid var(--surface-border, #ced4da);
+  background: var(--surface-0, #fff);
+  border-radius: 4px;
+  padding: 0.2rem 0.6rem;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+:host ::ng-deep .sc-group-heading {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+// Group list and gene tree: compact rows with checkbox/eye, dot, label, count.
+.sc-group-list,
+.sc-gene-tree {
+  max-height: 16rem;
+  overflow-y: auto;
+  border: 1px solid var(--surface-border, #dee2e6);
+  border-radius: 4px;
+  padding: 0.25rem 0.4rem;
+}
+
+.sc-group-row,
+.sc-gene-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.15rem 0;
+  font-size: 0.88rem;
+
+  .sc-group-label {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.sc-group-all,
+.sc-gene-root,
+.sc-gene-group {
+  font-weight: 600;
+  .sc-icon-btn { margin-left: auto; font-size: 0.85rem; }
+}
+.sc-gene-group { padding-left: 1rem; }
+.sc-gene-leaf { padding-left: 1rem; }
+.sc-gene-leaf.nested { padding-left: 2rem; }
+
+.sc-count {
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+  color: var(--text-color-secondary, #6c757d);
+}
+
+.sc-dot {
+  flex: 0 0 auto;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+// A colour dot that opens the native colour picker.
+.sc-dot-pick {
+  position: relative;
+  cursor: pointer;
+  input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+}
+
+.sc-eye {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  color: var(--text-color-secondary, #6c757d);
+  .pi-eye { color: var(--text-color, #333); }
+}
+
+.sc-gene-footer {
+  text-align: right;
+  font-size: 0.78rem;
+  padding: 0.2rem 0;
+  color: var(--text-color-secondary, #6c757d);
+}
+
+.sc-color-input {
+  width: 2.5rem;
+  height: 1.8rem;
+  border: 1px solid var(--surface-border, #ced4da);
+  border-radius: 4px;
+  padding: 0;
+  background: none;
+}
+
+// Points estimate meter: Explorer's bar.
+.sc-meter {
+  height: 0.45rem;
+  border-radius: 3px;
+  background: var(--surface-200, #e9ecef);
+  overflow: hidden;
+}
+.sc-meter-fill {
+  height: 100%;
+  background: var(--primary-color, #2196f3);
+  &.over { background: var(--orange-500, #f59e0b); }
+}
+.sc-meter-ends,
+.sc-ticks {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-color-secondary, #6c757d);
+}
+
+// Slider with a number box: [────●────] [80]
+.sc-row-number,
+.sc-row-range {
+  p-slider { flex: 1 1 0; min-width: 0; }
+}
+:host ::ng-deep .sc-num { width: 4.5rem; padding: 0.3rem 0.4rem; text-align: center; }
+:host ::ng-deep .sc-row-number p-inputnumber,
+:host ::ng-deep .sc-row-range p-inputnumber { flex: 0 0 auto; }
+
+.sc-error { color: var(--red-600, #c62828); }

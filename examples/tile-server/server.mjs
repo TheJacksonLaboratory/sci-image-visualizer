@@ -58,7 +58,7 @@ import { readArray } from './lib/zarr3.mjs';
 import {
   listXeniumDatasets, xeniumManifest, xeniumCoords, xeniumRadius, xeniumColumn, xeniumFeature,
   xeniumFeatureSearch, xeniumPolygonTile, xeniumTranscriptTile, xeniumTranscriptBins, xeniumDensity,
-  xeniumTranscriptSummary,
+  xeniumTranscriptSummary, xeniumImportGroups, xeniumTranscriptCounts,
 } from './lib/spatial-xenium.mjs';
 
 const PORT = Number(process.env.PORT || 8090);
@@ -101,6 +101,8 @@ const app = express();
 // unauthenticated demo this is harmless; a real deployment would restrict origin.
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
+// Cell-group tables imported from the viewer: tens of MB for a large dataset.
+app.use('/spatial/:id/groups', express.text({ type: '*/*', limit: '200mb' }));
 
 function decodeInfo(raw) {
   const b64 = String(raw ?? '');
@@ -505,7 +507,7 @@ app.get('/spatial/:id/polygon-tile/:set/:level/:gx/:gy', async (req, res) => {
 /** `?genes=A,B,C` — capped, since each gene is a separate row range per tile. */
 function genesParam(v) {
   const genes = String(v ?? '').split(',').map((g) => g.trim()).filter(Boolean);
-  if (genes.length > 64) throw new RangeError('at most 64 genes per request');
+  if (genes.length > 512) throw new RangeError('at most 512 genes per request');
   return genes;
 }
 
@@ -556,7 +558,26 @@ app.get('/spatial/:id/transcript-summary', async (req, res) => {
 app.get('/spatial/:id/density', async (req, res) => {
   const { id } = req.params;
   await fromSource(res, id, {
-    xenium: async () => octet(res).send(await xeniumDensity(XENIUM_DIR, id, genesParam(req.query.genes))),
+    xenium: async () => octet(res).send(await xeniumDensity(
+      XENIUM_DIR, id, genesParam(req.query.genes), intParam(req.query.bin, 10),
+    )),
+  });
+});
+
+// Import a cell grouping: body = CSV/TSV with cell_id and group columns; ?name=<label>.
+app.post('/spatial/:id/groups', async (req, res) => {
+  const { id } = req.params;
+  await fromSource(res, id, {
+    xenium: async () => res.json(await xeniumImportGroups(XENIUM_DIR, id, req.query.name, req.body)),
+  });
+});
+
+// Transcript totals per gene (and overall) — for the viewer's points estimate.
+app.get('/spatial/:id/transcript-counts', async (req, res) => {
+  const { id } = req.params;
+  await fromSource(res, id, {
+    xenium: async () => res.set('Cache-Control', REVALIDATE)
+      .json(await xeniumTranscriptCounts(XENIUM_DIR, id, genesParam(req.query.genes))),
   });
 });
 

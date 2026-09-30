@@ -6,18 +6,19 @@ import { ALL_GENES, type SpatialDataPort } from '../../contracts/ports/spatial-d
 import type { SpatialViewState } from '../../contracts/display-types';
 import {
   NO_CATEGORY, NO_OBSERVATION, SpatialColumn, SpatialDataset, SpatialImageRef, SpatialPolygonTile,
-  SpatialPolygons, SpatialTranscriptSummary, SpatialTranscriptTile, isCategoricalColumn,
+  SpatialPolygons, SpatialTranscriptCounts, SpatialTranscriptSummary, SpatialTranscriptTile,
+  isCategoricalColumn,
 } from '../../contracts/spatial-dataset.contract';
 import {
-  DEFAULT_CATEGORICAL_PALETTE, MISSING_COLOR, contrastWindow, parseHex, resolveCategoryColors,
+  DEFAULT_CATEGORICAL_PALETTE, MISSING_COLOR, contrastWindow, lutFor, parseHex, resolveCategoryColors,
 } from '../../spatial/spatial-encoding';
 import { SpatialSelectionMask } from '../../spatial/spatial-selection';
 import {
-  DataRect, POLYGON_LEVEL_MIN_CELL_PX, TranscriptGlyph, allGenesPlan, cellTypeColumnFor,
-  cellsShown, colorDensity, groupedMarkerPx, quantileOf, tilesInRectFrom,
+  DataRect, INFERNO_SCALE, POLYGON_LEVEL_MIN_CELL_PX, TranscriptGlyph, allGenesPlan, cellTypeColumnFor,
+  cellsShown, colorDensityWindow, densityAutoRange, groupedMarkerPx, quantileOf, tilesInRectFrom,
   defaultGlyphFor, discreteColormapStops, glyphOutline, glyphRings, pixelsPerDataUnit,
-  polygonLevelFor, smoothRaster, tileId, tilesInRect, transcriptLevelFor, transcriptMarkerPx,
-  typicalCellDiameter, visibleDataRect,
+  polygonLevelFor, tileId, tilesInRect, transcriptLevelFor, transcriptMarkerPx,
+  typicalCellDiameter, visibleArea, visibleDataRect,
 } from '../../spatial/spatial-tiles';
 
 /**
@@ -55,10 +56,24 @@ export interface SpatialTileHost {
   continuousLut(view: SpatialViewState): Rgb[];
   /** Outlines appeared or disappeared: the markers' visibility follows. */
   polygonsShownChanged(shown: boolean): void;
+  /** The density window changed (auto-derived or set). */
+  densityChanged?(stats: { lo: number; hi: number; max: number }): void;
+  /** Estimated transcripts in view for the current selection, against the budget. */
+  estimateChanged?(estimate: TranscriptEstimate | null): void;
 }
 
-type Group = 'density' | 'cellFill' | 'cellOutline' | 'transcripts' | 'transcriptOutline';
-const ORDER: Group[] = ['cellFill', 'cellOutline', 'density', 'transcripts', 'transcriptOutline'];
+/** Xenium Explorer's "Estimated Transcript Points". */
+export interface TranscriptEstimate {
+  /** Transcripts of the visible genes estimated to be in view. */
+  points: number;
+  /** The marker budget. */
+  max: number;
+}
+
+type Group = 'density' | 'cellFill' | 'cellOutline' | 'nucleusOutline' | 'transcripts' | 'transcriptOutline';
+const ORDER: Group[] = [
+  'cellFill', 'cellOutline', 'nucleusOutline', 'density', 'transcripts', 'transcriptOutline',
+];
 
 /** Transcripts drawn at once. Past this a screen is solid colour anyway; the level
  *  policy keeps a normal view far below it. */
@@ -94,6 +109,7 @@ export class NapariSpatialTileLayers {
   /** Rings currently drawn and the (dataset, set, tiles) they came from. */
   private currentRings: SpatialPolygonTile | null = null;
   private cellGeometryKey: string | null = null;
+  private currentNuclei: SpatialPolygonTile | null = null;
   private cellStyleKey: string | null = null;
   /** Selection identity → revision, so a change key can name a selection cheaply. */
   private lastSelection: SpatialSelectionMask | null = null;
@@ -180,6 +196,7 @@ export class NapariSpatialTileLayers {
     const pxPerUnit = pixelsPerDataUnit(viewer.camera.zoom, ref);
     if (!rect) return;
 
+    void this.planEstimate(dataset, view, viewer, w, h, stale);
     await Promise.all([
       this.planDensity(dataset, view, stale),
       this.planCells(dataset, view, selection, rect, pxPerUnit, stale),
@@ -210,40 +227,58 @@ export class NapariSpatialTileLayers {
       return;
     }
 
+    // Groups switched off in the list: their cells are left out of the geometry.
+    const hidden = await this.hiddenCodes(dataset, view);
+    if (stale()) return;
+    const hiddenKey = view.hiddenGroups.join('\u0001');
+
     let rings: SpatialPolygonTile;
+    let nuclei: SpatialPolygonTile | null = null;
     let geometryKey: string;
     if (tiled) {
-      const set = view.cellSet && tiled.sets.some((s) => s.name === view.cellSet)
+      const both = view.cellSet === 'both';
+      const set = !both && view.cellSet && tiled.sets.some((s) => s.name === view.cellSet)
         ? view.cellSet : (tiled.defaultSet ?? tiled.sets[0]?.name);
       if (!set) return;
+      const nucleusSet = both ? tiled.sets.find((s) => s.name !== set)?.name : undefined;
       const keys = tilesInRect(rect, level, tiled.levels, tiled.bounds, MAX_CELL_TILES);
-      geometryKey = `${dataset.id}|${set}|${keys.map(tileId).join(',')}`;
+      geometryKey = `${dataset.id}|${set}|${nucleusSet ?? ''}|${hiddenKey}|${keys.map(tileId).join(',')}`;
       if (geometryKey === this.cellGeometryKey && this.currentRings) {
         rings = this.currentRings;
+        nuclei = this.currentNuclei;
       } else {
-        const tiles = await this.fetchAll(keys, (k) => this.port.getPolygonTile!(set, k.level, k.gx, k.gy));
+        const [tiles, nucleusTiles] = await Promise.all([
+          this.fetchAll(keys, (k) => this.port.getPolygonTile!(set, k.level, k.gx, k.gy)),
+          nucleusSet
+            ? this.fetchAll(keys, (k) => this.port.getPolygonTile!(nucleusSet, k.level, k.gx, k.gy))
+            : Promise.resolve(null),
+        ]);
         if (stale()) return;
-        rings = mergePolygonTiles(tiles);
+        rings = filterRings(mergePolygonTiles(tiles), hidden);
+        nuclei = nucleusTiles ? filterRings(mergePolygonTiles(nucleusTiles), hidden) : null;
       }
     } else {
-      geometryKey = `${dataset.id}|whole`;
+      geometryKey = `${dataset.id}|whole|${hiddenKey}`;
       if (geometryKey === this.cellGeometryKey && this.currentRings) {
         rings = this.currentRings;
       } else {
         const polys: SpatialPolygons = await this.port.getPolygons!();
         if (stale()) return;
         // Whole-dataset rings are index-aligned with the observations.
-        rings = { ...polys, observation: Uint32Array.from({ length: polys.count }, (_v, i) => i) };
+        rings = filterRings(
+          { ...polys, observation: Uint32Array.from({ length: polys.count }, (_v, i) => i) }, hidden,
+        );
       }
     }
 
     const geometryChanged = geometryKey !== this.cellGeometryKey;
     const styleKey = [
-      geometryKey, JSON.stringify(view.colorBy), this.cellTypeColumnName(dataset, view),
+      geometryKey, view.cellColorMode, view.cellColorGene, view.cellSingleColor,
+      this.cellTypeColumnName(dataset, view),
       this.selectionRev(selection), view.logScale, view.percentileClip.join(),
       JSON.stringify(view.continuousColormap), view.cellDraw, view.cellOpacity,
     ].join('|');
-    const present = ['cellFill', 'cellOutline'].some((g) => {
+    const present = ['cellFill', 'cellOutline', 'nucleusOutline'].some((g) => {
       const l = this.layers.get(g as Group);
       return l && this.viewer!.layers.items.includes(l);
     });
@@ -255,6 +290,7 @@ export class NapariSpatialTileLayers {
     if (stale()) return;
 
     this.currentRings = rings;
+    this.currentNuclei = nuclei;
     this.cellGeometryKey = geometryKey;
     this.cellStyleKey = styleKey;
     const ref = dataset.imageRef;
@@ -269,6 +305,14 @@ export class NapariSpatialTileLayers {
       // Over a fill, a dark outline separates neighbours of the same type.
       ? { name: 'cell outlines', draw: 'outline', color: [0.08, 0.08, 0.1, 1], opacity: 0.7, ...common }
       : { name: 'cell outlines', draw: 'outline', opacity: 1, ...colors, ...common });
+    // "Both": nuclei outlined over the cells, light so they read against any fill.
+    if (nuclei) {
+      this.upsertShapes('nucleusOutline', true, geometryChanged, nuclei, {
+        name: 'nucleus outlines', draw: 'outline', color: [0.95, 0.95, 0.98, 1], opacity: 0.8, ...common,
+      });
+    } else {
+      this.drop('nucleusOutline');
+    }
     this.setPolygonsShown(true);
   }
 
@@ -281,35 +325,50 @@ export class NapariSpatialTileLayers {
   }
 
   /** Per-shape values + colormap for the rings' owners. */
+  /**
+   * Per-shape values + colormap for the rings' owners, by the view's cell-colour mode
+   * (Xenium Explorer's "Cell Color"). A selection mutes what it leaves out.
+   */
   private async cellColors(
     dataset: SpatialDataset, view: SpatialViewState, selection: SpatialSelectionMask,
     owners: Uint32Array,
-  ): Promise<{ values: Float32Array; colormap: Colormap; contrastLimits: [number, number] }> {
+  ): Promise<{ values?: Float32Array; colormap?: Colormap; contrastLimits?: [number, number]; color?: RGBA }> {
     const muted = selection.count > 0 ? selection.mask : null;
-    // The explicit colour source wins; otherwise the cell type.
-    const colorBy = view.colorBy;
-    if (colorBy?.kind === 'feature' || (colorBy?.kind === 'column'
-      && dataset.columns.find((c) => c.name === colorBy.name)?.kind === 'continuous')) {
-      const raw = colorBy.kind === 'feature'
-        ? await this.port.getFeatureVector(colorBy.name)
-        : ((await this.port.getColumn(colorBy.name)) as { values: Float32Array }).values;
+    const mode = view.cellColorMode;
+
+    if (mode === 'single') {
+      const [r, g, b] = parseHex(view.cellSingleColor);
+      return { color: [r / 255, g / 255, b / 255, 1] };
+    }
+
+    const continuous = async (raw: Float32Array, log: boolean) => {
       const values = new Float32Array(owners.length);
       for (let i = 0; i < owners.length; i++) {
         const v = raw[owners[i]] ?? NaN;
-        values[i] = view.logScale ? Math.log1p(Math.max(0, v)) : v;
+        values[i] = log ? Math.log1p(Math.max(0, v)) : v;
       }
       const [lo, hi] = contrastWindow(
-        view.logScale ? raw.map((v) => Math.log1p(Math.max(0, v))) : raw,
+        log ? raw.map((v) => Math.log1p(Math.max(0, v))) : raw,
         view.percentileClip[0], view.percentileClip[1],
       );
       return {
         values,
         colormap: colormapFromLut('spatial-continuous', this.host.continuousLut(view)),
-        contrastLimits: [lo, hi],
+        contrastLimits: [lo, hi] as [number, number],
       };
+    };
+    if (mode === 'gene' && view.cellColorGene) {
+      return continuous(await this.port.getFeatureVector(view.cellColorGene), true);
     }
-    const column = colorBy?.kind === 'column' ? colorBy.name : this.cellTypeColumnName(dataset, view);
-    const codes = column ? await this.categoricalCodes(column) : null;
+    if (mode === 'transcriptDensity' && dataset.columns.some((c) => c.name === 'transcript_density')) {
+      const column = await this.port.getColumn('transcript_density');
+      if (!isCategoricalColumn(column)) return continuous(column.values, false);
+    }
+
+    const name = mode === 'segmentation' && dataset.columns.some((c) => c.name === 'segmentation_method')
+      ? 'segmentation_method'
+      : this.cellTypeColumnName(dataset, view);
+    const codes = name ? await this.categoricalCodes(name) : null;
     const { colormap, valueOf } = this.categoricalColormap(codes?.meta ?? null);
     const values = new Float32Array(owners.length);
     for (let i = 0; i < owners.length; i++) {
@@ -318,6 +377,19 @@ export class NapariSpatialTileLayers {
       values[i] = valueOf(code === NO_CATEGORY ? -1 : code);
     }
     return { values, colormap, contrastLimits: [0, 1] };
+  }
+
+  /** Codes of the group column that are switched off, or null when none are. */
+  private async hiddenCodes(
+    dataset: SpatialDataset, view: SpatialViewState,
+  ): Promise<{ codes: Uint16Array; hidden: Uint8Array } | null> {
+    if (!view.hiddenGroups.length) return null;
+    const name = this.cellTypeColumnName(dataset, view);
+    const col = name ? await this.categoricalCodes(name) : null;
+    if (!col || col.meta.kind !== 'categorical') return null;
+    const off = new Set(view.hiddenGroups);
+    const hidden = Uint8Array.from(col.meta.categories, (c) => (off.has(c) ? 1 : 0));
+    return { codes: col.codes, hidden };
   }
 
   private cellTypeColumnName(dataset: SpatialDataset, view: SpatialViewState): string | null {
@@ -363,14 +435,19 @@ export class NapariSpatialTileLayers {
     const planKey = [
       dataset.id, mode, job.key, view.transcriptColorBy, this.cellTypeColumnName(dataset, view),
       view.transcriptScale, view.transcriptOpacity, JSON.stringify(view.transcriptGlyphs),
-      pxPerUnit.toPrecision(4),
+      pxPerUnit.toPrecision(4), view.hiddenGroups.join('\u0001'), view.transcriptHiddenGenes.join(','),
+      JSON.stringify(view.transcriptGeneColors),
     ].join('|');
     const current = this.layers.get('transcripts');
     if (planKey === this.keys.get('transcripts') && current && this.viewer!.layers.items.includes(current)) {
       return;
     }
-    const { merged, px } = await job.load();
+    const loaded = await job.load();
     if (stale()) return;
+    const hidden = await this.hiddenCodes(dataset, view);
+    if (stale()) return;
+    const { merged, px } = filterTranscripts(loaded.merged, loaded.px, hidden,
+      job.kind === 'genes' ? hiddenGeneSlots(view) : null);
     const faces = await this.transcriptColors(dataset, view, merged);
     if (stale()) return;
 
@@ -684,8 +761,9 @@ export class NapariSpatialTileLayers {
     if (view.transcriptColorBy === 'gene') {
       // All genes: codes are the dataset's gene indices, folded onto the palette.
       const n = view.transcriptAllGenes ? DEFAULT_CATEGORICAL_PALETTE.length : view.transcriptGenes.length;
-      rgb = Array.from({ length: n }, (_g, i) =>
-        parseHex(DEFAULT_CATEGORICAL_PALETTE[i % DEFAULT_CATEGORICAL_PALETTE.length]));
+      rgb = Array.from({ length: n }, (_g, i) => parseHex(
+        (!view.transcriptAllGenes && view.transcriptGeneColors[view.transcriptGenes[i]])
+        || DEFAULT_CATEGORICAL_PALETTE[i % DEFAULT_CATEGORICAL_PALETTE.length]));
       codeOf = view.transcriptAllGenes ? (i) => t.gene[i] % n : (i) => t.gene[i];
     } else {
       const name = this.cellTypeColumnName(dataset, view);
@@ -715,40 +793,92 @@ export class NapariSpatialTileLayers {
   private async planDensity(
     dataset: SpatialDataset, view: SpatialViewState, stale: () => boolean,
   ): Promise<void> {
-    const meta = dataset.density;
-    if (!meta || !this.port.getDensity || view.transcriptMode !== 'density' || !view.transcriptGenes.length) {
+    const hiddenGenes = new Set(view.transcriptHiddenGenes);
+    const genes = view.transcriptAllGenes
+      ? [ALL_GENES]
+      : view.transcriptGenes.filter((g) => !hiddenGenes.has(g));
+    if (!dataset.density || !this.port.getDensity || view.transcriptMode !== 'density' || !genes.length) {
       this.drop('density');
+      this.densityStats = null;
       return;
     }
-    const lut = this.host.continuousLut(view);
-    const key = [dataset.id, view.transcriptGenes.join(','), view.densityOpacity,
-      view.logScale, lut.length, lut[0]?.join(), lut[lut.length - 1]?.join()].join('|');
+    const lut = lutFor(view.densityColormap ?? INFERNO_SCALE);
+    const key = [dataset.id, genes.join(','), view.densityBin, view.densityOpacity,
+      JSON.stringify(view.densityRange), JSON.stringify(view.densityColormap)].join('|');
     if (key === this.keys.get('density') && this.layers.has('density')) return;
-    const raster = await this.port.getDensity(view.transcriptGenes);
+    const raster = await this.port.getDensity(genes, view.densityBin);
     if (stale()) return;
 
-    const { rows, cols } = meta;
-    // ~1.5 raster cells: about a cell diameter at Xenium's 10 µm grid.
-    const smooth = smoothRaster(raster.values, rows, cols, 1.5);
-    const rgba = colorDensity(smooth, lut, view.densityOpacity);
+    // Bins drawn as squares, as Xenium Explorer does; the window is in transcripts/µm².
+    const meta = raster.meta;
+    const area = meta.gridSize[0] * meta.gridSize[1];
+    const perArea = raster.values.map((v) => v / area);
+    const [lo, hi] = view.densityRange ?? densityAutoRange(perArea);
+    this.densityStats = { lo, hi, max: perArea.reduce((m, v) => (v > m ? v : m), 0) };
+    const rgba = colorDensityWindow(perArea, lut, view.densityOpacity, lo, hi);
     const ref = dataset.imageRef;
     const sx = ref?.scale?.[0] ?? 1;
     const sy = ref?.scale?.[1] ?? 1;
     const layer: ImageLayer = this.viewer!.addImage(
-      { kind: 'typed', width: cols, height: rows, channels: 4, dtype: 'uint8', data: rgba },
+      { kind: 'typed', width: meta.cols, height: meta.rows, channels: 4, dtype: 'uint8', data: rgba },
       {
-        name: `density · ${view.transcriptGenes.join(', ')}`,
+        name: `density · ${view.transcriptAllGenes ? 'all genes' : genes.join(', ')}`,
         scale: [meta.gridSize[0] * sx, meta.gridSize[1] * sy],
         translate: [
           meta.origin[0] * sx + (ref?.translate?.[0] ?? 0),
           meta.origin[1] * sy + (ref?.translate?.[1] ?? 0),
         ],
         blending: 'translucent',
+        interpolation: 'nearest',
       },
     );
     this.keys.set('density', key);
     this.replace('density', layer);
+    this.host.densityChanged?.(this.densityStats);
   }
+
+  private countsCache: { key: string; counts: Promise<SpatialTranscriptCounts> } | null = null;
+
+  /**
+   * Transcripts in view for the visible genes: each gene's dataset total times the share
+   * of the tissue on screen. An estimate — expression is not uniform — which is also what
+   * Xenium Explorer shows; it tells the user whether the budget will force grouping.
+   */
+  private async planEstimate(
+    dataset: SpatialDataset, view: SpatialViewState, viewer: Viewer, w: number, h: number,
+    stale: () => boolean,
+  ): Promise<void> {
+    const tiles = dataset.transcriptTiles;
+    if (!tiles || !this.port.getTranscriptCounts || view.transcriptMode === 'off') {
+      this.host.estimateChanged?.(null);
+      return;
+    }
+    const hiddenGenes = new Set(view.transcriptHiddenGenes);
+    const genes = view.transcriptAllGenes ? [] : view.transcriptGenes.filter((g) => !hiddenGenes.has(g));
+    const key = `${dataset.id}|${genes.join(',')}`;
+    if (this.countsCache?.key !== key) {
+      this.countsCache = { key, counts: this.port.getTranscriptCounts(genes) };
+    }
+    let counts: SpatialTranscriptCounts;
+    try {
+      counts = await this.countsCache.counts;
+    } catch {
+      this.countsCache = null;
+      return;
+    }
+    if (stale()) return;
+    const inView = visibleDataRect(viewer.camera.center, viewer.camera.zoom, w, h, dataset.imageRef, 0);
+    if (!inView) return;
+    const b = counts.bounds;
+    const share = Math.min(1, visibleArea(inView, b) / Math.max(1, (b[2] - b[0]) * (b[3] - b[1])));
+    const selected = view.transcriptAllGenes
+      ? counts.total
+      : genes.reduce((sum, g) => sum + (counts.counts[g] ?? 0), 0);
+    this.host.estimateChanged?.({ points: Math.round(selected * share), max: view.transcriptBudget });
+  }
+
+  /** The density window in use and the densest bin, for the panel's threshold control. */
+  densityStats: { lo: number; hi: number; max: number } | null = null;
 
   // ── layer bookkeeping ─────────────────────────────────────────────────────────────
 
@@ -776,7 +906,8 @@ export class NapariSpatialTileLayers {
     }
     const existing = this.layers.get(group) as ShapesLayer | undefined;
     if (existing && !geometryChanged && this.viewer!.layers.items.includes(existing)) {
-      if (opts.values) existing.values = opts.values;
+      // Flat colour has no values; clearing them is what switches the layer to `color`.
+      existing.values = opts.values ?? null;
       if (opts.colormap) existing.colormap = opts.colormap;
       if (opts.contrastLimits) existing.contrastLimits = opts.contrastLimits;
       if (opts.color) existing.color = opts.color;
@@ -817,6 +948,8 @@ export class NapariSpatialTileLayers {
   private dropCells(): void {
     this.drop('cellFill');
     this.drop('cellOutline');
+    this.drop('nucleusOutline');
+    this.currentNuclei = null;
     this.cellGeometryKey = null;
     this.cellStyleKey = null;
     this.currentRings = null;
@@ -882,6 +1015,73 @@ export function pickNearest(
 
 function bucketKey(gx: number, gy: number): number {
   return (gx + 32768) * 65536 + (gy + 32768);
+}
+
+/** Rings whose owning cell is in a switched-off group removed. */
+export function filterRings(
+  rings: SpatialPolygonTile, hidden: { codes: Uint16Array; hidden: Uint8Array } | null,
+): SpatialPolygonTile {
+  if (!hidden) return rings;
+  const keep: number[] = [];
+  let vertices = 0;
+  for (let i = 0; i < rings.count; i++) {
+    const code = hidden.codes[rings.observation[i]];
+    if (code !== NO_CATEGORY && hidden.hidden[code]) continue;
+    keep.push(i);
+    vertices += rings.offsets[i + 1] - rings.offsets[i];
+  }
+  if (keep.length === rings.count) return rings;
+  const observation = new Uint32Array(keep.length);
+  const offsets = new Uint32Array(keep.length + 1);
+  const coords = new Float32Array(vertices * 2);
+  let v = 0;
+  keep.forEach((i, r) => {
+    observation[r] = rings.observation[i];
+    offsets[r] = v;
+    const a = rings.offsets[i] * 2;
+    const b = rings.offsets[i + 1] * 2;
+    coords.set(rings.coords.subarray(a, b), v * 2);
+    v += (b - a) / 2;
+  });
+  offsets[keep.length] = v;
+  return { count: keep.length, observation, offsets, coords };
+}
+
+/** Slots (indices into the selected genes) switched off with their eye toggle. */
+function hiddenGeneSlots(view: SpatialViewState): Uint8Array | null {
+  if (!view.transcriptHiddenGenes.length) return null;
+  const off = new Set(view.transcriptHiddenGenes);
+  return Uint8Array.from(view.transcriptGenes, (g) => (off.has(g) ? 1 : 0));
+}
+
+/** Entries in a hidden group's cell, or of a hidden gene, removed (with their sizes). */
+export function filterTranscripts(
+  t: SpatialTranscriptTile, px: Float32Array,
+  hidden: { codes: Uint16Array; hidden: Uint8Array } | null, hiddenGenes: Uint8Array | null,
+): { merged: SpatialTranscriptTile; px: Float32Array } {
+  if (!hidden && !hiddenGenes) return { merged: t, px };
+  const keep: number[] = [];
+  for (let i = 0; i < t.count; i++) {
+    if (hiddenGenes && hiddenGenes[t.gene[i]]) continue;
+    const o = t.observation[i];
+    if (hidden && o !== NO_OBSERVATION) {
+      const code = hidden.codes[o];
+      if (code !== NO_CATEGORY && hidden.hidden[code]) continue;
+    }
+    keep.push(i);
+  }
+  const pick = <T extends Float32Array | Uint32Array | Uint16Array>(a: T): T => {
+    const out = new (a.constructor as new (n: number) => T)(keep.length);
+    keep.forEach((i, k) => { out[k] = a[i]; });
+    return out;
+  };
+  return {
+    merged: {
+      count: keep.length, aggregated: t.aggregated, x: pick(t.x), y: pick(t.y), z: pick(t.z),
+      weight: pick(t.weight), observation: pick(t.observation), gene: pick(t.gene),
+    },
+    px: pick(px),
+  };
 }
 
 function median(v: Float32Array): number {

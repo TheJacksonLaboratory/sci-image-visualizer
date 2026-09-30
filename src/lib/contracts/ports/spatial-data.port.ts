@@ -3,7 +3,8 @@ import { Observable } from 'rxjs';
 
 import {
   SpatialColumn, SpatialDataset, SpatialDensityRaster, SpatialEmbedding, SpatialPolygonTile,
-  SpatialPolygons, SpatialTranscriptSummary, SpatialTranscriptTile,
+  CategoricalColumnMeta, SpatialPolygons, SpatialTranscriptCounts, SpatialTranscriptSummary,
+  SpatialTranscriptTile,
 } from '../spatial-dataset.contract';
 
 /** Options for {@link SpatialDataPort.getTranscriptTile}. */
@@ -126,10 +127,20 @@ export interface SpatialDataPort {
   }): Promise<SpatialTranscriptSummary>;
 
   /**
-   * The summed transcript density of `genes` on the dataset's `density` raster.
+   * The summed transcript density of `genes` (`[ALL_GENES]` for every gene) on the
+   * dataset's `density` raster, re-binned to `binSize` observation units when given.
    * Optional: only datasets that advertise `density` need it.
    */
-  getDensity?(genes: string[]): Promise<SpatialDensityRaster>;
+  getDensity?(genes: string[], binSize?: number): Promise<SpatialDensityRaster>;
+
+  /**
+   * Import a cell grouping — a CSV/TSV of `cell_id` and `group` — under `label`. The new
+   * categorical column is added to the dataset (which re-emits) and resolved. Optional.
+   */
+  importGroups?(label: string, table: string): Promise<{ column: CategoricalColumnMeta; matched: number }>;
+
+  /** Transcript totals per gene, for estimating how many markers a selection draws. */
+  getTranscriptCounts?(genes: string[]): Promise<SpatialTranscriptCounts>;
 
   /**
    * The reference volume's voxels: a uint8 scalar field, x-fastest, of exactly

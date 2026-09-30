@@ -195,8 +195,25 @@ export interface SpatialViewState {
    * user's explicit choice.
    */
   showCells: boolean | null;
-  /** Which boundary set (`cell`, `nucleus`); null takes the dataset's default. */
+  /** Which boundary set (`cell`, `nucleus`, or `both` — cells as set by
+   *  {@link cellDraw}, nuclei outlined over them); null takes the dataset's default. */
   cellSet: string | null;
+  /**
+   * What colours the cells — Xenium Explorer's "Cell Color": the active group
+   * ({@link cellTypeColumn}), one gene's expression ({@link cellColorGene}), the cell's
+   * transcript density, one flat colour, or how the cell was segmented.
+   */
+  cellColorMode: 'group' | 'gene' | 'transcriptDensity' | 'single' | 'segmentation';
+  cellColorGene: string | null;
+  /** `#rrggbb` for {@link cellColorMode} `single`. */
+  cellSingleColor: string;
+  /**
+   * Categories of {@link cellTypeColumn} switched off in the groups list: their cells are
+   * not drawn, nor the transcripts inside them. Cleared when the group column changes.
+   */
+  hiddenGroups: string[];
+  /** Draw the tissue image (the Images section's switch). */
+  showImage: boolean;
   /** Fill the cells with their colour, outline them, or both. */
   cellDraw: 'fill' | 'outline' | 'both';
   /** Opacity of the cell fill (outlines draw opaque). */
@@ -210,6 +227,12 @@ export interface SpatialViewState {
   cellTypeColumn: string | null;
   /** Genes whose transcripts are drawn. */
   transcriptGenes: string[];
+  /** Selected genes switched off with their eye toggle — kept in the list, not drawn. */
+  transcriptHiddenGenes: string[];
+  /** Per-gene marker colour (`#rrggbb`); genes not listed take the palette by position. */
+  transcriptGeneColors: Record<string, string>;
+  /** Named gene groups (e.g. marker genes per cell type) for the selected-genes tree. */
+  transcriptGeneGroups: { name: string; genes: string[] }[];
   /**
    * Draw EVERY gene's transcripts instead of {@link transcriptGenes}: grouped into bins
    * sized by how many transcripts they hold, finer as the camera zooms in, down to one
@@ -238,6 +261,12 @@ export interface SpatialViewState {
   transcriptQuality: 'high' | 'all';
   /** Opacity of the transcript density raster. */
   densityOpacity: number;
+  /** Density bin edge in observation units (µm): 10, 20, 40 or 80. */
+  densityBin: number;
+  /** Colour window in transcripts per unit² (µm²); null derives it from the data. */
+  densityRange: [number, number] | null;
+  /** Colormap for the density bins; null uses Inferno. */
+  densityColormap: ColormapValue | null;
 }
 
 /** Transcript glyph names — see `TRANSCRIPT_GLYPHS` in `spatial/spatial-tiles.ts`. */
@@ -269,6 +298,9 @@ export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
   cellOpacity: 0.55,
   cellTypeColumn: null,
   transcriptGenes: [],
+  transcriptHiddenGenes: [],
+  transcriptGeneColors: {},
+  transcriptGeneGroups: [],
   transcriptAllGenes: false,
   transcriptBudget: 100_000,
   transcriptMode: 'off',
@@ -278,4 +310,12 @@ export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
   transcriptOpacity: 0.9,
   transcriptQuality: 'high',
   densityOpacity: 0.8,
+  densityBin: 10,
+  densityRange: null,
+  densityColormap: null,
+  cellColorMode: 'group',
+  cellColorGene: null,
+  cellSingleColor: '#4fc3f7',
+  hiddenGroups: [],
+  showImage: true,
 };

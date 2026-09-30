@@ -66,6 +66,16 @@ export interface CategoricalColumnMeta extends SpatialColumnMetaBase {
   kind: 'categorical';
   /** Category labels; a value's label is `categories[codes[i]]`. */
   categories: string[];
+  /**
+   * Heading the column is listed under in a group picker — e.g. "Xenium Onboard Analysis
+   * groups" for a pipeline's clusterings, "Imported groups" for ones added by a user.
+   */
+  section?: string;
+  /**
+   * Columns that are variants of one choice — k-means at k = 2…10 — share a family: a
+   * picker lists the family once and offers the variants beside it.
+   */
+  family?: { id: string; label: string; variant: string };
   /** Authored display colours as `#rrggbb`, index-aligned with
    *  {@link categories}. Supply these to keep the viewer's palette identical to
    *  the figures the same analysis produced in R/Python; omit to let the viewer
@@ -284,7 +294,7 @@ export interface SpatialTranscriptTilesMeta {
   bounds: SpatialBounds;
   /** Total transcripts, for display. */
   count?: number;
-  /** Genes that can be requested. Names come from the feature search. */
+  /** Real genes (control probes excluded). Names come from the feature search. */
   geneCount: number;
   hasZ: boolean;
   levels: (SpatialTileLevel & {
@@ -373,6 +383,16 @@ export interface SpatialTranscriptTile {
   observation: Uint32Array;
   /** Index into the `genes` list the tile was requested with. */
   gene: Uint16Array;
+}
+
+/** Transcript totals for an estimate of how many markers a selection would draw. */
+export interface SpatialTranscriptCounts {
+  /** Total transcripts per requested gene, over the whole dataset. */
+  counts: Record<string, number>;
+  /** Total over every gene. */
+  total: number;
+  /** Extent the totals are spread over (observation units). */
+  bounds: SpatialBounds;
 }
 
 /** A summed density raster for a list of genes; `values` is row-major `rows × cols`. */

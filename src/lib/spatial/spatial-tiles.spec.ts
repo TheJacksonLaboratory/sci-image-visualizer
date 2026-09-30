@@ -1,7 +1,8 @@
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
+import { lutFor } from './spatial-encoding';
 import {
   POLYGON_LEVEL_MIN_CELL_PX, TRANSCRIPT_GLYPHS, TRANSCRIPT_MAX_PX, TRANSCRIPT_MIN_PX,
-  TRANSCRIPT_PHYSICAL_UM,
+  INFERNO_SCALE, TRANSCRIPT_PHYSICAL_UM,
   allGenesPlan, cellTypeColumnFor, cellsShown, colorDensity, groupedMarkerPx, quantileOf, tilesInRectFrom,
   visibleArea, discreteColormapStops, glyphOutline, glyphRings, pixelsPerDataUnit,
   smoothRaster,
@@ -353,5 +354,13 @@ describe('all-gene grouping', () => {
   it('tilesInRectFrom honours a grid origin', () => {
     const keys = tilesInRectFrom([-250, 0], { x0: -240, y0: 10, x1: -10, y1: 20 }, 0, [{ tileSize: 125 }]);
     expect(keys.map((k) => k.gx).sort()).toEqual([0, 1]);
+  });
+});
+
+describe('INFERNO_SCALE', () => {
+  it('resolves through the LUT factory from black-purple to pale yellow', () => {
+    const lut = lutFor(INFERNO_SCALE);
+    expect(lut[0]).toEqual([0, 0, 4]);
+    expect(lut[lut.length - 1]).toEqual([252, 255, 164]);
   });
 });

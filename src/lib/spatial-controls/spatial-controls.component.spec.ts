@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { NO_ERRORS_SCHEMA } from '@angular/core';
 import { BehaviorSubject, of } from 'rxjs';
 
-import { SpatialControlsComponent } from './spatial-controls.component';
+import { SpatialControlsComponent, parseGeneGroups } from './spatial-controls.component';
 import { GENE_OPTIONS_MAX } from '../spatial/gene-search';
 import { VISUALIZER, ISpatialControls } from '../contracts/visualizer.contract';
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
@@ -759,10 +759,11 @@ describe('SpatialControlsComponent', () => {
       expect(component.cellsOn).toBe(true);
       component.onShowCells(false);
       expect(component.cellsOn).toBe(false);
-      expect(component.cellSetOptions.map((o) => o.value)).toEqual(['nucleus', 'cell']);
+      // Explorer's order: cell first, and Both when there are two sets.
+      expect(component.cellSetOptions.map((o) => o.value)).toEqual(['cell', 'nucleus', 'both']);
       expect(component.activeCellSet).toBe('cell');
-      expect(component.transcriptModeOptions.map((o) => o.value))
-        .toEqual(['off', 'circles', 'glyphs', 'density']);
+      expect(component.transcriptModeOptions.map((o) => o.label))
+        .toEqual(['Points', 'Icons', 'Density Map']);
     });
 
     it('keeps option lists stable between change-detection passes', async () => {
@@ -770,21 +771,97 @@ describe('SpatialControlsComponent', () => {
       await build(controls);
       // A fresh array per read made PrimeNG re-render the buttons until they were unclickable.
       expect(component.transcriptModeOptions).toBe(component.transcriptModeOptions);
-      expect(component.cellTypeOptions).toBe(component.cellTypeOptions);
+      expect(component.groupOptions).toBe(component.groupOptions);
+      expect(component.geneTree).toBe(component.geneTree);
+      expect(component.geneMenu).toBe(component.geneMenu);
     });
 
-    it('defaults cell types to the pipeline clustering and switches to the curated table', async () => {
+    it('lists groups under their section, with a k-means family listed once', async () => {
+      dataset$.next({
+        ...tiled,
+        columns: [
+          { kind: 'categorical', name: 'graphclust', description: 'Graph-Based Clustering (GEX)',
+            categories: ['A', 'B'], section: 'Xenium Onboard Analysis groups' },
+          ...[2, 3].map((k) => ({
+            kind: 'categorical' as const, name: `kmeans_${k}`, categories: ['x'],
+            section: 'Xenium Onboard Analysis groups',
+            family: { id: 'kmeans', label: 'K-Means Clustering (GEX)', variant: `k = ${k}` },
+          })),
+          { kind: 'categorical', name: 'imported:Mine', description: 'Mine', categories: ['T'],
+            section: 'Imported groups' },
+        ],
+      });
+      await build(controls);
+      expect(component.groupOptions).toEqual([
+        { label: 'Xenium Onboard Analysis groups', items: [
+          { label: 'Graph-Based Clustering (GEX)', value: 'graphclust' },
+          { label: 'K-Means Clustering (GEX)', value: 'family:kmeans' },
+        ] },
+        { label: 'Imported groups', items: [{ label: 'Mine', value: 'imported:Mine' }] },
+      ]);
+      component.onGroupEntry('family:kmeans');
+      expect(view$.value.cellTypeColumn).toBe('kmeans_2');
+      expect(component.activeGroupEntry).toBe('family:kmeans');
+      expect(component.groupVariantOptions.map((o) => o.label)).toEqual(['k = 2', 'k = 3']);
+      component.onGroupVariant('kmeans_3');
+      component.onGroupEntry('graphclust');
+      component.onGroupEntry('family:kmeans');
+      expect(view$.value.cellTypeColumn).toBe('kmeans_3'); // remembers the k chosen
+    });
+
+    it('counts cells per group and hides switched-off groups', async () => {
+      dataset$.next(tiled);
+      (controls as any).categoricalView = jest.fn(async () => ({
+        name: 'graphclust', categories: ['A', 'B'], colors: ['#f00', '#0f0'],
+        codes: Uint16Array.from([1, 1, 0, 1, 0xffff]),
+      }));
+      await build(controls);
+      await flush();
+      expect(component.groupRows.map((r) => [r.label, r.count])).toEqual([['B', 3], ['A', 1]]);
+      expect(component.groupTotal).toBe(4);
+      component.onGroupShown('B', false);
+      expect(view$.value.hiddenGroups).toEqual(['B']);
+      expect(component.allGroupsShown).toBe(false);
+      component.onAllGroupsShown(true);
+      expect(view$.value.hiddenGroups).toEqual([]);
+      // Changing grouping clears the switched-off groups of the old one.
+      component.onGroupShown('A', false);
+      component.onCellTypeColumn('curated_cell_type');
+      expect(view$.value.hiddenGroups).toEqual([]);
+    });
+
+    it('builds the selected-genes tree from gene groups, and hides genes with the eye', async () => {
       dataset$.next(tiled);
       await build(controls);
-      expect(component.cellTypeOptions.map((o) => o.value)).toEqual(['graphclust', 'curated_cell_type']);
-      expect(component.activeCellTypeColumn).toBe('graphclust');
-      expect(component.curatedColumn).toBe('curated_cell_type');
-      expect(component.usingCurated).toBe(false);
-      component.onUseCurated(true);
-      expect(view$.value.cellTypeColumn).toBe('curated_cell_type');
-      expect(component.usingCurated).toBe(true);
-      component.onUseCurated(false);
-      expect(view$.value.cellTypeColumn).toBe('graphclust');
+      controls.setViewState({
+        transcriptGenes: ['DMBT1', 'MUC5AC', 'KRT5'],
+        transcriptGeneGroups: [{ name: 'Endocervical', genes: ['DMBT1', 'MUC5AC', 'PIGR'] }],
+      });
+      expect(component.geneTree).toEqual([
+        { name: 'Endocervical', genes: ['DMBT1', 'MUC5AC'] },
+        { name: null, genes: ['KRT5'] },
+      ]);
+      component.onGenesShown(['DMBT1', 'MUC5AC'], false);
+      expect(view$.value.transcriptHiddenGenes).toEqual(['DMBT1', 'MUC5AC']);
+      expect(component.areGenesShown(['DMBT1', 'MUC5AC'])).toBe(false);
+      component.onGeneColor('KRT5', '#123456');
+      expect(component.geneColorOf('KRT5')).toBe('#123456');
+    });
+
+    it('parses gene groups from a group,gene table', () => {
+      expect(parseGeneGroups('group,gene\nPlasma,IGHG3\nPlasma,IGKC\nEndo,AQP1\n')).toEqual([
+        { name: 'Plasma', genes: ['IGHG3', 'IGKC'] }, { name: 'Endo', genes: ['AQP1'] },
+      ]);
+    });
+
+    it('the Transcripts header switch turns transcripts off and back on in the last mode', async () => {
+      dataset$.next(tiled);
+      await build(controls);
+      component.onTranscriptMode('glyphs');
+      component.onTranscriptsOn(false);
+      expect(view$.value.transcriptMode).toBe('off');
+      component.onTranscriptsOn(true);
+      expect(view$.value.transcriptMode).toBe('glyphs');
     });
 
     it('seeds the transcript genes from the gene being coloured by', async () => {
@@ -830,7 +907,7 @@ describe('SpatialControlsComponent', () => {
         ] },
       });
       await build(controls);
-      expect(component.cellSetOptions.map((o) => o.label)).toEqual(['Nucleus', 'Cell']);
+      expect(component.cellSetOptions.map((o) => o.label)).toEqual(['Cell', 'Nucleus', 'Both']);
     });
 
     it('gives each gene a glyph by position until one is chosen', async () => {
