@@ -10,8 +10,10 @@ import { IRegionOverlay } from './region-overlay.contract';
 import { IHistogram } from './channel-histogram-api.contract';
 import { ColormapNode, IWandOptions, IBrushOptions, SpatialViewState, SpatialColorBy } from './display-types';
 import {
+  CategoricalColumnMeta,
   SpatialDataset,
   SpatialEmbedding,
+  SpatialTranscriptCounts,
 } from './spatial-dataset.contract';
 import { SpatialSelectionMask } from '../spatial/spatial-selection';
 import type { PlotModeViewport } from './plot-type-contribution.contract';
@@ -360,6 +362,17 @@ export interface ISpatialControls {
   getEmbedding?(name: string): Promise<SpatialEmbedding>;
   /** Names of the categorical columns available to group by. */
   categoricalColumns(): string[];
+  /**
+   * Import a cell grouping (CSV/TSV of `cell_id`, `group`) as a new categorical column.
+   * Optional: only data sources that can join cell ids implement it.
+   */
+  importGroups?(label: string, table: string): Promise<{ column: CategoricalColumnMeta; matched: number }>;
+  /** Transcript totals per gene — for the points estimate. Optional. */
+  transcriptCounts?(genes: string[]): Promise<SpatialTranscriptCounts>;
+  /** Estimated transcripts in view for the current selection, against the marker budget. */
+  getTranscriptEstimate$?(): Observable<{ points: number; max: number } | null>;
+  /** The density map's colour window in use (auto-derived or set) and its densest bin. */
+  getDensityStats$?(): Observable<{ lo: number; hi: number; max: number } | null>;
   /**
    * The z positions of the sections the dataset was imaged at, ascending — or
    * null when its z is continuous rather than sectioned (so there are no sections

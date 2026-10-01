@@ -78,6 +78,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
   private marqueeEl: SVGRectElement | null = null;
   private draftPath: Array<[number, number]> | null = null; // freehand or click polygon
   private drawing = false; // pointer is down for rect / freehand
+  private regionsVisible = true;
 
   /** In-progress manipulation (select/move modes): dragging a body, a polygon vertex, or a
    *  rectangle corner. `anchor` is the fixed opposite corner for a rectangle resize. */
@@ -695,9 +696,16 @@ export class NapariRegionOverlay implements IRegionOverlay {
     return false;
   }
 
+  /** Show or hide the drawn regions. A region being drawn stays visible either way. */
+  setRegionsVisible(visible: boolean): void {
+    if (visible === this.regionsVisible) return;
+    this.regionsVisible = visible;
+    this.redraw();
+  }
+
   redraw(): void {
     while (this.svg.firstChild) this.svg.removeChild(this.svg.firstChild);
-    const regions = this.store.getRegions();
+    const regions = this.regionsVisible ? this.store.getRegions() : [];
     regions.forEach((region, i) => {
       if (region.isProfile?.()) return;
       const isSel = this.selected.includes(i);

@@ -393,3 +393,14 @@ These change the design, not just the estimate. **Not guessed at — please answ
     don't pay for it?
 16. **Are there real JAX datasets or pilot users driving this?** If so their format should be the
     primary target and Visium just the public demo — that reorders P1 substantially.
+
+---
+
+## 8. Work to be done
+
+- **Omics preprocessing through JIT's conversion worker.** The two steps a Xenium bundle
+  needs before it can be fully served — the morphology image pyramid and the all-gene
+  transcript pyramid — run today from the example server's `prepare-xenium` script (or the
+  server's background fallback for the transcript pyramid). They should run as a JIT
+  conversion workflow so any dataset can be prepared from JIT. Plan, contract and open
+  questions: [omics-preprocessing-jit.md](omics-preprocessing-jit.md).

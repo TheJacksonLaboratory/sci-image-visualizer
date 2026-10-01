@@ -249,6 +249,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   setNavigatorVisible(visible: boolean): void {
     this.osd.setNavigatorVisible(visible);
     this.plotly.setNavigatorVisible(visible);
+    this.napari.setNavigatorVisible(visible);
   }
   // Set on both backends (see setNavigatorVisible): consumers may set it before
   // the first render, when the active renderer is still Plotly.
@@ -618,6 +619,14 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
         const q = query.toLowerCase();
         return names.filter((n) => n.toLowerCase().includes(q)).slice(0, limit);
       },
+      ...(port.importGroups ? {
+        importGroups: (label: string, table: string) => port.importGroups!(label, table),
+      } : {}),
+      ...(port.getTranscriptCounts ? {
+        transcriptCounts: (genes: string[]) => port.getTranscriptCounts!(genes),
+      } : {}),
+      getTranscriptEstimate$: () => this.napari.transcriptEstimate$.asObservable(),
+      getDensityStats$: () => this.napari.densityStats$.asObservable(),
       categoryColors: async (name: string) => {
         const column = await port.getColumn(name);
         if (!isCategoricalColumn(column)) {

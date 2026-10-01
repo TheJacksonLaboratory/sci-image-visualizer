@@ -124,11 +124,13 @@ describe('RoutingVisualizerService (characterization)', () => {
   let router: RoutingVisualizerService;
   let plotly: any;
   let osd: any;
+  let napari: any;
   let store: VisualizerStore;
 
   function setup(): void {
     plotly = mockBackend();
     osd = mockBackend();
+    napari = mockBackend();
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({
       providers: [
@@ -136,7 +138,7 @@ describe('RoutingVisualizerService (characterization)', () => {
         VisualizerStore,
         { provide: PlotlyService, useValue: plotly },
         { provide: OpenSeadragonVisualizerService, useValue: osd },
-        { provide: NapariVisualizerService, useValue: mockBackend() },
+        { provide: NapariVisualizerService, useValue: napari },
         { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
       ],
     });
@@ -475,6 +477,11 @@ describe('RoutingVisualizerService (characterization)', () => {
     (router as any)[method](...args);
     expect(osd[method]).toHaveBeenCalledWith(...args);
     expect(plotly[method]).toHaveBeenCalledWith(...args);
+  });
+
+  it('setNavigatorVisible also reaches napari-js, which now has a navigator too', () => {
+    router.setNavigatorVisible(false);
+    expect(napari.setNavigatorVisible).toHaveBeenCalledWith(false);
   });
 
   it('unsubscribe tears down both backends', () => {

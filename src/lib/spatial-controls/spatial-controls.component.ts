@@ -1,5 +1,5 @@
 import {
-  Component, EventEmitter, Inject, Input, OnDestroy, OnInit, Output, ViewChild,
+  Component, ElementRef, EventEmitter, Inject, Input, NgZone, OnDestroy, OnInit, Output, ViewChild,
 } from '@angular/core';
 import { Subscription, combineLatest } from 'rxjs';
 
@@ -9,11 +9,14 @@ import {
   CategoricalColumnMeta, SpatialColumnMeta, SpatialDataset,
 } from '../contracts/spatial-dataset.contract';
 import {
-  ColormapNode, ColormapValue, SpatialViewState, DEFAULT_SPATIAL_VIEW,
+  ColormapNode, ColormapValue, SpatialViewState, DEFAULT_SPATIAL_VIEW, TranscriptGlyphName,
 } from '../contracts/display-types';
 import {
-  SPATIAL_3D_MAX_CATEGORIES, spatialContinuousLut,
+  DEFAULT_CATEGORICAL_PALETTE, SPATIAL_3D_MAX_CATEGORIES, lutFor, spatialContinuousLut,
 } from '../spatial/spatial-encoding';
+import {
+  INFERNO_SCALE, TRANSCRIPT_GLYPHS, cellTypeColumnFor, cellsShown, defaultGlyphFor, glyphOutline, isCuratedColumn,
+} from '../spatial/spatial-tiles';
 import {
   SpatialSelectionMask, emptySelection,
 } from '../spatial/spatial-selection';
@@ -34,6 +37,30 @@ const geneOption = (name: string): { label: string; value: string } => ({
 
 /** Per-instance id source — see {@link SpatialControlsComponent.chartsBodyId}. */
 let controlsInstanceSeq = 0;
+
+/** Glyph choices with an SVG `points` string for the preview. */
+const GLYPH_OPTIONS = TRANSCRIPT_GLYPHS.map((g) => {
+  const o = glyphOutline(g);
+  const pts: string[] = [];
+  for (let i = 0; i < o.length; i += 2) pts.push(`${o[i].toFixed(3)},${o[i + 1].toFixed(3)}`);
+  return { label: g.replace('-', ' '), value: g as TranscriptGlyphName, points: pts.join(' ') };
+});
+
+/**
+ * `group,gene` rows (CSV or TSV, header optional) → gene groups, in file order.
+ * Exported for tests.
+ */
+export function parseGeneGroups(text: string): { name: string; genes: string[] }[] {
+  const groups = new Map<string, string[]>();
+  for (const line of text.split(/\r?\n/)) {
+    const [a, b] = line.split(/,|\t/).map((f) => f.trim().replace(/^"|"$/g, ''));
+    if (!a || !b || (/^(group|cell_?type|name)$/i.test(a) && /^(gene|genes|feature)$/i.test(b))) continue;
+    const list = groups.get(a) ?? [];
+    if (!list.includes(b)) list.push(b);
+    groups.set(a, list);
+  }
+  return [...groups].map(([name, genes]) => ({ name, genes }));
+}
 
 /** Outlier clipping presets, as `[lo, hi]` percentile fractions. */
 const CLIP_OPTIONS: { label: string; value: [number, number] }[] = [
@@ -174,7 +201,10 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   private keyToken = 0;
   private readonly subs = new Subscription();
 
-  constructor(@Inject(VISUALIZER) private readonly viz: IVisualizer) {}
+  constructor(
+    @Inject(VISUALIZER) private readonly viz: IVisualizer,
+    private readonly zone: NgZone,
+  ) {}
 
   ngOnInit(): void {
     this.controls = this.viz.getSpatialControls?.() ?? null;
@@ -196,7 +226,13 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       // The head of the list, not all of it: see `geneNames`.
       this.geneOptions = searchGeneNames(this.geneNames, '').map(geneOption);
       this.sections = this.controls?.sampledSections() ?? null;
+      this.buildTileOptions(dataset);
+      this.groupRowsFor = null;
+      // A dataset with no cells to outline leads with its observations.
+      this.open = { ...this.open, cells: !!(dataset?.polygonTiles || dataset?.polygons),
+        observations: !(dataset?.polygonTiles || dataset?.polygons) };
       void this.refreshKey();
+      void this.refreshGroups();
     }));
 
     this.subs.add(this.controls.getViewState$().subscribe((view) => {
@@ -204,8 +240,23 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       this.selectedColumn = view.colorBy?.kind === 'column' ? view.colorBy.name : null;
       this.selectedGene = view.colorBy?.kind === 'feature' ? view.colorBy.name : null;
       this.selectedColormapNode = this.colormapNodeFor(view.continuousColormap);
+      this.selectedDensityColormapNode = this.colormapNodeFor(view.densityColormap);
+      this.geneTree = this.buildGeneTree();
+      this.geneMenu = this.buildGeneMenu();
+      this.refreshDensityWindow();
       void this.refreshKey();
+      void this.refreshGroups();
     }));
+
+    const estimate$ = this.controls.getTranscriptEstimate$?.();
+    if (estimate$) this.subs.add(estimate$.subscribe((e) => this.zone.run(() => { this.estimate = e; })));
+    const density$ = this.controls.getDensityStats$?.();
+    if (density$) {
+      this.subs.add(density$.subscribe((d) => this.zone.run(() => {
+        this.densityStats = d;
+        this.refreshDensityWindow();
+      })));
+    }
 
     this.subs.add(this.controls.getSelection$().subscribe((selection) => {
       this.selection = selection;
@@ -260,7 +311,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       // Resident names: search them here and materialise only the top matches. The
       // dropdown's own filter then runs over those and agrees — they were chosen by the
       // same query — so the control behaves as if it still held the whole list.
-      this.geneOptions = searchGeneNames(this.geneNames, query).map(geneOption);
+      this.geneOptions = this.withSelected(searchGeneNames(this.geneNames, query));
       return;
     }
     if (!this.controls) return;
@@ -275,13 +326,61 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     try {
       const names = await this.controls.searchFeatures(query, 50);
       if (mine !== this.geneSearchToken) return;
-      this.geneOptions = names.map(geneOption);
+      this.zone.run(() => { this.geneOptions = this.withSelected(names); });
     } catch {
       if (mine !== this.geneSearchToken) return;
       // A failed lookup must not wedge the control — show none and say so.
-      this.geneOptions = [];
-      this.geneSearchFailed = true;
+      this.zone.run(() => {
+        this.geneOptions = this.withSelected([]);
+        this.geneSearchFailed = true;
+      });
     }
+  }
+
+  /**
+   * Opening either gene dropdown — "Colour by gene" or the transcript genes. Both share
+   * one list and one search, so each opens on the head of the full list rather than on
+   * whatever the other was last filtered to.
+   *
+   * A whole-transcriptome dataset does not inline its ~30k names; they are fetched here,
+   * once, on first open — the list is then resident and every keystroke filters locally,
+   * exactly as for a targeted panel. Until it arrives the dropdown falls back to asking
+   * the server per keystroke.
+   */
+  async ensureGeneList(): Promise<void> {
+    if (this.genesAreRemote && this.controls && !this.geneListLoading) {
+      this.geneListLoading = true;
+      try {
+        const names = await this.controls.searchFeatures('', SpatialControlsComponent.GENE_LIST_MAX);
+        if (names.length && this.genesAreRemote) {
+          this.zone.run(() => {
+            this.geneNames = names;
+            this.genesAreRemote = false;
+          });
+        }
+      } catch {
+        // Keep the per-keystroke search; the list is a convenience, not a requirement.
+      } finally {
+        this.geneListLoading = false;
+      }
+    }
+    this.zone.run(() => {
+      this.geneOptions = this.withSelected(
+        this.genesAreRemote ? [] : searchGeneNames(this.geneNames, ''),
+      );
+    });
+  }
+
+  /** Most names fetched for the lazy list — well above any panel, whole-transcriptome included. */
+  private static readonly GENE_LIST_MAX = 100_000;
+  private geneListLoading = false;
+
+  /** Options for `names`, plus the genes already chosen (a multi-select shows a chip only
+   *  for a value it can find among its options). */
+  private withSelected(names: readonly string[]): { label: string; value: string }[] {
+    const chosen = [...(this.view?.transcriptGenes ?? []), ...(this.selectedGene ? [this.selectedGene] : [])];
+    const seen = new Set(names);
+    return [...chosen.filter((g) => !seen.has(g)), ...names].map(geneOption);
   }
 
   /** A gene was picked; it supersedes any column selection. */
@@ -516,6 +615,603 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   onClip(value: [number, number]): void {
     this.controls?.setViewState({ percentileClip: value });
   }
+  // ── cells & transcripts ────────────────────────────────────────────────
+
+  readonly cellDrawOptions = [
+    { label: 'Fill', value: 'fill' }, { label: 'Outline', value: 'outline' }, { label: 'Both', value: 'both' },
+  ];
+  readonly transcriptColorOptions = [
+    { label: 'Cell type', value: 'cellType' }, { label: 'Gene', value: 'gene' },
+  ];
+  readonly glyphOptions = GLYPH_OPTIONS;
+  readonly budgetOptions = [25_000, 50_000, 100_000, 200_000, 400_000]
+    .map((n) => ({ label: n.toLocaleString(), value: n }));
+
+  /** Boundaries on offer: tiled (level-of-detail) or whole-dataset rings. */
+  get hasCells(): boolean {
+    return !!(this.dataset?.polygonTiles || this.dataset?.polygons);
+  }
+
+  get hasTranscripts(): boolean {
+    return !!this.dataset?.transcriptTiles || !!this.dataset?.density;
+  }
+
+
+  /** Whether outlines are on — the explicit choice, or automatically for data that has them. */
+  get cellsOn(): boolean {
+    return cellsShown(this.dataset, this.view);
+  }
+
+  get activeCellSet(): string | null {
+    const tiles = this.dataset?.polygonTiles;
+    return this.view.cellSet ?? tiles?.defaultSet ?? tiles?.sets[0]?.name ?? null;
+  }
+
+  /**
+   * Option lists for the cell/transcript controls. Built once per dataset rather than in
+   * getters: a getter returns a fresh array on every change-detection pass, and PrimeNG
+   * re-renders its buttons whenever the array identity changes — which made them
+   * impossible to click.
+   */
+  cellSetOptions: { label: string; value: string }[] = [];
+  transcriptModeOptions: { label: string; value: SpatialViewState['transcriptMode'] }[] = [];
+
+  private buildTileOptions(ds: SpatialDataset | null): void {
+    // Short labels, cell set first, and "Both" when there are two — as Xenium Explorer.
+    const sets = [...(ds?.polygonTiles?.sets ?? [])]
+      .sort((a, b) => (a.name === 'cell' ? -1 : b.name === 'cell' ? 1 : 0));
+    this.cellSetOptions = [
+      ...sets.map((s) => ({ label: s.label.replace(/\s*boundar(y|ies)$/i, ''), value: s.name })),
+      ...(sets.length > 1 ? [{ label: 'Both', value: 'both' }] : []),
+    ];
+    this.transcriptModeOptions = [
+      ...(ds?.transcriptTiles ? [
+        { label: 'Points', value: 'circles' as const },
+        { label: 'Icons', value: 'glyphs' as const },
+      ] : []),
+      ...(ds?.density ? [{ label: 'Density Map', value: 'density' as const }] : []),
+    ];
+    const has = (name: string) => !!ds?.columns.some((c) => c.name === name);
+    this.cellColorOptions = [
+      { label: 'Group Affiliation', value: 'group' },
+      ...(ds?.features ? [{ label: 'Gene Expression', value: 'gene' as const }] : []),
+      ...(has('transcript_density') ? [{ label: 'Transcript Density Map', value: 'transcriptDensity' as const }] : []),
+      { label: 'Single Color', value: 'single' },
+      ...(has('segmentation_method') ? [{ label: 'Segmentation Method', value: 'segmentation' as const }] : []),
+    ];
+    this.buildGroupOptions(ds);
+  }
+
+  /** Cell colour modes on offer (Xenium Explorer's "Cell Color"). */
+  cellColorOptions: { label: string; value: SpatialViewState['cellColorMode'] }[] = [];
+
+  // ── groups ──────────────────────────────────────────────────────────────
+
+  /**
+   * The group picker: categorical columns under their section heading, a family of
+   * variants (k-means at k = 2…10) listed once. Values are a column name, or
+   * `family:<id>` for a family.
+   */
+  groupOptions: { label: string; items: { label: string; value: string }[] }[] = [];
+  /** Variants of the active family (k = 2…10), when a family is active. */
+  groupVariantOptions: { label: string; value: string }[] = [];
+  /** The last variant chosen per family, so switching away and back keeps k. */
+  private familyChoice = new Map<string, string>();
+
+  private buildGroupOptions(ds: SpatialDataset | null): void {
+    const sections = new Map<string, { label: string; value: string }[]>();
+    const seenFamilies = new Set<string>();
+    for (const c of ds?.columns ?? []) {
+      if (c.kind !== 'categorical' || c.name === 'segmentation_method') continue;
+      const section = c.section ?? 'Groups';
+      const list = sections.get(section) ?? [];
+      if (c.family) {
+        if (seenFamilies.has(c.family.id)) continue;
+        seenFamilies.add(c.family.id);
+        list.push({ label: c.family.label, value: `family:${c.family.id}` });
+      } else {
+        list.push({ label: c.description && c.section ? c.description : this.columnLabel(c), value: c.name });
+      }
+      sections.set(section, list);
+    }
+    this.groupOptions = [...sections].map(([label, items]) => ({ label, items }));
+    this.refreshVariants();
+  }
+
+  /** The picker's value for the active group column. */
+  get activeGroupEntry(): string | null {
+    const name = this.activeCellTypeColumn;
+    const meta = name ? this.dataset?.columns.find((c) => c.name === name) : undefined;
+    if (meta?.kind === 'categorical' && meta.family) return `family:${meta.family.id}`;
+    return name;
+  }
+
+  private refreshVariants(): void {
+    const name = this.activeCellTypeColumn;
+    const meta = name ? this.dataset?.columns.find((c) => c.name === name) : undefined;
+    const family = meta?.kind === 'categorical' ? meta.family : undefined;
+    const next = family
+      ? (this.dataset?.columns ?? [])
+        .filter((c) => c.kind === 'categorical' && c.family?.id === family.id)
+        .map((c) => ({ label: (c as CategoricalColumnMeta).family!.variant, value: c.name }))
+      : [];
+    if (JSON.stringify(next) !== JSON.stringify(this.groupVariantOptions)) this.groupVariantOptions = next;
+  }
+
+  onGroupEntry(value: string): void {
+    if (value.startsWith('family:')) {
+      const id = value.slice('family:'.length);
+      const members = (this.dataset?.columns ?? [])
+        .filter((c) => c.kind === 'categorical' && c.family?.id === id);
+      const name = this.familyChoice.get(id) ?? members[0]?.name;
+      if (name) this.onCellTypeColumn(name);
+      return;
+    }
+    this.onCellTypeColumn(value);
+  }
+
+  onGroupVariant(name: string): void {
+    const meta = this.dataset?.columns.find((c) => c.name === name);
+    if (meta?.kind === 'categorical' && meta.family) this.familyChoice.set(meta.family.id, name);
+    this.onCellTypeColumn(name);
+  }
+
+  /** The active grouping's categories with colours and cell counts, largest first. */
+  groupRows: { label: string; color: string; count: number }[] = [];
+  groupTotal = 0;
+  groupsExpanded = true;
+  private groupRowsFor: string | null = null;
+  groupImportError: string | null = null;
+  groupImporting = false;
+
+  private async refreshGroups(): Promise<void> {
+    this.refreshVariants();
+    const name = this.activeCellTypeColumn;
+    if (!name || !this.controls) {
+      this.groupRows = [];
+      this.groupTotal = 0;
+      this.groupRowsFor = null;
+      return;
+    }
+    if (name === this.groupRowsFor) return;
+    this.groupRowsFor = name;
+    try {
+      const v = await this.controls.categoricalView(name);
+      if (this.groupRowsFor !== name) return;
+      const counts = new Uint32Array(v.categories.length);
+      for (const c of v.codes) if (c < counts.length) counts[c]++;
+      const rows = v.categories.map((label, i) => ({ label, color: v.colors[i] ?? '#999', count: counts[i] }))
+        .sort((a, b) => b.count - a.count);
+      this.zone.run(() => {
+        this.groupRows = rows;
+        this.groupTotal = rows.reduce((n, r) => n + r.count, 0);
+      });
+    } catch {
+      this.groupRowsFor = null;
+    }
+  }
+
+  isGroupShown(label: string): boolean {
+    return !this.view.hiddenGroups.includes(label);
+  }
+
+  get allGroupsShown(): boolean {
+    return this.view.hiddenGroups.length === 0;
+  }
+
+  onGroupShown(label: string, on: boolean): void {
+    const hidden = new Set(this.view.hiddenGroups);
+    if (on) hidden.delete(label);
+    else hidden.add(label);
+    this.controls?.setViewState({ hiddenGroups: [...hidden] });
+  }
+
+  onAllGroupsShown(on: boolean): void {
+    this.controls?.setViewState({ hiddenGroups: on ? [] : this.groupRows.map((r) => r.label) });
+  }
+
+  get canImportGroups(): boolean {
+    return !!this.controls?.importGroups;
+  }
+
+  /** '+': a CSV/TSV of `cell_id` and group, named after the file. */
+  async onImportGroupsFile(input: HTMLInputElement): Promise<void> {
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file || !this.controls?.importGroups) return;
+    this.groupImportError = null;
+    this.groupImporting = true;
+    try {
+      const label = file.name.replace(/\.(csv|tsv|txt)$/i, '');
+      const { column } = await this.controls.importGroups(label, await file.text());
+      this.zone.run(() => this.onCellTypeColumn(column.name));
+    } catch (err) {
+      this.zone.run(() => { this.groupImportError = String((err as Error)?.message ?? err); });
+    } finally {
+      this.zone.run(() => { this.groupImporting = false; });
+    }
+  }
+
+  get activeCellTypeColumn(): string | null {
+    return this.dataset ? cellTypeColumnFor(this.dataset, this.view) : null;
+  }
+
+  onShowCells(on: boolean): void {
+    this.controls?.setViewState({ showCells: on });
+  }
+
+  onCellSet(set: string): void {
+    this.controls?.setViewState({ cellSet: set });
+  }
+
+  onCellDraw(draw: SpatialViewState['cellDraw']): void {
+    this.controls?.setViewState({ cellDraw: draw });
+  }
+
+  onCellOpacity(value: number | undefined): void {
+    if (value === undefined) return;
+    this.controls?.setViewState({ cellOpacity: value });
+  }
+
+  onCellTypeColumn(name: string | null): void {
+    // Switched-off groups belong to the grouping they were switched off in.
+    this.controls?.setViewState({ cellTypeColumn: name, hiddenGroups: [] });
+  }
+
+  onCellColorMode(mode: SpatialViewState['cellColorMode']): void {
+    this.controls?.setViewState({ cellColorMode: mode });
+  }
+
+  onCellColorGene(gene: string | null): void {
+    this.controls?.setViewState({ cellColorGene: gene });
+  }
+
+  onCellSingleColor(hex: string): void {
+    this.controls?.setViewState({ cellSingleColor: hex });
+  }
+
+  /** Fill opacity as a 0–100 number, for the box beside the slider. */
+  onCellOpacityPercent(v: number | null): void {
+    if (v === null || !Number.isFinite(v)) return;
+    this.controls?.setViewState({ cellOpacity: Math.min(1, Math.max(0.05, v / 100)) });
+  }
+
+  onShowImage(on: boolean): void {
+    this.controls?.setViewState({ showImage: on });
+  }
+
+  onShowAnnotations(on: boolean): void {
+    this.controls?.setViewState({ showAnnotations: on });
+  }
+
+  // ── sections ────────────────────────────────────────────────────────────
+
+  /** Which collapsible sections are open. Per dialog instance, not persisted. */
+  open: Record<'images' | 'cells' | 'transcripts' | 'annotations' | 'observations', boolean> = {
+    images: false, cells: true, transcripts: false, annotations: false, observations: false,
+  };
+
+  toggleSection(name: keyof SpatialControlsComponent['open']): void {
+    this.open = { ...this.open, [name]: !this.open[name] };
+  }
+
+  // ── transcripts (Xenium Explorer layout) ─────────────────────────────────
+
+  /** The mode the section header's switch turns back on. */
+  private lastTranscriptMode: Exclude<SpatialViewState['transcriptMode'], 'off'> = 'circles';
+
+  onTranscriptsOn(on: boolean): void {
+    if (!on) {
+      if (this.view.transcriptMode !== 'off') this.lastTranscriptMode = this.view.transcriptMode;
+      this.controls?.setViewState({ transcriptMode: 'off' });
+      return;
+    }
+    const mode = this.dataset?.transcriptTiles ? this.lastTranscriptMode : 'density';
+    this.onTranscriptMode(mode);
+    this.open = { ...this.open, transcripts: true };
+  }
+
+  /** Estimated transcripts in view, against the budget — Explorer's points bar. */
+  estimate: { points: number; max: number } | null = null;
+  /** The density window in use and its densest bin, for the threshold control. */
+  densityStats: { lo: number; hi: number; max: number } | null = null;
+
+  get estimatePercent(): number {
+    const e = this.estimate;
+    return e && e.max > 0 ? Math.min(100, (100 * e.points) / e.max) : 0;
+  }
+
+  get estimateOverMax(): boolean {
+    return !!this.estimate && this.estimate.points > this.estimate.max;
+  }
+
+  editingMax = false;
+
+  /** The selected genes as Explorer's tree: named groups, then the ungrouped ones. */
+  /** Rebuilt when the view changes — never per change-detection pass (see buildTileOptions). */
+  geneTree: { name: string | null; genes: string[] }[] = [];
+  geneMenu: { label: string; icon: string; command: () => void; disabled?: boolean }[] = [];
+
+  private buildGeneTree(): { name: string | null; genes: string[] }[] {
+    const selected = this.view.transcriptGenes;
+    const chosen = new Set(selected);
+    const grouped = new Set<string>();
+    const out: { name: string | null; genes: string[] }[] = [];
+    for (const g of this.view.transcriptGeneGroups) {
+      const genes = g.genes.filter((x) => chosen.has(x));
+      if (!genes.length) continue;
+      genes.forEach((x) => grouped.add(x));
+      out.push({ name: g.name, genes });
+    }
+    const rest = selected.filter((x) => !grouped.has(x));
+    if (rest.length) out.push({ name: null, genes: rest });
+    return out;
+  }
+
+  /** Real genes in the panel — the tree's denominator. */
+  get geneTotal(): number {
+    return this.dataset?.transcriptTiles?.geneCount ?? this.dataset?.features?.count ?? this.geneNames.length;
+  }
+
+  collapsedGeneGroups = new Set<string>();
+  geneTreeOpen = true;
+
+  toggleGeneGroup(name: string): void {
+    const next = new Set(this.collapsedGeneGroups);
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
+    this.collapsedGeneGroups = next;
+  }
+
+  isGeneShown(gene: string): boolean {
+    return !this.view.transcriptHiddenGenes.includes(gene);
+  }
+
+  areGenesShown(genes: string[]): boolean {
+    return genes.some((g) => this.isGeneShown(g));
+  }
+
+  /** The eye toggle: hide or show genes without removing them from the selection. */
+  onGenesShown(genes: string[], on: boolean): void {
+    const hidden = new Set(this.view.transcriptHiddenGenes);
+    for (const g of genes) {
+      if (on) hidden.delete(g);
+      else hidden.add(g);
+    }
+    this.controls?.setViewState({ transcriptHiddenGenes: [...hidden] });
+  }
+
+  onGeneColor(gene: string, hex: string): void {
+    this.controls?.setViewState({ transcriptGeneColors: { ...this.view.transcriptGeneColors, [gene]: hex } });
+  }
+
+  /** '±': every gene, or back to the chosen list. */
+  onToggleAllGenes(): void {
+    if (!this.canShowAllGenes) return;
+    this.onTranscriptAllGenes(!this.view.transcriptAllGenes);
+  }
+
+  /** '⋮' menu. */
+  private buildGeneMenu(): { label: string; icon: string; command: () => void; disabled?: boolean }[] {
+    return [
+      {
+        label: 'New group from selected genes', icon: 'pi pi-folder-plus',
+        disabled: !this.view.transcriptGenes.length, command: () => this.onNewGeneGroup(),
+      },
+      { label: 'Import gene groups (CSV)…', icon: 'pi pi-upload', command: () => this.geneGroupInput?.click() },
+      {
+        label: 'Remove gene groups', icon: 'pi pi-times',
+        disabled: !this.view.transcriptGeneGroups.length,
+        command: () => this.controls?.setViewState({ transcriptGeneGroups: [] }),
+      },
+      {
+        label: 'Clear selection', icon: 'pi pi-ban', disabled: !this.view.transcriptGenes.length,
+        command: () => this.controls?.setViewState({ transcriptGenes: [], transcriptHiddenGenes: [] }),
+      },
+    ];
+  }
+
+  /** The hidden file input the menu's import opens. */
+  @ViewChild('geneGroupFile') private geneGroupFileRef?: ElementRef<HTMLInputElement>;
+  private get geneGroupInput(): HTMLInputElement | null {
+    return this.geneGroupFileRef?.nativeElement ?? null;
+  }
+
+  trackByLabel = (_i: number, row: { label: string }) => row.label;
+  trackByNode = (_i: number, node: { name: string | null }) => node.name ?? '';
+  trackByLabelString = (_i: number, s: string) => s;
+
+  get cellOpacityPercent(): number {
+    return Math.round(this.view.cellOpacity * 100);
+  }
+
+  get densityOpacityPercent(): number {
+    return Math.round(this.view.densityOpacity * 100);
+  }
+  geneGroupError: string | null = null;
+
+  onNewGeneGroup(): void {
+    const name = (globalThis.prompt?.('Name for this gene group', 'Gene group') ?? '').trim();
+    if (!name) return;
+    const groups = this.view.transcriptGeneGroups.filter((g) => g.name !== name);
+    this.controls?.setViewState({
+      transcriptGeneGroups: [...groups, { name, genes: [...this.view.transcriptGenes] }],
+    });
+  }
+
+  /**
+   * Import gene groups: CSV/TSV with a group and a gene column (header optional), e.g.
+   * marker genes per cell type. The genes are added to the selection.
+   */
+  async onImportGeneGroups(input: HTMLInputElement): Promise<void> {
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    this.geneGroupError = null;
+    const groups = parseGeneGroups(await file.text());
+    if (!groups.length) {
+      this.zone.run(() => { this.geneGroupError = 'No "group,gene" rows found in that file.'; });
+      return;
+    }
+    const names = new Set(groups.map((g) => g.name));
+    const genes = [...new Set([...this.view.transcriptGenes, ...groups.flatMap((g) => g.genes)])];
+    this.zone.run(() => this.controls?.setViewState({
+      transcriptGeneGroups: [...this.view.transcriptGeneGroups.filter((g) => !names.has(g.name)), ...groups],
+      transcriptGenes: genes,
+      transcriptAllGenes: false,
+    }));
+  }
+
+  // density
+  readonly densityBins = [10, 20, 40, 80];
+
+  get densityBinIndex(): number {
+    return Math.max(0, this.densityBins.indexOf(this.view.densityBin));
+  }
+
+  onDensityBinIndex(i: number | undefined): void {
+    if (i === undefined) return;
+    this.controls?.setViewState({ densityBin: this.densityBins[i] ?? 10 });
+  }
+
+  onDensityOpacityPercent(v: number | null): void {
+    if (v === null || !Number.isFinite(v)) return;
+    this.controls?.setViewState({ densityOpacity: Math.min(1, Math.max(0.05, v / 100)) });
+  }
+
+  /**
+   * The threshold window shown: the one set, else the one derived. A stored array, not a
+   * getter: a range slider's `ngModel` given a fresh array every change-detection pass
+   * schedules another pass, forever — which hung the page the moment the density
+   * controls appeared.
+   */
+  densityWindow: [number, number] = [0, 1];
+  densitySliderMax = 1;
+  densityStep = 0.005;
+
+  private refreshDensityWindow(): void {
+    const next: [number, number] = this.view.densityRange
+      ?? (this.densityStats ? [this.densityStats.lo, this.densityStats.hi] : [0, 1]);
+    if (next[0] !== this.densityWindow[0] || next[1] !== this.densityWindow[1]) this.densityWindow = next;
+    this.densitySliderMax = Math.max(this.densityStats?.max ?? 1, this.densityWindow[1]);
+    this.densityStep = this.densitySliderMax / 200;
+  }
+
+  onDensityRange(range: [number, number] | number[] | undefined): void {
+    if (!range || range.length !== 2) return;
+    this.controls?.setViewState({ densityRange: [Math.min(range[0], range[1]), Math.max(range[0], range[1])] });
+  }
+
+  onDensityRangeEnd(which: 0 | 1, v: number | null): void {
+    if (v === null || !Number.isFinite(v)) return;
+    const next: [number, number] = [...this.densityWindow];
+    next[which] = v;
+    this.onDensityRange(next);
+  }
+
+  onDensityAuto(): void {
+    this.controls?.setViewState({ densityRange: null });
+  }
+
+  selectedDensityColormapNode: ColormapNode | null = null;
+
+  onDensityColormap(node: ColormapNode | null): void {
+    this.selectedDensityColormapNode = node;
+    this.controls?.setViewState({ densityColormap: node?.data?.value ?? null });
+  }
+
+  get densityColorBarCss(): string {
+    const lut = lutFor(this.view.densityColormap ?? INFERNO_SCALE);
+    const stops: string[] = [];
+    for (let i = 0; i <= 16; i++) {
+      const [r, g, b] = lut[Math.round((i / 16) * (lut.length - 1))];
+      stops.push(`rgb(${r},${g},${b}) ${((i / 16) * 100).toFixed(0)}%`);
+    }
+    return `linear-gradient(to right, ${stops.join(', ')})`;
+  }
+
+  onTranscriptMode(mode: SpatialViewState['transcriptMode']): void {
+    // Seed the gene list from the gene being coloured by, so switching transcripts on
+    // shows something straight away.
+    const seed = !this.view.transcriptGenes.length && this.view.colorBy?.kind === 'feature'
+      ? [this.view.colorBy.name] : null;
+    this.controls?.setViewState({ transcriptMode: mode, ...(seed ? { transcriptGenes: seed } : {}) });
+  }
+
+  onTranscriptGenes(genes: string[] | null): void {
+    this.controls?.setViewState({ transcriptGenes: [...(genes ?? [])] });
+  }
+
+  /** "All genes" needs the grouping pyramid, or at least tiles to draw individually. */
+  get canShowAllGenes(): boolean {
+    return !!this.dataset?.transcriptBins;
+  }
+
+  /** Why "All genes" is not offered yet, while the server builds its pyramid. */
+  get allGenesPreparing(): string | null {
+    const st = this.dataset?.transcriptBinsStatus;
+    if (!st || this.canShowAllGenes) return null;
+    if (st.state === 'failed') return `"All genes" is unavailable: preparing it failed (${st.message ?? 'unknown error'}).`;
+    const pct = st.total ? ` — ${Math.floor((100 * (st.done ?? 0)) / st.total)}% when this dataset was opened` : '';
+    return `"All genes" is being prepared on the server${pct}; reopen the dataset once it is done.`;
+  }
+
+  get showingAllGenes(): boolean {
+    return this.canShowAllGenes && this.view.transcriptAllGenes && this.view.transcriptMode !== 'density';
+  }
+
+  onTranscriptAllGenes(on: boolean): void {
+    this.controls?.setViewState({ transcriptAllGenes: on });
+  }
+
+  onTranscriptBudget(n: number): void {
+    this.controls?.setViewState({ transcriptBudget: n });
+  }
+
+  onTranscriptColorBy(by: SpatialViewState['transcriptColorBy']): void {
+    this.controls?.setViewState({ transcriptColorBy: by });
+  }
+
+  onTranscriptScale(value: number | undefined): void {
+    if (value === undefined) return;
+    this.controls?.setViewState({ transcriptScale: value });
+  }
+
+  onTranscriptOpacity(value: number | undefined): void {
+    if (value === undefined) return;
+    this.controls?.setViewState({ transcriptOpacity: value });
+  }
+
+  onTranscriptQuality(includeLow: boolean): void {
+    this.controls?.setViewState({ transcriptQuality: includeLow ? 'all' : 'high' });
+  }
+
+  onDensityOpacity(value: number | undefined): void {
+    if (value === undefined) return;
+    this.controls?.setViewState({ densityOpacity: value });
+  }
+
+  glyphOf(gene: string, slot: number): TranscriptGlyphName {
+    return this.view.transcriptGlyphs[gene] ?? defaultGlyphFor(slot);
+  }
+
+  onGlyph(gene: string, glyph: TranscriptGlyphName): void {
+    this.controls?.setViewState({ transcriptGlyphs: { ...this.view.transcriptGlyphs, [gene]: glyph } });
+  }
+
+  /** The colour gene `slot` is drawn in when transcripts are coloured by gene. */
+  geneColor(slot: number): string {
+    const gene = this.view?.transcriptGenes[slot];
+    return (gene && this.view.transcriptGeneColors[gene])
+      || DEFAULT_CATEGORICAL_PALETTE[slot % DEFAULT_CATEGORICAL_PALETTE.length];
+  }
+
+  geneColorOf(gene: string): string {
+    return this.geneColor(Math.max(0, this.view.transcriptGenes.indexOf(gene)));
+  }
+
+
+
   reset(): void {
     this.controls?.setViewState({ ...DEFAULT_SPATIAL_VIEW });
     this.clearSelection();

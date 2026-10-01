@@ -117,7 +117,8 @@ export interface SpatialViewState {
    * setting for a backdrop and a useless one for the measurement.
    */
   volumeOpacity: number;
-  /** Draw the observation cloud (3D). */
+  /** Draw the observation markers — the 3D cloud, or the 2D circles. In 2D they also
+   *  stand in for cells too small on screen to outline. */
   showPoints: boolean;
   /**
    * Restrict the cloud to ONE imaged section, by index into the dataset's sampled
@@ -182,7 +183,99 @@ export interface SpatialViewState {
    *  the markers: turning the cells down to read the field underneath must not
    *  turn the field down with them. */
   geneMapOpacity: number;
+  /**
+   * Draw cell boundaries (for a dataset with `polygonTiles` or `polygons`).
+   *
+   * Outlines are level-of-detail: coarse rings when zoomed out, every vertex at the
+   * finest zoom, and none at all once a cell is a few pixels wide — there the
+   * observation markers already draw it as a dot.
+   *
+   * `null` (the default) means automatic: on for any dataset that has outlines, since a
+   * segmented cell is better shown as its shape than as a circle. A boolean is the
+   * user's explicit choice.
+   */
+  showCells: boolean | null;
+  /** Which boundary set (`cell`, `nucleus`, or `both` — cells as set by
+   *  {@link cellDraw}, nuclei outlined over them); null takes the dataset's default. */
+  cellSet: string | null;
+  /**
+   * What colours the cells — Xenium Explorer's "Cell Color": the active group
+   * ({@link cellTypeColumn}), one gene's expression ({@link cellColorGene}), the cell's
+   * transcript density, one flat colour, or how the cell was segmented.
+   */
+  cellColorMode: 'group' | 'gene' | 'transcriptDensity' | 'single' | 'segmentation';
+  cellColorGene: string | null;
+  /** `#rrggbb` for {@link cellColorMode} `single`. */
+  cellSingleColor: string;
+  /**
+   * Categories of {@link cellTypeColumn} switched off in the groups list: their cells are
+   * not drawn, nor the transcripts inside them. Cleared when the group column changes.
+   */
+  hiddenGroups: string[];
+  /** Draw the tissue image (the Images section's switch). */
+  showImage: boolean;
+  /** Draw the annotation regions (the Annotations section's switch). Selecting from them
+   *  still works while they are hidden. */
+  showAnnotations: boolean;
+  /** Fill the cells with their colour, outline them, or both. */
+  cellDraw: 'fill' | 'outline' | 'both';
+  /** Opacity of the cell fill (outlines draw opaque). */
+  cellOpacity: number;
+  /**
+   * The categorical column that says what TYPE each cell is: it colours the cells
+   * whenever nothing else is chosen, and it colours every transcript by the cell it
+   * falls in. Null picks the dataset's first categorical column. Swapping between a
+   * pipeline's clustering and a curated annotation is swapping this.
+   */
+  cellTypeColumn: string | null;
+  /** Genes whose transcripts are drawn. */
+  transcriptGenes: string[];
+  /** Selected genes switched off with their eye toggle — kept in the list, not drawn. */
+  transcriptHiddenGenes: string[];
+  /** Per-gene marker colour (`#rrggbb`); genes not listed take the palette by position. */
+  transcriptGeneColors: Record<string, string>;
+  /** Named gene groups (e.g. marker genes per cell type) for the selected-genes tree. */
+  transcriptGeneGroups: { name: string; genes: string[] }[];
+  /**
+   * Draw EVERY gene's transcripts instead of {@link transcriptGenes}: grouped into bins
+   * sized by how many transcripts they hold, finer as the camera zooms in, down to one
+   * marker per transcript once those fit {@link transcriptBudget}.
+   */
+  transcriptAllGenes: boolean;
+  /**
+   * Most transcript markers drawn at once. The level of detail is chosen to stay under it,
+   * which is what keeps pan and zoom responsive however dense the data is.
+   */
+  transcriptBudget: number;
+  /**
+   * How transcripts are drawn: `circles` sized by how many transcripts each stands for,
+   * `glyphs` (one icon shape per gene), or a `density` raster. Circles and glyphs are
+   * level-of-detail — aggregated when zoomed out, one per transcript at the finest zoom.
+   */
+  transcriptMode: 'off' | 'circles' | 'glyphs' | 'density';
+  /** Colour transcripts by the type of the cell they fall in, or by gene. */
+  transcriptColorBy: 'cellType' | 'gene';
+  /** Glyph per gene for `glyphs` mode; genes not listed take one by position. */
+  transcriptGlyphs: Record<string, TranscriptGlyphName>;
+  /** Multiplier on transcript marker size. */
+  transcriptScale: number;
+  transcriptOpacity: number;
+  /** `high` keeps only confidently decoded transcripts. */
+  transcriptQuality: 'high' | 'all';
+  /** Opacity of the transcript density raster. */
+  densityOpacity: number;
+  /** Density bin edge in observation units (µm): 10, 20, 40 or 80. */
+  densityBin: number;
+  /** Colour window in transcripts per unit² (µm²); null derives it from the data. */
+  densityRange: [number, number] | null;
+  /** Colormap for the density bins; null uses Inferno. */
+  densityColormap: ColormapValue | null;
 }
+
+/** Transcript glyph names — see `TRANSCRIPT_GLYPHS` in `spatial/spatial-tiles.ts`. */
+export type TranscriptGlyphName =
+  | 'circle' | 'star' | 'triangle' | 'square' | 'diamond' | 'cross' | 'hexagon'
+  | 'triangle-down' | 'pentagon' | 'x';
 
 export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
   colorBy: null,
@@ -202,4 +295,31 @@ export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
   geneMapVolume: false,
   geneMapSmoothing: 1,
   geneMapOpacity: 0.85,
+  showCells: null,
+  cellSet: null,
+  cellDraw: 'fill',
+  cellOpacity: 0.55,
+  cellTypeColumn: null,
+  transcriptGenes: [],
+  transcriptHiddenGenes: [],
+  transcriptGeneColors: {},
+  transcriptGeneGroups: [],
+  transcriptAllGenes: false,
+  transcriptBudget: 100_000,
+  transcriptMode: 'off',
+  transcriptColorBy: 'cellType',
+  transcriptGlyphs: {},
+  transcriptScale: 1,
+  transcriptOpacity: 0.9,
+  transcriptQuality: 'high',
+  densityOpacity: 0.8,
+  densityBin: 10,
+  densityRange: null,
+  densityColormap: null,
+  cellColorMode: 'group',
+  cellColorGene: null,
+  cellSingleColor: '#4fc3f7',
+  hiddenGroups: [],
+  showImage: true,
+  showAnnotations: true,
 };

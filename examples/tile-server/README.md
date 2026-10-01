@@ -55,6 +55,22 @@ format `SpatialDataHttpService` speaks (see
 | `GET /spatial/:id/features?q=&limit=` | `{ names: [...] }` typeahead |
 | `GET /spatial/:id/embedding/:name` | `f32[N]` per dimension — a UMAP/t-SNE/PCA embedding (bundles only) |
 | `GET /spatial/:id/polygons` | `u32` count, `u32[count+1]` offsets, `f32` coords |
+| `GET /spatial/:id/polygon-tile/:set/:level/:gx/:gy` | one grid tile of boundaries: `u32` count, `u32[count]` owning observation, `u32[count+1]` offsets, `f32` coords |
+| `GET /spatial/:id/transcript-tile/:level/:gx/:gy?genes=A,B&quality=high\|all` | one grid tile of transcripts (level 0) or pre-aggregated clusters (levels ≥ 1): x, y, z, count, owning cell, gene |
+| `GET /spatial/:id/density?genes=A,B&bin=10` | summed transcript density re-binned to 10/20/40/80 µm (`genes=*` for every real gene): `u32 rows, u32 cols, f32 cellW, cellH, originX, originY` header, then `f32[rows·cols]` |
+| `POST /spatial/:id/groups?name=<label>` | import a cell grouping (body: CSV/TSV with `cell_id` and a group column, quoted fields allowed, up to 50 MB); joined, added as a categorical column, and saved under `<id>.derived/groups/`. **Off by default** — it is a write every viewer sees: set `GROUP_IMPORT_TOKEN=<secret>` (callers send `Authorization: Bearer <secret>`), or `GROUP_IMPORT=open` for a server only you can reach |
+| `GET /spatial/:id/transcript-counts?genes=A,B` | `{ counts: { gene: n }, total, bounds }` — transcript totals for the viewer's points estimate |
+| `GET /spatial/:id/transcript-bins/:level/:tx/:ty` | one tile of the all-gene grouping pyramid, in the transcript-tile layout (one entry per bin: centroid, count, dominant cell) |
+
+`transcript-tile` also accepts `genes=*` (every real gene, unaggregated, level 0) with
+`box=x0,y0,x1,y1` to clip it — how the viewer draws every transcript once they fit its
+marker budget.
+
+The three **tiled** routes are optional and advertised by the manifest (`polygonTiles`,
+`transcriptTiles`, `density`), so the viewer only asks a dataset for what it has. They are
+how segmentation and transcripts scale past what a whole-dataset vector can carry: 717k
+cell outlines are ~140 MB and a whole-transcriptome run has ~10⁹ transcripts, so the
+viewer fetches only the tiles on screen, at the level of detail the zoom calls for.
 
 A manifest sets `hasZ: true` when the observations carry a third axis, and
 `/coords` then returns three `f32[N]` blocks instead of two. A dataset with no
@@ -292,6 +308,102 @@ Two things are worth knowing about what it serves:
   4,334,174 rows in a different order. Join on the label **verbatim**: about a
   third of the labels on both sides carry a `-<n>` suffix that is part of the
   identity, and stripping it collapses 3,739,961 cells into 2,648,427 keys.
+
+#### Serving a 10x Xenium bundle IN PLACE
+
+Point `$XENIUM_DIR` (default `./xenium`) at 10x Xenium output bundles and they appear on
+`/spatial/datasets` — **no conversion, no unzip, no download**. Three ways to register one:
+
+```bash
+# 1. drop the zip 10x publishes in the folder (id = the name before _xe_outs.zip)
+ln -s /data/WTA_Preview_FFPE_Cervical_Cancer_xe_outs.zip xenium/
+# 2. or an unzipped outs/ directory (id = the directory name)
+# 3. or a small config pointing ANYWHERE that serves byte ranges — local path, https, gs://
+cat > xenium/xenium-cervical.json <<'JSON'
+{ "name": "Xenium WTA — FFPE cervical cancer",
+  "source": "gs://jax-cimg-sample-data/Demonstrations/omics/xenium-wta-ffpe-cervical-cancer/WTA_Preview_FFPE_Cervical_Cancer_xe_outs.zip",
+  "cellTypes": "curated-cell-types.csv" }
+JSON
+```
+
+Why this works without a build step: every `*.zarr.zip` inside the bundle is **stored**
+(not compressed) in the outer zip, so a zarr chunk three zips deep is one ranged read of
+the outer file — whether that file is on disk, in the 10x S3 bucket, or in GCS (a `gs://`
+source authenticates with the GCP metadata server or `gcloud auth print-access-token`).
+And 10x already ships what a viewer needs, pre-tiled:
+
+| From | Served as |
+|---|---|
+| `cells.zarr.zip` `cell_summary` | observations: cell centroids (µm), radius from area, area columns |
+| `cells.zarr.zip` `gridded_polygon_sets` | `polygon-tile`: cell + nucleus outlines in 250 µm tiles at 4 levels (24 → 12 → 6 → 3 vertices) |
+| `transcripts.zarr.zip` `grids` | `transcript-tile`: every transcript at level 0, pre-aggregated clusters (`cluster_count`) at levels 1–6; rows sorted by gene, so a gene in a tile is one row range |
+| `transcripts.zarr.zip` `density/gene` | `density`: per-gene 10 µm count raster |
+| `analysis.zarr.zip` | categorical columns: graph-based and k-means (k = 2–10) clusterings |
+| `cell_feature_matrix.zarr.zip` | `feature/:gene`: gene-major CSR, so one gene is one contiguous range |
+| optional `cellTypes` CSV (`cell_id`, label) | a `curated_cell_type` column, joined on 10x's cell id string |
+
+Transcripts carry no cell id in this bundle format, so the server assigns each one to a
+cell by looking its position up in the cell label mask (`masks/1`) — exact at levels 0–1,
+and the cell nearest the aggregate's centroid above that.
+
+Everything is Blosc-compressed (lz4 / zstd) zarr v2; `lib/xenium/` has the zip, Blosc and
+zarr readers, with no dependencies beyond Node's own zstd.
+
+**The one thing that does need preparing is the image.** The morphology OME-TIFFs are
+*deflated* inside the zip (no byte range of them can be read without inflating what comes
+before), and their tiles are JPEG-2000 — which libtiff, and therefore vips and sharp,
+cannot decode (they open the file and return zeros). `prepare-xenium` does it once:
+
+```bash
+npm run prepare-xenium -- --source <zip | outs dir | https:// | gs://> --id xenium-cervical
+# → cogs/xenium-cervical-tissue/ : 4 channels × 8 levels, 8-bit, deflate-tiled (~7 GB)
+```
+
+It stream-inflates `morphology_focus/ch*.ome.tif` out of the bundle (resumable), decodes the
+JPEG-2000 tiles with openjpeg on a worker pool, windows each channel's 16-bit signal to
+8 bits at its 99.8th percentile, and writes each level straight from the OME-TIFF's own
+pyramid (no re-downsampling) — about 2.5 min per channel on 8 cores. The manifest then
+carries `imageRef.imageId = <id>-tissue` and the viewer draws the overlays over the tissue.
+
+Each output is built under `<dir>.partial` and moved into place only once complete, so an
+interrupted or concurrent run never leaves a half-written pyramid where the server reads. An
+output that is already complete is skipped; `--force` rebuilds it.
+
+**All genes at once** needs one more derived index. 10x groups transcripts per *gene*;
+across all genes even its coarsest level is ~32 million clusters — far too many markers.
+`--transcripts` builds a gene-independent grouping pyramid: bins of 1.95 µm up to 125 µm,
+each with its transcript count, centroid and the cell contributing most of them (counted
+across every base bin it covers, as a top-cells summary). The
+viewer picks the finest level whose bins on screen fit its marker budget and are at least
+~14 px apart, and switches to the transcripts themselves once those fit.
+
+```bash
+npm run prepare-xenium -- --source <bundle> --id xenium-cervical --no-images --transcripts
+# → xenium/xenium-cervical.transcripts/ (index.json + L0..L6.bin), picked up by the server
+```
+
+(`npm run build-transcript-index -- --source <bundle> --id <id>` is the same, spelled out.)
+It is one pass over every transcript (~1.2 billion rows) — about 40 minutes on 32 cores next
+to the data — and a few hundred MB out.
+
+**Fallback:** a dataset registered without it is not left incomplete. The first time the
+server opens it, it builds the pyramid itself in the background — into
+`<id>.transcripts.partial`, renamed only when finished, one build at a time. Every other
+feature works meanwhile; the manifest reports `transcriptBinsStatus` (tiles done of total)
+and the panel says "All genes" is being prepared. Set `XENIUM_AUTO_INDEX=0` to turn this
+off (for example on a server that should never spend an hour of CPU unasked). Running the
+step ahead of time, next to the data, remains the intended path.
+
+The cervical-cancer preview is already prepared in the sample-data bucket:
+
+```bash
+gcloud storage rsync -r \
+  gs://jax-cimg-sample-data/Demonstrations/omics/xenium-wta-ffpe-cervical-cancer/xenium-cervical-tissue \
+  cogs/xenium-cervical-tissue
+gcloud storage rsync -r \
+  gs://jax-cimg-sample-data/Demonstrations/omics/xenium-wta-ffpe-cervical-cancer/xenium-cervical.transcripts \
+  xenium/xenium-cervical.transcripts
+```
 
 #### Serving a plain `.h5ad` LIVE
 

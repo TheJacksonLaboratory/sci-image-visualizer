@@ -2,8 +2,27 @@ import { InjectionToken } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import {
-  SpatialColumn, SpatialDataset, SpatialEmbedding, SpatialPolygons,
+  SpatialColumn, SpatialDataset, SpatialDensityRaster, SpatialEmbedding, SpatialPolygonTile,
+  CategoricalColumnMeta, SpatialPolygons, SpatialTranscriptCounts, SpatialTranscriptSummary,
+  SpatialTranscriptTile,
 } from '../spatial-dataset.contract';
+
+/** Options for {@link SpatialDataPort.getTranscriptTile}. */
+export interface TranscriptTileQuery {
+  /**
+   * Genes to include, by name; the tile's `gene` codes index this list. `[ALL_GENES]`
+   * asks for every gene, unaggregated, at level 0 only and clipped to {@link box} — the
+   * `gene` codes are then the dataset's own gene indices.
+   */
+  genes: string[];
+  /** `high` (default) keeps only confidently decoded transcripts. */
+  quality?: 'high' | 'all';
+  /** Clip to `[x0, y0, x1, y1]` in observation units. */
+  box?: [number, number, number, number];
+}
+
+/** {@link TranscriptTileQuery.genes} value meaning "every gene". */
+export const ALL_GENES = '*';
 
 /**
  * Spatial-omics data access, inverted as a port so the visualization library
@@ -75,6 +94,53 @@ export interface SpatialDataPort {
    * `polygons`. Optional — a spot-based assay (Visium) has no segmentation.
    */
   getPolygons?(): Promise<SpatialPolygons>;
+
+  /**
+   * One tile of boundaries from `polygonTiles`. An empty tile resolves with `count` 0 —
+   * a tile outside the tissue is an answer, not an error. Optional: only datasets that
+   * advertise `polygonTiles` need it.
+   */
+  getPolygonTile?(set: string, level: number, gx: number, gy: number): Promise<SpatialPolygonTile>;
+
+  /**
+   * One tile of transcripts from `transcriptTiles`, restricted to `query.genes`.
+   * Optional: only datasets that advertise `transcriptTiles` need it.
+   */
+  getTranscriptTile?(
+    level: number, gx: number, gy: number, query: TranscriptTileQuery,
+  ): Promise<SpatialTranscriptTile>;
+
+  /**
+   * One tile of the all-gene grouping pyramid (`transcriptBins`): an entry per bin, with
+   * `weight` its transcript count and `observation` its dominant cell.
+   */
+  getTranscriptBins?(level: number, tx: number, ty: number): Promise<SpatialTranscriptTile>;
+
+  /**
+   * What is inside `box` (observation units): transcript count, distinct genes and cells,
+   * the most frequent of each — optionally restricted to `genes` — plus display ids for
+   * `cells`. Omit `box` for a cell-id lookup only. Optional; drives the hover details of
+   * transcript markers.
+   */
+  getTranscriptSummary?(query: {
+    box?: [number, number, number, number]; genes?: string[]; cells?: number[];
+  }): Promise<SpatialTranscriptSummary>;
+
+  /**
+   * The summed transcript density of `genes` (`[ALL_GENES]` for every gene) on the
+   * dataset's `density` raster, re-binned to `binSize` observation units when given.
+   * Optional: only datasets that advertise `density` need it.
+   */
+  getDensity?(genes: string[], binSize?: number): Promise<SpatialDensityRaster>;
+
+  /**
+   * Import a cell grouping — a CSV/TSV of `cell_id` and `group` — under `label`. The new
+   * categorical column is added to the dataset (which re-emits) and resolved. Optional.
+   */
+  importGroups?(label: string, table: string): Promise<{ column: CategoricalColumnMeta; matched: number }>;
+
+  /** Transcript totals per gene, for estimating how many markers a selection draws. */
+  getTranscriptCounts?(genes: string[]): Promise<SpatialTranscriptCounts>;
 
   /**
    * The reference volume's voxels: a uint8 scalar field, x-fastest, of exactly
