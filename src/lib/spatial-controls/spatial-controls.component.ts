@@ -880,6 +880,10 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     this.controls?.setViewState({ showImage: on });
   }
 
+  onShowAnnotations(on: boolean): void {
+    this.controls?.setViewState({ showAnnotations: on });
+  }
+
   // ── sections ────────────────────────────────────────────────────────────
 
   /** Which collapsible sections are open. Per dialog instance, not persisted. */

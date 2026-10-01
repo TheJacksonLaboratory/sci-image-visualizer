@@ -5,7 +5,7 @@ import type { Rgb } from '../../contracts/colormap-lut';
 import { ALL_GENES, type SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import type { SpatialViewState } from '../../contracts/display-types';
 import {
-  NO_CATEGORY, NO_OBSERVATION, SpatialColumn, SpatialDataset, SpatialImageRef, SpatialPolygonTile,
+  NO_CATEGORY, NO_OBSERVATION, SpatialBounds, SpatialColumn, SpatialDataset, SpatialImageRef, SpatialPolygonTile,
   SpatialPolygons, SpatialTranscriptCounts, SpatialTranscriptSummary, SpatialTranscriptTile,
   isCategoricalColumn,
 } from '../../contracts/spatial-dataset.contract';
@@ -90,8 +90,16 @@ interface TranscriptJob {
   bin?: { size: number; origin: [number, number] };
   /** Identifies what will be drawn, so an unchanged plan is a no-op. */
   key: string;
-  /** Fetch and merge; `px` is each entry's marker diameter in screen pixels. */
-  load(): Promise<{ merged: SpatialTranscriptTile; px: Float32Array }>;
+  /** Fetch and merge; `px` is each entry's marker diameter in screen pixels. A job may
+   *  switch to another kind once it sees the data (individual → bins); it then says so. */
+  load(): Promise<TranscriptLoad>;
+}
+
+interface TranscriptLoad {
+  merged: SpatialTranscriptTile;
+  px: Float32Array;
+  kind?: TranscriptJob['kind'];
+  bin?: TranscriptJob['bin'];
 }
 
 /** Where a layer sits in world space: the dataset's affine onto its tissue image. */
@@ -137,6 +145,12 @@ export class NapariSpatialTileLayers {
     this.detach();
     this.viewer = viewer;
     this.cameraOff = viewer.camera.changed.connect(() => this.schedule());
+  }
+
+  /** Whether `layer` is one of the overlays drawn here (density, cells, transcripts). */
+  owns(layer: Layer): boolean {
+    for (const l of this.layers.values()) if (l === layer) return true;
+    return false;
   }
 
   detach(): void {
@@ -487,15 +501,21 @@ export class NapariSpatialTileLayers {
     const hidden = await this.hiddenCodes(dataset, view);
     if (stale()) return;
     const { merged, px } = filterTranscripts(loaded.merged, loaded.px, hidden,
-      job.kind === 'genes' ? hiddenGeneSlots(view) : null);
-    const faces = await this.transcriptColors(dataset, view, merged);
+      (loaded.kind ?? job.kind) === 'genes' ? hiddenGeneSlots(view) : null);
+    // A bin of the all-gene pyramid mixes genes and carries none, so it cannot be coloured
+    // by gene: colour it by its dominant cell's type until individual transcripts show.
+    const kind = loaded.kind ?? job.kind;
+    const colorView = kind === 'bins' && view.transcriptColorBy === 'gene'
+      ? { ...view, transcriptColorBy: 'cellType' as const } : view;
+    const faces = await this.transcriptColors(dataset, colorView, merged);
     if (stale()) return;
 
     if (this.planIncomplete) this.keys.delete('transcripts');
     else this.keys.set('transcripts', planKey);
     const diam = px.map((d) => d / pxPerUnit);
     this.drawn = {
-      kind: job.kind, bin: job.bin, merged, radius: diam.map((d) => d / 2),
+      kind: loaded.kind ?? job.kind, bin: loaded.kind ? loaded.bin : job.bin,
+      merged, radius: diam.map((d) => d / 2),
       genes: [...view.transcriptGenes], ref: dataset.imageRef ?? null, grid: null,
     };
     this.hoverCache.clear();
@@ -772,7 +792,22 @@ export class NapariSpatialTileLayers {
         load: async () => {
           const got = await this.fetchAll(keys.map((k, i) => ({ ...k, box: boxes[i] })),
             (k) => this.port.getTranscriptTile!(0, k.gx, k.gy, { genes: [ALL_GENES], box: k.box }));
-          const merged = mergeTranscriptTiles(got, Math.max(view.transcriptBudget * 1.5, 1));
+          // The plan estimated the view from the dataset's average density; expression is
+          // uneven, so a dense view can hold far more. Rather than cut the excess off, show
+          // it grouped — the bin level the planner would pick if it had known.
+          const cap = Math.max(view.transcriptBudget * 1.5, 1);
+          const loaded = got.reduce((n, t) => n + t.count, 0);
+          if (loaded > cap && bins && this.port.getTranscriptBins) {
+            const fallback = allGenesPlan({
+              rect, bounds, pxPerUnit, budget: view.transcriptBudget, total: bins.count,
+              levels: bins.levels, canIndividual: false,
+            });
+            if (fallback.kind === 'bins') {
+              const job = this.binsJob(view, rect, pxPerUnit, bounds, bins, fallback.level);
+              return { ...(await job.load()), kind: job.kind, bin: job.bin };
+            }
+          }
+          const merged = mergeTranscriptTiles(got, cap);
           const px = new Float32Array(merged.count);
           for (let i = 0; i < merged.count; i++) px[i] = transcriptMarkerPx(1, view.transcriptScale, pxPerMicron);
           return { merged, px };
@@ -781,28 +816,35 @@ export class NapariSpatialTileLayers {
     }
 
     if (plan.kind === 'bins' && bins && this.port.getTranscriptBins) {
-      const level = plan.level;
-      const lv = bins.levels[level];
-      const keys = tilesInRectFrom(bins.origin, rect, level,
-        bins.levels.map((l) => ({ tileSize: l.tileSize })), bounds, MAX_BIN_TILES);
-      return {
-        kind: 'bins',
-        bin: { size: lv.binSize, origin: bins.origin },
-        key: `all|bins|${level}|${view.transcriptBudget}|${keys.map(tileId)}`,
-        load: async () => {
-          const got = await this.fetchAll(keys, (k) => this.port.getTranscriptBins!(k.level, k.gx, k.gy));
-          const merged = mergeTranscriptTiles(got, Math.max(view.transcriptBudget * 1.5, 1));
-          const refCount = quantileOf(merged.weight, 0.95);
-          const binPx = lv.binSize * pxPerUnit;
-          const px = new Float32Array(merged.count);
-          for (let i = 0; i < merged.count; i++) {
-            px[i] = groupedMarkerPx(merged.weight[i], refCount, binPx, view.transcriptScale);
-          }
-          return { merged, px };
-        },
-      };
+      return this.binsJob(view, rect, pxPerUnit, bounds, bins, plan.level);
     }
     return null;
+  }
+
+  /** Bins of the all-gene pyramid at `level`, sized by how many transcripts each holds. */
+  private binsJob(
+    view: SpatialViewState, rect: DataRect, pxPerUnit: number, bounds: SpatialBounds,
+    bins: NonNullable<SpatialDataset['transcriptBins']>, level: number,
+  ): TranscriptJob {
+    const lv = bins.levels[level];
+    const keys = tilesInRectFrom(bins.origin, rect, level,
+      bins.levels.map((l) => ({ tileSize: l.tileSize })), bounds, MAX_BIN_TILES);
+    return {
+      kind: 'bins',
+      bin: { size: lv.binSize, origin: bins.origin },
+      key: `all|bins|${level}|${view.transcriptBudget}|${keys.map(tileId)}`,
+      load: async () => {
+        const got = await this.fetchAll(keys, (k) => this.port.getTranscriptBins!(k.level, k.gx, k.gy));
+        const merged = mergeTranscriptTiles(got, Math.max(view.transcriptBudget * 1.5, 1));
+        const refCount = quantileOf(merged.weight, 0.95);
+        const binPx = lv.binSize * pxPerUnit;
+        const px = new Float32Array(merged.count);
+        for (let i = 0; i < merged.count; i++) {
+          px[i] = groupedMarkerPx(merged.weight[i], refCount, binPx, view.transcriptScale);
+        }
+        return { merged, px };
+      },
+    };
   }
 
   /** Per-entry colours both as RGBA (points) and as colormap values (glyph shapes). */

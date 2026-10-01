@@ -159,3 +159,82 @@ describe('NapariSpatialTileLayers: a tile that fails to load', () => {
     tiles.detach();
   });
 });
+
+describe('NapariSpatialTileLayers: every gene at once', () => {
+  const tile = (n: number): SpatialTranscriptTile => ({
+    count: n, aggregated: false,
+    x: new Float32Array(n).fill(5), y: new Float32Array(n).fill(5), z: new Float32Array(n),
+    weight: new Uint32Array(n).fill(1), observation: new Uint32Array(n), gene: new Uint16Array(n),
+  });
+
+  function setup(individualCount: number, colorBy: 'cellType' | 'gene') {
+    const getTranscriptTile = jest.fn(() => Promise.resolve(tile(individualCount)));
+    const getTranscriptBins = jest.fn(() => Promise.resolve({ ...tile(4), aggregated: true }));
+    const port = { getTranscriptTile, getTranscriptBins } as unknown as SpatialDataPort;
+    // Sparse on average (10 transcripts over the bounds), so the plan starts individual.
+    const dataset = {
+      id: 'd', name: 'd', columns: [],
+      observations: { count: 1, x: new Float32Array([5]), y: new Float32Array([5]) },
+      transcriptTiles: { bounds: [0, 0, 100, 100], count: 10, levels: [{ tileSize: 200 }] },
+      transcriptBins: {
+        bounds: [0, 0, 100, 100], origin: [0, 0], count: 10, levels: [{ binSize: 25, tileSize: 200 }],
+      },
+    } as unknown as SpatialDataset;
+    const view = {
+      ...DEFAULT_SPATIAL_VIEW, transcriptMode: 'circles' as const, transcriptAllGenes: true,
+      transcriptGenes: [], transcriptBudget: 1000, transcriptColorBy: colorBy,
+    };
+    const host: SpatialTileHost = {
+      latest: () => [dataset, view, emptySelection(1)],
+      canvasSize: () => [400, 400], continuousLut: () => [], polygonsShownChanged: () => undefined,
+    };
+    const items: unknown[] = [];
+    const viewer = {
+      camera: { center: [50, 50], zoom: 4, changed: { connect: () => () => undefined } },
+      layers: {
+        items,
+        add: (l: unknown) => items.push(l),
+        remove: (l: unknown) => items.splice(items.indexOf(l), 1),
+      },
+      addPoints: jest.fn(() => { const l = {}; items.push(l); return l; }),
+      addShapes: jest.fn(() => { const l = {}; items.push(l); return l; }),
+      addImage: jest.fn(() => { const l = {}; items.push(l); return l; }),
+      requestRender: () => undefined,
+    } as unknown as Viewer;
+    const tiles = new NapariSpatialTileLayers(port, host);
+    tiles.attach(viewer);
+    type WithColors = { transcriptColors: (...a: unknown[]) => unknown };
+    const colors = jest.spyOn(tiles as unknown as WithColors, 'transcriptColors');
+    return { tiles, getTranscriptTile, getTranscriptBins, colors };
+  }
+
+  it('shows every transcript when the view really is under budget', async () => {
+    const { tiles, getTranscriptBins } = setup(100, 'cellType');
+    await (tiles as unknown as { plan(): Promise<void> }).plan();
+    expect(getTranscriptBins).not.toHaveBeenCalled();
+    expect((tiles as unknown as { drawn: { kind: string } }).drawn.kind).toBe('individual');
+    tiles.detach();
+  });
+
+  it('groups a view denser than the estimate instead of cutting transcripts off', async () => {
+    const { tiles, getTranscriptBins } = setup(5000, 'cellType'); // over 1.5 × the budget
+    await (tiles as unknown as { plan(): Promise<void> }).plan();
+    expect(getTranscriptBins).toHaveBeenCalled();
+    expect((tiles as unknown as { drawn: { kind: string } }).drawn.kind).toBe('bins');
+    tiles.detach();
+  });
+
+  it('colours mixed-gene bins by cell type even when gene colouring is chosen', async () => {
+    const { tiles, colors } = setup(5000, 'gene');
+    await (tiles as unknown as { plan(): Promise<void> }).plan();
+    expect((colors.mock.calls[0][1] as { transcriptColorBy: string }).transcriptColorBy).toBe('cellType');
+    tiles.detach();
+  });
+
+  it('keeps gene colouring for individual transcripts, which carry their gene', async () => {
+    const { tiles, colors } = setup(100, 'gene');
+    await (tiles as unknown as { plan(): Promise<void> }).plan();
+    expect((colors.mock.calls[0][1] as { transcriptColorBy: string }).transcriptColorBy).toBe('gene');
+    tiles.detach();
+  });
+});

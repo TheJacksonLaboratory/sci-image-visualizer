@@ -169,6 +169,21 @@ describe('NapariRegionOverlay', () => {
     staticHost.remove();
   });
 
+  it('hides and shows the drawn regions (the Annotations switch)', () => {
+    store.addRegion(rectRegion());
+    overlay.redraw();
+    const drawn = svgOf(overlay).childElementCount;
+    expect(drawn).toBeGreaterThan(0);
+    overlay.setRegionsVisible(false);
+    expect(svgOf(overlay).childElementCount).toBe(0);
+    store.addRegion(triRegion()); // a store change while hidden draws nothing
+    overlay.redraw();
+    expect(svgOf(overlay).childElementCount).toBe(0);
+    overlay.setRegionsVisible(true);
+    expect(svgOf(overlay).childElementCount).toBeGreaterThan(0);
+    expect(store.getRegions()).toHaveLength(2); // hiding never touched the regions themselves
+  });
+
   it('setMode toggles control gating and svg pointer-events', () => {
     overlay.setMode('drawrect');
     expect(viewer.controlsEnabledLog.at(-1)).toBe(false); // disabled while drawing

@@ -214,6 +214,9 @@ export interface SpatialViewState {
   hiddenGroups: string[];
   /** Draw the tissue image (the Images section's switch). */
   showImage: boolean;
+  /** Draw the annotation regions (the Annotations section's switch). Selecting from them
+   *  still works while they are hidden. */
+  showAnnotations: boolean;
   /** Fill the cells with their colour, outline them, or both. */
   cellDraw: 'fill' | 'outline' | 'both';
   /** Opacity of the cell fill (outlines draw opaque). */
@@ -318,4 +321,5 @@ export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
   cellSingleColor: '#4fc3f7',
   hiddenGroups: [],
   showImage: true,
+  showAnnotations: true,
 };

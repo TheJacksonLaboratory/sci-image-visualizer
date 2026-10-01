@@ -2442,6 +2442,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       this.spatialPoints.visible = this.spatialPointsVisible();
       this.spatialPoints.faceColor = this.gatherColors(faceColor, slab?.indices) as never;
       this.hideForeignImage(viewer, (!!ref || !!dataset.volume) && view.showImage !== false);
+    this.regionOverlay?.setRegionsVisible(view.showAnnotations !== false);
       viewer.requestRender();
       return;
     }
@@ -2480,6 +2481,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.spatialTilesMgr?.afterObservations();
     this.frameSpatialPointsOnce(viewer, dataset.id, positions, !!ref);
     this.hideForeignImage(viewer, (!!ref || !!dataset.volume) && view.showImage !== false);
+    this.regionOverlay?.setRegionsVisible(view.showAnnotations !== false);
     this.setRegionGridFor(dataset, positions);
   }
 
@@ -2555,6 +2557,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.navigator?.setVisible(datasetHasPixels && this.navigatorVisible);
     for (const layer of viewer.layers.items) {
       if (layer.kind !== 'image') continue;
+      // The transcript-density raster is an image layer too, but it is data, not the
+      // tissue: the Images toggle must not take it down with the slide.
+      if (this.spatialTilesMgr?.owns(layer)) continue;
       // Re-shown when a dataset that owns an image comes back, so switching between
       // datasets does not leave the tissue permanently hidden.
       layer.visible = datasetHasPixels;

@@ -314,6 +314,14 @@ describe('SpatialControlsComponent', () => {
       expect(controls.setViewState).not.toHaveBeenCalled();
     });
 
+    it('switches the drawn annotation regions off and on, like the other layer sections', () => {
+      component.onShowAnnotations(false);
+      expect(controls.setViewState).toHaveBeenCalledWith({ showAnnotations: false });
+      expect(component.view.showAnnotations).toBe(false);
+      component.onShowAnnotations(true);
+      expect(component.view.showAnnotations).toBe(true);
+    });
+
     it('writes the log toggle and the percentile clip', () => {
       component.onLogScale(true);
       expect(controls.setViewState).toHaveBeenCalledWith({ logScale: true });

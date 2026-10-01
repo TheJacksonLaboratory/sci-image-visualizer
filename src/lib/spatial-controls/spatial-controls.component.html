@@ -287,6 +287,9 @@
                             [ngModel]="view.transcriptColorBy" (ngModelChange)="onTranscriptColorBy($event)"
                             [allowEmpty]="false" styleClass="sc-buttons"></p-selectButton>
           </div>
+          <small class="sc-hint" *ngIf="view.transcriptAllGenes && view.transcriptColorBy === 'gene' && estimateOverMax">
+            Grouped markers mix genes, so they are coloured by cell type until you zoom in to individual transcripts.
+          </small>
           <div class="sc-row" *ngIf="view.transcriptAllGenes && view.transcriptMode === 'glyphs'">
             <span class="sc-lbl">Icon</span>
             <p-dropdown [options]="glyphOptions" optionLabel="label" optionValue="value"
@@ -377,6 +380,9 @@
     <!-- Annotations: the drawn regions, and selecting what they enclose. -->
     <div class="sc-panel" [class.open]="open.annotations">
       <div class="sc-panel-head" (click)="toggleSection('annotations')">
+        <p-checkbox [binary]="true" [ngModel]="view.showAnnotations !== false" (click)="$event.stopPropagation()"
+                    (onChange)="onShowAnnotations($event.checked)" pTooltip="Show the drawn regions"
+                    tooltipPosition="top"></p-checkbox>
         <span class="sc-panel-title">Annotations</span>
         <i class="pi" [class.pi-chevron-down]="open.annotations" [class.pi-chevron-right]="!open.annotations"></i>
       </div>

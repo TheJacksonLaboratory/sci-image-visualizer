@@ -93,18 +93,66 @@ function binSourceTile(t, gx, gy, baseBin) {
   keys.sort();
   const cell = new Uint32Array(nb).fill(NO_CELL);
   const best = new Uint32Array(nb);
+  // Every (bin, cell, count) run, so the coarser levels can add up each cell's share.
+  const runs = { bin: [], cell: [], n: [] };
   for (let i = 0; i < keys.length;) {
     let j = i;
     while (j < keys.length && keys[j] === keys[i]) j++;
     const b = Math.floor(keys[i] / CELL_SHIFT);
     const c = keys[i] - b * CELL_SHIFT;
-    if (c > 0 && j - i > best[b]) {
-      best[b] = j - i;
-      cell[b] = c - 1;
+    if (c > 0) {
+      runs.bin.push(b);
+      runs.cell.push(c - 1);
+      runs.n.push(j - i);
+      if (j - i > best[b]) {
+        best[b] = j - i;
+        cell[b] = c - 1;
+      }
     }
     i = j;
   }
-  return { count, sx, sy, cell };
+  return { count, sx, sy, cell, runs };
+}
+
+/** Cells a coarse bin tracks (Space-Saving): exact for bins with at most this many cells. */
+export const TOP_CELLS = 4;
+
+/**
+ * Add `n` transcripts of `cell` to the top-cells summary at `slot` (TOP_CELLS entries of
+ * `cand`/`candN` from `slot * TOP_CELLS`). Space-Saving: a new cell replaces the smallest
+ * entry and inherits its count, so a cell holding a real share of the bin is never lost.
+ */
+export function addCell(cand, candN, slot, cell, n) {
+  const at = slot * TOP_CELLS;
+  let min = at;
+  for (let i = at; i < at + TOP_CELLS; i++) {
+    if (cand[i] === cell) {
+      candN[i] += n;
+      return;
+    }
+    if (cand[i] === NO_CELL) {
+      cand[i] = cell;
+      candN[i] = n;
+      return;
+    }
+    if (candN[i] < candN[min]) min = i;
+  }
+  cand[min] = cell;
+  candN[min] += n;
+}
+
+/** The cell with the most transcripts in the summary at `slot`, or NO_CELL. */
+export function topCell(cand, candN, slot) {
+  const at = slot * TOP_CELLS;
+  let best = NO_CELL;
+  let most = 0;
+  for (let i = at; i < at + TOP_CELLS; i++) {
+    if (cand[i] !== NO_CELL && candN[i] > most) {
+      most = candN[i];
+      best = cand[i];
+    }
+  }
+  return best;
 }
 
 /** Build the pyramid for `source` into `outDir`. */
@@ -138,7 +186,7 @@ export async function buildTranscriptIndex(
     if (!b && create) {
       b = {
         count: new Uint32Array(BLOCK), sx: new Float64Array(BLOCK), sy: new Float64Array(BLOCK),
-        best: new Uint32Array(BLOCK), cell: new Uint32Array(BLOCK).fill(NO_CELL),
+        cand: new Uint32Array(BLOCK * TOP_CELLS).fill(NO_CELL), candN: new Uint32Array(BLOCK * TOP_CELLS),
       };
       L.blocks.set(key, b);
     }
@@ -152,7 +200,7 @@ export async function buildTranscriptIndex(
   const t0 = Date.now();
 
   /** Write one binned tile's base records and fold it into the coarser levels. */
-  const emit = async ([gx, gy], n, { count, sx, sy, cell }) => {
+  const emit = async ([gx, gy], n, { count, sx, sy, cell, runs }) => {
     total += n;
     // Base level: this source tile is exactly 2 × 2 storage tiles.
     const sub = BASE_PER_SOURCE / TILE_BINS;
@@ -170,28 +218,29 @@ export async function buildTranscriptIndex(
         await base.writeTile(`${tx},${ty}`, Buffer.concat(parts));
       }
     }
-    // Fold into the coarser levels. A coarse bin's cell is the cell of its heaviest base
-    // bin — the dominant contributor, without carrying every (bin, cell) pair upward.
-    for (let by = 0; by < BASE_PER_SOURCE; by++) {
-      for (let bx = 0; bx < BASE_PER_SOURCE; bx++) {
-        const b = by * BASE_PER_SOURCE + bx;
-        const c = count[b];
-        if (!c) continue;
-        const gbx = (gx - gxMin) * BASE_PER_SOURCE + bx;
-        const gby = (gy - gyMin) * BASE_PER_SOURCE + by;
-        for (let m = 1; m < LEVELS; m++) {
-          const cx = gbx >> m;
-          const cy = gby >> m;
-          const B = blockAt(dense[m], Math.floor(cx / TILE_BINS), Math.floor(cy / TILE_BINS), true);
-          const k = (cy % TILE_BINS) * TILE_BINS + (cx % TILE_BINS);
-          B.count[k] += c;
-          B.sx[k] += sx[b];
-          B.sy[k] += sy[b];
-          if (c > B.best[k] && cell[b] !== NO_CELL) {
-            B.best[k] = c;
-            B.cell[k] = cell[b];
-          }
-        }
+    // Fold into the coarser levels: counts and centroids add up, and each coarse bin keeps
+    // a top-cells summary of every cell's transcripts in it, so its cell is the one with the
+    // most transcripts across all its base bins — not merely the cell of its busiest one.
+    const coarse = (b, m) => {
+      const cx = ((gx - gxMin) * BASE_PER_SOURCE + (b % BASE_PER_SOURCE)) >> m;
+      const cy = ((gy - gyMin) * BASE_PER_SOURCE + Math.floor(b / BASE_PER_SOURCE)) >> m;
+      const B = blockAt(dense[m], Math.floor(cx / TILE_BINS), Math.floor(cy / TILE_BINS), true);
+      return [B, (cy % TILE_BINS) * TILE_BINS + (cx % TILE_BINS)];
+    };
+    for (let b = 0; b < count.length; b++) {
+      const c = count[b];
+      if (!c) continue;
+      for (let m = 1; m < LEVELS; m++) {
+        const [B, k] = coarse(b, m);
+        B.count[k] += c;
+        B.sx[k] += sx[b];
+        B.sy[k] += sy[b];
+      }
+    }
+    for (let r = 0; r < runs.bin.length; r++) {
+      for (let m = 1; m < LEVELS; m++) {
+        const [B, k] = coarse(runs.bin[r], m);
+        addCell(B.cand, B.candN, k, runs.cell[r], runs.n[r]);
       }
     }
     done++;
@@ -234,7 +283,7 @@ export async function buildTranscriptIndex(
             for (let bx = tx * TILE_BINS; bx < Math.min(L.w, (tx + 1) * TILE_BINS); bx++) {
               const k = (by - ty * TILE_BINS) * TILE_BINS + (bx - tx * TILE_BINS);
               const c = B.count[k];
-              if (c) parts.push(record(B.sx[k] / c, B.sy[k] / c, c, B.cell[k]));
+              if (c) parts.push(record(B.sx[k] / c, B.sy[k] / c, c, topCell(B.cand, B.candN, k)));
             }
           }
           L.blocks.delete(`${tx},${ty}`); // written: free it

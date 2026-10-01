@@ -40,6 +40,10 @@
 //   --transcripts build the all-gene transcript pyramid into --index-out
 //   --index-out   default $XENIUM_DIR/<id>.transcripts (where the server looks for it)
 //   --no-images   skip the image pyramid (e.g. to build only the transcript pyramid)
+//   --force       rebuild outputs that are already complete (default: skip them)
+//
+// Each output is built under `<dir>.partial` and moved into place only when complete, so an
+// interrupted or concurrent run never leaves a half-written pyramid where the server reads.
 
 import { createWriteStream } from 'node:fs';
 import { mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -79,6 +83,7 @@ function parseArgs(argv) {
     else if (a === '--index-out') o.indexOut = next();
     else if (a === '--no-images') o.images = false;
     else if (a === '--limit-tiles') o.limitTiles = Number(next());
+    else if (a === '--force') o.force = true;
     else throw new Error(`unknown option ${a}`);
   }
   if (!o.source || !o.id) {
@@ -87,6 +92,24 @@ function parseArgs(argv) {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(o.id)) throw new Error(`bad --id ${o.id}`);
   o.work ??= path.join('.cache', 'xenium', o.id);
   return o;
+}
+
+/** Whether a finished output is already in place (its last-written file exists). */
+async function complete(dir, marker) {
+  return (await sizeOf(path.join(dir, marker))) > 0;
+}
+
+/**
+ * Build an output into `<dir>.partial`, then swap it in for `dir`. Readers see either the
+ * old complete output or the new one, never a mix.
+ */
+async function buildInto(dir, build) {
+  const partial = `${dir}.partial`;
+  await rm(partial, { recursive: true, force: true });
+  await mkdir(partial, { recursive: true });
+  await build(partial);
+  await rm(dir, { recursive: true, force: true });
+  await rename(partial, dir);
 }
 
 async function sizeOf(file) {
@@ -269,7 +292,11 @@ async function main() {
   const o = parseArgs(process.argv.slice(2));
   if (o.transcripts) {
     const out = o.indexOut ?? path.join(process.env.XENIUM_DIR || 'xenium', `${o.id}.transcripts`);
-    await buildTranscriptIndex(o.source, out, { limitTiles: o.limitTiles ?? Infinity });
+    if (!o.force && await complete(out, 'index.json')) {
+      console.log(`[prepare-xenium] transcript pyramid already built: ${out} (--force to rebuild)`);
+    } else {
+      await buildInto(out, (dir) => buildTranscriptIndex(o.source, dir, { limitTiles: o.limitTiles ?? Infinity }));
+    }
   }
   if (o.images) await buildImages(o);
   if (o.register) {
@@ -282,10 +309,18 @@ async function main() {
 }
 
 async function buildImages(o) {
+  const finalDir = path.join(o.out, `${o.id}-tissue`);
+  if (!o.force && await complete(finalDir, 'descriptor.json')) {
+    console.log(`[prepare-xenium] image pyramid already built: ${finalDir} (--force to rebuild)`);
+    return;
+  }
+  await buildInto(finalDir, (outDir) => buildImagePyramid(o, outDir));
+  console.log(`[prepare-xenium] pyramid ready: ${finalDir}`);
+}
+
+async function buildImagePyramid(o, outDir) {
   const { files, extracted } = await focusImages(o);
   const channels = o.channels ?? files.map((_f, i) => i);
-  const outDir = path.join(o.out, `${o.id}-tissue`);
-  await mkdir(outDir, { recursive: true });
 
   const pool = workerPool(Math.max(1, (os.availableParallelism?.() ?? os.cpus().length) - 1));
   let levels = null;
@@ -319,7 +354,6 @@ async function buildImages(o) {
     mppY: mpp,
   };
   await writeFile(path.join(outDir, 'descriptor.json'), JSON.stringify(descriptor, null, 2));
-  console.log(`[prepare-xenium] pyramid ready: ${outDir}`);
   if (extracted && !o.keep) await rm(o.work, { recursive: true, force: true });
 }
 

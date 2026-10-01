@@ -365,10 +365,15 @@ JPEG-2000 tiles with openjpeg on a worker pool, windows each channel's 16-bit si
 pyramid (no re-downsampling) — about 2.5 min per channel on 8 cores. The manifest then
 carries `imageRef.imageId = <id>-tissue` and the viewer draws the overlays over the tissue.
 
+Each output is built under `<dir>.partial` and moved into place only once complete, so an
+interrupted or concurrent run never leaves a half-written pyramid where the server reads. An
+output that is already complete is skipped; `--force` rebuilds it.
+
 **All genes at once** needs one more derived index. 10x groups transcripts per *gene*;
 across all genes even its coarsest level is ~32 million clusters — far too many markers.
 `--transcripts` builds a gene-independent grouping pyramid: bins of 1.95 µm up to 125 µm,
-each with its transcript count, centroid and the cell contributing most of them. The
+each with its transcript count, centroid and the cell contributing most of them (counted
+across every base bin it covers, as a top-cells summary). The
 viewer picks the finest level whose bins on screen fit its marker budget and are at least
 ~14 px apart, and switches to the transcripts themselves once those fit.
 

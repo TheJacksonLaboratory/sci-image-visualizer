@@ -2112,6 +2112,19 @@ describe('NapariVisualizerService', () => {
         expect(layers.find((l) => l.kind === 'points')!.visible).toBe(true);
       });
 
+      it("leaves the tile layers' density raster alone when the tissue is hidden", () => {
+        // The density map is an image layer as well, but it is data: the Images toggle
+        // must not take it down with the slide.
+        const { layers, viewer } = scene();
+        const density = layers[2];
+        const owned = { owns: (l: unknown) => l === density };
+        (service as unknown as { spatialTilesMgr: unknown }).spatialTilesMgr = owned;
+        hide(viewer, false);
+        expect(layers[0].visible).toBe(false);
+        expect(density.visible).toBe(true);
+        (service as unknown as { spatialTilesMgr: unknown }).spatialTilesMgr = null;
+      });
+
       it('shows the image for a dataset that owns one', () => {
         // The observations belong ON that tissue; hiding it would remove the point of
         // the mode. Hidden rather than removed, so this can restore it when a
