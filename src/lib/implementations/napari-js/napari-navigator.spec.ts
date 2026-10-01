@@ -129,6 +129,18 @@ describe('NapariNavigator', () => {
     expect(parseFloat(region.style.left)).toBeGreaterThan(before);
   });
 
+  it('releases its listeners on destroy', () => {
+    const cam = fakeCamera([100, 100], 1);
+    const h = host(1000, 800);
+    nav = new NapariNavigator(h, cam, 1000, 1000);
+    const box = h.querySelector('.napari-navigator') as HTMLElement;
+    nav.destroy();
+    nav = null;
+    box.dispatchEvent(pointer('pointerdown', 50, 50));
+    box.dispatchEvent(pointer('pointerup', 50, 50));
+    expect(cam.center).toEqual([100, 100]);
+  });
+
   it('hides and shows', () => {
     const h = host(1000, 800);
     nav = new NapariNavigator(h, fakeCamera([0, 0], 1), 100, 100);

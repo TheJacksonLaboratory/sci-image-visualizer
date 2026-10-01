@@ -93,6 +93,12 @@ interface TranscriptJob {
   /** Fetch and merge; `px` is each entry's marker diameter in screen pixels. */
   load(): Promise<{ merged: SpatialTranscriptTile; px: Float32Array }>;
 }
+
+/** Where a layer sits in world space: the dataset's affine onto its tissue image. */
+interface Placement { scale: [number, number]; translate: [number, number] }
+
+/** Transcript colours: per-entry RGBA for points, values + colormap for shapes. */
+interface TranscriptFaces { rgba: RGBA[]; values: Float32Array; colormap: Colormap }
 const CAMERA_IDLE_MS = 120;
 
 const UNASSIGNED_RGBA: RGBA = [0.62, 0.62, 0.62, 0.55];
@@ -128,6 +134,7 @@ export class NapariSpatialTileLayers {
 
   detach(): void {
     if (this.hoverTimer) clearTimeout(this.hoverTimer);
+    this.hoverTimer = null;
     this.drawn = null;
     this.cameraOff?.();
     this.cameraOff = null;
@@ -230,46 +237,9 @@ export class NapariSpatialTileLayers {
     // Groups switched off in the list: their cells are left out of the geometry.
     const hidden = await this.hiddenCodes(dataset, view);
     if (stale()) return;
-    const hiddenKey = view.hiddenGroups.join('\u0001');
-
-    let rings: SpatialPolygonTile;
-    let nuclei: SpatialPolygonTile | null = null;
-    let geometryKey: string;
-    if (tiled) {
-      const both = view.cellSet === 'both';
-      const set = !both && view.cellSet && tiled.sets.some((s) => s.name === view.cellSet)
-        ? view.cellSet : (tiled.defaultSet ?? tiled.sets[0]?.name);
-      if (!set) return;
-      const nucleusSet = both ? tiled.sets.find((s) => s.name !== set)?.name : undefined;
-      const keys = tilesInRect(rect, level, tiled.levels, tiled.bounds, MAX_CELL_TILES);
-      geometryKey = `${dataset.id}|${set}|${nucleusSet ?? ''}|${hiddenKey}|${keys.map(tileId).join(',')}`;
-      if (geometryKey === this.cellGeometryKey && this.currentRings) {
-        rings = this.currentRings;
-        nuclei = this.currentNuclei;
-      } else {
-        const [tiles, nucleusTiles] = await Promise.all([
-          this.fetchAll(keys, (k) => this.port.getPolygonTile!(set, k.level, k.gx, k.gy)),
-          nucleusSet
-            ? this.fetchAll(keys, (k) => this.port.getPolygonTile!(nucleusSet, k.level, k.gx, k.gy))
-            : Promise.resolve(null),
-        ]);
-        if (stale()) return;
-        rings = filterRings(mergePolygonTiles(tiles), hidden);
-        nuclei = nucleusTiles ? filterRings(mergePolygonTiles(nucleusTiles), hidden) : null;
-      }
-    } else {
-      geometryKey = `${dataset.id}|whole|${hiddenKey}`;
-      if (geometryKey === this.cellGeometryKey && this.currentRings) {
-        rings = this.currentRings;
-      } else {
-        const polys: SpatialPolygons = await this.port.getPolygons!();
-        if (stale()) return;
-        // Whole-dataset rings are index-aligned with the observations.
-        rings = filterRings(
-          { ...polys, observation: Uint32Array.from({ length: polys.count }, (_v, i) => i) }, hidden,
-        );
-      }
-    }
+    const geometry = await this.cellGeometry(dataset, view, rect, level, hidden, stale);
+    if (!geometry) return;
+    const { rings, nuclei, geometryKey } = geometry;
 
     const geometryChanged = geometryKey !== this.cellGeometryKey;
     const styleKey = [
@@ -412,6 +382,58 @@ export class NapariSpatialTileLayers {
     return { colormap: new Colormap('spatial-categories', stops), valueOf, rgb };
   }
 
+  /**
+   * The cell rings (and, for "both", the nucleus rings) covering `rect` at `level`, minus
+   * the hidden groups — reused when nothing that decides them changed. Null when the
+   * view went stale or the dataset has no set to draw.
+   */
+  private async cellGeometry(
+    dataset: SpatialDataset, view: SpatialViewState, rect: DataRect, level: number,
+    hidden: { codes: Uint16Array; hidden: Uint8Array } | null, stale: () => boolean,
+  ): Promise<{ rings: SpatialPolygonTile; nuclei: SpatialPolygonTile | null; geometryKey: string } | null> {
+    const tiled = dataset.polygonTiles;
+    const hiddenKey = view.hiddenGroups.join('\u0001');
+    let rings: SpatialPolygonTile;
+    let nuclei: SpatialPolygonTile | null = null;
+    let geometryKey: string;
+    if (tiled) {
+      const both = view.cellSet === 'both';
+      const set = !both && view.cellSet && tiled.sets.some((s) => s.name === view.cellSet)
+        ? view.cellSet : (tiled.defaultSet ?? tiled.sets[0]?.name);
+      if (!set) return null;
+      const nucleusSet = both ? tiled.sets.find((s) => s.name !== set)?.name : undefined;
+      const keys = tilesInRect(rect, level, tiled.levels, tiled.bounds, MAX_CELL_TILES);
+      geometryKey = `${dataset.id}|${set}|${nucleusSet ?? ''}|${hiddenKey}|${keys.map(tileId).join(',')}`;
+      if (geometryKey === this.cellGeometryKey && this.currentRings) {
+        rings = this.currentRings;
+        nuclei = this.currentNuclei;
+      } else {
+        const [tiles, nucleusTiles] = await Promise.all([
+          this.fetchAll(keys, (k) => this.port.getPolygonTile!(set, k.level, k.gx, k.gy)),
+          nucleusSet
+            ? this.fetchAll(keys, (k) => this.port.getPolygonTile!(nucleusSet, k.level, k.gx, k.gy))
+            : Promise.resolve(null),
+        ]);
+        if (stale()) return null;
+        rings = filterRings(mergePolygonTiles(tiles), hidden);
+        nuclei = nucleusTiles ? filterRings(mergePolygonTiles(nucleusTiles), hidden) : null;
+      }
+    } else {
+      geometryKey = `${dataset.id}|whole|${hiddenKey}`;
+      if (geometryKey === this.cellGeometryKey && this.currentRings) {
+        rings = this.currentRings;
+      } else {
+        const polys: SpatialPolygons = await this.port.getPolygons!();
+        if (stale()) return null;
+        // Whole-dataset rings are index-aligned with the observations.
+        rings = filterRings(
+          { ...polys, observation: Uint32Array.from({ length: polys.count }, (_v, i) => i) }, hidden,
+        );
+      }
+    }
+    return { rings, nuclei, geometryKey };
+  }
+
   // ── transcripts ───────────────────────────────────────────────────────────────────
 
   private async planTranscripts(
@@ -462,32 +484,44 @@ export class NapariSpatialTileLayers {
     this.hoverTypes = typeColumn ? await this.categoricalCodes(typeColumn).catch(() => null) : null;
     if (stale()) return;
     const ref = dataset.imageRef;
-    const scale: [number, number] = ref?.scale ?? [1, 1];
-    const translate: [number, number] = ref?.translate ?? [0, 0];
-
+    const place: Placement = { scale: ref?.scale ?? [1, 1], translate: ref?.translate ?? [0, 0] };
     if (mode === 'circles') {
       this.drop('transcriptOutline');
-      const positions = new Float32Array(merged.count * 2);
-      for (let i = 0; i < merged.count; i++) {
-        positions[2 * i] = merged.x[i];
-        positions[2 * i + 1] = merged.y[i];
-      }
-      const layer = this.viewer!.addPoints(positions, {
-        name: 'transcripts',
-        size: diam,
-        faceColor: faces.rgba,
-        // A dark rim: a transcript coloured by its cell's type is otherwise the same
-        // colour as the cell fill it sits on, and vanishes into it.
-        borderColor: [0.04, 0.04, 0.05, 0.9],
-        borderWidth: 0.18 * median(diam),
-        opacity: view.transcriptOpacity,
-        scale,
-        translate,
-      });
-      this.replace('transcripts', layer);
-      return;
+      this.drawTranscriptCircles(merged, diam, faces.rgba, view, place);
+    } else {
+      this.drawTranscriptGlyphs(merged, diam, faces, view, place);
     }
+  }
 
+  /** One sized circle per entry, the size saying how many transcripts it stands for. */
+  private drawTranscriptCircles(
+    merged: SpatialTranscriptTile, diam: Float32Array, rgba: RGBA[], view: SpatialViewState,
+    { scale, translate }: Placement,
+  ): void {
+    const positions = new Float32Array(merged.count * 2);
+    for (let i = 0; i < merged.count; i++) {
+      positions[2 * i] = merged.x[i];
+      positions[2 * i + 1] = merged.y[i];
+    }
+    const layer = this.viewer!.addPoints(positions, {
+      name: 'transcripts',
+      size: diam,
+      faceColor: rgba,
+      // A dark rim: a transcript coloured by its cell's type is otherwise the same
+      // colour as the cell fill it sits on, and vanishes into it.
+      borderColor: [0.04, 0.04, 0.05, 0.9],
+      borderWidth: 0.18 * median(diam),
+      opacity: view.transcriptOpacity,
+      scale,
+      translate,
+    });
+    this.replace('transcripts', layer);
+  }
+
+  private drawTranscriptGlyphs(
+    merged: SpatialTranscriptTile, diam: Float32Array, faces: TranscriptFaces, view: SpatialViewState,
+    { scale, translate }: Placement,
+  ): void {
     // Glyphs: each entry becomes its gene's icon polygon, filled through a discrete
     // colormap and outlined dark so small icons stay readable over the tissue. With every
     // gene drawn there is one icon for all of them — 18,000 shapes would say nothing.
@@ -755,7 +789,7 @@ export class NapariSpatialTileLayers {
   /** Per-entry colours both as RGBA (points) and as colormap values (glyph shapes). */
   private async transcriptColors(
     dataset: SpatialDataset, view: SpatialViewState, t: SpatialTranscriptTile,
-  ): Promise<{ rgba: RGBA[]; values: Float32Array; colormap: Colormap }> {
+  ): Promise<TranscriptFaces> {
     let rgb: Rgb[];
     let codeOf: (i: number) => number;
     if (view.transcriptColorBy === 'gene') {

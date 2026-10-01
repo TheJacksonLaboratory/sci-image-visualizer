@@ -63,6 +63,8 @@ export class NapariNavigator {
   private readonly region: HTMLDivElement;
   private readonly disconnectCamera: () => void;
   private readonly resizeObserver?: ResizeObserver;
+  /** Aborted by destroy() to remove every DOM listener the box holds. */
+  private readonly listeners = new AbortController();
   private layout: NavigatorLayout | null = null;
   private image: CanvasImageSource | null = null;
   private dragging = false;
@@ -110,13 +112,15 @@ export class NapariNavigator {
 
     // The navigator's own gestures must not also reach the canvas underneath (pan/zoom,
     // region drawing), so every pointer/wheel event is consumed here.
-    this.box.addEventListener('pointerdown', this.onDown);
-    this.box.addEventListener('pointermove', this.onMove);
-    this.box.addEventListener('pointerup', this.onUp);
-    this.box.addEventListener('pointercancel', this.onUp);
-    this.box.addEventListener('pointerenter', () => this.onEnter?.());
+    // One signal for all of them, so destroy() releases every listener at once.
+    const signal = this.listeners.signal;
+    this.box.addEventListener('pointerdown', this.onDown, { signal });
+    this.box.addEventListener('pointermove', this.onMove, { signal });
+    this.box.addEventListener('pointerup', this.onUp, { signal });
+    this.box.addEventListener('pointercancel', this.onUp, { signal });
+    this.box.addEventListener('pointerenter', () => this.onEnter?.(), { signal });
     for (const type of ['wheel', 'click', 'dblclick', 'contextmenu', 'mousedown'] as const) {
-      this.box.addEventListener(type, stop, { passive: false });
+      this.box.addEventListener(type, stop, { passive: false, signal });
     }
 
     this.disconnectCamera = camera.changed.connect(() => this.updateRegion());
@@ -146,6 +150,7 @@ export class NapariNavigator {
   }
 
   destroy(): void {
+    this.listeners.abort();
     this.disconnectCamera();
     this.resizeObserver?.disconnect();
     this.box.remove();
