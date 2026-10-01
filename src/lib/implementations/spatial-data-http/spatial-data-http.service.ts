@@ -1,4 +1,4 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable, firstValueFrom } from 'rxjs';
 import { timeout } from 'rxjs/operators';
@@ -348,10 +348,20 @@ export class SpatialDataHttpService implements SpatialDataPort {
   async importGroups(label: string, table: string): Promise<{ column: CategoricalColumnMeta; matched: number }> {
     const manifest = this.requireManifest();
     const url = `${this.baseUrl}spatial/${encodeURIComponent(manifest.id)}/groups?name=${encodeURIComponent(label)}`;
-    const res = await fetch(url, { method: 'POST', body: table, headers: { 'Content-Type': 'text/csv' } });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body?.error ?? `[spatial] import failed (HTTP ${res.status})`);
-    const column = body.column as CategoricalColumnMeta;
+    // HttpClient, not fetch: a host's interceptors (its auth header) must apply to the
+    // upload as they do to every read, or a protected server refuses it.
+    let body: { column: CategoricalColumnMeta; matched: number };
+    try {
+      body = await firstValueFrom(
+        this.http.post<{ column: CategoricalColumnMeta; matched: number }>(url, table, {
+          headers: { 'Content-Type': 'text/csv' },
+        }).pipe(timeout(this.timeoutMs)),
+      );
+    } catch (err) {
+      const e = err as HttpErrorResponse;
+      throw new Error(e?.error?.error ?? `[spatial] import failed (HTTP ${e?.status ?? '?'})`);
+    }
+    const column = body.column;
     // The new column joins the dataset: re-emit so every panel sees it.
     const current = this.dataset$.value;
     if (current && this.manifest?.id === manifest.id) {

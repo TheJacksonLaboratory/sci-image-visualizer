@@ -1,3 +1,4 @@
+import { firstValueFrom } from 'rxjs';
 import { TestBed } from '@angular/core/testing';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 
@@ -345,6 +346,31 @@ describe('SpatialDataHttpService', () => {
 
       expect(await service.getPolygons()).toBe(poly);
       http.verify();
+    });
+  });
+
+  describe('importGroups', () => {
+    it('posts the table through HttpClient, so host interceptors apply, and adds the column', async () => {
+      await loadDataset();
+      const promise = service.importGroups('My groups', 'cell_id,group\nc1,A\n');
+      const req = http.expectOne(`${BASE}/spatial/visium-brain/groups?name=My%20groups`);
+      expect(req.request.method).toBe('POST');
+      expect(req.request.headers.get('Content-Type')).toBe('text/csv');
+      expect(req.request.body).toBe('cell_id,group\nc1,A\n');
+      const column = { kind: 'categorical', name: 'imported:My groups', categories: ['A'] };
+      req.flush({ column, matched: 1 });
+      const r = await promise;
+      expect(r.matched).toBe(1);
+      const dataset = await firstValueFrom(service.getDataset$());
+      expect(dataset?.columns.map((c) => c.name)).toContain('imported:My groups');
+    });
+
+    it("surfaces the server's error message", async () => {
+      await loadDataset();
+      const promise = service.importGroups('x', 'cell_id,group\nnope,A\n');
+      http.expectOne(`${BASE}/spatial/visium-brain/groups?name=x`)
+        .flush({ error: 'no cell ids matched' }, { status: 400, statusText: 'Bad Request' });
+      await expect(promise).rejects.toThrow('no cell ids matched');
     });
   });
 
