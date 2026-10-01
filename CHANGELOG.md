@@ -9,6 +9,58 @@ file was added.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-10-01
+
+10x Xenium in the Spatial omics mode: cells drawn as their segmentation outlines, every
+transcript at any zoom, a transcript density map and an Explorer-style controls panel,
+all read in place from the 10x bundle. The first host is Jax Image Tools, whose
+jit-service serves the same wire format.
+
+### Added
+
+- **Tiled cells, transcripts and density on `SpatialDataPort`** — all optional, so an
+  existing port is unaffected:
+  - `getPolygonTile(set, level, gx, gy)`: cell and nucleus outlines at the four level-of-detail
+    levels 10x ships.
+  - `getTranscriptTile(level, gx, gy, query)`: per-gene transcripts, or every gene with
+    `ALL_GENES`, each tagged with the cell it falls in.
+  - `getTranscriptBins(level, tx, ty)`: an all-gene grouping pyramid, built ahead of time.
+  - `getTranscriptSummary`, `getTranscriptCounts` and `getDensity(genes, binSize)` back the
+    hover and the points estimate, and draw the density map.
+  - `importGroups(label, table)` imports a `cell_id,group` table as a categorical column.
+  - The matching contracts in `spatial-dataset.contract`, advertised on `SpatialDataset`
+    as `polygonTiles`, `transcriptTiles`, `transcriptBins` and `density`.
+- **napari · WebGPU rendering of those layers** (`NapariSpatialTileLayers`):
+  - Cells are drawn as outlines and/or fills, at the polygon level that suits the zoom.
+  - Transcripts are drawn as circles sized by how many each stands for, or as one icon
+    per gene, within a marker budget.
+  - "All genes" switches between grouped bins and individual transcripts.
+  - The density map is drawn over the cells, with its own bin size, range and colormap.
+  - Hovering a cell or transcript reports its genes, cell and counts.
+  - A view with a tile that failed to load is retried.
+- **Explorer-style controls**, in collapsible sections (Images, Cells, Transcripts,
+  Annotations, Observations), each with an on/off switch:
+  - Cells: colour by group, gene, transcript density, segmentation method or one colour,
+    and hide groups.
+  - Transcripts: a gene tree with per-gene colours and groups.
+  - New `SpatialViewState` fields for all of this, defaulted in `DEFAULT_SPATIAL_VIEW`.
+- **A navigator minimap for the napari image views**, like OpenSeadragon's: click or drag
+  to pan at the same zoom.
+- **`SpatialDataHttpService`** speaks the new routes. The group import goes through
+  `HttpClient`, so host interceptors (auth) apply.
+- **Example tile server**:
+  - Reads Xenium bundles in place (`lib/spatial-xenium.mjs`), with `prepare-xenium` for the
+    tissue image and the all-gene transcript pyramid.
+  - Group import is off by default: `GROUP_IMPORT_TOKEN`, or `GROUP_IMPORT=open` locally.
+  - See its README and `docs/omics-preprocessing-jit.md`.
+
+### Changed
+
+- `SpatialViewState` gains required fields (the cell, transcript, density and annotation
+  settings above). A host that builds a view state from `DEFAULT_SPATIAL_VIEW` is unaffected;
+  one that writes a full literal must add them. That is a type-level break, so this is a
+  minor bump under 0.x.
+
 ## [0.6.0] — 2026-09-28
 
 Interactive toolbar tools, and brush classes. The first user is dianne-js: its
@@ -1765,7 +1817,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.3.3...v0.4.0
