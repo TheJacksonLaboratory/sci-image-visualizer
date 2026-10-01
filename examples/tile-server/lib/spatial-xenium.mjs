@@ -35,6 +35,7 @@ import { openByteSource } from './xenium/byte-source.mjs';
 import { readZipDirectory, openStoredMember, readMember } from './xenium/zip.mjs';
 import { ZarrZipStore, typedArrayFor } from './xenium/zarr2-zip.mjs';
 import { LruCache } from './xenium/lru.mjs';
+import { parseDelimited } from './delimited.mjs';
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const NO_CATEGORY = 0xffff;
@@ -380,16 +381,17 @@ async function buildColumns(ds) {
 }
 
 /**
- * A derived per-cell vector, computed once and cached as `<derivedDir>/<name>.f32` — so a
- * server restart does not redo a full pass over the matrix.
+ * A derived f32 vector, computed once and cached as `<derivedDir>/<name>.f32` — so a
+ * server restart does not redo a full pass over the matrix. `length` is how many floats a
+ * valid cached file holds: one per cell by default, `rows × cols` for a density raster.
  */
-async function derived(ds, name, compute) {
+export async function derived(ds, name, compute, length = ds.count) {
   return chunkCache.get(`${ds.cfg.source}|derived|${name}`, async () => {
     const file = ds.cfg.derivedDir ? path.join(ds.cfg.derivedDir, `${name}.f32`) : null;
     if (file) {
       try {
         const buf = await readFile(file);
-        if (buf.length === ds.count * 4) return new Float32Array(buf.buffer, buf.byteOffset, ds.count);
+        if (buf.length === length * 4) return new Float32Array(buf.buffer, buf.byteOffset, length);
       } catch { /* not cached yet */ }
     }
     const t0 = Date.now();
@@ -397,8 +399,10 @@ async function derived(ds, name, compute) {
     console.log(`[xenium] ${ds.cfg.id}: computed ${name} in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
     if (file) {
       await mkdir(ds.cfg.derivedDir, { recursive: true });
-      await writeFile(`${file}.partial`, Buffer.from(v.buffer, v.byteOffset, v.byteLength));
-      await rename(`${file}.partial`, file);
+      // A temp name of its own: two servers may share the derived directory.
+      const partial = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.partial`;
+      await writeFile(partial, Buffer.from(v.buffer, v.byteOffset, v.byteLength));
+      await rename(partial, file);
     }
     return v;
   });
@@ -425,23 +429,24 @@ async function cellTranscriptCounts(ds) {
 
 /** Parse a `cell_id,group` table and join it onto the observations. */
 async function joinCellGroups(ds, text, name, description, section) {
-  const lines = text.split(/\r?\n/).filter((l) => l.trim());
-  if (lines.length < 2) throw new RangeError('the table needs a header row and at least one cell');
-  const split = (l) => l.split(/,|\t/).map((f) => f.trim().replace(/^"|"$/g, ''));
-  const header = split(lines[0]);
+  const rows = parseDelimited(text);
+  if (rows.length < 2) throw new RangeError('the table needs a header row and at least one cell');
+  const header = rows[0];
   const idCol = header.findIndex((h) => /^(cell_id|cell|barcode)$/i.test(h));
   let labelCol = header.findIndex((h) => /^(cell_?type|group|label|annotation|cluster)$/i.test(h));
   if (labelCol < 0) labelCol = header.findIndex((_, i) => i !== idCol);
   if (idCol < 0 || labelCol < 0) throw new RangeError('the table needs a cell_id column and a group column');
   const byId = new Map();
-  for (let i = 1; i < lines.length; i++) {
-    const f = split(lines[i]);
-    if (f[idCol]) byId.set(f[idCol], f[labelCol]);
+  for (let i = 1; i < rows.length; i++) {
+    const f = rows[i];
+    if (f[idCol]) byId.set(f[idCol], f[labelCol] ?? '');
   }
   const ids = await chunkCache.get(`${ds.cfg.source}|cell_id`, async () => (await ds.cells.read('cell_id')).data);
   // Categories ordered by size, largest first — how Xenium Explorer lists groups.
   const sizes = new Map();
   for (const v of byId.values()) sizes.set(v, (sizes.get(v) ?? 0) + 1);
+  // Codes are u16 with 0xffff meaning "no group", so at most 65,535 groups fit.
+  if (sizes.size >= NO_CATEGORY) throw new RangeError(`too many groups (${sizes.size}); at most ${NO_CATEGORY - 1}`);
   const categories = [...sizes.keys()].sort((a, b) => sizes.get(b) - sizes.get(a) || a.localeCompare(b));
   const code = new Map(categories.map((c, i) => [c, i]));
   const codes = new Uint16Array(ds.count).fill(NO_CATEGORY);
@@ -1197,10 +1202,11 @@ export async function xeniumDensity(xeniumDir, id, genes, bin = 10) {
   if (!ds.densityAttrs) throw new RangeError('no density grid in this bundle');
   const { rows, cols } = ds.densityAttrs;
   const base = ds.densityAttrs.grid_size[0];
-  const f = Math.max(1, Math.round(bin / base));
-  if (![1, 2, 4, 8].includes(f)) throw new RangeError('bin must be 10, 20, 40 or 80 µm');
+  // Exactly 1, 2, 4 or 8 grid cells per bin — never rounded to a size the caller did not ask for.
+  const f = [1, 2, 4, 8].find((k) => Math.abs(bin - base * k) < 1e-6);
+  if (!f) throw new RangeError(`bin must be ${base}, ${2 * base}, ${4 * base} or ${8 * base} µm`);
   const fine = genes.length === 1 && genes[0] === '*'
-    ? await derived(ds, 'density_all_genes', () => allGenesDensity(ds))
+    ? await derived(ds, 'density_all_genes', () => allGenesDensity(ds), rows * cols)
     : await genesDensity(ds, genes);
   const R = Math.ceil(rows / f);
   const C = Math.ceil(cols / f);

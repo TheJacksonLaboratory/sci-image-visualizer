@@ -100,6 +100,9 @@ interface Placement { scale: [number, number]; translate: [number, number] }
 /** Transcript colours: per-entry RGBA for points, values + colormap for shapes. */
 interface TranscriptFaces { rgba: RGBA[]; values: Float32Array; colormap: Colormap }
 const CAMERA_IDLE_MS = 120;
+/** First retry of a view with a failed tile; doubles each time, up to MAX_TILE_RETRIES. */
+const TILE_RETRY_MS = 1000;
+const MAX_TILE_RETRIES = 3;
 
 const UNASSIGNED_RGBA: RGBA = [0.62, 0.62, 0.62, 0.55];
 
@@ -107,6 +110,10 @@ export class NapariSpatialTileLayers {
   private viewer: Viewer | null = null;
   private cameraOff: (() => void) | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  /** Set when a tile of the current plan failed to load (see fetchAll). */
+  private planIncomplete = false;
+  /** Consecutive retries of an incomplete view. */
+  private tileRetries = 0;
   private token = 0;
   private readonly layers = new Map<Group, Layer>();
   /** What each group currently shows, so an unchanged plan is a no-op. */
@@ -141,6 +148,7 @@ export class NapariSpatialTileLayers {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     this.token++;
+    this.tileRetries = 0;
     if (this.viewer) {
       for (const layer of this.layers.values()) {
         if (this.viewer.layers.items.includes(layer)) this.viewer.layers.remove(layer);
@@ -191,6 +199,7 @@ export class NapariSpatialTileLayers {
     const [dataset, view, selection] = latest;
     const token = ++this.token;
     const stale = () => token !== this.token || this.viewer !== viewer;
+    this.planIncomplete = false;
 
     if (!dataset) {
       for (const g of ORDER) this.drop(g);
@@ -209,6 +218,14 @@ export class NapariSpatialTileLayers {
       this.planCells(dataset, view, selection, rect, pxPerUnit, stale),
       this.planTranscripts(dataset, view, rect, pxPerUnit, stale),
     ]);
+    if (stale()) return;
+    // A tile that failed left a hole the cache keys do not record, so try the same view
+    // again, backing off, a bounded number of times.
+    if (!this.planIncomplete) {
+      this.tileRetries = 0;
+    } else if (this.tileRetries < MAX_TILE_RETRIES) {
+      this.schedule(TILE_RETRY_MS * 2 ** this.tileRetries++);
+    }
   }
 
   // ── cells ─────────────────────────────────────────────────────────────────────────
@@ -261,7 +278,8 @@ export class NapariSpatialTileLayers {
 
     this.currentRings = rings;
     this.currentNuclei = nuclei;
-    this.cellGeometryKey = geometryKey;
+    // A geometry missing a failed tile is drawn but not remembered, so the retry refetches it.
+    this.cellGeometryKey = this.planIncomplete ? null : geometryKey;
     this.cellStyleKey = styleKey;
     const ref = dataset.imageRef;
     const common = { scale: ref?.scale ?? [1, 1], translate: ref?.translate ?? [0, 0] } as const;
@@ -473,7 +491,8 @@ export class NapariSpatialTileLayers {
     const faces = await this.transcriptColors(dataset, view, merged);
     if (stale()) return;
 
-    this.keys.set('transcripts', planKey);
+    if (this.planIncomplete) this.keys.delete('transcripts');
+    else this.keys.set('transcripts', planKey);
     const diam = px.map((d) => d / pxPerUnit);
     this.drawn = {
       kind: job.kind, bin: job.bin, merged, radius: diam.map((d) => d / 2),
@@ -916,6 +935,10 @@ export class NapariSpatialTileLayers {
 
   // ── layer bookkeeping ─────────────────────────────────────────────────────────────
 
+  /**
+   * Fetch every tile, drawing what arrived. A failure does not fail the view, but it marks the
+   * plan incomplete: the caller must not cache it as done, and `plan()` retries it.
+   */
   private async fetchAll<K, T>(keys: K[], load: (k: K) => Promise<T>): Promise<T[]> {
     const settled = await Promise.allSettled(keys.map(load));
     const out: T[] = [];
@@ -923,6 +946,7 @@ export class NapariSpatialTileLayers {
       if (s.status === 'fulfilled') out.push(s.value);
       else console.warn('[napari-js] spatial tile failed', s.reason);
     }
+    if (out.length < keys.length) this.planIncomplete = true;
     return out;
   }
 

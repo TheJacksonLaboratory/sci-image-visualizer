@@ -124,17 +124,26 @@ export async function buildTranscriptIndex(
   const baseW = (gxMax - gxMin + 1) * BASE_PER_SOURCE;
   const baseH = (gyMax - gyMin + 1) * BASE_PER_SOURCE;
 
-  // Dense accumulators for the coarser levels (the base level is written as it is made).
+  // Accumulators for the coarser levels (the base level is written as it is made), one
+  // block per output tile, allocated when a transcript first lands in it — so memory follows
+  // the tissue, not the bounding rectangle with all its empty space.
   const dense = [];
   for (let m = 1; m < LEVELS; m++) {
-    const w = Math.ceil(baseW / 2 ** m);
-    const h = Math.ceil(baseH / 2 ** m);
-    dense[m] = {
-      w, h,
-      count: new Uint32Array(w * h), sx: new Float64Array(w * h), sy: new Float64Array(w * h),
-      best: new Uint32Array(w * h), cell: new Uint32Array(w * h).fill(NO_CELL),
-    };
+    dense[m] = { w: Math.ceil(baseW / 2 ** m), h: Math.ceil(baseH / 2 ** m), blocks: new Map() };
   }
+  const BLOCK = TILE_BINS * TILE_BINS;
+  const blockAt = (L, tx, ty, create) => {
+    const key = `${tx},${ty}`;
+    let b = L.blocks.get(key);
+    if (!b && create) {
+      b = {
+        count: new Uint32Array(BLOCK), sx: new Float64Array(BLOCK), sy: new Float64Array(BLOCK),
+        best: new Uint32Array(BLOCK), cell: new Uint32Array(BLOCK).fill(NO_CELL),
+      };
+      L.blocks.set(key, b);
+    }
+    return b;
+  };
 
   await mkdir(outDir, { recursive: true });
   const base = levelWriter(path.join(outDir, 'L0.bin'));
@@ -171,14 +180,16 @@ export async function buildTranscriptIndex(
         const gbx = (gx - gxMin) * BASE_PER_SOURCE + bx;
         const gby = (gy - gyMin) * BASE_PER_SOURCE + by;
         for (let m = 1; m < LEVELS; m++) {
-          const L = dense[m];
-          const k = (gby >> m) * L.w + (gbx >> m);
-          L.count[k] += c;
-          L.sx[k] += sx[b];
-          L.sy[k] += sy[b];
-          if (c > L.best[k] && cell[b] !== NO_CELL) {
-            L.best[k] = c;
-            L.cell[k] = cell[b];
+          const cx = gbx >> m;
+          const cy = gby >> m;
+          const B = blockAt(dense[m], Math.floor(cx / TILE_BINS), Math.floor(cy / TILE_BINS), true);
+          const k = (cy % TILE_BINS) * TILE_BINS + (cx % TILE_BINS);
+          B.count[k] += c;
+          B.sx[k] += sx[b];
+          B.sy[k] += sy[b];
+          if (c > B.best[k] && cell[b] !== NO_CELL) {
+            B.best[k] = c;
+            B.cell[k] = cell[b];
           }
         }
       }
@@ -217,12 +228,16 @@ export async function buildTranscriptIndex(
     for (let ty = 0; ty * TILE_BINS < L.h; ty++) {
       for (let tx = 0; tx * TILE_BINS < L.w; tx++) {
         const parts = [];
-        for (let by = ty * TILE_BINS; by < Math.min(L.h, (ty + 1) * TILE_BINS); by++) {
-          for (let bx = tx * TILE_BINS; bx < Math.min(L.w, (tx + 1) * TILE_BINS); bx++) {
-            const k = by * L.w + bx;
-            const c = L.count[k];
-            if (c) parts.push(record(L.sx[k] / c, L.sy[k] / c, c, L.cell[k]));
+        const B = blockAt(L, tx, ty, false);
+        if (B) {
+          for (let by = ty * TILE_BINS; by < Math.min(L.h, (ty + 1) * TILE_BINS); by++) {
+            for (let bx = tx * TILE_BINS; bx < Math.min(L.w, (tx + 1) * TILE_BINS); bx++) {
+              const k = (by - ty * TILE_BINS) * TILE_BINS + (bx - tx * TILE_BINS);
+              const c = B.count[k];
+              if (c) parts.push(record(B.sx[k] / c, B.sy[k] / c, c, B.cell[k]));
+            }
           }
+          L.blocks.delete(`${tx},${ty}`); // written: free it
         }
         await w.writeTile(`${tx},${ty}`, Buffer.concat(parts));
       }

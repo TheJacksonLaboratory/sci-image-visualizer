@@ -28,6 +28,7 @@
 
 import express from 'express';
 import cors from 'cors';
+import { timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import sharp from 'sharp';
 
@@ -101,8 +102,34 @@ const app = express();
 // unauthenticated demo this is harmless; a real deployment would restrict origin.
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
-// Cell-group tables imported from the viewer: tens of MB for a large dataset.
-app.use('/spatial/:id/groups', express.text({ type: '*/*', limit: '200mb' }));
+// Cell-group tables imported from the viewer: about 30 MB for 700k cells with long labels.
+app.use('/spatial/:id/groups', express.text({ type: '*/*', limit: '50mb' }));
+
+/**
+ * Who may import a cell grouping. An import is a persistent write every viewer of the
+ * dataset sees, so a server reachable by others must not take one from anybody:
+ * - `GROUP_IMPORT_TOKEN=<secret>` — callers send `Authorization: Bearer <secret>`.
+ * - `GROUP_IMPORT=open` — anyone; only for a server on your own machine.
+ * - neither (the default) — imports are refused.
+ */
+const GROUP_IMPORT_TOKEN = process.env.GROUP_IMPORT_TOKEN || '';
+const GROUP_IMPORT_OPEN = process.env.GROUP_IMPORT === 'open';
+
+function allowGroupImport(req, res) {
+  if (GROUP_IMPORT_TOKEN) {
+    const sent = String(req.get('authorization') ?? '').replace(/^Bearer\s+/i, '');
+    const a = Buffer.from(sent);
+    const b = Buffer.from(GROUP_IMPORT_TOKEN);
+    if (a.length === b.length && timingSafeEqual(a, b)) return true;
+    res.status(401).json({ error: 'group import needs the server\'s import token' });
+    return false;
+  }
+  if (GROUP_IMPORT_OPEN) return true;
+  res.status(403).json({
+    error: 'group import is disabled on this server (set GROUP_IMPORT_TOKEN, or GROUP_IMPORT=open locally)',
+  });
+  return false;
+}
 
 function decodeInfo(raw) {
   const b64 = String(raw ?? '');
@@ -506,7 +533,8 @@ app.get('/spatial/:id/polygon-tile/:set/:level/:gx/:gy', async (req, res) => {
 
 /** `?genes=A,B,C` — capped, since each gene is a separate row range per tile. */
 function genesParam(v) {
-  const genes = String(v ?? '').split(',').map((g) => g.trim()).filter(Boolean);
+  // A set: a repeated gene would otherwise be counted or returned twice.
+  const genes = [...new Set(String(v ?? '').split(',').map((g) => g.trim()).filter(Boolean))];
   if (genes.length > 512) throw new RangeError('at most 512 genes per request');
   return genes;
 }
@@ -566,6 +594,7 @@ app.get('/spatial/:id/density', async (req, res) => {
 
 // Import a cell grouping: body = CSV/TSV with cell_id and group columns; ?name=<label>.
 app.post('/spatial/:id/groups', async (req, res) => {
+  if (!allowGroupImport(req, res)) return;
   const { id } = req.params;
   await fromSource(res, id, {
     xenium: async () => res.json(await xeniumImportGroups(XENIUM_DIR, id, req.query.name, req.body)),

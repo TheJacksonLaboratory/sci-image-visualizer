@@ -58,7 +58,7 @@ format `SpatialDataHttpService` speaks (see
 | `GET /spatial/:id/polygon-tile/:set/:level/:gx/:gy` | one grid tile of boundaries: `u32` count, `u32[count]` owning observation, `u32[count+1]` offsets, `f32` coords |
 | `GET /spatial/:id/transcript-tile/:level/:gx/:gy?genes=A,B&quality=high\|all` | one grid tile of transcripts (level 0) or pre-aggregated clusters (levels ≥ 1): x, y, z, count, owning cell, gene |
 | `GET /spatial/:id/density?genes=A,B&bin=10` | summed transcript density re-binned to 10/20/40/80 µm (`genes=*` for every real gene): `u32 rows, u32 cols, f32 cellW, cellH, originX, originY` header, then `f32[rows·cols]` |
-| `POST /spatial/:id/groups?name=<label>` | import a cell grouping (body: CSV/TSV with `cell_id` and a group column); joined, added as a categorical column, and saved under `<id>.derived/groups/` |
+| `POST /spatial/:id/groups?name=<label>` | import a cell grouping (body: CSV/TSV with `cell_id` and a group column, quoted fields allowed, up to 50 MB); joined, added as a categorical column, and saved under `<id>.derived/groups/`. **Off by default** — it is a write every viewer sees: set `GROUP_IMPORT_TOKEN=<secret>` (callers send `Authorization: Bearer <secret>`), or `GROUP_IMPORT=open` for a server only you can reach |
 | `GET /spatial/:id/transcript-counts?genes=A,B` | `{ counts: { gene: n }, total, bounds }` — transcript totals for the viewer's points estimate |
 | `GET /spatial/:id/transcript-bins/:level/:tx/:ty` | one tile of the all-gene grouping pyramid, in the transcript-tile layout (one entry per bin: centroid, count, dominant cell) |
 

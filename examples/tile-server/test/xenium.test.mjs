@@ -170,3 +170,27 @@ test('xeniumCellId: hex digits shift into a–p, then the dataset suffix', () =>
   assert.equal(xeniumCellId(0x0123abcd, 1), 'abcdklmn-1');
   assert.equal(xeniumCellId(0xffffffff, 2), 'pppppppp-2');
 });
+
+test('derived vectors are read back from disk after a restart, density rasters included', async () => {
+  const { derived } = await import('../lib/spatial-xenium.mjs');
+  const { mkdtemp, readdir, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const dir = await mkdtemp(path.join(tmpdir(), 'xenium-derived-'));
+  try {
+    let computed = 0;
+    const compute = (n) => async () => { computed++; return new Float32Array(n).fill(7); };
+    // Same directory, a new in-memory cache key each time: what a restarted server sees.
+    const ds = (run) => ({ count: 3, cfg: { id: 'x', source: `run-${run}`, derivedDir: dir } });
+    await derived(ds(1), 'transcript_count', compute(3));
+    await derived(ds(1), 'density_all_genes', compute(12), 12); // a 3 × 4 raster, not one per cell
+    assert.equal(computed, 2);
+    const cells = await derived(ds(2), 'transcript_count', compute(3));
+    const density = await derived(ds(2), 'density_all_genes', compute(12), 12);
+    assert.equal(computed, 2, 'both came from disk');
+    assert.equal(cells.length, 3);
+    assert.equal(density.length, 12);
+    assert.deepEqual((await readdir(dir)).sort(), ['density_all_genes.f32', 'transcript_count.f32']);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
