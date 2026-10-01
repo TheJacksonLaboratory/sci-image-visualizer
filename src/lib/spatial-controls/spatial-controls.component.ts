@@ -985,6 +985,49 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     this.controls?.setViewState({ transcriptGeneColors: { ...this.view.transcriptGeneColors, [gene]: hex } });
   }
 
+  // ── per-gene icon and colour picker ──────────────────────────────────────
+
+  /** Swatches in the picker: the categorical palette genes are coloured from by default. */
+  readonly colorPresets = DEFAULT_CATEGORICAL_PALETTE.slice(0, 10).map((c) => c.toLowerCase());
+  /** The gene the open picker edits. */
+  styleGene: string | null = null;
+
+  openGeneStyle(event: Event, gene: string, panel: { toggle(e: Event): void; hide(): void }): void {
+    if (this.styleGene === gene) {
+      panel.toggle(event);
+      return;
+    }
+    this.styleGene = gene;
+    panel.hide();
+    // Re-open anchored on the row that was clicked, once the panel has closed.
+    setTimeout(() => panel.toggle(event));
+  }
+
+  /** The icon the open picker shows as chosen. */
+  get styleGlyph(): TranscriptGlyphName | null {
+    const gene = this.styleGene;
+    return gene ? this.glyphOf(gene, Math.max(0, this.view.transcriptGenes.indexOf(gene))) : null;
+  }
+
+  glyphPoints(glyph: TranscriptGlyphName): string {
+    return GLYPH_OPTIONS.find((o) => o.value === glyph)?.points ?? '';
+  }
+
+  /** A typed hex colour, accepted as `#rrggbb` or `rrggbb`; anything else is ignored. */
+  onGeneHex(gene: string, text: string): void {
+    const m = /^#?([0-9a-f]{6})$/i.exec(text.trim());
+    if (m) this.onGeneColor(gene, `#${m[1].toLowerCase()}`);
+  }
+
+  /** Back to the gene's default icon and colour (by its position in the list). */
+  resetGeneStyle(gene: string): void {
+    const colors = { ...this.view.transcriptGeneColors };
+    const glyphs = { ...this.view.transcriptGlyphs };
+    delete colors[gene];
+    delete glyphs[gene];
+    this.controls?.setViewState({ transcriptGeneColors: colors, transcriptGlyphs: glyphs });
+  }
+
   /** '±': every gene, or back to the chosen list. */
   onToggleAllGenes(): void {
     if (!this.canShowAllGenes) return;

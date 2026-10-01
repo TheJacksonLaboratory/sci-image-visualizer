@@ -928,6 +928,59 @@ describe('SpatialControlsComponent', () => {
       expect(component.glyphOf('B', 1)).toBe('hexagon');
     });
 
+    it('opens one icon and colour picker per gene, as Xenium Explorer does', async () => {
+      dataset$.next(tiled);
+      await build(controls);
+      jest.useFakeTimers();
+      view$.next({ ...view$.value, transcriptGenes: ['A', 'B'] });
+      const panel = { toggle: jest.fn(), hide: jest.fn() };
+      const click = new MouseEvent('click');
+      component.openGeneStyle(click, 'B', panel);
+      expect(component.styleGene).toBe('B');
+      expect(component.styleGlyph).toBe('star'); // B's default, by position
+      jest.runAllTimers();
+      expect(panel.toggle).toHaveBeenCalledWith(click);
+      // Clicking the same gene again just toggles the panel.
+      component.openGeneStyle(click, 'B', panel);
+      expect(panel.toggle).toHaveBeenCalledTimes(2);
+      // Choosing an icon and a colour writes the view state; the picker follows it.
+      component.onGlyph('B', 'diamond');
+      expect(component.styleGlyph).toBe('diamond');
+      component.onGeneColor('B', component.colorPresets[3]);
+      expect(view$.value.transcriptGeneColors).toEqual({ B: component.colorPresets[3] });
+      jest.useRealTimers();
+    });
+
+    it('accepts a typed hex colour with or without #, and ignores anything else', async () => {
+      dataset$.next(tiled);
+      await build(controls);
+      component.onGeneHex('A', ' 43BCE7 ');
+      expect(view$.value.transcriptGeneColors).toEqual({ A: '#43bce7' });
+      component.onGeneHex('A', '#zzzzzz');
+      component.onGeneHex('A', '#123');
+      expect(view$.value.transcriptGeneColors).toEqual({ A: '#43bce7' });
+    });
+
+    it("resets a gene's icon and colour to its defaults, leaving the others", async () => {
+      dataset$.next(tiled);
+      await build(controls);
+      view$.next({
+        ...view$.value, transcriptGenes: ['A', 'B'],
+        transcriptGlyphs: { A: 'x', B: 'hexagon' }, transcriptGeneColors: { A: '#111111', B: '#222222' },
+      });
+      component.resetGeneStyle('A');
+      expect(view$.value.transcriptGlyphs).toEqual({ B: 'hexagon' });
+      expect(view$.value.transcriptGeneColors).toEqual({ B: '#222222' });
+      expect(component.glyphOf('A', 0)).toBe('circle');
+    });
+
+    it('draws each glyph for the picker and the gene rows', async () => {
+      dataset$.next(tiled);
+      await build(controls);
+      expect(component.glyphOptions).toHaveLength(10);
+      for (const o of component.glyphOptions) expect(component.glyphPoints(o.value)).toBe(o.points);
+    });
+
     it('patches the display settings', async () => {
       dataset$.next(tiled);
       await build(controls);
