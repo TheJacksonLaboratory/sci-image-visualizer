@@ -1502,6 +1502,12 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       // following `frame$.subscribe(redraw)` would stay blank until the next pan/zoom.
       frame$: this.withCurrentRect(this.frame$, ready),
       settled$: this.withCurrentRect(this.viewportChange$, ready),
+      fitBounds: (rect, options) => {
+        const viewer = this.viewer;
+        if (!viewer || !ready() || !(rect.width > 0) || !(rect.height > 0)) return;
+        const vpRect = imageRectToViewport(viewer, rect.x, rect.y, rect.width, rect.height);
+        viewer.viewport.fitBoundsWithConstraints(vpRect, !!options?.immediately);
+      },
     };
     return this.plotModeViewport;
   }
