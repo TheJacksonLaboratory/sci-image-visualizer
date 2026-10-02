@@ -305,6 +305,43 @@ export function groupTranscripts(
   return { tile, group };
 }
 
+/**
+ * The colour of each gene-tree cluster of a selection, for colouring transcripts by cluster: a
+ * cluster named like a group of the cells' grouping takes that group's colour (its cells and its
+ * transcripts agree); the others take palette colours in tree order. Clusters are the tree's
+ * groups holding a selected gene, then each ungrouped selected gene on its own. Every gene of a
+ * cluster gets the same colour — the tree's swatches and the markers use this one map.
+ */
+export function clusterColorMap(
+  genes: readonly string[], groups: readonly { name: string; genes: readonly string[] }[],
+  cellColors: ReadonlyMap<string, string>, palette: readonly string[],
+): Map<string, string> {
+  const chosen = new Set(genes);
+  const names: string[] = [];
+  const grouped = new Set<string>();
+  for (const g of groups) {
+    const mine = g.genes.filter((x) => chosen.has(x) && !grouped.has(x));
+    if (!mine.length) continue;
+    mine.forEach((x) => grouped.add(x));
+    names.push(g.name);
+  }
+  for (const gene of genes) if (!grouped.has(gene)) names.push(gene);
+  const out = new Map<string, string>();
+  let k = 0;
+  for (const name of names) {
+    if (out.has(name)) continue;
+    out.set(name, cellColors.get(name) ?? palette[k++ % palette.length]);
+  }
+  return out;
+}
+
+/** The cluster a selected gene is in: its first gene-tree group holding it, else itself. */
+export function clusterOfGene(
+  gene: string, groups: readonly { name: string; genes: readonly string[] }[],
+): string {
+  return groups.find((g) => g.genes.includes(gene))?.name ?? gene;
+}
+
 /** Smallest and largest transcript marker, in canvas pixels. */
 export const TRANSCRIPT_MIN_PX = 4;
 export const TRANSCRIPT_MAX_PX = 32;

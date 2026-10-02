@@ -20,6 +20,7 @@ import {
   defaultGlyphFor, discreteColormapStops, glyphOutline, glyphRings, pixelsPerDataUnit,
   polygonLevelFor, tileId, tilesInRect, transcriptLevelFor, transcriptMarkerPx,
   typicalCellDiameter, visibleArea, visibleDataRect, geneBinSize, groupTranscripts, clipTranscripts,
+  clusterColorMap,
 } from '../../spatial/spatial-tiles';
 
 /** The all-gene pyramid's finest bin (250 µm source tiles / 128) and default level count, used
@@ -1150,6 +1151,8 @@ export class NapariSpatialTileLayers {
         const colors = resolveCategoryColors(codes.meta);
         codes.meta.categories.forEach((c, k) => cellColor.set(c, colors[k]));
       }
+      const colors = clusterColorMap(view.transcriptGenes, view.transcriptGeneGroups, cellColor,
+        DEFAULT_CATEGORICAL_PALETTE);
       const index = new Map<string, number>();
       const hex: string[] = [];
       const codeFor = (cluster: string) => {
@@ -1157,7 +1160,7 @@ export class NapariSpatialTileLayers {
         if (k === undefined) {
           k = hex.length;
           index.set(cluster, k);
-          hex.push(cellColor.get(cluster) ?? DEFAULT_CATEGORICAL_PALETTE[k % DEFAULT_CATEGORICAL_PALETTE.length]);
+          hex.push(colors.get(cluster) ?? cellColor.get(cluster) ?? DEFAULT_CATEGORICAL_PALETTE[0]);
         }
         return k;
       };

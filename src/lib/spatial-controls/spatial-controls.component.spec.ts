@@ -974,6 +974,19 @@ describe('SpatialControlsComponent', () => {
       expect(component.glyphOf('A', 0)).toBe('circle');
     });
 
+    it('in Cluster colouring, shows every gene of a cluster in the cluster\'s colour', async () => {
+      dataset$.next(tiled);
+      await build(controls);
+      view$.next({
+        ...view$.value, transcriptColorBy: 'cluster', transcriptGenes: ['A', 'B', 'C'],
+        transcriptGeneGroups: [{ name: 'K1', genes: ['A', 'B'] }],
+      });
+      expect(component.geneSwatchOf('A')).toBe(component.geneSwatchOf('B'));
+      expect(component.geneSwatchOf('C')).not.toBe(component.geneSwatchOf('A'));
+      view$.next({ ...view$.value, transcriptColorBy: 'gene' });
+      expect(component.geneSwatchOf('A')).not.toBe(component.geneSwatchOf('B')); // per gene again
+    });
+
     it('draws each glyph for the picker and the gene rows', async () => {
       dataset$.next(tiled);
       await build(controls);

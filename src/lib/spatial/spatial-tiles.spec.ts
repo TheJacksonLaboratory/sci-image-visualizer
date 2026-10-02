@@ -1,6 +1,6 @@
 import { SpatialDataset, SpatialTranscriptTile } from '../contracts/spatial-dataset.contract';
 import { lutFor } from './spatial-encoding';
-import { geneBinSize, groupTranscripts } from './spatial-tiles';
+import { clusterColorMap, clusterOfGene, geneBinSize, groupTranscripts } from './spatial-tiles';
 import {
   POLYGON_LEVEL_MIN_CELL_PX, TRANSCRIPT_GLYPHS, TRANSCRIPT_MAX_PX, TRANSCRIPT_MIN_PX,
   INFERNO_SCALE, TRANSCRIPT_PHYSICAL_UM,
@@ -406,4 +406,23 @@ describe('grouping a gene selection by zoom', () => {
     expect(tile.gene[0]).toBe(1); // gene 1 holds 6 of the cluster's 7
   });
 
+});
+
+describe('cluster colours', () => {
+  const groups = [{ name: 'Cluster 27', genes: ['CD55', 'TFF3'] }, { name: 'Cluster 28', genes: ['TNS4', 'SOCS3'] }];
+  const genes = ['CD55', 'TFF3', 'TNS4', 'SOCS3', 'LONE'];
+
+  it('gives every gene of a cluster one colour, a different one per cluster', () => {
+    const map = clusterColorMap(genes, groups, new Map(), ['#a', '#b', '#c']);
+    expect(map.get(clusterOfGene('CD55', groups))).toBe(map.get(clusterOfGene('TFF3', groups)));
+    expect(map.get('Cluster 27')).not.toBe(map.get('Cluster 28'));
+    expect(map.get('LONE')).toBe('#c'); // an ungrouped gene is its own cluster
+  });
+
+  it('takes the colour of the cell group of the same name, palette for the rest in tree order', () => {
+    const map = clusterColorMap(genes, groups, new Map([['Cluster 28', '#ff0000']]), ['#a', '#b']);
+    expect(map.get('Cluster 28')).toBe('#ff0000');
+    expect(map.get('Cluster 27')).toBe('#a');
+    expect(map.get('LONE')).toBe('#b');
+  });
 });

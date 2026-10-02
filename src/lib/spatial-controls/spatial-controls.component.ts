@@ -15,7 +15,8 @@ import {
   DEFAULT_CATEGORICAL_PALETTE, SPATIAL_3D_MAX_CATEGORIES, lutFor, spatialContinuousLut,
 } from '../spatial/spatial-encoding';
 import {
-  INFERNO_SCALE, TRANSCRIPT_GLYPHS, cellTypeColumnFor, cellsShown, defaultGlyphFor, glyphOutline, isCuratedColumn,
+  INFERNO_SCALE, TRANSCRIPT_GLYPHS, cellTypeColumnFor, cellsShown, clusterColorMap, clusterOfGene, defaultGlyphFor,
+  glyphOutline, isCuratedColumn,
 } from '../spatial/spatial-tiles';
 import {
   SpatialSelectionMask, emptySelection,
@@ -246,6 +247,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       this.refreshDensityWindow();
       void this.refreshKey();
       void this.refreshGroups();
+      void this.refreshCellGroupColors();
     }));
 
     const estimate$ = this.controls.getTranscriptEstimate$?.();
@@ -1365,6 +1367,35 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     const gene = this.view?.transcriptGenes[slot];
     return (gene && this.view.transcriptGeneColors[gene])
       || DEFAULT_CATEGORICAL_PALETTE[slot % DEFAULT_CATEGORICAL_PALETTE.length];
+  }
+
+  /** Colours of the cells' groups, by name — what a cluster of the same name is drawn in. */
+  private cellGroupColors = new Map<string, string>();
+  private cellGroupColorsFor: string | null = null;
+
+  private async refreshCellGroupColors(): Promise<void> {
+    const column = this.activeCellTypeColumn;
+    if (column === this.cellGroupColorsFor) return;
+    this.cellGroupColorsFor = column;
+    const map = new Map<string, string>();
+    const meta = column ? this.dataset?.columns.find((c) => c.name === column) : null;
+    if (meta && meta.kind === 'categorical' && this.controls) {
+      try {
+        const colors = await this.controls.categoryColors(column!);
+        meta.categories.forEach((c, k) => { if (colors[k]) map.set(c, colors[k]); });
+      } catch {
+        // No colours: palette colours, as the markers fall back to.
+      }
+    }
+    this.zone.run(() => { this.cellGroupColors = map; });
+  }
+
+  /** In Cluster colouring, a gene's swatch is its cluster's colour, as its markers are. */
+  geneSwatchOf(gene: string): string {
+    if (this.view.transcriptColorBy !== 'cluster') return this.geneColorOf(gene);
+    const colors = clusterColorMap(this.view.transcriptGenes, this.view.transcriptGeneGroups,
+      this.cellGroupColors, DEFAULT_CATEGORICAL_PALETTE);
+    return colors.get(clusterOfGene(gene, this.view.transcriptGeneGroups)) ?? this.geneColorOf(gene);
   }
 
   geneColorOf(gene: string): string {

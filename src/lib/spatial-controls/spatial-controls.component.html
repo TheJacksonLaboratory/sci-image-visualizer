@@ -256,7 +256,7 @@
                   </button>
                   <!-- The gene's marker, in its colour: its icon in Icons mode, a dot for circles.
                        Clicking it opens the icon and colour picker (as Xenium Explorer does). -->
-                  <button type="button" class="sc-gene-icon" [style.color]="geneColorOf(gene)"
+                  <button type="button" class="sc-gene-icon" [style.color]="geneSwatchOf(gene)"
                           [attr.aria-label]="'Icon and colour for ' + gene" pTooltip="Icon and colour"
                           tooltipPosition="top" (click)="openGeneStyle($event, gene, genePop)">
                     <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg">
