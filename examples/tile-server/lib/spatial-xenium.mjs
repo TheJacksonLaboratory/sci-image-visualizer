@@ -1387,18 +1387,28 @@ async function genesDensity(ds, genes) {
     async () => (await ds.transcripts.read('density/gene/indptr')).data);
   const out = new Float32Array(rows * cols);
   const key = `${ds.cfg.source}|density`;
-  for (const name of genes) {
+  const index = genes.map((name) => {
     const g = densityNames.indexOf(name);
     if (g < 0) throw new RangeError(`unknown gene: ${name}`);
-    const start = indptr[g * rows];
-    const end = indptr[(g + 1) * rows];
-    const [indices, data] = await Promise.all([
-      readRange(ds.transcripts, 'density/gene/indices', start, end, key),
-      readRange(ds.transcripts, 'density/gene/data', start, end, key),
-    ]);
-    for (let r = 0; r < rows; r++) {
-      for (let k = indptr[g * rows + r]; k < indptr[g * rows + r + 1]; k++) {
-        out[r * cols + indices[k - start]] += data[k - start];
+    return g;
+  });
+  // Several genes' ranges in flight at once: each is its own read of the store.
+  const PARALLEL = 8;
+  for (let i = 0; i < index.length; i += PARALLEL) {
+    const batch = index.slice(i, i + PARALLEL);
+    const parts = await Promise.all(batch.map((g) => {
+      const start = indptr[g * rows];
+      const end = indptr[(g + 1) * rows];
+      return Promise.all([
+        readRange(ds.transcripts, 'density/gene/indices', start, end, key),
+        readRange(ds.transcripts, 'density/gene/data', start, end, key),
+      ]).then(([indices, data]) => ({ g, start, indices, data }));
+    }));
+    for (const { g, start, indices, data } of parts) {
+      for (let r = 0; r < rows; r++) {
+        for (let k = indptr[g * rows + r]; k < indptr[g * rows + r + 1]; k++) {
+          out[r * cols + indices[k - start]] += data[k - start];
+        }
       }
     }
   }

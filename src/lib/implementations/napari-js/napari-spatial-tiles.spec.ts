@@ -1,10 +1,12 @@
 import type { Viewer } from 'napari-js';
 import { DEFAULT_SPATIAL_VIEW } from '../../contracts/display-types';
 import type { SpatialDataPort } from '../../contracts/ports/spatial-data.port';
-import { SpatialDataset, SpatialPolygonTile, SpatialTranscriptTile } from '../../contracts/spatial-dataset.contract';
+import {
+  NO_OBSERVATION, SpatialDataset, SpatialDensityRaster, SpatialPolygonTile, SpatialTranscriptTile,
+} from '../../contracts/spatial-dataset.contract';
 import { emptySelection } from '../../spatial/spatial-selection';
 import {
-  NapariSpatialTileLayers, SpatialTileHost, mergePolygonTiles, mergeTranscriptTiles, pickNearest,
+  NapariSpatialTileLayers, SpatialTileHost, clusterMarkers, mergePolygonTiles, mergeTranscriptTiles, pickNearest,
 } from './napari-spatial-tiles';
 
 const tile = (xs: number[], ys: number[], weight = 1): SpatialTranscriptTile => ({
@@ -260,7 +262,7 @@ describe('NapariSpatialTileLayers: per-gene counts in view', () => {
 });
 
 describe('NapariSpatialTileLayers: a gene selection follows the zoom', () => {
-  function setup(zoom: number, mode: 'circles' | 'glyphs' = 'circles', clusters = 1) {
+  function setup(zoom: number, mode: 'circles' | 'glyphs' = 'circles', clusters = 1, budget = 100_000) {
     const n = 400;
     const x = new Float32Array(n);
     const y = new Float32Array(n);
@@ -285,7 +287,7 @@ describe('NapariSpatialTileLayers: a gene selection follows the zoom', () => {
       ...DEFAULT_SPATIAL_VIEW, transcriptMode: mode,
       transcriptGenes: Array.from({ length: clusters }, (_v, i) => `G${i}`),
       transcriptGeneGroups: Array.from({ length: clusters }, (_v, i) => ({ name: `Cluster ${i}`, genes: [`G${i}`] })),
-      transcriptBudget: 100_000,
+      transcriptBudget: budget,
     };
     const items: unknown[] = [];
     const viewer = {
@@ -322,13 +324,18 @@ describe('NapariSpatialTileLayers: a gene selection follows the zoom', () => {
     tiles.detach();
   });
 
-  it('gives each cluster room: more clusters in view, coarser bins, one marker per cluster', async () => {
-    const tiles = setup(20, 'glyphs', 4); // 4 clusters: bins need 2 × 14 px; the 1-unit bin is 20 px
+  it('keeps to the max: over it, one larger marker per cluster per area, named for the hover', async () => {
+    // Zoomed in (individual transcripts would do), but 400 transcripts against a max of 50.
+    const tiles = setup(20, 'glyphs', 4, 50);
     await (tiles as unknown as { plan(): Promise<void> }).plan();
-    expect(drawn(tiles).bin?.size).toBe(2);
-    const d = drawn(tiles) as unknown as { entryGroup: Int32Array; groupNames: string[] };
+    const d = drawn(tiles) as unknown as {
+      bin?: { size: number }; merged: SpatialTranscriptTile; entryGroup: Int32Array; groupNames: string[];
+    };
+    expect(d.bin).toBeDefined();
+    expect(d.merged.count).toBeLessThanOrEqual(50);
     expect(new Set(d.entryGroup).size).toBe(4);
     expect(d.groupNames[d.entryGroup[0]]).toMatch(/^Cluster /);
+    expect(Array.from(d.merged.weight).reduce((a, b) => a + b, 0)).toBe(400); // nothing dropped
     tiles.detach();
   });
 
@@ -338,5 +345,23 @@ describe('NapariSpatialTileLayers: a gene selection follows the zoom', () => {
     expect(drawn(tiles).bin).toBeUndefined();
     expect(drawn(tiles).merged.count).toBe(400);
     tiles.detach();
+  });
+});
+
+describe('clusterMarkers (a zoomed-out selection, from density grids)', () => {
+  it('sums each cluster\'s grid cells per square, at their count-weighted centre', () => {
+    const raster = (values: number[]): SpatialDensityRaster => ({
+      meta: { gridSize: [10, 10], origin: [0, 0], rows: 2, cols: 2 }, genes: [], values: Float32Array.from(values),
+    });
+    // One 20-unit square holds all four cells. Cluster 0 is mostly in the top-left cell.
+    const { tile, group } = clusterMarkers([raster([3, 1, 0, 0]), raster([0, 0, 0, 2])], [5, 7], 20,
+      { x0: 0, y0: 0, x1: 20, y1: 20 });
+    expect(tile.count).toBe(2);
+    expect(Array.from(group)).toEqual([0, 1]);
+    expect(Array.from(tile.weight)).toEqual([4, 2]);
+    expect(tile.x[0]).toBeCloseTo((3 * 5 + 1 * 15) / 4); // pulled toward the busier cell
+    expect(tile.x[1]).toBeCloseTo(15);
+    expect(Array.from(tile.gene)).toEqual([5, 7]); // each cluster's icon gene
+    expect(tile.observation[0]).toBe(NO_OBSERVATION);
   });
 });
