@@ -253,8 +253,10 @@ export interface SpatialViewState {
    * level-of-detail — aggregated when zoomed out, one per transcript at the finest zoom.
    */
   transcriptMode: 'off' | 'circles' | 'glyphs' | 'density';
-  /** Colour transcripts by the type of the cell they fall in, or by gene. */
-  transcriptColorBy: 'cellType' | 'gene';
+  /** Colour transcripts by the type of the cell they fall in, by gene, or by the gene-tree
+   *  cluster their gene is in (in the colour that cluster's cells have, when a cell grouping
+   *  names it). */
+  transcriptColorBy: 'cellType' | 'gene' | 'cluster';
   /** Glyph per gene for `glyphs` mode; genes not listed take one by position. */
   transcriptGlyphs: Record<string, TranscriptGlyphName>;
   /** Multiplier on transcript marker size. */

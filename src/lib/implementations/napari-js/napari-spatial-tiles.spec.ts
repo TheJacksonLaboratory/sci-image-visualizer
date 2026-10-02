@@ -437,3 +437,35 @@ describe('NapariSpatialTileLayers: a gene selection from the per-gene pyramid le
     tiles.detach();
   });
 });
+
+describe('NapariSpatialTileLayers: colouring transcripts by cluster', () => {
+  const tile = (genes: number[]): SpatialTranscriptTile => {
+    const n = genes.length;
+    return {
+      count: n, aggregated: false, x: new Float32Array(n), y: new Float32Array(n), z: new Float32Array(n),
+      weight: new Uint32Array(n).fill(1), observation: new Uint32Array(n), gene: Uint16Array.from(genes),
+    };
+  };
+  type Colors = (d: unknown, v: unknown, t: SpatialTranscriptTile, c?: (i: number) => string | null) =>
+    Promise<{ rgba: number[][] }>;
+
+  it('gives a cluster one colour, the colour of the cell group of the same name', async () => {
+    const meta = { kind: 'categorical', name: 'graphclust', categories: ['Cluster 1', 'Cluster 2'],
+      colors: ['#ff0000', '#00ff00'] };
+    const port = {
+      getColumn: async () => ({ meta, codes: new Uint16Array(1) }),
+    } as unknown as SpatialDataPort;
+    const tiles = new NapariSpatialTileLayers(port, {
+      latest: () => null, canvasSize: () => [0, 0], continuousLut: () => [], polygonsShownChanged: () => undefined,
+    });
+    const dataset = { id: 'd', columns: [meta] } as unknown as SpatialDataset;
+    const view = { ...DEFAULT_SPATIAL_VIEW, transcriptColorBy: 'cluster' as const, cellTypeColumn: 'graphclust' };
+    const clusters = ['Cluster 2', 'Cluster 2', 'Cluster 1', 'Mine'];
+    const colors = (tiles as unknown as { transcriptColors: Colors }).transcriptColors.bind(tiles);
+    const { rgba } = await colors(dataset, view, tile([0, 1, 2, 3]), (i) => clusters[i]);
+    expect(rgba[0]).toEqual(rgba[1]);           // genes 0 and 1: one cluster, one colour
+    expect(rgba[0]).toEqual([0, 1, 0, 1]);      // Cluster 2's cells are green
+    expect(rgba[2]).toEqual([1, 0, 0, 1]);      // Cluster 1's are red
+    expect(rgba[3]).not.toEqual(rgba[0]);       // a cluster no cell group names: a palette colour
+  });
+});

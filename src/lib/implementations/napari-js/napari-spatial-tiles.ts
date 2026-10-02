@@ -603,11 +603,18 @@ export class NapariSpatialTileLayers {
     // A bin of the all-gene pyramid mixes genes and carries none, so it cannot be coloured
     // by gene: colour it by its dominant cell's type until individual transcripts show.
     const kind = loaded.kind ?? job.kind;
-    const colorView = kind === 'bins' && view.transcriptColorBy === 'gene'
+    const colorView = kind === 'bins' && view.transcriptColorBy !== 'cellType'
       ? { ...view, transcriptColorBy: 'cellType' as const }
-      // Density-grid markers have no cell to take a type from: they take their cluster's gene colour.
-      : loaded.clustered ? { ...view, transcriptColorBy: 'gene' as const } : view;
-    const faces = await this.transcriptColors(dataset, colorView, merged);
+      // Density-grid markers have no cell to take a type from: they take their cluster's colour.
+      : loaded.clustered && view.transcriptColorBy === 'cellType'
+        ? { ...view, transcriptColorBy: 'cluster' as const } : view;
+    // Each entry's cluster: its marker's group, or the gene-tree group its gene is in.
+    const geneCluster = view.transcriptGenes.map((g) =>
+      view.transcriptGeneGroups.find((x) => x.genes.includes(g))?.name ?? g);
+    const clusterOf = (i: number): string | null => (entryGroup && groupNames
+      ? groupNames[entryGroup[i]] ?? null
+      : geneCluster[merged.gene[i]] ?? null);
+    const faces = await this.transcriptColors(dataset, colorView, merged, kind === 'genes' ? clusterOf : undefined);
     if (stale()) return;
 
     if (this.planIncomplete) this.keys.delete('transcripts');
@@ -1129,10 +1136,39 @@ export class NapariSpatialTileLayers {
   /** Per-entry colours both as RGBA (points) and as colormap values (glyph shapes). */
   private async transcriptColors(
     dataset: SpatialDataset, view: SpatialViewState, t: SpatialTranscriptTile,
+    clusterOf?: (i: number) => string | null,
   ): Promise<TranscriptFaces> {
     let rgb: Rgb[];
     let codeOf: (i: number) => number;
-    if (view.transcriptColorBy === 'gene') {
+    if (view.transcriptColorBy === 'cluster' && clusterOf) {
+      // A cluster named like a group of the cells' grouping takes that group's colour, so a
+      // cluster's transcripts and its cells agree; any other cluster takes a palette colour.
+      const name = this.cellTypeColumnName(dataset, view);
+      const codes = name ? await this.categoricalCodes(name).catch(() => null) : null;
+      const cellColor = new Map<string, string>();
+      if (codes?.meta.kind === 'categorical') {
+        const colors = resolveCategoryColors(codes.meta);
+        codes.meta.categories.forEach((c, k) => cellColor.set(c, colors[k]));
+      }
+      const index = new Map<string, number>();
+      const hex: string[] = [];
+      const codeFor = (cluster: string) => {
+        let k = index.get(cluster);
+        if (k === undefined) {
+          k = hex.length;
+          index.set(cluster, k);
+          hex.push(cellColor.get(cluster) ?? DEFAULT_CATEGORICAL_PALETTE[k % DEFAULT_CATEGORICAL_PALETTE.length]);
+        }
+        return k;
+      };
+      const code = new Int32Array(t.count);
+      for (let i = 0; i < t.count; i++) {
+        const c = clusterOf(i);
+        code[i] = c === null ? -1 : codeFor(c);
+      }
+      rgb = hex.map(parseHex);
+      codeOf = (i) => code[i];
+    } else if (view.transcriptColorBy === 'gene' || view.transcriptColorBy === 'cluster') {
       // All genes: codes are the dataset's gene indices, folded onto the palette.
       const n = view.transcriptAllGenes ? DEFAULT_CATEGORICAL_PALETTE.length : view.transcriptGenes.length;
       rgb = Array.from({ length: n }, (_g, i) => parseHex(

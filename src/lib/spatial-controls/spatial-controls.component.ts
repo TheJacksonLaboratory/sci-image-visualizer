@@ -623,7 +623,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     { label: 'Fill', value: 'fill' }, { label: 'Outline', value: 'outline' }, { label: 'Both', value: 'both' },
   ];
   readonly transcriptColorOptions = [
-    { label: 'Cell type', value: 'cellType' }, { label: 'Gene', value: 'gene' },
+    { label: 'Cluster', value: 'cluster' }, { label: 'Cell type', value: 'cellType' }, { label: 'Gene', value: 'gene' },
   ];
   readonly glyphOptions = GLYPH_OPTIONS;
   readonly budgetOptions = [25_000, 50_000, 100_000, 200_000, 400_000]
@@ -1175,6 +1175,8 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
         this.controls?.setViewState({
           transcriptGeneGroups: [...this.view.transcriptGeneGroups.filter((g) => !names.has(g.name)), ...groups],
           transcriptGenes: genes,
+          // Marker groups are clusters: colour the transcripts by them, as their cells are.
+          transcriptColorBy: 'cluster',
           ...(this.view.transcriptMode === 'off' ? { transcriptMode: 'circles' as const } : {}),
         });
         this.markersOpen = false;

@@ -1011,6 +1011,7 @@ describe('SpatialControlsComponent', () => {
         { name: 'Tumour', genes: ['KRT5', 'SHARED'] }, // SHARED goes where it scores higher
       ]);
       expect(view$.value.transcriptGenes).toEqual(['EPCAM', 'CD3E', 'KRT5', 'SHARED']);
+      expect(view$.value.transcriptColorBy).toBe('cluster'); // coloured by cluster from now on
       expect(component.markersOpen).toBe(false);
     });
 
