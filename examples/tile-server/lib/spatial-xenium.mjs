@@ -37,6 +37,7 @@ import { ZarrZipStore, typedArrayFor } from './xenium/zarr2-zip.mjs';
 import { LruCache } from './xenium/lru.mjs';
 import { parseDelimited } from './delimited.mjs';
 import { KEEP as MARKERS_KEPT, computeMarkers, topMarkers } from './xenium/markers.mjs';
+import { isLocalSource, transcriptPyramidName } from './xenium/pyramid-name.mjs';
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const NO_CATEGORY = 0xffff;
@@ -48,6 +49,30 @@ const chunkCache = new LruCache(Number(process.env.XENIUM_CACHE_MB ?? 768) * 2 *
 // ---------------------------------------------------------------------------
 // Discovery
 // ---------------------------------------------------------------------------
+
+/**
+ * Where a dataset's all-gene transcript pyramid is: an explicit `transcriptIndex`, else the
+ * first that exists of `<bundle name>.transcripts` next to a local bundle or in $XENIUM_DIR
+ * (the name jit-service uses too) and the older `<id>.transcripts`. With none built yet, the
+ * place a fallback build writes to: next to a local bundle, else in $XENIUM_DIR.
+ */
+async function pyramidFor(xeniumDir, id, source, explicit) {
+  if (explicit) return explicit;
+  const name = transcriptPyramidName(source);
+  const local = isLocalSource(source);
+  const candidates = [
+    ...(local ? [path.join(path.dirname(source), name)] : []),
+    path.join(xeniumDir, name),
+    path.join(xeniumDir, `${id}.transcripts`),
+  ];
+  for (const c of candidates) {
+    try {
+      await stat(path.join(c, 'index.json'));
+      return c;
+    } catch { /* try the next */ }
+  }
+  return candidates[0];
+}
 
 /** `{ id → { id, name, source, cellTypes? } }` for everything under $XENIUM_DIR. */
 async function discover(xeniumDir) {
@@ -68,7 +93,7 @@ async function discover(xeniumDir) {
         const rel = (p) => (p && !/^(https?|gs):/.test(p) && !path.isAbsolute(p) ? path.join(xeniumDir, p) : p);
         out.set(id, {
           id, name: cfg.name ?? id, source: rel(cfg.source), cellTypes: rel(cfg.cellTypes),
-          transcriptIndex: rel(cfg.transcriptIndex) ?? path.join(xeniumDir, `${id}.transcripts`),
+          transcriptIndex: await pyramidFor(xeniumDir, id, rel(cfg.source), rel(cfg.transcriptIndex)),
           derivedDir: path.join(xeniumDir, `${id}.derived`),
         });
       } else if (e.isFile() && e.name.endsWith('_xe_outs.zip')) {
@@ -76,7 +101,7 @@ async function discover(xeniumDir) {
         if (!out.has(id)) {
           out.set(id, {
             id, name: e.name.slice(0, -'_xe_outs.zip'.length).replace(/_/g, ' '), source: full,
-            transcriptIndex: path.join(xeniumDir, `${id}.transcripts`),
+            transcriptIndex: await pyramidFor(xeniumDir, id, full),
             derivedDir: path.join(xeniumDir, `${id}.derived`),
           });
         }
@@ -85,7 +110,7 @@ async function discover(xeniumDir) {
         if (!out.has(e.name)) {
           out.set(e.name, {
             id: e.name, name: e.name, source: full,
-            transcriptIndex: path.join(xeniumDir, `${e.name}.transcripts`),
+            transcriptIndex: await pyramidFor(xeniumDir, e.name, full),
             derivedDir: path.join(xeniumDir, `${e.name}.derived`),
           });
         }

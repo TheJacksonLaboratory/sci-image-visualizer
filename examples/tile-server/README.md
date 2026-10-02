@@ -383,8 +383,16 @@ per gene, so it too shows one marker per gene per area when zoomed out.
 
 ```bash
 npm run prepare-xenium -- --source <bundle> --id xenium-cervical --no-images --transcripts
-# → xenium/xenium-cervical.transcripts/ (index.json + one L<m>.bin per level), picked up by the server
+# → <bundle name>.transcripts/ (index.json + one L<m>.bin per level), picked up by the server
 ```
+
+The pyramid is **named after the bundle and kept next to it**: `X_xe_outs.zip` →
+`X_xe_outs.transcripts/` beside the zip (an unzipped `outs/` → `outs.transcripts/` beside the
+folder). That is where jit-service looks for it, and where this server does: next to a local
+bundle, or under `$XENIUM_DIR` with that name for a remote one (the older
+`$XENIUM_DIR/<id>.transcripts` still works, and a config's `transcriptIndex` overrides both).
+For a remote bundle (`gs://`, `https://`), `prepare-xenium` builds it under `$XENIUM_DIR` and
+prints where to copy it next to the bundle.
 
 (`npm run build-transcript-index -- --source <bundle> --id <id>` is the same, spelled out.)
 It is one pass over every transcript (~1.2 billion rows) — about 40 minutes on 32 cores next
@@ -392,7 +400,7 @@ to the data — and a few hundred MB out.
 
 **Fallback:** a dataset registered without it is not left incomplete. The first time the
 server opens it, it builds the pyramid itself in the background — into
-`<id>.transcripts.partial`, renamed only when finished, one build at a time. Every other
+`<bundle name>.transcripts.partial`, renamed only when finished, one build at a time. Every other
 feature works meanwhile; the manifest reports `transcriptBinsStatus` (tiles done of total)
 and the panel says "All genes" is being prepared. Set `XENIUM_AUTO_INDEX=0` to turn this
 off (for example on a server that should never spend an hour of CPU unasked). Running the
@@ -405,8 +413,8 @@ gcloud storage rsync -r \
   gs://jax-cimg-sample-data/Demonstrations/omics/xenium-wta-ffpe-cervical-cancer/xenium-cervical-tissue \
   cogs/xenium-cervical-tissue
 gcloud storage rsync -r \
-  gs://jax-cimg-sample-data/Demonstrations/omics/xenium-wta-ffpe-cervical-cancer/xenium-cervical.transcripts \
-  xenium/xenium-cervical.transcripts
+  gs://jax-cimg-sample-data/Demonstrations/omics/xenium-wta-ffpe-cervical-cancer/WTA_Preview_FFPE_Cervical_Cancer_xe_outs.transcripts \
+  xenium/WTA_Preview_FFPE_Cervical_Cancer_xe_outs.transcripts
 ```
 
 #### Serving a plain `.h5ad` LIVE

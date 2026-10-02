@@ -38,7 +38,9 @@
 //   --register    also write $XENIUM_DIR/<id>.json pointing at --source
 //   --keep        keep the extracted OME-TIFFs (default: delete after building)
 //   --transcripts build the all-gene transcript pyramid into --index-out
-//   --index-out   default $XENIUM_DIR/<id>.transcripts (where the server looks for it)
+//   --index-out   default <bundle name>.transcripts next to a local bundle (X_xe_outs.zip →
+//                 X_xe_outs.transcripts), or under $XENIUM_DIR for a remote one — copy it next
+//                 to the bundle; that is where jit-service and the server look for it
 //   --no-images   skip the image pyramid (e.g. to build only the transcript pyramid)
 //   --force       rebuild outputs that are already complete (default: skip them)
 //   --levels      transcript pyramid levels (default: as many as the image pyramid in --out,
@@ -57,7 +59,9 @@ import sharp from 'sharp';
 import { openByteSource } from '../lib/xenium/byte-source.mjs';
 import { readZipDirectory, streamMember } from '../lib/xenium/zip.mjs';
 import { readTiffPyramid } from '../lib/xenium/ome-tiff.mjs';
-import { DEFAULT_LEVELS, buildTranscriptIndex, imagePyramidLevels } from '../lib/xenium/transcript-index.mjs';
+import {
+  DEFAULT_LEVELS, buildTranscriptIndex, imagePyramidLevels, isLocalSource, transcriptPyramidName,
+} from '../lib/xenium/transcript-index.mjs';
 
 const TILE = 512;
 const CHANNEL_COLORS = ['#3b6cff', '#34d058', '#ff4d4d', '#ff66ff', '#ffd33d', '#00d1d1'];
@@ -296,7 +300,13 @@ async function main() {
   // The image first: the transcript pyramid takes its number of levels from it.
   if (o.images) await buildImages(o);
   if (o.transcripts) {
-    const out = o.indexOut ?? path.join(process.env.XENIUM_DIR || 'xenium', `${o.id}.transcripts`);
+    // Named after the bundle (X_xe_outs.zip → X_xe_outs.transcripts) and kept next to it — where
+    // jit-service and the example server look. A remote bundle's pyramid is built under
+    // $XENIUM_DIR with that name, to be copied next to the bundle.
+    const name = transcriptPyramidName(o.source);
+    const out = o.indexOut ?? (isLocalSource(o.source)
+      ? path.join(path.dirname(path.resolve(o.source)), name)
+      : path.join(process.env.XENIUM_DIR || 'xenium', name));
     if (!o.force && await complete(out, 'index.json')) {
       console.log(`[prepare-xenium] transcript pyramid already built: ${out} (--force to rebuild)`);
     } else {
@@ -306,6 +316,10 @@ async function main() {
       await buildInto(out, (dir) => buildTranscriptIndex(o.source, dir, {
         limitTiles: o.limitTiles ?? Infinity, levels,
       }));
+      if (!isLocalSource(o.source)) {
+        const next = o.source.replace(/[?#].*$/, '').replace(/\/+$/, '').replace(/[^/]*$/, name);
+        console.log(`[prepare-xenium] built ${out}; copy it next to the bundle as ${next}`);
+      }
     }
   }
   if (o.register) {

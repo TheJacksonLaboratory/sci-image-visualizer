@@ -32,6 +32,8 @@ import path from 'node:path';
 
 import { openXeniumSource, readAllTranscripts, BIN_RECORD } from '../spatial-xenium.mjs';
 
+export { isLocalSource, transcriptPyramidName } from './pyramid-name.mjs';
+
 const SOURCE_TILE = 250;
 const BASE_PER_SOURCE = 128;
 const TILE_BINS = 64;
