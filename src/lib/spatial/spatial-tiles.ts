@@ -223,54 +223,86 @@ export function geneBinSize(
   return baseBin * 2 ** (levels - 1);
 }
 
+/** The entries of `t` inside `rect` (observation units). */
+export function clipTranscripts(t: SpatialTranscriptTile, rect: DataRect): SpatialTranscriptTile {
+  const keep: number[] = [];
+  for (let i = 0; i < t.count; i++) {
+    if (t.x[i] >= rect.x0 && t.x[i] <= rect.x1 && t.y[i] >= rect.y0 && t.y[i] <= rect.y1) keep.push(i);
+  }
+  if (keep.length === t.count) return t;
+  const pick = <A extends Float32Array | Uint32Array | Uint16Array>(a: A): A => {
+    const out = new (a.constructor as new (n: number) => A)(keep.length);
+    keep.forEach((src, i) => { out[i] = a[src]; });
+    return out;
+  };
+  return {
+    count: keep.length, aggregated: t.aggregated,
+    x: pick(t.x), y: pick(t.y), z: pick(t.z), weight: pick(t.weight), observation: pick(t.observation),
+    gene: pick(t.gene),
+  };
+}
+
 /**
- * Group transcripts per gene into `bin`-wide squares of a grid anchored at the origin (so
- * a pan does not move them): one entry per (gene, square) at the transcripts' centroid,
- * weighted by how many each entry stands for, in the cell holding most of them.
+ * Group transcripts into `bin`-wide squares of a grid anchored at the origin (so a pan does
+ * not move them), one entry per (group, square): `groupOf(gene slot)` says which group a gene
+ * is in — its cluster in the gene tree, or itself. Each entry sits at its transcripts'
+ * centroid, weighted by how many each stands for; it takes the gene and the cell holding most
+ * of them. `group[i]` is entry i's group.
  */
-export function groupTranscriptsByGene(t: SpatialTranscriptTile, bin: number): SpatialTranscriptTile {
+export function groupTranscripts(
+  t: SpatialTranscriptTile, bin: number, groupOf: (geneSlot: number) => number = (g) => g,
+): { tile: SpatialTranscriptTile; group: Int32Array } {
   const index = new Map<string, number>();
   const sx: number[] = [];
   const sy: number[] = [];
   const sz: number[] = [];
   const w: number[] = [];
-  const gene: number[] = [];
+  const grp: number[] = [];
   const obs: number[] = [];
-  const best: number[] = [];
+  const bestObs: number[] = [];
+  // Per entry, how many transcripts of each gene: the dominant one gives the icon and colour.
+  const geneW: Map<number, number>[] = [];
   for (let i = 0; i < t.count; i++) {
-    const key = `${t.gene[i]}|${Math.floor(t.x[i] / bin)}|${Math.floor(t.y[i] / bin)}`;
+    const gk = groupOf(t.gene[i]);
+    const key = `${gk}|${Math.floor(t.x[i] / bin)}|${Math.floor(t.y[i] / bin)}`;
     let k = index.get(key);
     const wi = t.weight[i] || 1;
     if (k === undefined) {
       k = w.length;
       index.set(key, k);
       sx.push(0); sy.push(0); sz.push(0); w.push(0);
-      gene.push(t.gene[i]); obs.push(t.observation[i]); best.push(0);
+      grp.push(gk); obs.push(t.observation[i]); bestObs.push(0); geneW.push(new Map());
     }
     sx[k] += t.x[i] * wi;
     sy[k] += t.y[i] * wi;
     sz[k] += t.z[i] * wi;
     w[k] += wi;
-    if (wi > best[k]) {
-      best[k] = wi;
+    geneW[k].set(t.gene[i], (geneW[k].get(t.gene[i]) ?? 0) + wi);
+    if (wi > bestObs[k]) {
+      bestObs[k] = wi;
       obs[k] = t.observation[i];
     }
   }
   const n = w.length;
-  const out: SpatialTranscriptTile = {
+  const tile: SpatialTranscriptTile = {
     count: n, aggregated: true,
     x: new Float32Array(n), y: new Float32Array(n), z: new Float32Array(n),
     weight: new Uint32Array(n), observation: new Uint32Array(n), gene: new Uint16Array(n),
   };
+  const group = new Int32Array(n);
   for (let k = 0; k < n; k++) {
-    out.x[k] = sx[k] / w[k];
-    out.y[k] = sy[k] / w[k];
-    out.z[k] = sz[k] / w[k];
-    out.weight[k] = w[k];
-    out.observation[k] = obs[k];
-    out.gene[k] = gene[k];
+    tile.x[k] = sx[k] / w[k];
+    tile.y[k] = sy[k] / w[k];
+    tile.z[k] = sz[k] / w[k];
+    tile.weight[k] = w[k];
+    tile.observation[k] = obs[k];
+    let topGene = 0;
+    let top = -1;
+    for (const [g, v] of geneW[k]) if (v > top) { top = v; topGene = g; }
+    tile.gene[k] = topGene;
+    group[k] = grp[k];
   }
-  return out;
+  return { tile, group };
 }
 
 /** Smallest and largest transcript marker, in canvas pixels. */

@@ -260,14 +260,16 @@ describe('NapariSpatialTileLayers: per-gene counts in view', () => {
 });
 
 describe('NapariSpatialTileLayers: a gene selection follows the zoom', () => {
-  function setup(zoom: number) {
+  function setup(zoom: number, mode: 'circles' | 'glyphs' = 'circles', clusters = 1) {
     const n = 400;
     const x = new Float32Array(n);
     const y = new Float32Array(n);
     for (let i = 0; i < n; i++) { x[i] = (i % 20) * 0.5; y[i] = Math.floor(i / 20) * 0.5; }
+    // With several clusters, transcript i belongs to gene i % clusters, each gene its own cluster.
+    const gene = Uint16Array.from({ length: n }, (_v, i) => i % clusters);
     const tile: SpatialTranscriptTile = {
       count: n, aggregated: false, x, y, z: new Float32Array(n),
-      weight: new Uint32Array(n).fill(1), observation: new Uint32Array(n), gene: new Uint16Array(n),
+      weight: new Uint32Array(n).fill(1), observation: new Uint32Array(n), gene,
     };
     const port = { getTranscriptTile: jest.fn(async () => tile) } as unknown as SpatialDataPort;
     const dataset = {
@@ -280,7 +282,9 @@ describe('NapariSpatialTileLayers: a gene selection follows the zoom', () => {
       },
     } as unknown as SpatialDataset;
     const view = {
-      ...DEFAULT_SPATIAL_VIEW, transcriptMode: 'circles' as const, transcriptGenes: ['CD163'],
+      ...DEFAULT_SPATIAL_VIEW, transcriptMode: mode,
+      transcriptGenes: Array.from({ length: clusters }, (_v, i) => `G${i}`),
+      transcriptGeneGroups: Array.from({ length: clusters }, (_v, i) => ({ name: `Cluster ${i}`, genes: [`G${i}`] })),
       transcriptBudget: 100_000,
     };
     const items: unknown[] = [];
@@ -307,6 +311,24 @@ describe('NapariSpatialTileLayers: a gene selection follows the zoom', () => {
     expect(drawn(tiles).bin?.size).toBe(8);
     expect(drawn(tiles).merged.count).toBeLessThan(400);
     expect(drawn(tiles).merged.aggregated).toBe(true);
+    tiles.detach();
+  });
+
+  it('groups the same way when transcripts are drawn as icons', async () => {
+    const tiles = setup(2, 'glyphs');
+    await (tiles as unknown as { plan(): Promise<void> }).plan();
+    expect(drawn(tiles).bin?.size).toBe(8);
+    expect(drawn(tiles).merged.count).toBeLessThan(400);
+    tiles.detach();
+  });
+
+  it('gives each cluster room: more clusters in view, coarser bins, one marker per cluster', async () => {
+    const tiles = setup(20, 'glyphs', 4); // 4 clusters: bins need 2 × 14 px; the 1-unit bin is 20 px
+    await (tiles as unknown as { plan(): Promise<void> }).plan();
+    expect(drawn(tiles).bin?.size).toBe(2);
+    const d = drawn(tiles) as unknown as { entryGroup: Int32Array; groupNames: string[] };
+    expect(new Set(d.entryGroup).size).toBe(4);
+    expect(d.groupNames[d.entryGroup[0]]).toMatch(/^Cluster /);
     tiles.detach();
   });
 

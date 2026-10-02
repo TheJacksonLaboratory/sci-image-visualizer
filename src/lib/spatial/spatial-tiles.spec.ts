@@ -1,6 +1,6 @@
 import { SpatialDataset, SpatialTranscriptTile } from '../contracts/spatial-dataset.contract';
 import { lutFor } from './spatial-encoding';
-import { geneBinSize, groupTranscriptsByGene } from './spatial-tiles';
+import { geneBinSize, groupTranscripts } from './spatial-tiles';
 import {
   POLYGON_LEVEL_MIN_CELL_PX, TRANSCRIPT_GLYPHS, TRANSCRIPT_MAX_PX, TRANSCRIPT_MIN_PX,
   INFERNO_SCALE, TRANSCRIPT_PHYSICAL_UM,
@@ -375,14 +375,14 @@ describe('grouping a gene selection by zoom', () => {
     expect(geneBinSize(0, base)).toBeNull();
   });
 
-  it('groups each gene on its own, at the weighted centroid, in the cell holding most', () => {
+  it('groups each gene on its own by default, at the weighted centroid, in the cell holding most', () => {
     const t: SpatialTranscriptTile = {
       count: 4, aggregated: false,
       x: new Float32Array([1, 3, 2, 30]), y: new Float32Array([1, 1, 2, 30]), z: new Float32Array(4),
       weight: new Uint32Array([1, 3, 1, 1]), observation: new Uint32Array([7, 8, 9, 9]),
       gene: new Uint16Array([0, 0, 1, 0]),
     };
-    const g = groupTranscriptsByGene(t, 10);
+    const { tile: g } = groupTranscripts(t, 10);
     expect(g.count).toBe(3); // gene 0 near the origin, gene 1 there too, gene 0 far away
     expect(g.aggregated).toBe(true);
     expect(Array.from(g.weight)).toEqual([4, 1, 1]);
@@ -390,4 +390,20 @@ describe('grouping a gene selection by zoom', () => {
     expect(g.observation[0]).toBe(8); // the entry standing for 3 transcripts
     expect(Array.from(g.gene)).toEqual([0, 1, 0]);
   });
+
+  it('merges the genes of one cluster into one marker, showing its dominant gene', () => {
+    const t: SpatialTranscriptTile = {
+      count: 4, aggregated: false,
+      x: new Float32Array([1, 2, 3, 4]), y: new Float32Array([1, 2, 3, 4]), z: new Float32Array(4),
+      weight: new Uint32Array([1, 1, 5, 1]), observation: new Uint32Array(4),
+      gene: new Uint16Array([0, 1, 1, 2]),
+    };
+    // Genes 0 and 1 are one cluster (key 0); gene 2 is its own (key 9).
+    const { tile, group } = groupTranscripts(t, 10, (slot) => (slot <= 1 ? 0 : 9));
+    expect(tile.count).toBe(2);
+    expect(Array.from(group)).toEqual([0, 9]);
+    expect(Array.from(tile.weight)).toEqual([7, 1]);
+    expect(tile.gene[0]).toBe(1); // gene 1 holds 6 of the cluster's 7
+  });
+
 });

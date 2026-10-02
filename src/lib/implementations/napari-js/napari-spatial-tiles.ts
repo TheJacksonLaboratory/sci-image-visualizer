@@ -17,14 +17,17 @@ import {
   DataRect, INFERNO_SCALE, POLYGON_LEVEL_MIN_CELL_PX, TranscriptGlyph, allGenesPlan, cellTypeColumnFor,
   cellsShown, colorDensityWindow, densityAutoRange, groupedMarkerPx, quantileOf, tilesInRectFrom,
   defaultGlyphFor, discreteColormapStops, glyphOutline, glyphRings, pixelsPerDataUnit,
-  polygonLevelFor, tileId, tilesInRect, transcriptLevelFor, transcriptMarkerPx,
-  typicalCellDiameter, visibleArea, visibleDataRect, geneBinSize, groupTranscriptsByGene,
+  polygonLevelFor, tileId, tilesInRect, transcriptLevelFor, transcriptMarkerPx, GROUP_MIN_SPACING_PX,
+  typicalCellDiameter, visibleArea, visibleDataRect, geneBinSize, groupTranscripts, clipTranscripts,
 } from '../../spatial/spatial-tiles';
 
 /** The all-gene pyramid's finest bin (250 µm source tiles / 128) and default level count, used
  *  to group a gene selection on the same ladder when a dataset has no pyramid. */
 const PYRAMID_BASE_BIN_UM = 250 / 128;
 const PYRAMID_LEVELS = 7;
+/** Icons get a dark rim only while there are at most this many, at least this big (px). */
+const GLYPH_OUTLINE_MAX = 20_000;
+const GLYPH_OUTLINE_MIN_PX = 8;
 
 /**
  * Level-of-detail cell outlines, transcripts and transcript density for the 2D spatial view.
@@ -105,6 +108,8 @@ interface TranscriptJob {
 interface TranscriptLoad {
   merged: SpatialTranscriptTile;
   px: Float32Array;
+  /** For a gene selection: group it on this bin ladder once hidden genes are dropped. */
+  ladder?: { baseBin: number; levels: number; start: number | null };
   kind?: TranscriptJob['kind'];
   bin?: TranscriptJob['bin'];
 }
@@ -152,6 +157,53 @@ export class NapariSpatialTileLayers {
     this.detach();
     this.viewer = viewer;
     this.cameraOff = viewer.camera.changed.connect(() => this.schedule());
+  }
+
+  /**
+   * Group a gene selection for the zoom: one marker per gene-tree cluster (a gene in no
+   * cluster is its own) per bin of the pyramid ladder, starting at the finest bin whose
+   * markers are 14 px apart and stepping up while the markers would exceed the budget.
+   * Null to draw every transcript: zoomed in, with the selection within the budget.
+   */
+  private groupSelection(
+    t: SpatialTranscriptTile, view: SpatialViewState, ladder: NonNullable<TranscriptLoad['ladder']>,
+    pxPerUnit: number,
+  ): { merged: SpatialTranscriptTile; px: Float32Array; bin: number; group: Int32Array; names: string[] } | null {
+    const budget = Math.max(1, view.transcriptBudget);
+    const genes = view.transcriptGenes;
+    const groups = view.transcriptGeneGroups;
+    const names = [...groups.map((g) => g.name), ...genes];
+    const clusterOf = genes.map((gene, slot) => {
+      const g = groups.findIndex((x) => x.genes.includes(gene));
+      return g >= 0 ? g : groups.length + slot;
+    });
+    const keyOf = (slot: number) => clusterOf[slot] ?? groups.length + slot;
+    // Each square holds one marker per cluster present, all near its centre: K clusters need
+    // √K times the spacing to leave each marker the room one would have.
+    const present = new Set<number>();
+    for (let i = 0; i < t.count; i++) present.add(keyOf(t.gene[i]));
+    const share = Math.sqrt(Math.max(1, present.size));
+    let bin = ladder.start;
+    if (bin === null) {
+      // Every transcript, if they fit, none was cut off at the cap, and even the finest bin
+      // leaves each cluster's markers room — otherwise the finest bins.
+      if (t.count <= budget && t.count < MAX_TRANSCRIPTS
+        && ladder.baseBin * pxPerUnit >= GROUP_MIN_SPACING_PX * share) return null;
+      bin = ladder.baseBin;
+    }
+    const top = ladder.baseBin * 2 ** (ladder.levels - 1);
+    let grouped = groupTranscripts(t, bin, keyOf);
+    while ((grouped.tile.count > budget || bin * pxPerUnit < GROUP_MIN_SPACING_PX * share) && bin < top) {
+      bin *= 2;
+      grouped = groupTranscripts(t, bin, keyOf);
+    }
+    const refCount = quantileOf(grouped.tile.weight, 0.95);
+    const binPx = (bin * pxPerUnit) / share;
+    const px = new Float32Array(grouped.tile.count);
+    for (let i = 0; i < grouped.tile.count; i++) {
+      px[i] = groupedMarkerPx(grouped.tile.weight[i], refCount, binPx, view.transcriptScale);
+    }
+    return { merged: grouped.tile, px, bin, group: grouped.group, names };
   }
 
   /** µm per observation unit of the drawn dataset, for describing a grouped marker's area. */
@@ -524,7 +576,7 @@ export class NapariSpatialTileLayers {
       dataset.id, mode, job.key, view.transcriptColorBy, this.cellTypeColumnName(dataset, view),
       view.transcriptScale, view.transcriptOpacity, JSON.stringify(view.transcriptGlyphs),
       pxPerUnit.toPrecision(4), view.hiddenGroups.join('\u0001'), view.transcriptHiddenGenes.join(','),
-      JSON.stringify(view.transcriptGeneColors),
+      JSON.stringify(view.transcriptGeneColors), JSON.stringify(view.transcriptGeneGroups),
     ].join('|');
     const current = this.layers.get('transcripts');
     if (planKey === this.keys.get('transcripts') && current && this.viewer!.layers.items.includes(current)) {
@@ -538,8 +590,16 @@ export class NapariSpatialTileLayers {
       ? { merged: loaded.merged, genes: [...view.transcriptGenes] } : null;
     const hidden = await this.hiddenCodes(dataset, view);
     if (stale()) return;
-    const { merged, px } = filterTranscripts(loaded.merged, loaded.px, hidden,
+    const filtered = filterTranscripts(loaded.merged, loaded.px, hidden,
       (loaded.kind ?? job.kind) === 'genes' ? hiddenGeneSlots(view) : null);
+    let { merged, px } = filtered;
+    let selectionBin: number | null = null;
+    let entryGroup: Int32Array | null = null;
+    let groupNames: string[] | null = null;
+    if (loaded.ladder) {
+      const g = this.groupSelection(merged, view, loaded.ladder, pxPerUnit);
+      if (g) ({ merged, px, bin: selectionBin, group: entryGroup, names: groupNames } = g);
+    }
     // A bin of the all-gene pyramid mixes genes and carries none, so it cannot be coloured
     // by gene: colour it by its dominant cell's type until individual transcripts show.
     const kind = loaded.kind ?? job.kind;
@@ -552,9 +612,11 @@ export class NapariSpatialTileLayers {
     else this.keys.set('transcripts', planKey);
     const diam = px.map((d) => d / pxPerUnit);
     this.drawn = {
-      kind: loaded.kind ?? job.kind, bin: loaded.kind ? loaded.bin : job.bin,
+      kind: loaded.kind ?? job.kind,
+      bin: selectionBin ? { size: selectionBin, origin: [0, 0] } : (loaded.kind ? loaded.bin : job.bin),
       merged, radius: diam.map((d) => d / 2),
       genes: [...view.transcriptGenes], ref: dataset.imageRef ?? null, grid: null,
+      ...(entryGroup && groupNames ? { entryGroup, groupNames } : {}),
     };
     this.hoverCache.clear();
     this.micronsPerUnit = dataset.micronsPerUnit ?? null;
@@ -567,7 +629,7 @@ export class NapariSpatialTileLayers {
       this.drop('transcriptOutline');
       this.drawTranscriptCircles(merged, diam, faces.rgba, view, place);
     } else {
-      this.drawTranscriptGlyphs(merged, diam, faces, view, place);
+      this.drawTranscriptGlyphs(merged, diam, faces, view, place, pxPerUnit);
     }
   }
 
@@ -598,7 +660,7 @@ export class NapariSpatialTileLayers {
 
   private drawTranscriptGlyphs(
     merged: SpatialTranscriptTile, diam: Float32Array, faces: TranscriptFaces, view: SpatialViewState,
-    { scale, translate }: Placement,
+    { scale, translate }: Placement, pxPerUnit: number,
   ): void {
     // Glyphs: each entry becomes its gene's icon polygon, filled through a discrete
     // colormap and outlined dark so small icons stay readable over the tissue. With every
@@ -625,6 +687,13 @@ export class NapariSpatialTileLayers {
       translate,
     });
     this.replace('transcripts', fill);
+    // A dark rim keeps a few large icons readable over the tissue; on many small ones the
+    // rims merge into a solid dark sheet that hides every colour, so they are left off.
+    const medianPx = median(diam) * pxPerUnit;
+    if (merged.count > GLYPH_OUTLINE_MAX || medianPx < GLYPH_OUTLINE_MIN_PX) {
+      this.drop('transcriptOutline');
+      return;
+    }
     const edge = this.viewer!.addShapes(coords, offsets, {
       name: 'transcript outlines',
       draw: 'outline',
@@ -753,8 +822,10 @@ export class NapariSpatialTileLayers {
     const gene = d.genes[t.gene[i]] ?? 'transcript';
     if (d.bin) {
       const um = d.bin.size * (this.micronsPerUnit ?? 1);
+      const group = d.entryGroup && d.groupNames ? d.groupNames[d.entryGroup[i]] : gene;
       return [
-        `${gene} · ${fmt(n)} transcript${n === 1 ? '' : 's'}`,
+        `${group} · ${fmt(n)} transcript${n === 1 ? '' : 's'}`,
+        ...(group !== gene ? [`mostly ${gene}`] : []),
         `${um.toFixed(1)} × ${um.toFixed(1)} µm area · zoom in to split`,
         cellLine(obs, 'mostly cell'),
       ];
@@ -783,6 +854,9 @@ export class NapariSpatialTileLayers {
     const keysAt = (l: number) => tilesInRect(rect, l, meta.levels, meta.bounds, MAX_TRANSCRIPT_TILES);
     const query = { genes, quality: view.transcriptQuality };
     const pxPerMicron = this.pxPerMicron(dataset, pxPerUnit);
+    const mx = (rect.x1 - rect.x0) * 0.25;
+    const my = (rect.y1 - rect.y0) * 0.25;
+    const around: DataRect = { x0: rect.x0 - mx, y0: rect.y0 - my, x1: rect.x1 + mx, y1: rect.y1 + my };
     // Zoomed out, each gene's transcripts are grouped on the all-gene pyramid's bin ladder,
     // so a gene selection reads like "all genes" does: one marker per gene per area, sized
     // by how many it holds; zoomed in far enough, every transcript is its own marker.
@@ -792,33 +866,28 @@ export class NapariSpatialTileLayers {
     const bin = geneBinSize(pxPerUnit, baseBin, ladder?.length ?? PYRAMID_LEVELS);
     return {
       kind: 'genes',
+      // The clip window, in quarter-view steps: a pan past the margin re-clips.
       key: `genes|${genes.join(',')}|${view.transcriptQuality}|${view.transcriptBudget}|${bin ?? 'each'}|`
-        + `${keysAt(first).map(tileId)}`,
+        + `${Math.floor(rect.x0 / (mx || 1))},${Math.floor(rect.y0 / (my || 1))}|${keysAt(first).map(tileId)}`,
       load: async () => {
         let level = first;
         let merged: SpatialTranscriptTile;
         for (;;) {
           const tiles = await this.fetchAll(keysAt(level),
             (k) => this.port.getTranscriptTile!(k.level, k.gx, k.gy, query));
-          merged = mergeTranscriptTiles(tiles, MAX_TRANSCRIPTS);
+          // Only what is on screen (and a margin, so a small pan needs nothing new) counts
+          // against the budget and the cap; a tile reaches far past the view.
+          merged = mergeTranscriptTiles(tiles.map((t) => clipTranscripts(t, around)), MAX_TRANSCRIPTS);
           if (merged.count <= view.transcriptBudget || level >= meta.levels.length - 1) break;
           level++;
-        }
-        if (bin) {
-          const grouped = groupTranscriptsByGene(merged, bin);
-          const refCount = quantileOf(grouped.weight, 0.95);
-          const binPx = bin * pxPerUnit;
-          const px = new Float32Array(grouped.count);
-          for (let i = 0; i < grouped.count; i++) {
-            px[i] = groupedMarkerPx(grouped.weight[i], refCount, binPx, view.transcriptScale);
-          }
-          return { merged: grouped, px, kind: 'genes', bin: { size: bin, origin: [0, 0] } };
         }
         const px = new Float32Array(merged.count);
         for (let i = 0; i < merged.count; i++) {
           px[i] = transcriptMarkerPx(merged.weight[i], view.transcriptScale, pxPerMicron);
         }
-        return { merged, px };
+        return baseBin > 0
+          ? { merged, px, ladder: { baseBin, levels: ladder?.length ?? PYRAMID_LEVELS, start: bin } }
+          : { merged, px };
       },
     };
   }
@@ -1137,6 +1206,9 @@ interface DrawnTranscripts {
   radius: Float32Array;
   genes: string[];
   ref: SpatialImageRef | null;
+  /** For a grouped gene selection: each entry's group, and the groups' names. */
+  entryGroup?: Int32Array;
+  groupNames?: string[];
   /** Lazily built spatial index: bucket → entry indices. */
   grid: { size: number; buckets: Map<number, number[]> } | null;
 }
