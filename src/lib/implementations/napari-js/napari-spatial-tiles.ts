@@ -72,6 +72,8 @@ export interface SpatialTileHost {
   estimateChanged?(estimate: TranscriptEstimate | null): void;
   /** Transcripts of each selected gene inside the view, or null when not known. */
   geneCountsChanged?(counts: Record<string, number> | null): void;
+  /** The layers whose data is in flight now ("Transcripts", "Cells"…); empty when none. */
+  loadingChanged?(layers: string[]): void;
 }
 
 /** Xenium Explorer's "Estimated Transcript Points". */
@@ -207,6 +209,23 @@ export class NapariSpatialTileLayers {
   /** µm per observation unit of the drawn dataset, for describing a grouped marker's area. */
   private micronsPerUnit: number | null = null;
 
+  /** Loads in flight, per layer label, for the loading badge. */
+  private readonly loading = new Map<string, number>();
+
+  /** Report `label` loading while `work` is in flight. */
+  private async track<T>(label: string, work: Promise<T>): Promise<T> {
+    this.loading.set(label, (this.loading.get(label) ?? 0) + 1);
+    this.host.loadingChanged?.([...this.loading.keys()]);
+    try {
+      return await work;
+    } finally {
+      const n = (this.loading.get(label) ?? 1) - 1;
+      if (n > 0) this.loading.set(label, n);
+      else this.loading.delete(label);
+      this.host.loadingChanged?.([...this.loading.keys()]);
+    }
+  }
+
   /** The loaded per-gene transcripts the in-view counts are taken from. */
   private countSource: { merged: SpatialTranscriptTile; genes: string[] } | null = null;
 
@@ -245,6 +264,8 @@ export class NapariSpatialTileLayers {
     this.token++;
     this.tileRetries = 0;
     this.countSource = null;
+    this.loading.clear();
+    this.host.loadingChanged?.([]);
     if (this.viewer) {
       for (const layer of this.layers.values()) {
         if (this.viewer.layers.items.includes(layer)) this.viewer.layers.remove(layer);
@@ -351,7 +372,9 @@ export class NapariSpatialTileLayers {
     // Groups switched off in the list: their cells are left out of the geometry.
     const hidden = await this.hiddenCodes(dataset, view);
     if (stale()) return;
-    const geometry = await this.cellGeometry(dataset, view, rect, level, hidden, stale);
+    const label = view.cellSet === 'both' ? 'Cells and nuclei'
+      : view.cellSet === 'nucleus' ? 'Nuclei' : 'Cells';
+    const geometry = await this.track(label, this.cellGeometry(dataset, view, rect, level, hidden, stale));
     if (!geometry) return;
     const { rings, nuclei, geometryKey } = geometry;
 
@@ -581,7 +604,7 @@ export class NapariSpatialTileLayers {
     if (planKey === this.keys.get('transcripts') && current && this.viewer!.layers.items.includes(current)) {
       return;
     }
-    const loaded = await job.load();
+    const loaded = await this.track('Transcripts', job.load());
     if (stale()) return;
     // Per-gene counts in view come from what was loaded, before hidden genes are dropped:
     // a hidden gene still has transcripts there.
@@ -1219,7 +1242,7 @@ export class NapariSpatialTileLayers {
     const key = [dataset.id, genes.join(','), view.densityBin, view.densityOpacity,
       JSON.stringify(view.densityRange), JSON.stringify(view.densityColormap)].join('|');
     if (key === this.keys.get('density') && this.layers.has('density')) return;
-    const raster = await this.port.getDensity(genes, view.densityBin);
+    const raster = await this.track('Transcript density', this.port.getDensity(genes, view.densityBin));
     if (stale()) return;
 
     // Bins drawn as squares, as Xenium Explorer does; the window is in transcripts/µm².

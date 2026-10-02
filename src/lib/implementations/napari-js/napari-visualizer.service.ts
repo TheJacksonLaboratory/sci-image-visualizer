@@ -60,6 +60,7 @@ import { type HoverSource, hoverText, nearestObservation } from '../../spatial/s
 import { NapariSpatialTooltip } from './napari-spatial-tooltip';
 import { NapariSpatialTileLayers, TranscriptEstimate } from './napari-spatial-tiles';
 import { NapariNavigator } from './napari-navigator';
+import { NapariLoadingBadge } from './napari-loading-badge';
 import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
 import { NAPARI_WHEEL_ZOOM_SPEED } from './napari-zoom';
 
@@ -454,6 +455,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    *  round-trip, so a fast sequence of colour-by changes can resolve out of
    *  order. Only the newest rebuild is allowed to touch the layer. */
   private spatialRebuildToken = 0;
+  /** "x reloading…" at the bottom of the canvas: the tile layers' loads and the observations'. */
+  private loadingBadge: NapariLoadingBadge | null = null;
+  private tileLoading: string[] = [];
+  private observationsLoading = 0;
   /** Monotonic load generation. Bumped by {@link reset} and {@link cancelLoading}; the frame-loading
    *  loops (volume assembly, surface preload) capture it and bail when it changes, so a Cancel (or a
    *  new plot) actually stops fetching frames instead of running to completion in the background. */
@@ -1327,6 +1332,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    * The overview navigator for a 2D view with an image: a coarse thumbnail of the whole
    * image with the viewport on it; click or drag to pan at the current zoom (as OSD).
    */
+  private showLoading(): void {
+    if (!this.host) return;
+    this.loadingBadge ??= new NapariLoadingBadge(this.host);
+    this.loadingBadge.set([...(this.observationsLoading > 0 ? ['Observations'] : []), ...this.tileLoading]);
+  }
+
   private installNavigator(z: number): void {
     this.navigator?.destroy();
     this.navigator = null;
@@ -1872,6 +1883,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       },
       estimateChanged: (e) => this.transcriptEstimate$.next(e),
       geneCountsChanged: (c) => this.geneCountsInView$.next(c),
+      loadingChanged: (layers) => {
+        this.tileLoading = layers;
+        this.showLoading();
+      },
       densityChanged: (d) => this.densityStats$.next(d),
       polygonsShownChanged: () => {
         if (this.spatialPoints) this.spatialPoints.visible = this.spatialPointsVisible();
@@ -2377,6 +2392,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // Resolve colours BEFORE touching the scene: a gene fetch can fail or be
     // superseded, and dropping the existing layer first would blank the view.
     let faceColor: ReturnType<typeof toRgbaTuples> | [number, number, number, number];
+    this.observationsLoading++;
+    this.showLoading();
     try {
       faceColor = dataset
         ? await this.spatialFaceColors(dataset, view, selection)
@@ -2384,6 +2401,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     } catch (err) {
       console.warn('[napari-js] spatial colouring failed — falling back to a flat colour', err);
       faceColor = NapariVisualizerService.SPATIAL_NEUTRAL_COLOR;
+    } finally {
+      this.observationsLoading--;
+      this.showLoading();
     }
     // A newer rebuild (or a teardown) started while the vector was in flight.
     if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
@@ -2833,11 +2853,16 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // layer first would blank the view.
     let enc: Spatial3dEncoding | null = null;
     if (dataset) {
+      this.observationsLoading++;
+      this.showLoading();
       try {
         enc = await this.spatialScalar3d(dataset, view);
       } catch (err) {
         console.warn('[napari-js] spatial 3D colouring failed — falling back to a flat colour', err);
         enc = null;
+      } finally {
+        this.observationsLoading--;
+        this.showLoading();
       }
     }
     if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
@@ -3988,6 +4013,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.scaleBar = null;
     this.navigator?.destroy();
     this.navigator = null;
+    this.loadingBadge?.destroy();
+    this.loadingBadge = null;
+    this.tileLoading = [];
+    this.observationsLoading = 0;
     this.regionOverlay?.destroy();
     this.regionOverlay = null;
     this.axesLabels?.destroy();

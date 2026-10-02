@@ -123,11 +123,11 @@ describe('NapariSpatialTileLayers: a tile that fails to load', () => {
 
   /** Let the debounce and every awaited fetch settle. */
   async function settle(ms: number) {
-    for (let i = 0; i < 20; i++) {
-      await Promise.resolve();
-      jest.advanceTimersByTime(ms / 20);
+    for (let i = 0; i < 40; i++) {
+      for (let j = 0; j < 4; j++) await Promise.resolve();
+      jest.advanceTimersByTime(ms / 40);
     }
-    for (let i = 0; i < 20; i++) await Promise.resolve();
+    for (let i = 0; i < 40; i++) await Promise.resolve();
   }
 
   beforeEach(() => {
@@ -467,5 +467,41 @@ describe('NapariSpatialTileLayers: colouring transcripts by cluster', () => {
     expect(rgba[0]).toEqual([0, 1, 0, 1]);      // Cluster 2's cells are green
     expect(rgba[2]).toEqual([1, 0, 0, 1]);      // Cluster 1's are red
     expect(rgba[3]).not.toEqual(rgba[0]);       // a cluster no cell group names: a palette colour
+  });
+});
+
+describe('NapariSpatialTileLayers: reporting loads for the canvas badge', () => {
+  it('reports "Transcripts" while a selection loads, and nothing once it is drawn', async () => {
+    const reports: string[][] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const tile: SpatialTranscriptTile = {
+      count: 1, aggregated: false, x: Float32Array.of(5), y: Float32Array.of(5), z: new Float32Array(1),
+      weight: Uint32Array.of(1), observation: new Uint32Array(1), gene: new Uint16Array(1),
+    };
+    const port = { getTranscriptTile: async () => { await gate; return tile; } } as unknown as SpatialDataPort;
+    const dataset = {
+      id: 'd', name: 'd', columns: [], observations: { count: 1, x: Float32Array.of(5), y: Float32Array.of(5) },
+      transcriptTiles: { bounds: [0, 0, 100, 100], count: 1, levels: [{ tileSize: 200 }] },
+    } as unknown as SpatialDataset;
+    const view = { ...DEFAULT_SPATIAL_VIEW, transcriptMode: 'circles' as const, transcriptGenes: ['A'] };
+    const viewer = {
+      camera: { center: [50, 50], zoom: 40, changed: { connect: () => () => undefined } },
+      layers: { items: [] as unknown[], add: () => undefined, remove: () => undefined },
+      addPoints: jest.fn(() => ({})), addShapes: jest.fn(() => ({})), addImage: jest.fn(() => ({})),
+      requestRender: () => undefined,
+    } as unknown as Viewer;
+    const tiles = new NapariSpatialTileLayers(port, {
+      latest: () => [dataset, view, emptySelection(1)], canvasSize: () => [400, 400], continuousLut: () => [],
+      polygonsShownChanged: () => undefined, loadingChanged: (l) => reports.push(l),
+    });
+    tiles.attach(viewer);
+    const planned = (tiles as unknown as { plan(): Promise<void> }).plan();
+    await Promise.resolve();
+    expect(reports.at(-1)).toEqual(['Transcripts']);
+    release();
+    await planned;
+    expect(reports.at(-1)).toEqual([]);
+    tiles.detach();
   });
 });
