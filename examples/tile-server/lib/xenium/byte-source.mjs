@@ -78,31 +78,45 @@ async function fetchGcsToken() {
       'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token',
       { headers: { 'Metadata-Flavor': 'Google' }, signal: AbortSignal.timeout(800) },
     );
-    if (res.ok) return (await res.json()).access_token;
+    if (res.ok) {
+      // The metadata server hands out a token part-way through its life: trust its own
+      // `expires_in`, not an hour from now — the 401 that ended a two-hour build at minute 61.
+      const body = await res.json();
+      return { token: body.access_token, lifeMs: Math.max(60, Number(body.expires_in) || 0) * 1000 };
+    }
   } catch {
     // Not on GCP.
   }
   const { stdout } = await run('gcloud', ['auth', 'print-access-token']);
-  return stdout.trim();
+  return { token: stdout.trim(), lifeMs: 45 * 60_000 };
 }
 
 async function gcsAuthHeader() {
   if (process.env.GCS_TOKEN) return { Authorization: `Bearer ${process.env.GCS_TOKEN}` };
   if (!gcsToken || Date.now() > gcsTokenExpires) {
-    gcsToken = await fetchGcsToken();
-    gcsTokenExpires = Date.now() + 45 * 60_000;
+    const { token, lifeMs } = await fetchGcsToken();
+    gcsToken = token;
+    // Refresh five minutes before it lapses (or half-way, for a token with little left).
+    gcsTokenExpires = Date.now() + Math.max(lifeMs / 2, lifeMs - 5 * 60_000);
   }
   return { Authorization: `Bearer ${gcsToken}` };
+}
+
+/** Forget the token, so the next request fetches a new one (after a 401). */
+function dropGcsToken() {
+  gcsToken = undefined;
+  gcsTokenExpires = 0;
 }
 
 function openGcs(url) {
   const m = /^gs:\/\/([^/]+)\/(.+)$/.exec(url);
   if (!m) throw new RangeError(`bad gs:// url: ${url}`);
   const media = `https://storage.googleapis.com/storage/v1/b/${m[1]}/o/${encodeURIComponent(m[2])}?alt=media`;
-  return openHttp(media, { label: url, headers: gcsAuthHeader });
+  return openHttp(media, { label: url, headers: gcsAuthHeader, onUnauthorized: dropGcsToken });
 }
 
-async function openHttp(url, { label = url, headers = async () => ({}) } = {}) {
+/** Range reads over HTTP(S); exported for tests. */
+export async function openHttp(url, { label = url, headers = async () => ({}), onUnauthorized = null } = {}) {
   const head = await fetch(url, { headers: { ...(await headers()), Range: 'bytes=0-0' } });
   if (head.status !== 206) {
     throw new Error(`${label}: server does not honour Range requests (HTTP ${head.status})`);
@@ -120,6 +134,12 @@ async function openHttp(url, { label = url, headers = async () => ({}) } = {}) {
           const res = await fetch(url, {
             headers: { ...(await headers()), Range: `bytes=${offset}-${offset + length - 1}` },
           });
+          if ((res.status === 401 || res.status === 403) && onUnauthorized) {
+            // An expired token: fetch a new one and retry rather than fail the whole run.
+            await res.arrayBuffer().catch(() => {});
+            onUnauthorized();
+            throw new Error(`HTTP ${res.status}`);
+          }
           if (res.status !== 206) throw new Error(`HTTP ${res.status}`);
           const buf = Buffer.from(await res.arrayBuffer());
           if (buf.length !== length) throw new Error(`short read ${buf.length}/${length}`);
