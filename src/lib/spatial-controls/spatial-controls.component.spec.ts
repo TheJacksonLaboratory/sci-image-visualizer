@@ -981,6 +981,64 @@ describe('SpatialControlsComponent', () => {
       for (const o of component.glyphOptions) expect(component.glyphPoints(o.value)).toBe(o.points);
     });
 
+    it('adds each cluster\'s marker genes as a gene group, each gene once', async () => {
+      const markerGenes = jest.fn(async () => ({
+        column: 'curated_cell_type',
+        groups: [
+          { name: 'T cell', cells: 10, genes: [
+            { name: 'CD3E', score: 2, pctIn: 0.8, pctOut: 0.1 },
+            { name: 'SHARED', score: 0.5, pctIn: 0.4, pctOut: 0.2 },
+          ] },
+          { name: 'Tumour', cells: 20, genes: [
+            { name: 'KRT5', score: 3, pctIn: 0.9, pctOut: 0.1 },
+            { name: 'SHARED', score: 1.5, pctIn: 0.6, pctOut: 0.2 },
+          ] },
+        ],
+      }));
+      (controls as unknown as { markerGenes: unknown }).markerGenes = markerGenes;
+      dataset$.next(tiled);
+      await build(controls);
+      view$.next({ ...view$.value, cellTypeColumn: 'curated_cell_type', transcriptGenes: ['EPCAM'] });
+      expect(component.canAddMarkers).toBe(true);
+      component.openMarkers();
+      expect(component.markerColumn).toBe('curated_cell_type'); // the cells' grouping
+      expect(component.markerClusters).toEqual(['T cell', 'Tumour']);
+      component.markerPerGroup = 10;
+      await component.addMarkerGenes();
+      expect(markerGenes).toHaveBeenCalledWith('curated_cell_type', 10);
+      expect(view$.value.transcriptGeneGroups).toEqual([
+        { name: 'T cell', genes: ['CD3E'] },
+        { name: 'Tumour', genes: ['KRT5', 'SHARED'] }, // SHARED goes where it scores higher
+      ]);
+      expect(view$.value.transcriptGenes).toEqual(['EPCAM', 'CD3E', 'KRT5', 'SHARED']);
+      expect(component.markersOpen).toBe(false);
+    });
+
+    it('adds only the clusters picked, and says so when none pass', async () => {
+      (controls as unknown as { markerGenes: unknown }).markerGenes = jest.fn(async () => ({
+        column: 'graphclust', groups: [{ name: 'A', cells: 5, genes: [] }, { name: 'B', cells: 5, genes: [] }],
+      }));
+      dataset$.next(tiled);
+      await build(controls);
+      component.openMarkers();
+      component.onMarkerColumn('graphclust');
+      component.markerClusters = ['A'];
+      await component.addMarkerGenes();
+      expect(component.markerError).toMatch(/No marker genes/);
+      expect(view$.value.transcriptGeneGroups).toEqual([]);
+    });
+
+    it('shows the renderer\'s per-gene counts in view, 0 for a gene with none', async () => {
+      const counts$ = new BehaviorSubject<Record<string, number> | null>(null);
+      (controls as unknown as { getGeneCountsInView$: unknown }).getGeneCountsInView$ = () => counts$;
+      dataset$.next(tiled);
+      await build(controls);
+      expect(component.geneCountOf('CD163')).toBeNull();
+      counts$.next({ CD163: 17 });
+      expect(component.geneCountOf('CD163')).toBe(17);
+      expect(component.geneCountOf('CD163L1')).toBe(0);
+    });
+
     it('patches the display settings', async () => {
       dataset$.next(tiled);
       await build(controls);

@@ -250,6 +250,8 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
 
     const estimate$ = this.controls.getTranscriptEstimate$?.();
     if (estimate$) this.subs.add(estimate$.subscribe((e) => this.zone.run(() => { this.estimate = e; })));
+    const counts$ = this.controls.getGeneCountsInView$?.();
+    if (counts$) this.subs.add(counts$.subscribe((c) => this.zone.run(() => { this.geneCounts = c; })));
     const density$ = this.controls.getDensityStats$?.();
     if (density$) {
       this.subs.add(density$.subscribe((d) => this.zone.run(() => {
@@ -1038,6 +1040,10 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   private buildGeneMenu(): { label: string; icon: string; command: () => void; disabled?: boolean }[] {
     return [
       {
+        label: 'Add marker genes of clusters…', icon: 'pi pi-sitemap',
+        disabled: !this.canAddMarkers, command: () => this.openMarkers(),
+      },
+      {
         label: 'New group from selected genes', icon: 'pi pi-folder-plus',
         disabled: !this.view.transcriptGenes.length, command: () => this.onNewGeneGroup(),
       },
@@ -1072,6 +1078,116 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     return Math.round(this.view.densityOpacity * 100);
   }
   geneGroupError: string | null = null;
+
+  // ── per-gene counts in view ─────────────────────────────────────────────
+
+  /** Transcripts of each selected gene in the current view, from the renderer. */
+  geneCounts: Record<string, number> | null = null;
+
+  geneCountOf(gene: string): number | null {
+    return this.geneCounts ? (this.geneCounts[gene] ?? 0) : null;
+  }
+
+  // ── marker genes of clusters, as gene groups ────────────────────────────
+
+  markersOpen = false;
+  markerColumn: string | null = null;
+  markerPerGroup = 5;
+  readonly markerPerGroupOptions = [3, 5, 10, 20].map((n) => ({ label: `${n} genes`, value: n }));
+  markerClusters: string[] = [];
+  markerClusterOptions: { label: string; value: string }[] = [];
+  markerLoading = false;
+  markerError: string | null = null;
+
+  get canAddMarkers(): boolean {
+    return !!this.controls?.markerGenes && this.markerColumnOptions.length > 0;
+  }
+
+  /** Every categorical column but the segmentation method, which says nothing about genes. */
+  get markerColumnOptions(): { label: string; value: string }[] {
+    return (this.dataset?.columns ?? [])
+      .filter((c): c is CategoricalColumnMeta => c.kind === 'categorical' && c.name !== 'segmentation_method')
+      .map((c) => ({ label: c.description && c.section ? c.description : this.columnLabel(c), value: c.name }));
+  }
+
+  openMarkers(): void {
+    const options = this.markerColumnOptions;
+    const active = this.activeCellTypeColumn;
+    if (!this.markerColumn || !options.some((o) => o.value === this.markerColumn)) {
+      this.markerColumn = active && options.some((o) => o.value === active) ? active : options[0]?.value ?? null;
+    }
+    this.markerError = null;
+    this.refreshMarkerClusters();
+    this.markersOpen = true;
+    this.open = { ...this.open, transcripts: true };
+  }
+
+  onMarkerColumn(column: string): void {
+    this.markerColumn = column;
+    this.refreshMarkerClusters();
+  }
+
+  /** The clusters of the chosen column, all picked to start with. */
+  private refreshMarkerClusters(): void {
+    const col = this.dataset?.columns.find((c) => c.name === this.markerColumn);
+    const categories = col && col.kind === 'categorical' ? col.categories : [];
+    this.markerClusterOptions = categories.map((c) => ({ label: c, value: c }));
+    this.markerClusters = [...categories];
+  }
+
+  /**
+   * Add each picked cluster's top marker genes as a gene group named after it, and select
+   * them. A gene that marks several clusters goes to the one it is most specific to, so the
+   * tree lists it once.
+   */
+  async addMarkerGenes(): Promise<void> {
+    const column = this.markerColumn;
+    const markerGenes = this.controls?.markerGenes;
+    if (!column || !markerGenes || !this.markerClusters.length) return;
+    this.markerLoading = true;
+    this.markerError = null;
+    try {
+      const result = await markerGenes(column, this.markerPerGroup);
+      this.zone.run(() => {
+        const picked = new Set(this.markerClusters);
+        const best = new Map<string, { group: string; score: number }>();
+        for (const g of result.groups) {
+          if (!picked.has(g.name)) continue;
+          for (const gene of g.genes) {
+            const prev = best.get(gene.name);
+            if (!prev || gene.score > prev.score) best.set(gene.name, { group: g.name, score: gene.score });
+          }
+        }
+        const groups = result.groups
+          .filter((g) => picked.has(g.name))
+          .map((g) => ({
+            name: g.name,
+            genes: g.genes.map((x) => x.name).filter((n) => best.get(n)?.group === g.name),
+          }))
+          .filter((g) => g.genes.length);
+        if (!groups.length) {
+          this.markerError = 'No marker genes passed the filter for the chosen clusters.';
+          return;
+        }
+        const names = new Set(groups.map((g) => g.name));
+        const genes = [...this.view.transcriptGenes];
+        for (const g of groups) for (const n of g.genes) if (!genes.includes(n)) genes.push(n);
+        this.controls?.setViewState({
+          transcriptGeneGroups: [...this.view.transcriptGeneGroups.filter((g) => !names.has(g.name)), ...groups],
+          transcriptGenes: genes,
+          ...(this.view.transcriptMode === 'off' ? { transcriptMode: 'circles' as const } : {}),
+        });
+        this.markersOpen = false;
+      });
+    } catch (err) {
+      this.zone.run(() => {
+        const e = err as { error?: { error?: string }; message?: string };
+        this.markerError = e?.error?.error ?? e?.message ?? 'Could not compute marker genes.';
+      });
+    } finally {
+      this.zone.run(() => { this.markerLoading = false; });
+    }
+  }
 
   onNewGeneGroup(): void {
     const name = (globalThis.prompt?.('Name for this gene group', 'Gene group') ?? '').trim();

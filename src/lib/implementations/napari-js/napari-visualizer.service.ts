@@ -440,6 +440,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private spatialTilesMgr: NapariSpatialTileLayers | null = null;
   /** For the panel: the transcripts-in-view estimate and the density window in use. */
   readonly transcriptEstimate$ = new BehaviorSubject<TranscriptEstimate | null>(null);
+  /** Transcripts of each selected gene in view (see NapariSpatialTileLayers.geneCountsIn). */
+  readonly geneCountsInView$ = new BehaviorSubject<Record<string, number> | null>(null);
   readonly densityStats$ = new BehaviorSubject<{ lo: number; hi: number; max: number } | null>(null);
   /** Latest (dataset, view, selection) the spatial subscription saw, so a slice
    *  change can rebuild the markers for the new plane. */
@@ -1869,6 +1871,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         return spatialContinuousLut(node?.data?.value, this.currentReverse, view.continuousColormap);
       },
       estimateChanged: (e) => this.transcriptEstimate$.next(e),
+      geneCountsChanged: (c) => this.geneCountsInView$.next(c),
       densityChanged: (d) => this.densityStats$.next(d),
       polygonsShownChanged: () => {
         if (this.spatialPoints) this.spatialPoints.visible = this.spatialPointsVisible();

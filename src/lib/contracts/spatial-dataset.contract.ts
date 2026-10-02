@@ -386,6 +386,22 @@ export interface SpatialTranscriptTile {
 }
 
 /** Transcript totals for an estimate of how many markers a selection would draw. */
+/**
+ * Marker genes of each group of a categorical column: per group, the real genes most
+ * specific to it, best first. A gene's score is its mean `log1p(count)` in the group minus
+ * that in every other cell; it must be detected in at least 10% of the group's cells, and
+ * in more of them than elsewhere.
+ */
+export interface SpatialMarkerGenes {
+  column: string;
+  groups: {
+    name: string;
+    /** Cells in the group. */
+    cells: number;
+    genes: { name: string; score: number; pctIn: number; pctOut: number }[];
+  }[];
+}
+
 export interface SpatialTranscriptCounts {
   /** Total transcripts per requested gene, over the whole dataset. */
   counts: Record<string, number>;

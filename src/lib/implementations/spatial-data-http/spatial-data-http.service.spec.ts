@@ -374,6 +374,17 @@ describe('SpatialDataHttpService', () => {
     });
   });
 
+  describe('getMarkerGenes', () => {
+    it('asks for a column\'s marker genes, n per group', async () => {
+      await loadDataset();
+      const promise = service.getMarkerGenes('cell type', 4);
+      const req = http.expectOne(`${BASE}/spatial/visium-brain/markers/cell%20type?n=4`);
+      const body = { column: 'cell type', groups: [{ name: 'A', cells: 2, genes: [] }] };
+      req.flush(body);
+      expect(await promise).toEqual(body);
+    });
+  });
+
   describe('clear', () => {
     it('drops the dataset and the cache, so the next read refetches', async () => {
       await loadDataset();

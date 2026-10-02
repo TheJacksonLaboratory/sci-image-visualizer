@@ -625,7 +625,11 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       ...(port.getTranscriptCounts ? {
         transcriptCounts: (genes: string[]) => port.getTranscriptCounts!(genes),
       } : {}),
+      ...(port.getMarkerGenes ? {
+        markerGenes: (column: string, perGroup?: number) => port.getMarkerGenes!(column, perGroup),
+      } : {}),
       getTranscriptEstimate$: () => this.napari.transcriptEstimate$.asObservable(),
+      getGeneCountsInView$: () => this.napari.geneCountsInView$.asObservable(),
       getDensityStats$: () => this.napari.densityStats$.asObservable(),
       categoryColors: async (name: string) => {
         const column = await port.getColumn(name);

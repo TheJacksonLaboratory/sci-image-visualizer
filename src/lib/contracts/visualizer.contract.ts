@@ -13,7 +13,7 @@ import {
   CategoricalColumnMeta,
   SpatialDataset,
   SpatialEmbedding,
-  SpatialTranscriptCounts,
+  SpatialMarkerGenes, SpatialTranscriptCounts,
 } from './spatial-dataset.contract';
 import { SpatialSelectionMask } from '../spatial/spatial-selection';
 import type { PlotModeViewport } from './plot-type-contribution.contract';
@@ -369,6 +369,11 @@ export interface ISpatialControls {
   importGroups?(label: string, table: string): Promise<{ column: CategoricalColumnMeta; matched: number }>;
   /** Transcript totals per gene — for the points estimate. Optional. */
   transcriptCounts?(genes: string[]): Promise<SpatialTranscriptCounts>;
+  /** Marker genes of each group of a categorical column. Optional (see the port). */
+  markerGenes?(column: string, perGroup?: number): Promise<SpatialMarkerGenes>;
+  /** Transcripts of each selected gene in the current view, or null when not known
+   *  (all genes at once, or transcripts off). */
+  getGeneCountsInView$?(): Observable<Record<string, number> | null>;
   /** Estimated transcripts in view for the current selection, against the marker budget. */
   getTranscriptEstimate$?(): Observable<{ points: number; max: number } | null>;
   /** The density map's colour window in use (auto-derived or set) and its densest bin. */

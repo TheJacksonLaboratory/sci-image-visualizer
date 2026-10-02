@@ -59,7 +59,7 @@ import { readArray } from './lib/zarr3.mjs';
 import {
   listXeniumDatasets, xeniumManifest, xeniumCoords, xeniumRadius, xeniumColumn, xeniumFeature,
   xeniumFeatureSearch, xeniumPolygonTile, xeniumTranscriptTile, xeniumTranscriptBins, xeniumDensity,
-  xeniumTranscriptSummary, xeniumImportGroups, xeniumTranscriptCounts,
+  xeniumTranscriptSummary, xeniumImportGroups, xeniumTranscriptCounts, xeniumMarkerGenes,
 } from './lib/spatial-xenium.mjs';
 
 const PORT = Number(process.env.PORT || 8090);
@@ -607,6 +607,15 @@ app.get('/spatial/:id/transcript-counts', async (req, res) => {
   await fromSource(res, id, {
     xenium: async () => res.set('Cache-Control', REVALIDATE)
       .json(await xeniumTranscriptCounts(XENIUM_DIR, id, genesParam(req.query.genes))),
+  });
+});
+
+// Marker genes of each group of a categorical column; ?n= per group (default 5).
+app.get('/spatial/:id/markers/:column', async (req, res) => {
+  const { id, column } = req.params;
+  await fromSource(res, id, {
+    xenium: async () => res.set('Cache-Control', REVALIDATE)
+      .json(await xeniumMarkerGenes(XENIUM_DIR, id, column, intParam(req.query.n, 5))),
   });
 });
 

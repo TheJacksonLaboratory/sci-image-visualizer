@@ -36,6 +36,7 @@ import { readZipDirectory, openStoredMember, readMember } from './xenium/zip.mjs
 import { ZarrZipStore, typedArrayFor } from './xenium/zarr2-zip.mjs';
 import { LruCache } from './xenium/lru.mjs';
 import { parseDelimited } from './delimited.mjs';
+import { KEEP as MARKERS_KEPT, computeMarkers, topMarkers } from './xenium/markers.mjs';
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const NO_CATEGORY = 0xffff;
@@ -691,6 +692,132 @@ async function readRange(store, arrPath, start, end, cacheKey) {
     out.set(chunk.subarray(a - c * cs, b - c * cs), a - start);
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Marker genes of cell groups
+// ---------------------------------------------------------------------------
+
+/**
+ * The top `perGroup` marker genes of each group of categorical `column` (see
+ * xenium/markers.mjs). The first request reads the whole expression matrix once and scores
+ * every built-in clustering in that pass; results are cached in the derived directory.
+ * An imported grouping is scored on its own, and again whenever its categories change.
+ */
+export async function xeniumMarkerGenes(xeniumDir, id, column, perGroup = 5) {
+  const ds = await dataset(xeniumDir, id);
+  if (!ds.features) throw new RangeError('no cell_feature_matrix in this bundle');
+  const col = ds.columns.find((c) => c.meta.name === column);
+  if (!col) throw new RangeError(`unknown column: ${column}`);
+  if (col.meta.kind !== 'categorical') throw new RangeError(`column "${column}" is not categorical`);
+  const n = Math.max(1, Math.min(MARKERS_KEPT, Math.floor(Number(perGroup)) || 5));
+  return topMarkers(await markersFor(ds, col), n);
+}
+
+const markerKey = (col) => col.meta.categories.join('\u0001');
+const markerFile = (ds, name) => (ds.cfg.derivedDir
+  ? path.join(ds.cfg.derivedDir, 'markers', `${encodeURIComponent(name)}.json`) : null);
+
+async function markersFor(ds, col) {
+  ds.markers ??= new Map();
+  const name = col.meta.name;
+  const key = markerKey(col);
+  const hit = ds.markers.get(name);
+  if (hit?.key === key) return hit.result;
+  const file = markerFile(ds, name);
+  if (file) {
+    try {
+      const saved = JSON.parse(await readFile(file, 'utf8'));
+      if (saved.key === key) {
+        ds.markers.set(name, saved);
+        return saved.result;
+      }
+    } catch { /* not computed yet */ }
+  }
+  // One pass at a time: a second request waits for the pass already reading the matrix.
+  const imported = name.startsWith('imported:');
+  ds.markerPass = (ds.markerPass ?? Promise.resolve()).then(async () => {
+    const again = ds.markers.get(name);
+    if (again?.key === key) return;
+    const cols = imported ? [col] : ds.columns.filter((c) => c.meta.kind === 'categorical'
+      && c.meta.name !== 'segmentation_method' && !c.meta.name.startsWith('imported:')
+      && ds.markers.get(c.meta.name)?.key !== markerKey(c));
+    const groupings = [];
+    for (const c of cols) {
+      const codes = await chunkCache.get(`${ds.cfg.source}|col|${c.meta.name}`, c.load);
+      groupings.push({ name: c.meta.name, codes, categories: c.meta.categories });
+    }
+    const t0 = Date.now();
+    const results = await computeMarkers({
+      groupings,
+      geneCount: ds.featureNames.length,
+      geneName: (g) => ds.featureNames[g],
+      isReal: realFeature(ds),
+      forEachNonzero: (visit) => forEachFeatureNonzero(ds, visit),
+    });
+    console.log(`[xenium] ${ds.cfg.id}: marker genes for ${groupings.length} groupings in ` +
+      `${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    for (const c of cols) {
+      const entry = { key: markerKey(c), result: results.get(c.meta.name) };
+      ds.markers.set(c.meta.name, entry);
+      const f = markerFile(ds, c.meta.name);
+      if (f && !imported) {
+        await mkdir(path.dirname(f), { recursive: true });
+        const partial = `${f}.${process.pid}.${Math.random().toString(36).slice(2)}.partial`;
+        await writeFile(partial, JSON.stringify(entry));
+        await rename(partial, f);
+      }
+    }
+  });
+  await ds.markerPass;
+  return ds.markers.get(name).result;
+}
+
+/** Whether each feature of the matrix is a real gene (not a control probe or codeword). */
+function realFeature(ds) {
+  if (!ds.featureIsReal) {
+    ds.featureIsReal = Uint8Array.from(ds.featureNames, (n) => {
+      const g = ds.geneIndex.get(n);
+      return g !== undefined && ds.geneIsReal[g] === 1 ? 1 : 0;
+    });
+  }
+  return (g) => ds.featureIsReal[g] === 1;
+}
+
+/** Every non-zero of the gene-major CSR, chunk by chunk, reading a few chunks ahead. */
+async function forEachFeatureNonzero(ds, visit) {
+  const indptr = await chunkCache.get(`${ds.cfg.source}|cfm-indptr`,
+    async () => (await ds.features.read('cell_features/indptr')).data);
+  const im = await ds.features.meta('cell_features/indices');
+  const dm = await ds.features.meta('cell_features/data');
+  const total = im.shape[0];
+  const cs = im.chunks[0];
+  const coords = (meta, c) => meta.chunks.map((_, d) => (d === 0 ? c : 0));
+  const load = (c) => {
+    const base = c * cs;
+    const end = Math.min(total, base + cs);
+    return Promise.all([
+      ds.features.chunk('cell_features/indices', im, coords(im, c)),
+      dm.chunks[0] === cs
+        ? ds.features.chunk('cell_features/data', dm, coords(dm, c))
+        : readRange(ds.features, 'cell_features/data', base, end, `${ds.cfg.source}|cfm`),
+    ]);
+  };
+  const chunks = Math.ceil(total / cs);
+  const AHEAD = 4;
+  const pending = [];
+  for (let c = 0; c < Math.min(AHEAD, chunks); c++) pending.push(load(c));
+  let g = 0;
+  for (let c = 0; c < chunks; c++) {
+    const [idx, dat] = await pending.shift();
+    if (c + AHEAD < chunks) pending.push(load(c + AHEAD));
+    const base = c * cs;
+    const end = Math.min(total, base + cs);
+    for (let k = base; k < end; k++) {
+      while (k >= indptr[g + 1]) g++;
+      visit(g, idx[k - base], dat[k - base]);
+    }
+  }
 }
 
 /** One gene's per-cell counts, from the gene-major CSR. */

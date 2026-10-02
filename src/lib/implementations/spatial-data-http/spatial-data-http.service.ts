@@ -12,7 +12,7 @@ import {
   SpatialPolygonTile,
   SpatialPolygons,
   CategoricalColumnMeta,
-  SpatialTranscriptCounts,
+  SpatialMarkerGenes, SpatialTranscriptCounts,
   SpatialTranscriptSummary,
   SpatialTranscriptTile,
   findColumnMeta,
@@ -371,6 +371,14 @@ export class SpatialDataHttpService implements SpatialDataPort {
       this.dataset$.next({ ...current, columns });
     }
     return { column, matched: body.matched };
+  }
+
+  getMarkerGenes(column: string, perGroup = 5): Promise<SpatialMarkerGenes> {
+    const manifest = this.requireManifest();
+    // No per-request timeout: the first computation is a pass over the whole matrix.
+    return firstValueFrom(this.http.get<SpatialMarkerGenes>(
+      `${this.baseUrl}spatial/${encodeURIComponent(manifest.id)}/markers/${encodeURIComponent(column)}?n=${perGroup}`,
+    ));
   }
 
   getTranscriptCounts(genes: string[]): Promise<SpatialTranscriptCounts> {

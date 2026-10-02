@@ -60,6 +60,8 @@ export interface SpatialTileHost {
   densityChanged?(stats: { lo: number; hi: number; max: number }): void;
   /** Estimated transcripts in view for the current selection, against the budget. */
   estimateChanged?(estimate: TranscriptEstimate | null): void;
+  /** Transcripts of each selected gene inside the view, or null when not known. */
+  geneCountsChanged?(counts: Record<string, number> | null): void;
 }
 
 /** Xenium Explorer's "Estimated Transcript Points". */
@@ -147,6 +149,27 @@ export class NapariSpatialTileLayers {
     this.cameraOff = viewer.camera.changed.connect(() => this.schedule());
   }
 
+  /** The loaded per-gene transcripts the in-view counts are taken from. */
+  private countSource: { merged: SpatialTranscriptTile; genes: string[] } | null = null;
+
+  /**
+   * Transcripts of each selected gene inside `rect`: each entry counts for the transcripts it
+   * stands for (an aggregate at a coarse level holds several). Null without per-gene data.
+   */
+  geneCountsIn(rect: DataRect): Record<string, number> | null {
+    const src = this.countSource;
+    if (!src) return null;
+    const out: Record<string, number> = {};
+    for (const g of src.genes) out[g] = 0;
+    const { x, y, weight, gene } = src.merged;
+    for (let i = 0; i < src.merged.count; i++) {
+      if (x[i] < rect.x0 || x[i] > rect.x1 || y[i] < rect.y0 || y[i] > rect.y1) continue;
+      const name = src.genes[gene[i]];
+      if (name !== undefined) out[name] += weight[i];
+    }
+    return out;
+  }
+
   /** Whether `layer` is one of the overlays drawn here (density, cells, transcripts). */
   owns(layer: Layer): boolean {
     for (const l of this.layers.values()) if (l === layer) return true;
@@ -163,6 +186,7 @@ export class NapariSpatialTileLayers {
     this.timer = null;
     this.token++;
     this.tileRetries = 0;
+    this.countSource = null;
     if (this.viewer) {
       for (const layer of this.layers.values()) {
         if (this.viewer.layers.items.includes(layer)) this.viewer.layers.remove(layer);
@@ -233,6 +257,7 @@ export class NapariSpatialTileLayers {
       this.planTranscripts(dataset, view, rect, pxPerUnit, stale),
     ]);
     if (stale()) return;
+    this.host.geneCountsChanged?.(this.geneCountsIn(rect));
     // A tile that failed left a hole the cache keys do not record, so try the same view
     // again, backing off, a bounded number of times.
     if (!this.planIncomplete) {
@@ -482,6 +507,7 @@ export class NapariSpatialTileLayers {
       this.drop('transcripts');
       this.drop('transcriptOutline');
       this.drawn = null;
+      this.countSource = null;
       return;
     }
     // Marker sizes follow the zoom, so the zoom is part of the key; a pan that keeps
@@ -498,6 +524,10 @@ export class NapariSpatialTileLayers {
     }
     const loaded = await job.load();
     if (stale()) return;
+    // Per-gene counts in view come from what was loaded, before hidden genes are dropped:
+    // a hidden gene still has transcripts there.
+    this.countSource = (loaded.kind ?? job.kind) === 'genes'
+      ? { merged: loaded.merged, genes: [...view.transcriptGenes] } : null;
     const hidden = await this.hiddenCodes(dataset, view);
     if (stale()) return;
     const { merged, px } = filterTranscripts(loaded.merged, loaded.px, hidden,

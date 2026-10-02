@@ -238,3 +238,23 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
     tiles.detach();
   });
 });
+
+describe('NapariSpatialTileLayers: per-gene counts in view', () => {
+  it('counts each gene\'s transcripts inside the view, weighting aggregates', () => {
+    const tiles = new NapariSpatialTileLayers({} as SpatialDataPort, {
+      latest: () => null, canvasSize: () => [0, 0], continuousLut: () => [], polygonsShownChanged: () => undefined,
+    });
+    expect(tiles.geneCountsIn({ x0: 0, y0: 0, x1: 10, y1: 10 })).toBeNull();
+    (tiles as unknown as { countSource: unknown }).countSource = {
+      genes: ['CD163', 'MRC1', 'CHIT1'],
+      merged: {
+        count: 4, aggregated: true,
+        x: new Float32Array([1, 2, 50, 3]), y: new Float32Array([1, 2, 50, 3]), z: new Float32Array(4),
+        weight: new Uint32Array([5, 1, 9, 2]), observation: new Uint32Array(4),
+        gene: new Uint16Array([0, 1, 0, 0]),
+      },
+    };
+    // The third entry is outside the view; CHIT1 has none in view.
+    expect(tiles.geneCountsIn({ x0: 0, y0: 0, x1: 10, y1: 10 })).toEqual({ CD163: 7, MRC1: 1, CHIT1: 0 });
+  });
+});
