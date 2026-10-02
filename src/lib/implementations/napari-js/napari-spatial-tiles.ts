@@ -18,8 +18,13 @@ import {
   cellsShown, colorDensityWindow, densityAutoRange, groupedMarkerPx, quantileOf, tilesInRectFrom,
   defaultGlyphFor, discreteColormapStops, glyphOutline, glyphRings, pixelsPerDataUnit,
   polygonLevelFor, tileId, tilesInRect, transcriptLevelFor, transcriptMarkerPx,
-  typicalCellDiameter, visibleArea, visibleDataRect,
+  typicalCellDiameter, visibleArea, visibleDataRect, geneBinSize, groupTranscriptsByGene,
 } from '../../spatial/spatial-tiles';
+
+/** The all-gene pyramid's finest bin (250 µm source tiles / 128) and default level count, used
+ *  to group a gene selection on the same ladder when a dataset has no pyramid. */
+const PYRAMID_BASE_BIN_UM = 250 / 128;
+const PYRAMID_LEVELS = 7;
 
 /**
  * Level-of-detail cell outlines, transcripts and transcript density for the 2D spatial view.
@@ -148,6 +153,9 @@ export class NapariSpatialTileLayers {
     this.viewer = viewer;
     this.cameraOff = viewer.camera.changed.connect(() => this.schedule());
   }
+
+  /** µm per observation unit of the drawn dataset, for describing a grouped marker's area. */
+  private micronsPerUnit: number | null = null;
 
   /** The loaded per-gene transcripts the in-view counts are taken from. */
   private countSource: { merged: SpatialTranscriptTile; genes: string[] } | null = null;
@@ -549,6 +557,7 @@ export class NapariSpatialTileLayers {
       genes: [...view.transcriptGenes], ref: dataset.imageRef ?? null, grid: null,
     };
     this.hoverCache.clear();
+    this.micronsPerUnit = dataset.micronsPerUnit ?? null;
     const typeColumn = this.cellTypeColumnName(dataset, view);
     this.hoverTypes = typeColumn ? await this.categoricalCodes(typeColumn).catch(() => null) : null;
     if (stale()) return;
@@ -679,7 +688,7 @@ export class NapariSpatialTileLayers {
     const obs = d.merged.observation[i];
     const cells = obs === NO_OBSERVATION ? [] : [obs];
     let box: [number, number, number, number] | undefined;
-    if (d.kind === 'bins' && d.bin) {
+    if ((d.kind === 'bins' || d.kind === 'genes') && d.bin) {
       const { size, origin } = d.bin;
       const bx = Math.floor((d.merged.x[i] - origin[0]) / size);
       const by = Math.floor((d.merged.y[i] - origin[1]) / size);
@@ -742,6 +751,14 @@ export class NapariSpatialTileLayers {
       ];
     }
     const gene = d.genes[t.gene[i]] ?? 'transcript';
+    if (d.bin) {
+      const um = d.bin.size * (this.micronsPerUnit ?? 1);
+      return [
+        `${gene} · ${fmt(n)} transcript${n === 1 ? '' : 's'}`,
+        `${um.toFixed(1)} × ${um.toFixed(1)} µm area · zoom in to split`,
+        cellLine(obs, 'mostly cell'),
+      ];
+    }
     return n > 1
       ? [`${gene} · ${fmt(n)} transcripts`, 'grouped: zoom in to split', cellLine(obs, 'near cell')]
       : [`${gene} transcript`, cellLine(obs, 'in cell')];
@@ -766,9 +783,17 @@ export class NapariSpatialTileLayers {
     const keysAt = (l: number) => tilesInRect(rect, l, meta.levels, meta.bounds, MAX_TRANSCRIPT_TILES);
     const query = { genes, quality: view.transcriptQuality };
     const pxPerMicron = this.pxPerMicron(dataset, pxPerUnit);
+    // Zoomed out, each gene's transcripts are grouped on the all-gene pyramid's bin ladder,
+    // so a gene selection reads like "all genes" does: one marker per gene per area, sized
+    // by how many it holds; zoomed in far enough, every transcript is its own marker.
+    const ladder = dataset.transcriptBins?.levels;
+    const baseBin = ladder?.[0]?.binSize
+      ?? (dataset.micronsPerUnit ? PYRAMID_BASE_BIN_UM / dataset.micronsPerUnit : 0);
+    const bin = geneBinSize(pxPerUnit, baseBin, ladder?.length ?? PYRAMID_LEVELS);
     return {
       kind: 'genes',
-      key: `genes|${genes.join(',')}|${view.transcriptQuality}|${view.transcriptBudget}|${keysAt(first).map(tileId)}`,
+      key: `genes|${genes.join(',')}|${view.transcriptQuality}|${view.transcriptBudget}|${bin ?? 'each'}|`
+        + `${keysAt(first).map(tileId)}`,
       load: async () => {
         let level = first;
         let merged: SpatialTranscriptTile;
@@ -778,6 +803,16 @@ export class NapariSpatialTileLayers {
           merged = mergeTranscriptTiles(tiles, MAX_TRANSCRIPTS);
           if (merged.count <= view.transcriptBudget || level >= meta.levels.length - 1) break;
           level++;
+        }
+        if (bin) {
+          const grouped = groupTranscriptsByGene(merged, bin);
+          const refCount = quantileOf(grouped.weight, 0.95);
+          const binPx = bin * pxPerUnit;
+          const px = new Float32Array(grouped.count);
+          for (let i = 0; i < grouped.count; i++) {
+            px[i] = groupedMarkerPx(grouped.weight[i], refCount, binPx, view.transcriptScale);
+          }
+          return { merged: grouped, px, kind: 'genes', bin: { size: bin, origin: [0, 0] } };
         }
         const px = new Float32Array(merged.count);
         for (let i = 0; i < merged.count; i++) {

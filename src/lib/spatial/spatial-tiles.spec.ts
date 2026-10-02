@@ -1,5 +1,6 @@
-import { SpatialDataset } from '../contracts/spatial-dataset.contract';
+import { SpatialDataset, SpatialTranscriptTile } from '../contracts/spatial-dataset.contract';
 import { lutFor } from './spatial-encoding';
+import { geneBinSize, groupTranscriptsByGene } from './spatial-tiles';
 import {
   POLYGON_LEVEL_MIN_CELL_PX, TRANSCRIPT_GLYPHS, TRANSCRIPT_MAX_PX, TRANSCRIPT_MIN_PX,
   INFERNO_SCALE, TRANSCRIPT_PHYSICAL_UM,
@@ -362,5 +363,31 @@ describe('INFERNO_SCALE', () => {
     const lut = lutFor(INFERNO_SCALE);
     expect(lut[0]).toEqual([0, 0, 4]);
     expect(lut[lut.length - 1]).toEqual([252, 255, 164]);
+  });
+});
+
+describe('grouping a gene selection by zoom', () => {
+  it('uses the pyramid ladder: the finest bin at least 14 px apart, none when zoomed in', () => {
+    const base = 250 / 128;
+    expect(geneBinSize(10, base)).toBeNull();          // 19.5 px per base bin: draw each transcript
+    expect(geneBinSize(1, base)).toBeCloseTo(base * 8); // 15.6 px at 8× the base bin
+    expect(geneBinSize(0.001, base, 7)).toBeCloseTo(base * 64); // capped at the coarsest level
+    expect(geneBinSize(0, base)).toBeNull();
+  });
+
+  it('groups each gene on its own, at the weighted centroid, in the cell holding most', () => {
+    const t: SpatialTranscriptTile = {
+      count: 4, aggregated: false,
+      x: new Float32Array([1, 3, 2, 30]), y: new Float32Array([1, 1, 2, 30]), z: new Float32Array(4),
+      weight: new Uint32Array([1, 3, 1, 1]), observation: new Uint32Array([7, 8, 9, 9]),
+      gene: new Uint16Array([0, 0, 1, 0]),
+    };
+    const g = groupTranscriptsByGene(t, 10);
+    expect(g.count).toBe(3); // gene 0 near the origin, gene 1 there too, gene 0 far away
+    expect(g.aggregated).toBe(true);
+    expect(Array.from(g.weight)).toEqual([4, 1, 1]);
+    expect(g.x[0]).toBeCloseTo((1 + 3 * 3) / 4);
+    expect(g.observation[0]).toBe(8); // the entry standing for 3 transcripts
+    expect(Array.from(g.gene)).toEqual([0, 1, 0]);
   });
 });

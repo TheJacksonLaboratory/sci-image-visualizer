@@ -372,15 +372,18 @@ output that is already complete is skipped; `--force` rebuilds it.
 
 **All genes at once** needs one more derived index. 10x groups transcripts per *gene*;
 across all genes even its coarsest level is ~32 million clusters — far too many markers.
-`--transcripts` builds a gene-independent grouping pyramid: bins of 1.95 µm up to 125 µm,
-each with its transcript count, centroid and the cell contributing most of them (counted
-across every base bin it covers, as a top-cells summary). The
-viewer picks the finest level whose bins on screen fit its marker budget and are at least
-~14 px apart, and switches to the transcripts themselves once those fit.
+`--transcripts` builds a gene-independent grouping pyramid with **one level per level of the
+dataset's image pyramid** (8 for the cervical bundle: bins of 1.95 µm up to 250 µm; `--levels`
+overrides, and without an image it is 7). Each bin has its transcript count, centroid and the
+cell contributing most of them (counted across every base bin it covers, as a top-cells
+summary). The viewer picks the finest level whose bins on screen fit its marker budget and are
+at least ~14 px apart, and switches to the transcripts themselves once those fit. A selection
+of genes (from the gene tree, a marker-gene group or a search) is grouped on the same ladder,
+per gene, so it too shows one marker per gene per area when zoomed out.
 
 ```bash
 npm run prepare-xenium -- --source <bundle> --id xenium-cervical --no-images --transcripts
-# → xenium/xenium-cervical.transcripts/ (index.json + L0..L6.bin), picked up by the server
+# → xenium/xenium-cervical.transcripts/ (index.json + one L<m>.bin per level), picked up by the server
 ```
 
 (`npm run build-transcript-index -- --source <bundle> --id <id>` is the same, spelled out.)

@@ -15,7 +15,7 @@
  */
 
 import type {
-  SpatialBounds, SpatialImageRef, SpatialTileLevel,
+  SpatialBounds, SpatialImageRef, SpatialTileLevel, SpatialTranscriptTile,
 } from '../contracts/spatial-dataset.contract';
 import type { SpatialViewState, TranscriptGlyphName } from '../contracts/display-types';
 import type { SpatialDataset } from '../contracts/spatial-dataset.contract';
@@ -202,6 +202,75 @@ export function transcriptLevelFor(
     }
   }
   return best;
+}
+
+/**
+ * The bin a selection of genes is grouped into at this zoom, in observation units, or null
+ * to draw every transcript. Bins follow the all-gene pyramid's ladder (`baseBin` × 2^m) so a
+ * gene selection and "all genes" group alike: the finest bin whose markers land at least
+ * `spacingPx` apart on screen. Once the finest bin is that wide, transcripts are drawn as
+ * themselves.
+ */
+export function geneBinSize(
+  pxPerUnit: number, baseBin: number, levels = 7, spacingPx = GROUP_MIN_SPACING_PX,
+): number | null {
+  if (!(pxPerUnit > 0) || !(baseBin > 0)) return null;
+  if (baseBin * pxPerUnit >= spacingPx) return null;
+  for (let m = 1; m < levels; m++) {
+    const bin = baseBin * 2 ** m;
+    if (bin * pxPerUnit >= spacingPx) return bin;
+  }
+  return baseBin * 2 ** (levels - 1);
+}
+
+/**
+ * Group transcripts per gene into `bin`-wide squares of a grid anchored at the origin (so
+ * a pan does not move them): one entry per (gene, square) at the transcripts' centroid,
+ * weighted by how many each entry stands for, in the cell holding most of them.
+ */
+export function groupTranscriptsByGene(t: SpatialTranscriptTile, bin: number): SpatialTranscriptTile {
+  const index = new Map<string, number>();
+  const sx: number[] = [];
+  const sy: number[] = [];
+  const sz: number[] = [];
+  const w: number[] = [];
+  const gene: number[] = [];
+  const obs: number[] = [];
+  const best: number[] = [];
+  for (let i = 0; i < t.count; i++) {
+    const key = `${t.gene[i]}|${Math.floor(t.x[i] / bin)}|${Math.floor(t.y[i] / bin)}`;
+    let k = index.get(key);
+    const wi = t.weight[i] || 1;
+    if (k === undefined) {
+      k = w.length;
+      index.set(key, k);
+      sx.push(0); sy.push(0); sz.push(0); w.push(0);
+      gene.push(t.gene[i]); obs.push(t.observation[i]); best.push(0);
+    }
+    sx[k] += t.x[i] * wi;
+    sy[k] += t.y[i] * wi;
+    sz[k] += t.z[i] * wi;
+    w[k] += wi;
+    if (wi > best[k]) {
+      best[k] = wi;
+      obs[k] = t.observation[i];
+    }
+  }
+  const n = w.length;
+  const out: SpatialTranscriptTile = {
+    count: n, aggregated: true,
+    x: new Float32Array(n), y: new Float32Array(n), z: new Float32Array(n),
+    weight: new Uint32Array(n), observation: new Uint32Array(n), gene: new Uint16Array(n),
+  };
+  for (let k = 0; k < n; k++) {
+    out.x[k] = sx[k] / w[k];
+    out.y[k] = sy[k] / w[k];
+    out.z[k] = sz[k] / w[k];
+    out.weight[k] = w[k];
+    out.observation[k] = obs[k];
+    out.gene[k] = gene[k];
+  }
+  return out;
 }
 
 /** Smallest and largest transcript marker, in canvas pixels. */

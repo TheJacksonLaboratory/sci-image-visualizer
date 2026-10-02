@@ -1052,9 +1052,13 @@ function scheduleTranscriptIndex(ds) {
       '(run prepare-xenium --transcripts to do this ahead of time)');
     try {
       await rm(partial, { recursive: true, force: true });
-      const { buildTranscriptIndex } = await import('./xenium/transcript-index.mjs');
+      const { buildTranscriptIndex, imagePyramidLevels, DEFAULT_LEVELS } = await import('./xenium/transcript-index.mjs');
+      // As many levels as the dataset's tissue image, when it has been prepared.
+      const cogDir = process.env.COG_DIR || new URL('../cogs', import.meta.url).pathname;
+      const levels = await imagePyramidLevels(path.join(cogDir, `${ds.cfg.id}-tissue`)) ?? DEFAULT_LEVELS;
       await buildTranscriptIndex(ds.cfg.source, partial, {
         dataset: ds,
+        levels,
         concurrency: 2,
         log: () => {},
         onProgress: (done, total) => Object.assign(ds.transcriptIndexStatus, { done, total }),

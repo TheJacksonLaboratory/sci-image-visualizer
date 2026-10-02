@@ -258,3 +258,63 @@ describe('NapariSpatialTileLayers: per-gene counts in view', () => {
     expect(tiles.geneCountsIn({ x0: 0, y0: 0, x1: 10, y1: 10 })).toEqual({ CD163: 7, MRC1: 1, CHIT1: 0 });
   });
 });
+
+describe('NapariSpatialTileLayers: a gene selection follows the zoom', () => {
+  function setup(zoom: number) {
+    const n = 400;
+    const x = new Float32Array(n);
+    const y = new Float32Array(n);
+    for (let i = 0; i < n; i++) { x[i] = (i % 20) * 0.5; y[i] = Math.floor(i / 20) * 0.5; }
+    const tile: SpatialTranscriptTile = {
+      count: n, aggregated: false, x, y, z: new Float32Array(n),
+      weight: new Uint32Array(n).fill(1), observation: new Uint32Array(n), gene: new Uint16Array(n),
+    };
+    const port = { getTranscriptTile: jest.fn(async () => tile) } as unknown as SpatialDataPort;
+    const dataset = {
+      id: 'd', name: 'd', columns: [],
+      observations: { count: 1, x: new Float32Array([5]), y: new Float32Array([5]) },
+      transcriptTiles: { bounds: [0, 0, 100, 100], count: n, levels: [{ tileSize: 200 }] },
+      transcriptBins: {
+        bounds: [0, 0, 100, 100], origin: [0, 0], count: n,
+        levels: [1, 2, 4, 8].map((k) => ({ binSize: k, tileSize: 200 })),
+      },
+    } as unknown as SpatialDataset;
+    const view = {
+      ...DEFAULT_SPATIAL_VIEW, transcriptMode: 'circles' as const, transcriptGenes: ['CD163'],
+      transcriptBudget: 100_000,
+    };
+    const items: unknown[] = [];
+    const viewer = {
+      camera: { center: [5, 5], zoom, changed: { connect: () => () => undefined } },
+      layers: { items, add: (l: unknown) => items.push(l), remove: () => undefined },
+      addPoints: jest.fn(() => { const l = {}; items.push(l); return l; }),
+      addShapes: jest.fn(() => ({})), addImage: jest.fn(() => ({})), requestRender: () => undefined,
+    } as unknown as Viewer;
+    const tiles = new NapariSpatialTileLayers(port, {
+      latest: () => [dataset, view, emptySelection(1)],
+      canvasSize: () => [400, 400], continuousLut: () => [], polygonsShownChanged: () => undefined,
+    });
+    tiles.attach(viewer);
+    return tiles;
+  }
+  const drawn = (t: NapariSpatialTileLayers) =>
+    (t as unknown as { drawn: { kind: string; bin?: { size: number }; merged: SpatialTranscriptTile } }).drawn;
+
+  it('groups each gene into the pyramid bin the zoom calls for', async () => {
+    const tiles = setup(2); // 2 px per unit: the 8-unit bin is the first 14 px apart
+    await (tiles as unknown as { plan(): Promise<void> }).plan();
+    expect(drawn(tiles).kind).toBe('genes');
+    expect(drawn(tiles).bin?.size).toBe(8);
+    expect(drawn(tiles).merged.count).toBeLessThan(400);
+    expect(drawn(tiles).merged.aggregated).toBe(true);
+    tiles.detach();
+  });
+
+  it('draws every transcript once the finest bin is wide on screen', async () => {
+    const tiles = setup(20); // the 1-unit bin is 20 px
+    await (tiles as unknown as { plan(): Promise<void> }).plan();
+    expect(drawn(tiles).bin).toBeUndefined();
+    expect(drawn(tiles).merged.count).toBe(400);
+    tiles.detach();
+  });
+});

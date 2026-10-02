@@ -33,7 +33,9 @@ export async function computeMarkers({ groupings, geneCount, geneName, isReal, f
   // Per grouping: cells per group, and the gene's totals over every assigned cell of it.
   const sizes = groupings.map((gr) => {
     const n = new Uint32Array(gr.categories.length);
-    for (let c = 0; c < gr.codes.length; c++) if (gr.codes[c] !== NO_CATEGORY && gr.codes[c] < n.length) n[gr.codes[c]]++;
+    for (let c = 0; c < gr.codes.length; c++) {
+      if (gr.codes[c] !== NO_CATEGORY && gr.codes[c] < n.length) n[gr.codes[c]]++;
+    }
     return n;
   });
   await forEachNonzero((g, cell, count) => {
@@ -89,7 +91,9 @@ export function topMarkers(result, n) {
     column: result.column,
     groups: result.groups.map((g) => ({
       name: g.name, cells: g.cells,
-      genes: g.genes.slice(0, n).map((x) => ({ name: x.name, score: r(x.score), pctIn: r(x.pctIn), pctOut: r(x.pctOut) })),
+      genes: g.genes.slice(0, n).map((x) => ({
+        name: x.name, score: r(x.score), pctIn: r(x.pctIn), pctOut: r(x.pctOut),
+      })),
     })),
   };
 }
