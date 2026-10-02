@@ -15,7 +15,7 @@ import {
   SpatialPolygonTile,
   SpatialPolygonTilesMeta,
   SpatialPolygons,
-  SpatialTranscriptBinsMeta,
+  SpatialTranscriptBinsMeta, SpatialTranscriptGeneBinsMeta,
   SpatialTranscriptBinsStatus,
   SpatialTranscriptTile,
   SpatialTranscriptTilesMeta,
@@ -100,6 +100,7 @@ export interface SpatialManifest {
   density?: SpatialDensityMeta;
   transcriptBins?: SpatialTranscriptBinsMeta;
   transcriptBinsStatus?: SpatialTranscriptBinsStatus;
+  transcriptGeneBins?: SpatialTranscriptGeneBinsMeta;
 }
 
 /** `GET /spatial/datasets` */
@@ -336,6 +337,7 @@ export function datasetFromManifest(
     ...(manifest.transcriptTiles ? { transcriptTiles: manifest.transcriptTiles } : {}),
     ...(manifest.density ? { density: manifest.density } : {}),
     ...(manifest.transcriptBins ? { transcriptBins: manifest.transcriptBins } : {}),
+    ...(manifest.transcriptGeneBins ? { transcriptGeneBins: manifest.transcriptGeneBins } : {}),
     ...(manifest.transcriptBinsStatus ? { transcriptBinsStatus: manifest.transcriptBinsStatus } : {}),
   };
 }

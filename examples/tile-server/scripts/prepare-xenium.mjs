@@ -45,6 +45,8 @@
 //   --force       rebuild outputs that are already complete (default: skip them)
 //   --levels      transcript pyramid levels (default: as many as the image pyramid in --out,
 //                 else 7)
+//   --no-gene-levels  skip the per-gene levels (genes/): by default every level also gets each
+//                 gene's bins, so a gene selection is drawn at any zoom from small reads
 //
 // Each output is built under `<dir>.partial` and moved into place only when complete, so an
 // interrupted or concurrent run never leaves a half-written pyramid where the server reads.
@@ -91,6 +93,7 @@ function parseArgs(argv) {
     else if (a === '--limit-tiles') o.limitTiles = Number(next());
     else if (a === '--force') o.force = true;
     else if (a === '--levels') o.levels = Number(next());
+    else if (a === '--no-gene-levels') o.geneLevels = false;
     else throw new Error(`unknown option ${a}`);
   }
   if (!o.source || !o.id) {
@@ -314,7 +317,7 @@ async function main() {
       const levels = o.levels ?? await imagePyramidLevels(path.join(o.out, `${o.id}-tissue`)) ?? DEFAULT_LEVELS;
       console.log(`[prepare-xenium] transcript pyramid: ${levels} levels`);
       await buildInto(out, (dir) => buildTranscriptIndex(o.source, dir, {
-        limitTiles: o.limitTiles ?? Infinity, levels,
+        limitTiles: o.limitTiles ?? Infinity, levels, geneLevels: o.geneLevels !== false,
       }));
       if (!isLocalSource(o.source)) {
         const next = o.source.replace(/[?#].*$/, '').replace(/\/+$/, '').replace(/[^/]*$/, name);

@@ -300,6 +300,14 @@ export class SpatialDataHttpService implements SpatialDataPort {
       Promise<SpatialTranscriptTile>;
   }
 
+  getTranscriptGeneBins(level: number, tx: number, ty: number, genes: string[]): Promise<SpatialTranscriptTile> {
+    const manifest = this.requireManifest();
+    const path = `spatial/${encodeURIComponent(manifest.id)}/gene-bins/${level}/${tx}/${ty}`
+      + `?genes=${genes.map(encodeURIComponent).join(',')}`;
+    return this.cachedTile(path, () => this.getBinary(path).then(decodeTranscriptTile)) as
+      Promise<SpatialTranscriptTile>;
+  }
+
   getTranscriptBins(level: number, tx: number, ty: number): Promise<SpatialTranscriptTile> {
     const manifest = this.requireManifest();
     if (!manifest.transcriptBins) {

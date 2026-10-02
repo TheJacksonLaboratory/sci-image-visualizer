@@ -394,6 +394,17 @@ bundle, or under `$XENIUM_DIR` with that name for a remote one (the older
 For a remote bundle (`gs://`, `https://`), `prepare-xenium` builds it under `$XENIUM_DIR` and
 prints where to copy it next to the bundle.
 
+**Per-gene levels.** By default the pyramid also gets `genes/`: for every level (same bins and
+origin), each gene's bins with their transcript count, centroid and dominant cell. A selection of
+genes — from the gene tree, a marker-gene group, a search — is then drawn at any zoom from a few
+small reads per tile (`GET /spatial/:id/gene-bins/:level/:tx/:ty?genes=`, advertised as
+`transcriptGeneBins`), stepping to coarser levels while the markers would exceed the max, one
+marker per gene-tree cluster per bin. It is large — about 60 GB for the 1 billion transcripts of the
+cervical bundle, most of it in the finest levels — so `--no-gene-levels` skips it. The server reads
+it next to the pyramid, or wherever a dataset config's `geneIndex` points: a `gs://` URL reads it
+from the bucket, a tile's gene table and the selected genes' ranges at a time, so it never has to be
+downloaded.
+
 (`npm run build-transcript-index -- --source <bundle> --id <id>` is the same, spelled out.)
 It is one pass over every transcript (~1.2 billion rows) — about 40 minutes on 32 cores next
 to the data — and a few hundred MB out.

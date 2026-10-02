@@ -38,6 +38,7 @@ import { LruCache } from './xenium/lru.mjs';
 import { parseDelimited } from './delimited.mjs';
 import { KEEP as MARKERS_KEPT, computeMarkers, topMarkers } from './xenium/markers.mjs';
 import { isLocalSource, transcriptPyramidName } from './xenium/pyramid-name.mjs';
+import { readGeneTile } from './xenium/gene-index.mjs';
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const NO_CATEGORY = 0xffff;
@@ -94,6 +95,9 @@ async function discover(xeniumDir) {
         out.set(id, {
           id, name: cfg.name ?? id, source: rel(cfg.source), cellTypes: rel(cfg.cellTypes),
           transcriptIndex: await pyramidFor(xeniumDir, id, rel(cfg.source), rel(cfg.transcriptIndex)),
+          // The per-gene levels: next to the pyramid (genes/) unless the config points elsewhere —
+          // a gs:// URL reads them from the bucket, a tile's needed ranges at a time.
+          geneIndex: rel(cfg.geneIndex),
           derivedDir: path.join(xeniumDir, `${id}.derived`),
         });
       } else if (e.isFile() && e.name.endsWith('_xe_outs.zip')) {
@@ -273,6 +277,7 @@ async function loadDataset(cfg) {
     for (let g = 0; g < categories.shape[0]; g++) ds.geneIsReal[g] = categories.data[g * cols];
   }
   ds.transcriptIndex = await loadTranscriptIndex(cfg.transcriptIndex);
+  ds.geneBins = await loadGeneIndex(cfg.geneIndex ?? (cfg.transcriptIndex && path.join(cfg.transcriptIndex, 'genes')));
   if (!ds.transcriptIndex) scheduleTranscriptIndex(ds);
   ds.bounds = boundsOf(ds.x, ds.y);
 
@@ -644,6 +649,12 @@ export async function xeniumManifest(xeniumDir, id, { imageExists } = {}) {
     },
     ...(!ds.transcriptIndex && ds.transcriptIndexStatus ? {
       transcriptBinsStatus: { ...ds.transcriptIndexStatus },
+    } : {}),
+    ...(ds.geneBins ? {
+      transcriptGeneBins: {
+        origin: ds.geneBins.index.origin,
+        levels: ds.geneBins.index.levels.map((l) => ({ binSize: l.bin, tileSize: l.tileSize })),
+      },
     } : {}),
     ...(ds.transcriptIndex ? {
       transcriptBins: {
@@ -1098,6 +1109,47 @@ function scheduleTranscriptIndex(ds) {
       console.warn(`[xenium] ${ds.cfg.id}: transcript pyramid build failed: ${err?.message ?? err}`);
     }
   });
+}
+
+/** The per-gene levels' index (local folder or gs:// URL), or null when there are none. */
+async function loadGeneIndex(location) {
+  if (!location) return null;
+  const at = (file) => (isLocalSource(location) ? path.join(location, file) : `${location.replace(/\/+$/, '')}/${file}`);
+  try {
+    const src = await openByteSource(at('index.json'));
+    const index = JSON.parse((await src.read(0, src.size)).toString('utf8'));
+    await src.close?.();
+    if (index.version !== 1) return null;
+    const geneId = new Map(index.genes.map((g, i) => [g, i]));
+    return { index, at, geneId, sources: new Map(), tables: new Map() };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One tile of the per-gene levels for `genes`, in the transcript-tile layout (aggregated):
+ * each entry is a gene's transcripts in one bin — centroid, count, dominant cell — and its
+ * `gene` is the position in `genes`.
+ */
+export async function xeniumGeneBins(xeniumDir, id, level, tx, ty, genes) {
+  const ds = await dataset(xeniumDir, id);
+  const gb = ds.geneBins;
+  if (!gb) throw new RangeError('no per-gene transcript levels for this dataset');
+  const lv = gb.index.levels[level];
+  if (!lv) throw new RangeError(`no gene level ${level}`);
+  const entry = lv.tiles[`${tx},${ty}`];
+  if (!entry) return encodeTranscripts({ n: 0 }, true);
+  let src = gb.sources.get(lv.file);
+  if (!src) {
+    src = openByteSource(gb.at(lv.file));
+    gb.sources.set(lv.file, src);
+  }
+  const wanted = genes.map((g) => gb.geneId.get(g) ?? -1);
+  const key = `${ds.cfg.source}|gene-bins|${level}|${tx},${ty}|${genes.join(',')}`;
+  const t = await chunkCache.get(key, async () =>
+    readGeneTile(await src, entry[0], entry[1], wanted, gb.tables));
+  return encodeTranscripts(t, true);
 }
 
 /** The pyramid's `index.json`, or null when it has not been built. */

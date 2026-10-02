@@ -365,3 +365,75 @@ describe('clusterMarkers (a zoomed-out selection, from density grids)', () => {
     expect(tile.observation[0]).toBe(NO_OBSERVATION);
   });
 });
+
+describe('NapariSpatialTileLayers: a gene selection from the per-gene pyramid levels', () => {
+  function setup(zoom: number, budget: number) {
+    // Two genes, one cluster, spread over a 100 × 100 area; each level's tile holds its bins.
+    const getTranscriptGeneBins = jest.fn(async (level: number) => {
+      const bin = 2 ** level;
+      const xs: number[] = [];
+      const ys: number[] = [];
+      const genes: number[] = [];
+      for (let y = 0; y < 100; y += bin) {
+        for (let x = 0; x < 100; x += bin) {
+          for (const g of [0, 1]) { xs.push(x + bin / 2); ys.push(y + bin / 2); genes.push(g); }
+        }
+      }
+      const n = xs.length;
+      return {
+        count: n, aggregated: true, x: Float32Array.from(xs), y: Float32Array.from(ys), z: new Float32Array(n),
+        weight: new Uint32Array(n).fill(bin * bin), observation: new Uint32Array(n).fill(3),
+        gene: Uint16Array.from(genes),
+      } as SpatialTranscriptTile;
+    });
+    const port = { getTranscriptGeneBins } as unknown as SpatialDataPort;
+    const dataset = {
+      id: 'd', name: 'd', columns: [],
+      observations: { count: 1, x: new Float32Array([5]), y: new Float32Array([5]) },
+      transcriptTiles: { bounds: [0, 0, 100, 100], count: 1, levels: [{ tileSize: 1000 }] },
+      transcriptBins: { bounds: [0, 0, 100, 100], origin: [0, 0], count: 1,
+        levels: [1, 2, 4, 8, 16].map((k) => ({ binSize: k, tileSize: 1000 })) },
+      transcriptGeneBins: {
+        origin: [0, 0], levels: [1, 2, 4, 8, 16].map((k) => ({ binSize: k, tileSize: 1000 })),
+      },
+    } as unknown as SpatialDataset;
+    const view = {
+      ...DEFAULT_SPATIAL_VIEW, transcriptMode: 'glyphs' as const, transcriptGenes: ['A', 'B'],
+      transcriptGeneGroups: [{ name: 'Cluster 1', genes: ['A', 'B'] }], transcriptBudget: budget,
+    };
+    const items: unknown[] = [];
+    const viewer = {
+      camera: { center: [50, 50], zoom, changed: { connect: () => () => undefined } },
+      layers: { items, add: (l: unknown) => items.push(l), remove: () => undefined },
+      addPoints: jest.fn(() => ({})), addShapes: jest.fn(() => ({})), addImage: jest.fn(() => ({})),
+      requestRender: () => undefined,
+    } as unknown as Viewer;
+    const tiles = new NapariSpatialTileLayers(port, {
+      latest: () => [dataset, view, emptySelection(1)],
+      canvasSize: () => [400, 400], continuousLut: () => [], polygonsShownChanged: () => undefined,
+    });
+    tiles.attach(viewer);
+    return { tiles, getTranscriptGeneBins };
+  }
+  type Drawn = { bin?: { size: number }; merged: SpatialTranscriptTile; entryGroup: Int32Array };
+  const drawn = (t: NapariSpatialTileLayers) => (t as unknown as { drawn: Drawn }).drawn;
+
+  it('reads the level the zoom calls for, one marker per cluster per bin, cells kept', async () => {
+    const { tiles, getTranscriptGeneBins } = setup(4, 100_000); // 4 px per unit: 4-unit bins
+    await (tiles as unknown as { plan(): Promise<void> }).plan();
+    expect(getTranscriptGeneBins.mock.calls[0][0]).toBe(2); // level of the 4-unit bins
+    expect(drawn(tiles).bin?.size).toBe(4);
+    expect(drawn(tiles).merged.count).toBe(25 * 25); // the two genes merged per bin
+    expect(drawn(tiles).merged.observation[0]).toBe(3);
+    tiles.detach();
+  });
+
+  it('steps to coarser levels until the markers fit the max', async () => {
+    const { tiles, getTranscriptGeneBins } = setup(4, 50);
+    await (tiles as unknown as { plan(): Promise<void> }).plan();
+    expect([...new Set(getTranscriptGeneBins.mock.calls.map((c) => c[0]))]).toEqual([2, 3, 4]);
+    expect(drawn(tiles).bin?.size).toBe(16);
+    expect(drawn(tiles).merged.count).toBeLessThanOrEqual(50);
+    tiles.detach();
+  });
+});

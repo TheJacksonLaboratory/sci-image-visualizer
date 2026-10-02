@@ -374,6 +374,18 @@ describe('SpatialDataHttpService', () => {
     });
   });
 
+  describe('getTranscriptGeneBins', () => {
+    it('asks for a tile of the per-gene levels for the given genes', async () => {
+      await loadDataset();
+      const promise = service.getTranscriptGeneBins(3, 1, 2, ['CD163', 'MRC1']);
+      const req = http.expectOne(`${BASE}/spatial/visium-brain/gene-bins/3/1/2?genes=CD163,MRC1`);
+      const buf = new ArrayBuffer(8);
+      new DataView(buf).setUint32(4, 1, true); // empty, aggregated
+      req.flush(buf);
+      expect((await promise).count).toBe(0);
+    });
+  });
+
   describe('getMarkerGenes', () => {
     it('asks for a column\'s marker genes, n per group', async () => {
       await loadDataset();

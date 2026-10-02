@@ -117,6 +117,12 @@ export interface SpatialDataPort {
   getTranscriptBins?(level: number, tx: number, ty: number): Promise<SpatialTranscriptTile>;
 
   /**
+   * One tile of the per-gene levels for `genes`: each entry is one gene's transcripts in one bin
+   * (centroid, count, dominant cell); its `gene` is the position in `genes`. Optional.
+   */
+  getTranscriptGeneBins?(level: number, tx: number, ty: number, genes: string[]): Promise<SpatialTranscriptTile>;
+
+  /**
    * What is inside `box` (observation units): transcript count, distinct genes and cells,
    * the most frequent of each — optionally restricted to `genes` — plus display ids for
    * `cells`. Omit `box` for a cell-id lookup only. Optional; drives the hover details of

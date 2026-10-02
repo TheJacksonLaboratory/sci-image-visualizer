@@ -555,7 +555,8 @@ export class NapariSpatialTileLayers {
     stale: () => boolean,
   ): Promise<void> {
     const mode = view.transcriptMode;
-    const job = (mode === 'circles' || mode === 'glyphs') && this.port.getTranscriptTile
+    const job = (mode === 'circles' || mode === 'glyphs')
+      && (this.port.getTranscriptTile || (this.port.getTranscriptGeneBins && dataset.transcriptGeneBins))
       ? (view.transcriptAllGenes
         ? this.allGenesJob(dataset, view, rect, pxPerUnit)
         : this.geneJob(dataset, view, rect, pxPerUnit))
@@ -874,6 +875,12 @@ export class NapariSpatialTileLayers {
     // Zoomed out to bins as wide as the density grid, a selection is drawn from the per-gene
     // density grids — one cached request per cluster — rather than 10x's coarse per-gene
     // tiles, which take minutes for a few hundred genes.
+    // With the pyramid's per-gene levels, every zoom of a selection reads them: the level the
+    // zoom calls for, coarser while the markers would exceed the max.
+    const geneBins = dataset.transcriptGeneBins;
+    if (geneBins && this.port.getTranscriptGeneBins && (bin !== null || !this.port.getTranscriptTile)) {
+      return this.geneBinsJob(dataset, view, around, geneBins, bin ?? geneBins.levels[0].binSize, mx, my, rect);
+    }
     const grid = dataset.density?.gridSize[0] ?? 0;
     if (bin !== null && grid > 0 && this.port.getDensity && bin >= grid * 0.75) {
       return this.clusterDensityJob(dataset, view, around, pxPerUnit, Math.max(bin, grid), mx, my, rect);
@@ -898,6 +905,55 @@ export class NapariSpatialTileLayers {
         return baseBin > 0
           ? { merged, px, ladder: { baseBin, levels: ladder?.length ?? PYRAMID_LEVELS, start: bin } }
           : { merged, px };
+      },
+    };
+  }
+
+  /**
+   * A gene selection from the pyramid's per-gene levels: starting at the level whose bins are
+   * `startBin`, fetch the view's tiles for the selected genes and step to a coarser level while
+   * one marker per cluster per bin would exceed the max. Hidden genes are fetched too (their
+   * counts in view still show) and dropped before drawing; grouping by cluster happens there.
+   */
+  private geneBinsJob(
+    dataset: SpatialDataset, view: SpatialViewState, around: DataRect,
+    meta: NonNullable<SpatialDataset['transcriptGeneBins']>, startBin: number, mx: number, my: number, rect: DataRect,
+  ): TranscriptJob {
+    const genes = view.transcriptGenes;
+    const levels = meta.levels;
+    let first = levels.findIndex((l) => l.binSize >= startBin * 0.999);
+    if (first < 0) first = levels.length - 1;
+    const budget = Math.max(1, view.transcriptBudget);
+    const hidden = new Set(view.transcriptHiddenGenes);
+    const clusters = this.selectionClusters(view);
+    const clusterOf = new Map<number, number>();
+    clusters.forEach((c, ci) => c.genes.forEach((g) => clusterOf.set(genes.indexOf(g), ci)));
+    const keysAt = (m: number) => tilesInRectFrom(meta.origin, around, m,
+      levels.map((l) => ({ tileSize: l.tileSize })), null, MAX_BIN_TILES);
+    return {
+      kind: 'genes',
+      key: `gene-bins|${genes.join(',')}|${budget}|${first}|${JSON.stringify(view.transcriptGeneGroups)}|`
+        + `${Math.floor(rect.x0 / (mx || 1))},${Math.floor(rect.y0 / (my || 1))}`,
+      load: async () => {
+        let m = first;
+        for (;;) {
+          const tiles = await this.fetchAll(keysAt(m),
+            (k) => this.port.getTranscriptGeneBins!(k.level, k.gx, k.gy, genes));
+          const merged = mergeTranscriptTiles(tiles.map((t) => clipTranscripts(t, around)), MAX_TRANSCRIPTS);
+          // Markers this level would draw: one per (visible cluster, bin).
+          const seen = new Set<string>();
+          const bin = levels[m].binSize;
+          for (let i = 0; i < merged.count; i++) {
+            if (hidden.has(genes[merged.gene[i]])) continue;
+            const c = clusterOf.get(merged.gene[i]);
+            if (c === undefined) continue;
+            seen.add(`${c}|${Math.floor(merged.x[i] / bin)}|${Math.floor(merged.y[i] / bin)}`);
+          }
+          if (seen.size <= budget || m >= levels.length - 1) {
+            return { merged, px: new Float32Array(merged.count), ladder: { baseBin: bin, levels: 1, start: bin } };
+          }
+          m++;
+        }
       },
     };
   }

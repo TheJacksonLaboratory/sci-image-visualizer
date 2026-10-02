@@ -59,7 +59,7 @@ import { readArray } from './lib/zarr3.mjs';
 import {
   listXeniumDatasets, xeniumManifest, xeniumCoords, xeniumRadius, xeniumColumn, xeniumFeature,
   xeniumFeatureSearch, xeniumPolygonTile, xeniumTranscriptTile, xeniumTranscriptBins, xeniumDensity,
-  xeniumTranscriptSummary, xeniumImportGroups, xeniumTranscriptCounts, xeniumMarkerGenes,
+  xeniumTranscriptSummary, xeniumImportGroups, xeniumTranscriptCounts, xeniumMarkerGenes, xeniumGeneBins,
 } from './lib/spatial-xenium.mjs';
 
 const PORT = Number(process.env.PORT || 8090);
@@ -607,6 +607,15 @@ app.get('/spatial/:id/transcript-counts', async (req, res) => {
   await fromSource(res, id, {
     xenium: async () => res.set('Cache-Control', REVALIDATE)
       .json(await xeniumTranscriptCounts(XENIUM_DIR, id, genesParam(req.query.genes))),
+  });
+});
+
+// Per-gene transcript levels: genes' bins in one tile of `level` (?genes=a,b).
+app.get('/spatial/:id/gene-bins/:level/:tx/:ty', async (req, res) => {
+  const { id } = req.params;
+  await fromSource(res, id, {
+    xenium: async () => octet(res).send(await xeniumGeneBins(XENIUM_DIR, id, intParam(req.params.level, 0),
+      intParam(req.params.tx, 0), intParam(req.params.ty, 0), genesParam(req.query.genes))),
   });
 });
 
