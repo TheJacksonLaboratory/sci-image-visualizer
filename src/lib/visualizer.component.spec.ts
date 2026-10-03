@@ -589,6 +589,67 @@ describe('VisualizerComponent (UI shell)', () => {
         expect(plotService.setPlotType).not.toHaveBeenCalledWith(PlotType.SPATIAL_OMICS_3D);
       });
 
+      it('draws an image-less dataset when no image was ever loaded (a host\'s first view)', async () => {
+        // jit-ui opens a Xenium zip straight from the file tree: no image has been loaded, so
+        // there is no image info to re-drive. Redrawing through the renderer's own state threw
+        // from Plotly's never-set image size and left a white canvas.
+        plotService.plot = jest.fn(async () => true);
+        plotService.reloadAndPlot = jest.fn();
+        const c = makeComponent(plotService, port);
+        (c as any).imageInfo = undefined;
+        (c as any).watchSpatialDataset();
+        dataset$.next({ id: 'xenium', name: 'Cervical', observations: { count: 3 }, columns: [] });
+        await flush();
+
+        expect(plotService.reloadAndPlot).not.toHaveBeenCalled();
+        expect(plotService.plot).toHaveBeenCalledWith(expect.any(String), null,
+          expect.objectContaining({ fileName: 'spatial:xenium', urls: [] }), expect.any(Number), PlotType.SPATIAL_OMICS);
+      });
+
+      it('a superseded image-less draw leaves the newer render\'s loading state alone', async () => {
+        let finish!: (ok: boolean) => void;
+        plotService.plot = jest.fn(() => new Promise<boolean>((resolve) => { finish = resolve; }));
+        const c = makeComponent(plotService, port);
+        (c as any).imageInfo = undefined;
+        (c as any).watchSpatialDataset();
+        dataset$.next({ id: 'one', name: 'One', observations: { count: 3 }, columns: [] });
+        await flush();
+        (c as any).renderToken++; // a newer image starts rendering
+        const state = (c as any).state;
+        state.setImageLoading.mockClear();
+        finish(true);
+        await flush();
+        expect(state.setImageLoading).not.toHaveBeenCalledWith(false);
+      });
+
+      it('says so when the renderer cannot draw an image-less dataset, rather than look finished', async () => {
+        plotService.plot = jest.fn(async () => false); // napari without WebGPU resolves false
+        const c = makeComponent(plotService, port);
+        (c as any).imageInfo = undefined;
+        (c as any).watchSpatialDataset();
+        dataset$.next({ id: 'one', name: 'One', observations: { count: 3 }, columns: [] });
+        await flush();
+        expect((c as any).messageService.add).toHaveBeenCalledWith(
+          expect.objectContaining({ severity: 'error', summary: 'Could not draw the dataset' }));
+        expect((c as any).state.setImageLoading).toHaveBeenLastCalledWith(false);
+      });
+
+      it('re-plots when another image-less dataset follows in the same mode', async () => {
+        // Its placeholder image info keys the regions: without a re-plot the first dataset's
+        // regions would show on, and be saved under, the second.
+        plotService.plot = jest.fn(async () => true);
+        const c = makeComponent(plotService, port);
+        (c as any).imageInfo = undefined;
+        (c as any).watchSpatialDataset();
+        dataset$.next({ id: 'one', name: 'One', observations: { count: 3 }, columns: [] });
+        await flush();
+        dataset$.next({ id: 'two', name: 'Two', observations: { count: 3 }, columns: [] });
+        await flush();
+
+        expect((plotService.plot as jest.Mock).mock.calls.map((call) => call[2].fileName))
+          .toEqual(['spatial:one', 'spatial:two']);
+      });
+
       it('leaves a dataset that HAS an image alone, to be drawn over it', async () => {
         // With a tissue image the host has already opened on it, and the observations
         // register onto that section — switching the type here would fight the host.

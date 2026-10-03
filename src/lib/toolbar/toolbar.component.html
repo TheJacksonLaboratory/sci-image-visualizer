@@ -21,8 +21,9 @@
       </p-button>
     </ng-container>
 
-    <!-- Plot type: available for any image (grayscale or RGB). -->
-    <ng-container *ngIf="imageInfo && tools.specialTools">
+    <!-- Plot type: available for any image (grayscale or RGB), and for a spatial dataset
+         that brings none (its spatial modes are still a choice). -->
+    <ng-container *ngIf="showPlotTypes">
       <span class="toolbar-separator"></span>
       <p-dropdown [options]="plotTypeOptions" optionLabel="label" optionValue="type"
                   [(ngModel)]="selectedPlotType" appendTo="body"

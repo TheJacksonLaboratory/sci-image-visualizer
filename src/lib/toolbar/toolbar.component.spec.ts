@@ -46,6 +46,15 @@ describe('ToolbarComponent', () => {
     expect(component).toBeTruthy();
   });
 
+  it('offers the plot modes for a spatial dataset that brings no image', () => {
+    // jit-ui opening a Xenium zip: no image loaded, but Spatial omics is still a choice.
+    component.imageInfo = undefined;
+    component.hasSpatialDataset = false;
+    expect(component.showPlotTypes).toBe(false);
+    component.hasSpatialDataset = true;
+    expect(component.showPlotTypes).toBe(true);
+  });
+
   it('isImageView is true only for the Image plot type', () => {
     component.selectedPlotType = PlotType.IMAGE;
     expect(component.isImageView).toBe(true);

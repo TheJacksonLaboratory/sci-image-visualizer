@@ -30,6 +30,13 @@ import { MODEL_INFO } from './model-info';
 export class ToolbarComponent implements OnChanges {
   /** Current image (gates which control groups are shown). */
   @Input() imageInfo: IImageInfo | undefined;
+  /** A spatial dataset is on offer: its plot modes are a choice even with no image loaded. */
+  @Input() hasSpatialDataset = false;
+
+  /** Whether the plot-type dropdown shows: for an image, or a spatial dataset with none. */
+  get showPlotTypes(): boolean {
+    return !!(this.imageInfo || this.hasSpatialDataset) && !!this.tools.specialTools;
+  }
   /** Plot types the active backend advertises, then any contributed modes. */
   @Input() plotTypeOptions: PlotTypeOption[] = [];
   /** The selector's value: a built-in type or a contributed mode's id. */
