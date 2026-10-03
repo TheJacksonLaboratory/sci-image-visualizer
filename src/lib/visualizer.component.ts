@@ -400,7 +400,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
 
   /** Whether a spatial-omics dataset is currently published on
    *  `SPATIAL_DATA_PORT` — gates the spatial plot types in the selector. */
-  private hasSpatialDataset = false;
+  /** Bound by the toolbar, which offers the plot modes for a dataset with no image too. */
+  hasSpatialDataset = false;
   /** The spatial dataset on offer, for drawing one that brings no image (see reloadAndPlot). */
   private spatialDataset: SpatialDataset | null = null;
   /** Whether that dataset's observations carry a z, gating the 3D spatial mode. */
