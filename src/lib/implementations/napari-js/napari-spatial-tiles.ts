@@ -970,7 +970,13 @@ export class NapariSpatialTileLayers {
         for (;;) {
           const tiles = await this.fetchAll(keysAt(m),
             (k) => this.port.getTranscriptGeneBins!(k.level, k.gx, k.gy, genes));
-          const merged = mergeTranscriptTiles(tiles.map((t) => clipTranscripts(t, around)), MAX_TRANSCRIPTS);
+          const clipped = tiles.map((t) => clipTranscripts(t, around));
+          // Past the cap a merge would drop whole genes (the tail of every tile): go coarser.
+          if (clipped.reduce((n, t) => n + t.count, 0) > MAX_TRANSCRIPTS && m < levels.length - 1) {
+            m++;
+            continue;
+          }
+          const merged = mergeTranscriptTiles(clipped, MAX_TRANSCRIPTS);
           // Markers this level would draw: one per (visible cluster, bin).
           const seen = new Set<string>();
           const bin = levels[m].binSize;

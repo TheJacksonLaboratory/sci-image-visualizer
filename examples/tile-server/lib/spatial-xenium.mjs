@@ -1148,7 +1148,7 @@ export async function xeniumGeneBins(xeniumDir, id, level, tx, ty, genes) {
   const wanted = genes.map((g) => gb.geneId.get(g) ?? -1);
   const key = `${ds.cfg.source}|gene-bins|${level}|${tx},${ty}|${genes.join(',')}`;
   const t = await chunkCache.get(key, async () =>
-    readGeneTile(await src, entry[0], entry[1], wanted, gb.tables));
+    readGeneTile(await src, entry[0], entry[1], wanted, gb.tables, lv.file));
   return encodeTranscripts(t, true);
 }
 

@@ -253,8 +253,10 @@ export function readGeneBlock(buf, wanted) {
  * touching only the tile's gene table and those genes' records — a coarse tile can be hundreds of
  * MB, of which a selection needs a few KB. `tables` caches gene tables by `off`.
  */
-export async function readGeneTile(source, off, len, wanted, tables) {
-  let table = tables?.get(off);
+export async function readGeneTile(source, off, len, wanted, tables, file = '') {
+  // Keyed by file too: every level's file has a tile at offset 0.
+  const key = `${file}|${off}`;
+  let table = tables?.get(key);
   if (!table) {
     const g = (await source.read(off, 4)).readUInt32LE(0);
     const head = await source.read(off + 4, g * 12);
@@ -262,7 +264,7 @@ export async function readGeneTile(source, off, len, wanted, tables) {
     for (let j = 0; j < g; j++) {
       table.genes.set(head.readUInt32LE(j * 12), [head.readUInt32LE(j * 12 + 4), head.readUInt32LE(j * 12 + 8)]);
     }
-    tables?.set(off, table);
+    tables?.set(key, table);
   }
   const parts = await Promise.all(wanted.map(async (w, slot) => {
     const e = table.genes.get(w);

@@ -56,3 +56,34 @@ test('builds 8 levels from two source tiles; each gene readable on its own', asy
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('a shared table cache keeps levels apart: each level file has a tile at offset 0', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'gene-levels-'));
+  try {
+    const w = await createGeneLevels({
+      outDir: dir, levels: 3, baseBin: 250 / 128, sourceTile: 250, basePerSource: 128, tileBins: 64,
+      gxMin: 0, gyMin: 0, geneNames: ['A'],
+    });
+    // Gene A at two spots far apart in one source tile: 2 bins at the finest level, 1 coarser.
+    await w.addSourceTile(0, 0, {
+      n: 2, x: Float32Array.of(1, 200), y: Float32Array.of(1, 200),
+      cell: Uint32Array.of(NO_CELL, NO_CELL), gene: Uint16Array.of(0, 0),
+    });
+    const index = await w.finish([0, 0]);
+    const tables = new Map();
+    const read = async (m) => {
+      const l = index.levels[m];
+      const [off, len] = l.tiles['0,0'] ?? Object.values(l.tiles)[0];
+      const src = await openByteSource(path.join(dir, l.file));
+      const t = await readGeneTile(src, off, len, [0], tables, l.file);
+      await src.close?.();
+      return t;
+    };
+    const coarse = await read(2); // 7.8 µm bins in 500 µm tiles: tile 0,0 holds both spots
+    const fine = await read(0);
+    assert.equal(fine.count.reduce((a, b) => a + b, 0), 1); // L0's 125 µm tile 0,0 holds only the first
+    assert.equal(coarse.count.reduce((a, b) => a + b, 0), 2);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
