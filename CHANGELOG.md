@@ -9,6 +9,59 @@ file was added.
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-10-02
+
+The Transcripts gene tree works like Xenium Explorer's: genes grouped under the cell
+cluster they mark, each with its icon, colour and count in view. A gene selection is drawn
+from the transcript pyramid at every zoom, never more markers than the max.
+
+### Added
+
+- **A per-gene icon and colour picker** in the gene tree: every icon the renderer draws, a
+  colour swatch and hex field, presets, and a reset. It writes the existing
+  `transcriptGlyphs` and `transcriptGeneColors`.
+- **Marker-gene groups:** optional `SpatialDataPort.getMarkerGenes(column, perGroup)` (on the
+  controls as `markerGenes`). "Add marker genes of clusters…" adds each picked cluster's top
+  genes as a gene group named after it, each gene once.
+- **Per-gene counts in view** on each gene row, via `getGeneCountsInView$()` on the controls.
+- **The pyramid's per-gene levels:**
+  - optional `SpatialDataPort.getTranscriptGeneBins(level, tx, ty, genes)`, advertised as
+    `SpatialDataset.transcriptGeneBins`;
+  - a selection reads them at every zoom, so zooming out takes seconds, not minutes, and
+    revisits come from cache.
+- **`transcriptColorBy: 'cluster'`:** every gene of a gene-tree cluster takes the cluster's
+  colour (its cells' colour when a cell grouping names it), in the tree and on the canvas.
+- **An "x reloading…" badge** at the bottom of the napari canvas while transcripts, cells,
+  nuclei or observations load.
+- **`PlotModeViewport.fitBounds(rect, { immediately? })`** (optional) lets a plot mode or
+  dialog tool take the user to a region. The OpenSeadragon backend implements it.
+- **Example server:**
+  - `GET /spatial/:id/markers/:column` and `GET /spatial/:id/gene-bins/:level/:tx/:ty`.
+  - `prepare-xenium` builds one transcript level per image level, the per-gene levels in the
+    same pass (`--no-gene-levels` skips them), and names the output `<bundle>.transcripts`
+    beside the bundle.
+
+### Changed
+
+- **A gene selection is grouped by gene-tree cluster per bin** on the pyramid's ladder, in
+  icons as in circles:
+  - over the max, it steps to coarser bins rather than truncating;
+  - a larger marker's tooltip gives the combined count, genes and cluster;
+  - only the view (plus a margin) counts, so zooming out refreshes too.
+- **`transcriptColorBy` gains `'cluster'`.** An exhaustive `switch` over it needs the new
+  case; that is a type-level break, so this is a minor bump under 0.x.
+
+### Fixed
+
+- **"Include low-quality calls"** is honoured at every zoom of a gene selection.
+- **Density grids** are cached per dataset.
+- **A grouped marker's cell** is the one holding most of its transcripts in total.
+- **Example server:**
+  - GCS reads outlive the access token: it's refreshed before it expires, and a 401 is retried.
+  - A failed marker pass no longer blocks later ones.
+  - A re-imported grouping is rescored.
+  - Marker scoring and gene-table caches are memory-bounded.
+
 ## [0.7.0] — 2026-10-01
 
 10x Xenium in the Spatial omics mode: cells drawn as their segmentation outlines, every
@@ -1817,7 +1870,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.4.0...v0.5.0
