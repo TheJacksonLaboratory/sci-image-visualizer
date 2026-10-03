@@ -247,7 +247,7 @@ export function clipTranscripts(t: SpatialTranscriptTile, rect: DataRect): Spati
  * not move them), one entry per (group, square): `groupOf(gene slot)` says which group a gene
  * is in — its cluster in the gene tree, or itself. Each entry sits at its transcripts'
  * centroid, weighted by how many each stands for; it takes the gene and the cell holding most
- * of them. `group[i]` is entry i's group.
+ * of them, each summed over all its transcripts in the entry. `group[i]` is entry i's group.
  */
 export function groupTranscripts(
   t: SpatialTranscriptTile, bin: number, groupOf: (geneSlot: number) => number = (g) => g,
@@ -258,10 +258,10 @@ export function groupTranscripts(
   const sz: number[] = [];
   const w: number[] = [];
   const grp: number[] = [];
-  const obs: number[] = [];
-  const bestObs: number[] = [];
-  // Per entry, how many transcripts of each gene: the dominant one gives the icon and colour.
+  // Per entry, how many transcripts of each gene (the dominant one gives the icon and colour)
+  // and in each cell (the dominant one is the entry's cell).
   const geneW: Map<number, number>[] = [];
+  const obsW: Map<number, number>[] = [];
   for (let i = 0; i < t.count; i++) {
     const gk = groupOf(t.gene[i]);
     const key = `${gk}|${Math.floor(t.x[i] / bin)}|${Math.floor(t.y[i] / bin)}`;
@@ -271,17 +271,14 @@ export function groupTranscripts(
       k = w.length;
       index.set(key, k);
       sx.push(0); sy.push(0); sz.push(0); w.push(0);
-      grp.push(gk); obs.push(t.observation[i]); bestObs.push(0); geneW.push(new Map());
+      grp.push(gk); geneW.push(new Map()); obsW.push(new Map());
     }
     sx[k] += t.x[i] * wi;
     sy[k] += t.y[i] * wi;
     sz[k] += t.z[i] * wi;
     w[k] += wi;
     geneW[k].set(t.gene[i], (geneW[k].get(t.gene[i]) ?? 0) + wi);
-    if (wi > bestObs[k]) {
-      bestObs[k] = wi;
-      obs[k] = t.observation[i];
-    }
+    obsW[k].set(t.observation[i], (obsW[k].get(t.observation[i]) ?? 0) + wi);
   }
   const n = w.length;
   const tile: SpatialTranscriptTile = {
@@ -295,14 +292,19 @@ export function groupTranscripts(
     tile.y[k] = sy[k] / w[k];
     tile.z[k] = sz[k] / w[k];
     tile.weight[k] = w[k];
-    tile.observation[k] = obs[k];
-    let topGene = 0;
-    let top = -1;
-    for (const [g, v] of geneW[k]) if (v > top) { top = v; topGene = g; }
-    tile.gene[k] = topGene;
+    tile.observation[k] = dominant(obsW[k]);
+    tile.gene[k] = dominant(geneW[k]);
     group[k] = grp[k];
   }
   return { tile, group };
+}
+
+/** The key with the largest total; the first seen on a tie. */
+function dominant(totals: Map<number, number>): number {
+  let best = 0;
+  let top = -1;
+  for (const [key, v] of totals) if (v > top) { top = v; best = key; }
+  return best;
 }
 
 /**

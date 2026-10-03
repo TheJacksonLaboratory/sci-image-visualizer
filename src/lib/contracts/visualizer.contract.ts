@@ -372,7 +372,8 @@ export interface ISpatialControls {
   /** Marker genes of each group of a categorical column. Optional (see the port). */
   markerGenes?(column: string, perGroup?: number): Promise<SpatialMarkerGenes>;
   /** Transcripts of each selected gene in the current view, or null when not known
-   *  (all genes at once, or transcripts off). */
+   *  (all genes at once, transcripts off, or a selection zoomed out on a dataset without the
+   *  pyramid's per-gene levels, where clusters are drawn from summed density grids). */
   getGeneCountsInView$?(): Observable<Record<string, number> | null>;
   /** Estimated transcripts in view for the current selection, against the marker budget. */
   getTranscriptEstimate$?(): Observable<{ points: number; max: number } | null>;

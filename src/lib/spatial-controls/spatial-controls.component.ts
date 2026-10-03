@@ -1146,12 +1146,13 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     const column = this.markerColumn;
     const markerGenes = this.controls?.markerGenes;
     if (!column || !markerGenes || !this.markerClusters.length) return;
+    // The form stays editable while the scan runs: apply what was picked when it was asked.
+    const picked = new Set(this.markerClusters);
     this.markerLoading = true;
     this.markerError = null;
     try {
       const result = await markerGenes(column, this.markerPerGroup);
       this.zone.run(() => {
-        const picked = new Set(this.markerClusters);
         const best = new Map<string, { group: string; score: number }>();
         for (const g of result.groups) {
           if (!picked.has(g.name)) continue;
@@ -1387,6 +1388,8 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
         // No colours: palette colours, as the markers fall back to.
       }
     }
+    // The cells' grouping changed while the colours loaded: the newer request applies its own.
+    if (this.cellGroupColorsFor !== column) return;
     this.zone.run(() => { this.cellGroupColors = map; });
   }
 

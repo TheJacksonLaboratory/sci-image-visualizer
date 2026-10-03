@@ -36,9 +36,9 @@ import { readZipDirectory, openStoredMember, readMember } from './xenium/zip.mjs
 import { ZarrZipStore, typedArrayFor } from './xenium/zarr2-zip.mjs';
 import { LruCache } from './xenium/lru.mjs';
 import { parseDelimited } from './delimited.mjs';
-import { KEEP as MARKERS_KEPT, computeMarkers, topMarkers } from './xenium/markers.mjs';
+import { KEEP as MARKERS_KEPT, computeMarkers, topMarkers, after } from './xenium/markers.mjs';
 import { isLocalSource, transcriptPyramidName } from './xenium/pyramid-name.mjs';
-import { readGeneTile } from './xenium/gene-index.mjs';
+import { readGeneTile, TableCache } from './xenium/gene-index.mjs';
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const NO_CATEGORY = 0xffff;
@@ -523,12 +523,20 @@ async function loadImportedGroups(ds) {
  * Import a cell grouping (CSV/TSV of `cell_id,group`) under `label`: joined now, added to
  * the dataset's columns, and saved so it is there after a restart.
  */
+let importRevision = 0;
+
+/** A column's values in the chunk cache: by revision too, for a re-imported grouping. */
+const columnKey = (ds, col) => `${ds.cfg.source}|col|${col.meta.name}${col.rev ? `|r${col.rev}` : ''}`;
+
 export async function xeniumImportGroups(xeniumDir, id, label, text) {
   const ds = await dataset(xeniumDir, id);
   const clean = String(label ?? '').trim().replace(/[^\w .()-]/g, '').slice(0, 60);
   if (!clean) throw new RangeError('a group name is required');
   const name = `imported:${clean}`;
   const col = await joinCellGroups(ds, text, name, clean, 'Imported groups');
+  // A new revision: its values and marker genes are cached apart from the grouping it replaces,
+  // even when the group names are the same.
+  col.rev = ++importRevision;
   ds.columns = ds.columns.filter((c) => c.meta.name !== name).concat(col);
   if (ds.cfg.derivedDir) {
     const dir = path.join(ds.cfg.derivedDir, 'groups');
@@ -695,7 +703,7 @@ export async function xeniumColumn(xeniumDir, id, name) {
   const ds = await dataset(xeniumDir, id);
   const col = ds.columns.find((c) => c.meta.name === name);
   if (!col) throw new RangeError(`unknown column: ${name}`);
-  const v = await chunkCache.get(`${ds.cfg.source}|col|${name}`, col.load);
+  const v = await chunkCache.get(columnKey(ds, col), col.load);
   return Buffer.from(v.buffer, v.byteOffset, v.byteLength);
 }
 
@@ -750,7 +758,8 @@ export async function xeniumMarkerGenes(xeniumDir, id, column, perGroup = 5) {
   return topMarkers(await markersFor(ds, col), n);
 }
 
-const markerKey = (col) => col.meta.categories.join('\u0001');
+// A built-in column's key is its categories alone, as results saved before revisions were.
+const markerKey = (col) => `${col.rev ? `r${col.rev}\u0002` : ''}${col.meta.categories.join('\u0001')}`;
 const markerFile = (ds, name) => (ds.cfg.derivedDir
   ? path.join(ds.cfg.derivedDir, 'markers', `${encodeURIComponent(name)}.json`) : null);
 
@@ -770,9 +779,10 @@ async function markersFor(ds, col) {
       }
     } catch { /* not computed yet */ }
   }
-  // One pass at a time: a second request waits for the pass already reading the matrix.
+  // One pass at a time: a second request waits for the pass already reading the matrix. A
+  // failed pass fails its own callers only; the next request starts afresh.
   const imported = name.startsWith('imported:');
-  ds.markerPass = (ds.markerPass ?? Promise.resolve()).then(async () => {
+  ds.markerPass = after(ds.markerPass, async () => {
     const again = ds.markers.get(name);
     if (again?.key === key) return;
     const cols = imported ? [col] : ds.columns.filter((c) => c.meta.kind === 'categorical'
@@ -780,7 +790,7 @@ async function markersFor(ds, col) {
       && ds.markers.get(c.meta.name)?.key !== markerKey(c));
     const groupings = [];
     for (const c of cols) {
-      const codes = await chunkCache.get(`${ds.cfg.source}|col|${c.meta.name}`, c.load);
+      const codes = await chunkCache.get(columnKey(ds, c), c.load);
       groupings.push({ name: c.meta.name, codes, categories: c.meta.categories });
     }
     const t0 = Date.now();
@@ -806,7 +816,9 @@ async function markersFor(ds, col) {
     }
   });
   await ds.markerPass;
-  return ds.markers.get(name).result;
+  const done = ds.markers.get(name);
+  // Re-imported while this pass ran: the newer grouping gets its own pass.
+  return done?.key === key ? done.result : markersFor(ds, ds.columns.find((c) => c.meta.name === name) ?? col);
 }
 
 /** Whether each feature of the matrix is a real gene (not a control probe or codeword). */
@@ -1121,7 +1133,7 @@ async function loadGeneIndex(location) {
     await src.close?.();
     if (index.version !== 1) return null;
     const geneId = new Map(index.genes.map((g, i) => [g, i]));
-    return { index, at, geneId, sources: new Map(), tables: new Map() };
+    return { index, at, geneId, sources: new Map(), tables: new TableCache() };
   } catch {
     return null;
   }

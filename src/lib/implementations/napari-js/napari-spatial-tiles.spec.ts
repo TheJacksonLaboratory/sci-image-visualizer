@@ -367,7 +367,7 @@ describe('clusterMarkers (a zoomed-out selection, from density grids)', () => {
 });
 
 describe('NapariSpatialTileLayers: a gene selection from the per-gene pyramid levels', () => {
-  function setup(zoom: number, budget: number) {
+  function setup(zoom: number, budget: number, quality: 'high' | 'all' = 'high') {
     // Two genes, one cluster, spread over a 100 × 100 area; each level's tile holds its bins.
     const getTranscriptGeneBins = jest.fn(async (level: number) => {
       const bin = 2 ** level;
@@ -386,7 +386,11 @@ describe('NapariSpatialTileLayers: a gene selection from the per-gene pyramid le
         gene: Uint16Array.from(genes),
       } as SpatialTranscriptTile;
     });
-    const port = { getTranscriptGeneBins } as unknown as SpatialDataPort;
+    const getTranscriptTile = jest.fn(async () => ({
+      count: 0, aggregated: false, x: new Float32Array(0), y: new Float32Array(0), z: new Float32Array(0),
+      weight: new Uint32Array(0), observation: new Uint32Array(0), gene: new Uint16Array(0),
+    } as SpatialTranscriptTile));
+    const port = { getTranscriptGeneBins, ...(quality === 'all' ? { getTranscriptTile } : {}) } as unknown as SpatialDataPort;
     const dataset = {
       id: 'd', name: 'd', columns: [],
       observations: { count: 1, x: new Float32Array([5]), y: new Float32Array([5]) },
@@ -400,6 +404,7 @@ describe('NapariSpatialTileLayers: a gene selection from the per-gene pyramid le
     const view = {
       ...DEFAULT_SPATIAL_VIEW, transcriptMode: 'glyphs' as const, transcriptGenes: ['A', 'B'],
       transcriptGeneGroups: [{ name: 'Cluster 1', genes: ['A', 'B'] }], transcriptBudget: budget,
+      transcriptQuality: quality,
     };
     const items: unknown[] = [];
     const viewer = {
@@ -413,7 +418,7 @@ describe('NapariSpatialTileLayers: a gene selection from the per-gene pyramid le
       canvasSize: () => [400, 400], continuousLut: () => [], polygonsShownChanged: () => undefined,
     });
     tiles.attach(viewer);
-    return { tiles, getTranscriptGeneBins };
+    return { tiles, getTranscriptGeneBins, getTranscriptTile };
   }
   type Drawn = { bin?: { size: number }; merged: SpatialTranscriptTile; entryGroup: Int32Array };
   const drawn = (t: NapariSpatialTileLayers) => (t as unknown as { drawn: Drawn }).drawn;
@@ -425,6 +430,27 @@ describe('NapariSpatialTileLayers: a gene selection from the per-gene pyramid le
     expect(drawn(tiles).bin?.size).toBe(4);
     expect(drawn(tiles).merged.count).toBe(25 * 25); // the two genes merged per bin
     expect(drawn(tiles).merged.observation[0]).toBe(3);
+    tiles.detach();
+  });
+
+  it('with low-quality calls included, reads the quality-aware tiles instead (the levels hold high only)', async () => {
+    const { tiles, getTranscriptGeneBins, getTranscriptTile } = setup(4, 100_000, 'all');
+    await (tiles as unknown as { plan(): Promise<void> }).plan();
+    expect(getTranscriptGeneBins).not.toHaveBeenCalled();
+    expect(getTranscriptTile).toHaveBeenCalledWith(0, 0, 0, { genes: ['A', 'B'], quality: 'all' });
+    tiles.detach();
+  });
+
+  it('keeps each dataset\'s density grids apart, though their genes and bins match', async () => {
+    const { tiles } = setup(4, 100_000);
+    const getDensity = jest.fn(async () => ({}));
+    (tiles as unknown as { port: unknown }).port = { getDensity };
+    const densityFor = (id: string) =>
+      (tiles as unknown as { densityFor(d: string, g: string[], b: number): Promise<unknown> }).densityFor(id, ['A'], 8);
+    await densityFor('one');
+    await densityFor('two');
+    await densityFor('one');
+    expect(getDensity).toHaveBeenCalledTimes(2);
     tiles.detach();
   });
 

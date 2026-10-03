@@ -1028,6 +1028,26 @@ describe('SpatialControlsComponent', () => {
       expect(component.markersOpen).toBe(false);
     });
 
+    it('applies the clusters picked when asked, even if the form changes while the scan runs', async () => {
+      let finish!: () => void;
+      (controls as unknown as { markerGenes: unknown }).markerGenes = jest.fn(() => new Promise((resolve) => {
+        finish = () => resolve({ column: 'graphclust', groups: [
+          { name: 'A', cells: 5, genes: [{ name: 'GA', score: 1, pctIn: 0.5, pctOut: 0.1 }] },
+          { name: 'B', cells: 5, genes: [{ name: 'GB', score: 1, pctIn: 0.5, pctOut: 0.1 }] },
+        ] });
+      }));
+      dataset$.next(tiled);
+      await build(controls);
+      component.openMarkers();
+      component.onMarkerColumn('graphclust');
+      component.markerClusters = ['A'];
+      const added = component.addMarkerGenes();
+      component.markerClusters = ['B']; // edited mid-scan
+      finish();
+      await added;
+      expect(view$.value.transcriptGeneGroups).toEqual([{ name: 'A', genes: ['GA'] }]);
+    });
+
     it('adds only the clusters picked, and says so when none pass', async () => {
       (controls as unknown as { markerGenes: unknown }).markerGenes = jest.fn(async () => ({
         column: 'graphclust', groups: [{ name: 'A', cells: 5, genes: [] }, { name: 'B', cells: 5, genes: [] }],

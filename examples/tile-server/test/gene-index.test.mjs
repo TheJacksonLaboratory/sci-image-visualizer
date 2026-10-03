@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { openByteSource } from '../lib/xenium/byte-source.mjs';
-import { createGeneLevels, readGeneBlock, readGeneTile } from '../lib/xenium/gene-index.mjs';
+import { createGeneLevels, readGeneBlock, readGeneTile, TableCache } from '../lib/xenium/gene-index.mjs';
 
 const NO_CELL = 0xffffffff;
 
@@ -86,4 +86,14 @@ test('a shared table cache keeps levels apart: each level file has a tile at off
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('the table cache holds at most its size, dropping the least recently read', () => {
+  const c = new TableCache(2);
+  c.set('a', 1);
+  c.set('b', 2);
+  assert.equal(c.get('a'), 1); // a is now the most recent
+  c.set('c', 3);
+  assert.deepEqual([...c.keys()], ['a', 'c']);
+  assert.equal(c.get('b'), undefined);
 });

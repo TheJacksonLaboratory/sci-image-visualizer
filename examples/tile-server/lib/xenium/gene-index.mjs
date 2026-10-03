@@ -251,8 +251,33 @@ export function readGeneBlock(buf, wanted) {
 /**
  * Read genes `wanted` (indices) of one tile through `source` (a byte source over its level file),
  * touching only the tile's gene table and those genes' records — a coarse tile can be hundreds of
- * MB, of which a selection needs a few KB. `tables` caches gene tables by `off`.
+ * MB, of which a selection needs a few KB. `tables` caches gene tables by file and `off` (a
+ * {@link TableCache}, so panning a large index does not keep every table it visits).
  */
+/** A Map of at most `max` entries, dropping the least recently read. */
+export class TableCache extends Map {
+  constructor(max = 512) {
+    super();
+    this.max = max;
+  }
+
+  get(key) {
+    const v = super.get(key);
+    if (v !== undefined) {
+      super.delete(key);
+      super.set(key, v);
+    }
+    return v;
+  }
+
+  set(key, value) {
+    super.delete(key);
+    super.set(key, value);
+    while (this.size > this.max) super.delete(this.keys().next().value);
+    return this;
+  }
+}
+
 export async function readGeneTile(source, off, len, wanted, tables, file = '') {
   // Keyed by file too: every level's file has a tile at offset 0.
   const key = `${file}|${off}`;

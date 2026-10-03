@@ -391,6 +391,16 @@ describe('grouping a gene selection by zoom', () => {
     expect(Array.from(g.gene)).toEqual([0, 1, 0]);
   });
 
+  it('takes the cell holding most transcripts in total, not the heaviest single one', () => {
+    const t: SpatialTranscriptTile = {
+      count: 4, aggregated: false,
+      x: new Float32Array([1, 2, 3, 4]), y: new Float32Array(4), z: new Float32Array(4),
+      weight: new Uint32Array([2, 1, 1, 1]), observation: new Uint32Array([8, 7, 7, 7]),
+      gene: new Uint16Array(4),
+    };
+    expect(groupTranscripts(t, 10).tile.observation[0]).toBe(7); // 3 in cell 7, 2 in cell 8
+  });
+
   it('merges the genes of one cluster into one marker, showing its dominant gene', () => {
     const t: SpatialTranscriptTile = {
       count: 4, aggregated: false,

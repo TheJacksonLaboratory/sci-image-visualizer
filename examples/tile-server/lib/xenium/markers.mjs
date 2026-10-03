@@ -12,6 +12,11 @@ export const MIN_PCT = 0.1;
 /** Genes kept per group in a stored result; a request takes its top n. */
 export const KEEP = 50;
 export const NO_CATEGORY = 0xffff;
+/**
+ * Most (gene, group) accumulators held at once: each takes 12 bytes, so this is about 400 MB.
+ * Groupings are scored in passes of at most this many; a single grouping over it is refused.
+ */
+export const MAX_ACCUMULATORS = 2 ** 25;
 
 /**
  * @param groupings  [{ name, codes: Uint16Array (per cell), categories: string[] }]
@@ -19,9 +24,41 @@ export const NO_CATEGORY = 0xffff;
  * @param geneName   (g) => name
  * @param isReal     (g) => whether gene g is a real gene (not a control probe)
  * @param forEachNonzero  async (visit) => calls visit(gene, cell, count) for every non-zero
+ * @param maxAccumulators  per-pass cap on genes × groups (see MAX_ACCUMULATORS)
  * @returns Map(name → { column, groups: [{ name, cells, genes: [{ name, score, pctIn, pctOut }] }] })
  */
-export async function computeMarkers({ groupings, geneCount, geneName, isReal, forEachNonzero }) {
+export async function computeMarkers({
+  groupings, geneCount, geneName, isReal, forEachNonzero, maxAccumulators = MAX_ACCUMULATORS,
+}) {
+  // As many groupings per pass as fit the accumulator cap, in order.
+  const batches = [];
+  let batch = [];
+  let width = 0;
+  for (const gr of groupings) {
+    const k = gr.categories.length;
+    if (geneCount * k > maxAccumulators) {
+      throw new Error(`"${gr.name}" has too many groups (${k}) to score against ${geneCount} genes`);
+    }
+    if (batch.length && geneCount * (width + k) > maxAccumulators) {
+      batches.push(batch);
+      batch = [];
+      width = 0;
+    }
+    batch.push(gr);
+    width += k;
+  }
+  if (batch.length) batches.push(batch);
+  const out = new Map();
+  for (const b of batches) {
+    for (const [name, r] of await scorePass({ groupings: b, geneCount, geneName, isReal, forEachNonzero })) {
+      out.set(name, r);
+    }
+  }
+  return out;
+}
+
+/** One pass over the matrix scoring `groupings` together. */
+async function scorePass({ groupings, geneCount, geneName, isReal, forEachNonzero }) {
   const offsets = [];
   let width = 0;
   for (const gr of groupings) {
@@ -82,6 +119,14 @@ export async function computeMarkers({ groupings, geneCount, geneName, isReal, f
     out.set(gr.name, { column: gr.name, groups });
   });
   return out;
+}
+
+/**
+ * `next` once `prev` has settled, either way: a queue of passes where a failed one fails its
+ * own callers only, and the next starts afresh.
+ */
+export function after(prev, next) {
+  return (prev ?? Promise.resolve()).catch(() => {}).then(next);
 }
 
 /** The top `n` genes per group of a stored result, scores rounded for the wire. */

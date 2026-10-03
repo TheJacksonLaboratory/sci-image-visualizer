@@ -607,7 +607,8 @@ export class NapariSpatialTileLayers {
     const loaded = await this.track('Transcripts', job.load());
     if (stale()) return;
     // Per-gene counts in view come from what was loaded, before hidden genes are dropped:
-    // a hidden gene still has transcripts there.
+    // a hidden gene still has transcripts there. Summed density grids (no per-gene levels,
+    // zoomed out) hold clusters, not genes: no per-gene counts there, rather than a guess.
     this.countSource = (loaded.kind ?? job.kind) === 'genes' && !loaded.clustered
       ? { merged: loaded.merged, genes: [...view.transcriptGenes] } : null;
     const hidden = await this.hiddenCodes(dataset, view);
@@ -908,12 +909,16 @@ export class NapariSpatialTileLayers {
     // tiles, which take minutes for a few hundred genes.
     // With the pyramid's per-gene levels, every zoom of a selection reads them: the level the
     // zoom calls for, coarser while the markers would exceed the max.
+    // Both are built from high-quality calls only: with low-quality calls included, the
+    // quality-aware tiles below serve every zoom (as long as there are tiles to serve).
+    const highOnly = view.transcriptQuality !== 'all' || !this.port.getTranscriptTile;
     const geneBins = dataset.transcriptGeneBins;
-    if (geneBins && this.port.getTranscriptGeneBins && (bin !== null || !this.port.getTranscriptTile)) {
+    const fromGeneBins = highOnly && geneBins && this.port.getTranscriptGeneBins;
+    if (fromGeneBins && (bin !== null || !this.port.getTranscriptTile)) {
       return this.geneBinsJob(dataset, view, around, geneBins, bin ?? geneBins.levels[0].binSize, mx, my, rect);
     }
     const grid = dataset.density?.gridSize[0] ?? 0;
-    if (bin !== null && grid > 0 && this.port.getDensity && bin >= grid * 0.75) {
+    if (highOnly && bin !== null && grid > 0 && this.port.getDensity && bin >= grid * 0.75) {
       return this.clusterDensityJob(dataset, view, around, pxPerUnit, Math.max(bin, grid), mx, my, rect);
     }
     return {
@@ -1012,9 +1017,12 @@ export class NapariSpatialTileLayers {
     return out;
   }
 
-  /** Per-gene density grids summed for `genes`, cached (a cluster is asked for once per bin). */
-  private densityFor(genes: string[], bin: number): Promise<SpatialDensityRaster> {
-    const key = `${bin}|${genes.join(',')}`;
+  /**
+   * Per-gene density grids summed for `genes`, cached (a cluster is asked for once per bin).
+   * Keyed by dataset too: this manager outlives a dataset, and another may share gene names.
+   */
+  private densityFor(dataset: string, genes: string[], bin: number): Promise<SpatialDensityRaster> {
+    const key = `${dataset}|${bin}|${genes.join(',')}`;
     let p = this.densityCache.get(key);
     if (!p) {
       p = this.port.getDensity!(genes, bin);
@@ -1051,7 +1059,7 @@ export class NapariSpatialTileLayers {
         for (;;) {
           // The finer grid gives each marker its centre; the server bins 1, 2, 4 or 8 cells.
           const fine = Math.min(bin >= grid * 2 ? bin / 2 : bin, grid * 8);
-          const rasters = await Promise.all(clusters.map((c) => this.densityFor(c.genes, fine)));
+          const rasters = await Promise.all(clusters.map((c) => this.densityFor(dataset.id, c.genes, fine)));
           const out = clusterMarkers(rasters, clusters.map((c) => c.slot), bin, around);
           if (out.tile.count <= budget || bin >= grid * 2 ** 12) {
             const refCount = quantileOf(out.tile.weight, 0.95);
