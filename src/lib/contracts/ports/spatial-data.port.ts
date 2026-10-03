@@ -3,7 +3,7 @@ import { Observable } from 'rxjs';
 
 import {
   SpatialColumn, SpatialDataset, SpatialDensityRaster, SpatialEmbedding, SpatialPolygonTile,
-  CategoricalColumnMeta, SpatialPolygons, SpatialTranscriptCounts, SpatialTranscriptSummary,
+  CategoricalColumnMeta, SpatialMarkerGenes, SpatialPolygons, SpatialTranscriptCounts, SpatialTranscriptSummary,
   SpatialTranscriptTile,
 } from '../spatial-dataset.contract';
 
@@ -117,6 +117,12 @@ export interface SpatialDataPort {
   getTranscriptBins?(level: number, tx: number, ty: number): Promise<SpatialTranscriptTile>;
 
   /**
+   * One tile of the per-gene levels for `genes`: each entry is one gene's transcripts in one bin
+   * (centroid, count, dominant cell); its `gene` is the position in `genes`. Optional.
+   */
+  getTranscriptGeneBins?(level: number, tx: number, ty: number, genes: string[]): Promise<SpatialTranscriptTile>;
+
+  /**
    * What is inside `box` (observation units): transcript count, distinct genes and cells,
    * the most frequent of each — optionally restricted to `genes` — plus display ids for
    * `cells`. Omit `box` for a cell-id lookup only. Optional; drives the hover details of
@@ -141,6 +147,13 @@ export interface SpatialDataPort {
 
   /** Transcript totals per gene, for estimating how many markers a selection draws. */
   getTranscriptCounts?(genes: string[]): Promise<SpatialTranscriptCounts>;
+
+  /**
+   * The top `perGroup` marker genes of every group of categorical `column`, for building
+   * gene groups from cell clusters ("Macrophages: CD163, MRC1, …"). Optional, and possibly
+   * slow the first time: the server makes one pass over the expression matrix.
+   */
+  getMarkerGenes?(column: string, perGroup?: number): Promise<SpatialMarkerGenes>;
 
   /**
    * The reference volume's voxels: a uint8 scalar field, x-fastest, of exactly

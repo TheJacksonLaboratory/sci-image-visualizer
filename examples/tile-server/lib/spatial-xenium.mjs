@@ -36,6 +36,9 @@ import { readZipDirectory, openStoredMember, readMember } from './xenium/zip.mjs
 import { ZarrZipStore, typedArrayFor } from './xenium/zarr2-zip.mjs';
 import { LruCache } from './xenium/lru.mjs';
 import { parseDelimited } from './delimited.mjs';
+import { KEEP as MARKERS_KEPT, computeMarkers, topMarkers, after } from './xenium/markers.mjs';
+import { isLocalSource, transcriptPyramidName } from './xenium/pyramid-name.mjs';
+import { readGeneTile, TableCache } from './xenium/gene-index.mjs';
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const NO_CATEGORY = 0xffff;
@@ -47,6 +50,30 @@ const chunkCache = new LruCache(Number(process.env.XENIUM_CACHE_MB ?? 768) * 2 *
 // ---------------------------------------------------------------------------
 // Discovery
 // ---------------------------------------------------------------------------
+
+/**
+ * Where a dataset's all-gene transcript pyramid is: an explicit `transcriptIndex`, else the
+ * first that exists of `<bundle name>.transcripts` next to a local bundle or in $XENIUM_DIR
+ * (the name jit-service uses too) and the older `<id>.transcripts`. With none built yet, the
+ * place a fallback build writes to: next to a local bundle, else in $XENIUM_DIR.
+ */
+async function pyramidFor(xeniumDir, id, source, explicit) {
+  if (explicit) return explicit;
+  const name = transcriptPyramidName(source);
+  const local = isLocalSource(source);
+  const candidates = [
+    ...(local ? [path.join(path.dirname(source), name)] : []),
+    path.join(xeniumDir, name),
+    path.join(xeniumDir, `${id}.transcripts`),
+  ];
+  for (const c of candidates) {
+    try {
+      await stat(path.join(c, 'index.json'));
+      return c;
+    } catch { /* try the next */ }
+  }
+  return candidates[0];
+}
 
 /** `{ id → { id, name, source, cellTypes? } }` for everything under $XENIUM_DIR. */
 async function discover(xeniumDir) {
@@ -67,7 +94,10 @@ async function discover(xeniumDir) {
         const rel = (p) => (p && !/^(https?|gs):/.test(p) && !path.isAbsolute(p) ? path.join(xeniumDir, p) : p);
         out.set(id, {
           id, name: cfg.name ?? id, source: rel(cfg.source), cellTypes: rel(cfg.cellTypes),
-          transcriptIndex: rel(cfg.transcriptIndex) ?? path.join(xeniumDir, `${id}.transcripts`),
+          transcriptIndex: await pyramidFor(xeniumDir, id, rel(cfg.source), rel(cfg.transcriptIndex)),
+          // The per-gene levels: next to the pyramid (genes/) unless the config points elsewhere —
+          // a gs:// URL reads them from the bucket, a tile's needed ranges at a time.
+          geneIndex: rel(cfg.geneIndex),
           derivedDir: path.join(xeniumDir, `${id}.derived`),
         });
       } else if (e.isFile() && e.name.endsWith('_xe_outs.zip')) {
@@ -75,7 +105,7 @@ async function discover(xeniumDir) {
         if (!out.has(id)) {
           out.set(id, {
             id, name: e.name.slice(0, -'_xe_outs.zip'.length).replace(/_/g, ' '), source: full,
-            transcriptIndex: path.join(xeniumDir, `${id}.transcripts`),
+            transcriptIndex: await pyramidFor(xeniumDir, id, full),
             derivedDir: path.join(xeniumDir, `${id}.derived`),
           });
         }
@@ -84,7 +114,7 @@ async function discover(xeniumDir) {
         if (!out.has(e.name)) {
           out.set(e.name, {
             id: e.name, name: e.name, source: full,
-            transcriptIndex: path.join(xeniumDir, `${e.name}.transcripts`),
+            transcriptIndex: await pyramidFor(xeniumDir, e.name, full),
             derivedDir: path.join(xeniumDir, `${e.name}.derived`),
           });
         }
@@ -247,6 +277,7 @@ async function loadDataset(cfg) {
     for (let g = 0; g < categories.shape[0]; g++) ds.geneIsReal[g] = categories.data[g * cols];
   }
   ds.transcriptIndex = await loadTranscriptIndex(cfg.transcriptIndex);
+  ds.geneBins = await loadGeneIndex(cfg.geneIndex ?? (cfg.transcriptIndex && path.join(cfg.transcriptIndex, 'genes')));
   if (!ds.transcriptIndex) scheduleTranscriptIndex(ds);
   ds.bounds = boundsOf(ds.x, ds.y);
 
@@ -492,12 +523,20 @@ async function loadImportedGroups(ds) {
  * Import a cell grouping (CSV/TSV of `cell_id,group`) under `label`: joined now, added to
  * the dataset's columns, and saved so it is there after a restart.
  */
+let importRevision = 0;
+
+/** A column's values in the chunk cache: by revision too, for a re-imported grouping. */
+const columnKey = (ds, col) => `${ds.cfg.source}|col|${col.meta.name}${col.rev ? `|r${col.rev}` : ''}`;
+
 export async function xeniumImportGroups(xeniumDir, id, label, text) {
   const ds = await dataset(xeniumDir, id);
   const clean = String(label ?? '').trim().replace(/[^\w .()-]/g, '').slice(0, 60);
   if (!clean) throw new RangeError('a group name is required');
   const name = `imported:${clean}`;
   const col = await joinCellGroups(ds, text, name, clean, 'Imported groups');
+  // A new revision: its values and marker genes are cached apart from the grouping it replaces,
+  // even when the group names are the same.
+  col.rev = ++importRevision;
   ds.columns = ds.columns.filter((c) => c.meta.name !== name).concat(col);
   if (ds.cfg.derivedDir) {
     const dir = path.join(ds.cfg.derivedDir, 'groups');
@@ -619,6 +658,12 @@ export async function xeniumManifest(xeniumDir, id, { imageExists } = {}) {
     ...(!ds.transcriptIndex && ds.transcriptIndexStatus ? {
       transcriptBinsStatus: { ...ds.transcriptIndexStatus },
     } : {}),
+    ...(ds.geneBins ? {
+      transcriptGeneBins: {
+        origin: ds.geneBins.index.origin,
+        levels: ds.geneBins.index.levels.map((l) => ({ binSize: l.bin, tileSize: l.tileSize })),
+      },
+    } : {}),
     ...(ds.transcriptIndex ? {
       transcriptBins: {
         bounds: ds.bounds,
@@ -658,7 +703,7 @@ export async function xeniumColumn(xeniumDir, id, name) {
   const ds = await dataset(xeniumDir, id);
   const col = ds.columns.find((c) => c.meta.name === name);
   if (!col) throw new RangeError(`unknown column: ${name}`);
-  const v = await chunkCache.get(`${ds.cfg.source}|col|${name}`, col.load);
+  const v = await chunkCache.get(columnKey(ds, col), col.load);
   return Buffer.from(v.buffer, v.byteOffset, v.byteLength);
 }
 
@@ -691,6 +736,136 @@ async function readRange(store, arrPath, start, end, cacheKey) {
     out.set(chunk.subarray(a - c * cs, b - c * cs), a - start);
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Marker genes of cell groups
+// ---------------------------------------------------------------------------
+
+/**
+ * The top `perGroup` marker genes of each group of categorical `column` (see
+ * xenium/markers.mjs). The first request reads the whole expression matrix once and scores
+ * every built-in clustering in that pass; results are cached in the derived directory.
+ * An imported grouping is scored on its own, and again whenever its categories change.
+ */
+export async function xeniumMarkerGenes(xeniumDir, id, column, perGroup = 5) {
+  const ds = await dataset(xeniumDir, id);
+  if (!ds.features) throw new RangeError('no cell_feature_matrix in this bundle');
+  const col = ds.columns.find((c) => c.meta.name === column);
+  if (!col) throw new RangeError(`unknown column: ${column}`);
+  if (col.meta.kind !== 'categorical') throw new RangeError(`column "${column}" is not categorical`);
+  const n = Math.max(1, Math.min(MARKERS_KEPT, Math.floor(Number(perGroup)) || 5));
+  return topMarkers(await markersFor(ds, col), n);
+}
+
+// A built-in column's key is its categories alone, as results saved before revisions were.
+const markerKey = (col) => `${col.rev ? `r${col.rev}\u0002` : ''}${col.meta.categories.join('\u0001')}`;
+const markerFile = (ds, name) => (ds.cfg.derivedDir
+  ? path.join(ds.cfg.derivedDir, 'markers', `${encodeURIComponent(name)}.json`) : null);
+
+async function markersFor(ds, col) {
+  ds.markers ??= new Map();
+  const name = col.meta.name;
+  const key = markerKey(col);
+  const hit = ds.markers.get(name);
+  if (hit?.key === key) return hit.result;
+  const file = markerFile(ds, name);
+  if (file) {
+    try {
+      const saved = JSON.parse(await readFile(file, 'utf8'));
+      if (saved.key === key) {
+        ds.markers.set(name, saved);
+        return saved.result;
+      }
+    } catch { /* not computed yet */ }
+  }
+  // One pass at a time: a second request waits for the pass already reading the matrix. A
+  // failed pass fails its own callers only; the next request starts afresh.
+  const imported = name.startsWith('imported:');
+  ds.markerPass = after(ds.markerPass, async () => {
+    const again = ds.markers.get(name);
+    if (again?.key === key) return;
+    const cols = imported ? [col] : ds.columns.filter((c) => c.meta.kind === 'categorical'
+      && c.meta.name !== 'segmentation_method' && !c.meta.name.startsWith('imported:')
+      && ds.markers.get(c.meta.name)?.key !== markerKey(c));
+    const groupings = [];
+    for (const c of cols) {
+      const codes = await chunkCache.get(columnKey(ds, c), c.load);
+      groupings.push({ name: c.meta.name, codes, categories: c.meta.categories });
+    }
+    const t0 = Date.now();
+    const results = await computeMarkers({
+      groupings,
+      geneCount: ds.featureNames.length,
+      geneName: (g) => ds.featureNames[g],
+      isReal: realFeature(ds),
+      forEachNonzero: (visit) => forEachFeatureNonzero(ds, visit),
+    });
+    console.log(`[xenium] ${ds.cfg.id}: marker genes for ${groupings.length} groupings in ` +
+      `${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    for (const c of cols) {
+      const entry = { key: markerKey(c), result: results.get(c.meta.name) };
+      ds.markers.set(c.meta.name, entry);
+      const f = markerFile(ds, c.meta.name);
+      if (f && !imported) {
+        await mkdir(path.dirname(f), { recursive: true });
+        const partial = `${f}.${process.pid}.${Math.random().toString(36).slice(2)}.partial`;
+        await writeFile(partial, JSON.stringify(entry));
+        await rename(partial, f);
+      }
+    }
+  });
+  await ds.markerPass;
+  const done = ds.markers.get(name);
+  // Re-imported while this pass ran: the newer grouping gets its own pass.
+  return done?.key === key ? done.result : markersFor(ds, ds.columns.find((c) => c.meta.name === name) ?? col);
+}
+
+/** Whether each feature of the matrix is a real gene (not a control probe or codeword). */
+function realFeature(ds) {
+  if (!ds.featureIsReal) {
+    ds.featureIsReal = Uint8Array.from(ds.featureNames, (n) => {
+      const g = ds.geneIndex.get(n);
+      return g !== undefined && ds.geneIsReal[g] === 1 ? 1 : 0;
+    });
+  }
+  return (g) => ds.featureIsReal[g] === 1;
+}
+
+/** Every non-zero of the gene-major CSR, chunk by chunk, reading a few chunks ahead. */
+async function forEachFeatureNonzero(ds, visit) {
+  const indptr = await chunkCache.get(`${ds.cfg.source}|cfm-indptr`,
+    async () => (await ds.features.read('cell_features/indptr')).data);
+  const im = await ds.features.meta('cell_features/indices');
+  const dm = await ds.features.meta('cell_features/data');
+  const total = im.shape[0];
+  const cs = im.chunks[0];
+  const coords = (meta, c) => meta.chunks.map((_, d) => (d === 0 ? c : 0));
+  const load = (c) => {
+    const base = c * cs;
+    const end = Math.min(total, base + cs);
+    return Promise.all([
+      ds.features.chunk('cell_features/indices', im, coords(im, c)),
+      dm.chunks[0] === cs
+        ? ds.features.chunk('cell_features/data', dm, coords(dm, c))
+        : readRange(ds.features, 'cell_features/data', base, end, `${ds.cfg.source}|cfm`),
+    ]);
+  };
+  const chunks = Math.ceil(total / cs);
+  const AHEAD = 4;
+  const pending = [];
+  for (let c = 0; c < Math.min(AHEAD, chunks); c++) pending.push(load(c));
+  let g = 0;
+  for (let c = 0; c < chunks; c++) {
+    const [idx, dat] = await pending.shift();
+    if (c + AHEAD < chunks) pending.push(load(c + AHEAD));
+    const base = c * cs;
+    const end = Math.min(total, base + cs);
+    for (let k = base; k < end; k++) {
+      while (k >= indptr[g + 1]) g++;
+      visit(g, idx[k - base], dat[k - base]);
+    }
+  }
 }
 
 /** One gene's per-cell counts, from the gene-major CSR. */
@@ -925,9 +1100,13 @@ function scheduleTranscriptIndex(ds) {
       '(run prepare-xenium --transcripts to do this ahead of time)');
     try {
       await rm(partial, { recursive: true, force: true });
-      const { buildTranscriptIndex } = await import('./xenium/transcript-index.mjs');
+      const { buildTranscriptIndex, imagePyramidLevels, DEFAULT_LEVELS } = await import('./xenium/transcript-index.mjs');
+      // As many levels as the dataset's tissue image, when it has been prepared.
+      const cogDir = process.env.COG_DIR || new URL('../cogs', import.meta.url).pathname;
+      const levels = await imagePyramidLevels(path.join(cogDir, `${ds.cfg.id}-tissue`)) ?? DEFAULT_LEVELS;
       await buildTranscriptIndex(ds.cfg.source, partial, {
         dataset: ds,
+        levels,
         concurrency: 2,
         log: () => {},
         onProgress: (done, total) => Object.assign(ds.transcriptIndexStatus, { done, total }),
@@ -942,6 +1121,47 @@ function scheduleTranscriptIndex(ds) {
       console.warn(`[xenium] ${ds.cfg.id}: transcript pyramid build failed: ${err?.message ?? err}`);
     }
   });
+}
+
+/** The per-gene levels' index (local folder or gs:// URL), or null when there are none. */
+async function loadGeneIndex(location) {
+  if (!location) return null;
+  const at = (file) => (isLocalSource(location) ? path.join(location, file) : `${location.replace(/\/+$/, '')}/${file}`);
+  try {
+    const src = await openByteSource(at('index.json'));
+    const index = JSON.parse((await src.read(0, src.size)).toString('utf8'));
+    await src.close?.();
+    if (index.version !== 1) return null;
+    const geneId = new Map(index.genes.map((g, i) => [g, i]));
+    return { index, at, geneId, sources: new Map(), tables: new TableCache() };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One tile of the per-gene levels for `genes`, in the transcript-tile layout (aggregated):
+ * each entry is a gene's transcripts in one bin — centroid, count, dominant cell — and its
+ * `gene` is the position in `genes`.
+ */
+export async function xeniumGeneBins(xeniumDir, id, level, tx, ty, genes) {
+  const ds = await dataset(xeniumDir, id);
+  const gb = ds.geneBins;
+  if (!gb) throw new RangeError('no per-gene transcript levels for this dataset');
+  const lv = gb.index.levels[level];
+  if (!lv) throw new RangeError(`no gene level ${level}`);
+  const entry = lv.tiles[`${tx},${ty}`];
+  if (!entry) return encodeTranscripts({ n: 0 }, true);
+  let src = gb.sources.get(lv.file);
+  if (!src) {
+    src = openByteSource(gb.at(lv.file));
+    gb.sources.set(lv.file, src);
+  }
+  const wanted = genes.map((g) => gb.geneId.get(g) ?? -1);
+  const key = `${ds.cfg.source}|gene-bins|${level}|${tx},${ty}|${genes.join(',')}`;
+  const t = await chunkCache.get(key, async () =>
+    readGeneTile(await src, entry[0], entry[1], wanted, gb.tables, lv.file));
+  return encodeTranscripts(t, true);
 }
 
 /** The pyramid's `index.json`, or null when it has not been built. */
@@ -1231,18 +1451,28 @@ async function genesDensity(ds, genes) {
     async () => (await ds.transcripts.read('density/gene/indptr')).data);
   const out = new Float32Array(rows * cols);
   const key = `${ds.cfg.source}|density`;
-  for (const name of genes) {
+  const index = genes.map((name) => {
     const g = densityNames.indexOf(name);
     if (g < 0) throw new RangeError(`unknown gene: ${name}`);
-    const start = indptr[g * rows];
-    const end = indptr[(g + 1) * rows];
-    const [indices, data] = await Promise.all([
-      readRange(ds.transcripts, 'density/gene/indices', start, end, key),
-      readRange(ds.transcripts, 'density/gene/data', start, end, key),
-    ]);
-    for (let r = 0; r < rows; r++) {
-      for (let k = indptr[g * rows + r]; k < indptr[g * rows + r + 1]; k++) {
-        out[r * cols + indices[k - start]] += data[k - start];
+    return g;
+  });
+  // Several genes' ranges in flight at once: each is its own read of the store.
+  const PARALLEL = 8;
+  for (let i = 0; i < index.length; i += PARALLEL) {
+    const batch = index.slice(i, i + PARALLEL);
+    const parts = await Promise.all(batch.map((g) => {
+      const start = indptr[g * rows];
+      const end = indptr[(g + 1) * rows];
+      return Promise.all([
+        readRange(ds.transcripts, 'density/gene/indices', start, end, key),
+        readRange(ds.transcripts, 'density/gene/data', start, end, key),
+      ]).then(([indices, data]) => ({ g, start, indices, data }));
+    }));
+    for (const { g, start, indices, data } of parts) {
+      for (let r = 0; r < rows; r++) {
+        for (let k = indptr[g * rows + r]; k < indptr[g * rows + r + 1]; k++) {
+          out[r * cols + indices[k - start]] += data[k - start];
+        }
       }
     }
   }

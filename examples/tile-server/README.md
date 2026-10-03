@@ -59,6 +59,7 @@ format `SpatialDataHttpService` speaks (see
 | `GET /spatial/:id/transcript-tile/:level/:gx/:gy?genes=A,B&quality=high\|all` | one grid tile of transcripts (level 0) or pre-aggregated clusters (levels ≥ 1): x, y, z, count, owning cell, gene |
 | `GET /spatial/:id/density?genes=A,B&bin=10` | summed transcript density re-binned to 10/20/40/80 µm (`genes=*` for every real gene): `u32 rows, u32 cols, f32 cellW, cellH, originX, originY` header, then `f32[rows·cols]` |
 | `POST /spatial/:id/groups?name=<label>` | import a cell grouping (body: CSV/TSV with `cell_id` and a group column, quoted fields allowed, up to 50 MB); joined, added as a categorical column, and saved under `<id>.derived/groups/`. **Off by default** — it is a write every viewer sees: set `GROUP_IMPORT_TOKEN=<secret>` (callers send `Authorization: Bearer <secret>`), or `GROUP_IMPORT=open` for a server only you can reach |
+| `GET /spatial/:id/markers/:column?n=5` | marker genes of each group of a categorical column, best first: mean `log1p(count)` in the group minus elsewhere, detected in ≥10% of the group's cells and more than elsewhere. The first request scores every built-in clustering in one pass over the expression matrix (about 2.5 min for the cervical WTA bundle) and caches the results under `<id>.derived/markers/` |
 | `GET /spatial/:id/transcript-counts?genes=A,B` | `{ counts: { gene: n }, total, bounds }` — transcript totals for the viewer's points estimate |
 | `GET /spatial/:id/transcript-bins/:level/:tx/:ty` | one tile of the all-gene grouping pyramid, in the transcript-tile layout (one entry per bin: centroid, count, dominant cell) |
 
@@ -371,16 +372,38 @@ output that is already complete is skipped; `--force` rebuilds it.
 
 **All genes at once** needs one more derived index. 10x groups transcripts per *gene*;
 across all genes even its coarsest level is ~32 million clusters — far too many markers.
-`--transcripts` builds a gene-independent grouping pyramid: bins of 1.95 µm up to 125 µm,
-each with its transcript count, centroid and the cell contributing most of them (counted
-across every base bin it covers, as a top-cells summary). The
-viewer picks the finest level whose bins on screen fit its marker budget and are at least
-~14 px apart, and switches to the transcripts themselves once those fit.
+`--transcripts` builds a gene-independent grouping pyramid with **one level per level of the
+dataset's image pyramid** (8 for the cervical bundle: bins of 1.95 µm up to 250 µm; `--levels`
+overrides, and without an image it is 7). Each bin has its transcript count, centroid and the
+cell contributing most of them (counted across every base bin it covers, as a top-cells
+summary). The viewer picks the finest level whose bins on screen fit its marker budget and are
+at least ~14 px apart, and switches to the transcripts themselves once those fit. A selection
+of genes (from the gene tree, a marker-gene group or a search) is grouped on the same ladder,
+per gene, so it too shows one marker per gene per area when zoomed out.
 
 ```bash
 npm run prepare-xenium -- --source <bundle> --id xenium-cervical --no-images --transcripts
-# → xenium/xenium-cervical.transcripts/ (index.json + L0..L6.bin), picked up by the server
+# → <bundle name>.transcripts/ (index.json + one L<m>.bin per level), picked up by the server
 ```
+
+The pyramid is **named after the bundle and kept next to it**: `X_xe_outs.zip` →
+`X_xe_outs.transcripts/` beside the zip (an unzipped `outs/` → `outs.transcripts/` beside the
+folder). That is where jit-service looks for it, and where this server does: next to a local
+bundle, or under `$XENIUM_DIR` with that name for a remote one (the older
+`$XENIUM_DIR/<id>.transcripts` still works, and a config's `transcriptIndex` overrides both).
+For a remote bundle (`gs://`, `https://`), `prepare-xenium` builds it under `$XENIUM_DIR` and
+prints where to copy it next to the bundle.
+
+**Per-gene levels.** By default the pyramid also gets `genes/`: for every level (same bins and
+origin), each gene's bins with their transcript count, centroid and dominant cell. A selection of
+genes — from the gene tree, a marker-gene group, a search — is then drawn at any zoom from a few
+small reads per tile (`GET /spatial/:id/gene-bins/:level/:tx/:ty?genes=`, advertised as
+`transcriptGeneBins`), stepping to coarser levels while the markers would exceed the max, one
+marker per gene-tree cluster per bin. It is large — about 60 GB for the 1 billion transcripts of the
+cervical bundle, most of it in the finest levels — so `--no-gene-levels` skips it. The server reads
+it next to the pyramid, or wherever a dataset config's `geneIndex` points: a `gs://` URL reads it
+from the bucket, a tile's gene table and the selected genes' ranges at a time, so it never has to be
+downloaded.
 
 (`npm run build-transcript-index -- --source <bundle> --id <id>` is the same, spelled out.)
 It is one pass over every transcript (~1.2 billion rows) — about 40 minutes on 32 cores next
@@ -388,7 +411,7 @@ to the data — and a few hundred MB out.
 
 **Fallback:** a dataset registered without it is not left incomplete. The first time the
 server opens it, it builds the pyramid itself in the background — into
-`<id>.transcripts.partial`, renamed only when finished, one build at a time. Every other
+`<bundle name>.transcripts.partial`, renamed only when finished, one build at a time. Every other
 feature works meanwhile; the manifest reports `transcriptBinsStatus` (tiles done of total)
 and the panel says "All genes" is being prepared. Set `XENIUM_AUTO_INDEX=0` to turn this
 off (for example on a server that should never spend an hour of CPU unasked). Running the
@@ -401,8 +424,8 @@ gcloud storage rsync -r \
   gs://jax-cimg-sample-data/Demonstrations/omics/xenium-wta-ffpe-cervical-cancer/xenium-cervical-tissue \
   cogs/xenium-cervical-tissue
 gcloud storage rsync -r \
-  gs://jax-cimg-sample-data/Demonstrations/omics/xenium-wta-ffpe-cervical-cancer/xenium-cervical.transcripts \
-  xenium/xenium-cervical.transcripts
+  gs://jax-cimg-sample-data/Demonstrations/omics/xenium-wta-ffpe-cervical-cancer/WTA_Preview_FFPE_Cervical_Cancer_xe_outs.transcripts \
+  xenium/WTA_Preview_FFPE_Cervical_Cancer_xe_outs.transcripts
 ```
 
 #### Serving a plain `.h5ad` LIVE

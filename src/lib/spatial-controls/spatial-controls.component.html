@@ -186,6 +186,40 @@
         <small class="sc-hint sc-error" *ngIf="geneGroupError">{{ geneGroupError }}</small>
         <small class="sc-hint" *ngIf="allGenesPreparing">{{ allGenesPreparing }}</small>
 
+        <!-- Marker genes of each cluster, added as gene groups named after the clusters. -->
+        <div class="sc-markers" *ngIf="markersOpen">
+          <div class="sc-row">
+            <span class="sc-lbl">Clusters from</span>
+            <p-dropdown [options]="markerColumnOptions" optionLabel="label" optionValue="value"
+                        [ngModel]="markerColumn" (ngModelChange)="onMarkerColumn($event)"
+                        appendTo="body" [filter]="markerColumnOptions.length > 8"></p-dropdown>
+          </div>
+          <div class="sc-row">
+            <span class="sc-lbl">Per cluster</span>
+            <p-dropdown [options]="markerPerGroupOptions" optionLabel="label" optionValue="value"
+                        [(ngModel)]="markerPerGroup" appendTo="body"></p-dropdown>
+          </div>
+          <div class="sc-row">
+            <span class="sc-lbl">Clusters</span>
+            <p-multiSelect [options]="markerClusterOptions" optionLabel="label" optionValue="value"
+                           [(ngModel)]="markerClusters" appendTo="body" [filter]="true"
+                           selectedItemsLabel="{0} clusters" [maxSelectedLabels]="2"
+                           placeholder="Pick clusters"></p-multiSelect>
+          </div>
+          <small class="sc-hint" *ngIf="markerLoading">
+            Finding marker genes… the first time for a grouping reads the whole expression matrix,
+            which can take a minute.
+          </small>
+          <small class="sc-hint sc-error" *ngIf="markerError">{{ markerError }}</small>
+          <div class="sc-row sc-markers-actions">
+            <p-button label="Add marker genes" icon="pi pi-sitemap" size="small"
+                      [loading]="markerLoading" [disabled]="!markerClusters.length"
+                      (onClick)="addMarkerGenes()"></p-button>
+            <p-button label="Cancel" size="small" [text]="true" [disabled]="markerLoading"
+                      (onClick)="markersOpen = false"></p-button>
+          </div>
+        </div>
+
         <div class="sc-subhead">Selected genes</div>
         <div class="sc-gene-tree">
           <div class="sc-gene-row sc-gene-root">
@@ -220,31 +254,64 @@
                   <button type="button" class="sc-eye" (click)="onGenesShown([gene], !isGeneShown(gene))">
                     <i class="pi" [class.pi-eye]="isGeneShown(gene)" [class.pi-eye-slash]="!isGeneShown(gene)"></i>
                   </button>
-                  <label class="sc-dot sc-dot-pick" [style.background]="geneColorOf(gene)" title="Colour">
-                    <input type="color" [value]="geneColorOf(gene)" (change)="onGeneColor(gene, $any($event.target).value)" />
-                  </label>
+                  <!-- The gene's marker, in its colour: its icon in Icons mode, a dot for circles.
+                       Clicking it opens the icon and colour picker (as Xenium Explorer does). -->
+                  <button type="button" class="sc-gene-icon" [style.color]="geneSwatchOf(gene)"
+                          [attr.aria-label]="'Icon and colour for ' + gene" pTooltip="Icon and colour"
+                          tooltipPosition="top" (click)="openGeneStyle($event, gene, genePop)">
+                    <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg">
+                      <polygon *ngIf="view.transcriptMode === 'glyphs'; else dotIcon"
+                               [attr.points]="glyphPoints(glyphOf(gene, view.transcriptGenes.indexOf(gene)))"></polygon>
+                      <ng-template #dotIcon><circle r="0.75"></circle></ng-template>
+                    </svg>
+                  </button>
                   <span class="sc-group-label">{{ gene }}</span>
-                  <p-dropdown *ngIf="view.transcriptMode === 'glyphs'"
-                              [options]="glyphOptions" optionLabel="label" optionValue="value"
-                              [ngModel]="glyphOf(gene, view.transcriptGenes.indexOf(gene))"
-                              (ngModelChange)="onGlyph(gene, $event)"
-                              appendTo="body" styleClass="sc-glyph-pick">
-                      <ng-template let-opt pTemplate="item">
-                        <span class="sc-glyph-option">
-                          <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg"><polygon [attr.points]="opt.points"></polygon></svg>
-                          {{ opt.label }}
-                        </span>
-                      </ng-template>
-                      <ng-template let-opt pTemplate="selectedItem">
-                        <span class="sc-glyph-option">
-                          <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg"><polygon [attr.points]="opt?.points"></polygon></svg>
-                        </span>
-                      </ng-template>
-                  </p-dropdown>
+                  <span class="sc-gene-count" *ngIf="geneCountOf(gene) as n; else zeroCount"
+                        title="Transcripts in view">{{ n | number }}</span>
+                  <ng-template #zeroCount>
+                    <span class="sc-gene-count" *ngIf="geneCounts" title="Transcripts in view">0</span>
+                  </ng-template>
                 </div>
               </ng-container>
             </ng-container>
           </ng-container>
+          <!-- One picker for every gene row, filled for the gene that opened it. -->
+          <p-overlayPanel #genePop styleClass="sc-gene-style" appendTo="body">
+            <ng-template pTemplate="content">
+              <div class="sc-style-pop" *ngIf="styleGene as gene">
+                <div class="sc-style-title">Transcript Icon</div>
+                <div class="sc-style-icons" role="radiogroup" [attr.aria-label]="'Icon for ' + gene">
+                  <button type="button" *ngFor="let opt of glyphOptions" class="sc-style-icon"
+                          role="radio" [attr.aria-checked]="opt.value === styleGlyph"
+                          [class.active]="opt.value === styleGlyph" [title]="opt.label"
+                          (click)="onGlyph(gene, opt.value)">
+                    <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg"><polygon [attr.points]="opt.points"></polygon></svg>
+                  </button>
+                </div>
+                <small class="sc-hint" *ngIf="view.transcriptMode !== 'glyphs'">
+                  Icons show when the transcript point style is Icons.
+                </small>
+                <div class="sc-style-title">Transcript Color</div>
+                <div class="sc-style-color">
+                  <label class="sc-style-swatch" [style.background]="geneColorOf(gene)" title="Pick a colour">
+                    <input type="color" [value]="geneColorOf(gene)" (change)="onGeneColor(gene, $any($event.target).value)" />
+                  </label>
+                  <input pInputText class="sc-style-hex" [value]="geneColorOf(gene)" maxlength="7"
+                         [attr.aria-label]="'Hex colour for ' + gene"
+                         (change)="onGeneHex(gene, $any($event.target).value)"
+                         (keydown.enter)="onGeneHex(gene, $any($event.target).value)" />
+                </div>
+                <div class="sc-style-title sc-style-sub">Presets</div>
+                <div class="sc-style-presets">
+                  <button type="button" *ngFor="let c of colorPresets" class="sc-style-preset"
+                          [style.background]="c" [class.active]="c === geneColorOf(gene).toLowerCase()"
+                          [title]="c" [attr.aria-label]="'Colour ' + c" (click)="onGeneColor(gene, c)"></button>
+                </div>
+                <p-button label="Reset to default" icon="pi pi-refresh" size="small" [text]="true"
+                          styleClass="sc-style-reset" (onClick)="resetGeneStyle(gene)"></p-button>
+              </div>
+            </ng-template>
+          </p-overlayPanel>
           <div class="sc-gene-footer">
             {{ (view.transcriptAllGenes ? geneTotal : view.transcriptGenes.length) | number }}/{{ geneTotal | number }} genes selected
           </div>

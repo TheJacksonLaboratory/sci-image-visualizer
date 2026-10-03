@@ -5,7 +5,8 @@ import type { Rgb } from '../../contracts/colormap-lut';
 import { ALL_GENES, type SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import type { SpatialViewState } from '../../contracts/display-types';
 import {
-  NO_CATEGORY, NO_OBSERVATION, SpatialBounds, SpatialColumn, SpatialDataset, SpatialImageRef, SpatialPolygonTile,
+  NO_CATEGORY, NO_OBSERVATION, SpatialBounds, SpatialColumn, SpatialDataset, SpatialDensityRaster, SpatialImageRef,
+  SpatialPolygonTile,
   SpatialPolygons, SpatialTranscriptCounts, SpatialTranscriptSummary, SpatialTranscriptTile,
   isCategoricalColumn,
 } from '../../contracts/spatial-dataset.contract';
@@ -18,8 +19,17 @@ import {
   cellsShown, colorDensityWindow, densityAutoRange, groupedMarkerPx, quantileOf, tilesInRectFrom,
   defaultGlyphFor, discreteColormapStops, glyphOutline, glyphRings, pixelsPerDataUnit,
   polygonLevelFor, tileId, tilesInRect, transcriptLevelFor, transcriptMarkerPx,
-  typicalCellDiameter, visibleArea, visibleDataRect,
+  typicalCellDiameter, visibleArea, visibleDataRect, geneBinSize, groupTranscripts, clipTranscripts,
+  clusterColorMap,
 } from '../../spatial/spatial-tiles';
+
+/** The all-gene pyramid's finest bin (250 µm source tiles / 128) and default level count, used
+ *  to group a gene selection on the same ladder when a dataset has no pyramid. */
+const PYRAMID_BASE_BIN_UM = 250 / 128;
+const PYRAMID_LEVELS = 7;
+/** Icons get a dark rim only while there are at most this many, at least this big (px). */
+const GLYPH_OUTLINE_MAX = 20_000;
+const GLYPH_OUTLINE_MIN_PX = 8;
 
 /**
  * Level-of-detail cell outlines, transcripts and transcript density for the 2D spatial view.
@@ -60,6 +70,10 @@ export interface SpatialTileHost {
   densityChanged?(stats: { lo: number; hi: number; max: number }): void;
   /** Estimated transcripts in view for the current selection, against the budget. */
   estimateChanged?(estimate: TranscriptEstimate | null): void;
+  /** Transcripts of each selected gene inside the view, or null when not known. */
+  geneCountsChanged?(counts: Record<string, number> | null): void;
+  /** The layers whose data is in flight now ("Transcripts", "Cells"…); empty when none. */
+  loadingChanged?(layers: string[]): void;
 }
 
 /** Xenium Explorer's "Estimated Transcript Points". */
@@ -98,6 +112,10 @@ interface TranscriptJob {
 interface TranscriptLoad {
   merged: SpatialTranscriptTile;
   px: Float32Array;
+  /** For a gene selection: group it on this bin ladder once hidden genes are dropped. */
+  ladder?: { baseBin: number; levels: number; start: number | null };
+  /** Already one marker per cluster per bin (zoomed out, from the density grids): no cells. */
+  clustered?: { group: Int32Array; names: string[]; genes: string[][]; bin: number; origin: [number, number] };
   kind?: TranscriptJob['kind'];
   bin?: TranscriptJob['bin'];
 }
@@ -147,6 +165,88 @@ export class NapariSpatialTileLayers {
     this.cameraOff = viewer.camera.changed.connect(() => this.schedule());
   }
 
+  /**
+   * Group a gene selection for the zoom: one marker per gene-tree cluster (a gene in no
+   * cluster is its own) per bin of the pyramid ladder, starting at the finest bin whose
+   * markers are 14 px apart and stepping up while the markers would exceed the budget.
+   * Null to draw every transcript: zoomed in, with the selection within the budget.
+   */
+  private groupSelection(
+    t: SpatialTranscriptTile, view: SpatialViewState, ladder: NonNullable<TranscriptLoad['ladder']>,
+    pxPerUnit: number,
+  ): { merged: SpatialTranscriptTile; px: Float32Array; bin: number; group: Int32Array; names: string[] } | null {
+    const budget = Math.max(1, view.transcriptBudget);
+    const genes = view.transcriptGenes;
+    const groups = view.transcriptGeneGroups;
+    const names = [...groups.map((g) => g.name), ...genes];
+    const clusterOf = genes.map((gene, slot) => {
+      const g = groups.findIndex((x) => x.genes.includes(gene));
+      return g >= 0 ? g : groups.length + slot;
+    });
+    const keyOf = (slot: number) => clusterOf[slot] ?? groups.length + slot;
+    let bin = ladder.start;
+    if (bin === null) {
+      // Every transcript, if they fit the max and none was cut off at the cap.
+      if (t.count <= budget && t.count < MAX_TRANSCRIPTS) return null;
+      bin = ladder.baseBin;
+    }
+    const top = ladder.baseBin * 2 ** (ladder.levels - 1);
+    let grouped = groupTranscripts(t, bin, keyOf);
+    // Over the max: combine into larger markers, a level at a time.
+    while (grouped.tile.count > budget && bin < top) {
+      bin *= 2;
+      grouped = groupTranscripts(t, bin, keyOf);
+    }
+    const refCount = quantileOf(grouped.tile.weight, 0.95);
+    const binPx = bin * pxPerUnit;
+    const px = new Float32Array(grouped.tile.count);
+    for (let i = 0; i < grouped.tile.count; i++) {
+      px[i] = groupedMarkerPx(grouped.tile.weight[i], refCount, binPx, view.transcriptScale);
+    }
+    return { merged: grouped.tile, px, bin, group: grouped.group, names };
+  }
+
+  /** µm per observation unit of the drawn dataset, for describing a grouped marker's area. */
+  private micronsPerUnit: number | null = null;
+
+  /** Loads in flight, per layer label, for the loading badge. */
+  private readonly loading = new Map<string, number>();
+
+  /** Report `label` loading while `work` is in flight. */
+  private async track<T>(label: string, work: Promise<T>): Promise<T> {
+    this.loading.set(label, (this.loading.get(label) ?? 0) + 1);
+    this.host.loadingChanged?.([...this.loading.keys()]);
+    try {
+      return await work;
+    } finally {
+      const n = (this.loading.get(label) ?? 1) - 1;
+      if (n > 0) this.loading.set(label, n);
+      else this.loading.delete(label);
+      this.host.loadingChanged?.([...this.loading.keys()]);
+    }
+  }
+
+  /** The loaded per-gene transcripts the in-view counts are taken from. */
+  private countSource: { merged: SpatialTranscriptTile; genes: string[] } | null = null;
+
+  /**
+   * Transcripts of each selected gene inside `rect`: each entry counts for the transcripts it
+   * stands for (an aggregate at a coarse level holds several). Null without per-gene data.
+   */
+  geneCountsIn(rect: DataRect): Record<string, number> | null {
+    const src = this.countSource;
+    if (!src) return null;
+    const out: Record<string, number> = {};
+    for (const g of src.genes) out[g] = 0;
+    const { x, y, weight, gene } = src.merged;
+    for (let i = 0; i < src.merged.count; i++) {
+      if (x[i] < rect.x0 || x[i] > rect.x1 || y[i] < rect.y0 || y[i] > rect.y1) continue;
+      const name = src.genes[gene[i]];
+      if (name !== undefined) out[name] += weight[i];
+    }
+    return out;
+  }
+
   /** Whether `layer` is one of the overlays drawn here (density, cells, transcripts). */
   owns(layer: Layer): boolean {
     for (const l of this.layers.values()) if (l === layer) return true;
@@ -163,6 +263,9 @@ export class NapariSpatialTileLayers {
     this.timer = null;
     this.token++;
     this.tileRetries = 0;
+    this.countSource = null;
+    this.loading.clear();
+    this.host.loadingChanged?.([]);
     if (this.viewer) {
       for (const layer of this.layers.values()) {
         if (this.viewer.layers.items.includes(layer)) this.viewer.layers.remove(layer);
@@ -233,6 +336,7 @@ export class NapariSpatialTileLayers {
       this.planTranscripts(dataset, view, rect, pxPerUnit, stale),
     ]);
     if (stale()) return;
+    this.host.geneCountsChanged?.(this.geneCountsIn(rect));
     // A tile that failed left a hole the cache keys do not record, so try the same view
     // again, backing off, a bounded number of times.
     if (!this.planIncomplete) {
@@ -268,7 +372,9 @@ export class NapariSpatialTileLayers {
     // Groups switched off in the list: their cells are left out of the geometry.
     const hidden = await this.hiddenCodes(dataset, view);
     if (stale()) return;
-    const geometry = await this.cellGeometry(dataset, view, rect, level, hidden, stale);
+    const label = view.cellSet === 'both' ? 'Cells and nuclei'
+      : view.cellSet === 'nucleus' ? 'Nuclei' : 'Cells';
+    const geometry = await this.track(label, this.cellGeometry(dataset, view, rect, level, hidden, stale));
     if (!geometry) return;
     const { rings, nuclei, geometryKey } = geometry;
 
@@ -473,7 +579,8 @@ export class NapariSpatialTileLayers {
     stale: () => boolean,
   ): Promise<void> {
     const mode = view.transcriptMode;
-    const job = (mode === 'circles' || mode === 'glyphs') && this.port.getTranscriptTile
+    const job = (mode === 'circles' || mode === 'glyphs')
+      && (this.port.getTranscriptTile || (this.port.getTranscriptGeneBins && dataset.transcriptGeneBins))
       ? (view.transcriptAllGenes
         ? this.allGenesJob(dataset, view, rect, pxPerUnit)
         : this.geneJob(dataset, view, rect, pxPerUnit))
@@ -482,6 +589,7 @@ export class NapariSpatialTileLayers {
       this.drop('transcripts');
       this.drop('transcriptOutline');
       this.drawn = null;
+      this.countSource = null;
       return;
     }
     // Marker sizes follow the zoom, so the zoom is part of the key; a pan that keeps
@@ -490,35 +598,64 @@ export class NapariSpatialTileLayers {
       dataset.id, mode, job.key, view.transcriptColorBy, this.cellTypeColumnName(dataset, view),
       view.transcriptScale, view.transcriptOpacity, JSON.stringify(view.transcriptGlyphs),
       pxPerUnit.toPrecision(4), view.hiddenGroups.join('\u0001'), view.transcriptHiddenGenes.join(','),
-      JSON.stringify(view.transcriptGeneColors),
+      JSON.stringify(view.transcriptGeneColors), JSON.stringify(view.transcriptGeneGroups),
     ].join('|');
     const current = this.layers.get('transcripts');
     if (planKey === this.keys.get('transcripts') && current && this.viewer!.layers.items.includes(current)) {
       return;
     }
-    const loaded = await job.load();
+    const loaded = await this.track('Transcripts', job.load());
     if (stale()) return;
+    // Per-gene counts in view come from what was loaded, before hidden genes are dropped:
+    // a hidden gene still has transcripts there. Summed density grids (no per-gene levels,
+    // zoomed out) hold clusters, not genes: no per-gene counts there, rather than a guess.
+    this.countSource = (loaded.kind ?? job.kind) === 'genes' && !loaded.clustered
+      ? { merged: loaded.merged, genes: [...view.transcriptGenes] } : null;
     const hidden = await this.hiddenCodes(dataset, view);
     if (stale()) return;
-    const { merged, px } = filterTranscripts(loaded.merged, loaded.px, hidden,
-      (loaded.kind ?? job.kind) === 'genes' ? hiddenGeneSlots(view) : null);
+    // Density-grid markers carry no cells and were built from the visible genes only.
+    const filtered = loaded.clustered ? { merged: loaded.merged, px: loaded.px }
+      : filterTranscripts(loaded.merged, loaded.px, hidden,
+        (loaded.kind ?? job.kind) === 'genes' ? hiddenGeneSlots(view) : null);
+    let { merged, px } = filtered;
+    let selectionBin: number | null = loaded.clustered?.bin ?? null;
+    let entryGroup: Int32Array | null = loaded.clustered?.group ?? null;
+    let groupNames: string[] | null = loaded.clustered?.names ?? null;
+    if (loaded.ladder) {
+      const g = this.groupSelection(merged, view, loaded.ladder, pxPerUnit);
+      if (g) ({ merged, px, bin: selectionBin, group: entryGroup, names: groupNames } = g);
+    }
     // A bin of the all-gene pyramid mixes genes and carries none, so it cannot be coloured
     // by gene: colour it by its dominant cell's type until individual transcripts show.
     const kind = loaded.kind ?? job.kind;
-    const colorView = kind === 'bins' && view.transcriptColorBy === 'gene'
-      ? { ...view, transcriptColorBy: 'cellType' as const } : view;
-    const faces = await this.transcriptColors(dataset, colorView, merged);
+    const colorView = kind === 'bins' && view.transcriptColorBy !== 'cellType'
+      ? { ...view, transcriptColorBy: 'cellType' as const }
+      // Density-grid markers have no cell to take a type from: they take their cluster's colour.
+      : loaded.clustered && view.transcriptColorBy === 'cellType'
+        ? { ...view, transcriptColorBy: 'cluster' as const } : view;
+    // Each entry's cluster: its marker's group, or the gene-tree group its gene is in.
+    const geneCluster = view.transcriptGenes.map((g) =>
+      view.transcriptGeneGroups.find((x) => x.genes.includes(g))?.name ?? g);
+    const clusterOf = (i: number): string | null => (entryGroup && groupNames
+      ? groupNames[entryGroup[i]] ?? null
+      : geneCluster[merged.gene[i]] ?? null);
+    const faces = await this.transcriptColors(dataset, colorView, merged, kind === 'genes' ? clusterOf : undefined);
     if (stale()) return;
 
     if (this.planIncomplete) this.keys.delete('transcripts');
     else this.keys.set('transcripts', planKey);
     const diam = px.map((d) => d / pxPerUnit);
     this.drawn = {
-      kind: loaded.kind ?? job.kind, bin: loaded.kind ? loaded.bin : job.bin,
+      kind: loaded.kind ?? job.kind,
+      bin: selectionBin ? { size: selectionBin, origin: loaded.clustered?.origin ?? [0, 0] }
+        : (loaded.kind ? loaded.bin : job.bin),
       merged, radius: diam.map((d) => d / 2),
       genes: [...view.transcriptGenes], ref: dataset.imageRef ?? null, grid: null,
+      ...(entryGroup && groupNames ? { entryGroup, groupNames } : {}),
+      ...(loaded.clustered ? { groupGenes: loaded.clustered.genes } : {}),
     };
     this.hoverCache.clear();
+    this.micronsPerUnit = dataset.micronsPerUnit ?? null;
     const typeColumn = this.cellTypeColumnName(dataset, view);
     this.hoverTypes = typeColumn ? await this.categoricalCodes(typeColumn).catch(() => null) : null;
     if (stale()) return;
@@ -528,7 +665,7 @@ export class NapariSpatialTileLayers {
       this.drop('transcriptOutline');
       this.drawTranscriptCircles(merged, diam, faces.rgba, view, place);
     } else {
-      this.drawTranscriptGlyphs(merged, diam, faces, view, place);
+      this.drawTranscriptGlyphs(merged, diam, faces, view, place, pxPerUnit);
     }
   }
 
@@ -559,7 +696,7 @@ export class NapariSpatialTileLayers {
 
   private drawTranscriptGlyphs(
     merged: SpatialTranscriptTile, diam: Float32Array, faces: TranscriptFaces, view: SpatialViewState,
-    { scale, translate }: Placement,
+    { scale, translate }: Placement, pxPerUnit: number,
   ): void {
     // Glyphs: each entry becomes its gene's icon polygon, filled through a discrete
     // colormap and outlined dark so small icons stay readable over the tissue. With every
@@ -586,6 +723,13 @@ export class NapariSpatialTileLayers {
       translate,
     });
     this.replace('transcripts', fill);
+    // A dark rim keeps a few large icons readable over the tissue; on many small ones the
+    // rims merge into a solid dark sheet that hides every colour, so they are left off.
+    const medianPx = median(diam) * pxPerUnit;
+    if (merged.count > GLYPH_OUTLINE_MAX || medianPx < GLYPH_OUTLINE_MIN_PX) {
+      this.drop('transcriptOutline');
+      return;
+    }
     const edge = this.viewer!.addShapes(coords, offsets, {
       name: 'transcript outlines',
       draw: 'outline',
@@ -649,7 +793,7 @@ export class NapariSpatialTileLayers {
     const obs = d.merged.observation[i];
     const cells = obs === NO_OBSERVATION ? [] : [obs];
     let box: [number, number, number, number] | undefined;
-    if (d.kind === 'bins' && d.bin) {
+    if ((d.kind === 'bins' || d.kind === 'genes') && d.bin) {
       const { size, origin } = d.bin;
       const bx = Math.floor((d.merged.x[i] - origin[0]) / size);
       const by = Math.floor((d.merged.y[i] - origin[1]) / size);
@@ -660,8 +804,9 @@ export class NapariSpatialTileLayers {
       const e = 0.02;
       box = [d.merged.x[i] - e, d.merged.y[i] - e, d.merged.x[i] + e, d.merged.y[i] + e];
     }
+    const genes = d.groupGenes && d.entryGroup ? d.groupGenes[d.entryGroup[i]] : undefined;
     try {
-      const summary = await this.port.getTranscriptSummary({ box, cells });
+      const summary = await this.port.getTranscriptSummary({ box, cells, ...(genes ? { genes } : {}) });
       const lines = this.describe(d, i, summary);
       this.hoverCache.set(key, lines);
       if (this.hoverKey === key) onDetails(lines);
@@ -712,6 +857,19 @@ export class NapariSpatialTileLayers {
       ];
     }
     const gene = d.genes[t.gene[i]] ?? 'transcript';
+    if (d.bin) {
+      const um = d.bin.size * (this.micronsPerUnit ?? 1);
+      const group = d.entryGroup && d.groupNames ? d.groupNames[d.entryGroup[i]] : gene;
+      const top = s?.topGenes?.length
+        ? [s.topGenes.slice(0, 6).map((g) => `${g.name} ${fmt(g.count)}`).join(', ')] : [];
+      return [
+        `${group} · ${fmt(n)} transcript${n === 1 ? '' : 's'}`,
+        ...(d.groupGenes ? top : group !== gene ? [`mostly ${gene}`] : []),
+        `${um.toFixed(1)} × ${um.toFixed(1)} µm area · zoom in to split`,
+        ...(obs === NO_OBSERVATION && d.groupGenes ? [] : [cellLine(obs, 'mostly cell')]),
+        ...(!s && d.groupGenes && this.port.getTranscriptSummary ? ['loading details…'] : []),
+      ];
+    }
     return n > 1
       ? [`${gene} · ${fmt(n)} transcripts`, 'grouped: zoom in to split', cellLine(obs, 'near cell')]
       : [`${gene} transcript`, cellLine(obs, 'in cell')];
@@ -736,24 +894,190 @@ export class NapariSpatialTileLayers {
     const keysAt = (l: number) => tilesInRect(rect, l, meta.levels, meta.bounds, MAX_TRANSCRIPT_TILES);
     const query = { genes, quality: view.transcriptQuality };
     const pxPerMicron = this.pxPerMicron(dataset, pxPerUnit);
+    const mx = (rect.x1 - rect.x0) * 0.25;
+    const my = (rect.y1 - rect.y0) * 0.25;
+    const around: DataRect = { x0: rect.x0 - mx, y0: rect.y0 - my, x1: rect.x1 + mx, y1: rect.y1 + my };
+    // Zoomed out, each gene's transcripts are grouped on the all-gene pyramid's bin ladder,
+    // so a gene selection reads like "all genes" does: one marker per gene per area, sized
+    // by how many it holds; zoomed in far enough, every transcript is its own marker.
+    const ladder = dataset.transcriptBins?.levels;
+    const baseBin = ladder?.[0]?.binSize
+      ?? (dataset.micronsPerUnit ? PYRAMID_BASE_BIN_UM / dataset.micronsPerUnit : 0);
+    const bin = geneBinSize(pxPerUnit, baseBin, ladder?.length ?? PYRAMID_LEVELS);
+    // Zoomed out to bins as wide as the density grid, a selection is drawn from the per-gene
+    // density grids — one cached request per cluster — rather than 10x's coarse per-gene
+    // tiles, which take minutes for a few hundred genes.
+    // With the pyramid's per-gene levels, every zoom of a selection reads them: the level the
+    // zoom calls for, coarser while the markers would exceed the max.
+    // Both are built from high-quality calls only: with low-quality calls included, the
+    // quality-aware tiles below serve every zoom (as long as there are tiles to serve).
+    const highOnly = view.transcriptQuality !== 'all' || !this.port.getTranscriptTile;
+    const geneBins = dataset.transcriptGeneBins;
+    const fromGeneBins = highOnly && geneBins && this.port.getTranscriptGeneBins;
+    if (fromGeneBins && (bin !== null || !this.port.getTranscriptTile)) {
+      return this.geneBinsJob(dataset, view, around, geneBins, bin ?? geneBins.levels[0].binSize, mx, my, rect);
+    }
+    const grid = dataset.density?.gridSize[0] ?? 0;
+    if (highOnly && bin !== null && grid > 0 && this.port.getDensity && bin >= grid * 0.75) {
+      return this.clusterDensityJob(dataset, view, around, pxPerUnit, Math.max(bin, grid), mx, my, rect);
+    }
     return {
       kind: 'genes',
-      key: `genes|${genes.join(',')}|${view.transcriptQuality}|${view.transcriptBudget}|${keysAt(first).map(tileId)}`,
+      // The clip window, in quarter-view steps: a pan past the margin re-clips.
+      key: `genes|${genes.join(',')}|${view.transcriptQuality}|${view.transcriptBudget}|${bin ?? 'each'}|`
+        + `${Math.floor(rect.x0 / (mx || 1))},${Math.floor(rect.y0 / (my || 1))}|${keysAt(first).map(tileId)}`,
       load: async () => {
-        let level = first;
-        let merged: SpatialTranscriptTile;
-        for (;;) {
-          const tiles = await this.fetchAll(keysAt(level),
-            (k) => this.port.getTranscriptTile!(k.level, k.gx, k.gy, query));
-          merged = mergeTranscriptTiles(tiles, MAX_TRANSCRIPTS);
-          if (merged.count <= view.transcriptBudget || level >= meta.levels.length - 1) break;
-          level++;
-        }
+        // The zoom's own level only: over the budget, the transcripts are combined into
+        // larger markers (groupSelection), never fetched from slower coarse levels.
+        const tiles = await this.fetchAll(keysAt(first),
+          (k) => this.port.getTranscriptTile!(k.level, k.gx, k.gy, query));
+        // Only what is on screen (and a margin, so a small pan needs nothing new) counts
+        // against the budget and the cap; a tile reaches far past the view.
+        const merged = mergeTranscriptTiles(tiles.map((t) => clipTranscripts(t, around)), MAX_TRANSCRIPTS);
         const px = new Float32Array(merged.count);
         for (let i = 0; i < merged.count; i++) {
           px[i] = transcriptMarkerPx(merged.weight[i], view.transcriptScale, pxPerMicron);
         }
-        return { merged, px };
+        return baseBin > 0
+          ? { merged, px, ladder: { baseBin, levels: ladder?.length ?? PYRAMID_LEVELS, start: bin } }
+          : { merged, px };
+      },
+    };
+  }
+
+  /**
+   * A gene selection from the pyramid's per-gene levels: starting at the level whose bins are
+   * `startBin`, fetch the view's tiles for the selected genes and step to a coarser level while
+   * one marker per cluster per bin would exceed the max. Hidden genes are fetched too (their
+   * counts in view still show) and dropped before drawing; grouping by cluster happens there.
+   */
+  private geneBinsJob(
+    dataset: SpatialDataset, view: SpatialViewState, around: DataRect,
+    meta: NonNullable<SpatialDataset['transcriptGeneBins']>, startBin: number, mx: number, my: number, rect: DataRect,
+  ): TranscriptJob {
+    const genes = view.transcriptGenes;
+    const levels = meta.levels;
+    let first = levels.findIndex((l) => l.binSize >= startBin * 0.999);
+    if (first < 0) first = levels.length - 1;
+    const budget = Math.max(1, view.transcriptBudget);
+    const hidden = new Set(view.transcriptHiddenGenes);
+    const clusters = this.selectionClusters(view);
+    const clusterOf = new Map<number, number>();
+    clusters.forEach((c, ci) => c.genes.forEach((g) => clusterOf.set(genes.indexOf(g), ci)));
+    const keysAt = (m: number) => tilesInRectFrom(meta.origin, around, m,
+      levels.map((l) => ({ tileSize: l.tileSize })), null, MAX_BIN_TILES);
+    return {
+      kind: 'genes',
+      key: `gene-bins|${genes.join(',')}|${budget}|${first}|${JSON.stringify(view.transcriptGeneGroups)}|`
+        + `${Math.floor(rect.x0 / (mx || 1))},${Math.floor(rect.y0 / (my || 1))}`,
+      load: async () => {
+        let m = first;
+        for (;;) {
+          const tiles = await this.fetchAll(keysAt(m),
+            (k) => this.port.getTranscriptGeneBins!(k.level, k.gx, k.gy, genes));
+          const clipped = tiles.map((t) => clipTranscripts(t, around));
+          // Past the cap a merge would drop whole genes (the tail of every tile): go coarser.
+          if (clipped.reduce((n, t) => n + t.count, 0) > MAX_TRANSCRIPTS && m < levels.length - 1) {
+            m++;
+            continue;
+          }
+          const merged = mergeTranscriptTiles(clipped, MAX_TRANSCRIPTS);
+          // Markers this level would draw: one per (visible cluster, bin).
+          const seen = new Set<string>();
+          const bin = levels[m].binSize;
+          for (let i = 0; i < merged.count; i++) {
+            if (hidden.has(genes[merged.gene[i]])) continue;
+            const c = clusterOf.get(merged.gene[i]);
+            if (c === undefined) continue;
+            seen.add(`${c}|${Math.floor(merged.x[i] / bin)}|${Math.floor(merged.y[i] / bin)}`);
+          }
+          if (seen.size <= budget || m >= levels.length - 1) {
+            return { merged, px: new Float32Array(merged.count), ladder: { baseBin: bin, levels: 1, start: bin } };
+          }
+          m++;
+        }
+      },
+    };
+  }
+
+  /** The selection's clusters: each gene-tree group's visible genes, then each ungrouped gene. */
+  private selectionClusters(view: SpatialViewState): { name: string; genes: string[]; slot: number }[] {
+    const hidden = new Set(view.transcriptHiddenGenes);
+    const slots = new Map(view.transcriptGenes.map((g, i) => [g, i]));
+    const taken = new Set<string>();
+    const out: { name: string; genes: string[]; slot: number }[] = [];
+    for (const g of view.transcriptGeneGroups) {
+      const genes = g.genes.filter((x) => slots.has(x) && !hidden.has(x) && !taken.has(x));
+      genes.forEach((x) => taken.add(x));
+      if (genes.length) out.push({ name: g.name, genes, slot: slots.get(genes[0])! });
+    }
+    for (const gene of view.transcriptGenes) {
+      if (!taken.has(gene) && !hidden.has(gene)) out.push({ name: gene, genes: [gene], slot: slots.get(gene)! });
+    }
+    return out;
+  }
+
+  /**
+   * Per-gene density grids summed for `genes`, cached (a cluster is asked for once per bin).
+   * Keyed by dataset too: this manager outlives a dataset, and another may share gene names.
+   */
+  private densityFor(dataset: string, genes: string[], bin: number): Promise<SpatialDensityRaster> {
+    const key = `${dataset}|${bin}|${genes.join(',')}`;
+    let p = this.densityCache.get(key);
+    if (!p) {
+      p = this.port.getDensity!(genes, bin);
+      p.catch(() => this.densityCache.delete(key));
+      this.densityCache.set(key, p);
+      if (this.densityCache.size > 256) this.densityCache.delete(this.densityCache.keys().next().value!);
+    }
+    return p;
+  }
+
+  private readonly densityCache = new Map<string, Promise<SpatialDensityRaster>>();
+
+  /**
+   * A gene selection zoomed out: one marker per cluster per bin, from the per-gene density
+   * grids. The bin starts where markers are 14 px apart and doubles until the markers fit the
+   * max; each marker sits at the count-weighted centre of the finer grid inside it, so markers
+   * follow the tissue rather than a lattice.
+   */
+  private clusterDensityJob(
+    dataset: SpatialDataset, view: SpatialViewState, around: DataRect, pxPerUnit: number, startBin: number,
+    mx: number, my: number, rect: DataRect,
+  ): TranscriptJob {
+    const grid = dataset.density!.gridSize[0];
+    const clusters = this.selectionClusters(view);
+    let first = grid;
+    while (first < startBin * 0.999) first *= 2;
+    const budget = Math.max(1, view.transcriptBudget);
+    return {
+      kind: 'genes',
+      key: `clusters|${clusters.map((c) => `${c.name}:${c.genes.join('+')}`).join(';')}|${budget}|${first}|`
+        + `${Math.floor(rect.x0 / (mx || 1))},${Math.floor(rect.y0 / (my || 1))}`,
+      load: async () => {
+        let bin = first;
+        for (;;) {
+          // The finer grid gives each marker its centre; the server bins 1, 2, 4 or 8 cells.
+          const fine = Math.min(bin >= grid * 2 ? bin / 2 : bin, grid * 8);
+          const rasters = await Promise.all(clusters.map((c) => this.densityFor(dataset.id, c.genes, fine)));
+          const out = clusterMarkers(rasters, clusters.map((c) => c.slot), bin, around);
+          if (out.tile.count <= budget || bin >= grid * 2 ** 12) {
+            const refCount = quantileOf(out.tile.weight, 0.95);
+            const binPx = bin * pxPerUnit;
+            const px = new Float32Array(out.tile.count);
+            for (let i = 0; i < out.tile.count; i++) {
+              px[i] = groupedMarkerPx(out.tile.weight[i], refCount, binPx, view.transcriptScale);
+            }
+            return {
+              merged: out.tile, px, kind: 'genes',
+              clustered: {
+                group: out.group, names: clusters.map((c) => c.name), genes: clusters.map((c) => c.genes), bin,
+                origin: rasters[0]?.meta.origin ?? [0, 0],
+              },
+            };
+          }
+          bin *= 2;
+        }
       },
     };
   }
@@ -850,10 +1174,41 @@ export class NapariSpatialTileLayers {
   /** Per-entry colours both as RGBA (points) and as colormap values (glyph shapes). */
   private async transcriptColors(
     dataset: SpatialDataset, view: SpatialViewState, t: SpatialTranscriptTile,
+    clusterOf?: (i: number) => string | null,
   ): Promise<TranscriptFaces> {
     let rgb: Rgb[];
     let codeOf: (i: number) => number;
-    if (view.transcriptColorBy === 'gene') {
+    if (view.transcriptColorBy === 'cluster' && clusterOf) {
+      // A cluster named like a group of the cells' grouping takes that group's colour, so a
+      // cluster's transcripts and its cells agree; any other cluster takes a palette colour.
+      const name = this.cellTypeColumnName(dataset, view);
+      const codes = name ? await this.categoricalCodes(name).catch(() => null) : null;
+      const cellColor = new Map<string, string>();
+      if (codes?.meta.kind === 'categorical') {
+        const colors = resolveCategoryColors(codes.meta);
+        codes.meta.categories.forEach((c, k) => cellColor.set(c, colors[k]));
+      }
+      const colors = clusterColorMap(view.transcriptGenes, view.transcriptGeneGroups, cellColor,
+        DEFAULT_CATEGORICAL_PALETTE);
+      const index = new Map<string, number>();
+      const hex: string[] = [];
+      const codeFor = (cluster: string) => {
+        let k = index.get(cluster);
+        if (k === undefined) {
+          k = hex.length;
+          index.set(cluster, k);
+          hex.push(colors.get(cluster) ?? cellColor.get(cluster) ?? DEFAULT_CATEGORICAL_PALETTE[0]);
+        }
+        return k;
+      };
+      const code = new Int32Array(t.count);
+      for (let i = 0; i < t.count; i++) {
+        const c = clusterOf(i);
+        code[i] = c === null ? -1 : codeFor(c);
+      }
+      rgb = hex.map(parseHex);
+      codeOf = (i) => code[i];
+    } else if (view.transcriptColorBy === 'gene' || view.transcriptColorBy === 'cluster') {
       // All genes: codes are the dataset's gene indices, folded onto the palette.
       const n = view.transcriptAllGenes ? DEFAULT_CATEGORICAL_PALETTE.length : view.transcriptGenes.length;
       rgb = Array.from({ length: n }, (_g, i) => parseHex(
@@ -901,7 +1256,7 @@ export class NapariSpatialTileLayers {
     const key = [dataset.id, genes.join(','), view.densityBin, view.densityOpacity,
       JSON.stringify(view.densityRange), JSON.stringify(view.densityColormap)].join('|');
     if (key === this.keys.get('density') && this.layers.has('density')) return;
-    const raster = await this.port.getDensity(genes, view.densityBin);
+    const raster = await this.track('Transcript density', this.port.getDensity(genes, view.densityBin));
     if (stale()) return;
 
     // Bins drawn as squares, as Xenium Explorer does; the window is in transcripts/µm².
@@ -1072,6 +1427,11 @@ interface DrawnTranscripts {
   radius: Float32Array;
   genes: string[];
   ref: SpatialImageRef | null;
+  /** For a grouped gene selection: each entry's group, and the groups' names. */
+  entryGroup?: Int32Array;
+  groupNames?: string[];
+  /** Each group's genes, when the markers came from the density grids (for the hover). */
+  groupGenes?: string[][];
   /** Lazily built spatial index: bucket → entry indices. */
   grid: { size: number; buckets: Map<number, number[]> } | null;
 }
@@ -1252,4 +1612,60 @@ export function mergeTranscriptTiles(tiles: SpatialTranscriptTile[], limit = Inf
     o += k;
   }
   return out;
+}
+
+/**
+ * One marker per (cluster, `bin` square) from per-cluster density grids: the counts of the grid
+ * cells inside `area` summed per square, at their count-weighted centre. `slots[c]` is the gene
+ * slot whose icon cluster c's markers take.
+ */
+export function clusterMarkers(
+  rasters: SpatialDensityRaster[], slots: number[], bin: number, area: DataRect,
+): { tile: SpatialTranscriptTile; group: Int32Array } {
+  const x: number[] = [];
+  const y: number[] = [];
+  const w: number[] = [];
+  const gene: number[] = [];
+  const group: number[] = [];
+  rasters.forEach((r, c) => {
+    const [cw, ch] = r.meta.gridSize;
+    const [ox, oy] = r.meta.origin;
+    const { rows, cols } = r.meta;
+    const c0 = Math.max(0, Math.floor((area.x0 - ox) / cw));
+    const c1 = Math.min(cols - 1, Math.floor((area.x1 - ox) / cw));
+    const r0 = Math.max(0, Math.floor((area.y0 - oy) / ch));
+    const r1 = Math.min(rows - 1, Math.floor((area.y1 - oy) / ch));
+    const squares = new Map<number, { n: number; sx: number; sy: number }>();
+    for (let row = r0; row <= r1; row++) {
+      for (let col = c0; col <= c1; col++) {
+        const v = r.values[row * cols + col];
+        if (!(v > 0)) continue;
+        const cx = ox + (col + 0.5) * cw;
+        const cy = oy + (row + 0.5) * ch;
+        const key = Math.floor((cy - oy) / bin) * 1e6 + Math.floor((cx - ox) / bin);
+        const s = squares.get(key) ?? { n: 0, sx: 0, sy: 0 };
+        s.n += v;
+        s.sx += v * cx;
+        s.sy += v * cy;
+        squares.set(key, s);
+      }
+    }
+    for (const s of squares.values()) {
+      x.push(s.sx / s.n);
+      y.push(s.sy / s.n);
+      w.push(Math.round(s.n));
+      gene.push(slots[c]);
+      group.push(c);
+    }
+  });
+  const n = w.length;
+  return {
+    tile: {
+      count: n, aggregated: true,
+      x: Float32Array.from(x), y: Float32Array.from(y), z: new Float32Array(n),
+      weight: Uint32Array.from(w), observation: new Uint32Array(n).fill(NO_OBSERVATION),
+      gene: Uint16Array.from(gene),
+    },
+    group: Int32Array.from(group),
+  };
 }

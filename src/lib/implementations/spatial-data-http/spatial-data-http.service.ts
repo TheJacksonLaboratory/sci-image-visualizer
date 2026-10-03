@@ -12,7 +12,7 @@ import {
   SpatialPolygonTile,
   SpatialPolygons,
   CategoricalColumnMeta,
-  SpatialTranscriptCounts,
+  SpatialMarkerGenes, SpatialTranscriptCounts,
   SpatialTranscriptSummary,
   SpatialTranscriptTile,
   findColumnMeta,
@@ -300,6 +300,14 @@ export class SpatialDataHttpService implements SpatialDataPort {
       Promise<SpatialTranscriptTile>;
   }
 
+  getTranscriptGeneBins(level: number, tx: number, ty: number, genes: string[]): Promise<SpatialTranscriptTile> {
+    const manifest = this.requireManifest();
+    const path = `spatial/${encodeURIComponent(manifest.id)}/gene-bins/${level}/${tx}/${ty}`
+      + `?genes=${genes.map(encodeURIComponent).join(',')}`;
+    return this.cachedTile(path, () => this.getBinary(path).then(decodeTranscriptTile)) as
+      Promise<SpatialTranscriptTile>;
+  }
+
   getTranscriptBins(level: number, tx: number, ty: number): Promise<SpatialTranscriptTile> {
     const manifest = this.requireManifest();
     if (!manifest.transcriptBins) {
@@ -371,6 +379,14 @@ export class SpatialDataHttpService implements SpatialDataPort {
       this.dataset$.next({ ...current, columns });
     }
     return { column, matched: body.matched };
+  }
+
+  getMarkerGenes(column: string, perGroup = 5): Promise<SpatialMarkerGenes> {
+    const manifest = this.requireManifest();
+    // No per-request timeout: the first computation is a pass over the whole matrix.
+    return firstValueFrom(this.http.get<SpatialMarkerGenes>(
+      `${this.baseUrl}spatial/${encodeURIComponent(manifest.id)}/markers/${encodeURIComponent(column)}?n=${perGroup}`,
+    ));
   }
 
   getTranscriptCounts(genes: string[]): Promise<SpatialTranscriptCounts> {

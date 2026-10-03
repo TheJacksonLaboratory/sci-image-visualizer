@@ -15,7 +15,8 @@ import {
   DEFAULT_CATEGORICAL_PALETTE, SPATIAL_3D_MAX_CATEGORIES, lutFor, spatialContinuousLut,
 } from '../spatial/spatial-encoding';
 import {
-  INFERNO_SCALE, TRANSCRIPT_GLYPHS, cellTypeColumnFor, cellsShown, defaultGlyphFor, glyphOutline, isCuratedColumn,
+  INFERNO_SCALE, TRANSCRIPT_GLYPHS, cellTypeColumnFor, cellsShown, clusterColorMap, clusterOfGene, defaultGlyphFor,
+  glyphOutline, isCuratedColumn,
 } from '../spatial/spatial-tiles';
 import {
   SpatialSelectionMask, emptySelection,
@@ -246,10 +247,13 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       this.refreshDensityWindow();
       void this.refreshKey();
       void this.refreshGroups();
+      void this.refreshCellGroupColors();
     }));
 
     const estimate$ = this.controls.getTranscriptEstimate$?.();
     if (estimate$) this.subs.add(estimate$.subscribe((e) => this.zone.run(() => { this.estimate = e; })));
+    const counts$ = this.controls.getGeneCountsInView$?.();
+    if (counts$) this.subs.add(counts$.subscribe((c) => this.zone.run(() => { this.geneCounts = c; })));
     const density$ = this.controls.getDensityStats$?.();
     if (density$) {
       this.subs.add(density$.subscribe((d) => this.zone.run(() => {
@@ -621,7 +625,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     { label: 'Fill', value: 'fill' }, { label: 'Outline', value: 'outline' }, { label: 'Both', value: 'both' },
   ];
   readonly transcriptColorOptions = [
-    { label: 'Cell type', value: 'cellType' }, { label: 'Gene', value: 'gene' },
+    { label: 'Cluster', value: 'cluster' }, { label: 'Cell type', value: 'cellType' }, { label: 'Gene', value: 'gene' },
   ];
   readonly glyphOptions = GLYPH_OPTIONS;
   readonly budgetOptions = [25_000, 50_000, 100_000, 200_000, 400_000]
@@ -985,6 +989,49 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     this.controls?.setViewState({ transcriptGeneColors: { ...this.view.transcriptGeneColors, [gene]: hex } });
   }
 
+  // ── per-gene icon and colour picker ──────────────────────────────────────
+
+  /** Swatches in the picker: the categorical palette genes are coloured from by default. */
+  readonly colorPresets = DEFAULT_CATEGORICAL_PALETTE.slice(0, 10).map((c) => c.toLowerCase());
+  /** The gene the open picker edits. */
+  styleGene: string | null = null;
+
+  openGeneStyle(event: Event, gene: string, panel: { toggle(e: Event): void; hide(): void }): void {
+    if (this.styleGene === gene) {
+      panel.toggle(event);
+      return;
+    }
+    this.styleGene = gene;
+    panel.hide();
+    // Re-open anchored on the row that was clicked, once the panel has closed.
+    setTimeout(() => panel.toggle(event));
+  }
+
+  /** The icon the open picker shows as chosen. */
+  get styleGlyph(): TranscriptGlyphName | null {
+    const gene = this.styleGene;
+    return gene ? this.glyphOf(gene, Math.max(0, this.view.transcriptGenes.indexOf(gene))) : null;
+  }
+
+  glyphPoints(glyph: TranscriptGlyphName): string {
+    return GLYPH_OPTIONS.find((o) => o.value === glyph)?.points ?? '';
+  }
+
+  /** A typed hex colour, accepted as `#rrggbb` or `rrggbb`; anything else is ignored. */
+  onGeneHex(gene: string, text: string): void {
+    const m = /^#?([0-9a-f]{6})$/i.exec(text.trim());
+    if (m) this.onGeneColor(gene, `#${m[1].toLowerCase()}`);
+  }
+
+  /** Back to the gene's default icon and colour (by its position in the list). */
+  resetGeneStyle(gene: string): void {
+    const colors = { ...this.view.transcriptGeneColors };
+    const glyphs = { ...this.view.transcriptGlyphs };
+    delete colors[gene];
+    delete glyphs[gene];
+    this.controls?.setViewState({ transcriptGeneColors: colors, transcriptGlyphs: glyphs });
+  }
+
   /** '±': every gene, or back to the chosen list. */
   onToggleAllGenes(): void {
     if (!this.canShowAllGenes) return;
@@ -994,6 +1041,10 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   /** '⋮' menu. */
   private buildGeneMenu(): { label: string; icon: string; command: () => void; disabled?: boolean }[] {
     return [
+      {
+        label: 'Add marker genes of clusters…', icon: 'pi pi-sitemap',
+        disabled: !this.canAddMarkers, command: () => this.openMarkers(),
+      },
       {
         label: 'New group from selected genes', icon: 'pi pi-folder-plus',
         disabled: !this.view.transcriptGenes.length, command: () => this.onNewGeneGroup(),
@@ -1029,6 +1080,119 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     return Math.round(this.view.densityOpacity * 100);
   }
   geneGroupError: string | null = null;
+
+  // ── per-gene counts in view ─────────────────────────────────────────────
+
+  /** Transcripts of each selected gene in the current view, from the renderer. */
+  geneCounts: Record<string, number> | null = null;
+
+  geneCountOf(gene: string): number | null {
+    return this.geneCounts ? (this.geneCounts[gene] ?? 0) : null;
+  }
+
+  // ── marker genes of clusters, as gene groups ────────────────────────────
+
+  markersOpen = false;
+  markerColumn: string | null = null;
+  markerPerGroup = 5;
+  readonly markerPerGroupOptions = [3, 5, 10, 20].map((n) => ({ label: `${n} genes`, value: n }));
+  markerClusters: string[] = [];
+  markerClusterOptions: { label: string; value: string }[] = [];
+  markerLoading = false;
+  markerError: string | null = null;
+
+  get canAddMarkers(): boolean {
+    return !!this.controls?.markerGenes && this.markerColumnOptions.length > 0;
+  }
+
+  /** Every categorical column but the segmentation method, which says nothing about genes. */
+  get markerColumnOptions(): { label: string; value: string }[] {
+    return (this.dataset?.columns ?? [])
+      .filter((c): c is CategoricalColumnMeta => c.kind === 'categorical' && c.name !== 'segmentation_method')
+      .map((c) => ({ label: c.description && c.section ? c.description : this.columnLabel(c), value: c.name }));
+  }
+
+  openMarkers(): void {
+    const options = this.markerColumnOptions;
+    const active = this.activeCellTypeColumn;
+    if (!this.markerColumn || !options.some((o) => o.value === this.markerColumn)) {
+      this.markerColumn = active && options.some((o) => o.value === active) ? active : options[0]?.value ?? null;
+    }
+    this.markerError = null;
+    this.refreshMarkerClusters();
+    this.markersOpen = true;
+    this.open = { ...this.open, transcripts: true };
+  }
+
+  onMarkerColumn(column: string): void {
+    this.markerColumn = column;
+    this.refreshMarkerClusters();
+  }
+
+  /** The clusters of the chosen column, all picked to start with. */
+  private refreshMarkerClusters(): void {
+    const col = this.dataset?.columns.find((c) => c.name === this.markerColumn);
+    const categories = col && col.kind === 'categorical' ? col.categories : [];
+    this.markerClusterOptions = categories.map((c) => ({ label: c, value: c }));
+    this.markerClusters = [...categories];
+  }
+
+  /**
+   * Add each picked cluster's top marker genes as a gene group named after it, and select
+   * them. A gene that marks several clusters goes to the one it is most specific to, so the
+   * tree lists it once.
+   */
+  async addMarkerGenes(): Promise<void> {
+    const column = this.markerColumn;
+    const markerGenes = this.controls?.markerGenes;
+    if (!column || !markerGenes || !this.markerClusters.length) return;
+    // The form stays editable while the scan runs: apply what was picked when it was asked.
+    const picked = new Set(this.markerClusters);
+    this.markerLoading = true;
+    this.markerError = null;
+    try {
+      const result = await markerGenes(column, this.markerPerGroup);
+      this.zone.run(() => {
+        const best = new Map<string, { group: string; score: number }>();
+        for (const g of result.groups) {
+          if (!picked.has(g.name)) continue;
+          for (const gene of g.genes) {
+            const prev = best.get(gene.name);
+            if (!prev || gene.score > prev.score) best.set(gene.name, { group: g.name, score: gene.score });
+          }
+        }
+        const groups = result.groups
+          .filter((g) => picked.has(g.name))
+          .map((g) => ({
+            name: g.name,
+            genes: g.genes.map((x) => x.name).filter((n) => best.get(n)?.group === g.name),
+          }))
+          .filter((g) => g.genes.length);
+        if (!groups.length) {
+          this.markerError = 'No marker genes passed the filter for the chosen clusters.';
+          return;
+        }
+        const names = new Set(groups.map((g) => g.name));
+        const genes = [...this.view.transcriptGenes];
+        for (const g of groups) for (const n of g.genes) if (!genes.includes(n)) genes.push(n);
+        this.controls?.setViewState({
+          transcriptGeneGroups: [...this.view.transcriptGeneGroups.filter((g) => !names.has(g.name)), ...groups],
+          transcriptGenes: genes,
+          // Marker groups are clusters: colour the transcripts by them, as their cells are.
+          transcriptColorBy: 'cluster',
+          ...(this.view.transcriptMode === 'off' ? { transcriptMode: 'circles' as const } : {}),
+        });
+        this.markersOpen = false;
+      });
+    } catch (err) {
+      this.zone.run(() => {
+        const e = err as { error?: { error?: string }; message?: string };
+        this.markerError = e?.error?.error ?? e?.message ?? 'Could not compute marker genes.';
+      });
+    } finally {
+      this.zone.run(() => { this.markerLoading = false; });
+    }
+  }
 
   onNewGeneGroup(): void {
     const name = (globalThis.prompt?.('Name for this gene group', 'Gene group') ?? '').trim();
@@ -1204,6 +1368,37 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     const gene = this.view?.transcriptGenes[slot];
     return (gene && this.view.transcriptGeneColors[gene])
       || DEFAULT_CATEGORICAL_PALETTE[slot % DEFAULT_CATEGORICAL_PALETTE.length];
+  }
+
+  /** Colours of the cells' groups, by name — what a cluster of the same name is drawn in. */
+  private cellGroupColors = new Map<string, string>();
+  private cellGroupColorsFor: string | null = null;
+
+  private async refreshCellGroupColors(): Promise<void> {
+    const column = this.activeCellTypeColumn;
+    if (column === this.cellGroupColorsFor) return;
+    this.cellGroupColorsFor = column;
+    const map = new Map<string, string>();
+    const meta = column ? this.dataset?.columns.find((c) => c.name === column) : null;
+    if (meta && meta.kind === 'categorical' && this.controls) {
+      try {
+        const colors = await this.controls.categoryColors(column!);
+        meta.categories.forEach((c, k) => { if (colors[k]) map.set(c, colors[k]); });
+      } catch {
+        // No colours: palette colours, as the markers fall back to.
+      }
+    }
+    // The cells' grouping changed while the colours loaded: the newer request applies its own.
+    if (this.cellGroupColorsFor !== column) return;
+    this.zone.run(() => { this.cellGroupColors = map; });
+  }
+
+  /** In Cluster colouring, a gene's swatch is its cluster's colour, as its markers are. */
+  geneSwatchOf(gene: string): string {
+    if (this.view.transcriptColorBy !== 'cluster') return this.geneColorOf(gene);
+    const colors = clusterColorMap(this.view.transcriptGenes, this.view.transcriptGeneGroups,
+      this.cellGroupColors, DEFAULT_CATEGORICAL_PALETTE);
+    return colors.get(clusterOfGene(gene, this.view.transcriptGeneGroups)) ?? this.geneColorOf(gene);
   }
 
   geneColorOf(gene: string): string {

@@ -575,6 +575,23 @@ describe('OpenSeadragonVisualizerService — plot-mode viewport', () => {
     expect(vp.dataLengthToScreen(10)).toBe(5);
   });
 
+  it('fitBounds fits the view to an image rect (through world item 0), animated unless immediately', () => {
+    const vp = service.getPlotModeViewport();
+    vp.fitBounds!({ x: 1, y: 2, width: 3, height: 4 }); // not ready: a no-op, not a throw
+    const fits: Array<[any, boolean]> = [];
+    const viewer: any = fakeViewer();
+    viewer.world.getItemAt = () => ({ imageToViewportRectangle: (r: any) => ({ ...r, via: 'item' }) });
+    viewer.viewport.fitBoundsWithConstraints = (r: any, immediately: boolean) => fits.push([r, immediately]);
+    mountFake(viewer);
+    vp.fitBounds!({ x: 100, y: 200, width: 300, height: 400 });
+    vp.fitBounds!({ x: 5, y: 6, width: 7, height: 8 }, { immediately: true });
+    vp.fitBounds!({ x: 0, y: 0, width: 0, height: 10 }); // empty: ignored
+    expect(fits).toEqual([
+      [expect.objectContaining({ x: 100, y: 200, width: 300, height: 400, via: 'item' }), false],
+      [expect.objectContaining({ x: 5, y: 6, width: 7, height: 8, via: 'item' }), true],
+    ]);
+  });
+
   it('frame$ emits the visible image rect once per animation frame, however many redraws', () => {
     const vp = service.getPlotModeViewport();
     mountFake(fakeViewer());

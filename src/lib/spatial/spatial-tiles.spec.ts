@@ -1,5 +1,6 @@
-import { SpatialDataset } from '../contracts/spatial-dataset.contract';
+import { SpatialDataset, SpatialTranscriptTile } from '../contracts/spatial-dataset.contract';
 import { lutFor } from './spatial-encoding';
+import { clusterColorMap, clusterOfGene, geneBinSize, groupTranscripts } from './spatial-tiles';
 import {
   POLYGON_LEVEL_MIN_CELL_PX, TRANSCRIPT_GLYPHS, TRANSCRIPT_MAX_PX, TRANSCRIPT_MIN_PX,
   INFERNO_SCALE, TRANSCRIPT_PHYSICAL_UM,
@@ -362,5 +363,76 @@ describe('INFERNO_SCALE', () => {
     const lut = lutFor(INFERNO_SCALE);
     expect(lut[0]).toEqual([0, 0, 4]);
     expect(lut[lut.length - 1]).toEqual([252, 255, 164]);
+  });
+});
+
+describe('grouping a gene selection by zoom', () => {
+  it('uses the pyramid ladder: the finest bin at least 14 px apart, none when zoomed in', () => {
+    const base = 250 / 128;
+    expect(geneBinSize(10, base)).toBeNull();          // 19.5 px per base bin: draw each transcript
+    expect(geneBinSize(1, base)).toBeCloseTo(base * 8); // 15.6 px at 8× the base bin
+    expect(geneBinSize(0.001, base, 7)).toBeCloseTo(base * 64); // capped at the coarsest level
+    expect(geneBinSize(0, base)).toBeNull();
+  });
+
+  it('groups each gene on its own by default, at the weighted centroid, in the cell holding most', () => {
+    const t: SpatialTranscriptTile = {
+      count: 4, aggregated: false,
+      x: new Float32Array([1, 3, 2, 30]), y: new Float32Array([1, 1, 2, 30]), z: new Float32Array(4),
+      weight: new Uint32Array([1, 3, 1, 1]), observation: new Uint32Array([7, 8, 9, 9]),
+      gene: new Uint16Array([0, 0, 1, 0]),
+    };
+    const { tile: g } = groupTranscripts(t, 10);
+    expect(g.count).toBe(3); // gene 0 near the origin, gene 1 there too, gene 0 far away
+    expect(g.aggregated).toBe(true);
+    expect(Array.from(g.weight)).toEqual([4, 1, 1]);
+    expect(g.x[0]).toBeCloseTo((1 + 3 * 3) / 4);
+    expect(g.observation[0]).toBe(8); // the entry standing for 3 transcripts
+    expect(Array.from(g.gene)).toEqual([0, 1, 0]);
+  });
+
+  it('takes the cell holding most transcripts in total, not the heaviest single one', () => {
+    const t: SpatialTranscriptTile = {
+      count: 4, aggregated: false,
+      x: new Float32Array([1, 2, 3, 4]), y: new Float32Array(4), z: new Float32Array(4),
+      weight: new Uint32Array([2, 1, 1, 1]), observation: new Uint32Array([8, 7, 7, 7]),
+      gene: new Uint16Array(4),
+    };
+    expect(groupTranscripts(t, 10).tile.observation[0]).toBe(7); // 3 in cell 7, 2 in cell 8
+  });
+
+  it('merges the genes of one cluster into one marker, showing its dominant gene', () => {
+    const t: SpatialTranscriptTile = {
+      count: 4, aggregated: false,
+      x: new Float32Array([1, 2, 3, 4]), y: new Float32Array([1, 2, 3, 4]), z: new Float32Array(4),
+      weight: new Uint32Array([1, 1, 5, 1]), observation: new Uint32Array(4),
+      gene: new Uint16Array([0, 1, 1, 2]),
+    };
+    // Genes 0 and 1 are one cluster (key 0); gene 2 is its own (key 9).
+    const { tile, group } = groupTranscripts(t, 10, (slot) => (slot <= 1 ? 0 : 9));
+    expect(tile.count).toBe(2);
+    expect(Array.from(group)).toEqual([0, 9]);
+    expect(Array.from(tile.weight)).toEqual([7, 1]);
+    expect(tile.gene[0]).toBe(1); // gene 1 holds 6 of the cluster's 7
+  });
+
+});
+
+describe('cluster colours', () => {
+  const groups = [{ name: 'Cluster 27', genes: ['CD55', 'TFF3'] }, { name: 'Cluster 28', genes: ['TNS4', 'SOCS3'] }];
+  const genes = ['CD55', 'TFF3', 'TNS4', 'SOCS3', 'LONE'];
+
+  it('gives every gene of a cluster one colour, a different one per cluster', () => {
+    const map = clusterColorMap(genes, groups, new Map(), ['#a', '#b', '#c']);
+    expect(map.get(clusterOfGene('CD55', groups))).toBe(map.get(clusterOfGene('TFF3', groups)));
+    expect(map.get('Cluster 27')).not.toBe(map.get('Cluster 28'));
+    expect(map.get('LONE')).toBe('#c'); // an ungrouped gene is its own cluster
+  });
+
+  it('takes the colour of the cell group of the same name, palette for the rest in tree order', () => {
+    const map = clusterColorMap(genes, groups, new Map([['Cluster 28', '#ff0000']]), ['#a', '#b']);
+    expect(map.get('Cluster 28')).toBe('#ff0000');
+    expect(map.get('Cluster 27')).toBe('#a');
+    expect(map.get('LONE')).toBe('#b');
   });
 });

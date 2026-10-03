@@ -158,8 +158,10 @@ test('zarr: a dtype without a byte-order prefix (`u1`) is accepted', async () =>
   const dir = await mkdtemp(path.join(os.tmpdir(), 'xenium-test-'));
   const file = path.join(dir, 'v.zarr.zip');
   await writeFile(file, inner);
-  const store = await ZarrZipStore.open(await openByteSource(file));
+  const src = await openByteSource(file);
+  const store = await ZarrZipStore.open(src);
   assert.deepEqual(Array.from((await store.read('v')).data), [1, 0, 1]);
+  await src.close();
 });
 
 // ── cell ids ─────────────────────────────────────────────────────────────────────────

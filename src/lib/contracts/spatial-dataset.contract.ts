@@ -386,6 +386,28 @@ export interface SpatialTranscriptTile {
 }
 
 /** Transcript totals for an estimate of how many markers a selection would draw. */
+/** The per-gene levels: each level's bin and tile size, on the all-gene pyramid's grid. */
+export interface SpatialTranscriptGeneBinsMeta {
+  origin: [number, number];
+  levels: { binSize: number; tileSize: number }[];
+}
+
+/**
+ * Marker genes of each group of a categorical column: per group, the real genes most
+ * specific to it, best first. A gene's score is its mean `log1p(count)` in the group minus
+ * that in every other cell; it must be detected in at least 10% of the group's cells, and
+ * in more of them than elsewhere.
+ */
+export interface SpatialMarkerGenes {
+  column: string;
+  groups: {
+    name: string;
+    /** Cells in the group. */
+    cells: number;
+    genes: { name: string; score: number; pctIn: number; pctOut: number }[];
+  }[];
+}
+
 export interface SpatialTranscriptCounts {
   /** Total transcripts per requested gene, over the whole dataset. */
   counts: Record<string, number>;
@@ -425,6 +447,8 @@ export interface SpatialDataset {
   density?: SpatialDensityMeta;
   /** The all-gene transcript grouping pyramid, when it has been built. */
   transcriptBins?: SpatialTranscriptBinsMeta;
+  /** Per-gene levels of the transcript pyramid (same bins): a gene selection at any zoom. */
+  transcriptGeneBins?: SpatialTranscriptGeneBinsMeta;
   /** Present while the server is still building {@link transcriptBins}. */
   transcriptBinsStatus?: SpatialTranscriptBinsStatus;
   /**

@@ -928,6 +928,151 @@ describe('SpatialControlsComponent', () => {
       expect(component.glyphOf('B', 1)).toBe('hexagon');
     });
 
+    it('opens one icon and colour picker per gene, as Xenium Explorer does', async () => {
+      dataset$.next(tiled);
+      await build(controls);
+      jest.useFakeTimers();
+      view$.next({ ...view$.value, transcriptGenes: ['A', 'B'] });
+      const panel = { toggle: jest.fn(), hide: jest.fn() };
+      const click = new MouseEvent('click');
+      component.openGeneStyle(click, 'B', panel);
+      expect(component.styleGene).toBe('B');
+      expect(component.styleGlyph).toBe('star'); // B's default, by position
+      jest.runAllTimers();
+      expect(panel.toggle).toHaveBeenCalledWith(click);
+      // Clicking the same gene again just toggles the panel.
+      component.openGeneStyle(click, 'B', panel);
+      expect(panel.toggle).toHaveBeenCalledTimes(2);
+      // Choosing an icon and a colour writes the view state; the picker follows it.
+      component.onGlyph('B', 'diamond');
+      expect(component.styleGlyph).toBe('diamond');
+      component.onGeneColor('B', component.colorPresets[3]);
+      expect(view$.value.transcriptGeneColors).toEqual({ B: component.colorPresets[3] });
+      jest.useRealTimers();
+    });
+
+    it('accepts a typed hex colour with or without #, and ignores anything else', async () => {
+      dataset$.next(tiled);
+      await build(controls);
+      component.onGeneHex('A', ' 43BCE7 ');
+      expect(view$.value.transcriptGeneColors).toEqual({ A: '#43bce7' });
+      component.onGeneHex('A', '#zzzzzz');
+      component.onGeneHex('A', '#123');
+      expect(view$.value.transcriptGeneColors).toEqual({ A: '#43bce7' });
+    });
+
+    it("resets a gene's icon and colour to its defaults, leaving the others", async () => {
+      dataset$.next(tiled);
+      await build(controls);
+      view$.next({
+        ...view$.value, transcriptGenes: ['A', 'B'],
+        transcriptGlyphs: { A: 'x', B: 'hexagon' }, transcriptGeneColors: { A: '#111111', B: '#222222' },
+      });
+      component.resetGeneStyle('A');
+      expect(view$.value.transcriptGlyphs).toEqual({ B: 'hexagon' });
+      expect(view$.value.transcriptGeneColors).toEqual({ B: '#222222' });
+      expect(component.glyphOf('A', 0)).toBe('circle');
+    });
+
+    it('in Cluster colouring, shows every gene of a cluster in the cluster\'s colour', async () => {
+      dataset$.next(tiled);
+      await build(controls);
+      view$.next({
+        ...view$.value, transcriptColorBy: 'cluster', transcriptGenes: ['A', 'B', 'C'],
+        transcriptGeneGroups: [{ name: 'K1', genes: ['A', 'B'] }],
+      });
+      expect(component.geneSwatchOf('A')).toBe(component.geneSwatchOf('B'));
+      expect(component.geneSwatchOf('C')).not.toBe(component.geneSwatchOf('A'));
+      view$.next({ ...view$.value, transcriptColorBy: 'gene' });
+      expect(component.geneSwatchOf('A')).not.toBe(component.geneSwatchOf('B')); // per gene again
+    });
+
+    it('draws each glyph for the picker and the gene rows', async () => {
+      dataset$.next(tiled);
+      await build(controls);
+      expect(component.glyphOptions).toHaveLength(10);
+      for (const o of component.glyphOptions) expect(component.glyphPoints(o.value)).toBe(o.points);
+    });
+
+    it('adds each cluster\'s marker genes as a gene group, each gene once', async () => {
+      const markerGenes = jest.fn(async () => ({
+        column: 'curated_cell_type',
+        groups: [
+          { name: 'T cell', cells: 10, genes: [
+            { name: 'CD3E', score: 2, pctIn: 0.8, pctOut: 0.1 },
+            { name: 'SHARED', score: 0.5, pctIn: 0.4, pctOut: 0.2 },
+          ] },
+          { name: 'Tumour', cells: 20, genes: [
+            { name: 'KRT5', score: 3, pctIn: 0.9, pctOut: 0.1 },
+            { name: 'SHARED', score: 1.5, pctIn: 0.6, pctOut: 0.2 },
+          ] },
+        ],
+      }));
+      (controls as unknown as { markerGenes: unknown }).markerGenes = markerGenes;
+      dataset$.next(tiled);
+      await build(controls);
+      view$.next({ ...view$.value, cellTypeColumn: 'curated_cell_type', transcriptGenes: ['EPCAM'] });
+      expect(component.canAddMarkers).toBe(true);
+      component.openMarkers();
+      expect(component.markerColumn).toBe('curated_cell_type'); // the cells' grouping
+      expect(component.markerClusters).toEqual(['T cell', 'Tumour']);
+      component.markerPerGroup = 10;
+      await component.addMarkerGenes();
+      expect(markerGenes).toHaveBeenCalledWith('curated_cell_type', 10);
+      expect(view$.value.transcriptGeneGroups).toEqual([
+        { name: 'T cell', genes: ['CD3E'] },
+        { name: 'Tumour', genes: ['KRT5', 'SHARED'] }, // SHARED goes where it scores higher
+      ]);
+      expect(view$.value.transcriptGenes).toEqual(['EPCAM', 'CD3E', 'KRT5', 'SHARED']);
+      expect(view$.value.transcriptColorBy).toBe('cluster'); // coloured by cluster from now on
+      expect(component.markersOpen).toBe(false);
+    });
+
+    it('applies the clusters picked when asked, even if the form changes while the scan runs', async () => {
+      let finish!: () => void;
+      (controls as unknown as { markerGenes: unknown }).markerGenes = jest.fn(() => new Promise((resolve) => {
+        finish = () => resolve({ column: 'graphclust', groups: [
+          { name: 'A', cells: 5, genes: [{ name: 'GA', score: 1, pctIn: 0.5, pctOut: 0.1 }] },
+          { name: 'B', cells: 5, genes: [{ name: 'GB', score: 1, pctIn: 0.5, pctOut: 0.1 }] },
+        ] });
+      }));
+      dataset$.next(tiled);
+      await build(controls);
+      component.openMarkers();
+      component.onMarkerColumn('graphclust');
+      component.markerClusters = ['A'];
+      const added = component.addMarkerGenes();
+      component.markerClusters = ['B']; // edited mid-scan
+      finish();
+      await added;
+      expect(view$.value.transcriptGeneGroups).toEqual([{ name: 'A', genes: ['GA'] }]);
+    });
+
+    it('adds only the clusters picked, and says so when none pass', async () => {
+      (controls as unknown as { markerGenes: unknown }).markerGenes = jest.fn(async () => ({
+        column: 'graphclust', groups: [{ name: 'A', cells: 5, genes: [] }, { name: 'B', cells: 5, genes: [] }],
+      }));
+      dataset$.next(tiled);
+      await build(controls);
+      component.openMarkers();
+      component.onMarkerColumn('graphclust');
+      component.markerClusters = ['A'];
+      await component.addMarkerGenes();
+      expect(component.markerError).toMatch(/No marker genes/);
+      expect(view$.value.transcriptGeneGroups).toEqual([]);
+    });
+
+    it('shows the renderer\'s per-gene counts in view, 0 for a gene with none', async () => {
+      const counts$ = new BehaviorSubject<Record<string, number> | null>(null);
+      (controls as unknown as { getGeneCountsInView$: unknown }).getGeneCountsInView$ = () => counts$;
+      dataset$.next(tiled);
+      await build(controls);
+      expect(component.geneCountOf('CD163')).toBeNull();
+      counts$.next({ CD163: 17 });
+      expect(component.geneCountOf('CD163')).toBe(17);
+      expect(component.geneCountOf('CD163L1')).toBe(0);
+    });
+
     it('patches the display settings', async () => {
       dataset$.next(tiled);
       await build(controls);

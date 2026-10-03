@@ -15,7 +15,7 @@
  */
 
 import type {
-  SpatialBounds, SpatialImageRef, SpatialTileLevel,
+  SpatialBounds, SpatialImageRef, SpatialTileLevel, SpatialTranscriptTile,
 } from '../contracts/spatial-dataset.contract';
 import type { SpatialViewState, TranscriptGlyphName } from '../contracts/display-types';
 import type { SpatialDataset } from '../contracts/spatial-dataset.contract';
@@ -202,6 +202,146 @@ export function transcriptLevelFor(
     }
   }
   return best;
+}
+
+/**
+ * The bin a selection of genes is grouped into at this zoom, in observation units, or null
+ * to draw every transcript. Bins follow the all-gene pyramid's ladder (`baseBin` × 2^m) so a
+ * gene selection and "all genes" group alike: the finest bin whose markers land at least
+ * `spacingPx` apart on screen. Once the finest bin is that wide, transcripts are drawn as
+ * themselves.
+ */
+export function geneBinSize(
+  pxPerUnit: number, baseBin: number, levels = 7, spacingPx = GROUP_MIN_SPACING_PX,
+): number | null {
+  if (!(pxPerUnit > 0) || !(baseBin > 0)) return null;
+  if (baseBin * pxPerUnit >= spacingPx) return null;
+  for (let m = 1; m < levels; m++) {
+    const bin = baseBin * 2 ** m;
+    if (bin * pxPerUnit >= spacingPx) return bin;
+  }
+  return baseBin * 2 ** (levels - 1);
+}
+
+/** The entries of `t` inside `rect` (observation units). */
+export function clipTranscripts(t: SpatialTranscriptTile, rect: DataRect): SpatialTranscriptTile {
+  const keep: number[] = [];
+  for (let i = 0; i < t.count; i++) {
+    if (t.x[i] >= rect.x0 && t.x[i] <= rect.x1 && t.y[i] >= rect.y0 && t.y[i] <= rect.y1) keep.push(i);
+  }
+  if (keep.length === t.count) return t;
+  const pick = <A extends Float32Array | Uint32Array | Uint16Array>(a: A): A => {
+    const out = new (a.constructor as new (n: number) => A)(keep.length);
+    keep.forEach((src, i) => { out[i] = a[src]; });
+    return out;
+  };
+  return {
+    count: keep.length, aggregated: t.aggregated,
+    x: pick(t.x), y: pick(t.y), z: pick(t.z), weight: pick(t.weight), observation: pick(t.observation),
+    gene: pick(t.gene),
+  };
+}
+
+/**
+ * Group transcripts into `bin`-wide squares of a grid anchored at the origin (so a pan does
+ * not move them), one entry per (group, square): `groupOf(gene slot)` says which group a gene
+ * is in — its cluster in the gene tree, or itself. Each entry sits at its transcripts'
+ * centroid, weighted by how many each stands for; it takes the gene and the cell holding most
+ * of them, each summed over all its transcripts in the entry. `group[i]` is entry i's group.
+ */
+export function groupTranscripts(
+  t: SpatialTranscriptTile, bin: number, groupOf: (geneSlot: number) => number = (g) => g,
+): { tile: SpatialTranscriptTile; group: Int32Array } {
+  const index = new Map<string, number>();
+  const sx: number[] = [];
+  const sy: number[] = [];
+  const sz: number[] = [];
+  const w: number[] = [];
+  const grp: number[] = [];
+  // Per entry, how many transcripts of each gene (the dominant one gives the icon and colour)
+  // and in each cell (the dominant one is the entry's cell).
+  const geneW: Map<number, number>[] = [];
+  const obsW: Map<number, number>[] = [];
+  for (let i = 0; i < t.count; i++) {
+    const gk = groupOf(t.gene[i]);
+    const key = `${gk}|${Math.floor(t.x[i] / bin)}|${Math.floor(t.y[i] / bin)}`;
+    let k = index.get(key);
+    const wi = t.weight[i] || 1;
+    if (k === undefined) {
+      k = w.length;
+      index.set(key, k);
+      sx.push(0); sy.push(0); sz.push(0); w.push(0);
+      grp.push(gk); geneW.push(new Map()); obsW.push(new Map());
+    }
+    sx[k] += t.x[i] * wi;
+    sy[k] += t.y[i] * wi;
+    sz[k] += t.z[i] * wi;
+    w[k] += wi;
+    geneW[k].set(t.gene[i], (geneW[k].get(t.gene[i]) ?? 0) + wi);
+    obsW[k].set(t.observation[i], (obsW[k].get(t.observation[i]) ?? 0) + wi);
+  }
+  const n = w.length;
+  const tile: SpatialTranscriptTile = {
+    count: n, aggregated: true,
+    x: new Float32Array(n), y: new Float32Array(n), z: new Float32Array(n),
+    weight: new Uint32Array(n), observation: new Uint32Array(n), gene: new Uint16Array(n),
+  };
+  const group = new Int32Array(n);
+  for (let k = 0; k < n; k++) {
+    tile.x[k] = sx[k] / w[k];
+    tile.y[k] = sy[k] / w[k];
+    tile.z[k] = sz[k] / w[k];
+    tile.weight[k] = w[k];
+    tile.observation[k] = dominant(obsW[k]);
+    tile.gene[k] = dominant(geneW[k]);
+    group[k] = grp[k];
+  }
+  return { tile, group };
+}
+
+/** The key with the largest total; the first seen on a tie. */
+function dominant(totals: Map<number, number>): number {
+  let best = 0;
+  let top = -1;
+  for (const [key, v] of totals) if (v > top) { top = v; best = key; }
+  return best;
+}
+
+/**
+ * The colour of each gene-tree cluster of a selection, for colouring transcripts by cluster: a
+ * cluster named like a group of the cells' grouping takes that group's colour (its cells and its
+ * transcripts agree); the others take palette colours in tree order. Clusters are the tree's
+ * groups holding a selected gene, then each ungrouped selected gene on its own. Every gene of a
+ * cluster gets the same colour — the tree's swatches and the markers use this one map.
+ */
+export function clusterColorMap(
+  genes: readonly string[], groups: readonly { name: string; genes: readonly string[] }[],
+  cellColors: ReadonlyMap<string, string>, palette: readonly string[],
+): Map<string, string> {
+  const chosen = new Set(genes);
+  const names: string[] = [];
+  const grouped = new Set<string>();
+  for (const g of groups) {
+    const mine = g.genes.filter((x) => chosen.has(x) && !grouped.has(x));
+    if (!mine.length) continue;
+    mine.forEach((x) => grouped.add(x));
+    names.push(g.name);
+  }
+  for (const gene of genes) if (!grouped.has(gene)) names.push(gene);
+  const out = new Map<string, string>();
+  let k = 0;
+  for (const name of names) {
+    if (out.has(name)) continue;
+    out.set(name, cellColors.get(name) ?? palette[k++ % palette.length]);
+  }
+  return out;
+}
+
+/** The cluster a selected gene is in: its first gene-tree group holding it, else itself. */
+export function clusterOfGene(
+  gene: string, groups: readonly { name: string; genes: readonly string[] }[],
+): string {
+  return groups.find((g) => g.genes.includes(gene))?.name ?? gene;
 }
 
 /** Smallest and largest transcript marker, in canvas pixels. */

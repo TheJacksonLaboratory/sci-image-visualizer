@@ -10,8 +10,10 @@
 //
 // GEOMETRY
 //   Source tiles are 10x's 250 µm level-0 grid. The finest bin is 250/128 µm (1.95 µm) so
-//   every level's bins nest inside the source tiles: levels m = 0..6 have bins of
-//   1.95 · 2^m µm (1.95 … 125 µm). Each level is stored in tiles of 64 × 64 bins.
+//   every level's bins nest inside the source tiles: levels m = 0..L-1 have bins of
+//   1.95 · 2^m µm. L defaults to 7 (1.95 … 125 µm); prepare-xenium builds one level per
+//   level of the dataset's image pyramid (8 for the cervical bundle: up to 250 µm). Each
+//   level is stored in tiles of 64 × 64 bins.
 //   Coordinates are relative to `origin`, the near corner of the lowest source tile.
 //
 // ON DISK  (<out>/)
@@ -25,15 +27,21 @@
 //   (Cloud Build against the GCS copy); the result is a few hundred MB.
 
 import { createWriteStream } from 'node:fs';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { openXeniumSource, readAllTranscripts, BIN_RECORD } from '../spatial-xenium.mjs';
 
+export { isLocalSource, transcriptPyramidName } from './pyramid-name.mjs';
+export { TOP_CELLS, addCell, topCell } from './cell-summary.mjs';
+import { TOP_CELLS, addCell, topCell } from './cell-summary.mjs';
+import { createGeneLevels } from './gene-index.mjs';
+
 const SOURCE_TILE = 250;
 const BASE_PER_SOURCE = 128;
 const TILE_BINS = 64;
-const LEVELS = 7;
+/** Levels when nothing says otherwise; a build next to an image pyramid matches its levels. */
+export const DEFAULT_LEVELS = 7;
 const NO_CELL = 0xffffffff;
 const CELL_SHIFT = 2 ** 20; // cell index + 1 fits below this (717k cells)
 
@@ -114,51 +122,27 @@ function binSourceTile(t, gx, gy, baseBin) {
   return { count, sx, sy, cell, runs };
 }
 
-/** Cells a coarse bin tracks (Space-Saving): exact for bins with at most this many cells. */
-export const TOP_CELLS = 4;
 
 /**
- * Add `n` transcripts of `cell` to the top-cells summary at `slot` (TOP_CELLS entries of
- * `cand`/`candN` from `slot * TOP_CELLS`). Space-Saving: a new cell replaces the smallest
- * entry and inherits its count, so a cell holding a real share of the bin is never lost.
+ * How many levels the image pyramid in `dir` has (its `descriptor.json`), or null — so the
+ * transcript pyramid can offer one level per image level.
  */
-export function addCell(cand, candN, slot, cell, n) {
-  const at = slot * TOP_CELLS;
-  let min = at;
-  for (let i = at; i < at + TOP_CELLS; i++) {
-    if (cand[i] === cell) {
-      candN[i] += n;
-      return;
-    }
-    if (cand[i] === NO_CELL) {
-      cand[i] = cell;
-      candN[i] = n;
-      return;
-    }
-    if (candN[i] < candN[min]) min = i;
+export async function imagePyramidLevels(dir) {
+  try {
+    const d = JSON.parse(await readFile(path.join(dir, 'descriptor.json'), 'utf8'));
+    return Array.isArray(d.levels) && d.levels.length > 0 ? d.levels.length : null;
+  } catch {
+    return null;
   }
-  cand[min] = cell;
-  candN[min] += n;
 }
 
-/** The cell with the most transcripts in the summary at `slot`, or NO_CELL. */
-export function topCell(cand, candN, slot) {
-  const at = slot * TOP_CELLS;
-  let best = NO_CELL;
-  let most = 0;
-  for (let i = at; i < at + TOP_CELLS; i++) {
-    if (cand[i] !== NO_CELL && candN[i] > most) {
-      most = candN[i];
-      best = cand[i];
-    }
-  }
-  return best;
-}
-
-/** Build the pyramid for `source` into `outDir`. */
+/** Build the pyramid for `source` into `outDir`, with `levels` levels (base bin doubling each). */
 export async function buildTranscriptIndex(
   source, outDir,
-  { concurrency = 4, log = console.log, limitTiles = Infinity, dataset = null, onProgress } = {},
+  {
+    concurrency = 4, log = console.log, limitTiles = Infinity, dataset = null, onProgress,
+    levels = DEFAULT_LEVELS, geneLevels = false,
+  } = {},
 ) {
   const ds = dataset ?? await openXeniumSource(source);
   // `limitTiles` builds a partial pyramid over the first tiles only — for testing.
@@ -176,7 +160,7 @@ export async function buildTranscriptIndex(
   // block per output tile, allocated when a transcript first lands in it — so memory follows
   // the tissue, not the bounding rectangle with all its empty space.
   const dense = [];
-  for (let m = 1; m < LEVELS; m++) {
+  for (let m = 1; m < levels; m++) {
     dense[m] = { w: Math.ceil(baseW / 2 ** m), h: Math.ceil(baseH / 2 ** m), blocks: new Map() };
   }
   const BLOCK = TILE_BINS * TILE_BINS;
@@ -195,6 +179,11 @@ export async function buildTranscriptIndex(
 
   await mkdir(outDir, { recursive: true });
   const base = levelWriter(path.join(outDir, 'L0.bin'));
+  // Per-gene levels (genes/), in the same pass: a selection of genes drawn at any zoom.
+  const genes = geneLevels ? await createGeneLevels({
+    outDir: path.join(outDir, 'genes'), levels, baseBin, sourceTile: SOURCE_TILE,
+    basePerSource: BASE_PER_SOURCE, tileBins: TILE_BINS, gxMin, gyMin, geneNames: ds.geneNames,
+  }) : null;
   let total = 0;
   let done = 0;
   const t0 = Date.now();
@@ -230,7 +219,7 @@ export async function buildTranscriptIndex(
     for (let b = 0; b < count.length; b++) {
       const c = count[b];
       if (!c) continue;
-      for (let m = 1; m < LEVELS; m++) {
+      for (let m = 1; m < levels; m++) {
         const [B, k] = coarse(b, m);
         B.count[k] += c;
         B.sx[k] += sx[b];
@@ -238,7 +227,7 @@ export async function buildTranscriptIndex(
       }
     }
     for (let r = 0; r < runs.bin.length; r++) {
-      for (let m = 1; m < LEVELS; m++) {
+      for (let m = 1; m < levels; m++) {
         const [B, k] = coarse(runs.bin[r], m);
         addCell(B.cand, B.candN, k, runs.cell[r], runs.n[r]);
       }
@@ -261,16 +250,17 @@ export async function buildTranscriptIndex(
       const k = keys[next++];
       const t = await readAllTranscripts(ds, k[0], k[1]);
       const binned = binSourceTile(t, k[0], k[1], baseBin);
-      writing = writing.then(() => emit(k, t.n, binned));
+      writing = writing.then(() => emit(k, t.n, binned))
+        .then(() => genes?.addSourceTile(k[0], k[1], t));
       await writing;
     }
   }));
   await base.close();
 
-  const levels = [{
+  const levelMeta = [{
     bin: baseBin, tileSize: baseBin * TILE_BINS, file: 'L0.bin', tiles: base.tiles,
   }];
-  for (let m = 1; m < LEVELS; m++) {
+  for (let m = 1; m < levels; m++) {
     const L = dense[m];
     const file = `L${m}.bin`;
     const w = levelWriter(path.join(outDir, file));
@@ -293,11 +283,15 @@ export async function buildTranscriptIndex(
     }
     await w.close();
     const bin = baseBin * 2 ** m;
-    levels.push({ bin, tileSize: bin * TILE_BINS, file, tiles: w.tiles });
+    levelMeta.push({ bin, tileSize: bin * TILE_BINS, file, tiles: w.tiles });
   }
 
-  const index = { version: 1, origin, baseBin, tileBins: TILE_BINS, total, levels };
+  if (genes) {
+    await genes.finish(origin);
+    log('[transcript-index] per-gene levels written');
+  }
+  const index = { version: 1, origin, baseBin, tileBins: TILE_BINS, total, levels: levelMeta };
   await writeFile(path.join(outDir, 'index.json'), JSON.stringify(index));
-  log(`[transcript-index] done: ${total} transcripts, ${levels.length} levels -> ${outDir}`);
+  log(`[transcript-index] done: ${total} transcripts, ${levelMeta.length} levels -> ${outDir}`);
   return index;
 }
