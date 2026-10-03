@@ -100,6 +100,13 @@ export interface PlotModeViewport {
   /** Same rect, emitted once the viewport settles (existing getViewportChange$ semantics).
    *  A new subscriber first receives the current rect when the viewport is ready. */
   settled$: Observable<PlotModeRect>;
+  /**
+   * Pan and zoom so a level-0 image rect fills the view (within the viewer's zoom
+   * constraints), e.g. to take the user to a region a mode proposes. Animated unless
+   * `immediately`. A no-op while the viewport is not ready. Optional: backends without
+   * a 2D image viewport leave it out, so callers feature-detect it.
+   */
+  fitBounds?(rect: PlotModeRect, options?: { immediately?: boolean }): void;
 }
 
 /** The class a {@link PlotModeTools.armBrush} stroke paints. */
