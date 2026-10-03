@@ -606,6 +606,34 @@ describe('VisualizerComponent (UI shell)', () => {
           expect.objectContaining({ fileName: 'spatial:xenium', urls: [] }), expect.any(Number), PlotType.SPATIAL_OMICS);
       });
 
+      it('a superseded image-less draw leaves the newer render\'s loading state alone', async () => {
+        let finish!: (ok: boolean) => void;
+        plotService.plot = jest.fn(() => new Promise<boolean>((resolve) => { finish = resolve; }));
+        const c = makeComponent(plotService, port);
+        (c as any).imageInfo = undefined;
+        (c as any).watchSpatialDataset();
+        dataset$.next({ id: 'one', name: 'One', observations: { count: 3 }, columns: [] });
+        await flush();
+        (c as any).renderToken++; // a newer image starts rendering
+        const state = (c as any).state;
+        state.setImageLoading.mockClear();
+        finish(true);
+        await flush();
+        expect(state.setImageLoading).not.toHaveBeenCalledWith(false);
+      });
+
+      it('says so when the renderer cannot draw an image-less dataset, rather than look finished', async () => {
+        plotService.plot = jest.fn(async () => false); // napari without WebGPU resolves false
+        const c = makeComponent(plotService, port);
+        (c as any).imageInfo = undefined;
+        (c as any).watchSpatialDataset();
+        dataset$.next({ id: 'one', name: 'One', observations: { count: 3 }, columns: [] });
+        await flush();
+        expect((c as any).messageService.add).toHaveBeenCalledWith(
+          expect.objectContaining({ severity: 'error', summary: 'Could not draw the dataset' }));
+        expect((c as any).state.setImageLoading).toHaveBeenLastCalledWith(false);
+      });
+
       it('re-plots when another image-less dataset follows in the same mode', async () => {
         // Its placeholder image info keys the regions: without a re-plot the first dataset's
         // regions would show on, and be saved under, the second.

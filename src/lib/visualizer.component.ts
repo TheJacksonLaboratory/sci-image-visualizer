@@ -1604,20 +1604,40 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * dataset, so regions drawn here are kept per dataset like any image's.
    */
   private async plotSpatialWithoutImage(dataset: SpatialDataset): Promise<void> {
+    // The same generation as the image pipeline: a newer image or dataset supersedes this
+    // draw, and a superseded draw neither reports nor releases the newer one's loading state.
+    const token = ++this.renderToken;
     const div = document.getElementById(this.plotDivName);
     const info: IImageInfo = {
       isGrayscale: false, trueImageSize: [0, 0], urls: [], isStack: false, showStack: false,
       scaleRatio: true, fileName: `spatial:${dataset.id}`, imageMeta: [],
     };
+    let failure: unknown = null;
     try {
-      await this.plotService.plot(this.plotDivName, null, info, div?.offsetHeight || 500, this.plotType);
+      // A backend that cannot draw (no WebGPU, no plot target) resolves false rather than throwing.
+      if (!(await this.plotService.plot(this.plotDivName, null, info, div?.offsetHeight || 500, this.plotType))) {
+        failure = 'the renderer could not start';
+      }
     } catch (err) {
-      console.warn('[visualizer] could not draw the spatial dataset', err);
-    } finally {
-      this.state.setImageLoading(false);
-      this.cdr.detectChanges();
+      failure = err;
     }
+    if (token !== this.renderToken) return;
+    if (failure) {
+      console.warn('[visualizer] could not draw the spatial dataset', failure);
+      const e = failure as { message?: string };
+      this.messageService.add({
+        key: this.vizAlertToastKey,
+        severity: 'error',
+        summary: 'Could not draw the dataset',
+        // An image-less dataset has no tissue image to fall back on, so say so rather than
+        // leave an empty canvas that looks finished.
+        detail: `${dataset.name ?? dataset.id}: ${e?.message ?? String(failure)}.`,
+      });
+    }
+    this.state.setImageLoading(false);
+    this.cdr.detectChanges();
   }
+
   cancelLoading() {
     // Stop any in-flight frame streaming (napari-js volume/surface preload) so the fetch loops
     // actually abort — clearing the flag alone only routed to Plotly and left napari fetching.
