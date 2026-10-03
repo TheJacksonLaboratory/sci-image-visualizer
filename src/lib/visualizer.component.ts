@@ -19,6 +19,7 @@ import {
   getPlotTypeDescriptor,
   isBuiltinPlotType,
   isNapari3d,
+  isSpatialOmics,
   isSpatialOmics3d,
   rendererOwnsWheel,
   NAPARI_DEFAULT_DECIMATE,
@@ -400,6 +401,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   /** Whether a spatial-omics dataset is currently published on
    *  `SPATIAL_DATA_PORT` — gates the spatial plot types in the selector. */
   private hasSpatialDataset = false;
+  /** The spatial dataset on offer, for drawing one that brings no image (see reloadAndPlot). */
+  private spatialDataset: SpatialDataset | null = null;
   /** Whether that dataset's observations carry a z, gating the 3D spatial mode. */
   private hasSpatial3dDataset = false;
   /** Whether it carries a registered volume. Change detection only: a volume
@@ -515,6 +518,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    */
   private watchSpatialDataset(): void {
     this.spatialDatasetSubscription = this.spatialData?.getDataset$().subscribe((dataset) => {
+      this.spatialDataset = dataset ?? null;
       const has = !!dataset;
       // Only a dataset whose observations carry a z can be drawn as a cloud, so
       // the 3D mode is gated on the coordinates, not merely on a dataset being
@@ -1581,8 +1585,33 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // empty/old urls, failing to hand the div over to the new renderer.
     if (this.imageInfo) {
       this.state.setImageInfo(this.imageInfo);
+    } else if (this.spatialDataset && (isSpatialOmics(this.plotType) || isSpatialOmics3d(this.plotType))) {
+      // A spatial dataset that brings no image, opened with no image loaded (a host's
+      // first view): there is no image info to re-drive, so draw the spatial mode itself.
+      void this.plotSpatialWithoutImage(this.spatialDataset);
     } else {
       this.plotService.reloadAndPlot();
+    }
+  }
+
+  /**
+   * Draw a spatial mode with no image behind it: the observations alone, framed on their own
+   * extent, as the seqFISH example shows them. The image info is a placeholder naming the
+   * dataset, so regions drawn here are kept per dataset like any image's.
+   */
+  private async plotSpatialWithoutImage(dataset: SpatialDataset): Promise<void> {
+    const div = document.getElementById(this.plotDivName);
+    const info: IImageInfo = {
+      isGrayscale: false, trueImageSize: [0, 0], urls: [], isStack: false, showStack: false,
+      scaleRatio: true, fileName: `spatial:${dataset.id}`, imageMeta: [],
+    };
+    try {
+      await this.plotService.plot(this.plotDivName, null, info, div?.offsetHeight || 500, this.plotType);
+    } catch (err) {
+      console.warn('[visualizer] could not draw the spatial dataset', err);
+    } finally {
+      this.state.setImageLoading(false);
+      this.cdr.detectChanges();
     }
   }
   cancelLoading() {

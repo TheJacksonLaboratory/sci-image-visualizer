@@ -2158,6 +2158,22 @@ describe('NapariVisualizerService', () => {
         spy.mockRestore();
       });
 
+      it('draws the observations with no image loaded at all, never asking for one', async () => {
+        // A host's first view can be an image-less dataset (jit-ui opening a Xenium zip): the
+        // visualizer then plots with no loaded image, and there is nothing to render under it.
+        const render = jest.spyOn(service as unknown as { renderImage(z: number): Promise<void> }, 'renderImage');
+        document.getElementById('spatial-host')?.remove();
+        const div = document.createElement('div');
+        div.id = 'spatial-host';
+        document.body.appendChild(div);
+        dataset$.next(spatialDataset());
+        await service.plot('spatial-host', null, imageInfo(), 600, PlotType.SPATIAL_OMICS);
+        await flush();
+        expect(render).not.toHaveBeenCalled();
+        expect(addPoints).toHaveBeenCalled();
+        render.mockRestore();
+      });
+
       it('asks for a redraw, or the change would not be on screen until something else did', () => {
         const { viewer } = scene();
         hide(viewer, false);

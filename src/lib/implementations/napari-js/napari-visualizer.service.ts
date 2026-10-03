@@ -884,7 +884,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       if (isSpatialOmics3d(plotType)) {
         await this.mountSpatialOmics3d(viewer, host);
       } else if (isSpatialOmics(plotType)) {
-        await this.mountSpatialOmics(viewer, host, z);
+        // No loaded image: an image-less dataset opened before any image (the visualizer's
+        // plotSpatialWithoutImage) — the observations alone.
+        await this.mountSpatialOmics(viewer, host, z, imageLoaded == null);
       } else if (isNapariScatter(plotType)) {
         await this.mountScatter(viewer, host, z);
       } else if (isNapariScatter3d(plotType)) {
@@ -1839,8 +1841,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    * exactly as the plain image view does. That is NOT optional here: this mode's selection is
    * driven by drawn ROIs, so without the overlay there is no way to make a selection at all.
    */
-  private async mountSpatialOmics(viewer: Viewer, host: HTMLElement, z: number): Promise<void> {
-    await this.renderImage(z);
+  private async mountSpatialOmics(viewer: Viewer, host: HTMLElement, z: number, noImage = false): Promise<void> {
+    // With no image loaded there is nothing to render under the observations; they are
+    // framed on their own extent, as for any dataset that brings no image.
+    if (!noImage) await this.renderImage(z);
     // Only fit to the image when this dataset actually has one. Otherwise there is
     // nothing to fit, `imageW`/`imageH` still hold the LAST image's dimensions, and
     // this fits to those — and because it defers to a frame, it lands AFTER the points
@@ -1849,7 +1853,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     if (this.spatialLatest?.[0]?.imageRef) this.fitCameraSoon();
     this.subscribeDisplayState();
     this.installScaleBar();
-    this.installNavigator(z);
+    if (!noImage) this.installNavigator(z);
     this.install2dInteraction(viewer, host);
     this.installSpatialHover(host);
     this.spatialTiles()?.attach(viewer);

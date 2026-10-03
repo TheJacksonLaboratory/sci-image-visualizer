@@ -29,6 +29,17 @@ describe('PlotlyService', () => {
     expect(service).toBeTruthy();
   });
 
+  it('a re-plot before anything was plotted stops the spinner instead of throwing', () => {
+    // A host's first view can be an image-less spatial dataset: no image size was ever set.
+    type State = { setImageLoading(v: boolean): void; setImageInfo(i: unknown): void };
+    const state = (service as unknown as { state: State }).state;
+    const loading = jest.spyOn(state, 'setImageLoading');
+    const info = jest.spyOn(state, 'setImageInfo');
+    expect(() => service.reloadAndPlot()).not.toThrow();
+    expect(loading).toHaveBeenCalledWith(false);
+    expect(info).not.toHaveBeenCalled();
+  });
+
 });
 
 describe('PlotlyService load and plot image', () => {

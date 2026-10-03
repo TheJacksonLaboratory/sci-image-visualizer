@@ -589,6 +589,23 @@ describe('VisualizerComponent (UI shell)', () => {
         expect(plotService.setPlotType).not.toHaveBeenCalledWith(PlotType.SPATIAL_OMICS_3D);
       });
 
+      it('draws an image-less dataset when no image was ever loaded (a host\'s first view)', async () => {
+        // jit-ui opens a Xenium zip straight from the file tree: no image has been loaded, so
+        // there is no image info to re-drive. Redrawing through the renderer's own state threw
+        // from Plotly's never-set image size and left a white canvas.
+        plotService.plot = jest.fn(async () => true);
+        plotService.reloadAndPlot = jest.fn();
+        const c = makeComponent(plotService, port);
+        (c as any).imageInfo = undefined;
+        (c as any).watchSpatialDataset();
+        dataset$.next({ id: 'xenium', name: 'Cervical', observations: { count: 3 }, columns: [] });
+        await flush();
+
+        expect(plotService.reloadAndPlot).not.toHaveBeenCalled();
+        expect(plotService.plot).toHaveBeenCalledWith(expect.any(String), null,
+          expect.objectContaining({ fileName: 'spatial:xenium', urls: [] }), expect.any(Number), PlotType.SPATIAL_OMICS);
+      });
+
       it('leaves a dataset that HAS an image alone, to be drawn over it', async () => {
         // With a tissue image the host has already opened on it, and the observations
         // register onto that section — switching the type here would fight the host.
