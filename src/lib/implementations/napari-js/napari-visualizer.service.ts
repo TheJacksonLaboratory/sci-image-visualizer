@@ -1852,8 +1852,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // dataset as a ten-pixel speck off to one side.
     if (this.spatialLatest?.[0]?.imageRef) this.fitCameraSoon();
     this.subscribeDisplayState();
-    this.installScaleBar();
-    if (!noImage) this.installNavigator(z);
+    // The scale bar and navigator describe an image; with none loaded, whatever they would
+    // read is left over from the last one.
+    if (!noImage) {
+      this.installScaleBar();
+      this.installNavigator(z);
+    }
     this.install2dInteraction(viewer, host);
     this.installSpatialHover(host);
     this.spatialTiles()?.attach(viewer);

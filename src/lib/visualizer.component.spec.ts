@@ -606,6 +606,22 @@ describe('VisualizerComponent (UI shell)', () => {
           expect.objectContaining({ fileName: 'spatial:xenium', urls: [] }), expect.any(Number), PlotType.SPATIAL_OMICS);
       });
 
+      it('re-plots when another image-less dataset follows in the same mode', async () => {
+        // Its placeholder image info keys the regions: without a re-plot the first dataset's
+        // regions would show on, and be saved under, the second.
+        plotService.plot = jest.fn(async () => true);
+        const c = makeComponent(plotService, port);
+        (c as any).imageInfo = undefined;
+        (c as any).watchSpatialDataset();
+        dataset$.next({ id: 'one', name: 'One', observations: { count: 3 }, columns: [] });
+        await flush();
+        dataset$.next({ id: 'two', name: 'Two', observations: { count: 3 }, columns: [] });
+        await flush();
+
+        expect((plotService.plot as jest.Mock).mock.calls.map((call) => call[2].fileName))
+          .toEqual(['spatial:one', 'spatial:two']);
+      });
+
       it('leaves a dataset that HAS an image alone, to be drawn over it', async () => {
         // With a tissue image the host has already opened on it, and the observations
         // register onto that section — switching the type here would fight the host.

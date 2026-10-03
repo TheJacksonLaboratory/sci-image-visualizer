@@ -578,6 +578,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
           // it, image-less meant 3D.
           const target = has3d ? PlotType.SPATIAL_OMICS_3D : PlotType.SPATIAL_OMICS;
           if (this.selectedPlotTypeId !== target) this.onSelectPlotType(target);
+          // Same mode, another image-less dataset, nothing loaded: re-plot so its placeholder
+          // image info (and with it the regions' key) is this dataset's, not the last one's.
+          else if (!this.imageInfo) this.reloadAndPlot();
         }
       }
       // Clearing the dataset while a spatial mode is active leaves a type that is
