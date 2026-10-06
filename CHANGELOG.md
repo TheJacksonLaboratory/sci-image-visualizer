@@ -9,6 +9,24 @@ file was added.
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-10-06
+
+An image-less spatial dataset opened as a host's first view is drawn, not left as a white
+canvas.
+
+### Fixed
+
+- **An image-less spatial dataset opened first** (jit-ui opening a Xenium zip from the file
+  tree, with no image loaded) is drawn in its spatial mode instead of throwing in Plotly's
+  re-plot. Regions are kept per dataset under the placeholder file name `spatial:<id>`.
+- **napari's Spatial omics mode** renders no image and adds no navigator when no image was
+  loaded; the observations are framed on their own extent, as for seqFISH.
+- **The plot-type dropdown** shows when a spatial dataset is on offer, not only with an image.
+- **A following image-less dataset** in the same mode re-plots, so regions follow it, and no
+  scale bar is drawn without an image.
+- **An image-less draw is superseded** by a newer image or dataset like any render, and a
+  renderer that fails shows an error toast instead of an empty canvas.
+
 ## [0.8.0] — 2026-10-02
 
 The Transcripts gene tree works like Xenium Explorer's: genes grouped under the cell
@@ -1870,7 +1888,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.5.0...v0.6.0
