@@ -19,6 +19,7 @@ import {
   getPlotTypeDescriptor,
   isBuiltinPlotType,
   isNapari3d,
+  isSpatialOmics,
   isSpatialOmics3d,
   rendererOwnsWheel,
   NAPARI_DEFAULT_DECIMATE,
@@ -399,7 +400,10 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
 
   /** Whether a spatial-omics dataset is currently published on
    *  `SPATIAL_DATA_PORT` — gates the spatial plot types in the selector. */
-  private hasSpatialDataset = false;
+  /** Bound by the toolbar, which offers the plot modes for a dataset with no image too. */
+  hasSpatialDataset = false;
+  /** The spatial dataset on offer, for drawing one that brings no image (see reloadAndPlot). */
+  private spatialDataset: SpatialDataset | null = null;
   /** Whether that dataset's observations carry a z, gating the 3D spatial mode. */
   private hasSpatial3dDataset = false;
   /** Whether it carries a registered volume. Change detection only: a volume
@@ -515,6 +519,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    */
   private watchSpatialDataset(): void {
     this.spatialDatasetSubscription = this.spatialData?.getDataset$().subscribe((dataset) => {
+      this.spatialDataset = dataset ?? null;
       const has = !!dataset;
       // Only a dataset whose observations carry a z can be drawn as a cloud, so
       // the 3D mode is gated on the coordinates, not merely on a dataset being
@@ -574,6 +579,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
           // it, image-less meant 3D.
           const target = has3d ? PlotType.SPATIAL_OMICS_3D : PlotType.SPATIAL_OMICS;
           if (this.selectedPlotTypeId !== target) this.onSelectPlotType(target);
+          // Same mode, another image-less dataset, nothing loaded: re-plot so its placeholder
+          // image info (and with it the regions' key) is this dataset's, not the last one's.
+          else if (!this.imageInfo) this.reloadAndPlot();
         }
       }
       // Clearing the dataset while a spatial mode is active leaves a type that is
@@ -1581,10 +1589,55 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // empty/old urls, failing to hand the div over to the new renderer.
     if (this.imageInfo) {
       this.state.setImageInfo(this.imageInfo);
+    } else if (this.spatialDataset && (isSpatialOmics(this.plotType) || isSpatialOmics3d(this.plotType))) {
+      // A spatial dataset that brings no image, opened with no image loaded (a host's
+      // first view): there is no image info to re-drive, so draw the spatial mode itself.
+      void this.plotSpatialWithoutImage(this.spatialDataset);
     } else {
       this.plotService.reloadAndPlot();
     }
   }
+
+  /**
+   * Draw a spatial mode with no image behind it: the observations alone, framed on their own
+   * extent, as the seqFISH example shows them. The image info is a placeholder naming the
+   * dataset, so regions drawn here are kept per dataset like any image's.
+   */
+  private async plotSpatialWithoutImage(dataset: SpatialDataset): Promise<void> {
+    // The same generation as the image pipeline: a newer image or dataset supersedes this
+    // draw, and a superseded draw neither reports nor releases the newer one's loading state.
+    const token = ++this.renderToken;
+    const div = document.getElementById(this.plotDivName);
+    const info: IImageInfo = {
+      isGrayscale: false, trueImageSize: [0, 0], urls: [], isStack: false, showStack: false,
+      scaleRatio: true, fileName: `spatial:${dataset.id}`, imageMeta: [],
+    };
+    let failure: unknown = null;
+    try {
+      // A backend that cannot draw (no WebGPU, no plot target) resolves false rather than throwing.
+      if (!(await this.plotService.plot(this.plotDivName, null, info, div?.offsetHeight || 500, this.plotType))) {
+        failure = 'the renderer could not start';
+      }
+    } catch (err) {
+      failure = err;
+    }
+    if (token !== this.renderToken) return;
+    if (failure) {
+      console.warn('[visualizer] could not draw the spatial dataset', failure);
+      const e = failure as { message?: string };
+      this.messageService.add({
+        key: this.vizAlertToastKey,
+        severity: 'error',
+        summary: 'Could not draw the dataset',
+        // An image-less dataset has no tissue image to fall back on, so say so rather than
+        // leave an empty canvas that looks finished.
+        detail: `${dataset.name ?? dataset.id}: ${e?.message ?? String(failure)}.`,
+      });
+    }
+    this.state.setImageLoading(false);
+    this.cdr.detectChanges();
+  }
+
   cancelLoading() {
     // Stop any in-flight frame streaming (napari-js volume/surface preload) so the fetch loops
     // actually abort — clearing the flag alone only routed to Plotly and left napari fetching.

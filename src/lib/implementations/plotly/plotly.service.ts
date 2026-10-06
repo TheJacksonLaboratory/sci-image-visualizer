@@ -1487,6 +1487,12 @@ export class PlotlyService implements IVisualizer {
   }
 
   private setImageInfo(showStack?: boolean, scaleratio?: boolean) {
+    // Nothing plotted yet (a host's first view is an image-less spatial dataset): there is no
+    // image to describe, so nothing to re-plot — stop the spinner rather than throw.
+    if (!this.trueImgSize) {
+      this.state.setImageLoading(false);
+      return;
+    }
     // Build a partial image descriptor and push it to the host via the port.
     const imgInfo: Partial<IImageInfo> = {
       isGrayscale: this.imageInfo?.isGrayscale,
