@@ -9,6 +9,20 @@ file was added.
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-10-08
+
+An image-less spatial dataset is drawn when the host creates the visualizer after publishing
+it, as jit-ui does when a dataset is opened from its file tree.
+
+### Fixed
+
+- **"Could not draw the dataset … the renderer could not start"** with
+  `[napari-js] plot target #viz-plot-N not found`: the spatial port replays its dataset into
+  `ngOnInit`, before the plot div exists, and the image-less draw ran then. It now waits for
+  `ngAfterViewInit`, and runs only if that dataset is still the one on offer with no image.
+- **A waiting draw survives the same dataset being re-emitted** as a new object (a colour-column
+  change) before the view exists: it is kept by id and draws the latest object.
+
 ## [0.8.1] — 2026-10-06
 
 An image-less spatial dataset opened as a host's first view is drawn, not left as a white
@@ -1888,7 +1902,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.6.0...v0.7.0
