@@ -459,6 +459,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private loadingBadge: NapariLoadingBadge | null = null;
   private tileLoading: string[] = [];
   private observationsLoading = 0;
+  /** Image tiles in flight, and the scene they belong to: a fetch that outlives {@link reset}
+   *  settles against the old generation and leaves the new scene's count alone. */
+  private imageTilesLoading = 0;
+  private imageTilesGeneration = 0;
   /** Monotonic load generation. Bumped by {@link reset} and {@link cancelLoading}; the frame-loading
    *  loops (volume assembly, surface preload) capture it and bail when it changes, so a Cancel (or a
    *  new plot) actually stops fetching frames instead of running to completion in the background. */
@@ -1170,16 +1174,27 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       fetchTile: async (key: TileKey): Promise<PixelChunk> => {
         const res = usable[key.level]?.res ?? key.level;
         const url = `${api}tile?info=${infoB64}&res=${res}&col=${key.col}&row=${key.row}&z=${key.z}&tileSize=${tileSize}${ch}`;
-        const headers = await this.tiles
-          .getAuthHeaders()
-          .catch(() => ({}) as Record<string, string>);
-        const resp = await fetch(url, { headers });
-        if (!resp.ok) {
-          throw new Error(`[napari-js] tile ${key.level}/${key.col}/${key.row} → ${resp.status}`);
+        // "Image reloading…" on the loading badge while any tile of the image is in flight.
+        const generation = this.imageTilesGeneration;
+        this.imageTilesLoading++;
+        this.showLoading();
+        try {
+          const headers = await this.tiles
+            .getAuthHeaders()
+            .catch(() => ({}) as Record<string, string>);
+          const resp = await fetch(url, { headers });
+          if (!resp.ok) {
+            throw new Error(`[napari-js] tile ${key.level}/${key.col}/${key.row} → ${resp.status}`);
+          }
+          const bmp = await createImageBitmap(await resp.blob());
+          if (channels === 4) return { width: bmp.width, height: bmp.height, data: bmp };
+          return this.bitmapToLuminance(bmp);
+        } finally {
+          if (generation === this.imageTilesGeneration) {
+            this.imageTilesLoading--;
+            this.showLoading();
+          }
         }
-        const bmp = await createImageBitmap(await resp.blob());
-        if (channels === 4) return { width: bmp.width, height: bmp.height, data: bmp };
-        return this.bitmapToLuminance(bmp);
       },
     };
   }
@@ -1337,7 +1352,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private showLoading(): void {
     if (!this.host) return;
     this.loadingBadge ??= new NapariLoadingBadge(this.host);
-    this.loadingBadge.set([...(this.observationsLoading > 0 ? ['Observations'] : []), ...this.tileLoading]);
+    this.loadingBadge.set([
+      ...(this.imageTilesLoading > 0 ? ['Image'] : []),
+      ...(this.observationsLoading > 0 ? ['Observations'] : []),
+      ...this.tileLoading,
+    ]);
   }
 
   private installNavigator(z: number): void {
@@ -4025,6 +4044,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.loadingBadge = null;
     this.tileLoading = [];
     this.observationsLoading = 0;
+    this.imageTilesLoading = 0;
+    this.imageTilesGeneration++;
     this.regionOverlay?.destroy();
     this.regionOverlay = null;
     this.axesLabels?.destroy();

@@ -285,6 +285,56 @@ describe('NapariVisualizerService', () => {
     expect(await service.plot('nope', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE)).toBe(false);
   });
 
+  describe('image tiles on the loading badge', () => {
+    type Internals = {
+      host: HTMLElement | null;
+      loadingBadge: { text: string } | null;
+      buildTiledSource(desc: unknown, channel: number | undefined, channels: 1 | 4): {
+        fetchTile(key: { level: number; col: number; row: number; z: number }): Promise<unknown>;
+      };
+    };
+    const desc = { width: 64, height: 48, tileSize: 512, levels: [{ res: 0, width: 64, height: 48 }] };
+    const key = { level: 0, col: 0, row: 0, z: 0 };
+    let release: () => void;
+    let internals: Internals;
+
+    beforeEach(() => {
+      internals = service as unknown as Internals;
+      internals.host = document.createElement('div');
+      // Hold the tile's response until the test releases it.
+      (globalThis.fetch as jest.Mock).mockImplementation(
+        () => new Promise((resolve) => {
+          release = () => resolve({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) });
+        }),
+      );
+    });
+
+    it('says the image is reloading while a tile is in flight, and stops once it lands', async () => {
+      const tile = internals.buildTiledSource(desc, undefined, 4).fetchTile(key);
+      await Promise.resolve();
+      expect(internals.loadingBadge?.text).toBe('Image reloading…');
+      release();
+      await tile;
+      expect(internals.loadingBadge?.text).toBe('');
+    });
+
+    it('a tile that lands after a reset leaves the new scene\'s count alone', async () => {
+      const stale = internals.buildTiledSource(desc, undefined, 4).fetchTile(key);
+      await Promise.resolve();
+      const releaseStale = release;
+      service.reset();
+      internals.host = document.createElement('div');
+      const fresh = internals.buildTiledSource(desc, undefined, 4).fetchTile(key);
+      await Promise.resolve();
+      releaseStale();
+      await stale;
+      expect(internals.loadingBadge?.text).toBe('Image reloading…');
+      release();
+      await fresh;
+      expect(internals.loadingBadge?.text).toBe('');
+    });
+  });
+
   it('volume display state drives the layer contrast window + gamma from the store', async () => {
     // Capture the volume layer the stub Viewer hands back so we can assert what the
     // display-state subscription writes onto it (regression: min/max/gamma must reach the volume).
