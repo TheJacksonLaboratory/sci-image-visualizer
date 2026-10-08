@@ -1306,10 +1306,15 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   /** The plot div exists now: run an image-less draw that arrived before it did. */
   private onViewReady(): void {
     this.viewReady = true;
-    const dataset = this.pendingSpatialDraw;
+    const pending = this.pendingSpatialDraw;
     this.pendingSpatialDraw = null;
-    // Only if it is still the dataset on offer and no image has arrived meanwhile.
-    if (dataset && dataset === this.spatialDataset && !this.imageInfo) void this.plotSpatialWithoutImage(dataset);
+    // Only if it is still the dataset on offer and no image has arrived meanwhile. By id, not by
+    // object: the port may re-emit the same dataset as a new object (a colour-column change does),
+    // and then the current object is the one to draw.
+    const current = this.spatialDataset;
+    if (pending && current && current.id === pending.id && !this.imageInfo) {
+      void this.plotSpatialWithoutImage(current);
+    }
   }
 
   onProfilePanelDragStart(e: MouseEvent) {
