@@ -840,6 +840,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       return false;
     }
     this.reset();
+    // This plot's scene. A newer plot resets into the next one while this one still awaits, and
+    // a superseded plot must not go on to draw (or count image tiles) into the newer scene.
+    const scene = this.imageTilesGeneration;
     this.host = host;
     this.plotDivId = plotDiv;
     this.currentPlotType = plotType;
@@ -884,6 +887,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       });
       this.viewer = viewer;
       await viewer.ready;
+      if (scene !== this.imageTilesGeneration) return false;
 
       if (isSpatialOmics3d(plotType)) {
         await this.mountSpatialOmics3d(viewer, host);
@@ -984,10 +988,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private async renderImage(z: number, token?: number): Promise<void> {
     const v = this.viewer;
     if (!v) return;
+    const scene = this.imageTilesGeneration;
     const desc = await this.ensureDescriptor();
+    // Reset into a newer scene while the descriptor was in flight: this render is superseded.
+    if (scene !== this.imageTilesGeneration) return;
     if (desc && desc.levels?.length) {
       if (token != null && token !== this.sliceReq) return;
-      await this.renderImageTiled(z, desc);
+      await this.renderImageTiled(z, desc, scene);
       return;
     }
     return this.renderImageStitched(z, token);
@@ -1087,7 +1094,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    * coordinates so regions align. Same three modes as the stitch path. Per-channel layers use the
    * REAL pyramid levels (per-channel tiles only exist there); the composite uses all levels.
    */
-  private async renderImageTiled(z: number, desc: TileDescriptor): Promise<void> {
+  private async renderImageTiled(z: number, desc: TileDescriptor, scene: number): Promise<void> {
     const v = this.viewer;
     if (!v) return;
     const states = this.store.currentChannelStates();
@@ -1105,7 +1112,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         const st = states.find((s) => s.index === c);
         const color = st?.color ?? desc.channelInfo?.[c]?.color ?? tintFor(c);
         views.push({
-          source: this.buildTiledSource(desc, c, 1),
+          source: this.buildTiledSource(desc, c, 1, scene),
           tint: color,
           name: st?.name ?? `ch${c}`,
           contrastLimits: [st?.min ?? 0, st?.max ?? 255],
@@ -1122,7 +1129,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         'grayscale',
         [
           {
-            source: this.buildTiledSource(desc, undefined, 1),
+            source: this.buildTiledSource(desc, undefined, 1, scene),
             colormap: this.grayscaleColormap(),
             contrastLimits: [st?.min ?? 0, st?.max ?? 255],
             gamma: st?.gamma ?? 1,
@@ -1133,7 +1140,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       );
     } else {
       this.imageMode = 'rgb';
-      this.channelView.render('rgb', [{ source: this.buildTiledSource(desc, undefined, 4) }], {
+      this.channelView.render('rgb', [{ source: this.buildTiledSource(desc, undefined, 4, scene) }], {
         interpolation,
       });
     }
@@ -1145,11 +1152,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   }
 
   /** Build a pyramidal TiledSource backed by the server `/tile` endpoint. `channel` selects a band
-   *  (grayscale luminance, real levels only); omit it for the composite (RGBA, all levels). */
+   *  (grayscale luminance, real levels only); omit it for the composite (RGBA, all levels).
+   *  `scene` is the generation of the render that asked for it, taken before that render's awaits. */
   private buildTiledSource(
     desc: TileDescriptor,
     channel: number | undefined,
     channels: 1 | 4,
+    scene: number,
   ): TiledSource {
     const infoB64 = this.tiles.getSelectedInfoB64() ?? '';
     // Per-channel tiles exist only at REAL Bio-Formats levels; the composite exists at all levels.
@@ -1163,7 +1172,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const api = this.api;
     // The scene this source draws: its tiles count on the badge only while that scene is current,
     // so a request the disposed source still issues after a reset never shows on the new one.
-    const generation = this.imageTilesGeneration;
+    const generation = scene;
     return {
       kind: 'tiled',
       width: desc.width,

@@ -289,7 +289,8 @@ describe('NapariVisualizerService', () => {
     type Internals = {
       host: HTMLElement | null;
       loadingBadge: { text: string } | null;
-      buildTiledSource(desc: unknown, channel: number | undefined, channels: 1 | 4): {
+      imageTilesGeneration: number;
+      buildTiledSource(desc: unknown, channel: number | undefined, channels: 1 | 4, scene: number): {
         fetchTile(key: { level: number; col: number; row: number; z: number }): Promise<unknown>;
       };
     };
@@ -310,7 +311,7 @@ describe('NapariVisualizerService', () => {
     });
 
     it('says the image is reloading while a tile is in flight, and stops once it lands', async () => {
-      const tile = internals.buildTiledSource(desc, undefined, 4).fetchTile(key);
+      const tile = internals.buildTiledSource(desc, undefined, 4, internals.imageTilesGeneration).fetchTile(key);
       await Promise.resolve();
       expect(internals.loadingBadge?.text).toBe('Image reloading…');
       release();
@@ -319,12 +320,12 @@ describe('NapariVisualizerService', () => {
     });
 
     it('a tile that lands after a reset leaves the new scene\'s count alone', async () => {
-      const stale = internals.buildTiledSource(desc, undefined, 4).fetchTile(key);
+      const stale = internals.buildTiledSource(desc, undefined, 4, internals.imageTilesGeneration).fetchTile(key);
       await Promise.resolve();
       const releaseStale = release;
       service.reset();
       internals.host = document.createElement('div');
-      const fresh = internals.buildTiledSource(desc, undefined, 4).fetchTile(key);
+      const fresh = internals.buildTiledSource(desc, undefined, 4, internals.imageTilesGeneration).fetchTile(key);
       await Promise.resolve();
       releaseStale();
       await stale;
@@ -335,7 +336,7 @@ describe('NapariVisualizerService', () => {
     });
 
     it('a disposed source\'s request after a reset never counts toward the new scene', async () => {
-      const disposed = internals.buildTiledSource(desc, undefined, 4);
+      const disposed = internals.buildTiledSource(desc, undefined, 4, internals.imageTilesGeneration);
       service.reset();
       internals.host = document.createElement('div');
       const late = disposed.fetchTile(key);
@@ -343,12 +344,47 @@ describe('NapariVisualizerService', () => {
       expect(internals.loadingBadge?.text ?? '').toBe('');
       release();
       await late;
-      const fresh = internals.buildTiledSource(desc, undefined, 4).fetchTile(key);
+      const fresh = internals.buildTiledSource(desc, undefined, 4, internals.imageTilesGeneration).fetchTile(key);
       await Promise.resolve();
       expect(internals.loadingBadge?.text).toBe('Image reloading…');
       release();
       await fresh;
       expect(internals.loadingBadge?.text).toBe('');
+    });
+
+    it('a plot superseded while its descriptor is in flight builds no source for the new scene', async () => {
+      const div = document.createElement('div');
+      div.id = 'superseded-host';
+      document.body.appendChild(div);
+      // The first /tiles/info is held; the newer plot's answers at once.
+      let releaseInfo!: () => void;
+      let infoCalls = 0;
+      const descriptor = { ...desc, z: 1, channels: 1, realLevels: 1 };
+      (globalThis.fetch as jest.Mock).mockImplementation((url: string) => {
+        if (url.includes('tiles/info')) {
+          const answer = { ok: true, status: 200, json: () => Promise.resolve(descriptor) };
+          if (infoCalls++ === 0) return new Promise((resolve) => { releaseInfo = () => resolve(answer); });
+          return Promise.resolve(answer);
+        }
+        return Promise.resolve({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) });
+      });
+      const built = jest.spyOn(internals, 'buildTiledSource');
+
+      const loaded = await service.load(imageInfo(), 0);
+      const old = service.plot('superseded-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE);
+      while (infoCalls === 0) await new Promise((r) => setTimeout(r, 0));
+      expect(await service.plot('superseded-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE)).toBe(true);
+      const scene = internals.imageTilesGeneration;
+      const builtByNew = built.mock.calls.length;
+      expect(builtByNew).toBeGreaterThan(0);
+      expect(built.mock.calls.every((c) => c[3] === scene)).toBe(true);
+
+      releaseInfo();
+      await old;
+      expect(built.mock.calls.length).toBe(builtByNew);
+      expect(internals.loadingBadge?.text ?? '').toBe('');
+      service.unsubscribe();
+      document.body.removeChild(div);
     });
   });
 
