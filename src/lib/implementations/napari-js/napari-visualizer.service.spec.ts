@@ -333,6 +333,23 @@ describe('NapariVisualizerService', () => {
       await fresh;
       expect(internals.loadingBadge?.text).toBe('');
     });
+
+    it('a disposed source\'s request after a reset never counts toward the new scene', async () => {
+      const disposed = internals.buildTiledSource(desc, undefined, 4);
+      service.reset();
+      internals.host = document.createElement('div');
+      const late = disposed.fetchTile(key);
+      await Promise.resolve();
+      expect(internals.loadingBadge?.text ?? '').toBe('');
+      release();
+      await late;
+      const fresh = internals.buildTiledSource(desc, undefined, 4).fetchTile(key);
+      await Promise.resolve();
+      expect(internals.loadingBadge?.text).toBe('Image reloading…');
+      release();
+      await fresh;
+      expect(internals.loadingBadge?.text).toBe('');
+    });
   });
 
   it('volume display state drives the layer contrast window + gamma from the store', async () => {

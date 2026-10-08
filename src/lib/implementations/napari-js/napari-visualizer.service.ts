@@ -1161,6 +1161,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const tileSize = desc.tileSize || TILE_SIZE;
     const ch = channel == null ? '' : `&channel=${channel}`;
     const api = this.api;
+    // The scene this source draws: its tiles count on the badge only while that scene is current,
+    // so a request the disposed source still issues after a reset never shows on the new one.
+    const generation = this.imageTilesGeneration;
     return {
       kind: 'tiled',
       width: desc.width,
@@ -1175,9 +1178,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         const res = usable[key.level]?.res ?? key.level;
         const url = `${api}tile?info=${infoB64}&res=${res}&col=${key.col}&row=${key.row}&z=${key.z}&tileSize=${tileSize}${ch}`;
         // "Image reloading…" on the loading badge while any tile of the image is in flight.
-        const generation = this.imageTilesGeneration;
-        this.imageTilesLoading++;
-        this.showLoading();
+        const counted = generation === this.imageTilesGeneration;
+        if (counted) {
+          this.imageTilesLoading++;
+          this.showLoading();
+        }
         try {
           const headers = await this.tiles
             .getAuthHeaders()
@@ -1190,7 +1195,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
           if (channels === 4) return { width: bmp.width, height: bmp.height, data: bmp };
           return this.bitmapToLuminance(bmp);
         } finally {
-          if (generation === this.imageTilesGeneration) {
+          if (counted && generation === this.imageTilesGeneration) {
             this.imageTilesLoading--;
             this.showLoading();
           }
