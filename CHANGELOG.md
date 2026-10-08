@@ -9,6 +9,10 @@ file was added.
 
 ## [Unreleased]
 
+## [0.8.3] — 2026-10-08
+
+The napari canvas says when the tissue image is fetching new tiles.
+
 ### Added
 
 - **"Image reloading…"** on the napari loading badge at the bottom of the canvas while the
@@ -1908,7 +1912,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.8.3...HEAD
+[0.8.3]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.7.0...v0.8.0
