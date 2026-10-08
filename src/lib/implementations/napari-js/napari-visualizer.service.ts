@@ -459,6 +459,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private loadingBadge: NapariLoadingBadge | null = null;
   private tileLoading: string[] = [];
   private observationsLoading = 0;
+  /** Image tiles in flight, and the scene they belong to: a fetch that outlives {@link reset}
+   *  settles against the old generation and leaves the new scene's count alone. */
+  private imageTilesLoading = 0;
+  private imageTilesGeneration = 0;
   /** Monotonic load generation. Bumped by {@link reset} and {@link cancelLoading}; the frame-loading
    *  loops (volume assembly, surface preload) capture it and bail when it changes, so a Cancel (or a
    *  new plot) actually stops fetching frames instead of running to completion in the background. */
@@ -836,6 +840,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       return false;
     }
     this.reset();
+    // This plot's scene. A newer plot resets into the next one while this one still awaits, and
+    // a superseded plot must not go on to draw (or count image tiles) into the newer scene.
+    const scene = this.imageTilesGeneration;
     this.host = host;
     this.plotDivId = plotDiv;
     this.currentPlotType = plotType;
@@ -880,6 +887,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       });
       this.viewer = viewer;
       await viewer.ready;
+      if (scene !== this.imageTilesGeneration) return false;
 
       if (isSpatialOmics3d(plotType)) {
         await this.mountSpatialOmics3d(viewer, host);
@@ -980,10 +988,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private async renderImage(z: number, token?: number): Promise<void> {
     const v = this.viewer;
     if (!v) return;
+    const scene = this.imageTilesGeneration;
     const desc = await this.ensureDescriptor();
+    // Reset into a newer scene while the descriptor was in flight: this render is superseded.
+    if (scene !== this.imageTilesGeneration) return;
     if (desc && desc.levels?.length) {
       if (token != null && token !== this.sliceReq) return;
-      await this.renderImageTiled(z, desc);
+      await this.renderImageTiled(z, desc, scene);
       return;
     }
     return this.renderImageStitched(z, token);
@@ -1083,7 +1094,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    * coordinates so regions align. Same three modes as the stitch path. Per-channel layers use the
    * REAL pyramid levels (per-channel tiles only exist there); the composite uses all levels.
    */
-  private async renderImageTiled(z: number, desc: TileDescriptor): Promise<void> {
+  private async renderImageTiled(z: number, desc: TileDescriptor, scene: number): Promise<void> {
     const v = this.viewer;
     if (!v) return;
     const states = this.store.currentChannelStates();
@@ -1101,7 +1112,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         const st = states.find((s) => s.index === c);
         const color = st?.color ?? desc.channelInfo?.[c]?.color ?? tintFor(c);
         views.push({
-          source: this.buildTiledSource(desc, c, 1),
+          source: this.buildTiledSource(desc, c, 1, scene),
           tint: color,
           name: st?.name ?? `ch${c}`,
           contrastLimits: [st?.min ?? 0, st?.max ?? 255],
@@ -1118,7 +1129,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         'grayscale',
         [
           {
-            source: this.buildTiledSource(desc, undefined, 1),
+            source: this.buildTiledSource(desc, undefined, 1, scene),
             colormap: this.grayscaleColormap(),
             contrastLimits: [st?.min ?? 0, st?.max ?? 255],
             gamma: st?.gamma ?? 1,
@@ -1129,7 +1140,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       );
     } else {
       this.imageMode = 'rgb';
-      this.channelView.render('rgb', [{ source: this.buildTiledSource(desc, undefined, 4) }], {
+      this.channelView.render('rgb', [{ source: this.buildTiledSource(desc, undefined, 4, scene) }], {
         interpolation,
       });
     }
@@ -1141,11 +1152,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   }
 
   /** Build a pyramidal TiledSource backed by the server `/tile` endpoint. `channel` selects a band
-   *  (grayscale luminance, real levels only); omit it for the composite (RGBA, all levels). */
+   *  (grayscale luminance, real levels only); omit it for the composite (RGBA, all levels).
+   *  `scene` is the generation of the render that asked for it, taken before that render's awaits. */
   private buildTiledSource(
     desc: TileDescriptor,
     channel: number | undefined,
     channels: 1 | 4,
+    scene: number,
   ): TiledSource {
     const infoB64 = this.tiles.getSelectedInfoB64() ?? '';
     // Per-channel tiles exist only at REAL Bio-Formats levels; the composite exists at all levels.
@@ -1157,6 +1170,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const tileSize = desc.tileSize || TILE_SIZE;
     const ch = channel == null ? '' : `&channel=${channel}`;
     const api = this.api;
+    // The scene this source draws: its tiles count on the badge only while that scene is current,
+    // so a request the disposed source still issues after a reset never shows on the new one.
+    const generation = scene;
     return {
       kind: 'tiled',
       width: desc.width,
@@ -1170,16 +1186,29 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       fetchTile: async (key: TileKey): Promise<PixelChunk> => {
         const res = usable[key.level]?.res ?? key.level;
         const url = `${api}tile?info=${infoB64}&res=${res}&col=${key.col}&row=${key.row}&z=${key.z}&tileSize=${tileSize}${ch}`;
-        const headers = await this.tiles
-          .getAuthHeaders()
-          .catch(() => ({}) as Record<string, string>);
-        const resp = await fetch(url, { headers });
-        if (!resp.ok) {
-          throw new Error(`[napari-js] tile ${key.level}/${key.col}/${key.row} → ${resp.status}`);
+        // "Image reloading…" on the loading badge while any tile of the image is in flight.
+        const counted = generation === this.imageTilesGeneration;
+        if (counted) {
+          this.imageTilesLoading++;
+          this.showLoading();
         }
-        const bmp = await createImageBitmap(await resp.blob());
-        if (channels === 4) return { width: bmp.width, height: bmp.height, data: bmp };
-        return this.bitmapToLuminance(bmp);
+        try {
+          const headers = await this.tiles
+            .getAuthHeaders()
+            .catch(() => ({}) as Record<string, string>);
+          const resp = await fetch(url, { headers });
+          if (!resp.ok) {
+            throw new Error(`[napari-js] tile ${key.level}/${key.col}/${key.row} → ${resp.status}`);
+          }
+          const bmp = await createImageBitmap(await resp.blob());
+          if (channels === 4) return { width: bmp.width, height: bmp.height, data: bmp };
+          return this.bitmapToLuminance(bmp);
+        } finally {
+          if (counted && generation === this.imageTilesGeneration) {
+            this.imageTilesLoading--;
+            this.showLoading();
+          }
+        }
       },
     };
   }
@@ -1337,7 +1366,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private showLoading(): void {
     if (!this.host) return;
     this.loadingBadge ??= new NapariLoadingBadge(this.host);
-    this.loadingBadge.set([...(this.observationsLoading > 0 ? ['Observations'] : []), ...this.tileLoading]);
+    this.loadingBadge.set([
+      ...(this.imageTilesLoading > 0 ? ['Image'] : []),
+      ...(this.observationsLoading > 0 ? ['Observations'] : []),
+      ...this.tileLoading,
+    ]);
   }
 
   private installNavigator(z: number): void {
@@ -4025,6 +4058,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.loadingBadge = null;
     this.tileLoading = [];
     this.observationsLoading = 0;
+    this.imageTilesLoading = 0;
+    this.imageTilesGeneration++;
     this.regionOverlay?.destroy();
     this.regionOverlay = null;
     this.axesLabels?.destroy();

@@ -9,6 +9,12 @@ file was added.
 
 ## [Unreleased]
 
+### Added
+
+- **"Image reloading…"** on the napari loading badge at the bottom of the canvas while the
+  tissue image fetches new tiles (after a pan or zoom), next to the transcripts' and cells'
+  loads already shown there, e.g. "Image and transcripts reloading…".
+
 ## [0.8.2] — 2026-10-08
 
 An image-less spatial dataset is drawn when the host creates the visualizer after publishing
