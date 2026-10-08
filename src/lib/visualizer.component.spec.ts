@@ -597,6 +597,7 @@ describe('VisualizerComponent (UI shell)', () => {
         plotService.reloadAndPlot = jest.fn();
         const c = makeComponent(plotService, port);
         (c as any).imageInfo = undefined;
+        (c as any).viewReady = true;
         (c as any).watchSpatialDataset();
         dataset$.next({ id: 'xenium', name: 'Cervical', observations: { count: 3 }, columns: [] });
         await flush();
@@ -606,11 +607,81 @@ describe('VisualizerComponent (UI shell)', () => {
           expect.objectContaining({ fileName: 'spatial:xenium', urls: [] }), expect.any(Number), PlotType.SPATIAL_OMICS);
       });
 
+      it('waits for the view before drawing an image-less dataset published before it (jit-ui)', async () => {
+        // jit-ui creates the visualizer after the dataset is published: the port replays it into
+        // ngOnInit, before the plot div exists, and napari found no target ("plot target not
+        // found") — which surfaced as "the renderer could not start".
+        plotService.plot = jest.fn(async () => true);
+        const c = makeComponent(plotService, port);
+        (c as any).imageInfo = undefined;
+        dataset$.next({ id: 'csc', name: 'csc-demo', observations: { count: 3 }, columns: [] });
+        (c as any).watchSpatialDataset();
+        await flush();
+        expect(plotService.plot).not.toHaveBeenCalled();
+        expect((c as any).messageService.add).not.toHaveBeenCalled();
+
+        (c as any).onViewReady();
+        await flush();
+        expect(plotService.plot).toHaveBeenCalledTimes(1);
+        expect((plotService.plot as jest.Mock).mock.calls[0][2].fileName).toBe('spatial:csc');
+      });
+
+      it('draws the current object when the same dataset is re-emitted before the view is ready', async () => {
+        // Immutable updates re-emit the same dataset as a new object (e.g. a colour-column change):
+        // the waiting draw must not be lost to an object comparison, and it draws the latest object.
+        plotService.plot = jest.fn(async () => true);
+        const c = makeComponent(plotService, port);
+        (c as any).imageInfo = undefined;
+        const first = { id: 'csc', name: 'csc-demo', observations: { count: 3 }, columns: [] };
+        dataset$.next(first);
+        (c as any).watchSpatialDataset();
+        await flush();
+        const again = { ...first, name: 'csc-demo (recoloured)' };
+        dataset$.next(again);
+        await flush();
+        expect(plotService.plot).not.toHaveBeenCalled();
+
+        (c as any).onViewReady();
+        await flush();
+        expect(plotService.plot).toHaveBeenCalledTimes(1);
+        expect((c as any).spatialDataset).toBe(again);
+        expect((plotService.plot as jest.Mock).mock.calls[0][2].fileName).toBe('spatial:csc');
+      });
+
+      it('drops a waiting draw when another dataset (a new id) replaced it', async () => {
+        plotService.plot = jest.fn(async () => true);
+        const c = makeComponent(plotService, port);
+        (c as any).imageInfo = undefined;
+        dataset$.next({ id: 'one', name: 'One', observations: { count: 3 }, columns: [] });
+        (c as any).watchSpatialDataset();
+        await flush();
+        dataset$.next({ id: 'two', name: 'Two', observations: { count: 3 }, columns: [] });
+        await flush();
+        (c as any).onViewReady();
+        await flush();
+        // Only the newer dataset's draw is waiting: it is drawn once, the older never.
+        expect((plotService.plot as jest.Mock).mock.calls.map((call) => call[2].fileName)).toEqual(['spatial:two']);
+      });
+
+      it('drops a waiting image-less draw when an image or another dataset arrived first', async () => {
+        plotService.plot = jest.fn(async () => true);
+        const c = makeComponent(plotService, port);
+        (c as any).imageInfo = undefined;
+        (c as any).watchSpatialDataset();
+        dataset$.next({ id: 'one', name: 'One', observations: { count: 3 }, columns: [] });
+        await flush();
+        (c as any).imageInfo = { fileName: 'slide.tif' }; // an image came in before the view
+        (c as any).onViewReady();
+        await flush();
+        expect(plotService.plot).not.toHaveBeenCalled();
+      });
+
       it('a superseded image-less draw leaves the newer render\'s loading state alone', async () => {
         let finish!: (ok: boolean) => void;
         plotService.plot = jest.fn(() => new Promise<boolean>((resolve) => { finish = resolve; }));
         const c = makeComponent(plotService, port);
         (c as any).imageInfo = undefined;
+        (c as any).viewReady = true;
         (c as any).watchSpatialDataset();
         dataset$.next({ id: 'one', name: 'One', observations: { count: 3 }, columns: [] });
         await flush();
@@ -626,6 +697,7 @@ describe('VisualizerComponent (UI shell)', () => {
         plotService.plot = jest.fn(async () => false); // napari without WebGPU resolves false
         const c = makeComponent(plotService, port);
         (c as any).imageInfo = undefined;
+        (c as any).viewReady = true;
         (c as any).watchSpatialDataset();
         dataset$.next({ id: 'one', name: 'One', observations: { count: 3 }, columns: [] });
         await flush();
@@ -640,6 +712,7 @@ describe('VisualizerComponent (UI shell)', () => {
         plotService.plot = jest.fn(async () => true);
         const c = makeComponent(plotService, port);
         (c as any).imageInfo = undefined;
+        (c as any).viewReady = true;
         (c as any).watchSpatialDataset();
         dataset$.next({ id: 'one', name: 'One', observations: { count: 3 }, columns: [] });
         await flush();

@@ -172,6 +172,10 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * the newer render's overlay, or applying its ROIs.
    */
   private renderToken = 0;
+  /** Set once the template, and with it the plot div, exists (see ngAfterViewInit). */
+  private viewReady = false;
+  /** An image-less dataset whose draw waits for the view: see plotSpatialWithoutImage. */
+  private pendingSpatialDraw: SpatialDataset | null = null;
   public zIndex = 0;
   public maxIndex = 0;
 
@@ -1296,6 +1300,21 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       requestAnimationFrame(() => this.renderIntensityInset());
     };
     window.addEventListener('resize', this.profileResizeListener);
+    this.onViewReady();
+  }
+
+  /** The plot div exists now: run an image-less draw that arrived before it did. */
+  private onViewReady(): void {
+    this.viewReady = true;
+    const pending = this.pendingSpatialDraw;
+    this.pendingSpatialDraw = null;
+    // Only if it is still the dataset on offer and no image has arrived meanwhile. By id, not by
+    // object: the port may re-emit the same dataset as a new object (a colour-column change does),
+    // and then the current object is the one to draw.
+    const current = this.spatialDataset;
+    if (pending && current && current.id === pending.id && !this.imageInfo) {
+      void this.plotSpatialWithoutImage(current);
+    }
   }
 
   onProfilePanelDragStart(e: MouseEvent) {
@@ -1604,6 +1623,13 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * dataset, so regions drawn here are kept per dataset like any image's.
    */
   private async plotSpatialWithoutImage(dataset: SpatialDataset): Promise<void> {
+    if (!this.viewReady) {
+      // A host that creates the visualizer AFTER publishing the dataset (jit-ui opening a file
+      // from its tree) has it replayed into ngOnInit, before the template and its plot div
+      // exist; drawing now finds no target. Draw once the view is ready (onViewReady).
+      this.pendingSpatialDraw = dataset;
+      return;
+    }
     // The same generation as the image pipeline: a newer image or dataset supersedes this
     // draw, and a superseded draw neither reports nor releases the newer one's loading state.
     const token = ++this.renderToken;
