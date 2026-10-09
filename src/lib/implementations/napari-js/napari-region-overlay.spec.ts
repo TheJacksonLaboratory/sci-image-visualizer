@@ -297,6 +297,20 @@ describe('NapariRegionOverlay', () => {
       expect(poly.npoints).toBeGreaterThan(20);
       o.destroy();
     });
+
+    it('selects with a rubber band smaller than 3 world units', () => {
+      // The "tiny marquee = click" threshold was 3 WORLD units — over half this sample —
+      // so any band drawn across it cleared the selection instead of selecting.
+      const o = tinyWorldOverlay(0.001);
+      store.addRegion(rectRegionAt(0.1, 0.1, 0.1, 0.1)); // screen ~16–32 px
+      store.addRegion(rectRegionAt(2, 2, 0.1, 0.1)); // selected, far away
+      o.setMode('select');
+      ptr(o, 'pointerdown', 100, 100); // empty space
+      ptr(o, 'pointermove', 5, 5);
+      ptr(o, 'pointerup', 5, 5);
+      expect(store.getSelectedShapeIndices()).toEqual([0]);
+      o.destroy();
+    });
   });
 
   it('drawrect: a degenerate (sub-2px) drag commits nothing', () => {

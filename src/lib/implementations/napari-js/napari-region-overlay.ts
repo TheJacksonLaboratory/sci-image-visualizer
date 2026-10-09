@@ -28,6 +28,12 @@ const FREEHAND_STEP_PX = 2;
  * impossible to create there.
  */
 const MIN_RECT_DRAG_PX = 2;
+/**
+ * A rubber band smaller than this on both sides, in SCREEN pixels, is a click on empty space
+ * (it clears the selection). Screen for the same reason as {@link MIN_RECT_DRAG_PX}: 3 world
+ * units is over half of seqFISH's sample.
+ */
+const MIN_MARQUEE_PX = 3;
 /** Click-distance (screen px) within which a polygon click snaps closed onto the first vertex. */
 const CLOSE_SNAP_PX = 10;
 /** Screen-px hit radius for grabbing a vertex / rectangle corner handle. */
@@ -594,14 +600,15 @@ export class NapariRegionOverlay implements IRegionOverlay {
     return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
   }
 
-  /** Finalize a rubber-band marquee: select every region whose bounding box it overlaps (a tiny
-   *  marquee is treated as a click on empty space → clear the selection). */
+  /** Finalize a rubber-band marquee: select every region whose bounding box it overlaps (a
+   *  marquee under {@link MIN_MARQUEE_PX} is a click on empty space → clear the selection). */
   private finishMarquee(m: { x0: number; y0: number; x1: number; y1: number }): void {
     const x0 = Math.min(m.x0, m.x1);
     const x1 = Math.max(m.x0, m.x1);
     const y0 = Math.min(m.y0, m.y1);
     const y1 = Math.max(m.y0, m.y1);
-    if (x1 - x0 < 3 && y1 - y0 < 3) {
+    const min = MIN_MARQUEE_PX * this.worldPerCanvasPixel();
+    if (x1 - x0 < min && y1 - y0 < min) {
       this.store.setSelectedShapeIndices([]);
       return;
     }
