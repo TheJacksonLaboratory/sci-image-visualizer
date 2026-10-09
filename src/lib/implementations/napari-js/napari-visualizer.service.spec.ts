@@ -2186,6 +2186,29 @@ describe('NapariVisualizerService', () => {
       expect(() => overlay?.setMode('none')).not.toThrow();
     });
 
+    it('an orbit clears only the regions drawn in 3D, not the ones it found', async () => {
+      // Regression (NAPARI-SVC-11): every camera change with any region present emptied the
+      // app-wide RegionStore — including the image's own regions, which have nothing to do
+      // with a screen-space lasso.
+      await mount3d();
+      regionStore.setRegions([{ bounds: { x: 1, y: 2, width: 3, height: 4 } }] as never, true, true);
+      const [found] = regionStore.getRegions();
+      // Re-install the 3D interaction on a viewer whose orbit the test can drive (the stub's
+      // camera never emits).
+      let orbit!: () => void;
+      const viewer = {
+        camera3d: { changed: { connect: (l: () => void) => { orbit = l; return () => undefined; } } },
+        setControlsEnabled: () => undefined,
+      };
+      (service as unknown as { install3dInteraction(v: unknown, h: HTMLElement): void })
+        .install3dInteraction(viewer, document.getElementById('spatial3d-host')!);
+      regionStore.addRegion({ bounds: { x: 10, y: 10, width: 5, height: 5 } } as never);
+      expect(regionStore.getRegions()).toHaveLength(2);
+
+      orbit();
+      expect(regionStore.getRegions().map((r) => r.id)).toEqual([found.id]);
+    });
+
     it('projects observations to canvas pixels through the 3D camera', async () => {
       await mount3d();
       const projected = service.getSpatialScreenProjection(spatialDataset3d().observations);

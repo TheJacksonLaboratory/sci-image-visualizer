@@ -2096,8 +2096,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    * works in 3D with no new drawing code.
    *
    * A screen-space shape stops meaning anything the moment the camera moves, so an orbit clears
-   * the drawn regions. The SELECTION it produced is kept: that is the durable artefact, and the
-   * highlighted points stay highlighted from every angle.
+   * the regions drawn in this view (and only those). The SELECTION they produced is kept: that is
+   * the durable artefact, and the highlighted points stay highlighted from every angle.
    */
   private install3dInteraction(viewer: Viewer, host: HTMLElement): void {
     const canvasRect = () => this.canvas?.getBoundingClientRect();
@@ -2113,10 +2113,14 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     };
     this.regionOverlay = new NapariRegionOverlay(host, screenSpace, this.regionStore);
     this.buildToolHosts();
+    // Regions already in the shared store when the 3D view mounted (the image's own, say) are
+    // not screen-space shapes and must survive an orbit; only those drawn here are cleared.
+    // (No mid-gesture case to guard: the overlay disables the camera controls while drawing.)
+    const foreign = new Set(this.regionStore.getRegions().map((r) => r.id));
     this.cameraReadbackOff = viewer.camera3d.changed.connect(() => {
-      // Only while nothing is being drawn — clearing mid-gesture would delete the
-      // shape under the user's cursor.
-      if (this.regionStore.getRegions().length > 0) this.regionStore.setRegions([]);
+      const regions = this.regionStore.getRegions();
+      const kept = regions.filter((r) => foreign.has(r.id));
+      if (kept.length < regions.length) this.regionStore.setRegions(kept);
     });
   }
 
