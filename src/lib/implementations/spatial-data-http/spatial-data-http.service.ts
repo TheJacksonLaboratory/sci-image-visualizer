@@ -310,6 +310,9 @@ export class SpatialDataHttpService implements SpatialDataPort {
 
   getTranscriptGeneBins(level: number, tx: number, ty: number, genes: string[]): Promise<SpatialTranscriptTile> {
     const manifest = this.requireManifest();
+    if (!manifest.transcriptGeneBins) {
+      return Promise.reject(new Error('[spatial] this dataset has no per-gene bins'));
+    }
     const path = `spatial/${encodeURIComponent(manifest.id)}/gene-bins/${level}/${tx}/${ty}`
       + `?genes=${genes.map(encodeURIComponent).join(',')}`;
     const limits = {
