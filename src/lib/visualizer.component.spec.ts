@@ -1389,6 +1389,45 @@ describe('VisualizerComponent — failed and superseded renders (CORE-11)', () =
   });
 });
 
+describe('VisualizerComponent — host-owned image info is never mutated (CORE-13)', () => {
+  const stack = (extra: Record<string, unknown> = {}): any => Object.freeze({
+    fileName: 'series.tif', urls: ['/0', '/1', '/2', '/3'], isStack: true, showStack: false,
+    isGrayscale: true, trueImageSize: [10, 10], imageMeta: [], ...extra,
+  });
+
+  it('honours the one-shot initialZIndex without writing to the host object', () => {
+    const { component, imageInfo$ } = harness();
+    const info = stack({ initialZIndex: 2 });
+    expect(() => imageInfo$.next(info)).not.toThrow();
+    expect(component.zIndex).toBe(2);
+    // Re-driving the pipeline from the component's copy must not jump back to the hint.
+    expect(component.imageInfo?.initialZIndex).toBeUndefined();
+    component.ngOnDestroy();
+  });
+
+  it('does not re-apply the hint when the host re-emits the very same object', () => {
+    const { component, imageInfo$ } = harness();
+    const info = stack({ initialZIndex: 2 });
+    imageInfo$.next(info);
+    component.zIndex = 3; // the user scrubbed
+    imageInfo$.next(info);
+    expect(component.zIndex).toBe(3);
+    component.ngOnDestroy();
+  });
+
+  it('switching to a stack-only Plotly type re-emits a copy with showStack on', () => {
+    const { component, imageInfo$, state } = harness();
+    const info = stack();
+    imageInfo$.next(info);
+    (component as any).plotTypeMenu = [{ type: PlotType.ISOSURFACE, requiresStack: true, dimensions: '3d' }];
+    expect(() => component.onSelectPlotType(PlotType.ISOSURFACE)).not.toThrow();
+    const sent = state.setImageInfo.mock.calls.at(-1)[0];
+    expect(sent).toMatchObject({ fileName: 'series.tif', showStack: true });
+    expect(sent).not.toBe(info);
+    component.ngOnDestroy();
+  });
+});
+
 describe('VisualizerComponent — host handle (CORE-10)', () => {
   it('registers a small typed handle with the host, not the component itself', () => {
     const { component, state, plot } = harness();

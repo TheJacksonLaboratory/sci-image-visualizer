@@ -174,6 +174,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   private renderToken = 0;
   /** Aborts the current render's backend loads; replaced with each new render. */
   private renderAbort: AbortController | null = null;
+  /** Host image-info objects whose one-shot `initialZIndex` was already applied. */
+  private readonly consumedSliceHints = new WeakSet<IImageInfo>();
   /** Set once the template, and with it the plot div, exists (see ngAfterViewInit). */
   private viewReady = false;
   /** An image-less dataset whose draw waits for the view: see plotSpatialWithoutImage. */
@@ -948,9 +950,16 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
             // Consumed immediately so redelivering the same ImageInfo later
             // (a plot-type switch, reloadAndPlot) doesn't reset the user's
             // current scrub position back to it.
+            // The host's object is never written to (a host store may freeze it):
+            // keep a copy without the hint as the component's own image info, which
+            // is what reloadAndPlot re-emits, and remember the host object so the
+            // very same emission repeated does not jump again.
             if (imgInfo.initialZIndex !== undefined) {
-              this.zIndex = imgInfo.initialZIndex;
-              imgInfo.initialZIndex = undefined;
+              if (!this.consumedSliceHints.has(imgInfo)) {
+                this.consumedSliceHints.add(imgInfo);
+                this.zIndex = imgInfo.initialZIndex;
+              }
+              this.imageInfo = { ...imgInfo, initialZIndex: undefined };
             }
             // make sure the zindex is within bounds
             this.updateZIndex();
@@ -2329,8 +2338,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       this.stackLoading = true;
       this.plotService.setStackLoading(true);
       if (this.imageInfo) {
-        this.imageInfo.showStack = true;
-        this.state.setImageInfo(this.imageInfo);
+        // A copy: the image info may be the host's own (possibly frozen) object.
+        this.state.setImageInfo({ ...this.imageInfo, showStack: true });
       }
       return;
     }
