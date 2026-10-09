@@ -321,6 +321,22 @@ describe('NapariVisualizerService', () => {
     document.body.removeChild(div);
   });
 
+  it('decodes a colour plane to BT.601 luminance, not to its red channel', () => {
+    // Regression (NAPARI-SVC-4): an RGB composite (an H&E surface, or the composite overview a
+    // channel falls back to) became the RED channel's relief, while the volume path used
+    // luminance. A grey pixel must still decode to itself exactly.
+    jest.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({
+      drawImage: () => undefined,
+      getImageData: () => ({
+        data: new Uint8ClampedArray([255, 0, 0, 255, 0, 0, 255, 255, 100, 100, 100, 255, 255, 255, 255, 255]),
+      }),
+    }) as unknown as CanvasRenderingContext2D);
+    const decode = (service as unknown as {
+      bitmapToLuminance(b: unknown): { data: Uint8Array; width: number; height: number };
+    }).bitmapToLuminance({ width: 4, height: 1, close: () => undefined });
+    expect(Array.from(decode.data)).toEqual([76, 29, 100, 255]);
+  });
+
   describe('the /tiles/info poll', () => {
     type Internals = { ensureDescriptor(): Promise<unknown> };
     const ensure = () => (service as unknown as Internals).ensureDescriptor();

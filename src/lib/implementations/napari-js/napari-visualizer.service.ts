@@ -35,6 +35,7 @@ import { nearestProjectedIndex, ScreenIndex, SCREEN_INDEX_MIN_POINTS } from 'nap
 import { IImageInfo } from '../../contracts/image.contract';
 import { IChannelState } from '../../contracts/channel-histogram-api.contract';
 import { buildColormapLut, Rgb } from '../../contracts/colormap-lut';
+import { bt601Luminance } from '../../contracts/intensity';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import {
   SpatialColumn, SpatialDataset, SpatialImageRef, findColumnMeta, isCategoricalColumn,
@@ -283,6 +284,19 @@ function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
     }, ms);
     signal.addEventListener('abort', onAbort, { once: true });
   });
+}
+
+/**
+ * RGBA bytes → one BT.601 luminance byte per pixel, written into `out` from `offset`. Rounded,
+ * so a grey pixel (R=G=B — every single-band server tile) decodes to itself exactly, while a
+ * colour source (an RGB composite) becomes its luminance rather than its red channel.
+ */
+function rgbaToLuminance(rgba: ArrayLike<number>, out: Uint8Array, offset = 0): void {
+  const n = rgba.length >> 2;
+  for (let i = 0; i < n; i++) {
+    const o = i * 4;
+    out[offset + i] = Math.round(bt601Luminance(rgba[o], rgba[o + 1], rgba[o + 2]));
+  }
 }
 
 /** Default per-channel tints (Fiji-style) when the store/descriptor offers no colour. */
@@ -1054,9 +1068,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     return this.bitmapToLuminance(bmp);
   }
 
-  /** Decode an `ImageBitmap` (server bands are grayscale, R=G=B) to a single-channel uint8 plane.
-   *  `maxSide` caps the longest side (downscaling on the canvas draw) — used to keep pre-loaded
-   *  surface slice planes small. */
+  /** Decode an `ImageBitmap` to a single-channel uint8 luminance plane (server bands are grey,
+   *  R=G=B, and decode exactly; a colour composite becomes its BT.601 luminance). `maxSide` caps
+   *  the longest side (downscaling on the canvas draw) — used to keep pre-loaded surface slice
+   *  planes small. */
   private bitmapToLuminance(
     bmp: ImageBitmap,
     maxSide?: number,
@@ -1083,7 +1098,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     bmp.close?.();
     const rgba = ctx.getImageData(0, 0, w, h).data;
     const data = new Uint8Array(w * h);
-    for (let i = 0; i < w * h; i++) data[i] = rgba[i * 4];
+    rgbaToLuminance(rgba, data);
     return { data, width: w, height: h };
   }
 
@@ -1826,12 +1841,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       const readSlice = (z: number, bmp: ImageBitmap): void => {
         ctx.clearRect(0, 0, width, height);
         ctx.drawImage(bmp, 0, 0, width, height);
-        const rgba = ctx.getImageData(0, 0, width, height).data;
-        const base = z * width * height;
-        for (let i = 0; i < width * height; i++) {
-          data[base + i] =
-            (rgba[i * 4] * 0.299 + rgba[i * 4 + 1] * 0.587 + rgba[i * 4 + 2] * 0.114) | 0;
-        }
+        rgbaToLuminance(ctx.getImageData(0, 0, width, height).data, data, z * width * height);
         bmp.close?.();
         done++;
         this.stackLoadingProgress$.next(Math.round((done / depth) * 100));
