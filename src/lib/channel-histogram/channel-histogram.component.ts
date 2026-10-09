@@ -140,7 +140,7 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
   // is labelled natively for 16-bit); we map them back to the store's 8-bit
   // display window via the channel's observed range (identity for 8-bit images,
   // so their behaviour is unchanged).
-  onMinChange(value: number | string | null): void {
+  onMinChange(value: number | string | null | undefined): void {
     if (!this.selected) return;
     const min = this.toDisp(value);
     const max = Math.max(min, this.selected.max);
@@ -148,7 +148,7 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
     this.markBusy('min');
     this.updateMarkers();
   }
-  onMaxChange(value: number | string | null): void {
+  onMaxChange(value: number | string | null | undefined): void {
     if (!this.selected) return;
     const max = this.toDisp(value);
     const min = Math.min(max, this.selected.min);
@@ -156,7 +156,7 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
     this.markBusy('max');
     this.updateMarkers();
   }
-  onGammaChange(value: number | string | null): void {
+  onGammaChange(value: number | string | null | undefined): void {
     if (!this.selected) return;
     const g = Number(value);
     if (isNaN(g)) return;
@@ -237,7 +237,7 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
     return Math.round(o.min + (disp / 255) * (o.max - o.min));
   }
   /** Native units → clamped 8-bit display value (0..255). */
-  private toDisp(value: number | string | null): number {
+  private toDisp(value: number | string | null | undefined): number {
     const v = Number(value);
     if (v == null || isNaN(v)) return 0;
     const o = this.obsRange();

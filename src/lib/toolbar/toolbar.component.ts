@@ -347,6 +347,11 @@ export class ToolbarComponent implements OnChanges {
     return this.effectivePlotType === PlotType.HEATMAP || this.effectivePlotType === PlotType.IMAGE;
   }
 
+  /** The slice field reports what was typed; the host owns `zIndex`. */
+  onSliceInput(value: string | number | null): void {
+    this.zIndexInput.emit(value == null || value === '' ? this.zIndex : Number(value));
+  }
+
   showHelp(): void {
     this.displayHelpDialog = true;
   }

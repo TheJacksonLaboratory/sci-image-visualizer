@@ -138,7 +138,7 @@
           <p-inputNumber styleClass="w-3rem toolbar-input"
 					pTooltip="View image in stack (&#x23CE;)"
 					[ngModel]="zIndex" [min]="0" [max]="maxIndex"
-           (onInput)="zIndexInput.emit($event.value)" (keydown.enter)="reloadAndPlot.emit()"/>
+           (onInput)="onSliceInput($event.value)" (keydown.enter)="reloadAndPlot.emit()"/>
           <p-button icon="pi pi-refresh" size="small" [text]="true" (onClick)="reloadAndPlot.emit()"
                     pTooltip="Plot this slice" tooltipPosition="bottom">
           </p-button>
