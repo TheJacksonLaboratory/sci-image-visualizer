@@ -126,6 +126,22 @@ describe('PlotlyService relayout handler', () => {
     jest.restoreAllMocks();
   });
 
+  it('re-binding the relayout handler on an in-place render does not stack it (OSD-PLOTLY-7)', () => {
+    // Plotly's gd.on() registers on its own EventEmitter (removeListener), not
+    // the DOM — removeEventListener never unbound the previous handler.
+    const listeners: Record<string, Array<(e: unknown) => void>> = {};
+    const plot = document.getElementById('plot') as any;
+    plot.on = (name: string, fn: (e: unknown) => void) => { (listeners[name] ??= []).push(fn); };
+    plot.removeListener = (name: string, fn: (e: unknown) => void) => {
+      listeners[name] = (listeners[name] ?? []).filter((f) => f !== fn);
+    };
+    const handler = jest.spyOn(service as any, 'relayoutEventHandler').mockImplementation(() => undefined);
+    (service as any).setEvents('plot', true, 600);
+    (service as any).setEvents('plot', true, 600); // the in-place (large) pass
+    listeners['plotly_relayout'].forEach((fn) => fn({ 'xaxis.range[0]': 1 }));
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
   it('should not process zoom-to-box shapes in relayout handler', () => {
     service.setZoomToBoxMode(true);
     relayoutSpy.mockClear();

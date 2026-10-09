@@ -1107,9 +1107,11 @@ export class PlotlyService implements IVisualizer {
     this.screenHeight = screenHeight;
     const plot: any = document.getElementById(plotDiv);
     if (plot) {
-      // unbind previous event
-      plot.removeEventListener('plotly_relayout', this.onRelayoutEvent);
-      // bind new event
+      // Rebind the relayout handler. gd.on() registers on Plotly's own
+      // EventEmitter, so it must be unbound with removeListener — the DOM's
+      // removeEventListener is a no-op for it, and every in-place render
+      // (Plotly.react keeps the emitter) used to add another handler.
+      plot.removeListener?.('plotly_relayout', this.onRelayoutEvent);
       plot.on('plotly_relayout', this.onRelayoutEvent);
 
       // Clicking on a shape activates it but Plotly doesn't fire a dedicated
