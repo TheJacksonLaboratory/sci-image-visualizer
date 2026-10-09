@@ -53,16 +53,21 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
    * up to {@link UNDO_LIMIT} times in a row. {@link redo} is the mirror. Any new
    * region action clears `redoStack` (the redo future is no longer reachable).
    *
-   * A continuous gesture (a wand/brush/vertex drag commits to the store many
-   * times) is coalesced into a single entry: the first commit of a burst
-   * captures the pre-burst state and every commit within
-   * {@link UNDO_COALESCE_MS} of the previous one is folded into it. History
+   * A continuous gesture (a wand/brush/eraser drag or an overlay drag commits
+   * to the store many times) is one entry: between {@link beginGesture} and
+   * {@link endGesture} (or {@link beginBatch}/{@link endBatch}) every commit
+   * folds into the entry its first commit opened, however long the user pauses,
+   * and the gesture never merges with a commit before or after it (RT-12).
+   * Commits outside any gesture still coalesce by time: each one within
+   * {@link UNDO_COALESCE_MS} of the previous folds into the same entry. History
    * never crosses an image load/switch — {@link resetUndoHistory} clears it.
    */
   private undoStack: Region[][] = [];
   private redoStack: Region[][] = [];
   /** True while a coalescing burst is open (further commits fold into it). */
   private undoBurstOpen = false;
+  /** Open gestures (nested begin/end); while > 0 the burst stays open with no timer. */
+  private gestureDepth = 0;
   private undoBurstTimer: ReturnType<typeof setTimeout> | null = null;
   /** True while restoring a snapshot, so the restore records no new history. */
   private restoringUndo = false;
@@ -489,7 +494,8 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   private recordUndoSnapshot(): void {
     if (this.restoringUndo) return;
     const startsBurst = !this.undoBurstOpen;
-    this.armUndoBurst();
+    if (this.gestureDepth > 0) this.undoBurstOpen = true; // closed by endGesture()
+    else this.armUndoBurst();
     if (!startsBurst) return;                      // mid-burst — keep first snapshot
     this.undoStack.push(this.cloneRegions(this.regions));
     if (this.undoStack.length > RegionStore.UNDO_LIMIT) this.undoStack.shift();
@@ -822,13 +828,35 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.emit();
   }
 
-  beginBatch(): void { this.batchDepth++; }
+  /** Coalesce `regionUpdate$` until the matching {@link endBatch} (live drags);
+   *  the batch is also one undo gesture ({@link beginGesture}). */
+  beginBatch(): void {
+    this.batchDepth++;
+    this.beginGesture();
+  }
   endBatch(): void {
     if (this.batchDepth > 0) this.batchDepth--;
+    this.endGesture();
     if (this.batchDepth === 0 && this.pendingEmit) {
       this.pendingEmit = false;
       this.regionUpdate$.next(this.getRegions());
     }
+  }
+
+  /**
+   * Mark the start of one user gesture (e.g. a wand/brush mousedown): every
+   * commit until the matching {@link endGesture} becomes a single undo step,
+   * without delaying `regionUpdate$` (tools render through it while dragging).
+   * Calls nest. A gesture never folds into an earlier timed burst.
+   */
+  beginGesture(): void {
+    if (this.gestureDepth++ === 0) this.closeUndoBurst();
+  }
+
+  /** End the gesture opened by {@link beginGesture}; the next commit starts a new step. */
+  endGesture(): void {
+    if (this.gestureDepth === 0) return;
+    if (--this.gestureDepth === 0) this.closeUndoBurst();
   }
 
   // ── per-image lifecycle ────────────────────────────────────────────────

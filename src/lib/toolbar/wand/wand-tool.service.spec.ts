@@ -399,3 +399,37 @@ describe('WandToolService — commits every traced piece with its holes (RT-3, R
     expect(r.label).toBe('Tumor');
   });
 });
+
+describe('WandToolService — one drag is one undo step (RT-12)', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+    document.body.innerHTML = '';
+  });
+
+  it('a drag with a long pause undoes in one step, and the next click is its own step', () => {
+    jest.useFakeTimers();
+    const store = new RegionStore(new VisualizerStore());
+    const tool = new WandToolService(new WandService(), store);
+    const { host, container } = makeHost({ cached: cached(40, 40) });
+    host.getRegions = () => store.getRegions();
+    host.setRegions = (r: Region[]) => store.setRegions(r);
+    tool.bindHost(host);
+    tool.setMode(true, { patchSize: 5, simpleMode: true });
+    const canvas = cv(container);
+
+    canvas.dispatchEvent(mouse('mousedown', 10, 10));
+    jest.advanceTimersByTime(1000); // pause mid-drag
+    canvas.dispatchEvent(mouse('mousemove', 13, 10));
+    canvas.dispatchEvent(mouse('mouseup', 13, 10));
+    canvas.dispatchEvent(mouse('mousedown', 20, 30)); // a new region, right away
+    canvas.dispatchEvent(mouse('mouseup', 20, 30));
+    expect(store.getRegions()).toHaveLength(2);
+
+    store.undo();
+    expect(store.getRegions()).toHaveLength(1);
+    store.undo();
+    expect(store.getRegions()).toHaveLength(0);
+    tool.setMode(false);
+    store.resetUndoHistory();
+  });
+});

@@ -390,6 +390,65 @@ describe('RegionStore', () => {
       expect((store.getRegions()[0].bounds as Rectangle).x).toBe(0);
     });
 
+    describe('gesture-based coalescing (RT-12)', () => {
+      it('keeps a gesture with a long pause as one undo step', () => {
+        const id = store.addRegion(rectRegion(0, 0, 1, 1)); settle();
+        store.beginGesture();
+        store.moveRegion(id, 1, 0);
+        jest.advanceTimersByTime(1000); // the user pauses mid-drag
+        store.moveRegion(id, 1, 0);
+        store.endGesture();
+
+        store.undo();
+        expect((store.getRegions()[0].bounds as Rectangle).x).toBe(0);
+      });
+
+      it('never merges two gestures, however close together', () => {
+        store.beginGesture();
+        store.addRegion(rectRegion(0, 0, 1, 1));
+        store.endGesture();
+        store.beginGesture();
+        store.addRegion(rectRegion(5, 5, 1, 1));
+        store.endGesture();
+
+        store.undo();
+        expect(store.getRegions().length).toBe(1);
+      });
+
+      it('starts a new step when a gesture follows a commit within the timer window', () => {
+        store.addRegion(rectRegion(0, 0, 1, 1)); // no settle(): the timed burst is still open
+        store.beginGesture();
+        store.addRegion(rectRegion(5, 5, 1, 1));
+        store.endGesture();
+
+        store.undo();
+        expect(store.getRegions().length).toBe(1);
+      });
+
+      it('treats a batched drag (beginBatch/endBatch) as one gesture', () => {
+        const id = store.addRegion(rectRegion(0, 0, 1, 1)); settle();
+        store.beginBatch();
+        store.moveRegion(id, 1, 0);
+        jest.advanceTimersByTime(1000);
+        store.moveRegion(id, 1, 0);
+        store.endBatch();
+        store.addRegion(rectRegion(5, 5, 1, 1)); // right after the drag: its own step
+
+        store.undo();
+        expect(store.getRegions().length).toBe(1);
+        expect((store.getRegions()[0].bounds as Rectangle).x).toBe(2);
+        store.undo();
+        expect((store.getRegions()[0].bounds as Rectangle).x).toBe(0);
+      });
+
+      it('an unbalanced endGesture is harmless', () => {
+        store.endGesture();
+        store.addRegion(rectRegion(0, 0, 1, 1));
+        store.undo();
+        expect(store.getRegions().length).toBe(0);
+      });
+    });
+
     it('does not alias the live region — an edit after undo is independent', () => {
       const id = store.addRegion(polyRegion([0, 10, 5], [0, 0, 10])); settle();
       store.moveVertex(id, 0, 99, 99); settle();

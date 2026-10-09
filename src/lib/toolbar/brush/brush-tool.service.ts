@@ -1,9 +1,11 @@
-import { Injectable } from '@angular/core';
+import { Injectable, Optional } from '@angular/core';
 
 import { WandService } from '../wand/wand.service';
 import { CachedImageData, WandToolHost } from '../wand/wand-tool.service';
 import { MatrixFrame } from '../tool-kit/matrix-frame';
 import { MaskStrokeEditor } from '../tool-kit/mask-stroke-editor';
+import { UndoGesture } from '../tool-kit/undo-gesture';
+import { RegionStore } from '../../store/region-store.service';
 import { Region } from '../../models/region';
 
 /** Brush parameters. `size` is the brush *diameter* in matrix (image) pixels. */
@@ -77,7 +79,11 @@ export class BrushToolService {
   private readonly boundMouseMove: (e: MouseEvent) => void;
   private readonly boundMouseUp: (e: MouseEvent) => void;
 
-  constructor() {
+  /** Makes each drag one undo step, however long the user pauses (RT-12). */
+  private readonly gesture: UndoGesture;
+
+  constructor(@Optional() regionStore?: RegionStore) {
+    this.gesture = new UndoGesture(regionStore);
     this.boundMouseDown = (e) => this.onMouseDown(e);
     this.boundMouseMove = (e) => this.onMouseMove(e);
     this.boundMouseUp = (e) => this.onMouseUp(e);
@@ -175,6 +181,7 @@ export class BrushToolService {
   private onMouseDown(e: MouseEvent) {
     if (e.button !== 0) return;
     this.dragging = true;
+    this.gesture.begin();
     this.lastMatrix = null; // first stamp of this drag is a single dab
     this.applyAtClient(e, true);
   }
@@ -183,6 +190,7 @@ export class BrushToolService {
     if (!this.dragging) return;
     if ((e.buttons & 1) === 0) {
       this.dragging = false;
+      this.gesture.end();
       return;
     }
     this.applyAtClient(e, false);
@@ -192,6 +200,7 @@ export class BrushToolService {
     // Stop accumulating from this drag, but keep the region alive so the next
     // mousedown extends it. Clear lastMatrix so the next drag starts a dab.
     this.dragging = false;
+    this.gesture.end();
     this.lastMatrix = null;
   }
 
@@ -199,6 +208,7 @@ export class BrushToolService {
     this.editor.reset();
     this.lastMatrix = null;
     this.dragging = false;
+    this.gesture.end();
   }
 
   // ── Per-tick stroke logic ───────────────────────────────────────────

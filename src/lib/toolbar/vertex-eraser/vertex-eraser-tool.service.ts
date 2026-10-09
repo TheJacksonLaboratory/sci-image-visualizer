@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, Optional } from '@angular/core';
 
 import { IViewportHost, IRegionDataHost } from '../../contracts/coordinate-transform.contract';
 import { Region, Polygon } from '../../models/region';
@@ -6,6 +6,8 @@ import { makePolygon, replaceBounds } from '../../models/polygon-factory';
 import { dropVerticesWithinRadius } from '../../geometry/ring';
 import type { CachedImageData } from '../wand/wand-tool.service';
 import { MatrixFrame } from '../tool-kit/matrix-frame';
+import { UndoGesture } from '../tool-kit/undo-gesture';
+import { RegionStore } from '../../store/region-store.service';
 
 /**
  * Collaboration interface the vertex eraser needs from its host backend.
@@ -57,7 +59,11 @@ export class VertexEraserToolService {
   private readonly boundMouseMove: (e: MouseEvent) => void;
   private readonly boundMouseUp: (e: MouseEvent) => void;
 
-  constructor() {
+  /** Makes each drag one undo step, however long the user pauses (RT-12). */
+  private readonly gesture: UndoGesture;
+
+  constructor(@Optional() regionStore?: RegionStore) {
+    this.gesture = new UndoGesture(regionStore);
     this.boundMouseDown = (e) => this.onMouseDown(e);
     this.boundMouseMove = (e) => this.onMouseMove(e);
     this.boundMouseUp = (e) => this.onMouseUp(e);
@@ -119,6 +125,7 @@ export class VertexEraserToolService {
     this.overlay.remove();
     this.overlay = null;
     this.dragging = false;
+    this.gesture.end();
     this.cursor = null;
   }
 
@@ -127,6 +134,7 @@ export class VertexEraserToolService {
   private onMouseDown(e: MouseEvent) {
     if (e.button !== 0) return;
     this.dragging = true;
+    this.gesture.begin();
     this.updateCursor(e);
     this.applyAtClient(e);
   }
@@ -139,6 +147,7 @@ export class VertexEraserToolService {
     }
     if ((e.buttons & 1) === 0) {
       this.dragging = false;
+      this.gesture.end();
       this.drawCursor();
       return;
     }
@@ -148,6 +157,7 @@ export class VertexEraserToolService {
 
   private onMouseUp(_: MouseEvent) {
     this.dragging = false;
+    this.gesture.end();
   }
 
   private updateCursor(e: MouseEvent) {

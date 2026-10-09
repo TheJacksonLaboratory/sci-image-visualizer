@@ -1,9 +1,11 @@
-import { Injectable } from '@angular/core';
+import { Injectable, Optional } from '@angular/core';
 
 import { WandImage, WandOptions, WandService } from './wand.service';
 import { BBoxMask } from '../../geometry/raster';
 import { MatrixFrame } from '../tool-kit/matrix-frame';
 import { MaskStrokeEditor } from '../tool-kit/mask-stroke-editor';
+import { UndoGesture } from '../tool-kit/undo-gesture';
+import { RegionStore } from '../../store/region-store.service';
 import { IViewportHost, IRegionDataHost } from '../../contracts/coordinate-transform.contract';
 import { Region } from '../../models/region';
 
@@ -87,7 +89,11 @@ export class WandToolService {
   private readonly boundMouseMove: (e: MouseEvent) => void;
   private readonly boundMouseUp: (e: MouseEvent) => void;
 
-  constructor(private wandService: WandService) {
+  /** Makes each drag one undo step, however long the user pauses (RT-12). */
+  private readonly gesture: UndoGesture;
+
+  constructor(private wandService: WandService, @Optional() regionStore?: RegionStore) {
+    this.gesture = new UndoGesture(regionStore);
     this.boundMouseDown = (e) => this.onMouseDown(e);
     this.boundMouseMove = (e) => this.onMouseMove(e);
     this.boundMouseUp = (e) => this.onMouseUp(e);
@@ -161,6 +167,7 @@ export class WandToolService {
   private onMouseDown(e: MouseEvent) {
     if (e.button !== 0) return;
     this.dragging = true;
+    this.gesture.begin();
     this.applyAtClient(e, true);
   }
 
@@ -168,6 +175,7 @@ export class WandToolService {
     if (!this.dragging) return;
     if ((e.buttons & 1) === 0) {
       this.dragging = false;
+      this.gesture.end();
       return;
     }
     this.applyAtClient(e, false);
@@ -177,11 +185,13 @@ export class WandToolService {
     // Stop accumulating from this drag, but keep the region alive so the
     // next mousedown extends it instead of starting fresh.
     this.dragging = false;
+    this.gesture.end();
   }
 
   private resetStroke() {
     this.editor.reset();
     this.dragging = false;
+    this.gesture.end();
   }
 
   // ── Per-tick stroke logic ───────────────────────────────────────────
