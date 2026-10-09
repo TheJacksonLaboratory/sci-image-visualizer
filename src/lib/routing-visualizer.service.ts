@@ -4,14 +4,14 @@ import { map } from 'rxjs/operators';
 import { Image } from 'image-js';
 
 import { IImageInfo, IImageMetadata } from './contracts/image.contract';
-import { Region } from './models/region';
+import { Polygon, Region } from './models/region';
 import { ClassPreset, PresetSet } from './models/class-preset';
 import { PlotlyService } from './implementations/plotly/plotly.service';
 import { OpenSeadragonVisualizerService } from './implementations/osd/openseadragon-visualizer.service';
 import { PlotType, PlotTypeDescriptor, isNapari3d, isNapariScatter, isSpatialOmics, isSpatialOmics3d } from './contracts/plot-type';
-import { IVisualizer, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls, ISpatialControls } from './contracts/visualizer.contract';
+import { IVisualizer, LoadedImage, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls, ISpatialControls } from './contracts/visualizer.contract';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-data.port';
-import { SpatialColorBy } from './contracts/display-types';
+import { ColormapNode, IBrushOptions, IWandOptions, SpatialColorBy } from './contracts/display-types';
 import { SpatialDataset, isCategoricalColumn } from './contracts/spatial-dataset.contract';
 import { resolveCategoryColors } from './spatial/spatial-encoding';
 import { sectionsOf } from './spatial/spatial-sections';
@@ -56,7 +56,7 @@ import { PlotModeViewport } from './contracts/plot-type-contribution.contract';
 /** Intensity-profile line ROIs are owned by the intensity tool, not the editor.
  *  Package-internal predicate (property-based so it also matches plain objects
  *  after a drag round-trip). */
-function isProfileRegion(r: any): boolean {
+function isProfileRegion(r: { kind?: string } | null | undefined): boolean {
   return r?.kind === 'profile';
 }
 
@@ -173,7 +173,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   get capabilities(): ViewerCapabilities { return this.plotly.capabilities; }
 
   // ── render / viewport → active renderer ──────────────────────────────
-  async load(imageInfo: IImageInfo, zIndex: number, signal?: AbortSignal): Promise<any> {
+  async load(imageInfo: IImageInfo, zIndex: number, signal?: AbortSignal): Promise<LoadedImage> {
     // A stack can open away from slice 0 (`initialZIndex` — a volume opens
     // mid-specimen), and that arrives here rather than through setZIndex.
     this.currentZIndex = zIndex;
@@ -203,7 +203,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   }
 
   /** Try OSD; on failure fall back to Plotly for this image (not permanent — see reset()). */
-  private async loadViaOsdThenPlotly(imageInfo: IImageInfo, zIndex: number, signal?: AbortSignal): Promise<any> {
+  private async loadViaOsdThenPlotly(imageInfo: IImageInfo, zIndex: number,
+                                     signal?: AbortSignal): Promise<LoadedImage> {
     try {
       return await (this.osd as IVisualizer).load(imageInfo, zIndex, signal);
     } catch (err) {
@@ -213,7 +214,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       return (this.plotly as IVisualizer).load(imageInfo, zIndex, signal);
     }
   }
-  plot(plotDiv: string, imageLoaded: any, imageInfo: IImageInfo, screenHeight: number,
+  plot(plotDiv: string, imageLoaded: unknown, imageInfo: IImageInfo, screenHeight: number,
        plotType: PlotType, inPlace?: boolean): Promise<boolean> {
     this.currentPlotType = plotType;
     // Apply the per-image region cache (snapshot old regions, restore the new
@@ -354,8 +355,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.renderer().setRegions(regions, showRegionLabel, isRegionSaveOn, fillColor, append);
   }
   getRegions(): Region[] { return this.renderer().getRegions(); }
-  getRegionPolygons(): any[] { return this.renderer().getRegionPolygons(); }
-  getRegionUpdateEvent(): Observable<any[]> { return this.renderer().getRegionUpdateEvent(); }
+  getRegionPolygons(): Polygon[] { return this.renderer().getRegionPolygons(); }
+  getRegionUpdateEvent(): Observable<Region[]> { return this.renderer().getRegionUpdateEvent(); }
   setSelectedShapeIndices(indices: number[]): void { this.renderer().setSelectedShapeIndices(indices); }
   selectRegion(region: Region): void { this.renderer().selectRegion(region); }
   getSelectedShapeIndices$(): Observable<number[]> { return this.renderer().getSelectedShapeIndices$(); }
@@ -478,11 +479,11 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   // The wand, vertex eraser and zoom-to-box are implemented on both backends
   // via ICoordinateTransform (+ a viewport pixel readback for the wand), so they
   // follow the active renderer.
-  setWandMode(active: boolean, options?: any): void { this.renderer().setWandMode(active, options); }
-  setWandOptions(options: any): void { this.renderer().setWandOptions(options); }
+  setWandMode(active: boolean, options?: IWandOptions): void { this.renderer().setWandMode(active, options); }
+  setWandOptions(options: IWandOptions): void { this.renderer().setWandOptions(options); }
   clearActiveWandRegion(): void { this.renderer().clearActiveWandRegion(); }
-  setBrushMode(active: boolean, options?: any): void { this.renderer().setBrushMode(active, options); }
-  setBrushOptions(options: any): void { this.renderer().setBrushOptions(options); }
+  setBrushMode(active: boolean, options?: IBrushOptions): void { this.renderer().setBrushMode(active, options); }
+  setBrushOptions(options: IBrushOptions): void { this.renderer().setBrushOptions(options); }
   setVertexEraserMode(active: boolean): void { this.renderer().setVertexEraserMode(active); }
   setVertexEraserRadius(radius: number): void { this.renderer().setVertexEraserRadius(radius); }
   setZoomToBoxMode(active: boolean): void { this.renderer().setZoomToBoxMode(active); }
@@ -499,11 +500,11 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   // carry render glue beyond the store write (a live Plotly.restyle of
   // colorscale/reversescale on the mounted heatmap); OSD recolors via its own
   // store subscription either way.
-  getColormap(): Observable<any> { return this.store.getColormap(); }
-  setColormap(colormap: any): void { this.plotly.setColormap(colormap); }
-  getColormapOptions(): any { return this.store.getColormapOptions(); }
+  getColormap(): Observable<ColormapNode | null> { return this.store.getColormap(); }
+  setColormap(colormap: ColormapNode): void { this.plotly.setColormap(colormap); }
+  getColormapOptions(): ColormapNode[] { return this.store.getColormapOptions(); }
   getReverseScale(): Observable<boolean> { return this.store.getReverseScale(); }
-  setReverseScale(reverscale: any): void { this.plotly.setReverseScale(reverscale); }
+  setReverseScale(reverse: boolean): void { this.plotly.setReverseScale(reverse); }
   setImageMeta(imageMeta: IImageMetadata[], imageKey?: string): void {
     this.store.setImageMeta(imageMeta, imageKey);
   }

@@ -67,6 +67,13 @@ import { buildVolumeStackImage } from './spatial/spatial-volume-image';
  *  Styling hangs off the `.viz-plot` class instead of the id. */
 let plotInstanceSeq = 0;
 
+/** A user-facing message for a failure: an HttpErrorResponse's server message, an
+ *  Error's message, or the status text, else the value itself. */
+function errorMessage(err: unknown): string {
+  const e = err as { error?: { message?: string }; message?: string; statusText?: string } | null;
+  return e?.error?.message || e?.message || e?.statusText || String(err);
+}
+
 @Component({
   // Canonical prefixed selector first; the unprefixed original is kept as an
   // alias for one release (pre-publication back-compat).
@@ -1108,11 +1115,11 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
                 this.activateSelectedPlotMode();
                 this.activateOpenDialogTool();
               },
-              sharpenFailed: (err: any) => {
+              sharpenFailed: (err: unknown) => {
                 if (!isCurrent()) return; // superseded by a newer image
                 // The small tier stays on screen as the fallback — tell the
                 // user the sharper version isn't coming.
-                const msg = err?.error?.message || err?.message || err?.statusText || String(err);
+                const msg = errorMessage(err);
                 this.messageService.add({
                   key: this.vizAlertToastKey,
                   severity: 'warn',
@@ -1126,8 +1133,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
               },
               renderFailed: (err: unknown) => {
                 if (!isCurrent()) return; // superseded by a newer image
-                const e = err as { error?: { message?: string }; message?: string; statusText?: string };
-                const msg = e?.error?.message || e?.message || e?.statusText || String(err);
+                const msg = errorMessage(err);
                 this.messageService.add({
                   key: this.vizAlertToastKey,
                   severity: 'error',
@@ -1139,8 +1145,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
           }
         }
       },
-      error: (err) => {
-        const msg = err?.error?.message || err?.message || err?.statusText || String(err);
+      error: (err: unknown) => {
+        const msg = errorMessage(err);
         console.error('Error occured when getting image info', err);
         this.messageService.add({
           key: this.vizAlertToastKey,

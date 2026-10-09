@@ -26,10 +26,6 @@ import type { PlotModeViewport } from './plot-type-contribution.contract';
  *
  * Split into role interfaces so a consumer can depend only on the slice it
  * uses, then composed into `IVisualizer`.
- *
- * Types are intentionally permissive (`any` where the current Plotly service
- * is untyped) so `PlotlyService` satisfies the contract without a typing
- * rewrite — tightening is a follow-up, not part of standing the interface up.
  */
 
 /** Pixel readback shape returned by `getDisplayedPixelData`. */
@@ -56,6 +52,16 @@ export interface IntensityProfile {
 }
 
 /**
+ * What `IDataRenderer.load()` resolves to. Backend-specific beyond `filename`,
+ * which names the image the handle was loaded for: the host compares it with the
+ * image it asked for, to drop a handle a newer request has overtaken. Pass the
+ * handle on to `plot()` unchanged.
+ */
+export interface LoadedImage {
+  readonly filename: string | undefined;
+}
+
+/**
  * The render/viewport role: load data, render it (image or plot), and handle
  * zoom, stack navigation, and pixel readback.
  */
@@ -64,9 +70,10 @@ export interface IDataRenderer {
    *  host no longer wants the result (a newer image, Cancel, teardown); a backend
    *  may stop its network work then. Optional, and ignored by backends that do
    *  not support it yet. */
-  load(imageInfo: IImageInfo, zIndex: number, signal?: AbortSignal): Promise<any>;
-  /** `imageLoaded` is the backend-specific handle returned by `load()` —
-   *  treat it as opaque and pass it straight through. */
+  load(imageInfo: IImageInfo, zIndex: number, signal?: AbortSignal): Promise<LoadedImage>;
+  /** `imageLoaded` is the {@link LoadedImage} handle returned by `load()` (or null
+   *  for a draw with no image) — pass it straight through. Resolves false when the
+   *  backend could not draw (no plot target, no WebGPU, …). */
   plot(plotDiv: string, imageLoaded: unknown, imageInfo: IImageInfo, screenHeight: number,
        plotType: PlotType, inPlace?: boolean): Promise<boolean>;
   /** @deprecated Plotly-specific re-render; the OSD backend no-ops it. The host
@@ -134,7 +141,8 @@ export interface IDataRenderer {
   /** @deprecated Use `getSurface3dControls()` — see {@link setSurfaceDragMode}. */
   resetSurfaceCamera(): void;
 
-  getAutoscaleEvent(): Observable<any>;
+  /** Emits whenever the backend fits the view (its autoscale / "fit to view"). */
+  getAutoscaleEvent(): Observable<unknown>;
 
   /** Plot types this backend advertises (drives the UI selector). */
   getPlotTypeDescriptors(): PlotTypeDescriptor[];
@@ -155,8 +163,10 @@ export interface IRegionStore {
              fillColor?: string, append?: boolean): void;
   /** Framework-neutral accessor — the canonical way to read current regions. */
   getRegions(): Region[];
-  getRegionPolygons(): any[];
-  getRegionUpdateEvent(): Observable<any[]>;
+  /** The current regions as polygons (rectangles expanded), for server requests. */
+  getRegionPolygons(): Polygon[];
+  /** Emits the region set whenever it changes. */
+  getRegionUpdateEvent(): Observable<Region[]>;
 
   setSelectedShapeIndices(indices: number[]): void;
   getSelectedShapeIndices$(): Observable<number[]>;
@@ -420,7 +430,7 @@ export interface IDisplayOptions {
   setColormap(colormap: ColormapNode): void;
   getColormapOptions(): ColormapNode[];
   getReverseScale(): Observable<boolean>;
-  setReverseScale(reverscale: any): void;
+  setReverseScale(reverse: boolean): void;
   /** Publish the current image's metadata. `imageKey` (its file name) lets the
    *  channel state survive a re-plot of the same image but not a switch to another. */
   setImageMeta(imageMeta: IImageMetadata[], imageKey?: string): void;

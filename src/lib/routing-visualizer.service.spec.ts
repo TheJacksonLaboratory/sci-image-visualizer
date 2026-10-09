@@ -289,9 +289,10 @@ describe('RoutingVisualizerService (characterization)', () => {
     await expect(firstValueFrom(router.getColormap())).resolves.toBe('Greens');
     expect(plotly.getColormap).not.toHaveBeenCalled();
 
-    router.setColormap('Reds');
+    const reds = { label: 'Reds', data: { value: 'Reds' } };
+    router.setColormap(reds);
     router.setReverseScale(true);
-    expect(plotly.setColormap).toHaveBeenCalledWith('Reds');
+    expect(plotly.setColormap).toHaveBeenCalledWith(reds);
     expect(plotly.setReverseScale).toHaveBeenCalledWith(true);
   });
 
