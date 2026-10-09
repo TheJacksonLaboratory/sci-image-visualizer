@@ -1,7 +1,7 @@
 import { Subscription } from 'rxjs';
 
 import { IRegionOverlay, RegionToolMode } from '../../contracts/region-overlay.contract';
-import { Region, Rectangle, Polygon } from '../../models/region';
+import { Region, Rectangle, Polygon, MultiPolygon } from '../../models/region';
 import { RegionStore } from '../../store/region-store.service';
 import { PIXEL_WORLD_QUANTUM, snapToWorldGrid } from '../../spatial/world-grid';
 
@@ -693,7 +693,28 @@ export class NapariRegionOverlay implements IRegionOverlay {
       }
       return inside;
     }
+    // Multi-part region (merge/union output): inside any part, minus that part's holes (as OSD).
+    if ('polygons' in b) {
+      return (b as MultiPolygon).polygons.some(
+        (p) =>
+          this.ringContains(p.xpoints, p.ypoints, x, y) &&
+          !(p.holes ?? []).some((ring) =>
+            this.ringContains(ring.map((pt) => pt[0]), ring.map((pt) => pt[1]), x, y),
+          ),
+      );
+    }
     return false;
+  }
+
+  /** Even-odd point-in-ring test in image coords. */
+  private ringContains(xs: number[], ys: number[], x: number, y: number): boolean {
+    let inside = false;
+    for (let i = 0, j = xs.length - 1; i < xs.length; j = i++) {
+      if (ys[i] > y !== ys[j] > y && x < ((xs[j] - xs[i]) * (y - ys[i])) / (ys[j] - ys[i]) + xs[i]) {
+        inside = !inside;
+      }
+    }
+    return inside;
   }
 
   /** Show or hide the drawn regions. A region being drawn stays visible either way. */
@@ -732,6 +753,12 @@ export class NapariRegionOverlay implements IRegionOverlay {
       const p = b as Polygon;
       ix = p.xpoints.reduce((m, x) => Math.min(m, x), Infinity);
       iy = p.ypoints.reduce((m, y) => Math.min(m, y), Infinity);
+    } else if ('polygons' in b) {
+      // Multi-part region: top-left of all parts together.
+      const bb = this.regionBBox(region);
+      if (!bb) return;
+      ix = bb.x0;
+      iy = bb.y0;
     } else {
       return;
     }
@@ -861,6 +888,27 @@ export class NapariRegionOverlay implements IRegionOverlay {
         .join(' ');
       const el = document.createElementNS(SVG_NS, p.closed === false ? 'polyline' : 'polygon');
       el.setAttribute('points', pts);
+      this.style(el, stroke, isSelected);
+      return el;
+    }
+    if ('polygons' in b) {
+      // Multi-part region (merge/union output): one even-odd <path> with every part's exterior
+      // plus its holes, as the OSD overlay draws it.
+      const parts = (b as MultiPolygon).polygons.filter((p) => (p.xpoints?.length ?? 0) >= 3);
+      if (!parts.length) return null;
+      const d = parts
+        .map((p) =>
+          [
+            this.straightPath(p.xpoints, p.ypoints, true),
+            ...(p.holes ?? []).map((ring) =>
+              this.straightPath(ring.map((pt) => pt[0]), ring.map((pt) => pt[1]), true),
+            ),
+          ].join(' '),
+        )
+        .join(' ');
+      const el = document.createElementNS(SVG_NS, 'path');
+      el.setAttribute('d', d);
+      el.setAttribute('fill-rule', 'evenodd');
       this.style(el, stroke, isSelected);
       return el;
     }

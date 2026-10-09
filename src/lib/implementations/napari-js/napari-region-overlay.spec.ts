@@ -1,7 +1,7 @@
 import { NapariRegionOverlay } from './napari-region-overlay';
 import { RegionStore } from '../../store/region-store.service';
 import { VisualizerStore } from '../../store/visualizer-store.service';
-import { Region, Rectangle, Polygon } from '../../models/region';
+import { Region, Rectangle, Polygon, MultiPolygon } from '../../models/region';
 
 /**
  * Tests for the napari-js SVG region overlay (jit-ui#102), mirroring
@@ -130,6 +130,27 @@ function donutRegion(): Region {
   p.closed = true;
   p.holes = [[[7, 7], [13, 7], [13, 13], [7, 13]]];
   r.bounds = p;
+  return r;
+}
+
+/** A 2-part MultiPolygon (merge output with disjoint parts): a 0–20 square with a 7–13 hole,
+ *  and a separate 50–60 square. */
+function multiRegion(): Region {
+  const square = (x0: number, y0: number, x1: number, y1: number): Polygon => {
+    const p = new Polygon();
+    p.xpoints = [x0, x1, x1, x0];
+    p.ypoints = [y0, y0, y1, y1];
+    p.npoints = 4;
+    p.coordinates = p.xpoints.map((x, i) => [x, p.ypoints[i]]);
+    p.closed = true;
+    return p;
+  };
+  const a = square(0, 0, 20, 20);
+  a.holes = [[[7, 7], [13, 7], [13, 13], [7, 13]]];
+  const mp = new MultiPolygon();
+  mp.polygons = [a, square(50, 50, 60, 60)];
+  const r = new Region();
+  r.bounds = mp;
   return r;
 }
 
@@ -533,6 +554,47 @@ describe('NapariRegionOverlay', () => {
     ptr(overlay, 'pointerup', 5, 6);
     const after = store.getRegions().find((r) => r.id === id)!.bounds as Polygon;
     expect(after.holeHandlesOut![0][0]).toEqual([5 - ring[0][0], 6 - ring[0][1]]);
+  });
+
+  // ── multi-part regions (review NAPARI-BOUNDARY-1) ─────────────────────
+
+  it('renders a MultiPolygon as one even-odd <path> holding every part and its holes', () => {
+    store.addRegion(multiRegion());
+    const path = svgOf(overlay).querySelector('path');
+    expect(path).toBeTruthy();
+    expect(path!.getAttribute('fill-rule')).toBe('evenodd');
+    // Two exteriors + one hole = three closed sub-paths.
+    expect(path!.getAttribute('d')!.match(/M/g)).toHaveLength(3);
+    expect(path!.getAttribute('d')).toContain('50,50');
+  });
+
+  it('select: clicking inside either part of a MultiPolygon selects it, but not inside a hole', () => {
+    store.addRegion(rectRegionAt(200, 200, 10, 10)); // index 0
+    store.addRegion(multiRegion()); // index 1
+    overlay.setMode('select');
+    const click = (x: number, y: number) => {
+      store.setSelectedShapeIndices([]);
+      ptr(overlay, 'pointerdown', x, y);
+      ptr(overlay, 'pointerup', x, y);
+      return store.getSelectedShapeIndices();
+    };
+    expect(click(3, 3)).toEqual([1]); // first part
+    expect(click(55, 55)).toEqual([1]); // second part
+    expect(click(10, 10)).toEqual([]); // the first part's hole
+    expect(click(35, 35)).toEqual([]); // between the parts
+  });
+
+  it('draws a MultiPolygon label at the top-left of all its parts', () => {
+    store.setShowShapeLabel(true);
+    const r = multiRegion();
+    r.label = 'merged';
+    store.addRegion(r);
+    overlay.redraw();
+    const text = svgOf(overlay).querySelector('text');
+    expect(text).toBeTruthy();
+    expect(text!.textContent).toBe('merged');
+    expect(text!.getAttribute('x')).toBe('0');
+    expect(text!.getAttribute('y')).toBe('-4');
   });
 
   // ── labels ─────────────────────────────────────────────────────────────
