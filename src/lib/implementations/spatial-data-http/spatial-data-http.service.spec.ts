@@ -316,6 +316,13 @@ describe('SpatialDataHttpService', () => {
       http.verify();
     });
 
+    it('ranks inlined names as the picker does: prefix matches first', async () => {
+      // gene-search.ts: the picker must not rank differently depending on how the data
+      // happens to be served.
+      await loadDataset({ ...MANIFEST, features: { count: 3, names: ['Actb', 'Cd4', 'Cd44'] } });
+      expect(await service.searchFeatures('c')).toEqual(['Cd4', 'Cd44', 'Actb']);
+    });
+
     it('asks the server when the manifest did not inline the names', async () => {
       await loadDataset({ ...MANIFEST, features: { count: 31053 } });
       const promise = service.searchFeatures('Ttr', 5);

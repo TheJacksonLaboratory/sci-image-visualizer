@@ -32,6 +32,7 @@ import {
   decodeRadius,
   decodeTranscriptTile,
 } from './spatial-wire';
+import { searchGeneNames } from '../../spatial/gene-search';
 
 /**
  * Reference {@link SpatialDataPort} adapter for the wire format the bundled
@@ -249,12 +250,9 @@ export class SpatialDataHttpService implements SpatialDataPort {
   async searchFeatures(query: string, limit = 50): Promise<string[]> {
     const manifest = this.requireManifest();
     // A dataset that inlined its names (targeted panel) is filtered locally —
-    // no round-trip for a keystroke.
+    // no round-trip for a keystroke — and ranked as the picker ranks them.
     const names = manifest.features?.names;
-    if (names) {
-      const q = query.toLowerCase();
-      return names.filter((n) => n.toLowerCase().includes(q)).slice(0, limit);
-    }
+    if (names) return searchGeneNames(names, query, limit);
     const url = `spatial/${encodeURIComponent(manifest.id)}/features`
       + `?q=${encodeURIComponent(query)}&limit=${limit}`;
     return (await this.getJson<{ names: string[] }>(url)).names ?? [];
