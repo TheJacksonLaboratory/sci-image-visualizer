@@ -165,14 +165,6 @@ export interface SpatialDataPort {
    * mode should never pay for it.
    */
   getVolume?(): Promise<Uint8Array>;
-
-  /**
-   * Server-side "which observations fall inside this polygon", for datasets
-   * too large to hit-test client-side. Optional: without it the library
-   * point-in-polygons the resident coordinates itself, which is fine into the
-   * 10^5 range. Coordinates are in the same space as the observations.
-   */
-  queryRoi?(polygon: { x: number[]; y: number[] }): Promise<Uint32Array>;
 }
 
 export const SPATIAL_DATA_PORT = new InjectionToken<SpatialDataPort>('SPATIAL_DATA_PORT');
