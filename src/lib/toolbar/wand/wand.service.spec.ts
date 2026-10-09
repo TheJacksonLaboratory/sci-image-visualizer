@@ -209,7 +209,7 @@ describe('WandService', () => {
       }
     }
 
-    const poly = service.maskToPolygon(accum, bw, bh, x0, y0);
+    const poly = service.maskToPolygons(accum, bw, bh, x0, y0)[0];
     expect(poly).not.toBeNull();
     const b = bbox(poly!);
     // Boundary should span the union of both patches horizontally.

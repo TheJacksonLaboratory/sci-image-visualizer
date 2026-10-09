@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { Polygon } from '../../models/region';
 import { BBoxMask, rasterizePolygon } from '../../geometry/raster';
 import { dropVerticesWithinRadius, pointInPolygonWithHoles, pointInRing } from '../../geometry/ring';
-import { labelsToPolygons, maskToPolygons, mooreBoundary } from '../../geometry/contour';
+import { labelsToPolygons, maskToPolygons } from '../../geometry/contour';
 
 import { IWandOptions, WandType } from '../../contracts/display-types';
 
@@ -51,9 +51,10 @@ export class WandService {
   computeRegion(image: WandImage, cx: number, cy: number, options: WandOptions = {}): Polygon | null {
     const patch = this.computePatchMask(image, cx, cy, options);
     if (!patch) return null;
-    return this.maskToPolygon(patch.mask, patch.size, patch.size,
+    // The largest traced piece (with holes of 4+ px, as the tools trace); single pixels still count.
+    return maskToPolygons(patch.mask, patch.size, patch.size,
       Math.round(cx) - (patch.size - 1) / 2,
-      Math.round(cy) - (patch.size - 1) / 2);
+      Math.round(cy) - (patch.size - 1) / 2, 1, 4)[0] ?? null;
   }
 
   /**
@@ -138,33 +139,6 @@ export class WandService {
   public pointInPolygonWithHoles(px: number, py: number, xpoints: number[], ypoints: number[],
                                  holes?: number[][][]): boolean {
     return pointInPolygonWithHoles(px, py, xpoints, ypoints, holes);
-  }
-
-  /**
-   * Trace the largest 4-connected blob in `mask` (sized w*h) and return a
-   * Polygon translated into image-pixel coordinates via (originX, originY).
-   * The traced vertices are NOT clamped to the image bounds (jit-ui#102).
-   */
-  public maskToPolygon(mask: Uint8Array, w: number, h: number,
-                       originX: number, originY: number): Polygon | null {
-    const verticesLocal = this.traceContour(mask, w, h);
-    if (!verticesLocal || verticesLocal.length < 3) return null;
-    const xpoints: number[] = [];
-    const ypoints: number[] = [];
-    const coordinates: number[][] = [];
-    for (const v of verticesLocal) {
-      const ix = Math.round(originX + v.x);
-      const iy = Math.round(originY + v.y);
-      xpoints.push(ix);
-      ypoints.push(iy);
-      coordinates.push([ix, iy]);
-    }
-    const poly = new Polygon();
-    poly.npoints = xpoints.length;
-    poly.xpoints = xpoints;
-    poly.ypoints = ypoints;
-    poly.coordinates = coordinates;
-    return poly;
   }
 
   /** See {@link maskToPolygons} in `geometry/contour`. */
@@ -435,54 +409,6 @@ export class WandService {
       }
     }
     return out;
-  }
-
-  // ── Contour tracing (Moore-neighbour boundary follow) ───────────────
-
-  /**
-   * Returns the outer boundary of the largest 4-connected blob in the mask
-   * sized w*h.
-   */
-  private traceContour(mask: Uint8Array, w: number, h: number): { x: number; y: number }[] | null {
-    // Find the largest connected component (4-connectivity).
-    const labels = new Int32Array(w * h);
-    let bestLabel = 0;
-    let bestSize = 0;
-    let nextLabel = 0;
-    const queue: number[] = [];
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const idx = y * w + x;
-        if (!mask[idx] || labels[idx]) continue;
-        nextLabel++;
-        labels[idx] = nextLabel;
-        let size = 0;
-        queue.push(idx);
-        while (queue.length) {
-          const i = queue.pop() as number;
-          size++;
-          const px = i % w;
-          const py = (i - px) / w;
-          if (px > 0)     { const j = i - 1;
-            if (mask[j] && !labels[j]) { labels[j] = nextLabel; queue.push(j); } }
-          if (px < w - 1) { const j = i + 1;
-            if (mask[j] && !labels[j]) { labels[j] = nextLabel; queue.push(j); } }
-          if (py > 0)     { const j = i - w;
-            if (mask[j] && !labels[j]) { labels[j] = nextLabel; queue.push(j); } }
-          if (py < h - 1) { const j = i + w;
-            if (mask[j] && !labels[j]) { labels[j] = nextLabel; queue.push(j); } }
-        }
-        if (size > bestSize) { bestSize = size; bestLabel = nextLabel; }
-      }
-    }
-    if (bestSize === 0) return null;
-
-    // Build a single-component mask, then trace its outer boundary using
-    // Moore-neighbour following.
-    const comp = new Uint8Array(w * h);
-    for (let i = 0; i < comp.length; i++) comp[i] = labels[i] === bestLabel ? 1 : 0;
-
-    return mooreBoundary(comp, w, h);
   }
 }
 
