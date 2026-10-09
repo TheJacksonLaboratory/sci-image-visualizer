@@ -151,14 +151,6 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     expect(await service.plot('nope', loaded, {} as any, 600, {} as any)).toBe(false);
   });
 
-  /**
-   * Regression: the initial fit-to-home must not depend on WHEN the render
-   * started. If the container is still zero-size (diagram view mid-switch from
-   * a folder view — e.g. "Load as Stack" with no image open), the timed goHome
-   * retries all miss and preserveViewport leaves the image partial ("a tile").
-   * fitWhenContainerSized fits the instant the container first gains a size,
-   * then stops observing (jit-ui#106).
-   */
   it('load() simple detects MULTICHANNEL from channelUrls + channelCount>1', async () => {
     const loadPlanes = jest.spyOn(service as unknown as { loadSimpleChannelPlanes(u: string[]): Promise<unknown[]> },
       'loadSimpleChannelPlanes');
@@ -209,6 +201,14 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     decode.mockRestore();
   });
 
+  /**
+   * Regression: the initial fit-to-home must not depend on WHEN the render
+   * started. If the container is still zero-size (diagram view mid-switch from
+   * a folder view — e.g. "Load as Stack" with no image open), the timed goHome
+   * retries all miss and preserveViewport leaves the image partial ("a tile").
+   * fitWhenContainerSized fits the instant the container first gains a size,
+   * then stops observing (jit-ui#106).
+   */
   describe('fitWhenContainerSized (initial fit is layout-timing-independent)', () => {
     const call = (el: HTMLElement | null, refit: () => void) =>
       (service as unknown as {

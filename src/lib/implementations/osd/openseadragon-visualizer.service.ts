@@ -102,6 +102,11 @@ interface TileDescriptor {
   mppY?: number;
 }
 
+/** The drag modes the SVG region overlay handles itself (see setDragMode). */
+const OVERLAY_MODES = new Set<RegionToolMode>([
+  'drawrect', 'drawclosedpath', 'drawopenpath', 'drawpolygon', 'addpoint', 'deletepoint', 'move', 'select',
+]);
+
 /** One decoded single-band channel plane (serverless multichannel). */
 interface SimplePlane { data: Uint8ClampedArray; width: number; height: number; }
 
@@ -339,9 +344,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    */
   private ensureColormapSubscription(): void {
     if (this.colormapSub) return;
-    // Colormap/reverse live in the shared VisualizerStore — the single source
-    // of truth for both backends. Rebuild the LUT and re-run the pixel pipeline
-    // whenever either changes, so OSD recolors in lock-step with Plotly.
     // Colormap/reverse + per-channel window/gamma/visibility + invert all live in
     // the shared VisualizerStore. Rebuild the LUT and re-run the pixel pipeline
     // whenever any of them changes, so the Channels & Histogram pane updates the
@@ -1128,12 +1130,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     return ts;
   }
 
-  /** Re-apply the display pipeline (window/gamma/colour/invert) after a state change.
-   *  Multichannel invalidates ONLY the visible slice's channel images — invalidating
-   *  the whole world would re-process every hidden/preloaded slice's tiles (hundreds),
-   *  flooding OSD with "[CacheRecord] … InvalidStateError" and wasting work on tiles
-   *  that aren't on screen. The other cached slices are marked stale and re-tinted
-   *  lazily when revealed. Composite/grayscale invalidate the world as before. */
   /** Collapse a burst of display-state changes into ONE invalidation on the next
    *  frame. Dragging a window slider emits per pixel of travel, and each round
    *  restores and re-processes every tile of every channel — so the burst is both
@@ -1151,6 +1147,13 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     });
   }
 
+  /** Re-apply the display pipeline (window/gamma/colour/invert) after a state change.
+   *  Multichannel invalidates ONLY the visible slice's channel images — invalidating
+   *  the whole world would re-process every hidden/preloaded slice's tiles (hundreds),
+   *  flooding OSD with "[CacheRecord] … InvalidStateError" and wasting work on tiles
+   *  that aren't on screen. The other cached slices are marked stale and re-tinted
+   *  lazily when revealed. Composite/grayscale invalidate the world; serverless
+   *  multichannel re-composites its cached planes. */
   private invalidateDisplay(): void {
     // Supersede any in-flight recolor round before restarting one (see displayToken).
     this.displayToken++;
@@ -1224,27 +1227,9 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   }
 
   private toOverlayMode(mode: string | false): RegionToolMode {
-    switch (mode) {
-      case 'drawrect':
-        return 'drawrect';
-      case 'drawclosedpath':
-        return 'drawclosedpath';
-      case 'drawopenpath':
-        return 'drawopenpath';
-      case 'drawpolygon':
-        return 'drawpolygon';
-      case 'addpoint':
-        return 'addpoint';
-      case 'deletepoint':
-        return 'deletepoint';
-      case 'move':
-        return 'move';
-      case 'select':
-        return 'select';
-      default:
-        return 'none';
-    }
+    return OVERLAY_MODES.has(mode as RegionToolMode) ? (mode as RegionToolMode) : 'none';
   }
+
 
   reloadAndPlot(): void {
     /* host re-drives plot() via the image-info stream */
