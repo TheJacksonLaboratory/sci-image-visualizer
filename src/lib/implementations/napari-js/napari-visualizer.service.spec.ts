@@ -596,6 +596,61 @@ describe('NapariVisualizerService', () => {
     document.body.removeChild(div);
   });
 
+  it('keeps the orbit pose across a surface rebuild (fit3d: once frames only the first)', async () => {
+    // The stub's addSurface never frames; give it napari-js 0.14's behaviour (frame through the
+    // fit policy), so this pins that the rebuild leaves the camera to the policy alone.
+    type FitViewer = {
+      shouldFit3D(): boolean;
+      camera3d: { target: [number, number, number]; distance: number };
+    };
+    const addSurface = Viewer.prototype.addSurface;
+    jest.spyOn(Viewer.prototype, 'addSurface').mockImplementation(function (this: Viewer, ...args) {
+      const layer = addSurface.apply(this, args);
+      const v = this as unknown as FitViewer;
+      if (v.shouldFit3D()) {
+        v.camera3d.target = [0.5, 0.5, 0.5];
+        v.camera3d.distance = 2.5;
+      }
+      return layer;
+    });
+    const div = document.createElement('div');
+    div.id = 'surf-pose-host';
+    document.body.appendChild(div);
+    const loaded = await service.load(imageInfo(), 0);
+    await service.plot('surf-pose-host', loaded, imageInfo(), 600, PlotType.NAPARI_SURFACE);
+    const cam = (service as unknown as { viewer: FitViewer }).viewer.camera3d;
+    expect(cam.distance).toBe(2.5); // the first build framed
+
+    cam.target = [7, 8, 9];
+    cam.distance = 42;
+    store.setChannelStates([
+      { index: 0, name: 's', color: '#00ff00', min: 30, max: 210, gamma: 1, visible: true } as IChannelState,
+    ]);
+    service.setZIndex(1);
+    await Promise.resolve();
+    expect(cam.target).toEqual([7, 8, 9]);
+    expect(cam.distance).toBe(42);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('re-frames the 3D camera on every 3D layer through napari-js', async () => {
+    const fit = jest.spyOn(Viewer.prototype, 'fitToLayers');
+    const div = document.createElement('div');
+    div.id = 'reset-cam-host';
+    document.body.appendChild(div);
+    const loaded = await service.load(imageInfo(), 0);
+    for (const type of [PlotType.NAPARI_SURFACE, PlotType.NAPARI_VOLUME, PlotType.NAPARI_SCATTER3D]) {
+      await service.plot('reset-cam-host', loaded, imageInfo(), 600, type);
+      fit.mockClear();
+      service.getSurface3dControls()?.resetSurfaceCamera();
+      expect(fit).toHaveBeenCalledTimes(1);
+    }
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
   it('a superseded surface preload neither caches its planes nor ends the progress bar', async () => {
     // Regression (NAPARI-SVC-8): a channel switch starts a second preload while the first is
     // in flight. The first one's late planes (the OLD band) landed in the cache the second had

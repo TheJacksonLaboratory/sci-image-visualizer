@@ -4176,12 +4176,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       center: true,
     });
 
-    // Preserve the orbit camera across a re-slice / window rebuild — only the first mount frames, so
-    // stepping the stack or changing the window keeps the current zoom/pan/orientation.
-    const cam = viewer.camera3d;
-    const preserveCamera = this.surfaceLayer != null;
-    const savedTarget = cam.target;
-    const savedDistance = cam.distance;
+    // A re-slice / window rebuild keeps the orbit camera: the viewer's `fit3d: 'once'` frames only
+    // the scene's first 3D add, so stepping the stack or changing the window keeps the pose.
     if (this.surfaceLayer) {
       viewer.layers.remove(this.surfaceLayer);
       this.surfaceLayer = null;
@@ -4192,10 +4188,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
       wireframe: this.surfaceWireframe,
     });
-    if (preserveCamera) {
-      cam.target = savedTarget;
-      cam.distance = savedDistance;
-    }
 
     this.imageW = plane.width;
     this.imageH = plane.height;
@@ -4539,20 +4531,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.viewer.setCameraDragMode(m);
   }
 
-  /** Re-frame the 3D camera on the current 3D layer. A surface mesh sits in the positive octant
-   *  (not centred), so frame it by its own bounds; a volume/isosurface uses its centred box. */
+  /** Re-frame the 3D camera on the scene: napari-js frames the union of every 3D layer's bounds
+   *  (surface, volume, point cloud), with the viewport-aware framing its adders use. */
   resetSurfaceCamera(): void {
-    if (!this.viewer) return;
-    const meshLayer = this.surfaceLayer ?? this.scatter3dLayer;
-    if (meshLayer) {
-      const b = meshLayer.bounds();
-      this.viewer.camera3d.target = b.center;
-      this.viewer.camera3d.distance = Math.max(b.radius * 2.5, 1e-3);
-      this.viewer.requestRender();
-      return;
-    }
-    const d = this.volumeDims;
-    if (d) this.viewer.camera3d.frame(d.width, d.height, d.depth);
+    this.viewer?.fitToLayers();
+    this.viewer?.requestRender();
   }
 
   getAutoscaleEvent(): Observable<unknown> {
