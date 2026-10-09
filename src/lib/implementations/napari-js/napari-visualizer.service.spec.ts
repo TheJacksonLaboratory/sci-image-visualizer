@@ -2290,6 +2290,26 @@ describe('NapariVisualizerService', () => {
       expect(() => overlay?.setMode('none')).not.toThrow();
     });
 
+    it('hands the region overlay CLIENT pixels both ways, wherever the canvas sits', async () => {
+      // Regression (NAPARI-BOUNDARY-6): the 3D screen-space adapter returned canvas-local px
+      // from worldToCanvas while the overlay expects client px (it subtracts its own rect), so
+      // with the canvas anywhere but the page origin the lasso was drawn offset from the cursor.
+      await mount3d();
+      const internals = service as unknown as {
+        canvas: HTMLCanvasElement;
+        viewer: unknown;
+        screenSpaceViewer(v: unknown): {
+          canvasToWorld(x: number, y: number): [number, number];
+          worldToCanvas(x: number, y: number): [number, number];
+        };
+      };
+      jest.spyOn(internals.canvas, 'getBoundingClientRect')
+        .mockReturnValue({ left: 100, top: 50, width: 300, height: 150 } as DOMRect);
+      const screen = internals.screenSpaceViewer(internals.viewer);
+      expect(screen.canvasToWorld(130, 70)).toEqual([30, 20]);
+      expect(screen.worldToCanvas(30, 20)).toEqual([130, 70]);
+    });
+
     it('an orbit clears only the regions drawn in 3D, not the ones it found', async () => {
       // Regression (NAPARI-SVC-11): every camera change with any region present emptied the
       // app-wide RegionStore — including the image's own regions, which have nothing to do

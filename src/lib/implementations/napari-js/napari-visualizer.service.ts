@@ -2159,18 +2159,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    * the durable artefact, and the highlighted points stay highlighted from every angle.
    */
   private install3dInteraction(viewer: Viewer, host: HTMLElement): void {
-    const canvasRect = () => this.canvas?.getBoundingClientRect();
-    const screenSpace: OverlayViewer = {
-      canvasToWorld: (clientX: number, clientY: number) => {
-        const r = canvasRect();
-        return r ? [clientX - r.left, clientY - r.top] : [clientX, clientY];
-      },
-      // Already canvas pixels.
-      worldToCanvas: (x: number, y: number) => [x, y],
-      setControlsEnabled: (enabled: boolean) => viewer.setControlsEnabled(enabled),
-      camera: viewer.camera3d,
-    };
-    this.regionOverlay = new NapariRegionOverlay(host, screenSpace, this.regionStore);
+    this.regionOverlay = new NapariRegionOverlay(host, this.screenSpaceViewer(viewer), this.regionStore);
     this.buildToolHosts();
     // Regions already in the shared store when the 3D view mounted (the image's own, say) are
     // not screen-space shapes and must survive an orbit; only those drawn here are cleared.
@@ -2181,6 +2170,32 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       const kept = regions.filter((r) => foreign.has(r.id));
       if (kept.length < regions.length) this.regionStore.setRegions(kept);
     });
+  }
+
+  /**
+   * The {@link OverlayViewer} the 3D region overlay draws through: "world" is the canvas, in
+   * canvas-local CSS pixels. The overlay's contract is CLIENT pixels on both sides (it subtracts
+   * its own rect, as for napari-js's `Viewer.worldToCanvas`), so both directions apply the
+   * canvas's client offset — returning canvas-local pixels from `worldToCanvas` drew the lasso
+   * offset from the cursor whenever the canvas was not at the page origin.
+   */
+  private screenSpaceViewer(viewer: Viewer): OverlayViewer {
+    const offset = (): [number, number] => {
+      const r = this.canvas?.getBoundingClientRect();
+      return r ? [r.left, r.top] : [0, 0];
+    };
+    return {
+      canvasToWorld: (clientX: number, clientY: number) => {
+        const [left, top] = offset();
+        return [clientX - left, clientY - top];
+      },
+      worldToCanvas: (x: number, y: number) => {
+        const [left, top] = offset();
+        return [x + left, y + top];
+      },
+      setControlsEnabled: (enabled: boolean) => viewer.setControlsEnabled(enabled),
+      camera: viewer.camera3d,
+    };
   }
 
   /** Movement, in screen pixels, under which a press-release is a CLICK and not a
