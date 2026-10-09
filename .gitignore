@@ -32,3 +32,7 @@ examples/browser-image/public/
 
 # Office lock files, created while a .docx/.xlsx is open
 ~$*
+
+# Local PR drafts and office templates (not part of the library)
+/PR-*.md
+docs/*.potx

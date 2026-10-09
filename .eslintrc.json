@@ -73,6 +73,48 @@
             "ignoreTemplateLiterals": true,
             "ignoreRegExpLiterals": true
           }
+        ],
+        "no-console": [
+          "warn",
+          {
+            "allow": [
+              "warn",
+              "error"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/lib/contracts/**/*.ts"
+      ],
+      "excludedFiles": [
+        "*.spec.ts",
+        "src/lib/contracts/cell-segmenter.contract.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "warn",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "**/implementations/**",
+                  "**/spatial/**",
+                  "**/spatial-controls/**",
+                  "**/toolbar/**",
+                  "**/store/**",
+                  "**/region-editor/**",
+                  "**/channel-histogram/**",
+                  "**/plot-mode/**",
+                  "**/*.component",
+                  "**/*.service"
+                ],
+                "message": "contracts/ is the backend-neutral layer: depend on contracts/ and models/ only. (cell-segmenter.contract.ts is exempt for its default factory.)"
+              }
+            ]
+          }
         ]
       }
     },
