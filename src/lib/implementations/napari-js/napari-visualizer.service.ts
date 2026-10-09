@@ -246,6 +246,10 @@ const SCATTER3D_MAX_POINTS = 150000;
  *  .service.ts`); both should come from one shared constant (review NAPARI-SVC-13). */
 const ZOOM_BUTTON_STEP = 1.3;
 
+/** How long a pan/zoom must settle before the viewport (and, for pixel tools, the canvas
+ *  readback) is refreshed — coalesces the camera's per-frame changes. */
+const READBACK_DEBOUNCE_MS = 250;
+
 const TILE_SIZE = 512; // server tile edge (matches the OSD backend)
 /** Max tiles stitched for one displayed slice (512px tiles → up to ~6144² at full res). Beyond
  *  this we step to a coarser pyramid level so a large image stays tractable. */
@@ -651,6 +655,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private tiled = false;
   /** Debounced readback timer + camera-change unsubscribe (keep lastPixels current for tools). */
   private readbackTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Debounced viewport emission for a camera change that needs no pixels. */
+  private viewportTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Active tools that read the displayed pixels; a pan/zoom re-reads them only while non-empty. */
+  private readonly pixelTools = new Set<'wand' | 'brush' | 'eraser' | 'samPoint'>();
+  /** The camera moved since {@link lastPixels} was read. */
+  private pixelsStale = false;
   private cameraReadbackOff: (() => void) | null = null;
   /** Coarse per-channel luminance sample (keyed by channel index) for the histogram in tiled mode,
    *  where the layers have no full in-memory pixels. Refreshed on plot + slice change. */
@@ -2043,7 +2053,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private install2dInteraction(viewer: Viewer, host: HTMLElement): void {
     this.regionOverlay = new NapariRegionOverlay(host, viewer, this.regionStore);
     this.buildToolHosts();
-    this.cameraReadbackOff = viewer.camera.changed.connect(() => this.armReadback());
+    this.cameraReadbackOff = viewer.camera.changed.connect(() => this.onViewChanged());
   }
 
   // ── Spatial omics ────────────────────────────────────────────────────────────────────────
@@ -4307,6 +4317,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       clearTimeout(this.readbackTimer);
       this.readbackTimer = null;
     }
+    if (this.viewportTimer != null) {
+      clearTimeout(this.viewportTimer);
+      this.viewportTimer = null;
+    }
+    this.pixelsStale = false;
     this.cameraReadbackOff?.();
     this.cameraReadbackOff = null;
     this.channelView = null;
@@ -4586,17 +4601,47 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       const rect = v.visibleWorldRect(); // capture WITH the pixels (same camera)
       this.lastPixels = px;
       this.lastPixelsRect = rect;
-      const size = this.getTrueImageSize();
-      if (size && rect) {
-        const x = Math.max(0, Math.min(size.width, rect.x));
-        const y = Math.max(0, Math.min(size.height, rect.y));
-        const width = Math.max(1, Math.min(size.width - x, rect.width));
-        const height = Math.max(1, Math.min(size.height - y, rect.height));
-        this.viewportChange$.next({ x, y, width, height });
-      }
+      this.pixelsStale = false;
+      this.emitViewport(rect);
     } catch {
-      /* readback unavailable */
+      /* readback unavailable (no device yet, or it was lost): the tools keep the last pixels */
     }
+  }
+
+  /** Emit the visible region, clamped to the image, on {@link viewportChange$}. */
+  private emitViewport(rect: { x: number; y: number; width: number; height: number }): void {
+    const size = this.getTrueImageSize();
+    if (!size || !rect) return;
+    const x = Math.max(0, Math.min(size.width, rect.x));
+    const y = Math.max(0, Math.min(size.height, rect.y));
+    const width = Math.max(1, Math.min(size.width - x, rect.width));
+    const height = Math.max(1, Math.min(size.height - y, rect.height));
+    this.viewportChange$.next({ x, y, width, height });
+  }
+
+  /**
+   * A 2D pan/zoom. The full-canvas GPU readback is paid for only while a pixel tool reads it
+   * ({@link pixelTools}); otherwise only the viewport rect is emitted (debounced), and the pixels
+   * are marked stale for whoever next needs them ({@link rgbHistogram} refreshes lazily, and a
+   * tool arms a fresh readback as it activates).
+   */
+  private onViewChanged(): void {
+    this.pixelsStale = true;
+    if (this.pixelTools.size > 0) {
+      this.armReadback(); // emits the viewport with the pixels
+      return;
+    }
+    if (this.viewportTimer != null) clearTimeout(this.viewportTimer);
+    this.viewportTimer = setTimeout(() => {
+      this.viewportTimer = null;
+      if (this.viewer) this.emitViewport(this.viewer.visibleWorldRect());
+    }, READBACK_DEBOUNCE_MS);
+  }
+
+  /** Record whether a tool that reads the displayed pixels is active (see {@link onViewChanged}). */
+  private setPixelTool(tool: 'wand' | 'brush' | 'eraser' | 'samPoint', active: boolean): void {
+    if (active) this.pixelTools.add(tool);
+    else this.pixelTools.delete(tool);
   }
 
   private scheduleReadback(): void {
@@ -4605,10 +4650,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     else setTimeout(() => void this.runReadback(), 0);
   }
 
-  /** Debounced readback — armed on camera changes so `lastPixels` tracks the current view after a
-   *  pan/zoom settles (and after tiled levels finish loading), which the on-canvas pixel tools
+  /** Debounced readback — armed on camera changes while a pixel tool is active, so `lastPixels`
+   *  tracks the current view after a pan/zoom settles, which the on-canvas pixel tools
    *  (wand/brush/SAM) read synchronously. Coalesces rapid changes. */
-  private armReadback(delayMs = 250): void {
+  private armReadback(delayMs = READBACK_DEBOUNCE_MS): void {
     if (this.readbackTimer != null) clearTimeout(this.readbackTimer);
     this.readbackTimer = setTimeout(() => {
       this.readbackTimer = null;
@@ -4723,6 +4768,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   // because the host always calls the region overlay's setMode FIRST in each toggle (which sets
   // the baseline enabled/disabled), so re-enabling here would fight a freshly-activated draw mode.
   setWandMode(active: boolean, options?: IWandOptions): void {
+    this.setPixelTool('wand', active);
     if (!this.viewer) return; // no plot yet → nothing to drive
     if (!active) {
       this.wandTool.setMode(false);
@@ -4741,6 +4787,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.wandTool.clearActiveRegion();
   }
   setBrushMode(active: boolean, options?: IBrushOptions): void {
+    this.setPixelTool('brush', active);
     if (!this.viewer) return;
     if (!active) {
       this.brushTool.setMode(false);
@@ -4756,10 +4803,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.brushTool.setOptions(options ?? {});
   }
   setVertexEraserMode(active: boolean): void {
+    // The eraser sizes its radius from the readback's ratio, so it reads the pixels too.
+    this.setPixelTool('eraser', active);
     if (!this.viewer) return;
     if (active) {
       this.viewer?.setControlsEnabled(false);
       this.cachedImageSource = null;
+      if (this.pixelsStale) this.armReadback(0);
       if (this.eraserHost) this.eraserTool.bindHost(this.eraserHost);
     }
     this.eraserTool.setMode(active);
@@ -4796,6 +4846,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.samPointTool.setModel(id);
   }
   setSamPointMode(active: boolean): void {
+    this.setPixelTool('samPoint', active);
     if (!this.viewer) return;
     if (active) {
       this.viewer?.setControlsEnabled(false);
@@ -4962,6 +5013,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
 
   /** Per-channel histogram of the displayed RGB composite (R/G/B byte), from the last readback. */
   private rgbHistogram(channelIndex: number, bins: number): IHistogram | null {
+    // Pans no longer read the canvas back (no pixel tool needs it), so refresh lazily here: this
+    // answer may describe the previous view, and the pane's next request gets the current one.
+    if (this.pixelsStale) this.armReadback(0);
     const px = this.lastPixels;
     if (!px) return null;
     const band = Math.max(0, Math.min(2, channelIndex));

@@ -392,6 +392,56 @@ describe('NapariVisualizerService', () => {
     });
   });
 
+  it('reads the canvas back after a pan only while a pixel tool needs it', async () => {
+    // Regression (NAPARI-SVC-26): every 2D camera change armed a full-canvas GPU readback,
+    // pixel tool or not; the only always-needed output, viewportChange$, needs just the rect.
+    const div = document.createElement('div');
+    div.id = 'lazy-readback-host';
+    document.body.appendChild(div);
+    const loaded = await service.load(imageInfo(), 0);
+    await service.plot('lazy-readback-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE);
+    type Internals = {
+      viewer: { camera: { changed: { connect(l: () => void): () => void } } };
+      install2dInteraction(v: unknown, h: HTMLElement): void;
+    };
+    const internals = service as unknown as Internals;
+    // The stub camera never emits: capture the listeners the 2D interaction installs.
+    const listeners: Array<() => void> = [];
+    internals.viewer.camera.changed.connect = (l) => {
+      listeners.push(l);
+      return () => undefined;
+    };
+    internals.install2dInteraction(internals.viewer, div);
+    const pan = () => listeners.forEach((l) => l());
+    const settle = () => new Promise((r) => setTimeout(r, 300));
+    await settle();
+    const readback = jest.spyOn(Viewer.prototype, 'readDisplayedPixels');
+    const viewports: unknown[] = [];
+    const sub = service.getViewportChange$().subscribe((r) => viewports.push(r));
+
+    pan();
+    await settle();
+    expect(readback).not.toHaveBeenCalled();
+    expect(viewports).toHaveLength(1);
+
+    service.setWandMode(true);
+    await settle();
+    readback.mockClear();
+    pan();
+    await settle();
+    expect(readback).toHaveBeenCalledTimes(1);
+
+    service.setWandMode(false);
+    readback.mockClear();
+    pan();
+    await settle();
+    expect(readback).not.toHaveBeenCalled();
+
+    sub.unsubscribe();
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
   describe('PNG export', () => {
     async function mounted() {
       const div = document.createElement('div');
