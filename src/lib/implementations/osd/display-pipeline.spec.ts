@@ -155,4 +155,23 @@ describe('DisplayPipeline', () => {
     const { pipe } = makePipeline({});
     expect(pipe.channelIntensity(100, ch({ min: 50, max: 50 }))).toBe(0);
   });
+
+  // ── compositeChannels (additive per-channel merge) ────────────────────
+  it('compositeChannels sums each visible channel\'s tinted plane into one opaque RGBA image', () => {
+    const { pipe } = makePipeline({ gray: false });
+    const out = pipe.compositeChannels(
+      [rgba([100, 100, 100]), rgba([200, 200, 200]), rgba([50, 50, 50])],
+      [ch({ color: '#ff0000' }), ch({ color: '#00ff00', visible: false }), ch({ color: '#0000ff' })],
+    );
+    expect(Array.from(out)).toEqual([100, 0, 50, 255]);
+  });
+
+  it('compositeChannels skips missing or mis-sized planes', () => {
+    const { pipe } = makePipeline({ gray: false });
+    const out = pipe.compositeChannels(
+      [rgba([10, 10, 10]), null, rgba([1, 1, 1], [2, 2, 2])],
+      [ch({ color: '#ffffff' }), ch(), ch()],
+    );
+    expect(Array.from(out)).toEqual([10, 10, 10, 255]);
+  });
 });

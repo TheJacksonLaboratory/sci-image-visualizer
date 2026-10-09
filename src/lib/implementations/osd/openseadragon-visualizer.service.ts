@@ -642,24 +642,10 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     if (!planes.length) return undefined;
     const w = planes[0].width, h = planes[0].height;
     if (!w || !h) return undefined;
-    const states = this.store.currentChannelStates();
-    const out = new Uint8ClampedArray(w * h * 4);
-    for (let c = 0; c < planes.length; c++) {
-      const st = states[c];
-      if (st && st.visible === false) continue; // hidden channel contributes nothing
-      const plane = planes[c];
-      if (plane.width !== w || plane.height !== h || !plane.data.length) continue;
-      const { r, g, b } = this.display.channelRgbLut(st);
-      const pd = plane.data;
-      for (let i = 0; i < out.length; i += 4) {
-        if (pd[i + 3] === 0) continue;
-        const lum = pd[i]; // single-band plane (R=G=B)
-        out[i] += r[lum];          // Uint8ClampedArray clamps → additive ('lighter')
-        out[i + 1] += g[lum];
-        out[i + 2] += b[lum];
-      }
-    }
-    for (let i = 3; i < out.length; i += 4) out[i] = 255; // opaque
+    const out = this.display.compositeChannels(
+      planes.map((p) => (p.width === w && p.height === h ? p.data : null)),
+      this.store.currentChannelStates(),
+    );
     const canvas = document.createElement('canvas');
     canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext('2d');
@@ -2081,10 +2067,13 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    * colours / invert). Picks the largest pyramid level under a pixel cap (the
    * coarser overview for huge whole-slides), fetches that level's tile grid,
    * stitches it into one canvas, runs the shared display pipeline, and saves it.
+   * A per-channel (multichannel) image is exported the way it is drawn: each
+   * visible channel's tiles are stitched and merged additively with its tint.
    */
   async exportComposite(): Promise<void> {
     const desc = this.descriptor;
-    const levels = desc?.levels ?? [];
+    // Per-channel tiles exist only at the real Bio-Formats levels.
+    const levels = (this.isMultiChannel ? desc?.levels.slice(0, this.realLevels) : desc?.levels) ?? [];
     if (!desc || !this.infoB64 || !levels.length) return;
     const CAP = 32_000_000; // ~32 MP — bounds memory for whole-slide images
     let res = levels.length - 1; // coarsest fallback
@@ -2102,28 +2091,55 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
     const z = this.currentZ;
-    const jobs: Promise<void>[] = [];
-    for (let row = 0; row < rows; row++) {
-      for (let col = 0; col < cols; col++) {
-        const url = buildTileUrl(this.api, this.infoB64, { res, col, row, z, tileSize: t });
-        jobs.push(
-          (async () => {
-            try {
-              const bmp = await fetchTileBitmap(this.http, url, 30000);
-              ctx.drawImage(bmp, col * t, row * t);
-              bmp.close?.();
-            } catch (err) {
-              // Skip a failed tile — the exported composite has a gap there.
-              console.warn('[viz:export] composite tile fetch failed, skipping', url, err);
-            }
-          })(),
-        );
+    const infoB64 = this.infoB64;
+    /** Stitch the level's tile grid (server composite, or one channel) into the canvas. */
+    const stitch = async (channel?: number): Promise<void> => {
+      ctx.clearRect(0, 0, lw, lh);
+      const jobs: Promise<void>[] = [];
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          const url = buildTileUrl(this.api, infoB64, { res, col, row, z, tileSize: t, channel });
+          jobs.push(
+            (async () => {
+              try {
+                const bmp = await fetchTileBitmap(this.http, url, 30000);
+                ctx.drawImage(bmp, col * t, row * t);
+                bmp.close?.();
+              } catch (err) {
+                // Skip a failed tile — the exported composite has a gap there.
+                console.warn('[viz:export] composite tile fetch failed, skipping', url, err);
+              }
+            })(),
+          );
+        }
       }
-    }
-    await Promise.all(jobs);
+      await Promise.all(jobs);
+    };
     try {
-      const imageData = ctx.getImageData(0, 0, lw, lh);
-      if (this.display.applyToRgba(imageData.data)) ctx.putImageData(imageData, 0, 0);
+      if (this.isMultiChannel) {
+        const states = this.channelStates;
+        const nCh = Math.max(1, states.length || (desc.channels ?? 1));
+        let out: Uint8ClampedArray | null = null;
+        let imageData: ImageData | null = null;
+        for (let c = 0; c < nCh; c++) {
+          if (states[c]?.visible === false) continue;
+          await stitch(c);
+          imageData = ctx.getImageData(0, 0, lw, lh);
+          out ??= new Uint8ClampedArray(imageData.data.length);
+          this.display.addChannel(out, imageData.data, states[c]);
+        }
+        if (imageData && out) {
+          for (let i = 3; i < out.length; i += 4) out[i] = 255; // opaque
+          imageData.data.set(out);
+          ctx.putImageData(imageData, 0, 0);
+        } else {
+          ctx.clearRect(0, 0, lw, lh); // every channel hidden
+        }
+      } else {
+        await stitch();
+        const imageData = ctx.getImageData(0, 0, lw, lh);
+        if (this.display.applyToRgba(imageData.data)) ctx.putImageData(imageData, 0, 0);
+      }
     } catch (err) {
       // Keep the un-recolored composite if readback fails — but say why.
       console.warn('[viz:export] composite recolor readback failed — exporting raw tiles', err);

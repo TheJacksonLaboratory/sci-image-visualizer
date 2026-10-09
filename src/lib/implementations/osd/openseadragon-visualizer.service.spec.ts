@@ -7,6 +7,7 @@ import { VIZ_PORT_STUBS } from '../../testing/viz-port-stubs';
 import { TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
 import { saveAs } from 'file-saver';
 import { OsdCoordinateTransform } from './osd-coordinate-transform';
+import * as tileClient from './tile-client';
 
 jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
 
@@ -457,6 +458,82 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
 
     expect(ctx.putImageData).toHaveBeenCalled();
     expect(setData).toHaveBeenCalledWith(ctx, 'context2d');
+  });
+});
+
+/**
+ * The composite PNG export must match the on-screen image (review OSD-PLOTLY-9):
+ * a multichannel image is drawn from per-channel tiles, so the export fetches
+ * each visible channel and merges them like the viewer does.
+ */
+describe('OpenSeadragonVisualizerService — exportComposite', () => {
+  let service: OpenSeadragonVisualizerService;
+  let http: HttpTestingController;
+  let fetchBitmap: jest.SpyInstance;
+  let getContext: jest.SpyInstance;
+  let put: jest.Mock;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule],
+      providers: [OpenSeadragonVisualizerService, ...VIZ_PORT_STUBS],
+    });
+    service = TestBed.inject(OpenSeadragonVisualizerService);
+    http = TestBed.inject(HttpTestingController);
+    // One 1x1 level; each fetched tile is a bitmap tagged with its channel value.
+    fetchBitmap = jest.spyOn(tileClient, 'fetchTileBitmap').mockImplementation(async (_h, url: string) => {
+      const m = /channel=(\d+)/.exec(url);
+      return { v: m ? 10 * (Number(m[1]) + 1) : 99, close: () => undefined } as unknown as ImageBitmap;
+    });
+    let pixel = new Uint8ClampedArray(4);
+    put = jest.fn();
+    const ctx = {
+      clearRect: () => { pixel = new Uint8ClampedArray(4); },
+      drawImage: (bmp: { v: number }) => { pixel = new Uint8ClampedArray([bmp.v, bmp.v, bmp.v, 255]); },
+      getImageData: () => ({ data: new Uint8ClampedArray(pixel), width: 1, height: 1 }),
+      putImageData: put,
+    };
+    getContext = jest.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(ctx as never);
+    jest.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((cb: BlobCallback) => cb(new Blob(['x'])));
+    const s = service as any;
+    s.descriptor = { width: 1, height: 1, tileSize: 256, z: 1, channels: 3, realLevels: 1,
+      levels: [{ res: 0, width: 1, height: 1 }] };
+    s.infoB64 = 'INFO64';
+    s.realLevels = 1;
+    s.currentFileName = 'multi.tif';
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    service.unsubscribe();
+    http.match(() => true);
+  });
+
+  it('merges each visible channel\'s tiles with its tint for a multichannel image', async () => {
+    const s = service as any;
+    s.isMultiChannel = true;
+    s.channelStates = [
+      { index: 0, name: 'a', color: '#ff0000', min: 0, max: 255, gamma: 1, visible: true },
+      { index: 1, name: 'b', color: '#00ff00', min: 0, max: 255, gamma: 1, visible: false },
+      { index: 2, name: 'c', color: '#0000ff', min: 0, max: 255, gamma: 1, visible: true },
+    ];
+    await service.exportComposite();
+    const urls = fetchBitmap.mock.calls.map(([, url]) => url as string);
+    expect(urls.some((u) => u.includes('channel=0'))).toBe(true);
+    expect(urls.some((u) => u.includes('channel=1'))).toBe(false); // hidden
+    expect(urls.some((u) => u.includes('channel=2'))).toBe(true);
+    expect(urls.some((u) => !u.includes('channel='))).toBe(false); // no server composite
+    const written = put.mock.calls[put.mock.calls.length - 1][0].data;
+    expect(Array.from(written)).toEqual([10, 0, 30, 255]);
+    expect(saveAs).toHaveBeenCalledWith(expect.any(Blob), 'multi_composite.png');
+    expect(getContext).toHaveBeenCalled();
+  });
+
+  it('exports the server-composited tiles through the RGB/grayscale pipeline otherwise', async () => {
+    await service.exportComposite();
+    const urls = fetchBitmap.mock.calls.map(([, url]) => url as string);
+    expect(urls).toHaveLength(1);
+    expect(urls[0]).not.toContain('channel=');
   });
 });
 
