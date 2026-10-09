@@ -106,7 +106,19 @@ interface TranscriptJob {
   key: string;
   /** Fetch and merge; `px` is each entry's marker diameter in screen pixels. A job may
    *  switch to another kind once it sees the data (individual → bins); it then says so. */
-  load(): Promise<TranscriptLoad>;
+  load(ctx: PlanContext): Promise<TranscriptLoad>;
+}
+
+/**
+ * One run of {@link NapariSpatialTileLayers.plan}. Completeness belongs to the run that did
+ * the fetching: on the instance, a superseded run's failed tile marked the CURRENT run
+ * incomplete, which then skipped caching its keys and retried for nothing.
+ */
+interface PlanContext {
+  /** True once a newer plan started or the viewer changed. */
+  stale(): boolean;
+  /** Set when a fetch of this run failed (see fetchAll): don't cache it as done; retry. */
+  incomplete: boolean;
 }
 
 interface TranscriptLoad {
@@ -136,8 +148,6 @@ export class NapariSpatialTileLayers {
   private viewer: Viewer | null = null;
   private cameraOff: (() => void) | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
-  /** Set when a tile of the current plan failed to load (see fetchAll). */
-  private planIncomplete = false;
   /** Consecutive retries of an incomplete view. */
   private tileRetries = 0;
   private token = 0;
@@ -315,8 +325,10 @@ export class NapariSpatialTileLayers {
     if (!viewer || !latest) return;
     const [dataset, view, selection] = latest;
     const token = ++this.token;
-    const stale = () => token !== this.token || this.viewer !== viewer;
-    this.planIncomplete = false;
+    const ctx: PlanContext = {
+      stale: () => token !== this.token || this.viewer !== viewer,
+      incomplete: false,
+    };
 
     if (!dataset) {
       for (const g of ORDER) this.drop(g);
@@ -329,24 +341,24 @@ export class NapariSpatialTileLayers {
     const pxPerUnit = pixelsPerDataUnit(viewer.camera.zoom, ref);
     if (!rect) return;
 
-    this.planEstimate(dataset, view, viewer, w, h, stale)
+    this.planEstimate(dataset, view, viewer, w, h, ctx)
       .catch((err) => console.warn('[napari-js] transcript estimate failed', err));
     // A group whose request failed (a column, a feature vector, a density grid) leaves the
     // others drawn and marks the plan incomplete, so it is retried like a failed tile.
     const settle = (group: string, work: Promise<void>) => work.catch((err) => {
       console.warn(`[napari-js] spatial ${group} plan failed`, err);
-      this.planIncomplete = true;
+      ctx.incomplete = true;
     });
     await Promise.all([
-      settle('density', this.planDensity(dataset, view, stale)),
-      settle('cells', this.planCells(dataset, view, selection, rect, pxPerUnit, stale)),
-      settle('transcripts', this.planTranscripts(dataset, view, rect, pxPerUnit, stale)),
+      settle('density', this.planDensity(dataset, view, ctx)),
+      settle('cells', this.planCells(dataset, view, selection, rect, pxPerUnit, ctx)),
+      settle('transcripts', this.planTranscripts(dataset, view, rect, pxPerUnit, ctx)),
     ]);
-    if (stale()) return;
+    if (ctx.stale()) return;
     this.host.geneCountsChanged?.(this.geneCountsIn(rect));
     // A tile that failed left a hole the cache keys do not record, so try the same view
     // again, backing off, a bounded number of times.
-    if (!this.planIncomplete) {
+    if (!ctx.incomplete) {
       this.tileRetries = 0;
     } else if (this.tileRetries < MAX_TILE_RETRIES) {
       this.schedule(TILE_RETRY_MS * 2 ** this.tileRetries++);
@@ -357,7 +369,7 @@ export class NapariSpatialTileLayers {
 
   private async planCells(
     dataset: SpatialDataset, view: SpatialViewState, selection: SpatialSelectionMask,
-    rect: DataRect, pxPerUnit: number, stale: () => boolean,
+    rect: DataRect, pxPerUnit: number, ctx: PlanContext,
   ): Promise<void> {
     const tiled = dataset.polygonTiles;
     const whole = !tiled && dataset.polygons && this.port.getPolygons;
@@ -378,10 +390,10 @@ export class NapariSpatialTileLayers {
 
     // Groups switched off in the list: their cells are left out of the geometry.
     const hidden = await this.hiddenCodes(dataset, view);
-    if (stale()) return;
+    if (ctx.stale()) return;
     const label = view.cellSet === 'both' ? 'Cells and nuclei'
       : view.cellSet === 'nucleus' ? 'Nuclei' : 'Cells';
-    const geometry = await this.track(label, this.cellGeometry(dataset, view, rect, level, hidden, stale));
+    const geometry = await this.track(label, this.cellGeometry(dataset, view, rect, level, hidden, ctx));
     if (!geometry) return;
     const { rings, nuclei, geometryKey } = geometry;
 
@@ -401,12 +413,12 @@ export class NapariSpatialTileLayers {
       return;
     }
     const colors = await this.cellColors(dataset, view, selection, rings.observation);
-    if (stale()) return;
+    if (ctx.stale()) return;
 
     this.currentRings = rings;
     this.currentNuclei = nuclei;
     // A geometry missing a failed tile is drawn but not remembered, so the retry refetches it.
-    this.cellGeometryKey = this.planIncomplete ? null : geometryKey;
+    this.cellGeometryKey = ctx.incomplete ? null : geometryKey;
     this.cellStyleKey = styleKey;
     const ref = dataset.imageRef;
     const common = { scale: ref?.scale ?? [1, 1], translate: ref?.translate ?? [0, 0] } as const;
@@ -534,7 +546,7 @@ export class NapariSpatialTileLayers {
    */
   private async cellGeometry(
     dataset: SpatialDataset, view: SpatialViewState, rect: DataRect, level: number,
-    hidden: { codes: Uint16Array; hidden: Uint8Array } | null, stale: () => boolean,
+    hidden: { codes: Uint16Array; hidden: Uint8Array } | null, ctx: PlanContext,
   ): Promise<{ rings: SpatialPolygonTile; nuclei: SpatialPolygonTile | null; geometryKey: string } | null> {
     const tiled = dataset.polygonTiles;
     const hiddenKey = view.hiddenGroups.join('\u0001');
@@ -554,12 +566,12 @@ export class NapariSpatialTileLayers {
         nuclei = this.currentNuclei;
       } else {
         const [tiles, nucleusTiles] = await Promise.all([
-          this.fetchAll(keys, (k) => this.port.getPolygonTile!(set, k.level, k.gx, k.gy)),
+          this.fetchAll(ctx, keys, (k) => this.port.getPolygonTile!(set, k.level, k.gx, k.gy)),
           nucleusSet
-            ? this.fetchAll(keys, (k) => this.port.getPolygonTile!(nucleusSet, k.level, k.gx, k.gy))
+            ? this.fetchAll(ctx, keys, (k) => this.port.getPolygonTile!(nucleusSet, k.level, k.gx, k.gy))
             : Promise.resolve(null),
         ]);
-        if (stale()) return null;
+        if (ctx.stale()) return null;
         rings = filterRings(mergePolygonTiles(tiles), hidden);
         nuclei = nucleusTiles ? filterRings(mergePolygonTiles(nucleusTiles), hidden) : null;
       }
@@ -569,7 +581,7 @@ export class NapariSpatialTileLayers {
         rings = this.currentRings;
       } else {
         const polys: SpatialPolygons = await this.port.getPolygons!();
-        if (stale()) return null;
+        if (ctx.stale()) return null;
         // Whole-dataset rings are index-aligned with the observations.
         rings = filterRings(
           { ...polys, observation: Uint32Array.from({ length: polys.count }, (_v, i) => i) }, hidden,
@@ -583,7 +595,7 @@ export class NapariSpatialTileLayers {
 
   private async planTranscripts(
     dataset: SpatialDataset, view: SpatialViewState, rect: DataRect, pxPerUnit: number,
-    stale: () => boolean,
+    ctx: PlanContext,
   ): Promise<void> {
     const mode = view.transcriptMode;
     const job = (mode === 'circles' || mode === 'glyphs')
@@ -611,15 +623,15 @@ export class NapariSpatialTileLayers {
     if (planKey === this.keys.get('transcripts') && current && this.viewer!.layers.items.includes(current)) {
       return;
     }
-    const loaded = await this.track('Transcripts', job.load());
-    if (stale()) return;
+    const loaded = await this.track('Transcripts', job.load(ctx));
+    if (ctx.stale()) return;
     // Per-gene counts in view come from what was loaded, before hidden genes are dropped:
     // a hidden gene still has transcripts there. Summed density grids (no per-gene levels,
     // zoomed out) hold clusters, not genes: no per-gene counts there, rather than a guess.
     this.countSource = (loaded.kind ?? job.kind) === 'genes' && !loaded.clustered
       ? { merged: loaded.merged, genes: [...view.transcriptGenes] } : null;
     const hidden = await this.hiddenCodes(dataset, view);
-    if (stale()) return;
+    if (ctx.stale()) return;
     // Density-grid markers carry no cells and were built from the visible genes only.
     const filtered = loaded.clustered ? { merged: loaded.merged, px: loaded.px }
       : filterTranscripts(loaded.merged, loaded.px, hidden,
@@ -647,9 +659,9 @@ export class NapariSpatialTileLayers {
       ? groupNames[entryGroup[i]] ?? null
       : geneCluster[merged.gene[i]] ?? null);
     const faces = await this.transcriptColors(dataset, colorView, merged, kind === 'genes' ? clusterOf : undefined);
-    if (stale()) return;
+    if (ctx.stale()) return;
 
-    if (this.planIncomplete) this.keys.delete('transcripts');
+    if (ctx.incomplete) this.keys.delete('transcripts');
     else this.keys.set('transcripts', planKey);
     const diam = px.map((d) => d / pxPerUnit);
     this.drawn = {
@@ -665,7 +677,7 @@ export class NapariSpatialTileLayers {
     this.micronsPerUnit = dataset.micronsPerUnit ?? null;
     const typeColumn = this.cellTypeColumnName(dataset, view);
     this.hoverTypes = typeColumn ? await this.categoricalCodes(typeColumn).catch(() => null) : null;
-    if (stale()) return;
+    if (ctx.stale()) return;
     const ref = dataset.imageRef;
     const place: Placement = { scale: ref?.scale ?? [1, 1], translate: ref?.translate ?? [0, 0] };
     if (mode === 'circles') {
@@ -933,10 +945,10 @@ export class NapariSpatialTileLayers {
       // The clip window, in quarter-view steps: a pan past the margin re-clips.
       key: `genes|${genes.join(',')}|${view.transcriptQuality}|${view.transcriptBudget}|${bin ?? 'each'}|`
         + `${Math.floor(rect.x0 / (mx || 1))},${Math.floor(rect.y0 / (my || 1))}|${keysAt(first).map(tileId)}`,
-      load: async () => {
+      load: async (ctx) => {
         // The zoom's own level only: over the budget, the transcripts are combined into
         // larger markers (groupSelection), never fetched from slower coarse levels.
-        const tiles = await this.fetchAll(keysAt(first),
+        const tiles = await this.fetchAll(ctx, keysAt(first),
           (k) => this.port.getTranscriptTile!(k.level, k.gx, k.gy, query));
         // Only what is on screen (and a margin, so a small pan needs nothing new) counts
         // against the budget and the cap; a tile reaches far past the view.
@@ -977,10 +989,10 @@ export class NapariSpatialTileLayers {
       kind: 'genes',
       key: `gene-bins|${genes.join(',')}|${budget}|${first}|${JSON.stringify(view.transcriptGeneGroups)}|`
         + `${Math.floor(rect.x0 / (mx || 1))},${Math.floor(rect.y0 / (my || 1))}`,
-      load: async () => {
+      load: async (ctx) => {
         let m = first;
         for (;;) {
-          const tiles = await this.fetchAll(keysAt(m),
+          const tiles = await this.fetchAll(ctx, keysAt(m),
             (k) => this.port.getTranscriptGeneBins!(k.level, k.gx, k.gy, genes));
           const clipped = tiles.map((t) => clipTranscripts(t, around));
           // Past the cap a merge would drop whole genes (the tail of every tile): go coarser.
@@ -1120,8 +1132,8 @@ export class NapariSpatialTileLayers {
       return {
         kind: 'individual',
         key: `all|individual|${view.transcriptBudget}|${boxes.map((b) => b.join(',')).join(';')}`,
-        load: async () => {
-          const got = await this.fetchAll(keys.map((k, i) => ({ ...k, box: boxes[i] })),
+        load: async (ctx) => {
+          const got = await this.fetchAll(ctx, keys.map((k, i) => ({ ...k, box: boxes[i] })),
             (k) => this.port.getTranscriptTile!(0, k.gx, k.gy, { genes: [ALL_GENES], box: k.box }));
           // The plan estimated the view from the dataset's average density; expression is
           // uneven, so a dense view can hold far more. Rather than cut the excess off, show
@@ -1135,7 +1147,7 @@ export class NapariSpatialTileLayers {
             });
             if (fallback.kind === 'bins') {
               const job = this.binsJob(view, rect, pxPerUnit, bounds, bins, fallback.level);
-              return { ...(await job.load()), kind: job.kind, bin: job.bin };
+              return { ...(await job.load(ctx)), kind: job.kind, bin: job.bin };
             }
           }
           const merged = mergeTranscriptTiles(got, cap);
@@ -1164,8 +1176,8 @@ export class NapariSpatialTileLayers {
       kind: 'bins',
       bin: { size: lv.binSize, origin: bins.origin },
       key: `all|bins|${level}|${view.transcriptBudget}|${keys.map(tileId)}`,
-      load: async () => {
-        const got = await this.fetchAll(keys, (k) => this.port.getTranscriptBins!(k.level, k.gx, k.gy));
+      load: async (ctx) => {
+        const got = await this.fetchAll(ctx, keys, (k) => this.port.getTranscriptBins!(k.level, k.gx, k.gy));
         const merged = mergeTranscriptTiles(got, Math.max(view.transcriptBudget * 1.5, 1));
         const refCount = quantileOf(merged.weight, 0.95);
         const binPx = lv.binSize * pxPerUnit;
@@ -1248,7 +1260,7 @@ export class NapariSpatialTileLayers {
   // ── density ───────────────────────────────────────────────────────────────────────
 
   private async planDensity(
-    dataset: SpatialDataset, view: SpatialViewState, stale: () => boolean,
+    dataset: SpatialDataset, view: SpatialViewState, ctx: PlanContext,
   ): Promise<void> {
     const hiddenGenes = new Set(view.transcriptHiddenGenes);
     const genes = view.transcriptAllGenes
@@ -1264,7 +1276,7 @@ export class NapariSpatialTileLayers {
       JSON.stringify(view.densityRange), JSON.stringify(view.densityColormap)].join('|');
     if (key === this.keys.get('density') && this.layers.has('density')) return;
     const raster = await this.track('Transcript density', this.port.getDensity(genes, view.densityBin));
-    if (stale()) return;
+    if (ctx.stale()) return;
 
     // Bins drawn as squares, as Xenium Explorer does; the window is in transcripts/µm².
     const meta = raster.meta;
@@ -1303,7 +1315,7 @@ export class NapariSpatialTileLayers {
    */
   private async planEstimate(
     dataset: SpatialDataset, view: SpatialViewState, viewer: Viewer, w: number, h: number,
-    stale: () => boolean,
+    ctx: PlanContext,
   ): Promise<void> {
     const tiles = dataset.transcriptTiles;
     if (!tiles || !this.port.getTranscriptCounts || view.transcriptMode === 'off') {
@@ -1323,7 +1335,7 @@ export class NapariSpatialTileLayers {
       this.countsCache = null;
       return;
     }
-    if (stale()) return;
+    if (ctx.stale()) return;
     const inView = visibleDataRect(viewer.camera.center, viewer.camera.zoom, w, h, dataset.imageRef, 0);
     if (!inView) return;
     const b = counts.bounds;
@@ -1340,17 +1352,18 @@ export class NapariSpatialTileLayers {
   // ── layer bookkeeping ─────────────────────────────────────────────────────────────
 
   /**
-   * Fetch every tile, drawing what arrived. A failure does not fail the view, but it marks the
-   * plan incomplete: the caller must not cache it as done, and `plan()` retries it.
+   * Fetch every tile, drawing what arrived. A failure does not fail the view, but it marks
+   * `ctx` (the plan that asked) incomplete: the caller must not cache it as done, and `plan()`
+   * retries it.
    */
-  private async fetchAll<K, T>(keys: K[], load: (k: K) => Promise<T>): Promise<T[]> {
+  private async fetchAll<K, T>(ctx: PlanContext, keys: K[], load: (k: K) => Promise<T>): Promise<T[]> {
     const settled = await Promise.allSettled(keys.map(load));
     const out: T[] = [];
     for (const s of settled) {
       if (s.status === 'fulfilled') out.push(s.value);
       else console.warn('[napari-js] spatial tile failed', s.reason);
     }
-    if (out.length < keys.length) this.planIncomplete = true;
+    if (out.length < keys.length) ctx.incomplete = true;
     return out;
   }
 

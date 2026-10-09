@@ -601,3 +601,66 @@ describe('NapariSpatialTileLayers: a column request that fails', () => {
     tiles.detach();
   });
 });
+
+/**
+ * Whether a plan is complete belongs to that plan: a tile of a superseded plan that fails
+ * while a newer plan runs must not stop the newer one caching its (complete) tiles, nor
+ * schedule a retry of it (review NAPARI-BOUNDARY-9).
+ */
+describe('NapariSpatialTileLayers: overlapping plans', () => {
+  const ring = (): SpatialPolygonTile => ({
+    count: 1, coords: new Float32Array([0, 0, 10, 0, 10, 10, 0, 10]),
+    offsets: new Uint32Array([0, 4]), observation: new Uint32Array([0]),
+  });
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  it('a stale plan\'s failed tile does not mark the current plan incomplete', async () => {
+    const pending: { resolve(t: SpatialPolygonTile): void; reject(e: Error): void }[] = [];
+    const getPolygonTile = jest.fn(() => new Promise<SpatialPolygonTile>((resolve, reject) => {
+      pending.push({ resolve, reject });
+    }));
+    const dataset = {
+      id: 'd', name: 'd', columns: [],
+      observations: { count: 1, x: new Float32Array([5]), y: new Float32Array([5]), radius: 5 },
+      polygonTiles: {
+        bounds: [0, 0, 100, 100], sets: [{ name: 'cell', label: 'Cell' }], defaultSet: 'cell',
+        levels: [{ tileSize: 200 }],
+      },
+    } as unknown as SpatialDataset;
+    const view = { ...DEFAULT_SPATIAL_VIEW, cellColorMode: 'single' as const };
+    const tiles = new NapariSpatialTileLayers({ getPolygonTile } as unknown as SpatialDataPort, {
+      latest: () => [dataset, view, emptySelection(1)],
+      canvasSize: () => [400, 400], continuousLut: () => LUT, polygonsShownChanged: () => undefined,
+    });
+    const viewer = new Viewer({ canvas: document.createElement('canvas') });
+    viewer.camera.set([50, 50], 4);
+    tiles.attach(viewer);
+    const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
+    const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
+
+    const stale = plan();
+    await flush();
+    const current = plan(); // supersedes the first
+    await flush();
+    expect(pending).toHaveLength(2);
+    pending[0].reject(new Error('tile server hiccup')); // the stale plan's tile fails…
+    await stale;
+    pending[1].resolve(ring()); // …and the current plan's tile arrives
+    await current;
+
+    jest.advanceTimersByTime(10_000); // no retry is scheduled…
+    await flush();
+    expect(getPolygonTile).toHaveBeenCalledTimes(2);
+    // …because it was cached as complete.
+    expect((tiles as unknown as { cellGeometryKey: string | null }).cellGeometryKey).not.toBeNull();
+    tiles.detach();
+  });
+});
