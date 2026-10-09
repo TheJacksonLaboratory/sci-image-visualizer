@@ -1,3 +1,4 @@
+import { of } from 'rxjs';
 import { VisualizerStore } from './visualizer-store.service';
 import { IChannelState } from '../contracts/channel-histogram-api.contract';
 
@@ -186,5 +187,20 @@ describe('VisualizerStore.setImageMeta channel re-derivation (CORE-8)', () => {
     store.setImageMeta([{ rgbChannels: 3, channelCount: 1, x: 1, y: 1, z: 1 }] as any, 'rgb.png');
     store.setImageMeta(fluo(['DAPI', 'GFP', 'RFP']), 'fluo.tif');
     expect(store.currentChannelStates()[0].name).toBe('DAPI');
+  });
+});
+
+describe('VisualizerStore colormap LUT loading (CORE-18)', () => {
+  it('fetches the LUT asset once per page, however many isolated chains create a store', async () => {
+    const lut: [number, string][] = [[0, '#000000'], [1, '#ffffff']];
+    const http = { get: jest.fn(() => of({ GIST_NCAR_LUT: lut })) };
+    const first = new VisualizerStore(http as any);
+    new VisualizerStore(http as any); // e.g. the pipeline preview's provideVisualization() chain
+    await Promise.resolve();
+    expect(http.get).toHaveBeenCalledTimes(1);
+    const resolved = first.getColormapOptions()
+      .flatMap((g: { children?: { label: string; data: { value: unknown } }[] }) => g.children ?? [])
+      .find((c: { label: string }) => c.label === 'gist_ncar');
+    expect(resolved.data.value).toEqual(lut);
   });
 });

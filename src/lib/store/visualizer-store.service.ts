@@ -1,6 +1,6 @@
 import { Injectable, Optional, Inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, Observable, Subject } from 'rxjs';
+import { BehaviorSubject, Observable, Subject, firstValueFrom } from 'rxjs';
 import { debounceTime } from 'rxjs/operators';
 
 import { ClassPreset, PresetSet, defaultPresetSet } from '../models/class-preset';
@@ -12,24 +12,30 @@ import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../contracts/display-typ
 import { COLORMAP_OPTIONS } from '../plot.utilities';
 
 /**
+ * The colormap LUT asset is fetched once per HttpClient — in an app, once per page,
+ * since `provideVisualization()` chains share the root HttpClient — however many
+ * stores exist, and resolved INTO the shared `COLORMAP_OPTIONS` tree. In place on
+ * purpose: components read the options once at init and the default colormap is one
+ * of those nodes, so a resolved copy would leave them holding the unresolved keys.
+ * Dropped on failure so a later store can retry.
+ */
+const colormapLutsLoads = new WeakMap<HttpClient, Promise<void>>();
+
+/**
  * Backend-neutral store for the **visualization session** — the state that
  * describes *how* the current image is being viewed, independent of which
- * rendering backend (Plotly or OpenSeadragon) is on screen:
+ * rendering backend (Plotly, OpenSeadragon or napari-js) is on screen:
  *
  *  - the active colormap / LUT and its reverse-scale toggle,
- *  - the current image's physical metadata (µm/pixel etc.),
- *  - the classification label → colour map,
+ *  - the current image's physical metadata (µm/pixel etc.) and its per-channel
+ *    display state (window, gamma, tint, visibility; grayscale / invert),
+ *  - the annotation-class presets (the classification label → colour map),
+ *  - the spatial-omics view state,
  *  - which on-canvas tool is currently active.
  *
- * Both backends read and write this single instance, so they stay in lock-step
- * regardless of which one is rendering. Previously this state lived inside
- * `PlotlyService`, which forced the OpenSeadragon backend to depend on the
- * Plotly service purely to read the shared colormap; this store removes that
- * coupling — neither backend owns the session state.
- *
- * NOTE: region *geometry* (the drawn shapes / per-image region cache) still
- * lives in `PlotlyService` for now; extracting it into a sibling region store
- * is a separate follow-up.
+ * Every backend reads and writes this single instance (one per visualizer chain),
+ * so they stay in lock-step regardless of which one is rendering; none of them
+ * owns the session state. Region geometry lives in the sibling `RegionStore`.
  */
 @Injectable({ providedIn: 'root' })
 export class VisualizerStore {
@@ -104,18 +110,26 @@ export class VisualizerStore {
    * "Greys" scale) needs no JSON, so the first render works before this resolves.
    */
   private loadColormapLuts(): void {
-    if (!this.http) return;
-    this.http.get<Record<string, [number, string][]>>('assets/plotting/colormap-luts.json').subscribe({
-      next: (luts) => {
-        for (const group of COLORMAP_OPTIONS as any[]) {
+    const http = this.http;
+    if (!http || colormapLutsLoads.has(http)) return;
+    colormapLutsLoads.set(http, firstValueFrom(
+      http.get<Record<string, [number, string][]>>('assets/plotting/colormap-luts.json'),
+    ).then(
+      (luts) => {
+        for (const group of COLORMAP_OPTIONS) {
           for (const child of group.children ?? []) {
-            const key = child?.data?.value;
-            if (typeof key === 'string' && luts[key]) child.data.value = luts[key];
+            const data = child.data as { value: unknown } | null;
+            const key = data?.value;
+            if (data && typeof key === 'string' && luts[key]) data.value = luts[key];
           }
         }
       },
-      error: () => { /* leave keys unresolved; named scales still work */ },
-    });
+      (err: unknown) => {
+        // Named Plotly scales still work with the keys unresolved; let a later store retry.
+        console.warn('[visualizer] colormap LUTs unavailable', err);
+        colormapLutsLoads.delete(http);
+      },
+    ));
   }
 
   // ── Preset persistence (jit-ui#70) ───────────────────────────────────
@@ -373,10 +387,6 @@ export class VisualizerStore {
     this.presetSet$.next(this.presetSet);
     this.savePresetsNow(); // explicit reset → persist immediately
   }
-  /** Force a (debounced) write-back of the current preset set. */
-  persistPresets(): void {
-    this.queuePresetSave();
-  }
 
   // ── spatial-omics view state ──────────────────────────────────────────
   getSpatialView$(): Observable<SpatialViewState> {
@@ -393,17 +403,8 @@ export class VisualizerStore {
     this.spatialView$.next({ ...this.spatialView$.value, ...partial });
   }
 
-  /** Reset to defaults — e.g. when a different dataset is selected, where the
-   *  previous colour column almost certainly does not exist. */
-  resetSpatialView(): void {
-    this.spatialView$.next({ ...DEFAULT_SPATIAL_VIEW });
-  }
-
   getActiveTool$(): Observable<string | null> {
     return this.activeTool$.asObservable();
-  }
-  getActiveTool(): string | null {
-    return this.activeTool$.value;
   }
   setActiveTool(tool: string | null): void {
     this.activeTool$.next(tool);
