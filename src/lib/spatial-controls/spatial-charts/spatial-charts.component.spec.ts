@@ -281,6 +281,15 @@ describe('SpatialChartsComponent', () => {
       expect(layout.xaxis.title.text).toBe('observations');
     });
 
+    it('hands the kind picker the same options array until they change', async () => {
+      // A fresh array per change-detection pass makes PrimeNG re-render the buttons.
+      const first = component.kindOptions;
+      expect(component.kindOptions).toBe(first);
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'total_counts' } });
+      await flush();
+      expect(component.kindOptions).not.toBe(first);
+    });
+
     it('offers only the kinds a categorical subject can be drawn as', () => {
       // A category code is a label, not a magnitude, so no histogram/violin/box.
       // The heatmap is always offered: its subject is a gene LIST crossed with a

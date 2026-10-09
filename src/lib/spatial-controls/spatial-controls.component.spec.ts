@@ -534,6 +534,23 @@ describe('SpatialControlsComponent', () => {
     expect(component.chartsBodyId).not.toBe(first);
   });
 
+  describe('template bindings', () => {
+    beforeEach(async () => build(controls));
+
+    it('return the same option array and colour bar until their inputs change', async () => {
+      // Fresh arrays per change-detection pass make PrimeNG re-render its controls, and a
+      // colour bar is a 256-entry LUT; neither should be rebuilt per pass.
+      const options = component.markerColumnOptions;
+      const bar = component.densityColorBarCss;
+      expect(component.markerColumnOptions).toBe(options);
+      expect(component.densityColorBarCss).toBe(bar);
+      dataset$.next({ ...dataset, columns: [...dataset.columns] });
+      await flush();
+      expect(component.markerColumnOptions).not.toBe(options);
+      expect(component.markerColumnOptions).toEqual(options);
+    });
+  });
+
   describe('out-of-order responses', () => {
     beforeEach(async () => build(controls));
 

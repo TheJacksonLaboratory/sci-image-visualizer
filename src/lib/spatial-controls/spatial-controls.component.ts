@@ -1115,12 +1115,26 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     return !!this.controls?.markerGenes && this.markerColumnOptions.length > 0;
   }
 
-  /** Every categorical column but the segmentation method, which says nothing about genes. */
+  /**
+   * Every categorical column but the segmentation method, which says nothing about genes.
+   *
+   * Bound to a `p-dropdown`, so the same array comes back until the columns change: a
+   * fresh array per change-detection pass makes PrimeNG re-render the options (see
+   * `cellSetOptions` for what that does to a click).
+   */
   get markerColumnOptions(): { label: string; value: string }[] {
-    return (this.dataset?.columns ?? [])
+    const columns = this.dataset?.columns;
+    const hit = this.markerColumnMemo;
+    if (hit && hit.columns === columns) return hit.options;
+    const options = (columns ?? [])
       .filter((c): c is CategoricalColumnMeta => c.kind === 'categorical' && c.name !== 'segmentation_method')
       .map((c) => ({ label: c.description && c.section ? c.description : this.columnLabel(c), value: c.name }));
+    this.markerColumnMemo = { columns, options };
+    return options;
   }
+  private markerColumnMemo: {
+    columns: SpatialDataset['columns'] | undefined; options: { label: string; value: string }[];
+  } | null = null;
 
   openMarkers(): void {
     const options = this.markerColumnOptions;
@@ -1294,15 +1308,21 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     this.controls?.setViewState({ densityColormap: node?.data?.value ?? null });
   }
 
+  /** Built once per density colormap: a 256-entry LUT per change-detection pass is waste. */
   get densityColorBarCss(): string {
-    const lut = lutFor(this.view.densityColormap ?? INFERNO_SCALE);
-    const stops: string[] = [];
-    for (let i = 0; i <= 16; i++) {
-      const [r, g, b] = lut[Math.round((i / 16) * (lut.length - 1))];
-      stops.push(`rgb(${r},${g},${b}) ${((i / 16) * 100).toFixed(0)}%`);
+    const colormap = this.view.densityColormap;
+    if (!this.densityBarMemo || this.densityBarMemo.colormap !== colormap) {
+      const lut = lutFor(colormap ?? INFERNO_SCALE);
+      const stops: string[] = [];
+      for (let i = 0; i <= 16; i++) {
+        const [r, g, b] = lut[Math.round((i / 16) * (lut.length - 1))];
+        stops.push(`rgb(${r},${g},${b}) ${((i / 16) * 100).toFixed(0)}%`);
+      }
+      this.densityBarMemo = { colormap, css: `linear-gradient(to right, ${stops.join(', ')})` };
     }
-    return `linear-gradient(to right, ${stops.join(', ')})`;
+    return this.densityBarMemo.css;
   }
+  private densityBarMemo: { colormap: SpatialViewState['densityColormap']; css: string } | null = null;
 
   onTranscriptMode(mode: SpatialViewState['transcriptMode']): void {
     // Seed the gene list from the gene being coloured by, so switching transcripts on
@@ -1406,10 +1426,30 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   /** In Cluster colouring, a gene's swatch is its cluster's colour, as its markers are. */
   geneSwatchOf(gene: string): string {
     if (this.view.transcriptColorBy !== 'cluster') return this.geneColorOf(gene);
-    const colors = clusterColorMap(this.view.transcriptGenes, this.view.transcriptGeneGroups,
-      this.cellGroupColors, DEFAULT_CATEGORICAL_PALETTE);
-    return colors.get(clusterOfGene(gene, this.view.transcriptGeneGroups)) ?? this.geneColorOf(gene);
+    return this.clusterColors().get(clusterOfGene(gene, this.view.transcriptGeneGroups))
+      ?? this.geneColorOf(gene);
   }
+
+  /**
+   * The cluster colours, rebuilt only when what they come from changes. The template asks
+   * once per gene row per change-detection pass, and rebuilding per call made that O(G²).
+   */
+  private clusterColors(): Map<string, string> {
+    const { transcriptGenes: genes, transcriptGeneGroups: groups } = this.view;
+    const hit = this.clusterColorMemo;
+    if (hit && hit.genes === genes && hit.groups === groups && hit.cellColors === this.cellGroupColors) {
+      return hit.colors;
+    }
+    const colors = clusterColorMap(genes, groups, this.cellGroupColors, DEFAULT_CATEGORICAL_PALETTE);
+    this.clusterColorMemo = { genes, groups, cellColors: this.cellGroupColors, colors };
+    return colors;
+  }
+  private clusterColorMemo: {
+    genes: SpatialViewState['transcriptGenes'];
+    groups: SpatialViewState['transcriptGeneGroups'];
+    cellColors: Map<string, string>;
+    colors: Map<string, string>;
+  } | null = null;
 
   geneColorOf(gene: string): string {
     return this.geneColor(Math.max(0, this.view.transcriptGenes.indexOf(gene)));

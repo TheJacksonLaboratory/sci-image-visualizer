@@ -241,19 +241,34 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
 
   /** The kinds the ACTIVE subject can be drawn as. A category code is a label,
    *  not a magnitude, so a histogram of it would be meaningless — what a
-   *  categorical column has is a frequency distribution. */
+   *  categorical column has is a frequency distribution.
+   *
+   *  Bound to a `p-selectButton`, so the SAME array is returned until what it is built
+   *  from changes: a fresh array per change-detection pass makes PrimeNG re-render the
+   *  buttons, and a button re-rendered under the pointer swallows the click. */
   get kindOptions(): { label: string; value: OmicsChartKind }[] {
-    return [
-      ...(this.categorical
+    const categorical = !!this.categorical;
+    const embeddings = this.embeddings.length > 0;
+    const hit = this.kindOptionsMemo;
+    if (hit && hit.categorical === categorical && hit.embeddings === embeddings) {
+      return hit.options;
+    }
+    const options = [
+      ...(categorical
         ? SpatialChartsComponent.CATEGORICAL_KINDS
         : SpatialChartsComponent.CONTINUOUS_KINDS),
       ...SpatialChartsComponent.ALWAYS_KINDS,
       // An embedding is a property of the DATASET, not of the active colour source, so
       // it is offered whenever one is published and never otherwise — a tab that draws
       // nothing is worse than an absent one.
-      ...(this.embeddings.length > 0 ? SpatialChartsComponent.EMBEDDING_KINDS : []),
+      ...(embeddings ? SpatialChartsComponent.EMBEDDING_KINDS : []),
     ];
+    this.kindOptionsMemo = { categorical, embeddings, options };
+    return options;
   }
+  private kindOptionsMemo: {
+    categorical: boolean; embeddings: boolean; options: { label: string; value: OmicsChartKind }[];
+  } | null = null;
 
   controls: ISpatialControls | null = null;
   kind: OmicsChartKind = 'histogram';
