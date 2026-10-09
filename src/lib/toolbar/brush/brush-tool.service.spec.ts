@@ -402,3 +402,63 @@ describe('BrushToolService', () => {
     });
   });
 });
+
+/** Bounding box of a region's polygon (image coords). */
+function bbox(r: Region): { x0: number; y0: number; x1: number; y1: number } {
+  const p = r.bounds as Polygon;
+  return {
+    x0: Math.min(...p.xpoints), y0: Math.min(...p.ypoints),
+    x1: Math.max(...p.xpoints), y1: Math.max(...p.ypoints),
+  };
+}
+
+/** The brush twin of the wand's RT-2 specs: a stroke kept across mouseup must not
+ *  re-commit a region that was undone, deleted or replaced outside the tool. */
+describe('BrushToolService — a stale stroke never resurrects a region (RT-2)', () => {
+  let tool: BrushToolService;
+
+  beforeEach(() => {
+    tool = new BrushToolService(new WandService());
+  });
+
+  afterEach(() => {
+    tool.setMode(false);
+    document.body.innerHTML = '';
+  });
+
+  it('a dab after the region was removed outside the tool starts a fresh region', () => {
+    const { host, container, state } = makeHost();
+    tool.bindHost(host);
+    tool.setMode(true, { size: 12 });
+    const canvas = cv(container);
+    canvas.dispatchEvent(mouse('mousedown', 20, 20));
+    canvas.dispatchEvent(mouse('mouseup', 20, 20));
+    const first = bbox(state.regions[0]);
+
+    state.regions = []; // undo of the dab, or a Region Editor delete
+
+    canvas.dispatchEvent(mouse('mousedown', 23, 23));
+    canvas.dispatchEvent(mouse('mouseup', 23, 23));
+    expect(state.regions).toHaveLength(1);
+    expect(bbox(state.regions[0]).x0).toBe(first.x0 + 3); // just the new disc
+  });
+
+  it('a dab after the region\'s bounds were replaced (vertex eraser, undo) does not re-commit the old stroke', () => {
+    const { host, container, state } = makeHost();
+    tool.bindHost(host);
+    tool.setMode(true, { size: 12 });
+    const canvas = cv(container);
+    canvas.dispatchEvent(mouse('mousedown', 20, 20));
+    canvas.dispatchEvent(mouse('mousemove', 40, 20));
+    canvas.dispatchEvent(mouse('mouseup', 40, 20));
+    const painted = bbox(state.regions[0]);
+
+    // Something outside the tool cut the region back to its left end.
+    state.regions = [boxRegion(painted.x0, painted.y0, painted.x0 + 10, painted.y1, state.regions[0].id)];
+
+    canvas.dispatchEvent(mouse('mousedown', 22, 20));
+    canvas.dispatchEvent(mouse('mouseup', 22, 20));
+    expect(state.regions).toHaveLength(1);
+    expect(bbox(state.regions[0]).x1).toBeLessThan(painted.x1 - 5); // the cut part stays cut
+  });
+});

@@ -80,6 +80,11 @@ export class WandToolService {
   private stroke: BBoxMask | null = null;
   /** Id of the region this wand stroke is editing (null = a fresh region). */
   private strokeRegionId: number | null = null;
+  /** The bounds object the stroke last committed (or adopted). Undo/redo restore
+   *  clones and every external edit (Region Editor, segmentation, vertex eraser)
+   *  replaces the bounds, so once no region holds this object the stroke no
+   *  longer describes what is on screen and must not be re-committed (RT-2). */
+  private lastCommittedBounds: Region['bounds'] = null;
   /** Readback ratio/origin signature the active stroke's matrix coords are tied to; a change
    *  (zoom/pan) invalidates the stroke so it isn't re-committed at a different scale (jit-ui#102). */
   private strokeRatioSig: string | null = null;
@@ -205,6 +210,12 @@ export class WandToolService {
     // The current regions (neutral model). Mutated locally across this tick and
     // committed once via host.setRegions().
     const regions = this.host.getRegions();
+    // Drop a stroke whose region was undone, deleted or replaced outside the tool:
+    // re-committing it would bring the old shape back.
+    if (this.stroke && this.lastCommittedBounds && !regions.some((r) => r.bounds === this.lastCommittedBounds)) {
+      this.stroke = null;
+      this.strokeRegionId = null;
+    }
 
     const transform = this.host.getCoordinateTransform();
     if (!transform.isReady()) return;
@@ -478,6 +489,7 @@ export class WandToolService {
 
       this.stroke = raster;
       this.strokeRegionId = regions[i].id ?? null;
+      this.lastCommittedBounds = regions[i].bounds;
       return true;
     }
     return false;
@@ -580,5 +592,6 @@ export class WandToolService {
     this.host.setRegions(regions);
     // The store assigns an id on the first commit — adopt it.
     this.strokeRegionId = region.id ?? this.strokeRegionId;
+    this.lastCommittedBounds = region.bounds;
   }
 }

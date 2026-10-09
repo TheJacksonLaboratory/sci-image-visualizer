@@ -1,6 +1,8 @@
 import { WandToolService, WandToolHost, CachedImageData } from './wand-tool.service';
 import { WandService } from './wand.service';
 import { Region, Polygon } from '../../models/region';
+import { RegionStore } from '../../store/region-store.service';
+import { VisualizerStore } from '../../store/visualizer-store.service';
 
 /** Uniform grayscale matrix (data[y][x]); a flood fill from any interior point
  *  fills the whole patch, so the wand reliably produces a region. */
@@ -210,5 +212,111 @@ describe('WandToolService', () => {
     expect(setRegions).toHaveBeenCalled();
     expect(state.regions).toHaveLength(1);   // adopted, not added
     expect(state.regions[0].id).toBe(42);    // kept the adopted id
+  });
+});
+
+/** Bounding box of a region's polygon (image coords). */
+function bbox(r: Region): { x0: number; y0: number; x1: number; y1: number } {
+  const p = r.bounds as Polygon;
+  return {
+    x0: Math.min(...p.xpoints), y0: Math.min(...p.ypoints),
+    x1: Math.max(...p.xpoints), y1: Math.max(...p.ypoints),
+  };
+}
+
+/**
+ * The stroke accumulator survives mouseup by design, so it must notice when its
+ * region changed underneath it (undo/redo, Region Editor delete, segmentation
+ * replace, vertex eraser) — otherwise the next click re-commits the whole old
+ * stroke and brings the undone/deleted region back (review RT-2).
+ */
+describe('WandToolService — a stale stroke never resurrects a region (RT-2)', () => {
+  let tool: WandToolService;
+
+  beforeEach(() => {
+    tool = new WandToolService(new WandService());
+  });
+
+  afterEach(() => {
+    tool.setMode(false);
+    document.body.innerHTML = '';
+  });
+
+  it('a click after the region was removed outside the tool starts a fresh region', () => {
+    const { host, container, state } = makeHost({ cached: cached(40, 40) });
+    tool.bindHost(host);
+    tool.setMode(true, { patchSize: 9, simpleMode: true });
+    const canvas = cv(container);
+    canvas.dispatchEvent(mouse('mousedown', 10, 10));
+    canvas.dispatchEvent(mouse('mouseup', 10, 10));
+    const first = bbox(state.regions[0]);
+
+    state.regions = []; // undo of the wand click, or a Region Editor delete
+
+    canvas.dispatchEvent(mouse('mousedown', 11, 11));
+    canvas.dispatchEvent(mouse('mouseup', 11, 11));
+    expect(state.regions).toHaveLength(1);
+    // Only the new click's patch — the removed stroke (one pixel further up-left) is gone.
+    expect(bbox(state.regions[0]).x0).toBe(first.x0 + 1);
+    expect(bbox(state.regions[0]).y0).toBe(first.y0 + 1);
+  });
+
+  it('a click after undo restored an earlier, smaller region does not re-commit the undone growth', () => {
+    const { host, container, state } = makeHost({ cached: cached(40, 40) });
+    tool.bindHost(host);
+    tool.setMode(true, { patchSize: 9, simpleMode: true });
+    const canvas = cv(container);
+    canvas.dispatchEvent(mouse('mousedown', 10, 10));
+    canvas.dispatchEvent(mouse('mouseup', 10, 10));
+    const small = bbox(state.regions[0]);
+    canvas.dispatchEvent(mouse('mousedown', 12, 12));
+    canvas.dispatchEvent(mouse('mousemove', 20, 20));
+    canvas.dispatchEvent(mouse('mouseup', 20, 20));
+    expect(bbox(state.regions[0]).x1).toBeGreaterThan(small.x1 + 5);
+
+    // Undo the drag: the store restores a CLONE of the earlier region.
+    state.regions = [boxRegion(small.x0, small.y0, small.x1, small.y1, state.regions[0].id)];
+
+    canvas.dispatchEvent(mouse('mousedown', 11, 11));
+    canvas.dispatchEvent(mouse('mouseup', 11, 11));
+    expect(state.regions).toHaveLength(1);
+    // The restored region plus this click's patch — not the undone drag.
+    expect(bbox(state.regions[0]).x1).toBeLessThanOrEqual(small.x1 + 1);
+  });
+
+  it('a click after RegionStore.undo() of a wand click does not bring it back (real store)', () => {
+    const store = new RegionStore(new VisualizerStore());
+    const { host, container } = makeHost({ cached: cached(40, 40) });
+    host.getRegions = () => store.getRegions();
+    host.setRegions = (r: Region[]) => store.setRegions(r);
+    tool.bindHost(host);
+    tool.setMode(true, { patchSize: 9, simpleMode: true });
+    const canvas = cv(container);
+    canvas.dispatchEvent(mouse('mousedown', 10, 10));
+    canvas.dispatchEvent(mouse('mouseup', 10, 10));
+    const first = bbox(store.getRegions()[0]);
+    store.undo();
+    expect(store.getRegions()).toHaveLength(0);
+
+    canvas.dispatchEvent(mouse('mousedown', 11, 11));
+    canvas.dispatchEvent(mouse('mouseup', 11, 11));
+    expect(store.getRegions()).toHaveLength(1);
+    expect(bbox(store.getRegions()[0]).x0).toBe(first.x0 + 1);
+    store.resetUndoHistory(); // clear the coalescing timer
+  });
+
+  it('keeps extending the same stroke while nothing changed underneath it', () => {
+    const { host, container, state } = makeHost({ cached: cached(40, 40) });
+    tool.bindHost(host);
+    tool.setMode(true, { patchSize: 9, simpleMode: true });
+    const canvas = cv(container);
+    canvas.dispatchEvent(mouse('mousedown', 10, 10));
+    canvas.dispatchEvent(mouse('mouseup', 10, 10));
+    const first = bbox(state.regions[0]);
+    canvas.dispatchEvent(mouse('mousedown', 13, 13));
+    canvas.dispatchEvent(mouse('mouseup', 13, 13));
+    expect(state.regions).toHaveLength(1);
+    expect(bbox(state.regions[0]).x0).toBe(first.x0);
+    expect(bbox(state.regions[0]).x1).toBe(first.x1 + 3);
   });
 });

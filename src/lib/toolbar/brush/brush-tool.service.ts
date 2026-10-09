@@ -74,6 +74,11 @@ export class BrushToolService {
    *  into disconnected pieces — reused across drag ticks so the split pieces
    *  keep stable identities instead of being recreated each tick. */
   private strokeExtraIds: number[] = [];
+  /** The bounds objects the stroke last committed (or adopted), one per region it
+   *  owns. Undo/redo restore clones and every external edit (Region Editor,
+   *  segmentation, vertex eraser) replaces the bounds, so once any of them is no
+   *  longer held by a region the stroke is stale and must not be re-committed (RT-2). */
+  private lastCommittedBounds: Array<Region['bounds']> = [];
   /** Previous cursor position (matrix coords) within the current drag, so fast
    *  drags paint a continuous stroke rather than disconnected dabs. */
   private lastMatrix: { x: number; y: number } | null = null;
@@ -225,6 +230,14 @@ export class BrushToolService {
     if (!cached || cached.frames.length === 0) return;
 
     const regions = this.host.getRegions();
+    // Drop a stroke whose regions were undone, deleted or replaced outside the tool:
+    // re-committing it would bring the old shapes back.
+    if (this.stroke && this.lastCommittedBounds.some((b) => !regions.some((r) => r.bounds === b))) {
+      this.stroke = null;
+      this.strokeRegionId = null;
+      this.strokeExtraIds = [];
+      this.lastCommittedBounds = [];
+    }
 
     const transform = this.host.getCoordinateTransform();
     if (!transform.isReady()) return;
@@ -497,6 +510,7 @@ export class BrushToolService {
 
       this.stroke = raster;
       this.strokeRegionId = regions[i].id ?? null;
+      this.lastCommittedBounds = [regions[i].bounds];
       return true;
     }
     return false;
@@ -588,6 +602,7 @@ export class BrushToolService {
     this.strokeExtraIds = extras
       .map((r) => r.id)
       .filter((id): id is number => id != null);
+    this.lastCommittedBounds = [primary, ...extras].map((r) => r.bounds);
   }
 
   /**
