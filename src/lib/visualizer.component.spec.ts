@@ -1020,6 +1020,62 @@ describe('VisualizerComponent (UI shell)', () => {
 });
 
 /**
+ * The window keydown shortcuts must leave browser/OS shortcuts alone: Cmd/Ctrl+D
+ * (bookmark) used to delete the selected region, Ctrl+S toggled Select, etc.
+ * (review CORE-2).
+ */
+describe('VisualizerComponent — keyboard shortcuts with modifiers (CORE-2)', () => {
+  let component: VisualizerComponent;
+  let plotService: ReturnType<typeof mockPlotService>;
+  let toggle: jest.SpyInstance;
+
+  beforeEach(() => {
+    plotService = mockPlotService();
+    plotService.undo = jest.fn();
+    plotService.redo = jest.fn();
+    component = makeComponent(plotService);
+    component.ngAfterViewInit();
+    toggle = jest.spyOn(component, 'toggleDragMode').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => component.ngOnDestroy());
+
+  const press = (init: KeyboardEventInit) =>
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, ...init }));
+
+  it.each([
+    { key: 'd', metaKey: true },
+    { key: 'd', ctrlKey: true },
+    { key: 'D', ctrlKey: true, shiftKey: true },
+    { key: 'Delete', altKey: true },
+    { key: 's', ctrlKey: true },
+    { key: 'f', metaKey: true },
+    { key: 'p', ctrlKey: true },
+    { key: 'l', metaKey: true },
+    { key: 'w', ctrlKey: true },
+  ])('ignores %o (no region delete, no tool toggle)', (init) => {
+    press(init);
+    expect(plotService.deleteActiveShape).not.toHaveBeenCalled();
+    expect(toggle).not.toHaveBeenCalled();
+  });
+
+  it('a plain d still deletes the selected region and a plain s still toggles Select', () => {
+    press({ key: 'd' });
+    expect(plotService.deleteActiveShape).toHaveBeenCalledTimes(1);
+    press({ key: 's' });
+    expect(toggle).toHaveBeenCalledWith('select');
+  });
+
+  it('Ctrl+Z / Cmd+Shift+Z still undo / redo', () => {
+    press({ key: 'z', ctrlKey: true });
+    expect(plotService.undo).toHaveBeenCalledTimes(1);
+    press({ key: 'z', metaKey: true, shiftKey: true });
+    expect(plotService.redo).toHaveBeenCalledTimes(1);
+    expect(plotService.deleteActiveShape).not.toHaveBeenCalled();
+  });
+});
+
+/**
  * Preemption of a superseded render (#5).
  *
  * A newer image used to be DROPPED while an earlier render was in flight, which

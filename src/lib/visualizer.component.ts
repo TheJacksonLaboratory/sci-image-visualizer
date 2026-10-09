@@ -1220,6 +1220,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
           return;
         }
       }
+      // The bare-key shortcuts below must not fire on browser/OS shortcuts
+      // (Cmd/Ctrl+D would delete the selected region, Ctrl+S toggle Select, …).
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
       if (event.key === 'Delete' || event.key === 'Backspace' || event.key === 'd' || event.key === 'D') {
         this.ngZone.run(() => this.deleteRegion());
       } else if (event.key === '+' || event.key === '=') {
