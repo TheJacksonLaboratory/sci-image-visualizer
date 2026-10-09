@@ -95,26 +95,36 @@ export function densityGrid(
 }
 
 /**
- * In-place separable Gaussian along one axis of a w x h x d field.
+ * A normalised 1-D Gaussian kernel of radius `ceil(3σ)` (at least 1), centre at
+ * index `radius`.
+ */
+export function gaussianKernel(sigma: number): { kernel: Float32Array; radius: number } {
+  const radius = Math.max(1, Math.ceil(sigma * 3));
+  const kernel = new Float32Array(radius * 2 + 1);
+  let sum = 0;
+  for (let i = -radius; i <= radius; i++) {
+    const v = Math.exp(-(i * i) / (2 * sigma * sigma));
+    kernel[i + radius] = v;
+    sum += v;
+  }
+  for (let i = 0; i < kernel.length; i++) kernel[i] /= sum;
+  return { kernel, radius };
+}
+
+/**
+ * In-place separable Gaussian along one axis of a w x h x d field. A 2-D field is
+ * the `d = 1` case.
  *
- * Exported because the gene-map volume estimates a different quantity on the same
- * lattice with the same kernel (see `spatial-expression.ts`): two copies of a
- * separable blur would be two chances to smooth the estimate and its normaliser
- * differently, which is the one thing a Nadaraya-Watson field cannot survive.
+ * The ONE blur for every field in this folder: the 2-D gene map, the gene-map
+ * volume and the density volumes all smooth through it. Two copies of a separable
+ * blur would be two chances to smooth an estimate and its normaliser differently,
+ * which is the one thing a Nadaraya-Watson field cannot survive.
  */
 export function blurVolumeAxis(
   field: Float32Array, w: number, h: number, d: number, axis: 0 | 1 | 2, sigmaVox: number,
 ): void {
   if (!(sigmaVox > 0.01)) return;
-  const radius = Math.max(1, Math.ceil(sigmaVox * 3));
-  const kernel = new Float32Array(radius * 2 + 1);
-  let sum = 0;
-  for (let i = -radius; i <= radius; i++) {
-    const v = Math.exp(-(i * i) / (2 * sigmaVox * sigmaVox));
-    kernel[i + radius] = v;
-    sum += v;
-  }
-  for (let i = 0; i < kernel.length; i++) kernel[i] /= sum;
+  const { kernel, radius } = gaussianKernel(sigmaVox);
 
   const len = axis === 0 ? w : axis === 1 ? h : d;
   const stride = axis === 0 ? 1 : axis === 1 ? w : w * h;

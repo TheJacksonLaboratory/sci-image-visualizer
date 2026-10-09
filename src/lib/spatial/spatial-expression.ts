@@ -57,39 +57,6 @@ export interface ExpressionField {
   range: [number, number];
 }
 
-/** In-place separable Gaussian along one axis of a `w × h` field. */
-function blurAxis(field: Float32Array, w: number, h: number, axis: 0 | 1, sigma: number): void {
-  if (!(sigma > 0.01)) return;
-  const radius = Math.max(1, Math.ceil(sigma * 3));
-  const kernel = new Float32Array(radius * 2 + 1);
-  let sum = 0;
-  for (let i = -radius; i <= radius; i++) {
-    const v = Math.exp(-(i * i) / (2 * sigma * sigma));
-    kernel[i + radius] = v;
-    sum += v;
-  }
-  for (let i = 0; i < kernel.length; i++) kernel[i] /= sum;
-
-  const len = axis === 0 ? w : h;
-  const stride = axis === 0 ? 1 : w;
-  const lines = axis === 0 ? h : w;
-  const line = new Float32Array(len);
-  for (let l = 0; l < lines; l++) {
-    const base = axis === 0 ? l * w : l;
-    for (let i = 0; i < len; i++) line[i] = field[base + i * stride];
-    for (let i = 0; i < len; i++) {
-      let acc = 0;
-      for (let k = -radius; k <= radius; k++) {
-        // Clamped edges: zero-padding would darken the specimen's own boundary,
-        // and the support channel already says where there is no data at all.
-        const j = Math.min(len - 1, Math.max(0, i + k));
-        acc += line[j] * kernel[k + radius];
-      }
-      field[base + i * stride] = acc;
-    }
-  }
-}
-
 /**
  * Estimate a gene's expression field over the image the observations sit in.
  *
@@ -125,9 +92,11 @@ export function expressionField(
   }
   if (!placed) return null;
 
+  // A plane is the one-deep volume: the same blur, so the 2-D and 3-D gene maps
+  // cannot smooth differently.
   for (const axis of [0, 1] as const) {
-    blurAxis(num, w, h, axis, sigma);
-    blurAxis(den, w, h, axis, sigma);
+    blurVolumeAxis(num, w, h, 1, axis, sigma);
+    blurVolumeAxis(den, w, h, 1, axis, sigma);
   }
 
   const mean = new Float32Array(w * h);

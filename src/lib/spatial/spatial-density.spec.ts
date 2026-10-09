@@ -1,5 +1,5 @@
 import {
-  DensityGrid, defaultSigma, densityGrid, rasterizeDensity,
+  DensityGrid, blurVolumeAxis, defaultSigma, densityGrid, gaussianKernel, rasterizeDensity,
 } from './spatial-density';
 import { SpatialDataset, SpatialObservations } from '../contracts/spatial-dataset.contract';
 
@@ -158,5 +158,33 @@ describe('spatial density', () => {
       // smallest bandwidth that can bridge a missing section.
       expect(defaultSigma(g)[2]).toBeGreaterThan(g.voxelSize[2]);
     });
+  });
+});
+
+describe('gaussianKernel / blurVolumeAxis', () => {
+  it('builds a normalised, symmetric kernel of radius ceil(3 sigma)', () => {
+    const { kernel, radius } = gaussianKernel(1.5);
+    expect(radius).toBe(5);
+    expect(kernel.length).toBe(11);
+    expect(kernel.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 5);
+    expect(kernel[0]).toBeCloseTo(kernel[10], 6);
+    expect(kernel[5]).toBe(Math.max(...kernel));
+  });
+
+  it('blurs a 2-D field as the one-deep volume, conserving mass away from the edges', () => {
+    const w = 15;
+    const field = new Float32Array(w * w);
+    field[7 * w + 7] = 10;
+    blurVolumeAxis(field, w, w, 1, 0, 1.5);
+    blurVolumeAxis(field, w, w, 1, 1, 1.5);
+    expect(field.reduce((a, b) => a + b, 0)).toBeCloseTo(10, 3);
+    expect(field[7 * w + 7]).toBeLessThan(10);
+    expect(field[8 * w + 8]).toBeGreaterThan(0);
+  });
+
+  it('leaves the field alone for a negligible sigma', () => {
+    const field = Float32Array.from([1, 2, 3, 4]);
+    blurVolumeAxis(field, 2, 2, 1, 0, 0);
+    expect(Array.from(field)).toEqual([1, 2, 3, 4]);
   });
 });

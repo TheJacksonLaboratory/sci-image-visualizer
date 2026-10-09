@@ -4,9 +4,8 @@ import { clusterColorMap, clusterOfGene, geneBinSize, groupTranscripts } from '.
 import {
   POLYGON_LEVEL_MIN_CELL_PX, TRANSCRIPT_GLYPHS, TRANSCRIPT_MAX_PX, TRANSCRIPT_MIN_PX,
   INFERNO_SCALE, TRANSCRIPT_PHYSICAL_UM,
-  allGenesPlan, cellTypeColumnFor, cellsShown, colorDensity, groupedMarkerPx, quantileOf, tilesInRectFrom,
+  allGenesPlan, cellTypeColumnFor, cellsShown, groupedMarkerPx, quantileOf, tilesInRectFrom,
   visibleArea, discreteColormapStops, glyphOutline, glyphRings, pixelsPerDataUnit,
-  smoothRaster,
   polygonLevelFor, tileId, tilesInRect, transcriptLevelFor, transcriptMarkerPx,
   typicalCellDiameter, visibleDataRect,
 } from './spatial-tiles';
@@ -244,31 +243,6 @@ describe('cellTypeColumnFor', () => {
     expect(cellTypeColumnFor(ds([['curated_cell_type', 'categorical']]), { cellTypeColumn: null }))
       .toBe('curated_cell_type');
     expect(cellTypeColumnFor(ds([['cell_area', 'continuous']]), { cellTypeColumn: null })).toBeNull();
-  });
-});
-
-describe('smoothRaster / colorDensity', () => {
-  it('spreads a single count while conserving its mass (away from the edges)', () => {
-    const v = new Float32Array(15 * 15);
-    v[7 * 15 + 7] = 10;
-    const s = smoothRaster(v, 15, 15, 1.5);
-    const total = s.reduce((a, b) => a + b, 0);
-    expect(total).toBeCloseTo(10, 3);
-    expect(s[7 * 15 + 7]).toBeLessThan(10);
-    expect(s[7 * 15 + 8]).toBeGreaterThan(0);
-  });
-
-  it('is the identity for sigma 0', () => {
-    const v = Float32Array.from([1, 2, 3, 4]);
-    expect(Array.from(smoothRaster(v, 2, 2, 0))).toEqual([1, 2, 3, 4]);
-  });
-
-  it('leaves empty cells transparent and saturates the top of the window', () => {
-    const lut: [number, number, number][] = [[0, 0, 0], [255, 255, 255]];
-    const rgba = colorDensity(Float32Array.from([0, 1, 100]), lut, 1, { percentile: 0.5 });
-    expect(rgba[3]).toBe(0); // zero → transparent
-    expect(rgba[8 + 3]).toBe(255); // top of window → opaque
-    expect(rgba[8]).toBe(255);
   });
 });
 
