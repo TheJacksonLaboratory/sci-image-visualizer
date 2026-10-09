@@ -310,7 +310,6 @@ export class PlotUtilities {
   }
 
   /**
-   * TESTED
    * Rounds a list of numbers
    * @param a
    */
@@ -321,8 +320,7 @@ export class PlotUtilities {
   }
 
   /**
-   * TESTED
-   * Returns true of zoom is the same as image size
+   * Returns true if the zoom is the same as the image size
    * @param rect Rectangle area
    * @param trueImgSize
    * @return true if rect is out of image size boundary
@@ -333,10 +331,10 @@ export class PlotUtilities {
   }
 
   /**
-   * Save the json string to a file
-   * @param jsonString
+   * Download a GeoJSON string as `<baseName without extension>.geojson`
+   * (`rois.geojson` without a base name).
    */
-  public saveToFile(jsonString: any, baseName?: string) {
+  public saveToFile(jsonString: string, baseName?: string) {
     const blob = new Blob([jsonString], { type: 'application/json' });
     const stem = (baseName ?? '').replace(/\.[^/.]+$/, '').trim() || 'rois';
     saveAs(blob, `${stem}.geojson`);
@@ -478,13 +476,13 @@ export class PlotUtilities {
   }
 
   /**
-   * Function that returns a geojson object from a Plotly ROI
-   * @param rois
-   * @return FeatureCollection<Geometry, GeoJsonProperties>
+   * Serialise regions as a GeoJSON FeatureCollection string (QuPath-compatible),
+   * leaving out intensity-profile lines.
    */
   public exportROIsToGeoJson(rois: Region[]): string {
-    const features: any[] = [];
-    for (const roi of rois.filter(r => (r as any).kind !== 'profile')) {
+    const features: object[] = [];
+    for (const roi of rois.filter(r => r.kind !== 'profile')) {
+      const colorRgb = this.hexToRgb(roi?.color);
       // QuPath places the image plane inside the geometry (sibling of
       // type/coordinates), zero-based, and omits it for the default plane
       // (z=0,t=0). Emit `plane: {c,z,t}` only for a non-default slice so a
@@ -496,11 +494,7 @@ export class PlotUtilities {
           properties: {
             classification: {
               name: roi.label ? roi.label : roi.name,
-              color: [
-                this.hexToRgb(roi?.color)[0],
-                this.hexToRgb(roi?.color)[1],
-                this.hexToRgb(roi?.color)[2]
-              ]
+              color: colorRgb,
             },
           },
           geometry: {
@@ -517,11 +511,6 @@ export class PlotUtilities {
         };
         features.push(rectangle);
       } else if (roi.bounds instanceof Polygon) {
-        const colorRgb = [
-          this.hexToRgb(roi?.color)[0],
-          this.hexToRgb(roi?.color)[1],
-          this.hexToRgb(roi?.color)[2]
-        ];
         const closed = roi.bounds.closed !== false;
         const isBezier = roi.bounds.bezier === true;
         // For a bezier region the geometry is the flattened smooth curve,
@@ -535,7 +524,7 @@ export class PlotUtilities {
             return c.xs.map((x, i) => [x, c.ys[i]]);
           })()
           : roi.bounds.coordinates;
-        const properties: any = {
+        const properties: Record<string, unknown> = {
           classification: {
             name: roi.label ? roi.label : roi.name,
             color: colorRgb
@@ -595,11 +584,6 @@ export class PlotUtilities {
       } else if (roi.bounds instanceof MultiPolygon) {
         // Multi-part region → GeoJSON MultiPolygon: one ring-set per part
         // (exterior + holes), each ring closed (jit-ui#85).
-        const colorRgb = [
-          this.hexToRgb(roi?.color)[0],
-          this.hexToRgb(roi?.color)[1],
-          this.hexToRgb(roi?.color)[2]
-        ];
         const coordinates = roi.bounds.polygons
           .filter(part => part.xpoints.length >= 3)
           .map(part => {
@@ -628,11 +612,6 @@ export class PlotUtilities {
   }
 
   /**
-   * Convert GeoJSON interior rings into the neutral hole representation
-   * (`number[][]` per ring, no repeated closing point). Degenerate rings (< 3
-   * distinct points) are dropped. jit-ui#85.
-   */
-  /**
    * Build a closed {@link Polygon} from a GeoJSON ring set: `rings[0]` is the
    * exterior (closing point dropped), `rings[1..]` are interior holes. jit-ui#85.
    */
@@ -655,6 +634,11 @@ export class PlotUtilities {
     return poly;
   }
 
+  /**
+   * Convert GeoJSON interior rings into the neutral hole representation
+   * (`number[][]` per ring, no repeated closing point). Degenerate rings (< 3
+   * distinct points) are dropped. jit-ui#85.
+   */
   private ringsToHoles(rings: number[][][]): number[][][] {
     const holes: number[][][] = [];
     for (const ringIn of rings || []) {
