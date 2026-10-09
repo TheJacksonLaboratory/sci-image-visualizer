@@ -1,6 +1,6 @@
 import { Injectable, Inject, Optional } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, Observable, Subject, Subscription, combineLatest, defer, firstValueFrom, of } from 'rxjs';
+import { BehaviorSubject, EMPTY, Observable, Subject, Subscription, combineLatest, defer, firstValueFrom, of } from 'rxjs';
 import { startWith, timeout } from 'rxjs/operators';
 import { Image } from 'image-js';
 import * as OpenSeadragon from 'openseadragon';
@@ -316,8 +316,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   }
 
   private readonly stackLoading$ = new BehaviorSubject<boolean>(false);
-  private readonly stackLoadingProgress$ = new BehaviorSubject<number>(0);
-  private readonly autoscaleEvent$ = new Subject<any>();
   /** Visible image region (full-image pixel coords) emitted when the view
    *  settles, so the intensity inset can re-sample at the current zoom level. */
   private readonly viewportChange$ = new Subject<{ x: number; y: number; width: number; height: number }>();
@@ -327,9 +325,8 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   private frameRaf: number | null = null;
   private plotModeViewport: PlotModeViewport | null = null;
   // Region state (regions, selection, the update event) lives in the shared
-  // RegionStore; the IRegionStore methods below delegate to it.
-  private readonly intensityProfile$ = new Subject<IntensityProfile[]>();
-  // Image metadata and classification colours live in the shared VisualizerStore.
+  // RegionStore; image metadata and classification colours in the shared
+  // VisualizerStore — the inherited IRegionStore/display methods delegate there.
 
   /**
    * Subscribe to the shared VisualizerStore colormap/reverse so OSD recolors in
@@ -1283,7 +1280,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   }
   autoscale(): void {
     this.viewer?.viewport.goHome();
-    this.autoscaleEvent$.next('autoscale');
   }
   zoomIn(): void {
     this.viewer?.viewport.zoomBy(1.3);
@@ -1397,7 +1393,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     return this.stackLoading$.asObservable();
   }
   getStackLoadingProgress(): Observable<number> {
-    return this.stackLoadingProgress$.asObservable();
+    return of(0); // OSD loads a stack's slices lazily (SliceCache); no progress to report
   }
 
   getTrueImageSize(): { width: number; height: number } | null {
@@ -1468,8 +1464,9 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     /* 3D not supported by OSD */
   }
 
+  /** The router reads the autoscale event from Plotly only. */
   getAutoscaleEvent(): Observable<any> {
-    return this.autoscaleEvent$.asObservable();
+    return EMPTY;
   }
 
   /** Visible image region (full-image pixel coords), emitted when the view
@@ -1574,8 +1571,10 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     return [PLOT_TYPE_DESCRIPTORS[PlotType.HEATMAP]!];
   }
 
+  /** The intensity profiles live in Plotly (see IIntensitySampling); the
+   *  router reads them from there. */
   getIntensityProfile$(): Observable<IntensityProfile[]> {
-    return this.intensityProfile$.asObservable();
+    return EMPTY;
   }
   /** OSD only renders the image type; the LINE intensity inset is Plotly-only. */
   renderIntensityInset(_divId: string, _profiles: IntensityProfile[]): void {
