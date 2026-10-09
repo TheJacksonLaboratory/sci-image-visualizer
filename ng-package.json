@@ -8,7 +8,6 @@
     "src/lib/assets"
   ],
   "allowedNonPeerDependencies": [
-    "@jax-js/jax",
     "cellpose-js",
     "fast-png",
     "napari-js",
