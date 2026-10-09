@@ -3,7 +3,7 @@ import { ChangeDetectorRef, Component, AfterViewInit, ElementRef, EventEmitter, 
 import { BehaviorSubject, Observable, Subject, Subscription } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 
-import { MenuItem, MessageService, TreeNode } from 'primeng/api';
+import { MenuItem, MessageService } from 'primeng/api';
 import { ContextMenu } from 'primeng/contextmenu';
 import { IImageInfo } from './contracts/image.contract';
 import { ImageStatePort, IMAGE_STATE_PORT } from './contracts/ports/image-state.port';
@@ -271,9 +271,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   /** Vertex eraser radius in image-pixel coordinates. */
   vertexEraserRadius = 20;
 
-  colormapsOptions!: any;
-  reversescale = false;
-  selectedColormap!: any;
   /** Channels & Histogram dialog visibility (opened from the toolbar). */
   showChannelHistogram = false;
   /** Spatial-omics controls dialog visibility (toolbar button). */
@@ -284,11 +281,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    *  element's current width, or — when no selector is configured / the element
    *  isn't found — to a quarter of the page (see openRegionEditor). */
   regionEditorWidth = '25vw';
-  stackOptions = [
-    { name: 'Single image', val: 'false' },
-    { name: 'Stack', val: 'true' },
-  ];
-  selectedStackOption: { name: string; val: string } | undefined = this.stackOptions[0];
   readonly plotDivName = `viz-plot-${plotInstanceSeq++}`;
   plotType = PlotType.IMAGE;
   isHeatmap = true;
@@ -384,11 +376,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    *  camera a drawn rectangle has no fixed meaning in the data. */
   get isSpatial3dMode(): boolean {
     return isSpatialOmics3d(this.basePlotType);
-  }
-
-  /** LINE plot type shows the image + draggable line ROI + intensity inset. */
-  get isProfileMode(): boolean {
-    return this.basePlotType === PlotType.LINE;
   }
 
   /** True for the Image plot type, which renders as a natively pan/zoom-able
@@ -493,7 +480,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
         onFailed: (contribution) => this.dialogToolFailed(contribution.descriptor.type),
       },
     );
-    this.colormapsOptions = plotService.getColormapOptions();
     this.computePlotTypeOptions();
   }
 
@@ -791,18 +777,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // Join the live set; the oldest member renders the shared notice outlets.
     VisualizerComponent.liveInstances.add(this);
     this.state.setDiagram(this);
-    this.selectedColormap =
-      this.colormapsOptions[0].children.find((c: any) => c.label === 'Greys Inv') ??
-      this.colormapsOptions[0].children[0];
-    this.stackOptions = [
-      { name: 'Single image', val: 'false' },
-      { name: 'Stack', val: 'true' },
-    ];
-    this.selectedStackOption = this.stackOptions[0];
     this.watchSpatialDataset();
     this.autoscaleSubscription = this.plotService.getAutoscaleEvent().subscribe(() => {
-      // reset the image mode to single image
-      this.selectedStackOption = { name: 'Single image', val: 'false' };
       this.activeDragMode = null;
       this.session.setActiveTool(null);
     });
@@ -888,12 +864,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
         this.fileName = filename;
       }
     });
-    this.plotService.getColormap().subscribe((colormap) => {
-      this.selectedColormap = colormap;
-    });
-    this.plotService.getReverseScale().subscribe((reversescale) => {
-      this.reversescale = reversescale;
-    });
     this.intensityProfileSub = this.plotService.getIntensityProfile$().subscribe((profiles) => {
       this.latestProfiles = profiles;
       this.hasProfiles = profiles.length > 0;
@@ -928,9 +898,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
           // If the active plot type isn't valid for this image (e.g. a scalar
           // type like Contour carried over to an RGB image), fall back to Image.
           this.reconcileSelectedPlotType();
-          // reset stack options selection
-          this.selectedStackOption = imgInfo.showStack ? this.stackOptions[1] : this.stackOptions[0];
-
           // Read from `imgInfo`, the value this emission carried, rather than from the
           // field. Handling the empty emission means the field CAN be nulled part-way
           // through this branch: `reconcileSelectedPlotType` may call `setPlotType`,
@@ -996,7 +963,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
               imgInfo.initialZIndex = undefined;
             }
             // make sure the zindex is within bounds
-            this.updateZIndex(urls);
+            this.updateZIndex();
             this.running = true;
             // Multi-tier rendering (small blurry tier first, then sharpen in
             // place) — sequencing lives in RenderOrchestrator; this component
@@ -1468,25 +1435,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     return this.plotService.getRegionPolygons();
   }
 
-  /**
-   * Select the color scale type: called by the color scale select button
-   * @param event
-   */
-  toggleReverseScale() {
-    this.reversescale = !this.reversescale;
-    this.plotService.setReverseScale(this.reversescale);
-  }
-
-  /**
-   * Select a color map: called by the color map dropdown button
-   * @param colormapNode
-   */
-  selectColormap(colormapNode: TreeNode) {
-    if (!colormapNode.children) {
-      this.plotService.setColormap(colormapNode);
-    }
-  }
-
   /** Open the Channels & Histogram dialog (toolbar button). */
   openChannelHistogram() {
     this.showChannelHistogram = true;
@@ -1513,14 +1461,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.showRegionEditor = true;
   }
 
-  /**
-   * Called by the stack/single image dropdown button
-   * @param showstack
-   */
-  selectStackOption(selectedStackOption: any) {
+  /** The toolbar's Single image / Stack toggle. */
+  selectStackOption(selectedStackOption: { name: string; val: string }) {
     const showstack = selectedStackOption.val === 'true';
-    this.selectedStackOption = selectedStackOption;
-    console.log('selected stack option' + JSON.stringify(this.selectedStackOption));
     this.stackLoading = showstack;
     this.state.setImageLoading(!showstack);
     // Stack mode is always a 2D heatmap — reset surface mode if active
@@ -1533,18 +1476,13 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.plotService.setShowStack(showstack);
   }
 
-  updateZIndex(urls?: string[]) {
+  /** Clamp the slice index into [0, maxIndex] and push it to the renderer. */
+  updateZIndex() {
     if (this.zIndex > this.maxIndex) {
       this.zIndex = this.maxIndex;
     }
     if (this.zIndex < 0) {
       this.zIndex = 0;
-    }
-    if (urls) {
-      if (this.zIndex > urls?.length) {
-        this.zIndex = 0;
-        this.maxIndex = urls.length - 1;
-      }
     }
     this.plotService.setZIndex(this.zIndex);
   }
@@ -1843,13 +1781,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     }
     return { w, h };
   }
-
-  /** True when ≥2 eligible regions are selected (Merge available). */
-  get canMergeRegions(): boolean { return this.opEligible(this.selectedRegions).length >= 2; }
-  /** True when any selected region is multi-part (Ungroup available). */
-  get canUngroupRegions(): boolean { return this.selectedRegions.some((r) => this.regionOps.canUngroup(r)); }
-  /** True when ≥1 eligible region is selected (Inverse / Simplify available). */
-  get hasEligibleSelection(): boolean { return this.opEligible(this.selectedRegions).length >= 1; }
 
   /** Select every region on the image (excludes intensity-profile lines). */
   selectAllRegions(): void {
@@ -2405,7 +2336,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       // Plotly's stack-loading flag (keeps its frame-fetch loop alive) and
       // re-emit the image info with showStack on so the pipeline reloads on
       // Plotly regardless of which backend was on screen.
-      this.selectedStackOption = this.stackOptions[1];
       this.stackLoading = true;
       this.plotService.setStackLoading(true);
       if (this.imageInfo) {

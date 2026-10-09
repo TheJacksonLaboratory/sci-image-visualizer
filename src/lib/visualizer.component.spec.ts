@@ -756,16 +756,18 @@ describe('VisualizerComponent (UI shell)', () => {
       return () => regions;
     }
 
-    it('canMerge / canUngroup / hasEligibleSelection reflect the selection', () => {
+    it('offers Merge / Ungroup / Inverse in the context menu according to the selection', () => {
       statefulRegions([rectRegion(0, 0, 10, 10), rectRegion(50, 50, 10, 10)]);
+      const labels = () => ((component as any).buildRegionActionItems() as { label?: string }[])
+        .map((i) => i.label);
       (component as any).selectedIndices = [0, 1];
-      expect(component.canMergeRegions).toBe(true);
-      expect(component.hasEligibleSelection).toBe(true);
-      expect(component.canUngroupRegions).toBe(false);
+      expect(labels()).toContain('Merge / group');
+      expect(labels()).toContain('Inverse');
+      expect(labels()).not.toContain('Ungroup');
 
       (component as any).selectedIndices = [0];
-      expect(component.canMergeRegions).toBe(false); // needs ≥2
-      expect(component.hasEligibleSelection).toBe(true);
+      expect(labels()).not.toContain('Merge / group'); // needs ≥2
+      expect(labels()).toContain('Inverse');
     });
 
     it('selectAllRegions selects every non-profile region', () => {
@@ -911,26 +913,11 @@ describe('VisualizerComponent (UI shell)', () => {
       expect(plotService.deleteActiveShape).toHaveBeenCalled();
     });
 
-    it('toggleReverseScale flips state and pushes it to the service', () => {
-      component.toggleReverseScale();
-      expect(component.reversescale).toBe(true);
-      expect(plotService.setReverseScale).toHaveBeenCalledWith(true);
-      component.toggleReverseScale();
-      expect(plotService.setReverseScale).toHaveBeenLastCalledWith(false);
-    });
-
     it('onToggleImageSmoothing flips state and applies it', () => {
       expect(component.imageSmoothingEnabled).toBe(false);
       component.onToggleImageSmoothing();
       expect(component.imageSmoothingEnabled).toBe(true);
       expect(plotService.setImageSmoothingEnabled).toHaveBeenCalledWith(true);
-    });
-
-    it('selectColormap applies a leaf node but ignores a parent (has children)', () => {
-      component.selectColormap({ label: 'Viridis' } as any);
-      expect(plotService.setColormap).toHaveBeenCalledTimes(1);
-      component.selectColormap({ label: 'group', children: [] } as any);
-      expect(plotService.setColormap).toHaveBeenCalledTimes(1); // parent ignored
     });
 
     it('hasRegions / getRegionPolygons read through the service', () => {
