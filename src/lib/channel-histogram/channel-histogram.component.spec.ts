@@ -122,7 +122,7 @@ describe('ChannelHistogramComponent', () => {
   });
 
   describe('histogram rendering (with the plot div present)', () => {
-    beforeEach(() => { document.body.innerHTML = '<div id="channel-histogram-plot"></div>'; });
+    beforeEach(() => { document.body.innerHTML = `<div id="${component.histogramDiv}"></div>`; });
     afterEach(() => { document.body.innerHTML = ''; });
 
     it('selectChannel loads and renders the histogram via Plotly', () => {
@@ -195,6 +195,51 @@ describe('ChannelHistogramComponent', () => {
       const lastCall = (api.setChannelState as jest.Mock).mock.calls.pop();
       expect(lastCall[1].min).toBeGreaterThan(120);
       expect(lastCall[1].min).toBeLessThan(135);
+    });
+  });
+
+  describe('lifecycle (RT-33)', () => {
+    it('gives each instance its own plot element id', () => {
+      const other = TestBed.createComponent(ChannelHistogramComponent).componentInstance;
+      expect(other.histogramDiv).not.toBe(component.histogramDiv);
+    });
+
+    it('cancels a pending histogram retry on destroy', () => {
+      jest.useFakeTimers();
+      try {
+        api.getHistogram$.mockReturnValue(of(null));
+        component.visible = true;
+        component.selectChannel(component.channels[0]); // not ready → schedules a retry
+        const calls = api.getHistogram$.mock.calls.length;
+        component.ngOnDestroy();
+        jest.advanceTimersByTime(5000);
+        expect(api.getHistogram$.mock.calls.length).toBe(calls);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('a channel switch replaces the pending retry instead of stacking another', () => {
+      jest.useFakeTimers();
+      try {
+        api.getHistogram$.mockReturnValue(of(null));
+        component.visible = true;
+        component.selectChannel(component.channels[0]);
+        component.selectChannel(component.channels[0]);
+        const calls = api.getHistogram$.mock.calls.length;
+        jest.advanceTimersByTime(400);
+        expect(api.getHistogram$.mock.calls.length).toBe(calls + 1);
+      } finally {
+        component.ngOnDestroy();
+        jest.useRealTimers();
+      }
+    });
+
+    it('a colour edit does not mutate the channel state the store emitted', () => {
+      const emitted = component.selected!;
+      component.onColorChange(emitted, '#ff0000');
+      expect(emitted.color).toBe('#ffffff');
+      expect(component.selected?.color).toBe('#ff0000');
     });
   });
 });

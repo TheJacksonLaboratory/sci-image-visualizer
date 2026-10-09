@@ -18,9 +18,14 @@ import {
  * backends recolor the displayed image live. The pane depends only on the
  * contract, never the concrete visualizer.
  */
+/** Delay between retries while the histogram sampling resolves. */
+const HIST_RETRY_MS = 400;
+/** Retries before giving up and showing an empty histogram. */
+const HIST_MAX_RETRIES = 10;
+
+let nextInstanceId = 0;
+
 @Component({
-  // Canonical prefixed selector first; the unprefixed original is kept as an
-  // alias for one release (pre-publication back-compat).
   selector: 'channel-histogram',
   templateUrl: './channel-histogram.component.html',
   styleUrls: ['./channel-histogram.component.scss'],
@@ -30,7 +35,8 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
   @Input() visible = false;
   @Output() visibleChange = new EventEmitter<boolean>();
 
-  readonly histogramDiv = 'channel-histogram-plot';
+  /** DOM id of the Plotly histogram element — per instance, so two panes don't collide. */
+  readonly histogramDiv = `channel-histogram-plot-${++nextInstanceId}`;
   readonly lutColors = LUT_COLORS;
 
   channels: IChannelState[] = [];
@@ -39,6 +45,7 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
   logScale = false;
   /** Bounded retries while the (async) histogram sampling resolves. */
   private histRetries = 0;
+  private histRetryTimer?: ReturnType<typeof setTimeout>;
   /** The selected channel's current histogram. Native bit depth (with
    *  observed/range fields) for >8-bit images, else the 8-bit client histogram.
    *  Drives the plot, the native window labels, and the export-button gate. */
@@ -87,6 +94,7 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.subs.unsubscribe();
     this.histSub?.unsubscribe();
+    clearTimeout(this.histRetryTimer);
     clearTimeout(this.adjustTimer);
     this.teardownResize();
     try { Plotly.purge(this.histogramDiv); } catch { /* never rendered */ }
@@ -128,11 +136,11 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
 
   // ── per-channel edits (live) ─────────────────────────────────────────
   // PrimeNG slider/inputNumber events carry `number | string | null`, so the
-  // handlers accept `any` and coerce. Values arrive in NATIVE units (the slider
+  // handlers coerce. Values arrive in NATIVE units (the slider
   // is labelled natively for 16-bit); we map them back to the store's 8-bit
   // display window via the channel's observed range (identity for 8-bit images,
   // so their behaviour is unchanged).
-  onMinChange(value: any): void {
+  onMinChange(value: number | string | null): void {
     if (!this.selected) return;
     const min = this.toDisp(value);
     const max = Math.max(min, this.selected.max);
@@ -140,7 +148,7 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
     this.markBusy('min');
     this.updateMarkers();
   }
-  onMaxChange(value: any): void {
+  onMaxChange(value: number | string | null): void {
     if (!this.selected) return;
     const max = this.toDisp(value);
     const min = Math.min(max, this.selected.min);
@@ -148,7 +156,7 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
     this.markBusy('max');
     this.updateMarkers();
   }
-  onGammaChange(value: any): void {
+  onGammaChange(value: number | string | null): void {
     if (!this.selected) return;
     const g = Number(value);
     if (isNaN(g)) return;
@@ -171,8 +179,9 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
     this.api.setChannelState(ch.index, { color });
     // The histogram bars are drawn in the selected channel's colour — redraw
     // when that channel's colour changes.
+    // Copy rather than mutate: `selected` is the object the store emitted.
     if (this.selected && ch.index === this.selected.index) {
-      this.selected.color = color;
+      this.selected = { ...this.selected, color };
       this.renderHistogram();
     }
   }
@@ -228,7 +237,7 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
     return Math.round(o.min + (disp / 255) * (o.max - o.min));
   }
   /** Native units → clamped 8-bit display value (0..255). */
-  private toDisp(value: any): number {
+  private toDisp(value: number | string | null): number {
     const v = Number(value);
     if (v == null || isNaN(v)) return 0;
     const o = this.obsRange();
@@ -294,13 +303,15 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
    *  null until tile sampling resolves, so we retry a few times. */
   private loadHistogram(): void {
     if (!this.selected) return;
+    // A newer load (channel switch, new image) supersedes a pending retry.
+    clearTimeout(this.histRetryTimer);
     this.histSub?.unsubscribe();
     this.histSub = this.api.getHistogram$(this.selected.index, 256).subscribe((h) => {
       if (!h) {
         // Not ready (async sampling / file still caching) — retry a few times.
-        if (this.visible && this.histRetries < 10) {
+        if (this.visible && this.histRetries < HIST_MAX_RETRIES) {
           this.histRetries++;
-          setTimeout(() => this.loadHistogram(), 400);
+          this.histRetryTimer = setTimeout(() => this.loadHistogram(), HIST_RETRY_MS);
         } else {
           this.hist = null;
           this.renderHistogram();
