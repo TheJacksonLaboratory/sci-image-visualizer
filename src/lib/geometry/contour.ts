@@ -10,24 +10,20 @@ import { Polygon } from '../models/region';
 /** A traced boundary vertex in mask-local pixel coordinates. */
 interface Vertex { x: number; y: number }
 
-/** Build a closed Polygon from mask-local vertices translated by (ox, oy). */
-function toPolygon(verts: Vertex[], ox: number, oy: number): Polygon {
-  const xpoints: number[] = [];
-  const ypoints: number[] = [];
-  const coordinates: number[][] = [];
+/**
+ * Build a closed Polygon from crop-local vertices. A vertex (x, y) of a crop
+ * whose (0,0) sits at (cropX, cropY) in the mask maps to
+ * `round(originX + (cropX + x))`, the same value a full-mask trace produces.
+ */
+function toRing(verts: Vertex[], cropX: number, cropY: number, originX: number, originY: number)
+  : { xs: number[]; ys: number[] } {
+  const xs: number[] = [];
+  const ys: number[] = [];
   for (const v of verts) {
-    const ix = Math.round(ox + v.x);
-    const iy = Math.round(oy + v.y);
-    xpoints.push(ix);
-    ypoints.push(iy);
-    coordinates.push([ix, iy]);
+    xs.push(Math.round(originX + (cropX + v.x)));
+    ys.push(Math.round(originY + (cropY + v.y)));
   }
-  const poly = new Polygon();
-  poly.npoints = xpoints.length;
-  poly.xpoints = xpoints;
-  poly.ypoints = ypoints;
-  poly.coordinates = coordinates;
-  return poly;
+  return { xs, ys };
 }
 
 /**
@@ -37,63 +33,117 @@ function toPolygon(verts: Vertex[], ox: number, oy: number): Polygon {
  * background runs of at least `minHoleSize` pixels become the bordering blob's
  * {@link Polygon.holes}. An erase that cuts a region in two therefore yields
  * both pieces, and a donut keeps its hole.
+ *
+ * The mask is labelled once; each blob and each hole is then traced inside its
+ * own bounding box (RT-16), so the cost is O(w·h + Σ bbox areas) rather than
+ * O(w·h) per blob.
  */
 export function maskToPolygons(mask: Uint8Array, w: number, h: number,
                                originX: number, originY: number, minSize = 4,
                                minHoleSize = minSize): Polygon[] {
-  // Label all 4-connected components, recording each one's pixel count.
+  return traceMask(mask, w, h, 0, 0, originX, originY, minSize, minHoleSize, w * h * 8);
+}
+
+/** Growable per-label bounding boxes and pixel counts (index 0 unused). */
+class LabelStats {
+  size: number[] = [0];
+  minX: number[] = [0];
+  minY: number[] = [0];
+  maxX: number[] = [0];
+  maxY: number[] = [0];
+
+  add(): number {
+    this.size.push(0);
+    this.minX.push(Infinity);
+    this.minY.push(Infinity);
+    this.maxX.push(-Infinity);
+    this.maxY.push(-Infinity);
+    return this.size.length - 1;
+  }
+
+  grow(lbl: number, x: number, y: number): void {
+    this.size[lbl]++;
+    if (x < this.minX[lbl]) this.minX[lbl] = x;
+    if (x > this.maxX[lbl]) this.maxX[lbl] = x;
+    if (y < this.minY[lbl]) this.minY[lbl] = y;
+    if (y > this.maxY[lbl]) this.maxY[lbl] = y;
+  }
+}
+
+/**
+ * {@link maskToPolygons} over a mask that is itself a crop at (cropX, cropY) of
+ * a larger frame; `maxSteps` caps the boundary walk as for the full frame.
+ */
+function traceMask(mask: Uint8Array, w: number, h: number, cropX: number, cropY: number,
+                   originX: number, originY: number, minSize: number, minHoleSize: number,
+                   maxSteps: number): Polygon[] {
+  // 1. Label all 4-connected components once, recording size + bbox.
   const labels = new Int32Array(w * h);
-  const sizes: number[] = [0]; // sizes[label]; label 0 unused
-  let nextLabel = 0;
+  const stats = new LabelStats();
   const queue: number[] = [];
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const idx = y * w + x;
       if (!mask[idx] || labels[idx]) continue;
-      nextLabel++;
-      labels[idx] = nextLabel;
-      let size = 0;
+      const lbl = stats.add();
+      labels[idx] = lbl;
       queue.push(idx);
       while (queue.length) {
         const i = queue.pop() as number;
-        size++;
         const px = i % w;
         const py = (i - px) / w;
+        stats.grow(lbl, px, py);
         if (px > 0)     { const j = i - 1;
-          if (mask[j] && !labels[j]) { labels[j] = nextLabel; queue.push(j); } }
+          if (mask[j] && !labels[j]) { labels[j] = lbl; queue.push(j); } }
         if (px < w - 1) { const j = i + 1;
-          if (mask[j] && !labels[j]) { labels[j] = nextLabel; queue.push(j); } }
+          if (mask[j] && !labels[j]) { labels[j] = lbl; queue.push(j); } }
         if (py > 0)     { const j = i - w;
-          if (mask[j] && !labels[j]) { labels[j] = nextLabel; queue.push(j); } }
+          if (mask[j] && !labels[j]) { labels[j] = lbl; queue.push(j); } }
         if (py < h - 1) { const j = i + w;
-          if (mask[j] && !labels[j]) { labels[j] = nextLabel; queue.push(j); } }
+          if (mask[j] && !labels[j]) { labels[j] = lbl; queue.push(j); } }
       }
-      sizes[nextLabel] = size;
     }
   }
 
   const wanted: number[] = [];
-  for (let lbl = 1; lbl <= nextLabel; lbl++) {
-    if (sizes[lbl] >= minSize) wanted.push(lbl);
+  for (let lbl = 1; lbl < stats.size.length; lbl++) {
+    if (stats.size[lbl] >= minSize) wanted.push(lbl);
   }
-  wanted.sort((a, b) => sizes[b] - sizes[a]); // largest-first
+  wanted.sort((a, b) => stats.size[b] - stats.size[a]); // largest-first (stable)
 
-  // Interior rings (holes) per foreground label — jit-ui#85.
-  const holesByLabel = detectHoles(mask, labels, w, h, originX, originY, minHoleSize);
+  // 2. Interior rings (holes) per foreground label — jit-ui#85.
+  const holesByLabel = detectHoles(mask, labels, w, h, cropX, cropY, originX, originY,
+    minHoleSize, maxSteps);
 
+  // 3. Trace each wanted blob inside its own bbox.
   const polys: Polygon[] = [];
-  const comp = new Uint8Array(w * h);
   for (const lbl of wanted) {
-    comp.fill(0);
-    for (let i = 0; i < comp.length; i++) comp[i] = labels[i] === lbl ? 1 : 0;
-    const verts = mooreBoundary(comp, w, h);
-    if (!verts || verts.length < 3) continue;
-    const poly = toPolygon(verts, originX, originY);
+    const bx = stats.minX[lbl], by = stats.minY[lbl];
+    const bw = stats.maxX[lbl] - bx + 1, bh = stats.maxY[lbl] - by + 1;
+    const comp = new Uint8Array(bw * bh);
+    for (let y = 0; y < bh; y++) {
+      const row = (by + y) * w + bx;
+      for (let x = 0; x < bw; x++) if (labels[row + x] === lbl) comp[y * bw + x] = 1;
+    }
+    const verts = mooreBoundary(comp, bw, bh, maxSteps);
+    if (verts.length < 3) continue;
+    const ring = toRing(verts, cropX + bx, cropY + by, originX, originY);
+    const poly = makeTracedPolygon(ring.xs, ring.ys);
     const holes = holesByLabel.get(lbl);
     if (holes && holes.length) poly.holes = holes;
     polys.push(poly);
   }
   return polys;
+}
+
+/** A closed traced polygon with its `coordinates` mirror filled in. */
+function makeTracedPolygon(xs: number[], ys: number[]): Polygon {
+  const poly = new Polygon();
+  poly.npoints = xs.length;
+  poly.xpoints = xs;
+  poly.ypoints = ys;
+  poly.coordinates = xs.map((x, i) => [x, ys[i]]);
+  return poly;
 }
 
 /**
@@ -103,9 +153,11 @@ export function maskToPolygons(mask: Uint8Array, w: number, h: number,
  * the foreground component that borders it most. Returns `fgLabel → rings`,
  * each ring a list of `[x, y]` pairs translated by the origin (same convention
  * as a polygon's `coordinates`). Holes smaller than `minHoleSize` are dropped.
+ * Each hole is traced inside its own bbox.
  */
 function detectHoles(mask: Uint8Array, fgLabels: Int32Array, w: number, h: number,
-                     originX: number, originY: number, minHoleSize: number): Map<number, number[][][]> {
+                     cropX: number, cropY: number, originX: number, originY: number,
+                     minHoleSize: number, maxSteps: number): Map<number, number[][][]> {
   const result = new Map<number, number[][][]>();
 
   // 1. Flood-fill background reachable from the grid border ("outside").
@@ -128,21 +180,23 @@ function detectHoles(mask: Uint8Array, fgLabels: Int32Array, w: number, h: numbe
   // 2. Remaining unvisited background pixels are enclosed holes. BFS each,
   //    tally the bordering foreground label, and trace its boundary.
   const visited = new Uint8Array(w * h);
-  const holeMask = new Uint8Array(w * h);
   const queue: number[] = [];
   for (let start = 0; start < mask.length; start++) {
     if (mask[start] || outside[start] || visited[start]) continue;
-    let size = 0;
     const owners = new Map<number, number>();
     const pixels: number[] = [];
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     visited[start] = 1;
     queue.length = 0;
     queue.push(start);
     while (queue.length) {
       const i = queue.pop() as number;
-      size++;
       pixels.push(i);
       const px = i % w, py = (i - px) / w;
+      if (px < minX) minX = px;
+      if (px > maxX) maxX = px;
+      if (py < minY) minY = py;
+      if (py > maxY) maxY = py;
       const visit = (j: number) => {
         if (mask[j]) {
           const lbl = fgLabels[j];
@@ -157,20 +211,22 @@ function detectHoles(mask: Uint8Array, fgLabels: Int32Array, w: number, h: numbe
       if (py > 0) visit(i - w);
       if (py < h - 1) visit(i + w);
     }
-    if (size < minHoleSize || owners.size === 0) continue;
+    if (pixels.length < minHoleSize || owners.size === 0) continue;
     let owner = 0, best = -1;
     owners.forEach((cnt, lbl) => { if (cnt > best) { best = cnt; owner = lbl; } });
 
-    holeMask.fill(0);
-    for (const i of pixels) holeMask[i] = 1;
-    const verts = mooreBoundary(holeMask, w, h);
-    if (!verts || verts.length < 3) continue;
+    const hw = maxX - minX + 1, hh = maxY - minY + 1;
+    const holeMask = new Uint8Array(hw * hh);
+    for (const i of pixels) {
+      const px = i % w, py = (i - px) / w;
+      holeMask[(py - minY) * hw + (px - minX)] = 1;
+    }
+    const verts = mooreBoundary(holeMask, hw, hh, maxSteps);
+    if (verts.length < 3) continue;
     // No viewport clamp, exactly like the exterior (jit-ui#102): a hole may lie
     // partly outside the readback window.
-    const ring: number[][] = [];
-    for (const v of verts) {
-      ring.push([Math.round(originX + v.x), Math.round(originY + v.y)]);
-    }
+    const r = toRing(verts, cropX + minX, cropY + minY, originX, originY);
+    const ring: number[][] = r.xs.map((x, k) => [x, r.ys[k]]);
     const list = result.get(owner) ?? [];
     list.push(ring);
     result.set(owner, list);
@@ -182,21 +238,45 @@ function detectHoles(mask: Uint8Array, fgLabels: Int32Array, w: number, h: numbe
  * Trace each instance in an integer label map (0 = background) into polygons —
  * used to turn a cellpose-style segmentation into region outlines. Labels with
  * area below `minSize` are skipped; a label made of several blobs yields one
- * polygon per blob. Coords are translated via originX/originY (not clamped).
+ * polygon per blob, in label order. Coords are translated via originX/originY
+ * (not clamped).
+ *
+ * One pass finds every label's bbox; each label is then traced inside it
+ * (RT-16), instead of rescanning the whole map per label.
  */
 export function labelsToPolygons(labels: Uint32Array, w: number, h: number,
                                  originX: number, originY: number, minSize = 10): Polygon[] {
   let maxLabel = 0;
   for (let i = 0; i < labels.length; i++) if (labels[i] > maxLabel) maxLabel = labels[i];
-  const out: Polygon[] = [];
-  const bin = new Uint8Array(w * h);
-  for (let lbl = 1; lbl <= maxLabel; lbl++) {
-    let any = false;
-    for (let i = 0; i < labels.length; i++) {
-      const on = labels[i] === lbl; bin[i] = on ? 1 : 0; if (on) any = true;
+  const minX = new Int32Array(maxLabel + 1).fill(w);
+  const minY = new Int32Array(maxLabel + 1).fill(h);
+  const maxX = new Int32Array(maxLabel + 1).fill(-1);
+  const maxY = new Int32Array(maxLabel + 1).fill(-1);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const lbl = labels[y * w + x];
+      if (!lbl) continue;
+      if (x < minX[lbl]) minX[lbl] = x;
+      if (x > maxX[lbl]) maxX[lbl] = x;
+      if (y < minY[lbl]) minY[lbl] = y;
+      if (y > maxY[lbl]) maxY[lbl] = y;
     }
-    if (!any) continue;
-    for (const p of maskToPolygons(bin, w, h, originX, originY, minSize)) {
+  }
+
+  const out: Polygon[] = [];
+  const maxSteps = w * h * 8;
+  for (let lbl = 1; lbl <= maxLabel; lbl++) {
+    if (maxX[lbl] < 0) continue; // label absent
+    // The bbox crop is equivalent to the full map for this label: background
+    // inside the bbox reaches the map border iff it reaches the bbox border.
+    const bx = minX[lbl], by = minY[lbl];
+    const bw = maxX[lbl] - bx + 1, bh = maxY[lbl] - by + 1;
+    const bin = new Uint8Array(bw * bh);
+    for (let y = 0; y < bh; y++) {
+      const row = (by + y) * w + bx;
+      for (let x = 0; x < bw; x++) if (labels[row + x] === lbl) bin[y * bw + x] = 1;
+    }
+    for (const p of traceMask(bin, bw, bh, bx, by, originX, originY, minSize, minSize, maxSteps)) {
       out.push(p);
     }
   }
