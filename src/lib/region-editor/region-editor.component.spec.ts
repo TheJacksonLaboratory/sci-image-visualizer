@@ -270,6 +270,19 @@ describe('RegionEditorComponent', () => {
     expect(component.labelColors.has('tissue')).toBe(true);
   });
 
+  it('save/export propose <name>.geojson for an extension-less file name (RT-19)', () => {
+    const io = (component as any).regionIo as RegionIoPort;
+    io.getSelectedFileName = () => 'image';
+    component.regions = [Object.assign(new Region(), { id: 1, bounds: new Rectangle() })];
+    component.persistRegions();
+    expect(component.saveAsFilename).toBe('image.geojson');
+    component.exportRois();
+    expect(component.exportFilename).toBe('image.geojson');
+    io.getSelectedFileName = () => 'slide.ome.tif';
+    component.persistRegions();
+    expect(component.saveAsFilename).toBe('slide.ome.geojson');
+  });
+
   it('should show help dialog', () => {
     expect(component.displayHelpDialog).toBe(false);
     component.showHelp();

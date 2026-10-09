@@ -13,6 +13,7 @@ import { IRegionEditorApi, REGION_EDITOR_API } from '../contracts/region-editor-
 import { RegionIoPort, REGION_IO_PORT } from '../contracts/ports/region-io.port';
 import { regionToParts, scaleParts, maskScaleFor } from './mask-raster';
 import { VIZ_TOAST_KEY } from '../toast-outlets';
+import { fileStem } from './file-stem';
 
 @Component({
   // Canonical prefixed selector first; the unprefixed original is kept as an
@@ -993,9 +994,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   exportRois() {
     if (!this.regionsForSave().length) return;
-    const name = this.regionIo.getSelectedFileName();
-    const stem = name ? name.substring(0, name.lastIndexOf('.')) : 'rois';
-    this.exportFilename = `${stem}.geojson`;
+    this.exportFilename = `${fileStem(this.regionIo.getSelectedFileName(), 'rois')}.geojson`;
     this.showExportDialog = true;
   }
 
@@ -1012,13 +1011,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   /** Open the "Save mask" dialog, seeded with `<image-stem>_mask.png`. */
   openSaveMaskDialog() {
     if (!this.regions.length) return;
-    const name = this.regionIo.getSelectedFileName();
-    // Strip the extension only when there is one; an extension-less name keeps
-    // its whole stem (a leading-dot dotfile is treated as having no extension)
-    // so we never produce a bare "_mask.png".
-    const dot = name ? name.lastIndexOf('.') : -1;
-    const stem = name ? (dot > 0 ? name.substring(0, dot) : name) : 'regions';
-    this.saveMaskFilename = `${stem}_mask.png`;
+    this.saveMaskFilename = `${fileStem(this.regionIo.getSelectedFileName(), 'regions')}_mask.png`;
     this.maskMode = 'binary';
     this.showSaveMaskDialog = true;
   }
@@ -1145,7 +1138,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     const name = this.regionIo.getSelectedFileName();
     if (!name || !this.regionsForSave().length) return;
 
-    this.saveAsFilename = name.substring(0, name.lastIndexOf('.')) + '.geojson';
+    this.saveAsFilename = `${fileStem(name, name)}.geojson`;
     this.saveAsFileExists = false;
     this.showSaveAsDialog = true;
     this._saveAsCheck$.next(this.saveAsFilename);
