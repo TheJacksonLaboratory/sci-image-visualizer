@@ -982,7 +982,9 @@ export class PlotlyService implements IVisualizer {
     const roi = new Rectangle();
     roi.x = Math.round(x); roi.y = Math.round(y);
     roi.width = Math.round(width); roi.height = Math.round(height);
-    const screen = this.plotUtilities.getDomRectangle('diagram');
+    // Sized from this viewer's own plot div, not jit-ui's `#diagram` wrapper,
+    // which other hosts (and the pipeline preview) don't have.
+    const screen = this.plotUtilities.getDomRectangle(this.plotDiv);
     // Snapshot the filename so a response that arrives after the user switched
     // files is dropped (the request carried the file selected at call time).
     const reqName = this.fileName;
@@ -1457,7 +1459,9 @@ export class PlotlyService implements IVisualizer {
     // A brief "Caching image..." message for uncached files (large files take a
     // moment to cache); just a spinner otherwise.
     this.state.setImageLoadingMessage(this.imageCached ? '' : 'Caching image...');
-    const screen = this.plotUtilities.getDomRectangle('diagram');
+    // Sized from this viewer's own plot div, not jit-ui's `#diagram` wrapper,
+    // which other hosts (and the pipeline preview) don't have.
+    const screen = this.plotUtilities.getDomRectangle(this.plotDiv);
     const imageSize: any[] = [];
     imageSize[0] = rect.x;
     imageSize[1] = rect.x + rect.width;

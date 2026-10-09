@@ -578,4 +578,15 @@ describe('PlotlyService async supersession (review OSD-PLOTLY-8)', () => {
     expect(heatmap).not.toHaveBeenCalled();
     expect(registry).not.toHaveBeenCalled();
   });
+
+  it('sizes the zoom crop request from its own plot div, not a host element id (CORE-24)', () => {
+    const s = service as any;
+    s.plotDiv = 'plot';
+    s.trueImgSize = [0, 1000, 0, 800];
+    s.imageInfo = { isGrayscale: true, fileName: 'f.tif' } as IImageInfo;
+    const measure = jest.spyOn(s.plotUtilities, 'getDomRectangle');
+    s.triggerZoom([100, 200, 300, 400]);
+    service.refreshIntensitySamplingForRoi(0, 0, 10, 10, 0);
+    expect(measure.mock.calls).toEqual([['plot'], ['plot']]);
+  });
 });
