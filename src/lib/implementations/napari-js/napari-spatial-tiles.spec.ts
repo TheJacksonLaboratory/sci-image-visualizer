@@ -9,6 +9,9 @@ import {
   NapariSpatialTileLayers, SpatialTileHost, clusterMarkers, mergePolygonTiles, mergeTranscriptTiles, pickNearest,
 } from './napari-spatial-tiles';
 
+/** A minimal valid continuous LUT: napari-js's colormapFromLut rejects fewer than two rows. */
+const LUT: [number, number, number][] = [[0, 0, 0], [255, 255, 255]];
+
 const tile = (xs: number[], ys: number[], weight = 1): SpatialTranscriptTile => ({
   count: xs.length,
   aggregated: weight > 1,
@@ -95,7 +98,7 @@ describe('NapariSpatialTileLayers: a tile that fails to load', () => {
     const host: SpatialTileHost = {
       latest: () => [dataset, view, emptySelection(1)],
       canvasSize: () => [400, 400],
-      continuousLut: () => [],
+      continuousLut: () => LUT,
       polygonsShownChanged: () => undefined,
     };
     const listeners: (() => void)[] = [];
@@ -188,7 +191,7 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
     };
     const host: SpatialTileHost = {
       latest: () => [dataset, view, emptySelection(1)],
-      canvasSize: () => [400, 400], continuousLut: () => [], polygonsShownChanged: () => undefined,
+      canvasSize: () => [400, 400], continuousLut: () => LUT, polygonsShownChanged: () => undefined,
     };
     const items: unknown[] = [];
     const viewer = {
@@ -244,7 +247,8 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
 describe('NapariSpatialTileLayers: per-gene counts in view', () => {
   it('counts each gene\'s transcripts inside the view, weighting aggregates', () => {
     const tiles = new NapariSpatialTileLayers({} as SpatialDataPort, {
-      latest: () => null, canvasSize: () => [0, 0], continuousLut: () => [], polygonsShownChanged: () => undefined,
+      latest: () => null, canvasSize: () => [0, 0], continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
     });
     expect(tiles.geneCountsIn({ x0: 0, y0: 0, x1: 10, y1: 10 })).toBeNull();
     (tiles as unknown as { countSource: unknown }).countSource = {
@@ -298,7 +302,7 @@ describe('NapariSpatialTileLayers: a gene selection follows the zoom', () => {
     } as unknown as Viewer;
     const tiles = new NapariSpatialTileLayers(port, {
       latest: () => [dataset, view, emptySelection(1)],
-      canvasSize: () => [400, 400], continuousLut: () => [], polygonsShownChanged: () => undefined,
+      canvasSize: () => [400, 400], continuousLut: () => LUT, polygonsShownChanged: () => undefined,
     });
     tiles.attach(viewer);
     return tiles;
@@ -415,7 +419,7 @@ describe('NapariSpatialTileLayers: a gene selection from the per-gene pyramid le
     } as unknown as Viewer;
     const tiles = new NapariSpatialTileLayers(port, {
       latest: () => [dataset, view, emptySelection(1)],
-      canvasSize: () => [400, 400], continuousLut: () => [], polygonsShownChanged: () => undefined,
+      canvasSize: () => [400, 400], continuousLut: () => LUT, polygonsShownChanged: () => undefined,
     });
     tiles.attach(viewer);
     return { tiles, getTranscriptGeneBins, getTranscriptTile };
@@ -482,7 +486,8 @@ describe('NapariSpatialTileLayers: colouring transcripts by cluster', () => {
       getColumn: async () => ({ meta, codes: new Uint16Array(1) }),
     } as unknown as SpatialDataPort;
     const tiles = new NapariSpatialTileLayers(port, {
-      latest: () => null, canvasSize: () => [0, 0], continuousLut: () => [], polygonsShownChanged: () => undefined,
+      latest: () => null, canvasSize: () => [0, 0], continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
     });
     const dataset = { id: 'd', columns: [meta] } as unknown as SpatialDataset;
     const view = { ...DEFAULT_SPATIAL_VIEW, transcriptColorBy: 'cluster' as const, cellTypeColumn: 'graphclust' };
@@ -518,7 +523,7 @@ describe('NapariSpatialTileLayers: reporting loads for the canvas badge', () => 
       requestRender: () => undefined,
     } as unknown as Viewer;
     const tiles = new NapariSpatialTileLayers(port, {
-      latest: () => [dataset, view, emptySelection(1)], canvasSize: () => [400, 400], continuousLut: () => [],
+      latest: () => [dataset, view, emptySelection(1)], canvasSize: () => [400, 400], continuousLut: () => LUT,
       polygonsShownChanged: () => undefined, loadingChanged: (l) => reports.push(l),
     });
     tiles.attach(viewer);

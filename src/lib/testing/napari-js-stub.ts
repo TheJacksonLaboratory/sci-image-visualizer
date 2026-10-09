@@ -3,12 +3,160 @@
  * unavailable, so the real engine can't initialise — and Jest can't parse its ESM build
  * anyway. The lib's `jest.config.ts` maps `napari-js` to this file. Production builds
  * (ng-packagr / nx build) use the real package and its real types.
+ *
+ * Specs type-check against the REAL `.d.ts` but run against this file, so where the stub
+ * models behaviour it models napari-js 0.14's: the pure helpers (projection, picking,
+ * viewport, LRU) are ports of the library's, and the camera / layer list / transforms behave
+ * like the real ones. `napari-js-stub.conformance.spec.ts` checks the shapes against the
+ * real types. Until napari-js ships a headless `./testing` entry (review NAPARI-BOUNDARY-20),
+ * keep the two in step by hand.
  */
 
-interface StubCamera {
-  zoom: number;
-  fit(width: number, height: number, vw: number, vh: number): void;
-  changed: { connect(listener: () => void): () => void };
+type Listener<T> = (value: T) => void;
+
+/** Mirrors napari-js's `Emitter` (scene/events). */
+class Emitter<T> {
+  private readonly listeners = new Set<Listener<T>>();
+  connect(listener: Listener<T>): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+  emit(value: T): void {
+    for (const l of [...this.listeners]) l(value);
+  }
+  clear(): void {
+    this.listeners.clear();
+  }
+}
+
+/** Mirrors napari-js's 2D `Camera`: center + zoom (CSS px per world unit), evented. */
+class StubCamera {
+  readonly changed = new Emitter<StubCamera>();
+  private _center: [number, number] = [0, 0];
+  private _zoom = 1;
+
+  get center(): [number, number] {
+    return [this._center[0], this._center[1]];
+  }
+  set center(value: readonly [number, number]) {
+    this._center = [value[0], value[1]];
+    this.changed.emit(this);
+  }
+  get zoom(): number {
+    return this._zoom;
+  }
+  set zoom(value: number) {
+    this._zoom = value;
+    this.changed.emit(this);
+  }
+  set(center: readonly [number, number], zoom: number): void {
+    this._center = [center[0], center[1]];
+    this._zoom = zoom;
+    this.changed.emit(this);
+  }
+  /** Not modelled: the image framing the adapter asks for is not what its specs pin. */
+  fit(_width: number, _height: number, _vw: number, _vh: number, _margin?: number): void {
+    /* no-op */
+  }
+}
+
+/**
+ * Mirrors napari-js's `LayerList`: ordered (index 0 drawn first), with `added`/`removed`/
+ * `changed` events. Tracked for real, not stubbed away: napari's image view CLEARS the layer
+ * list on every render, and the spatial overlays reorder by remove + re-add, so whether (and
+ * where) a layer is in the scene is exactly what a test has to be able to see.
+ */
+class StubLayerList<L = unknown> implements Iterable<L> {
+  private readonly _items: L[] = [];
+  readonly added = new Emitter<L>();
+  readonly removed = new Emitter<L>();
+  readonly changed = new Emitter<StubLayerList<L>>();
+
+  get items(): readonly L[] {
+    return this._items;
+  }
+  get length(): number {
+    return this._items.length;
+  }
+  add(layer: L): L {
+    this._items.push(layer);
+    this.added.emit(layer);
+    this.changed.emit(this);
+    return layer;
+  }
+  remove(layer: L): boolean {
+    const i = this._items.indexOf(layer);
+    if (i < 0) return false;
+    this._items.splice(i, 1);
+    this.removed.emit(layer);
+    this.changed.emit(this);
+    return true;
+  }
+  clear(): void {
+    const old = this._items.splice(0, this._items.length);
+    for (const layer of old) this.removed.emit(layer);
+    this.changed.emit(this);
+  }
+  [Symbol.iterator](): Iterator<L> {
+    return this._items[Symbol.iterator]();
+  }
+}
+
+/** Mirrors napari-js's `worldViewport` (io/pyramid): the world rect a camera shows. */
+export function worldViewport(
+  centerX: number, centerY: number, zoom: number, vw: number, vh: number,
+): { x: number; y: number; width: number; height: number } {
+  const hw = vw / 2 / Math.max(zoom, 1e-9);
+  const hh = vh / 2 / Math.max(zoom, 1e-9);
+  return { x: centerX - hw, y: centerY - hh, width: 2 * hw, height: 2 * hh };
+}
+
+/** Mirrors napari-js's `LruCache` (cache/lru): a hit refreshes recency; `onEvict` on eviction
+ *  and on `delete`/`clear`. */
+export class LruCache<V> {
+  private readonly map = new Map<string, V>();
+
+  constructor(
+    private readonly capacity: number,
+    private readonly onEvict?: (value: V, key: string) => void,
+  ) {
+    if (capacity < 1) throw new Error('LruCache capacity must be >= 1.');
+  }
+
+  get size(): number {
+    return this.map.size;
+  }
+  has(key: string): boolean {
+    return this.map.has(key);
+  }
+  get(key: string): V | undefined {
+    const value = this.map.get(key);
+    if (value === undefined) return undefined;
+    this.map.delete(key);
+    this.map.set(key, value);
+    return value;
+  }
+  set(key: string, value: V): void {
+    if (this.map.has(key)) this.map.delete(key);
+    this.map.set(key, value);
+    while (this.map.size > this.capacity) {
+      const oldest = this.map.keys().next().value as string;
+      const evicted = this.map.get(oldest)!;
+      this.map.delete(oldest);
+      this.onEvict?.(evicted, oldest);
+    }
+  }
+  delete(key: string): boolean {
+    const value = this.map.get(key);
+    if (value === undefined) return false;
+    this.map.delete(key);
+    this.onEvict?.(value, key);
+    return true;
+  }
+  clear(): void {
+    for (const [key, value] of this.map) this.onEvict?.(value, key);
+    this.map.clear();
+  }
 }
 
 interface StubDims {
@@ -74,6 +222,23 @@ export interface PointsLayer {
   borderWidth?: number;
   name?: string;
   /** Data->world affine, as handed to `addPoints`. */
+  scale?: [number, number];
+  translate?: [number, number];
+}
+
+/** Stand-in for napari-js ShapesLayer (2D polygons: the spatial cell outlines). Keeps the
+ *  constructor arguments, like {@link PointsLayer}. */
+export interface ShapesLayer {
+  coords?: Float32Array;
+  offsets?: Uint32Array;
+  name?: string;
+  draw: string;
+  values: Float32Array | null;
+  colormap: unknown;
+  contrastLimits: [number, number];
+  color: unknown;
+  opacity: number;
+  visible: boolean;
   scale?: [number, number];
   translate?: [number, number];
 }
@@ -167,20 +332,32 @@ export function histogramScalar(
   return { counts: new Uint32Array(bins), bins, min, max };
 }
 
-/** Stand-in for napari-js Colormap (constructed for per-channel tints / grayscale LUTs). */
+/** Two placeholder stops, for the stand-ins below that do not model the ramp itself. */
+const PLACEHOLDER_STOPS = [
+  { t: 0, color: [0, 0, 0] },
+  { t: 1, color: [1, 1, 1] },
+];
+
+/**
+ * Stand-in for napari-js Colormap (constructed for per-channel tints / grayscale LUTs).
+ *
+ * Validates like the real one — fewer than two stops throws — so a code path that would
+ * crash in the browser crashes here too. It does not sort or sample the stops.
+ */
 export class Colormap {
+  readonly stops: unknown[];
   constructor(
     readonly name: string,
-    readonly stops: unknown[] = [],
-  ) {}
-  sample(): [number, number, number] {
+    stops: readonly unknown[],
+  ) {
+    if (stops.length < 2) throw new Error(`Colormap "${name}" needs at least two stops.`);
+    this.stops = [...stops];
+  }
+  sample(_t: number): [number, number, number] {
     return [0, 0, 0];
   }
 }
 
-/** Real napari-js LUT resolution. The spatial 3D path derives its categorical
- *  block widths from this, so the stub must agree with the library or the tests
- *  would verify arithmetic the renderer never does. */
 /**
  * napari-js ≥ 0.14 owns the 3D projection and the depth-aware pick. They are pure and
  * dependency-free, so this stub implements them for real rather than faking them — a stub
@@ -213,7 +390,11 @@ export function projectPoint(
   const cx = mvp[0] * x + mvp[4] * y + mvp[8] * z + mvp[12];
   const cy = mvp[1] * x + mvp[5] * y + mvp[9] * z + mvp[13];
   const cw = mvp[3] * x + mvp[7] * y + mvp[11] * z + mvp[15];
-  if (!(cw > 0)) return { x: NaN, y: NaN, depth: NaN, visible: false };
+  const cz = mvp[2] * x + mvp[6] * y + mvp[10] * z + mvp[14];
+  // Behind the eye, or outside the near/far planes (clip z/w in [0, 1]), as napari-js 0.14.
+  if (!(cw > 0) || !(cz / cw >= 0 && cz / cw <= 1)) {
+    return { x: NaN, y: NaN, depth: NaN, visible: false };
+  }
   return {
     x: ((cx / cw) * 0.5 + 0.5) * vw,
     y: (1 - ((cy / cw) * 0.5 + 0.5)) * vh,
@@ -297,13 +478,51 @@ export function nearestProjectedIndex(
  *  answers here would make every hover test meaningless. */
 export const SCREEN_INDEX_MIN_POINTS = 50_000;
 
+const SCREEN_INDEX_MIN_CELL = 8;
+const SCREEN_INDEX_DEFAULT_MAX_REACH = 32;
+
+/**
+ * Mirrors napari-js's `ScreenIndex`, including what a linear scan would get wrong: the grid
+ * overhangs the canvas by `maxReach` on every side, and a centre beyond that margin is not
+ * indexed (so it cannot be picked). Picking itself is the linear picker over the indexed
+ * points, which gives the same answer as the real grid walk.
+ */
 export class ScreenIndex {
+  readonly cell: number;
+  readonly cols: number;
+  readonly rows: number;
+  readonly margin: number;
+  private readonly indexedMask: Uint8Array;
+  private readonly count: number;
+
   constructor(
     private readonly projected: { screen: Float32Array; depth?: Float32Array | null },
-    _vw: number,
-    _vh: number,
-    _opts?: { cell?: number; maxReach?: number },
-  ) {}
+    vw: number,
+    vh: number,
+    opts: { cell?: number; maxReach?: number } = {},
+  ) {
+    this.cell = Math.max(SCREEN_INDEX_MIN_CELL, opts.cell ?? 32);
+    this.margin = Math.max(0, opts.maxReach ?? SCREEN_INDEX_DEFAULT_MAX_REACH);
+    this.cols = Math.floor((vw + 2 * this.margin) / this.cell) + 1;
+    this.rows = Math.floor((vh + 2 * this.margin) / this.cell) + 1;
+    const n = projected.screen.length >> 1;
+    this.indexedMask = new Uint8Array(n);
+    let count = 0;
+    for (let i = 0; i < n; i++) {
+      const gx = projected.screen[i * 2] + this.margin;
+      const gy = projected.screen[i * 2 + 1] + this.margin;
+      if (!(gx >= 0) || !(gy >= 0)) continue;
+      if (Math.floor(gx / this.cell) >= this.cols || Math.floor(gy / this.cell) >= this.rows) continue;
+      this.indexedMask[i] = 1;
+      count++;
+    }
+    this.count = count;
+  }
+
+  /** How many points the grid holds — the rest were beyond the margin or NaN. */
+  get indexed(): number {
+    return this.count;
+  }
 
   pick(
     x: number,
@@ -311,12 +530,17 @@ export class ScreenIndex {
     radius: number,
     opts?: { radiusAt?: (i: number) => number; pickable?: (i: number) => boolean },
   ): number {
+    const pickable = opts?.pickable;
     return nearestProjectedIndex(
-      this.projected.screen, x, y, radius, this.projected.depth ?? null, opts,
+      this.projected.screen, x, y, radius, this.projected.depth ?? null,
+      { ...opts, pickable: (i) => this.indexedMask[i] === 1 && (!pickable || pickable(i)) },
     );
   }
 }
 
+/** Real napari-js LUT resolution. The spatial 3D path derives its categorical
+ *  block widths from this, so the stub must agree with the library or the tests
+ *  would verify arithmetic the renderer never does. */
 export const LUT_SIZE = 256;
 
 /**
@@ -329,26 +553,33 @@ export const LUT_SIZE = 256;
  */
 export const WHEEL_DELTA_CLAMP = 24;
 
-/** Stand-in for napari-js colormapFromLut. Keeps the LUT so tests can assert that
- *  a category code lands on its own colour rather than a neighbour's blend. */
-export function colormapFromLut(name: string, lut: unknown, _maxValue = 255): Colormap {
-  return new Colormap(name, Array.isArray(lut) ? lut : []);
+/**
+ * Stand-in for napari-js colormapFromLut. Throws on fewer than two entries, as the real one
+ * does. Unlike the real one it keeps the RAW LUT rows as `stops` (not normalised ColorStops),
+ * so tests can assert that a category code lands on its own colour rather than a neighbour's
+ * blend.
+ */
+export function colormapFromLut(
+  name: string, lut: ReadonlyArray<readonly [number, number, number]>, _maxValue = 255,
+): Colormap {
+  if (lut.length < 2) throw new Error(`colormapFromLut("${name}") needs at least two LUT entries.`);
+  return new Colormap(name, lut);
 }
 
 /** Stand-in for napari-js tintColormap (black→hex ramp). */
 export function tintColormap(hex: string): Colormap {
-  return new Colormap(`tint-${hex}`);
+  return new Colormap(`tint-${hex}`, PLACEHOLDER_STOPS);
 }
 
 /** Stand-in for napari-js resolveColormap (name | instance → Colormap). */
 export function resolveColormap(cmap: Colormap | string): Colormap {
-  return cmap instanceof Colormap ? cmap : new Colormap(String(cmap));
+  return cmap instanceof Colormap ? cmap : new Colormap(String(cmap), PLACEHOLDER_STOPS);
 }
 
 /** Stand-in for napari-js reverseColormap (flipped ramp). */
 export function reverseColormap(cmap: Colormap | string): Colormap {
   const name = cmap instanceof Colormap ? cmap.name : String(cmap);
-  return new Colormap(`${name}-reversed`);
+  return new Colormap(`${name}-reversed`, PLACEHOLDER_STOPS);
 }
 
 export type ChannelMode = 'multichannel' | 'grayscale' | 'rgb';
@@ -494,11 +725,7 @@ export class MultiChannelVolumeView {
 /** Minimal Viewer matching the surface NapariVisualizerService touches. */
 export class Viewer {
   readonly ready: Promise<void> = Promise.resolve();
-  readonly camera: StubCamera = {
-    zoom: 1,
-    fit: () => undefined,
-    changed: { connect: () => () => undefined },
-  };
+  readonly camera = new StubCamera();
   /** Faithful about the ONE behaviour the adapter has to work around: napari-js
    *  re-frames this camera on every 3D layer it is handed, so a stubbed no-op
    *  would make a "the camera did not move" test pass without proving anything. */
@@ -509,7 +736,10 @@ export class Viewer {
       this.target = [0, 0, 0];
       this.distance = Math.max(width, height, depth) * 1.8;
     },
-    viewProjection: () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+    // x and y pass straight through to NDC (so tests can predict screen positions), and
+    // every point sits mid-way between the near and far planes (clip z = 0.5), inside the
+    // depth range the real projection clips to.
+    viewProjection: () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0.5, 1],
     azimuth: 0,
     elevation: 0,
     target: [0, 0, 0],
@@ -518,25 +748,7 @@ export class Viewer {
     changed: { connect: () => () => undefined },
   };
   readonly dims: StubDims = { z: 0 };
-  /** Tracked for real, not stubbed away: napari's image view CLEARS the layer list
-   *  on every render, so whether a layer is still in the scene is exactly the kind
-   *  of thing a test has to be able to see. */
-  private readonly _layers: unknown[] = [];
-  readonly layers = {
-    items: this._layers as readonly unknown[],
-    get length(): number {
-      return (this.items as unknown[]).length;
-    },
-    clear: (): void => {
-      this._layers.length = 0;
-    },
-    remove: (layer: unknown): boolean => {
-      const i = this._layers.indexOf(layer);
-      if (i < 0) return false;
-      this._layers.splice(i, 1);
-      return true;
-    },
-  };
+  readonly layers = new StubLayerList();
 
   /** Construction options, kept so a test can assert what the adapter asked for —
    *  `clickZoomFactor: 0` is what stops a selection click from also zooming. */
@@ -579,7 +791,7 @@ export class Viewer {
 
   /** Record a layer as mounted, and hand it back. */
   private mount<T>(layer: T): T {
-    this._layers.push(layer);
+    this.layers.add(layer);
     return layer;
   }
 
@@ -702,6 +914,37 @@ export class Viewer {
       translate: o.translate,
     });
   }
+  addShapes(
+    coords?: Float32Array,
+    offsets?: Uint32Array,
+    opts?: {
+      name?: string;
+      draw?: string;
+      values?: Float32Array | null;
+      colormap?: unknown;
+      contrastLimits?: [number, number];
+      color?: unknown;
+      opacity?: number;
+      scale?: [number, number];
+      translate?: [number, number];
+    },
+  ): ShapesLayer {
+    const o = opts ?? {};
+    return this.mount({
+      coords,
+      offsets,
+      name: o.name,
+      draw: o.draw ?? 'outline',
+      values: o.values ?? null,
+      colormap: o.colormap,
+      contrastLimits: o.contrastLimits ?? [0, 1],
+      color: o.color,
+      opacity: o.opacity ?? 1,
+      visible: true,
+      scale: o.scale,
+      translate: o.translate,
+    });
+  }
   addPoints3D(
     positions?: Float32Array,
     values?: Float32Array,
@@ -757,14 +1000,34 @@ export class Viewer {
   get controlsActive(): boolean {
     return true;
   }
+  /** As napari-js: the camera's world rect over the canvas's CSS size. */
   visibleWorldRect(): { x: number; y: number; width: number; height: number } {
-    return { x: 0, y: 0, width: 0, height: 0 };
+    const canvas = this.options.canvas;
+    const vw = canvas?.clientWidth || canvas?.width || 1;
+    const vh = canvas?.clientHeight || canvas?.height || 1;
+    const [cx, cy] = this.camera.center;
+    return worldViewport(cx, cy, this.camera.zoom, vw, vh);
   }
+  /** As napari-js: CLIENT px → world, through the canvas's client rect and the camera.
+   *  (With jsdom's zero rects and the default camera this is the identity.) */
   canvasToWorld(clientX: number, clientY: number): [number, number] {
-    return [clientX, clientY];
+    const rect = this.options.canvas.getBoundingClientRect();
+    const [cx, cy] = this.camera.center;
+    const { zoom } = this.camera;
+    return [
+      cx + (clientX - rect.left - rect.width / 2) / zoom,
+      cy + (clientY - rect.top - rect.height / 2) / zoom,
+    ];
   }
+  /** As napari-js: world → CLIENT px (not canvas-local). */
   worldToCanvas(worldX: number, worldY: number): [number, number] {
-    return [worldX, worldY];
+    const rect = this.options.canvas.getBoundingClientRect();
+    const [cx, cy] = this.camera.center;
+    const { zoom } = this.camera;
+    return [
+      rect.left + rect.width / 2 + (worldX - cx) * zoom,
+      rect.top + rect.height / 2 + (worldY - cy) * zoom,
+    ];
   }
   async readDisplayedPixels(): Promise<{
     width: number;
