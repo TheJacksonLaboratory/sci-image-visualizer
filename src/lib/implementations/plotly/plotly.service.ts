@@ -23,10 +23,6 @@ import { CellSegmentToolService } from '../../toolbar/segmentation/cell-segment-
 import { ICellSegmenter, CELL_SEGMENTER } from '../../contracts/cell-segmenter.contract';
 import { VertexEraserToolService, VertexEraserToolHost } from '../../toolbar/vertex-eraser/vertex-eraser-tool.service';
 import { ZoomToBoxToolService } from '../../toolbar/zoom-to-box/zoom-to-box-tool.service';
-import {
-  parseSvgPathPolygon,
-  verticesToSvgPath,
-} from '../../models/geometry';
 import { PlotType, PLOT_TYPE_DESCRIPTORS, PlotTypeDescriptor } from '../../contracts/plot-type';
 import {
   PLOTLY_PLOT_TYPE_IMPLS,
@@ -1400,25 +1396,6 @@ export class PlotlyService implements IVisualizer {
     }
   }
 
-  /**
-   * Push the current `this.shapes` to Plotly, mirror them into the shared store
-   * (which syncs its cache + emits the region-update event), and refresh the
-   * local previous-shapes buffer. The wand/eraser tools call this after mutating
-   * the shapes array directly.
-   */
-  public applyShapesChange() {
-    if (this.isRegionSavedOn) {
-      this.previousShapes = this.shapes.slice();
-    }
-    this.commitShapesToStore();
-    if (this.plotDiv) {
-      const dictArray = this.shapes.map(s => ({ ...s }));
-      try {
-        Plotly.relayout(this.plotDiv, this.shapesRelayout(dictArray) as any);
-      } catch { /* div owned by another backend (OSD) — its overlay renders shapes */ }
-    }
-  }
-
   /** Active frame index in the cached image stack. */
   private activeFrameIndex(): number {
     if (!this.cachedImageFrames || this.cachedImageFrames.length <= 1) return 0;
@@ -1587,11 +1564,6 @@ export class PlotlyService implements IVisualizer {
     this.previousShapes = this.shapes.slice();
   }
 
-  /** Test/dev hook — drop the entire per-image cache (logout / project switch). */
-  public clearRegionsByImageKey() {
-    this.regionStore.clearRegionsByImageKey();
-  }
-
   /**
    * Get all the selected regions as polygons. Open polylines (closed === false)
    * are excluded — they're annotation-only and cannot be used as filled regions
@@ -1599,14 +1571,6 @@ export class PlotlyService implements IVisualizer {
    */
   public getRegionPolygons(): any[] {
     return this.regionStore.getRegionPolygons();
-  }
-
-  isRectangle(bnds: any): bnds is Rectangle {
-    return 'x' in bnds && 'y' in bnds && 'width' in bnds && 'height' in bnds;
-  }
-
-  isPolygon(bnds: any): bnds is Polygon {
-    return 'npoints' in bnds && 'xpoints' in bnds && 'ypoints' in bnds;
   }
 
   /**

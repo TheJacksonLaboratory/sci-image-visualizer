@@ -242,7 +242,3 @@ export const PLOTLY_PLOT_TYPE_IMPLS: Partial<Record<PlotType, PlotlyPlotTypeImpl
   [PlotType.SCATTER3D]:  { buildTraces: buildScatter3dTraces,  layoutKind: '3d-volume',  threeD: true },
   [PlotType.ISOSURFACE]: { buildTraces: buildIsosurfaceTraces, layoutKind: '3d-volume',  threeD: true },
 };
-
-export function getPlotTypeImpl(type: PlotType): PlotlyPlotTypeImpl | undefined {
-  return PLOTLY_PLOT_TYPE_IMPLS[type];
-}
