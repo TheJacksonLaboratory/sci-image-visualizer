@@ -597,6 +597,7 @@ describe('OpenSeadragonVisualizerService — exportComposite', () => {
 });
 
 describe('OpenSeadragonVisualizerService (tiled load via /tiles/info)', () => {
+  const BIG_SVS = { fileName: 'big.svs' } as Parameters<OpenSeadragonVisualizerService['load']>[0];
   let service: OpenSeadragonVisualizerService;
   let http: HttpTestingController;
 
@@ -648,6 +649,18 @@ describe('OpenSeadragonVisualizerService (tiled load via /tiles/info)', () => {
     expect(loaded.infoB64).toBe('INFO64');
     expect(loaded.z).toBe(2);
     expect(loaded.simple).toBeUndefined(); // tiled path, not simple-image
+  });
+
+  it('fails the load at once when /tiles/info answers neither 200 nor 202 (shared poll semantics)', async () => {
+    // The OSD poll used to retry every error status until its 10-minute deadline,
+    // so a server without /tiles/info held the render (and the Plotly fallback)
+    // that long. It now shares napari-js's poll: only 202 is re-polled.
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const pending = service.load(BIG_SVS, 0);
+    await new Promise((r) => setTimeout(r, 0));
+    http.expectOne((r) => r.url.includes('tiles/info')).flush(null, { status: 404, statusText: 'Not Found' });
+    await expect(pending).rejects.toThrow(/no descriptor/);
+    warn.mockRestore();
   });
 });
 

@@ -395,6 +395,30 @@ describe('NapariVisualizerService', () => {
     });
   });
 
+  it('cache-busts the native /histogram request like the OSD backend (OSD-PLOTLY-15)', async () => {
+    // Regression: napari's /histogram URL lacked the per-app-load `_=` token, so after a
+    // reload the server's 24 h-cached answer was shown instead of the live one.
+    (globalThis.fetch as jest.Mock).mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            bitDepth: 16, rangeMin: 0, rangeMax: 2, observedMin: 0, observedMax: 2, binWidth: 1,
+            counts: [1, 2, 3],
+          }),
+      }),
+    );
+    type Internals = {
+      fetchNativeHistogram(ch: number, bins: number, z: number, key: string): Promise<unknown>;
+    };
+    const h = await (service as unknown as Internals).fetchNativeHistogram(1, 3, 0, 'k');
+    expect(h).toMatchObject({ bins: [0, 1, 2], max: 3, bitDepth: 16 });
+    const url = String((globalThis.fetch as jest.Mock).mock.calls.at(-1)[0]);
+    expect(url).toContain('histogram?info=INFO&channel=1&z=0&bins=3');
+    expect(url).toMatch(/&_=\d+$/);
+  });
+
   it('reads the canvas back after a pan only while a pixel tool needs it', async () => {
     // Regression (NAPARI-SVC-26): every 2D camera change armed a full-canvas GPU readback,
     // pixel tool or not; the only always-needed output, viewportChange$, needs just the rect.

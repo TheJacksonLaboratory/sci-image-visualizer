@@ -1,9 +1,9 @@
 import { HttpClient } from '@angular/common/http';
-import { Observable, firstValueFrom, from, of } from 'rxjs';
-import { timeout } from 'rxjs/operators';
+import { Observable, from, of } from 'rxjs';
 
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { buildTileUrl, fetchTileRgba } from './tile-client';
+import { httpFetchJson, nativeHistogram, timeoutSignal } from '../tile-server';
 import { histogram256, maxRgb } from '../../contracts/intensity';
 
 /**
@@ -46,12 +46,6 @@ export class HistogramSampler {
   /** Native-bit-depth histograms from `/histogram`, keyed
    *  `${infoB64}|${z}|${channel}|${bins}`. */
   private nativeHistograms = new Map<string, IHistogram>();
-  /** Per-app-load cache-buster for `/histogram` — the server marks the
-   *  response cacheable for 24h, and a hard refresh can't bust a post-load
-   *  XHR. A token stable within a session but new on each full load keeps the
-   *  in-session dedup (via `nativeHistograms`) while always reflecting the
-   *  live backend after a reload. */
-  private readonly histCacheBuster = Date.now();
   /** Bumped by {@link clear}. Every async sampler captures it before its first
    *  `await` and drops its result if it changed: tile sampling and the native
    *  fetch can take tens of seconds, and a run for the previous image must not
@@ -298,42 +292,28 @@ export class HistogramSampler {
     return from(this.fetchNative(infoB64, z, channel, bins, key));
   }
 
-  /** Fetch + cache one channel's native histogram from `GET /histogram`. */
+  /** Fetch + cache one channel's native histogram from `GET /histogram`
+   *  (the shared jit-service client, which adds the per-app-load cache-buster
+   *  that defeats the server's 24 h cache). */
   private async fetchNative(
     infoB64: string, z: number, channel: number, bins: number, key: string,
   ): Promise<IHistogram | null> {
-    const url = `${this.api}histogram?info=${infoB64}&channel=${channel}&z=${z}&bins=${bins}&_=${this.histCacheBuster}`;
     const gen = this.generation;
     try {
       // HttpClient calls get auth via the Angular interceptor (unlike OSD's own
       // ajax tile loader, which needs authHeaders) — mirror the other fetches.
-      const hi = await firstValueFrom(
-        this.http
-          .get<{
-            bitDepth: number; rangeMin: number; rangeMax: number;
-            observedMin: number; observedMax: number; binWidth: number; counts: number[];
-          }>(url)
-          .pipe(timeout(45000)),
-      );
-      if (!hi || !hi.counts) return null;
-      const out: IHistogram = {
-        // Native bin left-edges: rangeMin + i*binWidth.
-        bins: hi.counts.map((_, i) => hi.rangeMin + i * hi.binWidth),
-        counts: hi.counts,
-        max: hi.counts.reduce((m, c) => (c > m ? c : m), 0),
-        bitDepth: hi.bitDepth,
-        rangeMin: hi.rangeMin,
-        rangeMax: hi.rangeMax,
-        observedMin: hi.observedMin,
-        observedMax: hi.observedMax,
-      };
+      const req = timeoutSignal(undefined, 45000);
+      const out = await nativeHistogram(
+        httpFetchJson(this.http), this.api, infoB64, { z, channel, bins }, req.signal,
+      ).finally(req.done);
+      if (!out) return null; // 202 (still caching) → null; the pane retries
       // Cleared meanwhile (image switch): the histogram belongs to the previous
       // image — don't cache it or hand it to the pane (null → the pane retries).
       if (gen !== this.generation) return null;
       this.nativeHistograms.set(key, out);
       return out;
     } catch (err) {
-      // 202 (still caching) or a transient error → null; the pane retries.
+      // A transient error → null; the pane retries.
       console.warn('[viz:histogram] native histogram fetch failed', err);
       return null;
     }

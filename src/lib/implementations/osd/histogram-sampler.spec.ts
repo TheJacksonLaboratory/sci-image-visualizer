@@ -150,15 +150,19 @@ describe('HistogramSampler', () => {
     bitDepth: 16, rangeMin: 96, rangeMax: 150, observedMin: 96, observedMax: 150,
     binWidth: 0.215, counts: [4, 0, 8],
   };
+  /** What `http.get(url, { observe: 'response' })` emits for it. */
+  const NATIVE_RESP = { status: 200, body: NATIVE };
 
   it('maps the server HistogramInfo to native bins and caches per slice+channel', async () => {
-    http.get.mockReturnValue(of(NATIVE));
+    http.get.mockReturnValue(of(NATIVE_RESP));
     const h = (await firstValueFrom(sampler.native$('B64', 0, 1, 256)))!;
     expect(h.bitDepth).toBe(16);
     expect(h.bins[0]).toBe(96);
     expect(h.bins[2]).toBeCloseTo(96 + 2 * 0.215);
     expect(h.max).toBe(8);
     expect(http.get.mock.calls[0][0]).toContain('histogram?info=B64&channel=1&z=0&bins=256');
+    // The per-app-load cache-buster that defeats the server's 24 h cache.
+    expect(http.get.mock.calls[0][0]).toMatch(/&_=\d+$/);
 
     // Cached: a second subscription must not refetch.
     await firstValueFrom(sampler.native$('B64', 0, 1, 256));
@@ -212,15 +216,15 @@ describe('HistogramSampler', () => {
     http.get.mockReturnValueOnce(from(new Promise((r) => { respond = r; })));
     const first = firstValueFrom(sampler.native$('A64', 0, 0, 256));
     sampler.clear();
-    respond(NATIVE);
+    respond(NATIVE_RESP);
     await first;
-    http.get.mockReturnValue(of(NATIVE));
+    http.get.mockReturnValue(of(NATIVE_RESP));
     await firstValueFrom(sampler.native$('A64', 0, 0, 256));
     expect(http.get).toHaveBeenCalledTimes(2); // not served from a stale cache entry
   });
 
   it('keys native histograms by image and bin count', async () => {
-    http.get.mockReturnValue(of(NATIVE));
+    http.get.mockReturnValue(of(NATIVE_RESP));
     await firstValueFrom(sampler.native$('A64', 0, 0, 256));
     await firstValueFrom(sampler.native$('B64', 0, 0, 256)); // other image, same z/channel
     await firstValueFrom(sampler.native$('B64', 0, 0, 64));  // other bin count
@@ -249,7 +253,7 @@ describe('HistogramSampler', () => {
   });
 
   it('clear() drops both caches', async () => {
-    http.get.mockReturnValue(of(NATIVE));
+    http.get.mockReturnValue(of(NATIVE_RESP));
     await firstValueFrom(sampler.native$('B64', 0, 0, 256));
     (tileClient.fetchTileRgba as jest.Mock).mockResolvedValue(tile(1, [9, 9, 9]));
     await sampler.computeImageWindow(DESC, 'B64', 0);

@@ -15,7 +15,7 @@ a z-stack slice cache, and a serverless "simple" mode.
 | `slice-cache.ts` | Stack slices as separate TiledImages (opacity toggle on z-scrub), per-channel image groups, LRU sizing and the background preloader. |
 | `display-pipeline.ts` | Pure pixel math: window/gamma/invert/colormap for grayscale and RGB, per-channel tint LUTs and the additive channel merge. Shared by tile recoloring, the serverless compositor and the composite export. |
 | `histogram-sampler.ts` | Per-slice 8-bit histograms and the grayscale auto-window from sampled tiles, plus native-bit-depth histograms from `/histogram`. Generation-guarded against image switches. |
-| `tile-client.ts` | The `/tile` URL shape and the tile fetch → decode → RGBA helpers. |
+| `tile-client.ts` | The tile fetch → decode → RGBA helpers (the `/tile` URL shape is re-exported from the shared `../tile-server/` jit-service client, which also owns the `/tiles/info` poll, `/histogram` and `/export/tiff`). |
 | `osd-region-overlay.ts` | The SVG region overlay: draws the shared `RegionStore`'s regions, and drawing, selection and edit gestures. |
 | `osd-coords.ts` | Image ↔ viewport ↔ element conversions routed through world item 0 (accurate with several TiledImages). |
 | `osd-coordinate-transform.ts` | `ICoordinateTransform` for the canvas tools (wand, brush, eraser, SAM). |
@@ -24,8 +24,10 @@ a z-stack slice cache, and a serverless "simple" mode.
 
 ## Two source paths
 
-- **Tiled** (default): `load()` polls `GET /tiles/info` until the server has
-  cached the file, and `plot()` opens a custom tile source on `GET /tile` built
+- **Tiled** (default): `load()` polls `GET /tiles/info` (shared
+  `tile-server/pollDescriptor`) until the server has cached the file — only a
+  202 is re-polled; any other status, or the deadline, fails the load so the
+  router falls back to Plotly — and `plot()` opens a custom tile source on `GET /tile` built
   from the descriptor's real per-level sizes. A multichannel fluorescence image
   (`descriptor.multichannel`) is drawn as one TiledImage per channel, composited
   additively by the drawer, using only the real Bio-Formats levels.

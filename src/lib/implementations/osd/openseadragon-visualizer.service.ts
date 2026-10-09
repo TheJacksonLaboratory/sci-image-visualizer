@@ -27,6 +27,10 @@ import { buildTileUrl, fetchTileBitmap, readRgba } from './tile-client';
 import { SliceCache } from './slice-cache';
 import { DisplayPipeline } from './display-pipeline';
 import { HistogramSampler } from './histogram-sampler';
+import {
+  TileDescriptor, exportTiffFilename, exportTiffUrl, httpFetchJson, pollDescriptor, throwIfAborted,
+  tilesInfoUrl,
+} from '../tile-server';
 import { BaseStoreVisualizer } from '../base-store-visualizer';
 import { SimpleSliceAccessService } from '../simple-slice-access.service';
 import { CachedImageData, WandToolService, WandToolHost } from '../../toolbar/wand/wand-tool.service';
@@ -73,34 +77,8 @@ function silenceOsdMultiImageAdvisory(): void {
   osd.__multiImageFilterInstalled = true;
 }
 
-/** One pyramid level from `GET /tiles/info`. */
-interface TileLevel { res: number; width: number; height: number; }
-
-/** Tile-source descriptor returned by `GET /tiles/info`. */
-interface TileDescriptor {
-  width: number;
-  height: number;
-  tileSize: number;
-  z: number;
-  channels: number;
-  /** True only for genuine multi-channel composites (indexed/LUT-bearing
-   *  fluorescence stacks) the client should split into per-channel layers. The
-   *  server sets it; an RGB photo read as separated planes has channels>1 but
-   *  multichannel=false, so it stays a single composite tile source. */
-  multichannel?: boolean;
-  /** Real Bio-Formats resolution levels at the front of `levels`; the remaining
-   *  levels are synthetic composited overviews (no per-channel tiles). */
-  realLevels?: number;
-  /** Per-channel metadata (name/color/bitDepth/min-maxAllowed) for native 16-bit
-   *  windowing + histogram; null for plain 8-bit/RGB sources. */
-  channelInfo?: Array<{
-    name?: string; color?: string; bitDepth?: number; minAllowed?: number; maxAllowed?: number;
-  }> | null;
-  levels: TileLevel[];
-  /** Physical pixel size in µm (0 when the format doesn't report it). */
-  mppX?: number;
-  mppY?: number;
-}
+/** Wait between two `/tiles/info` polls while the server answers 202. */
+const OSD_TILES_INFO_POLL_INTERVAL_MS = 1500;
 
 /** The drag modes the SVG region overlay handles itself (see setDragMode). */
 const OVERLAY_MODES = new Set<RegionToolMode>([
@@ -250,7 +228,8 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    *  image (e.g. .ndpi) is cached server-side first (GCS->PVC), which can take
    *  several minutes — we poll (short requests; the cache-progress overlay
    *  shows the wait) until it's ready. Generous because each poll is cheap; on
-   *  expiry the render pipeline gives up and the router falls back to Plotly. */
+   *  expiry the render pipeline gives up and the router falls back to Plotly.
+   *  (napari-js waits less — it falls back to a single tile, not a backend.) */
   private readonly tilesInfoTimeoutMs = 600000; // 10 min
 
   /** Per-channel fit-view tile budget (tiles at the coarsest real level × channels).
@@ -401,8 +380,12 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    * the base64 RawFileInfo the rest of the API uses; the GET goes through the
    * auth interceptor (Bearer). We also grab a token here for OSD's own tile
    * fetches (its loader bypasses HttpClient).
+   *
+   * `signal` (the host's render supersession) cancels the `/tiles/info` poll and
+   * the simple-image fetches: the load then rejects with an `AbortError`.
    */
-  async load(imageInfo: IImageInfo, zIndex: number): Promise<OsdLoaded> {
+  async load(imageInfo: IImageInfo, zIndex: number, signal?: AbortSignal): Promise<OsdLoaded> {
+    throwIfAborted(signal);
     const filename = imageInfo?.fileName;
     // A different image was selected — stop the previous stack's background
     // loading immediately rather than letting it finish behind the new image.
@@ -415,7 +398,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     // getSelectedInfoB64, no /tiles/info poll. `urls[zIndex]` is a complete image
     // OSD opens via its single-image source (see plot()).
     if (this.simpleStack.isSimple(imageInfo)) {
-      return this.loadSimple(imageInfo, zIndex);
+      return this.loadSimple(imageInfo, zIndex, signal);
     }
     const infoB64 = this.tiles.getSelectedInfoB64();
     if (!infoB64) return { descriptor: null, infoB64: '', z: zIndex || 0, filename };
@@ -425,39 +408,28 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     } catch {
       this.authHeaders = {}; // fall back to cookie auth (ajaxWithCredentials)
     }
-    // Poll /tiles/info: the backend returns 202 while the source file is still
-    // being cached (GCS->PVC) — it kicks the download off in the background, so
-    // each request is short (no long-held connection to trip ingress/proxy or
-    // client timeouts), and 200 with the descriptor once it's ready. The
-    // cache-progress overlay shows progress during the wait. We give up after
-    // tilesInfoTimeoutMs so the render pipeline never hangs (the router then
-    // falls back to Plotly for this image).
-    const url = `${this.api}tiles/info?info=${infoB64}`;
-    const deadline = Date.now() + this.tilesInfoTimeoutMs;
-    for (;;) {
-      if (Date.now() > deadline) {
-        throw new Error('tiles/info not ready before deadline — file still caching');
-      }
-      try {
-        const resp = await firstValueFrom(
-          this.http.get<TileDescriptor>(url, { observe: 'response' }).pipe(timeout(45000)),
-        );
-        // Not committed to `this.descriptor` here: the previous image stays
-        // mounted (and keeps using its own descriptor) until plot().
-        if (resp.status === 200 && resp.body) {
-          return { descriptor: resp.body, infoB64, z: zIndex || 0, filename };
-        }
-        // 202 Accepted (or empty body) → still caching; fall through and re-poll.
-      } catch (err) {
-        // Tolerate transient failures WHILE the file is being prepared: a slow
-        // metadata read on a multi-GB file (IFD walk), a 5xx mid-pipeline, a
-        // proxy hiccup. A single bad poll must NOT drop us to Plotly — a large
-        // image always passes through this busy window, so bailing here is why
-        // it "always ends up on Plotly". Keep polling until ready or deadline.
-        console.warn('[OSD] tiles/info poll retry', err);
-      }
-      await new Promise((r) => setTimeout(r, 1500));
-    }
+    throwIfAborted(signal);
+    // Poll /tiles/info (the shared jit-service client): the backend returns 202
+    // while the source file is still being cached (GCS->PVC) — it kicks the
+    // download off in the background, so each request is short (no long-held
+    // connection to trip ingress/proxy or client timeouts), and 200 with the
+    // descriptor once it's ready. The cache-progress overlay shows progress
+    // during the wait. Transport failures (a proxy hiccup, a slow metadata read
+    // timing a request out) are retried until the deadline; a non-202 status
+    // means this server won't describe the file.
+    //
+    // No descriptor (deadline, or a status other than 202) is a load failure, so
+    // the router falls back to Plotly for this image, as before. Not committed to
+    // `this.descriptor` here: the previous image stays mounted (and keeps using
+    // its own descriptor) until plot().
+    const descriptor = await pollDescriptor(httpFetchJson(this.http), tilesInfoUrl(this.api, infoB64), {
+      deadlineMs: this.tilesInfoTimeoutMs,
+      intervalMs: OSD_TILES_INFO_POLL_INTERVAL_MS,
+      signal,
+      tag: '[OSD]',
+    });
+    if (!descriptor) throw new Error('tiles/info gave no descriptor — file still caching or not tileable');
+    return { descriptor, infoB64, z: zIndex || 0, filename };
   }
 
   /** Forget the simple (tiled:false) image's state: mode, slice URLs and the
@@ -475,8 +447,9 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   /** Build the `plot()` payload for a simple (tiled:false) image: a single-level
    *  descriptor sized from `trueImageSize`, plus the directly-loadable URL —
    *  resolved and fetched via {@link SimpleSliceAccessService} (shared with
-   *  napari-js; see its docs for why this can't be a raw `fetch()`/`<img>`). */
-  private async loadSimple(imageInfo: IImageInfo, zIndex: number): Promise<OsdLoaded> {
+   *  napari-js; see its docs for why this can't be a raw `fetch()`/`<img>`).
+   *  Those fetches take no signal, so an abort is honoured once they settle. */
+  private async loadSimple(imageInfo: IImageInfo, zIndex: number, signal?: AbortSignal): Promise<OsdLoaded> {
     const z = zIndex || 0;
     const filename = imageInfo?.fileName;
     this.authHeaders = {};
@@ -513,6 +486,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
         }
       }
     }
+    throwIfAborted(signal);
     // No loadable URL (empty urls[] or the fetch failed): signal "couldn't
     // load" with a null descriptor — same as the tiled path when there's no
     // selected-file info — so plot() returns false (its `if (!d)` guard) and
@@ -1978,12 +1952,8 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   async exportData(): Promise<void> {
     if (!this.infoB64) return;
     const visible = this.channelStates.filter((c) => c.visible).map((c) => c.index);
-    const all = this.channelStates.length;
-    // Omit `channels` when every channel is visible (server default = all).
-    const chParam =
-      visible.length && visible.length < all ? `&channels=${visible.join(',')}` : '';
-    const url = `${this.api}export/tiff?info=${this.infoB64}&z=${this.currentZ}${chParam}`;
-    const stem = (this.currentFileName || 'image').replace(/\.[^.]+$/, '');
+    const url = exportTiffUrl(this.api, this.infoB64, this.currentZ, visible, this.channelStates.length);
+    const saveName = exportTiffFilename(this.currentFileName);
     try {
       const resp = await firstValueFrom(
         this.http
@@ -1995,7 +1965,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
         return;
       }
       const blob = resp.body;
-      if (blob) saveAs(blob, `${stem}_16bit.ome.tif`);
+      if (blob) saveAs(blob, saveName);
     } catch (err) {
       console.warn('[OSD] 16-bit TIFF export failed', err);
     }

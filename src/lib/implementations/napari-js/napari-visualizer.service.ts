@@ -132,6 +132,19 @@ import { ColormapNode, IWandOptions, IBrushOptions } from '../../contracts/displ
 import { VIZ_CONFIG, VizConfig } from '../../contracts/viz-config';
 import { TILE_ACCESS_PORT, TileAccessPort } from '../../contracts/ports/tile-access.port';
 import { BaseStoreVisualizer } from '../base-store-visualizer';
+import {
+  TileDescriptor,
+  TileLevel,
+  buildTileUrl,
+  exportTiffFilename,
+  exportTiffUrl,
+  fetchJsonWithAuth,
+  fetchWithAuth,
+  isAbortError,
+  nativeHistogram,
+  pollDescriptor,
+  tilesInfoUrl,
+} from '../tile-server';
 import { SimpleSliceAccessService } from '../simple-slice-access.service';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
@@ -263,49 +276,8 @@ const TILE_FETCH_CONCURRENCY = 6;
 /** How long to poll `/tiles/info` (202 while the server caches the source) before falling back to
  *  a single tile. Generous like the OSD backend — a cold whole-slide can take minutes to cache. */
 const DESCRIPTOR_TIMEOUT_MS = 120000;
-/** Per-request timeout inside that poll (the OSD backend's), so a hung request cannot outlive it. */
-const DESCRIPTOR_REQUEST_TIMEOUT_MS = 45000;
 /** Wait between two `/tiles/info` polls while the server answers 202. */
 const DESCRIPTOR_POLL_INTERVAL_MS = 1200;
-
-/** `fetch` that gives up after `timeoutMs`, or as soon as `signal` aborts. */
-async function fetchWithTimeout(
-  url: string,
-  init: RequestInit,
-  signal: AbortSignal,
-  timeoutMs: number,
-): Promise<Response> {
-  const ctl = new AbortController();
-  const onAbort = (): void => ctl.abort(signal.reason);
-  if (signal.aborted) onAbort();
-  else signal.addEventListener('abort', onAbort, { once: true });
-  const timer = setTimeout(() => ctl.abort(new Error(`timed out after ${timeoutMs} ms`)), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: ctl.signal });
-  } finally {
-    clearTimeout(timer);
-    signal.removeEventListener('abort', onAbort);
-  }
-}
-
-/** Resolve after `ms`, or reject as soon as `signal` aborts. */
-function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) {
-      reject(signal.reason);
-      return;
-    }
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      reject(signal.reason);
-    };
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    signal.addEventListener('abort', onAbort, { once: true });
-  });
-}
 
 /**
  * RGBA bytes → one BT.601 luminance byte per pixel, written into `out` from `offset`. Rounded,
@@ -405,35 +377,6 @@ const DEFAULT_TINTS = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#
 /** Default tint for a channel index, cycling the Fiji palette. */
 function tintFor(channel: number): string {
   return DEFAULT_TINTS[channel % DEFAULT_TINTS.length];
-}
-
-/** One pyramid level from `GET /tiles/info` (res 0 = full resolution). */
-interface TileLevel {
-  res: number;
-  width: number;
-  height: number;
-}
-
-/** Subset of the `/tiles/info` descriptor this backend reads (tile grid, channels, scale). */
-interface TileDescriptor {
-  width: number;
-  height: number;
-  tileSize: number;
-  z: number;
-  channels: number;
-  multichannel?: boolean;
-  /** Real Bio-Formats levels at the front of `levels`; per-channel tiles exist only there. */
-  realLevels?: number;
-  channelInfo?: Array<{
-    name?: string;
-    color?: string;
-    bitDepth?: number;
-    minAllowed?: number;
-    maxAllowed?: number;
-  }> | null;
-  levels: TileLevel[];
-  mppX?: number;
-  mppY?: number;
 }
 
 /**
@@ -821,47 +764,23 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   }
 
   /**
-   * The `/tiles/info` loop behind {@link ensureDescriptor}. Re-polls only on 202 (the server is
-   * still caching the source); any other status means this server will not describe it, so the
-   * answer is null at once. Each request gives up after {@link DESCRIPTOR_REQUEST_TIMEOUT_MS} —
-   * a hung request would otherwise never reach the deadline check — and the whole poll ends as
-   * soon as `scene` is aborted.
+   * The `/tiles/info` loop behind {@link ensureDescriptor}: the shared jit-service poll
+   * (`tile-server/pollDescriptor`). Re-polls only on 202 (the server is still caching the source);
+   * any other status means this server will not describe it, so the answer is null at once. Each
+   * request gives up after its own timeout — a hung request would otherwise never reach the
+   * deadline check — and the whole poll ends (null) as soon as `scene` is aborted.
    */
   private async pollDescriptor(infoB64: string, scene: AbortSignal): Promise<TileDescriptor | null> {
-    const headers = await this.tiles
-      .getAuthHeaders()
-      .catch(() => ({}) as Record<string, string>);
-    const url = `${this.api}tiles/info?info=${infoB64}`;
-    const deadline = Date.now() + DESCRIPTOR_TIMEOUT_MS;
-    for (;;) {
-      if (scene.aborted) return null;
-      try {
-        const resp = await fetchWithTimeout(url, { headers }, scene, DESCRIPTOR_REQUEST_TIMEOUT_MS);
-        if (scene.aborted) return null;
-        if (resp.status === 200) {
-          const body = (await resp.json()) as TileDescriptor;
-          if (body?.levels?.length) return body;
-          console.warn('[napari-js] tiles/info answered without levels; using the single-tile fetch');
-          return null;
-        }
-        if (resp.status !== 202) {
-          console.warn(`[napari-js] tiles/info → ${resp.status}; using the single-tile fetch`);
-          return null;
-        }
-        // 202: still caching → re-poll until the deadline.
-      } catch (err) {
-        if (scene.aborted) return null;
-        console.warn('[napari-js] tiles/info poll retry', err);
-      }
-      if (Date.now() > deadline) {
-        console.warn('[napari-js] tiles/info not ready; falling back to single-tile fetch');
-        return null;
-      }
-      try {
-        await abortableDelay(DESCRIPTOR_POLL_INTERVAL_MS, scene);
-      } catch {
-        return null; // the scene was reset while waiting
-      }
+    try {
+      return await pollDescriptor(fetchJsonWithAuth(this.tiles), tilesInfoUrl(this.api, infoB64), {
+        deadlineMs: DESCRIPTOR_TIMEOUT_MS,
+        intervalMs: DESCRIPTOR_POLL_INTERVAL_MS,
+        signal: scene,
+        tag: '[napari-js]',
+      });
+    } catch (err) {
+      if (isAbortError(err)) return null; // the scene was reset
+      throw err;
     }
   }
 
@@ -933,9 +852,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     }
     const infoB64 = this.tiles.getSelectedInfoB64();
     if (!infoB64) throw new Error('[napari-js] no selected image info (getSelectedInfoB64 null)');
-    const headers = await this.tiles
-      .getAuthHeaders()
-      .catch(() => ({}) as Record<string, string>);
     const desc = await this.ensureDescriptor();
 
     // The requested band; may be dropped to the composite (undefined) below when the channel has no
@@ -947,9 +863,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       row: number,
       t: number,
     ): Promise<ImageBitmap> => {
-      const ch = effectiveChannel == null ? '' : `&channel=${effectiveChannel}`;
-      const url = `${this.api}tile?info=${infoB64}&res=${res}&col=${col}&row=${row}&z=${z}&tileSize=${t}${ch}`;
-      const resp = await fetch(url, { headers });
+      const url = buildTileUrl(this.api, infoB64, {
+        res, col, row, z, tileSize: t, channel: effectiveChannel,
+      });
+      const resp = await fetchWithAuth(this.tiles, url);
       if (!resp.ok) {
         throw new Error(`[napari-js] slice fetch failed: ${resp.status} (${col}/${row} res ${res})`);
       }
@@ -1381,7 +1298,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         : desc.levels.slice(0, Math.max(1, desc.realLevels ?? desc.levels.length));
     const levelScales = usable.map((l) => desc.width / Math.max(1, l.width)); // level-0 px per level px
     const tileSize = desc.tileSize || TILE_SIZE;
-    const ch = channel == null ? '' : `&channel=${channel}`;
     const api = this.api;
     // The scene this source draws: its tiles count on the badge only while that scene is current,
     // so a request the disposed source still issues after a reset never shows on the new one.
@@ -1397,7 +1313,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       dtype: 'uint8',
       fetchTile: async (key: TileKey): Promise<PixelChunk> => {
         const res = usable[key.level]?.res ?? key.level;
-        const url = `${api}tile?info=${infoB64}&res=${res}&col=${key.col}&row=${key.row}&z=${key.z}&tileSize=${tileSize}${ch}`;
+        const url = buildTileUrl(api, infoB64, {
+          res, col: key.col, row: key.row, z: key.z, tileSize, channel,
+        });
         // "Image reloading…" on the loading badge while any tile of the image is in flight.
         const counted = !scene.aborted;
         if (counted) {
@@ -1405,10 +1323,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
           this.showLoading();
         }
         try {
-          const headers = await this.tiles
-            .getAuthHeaders()
-            .catch(() => ({}) as Record<string, string>);
-          const resp = await fetch(url, { headers });
+          const resp = await fetchWithAuth(this.tiles, url);
           if (!resp.ok) {
             throw new Error(`[napari-js] tile ${key.level}/${key.col}/${key.row} → ${resp.status}`);
           }
@@ -4131,10 +4046,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       const url = info?.urls?.[z] ?? info?.smallUrls?.[z];
       if (url) {
         try {
-          const headers = await this.tiles
-            .getAuthHeaders()
-            .catch(() => ({}) as Record<string, string>);
-          const resp = await fetch(url, { headers });
+          const resp = await fetchWithAuth(this.tiles, url);
           if (resp.ok) {
             plane = this.bitmapToLuminance(await createImageBitmap(await resp.blob()), maxGrid);
           }
@@ -4979,7 +4891,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     return of(this.getHistogram(channelIndex, bins));
   }
 
-  /** Fetch + cache one channel's native-bit-depth histogram from `GET /histogram` (>8-bit). */
+  /** Fetch + cache one channel's native-bit-depth histogram from `GET /histogram` (>8-bit),
+   *  through the shared jit-service client — whose URL carries the per-app-load cache-buster
+   *  this backend used to omit, so a reload showed the server's 24 h-cached histogram. */
   private async fetchNativeHistogram(
     channel: number,
     bins: number,
@@ -4988,33 +4902,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   ): Promise<IHistogram | null> {
     const infoB64 = this.tiles.getSelectedInfoB64();
     if (!infoB64) return null;
-    const headers = await this.tiles
-      .getAuthHeaders()
-      .catch(() => ({}) as Record<string, string>);
-    const url = `${this.api}histogram?info=${infoB64}&channel=${channel}&z=${z}&bins=${bins}`;
     try {
-      const resp = await fetch(url, { headers });
-      if (!resp.ok) return null; // 202 (still caching) or transient → null; the pane retries
-      const hi = (await resp.json()) as {
-        bitDepth: number;
-        rangeMin: number;
-        rangeMax: number;
-        observedMin: number;
-        observedMax: number;
-        binWidth: number;
-        counts: number[];
-      };
-      if (!hi?.counts) return null;
-      const out: IHistogram = {
-        bins: hi.counts.map((_, i) => hi.rangeMin + i * hi.binWidth),
-        counts: hi.counts,
-        max: hi.counts.reduce((m, c) => (c > m ? c : m), 0),
-        bitDepth: hi.bitDepth,
-        rangeMin: hi.rangeMin,
-        rangeMax: hi.rangeMax,
-        observedMin: hi.observedMin,
-        observedMax: hi.observedMax,
-      };
+      const out = await nativeHistogram(fetchJsonWithAuth(this.tiles), this.api, infoB64, {
+        z,
+        channel,
+        bins,
+      });
+      if (!out) return null; // 202 (still caching) or transient → null; the pane retries
       this.nativeHistograms.set(key, out);
       return out;
     } catch (err) {
@@ -5059,22 +4953,17 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     if (!infoB64) return;
     const states = this.store.currentChannelStates();
     const visible = states.filter((c) => c.visible).map((c) => c.index);
-    const chParam =
-      visible.length && visible.length < states.length ? `&channels=${visible.join(',')}` : '';
     const z = this.loaded?.z ?? 0;
-    const url = `${this.api}export/tiff?info=${infoB64}&z=${z}${chParam}`;
-    const stem = (this.loaded?.filename || 'image').replace(/\.[^.]+$/, '');
-    const headers = await this.tiles
-      .getAuthHeaders()
-      .catch(() => ({}) as Record<string, string>);
+    const url = exportTiffUrl(this.api, infoB64, z, visible, states.length);
+    const saveName = exportTiffFilename(this.loaded?.filename);
     try {
-      const resp = await fetch(url, { headers });
+      const resp = await fetchWithAuth(this.tiles, url);
       if (resp.status === 202) {
         console.warn('[napari-js] 16-bit export: file still caching — try again shortly.');
         return;
       }
       if (!resp.ok) throw new Error(`status ${resp.status}`);
-      saveAs(await resp.blob(), `${stem}_16bit.ome.tif`);
+      saveAs(await resp.blob(), saveName);
     } catch (err) {
       console.warn('[napari-js] 16-bit TIFF export failed', err);
     }
