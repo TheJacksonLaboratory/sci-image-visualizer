@@ -192,6 +192,26 @@ describe('OsdRegionOverlay — vertex tools', () => {
     o.destroy();
   });
 
+  it('labels and marquee-selects a polygon with more vertices than a call can take arguments (OSD-PLOTLY-34)', () => {
+    const n = 200_000;
+    const r = new Region();
+    const p = new Polygon();
+    p.xpoints = Array.from({ length: n }, (_, i) => 20 + 10 * Math.cos((2 * Math.PI * i) / n));
+    p.ypoints = Array.from({ length: n }, (_, i) => 20 + 10 * Math.sin((2 * Math.PI * i) / n));
+    p.npoints = n;
+    p.closed = true;
+    r.bounds = p;
+    r.label = 'big';
+    jest.spyOn(store, 'getShowShapeLabel').mockReturnValue(true);
+    expect(() => store.addRegion(r)).not.toThrow();
+    overlay.setMode('select');
+    const h = handlers();
+    h.pressHandler({ position: { x: 0, y: 0 } });
+    h.dragHandler({ position: { x: 40, y: 40 } });
+    expect(() => h.releaseHandler({ position: { x: 40, y: 40 } })).not.toThrow();
+    expect(store.getSelectedShapeIndices()).toEqual([0]);
+  });
+
   it('destroy() mid-drag closes the store batch', () => {
     startMoveDrag();
     overlay.destroy();

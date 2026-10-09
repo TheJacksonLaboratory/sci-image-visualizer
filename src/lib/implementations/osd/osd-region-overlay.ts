@@ -412,8 +412,13 @@ export class OsdRegionOverlay implements IRegionOverlay {
     if (this.store.getShowShapeLabel() && label != null && `${label}`.length > 0) {
       const g = document.createElementNS(SVGNS, 'g');
       g.appendChild(el);
-      const minX = Math.min(...pts.map(p => p.x));
-      const minY = Math.min(...pts.map(p => p.y));
+      // A loop, not Math.min(...spread): spreading a large imported annotation's
+      // vertices as arguments throws RangeError.
+      let minX = Infinity, minY = Infinity;
+      for (const p of pts) {
+        if (p.x < minX) minX = p.x;
+        if (p.y < minY) minY = p.y;
+      }
       const q = this.toPx(minX, minY);
       const text = document.createElementNS(SVGNS, 'text');
       text.setAttribute('x', `${q.x}`);
@@ -1108,15 +1113,12 @@ export class OsdRegionOverlay implements IRegionOverlay {
     if (b instanceof Rectangle) {
       return { x0: b.x, y0: b.y, x1: b.x + b.width, y1: b.y + b.height };
     }
-    if (b instanceof Polygon && b.xpoints.length) {
-      return {
-        x0: Math.min(...b.xpoints), y0: Math.min(...b.ypoints),
-        x1: Math.max(...b.xpoints), y1: Math.max(...b.ypoints),
-      };
-    }
-    if (b instanceof MultiPolygon) {
+    // Loops, not Math.min(...spread): spreading a large imported annotation's
+    // vertices as arguments throws RangeError.
+    const polys = b instanceof Polygon ? [b] : b instanceof MultiPolygon ? b.polygons : null;
+    if (polys) {
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-      for (const p of b.polygons) {
+      for (const p of polys) {
         for (let i = 0; i < p.xpoints.length; i++) {
           if (p.xpoints[i] < x0) x0 = p.xpoints[i];
           if (p.xpoints[i] > x1) x1 = p.xpoints[i];
