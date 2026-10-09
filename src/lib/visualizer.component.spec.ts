@@ -1540,4 +1540,22 @@ describe('VisualizerComponent — contributed tool parameters', () => {
 
     expect(c.paramsFor('detect')).toEqual(first);
   });
+  it('builds the parameter dialog model once on open, not per change-detection pass (CORE-22)', () => {
+    const c = componentWith(tool());
+    c.openToolParams('detect');
+    const open = c.openParams!;
+    expect(open.tool.id).toBe('detect');
+    expect(open.fields.map((f) => f.spec.id)).toEqual(['confidence', 'overlapX', 'minArea']);
+    expect(open.fields[0].number).toBe(open.fields[0].spec); // narrowed once, here
+    expect(open.values).toBe(c.paramsFor('detect'));
+
+    // A reset or checkpoint switch while the dialog is open re-binds it to the new values.
+    c.resetToolParams('detect');
+    expect(c.openParams!.values).toBe(c.paramsFor('detect'));
+    c.onToolModelChange({ toolId: 'detect', modelId: 'sparse' });
+    expect(c.openParams!.values['overlapX']).toBe(0);
+
+    c.closeToolParams();
+    expect(c.openParams).toBeNull();
+  });
 });

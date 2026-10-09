@@ -239,8 +239,17 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * — which encode the scale and crowding its checkpoint was trained for.
    */
   toolParams: Record<string, Record<string, unknown>> = {};
-  /** Which tool's parameter dialog is open, or null. */
-  openParamsToolId: string | null = null;
+  /**
+   * The open parameter dialog, built once by {@link openToolParams}: the tool, its
+   * live values, and each field's spec already narrowed for the template (an
+   * `*ngSwitchCase` does not narrow a union in the template type checker). Null
+   * while closed. Built up front so change detection only reads properties.
+   */
+  openParams: {
+    tool: ToolbarToolContribution;
+    values: Record<string, unknown>;
+    fields: { spec: ToolParamSpec; number: NumberParamSpec | null; select: SelectParamSpec | null }[];
+  } | null = null;
   /** SAM download/segment toast state (bound by the `sam` p-toast template). */
   samStatus = '';
   samProgress = 0; // 0..100, encoder download
@@ -1901,6 +1910,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.toolModelIds = { ...this.toolModelIds, [e.toolId]: e.modelId };
     tool.onModelChange?.(e.modelId);
     this.toolParams[e.toolId] = this.seedParams(tool, e.modelId);
+    this.rebindOpenParams(e.toolId);
   }
 
   /** A tool's defaults for a checkpoint, with that checkpoint's own overrides
@@ -1910,35 +1920,37 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     return { ...tool.defaultParams(modelId), ...(model?.defaults ?? {}) };
   }
 
-  /**
-   * Narrow a param spec for the template.
-   *
-   * `*ngSwitchCase` does not narrow a discriminated union in Angular's template
-   * type checker the way a `switch` does in TypeScript, so the template asks for
-   * the variant it has already matched on.
-   */
-  numberParam(p: ToolParamSpec): NumberParamSpec {
-    return p as NumberParamSpec;
-  }
-
-  selectParam(p: ToolParamSpec): SelectParamSpec {
-    return p as SelectParamSpec;
-  }
-
   openToolParams(toolId: string): void {
-    this.paramsFor(toolId); // seed before the dialog binds to it
-    this.openParamsToolId = toolId;
+    const tool = this.contributedTools.find((t) => t.id === toolId);
+    if (!tool) return;
+    this.openParams = {
+      tool,
+      values: this.paramsFor(toolId), // seeds them on first use
+      fields: tool.params.map((spec) => ({
+        spec,
+        number: spec.type === 'number' ? spec : null,
+        select: spec.type === 'select' ? spec : null,
+      })),
+    };
   }
 
-  /** The tool whose parameter dialog is open, for the generic dialog's header
-   *  and field list. */
-  get openParamsTool(): ToolbarToolContribution | undefined {
-    return this.contributedTools.find((t) => t.id === this.openParamsToolId);
+  closeToolParams(): void {
+    this.openParams = null;
+  }
+
+  /** A tool's values object was replaced (reset / checkpoint switch): point an
+   *  open dialog for it at the new one. */
+  private rebindOpenParams(toolId: string): void {
+    if (this.openParams?.tool.id === toolId) {
+      this.openParams = { ...this.openParams, values: this.paramsFor(toolId) };
+    }
   }
 
   resetToolParams(toolId: string): void {
     const tool = this.contributedTools.find((t) => t.id === toolId);
-    if (tool) this.toolParams[toolId] = this.seedParams(tool, this.modelIdFor(tool));
+    if (!tool) return;
+    this.toolParams[toolId] = this.seedParams(tool, this.modelIdFor(tool));
+    this.rebindOpenParams(toolId);
   }
 
   /** Run a contributed tool over the current view. No prompt: these sweep the

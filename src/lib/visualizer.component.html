@@ -238,51 +238,48 @@
      the toolbar can lay every tool out the same way and a plugin needs no
      PrimeNG of its own. Defaults come from the active checkpoint, since they
      encode what it was trained for. -->
-<p-dialog *ngIf="openParamsTool as tool"
-          [header]="tool.label + ' parameters'"
-          [visible]="true" (visibleChange)="openParamsToolId = null"
+<p-dialog *ngIf="openParams as open"
+          [header]="open.tool.label + ' parameters'"
+          [visible]="true" (visibleChange)="closeToolParams()"
           [modal]="true"
           [style]="{width: '30rem'}" [draggable]="false" [resizable]="false" appendTo="body">
   <div class="grid formgrid p-fluid">
-    <ng-container *ngFor="let p of tool.params">
-      <div class="field" [ngClass]="p.type === 'boolean' ? 'col-12' : 'col-6'">
-        <ng-container [ngSwitch]="p.type">
+    <ng-container *ngFor="let f of open.fields">
+      <div class="field" [ngClass]="f.spec.type === 'boolean' ? 'col-12' : 'col-6'">
 
-          <ng-container *ngSwitchCase="'number'">
-            <label class="text-sm" [pTooltip]="p.tooltip || ''">{{ p.label }}</label>
-            <p-inputNumber [ngModel]="paramsFor(tool.id)[p.id]"
-                           (ngModelChange)="paramsFor(tool.id)[p.id] = $event"
-                           [min]="numberParam(p).min" [max]="numberParam(p).max"
-                           [step]="numberParam(p).step"
-                           [minFractionDigits]="numberParam(p).fractionDigits"
-                           [showButtons]="true"></p-inputNumber>
-          </ng-container>
-
-          <ng-container *ngSwitchCase="'select'">
-            <label class="text-sm" [pTooltip]="p.tooltip || ''">{{ p.label }}</label>
-            <p-dropdown [options]="selectParam(p).options" optionLabel="label" optionValue="value"
-                        [ngModel]="paramsFor(tool.id)[p.id]"
-                        (ngModelChange)="paramsFor(tool.id)[p.id] = $event"
-                        appendTo="body"></p-dropdown>
-          </ng-container>
-
-          <!-- Checkbox label sits beside the box and may run to a sentence, so
-               it does not get the stacked label the other types use. -->
-          <div *ngSwitchCase="'boolean'" class="flex align-items-center gap-2">
-            <p-checkbox [ngModel]="paramsFor(tool.id)[p.id]"
-                        (ngModelChange)="paramsFor(tool.id)[p.id] = $event"
-                        [binary]="true" [inputId]="tool.id + '-' + p.id"></p-checkbox>
-            <label [for]="tool.id + '-' + p.id" class="text-sm mb-0"
-                   [pTooltip]="p.tooltip || ''">{{ p.label }}</label>
-          </div>
-
+        <ng-container *ngIf="f.number as n">
+          <label class="text-sm" [pTooltip]="n.tooltip || ''">{{ n.label }}</label>
+          <p-inputNumber [ngModel]="open.values[n.id]"
+                         (ngModelChange)="open.values[n.id] = $event"
+                         [min]="n.min" [max]="n.max" [step]="n.step"
+                         [minFractionDigits]="n.fractionDigits"
+                         [showButtons]="true"></p-inputNumber>
         </ng-container>
+
+        <ng-container *ngIf="f.select as sel">
+          <label class="text-sm" [pTooltip]="sel.tooltip || ''">{{ sel.label }}</label>
+          <p-dropdown [options]="sel.options" optionLabel="label" optionValue="value"
+                      [ngModel]="open.values[sel.id]"
+                      (ngModelChange)="open.values[sel.id] = $event"
+                      appendTo="body"></p-dropdown>
+        </ng-container>
+
+        <!-- Checkbox label sits beside the box and may run to a sentence, so
+             it does not get the stacked label the other types use. -->
+        <div *ngIf="f.spec.type === 'boolean'" class="flex align-items-center gap-2">
+          <p-checkbox [ngModel]="open.values[f.spec.id]"
+                      (ngModelChange)="open.values[f.spec.id] = $event"
+                      [binary]="true" [inputId]="open.tool.id + '-' + f.spec.id"></p-checkbox>
+          <label [for]="open.tool.id + '-' + f.spec.id" class="text-sm mb-0"
+                 [pTooltip]="f.spec.tooltip || ''">{{ f.spec.label }}</label>
+        </div>
+
       </div>
     </ng-container>
   </div>
   <ng-template pTemplate="footer">
     <p-button label="Reset to model defaults" [text]="true" size="small"
-              (onClick)="resetToolParams(tool.id)"></p-button>
-    <p-button label="Close" size="small" (onClick)="openParamsToolId = null"></p-button>
+              (onClick)="resetToolParams(open.tool.id)"></p-button>
+    <p-button label="Close" size="small" (onClick)="closeToolParams()"></p-button>
   </ng-template>
 </p-dialog>
