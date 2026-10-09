@@ -255,6 +255,34 @@ describe('RegionEditorComponent', () => {
     expect(component.pagedRegions).not.toBe(page);
   });
 
+  it('rejects an imported preset file that is not a preset set, with an error toast (RT-32)', () => {
+    const api = mockVisualizer as unknown as { setPresetSet: jest.Mock };
+    api.setPresetSet = jest.fn();
+    const add = jest.spyOn(component.messageService, 'add');
+    (component as any).applyImportedPresets('{"classes": "nope"}');
+    expect(api.setPresetSet).not.toHaveBeenCalled();
+    expect(add).toHaveBeenCalledWith(expect.objectContaining({ severity: 'error', key: expect.any(String) }));
+  });
+
+  it('a failed region import shows its error toast in the library outlet (RT-32)', () => {
+    (mockVisualizer.importRegions as jest.Mock).mockImplementation(() => { throw new Error('bad geojson'); });
+    const add = jest.spyOn(component.messageService, 'add');
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    (component as any).applyImportedRois('garbage');
+    expect(add).toHaveBeenCalledWith(expect.objectContaining({ severity: 'error', key: expect.any(String) }));
+  });
+
+  it('stops the save-as exists check on destroy (RT-32)', fakeAsync(() => {
+    const io = (component as any).regionIo as RegionIoPort;
+    const exists = jest.fn(() => of(true));
+    io.roiFileExists = exists;
+    component.ngOnDestroy();
+    component.saveAsFilename = 'a.geojson';
+    component.checkSaveAsFileExists();
+    tick(500);
+    expect(exists).not.toHaveBeenCalled();
+  }));
+
   it('should show help dialog', () => {
     expect(component.displayHelpDialog).toBe(false);
     component.showHelp();

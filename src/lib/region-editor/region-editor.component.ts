@@ -5,8 +5,8 @@ import { Subject, Subscription } from 'rxjs';
 import { debounceTime, switchMap } from 'rxjs/operators';
 
 import { Polygon, Rectangle, Region, MultiPolygon } from '../models/region';
-import { PresetSet, ClassPreset, defaultPresetSet } from '../models/class-preset';
-import { colorForLabel } from '../store/class-color.util';
+import { PresetSet, ClassPreset, defaultPresetSet, parsePresetSet } from '../models/class-preset';
+import { colorForLabel, presetKey } from '../store/class-color.util';
 import { IImageMetadata } from '../contracts/image.contract';
 import { ConfirmationService, MessageService } from 'primeng/api';
 import { IRegionEditorApi, REGION_EDITOR_API } from '../contracts/region-editor-api.contract';
@@ -75,6 +75,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   saveAsBusy = false;
   private _saveAsCheck$ = new Subject<string>();
   private _saveAsSub?: Subscription;
+  private _saveAsCheckSub = new Subscription();
   /** Handle for the deferred-serialize timer so Cancel/destroy can abort it
    *  before it fires (otherwise the upload would still start). */
   private _saveAsTimer?: ReturnType<typeof setTimeout>;
@@ -164,7 +165,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       this.recomputeClassCounts();
     });
 
-    this._saveAsCheck$.pipe(
+    this._saveAsCheckSub = this._saveAsCheck$.pipe(
       debounceTime(400),
       switchMap(name => this.regionIo.roiFileExists(name)),
     ).subscribe({
@@ -209,6 +210,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this._selectedIdxSub.unsubscribe();
     this._metaSub.unsubscribe();
     this._presetSub.unsubscribe();
+    this._saveAsCheckSub.unsubscribe();
     if (this._saveAsTimer !== undefined) clearTimeout(this._saveAsTimer);
     this._saveAsSub?.unsubscribe();
     this.teardownMaskWorker();
@@ -588,8 +590,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
    * labels are ignored. (jit-ui#70)
    */
   private syncClassesFromRegions(regions: Region[]): void {
-    const normalized = this.presetSet.matchMode === 'normalized';
-    const keyOf = (l: string) => (normalized ? l.trim().toLowerCase() : l);
+    const keyOf = (l: string) => presetKey(this.presetSet, l);
     const known = new Set(this.presetSet.classes.map((c) => keyOf(c.name)));
     const added = new Set<string>();
     for (const r of regions) {
@@ -610,11 +611,10 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   /** Rebuild the per-class region counts shown in the panel. */
   private recomputeClassCounts(): void {
-    const normalized = this.presetSet.matchMode === 'normalized';
     const counts = new Map<string, number>();
     for (const r of this.regions) {
       if (!r.label) continue;
-      const k = normalized ? r.label.trim().toLowerCase() : r.label;
+      const k = presetKey(this.presetSet, r.label);
       counts.set(k, (counts.get(k) ?? 0) + 1);
     }
     this.classCounts = counts;
@@ -634,8 +634,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   /** Number of regions currently using a class (keyed by the active match mode). */
   classCount(name: string): number {
-    const k = this.presetSet.matchMode === 'normalized' ? name.trim().toLowerCase() : name;
-    return this.classCounts.get(k) ?? 0;
+    return this.classCounts.get(presetKey(this.presetSet, name)) ?? 0;
   }
 
   /** Recolour a class from its panel swatch and repaint its (non-overridden) regions. */
@@ -666,8 +665,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
    *  {@link defaultClassName} ("Region"): its class colour, override cleared.
    *  Skips the default itself so deleting "Region" can't self-reassign. (jit-ui#70) */
   private reassignRegionsToDefaultClass(removedNames: string[]): void {
-    const norm = this.presetSet.matchMode === 'normalized';
-    const keyOf = (s: string) => (norm ? s.trim().toLowerCase() : s);
+    const keyOf = (s: string) => presetKey(this.presetSet, s);
     const removed = new Set(removedNames.map(keyOf));
     removed.delete(keyOf(this.defaultClassName));
     if (!removed.size) return;
@@ -716,10 +714,8 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   addAndApplyBulkClass(): void {
     const name = this.newBulkClass.trim();
     if (!name) return;
-    const norm = this.presetSet.matchMode === 'normalized';
-    const exists = this.presetSet.classes.some((c) =>
-      norm ? c.name.trim().toLowerCase() === name.toLowerCase() : c.name === name,
-    );
+    const key = presetKey(this.presetSet, name);
+    const exists = this.presetSet.classes.some((c) => presetKey(this.presetSet, c.name) === key);
     if (!exists) {
       this.regionApi.upsertClass({ name, color: colorForLabel(name, this.presetSet), source: 'user' });
     }
@@ -760,12 +756,13 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     if (!this.presetDraft) return;
     // De-duplicate using the active match mode's key so normalized mode can't keep
     // both "Tumor" and "tumor" (which would collide at runtime in findPreset()).
-    const norm = this.presetDraft.matchMode === 'normalized';
+    const draft = this.presetDraft;
+    const keyOf = (s: string) => presetKey(draft, s);
     const seen = new Set<string>();
     const classes: ClassPreset[] = [];
-    for (const c of this.presetDraft.classes) {
+    for (const c of draft.classes) {
       const name = (c.name ?? '').trim();
-      const key = norm ? name.toLowerCase() : name;
+      const key = keyOf(name);
       if (!name || seen.has(key)) continue;
       seen.add(key);
       classes.push({ ...c, name });
@@ -773,7 +770,6 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.presetDraft.classes = classes;
     // Classes dropped in the dialog: their regions revert to the default "Region"
     // class (else syncClassesFromRegions would just re-add them) (jit-ui#70).
-    const keyOf = (s: string) => (norm ? s.trim().toLowerCase() : s);
     const kept = new Set(classes.map((c) => keyOf(c.name)));
     const removed = this.presetSet.classes
       .map((c) => c.name)
@@ -797,20 +793,24 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     const file = input.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (e: any) => {
-      try {
-        const set = JSON.parse(e.target.result) as PresetSet;
-        this.regionApi.setPresetSet(set);
-        this.presetDraft = this.clonePresetSet(this.regionApi.getPresetSet());
-        this.setRegionsFromEditor();
-        this.messageService.add({ key: VIZ_TOAST_KEY, severity: 'success',
-          summary: 'Classes imported', detail: 'Annotation classes loaded.' });
-      } catch (err) {
-        this.messageService.add({ key: VIZ_TOAST_KEY, severity: 'error',
-          summary: 'Import failed', detail: `${err}` });
-      }
-    };
+    reader.onload = () => this.applyImportedPresets(reader.result as string);
     reader.readAsText(file);
+  }
+
+  /** Validate and apply an imported annotation-classes JSON file. */
+  private applyImportedPresets(text: string): void {
+    try {
+      const set = parsePresetSet(JSON.parse(text));
+      if (!set) throw new Error('The file is not an annotation-class list (no valid classes).');
+      this.regionApi.setPresetSet(set);
+      this.presetDraft = this.clonePresetSet(this.regionApi.getPresetSet());
+      this.setRegionsFromEditor();
+      this.messageService.add({ key: VIZ_TOAST_KEY, severity: 'success',
+        summary: 'Classes imported', detail: 'Annotation classes loaded.' });
+    } catch (err) {
+      this.messageService.add({ key: VIZ_TOAST_KEY, severity: 'error',
+        summary: 'Import failed', detail: `${(err as Error)?.message ?? err}` });
+    }
   }
 
   importRois(event: Event) {
@@ -818,26 +818,29 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     const file = input.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (e: any) => {
-      const fileContent = e.target.result;
-      try {
-        this.regions = this.regionApi.importRegions(fileContent);
-        // set label colors
-        for (const region of this.regions) {
-          this.labelRegionUpdate(region, false);
-        }
-        this.syncClassesFromRegions(this.regions);
-        this.setRegionsFromEditor();
-      } catch (event) {
-        this.messageService.add({
-          severity: 'error',
-          summary: 'Error importing the file',
-          detail: `${event}`,
-        });
-        console.error('Error reading the file: ' + event);
-      }
-    };
+    reader.onload = () => this.applyImportedRois(reader.result as string);
     reader.readAsText(file);
+  }
+
+  /** Replace the regions with an imported GeoJSON file's. */
+  private applyImportedRois(text: string): void {
+    try {
+      this.regions = this.regionApi.importRegions(text);
+      // set label colors
+      for (const region of this.regions) {
+        this.labelRegionUpdate(region, false);
+      }
+      this.syncClassesFromRegions(this.regions);
+      this.setRegionsFromEditor();
+    } catch (err) {
+      this.messageService.add({
+        key: VIZ_TOAST_KEY,
+        severity: 'error',
+        summary: 'Error importing the file',
+        detail: `${(err as Error)?.message ?? err}`,
+      });
+      console.error('Error reading the file:', err);
+    }
   }
 
   /**

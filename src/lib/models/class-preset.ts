@@ -73,3 +73,30 @@ export function defaultPresetSet(): PresetSet {
 export function isEmptyPresetSet(set: PresetSet | null | undefined): boolean {
   return !set || !Array.isArray(set.classes) || set.classes.length === 0;
 }
+
+/**
+ * Validate an untrusted value (e.g. an imported JSON file) as a preset set.
+ * Returns a clean copy — only well-formed `{ name, color }` classes, defaults
+ * for missing optional fields — or null when it has no usable classes.
+ */
+export function parsePresetSet(value: unknown): PresetSet | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Partial<Record<keyof PresetSet, unknown>>;
+  if (!Array.isArray(raw.classes)) return null;
+  const classes: ClassPreset[] = [];
+  for (const c of raw.classes as unknown[]) {
+    const entry = c as Partial<ClassPreset> | null;
+    if (!entry || typeof entry.name !== 'string' || typeof entry.color !== 'string') continue;
+    classes.push({ ...entry, name: entry.name, color: entry.color });
+  }
+  if (classes.length === 0) return null;
+  const palette = Array.isArray(raw.fallbackPalette)
+    ? (raw.fallbackPalette as unknown[]).filter((c): c is string => typeof c === 'string')
+    : [];
+  return {
+    classes,
+    fallbackPalette: palette.length ? palette : [...DEFAULT_FALLBACK_PALETTE],
+    autoPromote: raw.autoPromote === true,
+    matchMode: raw.matchMode === 'normalized' ? 'normalized' : 'exact',
+  };
+}
