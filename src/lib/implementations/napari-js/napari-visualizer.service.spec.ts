@@ -823,6 +823,31 @@ describe('NapariVisualizerService', () => {
     document.body.removeChild(div);
   });
 
+  it('drives the orbit camera from the zoom buttons in a 3D scene', async () => {
+    // Regression (NAPARI-SVC-13): zoomIn/zoomOut only ever set the 2D camera's zoom, which
+    // changes nothing visible at ndisplay 3 — yet +/- and the buttons are bound for every type.
+    const div = document.createElement('div');
+    div.id = 'zoom-3d-host';
+    document.body.appendChild(div);
+    const loaded = await service.load(imageInfo(), 0);
+    await service.plot('zoom-3d-host', loaded, imageInfo(), 600, PlotType.NAPARI_VOLUME);
+    const viewer = (service as unknown as {
+      viewer: { dims: { ndisplay?: number }; camera: { zoom: number }; camera3d: { zoomBy?: jest.Mock } };
+    }).viewer;
+    // The stub models neither; napari-js 0.14 has both.
+    viewer.dims.ndisplay = 3;
+    viewer.camera3d.zoomBy = jest.fn();
+
+    service.zoomIn();
+    service.zoomOut();
+    // zoomBy scales the orbit DISTANCE, so zooming in shrinks it.
+    expect(viewer.camera3d.zoomBy.mock.calls.map((c) => c[0])).toEqual([1 / 1.3, 1.3]);
+    expect(viewer.camera.zoom).toBe(1);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
   it('keeps the newest slice\'s histogram sample when an older fetch lands late', async () => {
     // Regression (NAPARI-SVC-10): every tiled slice change fired a sample refresh with no
     // token, so a slower request for an older slice overwrote the newer one's samples.

@@ -242,6 +242,10 @@ function surfaceResolutionFor(scale: number): { maxGrid: number } {
 const SCATTER3D_MAX_XY = 64;
 const SCATTER3D_MAX_POINTS = 150000;
 
+/** Zoom factor per zoom-button press / +/- key — the OSD backend's step (`openseadragon-visualizer
+ *  .service.ts`); both should come from one shared constant (review NAPARI-SVC-13). */
+const ZOOM_BUTTON_STEP = 1.3;
+
 const TILE_SIZE = 512; // server tile edge (matches the OSD backend)
 /** Max tiles stitched for one displayed slice (512px tiles → up to ~6144² at full res). Beyond
  *  this we step to a coarser pyramid level so a large image stays tractable. */
@@ -4351,11 +4355,20 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   }
 
   zoomIn(): void {
-    if (this.viewer) this.viewer.camera.zoom = this.viewer.camera.zoom * 1.3;
+    this.zoomBy(ZOOM_BUTTON_STEP);
   }
 
   zoomOut(): void {
-    if (this.viewer) this.viewer.camera.zoom = this.viewer.camera.zoom / 1.3;
+    this.zoomBy(1 / ZOOM_BUTTON_STEP);
+  }
+
+  /** Zoom by `factor` (> 1 = in) on whichever camera is live: the 2D camera's zoom, or — in a 3D
+   *  scene, where that would change nothing visible — the orbit camera's distance. */
+  private zoomBy(factor: number): void {
+    const v = this.viewer;
+    if (!v) return;
+    if (v.dims.ndisplay === 3) v.camera3d.zoomBy(1 / factor); // zoomBy scales the distance
+    else v.camera.zoom = v.camera.zoom * factor;
   }
 
   setDragMode(_mode: string | false): void {
