@@ -457,9 +457,7 @@ export class PlotlyService implements IVisualizer {
         dy: ratios[0],
         z: dataset,
         type: 'heatmap',
-        // We remove the tooltip annotation for performances reasons
-        // text: dataset.map((row: any[], i: any) => row.map((item, j) => {
-        //   return `x: ${+(j * ratios[0]).toFixed(2)}<br>y: ${+(i * ratios[0]).toFixed(2)}<br>value: ${item}`})),
+        // No per-cell hover text: building it for every pixel is too slow.
         hoverinfo: 'none',
         colorscale: this.store.currentColormap().data.value,
         reversescale: this.store.currentReverseScale(),
@@ -501,19 +499,14 @@ export class PlotlyService implements IVisualizer {
       const trace = {
         z: dataset,
         type: 'surface',
-        // hoverinfo: 'none',
         colorscale: this.store.currentColormap().data.value,
         reversescale: this.store.currentReverseScale(),
-        // name: `Slice ${index + 1}`,
-        // visible: index === 0
       };
       traces.push(trace);
     });
-    const xrange = [trueImgSize[0], trueImgSize[1]];
-    const yrange = [trueImgSize[2], trueImgSize[3]];
     const render = inPlace ? Plotly.react : Plotly.newPlot;
     return (render as any)(plotDiv, traces as any,
-      this.getSurfaceLayout(xrange, yrange, 0.4), CONFIG_SURFACE as any).then(() => {
+      this.getSurfaceLayout(0.4), CONFIG_SURFACE as any).then(() => {
       // handle the relayout event for zoom / rois and the click event
       this.setEvents(plotDiv, true, screenHeight);
       return true;
@@ -558,9 +551,7 @@ export class PlotlyService implements IVisualizer {
         x: Array.from(Array(width).keys()),
         y: Array.from(Array(height).keys()),
         z: dataset,
-        // text: dataset.map((row: any[], i: any) => row.map((item, j) => {
-        //   return `x: ${+(j * ratios[0]).toFixed(2)}<br>y: ${+(i * ratios[0]).toFixed(2)}<br>value: ${item}`})),
-        hoverinfo: 'none',
+        hoverinfo: 'none', // no per-cell hover text: too slow for every pixel
         type: 'image',
         name: `Slice ${index + 1}`,
         visible: index === 0
@@ -1731,13 +1722,10 @@ export class PlotlyService implements IVisualizer {
     return shapesToRedraw.map(s => ({ ...s }));
   }
   /**
-   * Unused (will be used when surface plot is added)
-   * @param xRange
-   * @param yRange
-   * @param zRatio
-   * @private
+   * Scene layout for the surface plot (plotSurface): light-grey axis planes and
+   * a manual aspect ratio whose z extent is `zRatio` of the x/y extent.
    */
-  private getSurfaceLayout(xRange: number[], yRange: number[], zRatio: number): any {
+  private getSurfaceLayout(zRatio: number): any {
     return {
       margin: { t: 0, b: 0, l: 0, r: 0 },
       scene: {
@@ -1746,16 +1734,12 @@ export class PlotlyService implements IVisualizer {
           zerolinecolor: 'rgb(255, 255, 255)',
           showbackground: true,
           backgroundcolor: 'rgb(230, 230,230)',
-          // range: xRange
         },
         yaxis: {
           gridcolor: 'rgb(255, 255, 255)',
           zerolinecolor: 'rgb(255, 255, 255)',
           showbackground: true,
           backgroundcolor: 'rgb(230, 230, 230)',
-          // autorange: 'reversed',
-          // range: yRange,
-          // scaleanchor: 'x'
         },
         zaxis: {
           gridcolor: 'rgb(255, 255, 255)',
@@ -1765,15 +1749,6 @@ export class PlotlyService implements IVisualizer {
         },
         aspectratio: { x: 1, y: 1, z: zRatio },
         aspectmode: 'manual',
-        sliders: [{
-          pad: { t: 50 },
-          currentvalue: {
-            visible: true,
-            prefix: 'Z-plane:',
-            xanchor: 'right',
-          },
-          steps: this.getSteps()
-        }],
       }
     };
   }
