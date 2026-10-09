@@ -92,7 +92,7 @@ describe('WandToolService', () => {
     tool.bindHost(host);
     tool.setMode(true, { patchSize: 9, simpleMode: true });
 
-    cv(container).dispatchEvent(mouse('mousedown', 10, 10));
+    cv(container).dispatchEvent(mouse('pointerdown', 10, 10));
 
     expect(setRegions).toHaveBeenCalled();
     expect(state.regions).toHaveLength(1);
@@ -107,9 +107,9 @@ describe('WandToolService', () => {
     tool.setMode(true, { patchSize: 9, simpleMode: true });
     const canvas = cv(container);
 
-    canvas.dispatchEvent(mouse('mousedown', 6, 6));
-    canvas.dispatchEvent(mouse('mousemove', 12, 12));
-    canvas.dispatchEvent(mouse('mouseup', 12, 12));
+    canvas.dispatchEvent(mouse('pointerdown', 6, 6));
+    canvas.dispatchEvent(mouse('pointermove', 12, 12));
+    canvas.dispatchEvent(mouse('pointerup', 12, 12));
 
     // Still a single region (the stroke extended, not a second region).
     expect(state.regions).toHaveLength(1);
@@ -121,9 +121,9 @@ describe('WandToolService', () => {
     tool.setMode(true, { patchSize: 9, simpleMode: true });
     const canvas = cv(container);
 
-    canvas.dispatchEvent(mouse('mousedown', 10, 10));
+    canvas.dispatchEvent(mouse('pointerdown', 10, 10));
     const callsAfterDown = setRegions.mock.calls.length;
-    canvas.dispatchEvent(mouse('mousemove', 12, 12, { buttons: 0 })); // button released
+    canvas.dispatchEvent(mouse('pointermove', 12, 12, { buttons: 0 })); // button released
     expect(setRegions.mock.calls.length).toBe(callsAfterDown);
   });
 
@@ -133,9 +133,9 @@ describe('WandToolService', () => {
     tool.setMode(true, { patchSize: 5, simpleMode: true });
     const canvas = cv(container);
 
-    canvas.dispatchEvent(mouse('mousedown', 8, 8));
-    canvas.dispatchEvent(mouse('mouseup', 8, 8));
-    canvas.dispatchEvent(mouse('mousedown', 50, 50)); // far away → fresh region
+    canvas.dispatchEvent(mouse('pointerdown', 8, 8));
+    canvas.dispatchEvent(mouse('pointerup', 8, 8));
+    canvas.dispatchEvent(mouse('pointerdown', 50, 50)); // far away → fresh region
     expect(state.regions).toHaveLength(2);
   });
 
@@ -143,7 +143,7 @@ describe('WandToolService', () => {
     const { host, container, setRegions } = makeHost();
     tool.bindHost(host);
     tool.setMode(true, { patchSize: 9, simpleMode: true });
-    cv(container).dispatchEvent(mouse('mousedown', 10, 10, { button: 2 }));
+    cv(container).dispatchEvent(mouse('pointerdown', 10, 10, { button: 2 }));
     expect(setRegions).not.toHaveBeenCalled();
   });
 
@@ -151,7 +151,7 @@ describe('WandToolService', () => {
     const { host, container, setRegions } = makeHost();
     tool.bindHost(host);
     tool.setMode(true, { patchSize: 9, simpleMode: true });
-    cv(container).dispatchEvent(mouse('mousedown', 10, 10, { shiftKey: true }));
+    cv(container).dispatchEvent(mouse('pointerdown', 10, 10, { shiftKey: true }));
     expect(setRegions).not.toHaveBeenCalled();
   });
 
@@ -159,7 +159,7 @@ describe('WandToolService', () => {
     const { host, container, setRegions } = makeHost({ cached: null });
     tool.bindHost(host);
     tool.setMode(true, { patchSize: 9, simpleMode: true });
-    cv(container).dispatchEvent(mouse('mousedown', 10, 10));
+    cv(container).dispatchEvent(mouse('pointerdown', 10, 10));
     expect(setRegions).not.toHaveBeenCalled();
   });
 
@@ -167,7 +167,7 @@ describe('WandToolService', () => {
     const { host, container, setRegions } = makeHost();
     tool.bindHost(host);
     tool.setMode(true, { patchSize: 9, simpleMode: true });
-    cv(container).dispatchEvent(mouse('mousedown', 999, 999)); // outside 20×20
+    cv(container).dispatchEvent(mouse('pointerdown', 999, 999)); // outside 20×20
     expect(setRegions).not.toHaveBeenCalled();
   });
 
@@ -177,7 +177,7 @@ describe('WandToolService', () => {
       ({ isReady: () => false, clientToData: () => ({ x: 0, y: 0 }), dataLengthToScreen: () => 1 });
     tool.bindHost(host);
     tool.setMode(true, { patchSize: 9, simpleMode: true });
-    cv(container).dispatchEvent(mouse('mousedown', 10, 10));
+    cv(container).dispatchEvent(mouse('pointerdown', 10, 10));
     expect(setRegions).not.toHaveBeenCalled();
   });
 
@@ -187,10 +187,10 @@ describe('WandToolService', () => {
     tool.setMode(true, { patchSize: 5, simpleMode: true });
     const canvas = cv(container);
 
-    canvas.dispatchEvent(mouse('mousedown', 8, 8));
+    canvas.dispatchEvent(mouse('pointerdown', 8, 8));
     expect(state.regions).toHaveLength(1);
     tool.clearActiveRegion();
-    canvas.dispatchEvent(mouse('mousedown', 50, 50)); // empty space → a fresh region
+    canvas.dispatchEvent(mouse('pointerdown', 50, 50)); // empty space → a fresh region
     expect(state.regions).toHaveLength(2);
   });
 
@@ -207,7 +207,7 @@ describe('WandToolService', () => {
     tool.bindHost(host);
     tool.setMode(true, { patchSize: 9, simpleMode: true });
 
-    cv(container).dispatchEvent(mouse('mousedown', 10, 10)); // inside the box
+    cv(container).dispatchEvent(mouse('pointerdown', 10, 10)); // inside the box
 
     expect(setRegions).toHaveBeenCalled();
     expect(state.regions).toHaveLength(1);   // adopted, not added
@@ -247,14 +247,14 @@ describe('WandToolService — a stale stroke never resurrects a region (RT-2)', 
     tool.bindHost(host);
     tool.setMode(true, { patchSize: 9, simpleMode: true });
     const canvas = cv(container);
-    canvas.dispatchEvent(mouse('mousedown', 10, 10));
-    canvas.dispatchEvent(mouse('mouseup', 10, 10));
+    canvas.dispatchEvent(mouse('pointerdown', 10, 10));
+    canvas.dispatchEvent(mouse('pointerup', 10, 10));
     const first = bbox(state.regions[0]);
 
     state.regions = []; // undo of the wand click, or a Region Editor delete
 
-    canvas.dispatchEvent(mouse('mousedown', 11, 11));
-    canvas.dispatchEvent(mouse('mouseup', 11, 11));
+    canvas.dispatchEvent(mouse('pointerdown', 11, 11));
+    canvas.dispatchEvent(mouse('pointerup', 11, 11));
     expect(state.regions).toHaveLength(1);
     // Only the new click's patch — the removed stroke (one pixel further up-left) is gone.
     expect(bbox(state.regions[0]).x0).toBe(first.x0 + 1);
@@ -266,19 +266,19 @@ describe('WandToolService — a stale stroke never resurrects a region (RT-2)', 
     tool.bindHost(host);
     tool.setMode(true, { patchSize: 9, simpleMode: true });
     const canvas = cv(container);
-    canvas.dispatchEvent(mouse('mousedown', 10, 10));
-    canvas.dispatchEvent(mouse('mouseup', 10, 10));
+    canvas.dispatchEvent(mouse('pointerdown', 10, 10));
+    canvas.dispatchEvent(mouse('pointerup', 10, 10));
     const small = bbox(state.regions[0]);
-    canvas.dispatchEvent(mouse('mousedown', 12, 12));
-    canvas.dispatchEvent(mouse('mousemove', 20, 20));
-    canvas.dispatchEvent(mouse('mouseup', 20, 20));
+    canvas.dispatchEvent(mouse('pointerdown', 12, 12));
+    canvas.dispatchEvent(mouse('pointermove', 20, 20));
+    canvas.dispatchEvent(mouse('pointerup', 20, 20));
     expect(bbox(state.regions[0]).x1).toBeGreaterThan(small.x1 + 5);
 
     // Undo the drag: the store restores a CLONE of the earlier region.
     state.regions = [boxRegion(small.x0, small.y0, small.x1, small.y1, state.regions[0].id)];
 
-    canvas.dispatchEvent(mouse('mousedown', 11, 11));
-    canvas.dispatchEvent(mouse('mouseup', 11, 11));
+    canvas.dispatchEvent(mouse('pointerdown', 11, 11));
+    canvas.dispatchEvent(mouse('pointerup', 11, 11));
     expect(state.regions).toHaveLength(1);
     // The restored region plus this click's patch — not the undone drag.
     expect(bbox(state.regions[0]).x1).toBeLessThanOrEqual(small.x1 + 1);
@@ -292,14 +292,14 @@ describe('WandToolService — a stale stroke never resurrects a region (RT-2)', 
     tool.bindHost(host);
     tool.setMode(true, { patchSize: 9, simpleMode: true });
     const canvas = cv(container);
-    canvas.dispatchEvent(mouse('mousedown', 10, 10));
-    canvas.dispatchEvent(mouse('mouseup', 10, 10));
+    canvas.dispatchEvent(mouse('pointerdown', 10, 10));
+    canvas.dispatchEvent(mouse('pointerup', 10, 10));
     const first = bbox(store.getRegions()[0]);
     store.undo();
     expect(store.getRegions()).toHaveLength(0);
 
-    canvas.dispatchEvent(mouse('mousedown', 11, 11));
-    canvas.dispatchEvent(mouse('mouseup', 11, 11));
+    canvas.dispatchEvent(mouse('pointerdown', 11, 11));
+    canvas.dispatchEvent(mouse('pointerup', 11, 11));
     expect(store.getRegions()).toHaveLength(1);
     expect(bbox(store.getRegions()[0]).x0).toBe(first.x0 + 1);
     store.resetUndoHistory(); // clear the coalescing timer
@@ -310,11 +310,11 @@ describe('WandToolService — a stale stroke never resurrects a region (RT-2)', 
     tool.bindHost(host);
     tool.setMode(true, { patchSize: 9, simpleMode: true });
     const canvas = cv(container);
-    canvas.dispatchEvent(mouse('mousedown', 10, 10));
-    canvas.dispatchEvent(mouse('mouseup', 10, 10));
+    canvas.dispatchEvent(mouse('pointerdown', 10, 10));
+    canvas.dispatchEvent(mouse('pointerup', 10, 10));
     const first = bbox(state.regions[0]);
-    canvas.dispatchEvent(mouse('mousedown', 13, 13));
-    canvas.dispatchEvent(mouse('mouseup', 13, 13));
+    canvas.dispatchEvent(mouse('pointerdown', 13, 13));
+    canvas.dispatchEvent(mouse('pointerup', 13, 13));
     expect(state.regions).toHaveLength(1);
     expect(bbox(state.regions[0]).x0).toBe(first.x0);
     expect(bbox(state.regions[0]).x1).toBe(first.x1 + 3);
@@ -356,7 +356,7 @@ describe('WandToolService — commits every traced piece with its holes (RT-3, R
     tool.bindHost(host);
     tool.setMode(true, { patchSize: 5, simpleMode: true });
 
-    cv(container).dispatchEvent(mouse('mousedown', 8, 8)); // in the solid ring
+    cv(container).dispatchEvent(mouse('pointerdown', 8, 8)); // in the solid ring
 
     expect(state.regions).toHaveLength(1);
     expect(state.regions[0].id).toBe(5);
@@ -368,7 +368,7 @@ describe('WandToolService — commits every traced piece with its holes (RT-3, R
     tool.bindHost(host);
     tool.setMode(true, { patchSize: 9, simpleMode: true });
 
-    cv(container).dispatchEvent(mouse('mousedown', 20, 8, { shiftKey: true }));
+    cv(container).dispatchEvent(mouse('pointerdown', 20, 8, { shiftKey: true }));
 
     expect(state.regions).toHaveLength(2);
     expect(state.regions.map((r) => r.id)).toContain(5);
@@ -388,7 +388,7 @@ describe('WandToolService — commits every traced piece with its holes (RT-3, R
     tool.bindHost(host);
     tool.setMode(true, { patchSize: 5, simpleMode: true });
 
-    cv(container).dispatchEvent(mouse('mousedown', 8, 8));
+    cv(container).dispatchEvent(mouse('pointerdown', 8, 8));
 
     const r = state.regions[0];
     expect(r.id).toBe(5);
@@ -417,12 +417,12 @@ describe('WandToolService — one drag is one undo step (RT-12)', () => {
     tool.setMode(true, { patchSize: 5, simpleMode: true });
     const canvas = cv(container);
 
-    canvas.dispatchEvent(mouse('mousedown', 10, 10));
+    canvas.dispatchEvent(mouse('pointerdown', 10, 10));
     jest.advanceTimersByTime(1000); // pause mid-drag
-    canvas.dispatchEvent(mouse('mousemove', 13, 10));
-    canvas.dispatchEvent(mouse('mouseup', 13, 10));
-    canvas.dispatchEvent(mouse('mousedown', 20, 30)); // a new region, right away
-    canvas.dispatchEvent(mouse('mouseup', 20, 30));
+    canvas.dispatchEvent(mouse('pointermove', 13, 10));
+    canvas.dispatchEvent(mouse('pointerup', 13, 10));
+    canvas.dispatchEvent(mouse('pointerdown', 20, 30)); // a new region, right away
+    canvas.dispatchEvent(mouse('pointerup', 20, 30));
     expect(store.getRegions()).toHaveLength(2);
 
     store.undo();

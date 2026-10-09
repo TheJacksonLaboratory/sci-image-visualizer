@@ -90,7 +90,7 @@ describe('BrushToolService', () => {
     tool.bindHost(host);
     tool.setMode(true, { size: 12 });
 
-    cv(container).dispatchEvent(mouse('mousedown', 30, 30));
+    cv(container).dispatchEvent(mouse('pointerdown', 30, 30));
 
     expect(setRegions).toHaveBeenCalled();
     expect(state.regions).toHaveLength(1);
@@ -104,7 +104,7 @@ describe('BrushToolService', () => {
     tool.bindHost(host);
     tool.setMode(true, { size: 20 });
 
-    cv(container).dispatchEvent(mouse('mousedown', 30, 30));
+    cv(container).dispatchEvent(mouse('pointerdown', 30, 30));
 
     const b = state.regions[0].bounds as Polygon;
     const w = Math.max(...b.xpoints) - Math.min(...b.xpoints);
@@ -119,10 +119,10 @@ describe('BrushToolService', () => {
     tool.setMode(true, { size: 12 });
     const canvas = cv(container);
 
-    canvas.dispatchEvent(mouse('mousedown', 10, 10));
-    canvas.dispatchEvent(mouse('mousemove', 20, 20));
-    canvas.dispatchEvent(mouse('mousemove', 30, 30));
-    canvas.dispatchEvent(mouse('mouseup', 30, 30));
+    canvas.dispatchEvent(mouse('pointerdown', 10, 10));
+    canvas.dispatchEvent(mouse('pointermove', 20, 20));
+    canvas.dispatchEvent(mouse('pointermove', 30, 30));
+    canvas.dispatchEvent(mouse('pointerup', 30, 30));
 
     expect(state.regions).toHaveLength(1);
   });
@@ -133,9 +133,9 @@ describe('BrushToolService', () => {
     tool.setMode(true, { size: 8 });
     const canvas = cv(container);
 
-    canvas.dispatchEvent(mouse('mousedown', 10, 10));
-    canvas.dispatchEvent(mouse('mouseup', 10, 10));
-    canvas.dispatchEvent(mouse('mousedown', 50, 50));
+    canvas.dispatchEvent(mouse('pointerdown', 10, 10));
+    canvas.dispatchEvent(mouse('pointerup', 10, 10));
+    canvas.dispatchEvent(mouse('pointerdown', 50, 50));
     expect(state.regions).toHaveLength(2);
   });
 
@@ -146,7 +146,7 @@ describe('BrushToolService', () => {
     tool.setMode(true, { size: 16 });
 
     // Shift-paint near a corner so the box loses area but isn't destroyed.
-    cv(container).dispatchEvent(mouse('mousedown', 6, 6, { shiftKey: true }));
+    cv(container).dispatchEvent(mouse('pointerdown', 6, 6, { shiftKey: true }));
 
     expect(setRegions).toHaveBeenCalled();
     expect(state.regions).toHaveLength(1);
@@ -161,7 +161,7 @@ describe('BrushToolService', () => {
     tool.bindHost(host);
     tool.setMode(true, { size: 16 });
 
-    cv(container).dispatchEvent(mouse('mousedown', 30, 30, { shiftKey: true })); // dead centre
+    cv(container).dispatchEvent(mouse('pointerdown', 30, 30, { shiftKey: true })); // dead centre
 
     expect(state.regions).toHaveLength(1);
     expect(state.regions[0].id).toBe(7);
@@ -177,7 +177,7 @@ describe('BrushToolService', () => {
     tool.bindHost(host);
     tool.setMode(true, { size: 24 });
 
-    cv(container).dispatchEvent(mouse('mousedown', 30, 30, { shiftKey: true }));
+    cv(container).dispatchEvent(mouse('pointerdown', 30, 30, { shiftKey: true }));
 
     expect(state.regions).toHaveLength(2);
     // The larger piece keeps the original id; the other gets a fresh one.
@@ -193,10 +193,10 @@ describe('BrushToolService', () => {
     tool.setMode(true, { size: 24 });
     const canvas = cv(container);
 
-    canvas.dispatchEvent(mouse('mousedown', 30, 20, { shiftKey: true }));
-    canvas.dispatchEvent(mouse('mousemove', 30, 30, { shiftKey: true }));
-    canvas.dispatchEvent(mouse('mousemove', 30, 40, { shiftKey: true }));
-    canvas.dispatchEvent(mouse('mouseup', 30, 40, { shiftKey: true }));
+    canvas.dispatchEvent(mouse('pointerdown', 30, 20, { shiftKey: true }));
+    canvas.dispatchEvent(mouse('pointermove', 30, 30, { shiftKey: true }));
+    canvas.dispatchEvent(mouse('pointermove', 30, 40, { shiftKey: true }));
+    canvas.dispatchEvent(mouse('pointerup', 30, 40, { shiftKey: true }));
 
     expect(state.regions).toHaveLength(2); // still two, not one-per-tick
   });
@@ -205,7 +205,7 @@ describe('BrushToolService', () => {
     const { host, container, setRegions } = makeHost();
     tool.bindHost(host);
     tool.setMode(true, { size: 12 });
-    cv(container).dispatchEvent(mouse('mousedown', 30, 30, { shiftKey: true }));
+    cv(container).dispatchEvent(mouse('pointerdown', 30, 30, { shiftKey: true }));
     expect(setRegions).not.toHaveBeenCalled();
   });
 
@@ -215,7 +215,7 @@ describe('BrushToolService', () => {
     tool.bindHost(host);
     tool.setMode(true, { size: 10 });
 
-    cv(container).dispatchEvent(mouse('mousedown', 30, 30)); // inside the box
+    cv(container).dispatchEvent(mouse('pointerdown', 30, 30)); // inside the box
 
     expect(setRegions).toHaveBeenCalled();
     expect(state.regions).toHaveLength(1); // adopted, not added
@@ -226,7 +226,7 @@ describe('BrushToolService', () => {
     const { host, container, setRegions } = makeHost();
     tool.bindHost(host);
     tool.setMode(true, { size: 12 });
-    cv(container).dispatchEvent(mouse('mousedown', 30, 30, { button: 2 }));
+    cv(container).dispatchEvent(mouse('pointerdown', 30, 30, { button: 2 }));
     expect(setRegions).not.toHaveBeenCalled();
   });
 
@@ -234,7 +234,7 @@ describe('BrushToolService', () => {
     const { host, container, setRegions } = makeHost({ cached: null });
     tool.bindHost(host);
     tool.setMode(true, { size: 12 });
-    cv(container).dispatchEvent(mouse('mousedown', 30, 30));
+    cv(container).dispatchEvent(mouse('pointerdown', 30, 30));
     expect(setRegions).not.toHaveBeenCalled();
   });
 
@@ -242,7 +242,7 @@ describe('BrushToolService', () => {
     const { host, container, setRegions } = makeHost();
     tool.bindHost(host);
     tool.setMode(true, { size: 12 });
-    cv(container).dispatchEvent(mouse('mousedown', 999, 999)); // outside 60×60
+    cv(container).dispatchEvent(mouse('pointerdown', 999, 999)); // outside 60×60
     expect(setRegions).not.toHaveBeenCalled();
   });
 
@@ -252,7 +252,7 @@ describe('BrushToolService', () => {
       ({ isReady: () => false, clientToData: () => ({ x: 0, y: 0 }), dataLengthToScreen: () => 1 });
     tool.bindHost(host);
     tool.setMode(true, { size: 12 });
-    cv(container).dispatchEvent(mouse('mousedown', 30, 30));
+    cv(container).dispatchEvent(mouse('pointerdown', 30, 30));
     expect(setRegions).not.toHaveBeenCalled();
   });
 
@@ -262,10 +262,10 @@ describe('BrushToolService', () => {
     tool.setMode(true, { size: 8 });
     const canvas = cv(container);
 
-    canvas.dispatchEvent(mouse('mousedown', 10, 10));
+    canvas.dispatchEvent(mouse('pointerdown', 10, 10));
     expect(state.regions).toHaveLength(1);
     tool.clearActiveRegion();
-    canvas.dispatchEvent(mouse('mousedown', 50, 50)); // fresh region
+    canvas.dispatchEvent(mouse('pointerdown', 50, 50)); // fresh region
     expect(state.regions).toHaveLength(2);
   });
 
@@ -287,7 +287,7 @@ describe('BrushToolService', () => {
       tool.bindHost(host);
       tool.setMode(true, { size: 12, label: 'pos', color: '#1E88E5' });
 
-      cv(container).dispatchEvent(mouse('mousedown', 30, 30));
+      cv(container).dispatchEvent(mouse('pointerdown', 30, 30));
 
       expect(state.regions).toHaveLength(1);
       expect(state.regions[0].label).toBe('pos');
@@ -301,7 +301,7 @@ describe('BrushToolService', () => {
       tool.bindHost(host);
       tool.setMode(true, { size: 6, label: 'pos', color: '#00f' });
 
-      cv(container).dispatchEvent(mouse('mousedown', 30, 30));
+      cv(container).dispatchEvent(mouse('pointerdown', 30, 30));
 
       expect(state.regions).toHaveLength(2);
       expect(state.regions.find((r) => r.id === 7)?.label).toBe('neg');
@@ -315,8 +315,8 @@ describe('BrushToolService', () => {
       tool.setMode(true, { size: 6, label: 'pos' });
       const canvas = cv(container);
 
-      canvas.dispatchEvent(mouse('mousedown', 10, 30));
-      canvas.dispatchEvent(mouse('mousemove', 50, 30));
+      canvas.dispatchEvent(mouse('pointerdown', 10, 30));
+      canvas.dispatchEvent(mouse('pointermove', 50, 30));
 
       expect(state.regions.map((r) => r.label).sort()).toEqual(['neg', 'pos']);
       expect(state.regions.find((r) => r.id === 7)?.bounds).toBe(other.bounds);
@@ -328,7 +328,7 @@ describe('BrushToolService', () => {
       tool.bindHost(host);
       tool.setMode(true, { size: 6, label: 'pos' });
 
-      cv(container).dispatchEvent(mouse('mousedown', 30, 30));
+      cv(container).dispatchEvent(mouse('pointerdown', 30, 30));
 
       expect(state.regions).toHaveLength(1);
       expect(state.regions[0].id).toBe(7);
@@ -340,11 +340,11 @@ describe('BrushToolService', () => {
       tool.bindHost(host);
       tool.setMode(true, { size: 12, label: 'pos' });
       const canvas = cv(container);
-      canvas.dispatchEvent(mouse('mousedown', 30, 30));
-      canvas.dispatchEvent(mouse('mouseup', 30, 30));
+      canvas.dispatchEvent(mouse('pointerdown', 30, 30));
+      canvas.dispatchEvent(mouse('pointerup', 30, 30));
 
       tool.setOptions({ label: 'neg', color: '#f00' });
-      canvas.dispatchEvent(mouse('mousedown', 30, 30));
+      canvas.dispatchEvent(mouse('pointerdown', 30, 30));
 
       expect(state.regions.map((r) => r.label).sort()).toEqual(['neg', 'pos']);
     });
@@ -355,7 +355,7 @@ describe('BrushToolService', () => {
       tool.setMode(true, { size: 12, label: 'pos', color: '#00f' });
       tool.setOptions({ size: 20 });
 
-      cv(container).dispatchEvent(mouse('mousedown', 30, 30));
+      cv(container).dispatchEvent(mouse('pointerdown', 30, 30));
 
       expect(state.regions[0].label).toBe('pos');
       expect(state.regions[0].color).toBe('#00f');
@@ -368,7 +368,7 @@ describe('BrushToolService', () => {
       tool.setMode(false);
       tool.setMode(true, { size: 12 });
 
-      cv(container).dispatchEvent(mouse('mousedown', 30, 30));
+      cv(container).dispatchEvent(mouse('pointerdown', 30, 30));
 
       expect(state.regions[0].label).toBe('Region');
       expect(state.regions[0].color).toBe('#ffffff');
@@ -382,7 +382,7 @@ describe('BrushToolService', () => {
       tool.setMode(false, { size: 20 });
       tool.setMode(true);
 
-      cv(container).dispatchEvent(mouse('mousedown', 30, 30));
+      cv(container).dispatchEvent(mouse('pointerdown', 30, 30));
 
       const b = state.regions[0].bounds as Polygon;
       expect(Math.max(...b.xpoints) - Math.min(...b.xpoints)).toBeGreaterThan(12);
@@ -394,7 +394,7 @@ describe('BrushToolService', () => {
       tool.bindHost(host);
       tool.setMode(true, { size: 6 });
 
-      cv(container).dispatchEvent(mouse('mousedown', 30, 30));
+      cv(container).dispatchEvent(mouse('pointerdown', 30, 30));
 
       expect(state.regions).toHaveLength(1);
       expect(state.regions[0].id).toBe(7);
@@ -431,14 +431,14 @@ describe('BrushToolService — a stale stroke never resurrects a region (RT-2)',
     tool.bindHost(host);
     tool.setMode(true, { size: 12 });
     const canvas = cv(container);
-    canvas.dispatchEvent(mouse('mousedown', 20, 20));
-    canvas.dispatchEvent(mouse('mouseup', 20, 20));
+    canvas.dispatchEvent(mouse('pointerdown', 20, 20));
+    canvas.dispatchEvent(mouse('pointerup', 20, 20));
     const first = bbox(state.regions[0]);
 
     state.regions = []; // undo of the dab, or a Region Editor delete
 
-    canvas.dispatchEvent(mouse('mousedown', 23, 23));
-    canvas.dispatchEvent(mouse('mouseup', 23, 23));
+    canvas.dispatchEvent(mouse('pointerdown', 23, 23));
+    canvas.dispatchEvent(mouse('pointerup', 23, 23));
     expect(state.regions).toHaveLength(1);
     expect(bbox(state.regions[0]).x0).toBe(first.x0 + 3); // just the new disc
   });
@@ -448,16 +448,16 @@ describe('BrushToolService — a stale stroke never resurrects a region (RT-2)',
     tool.bindHost(host);
     tool.setMode(true, { size: 12 });
     const canvas = cv(container);
-    canvas.dispatchEvent(mouse('mousedown', 20, 20));
-    canvas.dispatchEvent(mouse('mousemove', 40, 20));
-    canvas.dispatchEvent(mouse('mouseup', 40, 20));
+    canvas.dispatchEvent(mouse('pointerdown', 20, 20));
+    canvas.dispatchEvent(mouse('pointermove', 40, 20));
+    canvas.dispatchEvent(mouse('pointerup', 40, 20));
     const painted = bbox(state.regions[0]);
 
     // Something outside the tool cut the region back to its left end.
     state.regions = [boxRegion(painted.x0, painted.y0, painted.x0 + 10, painted.y1, state.regions[0].id)];
 
-    canvas.dispatchEvent(mouse('mousedown', 22, 20));
-    canvas.dispatchEvent(mouse('mouseup', 22, 20));
+    canvas.dispatchEvent(mouse('pointerdown', 22, 20));
+    canvas.dispatchEvent(mouse('pointerup', 22, 20));
     expect(state.regions).toHaveLength(1);
     expect(bbox(state.regions[0]).x1).toBeLessThan(painted.x1 - 5); // the cut part stays cut
   });
@@ -485,7 +485,7 @@ describe('BrushToolService — edits keep region metadata and frame (RT-5, RT-14
     tool.bindHost(host);
     tool.setMode(true, { size: 8 });
 
-    cv(container).dispatchEvent(mouse('mousedown', 48, 30));
+    cv(container).dispatchEvent(mouse('pointerdown', 48, 30));
 
     const r = state.regions[0];
     expect(r.id).toBe(7);
@@ -502,7 +502,7 @@ describe('BrushToolService — edits keep region metadata and frame (RT-5, RT-14
     tool.bindHost(host);
     tool.setMode(true, { size: 10 });
 
-    cv(container).dispatchEvent(mouse('mousedown', 20, 40));
+    cv(container).dispatchEvent(mouse('pointerdown', 20, 40));
 
     const p = state.regions[0].bounds as Polygon;
     const w = Math.max(...p.xpoints) - Math.min(...p.xpoints);
@@ -517,12 +517,12 @@ describe('BrushToolService — edits keep region metadata and frame (RT-5, RT-14
     tool.bindHost(host);
     tool.setMode(true, { size: 24 });
     const canvas = cv(container);
-    canvas.dispatchEvent(mouse('mousedown', 30, 30, { shiftKey: true }));
-    canvas.dispatchEvent(mouse('mouseup', 30, 30, { shiftKey: true }));
+    canvas.dispatchEvent(mouse('pointerdown', 30, 30, { shiftKey: true }));
+    canvas.dispatchEvent(mouse('pointerup', 30, 30, { shiftKey: true }));
     expect(state.regions).toHaveLength(2);
 
-    canvas.dispatchEvent(mouse('mousedown', 30, 54));
-    canvas.dispatchEvent(mouse('mouseup', 30, 52));
+    canvas.dispatchEvent(mouse('pointerdown', 30, 54));
+    canvas.dispatchEvent(mouse('pointerup', 30, 52));
 
     expect(state.regions).toHaveLength(3);
   });

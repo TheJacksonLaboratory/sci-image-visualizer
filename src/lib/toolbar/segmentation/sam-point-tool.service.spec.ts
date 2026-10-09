@@ -56,7 +56,7 @@ function cv(c: HTMLElement): HTMLCanvasElement {
   return c.querySelector('canvas') as HTMLCanvasElement;
 }
 function click(x: number, y: number, shift = false): MouseEvent {
-  return new MouseEvent('mousedown', { button: 0, clientX: x, clientY: y, shiftKey: shift });
+  return new MouseEvent('pointerdown', { button: 0, clientX: x, clientY: y, shiftKey: shift });
 }
 
 describe('SamPointToolService', () => {

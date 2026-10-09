@@ -9,6 +9,7 @@ import { makePolygon, replaceBounds } from '../../models/polygon-factory';
 import { maskToPolygons } from '../../geometry/contour';
 import { MatrixFrame } from '../tool-kit/matrix-frame';
 import { AsyncToolStatus } from '../tool-kit/async-tool-status';
+import { ToolOverlayCanvas } from '../tool-kit/tool-overlay';
 
 /** Interactive SAM point-prompt tool (jit-ui#90, P1).
  *
@@ -27,7 +28,7 @@ import { AsyncToolStatus } from '../tool-kit/async-tool-status';
 @Injectable({ providedIn: 'root' })
 export class SamPointToolService {
   private host!: WandToolHost;
-  private overlay: HTMLCanvasElement | null = null;
+  private readonly overlay = new ToolOverlayCanvas();
   private readonly state = new AsyncToolStatus();
 
   /** Accumulated point prompts, in image (matrix) coords. */
@@ -40,11 +41,7 @@ export class SamPointToolService {
   /** Encoder-download progress (0..1) on the first click; -1 when not downloading. */
   readonly progress$ = this.state.progress$;
 
-  private readonly boundMouseDown: (e: MouseEvent) => void;
-
-  constructor(private readonly sessions: SamSessionService = new SamSessionService()) {
-    this.boundMouseDown = (e) => { void this.onMouseDown(e); };
-  }
+  constructor(private readonly sessions: SamSessionService = new SamSessionService()) {}
 
   bindHost(host: WandToolHost): void { this.host = host; }
 
@@ -92,36 +89,26 @@ export class SamPointToolService {
     this.status$.next('');
   }
 
-  // ── overlay lifecycle (mirrors the wand/brush tools) ────────────────────
+  // ── overlay lifecycle (shared with the wand/brush tools) ────────────────
 
   private createOverlay(): void {
-    const plotEl = this.host?.getOverlayContainer();
-    if (!plotEl || this.overlay) return;
-    const canvas = document.createElement('canvas');
-    Object.assign(canvas.style, {
-      position: 'absolute', top: '0', left: '0', width: '100%', height: '100%',
-      cursor: 'crosshair', zIndex: '100',
-    });
-    canvas.width = plotEl.offsetWidth;
-    canvas.height = plotEl.offsetHeight;
-    plotEl.appendChild(canvas);
-    this.overlay = canvas;
-    canvas.addEventListener('mousedown', this.boundMouseDown);
+    const container = this.host?.getOverlayContainer();
+    if (!container) return;
+    this.overlay.attach(container, { down: (e) => { void this.onPointerDown(e); } });
   }
 
   private destroyOverlay(): void {
-    if (!this.overlay) return;
-    this.overlay.removeEventListener('mousedown', this.boundMouseDown);
-    this.overlay.remove();
-    this.overlay = null;
+    if (!this.overlay.attached) return;
+    this.overlay.detach();
     this.points = [];
     this.regionId = null;
   }
 
   // ── per-click refinement ────────────────────────────────────────────────
 
-  private async onMouseDown(e: MouseEvent): Promise<void> {
-    if (e.button !== 0 || !this.overlay) return;
+  /** Primary button only (the overlay filters the others). */
+  private async onPointerDown(e: PointerEvent): Promise<void> {
+    if (!this.overlay.attached) return;
     // Re-entrancy guard: ignore clicks while a previous prompt is still
     // downloading the model / encoding / decoding. Without it, clicking again
     // during the slow first run (e.g. a ~172 MB ViT-B encode on WebGPU) launches

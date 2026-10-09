@@ -7,6 +7,7 @@ import { dropVerticesWithinRadius } from '../../geometry/ring';
 import type { CachedImageData } from '../wand/wand-tool.service';
 import { MatrixFrame } from '../tool-kit/matrix-frame';
 import { UndoGesture } from '../tool-kit/undo-gesture';
+import { ToolOverlayCanvas } from '../tool-kit/tool-overlay';
 import { RegionStore } from '../../store/region-store.service';
 
 /**
@@ -49,24 +50,17 @@ export interface VertexEraserToolHost extends IViewportHost, IRegionDataHost {
 export class VertexEraserToolService {
 
   private host!: VertexEraserToolHost;
-  private overlay: HTMLCanvasElement | null = null;
+  private readonly overlay = new ToolOverlayCanvas();
   private dragging = false;
   /** Eraser radius in image-pixel (matrix) coordinates. */
   private radius = 20;
   private cursor: { x: number; y: number } | null = null;
-
-  private readonly boundMouseDown: (e: MouseEvent) => void;
-  private readonly boundMouseMove: (e: MouseEvent) => void;
-  private readonly boundMouseUp: (e: MouseEvent) => void;
 
   /** Makes each drag one undo step, however long the user pauses (RT-12). */
   private readonly gesture: UndoGesture;
 
   constructor(@Optional() regionStore?: RegionStore) {
     this.gesture = new UndoGesture(regionStore);
-    this.boundMouseDown = (e) => this.onMouseDown(e);
-    this.boundMouseMove = (e) => this.onMouseMove(e);
-    this.boundMouseUp = (e) => this.onMouseUp(e);
   }
 
   bindHost(host: VertexEraserToolHost) {
@@ -93,53 +87,34 @@ export class VertexEraserToolService {
   // ── Overlay lifecycle ───────────────────────────────────────────────
 
   private createOverlay() {
-    const plotEl = this.host.getOverlayContainer();
-    if (!plotEl || this.overlay) return;
-
-    const canvas = document.createElement('canvas');
-    canvas.style.position = 'absolute';
-    canvas.style.top = '0';
-    canvas.style.left = '0';
-    canvas.style.width = '100%';
-    canvas.style.height = '100%';
-    canvas.style.cursor = 'crosshair';
-    canvas.style.zIndex = '100';
-    canvas.width = plotEl.offsetWidth;
-    canvas.height = plotEl.offsetHeight;
-
-    plotEl.appendChild(canvas);
-    this.overlay = canvas;
-
-    canvas.addEventListener('mousedown', this.boundMouseDown);
-    canvas.addEventListener('mousemove', this.boundMouseMove);
-    canvas.addEventListener('mouseup', this.boundMouseUp);
-    canvas.addEventListener('mouseleave', this.boundMouseUp);
+    const container = this.host.getOverlayContainer();
+    if (!container) return;
+    this.overlay.attach(container, {
+      down: (e) => this.onPointerDown(e),
+      move: (e) => this.onPointerMove(e),
+      up: () => this.onPointerUp(),
+      resize: () => this.drawCursor(), // a resize clears the canvas
+    });
   }
 
   private destroyOverlay() {
-    if (!this.overlay) return;
-    this.overlay.removeEventListener('mousedown', this.boundMouseDown);
-    this.overlay.removeEventListener('mousemove', this.boundMouseMove);
-    this.overlay.removeEventListener('mouseup', this.boundMouseUp);
-    this.overlay.removeEventListener('mouseleave', this.boundMouseUp);
-    this.overlay.remove();
-    this.overlay = null;
+    if (!this.overlay.attached) return;
+    this.overlay.detach();
     this.dragging = false;
     this.gesture.end();
     this.cursor = null;
   }
 
-  // ── Mouse handlers ──────────────────────────────────────────────────
+  // ── Pointer handlers ────────────────────────────────────────────────
 
-  private onMouseDown(e: MouseEvent) {
-    if (e.button !== 0) return;
+  private onPointerDown(e: PointerEvent) {
     this.dragging = true;
     this.gesture.begin();
     this.updateCursor(e);
     this.applyAtClient(e);
   }
 
-  private onMouseMove(e: MouseEvent) {
+  private onPointerMove(e: PointerEvent) {
     this.updateCursor(e);
     if (!this.dragging) {
       this.drawCursor();
@@ -155,23 +130,21 @@ export class VertexEraserToolService {
     this.drawCursor();
   }
 
-  private onMouseUp(_: MouseEvent) {
+  private onPointerUp() {
     this.dragging = false;
     this.gesture.end();
   }
 
-  private updateCursor(e: MouseEvent) {
-    if (!this.overlay) return;
-    const rect = this.overlay.getBoundingClientRect();
-    this.cursor = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  private updateCursor(e: PointerEvent) {
+    if (!this.overlay.attached) return;
+    this.cursor = this.overlay.toLocal(e);
   }
 
   /** Draw the eraser radius circle at the current cursor position. */
   private drawCursor() {
-    if (!this.overlay) return;
-    const ctx = this.overlay.getContext('2d');
+    const ctx = this.overlay.context();
     if (!ctx) return;
-    ctx.clearRect(0, 0, this.overlay.width, this.overlay.height);
+    ctx.clearRect(0, 0, this.overlay.cssWidth, this.overlay.cssHeight);
     if (!this.cursor) return;
     const transform = this.host.getCoordinateTransform();
     if (!transform.isReady()) return;
@@ -201,8 +174,8 @@ export class VertexEraserToolService {
    * eraser's radius of the cursor. Polygons reduced below 3 vertices (or
    * polylines below 2) are removed entirely. Edited regions keep their metadata.
    */
-  private applyAtClient(e: MouseEvent) {
-    if (!this.overlay) return;
+  private applyAtClient(e: PointerEvent) {
+    if (!this.overlay.attached) return;
     const regions = this.host.getRegions();
     if (!regions || regions.length === 0) return;
 

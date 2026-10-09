@@ -61,7 +61,7 @@ describe('VertexEraserToolService (neutral Region)', () => {
 
   it('removes the clicked vertex and commits neutral Region objects', () => {
     const canvas = container.querySelector('canvas') as HTMLCanvasElement;
-    canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 10, clientY: 0, button: 0 }));
+    canvas.dispatchEvent(new MouseEvent('pointerdown', { clientX: 10, clientY: 0, button: 0 }));
 
     expect(committed).not.toBeNull();
     expect(committed!.length).toBe(1);
@@ -90,7 +90,7 @@ describe('VertexEraserToolService (neutral Region)', () => {
   it('erases a vertex on the inner ring (donut), leaving the exterior intact', () => {
     regions = [donutRegion()];
     const canvas = container.querySelector('canvas') as HTMLCanvasElement;
-    canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 10, clientY: 10, button: 0 }));
+    canvas.dispatchEvent(new MouseEvent('pointerdown', { clientX: 10, clientY: 10, button: 0 }));
 
     const poly = committed![0].bounds as Polygon;
     expect(poly.xpoints.length).toBe(4);   // exterior untouched
@@ -101,7 +101,7 @@ describe('VertexEraserToolService (neutral Region)', () => {
   it('keeps the hole when erasing an exterior vertex (no donut fill)', () => {
     regions = [donutRegion()];
     const canvas = container.querySelector('canvas') as HTMLCanvasElement;
-    canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 0, clientY: 0, button: 0 }));
+    canvas.dispatchEvent(new MouseEvent('pointerdown', { clientX: 0, clientY: 0, button: 0 }));
 
     const poly = committed![0].bounds as Polygon;
     expect(poly.xpoints.length).toBe(3);   // exterior vertex removed
@@ -111,7 +111,7 @@ describe('VertexEraserToolService (neutral Region)', () => {
   it('drops a hole that erasing reduces below a triangle', () => {
     regions = [donutRegion([[10, 10], [12, 10], [11, 12]])]; // 3-vertex hole, all near (11,11)
     const canvas = container.querySelector('canvas') as HTMLCanvasElement;
-    canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 11, clientY: 11, button: 0 }));
+    canvas.dispatchEvent(new MouseEvent('pointerdown', { clientX: 11, clientY: 11, button: 0 }));
 
     const poly = committed![0].bounds as Polygon;
     expect(poly.xpoints.length).toBe(4);   // exterior intact
@@ -120,27 +120,27 @@ describe('VertexEraserToolService (neutral Region)', () => {
 
   it('does not commit when the click misses every vertex', () => {
     const canvas = container.querySelector('canvas') as HTMLCanvasElement;
-    canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 5, clientY: 5, button: 0 }));
+    canvas.dispatchEvent(new MouseEvent('pointerdown', { clientX: 5, clientY: 5, button: 0 }));
     expect(committed).toBeNull();
   });
 
   it('ignores non-left mouse buttons', () => {
     const canvas = container.querySelector('canvas') as HTMLCanvasElement;
-    canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 10, clientY: 0, button: 2 }));
+    canvas.dispatchEvent(new MouseEvent('pointerdown', { clientX: 10, clientY: 0, button: 2 }));
     expect(committed).toBeNull();
   });
 
   it('erases while dragging (mousedown then mousemove with the button held)', () => {
     const canvas = container.querySelector('canvas') as HTMLCanvasElement;
-    canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 5, clientY: 5, button: 0 })); // miss
-    canvas.dispatchEvent(new MouseEvent('mousemove', { clientX: 10, clientY: 0, buttons: 1 })); // hits (10,0)
+    canvas.dispatchEvent(new MouseEvent('pointerdown', { clientX: 5, clientY: 5, button: 0 })); // miss
+    canvas.dispatchEvent(new MouseEvent('pointermove', { clientX: 10, clientY: 0, buttons: 1 })); // hits (10,0)
     expect(committed).not.toBeNull();
     expect((committed![0].bounds as Polygon).xpoints.length).toBe(3);
   });
 
   it('a bare hover (no button) just redraws the cursor and commits nothing', () => {
     const canvas = container.querySelector('canvas') as HTMLCanvasElement;
-    expect(() => canvas.dispatchEvent(new MouseEvent('mousemove', { clientX: 10, clientY: 0, buttons: 0 })))
+    expect(() => canvas.dispatchEvent(new MouseEvent('pointermove', { clientX: 10, clientY: 0, buttons: 0 })))
       .not.toThrow();
     expect(committed).toBeNull();
   });
@@ -148,7 +148,7 @@ describe('VertexEraserToolService (neutral Region)', () => {
   it('removes a region outright once it drops below three vertices', () => {
     tool.setRadius(50); // large enough to catch every corner of the 10×10 square
     const canvas = container.querySelector('canvas') as HTMLCanvasElement;
-    canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 5, clientY: 5, button: 0 }));
+    canvas.dispatchEvent(new MouseEvent('pointerdown', { clientX: 5, clientY: 5, button: 0 }));
     expect(committed).not.toBeNull();
     expect(committed!.length).toBe(0); // degenerate → region removed
   });
@@ -159,7 +159,7 @@ describe('VertexEraserToolService (neutral Region)', () => {
     tool.setRadius(-3);
     // Still erases a single nearby vertex with the prior valid radius (2).
     const canvas = container.querySelector('canvas') as HTMLCanvasElement;
-    canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 10, clientY: 0, button: 0 }));
+    canvas.dispatchEvent(new MouseEvent('pointerdown', { clientX: 10, clientY: 0, button: 0 }));
     expect((committed![0].bounds as Polygon).xpoints.length).toBe(3);
   });
 });
@@ -195,7 +195,7 @@ describe('VertexEraserToolService — keeps what it does not edit (RT-5)', () =>
   });
 
   const click = (x: number, y: number) => (container.querySelector('canvas') as HTMLCanvasElement)
-    .dispatchEvent(new MouseEvent('mousedown', { clientX: x, clientY: y, button: 0 }));
+    .dispatchEvent(new MouseEvent('pointerdown', { clientX: x, clientY: y, button: 0 }));
 
   it('never edits an intensity-profile line', () => {
     const line = new Region();

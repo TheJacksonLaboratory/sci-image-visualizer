@@ -5,6 +5,7 @@ import { CachedImageData, WandToolHost } from '../wand/wand-tool.service';
 import { MatrixFrame } from '../tool-kit/matrix-frame';
 import { MaskStrokeEditor } from '../tool-kit/mask-stroke-editor';
 import { UndoGesture } from '../tool-kit/undo-gesture';
+import { ToolOverlayCanvas } from '../tool-kit/tool-overlay';
 import { RegionStore } from '../../store/region-store.service';
 import { Region } from '../../models/region';
 
@@ -58,7 +59,7 @@ export type BrushToolHost = WandToolHost;
 @Injectable({ providedIn: 'root' })
 export class BrushToolService {
   private host!: BrushToolHost;
-  private overlay: HTMLCanvasElement | null = null;
+  private readonly overlay = new ToolOverlayCanvas();
   private active = false;
 
   /**
@@ -75,18 +76,11 @@ export class BrushToolService {
   /** The class being painted ({@link BrushOptions.label} / `color`); null = plain brush. */
   private paintClass: { label?: string; color?: string } | null = null;
 
-  private readonly boundMouseDown: (e: MouseEvent) => void;
-  private readonly boundMouseMove: (e: MouseEvent) => void;
-  private readonly boundMouseUp: (e: MouseEvent) => void;
-
   /** Makes each drag one undo step, however long the user pauses (RT-12). */
   private readonly gesture: UndoGesture;
 
   constructor(@Optional() regionStore?: RegionStore) {
     this.gesture = new UndoGesture(regionStore);
-    this.boundMouseDown = (e) => this.onMouseDown(e);
-    this.boundMouseMove = (e) => this.onMouseMove(e);
-    this.boundMouseUp = (e) => this.onMouseUp(e);
   }
 
   /** Wire the tool to its host. Must be called once before `setMode(true)`. */
@@ -144,49 +138,29 @@ export class BrushToolService {
   // ── Overlay lifecycle ───────────────────────────────────────────────
 
   private createOverlay() {
-    const plotEl = this.host.getOverlayContainer();
-    if (!plotEl || this.overlay) return;
-
-    const canvas = document.createElement('canvas');
-    canvas.style.position = 'absolute';
-    canvas.style.top = '0';
-    canvas.style.left = '0';
-    canvas.style.width = '100%';
-    canvas.style.height = '100%';
-    canvas.style.cursor = 'crosshair';
-    canvas.style.zIndex = '100';
-    canvas.width = plotEl.offsetWidth;
-    canvas.height = plotEl.offsetHeight;
-
-    plotEl.appendChild(canvas);
-    this.overlay = canvas;
-
-    canvas.addEventListener('mousedown', this.boundMouseDown);
-    canvas.addEventListener('mousemove', this.boundMouseMove);
-    canvas.addEventListener('mouseup', this.boundMouseUp);
-    canvas.addEventListener('mouseleave', this.boundMouseUp);
+    const container = this.host.getOverlayContainer();
+    if (!container) return;
+    this.overlay.attach(container, {
+      down: (e) => this.onPointerDown(e),
+      move: (e) => this.onPointerMove(e),
+      up: () => this.onPointerUp(),
+    });
   }
 
   private destroyOverlay() {
-    if (!this.overlay) return;
-    this.overlay.removeEventListener('mousedown', this.boundMouseDown);
-    this.overlay.removeEventListener('mousemove', this.boundMouseMove);
-    this.overlay.removeEventListener('mouseup', this.boundMouseUp);
-    this.overlay.removeEventListener('mouseleave', this.boundMouseUp);
-    this.overlay.remove();
-    this.overlay = null;
+    if (!this.overlay.attached) return;
+    this.overlay.detach();
     this.resetStroke();
   }
 
-  private onMouseDown(e: MouseEvent) {
-    if (e.button !== 0) return;
+  private onPointerDown(e: PointerEvent) {
     this.dragging = true;
     this.gesture.begin();
     this.lastMatrix = null; // first stamp of this drag is a single dab
     this.applyAtClient(e, true);
   }
 
-  private onMouseMove(e: MouseEvent) {
+  private onPointerMove(e: PointerEvent) {
     if (!this.dragging) return;
     if ((e.buttons & 1) === 0) {
       this.dragging = false;
@@ -196,7 +170,7 @@ export class BrushToolService {
     this.applyAtClient(e, false);
   }
 
-  private onMouseUp(_: MouseEvent) {
+  private onPointerUp() {
     // Stop accumulating from this drag, but keep the region alive so the next
     // mousedown extends it. Clear lastMatrix so the next drag starts a dab.
     this.dragging = false;
@@ -218,8 +192,8 @@ export class BrushToolService {
    * tick — into the active region's accumulator mask, re-trace the boundary,
    * and commit the updated Region. Shift = erase.
    */
-  private applyAtClient(e: MouseEvent, isStart: boolean) {
-    if (!this.overlay) return;
+  private applyAtClient(e: PointerEvent, isStart: boolean) {
+    if (!this.overlay.attached) return;
     const cached = this.host.getCachedImageData();
     if (!cached || cached.frames.length === 0) return;
 

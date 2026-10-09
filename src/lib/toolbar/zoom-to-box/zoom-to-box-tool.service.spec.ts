@@ -50,17 +50,17 @@ describe('ZoomToBoxToolService overlay lifecycle', () => {
     const c = canvas();
     // jsdom getBoundingClientRect is all-zeros and pixelToData is identity, so
     // data coords equal the client coords.
-    c.dispatchEvent(new MouseEvent('mousedown', { clientX: 10, clientY: 10 }));
-    c.dispatchEvent(new MouseEvent('mousemove', { clientX: 40, clientY: 50 }));
-    c.dispatchEvent(new MouseEvent('mouseup', { clientX: 40, clientY: 50 }));
+    c.dispatchEvent(new MouseEvent('pointerdown', { clientX: 10, clientY: 10 }));
+    c.dispatchEvent(new MouseEvent('pointermove', { clientX: 40, clientY: 50 }));
+    c.dispatchEvent(new MouseEvent('pointerup', { clientX: 40, clientY: 50 }));
     expect(applyZoomToBox).toHaveBeenCalledWith([10, 40, 50, 10]);
   });
 
   it('ignores a tiny drag (accidental click) without zooming', () => {
     service.setMode(true);
     const c = canvas();
-    c.dispatchEvent(new MouseEvent('mousedown', { clientX: 10, clientY: 10 }));
-    c.dispatchEvent(new MouseEvent('mouseup', { clientX: 12, clientY: 11 })); // < 5px each axis
+    c.dispatchEvent(new MouseEvent('pointerdown', { clientX: 10, clientY: 10 }));
+    c.dispatchEvent(new MouseEvent('pointerup', { clientX: 12, clientY: 11 })); // < 5px each axis
     expect(applyZoomToBox).not.toHaveBeenCalled();
   });
 
@@ -68,8 +68,8 @@ describe('ZoomToBoxToolService overlay lifecycle', () => {
     service.setMode(true);
     const c = canvas();
     expect(() => {
-      c.dispatchEvent(new MouseEvent('mousemove', { clientX: 5, clientY: 5 }));
-      c.dispatchEvent(new MouseEvent('mouseup', { clientX: 40, clientY: 40 }));
+      c.dispatchEvent(new MouseEvent('pointermove', { clientX: 5, clientY: 5 }));
+      c.dispatchEvent(new MouseEvent('pointerup', { clientX: 40, clientY: 40 }));
     }).not.toThrow();
     expect(applyZoomToBox).not.toHaveBeenCalled();
   });
@@ -77,7 +77,16 @@ describe('ZoomToBoxToolService overlay lifecycle', () => {
   it('draws the selection rectangle on drag-move without throwing', () => {
     service.setMode(true);
     const c = canvas();
-    c.dispatchEvent(new MouseEvent('mousedown', { clientX: 10, clientY: 10 }));
-    expect(() => c.dispatchEvent(new MouseEvent('mousemove', { clientX: 40, clientY: 50 }))).not.toThrow();
+    c.dispatchEvent(new MouseEvent('pointerdown', { clientX: 10, clientY: 10 }));
+    expect(() => c.dispatchEvent(new MouseEvent('pointermove', { clientX: 40, clientY: 50 }))).not.toThrow();
+  });
+
+  it('only the primary button starts a zoom box (RT-31)', () => {
+    service.setMode(true);
+    const c = canvas();
+    c.dispatchEvent(new MouseEvent('pointerdown', { button: 2, clientX: 10, clientY: 10 }));
+    c.dispatchEvent(new MouseEvent('pointerup', { button: 2, clientX: 60, clientY: 60 }));
+    expect(applyZoomToBox).not.toHaveBeenCalled();
+    service.setMode(false);
   });
 });
