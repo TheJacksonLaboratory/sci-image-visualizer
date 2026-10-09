@@ -1,7 +1,7 @@
 import { Injectable, Optional } from '@angular/core';
 
 import { IViewportHost, IRegionDataHost } from '../../contracts/coordinate-transform.contract';
-import { Region, Polygon } from '../../models/region';
+import { Polygon } from '../../models/region';
 import { makePolygon, replaceBounds } from '../../models/polygon-factory';
 import { dropVerticesWithinRadius } from '../../geometry/ring';
 import type { CachedImageData } from '../wand/wand-tool.service';

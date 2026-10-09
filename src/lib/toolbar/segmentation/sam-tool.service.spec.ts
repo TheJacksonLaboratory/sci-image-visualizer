@@ -1,6 +1,5 @@
 import { SamToolService } from './sam-tool.service';
 import { SamSessionService } from './sam-session.service';
-import { WandService } from '../wand/wand.service';
 import { CachedImageData, WandToolHost } from '../wand/wand-tool.service';
 import { ISamSession, SamEmbedding, SamPrompt } from '../../contracts/sam.contract';
 import { Region, Rectangle, Polygon } from '../../models/region';
@@ -16,7 +15,7 @@ function rectRegion(x: number, y: number, w: number, h: number): Region {
 }
 
 /** Fake SAM session: `decode` fills the prompt box into a full-frame mask, so
- *  WandService.maskToPolygons traces it back to a polygon region. */
+ *  the contour tracer turns it back into a polygon region. */
 function fakeSession(): ISamSession {
   return {
     loadModel: async () => undefined,

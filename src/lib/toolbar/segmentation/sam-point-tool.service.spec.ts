@@ -1,5 +1,4 @@
 import { SamPointToolService } from './sam-point-tool.service';
-import { WandService } from '../wand/wand.service';
 import { CachedImageData, WandToolHost } from '../wand/wand-tool.service';
 import { ISamSession, SamEmbedding } from '../../contracts/sam.contract';
 import { Region } from '../../models/region';

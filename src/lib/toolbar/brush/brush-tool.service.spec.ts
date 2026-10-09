@@ -1,5 +1,4 @@
 import { BrushToolService } from './brush-tool.service';
-import { WandService } from '../wand/wand.service';
 import { CachedImageData, WandToolHost } from '../wand/wand-tool.service';
 import { Region, Polygon } from '../../models/region';
 

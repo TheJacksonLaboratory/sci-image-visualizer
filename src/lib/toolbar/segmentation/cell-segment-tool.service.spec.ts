@@ -1,5 +1,4 @@
 import { CellSegmentToolService } from './cell-segment-tool.service';
-import { WandService } from '../wand/wand.service';
 import { CachedImageData, WandToolHost } from '../wand/wand-tool.service';
 import { ICellSegmenter, CellSegmentation } from '../../contracts/cell-segmenter.contract';
 import { Region, Rectangle, Polygon } from '../../models/region';

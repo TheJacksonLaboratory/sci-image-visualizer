@@ -1,6 +1,5 @@
 import { Injectable, Optional } from '@angular/core';
 
-import { WandService } from '../wand/wand.service';
 import { CachedImageData, WandToolHost } from '../wand/wand-tool.service';
 import { MatrixFrame } from '../tool-kit/matrix-frame';
 import { MaskStrokeEditor } from '../tool-kit/mask-stroke-editor';

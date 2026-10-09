@@ -1,5 +1,4 @@
 import { VertexEraserToolService } from './vertex-eraser-tool.service';
-import { WandService } from '../wand/wand.service';
 import { Region, Polygon } from '../../models/region';
 import { ICoordinateTransform } from '../../contracts/coordinate-transform.contract';
 
