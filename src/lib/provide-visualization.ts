@@ -19,6 +19,18 @@ import { REGION_EDITOR_API } from './contracts/region-editor-api.contract';
 import { CHANNEL_HISTOGRAM_API } from './contracts/channel-histogram-api.contract';
 
 /**
+ * The three host-facing contracts, all served by the router. Shared by
+ * {@link provideVisualization} (component scope) and `VisualizationModule` (root),
+ * so both bind them the same way; at each scope they resolve to that scope's router.
+ * Package-internal (not exported from the public API).
+ */
+export const VISUALIZER_TOKEN_BINDINGS: Provider[] = [
+  { provide: VISUALIZER, useExisting: RoutingVisualizerService },
+  { provide: REGION_EDITOR_API, useExisting: RoutingVisualizerService },
+  { provide: CHANNEL_HISTOGRAM_API, useExisting: RoutingVisualizerService },
+];
+
+/**
  * A self-contained, isolated visualization backend chain for a component subtree.
  *
  * The chain services are `providedIn: 'root'` singletons, so by default the whole
@@ -68,10 +80,8 @@ export function provideVisualization(): Provider[] {
     SamToolService,
     SamPointToolService,
     CellSegmentToolService,
-    // The three host-facing contracts are all served by the router — bound here at
-    // the SAME (component) scope so they resolve to the isolated instance, not root.
-    { provide: VISUALIZER, useExisting: RoutingVisualizerService },
-    { provide: REGION_EDITOR_API, useExisting: RoutingVisualizerService },
-    { provide: CHANNEL_HISTOGRAM_API, useExisting: RoutingVisualizerService },
+    // The host-facing contracts, bound here at the SAME (component) scope so they
+    // resolve to the isolated router instance, not root.
+    ...VISUALIZER_TOKEN_BINDINGS,
   ];
 }

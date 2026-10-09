@@ -33,10 +33,7 @@ import { HexColorPickerComponent } from './hex-color-picker/hex-color-picker.com
 import { ChannelHistogramComponent } from './channel-histogram/channel-histogram.component';
 import { SpatialControlsComponent } from './spatial-controls/spatial-controls.component';
 import { SpatialChartsComponent } from './spatial-controls/spatial-charts/spatial-charts.component';
-import { RoutingVisualizerService } from './routing-visualizer.service';
-import { VISUALIZER } from './contracts/visualizer.contract';
-import { REGION_EDITOR_API } from './contracts/region-editor-api.contract';
-import { CHANNEL_HISTOGRAM_API } from './contracts/channel-histogram-api.contract';
+import { VISUALIZER_TOKEN_BINDINGS } from './provide-visualization';
 
 /**
  * Self-contained plotting UI: the {@link VisualizerComponent} (plot surface
@@ -97,11 +94,9 @@ import { CHANNEL_HISTOGRAM_API } from './contracts/channel-histogram-api.contrac
     // library so importing VisualizationModule is enough — the host supplies only
     // the *ports* (IMAGE_STATE_PORT / TILE_ACCESS_PORT / REGION_IO_PORT) and
     // VIZ_CONFIG, which are app-specific. A consumer needing an isolated instance
-    // (e.g. a modal that mustn't share region/image state) re-provides this same
-    // set at component scope, which shadows these defaults for its subtree.
-    { provide: VISUALIZER, useExisting: RoutingVisualizerService },
-    { provide: REGION_EDITOR_API, useExisting: RoutingVisualizerService },
-    { provide: CHANNEL_HISTOGRAM_API, useExisting: RoutingVisualizerService },
+    // (e.g. a modal that mustn't share region/image state) uses provideVisualization(),
+    // which binds the same set at component scope and shadows these for its subtree.
+    VISUALIZER_TOKEN_BINDINGS,
   ],
 })
 export class VisualizationModule {}
