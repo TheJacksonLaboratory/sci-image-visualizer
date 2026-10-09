@@ -1115,7 +1115,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    *  the multichannel tint ramps are built inside {@link MultiChannelImageView} from each
    *  channel's hex colour. */
   private grayscaleColormap(): Colormap | string {
-    const value = (this.currentColormap as { data?: { value?: unknown } } | null)?.data?.value;
+    const value = this.colormapValue();
     const lut = value != null ? buildColormapLut(value, this.currentReverse) : null;
     if (lut) return colormapFromLut('gray-cmap', lut);
     return this.currentReverse
@@ -1427,19 +1427,43 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     });
   }
 
-  /** Subscribe channel states + grayscale colormap → live-apply to the rendered layers (no
-   *  re-fetch; only z changes re-fetch). Replaces any prior subscription. */
-  private subscribeDisplayState(): void {
+  /**
+   * The one display-state subscription every image/volume/surface mode uses: channel states,
+   * colormap (+ reverse), invert and the selected channel. Records the colormap/reverse/invert the
+   * builders read, then hands the mode its own layer updates. Replaces any prior subscription
+   * (the spatial modes' marker subscription also records the colormap — see subscribeSpatial).
+   */
+  private watchDisplayState(apply: (channels: IChannelState[], selected: number) => void): void {
     this.displaySub?.unsubscribe();
     this.displaySub = combineLatest([
       this.store.getChannelStates(),
       this.store.getColormap(),
       this.store.getReverseScale(),
       this.store.getInvert(),
-    ]).subscribe(([channels, colormap, reverse, invert]) => {
+      this.store.getSelectedChannel(),
+    ]).subscribe(([channels, colormap, reverse, invert, selected]) => {
       this.currentColormap = (colormap as ColormapNode) ?? null;
       this.currentReverse = reverse;
       this.invertEnabled = invert;
+      apply(channels, selected);
+    });
+  }
+
+  /** The selected display colormap's value (a name or inline stops), if any. */
+  private colormapValue(): unknown {
+    return this.currentColormap?.data?.value;
+  }
+
+  /** The LUT a continuous spatial layer draws with: the view's own choice, else the display
+   *  colormap and its reverse flag — one rule for the markers, the cloud and both gene maps. */
+  private spatialLut(view: SpatialViewState): Rgb[] {
+    return spatialContinuousLut(this.colormapValue(), this.currentReverse, view.continuousColormap);
+  }
+
+  /** Subscribe channel states + grayscale colormap → live-apply to the rendered layers (no
+   *  re-fetch; only z changes re-fetch). Replaces any prior subscription. */
+  private subscribeDisplayState(): void {
+    this.watchDisplayState((channels) => {
       this.applyDisplayState(channels);
       this.recolorNavigator();
     });
@@ -1450,16 +1474,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    *  (min/max → contrastLimits)** and **gamma**, mirroring the grayscale image's display controls
    *  so the histogram pane drives the 3D render. Replaces any prior subscription. */
   private subscribeVolumeDisplayState(): void {
-    this.displaySub?.unsubscribe();
-    this.displaySub = combineLatest([
-      this.store.getColormap(),
-      this.store.getReverseScale(),
-      this.store.getInvert(),
-      this.store.getChannelStates(),
-    ]).subscribe(([colormap, reverse, invert, channels]) => {
-      this.currentColormap = (colormap as ColormapNode) ?? null;
-      this.currentReverse = reverse;
-      this.invertEnabled = invert;
+    this.watchDisplayState((channels) => {
       const view = this.volumeView;
       if (!view) return;
       if (this.volumeMultichannel) {
@@ -1502,7 +1517,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    * invert, so both are emulated by reversing the colormap.
    */
   private volumeColormap(st: IChannelState | undefined): Colormap | string {
-    const node = this.currentColormap as { label?: string; data?: { value?: unknown } } | null;
+    const node = this.currentColormap;
     // A colored colormap (viridis/magma/…) drives the volume; the default grayscale family
     // (gray / Greys / Greys Inv) yields to the channel's colour so the dialog colour swatch
     // recolors the 3D render.
@@ -2150,8 +2165,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       latest: () => this.spatialLatest,
       canvasSize: () => [this.canvas?.clientWidth ?? 0, this.canvas?.clientHeight ?? 0],
       continuousLut: (view) => {
-        const node = this.currentColormap as { data?: { value?: unknown } } | null;
-        return spatialContinuousLut(node?.data?.value, this.currentReverse, view.continuousColormap);
+        return this.spatialLut(view);
       },
       // These follow the camera, which moves outside the zone; the panel reads them.
       estimateChanged: (e) => this.inZone(() => this.transcriptEstimate$.next(e)),
@@ -2992,10 +3006,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const field = this.geneMapField;
     if (!field) return;
 
-    const node = this.currentColormap as { data?: { value?: unknown } } | null;
-    const lut = spatialContinuousLut(
-      node?.data?.value, this.currentReverse, view.continuousColormap,
-    );
+    const lut = this.spatialLut(view);
     const [lo, hi] = contrastWindow(field.mean, clip[0], clip[1]);
     const rgba = colorExpressionField(field, lut, [lo, hi], {
       log: view.logScale,
@@ -3405,10 +3416,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
 
     const [lo, hi] = contrastWindow(field.mean, clip[0], clip[1]);
     const data = encodeExpressionVolume(field, [lo, hi], { log: view.logScale });
-    const node = this.currentColormap as { data?: { value?: unknown } } | null;
-    const lut = spatialContinuousLut(
-      node?.data?.value, this.currentReverse, view.continuousColormap,
-    );
+    const lut = this.spatialLut(view);
     this.geneMapVolumeLayer = viewer.addVolume(
       data, field.width, field.height, field.depth,
       {
@@ -3539,10 +3547,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    * recoloured and the map under them did not.
    */
   private continuousColormapKey(view: SpatialViewState): string {
-    const node = this.currentColormap as { data?: { value?: unknown } } | null;
     return [
       colormapId(view.continuousColormap),
-      colormapId(node?.data?.value),
+      colormapId(this.colormapValue()),
       this.currentReverse ? 'rev' : '',
     ].join(':');
   }
@@ -3787,10 +3794,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private encodeSpatial3dContinuous(
     source: Float32Array, view: SpatialViewState, log: boolean,
   ): Spatial3dEncoding {
-    const node = this.currentColormap as { data?: { value?: unknown } } | null;
-    const lut = spatialContinuousLut(
-      node?.data?.value, this.currentReverse, view.continuousColormap,
-    );
+    const lut = this.spatialLut(view);
     const [lo, hi] = view.percentileClip ?? [0.01, 0.99];
     let values = source;
     if (log) {
@@ -3876,10 +3880,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     values: Float32Array, view: SpatialViewState, log: boolean,
     muted: Uint8Array | null = null,
   ): Float32Array {
-    const node = this.currentColormap as { data?: { value?: unknown } } | null;
-    const lut = spatialContinuousLut(
-      node?.data?.value, this.currentReverse, view.continuousColormap,
-    );
+    const lut = this.spatialLut(view);
     const [lo, hi] = view.percentileClip ?? [0.01, 0.99];
     const [min, max] = contrastWindow(values, lo, hi);
     return encodeContinuous(values, { lut, min, max, log, opacity: view.opacity, muted });
@@ -3940,16 +3941,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
 
   /** Store colormap / reverse / invert / channel window → the 3D scatter's colormap + contrast. */
   private subscribeScatter3dDisplayState(): void {
-    this.displaySub?.unsubscribe();
-    this.displaySub = combineLatest([
-      this.store.getColormap(),
-      this.store.getReverseScale(),
-      this.store.getInvert(),
-      this.store.getChannelStates(),
-    ]).subscribe(([colormap, reverse, invert, channels]) => {
-      this.currentColormap = (colormap as ColormapNode) ?? null;
-      this.currentReverse = reverse;
-      this.invertEnabled = invert;
+    this.watchDisplayState((channels) => {
       const layer = this.scatter3dLayer;
       if (!layer) return;
       const st = channels[0];
@@ -4231,17 +4223,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    *  mesh geometry (from the cached slice); colour-only edits (colormap/LUT, gamma, reverse, invert)
    *  just update the layer's uniforms. */
   private subscribeSurfaceDisplayState(): void {
-    this.displaySub?.unsubscribe();
-    this.displaySub = combineLatest([
-      this.store.getColormap(),
-      this.store.getReverseScale(),
-      this.store.getInvert(),
-      this.store.getChannelStates(),
-      this.store.getSelectedChannel(),
-    ]).subscribe(([colormap, reverse, invert, channels, selected]) => {
-      this.currentColormap = (colormap as ColormapNode) ?? null;
-      this.currentReverse = reverse;
-      this.invertEnabled = invert;
+    this.watchDisplayState((channels, selected) => {
       const layer = this.surfaceLayer;
       if (!layer || !this.viewer) return;
       // Selected channel changed (multichannel): re-fetch THAT band's planes and
