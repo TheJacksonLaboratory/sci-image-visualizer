@@ -365,6 +365,38 @@ describe('NapariRegionOverlay', () => {
     expect(store.getSelectedShapeIndices()).toEqual([0]);
   });
 
+  /** What a bare click in select mode selects (selection cleared first). */
+  function clickSelect(x: number, y: number): number[] {
+    store.setSelectedShapeIndices([]);
+    ptr(overlay, 'pointerdown', x, y);
+    ptr(overlay, 'pointerup', x, y);
+    return store.getSelectedShapeIndices();
+  }
+
+  it('select: a click inside a donut\'s hole does not select the donut (as OSD)', () => {
+    store.addRegion(rectRegionAt(200, 200, 10, 10)); // index 0
+    store.addRegion(donutRegion()); // index 1, hole 7–13
+    overlay.setMode('select');
+    expect(clickSelect(3, 3)).toEqual([1]); // the ring
+    expect(clickSelect(10, 10)).toEqual([]); // the hole
+  });
+
+  it('select: an open polyline is picked near its line, not by its implied interior', () => {
+    const r = triRegion();
+    const p = r.bounds as Polygon;
+    // A U: down the left, across the bottom, up the right.
+    p.xpoints = [0, 0, 40, 40];
+    p.ypoints = [0, 40, 40, 0];
+    p.npoints = 4;
+    p.closed = false;
+    store.addRegion(rectRegionAt(200, 200, 10, 10)); // index 0
+    store.addRegion(r); // index 1
+    overlay.setMode('select');
+    expect(clickSelect(20, 20)).toEqual([]); // inside the U: nothing is there
+    expect(clickSelect(3, 20)).toEqual([1]); // 3 px from the left stroke
+    expect(clickSelect(20, 37)).toEqual([1]); // 3 px from the bottom stroke
+  });
+
   it('move: dragging the body translates the whole region', () => {
     // A large rect so the press point sits clear of every corner handle.
     const id = store.addRegion(rectRegionAt(0, 0, 100, 100));

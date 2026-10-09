@@ -34,6 +34,8 @@ const CLOSE_SNAP_PX = 10;
 const HANDLE_HIT_PX = 9;
 /** Rendered handle size (screen px). */
 const HANDLE_SIZE = 7;
+/** Screen-px distance from an open polyline within which a click selects it (as OSD). */
+const OPEN_PATH_HIT_PX = 6;
 
 /**
  * The slice of the napari Viewer the overlay needs (coord transforms + control gating).
@@ -381,7 +383,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
     // Hit-test bodies, topmost first (last drawn renders on top).
     const regions = this.store.getRegions();
     for (let i = regions.length - 1; i >= 0; i--) {
-      if (this.hitTest(regions[i], ix, iy)) {
+      if (this.hitTest(regions[i], ix, iy, e.clientX, e.clientY)) {
         this.store.selectRegion(regions[i]);
         this.store.beginBatch();
         this.edit = { kind: 'body', id: regions[i].id, last: [ix, iy] };
@@ -575,7 +577,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
     if (best >= 0) this.store.deleteVertex(sel.id, best);
   }
 
-  /** Distance from point (px,py) to segment (ax,ay)-(bx,by), in image units. */
+  /** Distance from point (px,py) to segment (ax,ay)-(bx,by), in the units they are given in. */
   private pointSegDist(
     px: number,
     py: number,
@@ -670,7 +672,13 @@ export class NapariRegionOverlay implements IRegionOverlay {
   }
 
   // ── rendering ─────────────────────────────────────────────────────────────
-  private hitTest(region: Region, x: number, y: number): boolean {
+  /**
+   * Whether a click at image point `(x, y)` (client `clientX, clientY`) lands on `region`, by
+   * the same rules as OSD: a closed polygon is its exterior minus its holes, a multi-part
+   * region is any of its parts, and an open polyline has no interior — it is hit within
+   * {@link OPEN_PATH_HIT_PX} screen pixels of its line, so it stays clickable at any zoom.
+   */
+  private hitTest(region: Region, x: number, y: number, clientX: number, clientY: number): boolean {
     const b = region.bounds;
     if (!b) return false;
     if ('width' in b && 'x' in b) {
@@ -679,38 +687,52 @@ export class NapariRegionOverlay implements IRegionOverlay {
     }
     if ('npoints' in b) {
       const p = b as Polygon;
-      let inside = false;
-      for (let i = 0, j = p.npoints - 1; i < p.npoints; j = i++) {
-        const xi = p.xpoints[i];
-        const yi = p.ypoints[i];
-        const xj = p.xpoints[j];
-        const yj = p.ypoints[j];
-        if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
-      }
-      return inside;
+      if (p.closed === false) return this.nearPolyline(p.xpoints, p.ypoints, clientX, clientY);
+      return this.polygonContains(p, x, y);
     }
-    // Multi-part region (merge/union output): inside any part, minus that part's holes (as OSD).
+    // Multi-part region (merge/union output): inside any part, minus that part's holes.
     if ('polygons' in b) {
-      return (b as MultiPolygon).polygons.some(
-        (p) =>
-          this.ringContains(p.xpoints, p.ypoints, x, y) &&
-          !(p.holes ?? []).some((ring) =>
-            this.ringContains(ring.map((pt) => pt[0]), ring.map((pt) => pt[1]), x, y),
-          ),
-      );
+      return (b as MultiPolygon).polygons.some((p) => this.polygonContains(p, x, y));
     }
     return false;
   }
 
-  /** Even-odd point-in-ring test in image coords. */
-  private ringContains(xs: number[], ys: number[], x: number, y: number): boolean {
+  /** Inside the exterior ring and outside every hole (image coords). */
+  private polygonContains(p: Polygon, x: number, y: number): boolean {
+    if (!this.ringContains(p.xpoints.length, (i) => p.xpoints[i], (i) => p.ypoints[i], x, y)) return false;
+    return !(p.holes ?? []).some((ring) =>
+      this.ringContains(ring.length, (i) => ring[i][0], (i) => ring[i][1], x, y),
+    );
+  }
+
+  /** Even-odd point-in-ring test in image coords, over `n` vertices read through `xAt`/`yAt`. */
+  private ringContains(
+    n: number, xAt: (i: number) => number, yAt: (i: number) => number, x: number, y: number,
+  ): boolean {
     let inside = false;
-    for (let i = 0, j = xs.length - 1; i < xs.length; j = i++) {
-      if (ys[i] > y !== ys[j] > y && x < ((xs[j] - xs[i]) * (y - ys[i])) / (ys[j] - ys[i]) + xs[i]) {
-        inside = !inside;
-      }
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      const xi = xAt(i);
+      const yi = yAt(i);
+      const xj = xAt(j);
+      const yj = yAt(j);
+      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
     }
     return inside;
+  }
+
+  /** Whether a client point is within {@link OPEN_PATH_HIT_PX} screen px of an open polyline. */
+  private nearPolyline(xs: number[], ys: number[], clientX: number, clientY: number): boolean {
+    const r = this.svg.getBoundingClientRect();
+    const px = clientX - r.left;
+    const py = clientY - r.top;
+    let [ax, ay] = this.toLocal(xs[0], ys[0]);
+    for (let i = 1; i < xs.length; i++) {
+      const [bx, by] = this.toLocal(xs[i], ys[i]);
+      if (this.pointSegDist(px, py, ax, ay, bx, by) <= OPEN_PATH_HIT_PX) return true;
+      ax = bx;
+      ay = by;
+    }
+    return false;
   }
 
   /** Show or hide the drawn regions. A region being drawn stays visible either way. */
