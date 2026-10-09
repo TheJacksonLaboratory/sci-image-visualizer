@@ -156,10 +156,12 @@ export const PLOT_TYPE_DESCRIPTORS: Partial<Record<PlotType, PlotTypeDescriptor>
   [PlotType.SPATIAL_OMICS_3D]:  { type: PlotType.SPATIAL_OMICS_3D,  label: 'Spatial omics 3D (napari · WebGPU)', productionLabel: 'Spatial omics 3D', icon: 'assets/plotting/spatial-omics-3d.svg', dimensions: '3d', source: 'spatial', requiresSpatialData: true, requiresSpatial3d: true },
 };
 
+/** The built-in descriptor (label, icon, dimensions, data source) of a plot type, if any. */
 export function getPlotTypeDescriptor(type: PlotType): PlotTypeDescriptor | undefined {
   return PLOT_TYPE_DESCRIPTORS[type];
 }
 
+/** Whether a built-in plot type renders in 3D (its descriptor says `dimensions: '3d'`). */
 export function isThreeDimensional(type: PlotType): boolean {
   return PLOT_TYPE_DESCRIPTORS[type]?.dimensions === '3d';
 }

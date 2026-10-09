@@ -90,6 +90,7 @@ export interface SelectParamSpec {
   tooltip?: string;
 }
 
+/** One parameter a dialog tool asks for, discriminated by `type`. */
 export type ToolParamSpec = NumberParamSpec | BooleanParamSpec | SelectParamSpec;
 
 /** One selectable checkpoint. */

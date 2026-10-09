@@ -32,4 +32,7 @@ export interface ImageStatePort {
   setDiagram(diagram: VisualizerHandle | null): void;
 }
 
+/**
+ * DI token for the host's {@link ImageStatePort}. Required: the visualizer component injects it.
+ */
 export const IMAGE_STATE_PORT = new InjectionToken<ImageStatePort>('IMAGE_STATE_PORT');

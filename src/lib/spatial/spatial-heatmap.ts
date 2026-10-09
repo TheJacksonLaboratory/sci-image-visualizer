@@ -40,6 +40,7 @@ export interface HeatmapGroups {
   categories: readonly string[];
 }
 
+/** Options for {@link heatmapMatrix}: the observations, scaling and size limits. */
 export interface HeatmapMatrixOptions {
   /** Observations to include; every one when absent (an ROI selection). */
   indices?: Uint32Array;
@@ -68,6 +69,7 @@ export interface HeatmapMatrixOptions {
   maxCols?: number;
 }
 
+/** Mean expression of genes (rows) per group (columns), ready for a heatmap trace. */
 export interface HeatmapMatrix {
   /** Gene names, one per row, in the order given. */
   rows: string[];

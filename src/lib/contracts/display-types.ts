@@ -279,6 +279,10 @@ export type TranscriptGlyphName =
   | 'circle' | 'star' | 'triangle' | 'square' | 'diamond' | 'cross' | 'hexagon'
   | 'triangle-down' | 'pentagon' | 'x';
 
+/**
+ * The spatial view a dataset opens with: no colour source, points and volume shown, the
+ * optional layers off. A complete state to spread partial view-state patches over.
+ */
 export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
   colorBy: null,
   pointScale: 1,

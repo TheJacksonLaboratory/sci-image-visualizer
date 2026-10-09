@@ -10,6 +10,13 @@ import {
 } from '../contracts/channel-histogram-api.contract';
 import { autoWindowFromHistogram } from '../contracts/intensity';
 
+/** Delay between retries while the histogram sampling resolves. */
+const HIST_RETRY_MS = 400;
+/** Retries before giving up and showing an empty histogram. */
+const HIST_MAX_RETRIES = 10;
+
+let nextInstanceId = 0;
+
 /**
  * Channels & Histogram pane: a non-modal, resizable, draggable dialog for
  * brightness/contrast (per-channel display window), gamma, channel
@@ -19,13 +26,6 @@ import { autoWindowFromHistogram } from '../contracts/intensity';
  * backends recolor the displayed image live. The pane depends only on the
  * contract, never the concrete visualizer.
  */
-/** Delay between retries while the histogram sampling resolves. */
-const HIST_RETRY_MS = 400;
-/** Retries before giving up and showing an empty histogram. */
-const HIST_MAX_RETRIES = 10;
-
-let nextInstanceId = 0;
-
 @Component({
   selector: 'channel-histogram',
   templateUrl: './channel-histogram.component.html',

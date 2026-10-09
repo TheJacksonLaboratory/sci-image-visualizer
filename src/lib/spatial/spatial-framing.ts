@@ -14,6 +14,7 @@
  *  flush against the edge. Matches napari-js's own fit margin. */
 export const SPATIAL_FIT_MARGIN = 0.95;
 
+/** A 2D camera framing: where to centre, and how far to zoom. */
 export interface SpatialFraming {
   /** World point to put at the centre of the viewport. */
   center: [number, number];

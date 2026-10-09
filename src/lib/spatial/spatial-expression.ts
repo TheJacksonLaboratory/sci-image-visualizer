@@ -44,6 +44,10 @@ export interface ExpressionFieldOptions {
   indices?: Uint32Array;
 }
 
+/**
+ * A 2D field of kernel-weighted mean expression on a `width × height` grid, with the
+ * support that says where it was actually measured.
+ */
 export interface ExpressionField {
   width: number;
   height: number;
@@ -194,6 +198,10 @@ export interface ExpressionVolumeOptions {
   interpolate?: boolean;
 }
 
+/**
+ * The 3D counterpart of {@link ExpressionField}: kernel-weighted mean expression on a
+ * `width × height × depth` voxel grid, with its support.
+ */
 export interface ExpressionVolumeField {
   width: number;
   height: number;

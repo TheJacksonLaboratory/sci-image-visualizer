@@ -89,6 +89,7 @@ interface MuteOptions {
   muted?: Uint8Array | null;
 }
 
+/** Options for {@link encodeCategorical}: a colour per category, plus muting. */
 export interface CategoricalEncodingOptions extends MuteOptions {
   /** Per-category `#rrggbb`, index-aligned with the column's categories. */
   colors: string[];
@@ -96,6 +97,7 @@ export interface CategoricalEncodingOptions extends MuteOptions {
   missingColor?: Rgb;
 }
 
+/** Options for {@link encodeContinuous}: a colormap, a contrast window and scaling, plus muting. */
 export interface ContinuousEncodingOptions extends MuteOptions {
   /** 256-entry RGB table from {@link buildColormapLut}. */
   lut: Rgb[];

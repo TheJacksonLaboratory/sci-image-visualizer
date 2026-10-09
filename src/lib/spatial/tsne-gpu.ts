@@ -38,6 +38,7 @@ export function tileRows(nObs: number, dims: number): number {
   return Math.max(MIN_TILE_ROWS, Math.min(MAX_TILE_ROWS, Math.floor(TILE_BUDGET_BYTES / perRow)));
 }
 
+/** A t-SNE repulsion step that runs on the GPU through jax-js (or its WASM fallback). */
 export interface GpuRepulsion extends Repulsion {
   /** Which backend actually initialised: callers surface this, since it changes the wait. */
   readonly backend: 'webgpu' | 'wasm';

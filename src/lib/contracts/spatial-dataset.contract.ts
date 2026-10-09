@@ -100,6 +100,7 @@ export interface ContinuousColumnMeta extends SpatialColumnMetaBase {
   max?: number;
 }
 
+/** Descriptor of one per-observation column, discriminated by `kind`. */
 export type SpatialColumnMeta = CategoricalColumnMeta | ContinuousColumnMeta;
 
 /**
@@ -125,11 +126,14 @@ export interface ContinuousColumn {
   values: Float32Array;
 }
 
+/** A loaded column with its values, discriminated by `meta.kind`. */
 export type SpatialColumn = CategoricalColumn | ContinuousColumn;
 
+/** Narrow a loaded column to a categorical one. */
 export function isCategoricalColumn(c: SpatialColumn): c is CategoricalColumn {
   return c.meta.kind === 'categorical';
 }
+/** Narrow a loaded column to a continuous one. */
 export function isContinuousColumn(c: SpatialColumn): c is ContinuousColumn {
   return c.meta.kind === 'continuous';
 }

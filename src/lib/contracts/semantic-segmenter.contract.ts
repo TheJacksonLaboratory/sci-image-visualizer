@@ -30,6 +30,10 @@ export interface SemanticRegion {
   area: number;
 }
 
+/**
+ * The result of one {@link ISemanticSegmenter} run: the class layers found, in the pixel
+ * frame of the `width × height` image that was segmented.
+ */
 export interface SemanticSegmentation {
   regions: SemanticRegion[];
   /** Total pixels assigned to each class, indexed by class id. */
@@ -49,6 +53,7 @@ export interface SemanticSegmentation {
   unassignedFraction: number;
 }
 
+/** Options for one {@link ISemanticSegmenter} run. */
 export interface SemanticSegmentOptions {
   /** Which registered model to run. Defaults to the registry's default. */
   modelId?: string;

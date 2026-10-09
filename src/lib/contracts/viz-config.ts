@@ -24,4 +24,5 @@ export interface VizConfig {
   useNapariRenderer?: boolean;
 }
 
+/** DI token for the host's {@link VizConfig}. Required by the router. */
 export const VIZ_CONFIG = new InjectionToken<VizConfig>('VIZ_CONFIG');

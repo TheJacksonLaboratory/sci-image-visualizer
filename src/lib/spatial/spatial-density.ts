@@ -30,6 +30,7 @@ export interface DensityGrid {
   voxelSize: [number, number, number];
 }
 
+/** Kernel and observation subset for a density estimate. */
 export interface DensityOptions {
   /** Kernel σ per axis, in the observations' units. */
   sigma: [number, number, number];

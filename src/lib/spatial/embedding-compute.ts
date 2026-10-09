@@ -21,6 +21,7 @@ export interface ComputeProgress {
   message: string | null;
 }
 
+/** One t-SNE to compute: the PCA scores to embed and the run's parameters. */
 export interface ComputeRequest {
   /** PCA scores, row-major `nObs x nDims`. */
   scores: Float32Array;
@@ -38,6 +39,10 @@ export interface ComputeRequest {
  */
 export type WorkerFactory = () => Worker | Promise<Worker>;
 
+/**
+ * One t-SNE run in its own worker: start it, follow its progress, cancel it. Single use —
+ * a new computation takes a new run.
+ */
 export class EmbeddingComputeRun {
   private worker: Worker | null = null;
 

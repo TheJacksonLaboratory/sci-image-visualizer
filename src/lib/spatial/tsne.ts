@@ -50,6 +50,7 @@ export interface Repulsion {
   dispose?(): void;
 }
 
+/** Parameters of a t-SNE run; every one has a default. */
 export interface TsneOptions {
   dims?: 2 | 3;
   perplexity?: number;
@@ -63,6 +64,10 @@ export interface TsneOptions {
   shouldStop?: () => boolean;
 }
 
+/**
+ * A t-SNE embedding, row-major `n × dims`, with the perplexity and neighbour count it
+ * actually ran with (both shrink for a small dataset).
+ */
 export interface TsneResult {
   embedding: Float64Array;
   perplexity: number;

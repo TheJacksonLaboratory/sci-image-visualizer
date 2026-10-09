@@ -40,6 +40,10 @@ export interface InstanceDetection {
   className: string;
 }
 
+/**
+ * The result of one {@link IInstanceSegmenter} run: every detection, in the pixel frame of
+ * the `width × height` image that was segmented.
+ */
 export interface InstanceSegmentation {
   detections: InstanceDetection[];
   width: number;

@@ -167,4 +167,8 @@ export interface SpatialDataPort {
   getVolume?(): Promise<Uint8Array>;
 }
 
+/**
+ * DI token for the host's {@link SpatialDataPort}. Optional: a host that serves no
+ * spatial-omics data binds nothing, and the spatial plot types stay hidden.
+ */
 export const SPATIAL_DATA_PORT = new InjectionToken<SpatialDataPort>('SPATIAL_DATA_PORT');

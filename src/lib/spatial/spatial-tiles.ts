@@ -66,6 +66,7 @@ export function cellTypeColumnFor(
   return (categorical.find((c) => !isCuratedColumn(c.name)) ?? categorical[0])?.name ?? null;
 }
 
+/** A stable string id for a tile key, `level/gx/gy` — usable as a Map key. */
 export function tileId(k: TileKey): string {
   return `${k.level}/${k.gx}/${k.gy}`;
 }
@@ -400,8 +401,9 @@ export function clusterOfGene(
   return groups.find((g) => g.genes.includes(gene))?.name ?? gene;
 }
 
-/** Smallest and largest transcript marker, in canvas pixels. */
+/** Smallest transcript marker, in canvas pixels. */
 export const TRANSCRIPT_MIN_PX = 4;
+/** Largest transcript marker, in canvas pixels. */
 export const TRANSCRIPT_MAX_PX = 32;
 /**
  * Physical diameter a single transcript is drawn at, in µm — clearly larger than the
@@ -441,6 +443,7 @@ export const TRANSCRIPT_GLYPHS = [
   'circle', 'star', 'triangle', 'square', 'diamond', 'cross', 'hexagon', 'triangle-down',
   'pentagon', 'x',
 ] as const;
+/** One of the marker shapes in {@link TRANSCRIPT_GLYPHS}. */
 export type TranscriptGlyph = typeof TRANSCRIPT_GLYPHS[number];
 // The view state names glyphs without importing this module; keep the two in step.
 const _glyphNamesMatch: TranscriptGlyph extends TranscriptGlyphName
@@ -574,6 +577,9 @@ export function visibleArea(rect: DataRect, bounds?: SpatialBounds | null): numb
   return Math.max(0, x1 - x0) * Math.max(0, y1 - y0);
 }
 
+/**
+ * How "all genes" is drawn at the current zoom: individual transcripts, a bin level, or nothing.
+ */
 export type AllGenesPlan = { kind: 'individual' } | { kind: 'bins'; level: number } | { kind: 'none' };
 
 /**
