@@ -4,6 +4,7 @@ import {
 } from '@angular/core';
 
 import { hslToHex } from '../store/class-color.util';
+import { hexToRgb, rgbToHex } from '../contracts/color';
 
 @Component({
   selector: 'hex-color-picker',
@@ -217,7 +218,7 @@ export class HexColorPickerComponent implements OnDestroy {
     this.green = green;
     this.blue = blue;
 
-    const hex = this.rgbToHex(red, green, blue);
+    const hex = rgbToHex([red, green, blue]).toUpperCase();
     this._color = hex;
     this.syncHslFromRgb(red, green, blue);
     this.colorInput.emit(hex);
@@ -253,22 +254,16 @@ export class HexColorPickerComponent implements OnDestroy {
   // --- Color conversion utilities ---
 
   private syncFromHex(hex: string) {
-    const rgb = this.hexToRgb(hex);
+    const rgb = hexToRgb(hex);
     if (rgb) {
-      this.red = rgb.r;
-      this.green = rgb.g;
-      this.blue = rgb.b;
-      this.syncHslFromRgb(rgb.r, rgb.g, rgb.b);
+      [this.red, this.green, this.blue] = rgb;
+      this.syncHslFromRgb(rgb[0], rgb[1], rgb[2]);
     }
   }
 
   private syncRgbFromHex(hex: string) {
-    const rgb = this.hexToRgb(hex);
-    if (rgb) {
-      this.red = rgb.r;
-      this.green = rgb.g;
-      this.blue = rgb.b;
-    }
+    const rgb = hexToRgb(hex);
+    if (rgb) [this.red, this.green, this.blue] = rgb;
   }
 
   private syncHslFromRgb(r: number, g: number, b: number) {
@@ -276,25 +271,6 @@ export class HexColorPickerComponent implements OnDestroy {
     this.hue = hsl.h;
     this.saturation = hsl.s;
     this.lightness = hsl.l;
-  }
-
-  private hexToRgb(hex: string): { r: number; g: number; b: number } | null {
-    const match = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    return match
-      ? {
-          r: parseInt(match[1], 16),
-          g: parseInt(match[2], 16),
-          b: parseInt(match[3], 16),
-        }
-      : null;
-  }
-
-  private rgbToHex(r: number, g: number, b: number): string {
-    const toHex = (n: number) =>
-      Math.max(0, Math.min(255, Math.round(n)))
-        .toString(16)
-        .padStart(2, '0');
-    return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
   }
 
   private rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {

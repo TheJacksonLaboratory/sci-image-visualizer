@@ -8,6 +8,7 @@ import { IRegionEditApi } from '../../contracts/region-store.contract';
 import { IRegionOverlay, RegionToolMode } from '../../contracts/region-overlay.contract';
 import { elementToImage, imageToElement } from './osd-coords';
 import { OSD_ZOOM_PER_SCROLL } from './osd-zoom';
+import { parseCssColor } from '../../contracts/color';
 
 /**
  * The shared region store as the overlay needs it: the cross-backend
@@ -584,14 +585,9 @@ export class OsdRegionOverlay implements IRegionOverlay {
   }
 
   private rgba(color: string, alpha: number): string {
-    // Accept #rrggbb; fall back to the color as-is for named/rgb values.
-    if (/^#([0-9a-f]{6})$/i.test(color)) {
-      const r = parseInt(color.slice(1, 3), 16);
-      const g = parseInt(color.slice(3, 5), 16);
-      const b = parseInt(color.slice(5, 7), 16);
-      return `rgba(${r},${g},${b},${alpha})`;
-    }
-    return color;
+    // A parseable colour gets the alpha; anything else (a named colour) is used as-is.
+    const rgb = parseCssColor(color);
+    return rgb ? `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})` : color;
   }
 
   // ── interaction ──────────────────────────────────────────────────────

@@ -12,7 +12,9 @@
  * `color` may be `'rgb(r, g, b)'` or `'#rrggbb'`/`'#rgb'`.
  */
 
-export type Rgb = [number, number, number];
+import { Rgb, parseCssColor } from './color';
+
+export type { Rgb };
 type Stop = [number, string];
 
 /**
@@ -41,21 +43,9 @@ const BUILTIN_SCALES: Record<string, Stop[]> = {
   Cividis: [[0, 'rgb(0,32,76)'], [0.058824, 'rgb(0,42,102)'], [0.117647, 'rgb(0,52,110)'], [0.176471, 'rgb(39,63,108)'], [0.235294, 'rgb(60,74,107)'], [0.294118, 'rgb(76,85,107)'], [0.352941, 'rgb(91,95,109)'], [0.411765, 'rgb(104,106,112)'], [0.470588, 'rgb(117,117,117)'], [0.529412, 'rgb(131,129,120)'], [0.588235, 'rgb(146,140,120)'], [0.647059, 'rgb(161,152,118)'], [0.705882, 'rgb(176,165,114)'], [0.764706, 'rgb(192,177,109)'], [0.823529, 'rgb(209,191,102)'], [0.882353, 'rgb(225,204,92)'], [0.941176, 'rgb(243,219,79)'], [1, 'rgb(255,233,69)']],
 };
 
-/** Parse a Plotly colorscale color (`rgb(r,g,b)` or `#rrggbb`/`#rgb`) to RGB. */
+/** Parse a Plotly colorscale color (`rgb(r,g,b)` or `#rrggbb`/`#rgb`) to RGB; black when unparseable. */
 function parseColor(c: string): Rgb {
-  const s = (c || '').trim();
-  const hex = s.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
-  if (hex) {
-    let h = hex[1];
-    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
-    return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
-  }
-  const rgb = s.match(/rgba?\(([^)]+)\)/i);
-  if (rgb) {
-    const p = rgb[1].split(',').map((v) => parseFloat(v.trim()));
-    return [Math.round(p[0]) || 0, Math.round(p[1]) || 0, Math.round(p[2]) || 0];
-  }
-  return [0, 0, 0];
+  return parseCssColor(c) ?? [0, 0, 0];
 }
 
 /**

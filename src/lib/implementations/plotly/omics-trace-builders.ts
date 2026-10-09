@@ -1,4 +1,5 @@
 import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
+import { parseCssColor, rgbToHex } from '../../contracts/color';
 
 /**
  * Plotly traces for the 1-D distribution charts over spatial-omics values:
@@ -480,17 +481,10 @@ const EMBEDDING_MUTED_OPACITY = 0.15;
  * the same effect is produced by mixing toward the paper instead.
  */
 function towardPaper(hex: string, amount: number): string {
-  const clean = hex.replace('#', '');
-  const full = clean.length === 3
-    ? clean.split('').map((c) => c + c).join('')
-    : clean;
-  const n = Number.parseInt(full, 16);
-  if (!Number.isFinite(n) || full.length !== 6) return hex;
+  const rgb = parseCssColor(hex);
+  if (!rgb) return hex;
   const mix = (c: number): number => Math.round(c + (255 - c) * amount);
-  const r = mix((n >> 16) & 0xff);
-  const g = mix((n >> 8) & 0xff);
-  const b = mix(n & 0xff);
-  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
+  return rgbToHex([mix(rgb[0]), mix(rgb[1]), mix(rgb[2])]);
 }
 
 const DEFAULT_EMBEDDING_POINT_SIZE = 4;

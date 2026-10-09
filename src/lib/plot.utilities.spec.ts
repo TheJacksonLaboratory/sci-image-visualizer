@@ -191,6 +191,8 @@ describe('PlotUtilities', () => {
     const region1 = new Region();
     region1.name = 'region1';
     region1.bounds = new Rectangle();
+    // A named colour is not a hex colour: it exports as the black fallback (it used to be
+    // read as the hex tail 'ed' and export as [0,0,237]).
     region1.color = 'red';
     regions.push(region1);
     const region2 = new Region();
@@ -200,7 +202,7 @@ describe('PlotUtilities', () => {
     regions.push(region2);
 
     const result = plotUtilities.exportROIsToGeoJson(regions);
-    const expected = '{"features":[{"type":"Feature","properties":{"classification":{"name":"region1","color":[0,0,237]}},"geometry":{"type":"Polygon","coordinates":[[[0,0],[0,0],[0,0],[0,0],[0,0]]]}},{"type":"Feature","properties":{"classification":{"name":"region2","color":[0,0,0]}},"geometry":{"type":"Polygon","coordinates":[[null]]}}],"type":"FeatureCollection"}';
+    const expected = '{"features":[{"type":"Feature","properties":{"classification":{"name":"region1","color":[0,0,0]}},"geometry":{"type":"Polygon","coordinates":[[[0,0],[0,0],[0,0],[0,0],[0,0]]]}},{"type":"Feature","properties":{"classification":{"name":"region2","color":[0,0,0]}},"geometry":{"type":"Polygon","coordinates":[[null]]}}],"type":"FeatureCollection"}';
     expect(result).toEqual(expected);
   });
 

@@ -2,6 +2,7 @@ import { Polygon, Rectangle, Region, MultiPolygon } from './models/region';
 import { ShapeSelection } from './models/shape';
 import { resolveHandles, bezierCurveFromHandles } from './models/bezier';
 import { saveAs } from 'file-saver';
+import { hexToRgb, rgbToHex } from './contracts/color';
 
 export const COLORMAP_OPTIONS = [
   {
@@ -655,23 +656,14 @@ export class PlotUtilities {
     return holes;
   }
 
+  /** `#rrggbb` for an RGB triple; see {@link rgbToHex} in `contracts/color`. */
   public rgbToHex(r: number, g: number, b: number): string {
-    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+    return rgbToHex([r, g, b]);
   }
 
+  /** RGB for a hex colour (`#rgb` / `#rrggbb`); black when missing or unparseable. */
   public hexToRgb(hex: string | undefined): number[] {
-    let r: number, g: number, b: number;
-    if (hex) {
-      const bigint = parseInt(hex.slice(1), 16);
-      r = (bigint >> 16) & 255;
-      g = (bigint >> 8) & 255;
-      b = bigint & 255;
-    } else {
-      r = 0;
-      g = 0;
-      b = 0;
-    }
-    return [r, g, b];
+    return hexToRgb(hex) ?? [0, 0, 0];
   }
 
 }

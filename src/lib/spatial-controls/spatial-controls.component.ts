@@ -22,6 +22,7 @@ import {
   SpatialSelectionMask, emptySelection,
 } from '../spatial/spatial-selection';
 import { searchGeneNames } from '../spatial/gene-search';
+import { parseCssColor, rgbToHex } from '../contracts/color';
 import { Supersede } from '../util/supersede';
 
 /** One legend row for a categorical colouring. */
@@ -1042,8 +1043,9 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
 
   /** A typed hex colour, accepted as `#rrggbb` or `rrggbb`; anything else is ignored. */
   onGeneHex(gene: string, text: string): void {
-    const m = /^#?([0-9a-f]{6})$/i.exec(text.trim());
-    if (m) this.onGeneColor(gene, `#${m[1].toLowerCase()}`);
+    const t = text.trim();
+    const rgb = /^#?[0-9a-f]{6}$/i.test(t) ? parseCssColor(t) : null;
+    if (rgb) this.onGeneColor(gene, rgbToHex(rgb));
   }
 
   /** Back to the gene's default icon and colour (by its position in the list). */

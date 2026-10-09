@@ -1,4 +1,5 @@
 import { Rgb, buildColormapLut } from '../contracts/colormap-lut';
+import { parseCssColor } from '../contracts/color';
 import { fallbackColorFor } from '../store/class-color.util';
 import {
   CategoricalColumnMeta, NO_CATEGORY, SpatialObservations,
@@ -110,18 +111,10 @@ export interface ContinuousEncodingOptions extends MuteOptions {
   missingColor?: Rgb;
 }
 
-/** Parse `#rgb` / `#rrggbb` to 0–255 RGB; unparseable input falls back to grey.
- *  Exported so the 3D LUT path parses palettes exactly as the 2D path does. */
+/** Parse a CSS colour (`#rgb` / `#rrggbb`, see {@link parseCssColor}) to 0–255 RGB; unparseable
+ *  input falls back to grey. Exported so the 3D LUT path parses palettes exactly as the 2D path does. */
 export function parseHex(hex: string): Rgb {
-  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec((hex ?? '').trim());
-  if (!m) return MISSING_COLOR;
-  let h = m[1];
-  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
-  return [
-    parseInt(h.slice(0, 2), 16),
-    parseInt(h.slice(2, 4), 16),
-    parseInt(h.slice(4, 6), 16),
-  ];
+  return parseCssColor(hex) ?? MISSING_COLOR;
 }
 
 function alphaAt(i: number, opts: MuteOptions): number {

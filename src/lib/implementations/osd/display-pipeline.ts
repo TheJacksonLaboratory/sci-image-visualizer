@@ -1,5 +1,6 @@
 import { IChannelState } from '../../contracts/channel-histogram-api.contract';
 import { Rgb } from '../../contracts/colormap-lut';
+import { parseCssColor } from '../../contracts/color';
 
 /**
  * The OSD pixel display pipeline (refactoring plan, Step 4 — a pure move of
@@ -166,8 +167,8 @@ export class DisplayPipeline {
 
   /** A channel's pseudo-colour tint as [r,g,b] in 0..1 (default white). */
   tint01(c?: IChannelState): [number, number, number] {
-    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(c?.color ?? '');
-    return m ? [parseInt(m[1], 16) / 255, parseInt(m[2], 16) / 255, parseInt(m[3], 16) / 255] : [1, 1, 1];
+    const rgb = parseCssColor(c?.color);
+    return rgb ? [rgb[0] / 255, rgb[1] / 255, rgb[2] / 255] : [1, 1, 1];
   }
 
   /** True when any RGB channel is windowed/hidden/gamma'd/re-tinted or the
