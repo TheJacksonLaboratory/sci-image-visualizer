@@ -9,6 +9,11 @@ import { RegionStore } from './store/region-store.service';
 import { WandToolService } from './toolbar/wand/wand-tool.service';
 import { VertexEraserToolService } from './toolbar/vertex-eraser/vertex-eraser-tool.service';
 import { ZoomToBoxToolService } from './toolbar/zoom-to-box/zoom-to-box-tool.service';
+import { BrushToolService } from './toolbar/brush/brush-tool.service';
+import { SamToolService } from './toolbar/segmentation/sam-tool.service';
+import { SamPointToolService } from './toolbar/segmentation/sam-point-tool.service';
+import { CellSegmentToolService } from './toolbar/segmentation/cell-segment-tool.service';
+import { SpatialSelectionStore } from './store/spatial-selection.service';
 import { VISUALIZER } from './contracts/visualizer.contract';
 import { REGION_EDITOR_API } from './contracts/region-editor-api.contract';
 import { CHANNEL_HISTOGRAM_API } from './contracts/channel-histogram-api.contract';
@@ -43,7 +48,9 @@ import { CHANNEL_HISTOGRAM_API } from './contracts/channel-histogram-api.contrac
  * Lists EVERY stateful service in the chain. Stateless collaborators (HttpClient,
  * MessageService, WandService) deliberately resolve to root — they hold no
  * per-viewer state, so sharing them is correct and keeps this list minimal. When a
- * new stateful service joins the rendering chain, add it here too.
+ * new stateful service joins the rendering chain, add it here too —
+ * `provide-visualization.spec.ts` fails until it is listed (or allow-listed there as
+ * deliberately shared).
  */
 export function provideVisualization(): Provider[] {
   return [
@@ -53,9 +60,14 @@ export function provideVisualization(): Provider[] {
     NapariVisualizerService,
     VisualizerStore,
     RegionStore,
+    SpatialSelectionStore,
     WandToolService,
+    BrushToolService,
     VertexEraserToolService,
     ZoomToBoxToolService,
+    SamToolService,
+    SamPointToolService,
+    CellSegmentToolService,
     // The three host-facing contracts are all served by the router — bound here at
     // the SAME (component) scope so they resolve to the isolated instance, not root.
     { provide: VISUALIZER, useExisting: RoutingVisualizerService },
