@@ -26,7 +26,7 @@
     <ng-container *ngIf="showPlotTypes">
       <span class="toolbar-separator"></span>
       <p-dropdown [options]="plotTypeOptions" optionLabel="label" optionValue="type"
-                  [(ngModel)]="selectedPlotType" appendTo="body"
+                  [ngModel]="selectedPlotType" appendTo="body"
                   pTooltip="Select plot type" tooltipPosition="bottom"
                   [style]="{'min-width': '11rem'}"
                   styleClass="plotmode-dropdown" panelStyleClass="plotmode-panel"
@@ -48,7 +48,7 @@
       </p-dropdown>
       <ng-container *ngIf="isIsosurfaceMode">
         <span class="flex align-items-center mx-1 toolbar-text">Iso</span>
-        <p-slider [(ngModel)]="isoRange" [range]="true"
+        <p-slider [ngModel]="isoRange" [range]="true"
                   [min]="isoValueMin" [max]="isoValueMax" [step]="isoValueStep"
                   (onChange)="isoRangeChange.emit($event.values)"
                   pTooltip="Isosurface band (0–255), mapped onto the volume's
@@ -111,7 +111,7 @@
       <!-- Image view: scrub z-slices live (the renderer swaps slices in place). -->
       <ng-container *ngIf="showsLiveSliceScrubber">
         <span class="flex align-items-center mx-1 toolbar-text">Slice</span>
-        <p-slider [(ngModel)]="zIndex" [min]="0" [max]="maxIndex"
+        <p-slider [ngModel]="zIndex" [min]="0" [max]="maxIndex"
                   (onChange)="zScrub.emit($event.value)" (onSlideEnd)="zSlide.emit($event.value)"
                   pTooltip="Slice through the stack (← / → keys)" tooltipPosition="bottom"
                   [style]="{'width':'16rem'}" styleClass="wand-sensitivity-slider"></p-slider>
@@ -137,8 +137,8 @@
         <div class="p-inputgroup" style="width: auto">
           <p-inputNumber styleClass="w-3rem toolbar-input"
 					pTooltip="View image in stack (&#x23CE;)"
-					[(ngModel)]="zIndex" [min]="0" [max]="maxIndex"
-           (onInput)="zIndexInput.emit(zIndex)" (keydown.enter)="reloadAndPlot.emit()"/>
+					[ngModel]="zIndex" [min]="0" [max]="maxIndex"
+           (onInput)="zIndexInput.emit($event.value)" (keydown.enter)="reloadAndPlot.emit()"/>
           <p-button icon="pi pi-refresh" size="small" [text]="true" (onClick)="reloadAndPlot.emit()"
                     pTooltip="Plot this slice" tooltipPosition="bottom">
           </p-button>
@@ -303,7 +303,7 @@
       </p-button>
       <ng-container *ngIf="activeDragMode === 'brush'">
         <span class="flex align-items-center mx-1 toolbar-text">Size</span>
-        <p-slider [(ngModel)]="brushSize"
+        <p-slider [ngModel]="brushSize"
                   [min]="brushSizeMin" [max]="brushSizeMax" [step]="brushSizeStep"
                   (onChange)="brushSizeChange.emit($event.value)"
                   pTooltip="Brush diameter in image pixels."
@@ -356,7 +356,7 @@
       </p-button>
       <ng-container *ngIf="activeDragMode === 'wand'">
         <span class="flex align-items-center mx-1 toolbar-text">Sens.</span>
-        <p-slider [(ngModel)]="wandSensitivity"
+        <p-slider [ngModel]="wandSensitivity"
                   [min]="wandSensitivityMin" [max]="wandSensitivityMax" [step]="wandSensitivityStep"
                   (onChange)="wandSensitivityChange.emit($event.value)"
                   pTooltip="Higher = stricter (smaller selection); lower = looser.
@@ -375,7 +375,7 @@
       </p-button>
       <ng-container *ngIf="activeDragMode === 'eraseVertex'">
         <span class="flex align-items-center mx-1 toolbar-text">Radius</span>
-        <p-slider [(ngModel)]="vertexEraserRadius"
+        <p-slider [ngModel]="vertexEraserRadius"
                   [min]="vertexEraserRadiusMin" [max]="vertexEraserRadiusMax" [step]="vertexEraserRadiusStep"
                   (onChange)="vertexEraserRadiusChange.emit($event.value)"
                   pTooltip="Eraser radius in image pixels.

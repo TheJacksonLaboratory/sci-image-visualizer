@@ -1,4 +1,6 @@
-import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges } from '@angular/core';
+import {
+  ChangeDetectionStrategy, Component, EventEmitter, Input, OnChanges, Output, SimpleChanges,
+} from '@angular/core';
 import { MenuItem } from 'primeng/api';
 
 import { IImageInfo } from '../contracts/image.contract';
@@ -21,11 +23,14 @@ import { MODEL_INFO } from './model-info';
  * handlers in the host avoids duplicating that logic.
  */
 @Component({
-  // Canonical prefixed selector first; the unprefixed original is kept as an
-  // alias for one release (pre-publication back-compat).
   selector: 'plotting-toolbar',
   templateUrl: './toolbar.component.html',
   styleUrls: ['./toolbar.component.scss'],
+  // Purely @Input/@Output: re-check only when an input changes or the toolbar
+  // itself handles an event, not on every app tick (its ~15 getters ran each
+  // time). Controls bind [ngModel] one-way and report through the outputs, so
+  // the host stays the owner of every value (RT-35).
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ToolbarComponent implements OnChanges {
   /** Current image (gates which control groups are shown). */

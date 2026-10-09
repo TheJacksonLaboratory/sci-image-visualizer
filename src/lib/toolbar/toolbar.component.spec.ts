@@ -42,6 +42,10 @@ describe('ToolbarComponent', () => {
     fixture.detectChanges();
   });
 
+  it('uses OnPush change detection (RT-35)', () => {
+    expect((ToolbarComponent as unknown as { ɵcmp: { onPush: boolean } }).ɵcmp.onPush).toBe(true);
+  });
+
   it('should create', () => {
     expect(component).toBeTruthy();
   });
