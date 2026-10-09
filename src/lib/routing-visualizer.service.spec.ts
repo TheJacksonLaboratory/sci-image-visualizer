@@ -802,6 +802,16 @@ describe('RoutingVisualizerService — spatial controls', () => {
     });
   });
 
+  it('drops its dataset subscription when its injector is destroyed (CORE-30)', () => {
+    const dataset$ = new BehaviorSubject<SpatialDataset | null>(dataset);
+    build(mockPort({ getDataset$: () => dataset$ })).router.getSpatialControls();
+    expect(dataset$.observed).toBe(true);
+    // A component-scoped chain (provideVisualization) is destroyed with its host
+    // component; the root port must not keep the whole isolated chain reachable.
+    TestBed.resetTestingModule();
+    expect(dataset$.observed).toBe(false);
+  });
+
   it('returns null when the host binds no SPATIAL_DATA_PORT', () => {
     const { router } = build(null);
     expect(router.getSpatialControls()).toBeNull();

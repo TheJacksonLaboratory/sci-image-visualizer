@@ -1,4 +1,4 @@
-import { Inject, Injectable, Optional } from '@angular/core';
+import { Inject, Injectable, OnDestroy, Optional } from '@angular/core';
 import { Observable, Subscription, combineLatest, firstValueFrom, merge } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Image } from 'image-js';
@@ -89,7 +89,7 @@ function autoWindowFromHistogram(h: IHistogram, saturation: number): [number, nu
 }
 
 @Injectable({ providedIn: 'root' })
-export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, IChannelHistogramApi {
+export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, IChannelHistogramApi, OnDestroy {
 
   private currentPlotType: PlotType = PlotType.IMAGE;
   private lastRendered: IVisualizer | null = null;
@@ -776,6 +776,14 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
    *  region drawn over one section from selecting the whole depth behind it. */
   private currentZIndex = 0;
   private spatialDatasetSub: Subscription | null = null;
+
+  /** Angular calls this when the injector providing the router is destroyed — the host
+   *  component for a `provideVisualization()` chain. The dataset subscription would
+   *  otherwise keep the whole isolated chain reachable from the root data port. */
+  ngOnDestroy(): void {
+    this.spatialDatasetSub?.unsubscribe();
+    this.spatialDatasetSub = null;
+  }
 
   /** Load pixel frames for intensity sampling when OpenSeadragon owns the image
    *  (it doesn't feed Plotly's frame cache). No-op needed when Plotly renders. */
