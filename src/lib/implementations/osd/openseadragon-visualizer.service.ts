@@ -410,6 +410,9 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     if (this.simpleStack.isSimple(imageInfo)) {
       return this.loadSimple(imageInfo, zIndex);
     }
+    // A tiled image: drop any previous simple image's state, or its multichannel
+    // flag would keep re-opening the viewer with that image's composite.
+    this.resetSimpleState();
     const infoB64 = this.tiles.getSelectedInfoB64();
     if (!infoB64) return { descriptor: null, infoB64: '', z: zIndex || 0, filename };
 
@@ -450,6 +453,18 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       }
       await new Promise((r) => setTimeout(r, 1500));
     }
+  }
+
+  /** Forget the simple (tiled:false) image's state: mode, slice URLs and the
+   *  serverless-multichannel flag, URLs and decoded planes. Not part of
+   *  destroyViewer(): plot() tears the viewer down after loadSimple() filled
+   *  these in, and still needs them. */
+  private resetSimpleState(): void {
+    this.simpleMode = false;
+    this.simpleUrls = [];
+    this.simpleMultichannel = false;
+    this.simpleChannelUrls = [];
+    this.simpleChannelPlanes = [];
   }
 
   /** Build the `plot()` payload for a simple (tiled:false) image: a single-level
@@ -747,6 +762,9 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
         void this.sampleSimpleHistogram(loaded.url, loaded.z);
       }
     } else {
+      // A tiled image is going on screen: no simple-mode state may survive it
+      // (load() normally cleared it already; plot() is what mounts the image).
+      this.resetSimpleState();
       // Multichannel fluorescence (indexed/LUT-bearing stacks) composite client-side
       // from per-channel tiles. Trust the server's explicit `multichannel` flag — the
       // old `channels>1 && grayscale` heuristic also matched RGB photos Bio-Formats
@@ -1206,6 +1224,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   }
   reset(): void {
     this.destroyViewer();
+    this.resetSimpleState();
   }
   relayout(_trueImageSize?: number[]): void {
     const vp = this.viewer?.viewport;
@@ -2083,5 +2102,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       this.invalidateHandle = null;
     }
     this.destroyViewer();
+    this.resetSimpleState();
   }
 }
