@@ -1,6 +1,6 @@
 import { ChangeDetectorRef, Component, AfterViewInit, ElementRef, EventEmitter, HostListener, Inject, Injector, Input, NgZone, OnChanges, OnDestroy, OnInit, Optional, Output, SimpleChanges, Type, ViewChild } from '@angular/core';
 
-import { BehaviorSubject, Observable, Subject, Subscription } from 'rxjs';
+import { Observable, Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 
 import { MenuItem, MessageService } from 'primeng/api';
@@ -142,8 +142,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   private loadedFileName: string | undefined;
   imageInfo: IImageInfo | undefined;
 
+  /** Completes on destroy; every subscription the component makes is `takeUntil` it. */
   private unsub = new Subject<void>();
-  private previewSubscription = new Subscription();
 
   public stackLoading = false;
   public imgLoading = false;
@@ -266,8 +266,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * built for the live status + progress bar.
    */
   readonly resultToastKey = `${this.samToastKey}-result`;
-  /** Subscriptions to the point tool's live feeds (status/busy/download). */
-  private samPointSub = new Subscription();
   /** Vertex eraser radius in image-pixel coordinates. */
   vertexEraserRadius = 20;
 
@@ -365,8 +363,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   /** Drives the intensity inset panel's visibility — true whenever any
    *  intensity-profile line exists (independent of the current plot type). */
   hasProfiles = false;
-  private intensityProfileSub?: Subscription;
-  private viewportChangeSub?: Subscription;
   private profileDragMoveListener?: (e: MouseEvent) => void;
   private profileDragUpListener?: () => void;
   private profileResizeListener?: () => void;
@@ -409,14 +405,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   private volumeImageKey: string | null = null;
   /** Blob URLs backing that image — ours to revoke. */
   private volumeImageUrls: string[] = [];
-  private spatialDatasetSubscription?: Subscription;
-
-  plotWidthSubscription?: Subscription;
-  imageLoadingSubscription?: Subscription;
-  imgLoadingMessageSubscription?: Subscription;
-  isZoomSubscription?: Subscription;
-  filenameSubscription?: Subscription;
-  autoscaleSubscription?: Subscription;
 
   private plotContextMenuListener?: (e: MouseEvent) => void;
   private keydownListener?: (e: KeyboardEvent) => void;
@@ -508,7 +496,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * stay hidden for the life of the component.
    */
   private watchSpatialDataset(): void {
-    this.spatialDatasetSubscription = this.spatialData?.getDataset$().subscribe((dataset) => {
+    this.spatialData?.getDataset$().pipe(takeUntil(this.unsub)).subscribe((dataset) => {
       this.spatialDataset = dataset ?? null;
       const has = !!dataset;
       // Only a dataset whose observations carry a z can be drawn as a cloud, so
@@ -778,11 +766,11 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     VisualizerComponent.liveInstances.add(this);
     this.state.setDiagram(this);
     this.watchSpatialDataset();
-    this.autoscaleSubscription = this.plotService.getAutoscaleEvent().subscribe(() => {
+    this.plotService.getAutoscaleEvent().pipe(takeUntil(this.unsub)).subscribe(() => {
       this.activeDragMode = null;
       this.session.setActiveTool(null);
     });
-    this.imageLoadingSubscription = this.state.isImageLoading$().subscribe((isImageLoading) => {
+    this.state.isImageLoading$().pipe(takeUntil(this.unsub)).subscribe((isImageLoading) => {
       this.imgLoading = isImageLoading;
     });
     // Undo availability (jit-ui#85): the shared RegionStore emits whenever its
@@ -812,33 +800,27 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // Interactive point-prompt segmentation runs inside the renderer on each
     // click; surface its live status + download progress in the shared `sam`
     // toast so the user sees it working (the first click pulls the encoder).
-    this.samPointSub.add(
-      this.samPointTool.progress$.subscribe((f) => {
-        this.samDownloading = f >= 0 && f < 1;
-        if (f >= 0) this.samProgress = Math.min(100, Math.round(f * 100));
-        this.cdr.detectChanges();
-      }),
-    );
-    this.samPointSub.add(
-      this.samPointTool.status$.subscribe((m) => {
-        this.samStatus = m;
-        this.cdr.detectChanges();
-      }),
-    );
-    this.samPointSub.add(
-      this.samPointTool.busy$.subscribe((busy) => {
-        this.samBusy = busy;
-        if (busy) this.showSamToast('SAM point segmentation');
-        this.cdr.detectChanges();
-      }),
-    );
-    this.plotService.getStackLoadingProgress().subscribe((loadingProgress) => {
+    this.samPointTool.progress$.pipe(takeUntil(this.unsub)).subscribe((f) => {
+      this.samDownloading = f >= 0 && f < 1;
+      if (f >= 0) this.samProgress = Math.min(100, Math.round(f * 100));
+      this.cdr.detectChanges();
+    });
+    this.samPointTool.status$.pipe(takeUntil(this.unsub)).subscribe((m) => {
+      this.samStatus = m;
+      this.cdr.detectChanges();
+    });
+    this.samPointTool.busy$.pipe(takeUntil(this.unsub)).subscribe((busy) => {
+      this.samBusy = busy;
+      if (busy) this.showSamToast('SAM point segmentation');
+      this.cdr.detectChanges();
+    });
+    this.plotService.getStackLoadingProgress().pipe(takeUntil(this.unsub)).subscribe((loadingProgress) => {
       this.loadingPercentage = loadingProgress;
     });
-    this.plotService.isStackLoading().subscribe((stackLoading) => {
+    this.plotService.isStackLoading().pipe(takeUntil(this.unsub)).subscribe((stackLoading) => {
       this.stackLoading = stackLoading;
     });
-    this.plotWidthSubscription = this.state.getPanelWidth$().subscribe(() => {
+    this.state.getPanelWidth$().pipe(takeUntil(this.unsub)).subscribe(() => {
       this.plotService.relayout();
       // The intensity inset is a separate Plotly chart in a floating panel; reflow
       // it to its current size when the canvas resizes, else it keeps the stale
@@ -847,7 +829,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
         setTimeout(() => this.renderIntensityInset(), 0);
       }
     });
-    this.imgLoadingMessageSubscription = this.state.getImageLoadingMessage$().subscribe((message) => {
+    this.state.getImageLoadingMessage$().pipe(takeUntil(this.unsub)).subscribe((message) => {
       this.loadingMessage = message;
     });
     this.state
@@ -856,15 +838,15 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       .subscribe((progress) => {
         this.cacheProgress = progress;
       });
-    this.isZoomSubscription = this.state.isZoom$().subscribe((zoom) => {
+    this.state.isZoom$().pipe(takeUntil(this.unsub)).subscribe((zoom) => {
       this.zoom = zoom;
     });
-    this.filenameSubscription = this.state.getFilename$().subscribe((filename) => {
+    this.state.getFilename$().pipe(takeUntil(this.unsub)).subscribe((filename) => {
       if (filename) {
         this.fileName = filename;
       }
     });
-    this.intensityProfileSub = this.plotService.getIntensityProfile$().subscribe((profiles) => {
+    this.plotService.getIntensityProfile$().pipe(takeUntil(this.unsub)).subscribe((profiles) => {
       this.latestProfiles = profiles;
       this.hasProfiles = profiles.length > 0;
       // The panel div is behind *ngIf="hasProfiles". detectChanges() materializes
@@ -879,12 +861,12 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // When the OSD view settles at a new zoom/pan, re-sample the intensity lines
     // from a crop of the visible region so the inset reflects the zoom-level
     // resolution (Plotly's own high-def zoom updates the sampling cache inline).
-    this.viewportChangeSub = this.plotService.getViewportChange$().subscribe((roi) => {
+    this.plotService.getViewportChange$().pipe(takeUntil(this.unsub)).subscribe((roi) => {
       if (this.hasProfiles && this.isImageView) {
         this.plotService.refreshIntensitySamplingForRoi(roi.x, roi.y, roi.width, roi.height, this.zIndex);
       }
     });
-    this.previewSubscription = this.state.getImageInfo$().subscribe({
+    this.state.getImageInfo$().pipe(takeUntil(this.unsub)).subscribe({
       next: (imgInfo) => {
         if (!imgInfo) {
           this.onImageCleared();
@@ -1354,7 +1336,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     VisualizerComponent.liveInstances.delete(this);
     this.revokeVolumeImageUrls();
     this.scrubber.cancel();
-    this.samPointSub.unsubscribe();
+    this.unsub.next();
+    this.unsub.complete();
     if (this.plotContextMenuListener) {
       window.removeEventListener('contextmenu', this.plotContextMenuListener, true);
     }
@@ -1372,38 +1355,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     }
     if (this.profileResizeListener) {
       window.removeEventListener('resize', this.profileResizeListener);
-    }
-    if (this.intensityProfileSub) {
-      this.intensityProfileSub.unsubscribe();
-    }
-    if (this.viewportChangeSub) {
-      this.viewportChangeSub.unsubscribe();
-    }
-    this.unsub.next();
-    this.unsub.complete();
-    if (this.previewSubscription) {
-      this.previewSubscription.unsubscribe();
-    }
-    if (this.spatialDatasetSubscription) {
-      this.spatialDatasetSubscription.unsubscribe();
-    }
-    if (this.plotWidthSubscription) {
-      this.plotWidthSubscription.unsubscribe();
-    }
-    if (this.imageLoadingSubscription) {
-      this.imageLoadingSubscription.unsubscribe();
-    }
-    if (this.imgLoadingMessageSubscription) {
-      this.imgLoadingMessageSubscription.unsubscribe();
-    }
-    if (this.isZoomSubscription) {
-      this.isZoomSubscription.unsubscribe();
-    }
-    if (this.autoscaleSubscription) {
-      this.autoscaleSubscription.unsubscribe();
-    }
-    if (this.filenameSubscription) {
-      this.filenameSubscription.unsubscribe();
     }
     this.plotService.unsubscribe();
   }

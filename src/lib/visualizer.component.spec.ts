@@ -125,6 +125,97 @@ function makeComponent(plot: any, spatialData?: any): VisualizerComponent {
     );
 }
 
+/**
+ * A component driven through its real lifecycle (ngOnInit), for the render and
+ * teardown specs.
+ *
+ * ngOnInit subscribes to a long tail of streams on both ports. Rather than
+ * enumerating them (and re-enumerating whenever one is added), wrap the mock so
+ * any unlisted `getX$()` / `isX()` accessor answers with a BehaviorSubject and
+ * anything else with a jest.fn(). Explicit overrides win, and identities are
+ * cached so `expect(plot.reset)` is stable across accesses. Every subject handed
+ * out is recorded in `subjects`, so a spec can check nothing is still observed
+ * after ngOnDestroy.
+ */
+function harness(overrides: Record<string, unknown> = {}) {
+  const subjects: BehaviorSubject<unknown>[] = [];
+  const subject = <T>(v: T): BehaviorSubject<T> => {
+    const s = new BehaviorSubject<T>(v);
+    subjects.push(s as BehaviorSubject<unknown>);
+    return s;
+  };
+  const selfCompleting = (base: any): any => new Proxy(base, {
+    has: () => true,
+    get(target, prop: any) {
+      if (typeof prop !== 'string' || prop in target) return target[prop];
+      target[prop] = /\$$|^(get|is)[A-Z]/.test(prop)
+        ? jest.fn(() => subject(false))
+        : jest.fn();
+      return target[prop];
+    },
+  });
+  const plotBase: any = mockPlotService();
+  Object.assign(plotBase, {
+    getAutoscaleEvent: () => subject(''),
+    getIntensityProfile$: () => subject([]),
+    getStackLoadingProgress: () => subject(0),
+    getViewportChange$: () => subject({ x: 0, y: 0, width: 1, height: 1 }),
+    isStackLoading: () => subject(false),
+    getCanUndo$: () => subject(false),
+    getCanRedo$: () => subject(false),
+    getSelectedShapeIndices$: () => subject([]),
+    relayout: jest.fn(),
+    refreshIntensitySamplingForRoi: jest.fn(),
+    setImageMeta: jest.fn(),
+    reset: jest.fn(),
+    cancelLoading: jest.fn(),
+    load: jest.fn().mockImplementation((info: any) => Promise.resolve({ filename: info.fileName })),
+    plot: jest.fn().mockResolvedValue(undefined),
+    getShowShapeLabel: jest.fn().mockReturnValue(false),
+    importRegions: jest.fn().mockReturnValue([]),
+    setRegions: jest.fn(),
+    resetUndoHistory: jest.fn(),
+    setStackLoading: jest.fn(),
+  }, overrides);
+  const plot: any = selfCompleting(plotBase);
+  const imageInfo$ = subject<any>(null);
+  const stateBase: any = {
+    getImageInfo$: () => imageInfo$,
+    getFilename$: () => subject('none'),
+    getImageLoadingMessage$: () => subject(''),
+    getCacheProgress$: () => subject(null),
+    getPanelWidth$: () => subject(500),
+    isImageLoading$: () => subject(false),
+    isImageCached$: () => subject(true),
+    isZoom$: () => subject(false),
+    setDiagram: jest.fn(),
+    setImageLoading: jest.fn(),
+    setImageLoadingMessage: jest.fn(),
+    setImageInfo: jest.fn(),
+    setImageCached: jest.fn(),
+    setLoadingError: jest.fn(),
+    setZoom: jest.fn(),
+  };
+  const state: any = selfCompleting(stateBase);
+  const toolFeeds = () => ({ status$: subject(''), busy$: subject(false), progress$: subject(-1) }) as any;
+  const messages = { add: jest.fn(), clear: jest.fn() };
+  const store = new VisualizerStore();
+  const component = new VisualizerComponent(
+    state,
+    plot,
+    messages as any,
+    { run: (fn: () => void) => fn(), runOutsideAngular: (fn: () => void) => fn() } as any,
+    { detectChanges: jest.fn(), markForCheck: jest.fn() } as any,
+    store,
+    toolFeeds(),
+    toolFeeds(),
+    toolFeeds(),
+    new RegionOpsService(new WandService()),
+  );
+  component.ngOnInit();
+  return { component, plot, state, imageInfo$, subjects, messages, store };
+}
+
 describe('VisualizerComponent (UI shell)', () => {
   let component: VisualizerComponent;
   let plotService: any;
@@ -1085,86 +1176,6 @@ describe('VisualizerComponent — render preemption (#5)', () => {
     };
   }
 
-  /**
-   * ngOnInit subscribes to a long tail of streams on both ports. Rather than
-   * enumerating them (and re-enumerating whenever one is added), wrap the mock so
-   * any unlisted `getX$()` / `isX()` accessor answers with a BehaviorSubject and
-   * anything else with a jest.fn(). Explicit overrides below win, and identities are
-   * cached so `expect(plot.reset)` is stable across accesses.
-   */
-  function selfCompleting(base: any): any {
-    const cache: any = base;
-    return new Proxy(cache, {
-      has: () => true,
-      get(target, prop: any) {
-        if (typeof prop !== 'string' || prop in target) return target[prop];
-        target[prop] = /\$$|^(get|is)[A-Z]/.test(prop)
-          ? jest.fn(() => new BehaviorSubject(false))
-          : jest.fn();
-        return target[prop];
-      },
-    });
-  }
-
-  function harness() {
-    const plotBase: any = mockPlotService();
-    Object.assign(plotBase, {
-      getAutoscaleEvent: () => new BehaviorSubject(''),
-      getColormap: () => new BehaviorSubject('Greys'),
-      getReverseScale: () => new BehaviorSubject(false),
-      getIntensityProfile$: () => new BehaviorSubject([]),
-      getStackLoadingProgress: () => new BehaviorSubject(0),
-      getViewportChange$: () => new BehaviorSubject({ x: 0, y: 0, width: 1, height: 1 }),
-      isStackLoading: () => new BehaviorSubject(false),
-      relayout: jest.fn(),
-      refreshIntensitySamplingForRoi: jest.fn(),
-      setImageMeta: jest.fn(),
-      reset: jest.fn(),
-      cancelLoading: jest.fn(),
-      load: jest.fn().mockImplementation((info: any) => Promise.resolve({ filename: info.fileName })),
-      plot: jest.fn().mockResolvedValue(undefined),
-      getShowShapeLabel: jest.fn().mockReturnValue(false),
-      importRegions: jest.fn().mockReturnValue([]),
-      setRegions: jest.fn(),
-      resetUndoHistory: jest.fn(),
-      setStackLoading: jest.fn(),
-    });
-    const plot: any = selfCompleting(plotBase);
-    const imageInfo$ = new BehaviorSubject<any>(null);
-    const stateBase: any = {
-      getImageInfo$: () => imageInfo$,
-      getFilename$: () => new BehaviorSubject('none'),
-      getImageLoadingMessage$: () => new BehaviorSubject(''),
-      getCacheProgress$: () => new BehaviorSubject(null),
-      getPanelWidth$: () => new BehaviorSubject(500),
-      isImageLoading$: () => new BehaviorSubject(false),
-      isImageCached$: () => new BehaviorSubject(true),
-      isZoom$: () => new BehaviorSubject(false),
-      setDiagram: jest.fn(),
-      setImageLoading: jest.fn(),
-      setImageLoadingMessage: jest.fn(),
-      setImageInfo: jest.fn(),
-      setImageCached: jest.fn(),
-      setLoadingError: jest.fn(),
-      setZoom: jest.fn(),
-    };
-    const state: any = selfCompleting(stateBase);
-    const component = new VisualizerComponent(
-      state,
-      plot,
-      { add: jest.fn(), clear: jest.fn() } as any,
-      { run: (fn: () => void) => fn(), runOutsideAngular: (fn: () => void) => fn() } as any,
-      { detectChanges: jest.fn(), markForCheck: jest.fn() } as any,
-      new VisualizerStore(),
-      { status$: new BehaviorSubject(''), busy$: new BehaviorSubject(false), progress$: new BehaviorSubject(-1) } as any,
-      { status$: new BehaviorSubject(''), busy$: new BehaviorSubject(false), progress$: new BehaviorSubject(-1) } as any,
-      { status$: new BehaviorSubject(''), busy$: new BehaviorSubject(false), progress$: new BehaviorSubject(-1) } as any,
-      new RegionOpsService(new WandService()),
-    );
-    component.ngOnInit();
-    return { component, plot, state, imageInfo$ };
-  }
-
   beforeEach(() => {
     orchestratorHosts.length = 0;
   });
@@ -1220,6 +1231,30 @@ describe('VisualizerComponent — render preemption (#5)', () => {
 
     await liveHost.renderPhase(infoFor('B.tif'), false);
     expect(plot.load).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('VisualizerComponent — teardown (CORE-3)', () => {
+  it('leaves no subscription behind on the ports or the backend after ngOnDestroy', () => {
+    const { component, subjects } = harness();
+    expect(subjects.some((s) => s.observed)).toBe(true); // sanity: init subscribed
+    component.ngOnDestroy();
+    const leaked = subjects.filter((s) => s.observed);
+    expect(leaked).toHaveLength(0);
+  });
+
+  it('stops mirroring the stack-loading streams once destroyed', () => {
+    const progress$ = new BehaviorSubject(0);
+    const loading$ = new BehaviorSubject(false);
+    const { component } = harness({
+      getStackLoadingProgress: () => progress$,
+      isStackLoading: () => loading$,
+    });
+    component.ngOnDestroy();
+    progress$.next(42);
+    loading$.next(true);
+    expect(component.loadingPercentage).toBe(0);
+    expect(component.stackLoading).toBe(false);
   });
 });
 
