@@ -3,7 +3,7 @@ import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable, firstValueFrom } from 'rxjs';
 import { timeout } from 'rxjs/operators';
 
-import { SpatialDataPort, TranscriptTileQuery } from '../../contracts/ports/spatial-data.port';
+import { ALL_GENES, SpatialDataPort, TranscriptTileQuery } from '../../contracts/ports/spatial-data.port';
 import {
   SpatialColumn,
   SpatialDataset,
@@ -281,7 +281,9 @@ export class SpatialDataHttpService implements SpatialDataPort {
     }
     const path = `spatial/${encodeURIComponent(manifest.id)}/polygon-tile/`
       + `${encodeURIComponent(set)}/${level}/${gx}/${gy}`;
-    return this.cachedTile(path, () => this.getBinary(path).then(decodePolygonTile)) as
+    return this.cachedTile(
+      path, () => this.getBinary(path).then((buf) => decodePolygonTile(buf, manifest.count)),
+    ) as
       Promise<SpatialPolygonTile>;
   }
 
@@ -296,7 +298,13 @@ export class SpatialDataHttpService implements SpatialDataPort {
     const box = query.box ? `&box=${query.box.join(',')}` : '';
     const path = `spatial/${encodeURIComponent(manifest.id)}/transcript-tile/${level}/${gx}/${gy}`
       + `?genes=${genes}&quality=${query.quality ?? 'high'}${box}`;
-    return this.cachedTile(path, () => this.getBinary(path).then(decodeTranscriptTile)) as
+    // The codes index the genes asked for — except for ALL_GENES, whose list the
+    // server owns, so only the observations can be bounded there.
+    const limits = {
+      observations: manifest.count,
+      ...(query.genes.includes(ALL_GENES) ? {} : { genes: query.genes.length }),
+    };
+    return this.cachedTile(path, () => this.getBinary(path).then((buf) => decodeTranscriptTile(buf, limits))) as
       Promise<SpatialTranscriptTile>;
   }
 
@@ -304,7 +312,11 @@ export class SpatialDataHttpService implements SpatialDataPort {
     const manifest = this.requireManifest();
     const path = `spatial/${encodeURIComponent(manifest.id)}/gene-bins/${level}/${tx}/${ty}`
       + `?genes=${genes.map(encodeURIComponent).join(',')}`;
-    return this.cachedTile(path, () => this.getBinary(path).then(decodeTranscriptTile)) as
+    const limits = {
+      observations: manifest.count,
+      ...(genes.includes(ALL_GENES) ? {} : { genes: genes.length }),
+    };
+    return this.cachedTile(path, () => this.getBinary(path).then((buf) => decodeTranscriptTile(buf, limits))) as
       Promise<SpatialTranscriptTile>;
   }
 
@@ -314,7 +326,9 @@ export class SpatialDataHttpService implements SpatialDataPort {
       return Promise.reject(new Error('[spatial] this dataset has no transcript pyramid'));
     }
     const path = `spatial/${encodeURIComponent(manifest.id)}/transcript-bins/${level}/${tx}/${ty}`;
-    return this.cachedTile(path, () => this.getBinary(path).then(decodeTranscriptTile)) as
+    return this.cachedTile(
+      path, () => this.getBinary(path).then((buf) => decodeTranscriptTile(buf, { observations: manifest.count })),
+    ) as
       Promise<SpatialTranscriptTile>;
   }
 

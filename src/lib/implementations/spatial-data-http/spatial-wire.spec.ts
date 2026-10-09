@@ -307,3 +307,98 @@ describe('spatial-wire — tiled geometry', () => {
     expect(ds.density).toEqual(density);
   });
 });
+
+/**
+ * Values inside a well-sized response are still untrusted. A byte-length check keeps
+ * every read inside the buffer, but bad offsets or indices crash the renderers every frame
+ * (a negative vertex count, an undefined glyph), so a misbehaving server must get an
+ * error instead of a wedged view.
+ */
+describe('spatial-wire — crafted buffers', () => {
+  const ring = (offsets: number[], vertices: number) => concat(
+    Uint32Array.from([offsets.length - 1]), Uint32Array.from(offsets), new Float32Array(vertices * 2),
+  );
+
+  describe('ring offsets', () => {
+    it('rejects offsets that do not start at 0', () => {
+      expect(() => decodePolygons(ring([1, 3], 3))).toThrow(/offsets/);
+    });
+
+    it('rejects offsets that go backwards', () => {
+      expect(() => decodePolygons(ring([0, 4, 2, 5], 5))).toThrow(/offsets/);
+    });
+
+    it('rejects a count the header cannot hold, with a decode error', () => {
+      const buf = concat(Uint32Array.from([0xfffffff0, 0]));
+      expect(() => decodePolygons(buf)).toThrow(/\[spatial\] polygons/);
+      expect(() => decodePolygonTile(buf)).toThrow(/\[spatial\] polygon tile/);
+    });
+
+    it('rejects a polygon tile with backward offsets', () => {
+      const buf = concat(
+        Uint32Array.from([2]), Uint32Array.from([0, 1]), Uint32Array.from([0, 5, 3]),
+        new Float32Array(6),
+      );
+      expect(() => decodePolygonTile(buf)).toThrow(/offsets/);
+    });
+  });
+
+  describe('observation indices', () => {
+    const tile = (obs: number[]) => concat(
+      Uint32Array.from([obs.length]), Uint32Array.from(obs),
+      Uint32Array.from(obs.map((_, i) => i * 3).concat(obs.length * 3)), new Float32Array(obs.length * 6),
+    );
+
+    it('rejects a polygon tile ring owned by an observation past N', () => {
+      expect(() => decodePolygonTile(tile([0, 3]), 3)).toThrow(/observation/);
+      expect(decodePolygonTile(tile([0, 2]), 3).count).toBe(2);
+    });
+
+    const transcripts = (obs: number[], genes: number[]) => {
+      const n = obs.length;
+      const pad = new Uint16Array(Math.ceil((n * 2) / 4) * 2);
+      pad.set(genes);
+      return concat(
+        Uint32Array.from([n, 0]), new Float32Array(n * 3), new Uint32Array(n).fill(1),
+        Uint32Array.from(obs), pad,
+      );
+    };
+
+    it('rejects a transcript in an observation past N, but allows NO_OBSERVATION', () => {
+      expect(() => decodeTranscriptTile(transcripts([5], [0]), { observations: 3 }))
+        .toThrow(/observation/);
+      expect(decodeTranscriptTile(transcripts([0xffffffff, 2], [0, 0]), { observations: 3 }).count)
+        .toBe(2);
+    });
+
+    it('rejects a gene code past the genes asked for', () => {
+      expect(() => decodeTranscriptTile(transcripts([0, 1], [0, 2]), { genes: 2 }))
+        .toThrow(/gene/);
+      expect(decodeTranscriptTile(transcripts([0, 1], [0, 1]), { genes: 2 }).count).toBe(2);
+    });
+  });
+
+  describe('manifest, embedding and density metadata', () => {
+    it('rejects a negative or fractional observation count', () => {
+      expect(() => assertManifestVersion(manifest({ count: -1 }))).toThrow(/count/);
+      expect(() => assertManifestVersion(manifest({ count: 2.5 }))).toThrow(/count/);
+      expect(() => assertManifestVersion(manifest({ count: NaN }))).toThrow(/count/);
+    });
+
+    it('rejects an embedding whose dims are not 2 or 3', () => {
+      const meta = { name: 'X', dims: 4 as never };
+      expect(() => decodeEmbedding(new ArrayBuffer(4 * 4 * 1), meta, 1)).toThrow(/dims/);
+      expect(() => assertManifestVersion(manifest({ embeddings: [meta] }))).toThrow(/dims/);
+    });
+
+    it('rejects a density raster with a non-positive or non-finite grid size', () => {
+      const raster = (cw: number) => concat(
+        Uint32Array.from([1, 1]), Float32Array.from([cw, 40, 0, 0]), new Float32Array(1),
+      );
+      expect(() => decodeDensity(raster(0), [])).toThrow(/grid/);
+      expect(() => decodeDensity(raster(NaN), [])).toThrow(/grid/);
+      expect(() => decodeDensity(raster(-5), [])).toThrow(/grid/);
+      expect(decodeDensity(raster(40), []).meta.gridSize).toEqual([40, 40]);
+    });
+  });
+});
