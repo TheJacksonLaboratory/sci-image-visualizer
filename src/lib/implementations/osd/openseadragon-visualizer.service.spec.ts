@@ -152,8 +152,10 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
   });
 
   it('load() simple detects MULTICHANNEL from channelUrls + channelCount>1', async () => {
-    const loadPlanes = jest.spyOn(service as unknown as { loadSimpleChannelPlanes(u: string[]): Promise<unknown[]> },
-      'loadSimpleChannelPlanes');
+    const loadPlanes = jest.spyOn(
+      service as unknown as { loadSimpleChannelPlanes(u: string[]): Promise<unknown[]> },
+      'loadSimpleChannelPlanes',
+    );
     const loaded = await service.load({
       fileName: 'hyper.tif',
       tiled: false,
@@ -173,8 +175,10 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
   });
 
   it('load() simple stays single-image (NOT multichannel) for a plain grayscale image', async () => {
-    const loadPlanes = jest.spyOn(service as unknown as { loadSimpleChannelPlanes(u: string[]): Promise<unknown[]> },
-      'loadSimpleChannelPlanes');
+    const loadPlanes = jest.spyOn(
+      service as unknown as { loadSimpleChannelPlanes(u: string[]): Promise<unknown[]> },
+      'loadSimpleChannelPlanes',
+    );
     const loaded = await service.load({
       fileName: 'g.png', tiled: false, isGrayscale: true,
       urls: ['blob:gray'], trueImageSize: [4, 4],
