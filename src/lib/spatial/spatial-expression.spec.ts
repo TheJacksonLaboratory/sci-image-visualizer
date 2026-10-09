@@ -1,7 +1,8 @@
 import {
   colorExpressionField, encodeExpressionVolume, expressionField,
-  expressionVolume,
+  expressionVolume, fieldContrastWindow,
 } from './spatial-expression';
+import { contrastWindow } from './spatial-encoding';
 import { SpatialObservations } from '../contracts/spatial-dataset.contract';
 
 /**
@@ -329,5 +330,36 @@ describe('encodeExpressionVolume', () => {
     // Opt in and a measured-but-empty voxel becomes faintly visible again.
     const flat = field([0], [[1, 1, 1]]);
     expect(at(encodeExpressionVolume(flat, [0, 10], { floor: 0.2 }), 1, 1, 1)).toBe(51);
+  });
+});
+
+/**
+ * The contrast window of a field: `mean` is 0 wherever nothing was measured, and those
+ * zeros are not data. Counting them pinned the low end at 0 whenever tissue covered less
+ * than the raster.
+ */
+describe('fieldContrastWindow', () => {
+  // Measured values 10..19 over a tenth of the raster; the rest unmeasured.
+  const size = 100;
+  const mean = new Float32Array(size);
+  const support = new Float32Array(size);
+  for (let i = 0; i < 10; i++) {
+    mean[i] = 10 + i;
+    support[i] = 1;
+  }
+  const field = { mean, support };
+
+  it('windows the measured pixels only', () => {
+    // What counting every pixel gives: the unmeasured zeros set the floor.
+    expect(contrastWindow(mean, 0.01, 0.99)[0]).toBe(0);
+    expect(fieldContrastWindow(field, 0, 1)).toEqual([10, 19]);
+    const [lo, hi] = fieldContrastWindow(field, 0.01, 0.99);
+    expect(lo).toBeGreaterThanOrEqual(10);
+    expect(hi).toBeLessThanOrEqual(19);
+  });
+
+  it('falls back to a usable window for an unmeasured field', () => {
+    expect(fieldContrastWindow({ mean, support: new Float32Array(size) }, 0.01, 0.99))
+      .toEqual([0, 1]);
   });
 });

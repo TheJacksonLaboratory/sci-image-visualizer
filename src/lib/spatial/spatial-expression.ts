@@ -1,6 +1,6 @@
 import { SpatialImageRef, SpatialObservations } from '../contracts/spatial-dataset.contract';
 import { blurVolumeAxis, DensityGrid } from './spatial-density';
-import { quantile } from './stats';
+import { percentileWindow, quantile } from './stats';
 
 /**
  * Turning per-cell expression into a **gene map** — a continuous field over the
@@ -122,6 +122,21 @@ export function expressionField(
     supportScale,
     range: hi > lo ? [lo, hi] : [lo, lo + 1],
   };
+}
+
+/**
+ * Contrast window of a gene map (2-D or 3-D), from percentiles of the MEASURED pixels.
+ *
+ * `mean` is 0 wherever `support` is 0, and those zeros are not data: windowing the whole
+ * array pins the low percentile at 0 and slides the high one upward on any section the
+ * tissue does not fill, so the colours stop describing what was measured. `lo`/`hi` are
+ * fractions, as for `contrastWindow`; `[0, 1]` when nothing was measured.
+ */
+export function fieldContrastWindow(
+  field: Pick<ExpressionField | ExpressionVolumeField, 'mean' | 'support'>,
+  lo = 0.01, hi = 0.99,
+): [number, number] {
+  return percentileWindow(field.mean, lo, hi, { where: field.support });
 }
 
 /**
