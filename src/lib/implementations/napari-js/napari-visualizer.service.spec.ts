@@ -3072,6 +3072,14 @@ describe('NapariVisualizerService', () => {
         expect(layer.faceColor[0].slice(0, 3)).toEqual([0, 1, 0]);
       });
 
+      it('keeps one broadcast colour for the drawn plane when nothing colours the cells', async () => {
+        // A single RGBA tuple is an array too: "gathering" it down to the plane's observations
+        // indexed into its four NUMBERS and handed napari a one-number colour.
+        const layer = await mountAt(sliced(), 1);
+        expect(layer.faceColor).toHaveLength(4);
+        expect(typeof layer.faceColor[0]).toBe('number');
+      });
+
       it('leaves a dataset with a real imageRef drawing every observation', async () => {
         const ds = sliced();
         const layer = await mountAt(

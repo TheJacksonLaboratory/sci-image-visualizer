@@ -44,7 +44,7 @@ import { SpatialViewState } from '../../contracts/display-types';
 import {
   contrastWindow, encodeCategorical, encodeContinuous, markerDiameters,
   resolveCategoryColors, toRgbaTuples, parseHex, MISSING_COLOR, DEFAULT_MUTED_OPACITY,
-  SPATIAL_3D_MAX_CATEGORIES, spatialContinuousLut,
+  SPATIAL_3D_MAX_CATEGORIES, spatialContinuousLut, type RGBA,
 } from '../../spatial/spatial-encoding';
 import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
 import { SpatialObservations } from '../../contracts/spatial-dataset.contract';
@@ -392,6 +392,11 @@ function stackDepth(info: IImageInfo | undefined): number {
 /** A decoded single-channel uint8 plane as a napari-js typed image source. */
 function typedPlane(d: { data: Uint8Array; width: number; height: number }): ChannelView['source'] {
   return { kind: 'typed', width: d.width, height: d.height, channels: 1, dtype: 'uint8', data: d.data };
+}
+
+/** Whether a colour input is one RGBA per point rather than one broadcast RGBA. */
+function isPerPoint(colors: RGBA[] | RGBA): colors is RGBA[] {
+  return Array.isArray(colors[0]);
 }
 
 /** Default per-channel tints (Fiji-style) when the store/descriptor offers no colour. */
@@ -2678,7 +2683,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
 
     // Resolve colours BEFORE touching the scene: a gene fetch can fail or be
     // superseded, and dropping the existing layer first would blank the view.
-    let faceColor: ReturnType<typeof toRgbaTuples> | [number, number, number, number];
+    let faceColor: RGBA[] | RGBA;
     this.observationsLoading++;
     this.showLoading();
     try {
@@ -2750,7 +2755,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     if (this.spatialPoints && key === this.spatialLayerKey) {
       this.spatialPoints.size = size;
       this.spatialPoints.visible = this.spatialPointsVisible();
-      this.spatialPoints.faceColor = this.gatherColors(faceColor, slab?.indices) as never;
+      this.spatialPoints.faceColor = this.gatherColors(faceColor, slab?.indices);
       this.hideForeignImage(viewer, (!!ref || !!dataset.volume) && view.showImage !== false);
     this.regionOverlay?.setRegionsVisible(view.showAnnotations !== false);
       viewer.requestRender();
@@ -3046,10 +3051,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   }
 
   /** Per-point colours for the drawn subset. A broadcast tuple stays broadcast —
-   *  it is one colour for every point either way. */
-  private gatherColors<T>(colors: T[] | T, indices?: Uint32Array): T[] | T {
-    if (!indices || !Array.isArray(colors)) return colors;
-    const out: T[] = new Array(indices.length);
+   *  it is one colour for every point either way. (A tuple is an array too, so it is told
+   *  apart from a per-point list by its elements, not by `Array.isArray`.) */
+  private gatherColors(colors: RGBA[] | RGBA, indices?: Uint32Array): RGBA[] | RGBA {
+    if (!indices || !isPerPoint(colors)) return colors;
+    const out: RGBA[] = new Array(indices.length);
     for (let i = 0; i < indices.length; i++) out[i] = colors[indices[i]];
     return out;
   }
@@ -3816,7 +3822,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    */
   private async spatialFaceColors(
     dataset: SpatialDataset, view: SpatialViewState, selection: SpatialSelectionMask,
-  ): Promise<ReturnType<typeof toRgbaTuples> | [number, number, number, number]> {
+  ): Promise<RGBA[] | RGBA> {
     const port = this.spatialData;
     const colorBy = view.colorBy;
     // Everything NOT selected is muted; with nothing selected, nothing is muted
