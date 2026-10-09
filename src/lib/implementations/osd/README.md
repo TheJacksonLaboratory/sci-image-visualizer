@@ -1,11 +1,60 @@
-# OpenSeadragon backend — investigation & implementation plan
+# OpenSeadragon backend
 
-Status: **investigation / not implemented.** `openseadragon-visualizer.service.ts` is a
-stub that implements `IVisualizer` and advertises only `ViewerFeature.ImageDisplay`.
-This doc records what it would take to make it real, and what the backend
-(jit-service) must provide.
+`OpenSeadragonVisualizerService` renders the **image** plot type as a natively
+tiled, zoomable raster. It is the primary image backend: Plotly keeps the
+scientific/data plot types and napari-js the WebGPU ones. It advertises only
+`ViewerFeature.ImageDisplay`, but within that it does client-side display
+(window/gamma/colormap/invert, per-channel tints), region overlays and tools,
+a z-stack slice cache, and a serverless "simple" mode.
 
-## Why OpenSeadragon
+## Module map
+
+| File | Role |
+|------|------|
+| `openseadragon-visualizer.service.ts` | The coordinator: `load()` / `plot()` / `setZIndex()` / teardown, the store subscription that drives recoloring, tool activation, exports, and the `IVisualizer` stubs. |
+| `slice-cache.ts` | Stack slices as separate TiledImages (opacity toggle on z-scrub), per-channel image groups, LRU sizing and the background preloader. |
+| `display-pipeline.ts` | Pure pixel math: window/gamma/invert/colormap for grayscale and RGB, per-channel tint LUTs and the additive channel merge. Shared by tile recoloring, the serverless compositor and the composite export. |
+| `histogram-sampler.ts` | Per-slice 8-bit histograms and the grayscale auto-window from sampled tiles, plus native-bit-depth histograms from `/histogram`. Generation-guarded against image switches. |
+| `tile-client.ts` | The `/tile` URL shape and the tile fetch → decode → RGBA helpers. |
+| `osd-region-overlay.ts` | The SVG region overlay: draws the shared `RegionStore`'s regions, and drawing, selection and edit gestures. |
+| `osd-coords.ts` | Image ↔ viewport ↔ element conversions routed through world item 0 (accurate with several TiledImages). |
+| `osd-coordinate-transform.ts` | `ICoordinateTransform` for the canvas tools (wand, brush, eraser, SAM). |
+| `osd-scale-bar.ts` | The physical scale bar. |
+| `osd-lib.ts`, `osd-zoom.ts` | The OpenSeadragon import shim and the shared wheel-zoom step. |
+
+## Two source paths
+
+- **Tiled** (default): `load()` polls `GET /tiles/info` until the server has
+  cached the file, and `plot()` opens a custom tile source on `GET /tile` built
+  from the descriptor's real per-level sizes. A multichannel fluorescence image
+  (`descriptor.multichannel`) is drawn as one TiledImage per channel, composited
+  additively by the drawer, using only the real Bio-Formats levels.
+- **Simple** (`IImageInfo.tiled === false`, e.g. a folder stack or the
+  processing-pipeline preview): each slice is one self-contained image URL,
+  fetched through `SimpleSliceAccessService` (auth applies), resampled to the
+  full-resolution size so regions align, and opened as OSD's single-image
+  source. A serverless multichannel image is composited client-side from its
+  per-channel planes.
+
+`load()` only computes the `OsdLoaded` payload; the image on screen keeps its
+own state until `plot()` commits that payload.
+
+## Recolor invariant
+
+Display changes are applied through OSD's `tile-invalidated` pipeline:
+`requestInvalidate(true)` restores each tile's original data and re-runs the
+recolor. Invalidations are coalesced to one per animation frame, and every round
+captures `displayToken`: a round that a newer one has superseded must not write
+its pixels back — OSD then fails to convert the replaced canvas, destroys the
+cache record and unloads the tile (the viewer goes white mid-drag).
+
+## History: the original investigation
+
+The rest of this file is the pre-implementation investigation that led to the
+`/tiles/info` + `/tile` protocol. It is kept for the reasoning; the "stub" and
+"server-side LUT" statements in it are superseded by the sections above.
+
+### Why OpenSeadragon
 
 OpenSeadragon (OSD) is a pure-JS, natively-tiled zoomable image viewer. It is the
 right backend for the **image** plot type — large RGB / whole-slide / pyramidal
@@ -22,7 +71,7 @@ The visualization library splits work **per plot type**:
 
 Both implement the same `IVisualizer` contract (`../contracts/visualizer.contract.ts`).
 
-## How OSD consumes images
+### How OSD consumes images
 
 OSD pulls **tiles** for the current viewport/zoom level from a *tile source*. It
 needs (a) a **descriptor** (full pixel W×H, tile size, number of resolution
@@ -36,7 +85,7 @@ levels) and (b) a **tile endpoint** returning small fixed-size rasters
 | **Custom**         | a JS `getTileUrl(level,x,y)` → any endpoint returning a fixed tile     | Most flexible, least standard          |
 | **Simple image**   | one image URL                                                         | No pyramid → no real progressive zoom  |
 
-## What jit-service already has (from the jit-ui ↔ jit-service contract)
+### What jit-service already has (from the jit-ui ↔ jit-service contract)
 
 Observed in `apps/jit-ui/src/app/services/files.service.ts` and
 `plotly.service.ts` (the client only ever decodes rendered PNG/JPEG via
@@ -56,7 +105,7 @@ Observed in `apps/jit-ui/src/app/services/files.service.ts` and
 at a target resolution" engine. That is ~90% of a tile server — it is just not
 exposed as a tile protocol and is a POST (not cacheable).
 
-## The gap
+### The gap
 
 1. A **descriptor endpoint** (full pixel W×H, tile size, resolution-level count).
 2. A **tile endpoint**: `GET` (cacheable) returning a fixed-size tile for
@@ -64,7 +113,7 @@ exposed as a tile protocol and is a POST (not cacheable).
 3. **Pyramid awareness** so zoomed-out tiles don't decode the full-res plane.
 4. **Tile caching** (disk / GCS / CDN) keyed by `(file, level, col, row, z, c[, lut])`.
 
-## Recommended backend work (reuse the Bio-Formats engine)
+### Recommended backend work (reuse the Bio-Formats engine)
 
 Expose the existing render engine as a tile protocol; don't build a new one.
 
@@ -93,7 +142,7 @@ Expose the existing render engine as a tile protocol; don't build a new one.
    pyramidal formats (SVS, NDPI, pyramidal OME-TIFF); for flat formats, downsample
    from the full plane (slow for overviews — see note below).
 
-### Alternative: pre-generated pyramids (best perf, more infra)
+#### Alternative: pre-generated pyramids (best perf, more infra)
 
 Run `bioformats2raw → raw2ometiff` (or `libvips dzsave`) to produce pyramidal
 OME-TIFF / DZI in GCS, served statically — optionally via **iipsrv** (IIPImage)
@@ -102,7 +151,7 @@ TIFF, so Bio-Formats converts first). The existing `CONVERT → OME-TIFF Pyramid
 tool already proves the generation path exists. Downside: a conversion + storage
 step, not purely on-demand.
 
-## Can the existing Bio-Formats IO work with OSD?
+### Can the existing Bio-Formats IO work with OSD?
 
 **Yes — the engine can, but Bio-Formats doesn't "speak" DZI/IIIF; wrap it in a
 tiling layer.**
@@ -118,7 +167,7 @@ tiling layer.**
 - Precedent: OMERO, QuPath, PathViewer all do Bio-Formats → tiles for OSD-style
   viewers; iipsrv serves IIIF/DeepZoom from pyramidal TIFF.
 
-## The LUT / colormap caveat
+### The LUT / colormap caveat
 
 OSD shows **pre-composited RGB tiles**. So grayscale **LUT/colormap, contrast,
 and channel compositing must be applied server-side when rendering each tile**
@@ -127,7 +176,7 @@ plugin client-side. This is why the stub advertises only `ImageDisplay` and not
 `ScalarColormap`: live LUT over scalar data stays Plotly's job; OSD is for
 browsing large pre-rendered / RGB images.
 
-## Client-side wiring (jit-ui) — small once the protocol exists
+### Client-side wiring (jit-ui) — small once the protocol exists
 
 `OpenSeadragonVisualizerService` would mount a viewer in the plot div and open a
 tile source. Sketch:
@@ -166,7 +215,7 @@ Then map the rest of `IVisualizer`:
   (screen-res RGB, not original scalar) — gate the pipeline dialog accordingly.
 - 3D / scalar-colormap methods → no-ops (capabilities advertise neither).
 
-## Summary
+### Summary
 
 You don't need a new image engine — jit-service already renders arbitrary ROIs
 from Bio-Formats. To feed OpenSeadragon: (1) expose a **GET tile endpoint +

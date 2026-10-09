@@ -136,16 +136,16 @@ interface OsdLoaded {
  *
  * Renders the *image* plot type as a natively-tiled, zoomable raster, backed by
  * the jit-service tile endpoints (`GET /tiles/info` + `GET /tile`, which reuse
- * the Bio-Formats ROI renderer). Plotly keeps the scientific/data plot types
+ * the Bio-Formats ROI renderer), or — for a `tiled: false` image — by
+ * self-contained per-slice URLs. Plotly keeps the scientific/data plot types
  * (scalar heatmap, surface, contour, scatter, line, scatter3d, isosurface) —
  * hence this backend advertises only `ImageDisplay`.
  *
- * Wired: load → descriptor, plot → mount viewer with a custom tile source,
- * zoom/pan → viewport API. NOT wired yet (follow-ups): region overlays + tools
- * (a positioned canvas/SVG overlay or Annotorious), pixel readback, and the
- * per-tile LUT/contrast params. Not registered in DI providers — `PlotlyService`
- * is still the only active backend; this proves the contract supports a second
- * implementation against real endpoints.
+ * Display settings (window/gamma/colormap/invert, per-channel tints) are applied
+ * client-side by recoloring tiles; regions are drawn by {@link OsdRegionOverlay}
+ * and the canvas tools read back the rendered viewport. The collaborators
+ * (slice cache, display pipeline, histogram sampler, tile client) and the
+ * recolor invariant are described in this folder's README.
  */
 @Injectable({ providedIn: 'root' })
 export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implements IVisualizer {
