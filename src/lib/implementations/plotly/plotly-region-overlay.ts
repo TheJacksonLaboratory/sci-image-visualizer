@@ -29,9 +29,9 @@ export class PlotlyRegionOverlay implements IRegionOverlay {
 
   redraw(): void { /* Plotly re-renders its shapes natively on relayout */ }
 
-  /** Bezier regions are an OpenSeadragon-only feature (Plotly has no native
-   *  curved-shape rendering), so this is a no-op here. */
-  setSelectedBezier(_bezier: boolean): void { /* OSD-only */ }
+  /** Bezier regions are drawn by the SVG overlays (OpenSeadragon, napari-js);
+   *  Plotly has no native curved-shape rendering, so this is a no-op here. */
+  setSelectedBezier(_bezier: boolean): void { /* not rendered by Plotly */ }
 
   destroy(): void { /* nothing to tear down — shapes live in the Plotly layout */ }
 }

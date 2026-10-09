@@ -23,8 +23,9 @@ import { VisualizerStore } from '../store/visualizer-store.service';
  *
  * NOT `@Injectable`: an abstract base doesn't participate in Angular DI. Each
  * subclass stays `@Injectable`, declares its own injected dependencies
- * (including the two stores), and passes them to `super(...)`. Plotly is
- * intentionally not a subclass — it has its own region model.
+ * (including the two stores), and passes them to `super(...)`. Plotly is not
+ * a subclass yet: it keeps a Plotly-shape working-set beside the store, which
+ * changes about ten of these members; the rest it still forwards by hand.
  */
 export abstract class BaseStoreVisualizer implements IRegionStore, IDisplayOptions {
   protected constructor(

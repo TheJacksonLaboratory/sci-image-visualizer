@@ -8,10 +8,8 @@ import { bt601Luminance } from '../../contracts/intensity';
  * DESIGN / EXTRACTION ALIGNMENT
  * -----------------------------
  * Every function here is **pure** — it takes a `TraceBuildInput` and returns
- * Plotly trace dicts. There is no Angular, no RxJS, no host-state coupling
- * (`MainState`, `FilesService`, …). That keeps the module relocatable into the
- * future `@jax-data-science/image-visualization` library core (see the
- * `sketch/jit-plotting-extraction` SOW) without port surgery.
+ * Plotly trace dicts. There is no Angular, no RxJS and no service state, so
+ * the builders are unit-testable on plain fixtures.
  *
  * Layout building stays in `PlotlyService` (it needs live service state such
  * as screen height, scale ratio and the current shapes); only TRACE building

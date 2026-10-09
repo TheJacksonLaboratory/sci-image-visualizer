@@ -58,8 +58,8 @@ export class PlotlyService implements IVisualizer {
   /**
    * Plotly is the full-featured data backend: it supports every feature,
    * including 3D scenes, live scalar colormaps, pixel readback and the
-   * server-side high-def zoom re-fetch. (OpenSeadragon's stub advertises only
-   * image display.)
+   * server-side high-def zoom re-fetch. (OpenSeadragon, the tiled image
+   * backend, advertises only image display.)
    */
   readonly capabilities: ViewerCapabilities = capabilitiesOf([
     ViewerFeature.ImageDisplay,
@@ -1288,11 +1288,6 @@ export class PlotlyService implements IVisualizer {
   public commitSamPoints(): void { this.samPointTool.commit(); }
   public clearSamPoints(): void { this.samPointTool.clear(); }
 
-  /**
-   * Tool-host callback: apply the zoom-to-box selection. Stack mode does a
-   * pure axis-range relayout; non-stack mode goes through the high-def
-   * triggerZoom pipeline so the image is re-fetched at the new resolution.
-   */
   /** Overlay-pixel -> Plotly data coords via the axis objects (subtracting the
    *  plot margin offset). The zoom-to-box tool calls this through its host. */
   private zoomBoxPixelToData(px: number, py: number): { x: number; y: number } {
@@ -1302,6 +1297,11 @@ export class PlotlyService implements IVisualizer {
     return { x: xaxis.p2d(px - xaxis._offset), y: yaxis.p2d(py - yaxis._offset) };
   }
 
+  /**
+   * Tool-host callback: apply the zoom-to-box selection. Stack mode does a
+   * pure axis-range relayout; non-stack mode goes through the high-def
+   * triggerZoom pipeline so the image is re-fetched at the new resolution.
+   */
   private applyZoomToBox(coordinates: number[]) {
     this.zoomCoordinates = coordinates;
     if (this.imageInfo?.showStack) {
