@@ -4,7 +4,7 @@ import { BehaviorSubject, EMPTY, Observable, Subject, Subscription, combineLates
 import { startWith, timeout } from 'rxjs/operators';
 import { Image } from 'image-js';
 import * as OpenSeadragon from 'openseadragon';
-import { OSD } from './osd-lib';
+import { OSD, quiet } from './osd-lib';
 import { OSD_ZOOM_PER_SCROLL } from './osd-zoom';
 
 
@@ -965,10 +965,10 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
           // Drop the single opened (channel-0) image and add this slice's channel
           // group to the per-slice cache. The shared background loader / LRU then
           // pre-fills the other slices' channel groups so z-scrub is flicker-free.
-          try {
+          quiet(() => {
             const it0 = (this.viewer as any).world?.getItemAt?.(0);
             if (it0) (this.viewer as any).world.removeItem(it0);
-          } catch { /* nothing to remove */ }
+          });
           this.cache.addChannelSlice(this.currentZ);
         } else {
           // Seed the slice cache with the just-opened slice (world item 0), so
@@ -1020,18 +1020,14 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
         // fits the whole image so OSD selects the coarse synthetic level. Retry
         // across a few frames because the container may not have its final size
         // on the first frame after 'open'.
-        const refit = () => {
-          try {
-            this.viewer?.viewport.goHome(true);
-            // The navigator was sized in the Viewer constructor — BEFORE the
-            // layout settled — so its element can carry a stale (even
-            // wrong-aspect) size that floats the visible minimap above the
-            // corner. Re-size it from the settled container.
-            this.resizeNavigator();
-          } catch {
-            /* torn down */
-          }
-        };
+        const refit = () => quiet(() => {
+          this.viewer?.viewport.goHome(true);
+          // The navigator was sized in the Viewer constructor — BEFORE the
+          // layout settled — so its element can carry a stale (even
+          // wrong-aspect) size that floats the visible minimap above the
+          // corner. Re-size it from the settled container.
+          this.resizeNavigator();
+        });
         requestAnimationFrame(refit);
         setTimeout(refit, 150);
         setTimeout(refit, 400);
@@ -1180,8 +1176,8 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   private invalidateWorld(): void {
     const v: any = this.viewer;
     if (!v) return;
-    try { v.world.requestInvalidate(true); } catch { /* no-op */ }
-    try { v.navigator?.world?.requestInvalidate(true); } catch { /* no-op */ }
+    quiet(() => v.world.requestInvalidate(true));
+    quiet(() => v.navigator?.world?.requestInvalidate(true));
   }
 
   private destroyViewer(): void {
@@ -1255,14 +1251,10 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     // over a few hundred ms, so restore on the next frame and again after the
     // transition completes.
     const bounds = vp.getBounds(true);
-    const restore = () => {
-      try {
-        this.viewer?.viewport.fitBounds(bounds, true);
-        this.viewer?.viewport.applyConstraints(true);
-      } catch {
-        /* viewer torn down */
-      }
-    };
+    const restore = () => quiet(() => {
+      this.viewer?.viewport.fitBounds(bounds, true);
+      this.viewer?.viewport.applyConstraints(true);
+    });
     requestAnimationFrame(restore);
     setTimeout(restore, 350);
   }
@@ -1706,10 +1698,10 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     const w = Math.round(el.clientWidth * 0.16);
     const h = Math.round(el.clientHeight * 0.16);
     if (nav.element.style.width !== `${w}px` || nav.element.style.height !== `${h}px`) {
-      try {
+      quiet(() => {
         nav.setWidth(w);
         nav.setHeight(h);
-      } catch { /* navigator torn down */ }
+      });
     }
     // Normalize OSD's control-corner stack so the minimap sits flush in the
     // corner, inset 12px to line up with the scale bar:

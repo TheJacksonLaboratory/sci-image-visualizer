@@ -19,3 +19,17 @@ import * as OpenSeadragon from 'openseadragon';
  */
 export const OSD: typeof OpenSeadragon =
   (OpenSeadragon as any).default ?? OpenSeadragon;
+
+/**
+ * Run an operation on an OSD tiled image, navigator or viewer that may already
+ * have been torn down (a slice evicted mid-load, the viewer destroyed during an
+ * animation or a timed refit). A throw there is expected and harmless, so it is
+ * only logged at debug level instead of being swallowed silently.
+ */
+export function quiet(fn: () => void): void {
+  try {
+    fn();
+  } catch (err) {
+    console.debug('[OSD] ignored error from a torn-down viewer item', err);
+  }
+}

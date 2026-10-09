@@ -1,4 +1,4 @@
-import { OSD } from './osd-lib';
+import { OSD, quiet } from './osd-lib';
 
 /**
  * Stack-slice cache for the OpenSeadragon backend (refactoring plan, Step 3 —
@@ -172,7 +172,7 @@ export class SliceCache {
             // Image switched while this was adding — drop the orphan so it stops
             // loading instead of streaming tiles for the abandoned stack.
             if (item) {
-              try { this.host.viewer()?.world?.removeItem(item); } catch { /* gone */ }
+              quiet(() => this.host.viewer()?.world?.removeItem(item));
             }
             return;
           }
@@ -238,7 +238,7 @@ export class SliceCache {
           success: (e: any) => {
             const item = e?.item;
             if (token !== this.sliceLoadToken) {
-              if (item) { try { this.host.viewer()?.world?.removeItem(item); } catch { /* gone */ } }
+              if (item) { quiet(() => this.host.viewer()?.world?.removeItem(item)); }
               return;
             }
             if (item) group[c] = item;
@@ -261,7 +261,7 @@ export class SliceCache {
       group.forEach((it, c) => {
         if (!it) return;
         const visible = this.host.channelVisible(c);
-        try { it.setOpacity(active && visible ? 1 : 0); } catch { /* gone */ }
+        quiet(() => it.setOpacity(active && visible ? 1 : 0));
       });
     }
   }
@@ -269,7 +269,7 @@ export class SliceCache {
   /** Show the given composite slice (opacity 1) and hide all other cached slices. */
   private showOnlySlice(z: number): void {
     for (const [zz, item] of this.sliceItems) {
-      try { item.setOpacity(zz === z ? 1 : 0); } catch { /* item gone */ }
+      quiet(() => item.setOpacity(zz === z ? 1 : 0));
     }
   }
 
@@ -298,7 +298,7 @@ export class SliceCache {
     const tStamp = typeof osd.now === 'function' ? osd.now() : Date.now();
     for (const it of group) {
       if (it && typeof it.requestInvalidate === 'function') {
-        try { it.requestInvalidate(true, false, tStamp); } catch { /* gone */ }
+        quiet(() => it.requestInvalidate(true, false, tStamp));
       }
     }
   }
@@ -400,12 +400,12 @@ export class SliceCache {
     for (const [z, item] of [...this.sliceItems]) {
       if (z === cur) continue;
       this.sliceItems.delete(z);
-      try { v.world.removeItem(item); } catch { /* already gone */ }
+      quiet(() => v.world.removeItem(item));
     }
     for (const [z, group] of [...this.channelSliceItems]) {
       if (z === cur) continue;
       this.channelSliceItems.delete(z);
-      for (const it of group) { if (it) { try { v.world.removeItem(it); } catch { /* gone */ } } }
+      for (const it of group) { if (it) { quiet(() => v.world.removeItem(it)); } }
     }
     this.sliceLru = this.sliceCacheHas(cur) ? [cur] : [];
   }
@@ -438,11 +438,11 @@ export class SliceCache {
     if (this.host.isMultiChannel()) {
       const group = this.channelSliceItems.get(z);
       this.channelSliceItems.delete(z);
-      if (group && v) for (const it of group) { if (it) { try { v.world.removeItem(it); } catch { /* gone */ } } }
+      if (group && v) for (const it of group) { if (it) { quiet(() => v.world.removeItem(it)); } }
     } else {
       const item = this.sliceItems.get(z);
       this.sliceItems.delete(z);
-      if (item && v) { try { v.world.removeItem(item); } catch { /* gone */ } }
+      if (item && v) { quiet(() => v.world.removeItem(item)); }
     }
   }
 

@@ -49,7 +49,7 @@ jest.mock('./osd-lib', () => {
     TileSource: function TileSource(this: object, spec: object) { Object.assign(this, spec); },
     Point: function Point(this: { x: number; y: number }, x: number, y: number) { this.x = x; this.y = y; },
   });
-  return { OSD: factory };
+  return { OSD: factory, quiet: jest.requireActual('./osd-lib').quiet };
 });
 
 describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode state', () => {
