@@ -241,6 +241,49 @@ const TILE_FETCH_CONCURRENCY = 6;
 /** How long to poll `/tiles/info` (202 while the server caches the source) before falling back to
  *  a single tile. Generous like the OSD backend — a cold whole-slide can take minutes to cache. */
 const DESCRIPTOR_TIMEOUT_MS = 120000;
+/** Per-request timeout inside that poll (the OSD backend's), so a hung request cannot outlive it. */
+const DESCRIPTOR_REQUEST_TIMEOUT_MS = 45000;
+/** Wait between two `/tiles/info` polls while the server answers 202. */
+const DESCRIPTOR_POLL_INTERVAL_MS = 1200;
+
+/** `fetch` that gives up after `timeoutMs`, or as soon as `signal` aborts. */
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  signal: AbortSignal,
+  timeoutMs: number,
+): Promise<Response> {
+  const ctl = new AbortController();
+  const onAbort = (): void => ctl.abort(signal.reason);
+  if (signal.aborted) onAbort();
+  else signal.addEventListener('abort', onAbort, { once: true });
+  const timer = setTimeout(() => ctl.abort(new Error(`timed out after ${timeoutMs} ms`)), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: ctl.signal });
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener('abort', onAbort);
+  }
+}
+
+/** Resolve after `ms`, or reject as soon as `signal` aborts. */
+function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
 
 /** Default per-channel tints (Fiji-style) when the store/descriptor offers no colour. */
 const DEFAULT_TINTS = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ffffff'];
@@ -506,6 +549,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   /** Cached `/tiles/info` pyramid descriptor + the infoB64 it was fetched for. */
   private descriptor: TileDescriptor | null = null;
   private descriptorKey: string | null = null;
+  /** The poll in flight, shared by every caller asking for the same `infoB64`. */
+  private descriptorPoll: { key: string; promise: Promise<TileDescriptor | null> } | null = null;
+  /** `infoB64`s this scene's poll got no descriptor for (non-202 status, empty body, timeout).
+   *  Scene-scoped — cleared by {@link reset} — so a re-plot retries a slow or flaky server once. */
+  private readonly descriptorMisses = new Set<string>();
 
   /** How the current 2D image is composited (drives histogram + state application). */
   private imageMode: 'grayscale' | 'multichannel' | 'rgb' = 'rgb';
@@ -591,11 +639,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   /**
    * Fetch + cache the server pyramid descriptor (`GET /tiles/info`): the REAL per-level tile grid,
    * tile size, channel metadata and physical pixel size. The backend returns 202 while the source
-   * is still caching, so we poll briefly. Cached per `infoB64`; returns null if it never becomes
-   * ready (callers fall back to a single-tile fetch). This is the authoritative grid — guessing
+   * is still caching, so we poll ({@link pollDescriptor}). Cached per `infoB64`; returns null if it
+   * never becomes ready, or the server will not describe the source (callers fall back to a
+   * single-tile fetch). Read it back through {@link currentDescriptor}. This is the authoritative grid — guessing
    * level dims from `trueImageSize` overshoots the real grid and the server 400s out-of-range tiles.
    */
-  private async ensureDescriptor(): Promise<TileDescriptor | null> {
+  private ensureDescriptor(): Promise<TileDescriptor | null> {
     // Self-contained multi-slice stack (no tile server — e.g. a numbered image
     // series assembled client-side, each slice a different file): there is no
     // single server-tiled pyramid to describe. Returning null routes every
@@ -603,35 +652,72 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // fallback, which — via fetchSlice's own SimpleSliceAccessService branch —
     // correctly fetches each slice's own URL instead of one fixed file's tile
     // pyramid.
-    if (this.simpleStack.isSimple(this.loaded?.imageInfo)) return null;
+    if (this.simpleStack.isSimple(this.loaded?.imageInfo)) return Promise.resolve(null);
     const infoB64 = this.tiles.getSelectedInfoB64();
-    if (!infoB64) return null;
-    if (this.descriptor && this.descriptorKey === infoB64) return this.descriptor;
+    if (!infoB64) return Promise.resolve(null);
+    if (this.descriptor && this.descriptorKey === infoB64) return Promise.resolve(this.descriptor);
+    // A source that answered "no" (or never answered) this scene is not asked again: the render,
+    // the stitch fallback and every slice would otherwise each wait out their own poll.
+    if (this.descriptorMisses.has(infoB64)) return Promise.resolve(null);
+    // Concurrent callers (render, navigator, histogram) share one poll.
+    if (this.descriptorPoll?.key === infoB64) return this.descriptorPoll.promise;
+    const scene = this.scene.signal;
+    const promise = this.pollDescriptor(infoB64, scene).then((desc) => {
+      if (this.descriptorPoll?.promise === promise) this.descriptorPoll = null;
+      if (desc) {
+        this.descriptor = desc;
+        this.descriptorKey = infoB64;
+      } else if (!scene.aborted) {
+        this.descriptorMisses.add(infoB64);
+      }
+      return desc;
+    });
+    this.descriptorPoll = { key: infoB64, promise };
+    return promise;
+  }
+
+  /**
+   * The `/tiles/info` loop behind {@link ensureDescriptor}. Re-polls only on 202 (the server is
+   * still caching the source); any other status means this server will not describe it, so the
+   * answer is null at once. Each request gives up after {@link DESCRIPTOR_REQUEST_TIMEOUT_MS} —
+   * a hung request would otherwise never reach the deadline check — and the whole poll ends as
+   * soon as `scene` is aborted.
+   */
+  private async pollDescriptor(infoB64: string, scene: AbortSignal): Promise<TileDescriptor | null> {
     const headers = await this.tiles
       .getAuthHeaders()
       .catch(() => ({}) as Record<string, string>);
     const url = `${this.api}tiles/info?info=${infoB64}`;
     const deadline = Date.now() + DESCRIPTOR_TIMEOUT_MS;
     for (;;) {
+      if (scene.aborted) return null;
       try {
-        const resp = await fetch(url, { headers });
+        const resp = await fetchWithTimeout(url, { headers }, scene, DESCRIPTOR_REQUEST_TIMEOUT_MS);
+        if (scene.aborted) return null;
         if (resp.status === 200) {
           const body = (await resp.json()) as TileDescriptor;
-          if (body?.levels?.length) {
-            this.descriptor = body;
-            this.descriptorKey = infoB64;
-            return body;
-          }
+          if (body?.levels?.length) return body;
+          console.warn('[napari-js] tiles/info answered without levels; using the single-tile fetch');
+          return null;
         }
-        // 202 (still caching) or empty body → re-poll until the deadline.
+        if (resp.status !== 202) {
+          console.warn(`[napari-js] tiles/info → ${resp.status}; using the single-tile fetch`);
+          return null;
+        }
+        // 202: still caching → re-poll until the deadline.
       } catch (err) {
+        if (scene.aborted) return null;
         console.warn('[napari-js] tiles/info poll retry', err);
       }
       if (Date.now() > deadline) {
         console.warn('[napari-js] tiles/info not ready; falling back to single-tile fetch');
         return null;
       }
-      await new Promise((r) => setTimeout(r, 1200));
+      try {
+        await abortableDelay(DESCRIPTOR_POLL_INTERVAL_MS, scene);
+      } catch {
+        return null; // the scene was reset while waiting
+      }
     }
   }
 
@@ -1416,6 +1502,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const token = ++this.navigatorToken;
     try {
       const desc = await this.ensureDescriptor();
+      // Superseded (a newer slice, or the scene was torn down): fetch nothing.
+      if (token !== this.navigatorToken || this.navigator !== nav) return;
       const channels = desc?.multichannel ? desc.channelInfo ?? [] : [];
       let image: CanvasImageSource;
       if (channels.length > 1) {
@@ -4099,6 +4187,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.cachedImageSource = null;
     this.lastPixelsRect = null;
     this.nativeHistograms.clear();
+    this.descriptorPoll = null;
+    this.descriptorMisses.clear();
     this.tiled = false;
     this.histSamples.clear();
     if (this.readbackTimer != null) {

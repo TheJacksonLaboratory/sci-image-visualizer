@@ -321,6 +321,58 @@ describe('NapariVisualizerService', () => {
     document.body.removeChild(div);
   });
 
+  describe('the /tiles/info poll', () => {
+    type Internals = { ensureDescriptor(): Promise<unknown> };
+    const ensure = () => (service as unknown as Internals).ensureDescriptor();
+    const PENDING = Symbol('pending');
+    /** The poll's result if it settles within a few ticks, else PENDING. */
+    const settled = (p: Promise<unknown>) =>
+      Promise.race([p, new Promise((r) => setTimeout(() => r(PENDING), 50))]);
+    const infoCalls = () =>
+      (globalThis.fetch as jest.Mock).mock.calls.filter((c) => String(c[0]).includes('tiles/info'));
+    const answer = (status: number, body?: unknown) =>
+      Promise.resolve({ ok: status === 200, status, json: () => Promise.resolve(body) });
+
+    it('gives up at once on a status that is not "still caching"', async () => {
+      // Regression (NAPARI-SVC-3): a 404 from a server without /tiles/info was polled like a
+      // 202 for two minutes — and every serial caller then waited its own two minutes.
+      (globalThis.fetch as jest.Mock).mockImplementation(() => answer(404));
+      expect(await settled(ensure())).toBeNull();
+      // Remembered for the scene: the next caller does not ask again.
+      expect(await settled(ensure())).toBeNull();
+      expect(infoCalls()).toHaveLength(1);
+    });
+
+    it('shares one poll between concurrent callers', async () => {
+      let release!: () => void;
+      (globalThis.fetch as jest.Mock).mockImplementation(() => new Promise((resolve) => {
+        release = () => resolve({
+          ok: true, status: 200,
+          json: () => Promise.resolve({
+            width: 8, height: 8, tileSize: 512, levels: [{ res: 0, width: 8, height: 8 }],
+          }),
+        });
+      }));
+      const a = ensure();
+      const b = ensure();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(infoCalls()).toHaveLength(1);
+      release();
+      expect(await a).toEqual(await b);
+      expect(await a).not.toBeNull();
+    });
+
+    it('stops polling when the scene is reset', async () => {
+      // 202 forever: a cold source. A reset must end the poll rather than leave it running
+      // (and its eventual answer landing) under the next scene.
+      (globalThis.fetch as jest.Mock).mockImplementation(() => answer(202));
+      const poll = ensure();
+      await new Promise((r) => setTimeout(r, 0));
+      service.reset();
+      expect(await settled(poll)).toBeNull();
+    });
+  });
+
   it('plot() returns false when the target element is missing', async () => {
     const loaded = await service.load(imageInfo(), 0);
     expect(await service.plot('nope', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE)).toBe(false);
