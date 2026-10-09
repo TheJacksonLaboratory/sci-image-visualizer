@@ -2,6 +2,7 @@ import { Subscription } from 'rxjs';
 
 import { IRegionOverlay, RegionToolMode } from '../../contracts/region-overlay.contract';
 import { Region, Rectangle, Polygon, MultiPolygon } from '../../models/region';
+import { AnchorHandle, resolveHandles } from '../../models/bezier';
 import { RegionStore } from '../../store/region-store.service';
 import { PIXEL_WORLD_QUANTUM, snapToWorldGrid } from '../../spatial/world-grid';
 
@@ -454,17 +455,18 @@ export class NapariRegionOverlay implements IRegionOverlay {
       }
     } else if ('npoints' in b) {
       const p = b as Polygon;
+      // The bezier control point of `h` under the cursor, if any.
+      const sideAt = (h: AnchorHandle): 'in' | 'out' | null => {
+        if (h.hasOut && this.screenDist(clientX, clientY, h.out[0], h.out[1]) <= HANDLE_HIT_PX) return 'out';
+        if (h.hasIn && this.screenDist(clientX, clientY, h.in[0], h.in[1]) <= HANDLE_HIT_PX) return 'in';
+        return null;
+      };
       // Bezier control points first (they sit off the anchors), so they're grabbable.
-      if (p.bezier && p.handlesIn?.length === p.npoints && p.handlesOut?.length === p.npoints) {
-        for (let i = 0; i < p.npoints; i++) {
-          const out = p.handlesOut[i];
-          const inn = p.handlesIn[i];
-          if (this.screenDist(clientX, clientY, p.xpoints[i] + out[0], p.ypoints[i] + out[1]) <= HANDLE_HIT_PX) {
-            return { kind: 'bezier', vertexIndex: i, side: 'out' };
-          }
-          if (this.screenDist(clientX, clientY, p.xpoints[i] + inn[0], p.ypoints[i] + inn[1]) <= HANDLE_HIT_PX) {
-            return { kind: 'bezier', vertexIndex: i, side: 'in' };
-          }
+      if (p.bezier) {
+        const handles = resolveHandles(p.xpoints, p.ypoints, p.closed !== false, p.handlesIn, p.handlesOut);
+        for (let i = 0; i < handles.length; i++) {
+          const side = sideAt(handles[i]);
+          if (side) return { kind: 'bezier', vertexIndex: i, side };
         }
       }
       for (let i = 0; i < p.npoints; i++) {
@@ -474,19 +476,13 @@ export class NapariRegionOverlay implements IRegionOverlay {
       }
       // Hole (donut) ring: bezier control points first, then the vertices.
       const holes = p.holes ?? [];
-      const holeBezier = !!(p.bezier && p.holeHandlesIn && p.holeHandlesOut);
       for (let hi = 0; hi < holes.length; hi++) {
         const ring = holes[hi];
-        if (holeBezier && p.holeHandlesIn![hi] && p.holeHandlesOut![hi]) {
-          for (let vi = 0; vi < ring.length; vi++) {
-            const out = p.holeHandlesOut![hi][vi] ?? [0, 0];
-            const inn = p.holeHandlesIn![hi][vi] ?? [0, 0];
-            if (this.screenDist(clientX, clientY, ring[vi][0] + out[0], ring[vi][1] + out[1]) <= HANDLE_HIT_PX) {
-              return { kind: 'holebezier', holeIndex: hi, vertexIndex: vi, side: 'out' };
-            }
-            if (this.screenDist(clientX, clientY, ring[vi][0] + inn[0], ring[vi][1] + inn[1]) <= HANDLE_HIT_PX) {
-              return { kind: 'holebezier', holeIndex: hi, vertexIndex: vi, side: 'in' };
-            }
+        if (p.bezier) {
+          const handles = this.holeHandles(p, hi);
+          for (let vi = 0; vi < handles.length; vi++) {
+            const side = sideAt(handles[vi]);
+            if (side) return { kind: 'holebezier', holeIndex: hi, vertexIndex: vi, side };
           }
         }
         for (let vi = 0; vi < ring.length; vi++) {
@@ -801,40 +797,36 @@ export class NapariRegionOverlay implements IRegionOverlay {
       handle(r.x + r.width, r.y + r.height);
     } else if ('npoints' in b) {
       const p = b as Polygon;
-      const isBezier = p.bezier && p.handlesIn?.length === p.npoints && p.handlesOut?.length === p.npoints;
       for (let i = 0; i < p.npoints; i++) handle(p.xpoints[i], p.ypoints[i]);
       for (const ring of p.holes ?? []) for (const [hx, hy] of ring) handle(hx, hy);
       // Bezier regions also expose their tangent control points (circles) joined to the anchor
-      // by a thin line, matching the OSD overlay's editable bezier handles.
-      if (isBezier) {
-        const hIn = p.handlesIn as number[][];
-        const hOut = p.handlesOut as number[][];
-        for (let i = 0; i < p.npoints; i++) {
-          this.drawBezierHandle(p.xpoints[i], p.ypoints[i], hOut[i], stroke);
-          this.drawBezierHandle(p.xpoints[i], p.ypoints[i], hIn[i], stroke);
-        }
-      }
-      // Donut hole bezier control handles.
-      if (p.bezier && p.holeHandlesIn && p.holeHandlesOut) {
-        (p.holes ?? []).forEach((ring, hi) => {
-          const hIn = p.holeHandlesIn![hi];
-          const hOut = p.holeHandlesOut![hi];
-          if (!hIn || !hOut) return;
-          ring.forEach(([hx, hy], vi) => {
-            this.drawBezierHandle(hx, hy, hOut[vi], stroke);
-            this.drawBezierHandle(hx, hy, hIn[vi], stroke);
+      // by a thin line, matching the OSD overlay's editable bezier handles. Stored handles when
+      // present, else the Catmull-Rom default the curve is drawn with.
+      if (p.bezier) {
+        const ringHandles = (xs: number[], ys: number[], handles: AnchorHandle[]): void => {
+          handles.forEach((h, i) => {
+            if (h.hasOut) this.drawBezierHandle(xs[i], ys[i], h.out, stroke);
+            if (h.hasIn) this.drawBezierHandle(xs[i], ys[i], h.in, stroke);
           });
+        };
+        ringHandles(
+          p.xpoints, p.ypoints,
+          resolveHandles(p.xpoints, p.ypoints, p.closed !== false, p.handlesIn, p.handlesOut),
+        );
+        // Donut hole bezier control handles.
+        (p.holes ?? []).forEach((ring, hi) => {
+          ringHandles(ring.map((pt) => pt[0]), ring.map((pt) => pt[1]), this.holeHandles(p, hi));
         });
       }
     }
   }
 
-  /** Draw one bezier control point (anchor + handle offset) as a small circle connected to its
-   *  anchor by a tangent line. `handle` is the [dx,dy] offset from the anchor in image space. */
-  private drawBezierHandle(ax: number, ay: number, handle: number[], stroke: string): void {
-    if (!handle || (handle[0] === 0 && handle[1] === 0)) return;
+  /** Draw one bezier control point as a small circle connected to its anchor by a tangent line.
+   *  `handle` is the control point's absolute position in image space. */
+  private drawBezierHandle(ax: number, ay: number, handle: [number, number], stroke: string): void {
+    if (handle[0] === ax && handle[1] === ay) return;
     const [alx, aly] = this.toLocal(ax, ay);
-    const [hlx, hly] = this.toLocal(ax + handle[0], ay + handle[1]);
+    const [hlx, hly] = this.toLocal(handle[0], handle[1]);
     const line = document.createElementNS(SVG_NS, 'line');
     line.setAttribute('x1', `${alx}`);
     line.setAttribute('y1', `${aly}`);
@@ -872,8 +864,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
     }
     if ('npoints' in b) {
       const p = b as Polygon;
-      const isBezier =
-        !!p.bezier && p.handlesIn?.length === p.npoints && p.handlesOut?.length === p.npoints;
+      const isBezier = !!p.bezier && p.npoints >= 2;
       const hasHoles = !!(p.holes && p.holes.length);
       // Bezier or donut (holes) → a single <path>; holes use even-odd fill so they punch through.
       if (isBezier || hasHoles) {
@@ -915,24 +906,35 @@ export class NapariRegionOverlay implements IRegionOverlay {
     return null;
   }
 
-  /** Path data for a polygon: the exterior ring (bezier or straight) plus any holes (bezier when
-   *  the donut carries hole handles, else straight) as sub-paths — even-odd fill cuts them out. */
+  /** Path data for a polygon: the exterior ring plus any holes as sub-paths — even-odd fill cuts
+   *  them out. A bezier polygon curves every ring, through its stored handles when present and
+   *  the Catmull-Rom default otherwise (as OSD draws it). */
   private polygonPathData(p: Polygon, isBezier: boolean): string {
+    const closed = p.closed !== false;
     let d = isBezier
-      ? this.ringBezierPath(p.xpoints, p.ypoints, p.handlesIn!, p.handlesOut!, p.closed !== false)
-      : this.straightPath(p.xpoints, p.ypoints, p.closed !== false);
-    const holeBezier = !!(p.bezier && p.holeHandlesIn && p.holeHandlesOut);
+      ? this.ringBezierPath(
+          p.xpoints, p.ypoints,
+          resolveHandles(p.xpoints, p.ypoints, closed, p.handlesIn, p.handlesOut), closed,
+        )
+      : this.straightPath(p.xpoints, p.ypoints, closed);
     (p.holes ?? []).forEach((ring, hi) => {
       if (ring.length < 3) return;
       const xs = ring.map((pt) => pt[0]);
       const ys = ring.map((pt) => pt[1]);
-      if (holeBezier && p.holeHandlesIn![hi] && p.holeHandlesOut![hi]) {
-        d += ' ' + this.ringBezierPath(xs, ys, p.holeHandlesIn![hi], p.holeHandlesOut![hi], true);
-      } else {
-        d += ' ' + this.straightPath(xs, ys, true);
-      }
+      d += ' ' + (isBezier
+        ? this.ringBezierPath(xs, ys, this.holeHandles(p, hi), true)
+        : this.straightPath(xs, ys, true));
     });
     return d;
+  }
+
+  /** A hole ring's bezier handles: stored when present, else the Catmull-Rom default. */
+  private holeHandles(p: Polygon, holeIndex: number): AnchorHandle[] {
+    const ring = p.holes?.[holeIndex] ?? [];
+    return resolveHandles(
+      ring.map((pt) => pt[0]), ring.map((pt) => pt[1]), true,
+      p.holeHandlesIn?.[holeIndex], p.holeHandlesOut?.[holeIndex],
+    );
   }
 
   /** SVG path data for a straight ring/polyline in image coords (closed appends `Z`). */
@@ -946,21 +948,13 @@ export class NapariRegionOverlay implements IRegionOverlay {
   }
 
   /** SVG cubic-bezier path data for any ring (exterior or hole): anchors joined by cubic segments
-   *  whose control points are `anchor + handleOut` (leaving) and `nextAnchor + handleIn` (arriving),
-   *  in image space. Used for both the exterior and (donut) hole rings. */
-  private ringBezierPath(
-    xs: number[],
-    ys: number[],
-    hIn: number[][],
-    hOut: number[][],
-    closed: boolean,
-  ): string {
+   *  whose control points are the leaving anchor's `out` and the arriving anchor's `in` handle
+   *  (absolute, image space). Used for both the exterior and (donut) hole rings. */
+  private ringBezierPath(xs: number[], ys: number[], handles: AnchorHandle[], closed: boolean): string {
     const n = xs.length;
     const anchor = (i: number): [number, number] => this.toLocal(xs[i], ys[i]);
-    const ctrlOut = (i: number): [number, number] =>
-      this.toLocal(xs[i] + (hOut[i]?.[0] ?? 0), ys[i] + (hOut[i]?.[1] ?? 0));
-    const ctrlIn = (i: number): [number, number] =>
-      this.toLocal(xs[i] + (hIn[i]?.[0] ?? 0), ys[i] + (hIn[i]?.[1] ?? 0));
+    const ctrlOut = (i: number): [number, number] => this.toLocal(handles[i].out[0], handles[i].out[1]);
+    const ctrlIn = (i: number): [number, number] => this.toLocal(handles[i].in[0], handles[i].in[1]);
     const [sx, sy] = anchor(0);
     let d = `M ${sx},${sy}`;
     const segments = closed ? n : n - 1;

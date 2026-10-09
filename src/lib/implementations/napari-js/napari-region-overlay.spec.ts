@@ -2,6 +2,7 @@ import { NapariRegionOverlay } from './napari-region-overlay';
 import { RegionStore } from '../../store/region-store.service';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { Region, Rectangle, Polygon, MultiPolygon } from '../../models/region';
+import { bezierAnchorHandles } from '../../models/bezier';
 
 /**
  * Tests for the napari-js SVG region overlay (jit-ui#102), mirroring
@@ -507,6 +508,41 @@ describe('NapariRegionOverlay', () => {
     ptr(overlay, 'pointerup', 20, 5);
     const after = store.getRegions().find((r) => r.id === id)!.bounds as Polygon;
     expect(after.handlesOut![0]).toEqual([20, 5]); // offset = handle - anchor(0,0)
+  });
+
+  /**
+   * GeoJSON import keeps `bezier: true` without handles, and so do a clone and the vertex
+   * eraser. OSD draws those with the Catmull-Rom default, so napari has to as well
+   * (review NAPARI-BOUNDARY-3).
+   */
+  describe('a bezier region with no stored handles', () => {
+    function handlelessBezier(): Region {
+      const r = triRegion();
+      (r.bounds as Polygon).bezier = true;
+      return r;
+    }
+
+    it('draws a curve through the default handles, not a straight polygon', () => {
+      store.addRegion(handlelessBezier());
+      const path = svgOf(overlay).querySelector('path');
+      expect(path).toBeTruthy();
+      expect(path!.getAttribute('d')).toContain(' C ');
+      expect(svgOf(overlay).querySelector('polygon')).toBeNull();
+    });
+
+    it('shows and drags the default control handles', () => {
+      const id = store.addRegion(handlelessBezier()); // selected
+      overlay.setMode('select');
+      expect(svgOf(overlay).querySelectorAll('circle').length).toBeGreaterThan(0);
+      const p = store.getRegions().find((r) => r.id === id)!.bounds as Polygon;
+      const [h] = bezierAnchorHandles(p.xpoints, p.ypoints, true);
+      ptr(overlay, 'pointerdown', h.out[0], h.out[1]); // vertex 0's default out-handle
+      ptr(overlay, 'pointermove', 20, 5);
+      ptr(overlay, 'pointerup', 20, 5);
+      const after = store.getRegions().find((r) => r.id === id)!.bounds as Polygon;
+      expect(after.handlesOut![0]).toEqual([20, 5]);
+      expect(after.xpoints).toEqual([0, 10, 5]); // the anchor did not move
+    });
   });
 
   // ── holes / donuts ───────────────────────────────────────────────────
