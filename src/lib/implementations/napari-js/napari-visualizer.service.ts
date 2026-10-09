@@ -397,6 +397,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     number,
     { data: Uint8Array; width: number; height: number }
   >();
+  /** The surface preload in flight; a newer one (a channel switch) aborts it. */
+  private surfacePreload: AbortController | null = null;
   /** In-plane grid cap for the active surface load (full grid ÷ the decimate factor). */
   private surfaceMaxGrid = SURFACE_MAX_GRID;
   /** Contrast window [min,max] the current surface mesh was built with. A change reshapes the
@@ -3910,7 +3912,14 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    * concurrency keeps the connection pool busy without flooding it on a deep stack.
    */
   private async preloadSurfacePlanes(viewer: Viewer): Promise<void> {
+    // A channel switch starts a new preload while this one may still be in flight: the newer
+    // one owns the plane cache and the progress bar from here on.
+    this.surfacePreload?.abort();
+    const preload = new AbortController();
+    this.surfacePreload = preload;
     const loading = this.loading.signal; // bail on a Cancel / new plot while we fetch
+    const stale = (): boolean =>
+      preload.signal.aborted || loading.aborted || this.viewer !== viewer;
     const info = this.loaded?.imageInfo;
     const depth = info?.imageMeta?.[0]?.z || info?.urls?.length || 1;
     const { maxGrid } = surfaceResolutionFor(this.resolutionScale);
@@ -3924,10 +3933,15 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       const worker = async (): Promise<void> => {
         for (;;) {
           const z = pending.shift();
-          if (z === undefined || this.viewer !== viewer || loading.aborted) return;
+          if (z === undefined || stale()) return;
           try {
-            this.surfacePlanes.set(z, await this.fetchSurfacePlane(z, maxGrid));
+            const plane = await this.fetchSurfacePlane(z, maxGrid);
+            // Superseded while in flight: this plane may be the OLD band, and the cache is not
+            // this preload's any more.
+            if (stale()) return;
+            this.surfacePlanes.set(z, plane);
           } catch (err) {
+            if (stale()) return;
             console.warn(`[napari-js] surface slice ${z} preload failed`, err);
           }
           done++;
@@ -3937,8 +3951,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       const pool = Math.min(VOLUME_FETCH_CONCURRENCY, Math.max(1, depth));
       await Promise.all(Array.from({ length: pool }, () => worker()));
     } finally {
-      this.stackLoading$.next(false);
-      this.stackLoadingProgress$.next(0);
+      // Only the newest preload ends the progress bar; a superseded one would hide it while
+      // its successor is still loading.
+      if (this.surfacePreload === preload) {
+        this.surfacePreload = null;
+        this.stackLoading$.next(false);
+        this.stackLoadingProgress$.next(0);
+      }
     }
   }
 
@@ -4201,6 +4220,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.volumeMultichannel = false;
     this.surfaceLayer = null;
     this.surfaceChannel = undefined;
+    this.surfacePreload?.abort();
     this.surfacePlanes.clear();
     this.surfaceWindow = null;
     this.scatterRegionSub?.unsubscribe();

@@ -594,6 +594,54 @@ describe('NapariVisualizerService', () => {
     document.body.removeChild(div);
   });
 
+  it('a superseded surface preload neither caches its planes nor ends the progress bar', async () => {
+    // Regression (NAPARI-SVC-8): a channel switch starts a second preload while the first is
+    // in flight. The first one's late planes (the OLD band) landed in the cache the second had
+    // just cleared, and whichever finished first hid the progress bar.
+    type Plane = { data: Uint8Array; width: number; height: number };
+    type Internals = {
+      viewer: unknown;
+      surfacePlanes: Map<number, Plane>;
+      preloadSurfacePlanes(viewer: unknown): Promise<void>;
+      fetchSurfacePlane(z: number, maxGrid: number): Promise<Plane>;
+    };
+    const internals = service as unknown as Internals;
+    const div = document.createElement('div');
+    div.id = 'surf-preload-host';
+    document.body.appendChild(div);
+    const loaded = await service.load(imageInfo(), 0);
+    await service.plot('surf-preload-host', loaded, imageInfo(), 600, PlotType.NAPARI_SURFACE);
+
+    const held: Array<(p: Plane) => void> = [];
+    jest.spyOn(internals, 'fetchSurfacePlane').mockImplementation(
+      () => new Promise<Plane>((resolve) => held.push(resolve)),
+    );
+    const plane = (v: number): Plane => ({ data: new Uint8Array([v]), width: 1, height: 1 });
+    const loading = jest.fn();
+    const sub = service.isStackLoading().subscribe(loading);
+
+    const old = internals.preloadSurfacePlanes(internals.viewer);
+    await Promise.resolve();
+    const oldFetches = held.splice(0);
+    const fresh = internals.preloadSurfacePlanes(internals.viewer);
+    await Promise.resolve();
+    const freshFetches = held.splice(0);
+
+    oldFetches.forEach((r) => r(plane(1)));
+    await old;
+    expect([...internals.surfacePlanes.values()].some((p) => p.data[0] === 1)).toBe(false);
+    expect(loading).toHaveBeenLastCalledWith(true);
+
+    freshFetches.forEach((r) => r(plane(2)));
+    await fresh;
+    expect([...internals.surfacePlanes.values()].map((p) => p.data[0])).toEqual([2, 2]);
+    expect(loading).toHaveBeenLastCalledWith(false);
+
+    sub.unsubscribe();
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
   it('mounts a 3D axes gizmo for the napari surface and toggles it via Surface-3D controls', async () => {
     const addAxes = jest.spyOn(
       Viewer.prototype as unknown as { addAxes: (...a: unknown[]) => unknown },
