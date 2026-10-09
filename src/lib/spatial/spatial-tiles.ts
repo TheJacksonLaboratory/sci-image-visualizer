@@ -247,7 +247,38 @@ export function clipTranscripts(t: SpatialTranscriptTile, rect: DataRect): Spati
 export function groupTranscripts(
   t: SpatialTranscriptTile, bin: number, groupOf: (geneSlot: number) => number = (g) => g,
 ): { tile: SpatialTranscriptTile; group: Int32Array } {
-  const index = new Map<string, number>();
+  // Hot on every pan and zoom, so nothing is allocated per transcript: the (group, square)
+  // key is a number over the tile's own bounded extent rather than a template string, and
+  // the per-entry gene and cell tallies share two flat maps instead of two Maps per entry.
+  const count = t.count;
+  const gks = new Int32Array(count);
+  let minBx = Infinity;
+  let maxBx = -Infinity;
+  let minBy = Infinity;
+  let maxBy = -Infinity;
+  for (let i = 0; i < count; i++) {
+    gks[i] = groupOf(t.gene[i]);
+    const bx = Math.floor(t.x[i] / bin);
+    const by = Math.floor(t.y[i] / bin);
+    if (bx < minBx) minBx = bx;
+    if (bx > maxBx) maxBx = bx;
+    if (by < minBy) minBy = by;
+    if (by > maxBy) maxBy = by;
+  }
+  // One spare column and row for a square that is not finite (a NaN coordinate), so such
+  // transcripts still group together rather than colliding with a real square.
+  const cols = Number.isFinite(maxBx - minBx) ? maxBx - minBx + 2 : 1;
+  const rows = Number.isFinite(maxBy - minBy) ? maxBy - minBy + 2 : 1;
+  const col = (v: number): number => {
+    const b = Math.floor(v / bin);
+    return Number.isFinite(b) ? b - minBx : cols - 1;
+  };
+  const row = (v: number): number => {
+    const b = Math.floor(v / bin);
+    return Number.isFinite(b) ? b - minBy : rows - 1;
+  };
+
+  const index = new Map<number, number>();
   const sx: number[] = [];
   const sy: number[] = [];
   const sz: number[] = [];
@@ -255,25 +286,25 @@ export function groupTranscripts(
   const grp: number[] = [];
   // Per entry, how many transcripts of each gene (the dominant one gives the icon and colour)
   // and in each cell (the dominant one is the entry's cell).
-  const geneW: Map<number, number>[] = [];
-  const obsW: Map<number, number>[] = [];
-  for (let i = 0; i < t.count; i++) {
-    const gk = groupOf(t.gene[i]);
-    const key = `${gk}|${Math.floor(t.x[i] / bin)}|${Math.floor(t.y[i] / bin)}`;
+  const genes = new DominantTally();
+  const cells = new DominantTally();
+  for (let i = 0; i < count; i++) {
+    const gk = gks[i];
+    const key = (gk * rows + row(t.y[i])) * cols + col(t.x[i]);
     let k = index.get(key);
     const wi = t.weight[i] || 1;
     if (k === undefined) {
       k = w.length;
       index.set(key, k);
       sx.push(0); sy.push(0); sz.push(0); w.push(0);
-      grp.push(gk); geneW.push(new Map()); obsW.push(new Map());
+      grp.push(gk);
     }
     sx[k] += t.x[i] * wi;
     sy[k] += t.y[i] * wi;
     sz[k] += t.z[i] * wi;
     w[k] += wi;
-    geneW[k].set(t.gene[i], (geneW[k].get(t.gene[i]) ?? 0) + wi);
-    obsW[k].set(t.observation[i], (obsW[k].get(t.observation[i]) ?? 0) + wi);
+    genes.add(k, t.gene[i], wi);
+    cells.add(k, t.observation[i], wi);
   }
   const n = w.length;
   const tile: SpatialTranscriptTile = {
@@ -287,19 +318,49 @@ export function groupTranscripts(
     tile.y[k] = sy[k] / w[k];
     tile.z[k] = sz[k] / w[k];
     tile.weight[k] = w[k];
-    tile.observation[k] = dominant(obsW[k]);
-    tile.gene[k] = dominant(geneW[k]);
+    tile.observation[k] = cells.dominant(k);
+    tile.gene[k] = genes.dominant(k);
     group[k] = grp[k];
   }
   return { tile, group };
 }
 
-/** The key with the largest total; the first seen on a tie. */
-function dominant(totals: Map<number, number>): number {
-  let best = 0;
-  let top = -1;
-  for (const [key, v] of totals) if (v > top) { top = v; best = key; }
-  return best;
+/**
+ * Weighted tallies of u32 keys per entry, tracking each entry's dominant key as it goes:
+ * the key with the largest total, the first seen on a tie.
+ *
+ * One map for every entry, keyed `entry · 2^32 + key` — exact while entries stay below
+ * 2^21, far above any marker budget.
+ */
+class DominantTally {
+  private static readonly KEY_SPAN = 2 ** 32;
+  private readonly total = new Map<number, number>();
+  private readonly firstSeen = new Map<number, number>();
+  private seq = 0;
+  private readonly bestKey: number[] = [];
+  private readonly bestTotal: number[] = [];
+  private readonly bestSeen: number[] = [];
+
+  add(entry: number, key: number, weight: number): void {
+    const id = entry * DominantTally.KEY_SPAN + key;
+    const v = (this.total.get(id) ?? 0) + weight;
+    this.total.set(id, v);
+    let first = this.firstSeen.get(id);
+    if (first === undefined) {
+      first = this.seq++;
+      this.firstSeen.set(id, first);
+    }
+    const top = this.bestTotal[entry];
+    if (top === undefined || v > top || (v === top && first < this.bestSeen[entry])) {
+      this.bestKey[entry] = key;
+      this.bestTotal[entry] = v;
+      this.bestSeen[entry] = first;
+    }
+  }
+
+  dominant(entry: number): number {
+    return this.bestKey[entry] ?? 0;
+  }
 }
 
 /**

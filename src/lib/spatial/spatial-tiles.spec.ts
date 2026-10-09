@@ -390,6 +390,65 @@ describe('grouping a gene selection by zoom', () => {
     expect(tile.gene[0]).toBe(1); // gene 1 holds 6 of the cluster's 7
   });
 
+  it('matches the string-keyed reference on a dense random tile, ties included', () => {
+    // The original algorithm, kept here as the oracle: a template-string key per transcript
+    // and a Map per entry, dominant = largest total, first seen on a tie.
+    const reference = (t: SpatialTranscriptTile, bin: number, groupOf: (g: number) => number) => {
+      const index = new Map<string, number>();
+      const w: number[] = [];
+      const sx: number[] = [];
+      const genesW: Map<number, number>[] = [];
+      const obsW: Map<number, number>[] = [];
+      const grp: number[] = [];
+      for (let i = 0; i < t.count; i++) {
+        const gk = groupOf(t.gene[i]);
+        const key = `${gk}|${Math.floor(t.x[i] / bin)}|${Math.floor(t.y[i] / bin)}`;
+        let k = index.get(key);
+        const wi = t.weight[i] || 1;
+        if (k === undefined) {
+          k = w.length; index.set(key, k);
+          w.push(0); sx.push(0); grp.push(gk); genesW.push(new Map()); obsW.push(new Map());
+        }
+        w[k] += wi; sx[k] += t.x[i] * wi;
+        genesW[k].set(t.gene[i], (genesW[k].get(t.gene[i]) ?? 0) + wi);
+        obsW[k].set(t.observation[i], (obsW[k].get(t.observation[i]) ?? 0) + wi);
+      }
+      const dominant = (m: Map<number, number>) => {
+        let best = 0; let top = -1;
+        for (const [key, v] of m) if (v > top) { top = v; best = key; }
+        return best;
+      };
+      return {
+        weight: w, group: grp, x: sx.map((v, k) => v / w[k]),
+        gene: genesW.map(dominant), observation: obsW.map(dominant),
+      };
+    };
+    let seed = 11;
+    const rand = (n: number) => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return Math.floor((seed / 2147483648) * n);
+    };
+    const n = 3000;
+    const t: SpatialTranscriptTile = {
+      count: n, aggregated: false,
+      x: Float32Array.from({ length: n }, () => rand(400) - 200),
+      y: Float32Array.from({ length: n }, () => rand(300) - 100),
+      z: new Float32Array(n),
+      // Small weights and few genes and cells, so ties are common.
+      weight: Uint32Array.from({ length: n }, () => rand(3)),
+      observation: Uint32Array.from({ length: n }, () => (rand(5) === 0 ? 0xffffffff : rand(4))),
+      gene: Uint16Array.from({ length: n }, () => rand(6)),
+    };
+    const groupOf = (g: number) => (g < 3 ? 0 : g);
+    const want = reference(t, 50, groupOf);
+    const got = groupTranscripts(t, 50, groupOf);
+    expect(Array.from(got.tile.weight)).toEqual(want.weight);
+    expect(Array.from(got.group)).toEqual(want.group);
+    expect(Array.from(got.tile.gene)).toEqual(want.gene);
+    expect(Array.from(got.tile.observation)).toEqual(want.observation);
+    got.tile.x.forEach((v, k) => expect(v).toBeCloseTo(want.x[k], 3));
+  });
+
 });
 
 describe('cluster colours', () => {
