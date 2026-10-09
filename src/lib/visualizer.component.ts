@@ -622,7 +622,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
         this.onSelectPlotType(PlotType.SPATIAL_OMICS_3D);
       }
     } finally {
-      this.state.setImageLoading(false);
+      // Only the build still on screen (or one that failed and released its key) may
+      // drop the overlay: a newer volume build that superseded this one is still encoding.
+      if (this.volumeImageKey === key || this.volumeImageKey === null) this.state.setImageLoading(false);
       this.cdr.detectChanges();
     }
   }

@@ -557,6 +557,29 @@ describe('VisualizerComponent (UI shell)', () => {
         expect(infos.filter((i: any) => i?.isStack).length).toBe(2);
       });
 
+      it('a superseded volume build leaves the newer build\'s loading overlay up (CORE-12)', async () => {
+        const pending: ((v: Uint8Array) => void)[] = [];
+        port.getVolume = jest.fn(() => new Promise<Uint8Array>((resolve) => pending.push(resolve)));
+        const c = makeComponent(plotService, port);
+        const setLoading = (c as any).state.setImageLoading as jest.Mock;
+        (c as any).watchSpatialDataset();
+        const volume = { width: 4, height: 4, depth: 4, voxelSize: [40, 40, 200] };
+
+        dataset$.next({ ...VOLUME_DATASET, id: 'abc.full', volume });
+        dataset$.next({ ...VOLUME_DATASET, id: 'abc.sub10', volume });
+        await flush();
+        expect(pending).toHaveLength(2);
+
+        setLoading.mockClear();
+        pending[0](new Uint8Array(4 * 4 * 4)); // the superseded build finishes first
+        await flush();
+        expect(setLoading).not.toHaveBeenCalledWith(false);
+
+        pending[1](new Uint8Array(4 * 4 * 4));
+        await flush();
+        expect(setLoading).toHaveBeenLastCalledWith(false);
+      });
+
       it('republishes the volume after a detour through an image-backed dataset', async () => {
         port.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 4 * 4));
         const c = makeComponent(plotService, port);
