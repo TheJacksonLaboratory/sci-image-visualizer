@@ -664,3 +664,83 @@ describe('NapariSpatialTileLayers: overlapping plans', () => {
     tiles.detach();
   });
 });
+
+/**
+ * napari-js 0.14's LayerList cannot move a layer, so order is restored by remove + re-add,
+ * and every removal disposes the layer's GPU visual (re-uploaded on the next frame). A plan
+ * that replaces several groups restores the order ONCE, instead of re-adding the groups above
+ * each replaced one every time (review NAPARI-BOUNDARY-11).
+ */
+describe('NapariSpatialTileLayers: layer order', () => {
+  const ring = (): SpatialPolygonTile => ({
+    count: 1, coords: new Float32Array([0, 0, 10, 0, 10, 10, 0, 10]),
+    offsets: new Uint32Array([0, 4]), observation: new Uint32Array([0]),
+  });
+  const transcripts: SpatialTranscriptTile = {
+    count: 1, aggregated: false, x: Float32Array.of(5), y: Float32Array.of(5), z: new Float32Array(1),
+    weight: Uint32Array.of(1), observation: new Uint32Array(1), gene: new Uint16Array(1),
+  };
+
+  function setup() {
+    const port = {
+      getPolygonTile: jest.fn(async () => ring()),
+      getTranscriptTile: jest.fn(async () => transcripts),
+    } as unknown as SpatialDataPort;
+    const dataset = {
+      id: 'd', name: 'd', columns: [],
+      observations: { count: 1, x: Float32Array.of(5), y: Float32Array.of(5), radius: 5 },
+      polygonTiles: {
+        bounds: [0, 0, 100, 100], sets: [{ name: 'cell', label: 'Cell' }, { name: 'nucleus', label: 'Nucleus' }],
+        defaultSet: 'cell', levels: [{ tileSize: 200 }],
+      },
+      transcriptTiles: { bounds: [0, 0, 100, 100], count: 1, levels: [{ tileSize: 200 }] },
+    } as unknown as SpatialDataset;
+    let view = {
+      ...DEFAULT_SPATIAL_VIEW, cellColorMode: 'single' as const, cellDraw: 'both' as const,
+      cellSet: 'cell', transcriptMode: 'circles' as const, transcriptGenes: ['A'],
+    };
+    const tiles = new NapariSpatialTileLayers(port, {
+      latest: () => [dataset, view, emptySelection(1)],
+      canvasSize: () => [400, 400], continuousLut: () => LUT, polygonsShownChanged: () => undefined,
+    });
+    const viewer = new Viewer({ canvas: document.createElement('canvas') });
+    viewer.camera.set([50, 50], 40);
+    tiles.attach(viewer);
+    const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
+    const setView = (patch: Partial<typeof view>) => { view = { ...view, ...patch }; };
+    return { tiles, viewer, plan, setView };
+  }
+  const names = (viewer: Viewer) => viewer.layers.items.map((l) => l.name);
+
+  it('re-adds the transcripts once when the cells are rebuilt under them', async () => {
+    const { tiles, viewer, plan, setView } = setup();
+    await plan();
+    expect(names(viewer)).toEqual(['cells', 'cell outlines', 'transcripts']);
+    const transcriptLayer = viewer.layers.items[2];
+    const removals: unknown[] = [];
+    viewer.layers.removed.connect((l) => removals.push(l));
+
+    setView({ cellSet: 'nucleus' }); // new cell geometry; the transcripts are unchanged
+    await plan();
+
+    expect(names(viewer)).toEqual(['cells', 'cell outlines', 'transcripts']);
+    expect(viewer.layers.items[2]).toBe(transcriptLayer);
+    expect(removals.filter((l) => l === transcriptLayer)).toHaveLength(1);
+    tiles.detach();
+  });
+
+  it('puts every overlay back above re-added markers, and leaves a correct order alone', async () => {
+    const { tiles, viewer, plan } = setup();
+    await plan();
+    const before = [...viewer.layers.items];
+    const removals: unknown[] = [];
+    viewer.layers.removed.connect((l) => removals.push(l));
+    tiles.afterObservations(); // nothing was added since: already in order
+    expect(removals).toHaveLength(0);
+    viewer.addPoints(new Float32Array(2), { name: 'markers' });
+    tiles.afterObservations();
+    expect(names(viewer)).toEqual(['markers', 'cells', 'cell outlines', 'transcripts']);
+    expect(viewer.layers.items.slice(1)).toEqual(before);
+    tiles.detach();
+  });
+});

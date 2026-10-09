@@ -44,7 +44,10 @@ const GLYPH_OUTLINE_MIN_PX = 8;
  * LAYER ORDER
  * -----------
  * napari-js's layer list is append-only (add / remove / clear), so order is kept by
- * re-adding: cell fill, cell outline, the transcript density, then transcripts on top.
+ * re-adding: cell fill, cell outline, the transcript density, then transcripts on top. Each
+ * removal disposes the layer's GPU visual (re-uploaded on the next frame), so a plan restores
+ * the order once, after all its groups are in place, and moves only the layers that are out
+ * of place ({@link restoreOrder}). `LayerList.move` in napari-js would remove the re-upload.
  * The service's observation markers sit under all of them; while outlines are drawn the
  * markers are hidden (a cell is its outline then, not a dot), so the cells never have to
  * be ordered against them. The density goes OVER the markers on purpose: under 10^5
@@ -299,14 +302,7 @@ export class NapariSpatialTileLayers {
 
   /** Called right after the service adds its marker layer: everything goes back on top. */
   afterObservations(): void {
-    const v = this.viewer;
-    if (!v) return;
-    for (const g of ORDER) {
-      const layer = this.layers.get(g);
-      if (!layer) continue;
-      if (v.layers.items.includes(layer)) v.layers.remove(layer);
-      v.layers.add(layer);
-    }
+    this.restoreOrder(true);
   }
 
   // ── planning ──────────────────────────────────────────────────────────────────────
@@ -354,6 +350,7 @@ export class NapariSpatialTileLayers {
       settle('cells', this.planCells(dataset, view, selection, rect, pxPerUnit, ctx)),
       settle('transcripts', this.planTranscripts(dataset, view, rect, pxPerUnit, ctx)),
     ]);
+    this.restoreOrder(false);
     if (ctx.stale()) return;
     this.host.geneCountsChanged?.(this.geneCountsIn(rect));
     // A tile that failed left a hole the cache keys do not record, so try the same view
@@ -1395,20 +1392,38 @@ export class NapariSpatialTileLayers {
   }
 
   /**
-   * Install `layer` as `group`'s layer and restore the order of the groups above it.
-   * The layer was just added by the caller (so it is on top); groups that belong above
-   * it are removed and re-added.
+   * Install `layer` as `group`'s layer. The layer was just added by the caller, so it is on
+   * top: the plan puts the groups that belong above it back in place once it is done
+   * ({@link restoreOrder}), rather than after every replaced group.
    */
   private replace(group: Group, layer: Layer): void {
     const v = this.viewer!;
     const old = this.layers.get(group);
     if (old && old !== layer && v.layers.items.includes(old)) v.layers.remove(old);
     this.layers.set(group, layer);
-    for (const g of ORDER.slice(ORDER.indexOf(group) + 1)) {
-      const above = this.layers.get(g);
-      if (!above || !v.layers.items.includes(above)) continue;
-      v.layers.remove(above);
-      v.layers.add(above);
+    v.requestRender();
+  }
+
+  /**
+   * Put the groups' layers in {@link ORDER}, re-adding only from the first one out of place
+   * (and, with `aboveOthers`, the first one under a layer that is not ours — the service's
+   * markers). Everything before that is already where it belongs and keeps its GPU visual.
+   */
+  private restoreOrder(aboveOthers: boolean): void {
+    const v = this.viewer;
+    if (!v) return;
+    const items = v.layers.items;
+    const wanted = ORDER.map((g) => this.layers.get(g)).filter((l): l is Layer => !!l && items.includes(l));
+    const ours = new Set<Layer>(wanted);
+    let lastOther = -1;
+    if (aboveOthers) items.forEach((l, i) => { if (!ours.has(l)) lastOther = i; });
+    const current = items.filter((l) => ours.has(l));
+    let k = 0;
+    while (k < wanted.length && current[k] === wanted[k] && items.indexOf(wanted[k]) > lastOther) k++;
+    if (k === wanted.length) return;
+    for (const layer of wanted.slice(k)) {
+      v.layers.remove(layer);
+      v.layers.add(layer);
     }
     v.requestRender();
   }
