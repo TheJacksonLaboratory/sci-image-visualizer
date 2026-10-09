@@ -105,17 +105,23 @@ function polygonShape(
 ): Shape | null {
   if (xs.length < 3) return null;
   const bounds = ringBounds(xs, ys);
+  // Split and bounded ONCE per shape: the hit test runs for every candidate point
+  // inside the exterior — up to millions of cells per selection.
+  const holeRings = (holes ?? [])
+    .filter((ring) => ring.length >= 3)
+    .map((ring) => {
+      const hx = ring.map((p) => p[0]);
+      const hy = ring.map((p) => p[1]);
+      return { xs: hx, ys: hy, bounds: ringBounds(hx, hy) };
+    });
   return {
     bounds,
     hit: (px, py) => {
       if (!pointInRing(xs, ys, px, py)) return false;
       // The region model is explicit: a point inside the exterior AND inside a
       // hole is OUTSIDE the region.
-      for (const ring of holes ?? []) {
-        if (ring.length >= 3
-          && pointInRing(ring.map((p) => p[0]), ring.map((p) => p[1]), px, py)) {
-          return false;
-        }
+      for (const hole of holeRings) {
+        if (inBounds(hole.bounds, px, py) && pointInRing(hole.xs, hole.ys, px, py)) return false;
       }
       return true;
     },
