@@ -89,6 +89,13 @@ export class OsdRegionOverlay implements IRegionOverlay {
   private bandDragged = false;
 
   private readonly redrawHandler = () => this.redraw();
+  /** OSD's MouseTracker drops a cancelled pointer (touch interrupted, pointer
+   *  capture lost to the browser) without calling releaseHandler, so the
+   *  gesture is ended here instead. */
+  private readonly pointerCancelHandler = () => {
+    this.endGesture();
+    this.redraw();
+  };
 
   constructor(private viewer: any, private store: RegionEditStore) {
     this.svg = document.createElementNS(SVGNS, 'svg') as SVGSVGElement;
@@ -97,6 +104,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
       pointerEvents: 'none', // OSD handles navigation unless we're drawing
     });
     this.viewer.canvas.appendChild(this.svg);
+    (this.viewer.canvas as HTMLElement).addEventListener('pointercancel', this.pointerCancelHandler);
 
     this.viewer.addHandler('update-viewport', this.redrawHandler);
     this.viewer.addHandler('animation', this.redrawHandler);
@@ -186,6 +194,10 @@ export class OsdRegionOverlay implements IRegionOverlay {
   }
 
   destroy(): void {
+    // Close a gesture in flight first: a drag's open store batch would
+    // otherwise suppress every later region-update emission app-wide.
+    this.endGesture();
+    (this.viewer.canvas as HTMLElement).removeEventListener('pointercancel', this.pointerCancelHandler);
     this.subs.unsubscribe();
     (this.viewer.element as HTMLElement | undefined)
       ?.removeEventListener('wheel', this.wheelZoomHandler);
@@ -1165,6 +1177,14 @@ export class OsdRegionOverlay implements IRegionOverlay {
     let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
     t = Math.max(0, Math.min(1, t));
     return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+  }
+
+  /** Abandon whatever pointer gesture is in progress (drawing, edit drag,
+   *  rubber band) and close its store batch. */
+  private endGesture(): void {
+    this.resetInProgress();
+    this.bandStart = this.bandCurrent = null;
+    this.bandDragged = false;
   }
 
   private resetInProgress(): void {

@@ -145,6 +145,37 @@ describe('OsdRegionOverlay — vertex tools', () => {
     expect(b.height).toBe(10);
   });
 
+  // A move drag opens a RegionStore batch that only the release closes. A
+  // viewer teardown or a cancelled pointer mid-drag must close it too, or every
+  // later region-update emission is swallowed app-wide (OSD-PLOTLY-10).
+  function startMoveDrag(): void {
+    store.addRegion(rectRegion());
+    overlay.setMode('move');
+    const h = handlers();
+    h.pressHandler({ position: { x: 5, y: 5 } });
+    h.dragHandler({ position: { x: 8, y: 9 } });
+  }
+  function regionUpdatesFlow(): boolean {
+    let emitted = false;
+    const sub = store.getRegionUpdateEvent().subscribe(() => { emitted = true; });
+    emitted = false; // ignore a replayed value, if any
+    store.addRegion(rectRegionAt(50, 50, 5, 5));
+    sub.unsubscribe();
+    return emitted;
+  }
+
+  it('destroy() mid-drag closes the store batch', () => {
+    startMoveDrag();
+    overlay.destroy();
+    expect(regionUpdatesFlow()).toBe(true);
+  });
+
+  it('a cancelled pointer mid-drag closes the store batch', () => {
+    startMoveDrag();
+    ((overlay as any).viewer.canvas as HTMLElement).dispatchEvent(new Event('pointercancel'));
+    expect(regionUpdatesFlow()).toBe(true);
+  });
+
   it('draws the selected region\'s vertex handles in its own colour', () => {
     const r = triRegion();
     r.color = '#ff8800';
