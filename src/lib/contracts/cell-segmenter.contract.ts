@@ -29,6 +29,7 @@ export interface CellSegmentProgress {
   onStatus?: (status: string) => void;
 }
 
+/** A segmenter that labels every cell of an image (one exclusive label per pixel). */
 export interface ICellSegmenter {
   /** Segment all cells in an RGBA image into an instance label map. */
   segmentCells(

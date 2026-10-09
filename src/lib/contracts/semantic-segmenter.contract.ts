@@ -98,6 +98,7 @@ export interface SemanticSegmentProgress {
   onStatus?: (status: string) => void;
 }
 
+/** A segmenter that assigns every pixel a class and returns the class regions. */
 export interface ISemanticSegmenter {
   /** Assign every pixel a class and return the resulting regions. */
   segmentSemantic(

@@ -41,6 +41,11 @@ export type RegionToolMode =
   | 'deletepoint'
   | 'move';
 
+/**
+ * A backend's on-canvas region layer: draws the shared `RegionStore`'s regions
+ * over the image and runs the draw / select / vertex-edit interactions. Obtained
+ * from `IVisualizer.getRegionOverlay()`.
+ */
 export interface IRegionOverlay {
   /** Set the active draw/select interaction (or 'none' to just display). */
   setMode(mode: RegionToolMode): void;

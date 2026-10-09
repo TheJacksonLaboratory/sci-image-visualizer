@@ -1,9 +1,11 @@
 /**
- * Public API of the jax-image-visualization library. External consumers import
- * ONLY from here (`@jax-data-science/sci-image-visualizer`); everything else under `lib/` is
- * internal. The surface is contracts + tokens + neutral models + the Angular
- * module, plus the routing service the host's composition root binds the tokens
- * to (`useExisting`).
+ * Public API of `@jax-data-science/sci-image-visualizer`. External consumers import
+ * ONLY from here; everything else under `lib/` is internal. The surface is
+ * contracts + tokens + neutral models + the Angular module and components, plus
+ * `provideVisualization()` for an isolated, component-scoped viewer. The library
+ * binds the tokens itself (VisualizationModule / provideVisualization), so a host
+ * injects `VISUALIZER`, `REGION_EDITOR_API` and `CHANNEL_HISTOGRAM_API` and supplies
+ * only the ports and `VIZ_CONFIG`.
  */
 
 // ── Contracts & DI tokens ────────────────────────────────────────────────
@@ -80,12 +82,19 @@ export * from './lib/models/region';
 export * from './lib/models/class-preset';
 export { ShapeSelection } from './lib/models/shape';
 
-// ── Angular module + composition-root service ────────────────────────────
+// ── Angular module + providers ───────────────────────────────────────────
 export { VisualizationModule } from './lib/visualization.module';
+// DEPRECATED as public API, kept for one release: hosts should inject the tokens
+// (VISUALIZER / REGION_EDITOR_API / CHANNEL_HISTOGRAM_API), which the library binds
+// to this router itself. Reaching for the concrete class bypasses that binding.
 export { RoutingVisualizerService } from './lib/routing-visualizer.service';
 // Provider factory for an isolated, component-scoped viewer instance (e.g. a
 // modal that must not share the main viewer's region/image state).
 export { provideVisualization } from './lib/provide-visualization';
+
+// Keys of the toast outlets the visualizer renders for the library's own notices.
+// A host that renders its own <p-toast> with one of these keys shows each notice twice.
+export { VIZ_TOAST_KEY, VIZ_ALERT_TOAST_KEY } from './lib/toast-outlets';
 
 // ── Public components (exported by VisualizationModule) ───────────────────
 // ng-packagr requires module-exported components to be reachable from the

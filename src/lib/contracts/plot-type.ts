@@ -89,7 +89,7 @@ export interface PlotTypeDescriptor {
    * mode owns each name — so it drops the backend suffix (e.g. just "Surface").
    * A type WITHOUT a `productionLabel` is **test-only**: hidden from the default
    * selector and shown only when the host enables test mode. This is the single
-   * knob that curates the default plot-mode list (jax-image-visualization).
+   * knob that curates the default plot-mode list.
    */
   productionLabel?: string;
   /**
