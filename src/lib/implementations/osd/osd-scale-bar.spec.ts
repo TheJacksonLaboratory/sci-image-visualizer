@@ -9,9 +9,11 @@ function fakeViewer(pxPerImagePx: number, itemCount = 1) {
   const handlers: Record<string, Array<() => void>> = {};
   return {
     canvas: document.createElement('div'),
-    world: { getItemCount: () => itemCount },
+    // The bar converts through world item 0 (osd-coords): image → viewport is the
+    // identity here, and viewport → element the fixed scale.
+    world: { getItemCount: () => itemCount, getItemAt: () => ({ imageToViewportCoordinates: <P>(pt: P) => pt }) },
     viewport: {
-      imageToViewerElementCoordinates: (pt: any) => ({ x: pt.x * pxPerImagePx, y: 0 }),
+      viewportToViewerElementCoordinates: (pt: any) => ({ x: pt.x * pxPerImagePx, y: 0 }),
     },
     addHandler: (ev: string, fn: () => void) => { (handlers[ev] ||= []).push(fn); },
     removeHandler: (ev: string, fn: () => void) => { handlers[ev] = (handlers[ev] || []).filter(f => f !== fn); },
@@ -46,7 +48,7 @@ describe('OsdScaleBar', () => {
   });
 
   it('hides the bar when the image→screen scale collapses to zero', () => {
-    const v = fakeViewer(0); // imageToViewerElementCoordinates maps both points to x=0
+    const v = fakeViewer(0); // the image→element mapping sends both points to x=0
     new OsdScaleBar(v, 1);
     expect(visible(v)).toBe(false);
   });

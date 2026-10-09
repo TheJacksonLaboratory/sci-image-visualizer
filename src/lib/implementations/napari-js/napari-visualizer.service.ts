@@ -149,7 +149,8 @@ import {
 import { SimpleSliceAccessService } from '../simple-slice-access.service';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
-import { NapariScaleBar, ScaleBarCamera, formatUm } from './napari-scale-bar';
+import { NapariScaleBar, ScaleBarCamera } from './napari-scale-bar';
+import { formatUm } from '../../overlays/scale-bar-core';
 import { NapariRegionOverlay, OverlayViewer } from './napari-region-overlay';
 import { NapariAxesLabels, AxisLabelSpec } from './napari-axes-labels';
 import { NapariVolumeZHandle } from './napari-volume-z-handle';
