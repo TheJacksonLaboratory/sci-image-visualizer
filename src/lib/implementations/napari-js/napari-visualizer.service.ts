@@ -4975,17 +4975,15 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const binsArr = Array.from({ length: n }, (_, i) => (i * 256) / n);
     return { bins: binsArr, counts, max: counts.reduce((m, c) => (c > m ? c : m), 0) };
   }
+  /** Save the displayed composite as a PNG. Through file-saver, which (unlike revoking an object
+   *  URL straight after `a.click()`) does not race the browser's download. */
   exportComposite(): void {
     const v = this.viewer;
     if (!v) return;
-    void v.screenshot().then((blob) => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'napari-js.png';
-      a.click();
-      URL.revokeObjectURL(url);
-    });
+    void v
+      .screenshot()
+      .then((blob) => saveAs(blob, 'napari-js.png'))
+      .catch((err) => console.warn('[napari-js] PNG export failed', err));
   }
   /** Native-bit-depth (16/32-bit) multi-band TIFF export via the server `/export/tiff` endpoint —
    *  the displayed PNG is an 8-bit figure, this preserves the true pixel values. Visible channels

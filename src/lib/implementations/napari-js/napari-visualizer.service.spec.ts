@@ -4,6 +4,7 @@ import { HttpClientTestingModule, HttpTestingController } from '@angular/common/
 import { BehaviorSubject, firstValueFrom, of } from 'rxjs';
 
 import { MultiChannelImageView, Viewer } from 'napari-js';
+import { saveAs } from 'file-saver';
 
 import { NapariVisualizerService } from './napari-visualizer.service';
 import { VisualizerStore } from '../../store/visualizer-store.service';
@@ -22,6 +23,8 @@ import {
 } from '../../contracts/spatial-dataset.contract';
 import { DEFAULT_MUTED_OPACITY } from '../../spatial/spatial-encoding';
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
+
+jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
 
 const imageInfo = (over: Partial<IImageInfo> = {}): IImageInfo =>
   ({ urls: ['u0', 'u1'], isGrayscale: true, isStack: true, ...over }) as unknown as IImageInfo;
@@ -386,6 +389,42 @@ describe('NapariVisualizerService', () => {
       await new Promise((r) => setTimeout(r, 0));
       service.reset();
       expect(await settled(poll)).toBeNull();
+    });
+  });
+
+  describe('PNG export', () => {
+    async function mounted() {
+      const div = document.createElement('div');
+      div.id = 'png-host';
+      document.body.appendChild(div);
+      const loaded = await service.load(imageInfo(), 0);
+      await service.plot('png-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE);
+      return () => {
+        service.unsubscribe();
+        document.body.removeChild(div);
+      };
+    }
+    const settle = () => new Promise((r) => setTimeout(r, 0));
+
+    it('saves the screenshot through file-saver', async () => {
+      // Regression (NAPARI-SVC-30): the object URL was revoked synchronously after a.click(),
+      // which some browsers treat as cancelling the download.
+      const done = await mounted();
+      (saveAs as unknown as jest.Mock).mockClear();
+      service.downloadImage();
+      await settle();
+      expect(saveAs).toHaveBeenCalledWith(expect.any(Blob), 'napari-js.png');
+      done();
+    });
+
+    it('reports a failed screenshot instead of leaving an unhandled rejection', async () => {
+      const done = await mounted();
+      jest.spyOn(Viewer.prototype, 'screenshot').mockRejectedValue(new Error('device lost'));
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      service.downloadImage();
+      await settle();
+      expect(warn).toHaveBeenCalledWith('[napari-js] PNG export failed', expect.any(Error));
+      done();
     });
   });
 
