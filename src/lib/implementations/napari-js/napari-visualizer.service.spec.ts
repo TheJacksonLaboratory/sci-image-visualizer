@@ -770,6 +770,59 @@ describe('NapariVisualizerService', () => {
     document.body.removeChild(div);
   });
 
+  it('composites the navigator thumbnail in the user\'s channel tints and visibility', async () => {
+    // Regression (NAPARI-SVC-12): the thumbnail used the server's default channel colours, so a
+    // recoloured or hidden channel still showed in its default colour.
+    (globalThis.fetch as jest.Mock).mockImplementation((url: string) => Promise.resolve(
+      url.includes('tiles/info')
+        ? {
+          ok: true, status: 200,
+          json: () => Promise.resolve({
+            width: 64, height: 48, tileSize: 512, z: 1, channels: 2, multichannel: true,
+            realLevels: 1, channelInfo: [{ color: '#ff0000' }, { color: '#00ff00' }],
+            levels: [{ res: 0, width: 64, height: 48 }],
+          }),
+        }
+        : { ok: true, status: 200, blob: () => Promise.resolve(new Blob()) },
+    ));
+    // Record what the composite tints each channel with.
+    const fills: string[] = [];
+    jest.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({
+      drawImage: () => undefined,
+      clearRect: () => undefined,
+      fillRect: () => undefined,
+      getImageData: (_x: number, _y: number, w: number, h: number) => ({
+        data: new Uint8ClampedArray(Math.max(1, w) * Math.max(1, h) * 4),
+      }),
+      set fillStyle(v: string) { fills.push(v); },
+      globalCompositeOperation: 'source-over',
+    }) as unknown as CanvasRenderingContext2D);
+    store.setChannelStates([
+      { index: 0, name: 'a', color: '#0000ff', min: 0, max: 255, gamma: 1, visible: true },
+      { index: 1, name: 'b', color: '#00ff00', min: 0, max: 255, gamma: 1, visible: false },
+    ] as IChannelState[]);
+    const div = document.createElement('div');
+    div.id = 'nav-tint-host';
+    document.body.appendChild(div);
+    const loaded = await service.load(imageInfo(), 0);
+    await service.plot('nav-tint-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fills.filter((f) => f !== '#000')).toEqual(['#0000ff']);
+
+    // A recolour reaches the thumbnail without a re-plot (and without re-fetching).
+    fills.length = 0;
+    const fetches = (globalThis.fetch as jest.Mock).mock.calls.length;
+    store.setChannelStates([
+      { index: 0, name: 'a', color: '#ff00ff', min: 0, max: 255, gamma: 1, visible: true },
+      { index: 1, name: 'b', color: '#00ff00', min: 0, max: 255, gamma: 1, visible: true },
+    ] as IChannelState[]);
+    expect(fills.filter((f) => f !== '#000')).toEqual(['#ff00ff', '#00ff00']);
+    expect((globalThis.fetch as jest.Mock).mock.calls.length).toBe(fetches);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
   it('keeps the newest slice\'s histogram sample when an older fetch lands late', async () => {
     // Regression (NAPARI-SVC-10): every tiled slice change fired a sample refresh with no
     // token, so a slower request for an older slice overwrote the newer one's samples.

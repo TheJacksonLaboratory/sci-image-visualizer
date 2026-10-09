@@ -607,6 +607,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private navigatorVisible = true;
   /** Bumped per thumbnail request, so a slow one cannot overwrite a newer slice's. */
   private navigatorToken = 0;
+  /** The current slice's per-channel thumbnail bitmaps (multichannel only), kept so a tint or
+   *  visibility change recolours the thumbnail without re-fetching it. */
+  private navigatorChannels: ImageBitmap[] | null = null;
+  /** The tints/visibility the thumbnail was last composited with — see {@link recolorNavigator}. */
+  private navigatorTintKey = '';
   /** SVG region-drawing overlay for the 2D image (null until a 2D image is plotted). */
   private regionOverlay: NapariRegionOverlay | null = null;
   /** Pixel-tool plumbing: the plot div id, coord transform, and bound tool hosts. */
@@ -1395,6 +1400,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       this.currentReverse = reverse;
       this.invertEnabled = invert;
       this.applyDisplayState(channels);
+      this.recolorNavigator();
     });
   }
 
@@ -1537,8 +1543,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
 
   /**
    * Draw the navigator's thumbnail from the coarsest pyramid level. A multichannel image
-   * is composited from its channels in their display colours, so the overview looks like
-   * the view rather than like channel 0 in grey.
+   * is composited from its channels in their display colours (see {@link recolorNavigator}),
+   * so the overview looks like the view rather than like channel 0 in grey.
    */
   private async refreshNavigatorImage(z: number): Promise<void> {
     const nav = this.navigator;
@@ -1549,17 +1555,51 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       // Superseded (a newer slice, or the scene was torn down): fetch nothing.
       if (token !== this.navigatorToken || this.navigator !== nav) return;
       const channels = desc?.multichannel ? desc.channelInfo ?? [] : [];
-      let image: CanvasImageSource;
       if (channels.length > 1) {
         const bitmaps = await Promise.all(channels.map((_c, c) => this.fetchSlice(z, c, 1)));
-        image = tintedComposite(bitmaps, channels.map((c) => c.color ?? '#ffffff'));
+        if (token !== this.navigatorToken || this.navigator !== nav) return;
+        this.setNavigatorChannels(bitmaps);
+        this.recolorNavigator();
       } else {
-        image = await this.fetchSlice(z, undefined, 1);
+        const image = await this.fetchSlice(z, undefined, 1);
+        if (token !== this.navigatorToken || this.navigator !== nav) return;
+        this.setNavigatorChannels(null);
+        nav.setImage(image);
       }
-      if (token === this.navigatorToken && this.navigator === nav) nav.setImage(image);
     } catch (err) {
       console.warn('[napari-js] navigator thumbnail unavailable', err);
     }
+  }
+
+  /** Replace the per-channel thumbnail bitmaps (closing the previous ones). */
+  private setNavigatorChannels(bitmaps: ImageBitmap[] | null): void {
+    for (const bmp of this.navigatorChannels ?? []) bmp.close?.();
+    this.navigatorChannels = bitmaps;
+    this.navigatorTintKey = '';
+  }
+
+  /**
+   * Composite the multichannel thumbnail in the channels' CURRENT display tints, skipping hidden
+   * channels — the store's channel states, as the 2D layers use, not the server's defaults.
+   * Re-run on every display-state change; it only redraws (never re-fetches), and only when a
+   * tint or a visibility actually changed, so a window/gamma drag costs a string compare.
+   */
+  private recolorNavigator(): void {
+    const nav = this.navigator;
+    const bitmaps = this.navigatorChannels;
+    if (!nav || !bitmaps) return;
+    const info = this.currentDescriptor()?.channelInfo;
+    const states = this.store.currentChannelStates();
+    const shown = bitmaps
+      .map((bmp, c) => {
+        const st = states.find((s) => s.index === c);
+        return { bmp, visible: st?.visible ?? true, color: st?.color ?? info?.[c]?.color ?? tintFor(c) };
+      })
+      .filter((ch) => ch.visible);
+    const key = shown.map((ch) => `${bitmaps.indexOf(ch.bmp)}:${ch.color}`).join('|');
+    if (key === this.navigatorTintKey) return;
+    this.navigatorTintKey = key;
+    nav.setImage(tintedComposite(shown.map((ch) => ch.bmp), shown.map((ch) => ch.color)));
   }
 
   /** Show/hide the overview navigator (same setting as OSD's). */
@@ -4215,6 +4255,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.scaleBar = null;
     this.navigator?.destroy();
     this.navigator = null;
+    this.setNavigatorChannels(null);
     this.loadingBadge?.destroy();
     this.loadingBadge = null;
     this.tileLoading = [];
