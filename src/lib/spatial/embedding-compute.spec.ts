@@ -204,4 +204,42 @@ describe('EmbeddingComputeRun', () => {
     await promise;
     expect(() => fake.emit({ type: 'error', message: 'late' })).not.toThrow();
   });
+
+  /**
+   * The real worker module is imported on demand, so a run is "starting" for a while with
+   * no worker to kill. A dataset switch or a teardown in that window must still stop it:
+   * otherwise the run starts a worker afterwards and computes a whole t-SNE for nobody.
+   */
+  describe('while the worker is still being created', () => {
+    let deliver: (worker: Worker) => void;
+    let slow: EmbeddingComputeRun;
+
+    beforeEach(() => {
+      deliver = () => undefined;
+      slow = new EmbeddingComputeRun(
+        () => new Promise<Worker>((resolve) => { deliver = resolve; }),
+      );
+    });
+
+    it('honours a terminate that arrives before the worker exists', async () => {
+      const promise = slow.run(request(), META, () => undefined);
+      expect(slow.running).toBe(true);
+      slow.terminate();
+      deliver(fake as unknown as Worker);
+      await expect(promise).resolves.toBeNull();
+      expect(fake.posted).toEqual([]);
+      expect(fake.terminated).toBe(true);
+      expect(slow.running).toBe(false);
+    });
+
+    it('refuses a second run while the first is still starting', async () => {
+      const promise = slow.run(request(), META, () => undefined);
+      await expect(slow.run(request(), META, () => undefined)).rejects.toThrow(/already running/);
+      deliver(fake as unknown as Worker);
+      await Promise.resolve();
+      await Promise.resolve();
+      fake.emit(donePayload(4, 2));
+      await expect(promise).resolves.not.toBeNull();
+    });
+  });
 });
