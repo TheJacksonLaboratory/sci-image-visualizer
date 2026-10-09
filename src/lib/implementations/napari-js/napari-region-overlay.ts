@@ -1,10 +1,14 @@
 import { Subscription } from 'rxjs';
 
 import { IRegionOverlay, RegionToolMode } from '../../contracts/region-overlay.contract';
-import { Region, Rectangle, Polygon, MultiPolygon } from '../../models/region';
-import { AnchorHandle, resolveHandles } from '../../models/bezier';
+import { Region, Rectangle, Polygon } from '../../models/region';
+import { AnchorHandle } from '../../models/bezier';
 import { RegionStore } from '../../store/region-store.service';
 import { PIXEL_WORLD_QUANTUM, snapToWorldGrid } from '../../spatial/world-grid';
+import {
+  ToScreen, hitHandle, nearestEdge, nearestVertex, regionBBox, regionContains, regionPathD, regionsInRect,
+  ringHandles,
+} from '../../region-overlay/region-geometry';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 /**
@@ -79,9 +83,8 @@ export interface OverlayViewer {
  * Supports (jit-ui#102): rectangle / polygon / freehand path drawing, click-select and rubber-band
  * marquee select, pan/zoom gating via `setControlsEnabled`, body move, vertex move/add/delete,
  * bezier handle editing, and donut holes (including hole vertex + hole-bezier-handle editing).
- * Rendering and hit-testing follow the OSD overlay's rules (multi-part regions, holes, open
- * polylines, handle-less bezier curves), but the geometry is still a separate copy of OSD's
- * until both overlays share one module (review NAPARI-BOUNDARY-13).
+ * Hit-testing shares `region-overlay/region-geometry` with the OSD overlay, so both follow
+ * the same rules (multi-part regions, holes, open polylines, handle-less bezier curves).
  */
 export class NapariRegionOverlay implements IRegionOverlay {
   private readonly svg: SVGSVGElement;
@@ -272,6 +275,9 @@ export class NapariRegionOverlay implements IRegionOverlay {
     return this.clientToLocal(cx, cy);
   }
 
+  /** {@link toLocal} as the shared region geometry takes it. */
+  private readonly toScreen: ToScreen = (x, y) => this.toLocal(x, y);
+
   // ── pointer handlers ──────────────────────────────────────────────────────
   private readonly onPointerDown = (e: PointerEvent): void => {
     if (this.mode === 'none') return;
@@ -294,7 +300,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
     } else if (this.mode === 'select' || this.mode === 'move') {
       this.beginManipulation(ix, iy, e);
     } else if (this.mode === 'addpoint') {
-      this.handleAddPoint(ix, iy);
+      this.handleAddPoint(ix, iy, e.clientX, e.clientY);
     } else if (this.mode === 'deletepoint') {
       this.handleDeletePoint(ix, iy);
     }
@@ -462,10 +468,12 @@ export class NapariRegionOverlay implements IRegionOverlay {
         return;
       }
     }
-    // Hit-test bodies, topmost first (last drawn renders on top).
+    // Hit-test bodies, topmost first (last drawn renders on top), at the exact pointer
+    // position — snapping is for placing vertices, not for picking.
     const regions = this.store.getRegions();
+    const [wx, wy] = this.viewer.canvasToWorld(e.clientX, e.clientY);
     for (let i = regions.length - 1; i >= 0; i--) {
-      if (this.hitTest(regions[i], ix, iy, e.clientX, e.clientY)) {
+      if (regionContains(regions[i], wx, wy, { toScreen: this.toScreen, tolPx: OPEN_PATH_HIT_PX })) {
         this.store.selectRegion(regions[i]);
         this.store.beginBatch();
         this.edit = { kind: 'body', id: regions[i].id, last: [ix, iy] };
@@ -514,7 +522,10 @@ export class NapariRegionOverlay implements IRegionOverlay {
     this.marqueeEl = null;
   }
 
-  /** Test whether a client point grabs a rectangle corner or a polygon vertex of `region`. */
+  /**
+   * The handle of `region` under a client point: a rectangle corner, or a polygon's bezier
+   * control point (any ring) or vertex (any ring) — see the shared `hitHandle`.
+   */
   private hitHandle(
     region: Region,
     clientX: number,
@@ -526,59 +537,18 @@ export class NapariRegionOverlay implements IRegionOverlay {
     | { kind: 'holevertex'; holeIndex: number; vertexIndex: number }
     | { kind: 'holebezier'; holeIndex: number; vertexIndex: number; side: 'in' | 'out' }
     | null {
-    const b = region.bounds;
-    if (!b) return null;
-    if ('width' in b && 'x' in b) {
-      const r = b as Rectangle;
-      const corners: Array<[number, number, [number, number]]> = [
-        [r.x, r.y, [r.x + r.width, r.y + r.height]],
-        [r.x + r.width, r.y, [r.x, r.y + r.height]],
-        [r.x, r.y + r.height, [r.x + r.width, r.y]],
-        [r.x + r.width, r.y + r.height, [r.x, r.y]],
-      ];
-      for (const [cx, cy, anchor] of corners) {
-        if (this.screenDist(clientX, clientY, cx, cy) <= HANDLE_HIT_PX) return { kind: 'corner', anchor };
-      }
-    } else if ('npoints' in b) {
-      const p = b as Polygon;
-      // The bezier control point of `h` under the cursor, if any.
-      const sideAt = (h: AnchorHandle): 'in' | 'out' | null => {
-        if (h.hasOut && this.screenDist(clientX, clientY, h.out[0], h.out[1]) <= HANDLE_HIT_PX) return 'out';
-        if (h.hasIn && this.screenDist(clientX, clientY, h.in[0], h.in[1]) <= HANDLE_HIT_PX) return 'in';
-        return null;
-      };
-      // Bezier control points first (they sit off the anchors), so they're grabbable.
-      if (p.bezier) {
-        const handles = resolveHandles(p.xpoints, p.ypoints, p.closed !== false, p.handlesIn, p.handlesOut);
-        for (let i = 0; i < handles.length; i++) {
-          const side = sideAt(handles[i]);
-          if (side) return { kind: 'bezier', vertexIndex: i, side };
-        }
-      }
-      for (let i = 0; i < p.npoints; i++) {
-        if (this.screenDist(clientX, clientY, p.xpoints[i], p.ypoints[i]) <= HANDLE_HIT_PX) {
-          return { kind: 'vertex', vertexIndex: i };
-        }
-      }
-      // Hole (donut) ring: bezier control points first, then the vertices.
-      const holes = p.holes ?? [];
-      for (let hi = 0; hi < holes.length; hi++) {
-        const ring = holes[hi];
-        if (p.bezier) {
-          const handles = this.holeHandles(p, hi);
-          for (let vi = 0; vi < handles.length; vi++) {
-            const side = sideAt(handles[vi]);
-            if (side) return { kind: 'holebezier', holeIndex: hi, vertexIndex: vi, side };
-          }
-        }
-        for (let vi = 0; vi < ring.length; vi++) {
-          if (this.screenDist(clientX, clientY, ring[vi][0], ring[vi][1]) <= HANDLE_HIT_PX) {
-            return { kind: 'holevertex', holeIndex: hi, vertexIndex: vi };
-          }
-        }
-      }
+    const [lx, ly] = this.clientToLocal(clientX, clientY);
+    const hit = hitHandle(region, lx, ly, this.toScreen, HANDLE_HIT_PX);
+    if (!hit) return null;
+    if (hit.kind === 'corner') return { kind: 'corner', anchor: hit.anchor };
+    if (hit.kind === 'vertex') {
+      return hit.ring < 0
+        ? { kind: 'vertex', vertexIndex: hit.index }
+        : { kind: 'holevertex', holeIndex: hit.ring, vertexIndex: hit.index };
     }
-    return null;
+    return hit.ring < 0
+      ? { kind: 'bezier', vertexIndex: hit.index, side: hit.side }
+      : { kind: 'holebezier', holeIndex: hit.ring, vertexIndex: hit.index, side: hit.side };
   }
 
   /** Apply the live drag for the active manipulation (image coords `ix,iy`). */
@@ -623,59 +593,27 @@ export class NapariRegionOverlay implements IRegionOverlay {
     }
   }
 
-  /** addpoint mode: insert a vertex on the selected polygon's nearest edge at the click. */
-  private handleAddPoint(ix: number, iy: number): void {
+  /** addpoint mode: insert a vertex at the click on the selected polygon's nearest edge
+   *  (exterior or a hole ring). */
+  private handleAddPoint(ix: number, iy: number, clientX: number, clientY: number): void {
     const sel = this.selectedRegion();
-    const b = sel?.bounds;
-    if (!sel || !b || !('npoints' in b)) return;
-    const p = b as Polygon;
-    let bestSeg = 0;
-    let bestD = Infinity;
-    const segs = p.closed === false ? p.npoints - 1 : p.npoints;
-    for (let s = 0; s < segs; s++) {
-      const j = (s + 1) % p.npoints;
-      const d = this.pointSegDist(ix, iy, p.xpoints[s], p.ypoints[s], p.xpoints[j], p.ypoints[j]);
-      if (d < bestD) {
-        bestD = d;
-        bestSeg = s;
-      }
-    }
-    this.store.addVertex(sel.id, bestSeg, ix, iy);
+    if (!sel) return;
+    const [lx, ly] = this.clientToLocal(clientX, clientY);
+    const edge = nearestEdge(sel, lx, ly, this.toScreen);
+    if (!edge) return;
+    if (edge.ring < 0) this.store.addVertex(sel.id, edge.segIndex, ix, iy);
+    else this.store.addHoleVertex(sel.id, edge.ring, edge.segIndex, ix, iy);
   }
 
-  /** deletepoint mode: remove the selected polygon's vertex nearest the click. */
+  /** deletepoint mode: remove the selected polygon's vertex nearest the click (exterior or a
+   *  hole ring). */
   private handleDeletePoint(ix: number, iy: number): void {
     const sel = this.selectedRegion();
-    const b = sel?.bounds;
-    if (!sel || !b || !('npoints' in b)) return;
-    const p = b as Polygon;
-    let best = -1;
-    let bestD = Infinity;
-    for (let i = 0; i < p.npoints; i++) {
-      const d = Math.hypot(p.xpoints[i] - ix, p.ypoints[i] - iy);
-      if (d < bestD) {
-        bestD = d;
-        best = i;
-      }
-    }
-    if (best >= 0) this.store.deleteVertex(sel.id, best);
-  }
-
-  /** Distance from point (px,py) to segment (ax,ay)-(bx,by), in the units they are given in. */
-  private pointSegDist(
-    px: number,
-    py: number,
-    ax: number,
-    ay: number,
-    bx: number,
-    by: number,
-  ): number {
-    const dx = bx - ax;
-    const dy = by - ay;
-    const len2 = dx * dx + dy * dy || 1;
-    let t = ((px - ax) * dx + (py - ay) * dy) / len2;
-    t = Math.max(0, Math.min(1, t));
-    return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+    if (!sel) return;
+    const v = nearestVertex(sel, ix, iy);
+    if (!v) return;
+    if (v.ring < 0) this.store.deleteVertex(sel.id, v.index);
+    else this.store.deleteHoleVertex(sel.id, v.ring, v.index);
   }
 
   /** Finalize a rubber-band marquee: select every region whose bounding box it overlaps (a
@@ -690,43 +628,8 @@ export class NapariRegionOverlay implements IRegionOverlay {
       this.store.setSelectedShapeIndices([]);
       return;
     }
-    const indices: number[] = [];
-    this.store.getRegions().forEach((r, i) => {
-      if (r.isProfile?.()) return;
-      const bb = this.regionBBox(r);
-      if (bb && bb.x0 <= x1 && bb.x1 >= x0 && bb.y0 <= y1 && bb.y1 >= y0) indices.push(i);
-    });
-    this.store.setSelectedShapeIndices(indices);
-  }
-
-  /** A region's bounding box in image coords (rectangle, polygon, or multipolygon), or null. */
-  private regionBBox(
-    region: Region,
-  ): { x0: number; y0: number; x1: number; y1: number } | null {
-    const b = region.bounds;
-    if (!b) return null;
-    if ('width' in b && 'x' in b) {
-      const r = b as Rectangle;
-      return { x0: r.x, y0: r.y, x1: r.x + r.width, y1: r.y + r.height };
-    }
-    const acc = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
-    const addRing = (xs: number[], ys: number[]): void => {
-      for (let i = 0; i < xs.length; i++) {
-        if (xs[i] < acc.x0) acc.x0 = xs[i];
-        if (xs[i] > acc.x1) acc.x1 = xs[i];
-        if (ys[i] < acc.y0) acc.y0 = ys[i];
-        if (ys[i] > acc.y1) acc.y1 = ys[i];
-      }
-    };
-    if ('npoints' in b) {
-      const p = b as Polygon;
-      addRing(p.xpoints, p.ypoints);
-    } else if ('polygons' in b) {
-      for (const p of (b as { polygons: Polygon[] }).polygons) addRing(p.xpoints, p.ypoints);
-    } else {
-      return null;
-    }
-    return isFinite(acc.x0) ? acc : null;
+    const regions = this.store.getRegions();
+    this.store.setSelectedShapeIndices(regionsInRect(regions, x0, y0, x1, y1, { skipProfiles: true }));
   }
 
   // ── shape commit ──────────────────────────────────────────────────────────
@@ -757,67 +660,6 @@ export class NapariRegionOverlay implements IRegionOverlay {
   }
 
   // ── rendering ─────────────────────────────────────────────────────────────
-  /**
-   * Whether a click at image point `(x, y)` (client `clientX, clientY`) lands on `region`, by
-   * the same rules as OSD: a closed polygon is its exterior minus its holes, a multi-part
-   * region is any of its parts, and an open polyline has no interior — it is hit within
-   * {@link OPEN_PATH_HIT_PX} screen pixels of its line, so it stays clickable at any zoom.
-   */
-  private hitTest(region: Region, x: number, y: number, clientX: number, clientY: number): boolean {
-    const b = region.bounds;
-    if (!b) return false;
-    if ('width' in b && 'x' in b) {
-      const r = b as Rectangle;
-      return x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height;
-    }
-    if ('npoints' in b) {
-      const p = b as Polygon;
-      if (p.closed === false) return this.nearPolyline(p.xpoints, p.ypoints, clientX, clientY);
-      return this.polygonContains(p, x, y);
-    }
-    // Multi-part region (merge/union output): inside any part, minus that part's holes.
-    if ('polygons' in b) {
-      return (b as MultiPolygon).polygons.some((p) => this.polygonContains(p, x, y));
-    }
-    return false;
-  }
-
-  /** Inside the exterior ring and outside every hole (image coords). */
-  private polygonContains(p: Polygon, x: number, y: number): boolean {
-    if (!this.ringContains(p.xpoints.length, (i) => p.xpoints[i], (i) => p.ypoints[i], x, y)) return false;
-    return !(p.holes ?? []).some((ring) =>
-      this.ringContains(ring.length, (i) => ring[i][0], (i) => ring[i][1], x, y),
-    );
-  }
-
-  /** Even-odd point-in-ring test in image coords, over `n` vertices read through `xAt`/`yAt`. */
-  private ringContains(
-    n: number, xAt: (i: number) => number, yAt: (i: number) => number, x: number, y: number,
-  ): boolean {
-    let inside = false;
-    for (let i = 0, j = n - 1; i < n; j = i++) {
-      const xi = xAt(i);
-      const yi = yAt(i);
-      const xj = xAt(j);
-      const yj = yAt(j);
-      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
-    }
-    return inside;
-  }
-
-  /** Whether a client point is within {@link OPEN_PATH_HIT_PX} screen px of an open polyline. */
-  private nearPolyline(xs: number[], ys: number[], clientX: number, clientY: number): boolean {
-    const [px, py] = this.clientToLocal(clientX, clientY);
-    let [ax, ay] = this.toLocal(xs[0], ys[0]);
-    for (let i = 1; i < xs.length; i++) {
-      const [bx, by] = this.toLocal(xs[i], ys[i]);
-      if (this.pointSegDist(px, py, ax, ay, bx, by) <= OPEN_PATH_HIT_PX) return true;
-      ax = bx;
-      ay = by;
-    }
-    return false;
-  }
-
   /** Show or hide the drawn regions. A region being drawn stays visible either way. */
   setRegionsVisible(visible: boolean): void {
     if (visible === this.regionsVisible) return;
@@ -865,7 +707,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
       iy = p.ypoints.reduce((m, y) => Math.min(m, y), Infinity);
     } else if ('polygons' in b) {
       // Multi-part region: top-left of all parts together.
-      const bb = this.regionBBox(region);
+      const bb = regionBBox(region);
       if (!bb) return;
       ix = bb.x0;
       iy = bb.y0;
@@ -917,19 +759,16 @@ export class NapariRegionOverlay implements IRegionOverlay {
       // by a thin line, matching the OSD overlay's editable bezier handles. Stored handles when
       // present, else the Catmull-Rom default the curve is drawn with.
       if (p.bezier) {
-        const ringHandles = (xs: number[], ys: number[], handles: AnchorHandle[]): void => {
+        const drawRing = (xs: number[], ys: number[], handles: AnchorHandle[]): void => {
           handles.forEach((h, i) => {
             if (h.hasOut) this.drawBezierHandle(xs[i], ys[i], h.out, stroke, out);
             if (h.hasIn) this.drawBezierHandle(xs[i], ys[i], h.in, stroke, out);
           });
         };
-        ringHandles(
-          p.xpoints, p.ypoints,
-          resolveHandles(p.xpoints, p.ypoints, p.closed !== false, p.handlesIn, p.handlesOut),
-        );
+        drawRing(p.xpoints, p.ypoints, ringHandles(p, -1));
         // Donut hole bezier control handles.
         (p.holes ?? []).forEach((ring, hi) => {
-          ringHandles(ring.map((pt) => pt[0]), ring.map((pt) => pt[1]), this.holeHandles(p, hi));
+          drawRing(ring.map((pt) => pt[0]), ring.map((pt) => pt[1]), ringHandles(p, hi));
         });
       }
     }
@@ -985,7 +824,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
       // Bezier or donut (holes) → a single <path>; holes use even-odd fill so they punch through.
       if (isBezier || hasHoles) {
         const el = document.createElementNS(SVG_NS, 'path');
-        el.setAttribute('d', this.polygonPathData(p, isBezier));
+        el.setAttribute('d', regionPathD(region, this.toScreen));
         if (hasHoles) el.setAttribute('fill-rule', 'evenodd');
         this.style(el, stroke, isSelected);
         return el;
@@ -1001,18 +840,8 @@ export class NapariRegionOverlay implements IRegionOverlay {
     if ('polygons' in b) {
       // Multi-part region (merge/union output): one even-odd <path> with every part's exterior
       // plus its holes, as the OSD overlay draws it.
-      const parts = (b as MultiPolygon).polygons.filter((p) => (p.xpoints?.length ?? 0) >= 3);
-      if (!parts.length) return null;
-      const d = parts
-        .map((p) =>
-          [
-            this.straightPath(p.xpoints, p.ypoints, true),
-            ...(p.holes ?? []).map((ring) =>
-              this.straightPath(ring.map((pt) => pt[0]), ring.map((pt) => pt[1]), true),
-            ),
-          ].join(' '),
-        )
-        .join(' ');
+      const d = regionPathD(region, this.toScreen);
+      if (!d) return null;
       const el = document.createElementNS(SVG_NS, 'path');
       el.setAttribute('d', d);
       el.setAttribute('fill-rule', 'evenodd');
@@ -1020,70 +849,6 @@ export class NapariRegionOverlay implements IRegionOverlay {
       return el;
     }
     return null;
-  }
-
-  /** Path data for a polygon: the exterior ring plus any holes as sub-paths — even-odd fill cuts
-   *  them out. A bezier polygon curves every ring, through its stored handles when present and
-   *  the Catmull-Rom default otherwise (as OSD draws it). */
-  private polygonPathData(p: Polygon, isBezier: boolean): string {
-    const closed = p.closed !== false;
-    let d = isBezier
-      ? this.ringBezierPath(
-          p.xpoints, p.ypoints,
-          resolveHandles(p.xpoints, p.ypoints, closed, p.handlesIn, p.handlesOut), closed,
-        )
-      : this.straightPath(p.xpoints, p.ypoints, closed);
-    (p.holes ?? []).forEach((ring, hi) => {
-      if (ring.length < 3) return;
-      const xs = ring.map((pt) => pt[0]);
-      const ys = ring.map((pt) => pt[1]);
-      d += ' ' + (isBezier
-        ? this.ringBezierPath(xs, ys, this.holeHandles(p, hi), true)
-        : this.straightPath(xs, ys, true));
-    });
-    return d;
-  }
-
-  /** A hole ring's bezier handles: stored when present, else the Catmull-Rom default. */
-  private holeHandles(p: Polygon, holeIndex: number): AnchorHandle[] {
-    const ring = p.holes?.[holeIndex] ?? [];
-    return resolveHandles(
-      ring.map((pt) => pt[0]), ring.map((pt) => pt[1]), true,
-      p.holeHandlesIn?.[holeIndex], p.holeHandlesOut?.[holeIndex],
-    );
-  }
-
-  /** SVG path data for a straight ring/polyline in image coords (closed appends `Z`). */
-  private straightPath(xs: number[], ys: number[], closed: boolean): string {
-    let d = '';
-    for (let i = 0; i < xs.length; i++) {
-      const [lx, ly] = this.toLocal(xs[i], ys[i]);
-      d += (i === 0 ? 'M' : ' L') + ` ${lx},${ly}`;
-    }
-    return closed ? d + ' Z' : d;
-  }
-
-  /** SVG cubic-bezier path data for any ring (exterior or hole): anchors joined by cubic segments
-   *  whose control points are the leaving anchor's `out` and the arriving anchor's `in` handle
-   *  (absolute, image space). Used for both the exterior and (donut) hole rings. */
-  private ringBezierPath(xs: number[], ys: number[], handles: AnchorHandle[], closed: boolean): string {
-    const n = xs.length;
-    const anchor = (i: number): [number, number] => this.toLocal(xs[i], ys[i]);
-    const ctrlOut = (i: number): [number, number] => this.toLocal(handles[i].out[0], handles[i].out[1]);
-    const ctrlIn = (i: number): [number, number] => this.toLocal(handles[i].in[0], handles[i].in[1]);
-    const [sx, sy] = anchor(0);
-    let d = `M ${sx},${sy}`;
-    const segments = closed ? n : n - 1;
-    for (let s = 0; s < segments; s++) {
-      const i = s;
-      const j = (s + 1) % n;
-      const [c1x, c1y] = ctrlOut(i);
-      const [c2x, c2y] = ctrlIn(j);
-      const [ex, ey] = anchor(j);
-      d += ` C ${c1x},${c1y} ${c2x},${c2y} ${ex},${ey}`;
-    }
-    if (closed) d += ' Z';
-    return d;
   }
 
   private style(el: SVGElement, stroke: string, isSelected: boolean): void {

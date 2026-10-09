@@ -622,6 +622,28 @@ describe('NapariRegionOverlay', () => {
     expect(p.xpoints).toEqual([0, 10, 0]);
   });
 
+  it('addpoint: clicking a hole edge inserts a vertex on that ring (as OSD)', () => {
+    const id = store.addRegion(donutRegion()); // hole [[7,7],[13,7],[13,13],[7,13]]
+    overlay.setMode('addpoint');
+    ptr(overlay, 'pointerdown', 10, 7); // midpoint of hole edge 0
+    ptr(overlay, 'pointerup', 10, 7);
+    const p = store.getRegions().find((r) => r.id === id)!.bounds as Polygon;
+    expect(p.holes![0]).toEqual([[7, 7], [10, 7], [13, 7], [13, 13], [7, 13]]);
+    expect(p.npoints).toBe(4); // exterior unchanged
+  });
+
+  it('deletepoint: clicking a hole vertex removes it from that ring (as OSD)', () => {
+    const r = donutRegion();
+    (r.bounds as Polygon).holes = [[[7, 7], [13, 7], [13, 13], [7, 13], [9, 9]]];
+    const id = store.addRegion(r);
+    overlay.setMode('deletepoint');
+    ptr(overlay, 'pointerdown', 7, 7); // hole vertex 0
+    ptr(overlay, 'pointerup', 7, 7);
+    const p = store.getRegions().find((r2) => r2.id === id)!.bounds as Polygon;
+    expect(p.holes![0]).toEqual([[13, 7], [13, 13], [7, 13], [9, 9]]);
+    expect(p.xpoints).toEqual([0, 20, 20, 0]);
+  });
+
   // ── marquee ──────────────────────────────────────────────────────────
 
   it('select: a rubber-band marquee selects every region it intersects', () => {

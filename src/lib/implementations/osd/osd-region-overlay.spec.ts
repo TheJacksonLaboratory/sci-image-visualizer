@@ -471,6 +471,21 @@ describe('OsdRegionOverlay — vertex tools', () => {
     expect(ring[0]).toEqual([13, 7]);
   });
 
+  it('drags a bezier donut\'s default hole handle when none is stored (as napari)', () => {
+    const r = donutRegion();
+    (r.bounds as Polygon).bezier = true; // e.g. a GeoJSON import: no stored hole handles
+    const id = store.addRegion(r);
+    overlay.setMode('select');
+    const h = handlers();
+    // Hole vertex 0 is (7,7); its Catmull-Rom out-handle is (8,6), inside the vertex's grab radius.
+    h.pressHandler({ position: { x: 8, y: 6 } });
+    h.dragHandler({ position: { x: 5, y: 6 } });
+    h.releaseHandler({ position: { x: 5, y: 6 } });
+    const poly = store.getRegions().find(r2 => r2.id === id)!.bounds as Polygon;
+    expect(poly.holes![0][0]).toEqual([7, 7]);              // the vertex stayed put
+    expect(poly.holeHandlesOut![0][0]).toEqual([-2, -1]);   // the handle moved
+  });
+
   it('clicking inside the hole does not select the donut; the solid ring does', () => {
     store.addRegion(donutRegion());
     store.setSelectedShapeIndices([]); // start unselected

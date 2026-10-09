@@ -2,13 +2,16 @@ import { OSD } from './osd-lib';
 import { Subscription } from 'rxjs';
 
 import { Region, Rectangle, Polygon, MultiPolygon } from '../../models/region';
-import { resolveHandles } from '../../models/bezier';
 import { IRegionStore } from '../../contracts/visualizer.contract';
 import { IRegionEditApi } from '../../contracts/region-store.contract';
 import { IRegionOverlay, RegionToolMode } from '../../contracts/region-overlay.contract';
 import { elementToImage, imageToElement } from './osd-coords';
 import { OSD_ZOOM_PER_SCROLL } from './osd-zoom';
 import { parseCssColor } from '../../contracts/color';
+import {
+  OPEN_PATH_TOL_PX, ToScreen, hitHandle, nearestEdge, regionContains, regionPathD, regionsInRect, ringHandles,
+  ringOf, topmostRegionAt,
+} from '../../region-overlay/region-geometry';
 
 /**
  * The shared region store as the overlay needs it: the cross-backend
@@ -237,11 +240,21 @@ export class OsdRegionOverlay implements IRegionOverlay {
   private toPx(imgX: number, imgY: number): { x: number; y: number } {
     return imageToElement(this.viewer, imgX, imgY);
   }
-  /** Element pixel point (from a MouseTracker event) -> image-pixel point. */
+  /** Element pixel point (from a MouseTracker event) -> image-pixel point, rounded
+   *  to whole pixels (where a drawn vertex lands). */
   private toImage(pos: any): { x: number; y: number } {
     const p = elementToImage(this.viewer, pos.x, pos.y);
     return { x: Math.round(p.x), y: Math.round(p.y) };
   }
+  /** Element pixel point -> exact image point, for hit tests. */
+  private toWorld(pos: { x: number; y: number }): { x: number; y: number } {
+    return elementToImage(this.viewer, pos.x, pos.y);
+  }
+  /** Image point -> element px, as the shared region geometry wants it. */
+  private readonly toScreen: ToScreen = (x, y) => {
+    const q = this.toPx(x, y);
+    return [q.x, q.y];
+  };
 
   // ── rendering ────────────────────────────────────────────────────────
   /** The current image→element projection (origin + unit step), as a key. */
@@ -352,19 +365,11 @@ export class OsdRegionOverlay implements IRegionOverlay {
       const parts = bounds.polygons.filter((p) => (p.xpoints?.length ?? 0) >= 3);
       if (parts.length === 0) return null;
       pts = [];
-      let d = '';
       for (const part of parts) {
-        const ext = part.xpoints.map((x, i) => ({ x, y: part.ypoints[i] }));
-        pts.push(...ext);
-        d += (d ? ' ' : '') + this.straightPathD(ext, true);
-        if (part.holes) {
-          for (const ring of part.holes) {
-            d += ' ' + this.straightPathD(ring.map(([x, y]) => ({ x, y })), true);
-          }
-        }
+        for (let i = 0; i < part.xpoints.length; i++) pts.push({ x: part.xpoints[i], y: part.ypoints[i] });
       }
       el = document.createElementNS(SVGNS, 'path');
-      el.setAttribute('d', d);
+      el.setAttribute('d', regionPathD(region, this.toScreen));
       el.setAttribute('fill-rule', 'evenodd');
     } else if (bounds instanceof Rectangle) {
       pts = [
@@ -389,26 +394,11 @@ export class OsdRegionOverlay implements IRegionOverlay {
       const holes = (closed && bounds instanceof Polygon && bounds.holes?.length)
         ? bounds.holes : null;
       if (isBezier || holes) {
-        el = document.createElementNS(SVGNS, 'path');
         // Exterior subpath (smooth for bezier, straight otherwise) followed by a
-        // straight subpath per hole.
-        let d = isBezier ? this.bezierPathD(bounds as Polygon) : this.straightPathD(pts, closed);
-        if (holes) {
-          const poly = bounds as Polygon;
-          holes.forEach((ring, hi) => {
-            const xs = ring.map((p) => p[0]);
-            const ys = ring.map((p) => p[1]);
-            // When the donut is a bezier, smooth its holes too (jit-ui#102) — using stored hole
-            // handles when present, else the Catmull-Rom default (via resolveHandles).
-            d +=
-              ' ' +
-              (isBezier
-                ? this.ringBezierPathD(xs, ys, poly.holeHandlesIn?.[hi], poly.holeHandlesOut?.[hi], true)
-                : this.straightPathD(ring.map(([x, y]) => ({ x, y })), true));
-          });
-          el.setAttribute('fill-rule', 'evenodd');
-        }
-        el.setAttribute('d', d);
+        // subpath per hole (smooth too for a bezier donut, jit-ui#102).
+        el = document.createElementNS(SVGNS, 'path');
+        if (holes) el.setAttribute('fill-rule', 'evenodd');
+        el.setAttribute('d', regionPathD(region, this.toScreen));
       } else {
         el = document.createElementNS(SVGNS, closed ? 'polygon' : 'polyline');
         el.setAttribute('points', pts.map(p => { const q = this.toPx(p.x, p.y); return `${q.x},${q.y}`; }).join(' '));
@@ -488,72 +478,23 @@ export class OsdRegionOverlay implements IRegionOverlay {
     return el;
   }
 
-  /** SVG path `d` (element-pixel coords) for a straight-edged ring/polyline. */
-  private straightPathD(pts: { x: number; y: number }[], closed: boolean): string {
-    if (pts.length < 2) return '';
-    let d = '';
-    pts.forEach((p, i) => {
-      const q = this.toPx(p.x, p.y);
-      d += (i === 0 ? 'M ' : ' L ') + `${q.x},${q.y}`;
-    });
-    if (closed) d += ' Z';
-    return d;
-  }
-
-  /** SVG path `d` (element-pixel coords) for the smooth cubic bezier through a
-   *  polygon's anchors — the paper.js-equivalent curve. */
-  private bezierPathD(poly: Polygon): string {
-    const closed = poly.closed !== false;
-    return this.ringBezierPathD(poly.xpoints, poly.ypoints, poly.handlesIn, poly.handlesOut, closed);
-  }
-
-  /** SVG cubic-bezier path `d` (element px) for any ring (exterior or hole). Uses the stored
-   *  per-vertex handle offsets when present, else the Catmull-Rom default (resolveHandles). */
-  private ringBezierPathD(
-    xs: number[], ys: number[], inOff: number[][] | undefined, outOff: number[][] | undefined, closed: boolean,
-  ): string {
-    const n = Math.min(xs.length, ys.length);
-    if (n < 2) return '';
-    const h = resolveHandles(xs, ys, closed, inOff, outOff);
-    const px = (x: number, y: number) => { const q = this.toPx(x, y); return `${q.x},${q.y}`; };
-    let d = `M ${px(xs[0], ys[0])}`;
-    const segs = closed ? n : n - 1;
-    for (let i = 0; i < segs; i++) {
-      const j = (i + 1) % n;
-      const c1 = h[i].out;
-      const c2 = h[j].in;
-      d += ` C ${px(c1[0], c1[1])} ${px(c2[0], c2[1])} ${px(xs[j], ys[j])}`;
-    }
-    if (closed) d += ' Z';
-    return d;
-  }
-
   /**
    * Draw the bezier editing handles for the selected region, paper.js-style:
    * each anchor as a small square, with tangent lines out to its two control
    * points (drawn as small circles).
    */
   private drawBezierHandles(poly: Polygon, color: string): void {
-    const xs = poly.xpoints;
-    const ys = poly.ypoints;
-    const drawRing = (rxs: number[], rys: number[], inOff: number[][] | undefined,
-                      outOff: number[][] | undefined, closed: boolean): void => {
-      const h = resolveHandles(rxs, rys, closed, inOff, outOff);
-      for (let i = 0; i < rxs.length; i++) {
-        const a = this.toPx(rxs[i], rys[i]);
+    // The exterior, then each donut hole ring (jit-ui#102): stored handles, or the
+    // Catmull-Rom default the curve is drawn with — the ones hitHandle grabs.
+    for (let ring = -1; ring < (poly.holes?.length ?? 0); ring++) {
+      const { xs, ys } = ringOf(poly, ring);
+      const h = ringHandles(poly, ring);
+      for (let i = 0; i < xs.length; i++) {
+        const a = this.toPx(xs[i], ys[i]);
         if (h[i].hasIn) this.drawHandle(a, this.toPx(h[i].in[0], h[i].in[1]), color);
         if (h[i].hasOut) this.drawHandle(a, this.toPx(h[i].out[0], h[i].out[1]), color);
         this.svg.appendChild(this.anchorSquare(a.x, a.y, color));
       }
-    };
-    drawRing(xs, ys, poly.handlesIn, poly.handlesOut, poly.closed !== false);
-    // Donut hole rings get their own editable bezier handles (jit-ui#102).
-    if (poly.holes && poly.holeHandlesIn && poly.holeHandlesOut) {
-      poly.holes.forEach((ring, hi) => {
-        const inOff = poly.holeHandlesIn![hi];
-        const outOff = poly.holeHandlesOut![hi];
-        if (inOff && outOff) drawRing(ring.map((p) => p[0]), ring.map((p) => p[1]), inOff, outOff, true);
-      });
     }
   }
 
@@ -613,25 +554,22 @@ export class OsdRegionOverlay implements IRegionOverlay {
       // Whole-region drag ('move' mode): press inside the selected region
       // to translate it, ignoring vertices/edges.
       const sel = this.selectedRegionInfo();
-      if (sel && this.containsPoint(sel.region, this.toImage(e.position))) {
+      if (sel && this.containsPoint(sel.region, e.position)) {
         this.startEdit('bounds', 'move', -1, sel.region, this.toImage(e.position));
       }
       return;
     }
     if (this.mode === 'select') {
-      // A bezier control handle takes top priority (it sits off the anchor).
-      const hh = this.hitBezierHandle(e.position);
-      if (hh) {
+      // A bezier control handle takes top priority (it sits off the anchor), then
+      // dragging a single polygon vertex (over body-move/resize).
+      const hit = this.hitPolygonHandle(e.position);
+      if (hit) {
         const region = this.store.getRegions()[this.selected[this.selected.length - 1]];
-        this.startEdit('handle', 'move', hh.index, region, this.toImage(e.position), hh.side, hh.ring);
-        return;
-      }
-      // Then dragging a single polygon vertex (over body-move/resize) —
-      // 'select' grabs the nearest segment first.
-      const vh = this.hitVertex(e.position);
-      if (vh) {
-        const region = this.store.getRegions()[this.selected[this.selected.length - 1]];
-        this.startEdit('vertex', 'move', vh.index, region, this.toImage(e.position), 'out', vh.ring);
+        if (hit.kind === 'bezier') {
+          this.startEdit('handle', 'move', hit.index, region, this.toImage(e.position), hit.side, hit.ring);
+        } else {
+          this.startEdit('vertex', 'move', hit.index, region, this.toImage(e.position), 'out', hit.ring);
+        }
         return;
       }
       // Otherwise start a move/resize when pressing the selected region's
@@ -725,7 +663,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
       const x1 = Math.max(start.x, end.x), y1 = Math.max(start.y, end.y);
       // Only a real drag selects; a click-sized band falls through to onClick.
       if (this.bandDragged && (x1 - x0 > 2 || y1 - y0 > 2)) {
-        this.store.setSelectedShapeIndices(this.regionsInRect(x0, y0, x1, y1));
+        this.store.setSelectedShapeIndices(regionsInRect(this.store.getRegions(), x0, y0, x1, y1));
       }
       this.redraw();
     }
@@ -741,7 +679,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
       // selection; a plain click replaces it.
       const oe = e.originalEvent;
       const additive = !!oe && (oe.shiftKey || oe.metaKey || oe.ctrlKey);
-      this.selectAt(this.toImage(e.position), additive);
+      this.selectAt(this.toWorld(e.position), additive);
       return;
     }
     if (this.mode === 'drawpolygon') {
@@ -760,10 +698,11 @@ export class OsdRegionOverlay implements IRegionOverlay {
     }
     if (this.mode === 'deletepoint') {
       // Remove the clicked vertex — exterior or an interior ring (jit-ui#85).
-      const vh = this.hitVertex(e.position);
-      if (vh) {
-        if (vh.ring < 0) this.store.deleteVertex(vh.id, vh.index);
-        else this.store.deleteHoleVertex(vh.id, vh.ring, vh.index);
+      const sel = this.selectedRegionInfo();
+      const vh = this.hitPolygonHandle(e.position, false);
+      if (sel && vh) {
+        if (vh.ring < 0) this.store.deleteVertex(sel.region.id, vh.index);
+        else this.store.deleteHoleVertex(sel.region.id, vh.ring, vh.index);
       }
       return;
     }
@@ -800,7 +739,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
     if (this.mode !== 'select') return;
     // A grabbable bezier control handle or vertex of the selected polygon takes
     // priority.
-    if (this.hitBezierHandle(e.position) || this.hitVertex(e.position)) {
+    if (this.hitPolygonHandle(e.position)) {
       (this.viewer.canvas as HTMLElement).style.cursor = 'pointer';
       return;
     }
@@ -809,7 +748,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
       (this.viewer.canvas as HTMLElement).style.cursor = ZONE_CURSOR[ez.zone];
       return;
     }
-    this.updateCursor(this.regionIndexAt(this.toImage(e.position)) >= 0);
+    this.updateCursor(this.regionIndexAt(this.toWorld(e.position)) >= 0);
   }
 
   /**
@@ -832,7 +771,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
     }
     if (b instanceof Polygon || b instanceof MultiPolygon) {
       // Polygons + multi-part regions support whole-region move (no resize zones).
-      return this.containsPoint(region, this.toImage(position)) ? { zone: 'move', index } : null;
+      return this.containsPoint(region, position) ? { zone: 'move', index } : null;
     }
     return null;
   }
@@ -845,105 +784,26 @@ export class OsdRegionOverlay implements IRegionOverlay {
     return region ? { region, index } : null;
   }
 
-  /** The vertex of the selected polygon under the cursor (screen-pixel
-   *  tolerance), or null. Rectangles have no editable vertices. */
-  private hitVertex(position: { x: number; y: number }): { id: number; ring: number; index: number } | null {
+  /** The bezier control handle (when `bezier`) or vertex of the selected polygon
+   *  under the cursor (screen-pixel tolerance), or null. Rectangles have no
+   *  editable vertices (their corners are resize zones, see {@link rectZone}). */
+  private hitPolygonHandle(position: { x: number; y: number }, bezier = true):
+    { kind: 'vertex' | 'bezier'; ring: number; index: number; side: 'in' | 'out' } | null {
     const sel = this.selectedRegionInfo();
     if (!sel || !(sel.region.bounds instanceof Polygon)) return null;
-    const b = sel.region.bounds;
-    for (let i = 0; i < b.xpoints.length; i++) {
-      const q = this.toPx(b.xpoints[i], b.ypoints[i]);
-      if (Math.hypot(position.x - q.x, position.y - q.y) <= EDIT_TOL) {
-        return { id: sel.region.id, ring: -1, index: i };
-      }
-    }
-    // Interior-ring (hole) vertices are draggable too (jit-ui#85).
-    if (b.holes) {
-      for (let h = 0; h < b.holes.length; h++) {
-        const ring = b.holes[h];
-        for (let i = 0; i < ring.length; i++) {
-          const q = this.toPx(ring[i][0], ring[i][1]);
-          if (Math.hypot(position.x - q.x, position.y - q.y) <= EDIT_TOL) {
-            return { id: sel.region.id, ring: h, index: i };
-          }
-        }
-      }
-    }
-    return null;
-  }
-
-  /** The bezier control handle of the selected region under the cursor (which
-   *  anchor, and whether the in- or out-handle), or null. */
-  private hitBezierHandle(
-    position: { x: number; y: number },
-  ): { id: number; index: number; side: 'in' | 'out'; ring: number } | null {
-    const sel = this.selectedRegionInfo();
-    if (!sel || !(sel.region.bounds instanceof Polygon) || !sel.region.bounds.bezier) return null;
-    const b = sel.region.bounds;
-    // Test one ring's control handles; returns the matched vertex/side or null.
-    const testRing = (
-      xs: number[], ys: number[], inOff: number[][] | undefined, outOff: number[][] | undefined,
-      closed: boolean, ring: number,
-    ): { id: number; index: number; side: 'in' | 'out'; ring: number } | null => {
-      const h = resolveHandles(xs, ys, closed, inOff, outOff);
-      for (let i = 0; i < h.length; i++) {
-        if (h[i].hasOut) {
-          const q = this.toPx(h[i].out[0], h[i].out[1]);
-          if (Math.hypot(position.x - q.x, position.y - q.y) <= EDIT_TOL) {
-            return { id: sel.region.id, index: i, side: 'out', ring };
-          }
-        }
-        if (h[i].hasIn) {
-          const q = this.toPx(h[i].in[0], h[i].in[1]);
-          if (Math.hypot(position.x - q.x, position.y - q.y) <= EDIT_TOL) {
-            return { id: sel.region.id, index: i, side: 'in', ring };
-          }
-        }
-      }
-      return null;
-    };
-    const ext = testRing(b.xpoints, b.ypoints, b.handlesIn, b.handlesOut, b.closed !== false, -1);
-    if (ext) return ext;
-    // Donut hole rings (jit-ui#102): their own bezier control handles.
-    if (b.holes && b.holeHandlesIn && b.holeHandlesOut) {
-      for (let hi = 0; hi < b.holes.length; hi++) {
-        const ring = b.holes[hi];
-        const hit = testRing(
-          ring.map((p) => p[0]), ring.map((p) => p[1]),
-          b.holeHandlesIn[hi], b.holeHandlesOut[hi], true, hi,
-        );
-        if (hit) return hit;
-      }
-    }
-    return null;
+    const hit = hitHandle(sel.region, position.x, position.y, this.toScreen, EDIT_TOL, { bezier });
+    if (!hit || hit.kind === 'corner') return null;
+    return { kind: hit.kind, ring: hit.ring, index: hit.index, side: hit.kind === 'bezier' ? hit.side : 'out' };
   }
 
   /** The edge of `region`'s polygon nearest the cursor (within tolerance), with
    *  the clicked point in image coords as the insertion position, or null. */
   private hitEdge(position: { x: number; y: number }, region: Region):
     { ring: number; segIndex: number; x: number; y: number } | null {
-    if (!(region.bounds instanceof Polygon)) return null;
-    const b = region.bounds;
-    let best = -1, bestRing = -1, bestDist = Infinity;
-    // Nearest edge across the exterior (ring -1) and every interior ring (hole).
-    const scan = (xs: number[], ys: number[], ring: number, closed: boolean) => {
-      const n = xs.length;
-      const segCount = closed ? n : n - 1; // closed wraps the last->first edge
-      for (let i = 0; i < segCount; i++) {
-        const j = (i + 1) % n;
-        const a = this.toPx(xs[i], ys[i]);
-        const c = this.toPx(xs[j], ys[j]);
-        const d = this.distToSegmentPx(position, a, c);
-        if (d < bestDist) { bestDist = d; best = i; bestRing = ring; }
-      }
-    };
-    scan(b.xpoints, b.ypoints, -1, b.closed !== false);
-    if (b.holes) {
-      b.holes.forEach((r, h) => scan(r.map(p => p[0]), r.map(p => p[1]), h, true));
-    }
-    if (best < 0 || bestDist > EDIT_TOL) return null;
+    const edge = nearestEdge(region, position.x, position.y, this.toScreen);
+    if (!edge || edge.dist > EDIT_TOL) return null;
     const img = this.toImage(position);
-    return { ring: bestRing, segIndex: best, x: img.x, y: img.y };
+    return { ring: edge.ring, segIndex: edge.segIndex, x: img.x, y: img.y };
   }
 
   /** Classify a screen point against a screen-space rectangle into a zone. */
@@ -1106,106 +966,16 @@ export class OsdRegionOverlay implements IRegionOverlay {
     this.store.setSelectedShapeIndices(idx >= 0 ? [idx] : []);
   }
 
-  /** Indices of every region whose bounding box intersects the image-space
-   *  rectangle [x0,y0]–[x1,y1] (rubber-band multi-select). */
-  private regionsInRect(x0: number, y0: number, x1: number, y1: number): number[] {
-    const out: number[] = [];
-    this.store.getRegions().forEach((r, i) => {
-      const bb = this.regionBBox(r);
-      if (bb && bb.x0 <= x1 && bb.x1 >= x0 && bb.y0 <= y1 && bb.y1 >= y0) out.push(i);
-    });
-    return out;
-  }
-
-  /** Axis-aligned bounding box of a region in image coords, or null if empty. */
-  private regionBBox(r: Region): { x0: number; y0: number; x1: number; y1: number } | null {
-    const b = r.bounds;
-    if (b instanceof Rectangle) {
-      return { x0: b.x, y0: b.y, x1: b.x + b.width, y1: b.y + b.height };
-    }
-    // Loops, not Math.min(...spread): spreading a large imported annotation's
-    // vertices as arguments throws RangeError.
-    const polys = b instanceof Polygon ? [b] : b instanceof MultiPolygon ? b.polygons : null;
-    if (polys) {
-      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-      for (const p of polys) {
-        for (let i = 0; i < p.xpoints.length; i++) {
-          if (p.xpoints[i] < x0) x0 = p.xpoints[i];
-          if (p.xpoints[i] > x1) x1 = p.xpoints[i];
-          if (p.ypoints[i] < y0) y0 = p.ypoints[i];
-          if (p.ypoints[i] > y1) y1 = p.ypoints[i];
-        }
-      }
-      return x1 >= x0 ? { x0, y0, x1, y1 } : null;
-    }
-    return null;
-  }
-
-  /** Index of the topmost region under a point, or -1. */
+  /** Index of the topmost region under an image point, or -1. */
   private regionIndexAt(pt: { x: number; y: number }): number {
-    const regions = this.store.getRegions();
-    for (let i = regions.length - 1; i >= 0; i--) {
-      if (this.containsPoint(regions[i], pt)) return i;
-    }
-    return -1;
+    const opts = { toScreen: this.toScreen, tolPx: OPEN_PATH_TOL_PX };
+    return topmostRegionAt(this.store.getRegions(), pt.x, pt.y, opts);
   }
 
-  private containsPoint(region: Region, pt: { x: number; y: number }): boolean {
-    const b = region.bounds;
-    if (b instanceof Rectangle) {
-      return pt.x >= b.x && pt.x <= b.x + b.width && pt.y >= b.y && pt.y <= b.y + b.height;
-    }
-    // Multi-part region: inside any part (exterior minus that part's holes).
-    if (b instanceof MultiPolygon) {
-      return b.polygons.some((p) => this.closedPolygonContains(p, pt));
-    }
-    if (b instanceof Polygon) {
-      if (b.closed !== false) return this.closedPolygonContains(b, pt);
-      // Open polyline: no interior — select when the click lands near the line.
-      // Tolerance is in screen pixels so it stays clickable at any zoom.
-      const xs = b.xpoints, ys = b.ypoints, n = xs.length, tolPx = 6;
-      const here = this.toPx(pt.x, pt.y);
-      for (let i = 0; i + 1 < n; i++) {
-        const a = this.toPx(xs[i], ys[i]);
-        const c = this.toPx(xs[i + 1], ys[i + 1]);
-        if (this.distToSegmentPx(here, a, c) <= tolPx) return true;
-      }
-      return false;
-    }
-    return false;
-  }
-
-  /** Point-in-closed-polygon (image coords) honouring interior rings (holes):
-   *  inside the exterior AND outside every hole (even-odd). */
-  private closedPolygonContains(b: Polygon, pt: { x: number; y: number }): boolean {
-    const inRing = (rxs: number[], rys: number[]): boolean => {
-      let hit = false;
-      for (let i = 0, j = rxs.length - 1; i < rxs.length; j = i++) {
-        const intersect = ((rys[i] > pt.y) !== (rys[j] > pt.y))
-          && (pt.x < ((rxs[j] - rxs[i]) * (pt.y - rys[i])) / (rys[j] - rys[i]) + rxs[i]);
-        if (intersect) hit = !hit;
-      }
-      return hit;
-    };
-    if (!inRing(b.xpoints, b.ypoints)) return false;
-    if (b.holes) {
-      for (const ring of b.holes) {
-        if (inRing(ring.map(p => p[0]), ring.map(p => p[1]))) return false;
-      }
-    }
-    return true;
-  }
-
-  /** Shortest distance from point p to segment a–b, all in screen pixels. */
-  private distToSegmentPx(
-    p: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number },
-  ): number {
-    const dx = b.x - a.x, dy = b.y - a.y;
-    const len2 = dx * dx + dy * dy;
-    if (len2 === 0) return Math.hypot(p.x - a.x, p.y - a.y);
-    let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
-    t = Math.max(0, Math.min(1, t));
-    return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+  /** Whether the element-pixel `position` lands on `region` (see `regionContains`). */
+  private containsPoint(region: Region, position: { x: number; y: number }): boolean {
+    const pt = this.toWorld(position);
+    return regionContains(region, pt.x, pt.y, { toScreen: this.toScreen, tolPx: OPEN_PATH_TOL_PX });
   }
 
   /** Abandon whatever pointer gesture is in progress (drawing, edit drag,
