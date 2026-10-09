@@ -770,6 +770,39 @@ describe('NapariVisualizerService', () => {
     document.body.removeChild(div);
   });
 
+  it('keeps the newest slice\'s histogram sample when an older fetch lands late', async () => {
+    // Regression (NAPARI-SVC-10): every tiled slice change fired a sample refresh with no
+    // token, so a slower request for an older slice overwrote the newer one's samples.
+    type Plane = { data: Uint8Array; width: number; height: number };
+    type Internals = {
+      imageMode: string;
+      histSamples: Map<number, Uint8Array>;
+      refreshHistogramSamples(z: number, desc: unknown): Promise<void>;
+      fetchChannelData(z: number, ch?: number, budget?: number): Promise<Plane>;
+    };
+    const internals = service as unknown as Internals;
+    internals.imageMode = 'multichannel';
+    const held = new Map<number, Array<(p: Plane) => void>>();
+    jest.spyOn(internals, 'fetchChannelData').mockImplementation(
+      (z) => new Promise<Plane>((resolve) => {
+        held.set(z, [...(held.get(z) ?? []), resolve]);
+      }),
+    );
+    const plane = (v: number): Plane => ({ data: new Uint8Array([v]), width: 1, height: 1 });
+    const desc = { channels: 2 };
+
+    const older = internals.refreshHistogramSamples(0, desc);
+    const newer = internals.refreshHistogramSamples(1, desc);
+    await Promise.resolve();
+    // Both channels of a slice are fetched together, not one after the other.
+    expect(held.get(1)).toHaveLength(2);
+    held.get(1)!.forEach((r) => r(plane(1)));
+    await newer;
+    held.get(0)?.forEach((r) => r(plane(0)));
+    await older;
+    expect([...internals.histSamples.values()].map((d) => d[0])).toEqual([1, 1]);
+  });
+
   it('a slice change in a 3D scene never renders the 2D image into it', async () => {
     // Regression (NAPARI-SVC-9): setZIndex chose its branch by whichever layer handle was
     // non-null, so a 3D scatter, or a surface whose mesh was not built yet, fell through to

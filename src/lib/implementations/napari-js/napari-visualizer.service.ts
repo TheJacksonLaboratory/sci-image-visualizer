@@ -631,6 +631,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   /** Coarse per-channel luminance sample (keyed by channel index) for the histogram in tiled mode,
    *  where the layers have no full in-memory pixels. Refreshed on plot + slice change. */
   private readonly histSamples = new Map<number, Uint8Array>();
+  /** Latest-wins token for {@link refreshHistogramSamples}. */
+  private histGen = 0;
   /** Native-bit-depth histograms from `/histogram`, keyed `${z}|${channel}` (>8-bit images). */
   private readonly nativeHistograms = new Map<string, IHistogram>();
 
@@ -1355,20 +1357,28 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   }
 
   /** (Re)fetch a coarse per-channel luminance sample for the histogram (tiled mode has no full
-   *  in-memory pixels). One cheap overview tile per channel; cached by channel index. */
+   *  in-memory pixels). One cheap overview tile per channel, fetched together; cached by channel
+   *  index. Latest wins: a scrub fires one refresh per slice, and an older slice's samples that
+   *  land after a newer one's are dropped rather than shown as the current distribution. */
   private async refreshHistogramSamples(z: number, desc: TileDescriptor): Promise<void> {
+    const gen = ++this.histGen;
     this.histSamples.clear();
     if (this.imageMode === 'rgb') return; // RGB uses the displayed-pixel readback (rgbHistogram)
-    const channelCount = this.imageMode === 'multichannel' ? desc.channels ?? 1 : 1;
-    for (let c = 0; c < channelCount; c++) {
-      try {
-        const ch = this.imageMode === 'multichannel' ? c : undefined;
-        const d = await this.fetchChannelData(z, ch, 1); // budget 1 → coarsest single tile
-        this.histSamples.set(c, d.data);
-      } catch {
-        /* leave this channel's sample unset */
-      }
-    }
+    const multichannel = this.imageMode === 'multichannel';
+    const channelCount = multichannel ? desc.channels ?? 1 : 1;
+    const samples = await Promise.all(
+      Array.from({ length: channelCount }, (_, c) =>
+        // budget 1 → coarsest single tile; a failed channel leaves its sample unset.
+        this.fetchChannelData(z, multichannel ? c : undefined, 1).then(
+          (d) => d.data,
+          () => null,
+        ),
+      ),
+    );
+    if (gen !== this.histGen) return;
+    samples.forEach((data, c) => {
+      if (data) this.histSamples.set(c, data);
+    });
   }
 
   /** Subscribe channel states + grayscale colormap → live-apply to the rendered layers (no
@@ -4220,6 +4230,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.descriptorPoll = null;
     this.descriptorMisses.clear();
     this.tiled = false;
+    this.histGen++;
     this.histSamples.clear();
     if (this.readbackTimer != null) {
       clearTimeout(this.readbackTimer);
