@@ -1405,6 +1405,13 @@ describe('VisualizerComponent — host-owned image info is never mutated (CORE-1
     component.ngOnDestroy();
   });
 
+  it('publishes the image meta keyed by file name, so channel edits do not leak across images (CORE-8)', () => {
+    const { component, imageInfo$, plot } = harness();
+    imageInfo$.next(stack());
+    expect(plot.setImageMeta).toHaveBeenCalledWith([], 'series.tif');
+    component.ngOnDestroy();
+  });
+
   it('does not re-apply the hint when the host re-emits the very same object', () => {
     const { component, imageInfo$ } = harness();
     const info = stack({ initialZIndex: 2 });

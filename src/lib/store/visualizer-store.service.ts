@@ -55,6 +55,8 @@ export class VisualizerStore {
   // The derived defaults (full window, gamma 1, default tint) for the current
   // image, kept so "Reset" can restore a channel's window/gamma/colour.
   private defaultChannelStates: IChannelState[] = [];
+  /** The image the current channel states were derived for (see setImageMeta). */
+  private channelImageKey: string | undefined;
   // Grayscale display (ignore the channel tints) and inverted background — both
   // global display flags, like the colormap.
   private readonly grayscale$ = new BehaviorSubject<boolean>(false);
@@ -211,17 +213,26 @@ export class VisualizerStore {
     if (hasY) meta[0].mppY = mppY;
     this.imageMeta$.next(meta);
   }
-  setImageMeta(imageMeta: IImageMetadata[]): void {
+  /**
+   * Publish the current image's metadata and derive its channels.
+   *
+   * `imageKey` identifies the image (its file name). A re-plot of the SAME image
+   * keeps the user's window/gamma/tint edits; a different image gets its own
+   * derived channels even at the same channel count — keying on the count alone
+   * left a DAPI/GFP/RFP stack's names, tints and windows on a following
+   * CD3/CD8/PanCK one. Without a key, only a change of channel count re-derives.
+   */
+  setImageMeta(imageMeta: IImageMetadata[], imageKey?: string): void {
     this.imageMeta$.next(imageMeta);
-    // Re-derive channels only when their structure changes (count), so a re-plot
-    // of the same image doesn't clobber the user's window/gamma edits.
     const next = this.deriveChannels(imageMeta);
     // Always refresh the reset baseline to the current image's derived defaults
     // (names/colours can differ even at the same channel count).
     this.defaultChannelStates = next.map((c) => ({ ...c }));
-    if (next.length !== this.channelStates$.value.length) {
+    const otherImage = imageKey !== undefined && imageKey !== this.channelImageKey;
+    if (imageKey !== undefined) this.channelImageKey = imageKey;
+    if (otherImage || next.length !== this.channelStates$.value.length) {
       this.channelStates$.next(next);
-      this.selectedChannel$.next(0); // new channel structure → reset the selected band
+      this.selectedChannel$.next(0); // new image / channel structure → reset the selected band
     }
   }
 

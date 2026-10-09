@@ -155,3 +155,36 @@ describe('VisualizerStore.selectedChannel', () => {
     expect(seen).toEqual([0, 3]); // initial + one change
   });
 });
+
+describe('VisualizerStore.setImageMeta channel re-derivation (CORE-8)', () => {
+  const fluo = (names: string[]) => [{
+    channelCount: names.length, rgbChannels: 1, x: 10, y: 10, z: 1,
+    channelInfo: names.map((name) => ({ name })),
+  }] as any;
+
+  it('keeps the user\'s window edits on a re-plot of the SAME image', () => {
+    const store = new VisualizerStore();
+    store.setImageMeta(fluo(['DAPI', 'GFP', 'RFP']), 'a.tif');
+    store.setChannelState(1, { min: 20, max: 180 });
+    store.setImageMeta(fluo(['DAPI', 'GFP', 'RFP']), 'a.tif');
+    expect(store.currentChannelStates()[1]).toMatchObject({ name: 'GFP', min: 20, max: 180 });
+  });
+
+  it('re-derives names, tints and windows for a DIFFERENT image with the same channel count', () => {
+    const store = new VisualizerStore();
+    store.setImageMeta(fluo(['DAPI', 'GFP', 'RFP']), 'a.tif');
+    store.setChannelState(1, { min: 20, max: 180 });
+    store.setSelectedChannel(2);
+    store.setImageMeta(fluo(['CD3', 'CD8', 'PanCK']), 'b.tif');
+    expect(store.currentChannelStates().map((c) => c.name)).toEqual(['CD3', 'CD8', 'PanCK']);
+    expect(store.currentChannelStates()[1]).toMatchObject({ min: 0, max: 255 });
+    expect(store.currentSelectedChannel()).toBe(0);
+  });
+
+  it('an RGB image followed by a 3-channel fluorescence image drops Red/Green/Blue', () => {
+    const store = new VisualizerStore();
+    store.setImageMeta([{ rgbChannels: 3, channelCount: 1, x: 1, y: 1, z: 1 }] as any, 'rgb.png');
+    store.setImageMeta(fluo(['DAPI', 'GFP', 'RFP']), 'fluo.tif');
+    expect(store.currentChannelStates()[0].name).toBe('DAPI');
+  });
+});

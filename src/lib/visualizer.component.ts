@@ -907,7 +907,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
             this.activeSurface3dMode = 'turntable';
           }
           this.loadedFileName = imgInfo.fileName;
-          this.plotService.setImageMeta(imgInfo.imageMeta);
+          this.plotService.setImageMeta(imgInfo.imageMeta, imgInfo.fileName);
           const urls = imgInfo.urls;
           // A newer image ALWAYS preempts an in-flight render. This was
           // `if (!this.running)`, which DROPPED the new image while the old one

@@ -481,6 +481,12 @@ describe('RoutingVisualizerService (characterization)', () => {
     sub.unsubscribe();
   });
 
+  it('forwards the image key with the image meta to the store (CORE-8)', () => {
+    const spy = jest.spyOn(store, 'setImageMeta');
+    router.setImageMeta([], 'a.tif');
+    expect(spy).toHaveBeenCalledWith([], 'a.tif');
+  });
+
   it('setPlotType records the type and delegates to Plotly', () => {
     router.setPlotType(PlotType.HEATMAP);
     expect(plotly.setPlotType).toHaveBeenCalledWith(PlotType.HEATMAP);

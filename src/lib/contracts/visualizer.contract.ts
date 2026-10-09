@@ -421,7 +421,9 @@ export interface IDisplayOptions {
   getColormapOptions(): ColormapNode[];
   getReverseScale(): Observable<boolean>;
   setReverseScale(reverscale: any): void;
-  setImageMeta(imageMeta: IImageMetadata[]): void;
+  /** Publish the current image's metadata. `imageKey` (its file name) lets the
+   *  channel state survive a re-plot of the same image but not a switch to another. */
+  setImageMeta(imageMeta: IImageMetadata[], imageKey?: string): void;
   getImageMeta(): Observable<IImageMetadata[]>;
 }
 

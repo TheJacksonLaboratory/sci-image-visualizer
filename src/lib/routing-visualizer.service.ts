@@ -504,7 +504,9 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   getColormapOptions(): any { return this.store.getColormapOptions(); }
   getReverseScale(): Observable<boolean> { return this.store.getReverseScale(); }
   setReverseScale(reverscale: any): void { this.plotly.setReverseScale(reverscale); }
-  setImageMeta(imageMeta: IImageMetadata[]): void { this.store.setImageMeta(imageMeta); }
+  setImageMeta(imageMeta: IImageMetadata[], imageKey?: string): void {
+    this.store.setImageMeta(imageMeta, imageKey);
+  }
   getImageMeta(): Observable<IImageMetadata[]> { return this.store.getImageMeta(); }
 
   // ── IChannelHistogramApi: Channels & Histogram pane surface ───────────
