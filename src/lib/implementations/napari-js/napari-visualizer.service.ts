@@ -2722,9 +2722,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.navigator?.setVisible(datasetHasPixels && this.navigatorVisible);
     for (const layer of viewer.layers.items) {
       if (layer.kind !== 'image') continue;
-      // The transcript-density raster is an image layer too, but it is data, not the
-      // tissue: the Images toggle must not take it down with the slide.
-      if (this.spatialTilesMgr?.owns(layer)) continue;
+      // The transcript-density raster and the gene map are image layers too, but they are
+      // data, not the tissue: the Images toggle must not take them down with the slide.
+      if (this.spatialTilesMgr?.owns(layer) || layer === this.geneMapLayer) continue;
       // Re-shown when a dataset that owns an image comes back, so switching between
       // datasets does not leave the tissue permanently hidden.
       layer.visible = datasetHasPixels;
@@ -2819,7 +2819,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     }
 
     // The raster covers the displayed image; without one there is nothing to
-    // overlay and the cloud is the 3D mode's business, not this one's.
+    // overlay and the cloud is the 3D mode's business, not this one's. Gated on the
+    // DATASET bringing pixels, not on imageW/H: those keep the last plotted image's
+    // size after the host clears it, which would size the map over the wrong extent.
+    if (!slab && !dataset.imageRef) return;
     const imageW = slab ? dataset.volume!.width : this.imageW;
     const imageH = slab ? dataset.volume!.height : this.imageH;
     if (!imageW || !imageH) return;

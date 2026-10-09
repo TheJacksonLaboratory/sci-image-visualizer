@@ -2316,6 +2316,9 @@ describe('NapariVisualizerService', () => {
 
     /** Mount the spatial mode with `dataset` published, and return the layer built. */
     async function mount(dataset: SpatialDataset | null = spatialDataset()) {
+      return mountSpatial(dataset);
+    }
+    async function mountSpatial(dataset: SpatialDataset | null) {
       // Replace any host from an earlier mount, as the 3D helper does: overlays
       // attach to it, and `getElementById` would keep returning the FIRST stale
       // one — so a test would assert against a previous test's overlay.
@@ -2403,6 +2406,18 @@ describe('NapariVisualizerService', () => {
         expect(layers[0].visible).toBe(false);
         expect(density.visible).toBe(true);
         (service as unknown as { spatialTilesMgr: unknown }).spatialTilesMgr = null;
+      });
+
+      it('leaves the gene map alone when the tissue is hidden', () => {
+        // Regression (NAPARI-SVC-6): the gene map is an ImageLayer too, so the Images toggle
+        // took it down with the slide — though, like the density raster, it is data.
+        const { layers, viewer } = scene();
+        const geneMap = layers[2];
+        (service as unknown as { geneMapLayer: unknown }).geneMapLayer = geneMap;
+        hide(viewer, false);
+        expect(layers[0].visible).toBe(false);
+        expect(geneMap.visible).toBe(true);
+        (service as unknown as { geneMapLayer: unknown }).geneMapLayer = null;
       });
 
       it('shows the image for a dataset that owns one', () => {
@@ -2584,6 +2599,22 @@ describe('NapariVisualizerService', () => {
     describe('gene map', () => {
       const geneMapLayers = (addImage: jest.SpyInstance) =>
         addImage.mock.calls.filter((c) => /gene map/.test(String((c[1] as { name?: string })?.name)));
+      /** The map is estimated on the displayed image's grid, so its dataset registers onto one. */
+      const registered = (): SpatialDataset => ({
+        ...spatialDataset(), imageRef: { imageId: 'tissue', scale: [1, 1], translate: [0, 0] },
+      });
+      const mount = () => mountSpatial(registered());
+
+      it('draws no map for a dataset that registers onto no image', async () => {
+        // Regression (NAPARI-SVC-6): the raster was sized from imageW/H, which still hold the
+        // LAST image's size for a dataset that brings none — a map over the wrong extent.
+        const addImage = jest.spyOn(Viewer.prototype, 'addImage');
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 5, 9]));
+        await mountSpatial(spatialDataset());
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        expect(geneMapLayers(addImage)).toHaveLength(0);
+      });
 
       it('draws nothing until the option is on AND a gene is the colour source', async () => {
         const addImage = jest.spyOn(Viewer.prototype, 'addImage');
