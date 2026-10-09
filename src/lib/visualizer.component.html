@@ -112,7 +112,7 @@
      (incl. the OSD scale bar at bottom-left) was clipped by the host's
      overflow:hidden. The component stylesheet sizes it (.viz-plot { flex: 1 }). -->
 <div class="w-full relative viz-plot" [id]="plotDivName">
-  <div *ngIf="imgLoading || stackLoading || isCaching" id="overlay">
+  <div *ngIf="imgLoading || stackLoading || isCaching" class="loading-overlay">
     <!-- Determinate stack/volume progress takes precedence: while it's active show ONLY the
          progress bar + "Loading frames...", not the generic spinner/"Loading image..." on top of
          it (both were rendering at once for napari volume/isosurface loads). -->
@@ -148,15 +148,15 @@
        background. Lets the user see the blurry image underneath but makes
        it clear something is still loading so they don't mistake the
        low-res render for the final image. -->
-  <div *ngIf="sharpening && !imgLoading && !stackLoading && !isCaching" id="sharpening-overlay">
+  <div *ngIf="sharpening && !imgLoading && !stackLoading && !isCaching" class="sharpening-overlay">
     <div class="spinner"></div>
     <span class="text-loading">Sharpening preview...</span>
   </div>
 
 </div>
 
-<!-- Floating, draggable intensity-profile inset. Shown in LINE mode; the chart
-     updates live as the line ROI on the image is moved. Kept OUTSIDE #plot and
+<!-- Floating, draggable intensity-profile inset, shown while any intensity line
+     exists; the chart updates live as a line ROI is moved. Kept OUTSIDE the plot div and
      positioned fixed so it floats over the whole page (not clipped to the
      diagram/canvas area). -->
 <div *ngIf="hasProfiles" class="intensity-panel"

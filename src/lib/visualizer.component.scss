@@ -156,7 +156,8 @@ kbd {
   border-top:6px solid rgb(82, 107, 178);
   border-radius:100%;
 }
-#overlay {
+// Styled by class, not id: two live viewers would otherwise share the id.
+.loading-overlay {
   position: absolute;
   top:0;
   left:0;
@@ -169,10 +170,10 @@ kbd {
   z-index: 1000;
 }
 // Translucent overlay used during the small→large tier sharpening phase.
-// More transparent than the main #overlay so the user can clearly see the
+// More transparent than the main .loading-overlay so the user can clearly see the
 // blurry small-tier preview underneath, but still has a spinner + label to
 // communicate that loading isn't actually done yet.
-#sharpening-overlay {
+.sharpening-overlay {
   position: absolute;
   top: 0;
   left: 0;
@@ -180,7 +181,7 @@ kbd {
   height: 100%;
   background-color: rgba(255, 255, 255, 0.18);
   pointer-events: none;
-  z-index: 1000; // above the OSD canvas/navigator (see #overlay)
+  z-index: 1000; // above the OSD canvas/navigator (see .loading-overlay)
   // Inherit the spinner positioning, but make it smaller so it doesn't
   // dominate the visible image underneath.
   .spinner {

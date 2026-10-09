@@ -261,6 +261,12 @@ describe('VisualizerComponent (UI shell)', () => {
     });
   });
 
+  it('gives each instance its own intensity-inset div id (CORE-9)', () => {
+    const other = makeComponent(mockPlotService());
+    expect(component.intensityInsetDiv).not.toBe(other.intensityInsetDiv);
+    expect(component.intensityInsetDiv).not.toBe(component.plotDivName);
+  });
+
   it('constructs and reads the plot-type descriptors through the service', () => {
     expect(component).toBeTruthy();
     expect(plotService.getPlotTypeDescriptors).toHaveBeenCalled();

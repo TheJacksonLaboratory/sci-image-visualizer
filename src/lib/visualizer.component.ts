@@ -346,8 +346,10 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     return this.plotModes.baseTypeOf(this.selectedPlotTypeId);
   }
 
-  /** Floating intensity-profile inset (LINE mode). */
-  readonly intensityInsetDiv = 'intensity-inset-plot';
+  /** Div the floating intensity-profile inset is charted into. Per instance, like
+   *  {@link plotDivName}: the backend resolves it by id, so a fixed id made two live
+   *  viewers draw both insets into whichever div came first in the document. */
+  readonly intensityInsetDiv = `${this.plotDivName}-inset`;
   profilePanelPos = { x: 20, y: 70 };
   private profilePanelDragging = false;
   private profilePanelStart = { mx: 0, my: 0, x: 0, y: 0 };
