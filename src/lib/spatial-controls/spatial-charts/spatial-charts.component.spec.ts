@@ -1370,4 +1370,68 @@ describe('SpatialChartsComponent', () => {
     });
   });
 
+  /**
+   * Loads that a later event overtakes.
+   *
+   * Each async load (the colour source's vector, the heatmap's genes, the embedding's
+   * coordinates) is sequenced on its own, and a dataset switch invalidates them all: a
+   * vector for one dataset charted against another's selection reads as data, not as a bug.
+   */
+  describe('superseded loads', () => {
+    it('reloads the colour source when the dataset changes under an unchanged colorBy', async () => {
+      // A port may go straight from A to B with a column of the same name in both; the
+      // view does not re-emit, so nothing else would refetch the vector.
+      await build(controls);
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'total_counts' } });
+      await flush();
+      expect(lastPlot().traces[0].x).toEqual([1, 2, 3, 4]);
+
+      controls.continuousValues.mockResolvedValue(new Float32Array([7, 7, 7, 7]));
+      dataset$.next({ ...dataset, id: 'B' });
+      await flush();
+      expect(lastPlot().traces[0].x).toEqual([7, 7, 7, 7]);
+    });
+
+    it('does not cache a heatmap gene fetched for the previous dataset', async () => {
+      await build(controls);
+      let release: (v: Float32Array) => void = () => undefined;
+      controls.continuousValues
+        .mockImplementationOnce(() => new Promise<Float32Array>((r) => { release = r; }));
+      const pending = component.onHeatmapGenes(['Ttr']);
+      dataset$.next({ ...dataset, id: 'B' });
+      release(new Float32Array([9, 9, 9, 9]));
+      await pending;
+      await flush();
+
+      const before = controls.continuousValues.mock.calls
+        .filter(([s]) => s.name === 'Ttr').length;
+      await component.onHeatmapGenes(['Ttr']);
+      // A's vector was dropped, so B's is fetched rather than A's reused.
+      expect(controls.continuousValues.mock.calls
+        .filter(([s]) => s.name === 'Ttr').length).toBe(before + 1);
+    });
+
+    it('keeps a colour-source load that a heatmap gene fetch started after', async () => {
+      await build(controls);
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'total_counts' } });
+      await flush();
+
+      let release: (v: Float32Array) => void = () => undefined;
+      controls.continuousValues
+        .mockImplementationOnce(() => new Promise<Float32Array>((r) => { release = r; }));
+      view$.next({ ...view$.value, colorBy: { kind: 'feature', name: 'Ttr' } });
+      await flush();
+      // An unrelated load, started while the colour source is still in flight.
+      await component.onHeatmapGenes(['Mbp']);
+      release(new Float32Array([5, 6, 7, 8]));
+      await flush();
+
+      component.onKind('histogram');
+      await flush();
+      expect(lastPlot().traces[0].x).toEqual([5, 6, 7, 8]);
+      expect(component.busy).toBe(false);
+    });
+
+  });
+
 });

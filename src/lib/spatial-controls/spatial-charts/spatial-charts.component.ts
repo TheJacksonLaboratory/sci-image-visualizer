@@ -16,6 +16,7 @@ import {
 import { cellsAsGroups, heatmapMatrix } from '../../spatial/spatial-heatmap';
 import { geneOptionsFor } from '../../spatial/gene-search';
 import { ComputeProgress, EmbeddingComputeRun } from '../../spatial/embedding-compute';
+import { Supersede } from '../../spatial/supersede';
 import {
   OmicsChartKind, OmicsGrouping, benefitsFromGrouping, buildCountTraces, buildHeatmapTraces,
   buildOmicsTraces, buildEmbeddingTraces, countsLayout, heatmapLayout, omicsLayout, embeddingLayout,
@@ -203,8 +204,8 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   private computeRun: EmbeddingComputeRun | null = null;
 
   /**
-   * Bumped by every dataset change and by teardown, so a computation in progress can tell
-   * that what it is computing is no longer what is on screen.
+   * Invalidated by every dataset change and by teardown, so a computation in progress can
+   * tell that what it is computing is no longer what is on screen.
    *
    * A run is several awaits long — the PCA scores arrive over HTTP, then the worker takes
    * a minute or more — and the dataset can change at any of them, including BEFORE
@@ -212,7 +213,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    * dataset get embedded and drawn over another's observations: a plot of two datasets at
    * once, which reads as a strange-looking t-SNE rather than as a bug.
    */
-  private computeToken = 0;
+  private readonly computeLoad = new Supersede();
 
   /** 0..1 while running, or null before the first report. Drives the progress bar. */
   computeFraction: number | null = null;
@@ -309,7 +310,14 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   selectionCount = 0;
   /** Set when the active colour source cannot be charted, for an inline hint. */
   notice: string | null = null;
-  busy = false;
+  /** A load is in flight. One flag per load, because each is superseded on its own: a
+   *  shared flag was left set by whichever load lost its race. */
+  get busy(): boolean {
+    return this.valueBusy || this.heatmapBusy || this.embeddingBusy;
+  }
+  private valueBusy = false;
+  private heatmapBusy = false;
+  private embeddingBusy = false;
 
   private view: SpatialViewState = { ...DEFAULT_SPATIAL_VIEW };
   private selection: SpatialSelectionMask = emptySelection();
@@ -320,9 +328,16 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   private grouping: OmicsGrouping | null = null;
   /** Guards the async value fetch: a fast colour-source change can resolve out
    *  of order, and a stale vector would be charted against the new label. */
-  private token = 0;
+  private readonly valueLoad = new Supersede();
   /** The same guard for the grouping fetch, which the user can change as fast. */
-  private groupToken = 0;
+  private readonly groupLoad = new Supersede();
+  /** And for the heatmap's gene vectors and the embedding's coordinates. Each load has
+   *  its own: on one shared counter, a redraw for a selection change dropped a pending
+   *  colour-source load. */
+  private readonly heatmapLoad = new Supersede();
+  private readonly embeddingLoad = new Supersede();
+  /** The dataset the loaded vectors belong to; `undefined` before the first emission. */
+  private datasetId: string | null | undefined = undefined;
   /** Whether the first view emission has been handled. */
   private primed = false;
   private readonly subs = new Subscription();
@@ -359,6 +374,9 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     }));
 
     this.subs.add(this.controls.getDataset$().subscribe((dataset) => {
+      const id = dataset?.id ?? null;
+      const switched = this.datasetId !== undefined && id !== this.datasetId;
+      this.datasetId = id;
       this.groupOptions = [
         { label: 'No grouping', value: null },
         ...(this.controls?.categoricalColumns() ?? []).map((n) => ({ label: n, value: n })),
@@ -402,6 +420,23 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       this.embeddingCodes = null;
       // Nothing to draw for the kind that was selected; fall back rather than sit blank.
       if (this.kind === 'embedding' && this.embeddings.length === 0) this.kind = 'histogram';
+
+      // Every vector loaded so far is indexed by the previous dataset's observations, and
+      // a port may go straight from one dataset to the next with a colour source of the
+      // same name, so the view need not re-emit. Drop them, drop anything still loading
+      // for the old dataset, and fetch afresh.
+      if (switched) {
+        this.valueLoad.invalidate();
+        this.groupLoad.invalidate();
+        this.heatmapLoad.invalidate();
+        this.embeddingLoad.invalidate();
+        this.valueBusy = this.heatmapBusy = this.embeddingBusy = false;
+        this.values = null;
+        this.categorical = null;
+        this.grouping = null;
+        if (this.groupBy) void this.onGroupBy(this.groupBy);
+        void this.reload();
+      }
     }));
   }
 
@@ -541,29 +576,29 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   /**
    * Fetch any gene the heatmap needs and does not already hold.
    *
-   * Sequenced on the same token the colour-source load uses: each vector is a
-   * separate request, and a slower one must not paint rows for a gene list the
-   * user has already moved on from.
+   * Sequenced: each vector is a separate request, and a slower one must not paint
+   * rows for a gene list the user has already moved on from — nor land in the cache
+   * of a dataset it was not fetched for.
    */
   private async loadHeatmapGenes(): Promise<void> {
     const controls = this.controls;
     if (!controls) return;
     const missing = this.heatmapGenes.filter((n) => !this.geneCache.has(n));
     if (missing.length === 0) return;
-    const mine = ++this.token;
-    this.busy = true;
+    const current = this.heatmapLoad.next();
+    this.heatmapBusy = true;
     try {
       for (const name of missing) {
         const values = await controls.continuousValues({ kind: 'feature', name });
-        if (mine !== this.token) return;
+        if (!current()) return;
         this.geneCache.set(name, values);
       }
       this.notice = null;
     } catch (err) {
-      if (mine !== this.token) return;
+      if (!current()) return;
       this.notice = `A gene could not be charted: ${(err as Error)?.message ?? err}`;
     } finally {
-      if (mine === this.token) this.busy = false;
+      if (current()) this.heatmapBusy = false;
     }
   }
 
@@ -576,13 +611,13 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     }
     // Sequenced: pick A then B and a slower A would otherwise land last, charting
     // A's categories under a dropdown that says B.
-    const mine = ++this.groupToken;
+    const current = this.groupLoad.next();
     try {
       const view = await this.controls.categoricalView(name);
-      if (mine !== this.groupToken) return;
+      if (!current()) return;
       this.grouping = { codes: view.codes, categories: view.categories, colors: view.colors };
     } catch {
-      if (mine !== this.groupToken) return;
+      if (!current()) return;
       this.grouping = null;
       this.groupBy = null;
     }
@@ -605,8 +640,9 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   private async reload(): Promise<void> {
     const controls = this.controls;
     const source = this.view.colorBy;
-    const mine = ++this.token;
+    const current = this.valueLoad.next();
     if (!controls || !source) {
+      this.valueBusy = false;
       this.values = null;
       this.categorical = null;
       this.notice = controls
@@ -615,7 +651,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       void this.render();
       return;
     }
-    this.busy = true;
+    this.valueBusy = true;
     // A categorical column charts as COUNTS per category — asked for by name
     // rather than discovered by catching the continuous fetch's error, so a
     // genuine failure still reads as a failure.
@@ -624,26 +660,26 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     try {
       if (isCategorical) {
         const view = await controls.categoricalView(source.name);
-        if (mine !== this.token) return; // superseded
+        if (!current()) return; // superseded
         this.categorical = { codes: view.codes, categories: view.categories, colors: view.colors };
         this.values = null;
         this.kind = 'counts';
         this.notice = null;
       } else {
         const values = await controls.continuousValues(source);
-        if (mine !== this.token) return;
+        if (!current()) return;
         this.values = values;
         this.categorical = null;
         if (this.kind === 'counts') this.kind = 'histogram';
         this.notice = null;
       }
     } catch (err) {
-      if (mine !== this.token) return;
+      if (!current()) return;
       this.values = null;
       this.categorical = null;
       this.notice = `"${source.name}" could not be charted: ${(err as Error)?.message ?? err}`;
     } finally {
-      if (mine === this.token) this.busy = false;
+      if (current()) this.valueBusy = false;
     }
     void this.render();
   }
@@ -672,9 +708,9 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       return;
     }
 
-    // Sequenced on the shared token: the coordinates are a round-trip, and a slower one
-    // must not paint over a kind the user has already moved on from.
-    const mine = ++this.token;
+    // Sequenced: the coordinates are a round-trip, and a slower one must not paint over
+    // an embedding the user has already moved on from.
+    const current = this.embeddingLoad.next();
     // Computed here, not served: a local result is the same shape as a fetched one, so
     // everything downstream — colouring, lasso selection, the camera — is unchanged.
     const local = this.computed.get(meta.name);
@@ -687,19 +723,19 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       this.notice = null;
       return;
     } else if (!this.embeddingCoords || this.embeddingCoords.meta.name !== meta.name) {
-      this.busy = true;
+      this.embeddingBusy = true;
       try {
         const loaded = await controls.getEmbedding(meta.name);
-        if (mine !== this.token) return;
+        if (!current()) return;
         this.embeddingCoords = loaded;
       } catch (err) {
-        if (mine !== this.token) return;
+        if (!current()) return;
         this.notice = `Could not load ${meta.label ?? meta.name}: `
           + `${(err as Error)?.message ?? err}`;
         this.purgePlot();
         return;
       } finally {
-        if (mine === this.token) this.busy = false;
+        if (current()) this.embeddingBusy = false;
       }
     }
     const coords = this.embeddingCoords;
@@ -965,8 +1001,8 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     // locally as well as on the instance: after an await `this.computeRun` may already be
     // a newer run's, and clearing or terminating that one is how a fresh computation gets
     // killed by the tail of the one it replaced.
-    const mine = ++this.computeToken;
-    const superseded = () => mine !== this.computeToken;
+    const current = this.computeLoad.next();
+    const superseded = () => !current();
     let run: EmbeddingComputeRun | null = null;
 
     try {
@@ -1036,7 +1072,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    * observations nothing is showing any more.
    */
   private abandonCompute(): void {
-    this.computeToken++;
+    this.computeLoad.invalidate();
     this.computeRun?.terminate();
     this.computeRun = null;
     this.computeFraction = null;
@@ -1234,7 +1270,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       const counts = {
         group: this.categorical,
         selection: this.selection.count > 0 ? this.selection.mask : null,
-        name: this.colorBy.name,
+        name: this.colorBy.kind === 'feature' ? this.colorBy.name : this.colorBy.name,
       };
       await this.draw(buildCountTraces(counts), countsLayout(counts));
       return;
@@ -1242,7 +1278,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     if (!this.values) return;
     const input = {
       values: this.values,
-      name: this.colorBy.kind === 'feature' ? this.colorBy.name : this.colorBy.name,
+      name: this.colorBy.name,
       group: benefitsFromGrouping(this.kind) ? this.grouping : null,
       selection: this.selection.count > 0 ? this.selection.mask : null,
       log: this.view.logScale,
