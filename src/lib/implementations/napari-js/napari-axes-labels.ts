@@ -1,3 +1,5 @@
+import { projectPoint } from 'napari-js';
+
 /**
  * DOM text labels for the napari-js 3D axes gizmo (jit-ui#102). The {@link AxesLayer} draws the
  * axis lines/ticks/box in WebGPU; this overlay adds the crisp X/Y/Z + scale text on top, projected
@@ -19,19 +21,6 @@ export interface AxesLabelCamera3D {
   viewProjection(vw: number, vh: number): ArrayLike<number>;
   readonly changed: { connect(listener: () => void): () => void };
 }
-
-/**
- * Re-exported from napari-js, which owns the projection now.
- *
- * This used to be a local copy: the same column-major multiply, perspective divide and y-flip
- * that {@link NapariVisualizerService.getSpatialScreenProjection} ALSO carried, written twice
- * with two different behind-the-eye conventions. The renderer owns the camera and the clip
- * convention, so it owns the projection; kept as a named export here only so the overlays that
- * import it from this module do not all have to change.
- */
-import { projectPoint } from 'napari-js';
-
-export { projectPoint };
 
 export class NapariAxesLabels {
   private readonly els: HTMLSpanElement[] = [];

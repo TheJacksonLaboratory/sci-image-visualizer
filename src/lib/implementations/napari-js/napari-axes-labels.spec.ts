@@ -1,4 +1,6 @@
-import { NapariAxesLabels, projectPoint, AxisLabelSpec } from './napari-axes-labels';
+import { projectPoint } from 'napari-js';
+
+import { NapariAxesLabels, AxisLabelSpec } from './napari-axes-labels';
 
 /** Column-major identity 4×4. */
 const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
