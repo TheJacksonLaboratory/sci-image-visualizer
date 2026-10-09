@@ -64,6 +64,10 @@ import { NapariNavigator } from './napari-navigator';
 import { NapariLoadingBadge } from './napari-loading-badge';
 import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
 import { NAPARI_WHEEL_ZOOM_SPEED } from './napari-zoom';
+import {
+  type ExpressionField, type ExpressionVolumeField, colorExpressionField,
+  encodeExpressionVolume, expressionField, expressionVolume,
+} from '../../spatial/spatial-expression';
 
 /**
  * A short, stable id for a colormap value, for cache keys.
@@ -95,10 +99,6 @@ function colormapId(value: unknown): string {
  * at the template's full resolution means seconds of frozen UI per toggle.
  */
 const GENE_MAP_VOLUME_STRIDE = 2;
-import {
-  type ExpressionField, type ExpressionVolumeField, colorExpressionField,
-  encodeExpressionVolume, expressionField, expressionVolume,
-} from '../../spatial/spatial-expression';
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
 import {
   PlotType,
@@ -437,20 +437,6 @@ interface TileDescriptor {
 }
 
 /**
- * A WebGPU image backend built on the published `napari-js` library — the POC engine for
- * jit-ui#102 (a browser-based napari shipped as a JS library, swapping image plotting with
- * OpenSeadragon and 3D slicing/isosurfaces with Plotly).
- *
- * Render strategy: rather than re-implement the server's tile/pyramid protocol (which OSD
- * already handles), this backend renders the **complete per-slice image URLs the app already
- * produces** (`IImageInfo.urls`) — `urls[z]` for the 2D image, and the full `urls` stack
- * assembled into a downsampled volume for the 3D types. Region state and display options
- * delegate to the shared {@link RegionStore} / {@link VisualizerStore}, exactly as OSD does.
- *
- * Follow-ups (jit-ui#102): native-resolution pyramidal tiling, on-canvas tools, region
- * overlay rendering, per-channel histograms, TIFF export.
- */
-/**
  * What the 3D points layer needs to colour a cloud: one scalar per point, a colormap, and the
  * window that maps scalars onto it. Categorical and continuous colourings both reduce to this,
  * because the layer offers no per-point colour channel.
@@ -461,6 +447,28 @@ interface Spatial3dEncoding {
   contrastLimits: [number, number];
 }
 
+/**
+ * The WebGPU image backend, built on the published `napari-js` library (jit-ui#102: a
+ * browser-based napari shipped as a JS library, alongside OpenSeadragon for images and Plotly
+ * for 3D).
+ *
+ * One scene is mounted per {@link plot}, chosen by plot type:
+ *  - **2D image** (and the region-centroid scatter and spatial-omics views over it): pyramidal
+ *    `TiledSource`s against the jit-service `/tile` endpoint when `/tiles/info` describes the
+ *    image, else a single stitched level (`tiled:false` stacks fetch each slice's own URL);
+ *    multichannel additive tints, grayscale colormap or RGB; scale bar, navigator, region
+ *    overlay and the shared pixel tools (wand, brush, eraser, zoom-to-box, SAM/cellpose).
+ *  - **Volume / isosurface / 3D scatter / surface**: slices assembled into a decimated volume
+ *    (or one height field per slice), with the axes gizmo and the Z-height handle.
+ *  - **Spatial omics 2D / 3D**: observation markers or a 3D cloud, gene maps, density volumes,
+ *    level-of-detail tiles, hover tooltip and click-to-select.
+ *
+ * Per-channel histograms come from the client data, or from the server's `/histogram` for
+ * >8-bit images; TIFF export from `/export/tiff`. Region state and display options delegate to
+ * the shared {@link RegionStore} / {@link VisualizerStore} through {@link BaseStoreVisualizer},
+ * exactly as OSD does. napari-js's render loop and the hot pointer paths run outside the
+ * Angular zone.
+ */
 @Injectable({ providedIn: 'root' })
 export class NapariVisualizerService extends BaseStoreVisualizer implements IVisualizer {
   readonly capabilities: ViewerCapabilities = capabilitiesOf([
@@ -595,7 +603,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
 
   /** Per-observation depth from the last projection, for the depth-aware hover pick. */
   private spatialDepths3d: Float32Array | null = null;
-  /** The (viewer, dataset) whose 3D scene has already had its opening framing. */
   /** Whose 2D observations the camera has been framed on — see {@link frameSpatialPointsOnce}. */
   private spatial2dFramed: { viewer: Viewer; datasetId: string } | null = null;
   /** Dataset the 3D scale bar was built for. */
@@ -642,7 +649,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    * {@link spatialRebuildToken}, {@link hoverSourceToken}) are "latest wins WITHIN a scene".
    */
   private loading = new AbortController();
-  /** Decimate factor for the napari 3D types (1 = Full, 2 = ½ default, 4 = ¼, 8 = ⅛). Applied when a
+  /** Decimate factor for the napari 3D types (1 = Full, 2 = ½, 4 = ¼ default, 8 = ⅛). Applied when a
    *  volume/isosurface/surface (re)loads; changing it needs a re-plot (it changes fetched data). */
   private resolutionScale = NAPARI_DEFAULT_DECIMATE;
   /** 3D coordinate-axes / scale gizmo for the volume/isosurface view (null in 2D). */
@@ -887,8 +894,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    * within the GPU texture limit, fetches that grid concurrently, and stitches it into one canvas.
    *
    * `channel` selects a single band as grayscale (real levels only); omit for the server composite.
-   * `budgetTiles` caps the grid: the 2D view uses the full budget for detail; the 3D volume passes
-   * 1 for a cheap overview tile per slice (it downsamples to {@link VOLUME_MAX_SLICE}). Falls back
+   * `budgetTiles` caps the grid: the 2D view uses the full budget for detail; volume assembly and
+   * the surface pass {@link tileBudgetFor} their target resolution, and the histogram samples and
+   * navigator 1 for a cheap overview tile. Falls back
    * to a single `col=0,row=0` tile when no descriptor is available (small/simple images, volumes).
    */
   private async fetchSlice(
@@ -1585,10 +1593,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     }
   }
 
-  /**
-   * The overview navigator for a 2D view with an image: a coarse thumbnail of the whole
-   * image with the viewport on it; click or drag to pan at the current zoom (as OSD).
-   */
+  /** "x reloading…" on the loading badge: image tiles, observations and the spatial tile layers. */
   private showLoading(): void {
     if (!this.host) return;
     this.loadingBadge ??= new NapariLoadingBadge(this.host);
@@ -1599,6 +1604,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     ]);
   }
 
+  /**
+   * The overview navigator for a 2D view with an image: a coarse thumbnail of the whole
+   * image with the viewport on it; click or drag to pan at the current zoom (as OSD).
+   */
   private installNavigator(z: number): void {
     this.navigator?.destroy();
     this.navigator = null;
@@ -1765,11 +1774,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
 
     if (!dims || !channels.length || loading.aborted) return; // cancelled → don't render
 
-    // Resolution-invariant world box. Sizing the box by the sampled voxel counts made higher
-    // in-plane resolution grow X/Y while the depth stayed the (constant) slice count — so Z appeared
-    // to shrink at higher resolution. Instead anchor the in-plane long side to a fixed reference and
-    // let Z span the full slice count; the box shape is then identical at every decimate factor. The
-    // per-axis `voxelSize` (napari `scale`) maps the sampled grid onto that fixed world box.
+    // Resolution-invariant world box; the per-axis `voxelSize` (napari `scale`) maps the sampled
+    // grid onto it.
+    //
     // A stack that declares its physical spacing on ALL THREE axes gets its true
     // extent as the world box — the only way anisotropy survives, and what makes a
     // resampled 40 x 40 x 200 µm volume read as a brain instead of a cube-aspect
@@ -2835,22 +2842,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   }
 
   /**
-   * Frame the 2D camera on the observations, for a dataset that brings no image.
-   *
-   * The 2D camera is normally fitted to the IMAGE, because the observations are in that
-   * image's pixel space and framing the image frames them too. A dataset with no
-   * reference image has coordinates in its own units instead — seqFISH's span about
-   * 5x7 — so the image framing left over from whatever was on screen before puts the
-   * whole cloud offscreen: measured at 9.7 x 13.4 PIXELS, centred 256px from where the
-   * camera was looking. The points are all there and drawn; they are a speck. Which
-   * looks exactly like the dataset having failed to load.
-   *
-   * Once per dataset, as napari-js's `fit3d: 'once'` does for the cloud: re-colouring,
-   * slicing or picking a gene re-adds this layer, and re-framing on those would move
-   * the camera under the user — the camera tools and the canvas drag are meant to be
-   * the only things that do.
-   */
-  /**
    * Hide the image layer for a dataset that brings no image of its own.
    *
    * The host's viewer keeps whatever image was last loaded, and for a dataset that
@@ -2882,6 +2873,22 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     viewer.requestRender();
   }
 
+  /**
+   * Frame the 2D camera on the observations, for a dataset that brings no image.
+   *
+   * The 2D camera is normally fitted to the IMAGE, because the observations are in that
+   * image's pixel space and framing the image frames them too. A dataset with no
+   * reference image has coordinates in its own units instead — seqFISH's span about
+   * 5x7 — so the image framing left over from whatever was on screen before puts the
+   * whole cloud offscreen: measured at 9.7 x 13.4 PIXELS, centred 256px from where the
+   * camera was looking. The points are all there and drawn; they are a speck. Which
+   * looks exactly like the dataset having failed to load.
+   *
+   * Once per dataset, as napari-js's `fit3d: 'once'` does for the cloud: re-colouring,
+   * slicing or picking a gene re-adds this layer, and re-framing on those would move
+   * the camera under the user — the camera tools and the canvas drag are meant to be
+   * the only things that do.
+   */
   private frameSpatialPointsOnce(
     viewer: Viewer, datasetId: string, positions: Float32Array, registered: boolean,
   ): void {
@@ -2889,10 +2896,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // those keep the last plotted image's dimensions after the host clears it, so a
     // stale 512x383 read as "there is an image" and skipped the framing entirely.
     if (registered) return;
-    // Once per dataset, as napari-js's `fit3d: 'once'` does for the cloud: re-colouring, slicing
-    // or picking a gene re-adds this layer, and re-framing on those would move the
-    // camera under the user — the camera tools and the canvas drag are meant to be the
-    // only things that do.
+    // Once per dataset (see above).
     if (this.spatial2dFramed?.viewer === viewer
       && this.spatial2dFramed.datasetId === datasetId) return;
 
@@ -3082,11 +3086,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   /**
    * Mount the SPATIAL_OMICS_3D view: observations as a 3D point cloud under the orbit camera.
    *
-   * Deliberately much thinner than the 2D mount. There is no tissue image to render (a registered
-   * volume like the Allen CCF has no single reference plane), so no scale bar, no readback, and no
-   * 2D interaction stack — the region tools draw in screen space and have no meaning against an
-   * orbiting camera, which is why `Select from ROIs` is hidden in this mode. `addPoints3D` puts
-   * the viewer in 3D and frames the camera on the cloud itself.
+   * Thinner than the 2D mount: there is no tissue image to render (a registered volume like the
+   * Allen CCF has no single reference plane), so no readback and no navigator; the 3D scale bar
+   * follows the dataset (see {@link installSpatial3dScaleBar}). The region tools work in SCREEN
+   * space through {@link install3dInteraction} — a lasso selects the cells under it, and an orbit
+   * clears the shape while keeping the selection. The first 3D layer added frames the camera
+   * (`fit3d: 'once'`).
    */
   private async mountSpatialOmics3d(viewer: Viewer, host: HTMLElement): Promise<void> {
     this.install3dInteraction(viewer, host);
@@ -3215,11 +3220,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const shownCount = shown ? shown.length : obs.count;
 
     const key = `${dataset.id}:${obs.count}:${section ?? 'all'}`;
-    // `Points3DLayer.values` is readonly and the layer exposes no dataVersion to
-    // bump, so unlike the 2D path a change of colour SOURCE cannot be mutated in
-    // — the layer has to be rebuilt. Only the size/opacity/colormap knobs are
-    // genuinely display-only. So track the scalars' identity separately from the
-    // geometry's: `colorBy` plus the transforms feeding the encoding.
+    // Track the scalars' identity separately from the geometry's (`colorBy` plus the
+    // transforms feeding the encoding): a new colour source swaps `values` in place
+    // (napari-js ≥ 0.14), while a new geometry needs a new layer.
     const clip = view.percentileClip ?? [0.01, 0.99];
     const scalarKey = [
       key,
@@ -3393,9 +3396,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       }
       if (this.viewer !== viewer || this.geneMapVolumeKey !== key) return;
       const inSelection = selection.count > 0 ? maskToIndices(selection.mask) : undefined;
-      // In-plane bandwidth is the 2D map's, in this lattice's units, so a sheet
-      // and the 2D view of the same section are the same field. Along z it is the
-      // density path's 1.5 voxels — the smallest σ that bridges one section gap.
       // In-plane σ is a PHYSICAL bandwidth, anchored to the reference volume's own
       // voxel — the resolution the 2D map estimates at — so a sheet and the 2D
       // view of the same section are the same field whatever lattice this is
@@ -4070,13 +4070,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     }
   }
 
-  /**
-   * Fetch slice `z` as a single WHOLE-image luminance plane (decimated to `maxGrid`). Prefers the
-   * app's complete per-slice image (`smallUrls`/`urls`, exactly like the Plotly surface) so the
-   * surface always covers the FULL slice — the tile-pyramid `fetchSlice` path would fall back to a
-   * single top-left tile (a corner) for self-contained / non-`/tiles/info` images. Falls back to
-   * stitching the tile grid only when no complete-image URL is available.
-   */
   /** Tile budget to stitch a whole slice at ~`targetPx` resolution from the pyramid: a higher target
    *  pulls a FINER pyramid level (more real detail). Shared by the surface plane fetch and the volume
    *  assembly so both scale their in-plane resolution with the decimate factor. */
@@ -4088,6 +4081,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     );
   }
 
+  /**
+   * Fetch slice `z` as a single WHOLE-image luminance plane (decimated to `maxGrid`). Prefers the
+   * server pyramid, stitched at a resolution set by the decimate factor; without a descriptor,
+   * the app's complete per-slice image (`urls`/`smallUrls`, as the Plotly surface) — never a lone
+   * top-left tile, which would be a corner of the slice — and only as a last resort the
+   * single-tile fetch.
+   */
   private async fetchSurfacePlane(
     z: number,
     maxGrid: number,
