@@ -3,7 +3,7 @@ import { Observable } from 'rxjs';
 import { Image } from 'image-js';
 
 import { IImageInfo, IImageMetadata } from './image.contract';
-import { Region } from '../models/region';
+import { Polygon, Region } from '../models/region';
 import { PlotType, PlotTypeDescriptor } from './plot-type';
 import { ViewerCapabilities } from './capabilities.contract';
 import { IRegionOverlay } from './region-overlay.contract';
@@ -482,6 +482,25 @@ export interface IVisualizer extends IDataRenderer, IRegionStore, IToolControlle
    *  (native bit depth). No-op on backends that can't provide it. */
   exportData(): void;
   unsubscribe(): void;
+}
+
+/**
+ * What a mounted `<visualizer>` hands its host through
+ * `ImageStatePort.setDiagram()` — a small, typed surface rather than the component
+ * itself, whose every public member would otherwise be de-facto API. Cleared
+ * (`setDiagram(null)`) when the visualizer is destroyed. Hosts that can inject
+ * {@link VISUALIZER} / `REGION_EDITOR_API` directly need not use it at all.
+ */
+export interface VisualizerHandle {
+  /** The visualizer chain this `<visualizer>` renders through. */
+  readonly visualizer: IVisualizer;
+  /** @deprecated Use {@link visualizer}. Kept for hosts that read the component's
+   *  former `plotService` field off the registered object. */
+  readonly plotService: IVisualizer;
+  /** Whether any region (annotation or intensity line) exists on the current image. */
+  hasRegions(): boolean;
+  /** The current regions as polygons, for a server request (crop / processing). */
+  getRegionPolygons(): Polygon[];
 }
 
 /**

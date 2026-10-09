@@ -1,6 +1,7 @@
 import { InjectionToken } from '@angular/core';
 import { Observable } from 'rxjs';
 import { IImageInfo } from '../image.contract';
+import type { VisualizerHandle } from '../visualizer.contract';
 
 /**
  * Host image/loading/zoom state, inverted as a port so the visualization library
@@ -27,8 +28,8 @@ export interface ImageStatePort {
   setZoom(zoom: boolean): void;
   setImageCached(cached: boolean): void;
   setLoadingError(error: boolean): void;
-  /** Register the active diagram/visualization component with the host. */
-  setDiagram(diagram: unknown): void;
+  /** Register the mounted visualizer with the host, or `null` once it is destroyed. */
+  setDiagram(diagram: VisualizerHandle | null): void;
 }
 
 export const IMAGE_STATE_PORT = new InjectionToken<ImageStatePort>('IMAGE_STATE_PORT');

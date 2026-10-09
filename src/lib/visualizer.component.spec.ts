@@ -1311,6 +1311,28 @@ describe('VisualizerComponent — global listeners run outside Angular (CORE-4)'
   });
 });
 
+describe('VisualizerComponent — host handle (CORE-10)', () => {
+  it('registers a small typed handle with the host, not the component itself', () => {
+    const { component, state, plot } = harness();
+    expect(state.setDiagram).toHaveBeenCalledTimes(1);
+    const handle = state.setDiagram.mock.calls[0][0];
+    expect(handle).not.toBe(component);
+    expect(handle.visualizer).toBe(plot);
+    expect(handle.plotService).toBe(plot); // deprecated alias jit-ui still reads
+    plot.getRegions.mockReturnValue([{ id: 1 }]);
+    expect(handle.hasRegions()).toBe(true);
+    handle.getRegionPolygons();
+    expect(plot.getRegionPolygons).toHaveBeenCalled();
+    component.ngOnDestroy();
+  });
+
+  it('clears the registration on destroy so the host does not keep a dead viewer', () => {
+    const { component, state } = harness();
+    component.ngOnDestroy();
+    expect(state.setDiagram).toHaveBeenLastCalledWith(null);
+  });
+});
+
 describe('VisualizerComponent — autoscale from the backend (CORE-5)', () => {
   it('disarms the backend tool along with the toolbar, not just the toolbar', () => {
     const autoscale$ = new BehaviorSubject<void>(undefined);

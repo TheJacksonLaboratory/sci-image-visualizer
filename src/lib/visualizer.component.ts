@@ -37,7 +37,7 @@ import {
 } from './contracts/plot-type-contribution.contract';
 import { ActivePlotMode, PlotModeController } from './plot-mode/plot-mode-controller';
 import { ViewerFeature } from './contracts/capabilities.contract';
-import { IntensityProfile, IVisualizer, VISUALIZER } from './contracts/visualizer.contract';
+import { IntensityProfile, IVisualizer, VISUALIZER, VisualizerHandle } from './contracts/visualizer.contract';
 import { SAM_MODELS, getDefaultSamModelId, isSamModelReady } from './toolbar/segmentation/sam-model-registry';
 import { SamToolService } from './toolbar/segmentation/sam-tool.service';
 import { SamPointToolService } from './toolbar/segmentation/sam-point-tool.service';
@@ -766,7 +766,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   ngOnInit(): void {
     // Join the live set; the oldest member renders the shared notice outlets.
     VisualizerComponent.liveInstances.add(this);
-    this.state.setDiagram(this);
+    this.state.setDiagram(this.hostHandle);
     this.watchSpatialDataset();
     // OSD and napari-js emit this from their own "fit to view": disarm the tool on
     // the backend too, not only the toolbar's highlight.
@@ -1349,6 +1349,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.toolDialogs.deactivate();
     // Leave the live set so the next-oldest visualizer picks up the outlets.
     VisualizerComponent.liveInstances.delete(this);
+    this.state.setDiagram(null);
     this.revokeVolumeImageUrls();
     this.scrubber.cancel();
     this.unsub.next();
@@ -1374,6 +1375,14 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.plotService.unsubscribe();
   }
 
+  /** What the host gets through `setDiagram` — see {@link VisualizerHandle}. */
+  private readonly hostHandle: VisualizerHandle = {
+    visualizer: this.plotService,
+    plotService: this.plotService,
+    hasRegions: () => this.hasRegions(),
+    getRegionPolygons: () => this.getRegionPolygons(),
+  };
+
   public hasRegions(): boolean {
     // Use the contract's framework-neutral region accessor, not the raw
     // Plotly-shaped getShapes() — the component only needs to know whether any
@@ -1381,9 +1390,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     return this.plotService.getRegions().length > 0;
   }
 
-  /**
-   * This method is called in mainFacade.configRequest() - DO NOT DELETE
-   */
+  /** The current regions as polygons (also on the host handle). */
   public getRegionPolygons(): Polygon[] {
     return this.plotService.getRegionPolygons();
   }
