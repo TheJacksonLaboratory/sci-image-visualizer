@@ -25,11 +25,26 @@ const DEFAULT_MODEL_URL =
 export class CellposeSegmenterService implements ICellSegmenter {
   private instance: Cellpose | null = null;
   private loading: Promise<Cellpose> | null = null;
+  /** Bumped by {@link setModelUrl}, so a load of the previous URL is discarded. */
+  private generation = 0;
   private modelUrl = DEFAULT_MODEL_URL;
+  /** Every in-flight caller's callbacks: one shared load reports to all of them. */
+  private readonly progressListeners = new Set<(loaded: number, total: number | null) => void>();
+  private readonly statusListeners = new Set<(status: string) => void>();
 
-  /** Point the segmenter at a different hosted CPSAM ONNX (before first use). */
+  /**
+   * Point the segmenter at a different hosted CPSAM ONNX. Changing the URL after
+   * the model loaded (or while it loads) disposes it, so the next run loads the
+   * new model instead of silently keeping the old one.
+   */
   setModelUrl(url: string): void {
+    if (url === this.modelUrl) return;
     this.modelUrl = url;
+    this.generation++;
+    this.loading = null;
+    const old = this.instance;
+    this.instance = null;
+    old?.dispose().catch((err) => console.warn('Cellpose: disposing the previous model failed', err));
   }
 
   async segmentCells(
@@ -64,7 +79,8 @@ export class CellposeSegmenterService implements ICellSegmenter {
 
   /**
    * The shared Cellpose instance, lazily created on first use and reused
-   * thereafter (deduped across concurrent callers). Exposed so a host pipeline
+   * thereafter (deduped across concurrent callers, each of which receives the
+   * load's progress). A failed load is retried on the next call. Exposed so a host pipeline
    * engine can run richer `segment()` options on the same instance. `onProgress`
    * reports raw downloaded/total bytes (`total` is null when unknown); `onStatus`
    * reports worker-init phase strings.
@@ -74,21 +90,39 @@ export class CellposeSegmenterService implements ICellSegmenter {
     onStatus?: (status: string) => void,
   ): Promise<Cellpose> {
     if (this.instance) return Promise.resolve(this.instance);
+    if (onProgress) this.progressListeners.add(onProgress);
+    if (onStatus) this.statusListeners.add(onStatus);
     if (!this.loading) {
-      this.loading = (async () => {
+      const generation = this.generation;
+      const url = this.modelUrl;
+      const load = (async () => {
         // Lazy: keep cellpose-js + its ORT runtime out of the initial bundle.
         const { Cellpose, configureOrt } = await import('cellpose-js');
         configureOrt({ wasmPaths: getOrtWasmBase() });
-        const cp = await Cellpose.fromPretrained(this.modelUrl, {
+        const cp = await Cellpose.fromPretrained(url, {
           preload: true,
-          onProgress: ({ loaded, total }) => onProgress?.(loaded, total),
-          onStatus: (s) => onStatus?.(s),
+          onProgress: ({ loaded, total }) => this.progressListeners.forEach((l) => l(loaded, total)),
+          onStatus: (s) => this.statusListeners.forEach((l) => l(s)),
         });
+        if (generation !== this.generation) {
+          // The URL changed while this loaded: drop it and load the current one.
+          cp.dispose().catch(() => undefined);
+          return this.getModel();
+        }
         this.instance = cp;
         return cp;
       })();
+      this.loading = load;
+      // A failed load is not cached: the next call retries (a network blip or a
+      // WebGPU init failure must not need a page reload).
+      load.catch(() => undefined).finally(() => {
+        if (this.loading === load) this.loading = null;
+      });
     }
-    return this.loading;
+    return this.loading.finally(() => {
+      if (onProgress) this.progressListeners.delete(onProgress);
+      if (onStatus) this.statusListeners.delete(onStatus);
+    });
   }
 
   /** Whether the shared model is already loaded (warm). */
