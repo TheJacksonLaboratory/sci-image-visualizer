@@ -19,6 +19,7 @@ import type {
 } from '../contracts/spatial-dataset.contract';
 import type { SpatialViewState, TranscriptGlyphName } from '../contracts/display-types';
 import type { SpatialDataset } from '../contracts/spatial-dataset.contract';
+import { quantile, quantiles } from './stats';
 
 /** A rectangle in observation coordinates. */
 export interface DataRect {
@@ -142,14 +143,8 @@ export function typicalCellDiameter(radius: Float32Array | number | undefined, f
   if (typeof radius === 'number') return radius > 0 ? radius * 2 : fallback;
   if (!radius?.length) return fallback;
   // The median of a sample is plenty — this sets a threshold, not a measurement.
-  const step = Math.max(1, Math.floor(radius.length / 2048));
-  const sample: number[] = [];
-  for (let i = 0; i < radius.length; i += step) {
-    if (radius[i] > 0) sample.push(radius[i]);
-  }
-  if (!sample.length) return fallback;
-  sample.sort((a, b) => a - b);
-  return sample[sample.length >> 1] * 2;
+  const median = quantile(radius, 0.5, { filter: 'positive', sampleSize: 2048 });
+  return median === null ? fallback : median * 2;
 }
 
 /**
@@ -569,13 +564,7 @@ export function groupedMarkerPx(count: number, refCount: number, binPx: number, 
 
 /** The `p` quantile (0..1) of a count vector — a sample of it for large vectors. */
 export function quantileOf(values: ArrayLike<number>, p: number): number {
-  const n = values.length;
-  if (!n) return 0;
-  const step = Math.max(1, Math.floor(n / 4096));
-  const sample: number[] = [];
-  for (let i = 0; i < n; i += step) sample.push(values[i]);
-  sample.sort((a, b) => a - b);
-  return sample[Math.min(sample.length - 1, Math.floor(p * sample.length))];
+  return quantile(values, p, { sampleSize: 4096 }) ?? 0;
 }
 
 /** {@link tilesInRect} for a grid whose tile (0, 0) starts at `origin`. */
@@ -591,13 +580,9 @@ export function tilesInRectFrom(
 
 /** A density window from the non-empty bins: 1st to 99th percentile. */
 export function densityAutoRange(values: ArrayLike<number>): [number, number] {
-  const positive: number[] = [];
-  for (let i = 0; i < values.length; i++) if (values[i] > 0) positive.push(values[i]);
-  if (!positive.length) return [0, 1];
-  positive.sort((a, b) => a - b);
-  const at = (p: number) => positive[Math.min(positive.length - 1, Math.floor(p * positive.length))];
-  const lo = at(0.01);
-  const hi = at(0.99);
+  const q = quantiles(values, [0.01, 0.99], { filter: 'positive' });
+  if (!q) return [0, 1];
+  const [lo, hi] = q;
   return hi > lo ? [lo, hi] : [0, hi || 1];
 }
 

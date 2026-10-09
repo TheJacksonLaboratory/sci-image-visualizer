@@ -4,6 +4,7 @@ import {
   CategoricalColumnMeta, NO_CATEGORY, SpatialObservations,
 } from '../contracts/spatial-dataset.contract';
 import { ColormapValue } from '../contracts/display-types';
+import { percentileWindow } from './stats';
 
 /**
  * Turning spatial-omics columns into per-point visual attributes.
@@ -210,25 +211,14 @@ export function encodeContinuous(
  * fractions (0.01 / 0.99 clips the extreme 1% at each end).
  *
  * Returns `[0, 1]` for an empty or all-missing vector so callers always get a
- * usable window.
+ * usable window. A large vector is windowed from an even sample of it — see
+ * `spatial/stats.ts` — because this runs on every recolour, and sorting millions
+ * of values each time cost most of a second.
  */
 export function contrastWindow(
   values: Float32Array, lo = 0.01, hi = 0.99,
 ): [number, number] {
-  const finite: number[] = [];
-  for (let i = 0; i < values.length; i++) {
-    if (Number.isFinite(values[i])) finite.push(values[i]);
-  }
-  if (finite.length === 0) return [0, 1];
-  finite.sort((a, b) => a - b);
-  const at = (f: number) => {
-    const k = Math.max(0, Math.min(finite.length - 1, Math.round(f * (finite.length - 1))));
-    return finite[k];
-  };
-  const min = at(Math.max(0, Math.min(1, lo)));
-  const max = at(Math.max(0, Math.min(1, hi)));
-  // A flat or inverted window would divide by zero downstream; widen it.
-  return max > min ? [min, max] : [min, min + 1];
+  return percentileWindow(values, lo, hi);
 }
 
 /**

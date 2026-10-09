@@ -1,5 +1,6 @@
 import { SpatialImageRef, SpatialObservations } from '../contracts/spatial-dataset.contract';
 import { blurVolumeAxis, DensityGrid } from './spatial-density';
+import { quantile } from './stats';
 
 /**
  * Turning per-cell expression into a **gene map** — a continuous field over the
@@ -102,20 +103,17 @@ export function expressionField(
   const mean = new Float32Array(w * h);
   let lo = Infinity;
   let hi = -Infinity;
-  const positives: number[] = [];
   for (let i = 0; i < mean.length; i++) {
     const d = den[i];
     if (d <= 0) continue;
     const m = num[i] / d;
     mean[i] = m;
-    positives.push(d);
     if (m < lo) lo = m;
     if (m > hi) hi = m;
   }
   if (!Number.isFinite(lo)) return null;
 
-  positives.sort((a, b) => a - b);
-  const supportScale = positives[positives.length >> 1] || 0;
+  const supportScale = quantile(den, 0.5, { filter: 'positive' }) || 0;
   return {
     width: w,
     height: h,

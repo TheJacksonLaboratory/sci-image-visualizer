@@ -322,7 +322,7 @@ describe('all-gene grouping', () => {
 
   it('quantileOf picks a high percentile of the counts', () => {
     const v = Uint32Array.from({ length: 100 }, (_v, i) => i + 1);
-    expect(quantileOf(v, 0.95)).toBe(96);
+    expect(quantileOf(v, 0.95)).toBe(95);
     expect(quantileOf(new Uint32Array(0), 0.95)).toBe(0);
   });
 
