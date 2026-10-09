@@ -458,6 +458,35 @@ describe('NapariSpatialTileLayers: a gene selection from the per-gene pyramid le
     tiles.detach();
   });
 
+  it('keeps a density grid that is still in use when the cache is full (LRU, not FIFO)', async () => {
+    const { tiles } = setup(4, 100_000);
+    const getDensity = jest.fn(async () => ({}));
+    (tiles as unknown as { port: unknown }).port = { getDensity };
+    const densityFor = (gene: string) =>
+      (tiles as unknown as { densityFor(d: string, g: string[], b: number): Promise<unknown> })
+        .densityFor('d', [gene], 8);
+    await densityFor('first');
+    for (let i = 0; i < 300; i++) {
+      await densityFor(`g${i}`);
+      await densityFor('first'); // in view the whole time
+    }
+    expect(getDensity.mock.calls.filter((c) => (c as unknown[])[0]?.toString() === 'first')).toHaveLength(1);
+    tiles.detach();
+  });
+
+  it('asks again for a density grid whose request failed', async () => {
+    const { tiles } = setup(4, 100_000);
+    const getDensity = jest.fn().mockRejectedValueOnce(new Error('HTTP 503')).mockResolvedValue({});
+    (tiles as unknown as { port: unknown }).port = { getDensity };
+    const densityFor = () =>
+      (tiles as unknown as { densityFor(d: string, g: string[], b: number): Promise<unknown> })
+        .densityFor('d', ['A'], 8);
+    await expect(densityFor()).rejects.toThrow('HTTP 503');
+    await densityFor();
+    expect(getDensity).toHaveBeenCalledTimes(2);
+    tiles.detach();
+  });
+
   it('steps to coarser levels until the markers fit the max', async () => {
     const { tiles, getTranscriptGeneBins } = setup(4, 50);
     await (tiles as unknown as { plan(): Promise<void> }).plan();

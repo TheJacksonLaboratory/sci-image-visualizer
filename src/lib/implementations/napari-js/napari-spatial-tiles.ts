@@ -1,4 +1,4 @@
-import { Colormap, colormapFromLut } from 'napari-js';
+import { Colormap, LruCache, colormapFromLut } from 'napari-js';
 import type { ImageLayer, Layer, RGBA, ShapesLayer, Viewer } from 'napari-js';
 
 import type { Rgb } from '../../contracts/colormap-lut';
@@ -98,6 +98,8 @@ const MAX_TRANSCRIPTS = 400_000;
 const MAX_CELL_TILES = 48;
 const MAX_TRANSCRIPT_TILES = 36;
 const MAX_BIN_TILES = 64;
+/** Summed per-cluster density grids kept (one per cluster × bin × dataset). */
+const DENSITY_CACHE_SIZE = 256;
 
 /** A transcript fetch the planner can key before running. */
 interface TranscriptJob {
@@ -1036,20 +1038,24 @@ export class NapariSpatialTileLayers {
   /**
    * Per-gene density grids summed for `genes`, cached (a cluster is asked for once per bin).
    * Keyed by dataset too: this manager outlives a dataset, and another may share gene names.
+   * Least-recently-USED eviction, so the clusters in view stay cached; a failed request is
+   * dropped so the next plan asks again.
    */
   private densityFor(dataset: string, genes: string[], bin: number): Promise<SpatialDensityRaster> {
     const key = `${dataset}|${bin}|${genes.join(',')}`;
     let p = this.densityCache.get(key);
     if (!p) {
-      p = this.port.getDensity!(genes, bin);
-      p.catch(() => this.densityCache.delete(key));
-      this.densityCache.set(key, p);
-      if (this.densityCache.size > 256) this.densityCache.delete(this.densityCache.keys().next().value!);
+      const request = this.port.getDensity!(genes, bin);
+      request.catch(() => {
+        if (this.densityCache.get(key) === request) this.densityCache.delete(key);
+      });
+      this.densityCache.set(key, request);
+      p = request;
     }
     return p;
   }
 
-  private readonly densityCache = new Map<string, Promise<SpatialDensityRaster>>();
+  private readonly densityCache = new LruCache<Promise<SpatialDensityRaster>>(DENSITY_CACHE_SIZE);
 
   /**
    * A gene selection zoomed out: one marker per cluster per bin, from the per-gene density
