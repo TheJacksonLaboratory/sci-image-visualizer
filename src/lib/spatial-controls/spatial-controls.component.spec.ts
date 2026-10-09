@@ -558,6 +558,31 @@ describe('SpatialControlsComponent', () => {
       expect(component.geneSearchFailed).toBe(false);
     });
 
+    it('drops a whole-transcriptome gene list fetched for the previous dataset', async () => {
+      // Two remote-gene datasets: A's list arriving after the switch must not become
+      // B's, and B's own preload must not be skipped as "already loading".
+      const remote = (id: string) => ({ ...dataset, id, features: { count: 31_000 } }) as SpatialDataset;
+      dataset$.next(remote('A'));
+      await flush();
+      let resolveA: (v: string[]) => void = () => undefined;
+      controls.searchFeatures
+        .mockImplementationOnce(() => new Promise((r) => { resolveA = r; }))
+        .mockResolvedValueOnce(['B-gene']);
+
+      const loadingA = component.ensureGeneList();
+      dataset$.next(remote('B'));
+      await flush();
+      resolveA(['A-gene']);
+      await loadingA;
+      expect(component.genesAreRemote).toBe(true);
+      expect(component.geneOptions.map((o) => o.value)).not.toContain('A-gene');
+
+      await component.ensureGeneList();
+      expect(controls.searchFeatures).toHaveBeenCalledTimes(2);
+      expect(component.genesAreRemote).toBe(false);
+      expect(component.geneOptions.map((o) => o.value)).toEqual(['B-gene']);
+    });
+
     it('keeps the legend of the column that is selected now', async () => {
       // Two categorical columns, so the slow one's palette has somewhere wrong to
       // land: `region` (2 categories) answering after `zone` (1).

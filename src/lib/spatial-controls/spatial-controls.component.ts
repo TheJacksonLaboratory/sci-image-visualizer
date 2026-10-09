@@ -22,6 +22,7 @@ import {
   SpatialSelectionMask, emptySelection,
 } from '../spatial/spatial-selection';
 import { searchGeneNames } from '../spatial/gene-search';
+import { Supersede } from '../spatial/supersede';
 
 /** One legend row for a categorical colouring. */
 export interface SpatialLegendEntry {
@@ -198,8 +199,10 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   private reverse = false;
   /** Guards the gene typeahead and the legend/colour-bar rebuild: both are async
    *  and both are driven by input the user changes faster than they resolve. */
-  private geneSearchToken = 0;
-  private keyToken = 0;
+  private readonly geneSearch = new Supersede();
+  private readonly keyLoad = new Supersede();
+  /** Guards the whole-transcriptome gene-list preload against a dataset switch. */
+  private readonly geneListLoad = new Supersede();
   private readonly subs = new Subscription();
 
   constructor(
@@ -221,6 +224,10 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       // A new dataset almost certainly has different columns; drop stale UI state.
       this.selectedGene = null;
       this.geneSearchFailed = false;
+      // A gene search or list preload still in flight answers for the previous dataset.
+      this.geneSearch.invalidate();
+      this.geneListLoad.invalidate();
+      this.geneListLoading = false;
       const names = dataset?.features?.names;
       this.genesAreRemote = !!dataset?.features && !names;
       this.geneNames = names ? [...names] : [];
@@ -322,17 +329,17 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     // Typing outruns the lookup, so a slow answer for an earlier query would
     // replace the options for the text now in the box — including a failure, which
     // would wrongly mark the current query as failed.
-    const mine = ++this.geneSearchToken;
+    const current = this.geneSearch.next();
     if (!query) {
       this.geneOptions = [];
       return;
     }
     try {
       const names = await this.controls.searchFeatures(query, 50);
-      if (mine !== this.geneSearchToken) return;
+      if (!current()) return;
       this.zone.run(() => { this.geneOptions = this.withSelected(names); });
     } catch {
-      if (mine !== this.geneSearchToken) return;
+      if (!current()) return;
       // A failed lookup must not wedge the control — show none and say so.
       this.zone.run(() => {
         this.geneOptions = this.withSelected([]);
@@ -354,9 +361,12 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   async ensureGeneList(): Promise<void> {
     if (this.genesAreRemote && this.controls && !this.geneListLoading) {
       this.geneListLoading = true;
+      // A switch to another remote-gene dataset mid-fetch would otherwise hand it this
+      // dataset's names as its own.
+      const current = this.geneListLoad.next();
       try {
         const names = await this.controls.searchFeatures('', SpatialControlsComponent.GENE_LIST_MAX);
-        if (names.length && this.genesAreRemote) {
+        if (current() && names.length && this.genesAreRemote) {
           this.zone.run(() => {
             this.geneNames = names;
             this.genesAreRemote = false;
@@ -365,7 +375,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       } catch {
         // Keep the per-keystroke search; the list is a convenience, not a requirement.
       } finally {
-        this.geneListLoading = false;
+        if (current()) this.geneListLoading = false;
       }
     }
     this.zone.run(() => {
@@ -1463,17 +1473,17 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       ? this.dataset?.columns.find((c) => c.name === by.name)
       : undefined;
 
-    const mine = ++this.keyToken;
+    const current = this.keyLoad.next();
     if (meta?.kind === 'categorical') {
       try {
         const colors = await this.controls.categoryColors(by.name);
         // Same race, same cost if it is lost: a slower earlier column would paint
         // its palette into the legend for the column now selected.
-        if (mine !== this.keyToken) return;
+        if (!current()) return;
         this.legend = meta.categories.map((label, i) => ({ label, color: colors[i] }));
         this.colorBarCss = null;
       } catch {
-        if (mine !== this.keyToken) return;
+        if (!current()) return;
         // The column's values may not have loaded yet; leave the key empty
         // rather than showing a legend that might not match the render.
         this.legend = null;
