@@ -1,4 +1,5 @@
 import { SamToolService } from './sam-tool.service';
+import { SamSessionService } from './sam-session.service';
 import { WandService } from '../wand/wand.service';
 import { CachedImageData, WandToolHost } from '../wand/wand-tool.service';
 import { ISamSession, SamEmbedding, SamPrompt } from '../../contracts/sam.contract';
@@ -58,7 +59,7 @@ describe('SamToolService', () => {
   let tool: SamToolService;
 
   beforeEach(() => {
-    tool = new SamToolService(new WandService());
+    tool = new SamToolService();
     tool.useSession(fakeSession());
   });
 
@@ -117,12 +118,12 @@ describe('SamToolService', () => {
 
   it('fails gracefully when the model has no ONNX URLs configured', async () => {
     setSamModelUrls(DEFAULT_SAM_MODEL_ID, '', ''); // ensure unconfigured
-    const fresh = new SamToolService(new WandService()); // no session injected
+    const fresh = new SamToolService(); // no session injected
     const { host, get } = makeHost([rectRegion(10, 10, 20, 20)]);
     fresh.bindHost(host);
     const added = await fresh.segmentBoxes();
     expect(added).toBe(0);
-    expect(tool['model'] && getSamModel(DEFAULT_SAM_MODEL_ID).encoderUrl).toBe('');
+    expect(getSamModel(DEFAULT_SAM_MODEL_ID).encoderUrl).toBe('');
     expect(fresh.status$.value).toMatch(/not configured/i);
     expect(get()).toHaveLength(1); // nothing added
   });
@@ -141,5 +142,53 @@ describe('SamToolService', () => {
 
     tool.setModel('microsam-vit-b-lm');        // switch → drop the stale session
     expect(disposeSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SamToolService — async commit (RT-6)', () => {
+  it('keeps a region drawn while the encoder was running', async () => {
+    const tool = new SamToolService();
+    const session = fakeSession();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const embed = session.embed.bind(session);
+    session.embed = async (img) => { await gate; return embed(img); };
+    tool.useSession(session);
+    const { host, get } = makeHost([rectRegion(10, 10, 20, 20)]);
+    tool.bindHost(host);
+
+    const run = tool.segmentBoxes();
+    await Promise.resolve();
+    const drawn = rectRegion(0, 0, 2, 2);
+    host.setRegions([...get(), drawn]); // the user draws another prompt meanwhile
+    release();
+    await run;
+
+    expect(get()).toContain(drawn);
+    expect(get()).toHaveLength(2);
+  });
+});
+
+describe('SamToolService — guard covers the model download (RT-7)', () => {
+  it('is busy while the model loads, and a second press is ignored', async () => {
+    setSamModelUrls(DEFAULT_SAM_MODEL_ID, 'enc', 'dec');
+    const sessions = new SamSessionService();
+    let finishLoad!: () => void;
+    const loaded = new Promise<void>((r) => { finishLoad = r; });
+    const session = fakeSession();
+    session.loadModel = () => loaded;
+    const factory = jest.fn(async () => session);
+    sessions.useSessionFactory(factory);
+    const tool = new SamToolService(sessions);
+    const { host } = makeHost([rectRegion(10, 10, 20, 20)]);
+    tool.bindHost(host);
+
+    const first = tool.segmentBoxes();
+    expect(tool.busy$.value).toBe(true);       // busy before the download finishes
+    expect(await tool.segmentBoxes()).toBe(0); // second press ignored
+    finishLoad();
+    expect(await first).toBe(1);
+    expect(factory).toHaveBeenCalledTimes(1);
+    setSamModelUrls(DEFAULT_SAM_MODEL_ID, '', '');
   });
 });

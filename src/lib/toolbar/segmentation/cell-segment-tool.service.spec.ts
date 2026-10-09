@@ -52,7 +52,7 @@ function makeHost(regions: Region[]): { host: WandToolHost; get: () => Region[] 
 
 describe('CellSegmentToolService', () => {
   let tool: CellSegmentToolService;
-  beforeEach(() => { tool = new CellSegmentToolService(new WandService()); });
+  beforeEach(() => { tool = new CellSegmentToolService(); });
 
   it('crops each rectangle, cellpose-segments it, and adds a region per cell', async () => {
     const { host, get } = makeHost([rectRegion(8, 8, 24, 24)]);
@@ -110,5 +110,60 @@ describe('CellSegmentToolService', () => {
     expect(await tool.segmentBoxes(empty)).toBe(0);
     expect(get()).toHaveLength(1);
     expect(get()[0].bounds).toBeInstanceOf(Rectangle); // untouched
+  });
+});
+
+describe('CellSegmentToolService — async commit (RT-6, RT-14)', () => {
+  let tool: CellSegmentToolService;
+  beforeEach(() => { tool = new CellSegmentToolService(); });
+
+  /** A segmenter that waits for `release()` before answering. */
+  function gatedSegmenter() {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const inner = fakeSegmenter();
+    const segmenter: ICellSegmenter = {
+      segmentCells: async (img, p) => { await gate; return inner.segmentCells(img, p); },
+    };
+    return { segmenter, release };
+  }
+
+  it('keeps a region drawn while the segmenter was running', async () => {
+    const { host, get } = makeHost([rectRegion(8, 8, 24, 24)]);
+    tool.bindHost(host);
+    const { segmenter, release } = gatedSegmenter();
+    const run = tool.segmentBoxes(segmenter);
+    await new Promise((r) => setTimeout(r, 5));
+    host.setRegions([...get(), rectRegion(0, 0, 2, 2)].map((r) => r)); // the user draws meanwhile
+    const drawn = get()[get().length - 1];
+    release();
+    await run;
+    expect(get()).toContain(drawn);
+    expect(get().filter((r) => r.bounds instanceof Rectangle)).toHaveLength(1); // the prompt was consumed
+  });
+
+  it('ignores a second run while one is in flight', async () => {
+    const { host, get } = makeHost([rectRegion(8, 8, 24, 24)]);
+    tool.bindHost(host);
+    const { segmenter, release } = gatedSegmenter();
+    const first = tool.segmentBoxes(segmenter);
+    const second = tool.segmentBoxes(segmenter);
+    release();
+    expect(await second).toBe(0);
+    expect(await first).toBe(2);
+    expect(get()).toHaveLength(2);
+  });
+
+  it('maps rows with the Y ratio', async () => {
+    const { host, get } = makeHost([rectRegion(8, 16, 24, 48)]);
+    const cached = host.getCachedImageData()!;
+    cached.ratios = [1, 2]; // rows are 2 data units tall
+    tool.bindHost(host);
+    await tool.segmentBoxes(fakeSegmenter());
+    const ys = get().flatMap((r) => (r.bounds as Polygon).ypoints);
+    // The cells stay inside the prompt box's data extent (16..64), not 8..32 or 32..128.
+    expect(Math.min(...ys)).toBeGreaterThanOrEqual(16);
+    expect(Math.max(...ys)).toBeLessThanOrEqual(64);
+    expect(Math.max(...ys)).toBeGreaterThan(40);
   });
 });

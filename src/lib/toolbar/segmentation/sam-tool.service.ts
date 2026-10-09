@@ -1,12 +1,14 @@
 import { Injectable } from '@angular/core';
-import { BehaviorSubject } from 'rxjs';
 
-import { WandService } from '../wand/wand.service';
 import { WandToolHost } from '../wand/wand-tool.service';
-import { frameToRgba } from './sam-prompt';
-import { getSamModel, isSamModelReady } from './sam-model-registry';
-import { ISamSession, SamEmbedding, SamModelDef } from '../../contracts/sam.contract';
+import { SamSessionService } from './sam-session.service';
+import { ISamSession } from '../../contracts/sam.contract';
 import { Region, Polygon, Rectangle } from '../../models/region';
+import { makePolygon } from '../../models/polygon-factory';
+import { maskToPolygons } from '../../geometry/contour';
+import { MatrixFrame } from '../tool-kit/matrix-frame';
+import { AsyncToolStatus } from '../tool-kit/async-tool-status';
+import { withoutRegions } from './segmentation-commit';
 
 /** The SAM tool binds to the same host the wand/brush use, so each backend
  *  reuses its existing pixel readback + coordinate transform + region store. */
@@ -15,190 +17,127 @@ export type SamToolHost = WandToolHost;
 /**
  * Box-prompted SAM segmentation tool (jit-ui#90, P0). On `segmentBoxes()` it
  * reads every rectangle region, runs the (cached) encoder once for the image,
- * then runs the decoder per box, traces each mask to a polygon (reusing
- * WandService.maskToPolygons) and commits them as regions.
+ * then runs the decoder per box, traces each mask to a polygon and replaces
+ * the prompt rectangles with the masks.
  *
- * Inference is abstracted behind {@link ISamSession}: production uses the
- * onnxruntime-web session (lazy-imported so ORT never loads in unit tests);
- * tests inject a fake via {@link useSession}.
+ * Inference goes through the shared {@link SamSessionService} (one session and
+ * embedding for both SAM tools); tests inject a fake session via
+ * {@link useSession}.
  */
 @Injectable({ providedIn: 'root' })
 export class SamToolService {
   private host!: SamToolHost;
-  private session: ISamSession | null = null;
-  private model: SamModelDef = getSamModel();
-
-  /** Cached encoder embedding + the key (image identity) it was computed for. */
-  private embedding: SamEmbedding | null = null;
-  private embeddingKey: string | null = null;
+  private readonly state = new AsyncToolStatus();
 
   /** Status text + busy flag for a spinner / toast in the host. */
-  readonly status$ = new BehaviorSubject<string>('');
-  readonly busy$ = new BehaviorSubject<boolean>(false);
+  readonly status$ = this.state.status$;
+  readonly busy$ = this.state.busy$;
   /** Encoder-download progress: -1 = not downloading, 0..1 = downloading. */
-  readonly progress$ = new BehaviorSubject<number>(-1);
+  readonly progress$ = this.state.progress$;
 
-  constructor(private wandService: WandService) {}
+  constructor(private readonly sessions: SamSessionService = new SamSessionService()) {}
 
   /** Bind to the active backend's host (called by the backend, like the wand). */
   bindHost(host: SamToolHost): void {
     this.host = host;
   }
 
-  /** Choose the registered model to use; invalidates any cached embedding. */
+  /** Choose the registered model to use (shared with the point tool). */
   setModel(id: string): void {
-    const next = getSamModel(id);
-    if (next.id === this.model.id) return;
-    this.model = next;
-    this.invalidateEmbedding();
-    // Drop the loaded session so the next run reloads the newly-picked model's
-    // ONNX pair — ensureSession() returns the cached session as-is, so without
-    // this a model switch would keep running the previous model.
-    this.session?.dispose();
-    this.session = null;
+    this.sessions.setModel(id);
   }
 
   /** Drop the cached embedding (e.g. after the image/slice changes). */
   invalidateEmbedding(): void {
-    this.embedding = null;
-    this.embeddingKey = null;
+    this.sessions.invalidateEmbedding();
   }
 
   /** Test seam: inject a fake/alternate inference session. */
   useSession(session: ISamSession): void {
-    this.session = session;
+    this.sessions.useSession(session);
   }
 
   /**
-   * Segment every rectangle region with a box prompt and append the resulting
-   * masks as new polygon regions. Returns how many regions were added.
+   * Segment every rectangle region with a box prompt and replace each prompt
+   * that produced a mask with the mask's polygon region. Returns how many
+   * regions were added; 0 (ignored) while a previous run is still going.
    */
   async segmentBoxes(): Promise<number> {
-    if (!this.host) return 0;
-    // Re-entrancy guard: a second Segment press while the first run is still
-    // downloading/encoding would launch a concurrent model download + GPU
-    // encode (and can freeze the tab on a heavy WebGPU ViT-B). Ignore it.
-    if (this.busy$.value) return 0;
+    if (!this.host || this.state.busy) return 0;
     const cached = this.host.getCachedImageData();
     if (!cached || cached.frames.length === 0) {
       this.status$.next('No image loaded.');
       return 0;
     }
-
-    const regions = this.host.getRegions();
-    const rects = regions.filter((r) => r.bounds instanceof Rectangle);
+    const rects = this.host.getRegions().filter((r) => r.bounds instanceof Rectangle);
     if (rects.length === 0) {
       this.status$.next('Draw one or more rectangles, then press Segment.');
       return 0;
     }
+    const frame = MatrixFrame.from(cached);
+    const frameIdx = this.host.getActiveFrameIndex();
 
-    const rx = cached.ratios[0] || 1;
-    const ry = cached.ratios[0] || 1;
-    const ox = cached.originX ?? 0;
-    const oy = cached.originY ?? 0;
-
-    let session: ISamSession;
-    try {
-      session = await this.ensureSession();
-    } catch (err) {
-      this.busy$.next(false);
-      this.status$.next(err instanceof Error ? err.message : 'SAM model unavailable.');
-      return 0;
-    }
-
-    this.busy$.next(true);
-    try {
-      // Encode once per image; reuse the embedding across all boxes.
-      const key = [
-        this.host.getFileName() ?? '',
-        this.host.getActiveFrameIndex(),
-        `${cached.width}x${cached.height}`,
-        `${ox},${oy},${rx}`,
-        this.model.id,
-      ].join('|');
-      if (!this.embedding || this.embeddingKey !== key) {
-        this.status$.next('Encoding image…');
-        const rgba = frameToRgba(cached, this.host.getActiveFrameIndex());
-        this.embedding = await session.embed({ data: rgba, width: cached.width, height: cached.height });
-        this.embeddingKey = key;
+    // Busy from here on — including the model download, so a second press
+    // can't start a second download/encode (which can freeze the tab on a heavy
+    // WebGPU ViT-B).
+    const added = await this.state.run(async () => {
+      let session: ISamSession;
+      try {
+        session = await this.sessions.ensureSession((f) => this.progress$.next(f));
+      } catch (err) {
+        this.status$.next(err instanceof Error ? err.message : 'SAM model unavailable.');
+        return 0;
       }
+      try {
+        // Encode once per image; reuse the embedding across all boxes.
+        const key = [this.host.getFileName() ?? '', frameIdx, `${cached.width}x${cached.height}`, frame.sig]
+          .join('|');
+        const embedding = await this.sessions.embed(session, cached, frameIdx, key,
+          () => this.status$.next('Encoding image…'));
 
-      const masks: Region[] = [];
-      const consumed = new Set<Region>(); // prompt rectangles that produced a mask
-      let added = 0;
-      for (let i = 0; i < rects.length; i++) {
-        this.status$.next(`Segmenting ${i + 1}/${rects.length}…`);
-        const b = rects[i].bounds as Rectangle;
-        // Rectangle is in data coords → convert to image (matrix) coords.
-        const box = {
-          x0: (b.x - ox) / rx,
-          y0: (b.y - oy) / ry,
-          x1: (b.x + b.width - ox) / rx,
-          y1: (b.y + b.height - oy) / ry,
-        };
-        const res = await session.decode(this.embedding, { box });
-        const polys = this.wandService.maskToPolygons(
-          res.mask, res.width, res.height, 0, 0,
-        );
-        if (polys.length === 0) continue;
-        // Keep the largest connected piece (maskToPolygons returns largest-first).
-        const poly = polys[0];
-        masks.push(this.makeRegion(
-          poly.xpoints.map((x) => ox + x * rx),
-          poly.ypoints.map((y) => oy + y * ry),
-          rects[i].color, // inherit the prompt rectangle's color
-        ));
-        consumed.add(rects[i]); // this rectangle is now represented by its mask
-        added++;
+        const masks: Region[] = [];
+        const consumed: Region[] = []; // prompt rectangles that produced a mask
+        for (let i = 0; i < rects.length; i++) {
+          this.status$.next(`Segmenting ${i + 1}/${rects.length}…`);
+          const b = rects[i].bounds as Rectangle;
+          // Rectangle is in data coords → convert to image (matrix) coords.
+          const box = {
+            x0: frame.toMatrixX(b.x),
+            y0: frame.toMatrixY(b.y),
+            x1: frame.toMatrixX(b.x + b.width),
+            y1: frame.toMatrixY(b.y + b.height),
+          };
+          const res = await session.decode(embedding, { box });
+          // Keep the largest connected piece (maskToPolygons returns largest-first).
+          const poly = maskToPolygons(res.mask, res.width, res.height, 0, 0)[0];
+          if (!poly) continue;
+          // Inherit the prompt rectangle's colour.
+          masks.push(this.makeRegion(poly, frame, rects[i].color));
+          consumed.push(rects[i]);
+        }
+
+        // Commit against the regions as they are NOW: the user may have drawn,
+        // edited or deleted regions during the (possibly minutes-long) run.
+        // Prompts that produced a mask are replaced; the rest stay for a retry.
+        this.host.setRegions(withoutRegions(this.host.getRegions(), consumed).concat(masks));
+        this.status$.next(masks.length > 0 ? `Added ${masks.length} region(s).` : 'No masks found.');
+        return masks.length;
+      } catch (err) {
+        this.status$.next(err instanceof Error ? err.message : 'Segmentation failed.');
+        return 0;
       }
-
-      // Replace each segmented prompt rectangle with its mask region; keep any
-      // rectangle that produced no mask (so it can be retried) + other regions.
-      const out = regions.filter((r) => !consumed.has(r)).concat(masks);
-      this.host.setRegions(out);
-      this.status$.next(added > 0 ? `Added ${added} region(s).` : 'No masks found.');
-      return added;
-    } catch (err) {
-      this.status$.next(err instanceof Error ? err.message : 'Segmentation failed.');
-      return 0;
-    } finally {
-      this.busy$.next(false);
-      this.progress$.next(-1);
-    }
+    });
+    return added ?? 0;
   }
 
-  private makeRegion(xData: number[], yData: number[], color?: string): Region {
-    const poly = new Polygon();
-    poly.npoints = xData.length;
-    poly.xpoints = xData;
-    poly.ypoints = yData;
-    poly.coordinates = xData.map((x, i) => [x, yData[i]]);
-    poly.closed = true;
-
+  private makeRegion(poly: Polygon, frame: MatrixFrame, color?: string): Region {
+    const ring = frame.ringToData(poly.xpoints, poly.ypoints);
     const region = new Region();
-    region.bounds = poly;
+    region.bounds = makePolygon(ring.xs, ring.ys, { holes: frame.holesToData(poly.holes) });
     // Inherit the source prompt rectangle's color; fall back to the host default.
     region.color = color || this.host.getShapeColor();
     // Default class/annotation name, matching the wand/brush + overlay-drawn regions.
     region.label = 'sam';
     return region;
-  }
-
-  private async ensureSession(): Promise<ISamSession> {
-    if (this.session) return this.session;
-    if (!isSamModelReady(this.model)) {
-      throw new Error(
-        `SAM model "${this.model.id}" is not configured yet (no ONNX URLs). ` +
-        'Host it and call setSamModelUrls(), then retry.',
-      );
-    }
-    // Lazy-import so onnxruntime-web is never pulled into unit tests / the
-    // initial bundle — only when segmentation actually runs.
-    const { OnnxSamSession } = await import('./onnx-sam-session');
-    const session = new OnnxSamSession();
-    this.progress$.next(0);
-    await session.loadModel(this.model, (f) => this.progress$.next(f));
-    this.session = session;
-    return session;
   }
 }

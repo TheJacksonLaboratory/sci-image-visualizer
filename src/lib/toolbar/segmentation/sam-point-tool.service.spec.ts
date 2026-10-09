@@ -63,7 +63,7 @@ describe('SamPointToolService', () => {
   let tool: SamPointToolService;
 
   beforeEach(() => {
-    tool = new SamPointToolService(new WandService());
+    tool = new SamPointToolService();
     tool.useSession(fakeSession());
   });
   afterEach(() => { tool.setMode(false); document.body.innerHTML = ''; });
