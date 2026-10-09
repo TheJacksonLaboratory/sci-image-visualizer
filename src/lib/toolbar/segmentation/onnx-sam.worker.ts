@@ -35,8 +35,10 @@ async function onLoad(msg: any): Promise<void> {
   const eps: string[] = (msg.encoderProviders && msg.encoderProviders.length)
     ? msg.encoderProviders
     : (hasGpu ? ['webgpu', 'wasm'] : ['wasm']);
-  const encBuf = await fetchModel(msg.encoderUrl, (f) => post({ id: msg.id, type: 'progress', fraction: f }));
-  const decBuf = await fetchModel(msg.decoderUrl);
+  const encBuf = await fetchModel(
+    msg.encoderUrl, (f) => post({ id: msg.id, type: 'progress', fraction: f }), msg.revision,
+  );
+  const decBuf = await fetchModel(msg.decoderUrl, undefined, msg.revision);
   encoder = await ort.InferenceSession.create(encBuf, { executionProviders: eps });
   decoder = await ort.InferenceSession.create(decBuf, { executionProviders: ['wasm'] });
   post({ id: msg.id, type: 'loaded' });

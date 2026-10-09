@@ -76,6 +76,8 @@ export {
 
 // ── onnxruntime-web WASM location (host overrides once, at app init) ───────
 export { setOrtWasmBase, getOrtWasmBase } from './lib/toolbar/segmentation/ort-runtime-config';
+// Frees the several hundred MB of downloaded SAM models the browser keeps per origin.
+export { clearSamModelCache } from './lib/toolbar/segmentation/sam-onnx-core';
 
 // ── Neutral data models ──────────────────────────────────────────────────
 export * from './lib/models/region';

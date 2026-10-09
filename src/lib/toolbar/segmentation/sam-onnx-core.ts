@@ -10,11 +10,14 @@ import type { SamPrompt } from '../../contracts/sam.contract';
  * DOM, since the worker bundles it.
  */
 
+/** SAM's per-channel (RGB) pixel mean, subtracted before the encoder. */
 export const PIXEL_MEAN = [123.675, 116.28, 103.53];
+/** SAM's per-channel (RGB) pixel standard deviation, divided out before the encoder. */
 export const PIXEL_STD = [58.395, 57.12, 57.375];
-/** Cache API store for downloaded model files. Bump the version whenever the
- *  hosted models are re-exported under the same (mutable `resolve/main`) URLs:
- *  opening the cache deletes every older `sam-onnx*` store. */
+/** Cache API store for downloaded model files. Bump the version only when the cache
+ *  LAYOUT changes — opening the cache deletes every older `sam-onnx*` store. A model
+ *  re-exported under the same URLs bumps its own `SamModelDef.revision` instead,
+ *  which re-downloads that model alone (see {@link modelCacheKey}). */
 const MODEL_CACHE_PREFIX = 'sam-onnx';
 const MODEL_CACHE = `${MODEL_CACHE_PREFIX}-v2`;
 
@@ -66,12 +69,33 @@ export interface CoreMask {
   iou: number;
 }
 
+/**
+ * The Cache API key a model file is stored under: its URL, plus the model's
+ * `SamModelDef.revision` as a query parameter when it has one, so a bumped revision
+ * misses the cache and downloads the re-exported file.
+ */
+export function modelCacheKey(url: string, revision?: string): string {
+  if (!revision) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}siv-model-rev=${encodeURIComponent(revision)}`;
+}
+
+/** Store a downloaded file under `key`, first dropping every other copy of the same file
+ *  (other revisions, or the same path under another query): a model is several hundred
+ *  MB, and a superseded copy would otherwise stay on disk for good. */
+async function cacheModel(cache: Cache, url: string, key: string, body: Response): Promise<void> {
+  await cache.delete(url, { ignoreSearch: true }).catch(() => undefined);
+  await cache.put(key, body).catch(() => undefined);
+}
+
 /** Fetch a model as an ArrayBuffer, streaming progress and caching in the Cache
- *  API (so it isn't re-downloaded). Cache hit → progress jumps to 1. Works on
- *  the main thread and in a worker (both have `fetch` + `caches`). */
-export async function fetchModel(url: string, onProgress?: (f: number) => void): Promise<ArrayBuffer> {
+ *  API (so it isn't re-downloaded) under {@link modelCacheKey}. Cache hit → progress
+ *  jumps to 1. Works on the main thread and in a worker (both have `fetch` + `caches`). */
+export async function fetchModel(
+  url: string, onProgress?: (f: number) => void, revision?: string,
+): Promise<ArrayBuffer> {
+  const key = modelCacheKey(url, revision);
   const cache = await openModelCache();
-  const hit = cache ? await cache.match(url) : null;
+  const hit = cache ? await cache.match(key) : null;
   if (hit) { onProgress?.(1); return await hit.arrayBuffer(); }
 
   const resp = await fetch(url);
@@ -80,7 +104,7 @@ export async function fetchModel(url: string, onProgress?: (f: number) => void):
   if (!resp.body || !total) {
     const buf = await resp.arrayBuffer();
     onProgress?.(1);
-    if (cache) await cache.put(url, new Response(buf)).catch(() => undefined);
+    if (cache) await cacheModel(cache, url, key, new Response(buf));
     return buf;
   }
   const reader = resp.body.getReader();
@@ -98,8 +122,7 @@ export async function fetchModel(url: string, onProgress?: (f: number) => void):
   for (const c of chunks) { out.set(c, off); off += c.length; }
   if (cache) {
     // The Response copies its body, so no extra full-size copy of the model here.
-    await cache.put(url, new Response(out, { headers: { 'content-length': String(received) } }))
-      .catch(() => undefined);
+    await cacheModel(cache, url, key, new Response(out, { headers: { 'content-length': String(received) } }));
   }
   onProgress?.(1);
   return out.buffer;

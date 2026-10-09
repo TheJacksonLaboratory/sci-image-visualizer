@@ -54,8 +54,8 @@ export class OnnxSamSession implements ISamSession {
 
     if (this.mode === 'inproc') {
       ort.env.wasm.wasmPaths = getOrtWasmBase();
-      const encBuf = await fetchModel(model.encoderUrl, onProgress);
-      const decBuf = await fetchModel(model.decoderUrl);
+      const encBuf = await fetchModel(model.encoderUrl, onProgress, model.revision);
+      const decBuf = await fetchModel(model.decoderUrl, undefined, model.revision);
       this.encoder = await ort.InferenceSession.create(encBuf, { executionProviders: eps });
       this.decoder = await ort.InferenceSession.create(decBuf, { executionProviders: ['wasm'] });
     } else {
@@ -63,6 +63,7 @@ export class OnnxSamSession implements ISamSession {
         type: 'load',
         encoderUrl: model.encoderUrl,
         decoderUrl: model.decoderUrl,
+        revision: model.revision,
         wasmPaths: getOrtWasmBase(),
         inputSize: model.inputSize,
         encoderProviders: model.encoderProviders,
