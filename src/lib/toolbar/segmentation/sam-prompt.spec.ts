@@ -1,7 +1,10 @@
-import { frameToRgba, buildDecoderPrompt, binarizeMask, bestMaskIndex } from './sam-prompt';
+jest.mock('onnxruntime-web', () => ({})); // sam-onnx-core imports it; these helpers don't use it
+
+import { frameToRgba } from './sam-prompt';
+import { buildDecoderPrompt, binarizeMask, bestMaskIndex } from './sam-onnx-core';
 import { CachedImageData } from '../wand/wand-tool.service';
 
-describe('sam-prompt helpers', () => {
+describe('SAM prompt helpers', () => {
   describe('buildDecoderPrompt', () => {
     it('encodes a box as two points labelled 2 and 3, scaled', () => {
       const { pointCoords, pointLabels, numPoints } = buildDecoderPrompt(
@@ -30,7 +33,7 @@ describe('sam-prompt helpers', () => {
   });
 
   it('binarizeMask thresholds logits at > 0 by default', () => {
-    expect(Array.from(binarizeMask([-1, 0, 0.5, 2]))).toEqual([0, 0, 1, 1]);
+    expect(Array.from(binarizeMask(Float32Array.from([-1, 0, 0.5, 2])))).toEqual([0, 0, 1, 1]);
   });
 
   it('bestMaskIndex returns the argmax IoU', () => {
