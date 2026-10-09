@@ -335,6 +335,65 @@ function toNapariGamma(gamma: number | undefined): number {
   return gamma != null && gamma > 0 ? 1 / gamma : 1;
 }
 
+/** A 2D canvas (an `OffscreenCanvas` where available) and its context; throws, naming `what`,
+ *  when no 2D context can be had. */
+function create2dCanvas(
+  width: number,
+  height: number,
+  what: string,
+): {
+  canvas: HTMLCanvasElement | OffscreenCanvas;
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+} {
+  let canvas: HTMLCanvasElement | OffscreenCanvas;
+  if (typeof OffscreenCanvas !== 'undefined') {
+    canvas = new OffscreenCanvas(width, height);
+  } else {
+    canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+  }
+  const ctx = canvas.getContext('2d') as
+    | CanvasRenderingContext2D
+    | OffscreenCanvasRenderingContext2D
+    | null;
+  if (!ctx) throw new Error(`[napari-js] ${what}: 2D context unavailable`);
+  return { canvas, ctx };
+}
+
+/**
+ * Run `fn` over `items` with at most `concurrency` in flight — keeps the connection pool busy
+ * without flooding the server — starting no further item once `stop()` says so.
+ */
+async function mapPool<T>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T) => Promise<void>,
+  stop: () => boolean = () => false,
+): Promise<void> {
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length && !stop()) await fn(items[next++]);
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
+}
+
+/** A serverless multichannel stack (`tiled:false` + `channelUrls`): no tile descriptor, so its
+ *  channel count comes from `imageMeta`, and each band is fetched from its own plane URLs. */
+function isServerlessMultichannel(simple: boolean, info: IImageInfo | undefined): boolean {
+  return simple && !!info?.channelUrls?.length && (info?.imageMeta?.[0]?.channelCount ?? 1) > 1;
+}
+
+/** The stack's declared slice count (`imageMeta.z`, else one URL per slice); 0 when unknown. */
+function stackDepth(info: IImageInfo | undefined): number {
+  return info?.imageMeta?.[0]?.z || info?.urls?.length || 0;
+}
+
+/** A decoded single-channel uint8 plane as a napari-js typed image source. */
+function typedPlane(d: { data: Uint8Array; width: number; height: number }): ChannelView['source'] {
+  return { kind: 'typed', width: d.width, height: d.height, channels: 1, dtype: 'uint8', data: d.data };
+}
+
 /** Default per-channel tints (Fiji-style) when the store/descriptor offers no colour. */
 const DEFAULT_TINTS = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ffffff'];
 
@@ -798,6 +857,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     return NgZone.isInAngularZone() ? fn() : this.zone.run(fn);
   }
 
+  /** µm per pixel along x for the image on screen: the descriptor's, else the image metadata's;
+   *  0 when neither declares it. */
+  private mppX(): number {
+    return this.currentDescriptor()?.mppX || this.loaded?.imageInfo.imageMeta?.[0]?.mppX || 0;
+  }
+
   /**
    * The pyramid descriptor of the image on screen, or null when it has none.
    *
@@ -940,31 +1005,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       for (let col = 0; col < cols; col++) coords.push({ col, row });
     }
     const tiles: Array<{ col: number; row: number; bmp: ImageBitmap }> = [];
-    const stitchWorker = async (): Promise<void> => {
-      for (;;) {
-        const job = coords.shift();
-        if (!job) return;
-        const bmp = await fetchTile(chosen.res, job.col, job.row, t);
-        tiles.push({ col: job.col, row: job.row, bmp });
-      }
-    };
-    await Promise.all(
-      Array.from({ length: Math.min(TILE_FETCH_CONCURRENCY, coords.length) }, () => stitchWorker()),
-    );
+    await mapPool(coords, TILE_FETCH_CONCURRENCY, async ({ col, row }) => {
+      tiles.push({ col, row, bmp: await fetchTile(chosen.res, col, row, t) });
+    });
 
-    let canvas: HTMLCanvasElement | OffscreenCanvas;
-    if (typeof OffscreenCanvas !== 'undefined') {
-      canvas = new OffscreenCanvas(chosen.width, chosen.height);
-    } else {
-      canvas = document.createElement('canvas');
-      canvas.width = chosen.width;
-      canvas.height = chosen.height;
-    }
-    const ctx = canvas.getContext('2d') as
-      | CanvasRenderingContext2D
-      | OffscreenCanvasRenderingContext2D
-      | null;
-    if (!ctx) throw new Error('[napari-js] slice stitch: 2D context unavailable');
+    const { canvas, ctx } = create2dCanvas(chosen.width, chosen.height, 'slice stitch');
     for (const { col, row, bmp } of tiles) {
       ctx.drawImage(bmp, col * t, row * t);
       bmp.close?.();
@@ -982,19 +1027,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         `[napari-js] stitched level ${chosen.width}×${chosen.height} exceeds the ` +
           `${MAX_TEXTURE_DIM}px texture limit; downscaling to ${outW}×${outH}.`,
       );
-      let out: HTMLCanvasElement | OffscreenCanvas;
-      if (typeof OffscreenCanvas !== 'undefined') {
-        out = new OffscreenCanvas(outW, outH);
-      } else {
-        out = document.createElement('canvas');
-        out.width = outW;
-        out.height = outH;
-      }
-      const octx = out.getContext('2d') as
-        | CanvasRenderingContext2D
-        | OffscreenCanvasRenderingContext2D
-        | null;
-      if (!octx) throw new Error('[napari-js] slice downscale: 2D context unavailable');
+      const { canvas: out, ctx: octx } = create2dCanvas(outW, outH, 'slice downscale');
       octx.drawImage(canvas as unknown as CanvasImageSource, 0, 0, outW, outH);
       return createImageBitmap(out as unknown as ImageBitmapSource);
     }
@@ -1146,19 +1179,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const scale = maxSide ? Math.min(1, maxSide / Math.max(bmp.width, bmp.height, 1)) : 1;
     const w = Math.max(1, Math.round(bmp.width * scale));
     const h = Math.max(1, Math.round(bmp.height * scale));
-    let canvas: HTMLCanvasElement | OffscreenCanvas;
-    if (typeof OffscreenCanvas !== 'undefined') {
-      canvas = new OffscreenCanvas(w, h);
-    } else {
-      canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-    }
-    const ctx = canvas.getContext('2d') as
-      | CanvasRenderingContext2D
-      | OffscreenCanvasRenderingContext2D
-      | null;
-    if (!ctx) throw new Error('[napari-js] channel readback: 2D context unavailable');
+    const { ctx } = create2dCanvas(w, h, 'channel readback');
     // Scale the WHOLE bitmap into the (possibly smaller) target canvas — drawing at natural size
     // would crop to the top-left w×h corner when downscaling a large slice (maxSide < bmp size).
     ctx.drawImage(bmp, 0, 0, w, h);
@@ -1239,38 +1260,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const interpolation: 'linear' | 'nearest' = this.imageSmoothing ? 'linear' : 'nearest';
     this.channelView = new MultiChannelImageView(v);
     if (mode === 'multichannel') {
-      const views: ChannelView[] = planes.map((d, c) => {
-        const st = states.find((s) => s.index === c);
-        const color = st?.color ?? desc?.channelInfo?.[c]?.color ?? tintFor(c);
-        return {
-          source: { kind: 'typed', width: d.width, height: d.height, channels: 1, dtype: 'uint8', data: d.data },
-          tint: color,
-          name: st?.name ?? `ch${c}`,
-          contrastLimits: [st?.min ?? 0, st?.max ?? 255],
-          gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
-          visible: st?.visible ?? true,
-          invert: this.invertEnabled,
-          scale,
-        };
-      });
+      const views = planes.map((d, c) => this.tintedChannelView(c, states, desc, typedPlane(d), scale));
       this.channelView.render('multichannel', views, { interpolation });
     } else if (mode === 'grayscale') {
-      const d = planes[0];
-      const st = states[0];
-      this.channelView.render(
-        'grayscale',
-        [
-          {
-            source: { kind: 'typed', width: d.width, height: d.height, channels: 1, dtype: 'uint8', data: d.data },
-            colormap: this.grayscaleColormap(),
-            contrastLimits: [st?.min ?? 0, st?.max ?? 255],
-            gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
-            invert: this.invertEnabled,
-            scale,
-          },
-        ],
-        { interpolation },
-      );
+      const view = this.grayscaleChannelView(states[0], typedPlane(planes[0]), scale);
+      this.channelView.render('grayscale', [view], { interpolation });
     } else {
       this.channelView.render('rgb', [{ source: bitmap as ImageBitmap, scale }], { interpolation });
     }
@@ -1297,37 +1291,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
 
     if (multichannel) {
       this.imageMode = 'multichannel';
-      const views: ChannelView[] = [];
-      for (let c = 0; c < channelCount; c++) {
-        const st = states.find((s) => s.index === c);
-        const color = st?.color ?? desc.channelInfo?.[c]?.color ?? tintFor(c);
-        views.push({
-          source: this.buildTiledSource(desc, c, 1, scene),
-          tint: color,
-          name: st?.name ?? `ch${c}`,
-          contrastLimits: [st?.min ?? 0, st?.max ?? 255],
-          gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
-          visible: st?.visible ?? true,
-          invert: this.invertEnabled,
-        });
-      }
+      const views = Array.from({ length: channelCount }, (_, c) =>
+        this.tintedChannelView(c, states, desc, this.buildTiledSource(desc, c, 1, scene)));
       this.channelView.render('multichannel', views, { interpolation });
     } else if (channelCount === 1) {
       this.imageMode = 'grayscale';
-      const st = states[0];
-      this.channelView.render(
-        'grayscale',
-        [
-          {
-            source: this.buildTiledSource(desc, undefined, 1, scene),
-            colormap: this.grayscaleColormap(),
-            contrastLimits: [st?.min ?? 0, st?.max ?? 255],
-            gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
-            invert: this.invertEnabled,
-          },
-        ],
-        { interpolation },
-      );
+      const view = this.grayscaleChannelView(states[0], this.buildTiledSource(desc, undefined, 1, scene));
+      this.channelView.render('grayscale', [view], { interpolation });
     } else {
       this.imageMode = 'rgb';
       this.channelView.render('rgb', [{ source: this.buildTiledSource(desc, undefined, 4, scene) }], {
@@ -1339,6 +1309,44 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // Await on the initial render so getHistogram/autoContrast have data immediately; slice changes
     // refresh fire-and-forget (the histogram pane retries).
     await this.refreshHistogramSamples(z, desc);
+  }
+
+  /** Channel `c`'s layer in the additive multichannel composite: tinted by its display colour
+   *  (store, else descriptor, else the Fiji palette), with its window, gamma and visibility. */
+  private tintedChannelView(
+    c: number,
+    states: IChannelState[],
+    desc: TileDescriptor | null,
+    source: ChannelView['source'],
+    scale?: [number, number],
+  ): ChannelView {
+    const st = states.find((s) => s.index === c);
+    return {
+      source,
+      tint: st?.color ?? desc?.channelInfo?.[c]?.color ?? tintFor(c),
+      name: st?.name ?? `ch${c}`,
+      contrastLimits: [st?.min ?? 0, st?.max ?? 255],
+      gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
+      visible: st?.visible ?? true,
+      invert: this.invertEnabled,
+      ...(scale ? { scale } : {}),
+    };
+  }
+
+  /** The single grayscale layer: the selected colormap, with the channel's window and gamma. */
+  private grayscaleChannelView(
+    st: IChannelState | undefined,
+    source: ChannelView['source'],
+    scale?: [number, number],
+  ): ChannelView {
+    return {
+      source,
+      colormap: this.grayscaleColormap(),
+      contrastLimits: [st?.min ?? 0, st?.max ?? 255],
+      gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
+      invert: this.invertEnabled,
+      ...(scale ? { scale } : {}),
+    };
   }
 
   /** Build a pyramidal TiledSource backed by the server `/tile` endpoint. `channel` selects a band
@@ -1566,7 +1574,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private installScaleBar(): void {
     this.scaleBar?.destroy();
     this.scaleBar = null;
-    const mppX = this.currentDescriptor()?.mppX || this.loaded?.imageInfo.imageMeta?.[0]?.mppX || 0;
+    const mppX = this.mppX();
     if (this.viewer && this.host && mppX > 0) {
       this.scaleBar = new NapariScaleBar(this.host, this.viewer.camera, mppX);
     }
@@ -1688,8 +1696,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // Serverless multichannel (tiled:false + channelUrls): no tile descriptor, so
     // derive the channel count from imageMeta and assemble each band from its own
     // channelUrls[z][c] plane (fetchSlice does the per-channel routing).
-    const simpleMc = this.simpleStack.isSimple(info) && !!info?.channelUrls?.length
-      && (info?.imageMeta?.[0]?.channelCount ?? 1) > 1;
+    const simpleMc = isServerlessMultichannel(this.simpleStack.isSimple(info), info);
     const channelCount = simpleMc ? info!.imageMeta![0].channelCount : (desc?.channels ?? 1);
     const multichannel = simpleMc || (!!desc?.multichannel && channelCount > 1);
     const res = volumeResolutionFor(this.resolutionScale);
@@ -1778,7 +1785,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const imageDesc = this.currentDescriptor();
     const fullW = imageDesc?.width ?? meta?.x ?? dims.width;
     const fullH = imageDesc?.height ?? meta?.y ?? dims.height;
-    const fullD = meta?.z || this.loaded?.imageInfo.urls?.length || dims.depth;
+    const fullD = stackDepth(this.loaded?.imageInfo) || dims.depth;
     let world: { width: number; height: number; depth: number };
     if (mppXYZ) {
       world = {
@@ -1901,7 +1908,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       px: [
         desc?.width ?? meta?.x ?? dims?.width ?? 1,
         desc?.height ?? meta?.y ?? dims?.height ?? 1,
-        meta?.z || this.loaded?.imageInfo.urls?.length || dims?.depth || 1,
+        stackDepth(this.loaded?.imageInfo) || dims?.depth || 1,
       ],
       // A descriptor that reports only mppX is square-pixel by convention, which is
       // what the 2D scale bar already assumes of it.
@@ -1921,7 +1928,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     channel?: number,
   ): Promise<{ data: Uint8Array; width: number; height: number; depth: number } | null> {
     const loading = this.loading.signal; // bail on a Cancel / new plot while we fetch
-    const fullDepth = info?.imageMeta?.[0]?.z || info?.urls?.length || 1;
+    const fullDepth = stackDepth(info) || 1;
     if (fullDepth < 1) {
       console.warn('[napari-js] no slices to assemble a volume');
       return null;
@@ -1946,19 +1953,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       const height = Math.max(1, Math.round(first.height * scale));
       const data = new Uint8Array(width * height * depth);
 
-      let canvas: HTMLCanvasElement | OffscreenCanvas;
-      if (typeof OffscreenCanvas !== 'undefined') {
-        canvas = new OffscreenCanvas(width, height);
-      } else {
-        canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-      }
-      const ctx = canvas.getContext('2d') as
-        | CanvasRenderingContext2D
-        | OffscreenCanvasRenderingContext2D
-        | null;
-      if (!ctx) throw new Error('napari-js volume assembly: 2D context unavailable');
+      const { ctx } = create2dCanvas(width, height, 'volume assembly');
 
       // Read one fetched slice bitmap into the volume plane `z` (luminance). Synchronous between
       // awaits, so the shared 2D context is safe to reuse across the concurrent fetch workers.
@@ -1974,19 +1969,15 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
 
       readSlice(0, first);
 
-      // Remaining planes via a small pool of workers draining a shared queue. Each plane `p`
-      // maps to source slice `zIndices[p]` (subsampled for low-res).
-      const pending: number[] = [];
-      for (let p = 1; p < depth; p++) pending.push(p);
-      const worker = async (): Promise<void> => {
-        for (;;) {
-          const p = pending.shift();
-          if (p === undefined || loading.aborted) return;
-          readSlice(p, await this.fetchSlice(zIndices[p], channel, budget));
-        }
-      };
-      const poolSize = Math.min(VOLUME_FETCH_CONCURRENCY, Math.max(1, depth - 1));
-      await Promise.all(Array.from({ length: poolSize }, () => worker()));
+      // Remaining planes through a small fetch pool. Each plane `p` maps to source slice
+      // `zIndices[p]` (subsampled for low-res).
+      const planes = Array.from({ length: depth - 1 }, (_, i) => i + 1);
+      await mapPool(
+        planes,
+        VOLUME_FETCH_CONCURRENCY,
+        async (p) => readSlice(p, await this.fetchSlice(zIndices[p], channel, budget)),
+        () => loading.aborted,
+      );
 
       if (loading.aborted) return null; // cancelled → don't render a partial volume
       return { data, width, height, depth };
@@ -2102,14 +2093,20 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   /** Clusters drawn as density volumes at once. Past a handful, additive translucent
    *  clouds stop being separable by eye — and each one is a full rasterisation. */
   private static readonly DENSITY_MAX_CLUSTERS = 6;
-  /** Colour for observations when nothing is selected to colour by: visible, neutral, and
-   *  obviously not encoding anything. */
   /** How much larger a selected marker is drawn, so a small selection is findable inside a
    *  3.7M-point cloud rather than merely brighter. */
   private static readonly SPATIAL_SELECTED_SIZE_SCALE = 1.6;
 
+  /** Colour for observations when nothing is selected to colour by: visible, neutral, and
+   *  obviously not encoding anything. */
   private static readonly SPATIAL_NEUTRAL_COLOR: [number, number, number, number] =
     [0.35, 0.72, 0.95, 0.9];
+  /** {@link SPATIAL_NEUTRAL_COLOR} as a hex colour (alpha dropped), for the encoders and the
+   *  density-volume tint. */
+  private static readonly SPATIAL_NEUTRAL_HEX = `#${NapariVisualizerService.SPATIAL_NEUTRAL_COLOR
+    .slice(0, 3)
+    .map((c) => Math.round(c * 255).toString(16).padStart(2, '0'))
+    .join('')}`;
 
   /**
    * Mount the SPATIAL_OMICS view: the tissue image with one marker per observation, coloured by
@@ -3589,9 +3586,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const meta = column ? findColumnMeta(dataset, column) : undefined;
     if (!port || !column || !meta || meta.kind !== 'categorical') {
       const indices = inSelection ? maskToIndices(inSelection) : undefined;
-      const [r, g, b] = NapariVisualizerService.SPATIAL_NEUTRAL_COLOR;
-      const hex = `#${[r, g, b].map((c) => Math.round(c * 255).toString(16).padStart(2, '0')).join('')}`;
-      return [{ name: inSelection ? 'selected cells' : 'all cells', color: hex, indices }];
+      return [{
+        name: inSelection ? 'selected cells' : 'all cells',
+        color: NapariVisualizerService.SPATIAL_NEUTRAL_HEX,
+        indices,
+      }];
     }
 
     const loaded = await port.getColumn(column);
@@ -3825,7 +3824,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const muted = mutedFromSelection(selection);
 
     if (!port || !colorBy) {
-      const [r, g, b] = NapariVisualizerService.SPATIAL_NEUTRAL_COLOR;
       // Genuinely uniform: one broadcast tuple, so a flat 84k-observation view
       // does not allocate 84k of them.
       if (!muted && view.opacity >= 1) return NapariVisualizerService.SPATIAL_NEUTRAL_COLOR;
@@ -3833,9 +3831,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       // has to be per-point. Returning the constant tuple here is what made the
       // Opacity slider do nothing in the default state, which is the state anyone
       // lands in before picking a colour source.
-      const hex = `#${[r, g, b].map((c) => Math.round(c * 255).toString(16).padStart(2, '0')).join('')}`;
       return toRgbaTuples(encodeCategorical(new Uint16Array(dataset.observations.count), {
-        colors: [hex],
+        colors: [NapariVisualizerService.SPATIAL_NEUTRAL_HEX],
         opacity: view.opacity,
         muted,
       }));
@@ -3964,8 +3961,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const info = this.loaded?.imageInfo;
     // Serverless multichannel (tiled:false + channelUrls) has no descriptor — detect
     // it from imageMeta so the Surface still follows one band.
-    const simpleMc = this.simpleStack.isSimple(info) && !!info?.channelUrls?.length
-      && (info?.imageMeta?.[0]?.channelCount ?? 1) > 1;
+    const simpleMc = isServerlessMultichannel(this.simpleStack.isSimple(info), info);
     const multichannel = simpleMc || (!!desc?.multichannel && (desc?.channels ?? 1) > 1);
     this.surfaceMultichannel = multichannel;
     // A height field is single-scalar → follow the pane-SELECTED channel.
@@ -3991,7 +3987,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const boxH = Math.max(1, b.max[1] - b.min[1]);
     const boxD = Math.max(1, b.max[2] - b.min[2]);
     const desc = this.currentDescriptor();
-    const mppX = desc?.mppX || this.loaded?.imageInfo.imageMeta?.[0]?.mppX || 0;
+    const mppX = this.mppX();
     const voxel = mppX > 0 ? (mppX * (desc?.width ?? this.imageW)) / Math.max(1, this.imageW) : 1;
     this.axesLayer = viewer.addAxes(boxW, boxH, boxD, {
       voxelSize: [voxel, voxel, 1],
@@ -4045,35 +4041,28 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const stale = (): boolean =>
       preload.signal.aborted || loading.aborted || this.viewer !== viewer;
     const info = this.loaded?.imageInfo;
-    const depth = info?.imageMeta?.[0]?.z || info?.urls?.length || 1;
+    const depth = stackDepth(info) || 1;
     const { maxGrid } = surfaceResolutionFor(this.resolutionScale);
     this.surfacePlanes.clear();
     this.stackLoading$.next(true);
     this.stackLoadingProgress$.next(0);
     try {
-      const pending: number[] = [];
-      for (let z = 0; z < depth; z++) pending.push(z);
       let done = 0;
-      const worker = async (): Promise<void> => {
-        for (;;) {
-          const z = pending.shift();
-          if (z === undefined || stale()) return;
-          try {
-            const plane = await this.fetchSurfacePlane(z, maxGrid);
-            // Superseded while in flight: this plane may be the OLD band, and the cache is not
-            // this preload's any more.
-            if (stale()) return;
-            this.surfacePlanes.set(z, plane);
-          } catch (err) {
-            if (stale()) return;
-            console.warn(`[napari-js] surface slice ${z} preload failed`, err);
-          }
-          done++;
-          this.stackLoadingProgress$.next(Math.round((done / depth) * 100));
+      const slices = Array.from({ length: depth }, (_, z) => z);
+      await mapPool(slices, VOLUME_FETCH_CONCURRENCY, async (z) => {
+        try {
+          const plane = await this.fetchSurfacePlane(z, maxGrid);
+          // Superseded while in flight: this plane may be the OLD band, and the cache is not
+          // this preload's any more.
+          if (stale()) return;
+          this.surfacePlanes.set(z, plane);
+        } catch (err) {
+          if (stale()) return;
+          console.warn(`[napari-js] surface slice ${z} preload failed`, err);
         }
-      };
-      const pool = Math.min(VOLUME_FETCH_CONCURRENCY, Math.max(1, depth));
-      await Promise.all(Array.from({ length: pool }, () => worker()));
+        done++;
+        this.stackLoadingProgress$.next(Math.round((done / depth) * 100));
+      }, stale);
     } finally {
       // Only the newest preload ends the progress bar; a superseded one would hide it while
       // its successor is still loading.
