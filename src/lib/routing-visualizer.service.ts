@@ -31,6 +31,7 @@ import { ViewerCapabilities } from './contracts/capabilities.contract';
 import { IRegionOverlay } from './contracts/region-overlay.contract';
 import { IRegionEditorApi } from './contracts/region-editor-api.contract';
 import { IChannelHistogramApi, IChannelState, IHistogram } from './contracts/channel-histogram-api.contract';
+import { autoWindowFromHistogram } from './contracts/intensity';
 import { VisualizerStore } from './store/visualizer-store.service';
 import { NapariVisualizerService } from './implementations/napari-js/napari-visualizer.service';
 import { VIZ_CONFIG, VizConfig } from './contracts/viz-config';
@@ -41,34 +42,6 @@ import { PlotModeViewport } from './contracts/plot-type-contribution.contract';
  *  after a drag round-trip). */
 function isProfileRegion(r: { kind?: string } | null | undefined): boolean {
   return r?.kind === 'profile';
-}
-
-/** Saturation-based auto-window: pick [min,max] so ~`saturation` of pixels clip
- *  at each end of the histogram. A dominant first/last bin (unscanned padding /
- *  clipped background) is dropped so it doesn't skew the range. */
-function autoWindowFromHistogram(h: IHistogram, saturation: number): [number, number] {
-  const counts = h.counts.slice();
-  const n = counts.length;
-  if (n === 0) return [0, 255];
-  if (n > 2 && counts[0] > counts[1]) counts[0] = 0;
-  if (n > 2 && counts[n - 1] > counts[n - 2]) counts[n - 1] = 0;
-  let total = 0;
-  for (const c of counts) total += c;
-  if (total <= 0) return [0, 255];
-  const target = total * Math.max(0, Math.min(0.5, saturation));
-  let acc = 0;
-  let min = h.bins[0];
-  for (let i = 0; i < n; i++) {
-    acc += counts[i];
-    if (acc > target) { min = h.bins[i]; break; }
-  }
-  acc = 0;
-  let max = h.bins[n - 1];
-  for (let i = n - 1; i >= 0; i--) {
-    acc += counts[i];
-    if (acc > target) { max = h.bins[i]; break; }
-  }
-  return [min, max];
 }
 
 /**
@@ -541,7 +514,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     for (const i of indices) {
       const h = this.renderer().getHistogram(i, 256);
       if (!h) continue;
-      const [min, max] = autoWindowFromHistogram(h, saturation);
+      const [min, max] = autoWindowFromHistogram(h, saturation, [0, 255]);
       if (max > min) this.store.setChannelState(i, { min, max });
     }
   }

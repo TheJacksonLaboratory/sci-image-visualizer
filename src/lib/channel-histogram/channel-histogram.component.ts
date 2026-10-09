@@ -8,6 +8,7 @@ import * as Plotly from 'plotly.js-dist-min';
 import {
   CHANNEL_HISTOGRAM_API, IChannelHistogramApi, IChannelState, IHistogram, LUT_COLORS,
 } from '../contracts/channel-histogram-api.contract';
+import { autoWindowFromHistogram } from '../contracts/intensity';
 
 /**
  * Channels & Histogram pane: a non-modal, resizable, draggable dialog for
@@ -262,7 +263,7 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
     // Native path: saturate the true distribution, then map the native window
     // back to the 8-bit store. 8-bit path keeps the existing client auto-window.
     if (this.is16bit && this.hist) {
-      const [nmin, nmax] = this.autoWindow(this.hist, 0.001);
+      const [nmin, nmax] = autoWindowFromHistogram(this.hist, 0.001, [this.sliderMin, this.sliderMax]);
       if (nmax > nmin) {
         this.api.setChannelState(this.selected.index, { min: this.toDisp(nmin), max: this.toDisp(nmax) });
         this.updateMarkers();
@@ -273,28 +274,6 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
   }
   reset(): void {
     if (this.selected) this.api.resetContrast([this.selected.index]);
-  }
-
-  /** Saturation-based auto-window over a (native or 8-bit) histogram: pick
-   *  [min,max] so ~`saturation` of pixels clip at each end, dropping a dominant
-   *  first/last bin (background/padding). Returns native bin values. */
-  private autoWindow(h: IHistogram, saturation: number): [number, number] {
-    const counts = h.counts.slice();
-    const n = counts.length;
-    if (n === 0) return [this.sliderMin, this.sliderMax];
-    if (n > 2 && counts[0] > counts[1]) counts[0] = 0;
-    if (n > 2 && counts[n - 1] > counts[n - 2]) counts[n - 1] = 0;
-    let total = 0;
-    for (const c of counts) total += c;
-    if (total <= 0) return [this.sliderMin, this.sliderMax];
-    const target = total * Math.max(0, Math.min(0.5, saturation));
-    let acc = 0;
-    let min = h.bins[0];
-    for (let i = 0; i < n; i++) { acc += counts[i]; if (acc > target) { min = h.bins[i]; break; } }
-    acc = 0;
-    let max = h.bins[n - 1];
-    for (let i = n - 1; i >= 0; i--) { acc += counts[i]; if (acc > target) { max = h.bins[i]; break; } }
-    return [min, max];
   }
 
   // ── histogram rendering ──────────────────────────────────────────────
