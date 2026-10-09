@@ -913,6 +913,13 @@ export class PlotlyService implements IVisualizer {
     this.cachedImageFrames = frames;
     if (ratios) this.cachedImageRatios = ratios;
     this.cachedFrameOrigin = origin;
+    // The wand/brush bounds-check against these, so they must describe THESE
+    // frames (e.g. a zoom crop), not the image cached before.
+    const frame = frames?.[0];
+    if (frame?.length) {
+      this.cachedImageHeight = frame.length;
+      this.cachedImageWidth = frame[0]?.length ?? 0;
+    }
   }
 
   /**
@@ -1326,6 +1333,9 @@ export class PlotlyService implements IVisualizer {
       height: this.cachedImageHeight,
       ratios: this.cachedImageRatios,
       isGrayscale: this.cachedIsGrayscale,
+      // A high-def zoom caches the crop, whose pixel (0,0) is not image (0,0).
+      originX: this.cachedFrameOrigin[0],
+      originY: this.cachedFrameOrigin[1],
     };
   }
 
