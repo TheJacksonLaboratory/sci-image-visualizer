@@ -472,6 +472,71 @@ describe('NapariRegionOverlay', () => {
     expect(p.xpoints[0]).toBe(3);
   });
 
+  /**
+   * A drag can end without a pointerup: the browser cancels it, capture is lost, or the
+   * overlay is torn down (a backend switch). Each must close the store batch and drop the
+   * gesture, or later edits are never emitted and the region follows a bare hover
+   * (review NAPARI-BOUNDARY-7).
+   */
+  describe('a drag that ends without a pointerup', () => {
+    function startBodyDrag(): { id: number; emits: () => number } {
+      const id = store.addRegion(rectRegionAt(0, 0, 100, 100));
+      overlay.setMode('move');
+      let n = 0;
+      store.getRegionUpdateEvent().subscribe(() => n++);
+      ptr(overlay, 'pointerdown', 50, 50);
+      ptr(overlay, 'pointermove', 53, 54);
+      return { id, emits: () => n };
+    }
+    const xOf = (id: number) => (store.getRegions().find((r) => r.id === id)!.bounds as Rectangle).x;
+
+    for (const type of ['pointercancel', 'lostpointercapture'] as const) {
+      it(`${type} closes the batch and stops the drag`, () => {
+        const { id, emits } = startBodyDrag();
+        expect(emits()).toBe(0); // batched
+        svgOf(overlay).dispatchEvent(new MouseEvent(type));
+        expect(emits()).toBe(1); // the batch was flushed
+        ptr(overlay, 'pointermove', 80, 80); // a plain hover afterwards
+        expect(xOf(id)).toBe(3); // did not follow the cursor
+        store.addRegion(rectRegion()); // later edits emit at once again
+        expect(emits()).toBe(2);
+      });
+    }
+
+    it('setMode mid-drag closes the batch', () => {
+      const { emits } = startBodyDrag();
+      overlay.setMode('select');
+      expect(emits()).toBe(1);
+    });
+
+    it('destroy mid-drag closes the batch', () => {
+      const { emits } = startBodyDrag();
+      overlay.destroy();
+      expect(emits()).toBe(1);
+      overlay = new NapariRegionOverlay(host, viewer as any, store); // for afterEach
+    });
+
+    it('pointercancel drops a rectangle being drawn', () => {
+      overlay.setMode('drawrect');
+      ptr(overlay, 'pointerdown', 2, 3);
+      ptr(overlay, 'pointermove', 12, 13);
+      svgOf(overlay).dispatchEvent(new MouseEvent('pointercancel'));
+      ptr(overlay, 'pointerup', 12, 13);
+      expect(store.getRegions()).toHaveLength(0);
+      expect(svgOf(overlay).querySelector('rect')).toBeNull();
+    });
+
+    it('keeps a click-placed polygon in progress across a cancelled pointer', () => {
+      overlay.setMode('drawpolygon');
+      ptr(overlay, 'pointerdown', 0, 0);
+      ptr(overlay, 'pointerdown', 20, 0);
+      svgOf(overlay).dispatchEvent(new MouseEvent('pointercancel'));
+      ptr(overlay, 'pointerdown', 10, 20);
+      ptr(overlay, 'pointerdown', 1, 1); // close
+      expect((store.getRegions()[0].bounds as Polygon).xpoints).toEqual([0, 20, 10]);
+    });
+  });
+
   // ── vertex add / delete ────────────────────────────────────────────────
 
   it('addpoint: clicking an edge inserts a vertex after that segment', () => {

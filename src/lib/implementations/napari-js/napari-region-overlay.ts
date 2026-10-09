@@ -122,6 +122,8 @@ export class NapariRegionOverlay implements IRegionOverlay {
     this.svg.addEventListener('pointerdown', this.onPointerDown);
     this.svg.addEventListener('pointermove', this.onPointerMove);
     this.svg.addEventListener('pointerup', this.onPointerUp);
+    this.svg.addEventListener('pointercancel', this.onPointerCancel);
+    this.svg.addEventListener('lostpointercapture', this.onPointerCancel);
     this.svg.addEventListener('dblclick', this.onDblClick);
 
     this.subs.add(this.store.getRegionUpdateEvent().subscribe(() => this.redraw()));
@@ -149,12 +151,10 @@ export class NapariRegionOverlay implements IRegionOverlay {
   }
 
   setMode(mode: RegionToolMode): void {
+    this.endGesture();
     this.mode = mode;
     this.draftRect = null;
     this.draftPath = null;
-    this.marquee = null;
-    this.clearMarqueeEl();
-    this.drawing = false;
     // The overlay owns pointer/navigation gating: while a tool is active it captures the pointer
     // and the napari camera controls are disabled; 'none' hands the pointer back for pan/zoom.
     const active = mode !== 'none';
@@ -189,9 +189,13 @@ export class NapariRegionOverlay implements IRegionOverlay {
     this.svg.removeEventListener('pointerdown', this.onPointerDown);
     this.svg.removeEventListener('pointermove', this.onPointerMove);
     this.svg.removeEventListener('pointerup', this.onPointerUp);
+    this.svg.removeEventListener('pointercancel', this.onPointerCancel);
+    this.svg.removeEventListener('lostpointercapture', this.onPointerCancel);
     this.svg.removeEventListener('dblclick', this.onDblClick);
     this.disconnectCamera();
     this.subs.unsubscribe();
+    // A drag torn down mid-gesture (a backend switch) must still close its store batch.
+    this.endGesture();
     if (this.svg.parentNode) this.svg.parentNode.removeChild(this.svg);
   }
 
@@ -327,6 +331,35 @@ export class NapariRegionOverlay implements IRegionOverlay {
     }
     this.redraw();
   };
+
+  /**
+   * The pointer gesture ended without a pointerup (the browser cancelled it, or capture was
+   * lost): end it without committing. Also fires after every normal release, when nothing
+   * is live any more.
+   */
+  private readonly onPointerCancel = (): void => {
+    if (!this.edit && !this.drawing && !this.marquee) return;
+    this.endGesture();
+    this.redraw();
+  };
+
+  /**
+   * End whatever pointer gesture is live without committing it: close the store batch a drag
+   * opened (so later edits are emitted again) and forget the drag (so a bare hover no longer
+   * moves the region), and drop the marquee and a rectangle/freehand draft. A click-placed
+   * polygon is not a pointer gesture and survives.
+   */
+  private endGesture(): void {
+    if (this.edit) this.store.endBatch();
+    this.edit = null;
+    if (this.drawing) {
+      this.draftRect = null;
+      this.draftPath = null;
+    }
+    this.drawing = false;
+    this.marquee = null;
+    this.clearMarqueeEl();
+  }
 
   /** Click-to-place polygon: add a vertex, or close when clicking near the first one. */
   private handlePolygonClick(ix: number, iy: number, clientX: number, clientY: number): void {
