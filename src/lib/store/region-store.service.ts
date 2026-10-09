@@ -9,6 +9,7 @@ import { defaultHandleOffsets } from '../models/bezier';
 import { IRegionStore } from '../contracts/visualizer.contract';
 import { IRegionEditApi } from '../contracts/region-store.contract';
 import { findPreset, fallbackColorFor } from './class-color.util';
+import { regionPolygons } from '../models/polygon-factory';
 
 /**
  * Backend-neutral region store — the single source of truth for region state.
@@ -304,17 +305,13 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
 
   /**
    * Closed polygons projected for image-processing consumers (segmentation,
-   * trace builders). Open polylines are annotation-only and excluded. Reuses
-   * the neutral PlotUtilities projection so output matches the previous path.
+   * crop requests, trace builders), straight from each region's bounds: a
+   * rectangle's corners, a polygon with its holes (a bézier as its curve), one
+   * polygon per part of a multi-polygon. Open polylines are annotation-only and
+   * excluded. Coordinates are rounded to whole pixels.
    */
-  getRegionPolygons(): any[] {
-    const ret: any[] = [];
-    for (const region of this.regions) {
-      const poly: any = this.plotUtilities.getPolygon({ ...region.getShape(this.showShapeLabel) });
-      if (poly == null || poly.closed === false) continue;
-      ret.push(poly);
-    }
-    return ret;
+  getRegionPolygons(): Polygon[] {
+    return this.regions.flatMap((region) => regionPolygons(region));
   }
 
   getRegionUpdateEvent(): Observable<any[]> {

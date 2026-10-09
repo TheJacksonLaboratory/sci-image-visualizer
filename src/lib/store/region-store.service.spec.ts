@@ -734,6 +734,44 @@ describe('RegionStore', () => {
       expect(polys.length).toBe(1);
       expect(polys[0].closed).toBe(true);
     });
+
+    it('projects a rectangle to its four corners (RT-15)', () => {
+      store.addRegion(rectRegion(10, 20, 30, 40));
+      const [p] = store.getRegionPolygons();
+      expect(p.xpoints).toEqual([10, 40, 40, 10]);
+      expect(p.ypoints).toEqual([60, 60, 20, 20]);
+    });
+
+    it('returns one polygon per part of a multi-part region (RT-15)', () => {
+      const r = new Region();
+      const mp = new MultiPolygon();
+      mp.polygons = [
+        (polyRegion([0, 10, 5], [0, 0, 10]).bounds as Polygon),
+        (polyRegion([50, 60, 55], [0, 0, 10]).bounds as Polygon),
+      ];
+      r.bounds = mp;
+      store.addRegion(r);
+      const polys = store.getRegionPolygons();
+      expect(polys.length).toBe(2);
+      expect(polys[1].xpoints).toEqual([50, 60, 55]);
+    });
+
+    it('keeps a donut\'s holes (RT-15)', () => {
+      const r = polyRegion([0, 40, 40, 0], [0, 0, 40, 40]);
+      (r.bounds as Polygon).holes = [[[10, 10], [20, 10], [20, 20], [10, 20]]];
+      store.addRegion(r);
+      const [p] = store.getRegionPolygons();
+      expect(p.holes).toEqual([[[10, 10], [20, 10], [20, 20], [10, 20]]]);
+    });
+
+    it('sends a bézier region\'s curve, not its anchors (RT-15)', () => {
+      const r = polyRegion([0, 40, 40, 0], [0, 0, 40, 40]);
+      store.addRegion(r);
+      store.setBezier(store.getRegions()[0].id, true);
+      const [p] = store.getRegionPolygons();
+      expect(p.xpoints.length).toBeGreaterThan(4);
+      expect(p.bezier).toBe(false); // a plain polygon: the flattened curve
+    });
   });
 
   describe('classification colours', () => {
