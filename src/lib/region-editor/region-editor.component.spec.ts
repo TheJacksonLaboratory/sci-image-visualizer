@@ -31,6 +31,27 @@ class FakeMaskWorker {
   emit(data: any) { this.onmessage?.({ data }); }
 }
 
+/** Seed a 512×512 rectangle row and commit it, as the toolbar's drawing would. */
+function addRect(component: RegionEditorComponent): void {
+  const region = new Region();
+  region.bounds = Object.assign(new Rectangle(), { width: 512, height: 512 });
+  region.label = 'Region';
+  component.regions = [...component.regions, region];
+  (component as any).setRegionsFromEditor();
+}
+
+/** Seed a triangle row and commit it. */
+function addPoly(component: RegionEditorComponent): void {
+  const region = new Region();
+  const p = new Polygon();
+  p.xpoints = [0, 10, 5]; p.ypoints = [0, 0, 10];
+  p.coordinates = [[0, 0], [10, 0], [5, 10]]; p.npoints = 3;
+  region.bounds = p;
+  region.label = 'Region';
+  component.regions = [...component.regions, region];
+  (component as any).setRegionsFromEditor();
+}
+
 describe('RegionEditorComponent', () => {
   let component: RegionEditorComponent;
   let fixture: ComponentFixture<RegionEditorComponent>;
@@ -93,27 +114,9 @@ describe('RegionEditorComponent', () => {
     expect(component.regions.length).toBe(0);
   });
 
-  it('should add a rectangle region', () => {
-    component.addRectangle();
-    expect(component.regions.length).toBe(1);
-    expect(component.regions[0].bounds).toBeInstanceOf(Rectangle);
-    const rect = component.regions[0].bounds as Rectangle;
-    expect(rect.width).toBe(512);
-    expect(rect.height).toBe(512);
-  });
-
-  it('should add a polygon region with 3 default points', () => {
-    component.addPolygon();
-    expect(component.regions.length).toBe(1);
-    expect(component.regions[0].bounds).toBeInstanceOf(Polygon);
-    const poly = component.regions[0].bounds as Polygon;
-    expect(poly.npoints).toBe(3);
-    expect(poly.coordinates.length).toBe(3);
-  });
-
   it('should delete a region by index', () => {
-    component.addRectangle();
-    component.addRectangle();
+    addRect(component);
+    addRect(component);
     const secondBounds = component.regions[1].bounds;
     expect(component.regions.length).toBe(2);
     component.deleteRegion(0);
@@ -123,8 +126,8 @@ describe('RegionEditorComponent', () => {
   });
 
   it('should delete selected regions', () => {
-    component.addRectangle();
-    component.addPolygon();
+    addRect(component);
+    addPoly(component);
     component.selectedRegions = [component.regions[0]];
     component.deleteSelectedRegions();
     expect(component.regions.length).toBe(1);
@@ -133,26 +136,14 @@ describe('RegionEditorComponent', () => {
   });
 
   it('should not delete when no regions are selected', () => {
-    component.addRectangle();
+    addRect(component);
     component.selectedRegions = [];
     component.deleteSelectedRegions();
     expect(component.regions.length).toBe(1);
   });
 
-  it('should identify rectangle regions', () => {
-    const region = new Region();
-    region.bounds = new Rectangle();
-    expect(component.isRectangle(region)).toBe(true);
-  });
-
-  it('should identify polygon regions as not rectangle', () => {
-    const region = new Region();
-    region.bounds = new Polygon();
-    expect(component.isRectangle(region)).toBe(false);
-  });
-
   it('should round rectangle lengths to multiples of 512', () => {
-    component.addRectangle();
+    addRect(component);
     const rect = component.regions[0].bounds as Rectangle;
     rect.width = 1000;
     rect.height = 600;
@@ -164,7 +155,7 @@ describe('RegionEditorComponent', () => {
   });
 
   it('should round small rectangle lengths to 0', () => {
-    component.addRectangle();
+    addRect(component);
     const rect = component.regions[0].bounds as Rectangle;
     rect.width = 100;
     rect.height = 200;
@@ -174,39 +165,10 @@ describe('RegionEditorComponent', () => {
     expect(rounded.height).toBe(0);
   });
 
-  it('should change shape color for regions matching selected label', () => {
-    component.addRectangle();
-    component.regions[0].label = 'tumor';
-    component.regions[0].color = '#FF0000';
-    component.labelColors.set('tumor', '#FF0000');
-    component.selectedLabelColor = 'tumor';
-
-    component.changeShapeColor({ value: '#00FF00' });
-    expect(component.shapeColor).toBe('#00FF00');
-    expect(component.regions[0].color).toBe('#00FF00');
-    expect(component.labelColors.get('tumor')).toBe('#00FF00');
-  });
-
-  it('should not change color of regions with different label', () => {
-    component.addRectangle();
-    component.addRectangle();
-    component.regions[0].label = 'tumor';
-    component.regions[0].color = '#FF0000';
-    component.regions[1].label = 'normal';
-    component.regions[1].color = '#0000FF';
-    component.labelColors.set('tumor', '#FF0000');
-    component.labelColors.set('normal', '#0000FF');
-    component.selectedLabelColor = 'tumor';
-
-    component.changeShapeColor({ value: '#00FF00' });
-    expect(component.regions[0].color).toBe('#00FF00');
-    expect(component.regions[1].color).toBe('#0000FF');
-  });
-
   it('live-edit: every region change immediately calls plotService.setRegions with isRegionSaveOn=true', () => {
     const setRegionsSpy = mockVisualizer.setAnnotationRegions as jest.Mock;
     setRegionsSpy.mockClear();
-    component.addRectangle();
+    addRect(component);
     expect(setRegionsSpy).toHaveBeenCalled();
     const lastCall = setRegionsSpy.mock.calls[setRegionsSpy.mock.calls.length - 1];
     // Signature: setRegions(regions, showLabel, isRegionSaveOn, fillColor, append?)
@@ -214,9 +176,9 @@ describe('RegionEditorComponent', () => {
   });
 
   it('table → plot: onSelectionChanged pushes the selected regions to the contract', () => {
-    component.addRectangle();
-    component.addRectangle();
-    component.addRectangle();
+    addRect(component);
+    addRect(component);
+    addRect(component);
     const spy = mockVisualizer.setSelectedRegions as jest.Mock;
     spy.mockClear();
     component.selectedRegions = [component.regions[0], component.regions[2]];
@@ -225,7 +187,7 @@ describe('RegionEditorComponent', () => {
   });
 
   it('table → plot: clearing the selection emits an empty index array', () => {
-    component.addRectangle();
+    addRect(component);
     const spy = mockVisualizer.setSelectedRegions as jest.Mock;
     spy.mockClear();
     component.selectedRegions = [];
@@ -234,9 +196,9 @@ describe('RegionEditorComponent', () => {
   });
 
   it('deleteSelectedRegions removes every selected region and clears the plot selection', () => {
-    component.addRectangle();
-    component.addRectangle();
-    component.addRectangle();
+    addRect(component);
+    addRect(component);
+    addRect(component);
     component.selectedRegions = [component.regions[0], component.regions[2]];
     const setSelSpy = mockVisualizer.setSelectedRegions as jest.Mock;
     setSelSpy.mockClear();
@@ -248,9 +210,9 @@ describe('RegionEditorComponent', () => {
   });
 
   it('deleteRegion drops the deleted region from selectedRegions and re-syncs', () => {
-    component.addRectangle();
-    component.addRectangle();
-    component.addRectangle();
+    addRect(component);
+    addRect(component);
+    addRect(component);
     component.selectedRegions = [component.regions[0], component.regions[2]];
     const setSelSpy = mockVisualizer.setSelectedRegions as jest.Mock;
     setSelSpy.mockClear();
@@ -264,7 +226,7 @@ describe('RegionEditorComponent', () => {
   });
 
   it('should update label colors when label is edited', () => {
-    component.addRectangle();
+    addRect(component);
     component.regions[0].label = 'tissue';
     component.labelRegionUpdate(component.regions[0]);
     expect(component.labelColors.has('tissue')).toBe(true);
@@ -283,25 +245,22 @@ describe('RegionEditorComponent', () => {
     expect(component.saveAsFilename).toBe('slide.ome.geojson');
   });
 
+  it('pagedRegions hands the table a stable array until regions or the page change (RT-20)', () => {
+    for (let i = 0; i < 12; i++) addRect(component);
+    const page = component.pagedRegions;
+    expect(page).toHaveLength(10);
+    expect(component.pagedRegions).toBe(page); // no new array per change-detection pass
+    component.onPageChange({ first: 10, rows: 10 });
+    expect(component.pagedRegions).toHaveLength(2);
+    expect(component.pagedRegions).not.toBe(page);
+  });
+
   it('should show help dialog', () => {
     expect(component.displayHelpDialog).toBe(false);
     component.showHelp();
     expect(component.displayHelpDialog).toBe(true);
   });
 
-  it('should stop arrow key propagation', () => {
-    const event = new KeyboardEvent('keydown', { key: 'ArrowUp' });
-    const spy = jest.spyOn(event, 'stopPropagation');
-    component.disableArrowKeys(event);
-    expect(spy).toHaveBeenCalled();
-  });
-
-  it('should not stop non-arrow key propagation', () => {
-    const event = new KeyboardEvent('keydown', { key: 'Enter' });
-    const spy = jest.spyOn(event, 'stopPropagation');
-    component.disableArrowKeys(event);
-    expect(spy).not.toHaveBeenCalled();
-  });
 });
 
 describe('RegionEditorComponent with shapes', () => {
@@ -610,7 +569,7 @@ describe('RegionEditorComponent persist / save-as', () => {
     component = fixture.componentInstance;
     component.ngOnInit();
 
-    component.addRectangle();
+    addRect(component);
   });
 
   // --- persistRegions (opens the save-as dialog) ---
@@ -1061,7 +1020,7 @@ describe('RegionEditorComponent export', () => {
     component = fixture.componentInstance;
     component.ngOnInit();
 
-    component.addRectangle();
+    addRect(component);
   });
 
   // --- exportRois (opens the export dialog) ---
@@ -1207,42 +1166,6 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
     r.bounds = p; return r;
   }
 
-  it('xRectUpdate / yRectUpdate set the rectangle origin and commit', () => {
-    const r = rect();
-    (component as any).regions = [r];
-    component.xRectUpdate(r, { value: 99 });
-    component.yRectUpdate(component.regions[0], { value: 88 });
-    expect((component.regions[0].bounds as Rectangle).x).toBe(99);
-    expect((component.regions[0].bounds as Rectangle).y).toBe(88);
-    expect((r.bounds as Rectangle).x).toBe(10); // the original instance is never mutated (RT-1)
-    expect(api.setAnnotationRegions).toHaveBeenCalled();
-  });
-
-  it('widthRectUpdate recenters x by half the width delta', () => {
-    const r = rect();
-    (component as any).regions = [r];
-    (component as any).regionsCopy = [{ id: 1, bounds: { x: 10, y: 20, width: 30, height: 40 } }];
-    component.widthRectUpdate(r, { value: 50 }); // diff +20 → x = round(10 - 10) = 0
-    expect((component.regions[0].bounds as Rectangle).width).toBe(50);
-    expect((component.regions[0].bounds as Rectangle).x).toBe(0);
-  });
-
-  it('heightRectUpdate recenters y by half the height delta', () => {
-    const r = rect();
-    (component as any).regions = [r];
-    (component as any).regionsCopy = [{ id: 1, bounds: { x: 10, y: 20, width: 30, height: 40 } }];
-    component.heightRectUpdate(r, { value: 60 }); // diff +20 → y = round(20 - 10) = 10
-    expect((component.regions[0].bounds as Rectangle).height).toBe(60);
-    expect((component.regions[0].bounds as Rectangle).y).toBe(10);
-  });
-
-  it('widthRectUpdate ignores null/undefined values', () => {
-    const r = rect();
-    (component as any).regions = [r];
-    component.widthRectUpdate(r, { value: null });
-    expect((r.bounds as Rectangle).width).toBe(30); // unchanged
-  });
-
   it('regionArea reports px² for rect + polygon, blank when degenerate', () => {
     expect(component.regionArea(rect())).toContain('px²'); // 30·40 = 1200
     expect(component.regionArea(poly())).toContain('px²'); // shoelace = 100
@@ -1370,11 +1293,6 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
     expect(component.regionArea(donut)).toBe('84 px²'); // 100 − 16
   });
 
-  it('isRectangle distinguishes rectangles from polygons', () => {
-    expect(component.isRectangle(rect())).toBe(true);
-    expect(component.isRectangle(poly())).toBe(false);
-  });
-
   it('label-edit lifecycle tracks the editing set and commits on stop', () => {
     const r = rect();
     (component as any).regions = [r];
@@ -1492,13 +1410,6 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
     expect(component.regions[0].label).toBe('Stroma');
     expect(component.regions[1].color).toBe('#44AAFF');
     expect(api.setAnnotationRegions).toHaveBeenCalled();
-  });
-
-  it('new regions inherit the active class', () => {
-    component.activeClass = 'Tumor';
-    component.addRectangle();
-    const added = component.regions[component.regions.length - 1];
-    expect(added.label).toBe('Tumor');
   });
 
   it('openManageDialog clones the set into an isolated draft', () => {

@@ -16,19 +16,14 @@ import { VIZ_TOAST_KEY } from '../toast-outlets';
 import { fileStem } from './file-stem';
 
 @Component({
-  // Canonical prefixed selector first; the unprefixed original is kept as an
-  // alias for one release (pre-publication back-compat).
   selector: 'region-editor',
   templateUrl: './region-editor.component.html',
   styleUrls: ['./region-editor.component.scss'],
 })
 export class RegionEditorComponent implements OnInit, OnDestroy {
-  protected readonly Array = Array;
-
   @ViewChild('op') overlayPanel!: OverlayPanel;
 
   regions: Region[] = [];
-  regionsCopy: Region[] = [];
   selectedRegions: Region[] = [];
   showShapeLabel!: boolean;
   shapeColor!: string;
@@ -40,7 +35,6 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
    *  are grouped under a single entry with an empty `label`. */
   classColorEdits: { label: string; color: string }[] = [];
   labelColors: Map<string, string> = new Map();
-  selectedLabelColor = '';
   /** "Edit class on selected rows" popup: chosen existing class, and a new-class name. */
   bulkClass = '';
   newBulkClass = '';
@@ -48,7 +42,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   // ── annotation-class presets (jit-ui#70) ──
   /** Local mirror of the per-user preset set (chip strip, Class dropdown, dialog). */
   presetSet: PresetSet = defaultPresetSet();
-  /** Class applied to newly drawn/added regions and to bulk chip-clicks. */
+  /** The class last picked in the panel; a chip-click applies it to the selected rows. */
   activeClass: string | null = null;
   showManageDialog = false;
   /** Working copy edited inside the Manage-classes dialog; committed on Apply/Done. */
@@ -129,26 +123,6 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     @Inject(REGION_IO_PORT) private regionIo: RegionIoPort,
   ) {}
 
-  /**
-   * Deep copy of regions for dirty-tracking (`regionsCopy`). Returns plain-object
-   * clones — only structural equality matters here, not prototypes.
-   * TODO: replace with `structuredClone` once verified.
-   */
-  private deepClone<T>(items: T[]): T[] {
-    return items.map((item) => {
-      if (Array.isArray(item)) {
-        return this.deepClone(item) as unknown as T;
-      } else if (typeof item === 'object' && item !== null) {
-        const cloned: any = {};
-        for (const key in item) {
-          cloned[key] = this.deepClone([item[key]])[0];
-        }
-        return cloned;
-      }
-      return item;
-    });
-  }
-
   ngOnInit() {
     this.showShapeLabel = this.regionApi.getShowShapeLabel();
     this.shapeColor = this.regionApi.getShapeColor();
@@ -172,7 +146,6 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     // Annotation regions only — intensity-profile lines are owned by the
     // intensity tool and excluded by the contract, so the editor never sees them.
     this.regions = this.applyRegionColors(this.regionApi.getAnnotationRegions());
-    this.regionsCopy = this.deepClone(this.regions);
     this.syncClassesFromRegions(this.regions);
     this.recomputeClassCounts();
 
@@ -185,7 +158,6 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       // is a user-editable display label and may collide)
       const selectedIds = new Set(this.selectedRegions.map((r) => r.id));
       this.regions = updated;
-      this.regionsCopy = this.deepClone(this.regions);
       this.selectedRegions = updated.filter((r) => selectedIds.has(r.id));
       this.clampPaginatorFirst();
       this.syncClassesFromRegions(updated);
@@ -344,18 +316,6 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.setRegionsFromEditor();
   }
 
-  addRectangle() {
-    const region = new Region();
-    region.bounds = new Rectangle();
-    region.bounds.width = 512;
-    region.bounds.height = 512;
-    region.label = this.activeClass ?? 'Region';
-    // id and a non-colliding name are minted by the visualizer's setRegions
-    this.regions = [...this.regions, region];
-    this.setRegionsFromEditor();
-    this.regionsCopy = this.deepClone(this.regions);
-  }
-
   /**
    * Update the label of the region on enter key pressed (when editing a label cell in the table)
    * @param region
@@ -385,67 +345,18 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       this.setRegionsFromEditor();
     }
   }
-  xRectUpdate(region: Region, event: any) {
-    const rectangle = region.bounds;
-    if (rectangle && rectangle instanceof Rectangle) {
-      this.patchRegionBounds(region, { x: event.value });
-      this.setRegionsFromEditor();
+  /** The current page of the table. Memoized on (regions, first, rows), so
+   *  change detection doesn't hand p-table a new array every tick (RT-20). */
+  get pagedRegions(): Region[] {
+    const key = this._pageKey;
+    if (key.regions !== this.regions || key.first !== this.paginatorFirst || key.rows !== this.paginatorRows) {
+      this._pageKey = { regions: this.regions, first: this.paginatorFirst, rows: this.paginatorRows };
+      this._page = this.regions.slice(this.paginatorFirst, this.paginatorFirst + this.paginatorRows);
     }
+    return this._page;
   }
-  yRectUpdate(region: Region, event: any) {
-    const rectangle = region.bounds;
-    if (rectangle && rectangle instanceof Rectangle) {
-      this.patchRegionBounds(region, { y: event.value });
-      this.setRegionsFromEditor();
-    }
-  }
-
-  /** Replace a rectangle region's bounds with a patched copy (see patchRegions). */
-  private patchRegionBounds(region: Region, patch: Partial<Rectangle>): void {
-    this.patchRegions((r) =>
-      r === region ? { bounds: Object.assign(new Rectangle(), r.bounds, patch) } : null,
-    );
-  }
-  widthRectUpdate(region: Region, event: any) {
-    if (event.value === null || event.value === undefined) return;
-    const rectangle = region.bounds;
-    if (rectangle && rectangle instanceof Rectangle) {
-      const patch: Partial<Rectangle> = { width: event.value };
-      const reg = this.regionsCopy.filter((element: Region) => element.id === region.id);
-      if (reg.length) {
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore
-        const oldWidth = reg[0].bounds.width;
-        const diffWidth = event.value - oldWidth;
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore
-        patch.x = Math.round(reg[0].bounds.x - diffWidth / 2);
-      }
-      this.patchRegionBounds(region, patch);
-      this.setRegionsFromEditor();
-      this.regionsCopy = this.deepClone(this.regions);
-    }
-  }
-  heightRectUpdate(region: Region, event: any) {
-    if (event.value === null || event.value === undefined) return;
-    const rectangle = region.bounds;
-    if (rectangle && rectangle instanceof Rectangle) {
-      const patch: Partial<Rectangle> = { height: event.value };
-      const reg = this.regionsCopy.filter((element: Region) => element.id === region.id);
-      if (reg.length) {
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore
-        const oldHeight = reg[0].bounds.height;
-        const diffHeight = event.value - oldHeight;
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore
-        patch.y = Math.round(reg[0].bounds.y - diffHeight / 2);
-      }
-      this.patchRegionBounds(region, patch);
-      this.setRegionsFromEditor();
-      this.regionsCopy = this.deepClone(this.regions);
-    }
-  }
+  private _pageKey: { regions?: Region[]; first?: number; rows?: number } = {};
+  private _page: Region[] = [];
 
   onPageChange(event: { first?: number; rows?: number }) {
     this.paginatorFirst = event.first ?? 0;
@@ -486,22 +397,6 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     });
   }
 
-  addPolygon() {
-    const region = new Region();
-    region.bounds = new Polygon();
-    region.label = this.activeClass ?? 'Region';
-    region.bounds.ypoints = [0, 0, 0];
-    region.bounds.xpoints = [0, 0, 0];
-    region.bounds.coordinates = [
-      [0, 0],
-      [0, 0],
-      [0, 0],
-    ];
-    region.bounds.npoints = 3;
-    this.regions = [...this.regions, region];
-    this.setRegionsFromEditor();
-    this.regionsCopy = this.deepClone(this.regions);
-  }
   deleteRegion(shapeIdx: number) {
     const removed = this.regions[shapeIdx];
     this.regions = this.regions.filter((_, i) => i !== shapeIdx);
@@ -549,10 +444,6 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
           : region;
       this.labelRegionUpdate(edited, true);
     }
-  }
-
-  isRectangle(region: Region) {
-    return region.bounds instanceof Rectangle;
   }
 
   /**
@@ -637,35 +528,6 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       };
     });
     this.setRegionsFromEditor();
-  }
-
-  /**
-   * Stop key arrow event propagation
-   * @param event
-   */
-  disableArrowKeys(event: any) {
-    if (
-      event.key === 'ArrowDown' ||
-      event.key === 'Down' ||
-      event.key === 'ArrowUp' ||
-      event.key === 'Up' ||
-      event.key === 'ArrowLeft' ||
-      event.key === 'Left' ||
-      event.key === 'ArrowRight' ||
-      event.key === 'Right'
-    ) {
-      event.stopPropagation();
-    }
-  }
-
-  changeShapeColor(event: any) {
-    this.shapeColor = event.value;
-    this.patchRegions((region) => {
-      if (region.label !== this.selectedLabelColor || !this.labelColors.has(region.label)) return null;
-      this.labelColors.set(region.label, this.shapeColor);
-      return { color: this.shapeColor };
-    });
-    this.setRegionsFromEditor(this.fillColor);
   }
 
   showHelp() {

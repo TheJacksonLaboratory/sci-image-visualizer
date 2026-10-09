@@ -139,7 +139,7 @@
 </div>
 
 <div class="region-editor-content">
-    <p-table #dt [value]="regions.slice(paginatorFirst, paginatorFirst + paginatorRows)"
+    <p-table #dt [value]="pagedRegions"
              [tableStyle]="{'width': '100%'}" [(selection)]="selectedRegions"
              selectionMode="multiple" [metaKeySelection]="metaKey"
              (onRowSelect)="onSelectionChanged()" (onRowUnselect)="onSelectionChanged()"
