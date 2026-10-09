@@ -13,6 +13,8 @@ import * as path from 'path';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
 import { IChannelState } from '../../contracts/channel-histogram-api.contract';
+import { TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
+import { Subject } from 'rxjs';
 
 describe('PlotlyService', () => {
   let service: PlotlyService;
@@ -512,5 +514,68 @@ describe('PlotlyService service-lifetime subscriptions (review CORE-1)', () => {
       .mockImplementation(() => undefined);
     store.setChannelStates([channel(1, 2)]);
     expect(apply).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Async results must not land after the user moved on (review OSD-PLOTLY-8):
+ * an intensity-sampling fetch for the previous image, or a high-def zoom crop
+ * that arrives after the div was handed to another backend.
+ */
+describe('PlotlyService async supersession (review OSD-PLOTLY-8)', () => {
+  let service: PlotlyService;
+  let zoom$: Subject<ArrayBuffer>;
+
+  beforeEach(() => {
+    zoom$ = new Subject<ArrayBuffer>();
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule],
+      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+    });
+    TestBed.overrideProvider(TILE_ACCESS_PORT, {
+      useValue: {
+        getSelectedInfoB64: () => null,
+        getAuthHeaders: () => Promise.resolve({}),
+        zoomOnRegion: () => zoom$,
+        selectDiagramDisplay: () => undefined,
+      },
+    });
+    service = TestBed.inject(PlotlyService);
+    document.body.innerHTML = '<div id="plot"></div>';
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('drops an intensity-sampling load that a newer one superseded', async () => {
+    const frames = (name: string) => ({ data: [[[name]]], ratios: [1, 1], sizes: [1, 1] });
+    const releases: Array<() => void> = [];
+    jest.spyOn(service, 'load').mockImplementation((info: IImageInfo) =>
+      new Promise((resolve) => releases.push(() => resolve(frames(info.fileName!) as never))));
+    const a = service.ensureIntensitySampling({ fileName: 'A', urls: ['a'] } as IImageInfo, 0);
+    const b = service.ensureIntensitySampling({ fileName: 'B', urls: ['b'] } as IImageInfo, 0);
+    releases[1](); // B first
+    await b;
+    releases[0](); // then the slow A
+    await a;
+    expect((service as any).cachedImageFrames).toEqual([[['B']]]);
+  });
+
+  it('drops a high-def zoom crop that arrives after the plot was purged for another backend', async () => {
+    const s = service as any;
+    s.plotDiv = 'plot';
+    s.trueImgSize = [0, 1000, 0, 800];
+    s.imageInfo = { isGrayscale: true, fileName: 'f.tif' } as IImageInfo;
+    s.fileName = 'f.tif';
+    jest.spyOn(Plotly, 'purge').mockImplementation(() => undefined as never);
+    const image = { width: 2, height: 2, grey: () => ({ data: [1, 2, 3, 4] }) };
+    jest.spyOn(Image, 'load').mockResolvedValue(image as never);
+    const heatmap = jest.spyOn(s, 'plotHeatmap').mockResolvedValue(undefined);
+    const registry = jest.spyOn(s, 'plotViaRegistry').mockResolvedValue(undefined);
+    s.triggerZoom([100, 200, 300, 400]);
+    service.purgePlot(); // same file, user switched to the OSD image view
+    zoom$.next(new ArrayBuffer(4));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(heatmap).not.toHaveBeenCalled();
+    expect(registry).not.toHaveBeenCalled();
   });
 });

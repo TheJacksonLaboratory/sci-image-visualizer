@@ -133,6 +133,15 @@ export class PlotlyService implements IVisualizer {
 
   /** events */
   private onRelayoutEvent: any;
+  /** Bumped by every render of the plot div (plot, a high-def zoom re-render,
+   *  purge, reset). A high-def zoom drops its crop if another render (or the
+   *  hand-over of the div to another backend) happened while it was fetching. */
+  private renderGen = 0;
+  /** Bumped by every write request to the intensity-sampling cache (plot,
+   *  ensureIntensitySampling, refreshIntensitySamplingForRoi, reset): an async
+   *  sampling fetch lands only if no newer one was requested meanwhile, so a
+   *  slow fetch for the previous image can't overwrite the current one. */
+  private samplingGen = 0;
 
   private stackLoading$ = new BehaviorSubject<boolean>(false);
   private stackLoadingProgress$ = new BehaviorSubject<number>(0);
@@ -378,6 +387,8 @@ export class PlotlyService implements IVisualizer {
   public plot(plotDiv: string, imageLoaded: any, imageInfo: IImageInfo, screenHeight: number,
               plotType: PlotType, inPlace: boolean = false) {
     this.ensureSubscriptions();
+    this.renderGen++;
+    this.samplingGen++;
     const trueImageSize: number[] = [];
     this.zoomCoordinates = [];
     // [x0, x1, y0, y1]
@@ -937,7 +948,9 @@ export class PlotlyService implements IVisualizer {
     // Sample just the displayed slice (showStack off → single frame); `load`
     // also sets `this.trueImgSize`, which addProfileLine needs for placement.
     const single = { ...imageInfo, showStack: false } as IImageInfo;
+    const gen = ++this.samplingGen;
     const loaded = await this.load(single, zIndex || 0);
+    if (gen !== this.samplingGen) return; // superseded (another image / a crop)
     this.cachedImageFrames = loaded.data;
     this.cachedImageRatios = loaded.ratios;
     this.cachedImageWidth = loaded.sizes?.[0] ?? this.cachedImageWidth;
@@ -976,10 +989,11 @@ export class PlotlyService implements IVisualizer {
     // Snapshot the filename so a response that arrives after the user switched
     // files is dropped (the request carried the file selected at call time).
     const reqName = this.fileName;
+    const gen = ++this.samplingGen;
     this.tiles.zoomOnRegion(roi, screen, zIndex || 0).subscribe({
       next: (zoomData) => {
         Image.load(Buffer.from(new Uint8Array(zoomData))).then((image: any) => {
-          if (this.fileName !== reqName) return;
+          if (this.fileName !== reqName || gen !== this.samplingGen) return;
           const isGray = !!this.imageInfo?.isGrayscale;
           const frame = isGray
             ? this.plotUtilities.arrayToMatrix(image.grey().data, image.width)
@@ -1455,6 +1469,10 @@ export class PlotlyService implements IVisualizer {
     // Snapshot the filename so a response that arrives after the user switched
     // files is dropped (the request carried the file selected at call time).
     const reqName = this.fileName;
+    // A newer render (another zoom, a new plot, or the div handed to another
+    // backend — even for the same file) supersedes this crop.
+    const gen = ++this.renderGen;
+    const samplingGen = ++this.samplingGen;
     this.state.setImageLoading(true);
     this.state.setZoom(true);
     this.tiles.zoomOnRegion(rect, screen, this.zIndex.value).subscribe({ next: zoomData => {
@@ -1463,15 +1481,18 @@ export class PlotlyService implements IVisualizer {
       Image.load(buffer).then((image: any) => {
         const xRatio = rect.width / image.width;
         const yRatio = rect.height / image.height;
-        if (this.fileName === reqName) {
+        const gd: any = document.getElementById(this.plotDiv);
+        if (this.fileName === reqName && gen === this.renderGen && gd?._fullLayout) {
           const isGray = this.imageInfo?.isGrayscale;
           const frame = isGray
             ? this.plotUtilities.arrayToMatrix(image.grey().data, image.width)
             : this.plotUtilities.arrayToMatrix(image.getPixelsArray(), image.width);
           // Also sample the intensity profiles from this high-def crop so the
           // inset reflects the zoom-level resolution (origin = crop top-left).
-          this.setSamplingFrames([frame], [xRatio, yRatio], [imageSize[0], imageSize[2]]);
-          this.emitProfiles();
+          if (samplingGen === this.samplingGen) {
+            this.setSamplingFrames([frame], [xRatio, yRatio], [imageSize[0], imageSize[2]]);
+            this.emitProfiles();
+          }
           // Re-render the high-def crop in the SAME plot type the user is
           // viewing. Without this the zoom re-fetch always fell back to a
           // heatmap, so zooming in contour (or any registry type) reverted
@@ -1905,6 +1926,8 @@ export class PlotlyService implements IVisualizer {
   }
 
   public reset() {
+    this.renderGen++;
+    this.samplingGen++;
     if (this.plotDiv) {
       Plotly.newPlot(this.plotDiv, [],
         this.getHeatmapLayout([0, 100], [100, 0]), CONFIG as any);
@@ -1917,6 +1940,7 @@ export class PlotlyService implements IVisualizer {
    * which re-renders an empty plot and would leave the Plotly axes showing.
    */
   public purgePlot() {
+    this.renderGen++;
     if (this.plotDiv) {
       Plotly.purge(this.plotDiv);
     }
