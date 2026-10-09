@@ -46,10 +46,13 @@ describe('SpatialChartsComponent', () => {
     return { traces: (call?.[1] ?? []) as Record<string, any>[], layout: call?.[2] as any };
   };
   /** What a pre-binned histogram bar trace covers: its value range and its total count. */
-  const binned = (trace: Record<string, any>) => ({
-    range: [trace.customdata[0][0], trace.customdata[trace.customdata.length - 1][1]],
-    total: (trace.y as number[]).reduce((n, v) => n + v, 0),
-  });
+  const binned = (trace: { y?: unknown; customdata?: unknown }) => {
+    const edges = trace.customdata as [number, number][];
+    return {
+      range: [edges[0][0], edges[edges.length - 1][1]],
+      total: (trace.y as number[]).reduce((n, v) => n + v, 0),
+    };
+  };
 
   /** Behavioural tests drive ngOnInit directly: rendering the populated body
    *  under NO_ERRORS_SCHEMA gives the ngModel inputs no value accessor. */

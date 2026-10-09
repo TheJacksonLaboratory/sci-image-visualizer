@@ -16,7 +16,7 @@ import {
 } from '../spatial/spatial-encoding';
 import {
   INFERNO_SCALE, TRANSCRIPT_GLYPHS, cellTypeColumnFor, cellsShown, clusterColorMap, clusterOfGene, defaultGlyphFor,
-  glyphOutline, isCuratedColumn,
+  glyphOutline,
 } from '../spatial/spatial-tiles';
 import {
   SpatialSelectionMask, emptySelection,

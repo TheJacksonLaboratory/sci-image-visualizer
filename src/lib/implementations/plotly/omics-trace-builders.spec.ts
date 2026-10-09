@@ -23,7 +23,7 @@ const asRecords = (traces: unknown[]) => traces as Record<string, any>[];
 describe('omics-trace-builders', () => {
   describe('histogram', () => {
     /** The total a bar trace counts. */
-    const total = (trace: Record<string, any>) =>
+    const total = (trace: { y?: unknown }) =>
       (trace.y as number[]).reduce((n, v) => n + v, 0);
 
     it('charts the full distribution as pre-binned bars', () => {
