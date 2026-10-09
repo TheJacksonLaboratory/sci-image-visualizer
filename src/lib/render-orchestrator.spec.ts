@@ -17,13 +17,13 @@ describe('RenderOrchestrator', () => {
     const track = (name: string, impl?: (...a: any[]) => any) =>
       jest.fn((...a: any[]) => { calls.push(name); return impl?.(...a); });
     host = {
-      renderPhase: track('renderPhase', () => Promise.resolve(true)) as any,
-      smallShown: track('smallShown') as any,
-      sharpenSettled: track('sharpenSettled') as any,
-      finished: jest.fn((viaSmall: boolean) => { calls.push(`finished(${viaSmall})`); }) as any,
-      sharpenFailed: track('sharpenFailed') as any,
-      renderFailed: track('renderFailed') as any,
-    };
+      renderPhase: track('renderPhase', () => Promise.resolve(true)),
+      smallShown: track('smallShown'),
+      sharpenSettled: track('sharpenSettled'),
+      finished: jest.fn((viaSmall: boolean) => { calls.push(`finished(${viaSmall})`); }),
+      sharpenFailed: track('sharpenFailed'),
+      renderFailed: track('renderFailed'),
+    } as unknown as jest.Mocked<TwoPassRenderHost>;
     jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
   });

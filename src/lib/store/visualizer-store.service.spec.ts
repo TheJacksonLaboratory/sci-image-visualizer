@@ -1,4 +1,6 @@
 import { of } from 'rxjs';
+import { HttpClient } from '@angular/common/http';
+import { IImageMetadata } from '../contracts/image.contract';
 import { VisualizerStore } from './visualizer-store.service';
 import { IChannelState } from '../contracts/channel-histogram-api.contract';
 
@@ -158,10 +160,10 @@ describe('VisualizerStore.selectedChannel', () => {
 });
 
 describe('VisualizerStore.setImageMeta channel re-derivation (CORE-8)', () => {
-  const fluo = (names: string[]) => [{
+  const fluo = (names: string[]): IImageMetadata[] => [{
     channelCount: names.length, rgbChannels: 1, x: 10, y: 10, z: 1,
     channelInfo: names.map((name) => ({ name })),
-  }] as any;
+  } as IImageMetadata];
 
   it('keeps the user\'s window edits on a re-plot of the SAME image', () => {
     const store = new VisualizerStore();
@@ -184,7 +186,7 @@ describe('VisualizerStore.setImageMeta channel re-derivation (CORE-8)', () => {
 
   it('an RGB image followed by a 3-channel fluorescence image drops Red/Green/Blue', () => {
     const store = new VisualizerStore();
-    store.setImageMeta([{ rgbChannels: 3, channelCount: 1, x: 1, y: 1, z: 1 }] as any, 'rgb.png');
+    store.setImageMeta([{ rgbChannels: 3, channelCount: 1, x: 1, y: 1, z: 1 } as IImageMetadata], 'rgb.png');
     store.setImageMeta(fluo(['DAPI', 'GFP', 'RFP']), 'fluo.tif');
     expect(store.currentChannelStates()[0].name).toBe('DAPI');
   });
@@ -194,8 +196,8 @@ describe('VisualizerStore colormap LUT loading (CORE-18)', () => {
   it('fetches the LUT asset once per page, however many isolated chains create a store', async () => {
     const lut: [number, string][] = [[0, '#000000'], [1, '#ffffff']];
     const http = { get: jest.fn(() => of({ GIST_NCAR_LUT: lut })) };
-    const first = new VisualizerStore(http as any);
-    new VisualizerStore(http as any); // e.g. the pipeline preview's provideVisualization() chain
+    const first = new VisualizerStore(http as unknown as HttpClient);
+    new VisualizerStore(http as unknown as HttpClient); // e.g. the pipeline preview's provideVisualization() chain
     await Promise.resolve();
     expect(http.get).toHaveBeenCalledTimes(1);
     const resolved = first.getColormapOptions()

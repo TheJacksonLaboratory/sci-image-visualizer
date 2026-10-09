@@ -23,6 +23,7 @@ import { RegionOpsService } from './region-ops.service';
 import { WandService } from './toolbar/wand/wand.service';
 import { Region, Rectangle, Polygon, MultiPolygon } from './models/region';
 import { ToolbarToolContribution } from './contracts/toolbar-tool.contract';
+import { IImageInfo } from './contracts/image.contract';
 
 function rectRegion(x: number, y: number, w: number, h: number): Region {
   const r = new Region();
@@ -146,7 +147,7 @@ function harness(overrides: Record<string, unknown> = {}) {
   };
   const selfCompleting = (base: any): any => new Proxy(base, {
     has: () => true,
-    get(target, prop: any) {
+    get(target, prop: string | symbol) {
       if (typeof prop !== 'string' || prop in target) return target[prop];
       target[prop] = /\$$|^(get|is)[A-Z]/.test(prop)
         ? jest.fn(() => subject(false))
@@ -178,7 +179,7 @@ function harness(overrides: Record<string, unknown> = {}) {
     setStackLoading: jest.fn(),
   }, overrides);
   const plot: any = selfCompleting(plotBase);
-  const imageInfo$ = subject<any>(null);
+  const imageInfo$ = subject<IImageInfo | null>(null);
   const stateBase: any = {
     getImageInfo$: () => imageInfo$,
     getFilename$: () => subject('none'),
@@ -1295,10 +1296,11 @@ describe('VisualizerComponent — global listeners run outside Angular (CORE-4)'
     let outside = false;
     added = [];
     const realAdd = window.addEventListener.bind(window);
-    jest.spyOn(window, 'addEventListener').mockImplementation(((type: string, l: any, o?: any) => {
-      added.push({ type, outside });
-      realAdd(type, l, o);
-    }) as any);
+    jest.spyOn(window, 'addEventListener').mockImplementation(
+      (type: string, l: EventListenerOrEventListenerObject, o?: boolean | AddEventListenerOptions) => {
+        added.push({ type, outside });
+        realAdd(type, l, o);
+      });
     component = makeComponent(mockPlotService());
     (component as any).ngZone = {
       run: (fn: () => unknown) => fn(),
@@ -1322,7 +1324,7 @@ describe('VisualizerComponent — global listeners run outside Angular (CORE-4)'
   });
 
   it('steps the slice on ArrowRight/ArrowLeft from the one keydown listener', () => {
-    component.imageInfo = { isStack: true } as any;
+    component.imageInfo = { isStack: true } as IImageInfo;
     component.maxIndex = 5;
     const press = (key: string) =>
       document.body.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key }));
@@ -1335,9 +1337,9 @@ describe('VisualizerComponent — global listeners run outside Angular (CORE-4)'
 });
 
 describe('VisualizerComponent — failed and superseded renders (CORE-11)', () => {
-  const info = (fileName: string): any => ({
+  const info = (fileName: string): IImageInfo => ({
     fileName, urls: [`/p/${fileName}`], isStack: false, showStack: false, isGrayscale: true,
-    trueImageSize: [10, 10], imageMeta: [],
+    trueImageSize: [10, 10], imageMeta: [], scaleRatio: true,
   });
 
   beforeEach(() => { orchestratorHosts.length = 0; });
@@ -1390,9 +1392,9 @@ describe('VisualizerComponent — failed and superseded renders (CORE-11)', () =
 });
 
 describe('VisualizerComponent — host-owned image info is never mutated (CORE-13)', () => {
-  const stack = (extra: Record<string, unknown> = {}): any => Object.freeze({
+  const stack = (extra: Partial<IImageInfo> = {}): IImageInfo => Object.freeze({
     fileName: 'series.tif', urls: ['/0', '/1', '/2', '/3'], isStack: true, showStack: false,
-    isGrayscale: true, trueImageSize: [10, 10], imageMeta: [], ...extra,
+    isGrayscale: true, trueImageSize: [10, 10], imageMeta: [], scaleRatio: true, ...extra,
   });
 
   it('honours the one-shot initialZIndex without writing to the host object', () => {
