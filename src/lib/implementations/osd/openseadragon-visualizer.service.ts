@@ -798,17 +798,18 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
         }
       }
       this.cache.clearChannelGroups();
+      this.destroyViewer();
       // Auto-range grayscale tiles to the image's actual intensity span (like the
       // heatmap), sampling the coarsest tile level so the window matches the raw
       // tile values. Fire-and-forget: it re-invalidates once the window is known;
       // tiles paint unwindowed until then. (Multichannel windows are per-channel,
-      // defaulting to full range; the user auto/edits each channel.)
+      // defaulting to full range; the user auto/edits each channel.) Started
+      // AFTER destroyViewer: its sampler.clear() supersedes every run in flight.
       if (this.isMultiChannel) {
-        this.sampler.computeMultiChannelHistograms(d, loaded.infoB64, loaded.z);
+        void this.sampler.computeMultiChannelHistograms(d, loaded.infoB64, loaded.z);
       } else {
-        this.sampler.computeImageWindow(d, loaded.infoB64, loaded.z);
+        void this.sampler.computeImageWindow(d, loaded.infoB64, loaded.z);
       }
-      this.destroyViewer();
       // Size the slice cache for this image: LRU cap to hold the whole stack
       // (capped) and skip background preloading for stacks too large to preload
       // (would flood full-res reads). Normal stacks keep the flicker-free pre-cache.

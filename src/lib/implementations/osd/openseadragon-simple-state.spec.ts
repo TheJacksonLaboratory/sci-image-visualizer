@@ -146,4 +146,16 @@ describe('OpenSeadragonVisualizerService — simple-mode state reset (OSD-PLOTLY
     expect(invalidate).toHaveBeenCalled();
     expect(internals().simpleChannelPlanes).toEqual([]);
   });
+  it('plot() starts the tiled histogram sampling after clearing the sampler (OSD-PLOTLY-4)', async () => {
+    // sampler.clear() supersedes every run in flight, so a run started before it
+    // (as plot() used to do) would be dropped and the image would never auto-window.
+    const sampler = (service as unknown as { sampler: { clear(): void; computeImageWindow(): Promise<void> } })
+      .sampler;
+    const order: string[] = [];
+    jest.spyOn(sampler, 'clear').mockImplementation(() => { order.push('clear'); });
+    jest.spyOn(sampler, 'computeImageWindow').mockImplementation(async () => { order.push('sample'); });
+    const tiledLoaded = await loadTiled();
+    void service.plot('plotdiv', tiledLoaded, tiledInfo, 500, PlotType.IMAGE);
+    expect(order).toEqual(['clear', 'sample']);
+  });
 });

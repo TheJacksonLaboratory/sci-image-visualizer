@@ -42,7 +42,8 @@ export interface HistogramSamplerHost {
 export class HistogramSampler {
   /** 256-bin intensity histogram per z-slice, from sampled tiles. */
   private sliceHistograms = new Map<number, IHistogram[]>();
-  /** Native-bit-depth histograms from `/histogram`, keyed `${z}|${channel}`. */
+  /** Native-bit-depth histograms from `/histogram`, keyed
+   *  `${infoB64}|${z}|${channel}|${bins}`. */
   private nativeHistograms = new Map<string, IHistogram>();
   /** Per-app-load cache-buster for `/histogram` — the server marks the
    *  response cacheable for 24h, and a hard refresh can't bust a post-load
@@ -50,6 +51,12 @@ export class HistogramSampler {
    *  in-session dedup (via `nativeHistograms`) while always reflecting the
    *  live backend after a reload. */
   private readonly histCacheBuster = Date.now();
+  /** Bumped by {@link clear}. Every async sampler captures it before its first
+   *  `await` and drops its result if it changed: tile sampling and the native
+   *  fetch can take tens of seconds, and a run for the previous image must not
+   *  write that image's histogram, auto-window or native histogram into the
+   *  next one. */
+  private generation = 0;
 
   constructor(
     private http: HttpClient,
@@ -65,6 +72,7 @@ export class HistogramSampler {
 
   /** Drop everything (teardown / image switch). */
   clear(): void {
+    this.generation++;
     this.sliceHistograms.clear();
     this.nativeHistograms.clear();
   }
@@ -75,6 +83,7 @@ export class HistogramSampler {
    * luminance. Fire-and-forget.
    */
   async computeMultiChannelHistograms(d: SampledDescriptor, infoB64: string, z: number): Promise<void> {
+    const gen = this.generation;
     try {
       const t = d.tileSize;
       // Sample the COARSEST real level (per-channel tiles exist only at real
@@ -115,6 +124,7 @@ export class HistogramSampler {
         }
       }
       await Promise.all(jobs);
+      if (gen !== this.generation) return; // cleared meanwhile (image switch)
       this.sliceHistograms.set(z, counts.map((c) => histogram256(c)));
       this.host.onChannelHistogramsSampled();
     } catch (err) {
@@ -138,6 +148,7 @@ export class HistogramSampler {
    */
   async computeImageWindow(d: SampledDescriptor, infoB64: string, z: number): Promise<void> {
     const gray = this.host.isGrayscale();
+    const gen = this.generation;
     try {
       const t = d.tileSize;
       // Sample full-resolution when the grid is small (accurate for the grayscale
@@ -190,6 +201,7 @@ export class HistogramSampler {
           }
         }),
       );
+      if (gen !== this.generation) return; // cleared meanwhile (image switch)
       // Cache per-channel histograms: grayscale → [intensity]; RGB → [R, G, B].
       this.sliceHistograms.set(
         z, gray ? [histogram256(cR)] : [histogram256(cR), histogram256(cG!), histogram256(cB!)],
@@ -258,10 +270,10 @@ export class HistogramSampler {
   /**
    * Native-bit-depth histogram for >8-bit images, from the server `/histogram`
    * endpoint (the 8-bit canvas tiles can't carry 16-bit values). Cached per
-   * slice+channel for the session.
+   * image+slice+channel+bin count until {@link clear}.
    */
   native$(infoB64: string, z: number, channel: number, bins: number): Observable<IHistogram | null> {
-    const key = `${z}|${channel}`;
+    const key = `${infoB64}|${z}|${channel}|${bins}`;
     const cached = this.nativeHistograms.get(key);
     if (cached) return of(cached);
     return from(this.fetchNative(infoB64, z, channel, bins, key));
@@ -272,6 +284,7 @@ export class HistogramSampler {
     infoB64: string, z: number, channel: number, bins: number, key: string,
   ): Promise<IHistogram | null> {
     const url = `${this.api}histogram?info=${infoB64}&channel=${channel}&z=${z}&bins=${bins}&_=${this.histCacheBuster}`;
+    const gen = this.generation;
     try {
       // HttpClient calls get auth via the Angular interceptor (unlike OSD's own
       // ajax tile loader, which needs authHeaders) — mirror the other fetches.
@@ -295,6 +308,9 @@ export class HistogramSampler {
         observedMin: hi.observedMin,
         observedMax: hi.observedMax,
       };
+      // Cleared meanwhile (image switch): the histogram belongs to the previous
+      // image — don't cache it or hand it to the pane (null → the pane retries).
+      if (gen !== this.generation) return null;
       this.nativeHistograms.set(key, out);
       return out;
     } catch (err) {

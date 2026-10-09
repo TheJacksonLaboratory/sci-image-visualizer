@@ -1,4 +1,4 @@
-import { of, throwError, firstValueFrom } from 'rxjs';
+import { from, of, throwError, firstValueFrom } from 'rxjs';
 
 import { HistogramSampler, HistogramSamplerHost } from './histogram-sampler';
 
@@ -170,6 +170,62 @@ describe('HistogramSampler', () => {
     http.get.mockReturnValue(throwError(() => new Error('202')));
     await expect(firstValueFrom(sampler.native$('B64', 0, 0, 256))).resolves.toBeNull();
     warn.mockRestore();
+  });
+
+  // ── supersession (review OSD-PLOTLY-4) ───────────────────────────────
+  // A run started for image A that finishes after clear() (image switch) must
+  // not write A's histogram, auto-window or native histogram into image B.
+
+  /** A fetchTileRgba mock whose results are all held until released by hand. */
+  function deferredTile(px: [number, number, number]) {
+    const pending: Array<() => void> = [];
+    (tileClient.fetchTileRgba as jest.Mock).mockImplementation(
+      () => new Promise((resolve) => pending.push(() => resolve(tile(2, px)))),
+    );
+    return () => pending.forEach((release) => release());
+  }
+
+  it('drops a computeImageWindow result that lands after clear()', async () => {
+    const release = deferredTile([40, 40, 40]);
+    (tileClient.fetchTileRgba as jest.Mock).mockResolvedValueOnce(tile(2, [5, 5, 5]));
+    const twoTiles = { ...DESC, width: 128, levels: [{ width: 128, height: 64 }] };
+    const run = sampler.computeImageWindow(twoTiles, 'B64', 0);
+    sampler.clear(); // image switch while A's tiles are still in flight
+    release();
+    await run;
+    expect(sampler.get(0, 0)).toBeNull();
+    expect(onWindow).not.toHaveBeenCalled();
+  });
+
+  it('drops a computeMultiChannelHistograms result that lands after clear()', async () => {
+    const release = deferredTile([15, 15, 15]);
+    const run = sampler.computeMultiChannelHistograms(DESC, 'B64', 0);
+    sampler.clear();
+    release();
+    await run;
+    expect(sampler.get(0, 0)).toBeNull();
+    expect(onSampled).not.toHaveBeenCalled();
+  });
+
+  it('does not cache a native histogram that lands after clear()', async () => {
+    let respond!: (v: unknown) => void;
+    http.get.mockReturnValueOnce(from(new Promise((r) => { respond = r; })));
+    const first = firstValueFrom(sampler.native$('A64', 0, 0, 256));
+    sampler.clear();
+    respond(NATIVE);
+    await first;
+    http.get.mockReturnValue(of(NATIVE));
+    await firstValueFrom(sampler.native$('A64', 0, 0, 256));
+    expect(http.get).toHaveBeenCalledTimes(2); // not served from a stale cache entry
+  });
+
+  it('keys native histograms by image and bin count', async () => {
+    http.get.mockReturnValue(of(NATIVE));
+    await firstValueFrom(sampler.native$('A64', 0, 0, 256));
+    await firstValueFrom(sampler.native$('B64', 0, 0, 256)); // other image, same z/channel
+    await firstValueFrom(sampler.native$('B64', 0, 0, 64));  // other bin count
+    expect(http.get).toHaveBeenCalledTimes(3);
+    expect(http.get.mock.calls[2][0]).toContain('bins=64');
   });
 
   it('clear() drops both caches', async () => {
