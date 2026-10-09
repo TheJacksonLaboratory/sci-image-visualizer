@@ -957,8 +957,12 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
         this.scaleBar = new OsdScaleBar(this.viewer as any, d.mppX ?? 0);
         this.buildToolHosts();
         // Simple mode is a single, self-contained image — no slice cache to seed.
+        // Its z-scrub and recomposite re-open the viewer; one persistent handler
+        // reports a failed re-open (a once-handler per scrub would pile up).
         if (simple) {
-          /* nothing to cache: one frame, no pyramid */
+          this.viewer!.addHandler('open-failed', (e: any) => {
+            console.warn('[OSD] slice re-open failed', this.currentZ, e?.message ?? e);
+          });
         } else if (this.isMultiChannel) {
           // Drop the single opened (channel-0) image and add this slice's channel
           // group to the per-slice cache. The shared background loader / LRU then
@@ -1382,9 +1386,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
         )
         .then((url) => {
           if (this.currentZ !== z || !this.viewer) return;
-          this.viewer.addOnceHandler('open-failed', (e: any) => {
-            console.warn('[OSD] slice re-open failed', e?.message ?? e);
-          });
           this.viewer.open({ type: 'image', url } as any);
           void this.sampleSimpleHistogram(url, z); // re-bin the scrubbed slice
         })

@@ -257,4 +257,20 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
     expect(revoke).toHaveBeenCalledWith('blob:mounted');
     expect(revoke).not.toHaveBeenCalledWith('blob:next');
   });
+  it('a simple-mode z-scrub does not pile up open-failed handlers (OSD-PLOTLY-33)', async () => {
+    const info = { ...simpleInfo, channelUrls: undefined, urls: ['blob:a', 'blob:b', 'blob:c'] } as unknown as IImageInfo;
+    const loaded = await service.load(info, 0);
+    void service.plot('plotdiv', loaded, info, 500, PlotType.IMAGE);
+    const viewer = viewers[viewers.length - 1];
+    const failedHandlers = () =>
+      [...viewer.addOnceHandler.mock.calls, ...viewer.addHandler.mock.calls]
+        .filter(([name]) => name === 'open-failed').length;
+    const before = failedHandlers();
+    for (const z of [1, 2, 1, 2]) {
+      service.setZIndex(z);
+      await nextFrame();
+    }
+    expect(viewer.open).toHaveBeenCalledTimes(5); // mount + 4 scrubs
+    expect(failedHandlers()).toBe(before);
+  });
 });
