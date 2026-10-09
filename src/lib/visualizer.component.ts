@@ -75,8 +75,6 @@ function errorMessage(err: unknown): string {
 }
 
 @Component({
-  // Canonical prefixed selector first; the unprefixed original is kept as an
-  // alias for one release (pre-publication back-compat).
   selector: 'visualizer',
   templateUrl: './visualizer.component.html',
   styleUrls: ['./visualizer.component.scss'],
@@ -408,8 +406,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   isoRange: number[] = [0, 255];
 
   /** Whether a spatial-omics dataset is currently published on
-   *  `SPATIAL_DATA_PORT` — gates the spatial plot types in the selector. */
-  /** Bound by the toolbar, which offers the plot modes for a dataset with no image too. */
+   *  `SPATIAL_DATA_PORT` — gates the spatial plot types in the selector. Also bound
+   *  by the toolbar, which offers the plot modes for a dataset with no image too. */
   hasSpatialDataset = false;
   /** The spatial dataset on offer, for drawing one that brings no image (see reloadAndPlot). */
   private spatialDataset: SpatialDataset | null = null;
@@ -493,22 +491,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.computePlotTypeOptions();
   }
 
-  /**
-   * Plot types offered in the selector for the current image:
-   *  - Outside **test mode**, only the curated default set (descriptors with a
-   *    `productionLabel`) is offered, shown under suffix-free names — Image,
-   *    Heatmap, Contour and the napari Surface / Volume / Isosurface. Test mode
-   *    exposes every backend's type under its full (backend-suffixed) label.
-   *  - 3D types hidden when the backend can't render a 3D scene.
-   *  - stack-only types (volume, isosurface) hidden unless the file is a stack —
-   *    a volume needs multiple z-slices.
-   *  - scalar-intensity types (contour, surface, isosurface) hidden for RGB
-   *    images — they map a single intensity per pixel. Image and Heatmap render
-   *    any image.
-   *  - spatial-omics types hidden until a `SpatialDataset` is published on
-   *    `SPATIAL_DATA_PORT` — the mode has nothing to draw without observations,
-   *    exactly as a volume has nothing to draw without a stack.
-   */
   /**
    * Track whether a spatial-omics dataset is available. A dataset appearing (or
    * being cleared) changes which plot types make sense, so it drives the same
@@ -660,6 +642,22 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.volumeImageUrls = [];
   }
 
+  /**
+   * Plot types offered in the selector for the current image:
+   *  - Outside **test mode**, only the curated default set (descriptors with a
+   *    `productionLabel`) is offered, shown under suffix-free names — Image,
+   *    Heatmap, Contour and the napari Surface / Volume / Isosurface. Test mode
+   *    exposes every backend's type under its full (backend-suffixed) label.
+   *  - 3D types hidden when the backend can't render a 3D scene.
+   *  - stack-only types (volume, isosurface) hidden unless the file is a stack —
+   *    a volume needs multiple z-slices.
+   *  - scalar-intensity types (contour, surface, isosurface) hidden for RGB
+   *    images — they map a single intensity per pixel. Image and Heatmap render
+   *    any image.
+   *  - spatial-omics types hidden until a `SpatialDataset` is published on
+   *    `SPATIAL_DATA_PORT` — the mode has nothing to draw without observations,
+   *    exactly as a volume has nothing to draw without a stack.
+   */
   private computePlotTypeOptions() {
     const caps = this.plotService.capabilities;
     const isStack = !!this.imageInfo?.isStack;
@@ -731,9 +729,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     }
   }
 
-  /** If the active plot type is no longer in the offered options (e.g. test mode
-   *  turned off while a test-only type was active, or a scalar type carried onto
-   *  an RGB image), fall back to the default 2D Image view. */
   /** Whether the live spatial dataset brings pixels of its own — a tissue image it
    *  registers onto, or a volume that is published as a z-stack image. */
   private spatialDatasetHasPixels = false;
@@ -765,6 +760,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.cdr.detectChanges();
   }
 
+  /** If the active plot type is no longer in the offered options (e.g. test mode
+   *  turned off while a test-only type was active, or a scalar type carried onto
+   *  an RGB image), fall back to the default 2D Image view. */
   private reconcileSelectedPlotType(): void {
     if (this.plotTypeMenu.some((d) => d.type === this.selectedPlotTypeId)) return;
     // Image is the usual fallback, but it is not always ON OFFER: with no image loaded

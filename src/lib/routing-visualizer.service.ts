@@ -36,23 +36,6 @@ import { NapariVisualizerService } from './implementations/napari-js/napari-visu
 import { VIZ_CONFIG, VizConfig } from './contracts/viz-config';
 import { PlotModeViewport } from './contracts/plot-type-contribution.contract';
 
-/**
- * Backend selector. Routes per plot type:
- *  - the **Image** plot type renders through OpenSeadragon — a natively-tiled,
- *    zoomable raster backed by the jit-service tile endpoints. It's the default
- *    view and supports the region overlay/tools and (for grayscale) the
- *    colormap, applied client-side via the tile pixel pipeline.
- *  - every other plot type (heatmap, surface, contour, scatter, line,
- *    scatter3d, isosurface) renders through Plotly.
- *
- * Only the **render + viewport** path is routed. Region state, display options
- * (colormap/LUT), and the long-lived observables always live in Plotly (the
- * shared store) so both backends stay in sync; OSD reads them to drive its own
- * overlay and tile recoloring.
- *
- * The Image type renders through OpenSeadragon; a failed OSD load falls back to
- * Plotly for that image only (see `osdFellBack`) so it still renders.
- */
 /** Intensity-profile line ROIs are owned by the intensity tool, not the editor.
  *  Package-internal predicate (property-based so it also matches plain objects
  *  after a drag round-trip). */
@@ -88,6 +71,27 @@ function autoWindowFromHistogram(h: IHistogram, saturation: number): [number, nu
   return [min, max];
 }
 
+/**
+ * The visualizer chain's front door: implements `IVisualizer`, `IRegionEditorApi`
+ * and `IChannelHistogramApi` (bound to the `VISUALIZER` / `REGION_EDITOR_API` /
+ * `CHANNEL_HISTOGRAM_API` tokens) over three rendering backends, chosen per plot type:
+ *  - **Image** renders through OpenSeadragon (natively tiled, region tools,
+ *    client-side colormap), or through napari-js when `VizConfig.useNapariRenderer`
+ *    opts in; the napari image types and the 2D spatial-omics mode render through
+ *    napari-js. A failed load falls back napari-js → OSD → Plotly for that image only
+ *    (see `napariFellBack` / `osdFellBack`, cleared by `reset()`).
+ *  - the napari 3D types (volume, isosurface, surface, 3D scatter, the 3D spatial
+ *    cloud) render through napari-js, falling back to Plotly.
+ *  - every other plot type (heatmap, contour, surface, scatter, line, …) renders
+ *    through Plotly.
+ *
+ * Only rendering and the viewport are routed to the backend on screen. Region state
+ * lives in the shared `RegionStore` and display state (colormap, channels, presets,
+ * spatial view) in the shared `VisualizerStore`, so every backend sees the same
+ * values; the backends subscribe to them to redraw.
+ *
+ * Package-internal: hosts depend on the tokens, not on this class.
+ */
 @Injectable({ providedIn: 'root' })
 export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, IChannelHistogramApi, OnDestroy {
 
@@ -562,14 +566,11 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     return this.plotly.getRegionOverlay();
   }
 
-  /**
-   * Isosurface controls when available — always Plotly's, since the isosurface
-   * plot type renders on Plotly (OSD only handles the image type).
-   */
+  /** Isosurface controls of the backend on screen, when it renders isosurfaces. */
   getIsosurfaceControls(): IIsosurfaceControls | null { return this.renderer().getIsosurfaceControls(); }
 
-  /** 3D scene controls — always Plotly's, since the 3D plot types render on
-   *  Plotly (OSD only handles the image type). */
+  /** 3D scene controls of the backend on screen (Plotly or napari-js), or null on a
+   *  2D-only one. */
   getSurface3dControls(): ISurface3dControls | null { return this.renderer().getSurface3dControls(); }
 
   /** Intensity (line-ROI) controls — always Plotly's, since the line profiles
