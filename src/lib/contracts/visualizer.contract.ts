@@ -13,9 +13,8 @@ import {
   CategoricalColumnMeta,
   SpatialDataset,
   SpatialEmbedding,
-  SpatialMarkerGenes, SpatialTranscriptCounts,
+  SpatialMarkerGenes, SpatialSelectionMask, SpatialTranscriptCounts,
 } from './spatial-dataset.contract';
-import { SpatialSelectionMask } from '../spatial/spatial-selection';
 import type { PlotModeViewport } from './plot-type-contribution.contract';
 
 /**

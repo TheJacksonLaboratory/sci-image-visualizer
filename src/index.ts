@@ -52,13 +52,13 @@ export {
 export type {
   RGBA, CategoricalEncodingOptions, ContinuousEncodingOptions,
 } from './lib/spatial/spatial-encoding';
-// Selection: which observations fall inside the drawn ROIs, and the shared store
+// Selection: which observations fall inside the drawn ROIs (as a SpatialSelectionMask,
+// exported with the dataset contract above), and the shared store
 // that holds the answer.
 export {
   selectInRegions, selectByCategory, mutedFromSelection, pointInRing,
   emptySelection, countMask, maskToIndices,
 } from './lib/spatial/spatial-selection';
-export type { SpatialSelectionMask } from './lib/spatial/spatial-selection';
 export { SpatialSelectionStore } from './lib/store/spatial-selection.service';
 export * from './lib/contracts/instance-segmenter.contract';
 export * from './lib/contracts/semantic-segmenter.contract';

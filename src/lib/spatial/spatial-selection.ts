@@ -1,5 +1,5 @@
 import { Region } from '../models/region';
-import { SpatialImageRef, SpatialObservations } from '../contracts/spatial-dataset.contract';
+import { SpatialImageRef, SpatialObservations, SpatialSelectionMask } from '../contracts/spatial-dataset.contract';
 
 /**
  * Which observations fall inside a set of drawn regions.
@@ -21,11 +21,8 @@ import { SpatialImageRef, SpatialObservations } from '../contracts/spatial-datas
  * transformed forward before testing, matching exactly what the renderer draws.
  */
 
-/** A selection over N observations: `mask[i] === 1` when i is selected. */
-export interface SpatialSelectionMask {
-  mask: Uint8Array;
-  count: number;
-}
+/** Moved to the dataset contract (a pure data type); re-exported here for existing importers. */
+export type { SpatialSelectionMask };
 
 /** An empty selection over `count` observations. */
 export function emptySelection(count = 0): SpatialSelectionMask {

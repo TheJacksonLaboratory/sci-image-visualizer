@@ -486,6 +486,16 @@ export interface SpatialVolumeMeta {
   voxelSize: [number, number, number];
 }
 
+/**
+ * A selection over a dataset's N observations: `mask[i] === 1` when observation `i` is
+ * selected, and `count` the number selected. Pure data, so it lives with the dataset
+ * contract; the selection logic that builds one is in `spatial/spatial-selection.ts`.
+ */
+export interface SpatialSelectionMask {
+  mask: Uint8Array;
+  count: number;
+}
+
 /** Look a column's descriptor up by name. */
 export function findColumnMeta(
   dataset: SpatialDataset, name: string,
