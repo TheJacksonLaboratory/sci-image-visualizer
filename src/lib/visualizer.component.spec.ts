@@ -1126,7 +1126,6 @@ describe('VisualizerComponent — render preemption (#5)', () => {
       getShowShapeLabel: jest.fn().mockReturnValue(false),
       importRegions: jest.fn().mockReturnValue([]),
       setRegions: jest.fn(),
-      setPreviousShapes: jest.fn(),
       resetUndoHistory: jest.fn(),
       setStackLoading: jest.fn(),
     });

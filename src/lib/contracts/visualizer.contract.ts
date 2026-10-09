@@ -168,10 +168,6 @@ export interface IRegionStore {
   getClassificationColors(): Map<string, string>;
   setClassificationColor(label: string, color: string): void;
 
-  plotPreviousShapes(): void;
-  setPreviousShapes(shapes: any[]): void;
-  getPreviousShapes(): any[];
-
   /** Undo the most recent region action (jit-ui#85). Restores the region set to
    *  the state before that action; up to a small fixed depth (10) is retained,
    *  so it can be invoked up to 10 times in a row. No-op when nothing is left to

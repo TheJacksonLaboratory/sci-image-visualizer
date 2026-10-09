@@ -976,19 +976,12 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
               (imgInfo.smallUrls?.length ?? 0) > 0;
             const smallImgInfo = hasSmallTier ? { ...imgInfo, urls: imgInfo.smallUrls as string[] } : null;
 
-            // Enter per-slice stack mode with the given slice→regions map and
-            // seed the "previous shapes" from the now-live slice. enterStackMode
-            // makes zIndex's slice live and resets undo (jit-ui#93).
+            // Enter per-slice stack mode with the given slice→regions map.
+            // enterStackMode makes zIndex's slice live and resets undo (jit-ui#93).
             const enterStack = (
               slices: Map<number, Region[]>,
               layout: 'combined' | 'per-slice-file',
-            ) => {
-              this.plotService.enterStackMode(slices, this.zIndex, layout);
-              const shapes = this.plotService
-                .getRegions()
-                .map((region) => region.getShape(this.plotService.getShowShapeLabel()));
-              this.plotService.setPreviousShapes(shapes);
-            };
+            ) => this.plotService.enterStackMode(slices, this.zIndex, layout);
 
             const applyRoi = () => {
               // Folder stack: a stack of self-contained per-slice files
@@ -1036,12 +1029,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
               // Single-plane image (or a legacy global z-stack geojson): one
               // region set for the whole image.
               if (roiJson) {
-                const regions = this.plotService.importRegions(roiJson);
-                this.plotService.setRegions(regions);
-                const shapes = regions.map((region) =>
-                  region.getShape(this.plotService.getShowShapeLabel()),
-                );
-                this.plotService.setPreviousShapes(shapes);
+                this.plotService.setRegions(this.plotService.importRegions(roiJson));
               }
               // Loading an image's saved ROIs is not a user edit — start the
               // undo history fresh so the first undo can't wipe them (jit-ui#85).

@@ -362,9 +362,6 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   upsertClass(preset: ClassPreset): void { this.store.upsertClass(preset); }
   removeClass(name: string): void { this.store.removeClass(name); }
   resetPresets(): void { this.store.resetPresets(); }
-  plotPreviousShapes(): void { this.renderer().plotPreviousShapes(); }
-  setPreviousShapes(shapes: any[]): void { this.renderer().setPreviousShapes(shapes); }
-  getPreviousShapes(): any[] { return this.renderer().getPreviousShapes(); }
   // Undo state is owned by the shared RegionStore (same instance for both
   // backends), so routing through the active renderer is safe and stable.
   undo(): void { this.renderer().undo(); }
