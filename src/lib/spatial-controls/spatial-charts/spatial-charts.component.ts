@@ -261,9 +261,6 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   embeddings: SpatialEmbeddingMeta[] = [];
   embedding: SpatialEmbeddingMeta | null = null;
   private embeddingCoords: SpatialEmbedding | null = null;
-  /** The categorical colouring behind the embedding's colours, kept so a redraw for a
-   *  selection change does not refetch the column. */
-  private embeddingCodes: { codes: Uint16Array; names: string[]; colors: string[] } | null = null;
   /**
    * Genes the heatmap's rows are, and the vectors behind them.
    *
@@ -417,7 +414,6 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
         : published;
       this.embedding = this.embeddings[0] ?? null;
       this.embeddingCoords = null;
-      this.embeddingCodes = null;
       // Nothing to draw for the kind that was selected; fall back rather than sit blank.
       if (this.kind === 'embedding' && this.embeddings.length === 0) this.kind = 'histogram';
 
@@ -1272,7 +1268,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       const counts = {
         group: this.categorical,
         selection: this.selection.count > 0 ? this.selection.mask : null,
-        name: this.colorBy.kind === 'feature' ? this.colorBy.name : this.colorBy.name,
+        name: this.colorBy.name,
       };
       await this.draw(buildCountTraces(counts), countsLayout(counts));
       return;
