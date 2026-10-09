@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import { encode as encodePng } from 'fast-png';
 
-import { WandService } from '../toolbar/wand/wand.service';
+import { rasterizePolygon } from '../geometry/raster';
 import { regionsToMask, MaskPart } from './mask-raster';
 
 /**
@@ -29,14 +29,12 @@ interface MaskRequest {
   regions: MaskPart[][];
 }
 
-const wand = new WandService();
-
 addEventListener('message', ({ data }: MessageEvent<MaskRequest>) => {
   try {
     const { width, height, originalWidth, originalHeight, scale, mode, sourceName, regions } = data;
     const mask = regionsToMask(
       regions, width, height, mode,
-      (xs, ys, w, h, holes) => wand.rasterizePolygon(xs, ys, w, h, holes),
+      rasterizePolygon,
       (done, total) => postMessage({ type: 'progress', done, total }),
     );
     if (!mask) {

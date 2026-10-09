@@ -1,4 +1,7 @@
 import { Region, Rectangle, Polygon, MultiPolygon } from '../models/region';
+import type { BBoxMask } from '../geometry/raster';
+
+export type { BBoxMask };
 
 /** A single closed ring (+ optional holes) in image-pixel coordinates. A region
  *  rasterizes as the union of its parts. Plain data so it survives a
@@ -7,15 +10,6 @@ export interface MaskPart {
   xpoints: number[];
   ypoints: number[];
   holes?: number[][][];
-}
-
-/** A bbox-relative binary mask, as returned by `WandService.rasterizePolygon`. */
-export interface BBoxMask {
-  bx: number;
-  by: number;
-  bw: number;
-  bh: number;
-  mask: Uint8Array;
 }
 
 /** Polygon-fill function (the wand's scanline rasterizer), injected so this

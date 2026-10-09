@@ -1,4 +1,4 @@
-import { WandService } from '../toolbar/wand/wand.service';
+import { labelsToPolygons, maskToPolygons } from './contour';
 
 /**
  * Golden output for the contour tracer (mask → polygons with holes, and
@@ -6,9 +6,6 @@ import { WandService } from '../toolbar/wand/wand.service';
  * a set of seeded random masks so the tracer can be restructured (bbox-local
  * tracing, RT-16) without changing a single output coordinate.
  */
-const wand = new WandService();
-const maskToPolygons = wand.maskToPolygons.bind(wand);
-const labelsToPolygons = wand.labelsToPolygons.bind(wand);
 
 /** Deterministic PRNG (mulberry32). */
 function rng(seed: number): () => number {

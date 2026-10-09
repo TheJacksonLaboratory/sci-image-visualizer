@@ -1,5 +1,8 @@
 import { Injectable } from '@angular/core';
 import { Polygon } from '../../models/region';
+import { BBoxMask, rasterizePolygon } from '../../geometry/raster';
+import { dropVerticesWithinRadius, pointInPolygonWithHoles, pointInRing } from '../../geometry/ring';
+import { labelsToPolygons, maskToPolygons, mooreBoundary } from '../../geometry/contour';
 
 import { IWandOptions, WandType } from '../../contracts/display-types';
 
@@ -30,6 +33,10 @@ const DEFAULT_SENSITIVITY = 2.0;
  * click, optionally blurs it, computes a local threshold, runs a fixed-range
  * flood fill from the centre, closes the resulting mask, and returns the
  * traced contour as a polygon in image coordinates.
+ *
+ * The rasterizer, ring tests and contour tracer are pure functions in
+ * `src/lib/geometry/`; the methods here delegate to them so the DI consumers
+ * keep compiling. New code (and workers) should import the pure modules.
  */
 @Injectable({ providedIn: 'root' })
 export class WandService {
@@ -108,145 +115,35 @@ export class WandService {
     return { mask: closed, size: W };
   }
 
-  /**
-   * Standard ray-cast point-in-polygon test. (px, py) and the polygon
-   * vertices must be in the same coordinate system.
-   */
+  /** Ray-cast point-in-ring test; see {@link pointInRing}. */
   public pointInPolygon(px: number, py: number, xpoints: number[], ypoints: number[]): boolean {
-    const n = xpoints.length;
-    if (n < 3) return false;
-    let inside = false;
-    for (let i = 0, j = n - 1; i < n; j = i++) {
-      const yi = ypoints[i], yj = ypoints[j];
-      const xi = xpoints[i], xj = xpoints[j];
-      const intersect = ((yi > py) !== (yj > py)) &&
-        (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
-      if (intersect) inside = !inside;
-    }
-    return inside;
+    return pointInRing(px, py, xpoints, ypoints);
   }
 
-  /**
-   * Drop every vertex whose Euclidean distance to (cx, cy) is less than
-   * `radius`. Returns trimmed parallel arrays plus how many vertices were
-   * removed (so the caller can detect a no-op tick and skip the relayout).
-   */
+  /** See {@link dropVerticesWithinRadius} in `geometry/ring`. */
   public dropVerticesWithinRadius(xpoints: number[], ypoints: number[],
                                   cx: number, cy: number, radius: number)
     : { xpoints: number[]; ypoints: number[]; removed: number } {
-    const r2 = radius * radius;
-    const xs: number[] = [];
-    const ys: number[] = [];
-    let removed = 0;
-    for (let i = 0; i < xpoints.length; i++) {
-      const dx = xpoints[i] - cx;
-      const dy = ypoints[i] - cy;
-      if (dx * dx + dy * dy < r2) {
-        removed++;
-        continue;
-      }
-      xs.push(xpoints[i]);
-      ys.push(ypoints[i]);
-    }
-    return { xpoints: xs, ypoints: ys, removed };
+    return dropVerticesWithinRadius(xpoints, ypoints, cx, cy, radius);
   }
 
-  /**
-   * Rasterize a closed polygon into a bbox-relative mask suitable as a
-   * starting point for a wand stroke accumulator.
-   *
-   * Returns the bbox origin (clamped to the image) plus the filled mask, or
-   * null if the polygon is degenerate or fully outside the image.
-   */
+  /** See {@link rasterizePolygon} in `geometry/raster`. */
   public rasterizePolygon(xpoints: number[], ypoints: number[],
                           imageWidth: number, imageHeight: number,
-                          holes?: number[][][])
-    : { bx: number; by: number; bw: number; bh: number; mask: Uint8Array } | null {
-
-    const n = xpoints.length;
-    if (n < 3) return null;
-
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (let i = 0; i < n; i++) {
-      if (xpoints[i] < minX) minX = xpoints[i];
-      if (xpoints[i] > maxX) maxX = xpoints[i];
-      if (ypoints[i] < minY) minY = ypoints[i];
-      if (ypoints[i] > maxY) maxY = ypoints[i];
-    }
-    // Rasterize the polygon's FULL extent (not clamped to the viewport), so a region that's
-    // partially off the visible/zoomed area keeps its off-screen part when the wand/brush extends
-    // it — the coords here are viewport-matrix units and may be negative or exceed the viewport
-    // (jit-ui#102). Memory guard: a region that's enormous at the current zoom would allocate a
-    // giant mask, so only then fall back to the viewport window (rare; accepts the clip).
-    let bx = Math.floor(minX);
-    let by = Math.floor(minY);
-    let bx1 = Math.ceil(maxX) + 1;
-    let by1 = Math.ceil(maxY) + 1;
-    if ((bx1 - bx) * (by1 - by) > 4096 * 4096) {
-      bx = Math.max(0, bx);
-      by = Math.max(0, by);
-      bx1 = Math.min(imageWidth, bx1);
-      by1 = Math.min(imageHeight, by1);
-    }
-    const bw = bx1 - bx;
-    const bh = by1 - by;
-    if (bw <= 0 || bh <= 0) return null;
-
-    const mask = new Uint8Array(bw * bh);
-    // Scanline ring fill — sample each row at its pixel centre, writing `value`
-    // (1 to fill the exterior, 0 to punch a hole back out).
-    const fillRing = (rx: number[], ry: number[], value: number) => {
-      const m = rx.length;
-      if (m < 3) return;
-      for (let py = 0; py < bh; py++) {
-        const y = by + py + 0.5;
-        const xs: number[] = [];
-        for (let i = 0, j = m - 1; i < m; j = i++) {
-          const yi = ry[i], yj = ry[j];
-          if ((yi <= y && yj > y) || (yj <= y && yi > y)) {
-            const t = (y - yi) / (yj - yi);
-            xs.push(rx[i] + t * (rx[j] - rx[i]));
-          }
-        }
-        xs.sort((a, b) => a - b);
-        for (let k = 0; k + 1 < xs.length; k += 2) {
-          const xStart = Math.max(0, Math.ceil(xs[k] - bx));
-          const xEnd = Math.min(bw - 1, Math.floor(xs[k + 1] - bx));
-          for (let x = xStart; x <= xEnd; x++) mask[py * bw + x] = value;
-        }
-      }
-    };
-    fillRing(xpoints, ypoints, 1);
-    if (holes) {
-      for (const ring of holes) {
-        fillRing(ring.map(p => p[0]), ring.map(p => p[1]), 0);
-      }
-    }
-    return { bx, by, bw, bh, mask };
+                          holes?: number[][][]): BBoxMask | null {
+    return rasterizePolygon(xpoints, ypoints, imageWidth, imageHeight, holes);
   }
 
-  /**
-   * Point-in-region test that honours interior rings (holes): inside the
-   * exterior AND outside every hole (even-odd). Coordinates must share the
-   * polygon's frame. With no holes this is exactly {@link pointInPolygon}.
-   */
+  /** See {@link pointInPolygonWithHoles} in `geometry/ring`. */
   public pointInPolygonWithHoles(px: number, py: number, xpoints: number[], ypoints: number[],
                                  holes?: number[][][]): boolean {
-    if (!this.pointInPolygon(px, py, xpoints, ypoints)) return false;
-    if (holes) {
-      for (const ring of holes) {
-        if (this.pointInPolygon(px, py, ring.map(p => p[0]), ring.map(p => p[1]))) return false;
-      }
-    }
-    return true;
+    return pointInPolygonWithHoles(px, py, xpoints, ypoints, holes);
   }
 
   /**
    * Trace the largest 4-connected blob in `mask` (sized w*h) and return a
    * Polygon translated into image-pixel coordinates via (originX, originY).
-   * The traced vertices are NOT clamped to the image bounds: a region drawn while
-   * panned/zoomed keeps its true coordinates even where they fall outside the visible
-   * window (jit-ui#102).
+   * The traced vertices are NOT clamped to the image bounds (jit-ui#102).
    */
   public maskToPolygon(mask: Uint8Array, w: number, h: number,
                        originX: number, originY: number): Polygon | null {
@@ -255,8 +152,6 @@ export class WandService {
     const xpoints: number[] = [];
     const ypoints: number[] = [];
     const coordinates: number[][] = [];
-    // No viewport clamp: the trace coords (origin + local) are the region's true coords and may
-    // lie outside the currently-visible window when it was panned/zoomed (jit-ui#102).
     for (const v of verticesLocal) {
       const ix = Math.round(originX + v.x);
       const iy = Math.round(originY + v.y);
@@ -272,195 +167,17 @@ export class WandService {
     return poly;
   }
 
-  /**
-   * Trace EVERY 4-connected blob in `mask` (sized w*h) whose area is at least
-   * `minSize` pixels, returning one Polygon per blob in image-pixel coordinates
-   * (translated via originX/originY, not clamped — see {@link maskToPolygon}), ordered
-   * largest-first. Enclosed background runs of at least `minHoleSize` pixels become
-   * the blob's {@link Polygon.holes}. Unlike {@link maskToPolygon} (largest blob only), this lets
-   * the brush eraser split a region in two when a stroke cuts through it rather
-   * than discarding the smaller piece.
-   */
+  /** See {@link maskToPolygons} in `geometry/contour`. */
   public maskToPolygons(mask: Uint8Array, w: number, h: number,
                         originX: number, originY: number, minSize = 4,
                         minHoleSize = minSize): Polygon[] {
-    // Label all 4-connected components, recording each one's pixel count.
-    const labels = new Int32Array(w * h);
-    const sizes: number[] = [0]; // sizes[label]; label 0 unused
-    let nextLabel = 0;
-    const queue: number[] = [];
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const idx = y * w + x;
-        if (!mask[idx] || labels[idx]) continue;
-        nextLabel++;
-        labels[idx] = nextLabel;
-        let size = 0;
-        queue.push(idx);
-        while (queue.length) {
-          const i = queue.pop() as number;
-          size++;
-          const px = i % w;
-          const py = (i - px) / w;
-          if (px > 0)     { const j = i - 1;
-            if (mask[j] && !labels[j]) { labels[j] = nextLabel; queue.push(j); } }
-          if (px < w - 1) { const j = i + 1;
-            if (mask[j] && !labels[j]) { labels[j] = nextLabel; queue.push(j); } }
-          if (py > 0)     { const j = i - w;
-            if (mask[j] && !labels[j]) { labels[j] = nextLabel; queue.push(j); } }
-          if (py < h - 1) { const j = i + w;
-            if (mask[j] && !labels[j]) { labels[j] = nextLabel; queue.push(j); } }
-        }
-        sizes[nextLabel] = size;
-      }
-    }
-
-    const wanted: number[] = [];
-    for (let lbl = 1; lbl <= nextLabel; lbl++) {
-      if (sizes[lbl] >= minSize) wanted.push(lbl);
-    }
-    wanted.sort((a, b) => sizes[b] - sizes[a]); // largest-first
-
-    // Interior rings (holes) per foreground label — jit-ui#85.
-    const holesByLabel = this.detectHoles(
-      mask, labels, w, h, originX, originY, minHoleSize);
-
-    const polys: Polygon[] = [];
-    const comp = new Uint8Array(w * h);
-    for (const lbl of wanted) {
-      comp.fill(0);
-      for (let i = 0; i < comp.length; i++) comp[i] = labels[i] === lbl ? 1 : 0;
-      const verts = this.mooreBoundary(comp, w, h);
-      if (!verts || verts.length < 3) continue;
-      const xpoints: number[] = [];
-      const ypoints: number[] = [];
-      const coordinates: number[][] = [];
-      // No viewport clamp (jit-ui#102): keep the region's true coords even off the visible window.
-      for (const v of verts) {
-        const ix = Math.round(originX + v.x);
-        const iy = Math.round(originY + v.y);
-        xpoints.push(ix);
-        ypoints.push(iy);
-        coordinates.push([ix, iy]);
-      }
-      const poly = new Polygon();
-      poly.npoints = xpoints.length;
-      poly.xpoints = xpoints;
-      poly.ypoints = ypoints;
-      poly.coordinates = coordinates;
-      const holes = holesByLabel.get(lbl);
-      if (holes && holes.length) poly.holes = holes;
-      polys.push(poly);
-    }
-    return polys;
+    return maskToPolygons(mask, w, h, originX, originY, minSize, minHoleSize);
   }
 
-  /**
-   * Find interior rings (holes) of each foreground component in `mask`: a
-   * 4-connected run of background (0) pixels that is fully enclosed — i.e. not
-   * reachable from the grid border through background — is a hole, attributed to
-   * the foreground component that borders it most. Returns `fgLabel → rings`,
-   * each ring a list of `[x, y]` image-pixel pairs (same convention as a
-   * polygon's `coordinates`). Holes smaller than `minHoleSize` are dropped.
-   */
-  private detectHoles(mask: Uint8Array, fgLabels: Int32Array, w: number, h: number,
-                      originX: number, originY: number, minHoleSize: number): Map<number, number[][][]> {
-    const result = new Map<number, number[][][]>();
-
-    // 1. Flood-fill background reachable from the grid border ("outside").
-    const outside = new Uint8Array(w * h);
-    const stack: number[] = [];
-    const seed = (idx: number) => {
-      if (!mask[idx] && !outside[idx]) { outside[idx] = 1; stack.push(idx); }
-    };
-    for (let x = 0; x < w; x++) { seed(x); seed((h - 1) * w + x); }
-    for (let y = 0; y < h; y++) { seed(y * w); seed(y * w + w - 1); }
-    while (stack.length) {
-      const i = stack.pop() as number;
-      const px = i % w, py = (i - px) / w;
-      if (px > 0) seed(i - 1);
-      if (px < w - 1) seed(i + 1);
-      if (py > 0) seed(i - w);
-      if (py < h - 1) seed(i + w);
-    }
-
-    // 2. Remaining unvisited background pixels are enclosed holes. BFS each,
-    //    tally the bordering foreground label, and trace its boundary.
-    const visited = new Uint8Array(w * h);
-    const holeMask = new Uint8Array(w * h);
-    const queue: number[] = [];
-    for (let start = 0; start < mask.length; start++) {
-      if (mask[start] || outside[start] || visited[start]) continue;
-      let size = 0;
-      const owners = new Map<number, number>();
-      const pixels: number[] = [];
-      visited[start] = 1;
-      queue.length = 0;
-      queue.push(start);
-      while (queue.length) {
-        const i = queue.pop() as number;
-        size++;
-        pixels.push(i);
-        const px = i % w, py = (i - px) / w;
-        const visit = (j: number) => {
-          if (mask[j]) {
-            const lbl = fgLabels[j];
-            if (lbl) owners.set(lbl, (owners.get(lbl) ?? 0) + 1);
-          } else if (!outside[j] && !visited[j]) {
-            visited[j] = 1;
-            queue.push(j);
-          }
-        };
-        if (px > 0) visit(i - 1);
-        if (px < w - 1) visit(i + 1);
-        if (py > 0) visit(i - w);
-        if (py < h - 1) visit(i + w);
-      }
-      if (size < minHoleSize || owners.size === 0) continue;
-      let owner = 0, best = -1;
-      owners.forEach((cnt, lbl) => { if (cnt > best) { best = cnt; owner = lbl; } });
-
-      holeMask.fill(0);
-      for (const i of pixels) holeMask[i] = 1;
-      const verts = this.mooreBoundary(holeMask, w, h);
-      if (!verts || verts.length < 3) continue;
-      // No viewport clamp, exactly like the exterior (jit-ui#102): a hole may lie
-      // partly outside the readback window.
-      const ring: number[][] = [];
-      for (const v of verts) {
-        ring.push([Math.round(originX + v.x), Math.round(originY + v.y)]);
-      }
-      const list = result.get(owner) ?? [];
-      list.push(ring);
-      result.set(owner, list);
-    }
-    return result;
-  }
-
-  /**
-   * Trace each instance in an integer label map (0 = background) into a Polygon
-   * — used to turn a cellpose-style segmentation into region outlines. Labels
-   * with area below `minSize` are skipped. Coords are translated via
-   * originX/originY (not clamped).
-   */
+  /** See {@link labelsToPolygons} in `geometry/contour`. */
   public labelsToPolygons(labels: Uint32Array, w: number, h: number,
                           originX: number, originY: number, minSize = 10): Polygon[] {
-    let maxLabel = 0;
-    for (let i = 0; i < labels.length; i++) if (labels[i] > maxLabel) maxLabel = labels[i];
-    const out: Polygon[] = [];
-    const bin = new Uint8Array(w * h);
-    for (let lbl = 1; lbl <= maxLabel; lbl++) {
-      let any = false;
-      for (let i = 0; i < labels.length; i++) {
-        const on = labels[i] === lbl; bin[i] = on ? 1 : 0; if (on) any = true;
-      }
-      if (!any) continue;
-      // Reuse the contour tracer; one label is usually a single blob.
-      for (const p of this.maskToPolygons(bin, w, h, originX, originY, minSize)) {
-        out.push(p);
-      }
-    }
-    return out;
+    return labelsToPolygons(labels, w, h, originX, originY, minSize);
   }
 
   // ── Patch extraction ────────────────────────────────────────────────
@@ -765,76 +482,7 @@ export class WandService {
     const comp = new Uint8Array(w * h);
     for (let i = 0; i < comp.length; i++) comp[i] = labels[i] === bestLabel ? 1 : 0;
 
-    return this.mooreBoundary(comp, w, h);
-  }
-
-  private mooreBoundary(mask: Uint8Array, w: number, h: number): { x: number; y: number }[] {
-    // Find the first foreground pixel in raster order — guaranteed to lie
-    // on the boundary.
-    let startIdx = -1;
-    for (let i = 0; i < mask.length; i++) {
-      if (mask[i]) { startIdx = i; break; }
-    }
-    if (startIdx < 0) return [];
-
-    const sx = startIdx % w;
-    const sy = (startIdx - sx) / w;
-    const points: { x: number; y: number }[] = [{ x: sx, y: sy }];
-
-    // Single isolated pixel — emit the pixel's four corner points so callers
-    // (which require ≥ 3 vertices to build a polygon) get a valid 1×1 square
-    // instead of a degenerate single-vertex contour.
-    const singleton = (idx: number): boolean => {
-      const x = idx % w;
-      const y = (idx - x) / w;
-      const at = (xx: number, yy: number) => xx >= 0 && xx < w && yy >= 0 && yy < h && mask[yy * w + xx];
-      return !(at(x - 1, y) || at(x + 1, y) || at(x, y - 1) || at(x, y + 1));
-    };
-    if (singleton(startIdx)) {
-      return [
-        { x: sx,     y: sy     },
-        { x: sx + 1, y: sy     },
-        { x: sx + 1, y: sy + 1 },
-        { x: sx,     y: sy + 1 },
-      ];
-    }
-
-    // 8-connected neighbour offsets in clockwise order starting from West.
-    const dx = [-1, -1,  0,  1, 1, 1, 0, -1];
-    const dy = [ 0, -1, -1, -1, 0, 1, 1,  1];
-
-    let cx = sx, cy = sy;
-    // Backtrack direction — start from West (the side we'd be coming from in raster order).
-    let prevDir = 0;
-    const maxSteps = w * h * 8;
-
-    for (let step = 0; step < maxSteps; step++) {
-      // Standard Moore-neighbour tracing: search clockwise starting one step
-      // after the backtrack direction.
-      let found = false;
-      for (let k = 1; k <= 8; k++) {
-        const dir = (prevDir + k) & 7;
-        const nx = cx + dx[dir];
-        const ny = cy + dy[dir];
-        if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
-        if (mask[ny * w + nx]) {
-          // Backtrack direction is from new pixel back toward previous pixel.
-          prevDir = (dir + 4) & 7;
-          cx = nx;
-          cy = ny;
-          points.push({ x: cx, y: cy });
-          found = true;
-          break;
-        }
-      }
-      if (!found) break;
-      if (cx === sx && cy === sy && points.length > 1) {
-        points.pop();
-        break;
-      }
-    }
-
-    return points;
+    return mooreBoundary(comp, w, h);
   }
 }
 

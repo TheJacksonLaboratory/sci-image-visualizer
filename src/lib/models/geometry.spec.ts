@@ -1,13 +1,11 @@
 import {
-  BBoxMask,
-  masksOverlap,
   parseSvgPathPolygon,
   polygonToSvgPath,
   shapesEqual,
-  simplifyRing,
-  unionMasks,
   verticesToSvgPath,
 } from './geometry';
+import { BBoxMask, masksOverlap, unionMasks } from '../geometry/raster';
+import { simplifyRing } from '../geometry/ring';
 
 describe('geometry helpers', () => {
 

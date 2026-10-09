@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 
 import { WandImage, WandOptions, WandService } from './wand.service';
-import { BBoxMask, masksOverlap, unionMasks } from '../../models/geometry';
+import { BBoxMask, masksOverlap, unionMasks } from '../../geometry/raster';
 import { IViewportHost, IRegionDataHost } from '../../contracts/coordinate-transform.contract';
 import { Region, Polygon } from '../../models/region';
 

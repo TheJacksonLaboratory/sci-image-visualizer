@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 
 import { WandService } from '../wand/wand.service';
 import { CachedImageData, WandToolHost } from '../wand/wand-tool.service';
-import { BBoxMask, masksOverlap, unionMasks } from '../../models/geometry';
+import { BBoxMask, masksOverlap, unionMasks } from '../../geometry/raster';
 import { Region, Polygon } from '../../models/region';
 
 /** Brush parameters. `size` is the brush *diameter* in matrix (image) pixels. */

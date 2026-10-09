@@ -1,7 +1,8 @@
 import { Injectable } from '@angular/core';
 
 import { Region, Rectangle, Polygon, MultiPolygon } from './models/region';
-import { BBoxMask, unionMasks, simplifyRing } from './models/geometry';
+import { BBoxMask, unionMasks } from './geometry/raster';
+import { simplifyRing } from './geometry/ring';
 import { WandService } from './toolbar/wand/wand.service';
 
 /**
