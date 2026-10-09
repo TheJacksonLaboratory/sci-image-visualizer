@@ -25,7 +25,8 @@
              (change)="onHexInput($any($event.target).value)"
              maxlength="7" spellcheck="false">
       <input type="color" class="native-picker" [value]="color"
-             (input)="selectColor($any($event.target).value)"
+             (input)="previewColor($any($event.target).value)"
+             (change)="selectColor($any($event.target).value)"
              title="Open system color picker">
     </div>
 
@@ -34,21 +35,21 @@
       <div class="slider-row">
         <label>H</label>
         <input type="range" min="0" max="360" [ngModel]="hue"
-               (ngModelChange)="hue=$event; onHslChange()"
+               (ngModelChange)="hue=$event; onHslChange()" (change)="commitColor()"
                class="slider slider-hue" [style.background]="hueGradient">
         <span class="slider-value">{{hue}}</span>
       </div>
       <div class="slider-row">
         <label>S</label>
         <input type="range" min="0" max="100" [ngModel]="saturation"
-               (ngModelChange)="saturation=$event; onHslChange()"
+               (ngModelChange)="saturation=$event; onHslChange()" (change)="commitColor()"
                class="slider slider-sat" [style.background]="satGradient">
         <span class="slider-value">{{saturation}}</span>
       </div>
       <div class="slider-row">
         <label>L</label>
         <input type="range" min="0" max="100" [ngModel]="lightness"
-               (ngModelChange)="lightness=$event; onHslChange()"
+               (ngModelChange)="lightness=$event; onHslChange()" (change)="commitColor()"
                class="slider slider-light" [style.background]="lightGradient">
         <span class="slider-value">{{lightness}}</span>
       </div>
@@ -59,17 +60,17 @@
       <div class="rgb-field">
         <label>R</label>
         <input type="number" min="0" max="255" [ngModel]="red"
-               (ngModelChange)="red=$event; onRgbChange()">
+               (ngModelChange)="red=$event; onRgbChange()" (change)="commitColor()">
       </div>
       <div class="rgb-field">
         <label>G</label>
         <input type="number" min="0" max="255" [ngModel]="green"
-               (ngModelChange)="green=$event; onRgbChange()">
+               (ngModelChange)="green=$event; onRgbChange()" (change)="commitColor()">
       </div>
       <div class="rgb-field">
         <label>B</label>
         <input type="number" min="0" max="255" [ngModel]="blue"
-               (ngModelChange)="blue=$event; onRgbChange()">
+               (ngModelChange)="blue=$event; onRgbChange()" (change)="commitColor()">
       </div>
     </div>
   </div>

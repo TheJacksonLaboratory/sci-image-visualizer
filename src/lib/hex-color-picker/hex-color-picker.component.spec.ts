@@ -72,6 +72,7 @@ describe('HexColorPickerComponent', () => {
     component.saturation = 100;
     component.lightness = 50;
     component.onHslChange();
+    component.commitColor(); // slider released
     expect(component.color).toBe('#00FF00');
     expect(component.red).toBe(0);
     expect(component.green).toBe(255);
@@ -85,6 +86,7 @@ describe('HexColorPickerComponent', () => {
     component.green = 0;
     component.blue = 255;
     component.onRgbChange();
+    component.commitColor(); // field committed
     expect(component.color).toBe('#0000FF');
     expect(component.hue).toBe(240);
     expect(spy).toHaveBeenCalledWith('#0000FF');
@@ -198,5 +200,32 @@ describe('HexColorPickerComponent', () => {
     expect(component.red).toBe(r);
     expect(component.green).toBe(g);
     expect(component.blue).toBe(b);
+  });
+
+  describe('one commit per gesture, document listener only while open (RT-22)', () => {
+    it('slider moves preview through colorInput; the release commits colorChange once', () => {
+      const input = jest.spyOn(component.colorInput, 'emit');
+      const change = jest.spyOn(component.colorChange, 'emit');
+      for (const h of [10, 20, 30]) { component.hue = h; component.onHslChange(); }
+      expect(input).toHaveBeenCalledTimes(3);
+      expect(change).not.toHaveBeenCalled();
+      component.commitColor();
+      component.commitColor(); // a second release with no change is a no-op
+      expect(change).toHaveBeenCalledTimes(1);
+      expect(change).toHaveBeenCalledWith(component.color);
+    });
+
+    it('adds the document click listener on open and removes it on close', () => {
+      const add = jest.spyOn(document, 'addEventListener');
+      const remove = jest.spyOn(document, 'removeEventListener');
+      const clicks = () => add.mock.calls.filter(([type]) => type === 'click').length;
+      expect(clicks()).toBe(0);
+      component.toggle();
+      expect(clicks()).toBe(1);
+      component.close();
+      expect(remove.mock.calls.filter(([type]) => type === 'click').length).toBe(1);
+      add.mockRestore();
+      remove.mockRestore();
+    });
   });
 });

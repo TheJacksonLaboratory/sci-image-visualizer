@@ -1,13 +1,11 @@
 import {
   ChangeDetectionStrategy, ChangeDetectorRef, Component, ElementRef,
-  EventEmitter, HostListener, Input, OnDestroy, Output, Renderer2, ViewChild,
+  EventEmitter, Input, NgZone, OnDestroy, Output, Renderer2, ViewChild,
 } from '@angular/core';
 
 import { hslToHex } from '../store/class-color.util';
 
 @Component({
-  // Canonical prefixed selector first; the unprefixed original is kept as an
-  // alias for one release (pre-publication back-compat).
   selector: 'hex-color-picker',
   templateUrl: './hex-color-picker.component.html',
   styleUrls: ['./hex-color-picker.component.scss'],
@@ -22,7 +20,18 @@ export class HexColorPickerComponent implements OnDestroy {
 
   private _color = '#000000';
 
+  /** The committed colour: a swatch/hex pick, or a slider/field/system-picker
+   *  edit once it is released. Hosts commit their state on this. */
   @Output() colorChange = new EventEmitter<string>();
+  /** Every intermediate colour while a slider, number field or the system picker
+   *  is being dragged — for a live preview; {@link colorChange} follows on release. */
+  @Output() colorInput = new EventEmitter<string>();
+
+  /** The last colour emitted on (or received through) `color`, so a release
+   *  without a change doesn't commit again. */
+  private committed = '#000000';
+  /** Removes the document click listener; set only while the dropdown is open. */
+  private unlistenDocumentClick: (() => void) | null = null;
 
   open = false;
 
@@ -81,12 +90,15 @@ export class HexColorPickerComponent implements OnDestroy {
   set color(val: string) {
     const normalizedColor = this.normalizeHexColor(val);
     this._color = normalizedColor;
+    this.committed = normalizedColor;
     this.syncFromHex(normalizedColor);
   }
 
-  constructor(private elRef: ElementRef, private renderer: Renderer2, private cdr: ChangeDetectorRef) {}
+  constructor(private elRef: ElementRef, private renderer: Renderer2, private cdr: ChangeDetectorRef,
+              private ngZone: NgZone) {}
 
   ngOnDestroy() {
+    this.stopListeningForOutsideClicks();
     this.removeDropdownFromBody();
   }
 
@@ -96,9 +108,30 @@ export class HexColorPickerComponent implements OnDestroy {
       // Let Angular render the dropdown, then move it to body
       this.cdr.detectChanges();
       this.appendDropdownToBody();
+      this.listenForOutsideClicks();
     } else {
-      this.removeDropdownFromBody();
+      this.close();
     }
+  }
+
+  /**
+   * Close on a click outside the swatch and dropdown. Registered only while
+   * open and outside the Angular zone, so the many pickers on a page (one per
+   * class row and channel) don't each run app-wide change detection on every
+   * click anywhere (RT-22).
+   */
+  private listenForOutsideClicks() {
+    if (this.unlistenDocumentClick) return;
+    this.ngZone.runOutsideAngular(() => {
+      this.unlistenDocumentClick = this.renderer.listen('document', 'click', (event: Event) => {
+        if (this.isOutside(event)) this.ngZone.run(() => this.onDocumentClick(event));
+      });
+    });
+  }
+
+  private stopListeningForOutsideClicks() {
+    this.unlistenDocumentClick?.();
+    this.unlistenDocumentClick = null;
   }
 
   private appendDropdownToBody() {
@@ -133,7 +166,21 @@ export class HexColorPickerComponent implements OnDestroy {
   selectColor(hex: string) {
     this._color = hex;
     this.syncFromHex(hex);
-    this.colorChange.emit(hex);
+    this.commitColor();
+  }
+
+  /** Live preview from the system colour picker while it is open. */
+  previewColor(hex: string) {
+    this._color = hex;
+    this.syncFromHex(hex);
+    this.colorInput.emit(hex);
+  }
+
+  /** Commit the current colour (`colorChange`) unless it was already committed. */
+  commitColor() {
+    if (this._color === this.committed) return;
+    this.committed = this._color;
+    this.colorChange.emit(this._color);
   }
 
   selectAndClose(hex: string) {
@@ -143,7 +190,9 @@ export class HexColorPickerComponent implements OnDestroy {
 
   close() {
     this.open = false;
+    this.stopListeningForOutsideClicks();
     this.removeDropdownFromBody();
+    this.cdr.markForCheck();
   }
 
   onHexInput(value: string) {
@@ -156,7 +205,7 @@ export class HexColorPickerComponent implements OnDestroy {
     const hex = hslToHex(this.hue, this.saturation, this.lightness);
     this._color = hex;
     this.syncRgbFromHex(hex);
-    this.colorChange.emit(hex);
+    this.colorInput.emit(hex);
   }
 
   onRgbChange() {
@@ -171,7 +220,7 @@ export class HexColorPickerComponent implements OnDestroy {
     const hex = this.rgbToHex(red, green, blue);
     this._color = hex;
     this.syncHslFromRgb(red, green, blue);
-    this.colorChange.emit(hex);
+    this.colorInput.emit(hex);
   }
 
   get hueGradient(): string {
@@ -190,15 +239,15 @@ export class HexColorPickerComponent implements OnDestroy {
     return `linear-gradient(to right, hsl(${this.hue}, ${this.saturation}%, 0%), hsl(${this.hue}, ${this.saturation}%, 50%), hsl(${this.hue}, ${this.saturation}%, 100%))`;
   }
 
-  @HostListener('document:click', ['$event'])
+  /** Close the dropdown when `event` is a click outside the picker. */
   onDocumentClick(event: Event) {
     if (!this.open) return;
+    if (this.isOutside(event)) this.close();
+  }
+
+  private isOutside(event: Event): boolean {
     const target = event.target as Node;
-    const clickedInside =
-      this.elRef.nativeElement.contains(target) || this.dropdownRef?.nativeElement.contains(target);
-    if (!clickedInside) {
-      this.close();
-    }
+    return !this.elRef.nativeElement.contains(target) && !this.dropdownRef?.nativeElement.contains(target);
   }
 
   // --- Color conversion utilities ---
