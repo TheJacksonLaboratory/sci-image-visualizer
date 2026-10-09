@@ -518,6 +518,21 @@ describe('RoutingVisualizerService (characterization)', () => {
     expect(osd.unsubscribe).toHaveBeenCalled();
   });
 
+  it('unsubscribe also disposes the napari-js viewer and forgets the backend on screen (CORE-7)', async () => {
+    await router.load(IMAGE_INFO, 0);
+    router.setPlotType(PlotType.NAPARI_VOLUME);
+    await router.plot('div', {}, IMAGE_INFO, 600, PlotType.NAPARI_VOLUME);
+    expect(napari.plot).toHaveBeenCalled();
+    napari.reset.mockClear();
+
+    router.unsubscribe();
+    expect(napari.reset).toHaveBeenCalled();
+    // Nothing is on screen any more: delegation falls back to the Plotly default.
+    router.zoomIn();
+    expect(plotly.zoomIn).toHaveBeenCalled();
+    expect(napari.zoomIn).not.toHaveBeenCalled();
+  });
+
   it('getIsosurfaceControls / getIntensityControls are Plotly-owned', () => {
     router.getIsosurfaceControls();
     router.getIntensityControls();
