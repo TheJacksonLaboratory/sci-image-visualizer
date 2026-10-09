@@ -66,9 +66,11 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   paginatorFirst = 0;
   paginatorRows = 10;
   readonly rowsPerPageOptions = [10, 25, 50];
-  /** Regions whose Class cell is currently in edit mode.
-   *  Using object identity as the key avoids needing a unique id field. */
-  editingLabelRegions = new Set<any>();
+  /** Regions whose Class cell is currently in edit mode → the label being typed.
+   *  The draft is committed on Enter and discarded on Escape/✕, so typing never
+   *  writes into the store's region (RT-18). Keyed by object identity, which
+   *  avoids needing a unique id field. */
+  editingLabelRegions = new Map<Region, string>();
 
   showSaveAsDialog = false;
   saveAsFilename = '';
@@ -301,13 +303,42 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.recomputeClassCounts();
   }
 
+  /**
+   * Copy-on-write edit (review RT-1). The editor's rows are the region store's
+   * live instances, and the store takes its undo snapshot only when the edit is
+   * committed — so an edit must replace a region with a patched copy (and any
+   * bounds it changes with new bounds), never mutate the instance the store
+   * holds. Returns the copies by original; the selection and an open label edit
+   * follow them.
+   */
+  private patchRegions(patchFor: (r: Region) => Partial<Region> | null): Map<Region, Region> {
+    const copies = new Map<Region, Region>();
+    this.regions = this.regions.map((r) => {
+      const patch = patchFor(r);
+      if (!patch) return r;
+      const copy = Object.assign(new Region(), r, patch);
+      copies.set(r, copy);
+      return copy;
+    });
+    if (copies.size) {
+      this.selectedRegions = (this.selectedRegions ?? []).map((r) => copies.get(r) ?? r);
+      for (const [r, copy] of copies) {
+        const draft = this.editingLabelRegions.get(r);
+        if (draft === undefined) continue;
+        this.editingLabelRegions.delete(r);
+        this.editingLabelRegions.set(copy, draft);
+      }
+    }
+    return copies;
+  }
+
   /** Set one region's outline colour from the per-row picker and commit live.
    *  Remembers it as the label's colour so same-class regions added later match
    *  (jit-ui#85 — the Region Editor's per-region Color column). */
   changeRegionColor(region: Region, color: string): void {
     if (!color || region.color === color) return;
-    region.color = color;
-    region.colorOverridden = true; // explicit per-region colour — preserve it against preset (re)apply (jit-ui#70)
+    // colorOverridden: explicit per-region colour — preserve it against preset (re)apply (jit-ui#70)
+    this.patchRegions((r) => (r === region ? { color, colorOverridden: true } : null));
     if (region.label) this.labelColors.set(region.label, color);
     this.setRegionsFromEditor();
   }
@@ -337,13 +368,11 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       }
     }
     // update colors of the regions
-    for (const reg of this.regions) {
-      if (!reg.color) {
-        if (reg.label && this.labelColors.has(reg.label)) {
-          reg.color = this.labelColors.get(reg.label);
-        }
-      }
-    }
+    this.patchRegions((reg) =>
+      !reg.color && reg.label && this.labelColors.has(reg.label)
+        ? { color: this.labelColors.get(reg.label) }
+        : null,
+    );
     // update labels map
     this.labelColors.clear();
     for (const reg of this.regions) {
@@ -358,21 +387,29 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   xRectUpdate(region: Region, event: any) {
     const rectangle = region.bounds;
     if (rectangle && rectangle instanceof Rectangle) {
-      rectangle.x = event.value;
+      this.patchRegionBounds(region, { x: event.value });
       this.setRegionsFromEditor();
     }
   }
   yRectUpdate(region: Region, event: any) {
     const rectangle = region.bounds;
     if (rectangle && rectangle instanceof Rectangle) {
-      rectangle.y = event.value;
+      this.patchRegionBounds(region, { y: event.value });
       this.setRegionsFromEditor();
     }
+  }
+
+  /** Replace a rectangle region's bounds with a patched copy (see patchRegions). */
+  private patchRegionBounds(region: Region, patch: Partial<Rectangle>): void {
+    this.patchRegions((r) =>
+      r === region ? { bounds: Object.assign(new Rectangle(), r.bounds, patch) } : null,
+    );
   }
   widthRectUpdate(region: Region, event: any) {
     if (event.value === null || event.value === undefined) return;
     const rectangle = region.bounds;
     if (rectangle && rectangle instanceof Rectangle) {
+      const patch: Partial<Rectangle> = { width: event.value };
       const reg = this.regionsCopy.filter((element: Region) => element.id === region.id);
       if (reg.length) {
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -381,9 +418,9 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
         const diffWidth = event.value - oldWidth;
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore
-        rectangle.x = Math.round(reg[0].bounds.x - diffWidth / 2);
+        patch.x = Math.round(reg[0].bounds.x - diffWidth / 2);
       }
-      rectangle.width = event.value;
+      this.patchRegionBounds(region, patch);
       this.setRegionsFromEditor();
       this.regionsCopy = this.deepClone(this.regions);
     }
@@ -392,6 +429,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     if (event.value === null || event.value === undefined) return;
     const rectangle = region.bounds;
     if (rectangle && rectangle instanceof Rectangle) {
+      const patch: Partial<Rectangle> = { height: event.value };
       const reg = this.regionsCopy.filter((element: Region) => element.id === region.id);
       if (reg.length) {
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -400,9 +438,9 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
         const diffHeight = event.value - oldHeight;
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore
-        rectangle.y = Math.round(reg[0].bounds.y - diffHeight / 2);
+        patch.y = Math.round(reg[0].bounds.y - diffHeight / 2);
       }
-      rectangle.height = event.value;
+      this.patchRegionBounds(region, patch);
       this.setRegionsFromEditor();
       this.regionsCopy = this.deepClone(this.regions);
     }
@@ -489,20 +527,26 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.setRegionsFromEditor();
   }
 
-  isEditingLabel(region: any): boolean {
+  isEditingLabel(region: Region): boolean {
     return this.editingLabelRegions.has(region);
   }
 
-  startEditLabel(region: any, event?: Event): void {
+  startEditLabel(region: Region, event?: Event): void {
     event?.stopPropagation(); // don't toggle row selection
-    this.editingLabelRegions.add(region);
+    this.editingLabelRegions.set(region, region.label ?? '');
   }
 
-  stopEditLabel(region: any, commit: boolean, event?: Event): void {
+  stopEditLabel(region: Region, commit: boolean, event?: Event): void {
     event?.stopPropagation();
+    const draft = this.editingLabelRegions.get(region);
     this.editingLabelRegions.delete(region);
     if (commit) {
-      this.labelRegionUpdate(region, true);
+      // A changed label commits as a replacement region, so it is undoable (RT-1).
+      const edited =
+        draft !== undefined && draft !== region.label
+          ? (this.patchRegions((r) => (r === region ? { label: draft } : null)).get(region) ?? region)
+          : region;
+      this.labelRegionUpdate(edited, true);
     }
   }
 
@@ -581,13 +625,16 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
    * This method rounds all the rectangle regions lengths to multiple of 512
    */
   roundRectangleLengths() {
-    for (const region of this.regions) {
-      if (region.bounds instanceof Rectangle) {
-        const rect = region.bounds;
-        rect.height = Math.round(rect.height / 512) * 512;
-        rect.width = Math.round(rect.width / 512) * 512;
-      }
-    }
+    this.patchRegions((region) => {
+      const rect = region.bounds;
+      if (!(rect instanceof Rectangle)) return null;
+      return {
+        bounds: Object.assign(new Rectangle(), rect, {
+          height: Math.round(rect.height / 512) * 512,
+          width: Math.round(rect.width / 512) * 512,
+        }),
+      };
+    });
     this.setRegionsFromEditor();
   }
 
@@ -612,12 +659,11 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   changeShapeColor(event: any) {
     this.shapeColor = event.value;
-    for (const region of this.regions) {
-      if (region.label === this.selectedLabelColor && this.labelColors.has(region.label)) {
-        this.labelColors.set(region.label, this.shapeColor);
-        region.color = this.shapeColor;
-      }
-    }
+    this.patchRegions((region) => {
+      if (region.label !== this.selectedLabelColor || !this.labelColors.has(region.label)) return null;
+      this.labelColors.set(region.label, this.shapeColor);
+      return { color: this.shapeColor };
+    });
     this.setRegionsFromEditor(this.fillColor);
   }
 
@@ -649,14 +695,16 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
    *  later match. */
   applyColorToSelected() {
     const colorByLabel = new Map(this.classColorEdits.map((e) => [e.label, e.color]));
-    for (const region of this.selectedRegions ?? []) {
+    const selected = new Set(this.selectedRegions ?? []);
+    this.patchRegions((region) => {
+      if (!selected.has(region)) return null;
       const label = region.label?.trim() ?? '';
       const color = colorByLabel.get(label);
-      if (!color) continue;
-      region.color = color;
-      region.colorOverridden = true; // explicit colour — preserve against preset (re)apply (jit-ui#70)
+      if (!color) return null;
       if (label) this.labelColors.set(label, color);
-    }
+      // explicit colour — preserve against preset (re)apply (jit-ui#70)
+      return { color, colorOverridden: true };
+    });
     this.setRegionsFromEditor();
     this.showColorDialog = false;
   }
@@ -761,22 +809,20 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     removed.delete(keyOf(this.defaultClassName));
     if (!removed.size) return;
     const color = colorForLabel(this.defaultClassName, this.presetSet);
-    for (const r of this.regions) {
-      if (r.label && removed.has(keyOf(r.label))) {
-        r.label = this.defaultClassName;
-        r.colorOverridden = false;
-        r.color = color;
-      }
-    }
+    this.patchRegions((r) =>
+      r.label && removed.has(keyOf(r.label))
+        ? { label: this.defaultClassName, colorOverridden: false, color }
+        : null,
+    );
   }
 
   /** Stamp a class (and its preset/fallback colour) onto one region from the Class
    *  dropdown; choosing a class opts the region back into the preset colour. */
   applyPresetToRegion(region: Region, className: string): void {
     const name = (className ?? '').trim();
-    region.label = name;
-    region.colorOverridden = false;
-    if (name) region.color = colorForLabel(name, this.presetSet);
+    const patch: Partial<Region> = { label: name, colorOverridden: false };
+    if (name) patch.color = colorForLabel(name, this.presetSet);
+    this.patchRegions((r) => (r === region ? patch : null));
     this.setRegionsFromEditor();
   }
 
@@ -789,13 +835,10 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   /** Apply a class (label + preset/fallback colour) to the current selection and commit. */
   private applyClassToSelected(name: string): void {
-    const selected = this.selectedRegions ?? [];
-    if (!selected.length) return;
-    for (const r of selected) {
-      r.label = name;
-      r.colorOverridden = false;
-      r.color = colorForLabel(name, this.presetSet);
-    }
+    const selected = new Set(this.selectedRegions ?? []);
+    if (!selected.size) return;
+    const color = colorForLabel(name, this.presetSet);
+    this.patchRegions((r) => (selected.has(r) ? { label: name, colorOverridden: false, color } : null));
     this.setRegionsFromEditor();
   }
 

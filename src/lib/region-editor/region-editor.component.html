@@ -191,7 +191,8 @@
                    pTooltip="Close" tooltipPosition="bottom"
                    (click)="stopEditLabel(region, false, $event)"></i>
                 <input type="text" pInputText class="p-inputtext-sm w-full"
-                       [(ngModel)]="region.label"
+                       [ngModel]="editingLabelRegions.get(region)"
+                       (ngModelChange)="editingLabelRegions.set(region, $event)"
                        (click)="$event.stopPropagation()"
                        (keydown.enter)="stopEditLabel(region, true, $event)"
                        (keydown.escape)="stopEditLabel(region, false, $event)"/>

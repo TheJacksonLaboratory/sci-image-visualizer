@@ -157,8 +157,10 @@ describe('RegionEditorComponent', () => {
     rect.width = 1000;
     rect.height = 600;
     component.roundRectangleLengths();
-    expect(rect.width).toBe(1024);
-    expect(rect.height).toBe(512);
+    // Committed as a replacement (copy-on-write, RT-1): read the row back.
+    const rounded = component.regions[0].bounds as Rectangle;
+    expect(rounded.width).toBe(1024);
+    expect(rounded.height).toBe(512);
   });
 
   it('should round small rectangle lengths to 0', () => {
@@ -167,8 +169,9 @@ describe('RegionEditorComponent', () => {
     rect.width = 100;
     rect.height = 200;
     component.roundRectangleLengths();
-    expect(rect.width).toBe(0);
-    expect(rect.height).toBe(0);
+    const rounded = component.regions[0].bounds as Rectangle;
+    expect(rounded.width).toBe(0);
+    expect(rounded.height).toBe(0);
   });
 
   it('should change shape color for regions matching selected label', () => {
@@ -1195,9 +1198,10 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
     const r = rect();
     (component as any).regions = [r];
     component.xRectUpdate(r, { value: 99 });
-    component.yRectUpdate(r, { value: 88 });
-    expect((r.bounds as Rectangle).x).toBe(99);
-    expect((r.bounds as Rectangle).y).toBe(88);
+    component.yRectUpdate(component.regions[0], { value: 88 });
+    expect((component.regions[0].bounds as Rectangle).x).toBe(99);
+    expect((component.regions[0].bounds as Rectangle).y).toBe(88);
+    expect((r.bounds as Rectangle).x).toBe(10); // the original instance is never mutated (RT-1)
     expect(api.setAnnotationRegions).toHaveBeenCalled();
   });
 
@@ -1206,8 +1210,8 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
     (component as any).regions = [r];
     (component as any).regionsCopy = [{ id: 1, bounds: { x: 10, y: 20, width: 30, height: 40 } }];
     component.widthRectUpdate(r, { value: 50 }); // diff +20 → x = round(10 - 10) = 0
-    expect((r.bounds as Rectangle).width).toBe(50);
-    expect((r.bounds as Rectangle).x).toBe(0);
+    expect((component.regions[0].bounds as Rectangle).width).toBe(50);
+    expect((component.regions[0].bounds as Rectangle).x).toBe(0);
   });
 
   it('heightRectUpdate recenters y by half the height delta', () => {
@@ -1215,8 +1219,8 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
     (component as any).regions = [r];
     (component as any).regionsCopy = [{ id: 1, bounds: { x: 10, y: 20, width: 30, height: 40 } }];
     component.heightRectUpdate(r, { value: 60 }); // diff +20 → y = round(20 - 10) = 10
-    expect((r.bounds as Rectangle).height).toBe(60);
-    expect((r.bounds as Rectangle).y).toBe(10);
+    expect((component.regions[0].bounds as Rectangle).height).toBe(60);
+    expect((component.regions[0].bounds as Rectangle).y).toBe(10);
   });
 
   it('widthRectUpdate ignores null/undefined values', () => {
@@ -1270,9 +1274,8 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
       { label: 'Stroma', color: '#123456' },
     ];
     component.applyColorToSelected();
-    expect(a.color).toBe('#abcdef');
-    expect(b.color).toBe('#abcdef');
-    expect(c.color).toBe('#123456');
+    expect(component.regions.map((r) => r.color)).toEqual(['#abcdef', '#abcdef', '#123456']);
+    expect(component.selectedRegions).toEqual(component.regions); // the selection follows the copies
     expect(component.labelColors.get('Tumor')).toBe('#abcdef');
     expect(component.labelColors.get('Stroma')).toBe('#123456');
     expect(spy).toHaveBeenCalled();
@@ -1317,7 +1320,8 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
     const spy = api.setAnnotationRegions as jest.Mock;
     spy.mockClear();
     component.changeRegionColor(r, '#abcdef');
-    expect(r.color).toBe('#abcdef');
+    expect(component.regions[0].color).toBe('#abcdef');
+    expect(r.color).toBeUndefined(); // committed as a copy; the original is untouched (RT-1)
     expect(spy).toHaveBeenCalled();
   });
 
@@ -1449,28 +1453,31 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
 
   it('applyPresetToRegion stamps the class + preset colour, clears the override, and commits', () => {
     const r = Object.assign(new Region(), { id: 1, label: 'x', color: '#000000', colorOverridden: true });
+    component.regions = [r];
     component.applyPresetToRegion(r, 'Tumor');
-    expect(r.label).toBe('Tumor');
-    expect(r.color).toBe('#FF4444');
-    expect(r.colorOverridden).toBe(false);
+    expect(component.regions[0].label).toBe('Tumor');
+    expect(component.regions[0].color).toBe('#FF4444');
+    expect(component.regions[0].colorOverridden).toBe(false);
     expect(api.setAnnotationRegions).toHaveBeenCalled();
   });
 
   it('applyPresetToRegion gives an unknown class a deterministic fallback colour', () => {
     const r = Object.assign(new Region(), { id: 1 });
+    component.regions = [r];
     component.applyPresetToRegion(r, 'Mitosis');
-    expect(r.label).toBe('Mitosis');
-    expect(currentSet.fallbackPalette).toContain(r.color);
+    expect(component.regions[0].label).toBe('Mitosis');
+    expect(currentSet.fallbackPalette).toContain(component.regions[0].color);
   });
 
   it('selectActiveClass sets the active class and applies it to the selection', () => {
     const a = Object.assign(new Region(), { id: 1 });
     const b = Object.assign(new Region(), { id: 2 });
+    component.regions = [a, b];
     component.selectedRegions = [a, b];
     component.selectActiveClass('Stroma');
     expect(component.activeClass).toBe('Stroma');
-    expect(a.label).toBe('Stroma');
-    expect(b.color).toBe('#44AAFF');
+    expect(component.regions[0].label).toBe('Stroma');
+    expect(component.regions[1].color).toBe('#44AAFF');
     expect(api.setAnnotationRegions).toHaveBeenCalled();
   });
 
@@ -1530,10 +1537,11 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
 
     component.deleteClass('Tumor');
 
-    expect(a.label).toBe('Region');
-    expect(a.color).toBe('#00FFFF'); // the Region class colour
-    expect(a.colorOverridden).toBe(false);
-    expect(b.label).toBe('Stroma'); // other regions untouched
+    expect(component.regions[0].label).toBe('Region');
+    expect(component.regions[0].color).toBe('#00FFFF'); // the Region class colour
+    expect(component.regions[0].colorOverridden).toBe(false);
+    expect(component.regions[1]).toBe(b); // other regions untouched
+    expect(b.label).toBe('Stroma');
     expect(api.removeClass).toHaveBeenCalledWith('Tumor');
   });
 
@@ -1549,8 +1557,8 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
     component.presetDraft!.classes = [{ name: 'Region', color: '#00FFFF' }]; // drop Tumor
     component.applyManageDialog(true);
 
-    expect(a.label).toBe('Region');
-    expect(a.colorOverridden).toBe(false);
+    expect(component.regions[0].label).toBe('Region');
+    expect(component.regions[0].colorOverridden).toBe(false);
   });
 
   it('deleting the in-use default "Region" class is disabled (helper reports it)', () => {
@@ -1634,7 +1642,7 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
     component.regions = [t];
     component.deleteClass('Tumor'); // in use -> removed, its region reverts to Region
     expect(api.removeClass).toHaveBeenCalledWith('Tumor');
-    expect(t.label).toBe('Region');
+    expect(component.regions[0].label).toBe('Region');
     (api.removeClass as jest.Mock).mockClear();
     component.deleteClass('Necrosis'); // unused -> removed
     expect(api.removeClass).toHaveBeenCalledWith('Necrosis');
@@ -1642,21 +1650,23 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
 
   it('applyBulkClass sets the chosen class on the selection', () => {
     const a = Object.assign(new Region(), { id: 1 });
+    component.regions = [a];
     component.selectedRegions = [a];
     component.bulkClass = 'Stroma';
     component.applyBulkClass();
-    expect(a.label).toBe('Stroma');
-    expect(a.color).toBe('#44AAFF');
+    expect(component.regions[0].label).toBe('Stroma');
+    expect(component.regions[0].color).toBe('#44AAFF');
     expect(api.setAnnotationRegions).toHaveBeenCalled();
   });
 
   it('addAndApplyBulkClass adds a new class and sets it on the selection', () => {
     const a = Object.assign(new Region(), { id: 1 });
+    component.regions = [a];
     component.selectedRegions = [a];
     component.newBulkClass = 'Mitosis';
     component.addAndApplyBulkClass();
     expect(api.upsertClass).toHaveBeenCalledWith(expect.objectContaining({ name: 'Mitosis' }));
-    expect(a.label).toBe('Mitosis');
+    expect(component.regions[0].label).toBe('Mitosis');
     expect(component.newBulkClass).toBe('');
   });
 });
