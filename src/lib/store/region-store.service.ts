@@ -3,7 +3,7 @@ import { BehaviorSubject, Observable, Subject } from 'rxjs';
 
 import { IImageInfo } from '../contracts/image.contract';
 import { Region, Rectangle, Polygon, MultiPolygon, hydrateBounds } from '../models/region';
-import { PlotUtilities } from '../plot.utilities';
+import { downloadGeoJson, regionsFromGeoJson, regionsToGeoJson } from '../models/region-geojson';
 import { VisualizerStore } from './visualizer-store.service';
 import { defaultHandleOffsets } from '../models/bezier';
 import { IRegionStore } from '../contracts/visualizer.contract';
@@ -28,8 +28,8 @@ import { cloneBounds, makePolygon, rectToRing, regionPolygons } from '../models/
  *    add/delete/move vertex) the OSD overlay drives.
  *
  * Classification colours live in {@link VisualizerStore} (shared by both
- * backends); GeoJSON import/export and the closed-polygon projection reuse the
- * neutral {@link PlotUtilities} helpers. All coordinates are image pixels.
+ * backends); GeoJSON import/export is `models/region-geojson`. All coordinates
+ * are image pixels.
  */
 @Injectable({ providedIn: 'root' })
 export class RegionStore implements IRegionStore, IRegionEditApi {
@@ -119,8 +119,6 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   /** Emit coalescing for live drags (see IRegionEditApi.beginBatch). */
   private batchDepth = 0;
   private pendingEmit = false;
-
-  private readonly plotUtilities = new PlotUtilities();
 
   constructor(private store: VisualizerStore) {}
 
@@ -542,16 +540,18 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     return c;
   }
 
-  // ── IRegionStore: GeoJSON I/O (neutral helpers) ────────────────────────
+  // ── IRegionStore: GeoJSON I/O (models/region-geojson) ──────────────────
 
   importRegions(geoJsonStr: string): Region[] {
-    return this.plotUtilities.importROIsFromGeoJson(geoJsonStr);
+    return regionsFromGeoJson(geoJsonStr);
   }
-  exportRegions(regions: Region[]): void {
-    this.plotUtilities.saveToFile(this.plotUtilities.exportROIsToGeoJson(regions));
+  /** Download `regions` as GeoJSON, named after `fileName` (extension
+   *  replaced by `.geojson`) or `rois.geojson` without one. */
+  exportRegions(regions: Region[], fileName?: string): void {
+    downloadGeoJson(regionsToGeoJson(regions), fileName);
   }
   getGeoJsonString(regions: Region[]): string {
-    return this.plotUtilities.exportROIsToGeoJson(regions);
+    return regionsToGeoJson(regions);
   }
 
   // ── IRegionEditApi: structural edits ───────────────────────────────────

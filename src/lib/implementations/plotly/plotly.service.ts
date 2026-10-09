@@ -2143,8 +2143,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IVisualizer {
 
   /** As the base class, but the file is named after the image on screen. */
   override exportRegions(regions: Region[]) {
-    const jsonString = this.plotUtilities.exportROIsToGeoJson(regions);
-    this.plotUtilities.saveToFile(jsonString, this.fileName);
+    this.regionStore.exportRegions(regions, this.fileName);
   }
 
   getStackLoadingProgress() {
