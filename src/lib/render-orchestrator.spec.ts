@@ -22,6 +22,7 @@ describe('RenderOrchestrator', () => {
       sharpenSettled: track('sharpenSettled') as any,
       finished: jest.fn((viaSmall: boolean) => { calls.push(`finished(${viaSmall})`); }) as any,
       sharpenFailed: track('sharpenFailed') as any,
+      renderFailed: track('renderFailed') as any,
     };
     jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -37,10 +38,23 @@ describe('RenderOrchestrator', () => {
     expect(host.smallShown).not.toHaveBeenCalled();
   });
 
-  it('single-pass failure still finalizes (overlay must never get stuck)', async () => {
-    host.renderPhase.mockRejectedValueOnce(new Error('503'));
+  it('single-pass failure still finalizes (overlay must never get stuck) and reports it', async () => {
+    const err = new Error('503');
+    host.renderPhase.mockRejectedValueOnce(err);
     await new RenderOrchestrator(host, 0).render(INFO, null);
     expect(host.finished).toHaveBeenCalledWith(false);
+    expect(host.renderFailed).toHaveBeenCalledWith(err);
+    expect(calls).toEqual(['finished(false)', 'renderFailed']); // overlay released first
+  });
+
+  it('small AND large failing finalizes and reports a failed render, not a failed sharpen', async () => {
+    // Nothing reached the screen, so "the low-resolution preview is still shown"
+    // would be false — and sharpenFailed does not release the loading overlay.
+    host.renderPhase.mockRejectedValue(new Error('no WebGPU'));
+    await new RenderOrchestrator(host, 0).render(INFO, SMALL);
+    expect(host.sharpenFailed).not.toHaveBeenCalled();
+    expect(host.finished).toHaveBeenCalledWith(false);
+    expect(host.renderFailed).toHaveBeenCalled();
   });
 
   it('two-pass happy path: small shown → large in place → finished(viaSmall)', async () => {

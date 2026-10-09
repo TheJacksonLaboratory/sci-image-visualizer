@@ -1311,6 +1311,61 @@ describe('VisualizerComponent — global listeners run outside Angular (CORE-4)'
   });
 });
 
+describe('VisualizerComponent — failed and superseded renders (CORE-11)', () => {
+  const info = (fileName: string): any => ({
+    fileName, urls: [`/p/${fileName}`], isStack: false, showStack: false, isGrayscale: true,
+    trueImageSize: [10, 10], imageMeta: [],
+  });
+
+  beforeEach(() => { orchestratorHosts.length = 0; });
+
+  it('treats plot() resolving false as a failure, not a finished render', async () => {
+    const { component, plot, imageInfo$ } = harness();
+    plot.plot.mockResolvedValue(false);
+    imageInfo$.next(info('A.tif'));
+    const [host] = orchestratorHosts;
+    await expect(host.renderPhase(info('A.tif'), false)).rejects.toThrow();
+    component.ngOnDestroy();
+  });
+
+  it('tells the user when the current render failed, and stays quiet for a superseded one', () => {
+    const { component, imageInfo$, messages } = harness();
+    imageInfo$.next(info('A.tif'));
+    imageInfo$.next(info('B.tif'));
+    const [stale, live] = orchestratorHosts;
+    stale.renderFailed(new Error('gone'));
+    expect(messages.add).not.toHaveBeenCalled();
+    live.renderFailed(new Error('no WebGPU'));
+    expect(messages.add).toHaveBeenCalledWith(expect.objectContaining({ severity: 'error' }));
+    component.ngOnDestroy();
+  });
+
+  it('hands load() an AbortSignal and aborts it when a newer image supersedes the render', async () => {
+    const { component, plot, imageInfo$ } = harness();
+    imageInfo$.next(info('A.tif'));
+    await orchestratorHosts[0].renderPhase(info('A.tif'), false);
+    const signal: AbortSignal = plot.load.mock.calls[0][2];
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(signal.aborted).toBe(false);
+    imageInfo$.next(info('B.tif'));
+    expect(signal.aborted).toBe(true);
+    component.ngOnDestroy();
+  });
+
+  it('aborts the in-flight load on cancel and on destroy', async () => {
+    const { component, plot, imageInfo$ } = harness();
+    imageInfo$.next(info('A.tif'));
+    await orchestratorHosts[0].renderPhase(info('A.tif'), false);
+    component.cancelLoading();
+    expect(plot.load.mock.calls[0][2].aborted).toBe(true);
+
+    imageInfo$.next(info('B.tif'));
+    await orchestratorHosts[1].renderPhase(info('B.tif'), false);
+    component.ngOnDestroy();
+    expect(plot.load.mock.calls[1][2].aborted).toBe(true);
+  });
+});
+
 describe('VisualizerComponent — host handle (CORE-10)', () => {
   it('registers a small typed handle with the host, not the component itself', () => {
     const { component, state, plot } = harness();

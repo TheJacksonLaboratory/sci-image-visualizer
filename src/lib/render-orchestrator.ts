@@ -17,7 +17,8 @@ import { IImageInfo } from './contracts/image.contract';
 export interface TwoPassRenderHost {
   /** Load + plot one phase (the component owns div/screen/plot-type/z and the
    *  newer-click filename guard). `inPlace` updates the existing render so the
-   *  canvas doesn't blank during the small→large swap. */
+   *  canvas doesn't blank during the small→large swap. Rejects when the phase
+   *  could not be drawn (including a backend's `plot()` resolving false). */
   renderPhase(info: IImageInfo, inPlace: boolean): Promise<unknown>;
   /** The small tier is on screen — drop the full loading overlay so the user
    *  sees the blurry preview, and show the sharpening spinner. */
@@ -31,6 +32,9 @@ export interface TwoPassRenderHost {
   /** Both large-tier attempts failed; the small tier stays on screen as the
    *  fallback. Surface it to the user and release the running guard + ROI. */
   sharpenFailed(err: unknown): void;
+  /** Nothing could be drawn: the single pass failed, or both tiers did. Called
+   *  after {@link finished} (which releases the overlay), to tell the user. */
+  renderFailed(err: unknown): void;
 }
 
 export class RenderOrchestrator {
@@ -48,6 +52,7 @@ export class RenderOrchestrator {
       } catch (err) {
         console.error('Preview failed', err);
         this.host.finished(false);
+        this.host.renderFailed(err);
       }
       return;
     }
@@ -70,7 +75,14 @@ export class RenderOrchestrator {
     } catch (err) {
       this.host.sharpenSettled();
       console.error('Large-tier preview failed after retry', err);
-      this.host.sharpenFailed(err);
+      if (smallReleasedOverlay) {
+        this.host.sharpenFailed(err);
+      } else {
+        // The small tier never made it either: there is no preview to fall back
+        // on, and the overlay is still up.
+        this.host.finished(false);
+        this.host.renderFailed(err);
+      }
     }
   }
 

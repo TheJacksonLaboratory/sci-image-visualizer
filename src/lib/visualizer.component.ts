@@ -172,6 +172,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * the newer render's overlay, or applying its ROIs.
    */
   private renderToken = 0;
+  /** Aborts the current render's backend loads; replaced with each new render. */
+  private renderAbort: AbortController | null = null;
   /** Set once the template, and with it the plot div, exists (see ngAfterViewInit). */
   private viewReady = false;
   /** An image-less dataset whose draw waits for the view: see plotSpatialWithoutImage. */
@@ -913,6 +915,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
           if (urls) {
             const token = ++this.renderToken;
             const isCurrent = () => this.renderToken === token;
+            const signal = this.restartRenderAbort();
             if (this.running) {
               // Stop the previous render's frame streaming (napari volume/surface
               // preload keeps fetching otherwise) and clear its sharpen flag. Its
@@ -1038,7 +1041,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
                 // would let a preempted render keep fetching slices/tiles for an
                 // image nobody is looking at.
                 if (!isCurrent()) return Promise.resolve(null);
-                return this.plotService.load(phaseInfo, this.zIndex).then((loadedImage) => {
+                return this.plotService.load(phaseInfo, this.zIndex, signal).then((loadedImage) => {
                   // Preempted while this phase was loading — drop it on the floor.
                   if (!isCurrent()) return null;
                   // Guard against a newer click reaching us mid-render.
@@ -1050,7 +1053,13 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
                     screenHeight,
                     this.plotType,
                     inPlace,
-                  );
+                  ).then((drawn) => {
+                    // A backend that cannot draw (no plot target, no WebGPU, no tile
+                    // descriptor) resolves false rather than throwing. That is a failed
+                    // phase, not a finished one: reject so the retry/failure paths run.
+                    if (drawn === false && isCurrent()) throw new Error('the renderer could not draw the image');
+                    return drawn;
+                  });
                 });
               },
               smallShown: () => {
@@ -1094,6 +1103,17 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
                 applyRoi();
                 this.activateSelectedPlotMode();
                 this.activateOpenDialogTool();
+              },
+              renderFailed: (err: unknown) => {
+                if (!isCurrent()) return; // superseded by a newer image
+                const e = err as { error?: { message?: string }; message?: string; statusText?: string };
+                const msg = e?.error?.message || e?.message || e?.statusText || String(err);
+                this.messageService.add({
+                  key: this.vizAlertToastKey,
+                  severity: 'error',
+                  summary: 'Could not draw the image',
+                  detail: `${imgInfo.fileName ?? 'The image'}: ${msg}. Try opening it again.`,
+                });
               },
             }).render(imgInfo, smallImgInfo);
           }
@@ -1350,6 +1370,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // Leave the live set so the next-oldest visualizer picks up the outlets.
     VisualizerComponent.liveInstances.delete(this);
     this.state.setDiagram(null);
+    this.renderAbort?.abort();
     this.revokeVolumeImageUrls();
     this.scrubber.cancel();
     this.unsub.next();
@@ -1532,6 +1553,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // The same generation as the image pipeline: a newer image or dataset supersedes this
     // draw, and a superseded draw neither reports nor releases the newer one's loading state.
     const token = ++this.renderToken;
+    this.restartRenderAbort();
     const div = document.getElementById(this.plotDivName);
     const info: IImageInfo = {
       isGrayscale: false, trueImageSize: [0, 0], urls: [], isStack: false, showStack: false,
@@ -1563,10 +1585,18 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.cdr.detectChanges();
   }
 
+  /** Abort the previous render's loads and arm a fresh signal for the next one. */
+  private restartRenderAbort(): AbortSignal {
+    this.renderAbort?.abort();
+    this.renderAbort = new AbortController();
+    return this.renderAbort.signal;
+  }
+
   cancelLoading() {
     // Stop any in-flight frame streaming (napari-js volume/surface preload) so the fetch loops
     // actually abort — clearing the flag alone only routed to Plotly and left napari fetching.
     this.plotService.cancelLoading?.();
+    this.renderAbort?.abort();
     this.stackLoading = false;
     this.imgLoading = false;
     this.state.setImageLoading(false);

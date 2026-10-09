@@ -217,6 +217,21 @@ describe('RoutingVisualizerService (characterization)', () => {
     warn.mockRestore();
   });
 
+  it('passes the abort signal through to the backend load (CORE-11)', async () => {
+    router.setPlotType(PlotType.IMAGE);
+    const signal = new AbortController().signal;
+    await router.load(IMAGE_INFO, 0, signal);
+    expect(osd.load).toHaveBeenCalledWith(IMAGE_INFO, 0, signal);
+  });
+
+  it('does not fall back to another backend for a load that was aborted', async () => {
+    router.setPlotType(PlotType.IMAGE);
+    const ctl = new AbortController();
+    osd.load.mockImplementation(() => { ctl.abort(); return Promise.reject(new Error('aborted')); });
+    await expect(router.load(IMAGE_INFO, 0, ctl.signal)).rejects.toThrow('aborted');
+    expect(plotly.load).not.toHaveBeenCalled();
+  });
+
   it('loads through OSD when it succeeds (no Plotly load)', async () => {
     await router.load(IMAGE_INFO, 0);
     expect(osd.load).toHaveBeenCalled();

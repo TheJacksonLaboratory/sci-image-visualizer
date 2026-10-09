@@ -173,41 +173,44 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   get capabilities(): ViewerCapabilities { return this.plotly.capabilities; }
 
   // ── render / viewport → active renderer ──────────────────────────────
-  async load(imageInfo: IImageInfo, zIndex: number): Promise<any> {
+  async load(imageInfo: IImageInfo, zIndex: number, signal?: AbortSignal): Promise<any> {
     // A stack can open away from slice 0 (`initialZIndex` — a volume opens
     // mid-specimen), and that arrives here rather than through setZIndex.
     this.currentZIndex = zIndex;
     const backend = this.imageBackend();
     if (backend === this.napari) {
       try {
-        return await this.napari.load(imageInfo, zIndex);
+        return await (this.napari as IVisualizer).load(imageInfo, zIndex, signal);
       } catch (err) {
+        // Aborted: nobody wants this image any more, so don't go on to load it elsewhere.
+        if (signal?.aborted) throw err;
         this.napariFellBack = true;
         // Mirror imageBackend()'s fallback so load + plot pick the same backend:
         //  - 3D napari types have no 2D fallback → straight to Plotly.
         //  - 2D image → OSD, then Plotly.
         if (this.isNapari3dType(this.currentPlotType)) {
           console.warn('[visualizer] napari-js load failed — falling back to Plotly.', err);
-          return this.plotly.load(imageInfo, zIndex);
+          return (this.plotly as IVisualizer).load(imageInfo, zIndex, signal);
         }
         console.warn('[visualizer] napari-js load failed — falling back to OpenSeadragon.', err);
-        return this.loadViaOsdThenPlotly(imageInfo, zIndex);
+        return this.loadViaOsdThenPlotly(imageInfo, zIndex, signal);
       }
     }
     if (backend === this.osd) {
-      return this.loadViaOsdThenPlotly(imageInfo, zIndex);
+      return this.loadViaOsdThenPlotly(imageInfo, zIndex, signal);
     }
-    return this.plotly.load(imageInfo, zIndex);
+    return (this.plotly as IVisualizer).load(imageInfo, zIndex, signal);
   }
 
   /** Try OSD; on failure fall back to Plotly for this image (not permanent — see reset()). */
-  private async loadViaOsdThenPlotly(imageInfo: IImageInfo, zIndex: number): Promise<any> {
+  private async loadViaOsdThenPlotly(imageInfo: IImageInfo, zIndex: number, signal?: AbortSignal): Promise<any> {
     try {
-      return await this.osd.load(imageInfo, zIndex);
+      return await (this.osd as IVisualizer).load(imageInfo, zIndex, signal);
     } catch (err) {
+      if (signal?.aborted) throw err;
       console.warn('[visualizer] OpenSeadragon load failed — falling back to Plotly for this image.', err);
       this.osdFellBack = true;
-      return this.plotly.load(imageInfo, zIndex);
+      return (this.plotly as IVisualizer).load(imageInfo, zIndex, signal);
     }
   }
   plot(plotDiv: string, imageLoaded: any, imageInfo: IImageInfo, screenHeight: number,

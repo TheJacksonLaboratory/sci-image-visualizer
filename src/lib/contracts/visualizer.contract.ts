@@ -60,7 +60,11 @@ export interface IntensityProfile {
  * zoom, stack navigation, and pixel readback.
  */
 export interface IDataRenderer {
-  load(imageInfo: IImageInfo, zIndex: number): Promise<any>;
+  /** Fetch what {@link plot} needs for this image/slice. `signal` aborts when the
+   *  host no longer wants the result (a newer image, Cancel, teardown); a backend
+   *  may stop its network work then. Optional, and ignored by backends that do
+   *  not support it yet. */
+  load(imageInfo: IImageInfo, zIndex: number, signal?: AbortSignal): Promise<any>;
   /** `imageLoaded` is the backend-specific handle returned by `load()` —
    *  treat it as opaque and pass it straight through. */
   plot(plotDiv: string, imageLoaded: unknown, imageInfo: IImageInfo, screenHeight: number,
