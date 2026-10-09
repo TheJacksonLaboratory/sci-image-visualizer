@@ -1,4 +1,5 @@
 import { Region } from '../models/region';
+import { RingBounds as Bounds, pointInRing as ringContainsPoint, ringBounds } from '../geometry/ring';
 import { SpatialImageRef, SpatialObservations, SpatialSelectionMask } from '../contracts/spatial-dataset.contract';
 
 /**
@@ -56,34 +57,14 @@ export function mutedFromSelection(selection: SpatialSelectionMask): Uint8Array 
   return muted;
 }
 
-/** Even-odd ray cast: is (px, py) inside the closed ring xs/ys? */
+/**
+ * Even-odd ray cast: is (px, py) inside the closed ring xs/ys?
+ *
+ * Public API kept with its (ring, point) argument order; the test itself is
+ * the shared `geometry/ring` one the region overlays and tools use.
+ */
 export function pointInRing(xs: readonly number[], ys: readonly number[], px: number, py: number): boolean {
-  let inside = false;
-  const n = xs.length;
-  for (let i = 0, j = n - 1; i < n; j = i++) {
-    const yi = ys[i];
-    const yj = ys[j];
-    // Half-open comparison so a vertex on the ray is counted once, not twice.
-    if ((yi > py) !== (yj > py)) {
-      const t = (py - yi) / (yj - yi);
-      if (px < xs[i] + t * (xs[j] - xs[i])) inside = !inside;
-    }
-  }
-  return inside;
-}
-
-/** Axis-aligned bounds of a ring, for a cheap reject before the ray cast. */
-interface Bounds { minX: number; minY: number; maxX: number; maxY: number }
-
-function ringBounds(xs: readonly number[], ys: readonly number[]): Bounds {
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (let i = 0; i < xs.length; i++) {
-    if (xs[i] < minX) minX = xs[i];
-    if (xs[i] > maxX) maxX = xs[i];
-    if (ys[i] < minY) minY = ys[i];
-    if (ys[i] > maxY) maxY = ys[i];
-  }
-  return { minX, minY, maxX, maxY };
+  return ringContainsPoint(px, py, xs, ys);
 }
 
 function inBounds(b: Bounds, px: number, py: number): boolean {

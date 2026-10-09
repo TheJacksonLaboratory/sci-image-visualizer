@@ -55,10 +55,25 @@ export function pointInPolygonWithHoles(px: number, py: number, xs: ArrayLike<nu
   if (!pointInRing(px, py, xs, ys)) return false;
   if (holes) {
     for (const ring of holes) {
-      if (pointInRing(px, py, ring.map((p) => p[0]), ring.map((p) => p[1]))) return false;
+      if (pointInPairRing(px, py, ring)) return false;
     }
   }
   return true;
+}
+
+/** {@link pointInRing} over a `[[x, y], …]` ring (the hole convention), without splitting it. */
+export function pointInPairRing(px: number, py: number, ring: ReadonlyArray<ArrayLike<number>>): boolean {
+  const n = ring.length;
+  if (n < 3) return false;
+  let inside = false;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    const intersect = ((yi > py) !== (yj > py)) &&
+      (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
 }
 
 /**
