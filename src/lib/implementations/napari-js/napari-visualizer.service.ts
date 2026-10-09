@@ -626,6 +626,18 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   }
 
   /**
+   * The pyramid descriptor of the image on screen, or null when it has none.
+   *
+   * {@link descriptor} is a cache keyed by `infoB64` that survives image switches and failed polls,
+   * so reading it directly hands a `tiled:false` stack (or an image whose poll never answered) the
+   * PREVIOUS image's size, µm/pixel, tile size and bit depth. Every read site goes through here.
+   */
+  private currentDescriptor(): TileDescriptor | null {
+    if (!this.descriptor || this.simpleStack.isSimple(this.loaded?.imageInfo)) return null;
+    return this.descriptorKey === this.tiles.getSelectedInfoB64() ? this.descriptor : null;
+  }
+
+  /**
    * Fetch a COMPLETE rendered slice as an `ImageBitmap` by stitching the server's REAL tile grid
    * (from `/tiles/info`) — not just the top-left tile, which only ever showed a large image's
    * corner. Picks the finest pyramid level whose grid fits `budgetTiles` and whose longest side is
@@ -1353,7 +1365,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private installScaleBar(): void {
     this.scaleBar?.destroy();
     this.scaleBar = null;
-    const mppX = this.descriptor?.mppX || this.loaded?.imageInfo.imageMeta?.[0]?.mppX || 0;
+    const mppX = this.currentDescriptor()?.mppX || this.loaded?.imageInfo.imageMeta?.[0]?.mppX || 0;
     if (this.viewer && this.host && mppX > 0) {
       this.scaleBar = new NapariScaleBar(this.host, this.viewer.camera, mppX);
     }
@@ -1526,8 +1538,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // The image's DECLARED pixel dimensions, which is what mpp is per: the sampled
     // dims are decimated, so sizing a physical box by them would make the world
     // box depend on the resolution the user happens to be viewing at.
-    const fullW = this.descriptor?.width ?? meta?.x ?? dims.width;
-    const fullH = this.descriptor?.height ?? meta?.y ?? dims.height;
+    const imageDesc = this.currentDescriptor();
+    const fullW = imageDesc?.width ?? meta?.x ?? dims.width;
+    const fullH = imageDesc?.height ?? meta?.y ?? dims.height;
     const fullD = meta?.z || this.loaded?.imageInfo.urls?.length || dims.depth;
     let world: { width: number; height: number; depth: number };
     if (mppXYZ) {
@@ -1645,16 +1658,17 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private imageExtent(): { px: [number, number, number]; mpp: [number, number, number] } {
     const meta = this.loaded?.imageInfo.imageMeta?.[0];
     const dims = this.volumeDims;
-    const mppX = this.descriptor?.mppX || meta?.mppX || 0;
+    const desc = this.currentDescriptor();
+    const mppX = desc?.mppX || meta?.mppX || 0;
     return {
       px: [
-        this.descriptor?.width ?? meta?.x ?? dims?.width ?? 1,
-        this.descriptor?.height ?? meta?.y ?? dims?.height ?? 1,
+        desc?.width ?? meta?.x ?? dims?.width ?? 1,
+        desc?.height ?? meta?.y ?? dims?.height ?? 1,
         meta?.z || this.loaded?.imageInfo.urls?.length || dims?.depth || 1,
       ],
       // A descriptor that reports only mppX is square-pixel by convention, which is
       // what the 2D scale bar already assumes of it.
-      mpp: [mppX, this.descriptor?.mppY || meta?.mppY || mppX, meta?.mppZ || 0],
+      mpp: [mppX, desc?.mppY || meta?.mppY || mppX, meta?.mppZ || 0],
     };
   }
 
@@ -3760,8 +3774,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const boxW = Math.max(1, b.max[0] - b.min[0]);
     const boxH = Math.max(1, b.max[1] - b.min[1]);
     const boxD = Math.max(1, b.max[2] - b.min[2]);
-    const mppX = this.descriptor?.mppX || this.loaded?.imageInfo.imageMeta?.[0]?.mppX || 0;
-    const voxel = mppX > 0 ? (mppX * (this.descriptor?.width ?? this.imageW)) / Math.max(1, this.imageW) : 1;
+    const desc = this.currentDescriptor();
+    const mppX = desc?.mppX || this.loaded?.imageInfo.imageMeta?.[0]?.mppX || 0;
+    const voxel = mppX > 0 ? (mppX * (desc?.width ?? this.imageW)) / Math.max(1, this.imageW) : 1;
     this.axesLayer = viewer.addAxes(boxW, boxH, boxD, {
       voxelSize: [voxel, voxel, 1],
       visible: this.axesVisible,
@@ -3787,8 +3802,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const hx = boxW / 2;
     const hy = boxH / 2;
     const hz = boxD / 2;
-    const descW = this.descriptor?.width ?? this.imageW;
-    const descH = this.descriptor?.height ?? this.imageH;
+    const desc = this.currentDescriptor();
+    const descW = desc?.width ?? this.imageW;
+    const descH = desc?.height ?? this.imageH;
     const len = (px: number): string => (mppX > 0 ? formatUm(px * mppX) : `${px} px`);
     return [
       { anchor: [hx, -hy, -hz], text: `X · ${len(descW)}`, color: '#ed4545' },
@@ -3847,7 +3863,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    *  pulls a FINER pyramid level (more real detail). Shared by the surface plane fetch and the volume
    *  assembly so both scale their in-plane resolution with the decimate factor. */
   private tileBudgetFor(targetPx: number): number {
-    const tileSize = this.descriptor?.tileSize || TILE_SIZE;
+    const tileSize = this.currentDescriptor()?.tileSize || TILE_SIZE;
     return Math.min(
       MAX_STITCH_TILES,
       Math.max(1, Math.round((targetPx / tileSize) ** 2 * STITCH_BUDGET_COEFF)),
@@ -4191,7 +4207,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // (cached per z), no layer rebuild. Refresh the coarse histogram sample for the new slice.
     if (this.tiled) {
       v.dims.z = zIndex;
-      if (this.descriptor) void this.refreshHistogramSamples(zIndex, this.descriptor);
+      const desc = this.currentDescriptor();
+      if (desc) void this.refreshHistogramSamples(zIndex, desc);
       this.redrawSpatialMarkers();
       this.scheduleReadback();
       return;
@@ -4658,7 +4675,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   getHistogram$(channelIndex: number, bins: number): Observable<IHistogram | null> {
     // >8-bit channels: fetch the true native distribution from the server (the displayed pixels
     // are 8-bit, so the client histogram would be clipped). 8-bit channels use the client path.
-    const bitDepth = this.descriptor?.channelInfo?.[channelIndex]?.bitDepth ?? 8;
+    const bitDepth = this.currentDescriptor()?.channelInfo?.[channelIndex]?.bitDepth ?? 8;
     if (bitDepth > 8) {
       const z = this.loaded?.z ?? 0;
       const key = `${z}|${channelIndex}`;

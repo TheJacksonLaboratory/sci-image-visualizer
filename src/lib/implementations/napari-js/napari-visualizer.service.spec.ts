@@ -280,6 +280,47 @@ describe('NapariVisualizerService', () => {
     getSpy.mockRestore();
   });
 
+  it('never reads a previous image\'s descriptor for a stack that has none', async () => {
+    // Regression (NAPARI-SVC-2): the descriptor cache survived an image switch, so a
+    // tiled:false stack opened after a tiled 16-bit image got that image's µm/pixel (a
+    // scale bar it does not have) and its bit depth (a /histogram fetch for the wrong file).
+    const fetchMock = globalThis.fetch as jest.Mock;
+    fetchMock.mockImplementation((url: string) => {
+      if (url.includes('tiles/info')) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: () => Promise.resolve({
+            width: 64, height: 48, tileSize: 512, z: 1, channels: 1, realLevels: 1, mppX: 0.5,
+            channelInfo: [{ bitDepth: 16 }], levels: [{ res: 0, width: 64, height: 48 }],
+          }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) });
+    });
+    const scaleBar = () => (service as unknown as { scaleBar: unknown }).scaleBar;
+    const div = document.createElement('div');
+    div.id = 'stale-desc-host';
+    document.body.appendChild(div);
+
+    const tiled = await service.load(imageInfo(), 0);
+    await service.plot('stale-desc-host', tiled, imageInfo(), 600, PlotType.NAPARI_IMAGE);
+    expect(scaleBar()).not.toBeNull();
+
+    const getSpy = jest.spyOn(TestBed.inject(HttpClient), 'get').mockReturnValue(of(new Blob()));
+    const stack = imageInfo({ tiled: false, urls: ['https://x/a.png', 'https://x/b.png'] });
+    const loaded = await service.load(stack, 0);
+    await service.plot('stale-desc-host', loaded, stack, 600, PlotType.NAPARI_IMAGE);
+    expect(scaleBar()).toBeNull();
+
+    fetchMock.mockClear();
+    await firstValueFrom(service.getHistogram$(0, 256));
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('histogram'))).toBe(false);
+
+    getSpy.mockRestore();
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
   it('plot() returns false when the target element is missing', async () => {
     const loaded = await service.load(imageInfo(), 0);
     expect(await service.plot('nope', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE)).toBe(false);
