@@ -766,9 +766,10 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     VisualizerComponent.liveInstances.add(this);
     this.state.setDiagram(this);
     this.watchSpatialDataset();
+    // OSD and napari-js emit this from their own "fit to view": disarm the tool on
+    // the backend too, not only the toolbar's highlight.
     this.plotService.getAutoscaleEvent().pipe(takeUntil(this.unsub)).subscribe(() => {
-      this.activeDragMode = null;
-      this.session.setActiveTool(null);
+      this.applyDragMode(null);
     });
     this.state.isImageLoading$().pipe(takeUntil(this.unsub)).subscribe((isImageLoading) => {
       this.imgLoading = isImageLoading;

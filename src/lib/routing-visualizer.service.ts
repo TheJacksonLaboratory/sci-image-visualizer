@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional } from '@angular/core';
-import { Observable, Subscription, combineLatest, firstValueFrom } from 'rxjs';
+import { Observable, Subscription, combineLatest, firstValueFrom, merge } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Image } from 'image-js';
 
@@ -324,7 +324,16 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       }),
     );
   }
-  getAutoscaleEvent(): Observable<any> { return this.plotly.getAutoscaleEvent(); }
+  // Every backend fits to view on its own (Plotly's autoscale, OSD's goHome, napari's camera
+  // fit) and each emits from its own subject, so merge all three: listening to Plotly alone
+  // missed the context-menu Autoscale on the Image and napari views.
+  getAutoscaleEvent(): Observable<void> {
+    return merge(
+      this.plotly.getAutoscaleEvent(),
+      this.osd.getAutoscaleEvent(),
+      this.napari.getAutoscaleEvent(),
+    ).pipe(map(() => undefined));
+  }
   getIntensityProfile$(): Observable<IntensityProfile[]> { return this.plotly.getIntensityProfile$(); }
   // The intensity inset is a Plotly LINE chart — render it through Plotly, which
   // owns the profile stream regardless of which backend draws the main image.

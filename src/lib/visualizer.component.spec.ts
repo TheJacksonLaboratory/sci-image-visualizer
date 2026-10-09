@@ -1258,6 +1258,23 @@ describe('VisualizerComponent — teardown (CORE-3)', () => {
   });
 });
 
+describe('VisualizerComponent — autoscale from the backend (CORE-5)', () => {
+  it('disarms the backend tool along with the toolbar, not just the toolbar', () => {
+    const autoscale$ = new BehaviorSubject<void>(undefined);
+    const { component, plot, store } = harness({ getAutoscaleEvent: () => autoscale$ });
+    component.toggleDragMode('wand');
+    expect(plot.setWandMode).toHaveBeenLastCalledWith(true, expect.anything());
+
+    autoscale$.next(); // the context-menu "Autoscale" on OSD / napari
+    expect(component.activeDragMode).toBeNull();
+    expect(plot.setWandMode).toHaveBeenLastCalledWith(false, expect.anything());
+    let tool: string | null = 'unset';
+    store.getActiveTool$().subscribe((t) => (tool = t)).unsubscribe();
+    expect(tool).toBeNull();
+    component.ngOnDestroy();
+  });
+});
+
 describe('VisualizerComponent — contributed tool parameters', () => {
   /** A tool whose checkpoint overrides two of the tool's baseline values. */
   function tool(): ToolbarToolContribution {

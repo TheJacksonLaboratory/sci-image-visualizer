@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { firstValueFrom, of } from 'rxjs';
+import { Subject, firstValueFrom, of } from 'rxjs';
 
 import { RoutingVisualizerService } from './routing-visualizer.service';
 import { PlotlyService } from './implementations/plotly/plotly.service';
@@ -77,7 +77,7 @@ function mockBackend(): any {
     setStackLoading: jest.fn(),
     isStackLoading: jest.fn().mockReturnValue(of(false)),
     getStackLoadingProgress: jest.fn().mockReturnValue(of(0)),
-    getAutoscaleEvent: jest.fn().mockReturnValue(of(null)),
+    getAutoscaleEvent: jest.fn().mockReturnValue(new Subject<void>()),
     getIntensityProfile$: jest.fn().mockReturnValue(of([])),
     renderIntensityInset: jest.fn(),
     getRegionUpdateEvent: jest.fn().mockReturnValue(of([])),
@@ -451,6 +451,19 @@ describe('RoutingVisualizerService (characterization)', () => {
   ])('routes %s to Plotly (the full-featured backend)', (method, args) => {
     (router as any)[method](...args);
     expect(plotly[method]).toHaveBeenCalledWith(...args);
+  });
+
+  it('surfaces the autoscale event of every backend, not only Plotly (CORE-5)', () => {
+    const osdAutoscale = new Subject<void>();
+    const napariAutoscale = new Subject<void>();
+    osd.getAutoscaleEvent.mockReturnValue(osdAutoscale);
+    napari.getAutoscaleEvent.mockReturnValue(napariAutoscale);
+    const seen = jest.fn();
+    const sub = router.getAutoscaleEvent().subscribe(seen);
+    osdAutoscale.next();
+    napariAutoscale.next();
+    expect(seen).toHaveBeenCalledTimes(2);
+    sub.unsubscribe();
   });
 
   it('setPlotType records the type and delegates to Plotly', () => {
