@@ -619,7 +619,7 @@ export class PlotlyService implements IVisualizer {
       for (const row of frame || []) {
         for (const cell of row || []) {
           const v = isGrayscale ? cell
-            : 0.299 * cell[0] + 0.587 * cell[1] + 0.114 * cell[2];
+            : bt601Luminance(cell[0], cell[1], cell[2]);
           if (!Number.isFinite(v)) continue;
           if (v < min) min = v;
           if (v > max) max = v;
@@ -1044,7 +1044,7 @@ export class PlotlyService implements IVisualizer {
       let v = 0;
       if (px >= 0 && px < w && py >= 0 && py < h) {
         const cell = frame[py][px];
-        v = Array.isArray(cell) ? (0.299 * cell[0] + 0.587 * cell[1] + 0.114 * cell[2]) : cell;
+        v = Array.isArray(cell) ? bt601Luminance(cell[0], cell[1], cell[2]) : cell;
       }
       positions.push(t * lenData);
       values.push(v);
