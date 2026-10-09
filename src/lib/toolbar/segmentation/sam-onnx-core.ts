@@ -6,13 +6,48 @@ import type { SamPrompt } from '../../contracts/sam.contract';
  * Shared, DOM-free SAM inference primitives used by BOTH inference backends:
  * the in-process session (`OnnxSamSession`, main thread) and the dedicated
  * Web Worker (`onnx-sam.worker`). Keeping these here avoids duplicating the
- * preprocessing / decoder-prompt math and keeps the worker DOM-free (it can't
- * import sam-prompt.ts, which pulls in DOM types).
+ * preprocessing / decoder-prompt math; nothing here may import Angular or the
+ * DOM, since the worker bundles it.
  */
 
 export const PIXEL_MEAN = [123.675, 116.28, 103.53];
 export const PIXEL_STD = [58.395, 57.12, 57.375];
-const MODEL_CACHE = 'sam-onnx';
+/** Cache API store for downloaded model files. Bump the version whenever the
+ *  hosted models are re-exported under the same (mutable `resolve/main`) URLs:
+ *  opening the cache deletes every older `sam-onnx*` store. */
+const MODEL_CACHE_PREFIX = 'sam-onnx';
+const MODEL_CACHE = `${MODEL_CACHE_PREFIX}-v2`;
+
+let staleCachesPurged: Promise<void> | null = null;
+
+/** Delete model caches from earlier versions (once per page/worker). */
+function purgeStaleModelCaches(): Promise<void> {
+  staleCachesPurged ??= caches.keys()
+    .then((names) => Promise.all(names
+      .filter((n) => n.startsWith(MODEL_CACHE_PREFIX) && n !== MODEL_CACHE)
+      .map((n) => caches.delete(n))))
+    .then(() => undefined)
+    .catch(() => undefined); // best effort: a stale cache only wastes space
+  return staleCachesPurged;
+}
+
+/** Open the current model cache, or null where the Cache API is unavailable. */
+async function openModelCache(): Promise<Cache | null> {
+  if (typeof caches === 'undefined') return null;
+  await purgeStaleModelCaches();
+  return caches.open(MODEL_CACHE).catch(() => null);
+}
+
+/**
+ * Delete every downloaded SAM model (several hundred MB per origin). Resolves
+ * to true when something was removed; false where the Cache API is unavailable.
+ */
+export async function clearSamModelCache(): Promise<boolean> {
+  if (typeof caches === 'undefined') return false;
+  const names = (await caches.keys()).filter((n) => n.startsWith(MODEL_CACHE_PREFIX));
+  const removed = await Promise.all(names.map((n) => caches.delete(n)));
+  return removed.some(Boolean);
+}
 
 /** Encoder output for one image, reused across prompts. */
 export interface CoreEmbedding {
@@ -35,7 +70,7 @@ export interface CoreMask {
  *  API (so it isn't re-downloaded). Cache hit → progress jumps to 1. Works on
  *  the main thread and in a worker (both have `fetch` + `caches`). */
 export async function fetchModel(url: string, onProgress?: (f: number) => void): Promise<ArrayBuffer> {
-  const cache = typeof caches !== 'undefined' ? await caches.open(MODEL_CACHE).catch(() => null) : null;
+  const cache = await openModelCache();
   const hit = cache ? await cache.match(url) : null;
   if (hit) { onProgress?.(1); return await hit.arrayBuffer(); }
 
@@ -62,7 +97,8 @@ export async function fetchModel(url: string, onProgress?: (f: number) => void):
   let off = 0;
   for (const c of chunks) { out.set(c, off); off += c.length; }
   if (cache) {
-    await cache.put(url, new Response(out.slice(), { headers: { 'content-length': String(received) } }))
+    // The Response copies its body, so no extra full-size copy of the model here.
+    await cache.put(url, new Response(out, { headers: { 'content-length': String(received) } }))
       .catch(() => undefined);
   }
   onProgress?.(1);
