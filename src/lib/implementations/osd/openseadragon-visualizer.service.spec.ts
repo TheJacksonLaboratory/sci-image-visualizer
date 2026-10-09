@@ -158,6 +158,8 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
    * then stops observing (jit-ui#106).
    */
   it('load() simple detects MULTICHANNEL from channelUrls + channelCount>1', async () => {
+    const loadPlanes = jest.spyOn(service as unknown as { loadSimpleChannelPlanes(u: string[]): Promise<unknown[]> },
+      'loadSimpleChannelPlanes');
     const loaded = await service.load({
       fileName: 'hyper.tif',
       tiled: false,
@@ -170,17 +172,22 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     // The MULTICHANNEL branch was taken. jsdom can't decode <img>, so the planes
     // are empty and no composite builds → null descriptor — detection is what we
     // pin here; the real composite is covered by the headless example test.
-    expect((service as unknown as { simpleMultichannel: boolean }).simpleMultichannel).toBe(true);
+    expect(loadPlanes).toHaveBeenCalledWith(['blob:z0c0', 'blob:z0c1', 'blob:z0c2', 'blob:z0c3']);
     expect(loaded.descriptor).toBeNull();
+    // load() only computes: the service state changes when plot() mounts it.
+    expect((service as unknown as { simpleMultichannel: boolean }).simpleMultichannel).toBe(false);
   });
 
   it('load() simple stays single-image (NOT multichannel) for a plain grayscale image', async () => {
-    await service.load({
+    const loadPlanes = jest.spyOn(service as unknown as { loadSimpleChannelPlanes(u: string[]): Promise<unknown[]> },
+      'loadSimpleChannelPlanes');
+    const loaded = await service.load({
       fileName: 'g.png', tiled: false, isGrayscale: true,
       urls: ['blob:gray'], trueImageSize: [4, 4],
       imageMeta: [{ rgbChannels: 1, channelCount: 1, x: 4, y: 4, z: 1 }],
     } as any, 0);
-    expect((service as unknown as { simpleMultichannel: boolean }).simpleMultichannel).toBe(false);
+    expect(loadPlanes).not.toHaveBeenCalled();
+    expect(loaded.channelPlanes).toBeUndefined();
   });
 
   describe('fitWhenContainerSized (initial fit is layout-timing-independent)', () => {

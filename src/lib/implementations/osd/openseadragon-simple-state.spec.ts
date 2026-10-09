@@ -71,8 +71,10 @@ describe('OpenSeadragonVisualizerService — simple-mode state reset (OSD-PLOTLY
   } as unknown as IImageInfo;
 
   type Internals = {
-    loadSimpleChannelPlanes(urls: string[]): Promise<void>;
+    loadSimpleChannelPlanes(urls: string[]): Promise<unknown[]>;
     compositeSimpleMultichannel(): Promise<string | undefined>;
+    simpleMultichannel: boolean;
+    simpleChannelUrls: string[][];
     scheduleInvalidate(): void;
     simpleChannelPlanes: unknown[];
   };
@@ -101,13 +103,14 @@ describe('OpenSeadragonVisualizerService — simple-mode state reset (OSD-PLOTLY
     store = TestBed.inject(VisualizerStore);
     document.body.innerHTML = '<div id="plotdiv"></div>';
     // jsdom can't decode <img>: stand in two decoded channel planes and a composite.
-    jest.spyOn(internals(), 'loadSimpleChannelPlanes').mockImplementation(async () => {
-      internals().simpleChannelPlanes = [
-        { data: new Uint8ClampedArray(4), width: 1, height: 1 },
-        { data: new Uint8ClampedArray(4), width: 1, height: 1 },
-      ];
-    });
+    jest.spyOn(internals(), 'loadSimpleChannelPlanes').mockImplementation(async () => [
+      { data: new Uint8ClampedArray(4), width: 1, height: 1 },
+      { data: new Uint8ClampedArray(4), width: 1, height: 1 },
+    ]);
     jest.spyOn(internals(), 'compositeSimpleMultichannel').mockResolvedValue('blob:composite');
+    // ...and can't decode a single-image slice either (toFullResUrl then keeps the URL).
+    jest.spyOn(service as unknown as { loadImageEl(u: string): Promise<unknown> }, 'loadImageEl')
+      .mockRejectedValue(new Error('no <img> decode in jsdom'));
   });
 
   afterEach(() => {
@@ -157,5 +160,36 @@ describe('OpenSeadragonVisualizerService — simple-mode state reset (OSD-PLOTLY
     const tiledLoaded = await loadTiled();
     void service.plot('plotdiv', tiledLoaded, tiledInfo, 500, PlotType.IMAGE);
     expect(order).toEqual(['clear', 'sample']);
+  });
+  // ── load() must not touch the mounted image (OSD-PLOTLY-5) ────────────
+  // /tiles/info can poll for minutes; until plot() mounts the new image, the
+  // previous one stays on screen and must keep its own descriptor and state.
+
+  it('a pending tiled load() leaves the mounted image\'s descriptor alone', async () => {
+    const first = await loadTiled();
+    void service.plot('plotdiv', first, tiledInfo, 500, PlotType.IMAGE);
+    expect(service.getTrueImageSize()).toEqual({ width: 64, height: 64 });
+
+    const pending = service.load({ ...tiledInfo, fileName: 'other.tif' } as IImageInfo, 0);
+    await Promise.resolve();
+    await Promise.resolve();
+    http.expectOne((r) => r.url.includes('tiles/info')).flush({ ...descriptor, width: 999, height: 777 });
+    await pending;
+    expect(service.getTrueImageSize()).toEqual({ width: 64, height: 64 });
+  });
+
+  it('loading another image leaves the mounted serverless multichannel image\'s state alone', async () => {
+    const simpleLoaded = await service.load(simpleInfo, 0);
+    void service.plot('plotdiv', simpleLoaded, simpleInfo, 500, PlotType.IMAGE);
+    expect(internals().simpleMultichannel).toBe(true);
+    expect(internals().simpleChannelUrls).toEqual(simpleInfo.channelUrls);
+
+    await loadTiled(); // not plotted (yet)
+    expect(internals().simpleMultichannel).toBe(true);
+    expect(internals().simpleChannelUrls).toEqual(simpleInfo.channelUrls);
+
+    await service.load({ ...simpleInfo, fileName: 'single.png', channelUrls: undefined } as IImageInfo, 0);
+    expect(internals().simpleMultichannel).toBe(true);
+    expect(internals().simpleChannelPlanes).toHaveLength(2);
   });
 });

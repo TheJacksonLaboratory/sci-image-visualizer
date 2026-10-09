@@ -102,7 +102,11 @@ interface TileDescriptor {
   mppY?: number;
 }
 
-/** What `load()` hands to `plot()`. */
+/** One decoded single-band channel plane (serverless multichannel). */
+interface SimplePlane { data: Uint8ClampedArray; width: number; height: number; }
+
+/** What `load()` hands to `plot()`. `load()` only computes it: the image on
+ *  screen keeps its own state until `plot()` commits this payload. */
 interface OsdLoaded {
   descriptor: TileDescriptor | null;
   infoB64: string;
@@ -116,6 +120,10 @@ interface OsdLoaded {
   simple?: boolean;
   /** The directly-loadable image URL (`blob:`/`data:`/`http`) for simple mode. */
   url?: string;
+  /** Serverless multichannel only: every slice's per-channel plane URLs, and
+   *  the loaded slice's decoded planes ({@link url} is their composite). */
+  channelUrls?: string[][];
+  channelPlanes?: SimplePlane[];
 }
 
 /**
@@ -166,7 +174,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    *  (no tile server); kept OFF the tiled isMultiChannel path. */
   private simpleMultichannel = false;
   private simpleChannelUrls: string[][] = [];
-  private simpleChannelPlanes: Array<{ data: Uint8ClampedArray; width: number; height: number }> = [];
+  private simpleChannelPlanes: SimplePlane[] = [];
   private simpleCompositeUrl: string | null = null;
   /** Skip the full-res upscale above this longest-side dimension — a folder
    *  stack is per-file previews (well under this); this only guards against an
@@ -410,9 +418,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     if (this.simpleStack.isSimple(imageInfo)) {
       return this.loadSimple(imageInfo, zIndex);
     }
-    // A tiled image: drop any previous simple image's state, or its multichannel
-    // flag would keep re-opening the viewer with that image's composite.
-    this.resetSimpleState();
     const infoB64 = this.tiles.getSelectedInfoB64();
     if (!infoB64) return { descriptor: null, infoB64: '', z: zIndex || 0, filename };
 
@@ -438,8 +443,9 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
         const resp = await firstValueFrom(
           this.http.get<TileDescriptor>(url, { observe: 'response' }).pipe(timeout(45000)),
         );
+        // Not committed to `this.descriptor` here: the previous image stays
+        // mounted (and keeps using its own descriptor) until plot().
         if (resp.status === 200 && resp.body) {
-          this.descriptor = resp.body;
           return { descriptor: resp.body, infoB64, z: zIndex || 0, filename };
         }
         // 202 Accepted (or empty body) → still caching; fall through and re-poll.
@@ -456,9 +462,9 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   }
 
   /** Forget the simple (tiled:false) image's state: mode, slice URLs and the
-   *  serverless-multichannel flag, URLs and decoded planes. Not part of
-   *  destroyViewer(): plot() tears the viewer down after loadSimple() filled
-   *  these in, and still needs them. */
+   *  serverless-multichannel flag, URLs and decoded planes. Called when a tiled
+   *  image is mounted and on teardown; plot() commits a simple image's state
+   *  from its {@link OsdLoaded} payload. */
   private resetSimpleState(): void {
     this.simpleMode = false;
     this.simpleUrls = [];
@@ -480,22 +486,22 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     // SERVERLESS MULTICHANNEL: composite the slice's per-channel planes
     // client-side (no tile server), driven by the channel pane. Kept OFF the
     // tiled isMultiChannel path (see compositeSimpleMultichannel).
+    // Everything is computed into locals and returned: the image on screen keeps
+    // its state until plot() commits this payload.
     const chUrls = imageInfo.channelUrls;
-    this.simpleMultichannel = !!chUrls?.length && (meta?.channelCount ?? 1) > 1;
+    const multichannel = !!chUrls?.length && (meta?.channelCount ?? 1) > 1;
     let url: string | undefined;
-    if (this.simpleMultichannel) {
-      this.simpleChannelUrls = chUrls as string[][];
+    let channelPlanes: SimplePlane[] | undefined;
+    if (multichannel) {
       try {
-        await this.loadSimpleChannelPlanes(chUrls![z] ?? chUrls![0]);
-        url = await this.compositeSimpleMultichannel();
+        channelPlanes = await this.loadSimpleChannelPlanes(chUrls![z] ?? chUrls![0]);
+        url = await this.compositeSimpleMultichannel(channelPlanes);
         // NB: histograms are binned in plot(), AFTER destroyViewer clears the
         // sampler — computing them here would be wiped by that clear.
       } catch (err) {
         console.warn('[OSD] simple multichannel composite failed', err);
       }
     } else {
-      this.simpleChannelUrls = [];
-      this.simpleChannelPlanes = [];
       const rawUrl = this.simpleStack.urlFor(imageInfo, z);
       if (rawUrl) {
         try {
@@ -536,6 +542,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       filename,
       simple: true,
       url,
+      ...(multichannel ? { channelUrls: chUrls as string[][], channelPlanes: channelPlanes ?? [] } : {}),
     };
   }
 
@@ -605,8 +612,8 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   /** Fetch + decode a slice's per-channel planes (single-band grayscale) into
    *  pixel buffers, for the SERVERLESS multichannel compositor. Auth-safe: goes
    *  through SimpleSliceAccessService (blob:/data: as-is; http via HttpClient). */
-  private async loadSimpleChannelPlanes(urls: string[] | undefined): Promise<void> {
-    const planes: Array<{ data: Uint8ClampedArray; width: number; height: number }> = [];
+  private async loadSimpleChannelPlanes(urls: string[] | undefined): Promise<SimplePlane[]> {
+    const planes: SimplePlane[] = [];
     for (const u of urls ?? []) {
       try {
         const previewUrl = await this.simpleStack.fetchAsBlobUrl(u);
@@ -624,16 +631,15 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
         planes.push({ data: new Uint8ClampedArray(0), width: 0, height: 0 });
       }
     }
-    this.simpleChannelPlanes = planes;
+    return planes;
   }
 
-  /** Composite the cached per-channel planes into ONE RGBA image using the
+  /** Composite per-channel planes into ONE RGBA image using the
    *  current channel states (colour/window/gamma/visibility) — the client-side,
    *  serverless analog of the tiled per-channel 'lighter' compositor
    *  (same display.channelRgbLut math as recolorChannelTile, applied per-plane).
    *  Returns a blob: URL of the composite PNG, revoking the previous one. */
-  private async compositeSimpleMultichannel(): Promise<string | undefined> {
-    const planes = this.simpleChannelPlanes;
+  private async compositeSimpleMultichannel(planes: SimplePlane[]): Promise<string | undefined> {
     if (!planes.length) return undefined;
     const w = planes[0].width, h = planes[0].height;
     if (!w || !h) return undefined;
@@ -670,7 +676,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   /** Re-composite the current slice from its cached planes (new channel states)
    *  and re-open — the serverless analog of the tiled invalidate-on-channel-change. */
   private async recompositeAndOpen(): Promise<void> {
-    const url = await this.compositeSimpleMultichannel();
+    const url = await this.compositeSimpleMultichannel(this.simpleChannelPlanes);
     if (!url || !this.viewer) return;
     try { this.viewer.open({ type: 'image', url } as any); } catch { /* viewer gone */ }
   }
@@ -685,6 +691,14 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       img.onerror = (e) => reject(e);
       img.src = url;
     });
+  }
+
+  /** Commit a simple image's serverless-multichannel state from its
+   *  {@link OsdLoaded} payload (cleared for any other image). */
+  private commitSimpleMultichannel(loaded: OsdLoaded): void {
+    this.simpleMultichannel = !!loaded.channelPlanes;
+    this.simpleChannelUrls = loaded.channelUrls ?? [];
+    this.simpleChannelPlanes = loaded.channelPlanes ?? [];
   }
 
   private revokeSimpleFullResUrls(): void {
@@ -724,6 +738,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
         // tier's low-res URLs forever, even though the initial slice was
         // correctly swapped to full resolution here.
         this.simpleUrls = imageInfo?.urls ?? this.simpleUrls;
+        if (loaded.channelPlanes) this.commitSimpleMultichannel(loaded);
         this.viewer.open({ type: 'image', url: loaded.url } as any);
       }
       return Promise.resolve(true);
@@ -735,6 +750,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     this.currentZ = loaded.z;
     this.simpleMode = !!loaded.simple;
     this.simpleUrls = loaded.simple ? (imageInfo?.urls ?? []) : [];
+    this.commitSimpleMultichannel(loaded);
     // The descriptor's physical pixel size (server Bio-Formats `/tiles/info`) is
     // authoritative — push it into the shared meta so the Region Editor reports
     // areas in µm²/mm², matching the scale bar built from `d.mppX` below.
@@ -1320,10 +1336,10 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
         this.currentZ = z;
         this.viewportPixels = null;
         void (async () => {
-          await this.loadSimpleChannelPlanes(urls);
+          this.simpleChannelPlanes = await this.loadSimpleChannelPlanes(urls);
           if (this.currentZ !== z || !this.viewer) return;
           this.sampler.computeSimpleMultichannelHistograms(z, this.simpleChannelPlanes);
-          const url = await this.compositeSimpleMultichannel();
+          const url = await this.compositeSimpleMultichannel(this.simpleChannelPlanes);
           if (this.currentZ !== z || !this.viewer || !url) return;
           this.viewer.open({ type: 'image', url } as any);
         })();
