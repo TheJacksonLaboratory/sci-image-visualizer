@@ -1399,6 +1399,22 @@ describe('NapariVisualizerService', () => {
         expect(mapLayers(addVolume)).toHaveLength(1);
       });
 
+      it('draws the map again after a re-plot with the same view state', async () => {
+        // Regression (NAPARI-SVC-1): the key outlived reset(), so the new viewer's
+        // ensureGeneMapVolume saw "already built" and never added the layer.
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
+        await mount3d(sectioned());
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+
+        await mount3d(sectioned());
+        const inScene = (service as unknown as {
+          viewer: { layers: { items: readonly { name?: string }[] } };
+        }).viewer.layers.items.filter((l) => l.name?.startsWith('gene map'));
+        expect(inScene).toHaveLength(1);
+      });
+
       it('draws the sheets additively on the reference volume’s own lattice', async () => {
         const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
@@ -1687,6 +1703,21 @@ describe('NapariVisualizerService', () => {
         store.setSpatialView({ densityVolume: false });
         await flush();
         expect(inScene()).toBe(0);
+      });
+
+      it('draws the volumes again after a re-plot with the same view state', async () => {
+        // Regression (NAPARI-SVC-1): densityKey outlived reset(), so on the new viewer
+        // ensureDensityVolumes returned early and the clouds were gone until a toggle.
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        await mount3d(clustered());
+        store.setSpatialView({ densityVolume: true });
+        await flush();
+
+        await mount3d(clustered());
+        const inScene = ((service as unknown as {
+          viewer: { layers: { items: readonly { name?: string }[] } };
+        }).viewer.layers.items).filter((l) => l.name?.startsWith('density · '));
+        expect(inScene).toHaveLength(1);
       });
 
       it('re-rasterises for a different selection of the same size', async () => {
@@ -2527,6 +2558,21 @@ describe('NapariVisualizerService', () => {
         store.setSpatialView({ geneMap: false });
         await flush();
         expect(inScene()).toBe(0);
+      });
+
+      it('draws the map again after a re-plot with the same view state', async () => {
+        // Regression (NAPARI-SVC-1): geneMapKey outlived reset(), so the new viewer
+        // never got the layer back.
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 5, 9]));
+        await mount();
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+
+        await mount();
+        const inScene = ((service as unknown as {
+          viewer: { layers: { items: readonly { name?: string }[] } };
+        }).viewer.layers.items).filter((l) => l.name?.startsWith('gene map'));
+        expect(inScene).toHaveLength(1);
       });
     });
 

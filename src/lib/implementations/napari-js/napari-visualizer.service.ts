@@ -4106,6 +4106,16 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.spatialScalarKey3d = null;
     this.spatialVolume = null;
     this.spatialVolumeKey = null;
+    // The gene maps' and density volumes' layers belonged to the disposed viewer, so their keys
+    // must go with it: kept, the next viewer would see "already built" and never add them back.
+    // The estimated FIELDS (geneMapField*, geneMapVolumeField*) are viewer-independent and stay
+    // cached, so a re-plot recolours instead of re-estimating.
+    this.geneMapLayer = null;
+    this.geneMapKey = null;
+    this.geneMapVolumeLayer = null;
+    this.geneMapVolumeKey = null;
+    this.densityLayers = [];
+    this.densityKey = null;
     this.spatialOrigin3d = [0, 0, 0];
     this.spatialScaleBarKey = null;
     // Drop the cached interleaved coordinates too: holding 3.7M x 3 floats after
