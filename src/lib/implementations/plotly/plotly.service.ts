@@ -646,9 +646,8 @@ export class PlotlyService implements IVisualizer {
     this.isoMax = isoMax;
     if (this.plotType === PlotType.ISOSURFACE && this.plotDiv) {
       const [lo, hi] = this.mapIsoBand(isoMin, isoMax);
-      try {
-        Plotly.restyle(this.plotDiv, { isomin: [lo], isomax: [hi] } as any);
-      } catch { /* plot not ready */ }
+      const gd = this.liveGd();
+      if (gd) void Plotly.restyle(gd, { isomin: [lo], isomax: [hi] } as any);
     }
   }
 
@@ -863,9 +862,8 @@ export class PlotlyService implements IVisualizer {
     // (The OSD overlay renders automatically via its region-update subscription.)
     if (this.plotDiv) {
       this.syncShapesFromStore();
-      try {
-        Plotly.relayout(this.plotDiv, { shapes: this.currentRenderShapes() } as any);
-      } catch { /* div not a Plotly plot (OSD owns it) */ }
+      const gd = this.liveGd();
+      if (gd) void Plotly.relayout(gd, { shapes: this.currentRenderShapes() } as any);
     }
     return region;
   }
@@ -1590,9 +1588,8 @@ export class PlotlyService implements IVisualizer {
       // Transient display only — render the passed regions, don't touch the
       // working-set (and the store didn't store them either).
       const dicts = regions.map(r => { r.filename = this.fileName; return { ...r.getShape(showLabel) }; });
-      try {
-        Plotly.relayout(this.plotDiv, this.shapesRelayout(dicts) as any);
-      } catch { /* div owned by another backend (OSD) — its overlay renders shapes */ }
+      const gd = this.liveGd();
+      if (gd) void Plotly.relayout(gd, this.shapesRelayout(dicts) as any);
     }
   }
 
@@ -1608,11 +1605,18 @@ export class PlotlyService implements IVisualizer {
   /** Push the current dict working-set to Plotly (no-op when another backend
    *  owns the div). */
   private renderShapes(): void {
-    if (!this.plotDiv) return;
+    const gd = this.liveGd();
+    if (!gd) return; // another backend's overlay renders the regions
     const dictArray = this.shapes.map(s => ({ ...s }));
-    try {
-      Plotly.relayout(this.plotDiv, this.shapesRelayout(dictArray) as any);
-    } catch { /* div owned by another backend (OSD) — its overlay renders shapes */ }
+    void Plotly.relayout(gd, this.shapesRelayout(dictArray) as any);
+  }
+
+  /** The plot div while it hosts a live Plotly graph, else null. `plotDiv`
+   *  stays set after purgePlot() hands the div to another backend (OSD,
+   *  napari-js), and Plotly.relayout/restyle throw on a non-Plotly div. */
+  private liveGd(): any | null {
+    const gd: any = this.plotDiv ? document.getElementById(this.plotDiv) : null;
+    return gd?._fullLayout ? gd : null;
   }
 
   getShowShapeLabel() {
@@ -1625,9 +1629,8 @@ export class PlotlyService implements IVisualizer {
   public plotPreviousShapes() {
     // convert to dict so that plotly recognises the shapes
     const dictArray = this.previousShapes.map(s => ({ ...s }));
-    try {
-      Plotly.relayout(this.plotDiv, { shapes: dictArray });
-    } catch { /* div owned by another backend (OSD) */ }
+    const gd = this.liveGd();
+    if (gd) void Plotly.relayout(gd, { shapes: dictArray });
   }
 
   setPreviousShapes(shapes: ShapeSelection[]) {
@@ -1975,17 +1978,18 @@ export class PlotlyService implements IVisualizer {
     // cache and emits the region-update event.
     this.regionStore.deleteActiveShape();
 
-    // Re-project the remaining regions and render on the Plotly plot (a no-op,
-    // caught, when another backend owns the div — its overlay re-renders via
-    // the store's update event).
-    if (gd?._fullLayout) gd._fullLayout._activeShapeIndex = -1;
+    // Re-project the remaining regions and render on the Plotly plot (a no-op
+    // when another backend owns the div — its overlay re-renders via the
+    // store's update event).
     this.syncShapesFromStore();
+    const live = this.liveGd();
+    if (!live) return;
+    live._fullLayout._activeShapeIndex = -1;
     const dictArray = this.shapes.map(s => ({ ...s }));
-    try {
-      Plotly.relayout(this.plotDiv, { shapes: dictArray } as any).then(() => {
-        if (gd?._fullLayout) (Plotly as any).redraw(gd);
-      }, () => { /* div not a Plotly plot */ });
-    } catch { /* div owned by another backend */ }
+    Plotly.relayout(live, { shapes: dictArray } as any).then(
+      () => { if (live._fullLayout) (Plotly as any).redraw(live); },
+      (err: unknown) => console.warn('[viz:plotly] shape relayout after delete failed', err),
+    );
   }
 
   public zoomOut() {
@@ -2027,9 +2031,8 @@ export class PlotlyService implements IVisualizer {
   }
   setColormap(colormap: any) {
     this.store.setColormap(colormap);
-    try {
-      Plotly.restyle(this.plotDiv, { 'colorscale': [colormap.data.value] });
-    } catch { /* div owned by another backend (OSD) — it recolors via the LUT */ }
+    const gd = this.liveGd(); // OSD/napari recolor via their own LUT
+    if (gd) void Plotly.restyle(gd, { 'colorscale': [colormap.data.value] });
   }
   getColormap() {
     return this.store.getColormap();
@@ -2037,9 +2040,8 @@ export class PlotlyService implements IVisualizer {
 
   setReverseScale(reverscale: any) {
     this.store.setReverseScale(reverscale);
-    try {
-      Plotly.restyle(this.plotDiv, { 'reversescale': reverscale });
-    } catch { /* div owned by another backend (OSD) — it recolors via the LUT */ }
+    const gd = this.liveGd(); // OSD/napari recolor via their own LUT
+    if (gd) void Plotly.restyle(gd, { 'reversescale': reverscale });
   }
 
   getReverseScale() {
@@ -2173,7 +2175,8 @@ export class PlotlyService implements IVisualizer {
   /** Live-apply the channel display window (zmin/zmax) + reverse/invert to the
    *  heatmap. No-op when no Plotly plot is mounted (OSD owns the div). */
   private applyChannelDisplay(channels: any[], rev: boolean, inv: boolean): void {
-    if (!this.plotDiv) return;
+    const gd = this.liveGd();
+    if (!gd) return;
     const ch = channels?.[0];
     const colorscale = this.store.currentColormap()?.data?.value;
     // reverse-scale and invert each flip the ramp; both together cancel.
@@ -2195,11 +2198,8 @@ export class PlotlyService implements IVisualizer {
         update.zauto = false;
       }
     }
-    try {
-      Plotly.restyle(this.plotDiv, update);
-    } catch {
-      /* not a colour-mapped trace, or OSD owns the div */
-    }
+    // A trace without a colour scale just ignores these attributes.
+    void Plotly.restyle(gd, update);
   }
 
   /** Binned intensity histogram for a channel from the cached source frames

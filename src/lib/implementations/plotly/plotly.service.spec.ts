@@ -399,14 +399,27 @@ describe('PlotlyService viewport + stack-state methods', () => {
     expect(purge).toHaveBeenCalledWith('plot');
   });
 
-  it('setColormap restyles the colorscale and writes the store', () => {
+  it('setColormap restyles the colorscale of a live Plotly graph and writes the store', () => {
+    const gd = document.getElementById('plot') as any;
+    gd._fullLayout = {};
     service.setColormap({ data: { value: 'Viridis' } } as any);
-    expect(restyle).toHaveBeenCalledWith('plot', { colorscale: ['Viridis'] });
+    expect(restyle).toHaveBeenCalledWith(gd, { colorscale: ['Viridis'] });
   });
 
-  it('setReverseScale restyles reversescale', () => {
+  it('setReverseScale restyles reversescale of a live Plotly graph', () => {
+    const gd = document.getElementById('plot') as any;
+    gd._fullLayout = {};
     service.setReverseScale(true);
-    expect(restyle).toHaveBeenCalledWith('plot', { reversescale: true });
+    expect(restyle).toHaveBeenCalledWith(gd, { reversescale: true });
+  });
+
+  it('display/shape restyles skip a div another backend owns (OSD-PLOTLY-26)', () => {
+    // No _fullLayout: the div was purged and handed to OSD/napari.
+    service.setColormap({ data: { value: 'Viridis' } } as any);
+    service.setReverseScale(true);
+    service.plotPreviousShapes();
+    expect(relayout).not.toHaveBeenCalled();
+    expect(restyle).not.toHaveBeenCalled();
   });
 
   it('setShowStack(false) resets the slice index and relayouts', () => {
@@ -482,7 +495,7 @@ describe('PlotlyService service-lifetime subscriptions (review CORE-1)', () => {
     const restyle = jest.spyOn(Plotly, 'restyle').mockResolvedValue(document.createElement('div') as never);
     const emitProfiles = jest.spyOn(service as unknown as { emitProfiles(): void }, 'emitProfiles');
     store.setChannelStates([channel(10, 20)]);
-    expect(restyle).toHaveBeenCalledWith('plot', expect.objectContaining({ zmin: 10, zmax: 20 }));
+    expect(restyle).toHaveBeenCalledWith(document.getElementById('plot'), expect.objectContaining({ zmin: 10, zmax: 20 }));
 
     const r = new Region();
     r.bounds = Object.assign(new Rectangle(), { x: 1, y: 1, width: 5, height: 5 });
