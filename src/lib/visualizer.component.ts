@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, AfterViewInit, ElementRef, EventEmitter, HostListener, Inject, Injector, Input, NgZone, OnChanges, OnDestroy, OnInit, Optional, Output, SimpleChanges, Type, ViewChild } from '@angular/core';
+import { ChangeDetectorRef, Component, AfterViewInit, ElementRef, EventEmitter, Inject, Injector, Input, NgZone, OnChanges, OnDestroy, OnInit, Optional, Output, SimpleChanges, Type, ViewChild } from '@angular/core';
 
 import { Observable, Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
@@ -1117,6 +1117,14 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   }
 
   ngAfterViewInit() {
+    // Window listeners are registered OUTSIDE the Angular zone: zone-patched, every
+    // mousemove anywhere in the host app ran app-wide change detection. Each handler
+    // re-enters the zone (ngZone.run) only when it actually changes view state.
+    this.ngZone.runOutsideAngular(() => this.addWindowListeners());
+    this.onViewReady();
+  }
+
+  private addWindowListeners(): void {
     this.plotContextMenuListener = (event: MouseEvent) => {
       const plotEl = document.getElementById(this.plotDivName);
       if (!plotEl?.contains(event.target as Node)) return;
@@ -1131,6 +1139,11 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     window.addEventListener('contextmenu', this.plotContextMenuListener, true);
 
     this.keydownListener = (event: KeyboardEvent) => {
+      if (this.isSliceStepKey(event)) {
+        event.preventDefault();
+        this.ngZone.run(() => this.stepSlice(event.key === 'ArrowRight' ? 1 : -1));
+        return;
+      }
       const target = event.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
       // SAM point mode: Enter commits the object, Esc clears the prompt.
@@ -1240,7 +1253,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       requestAnimationFrame(() => this.renderIntensityInset());
     };
     window.addEventListener('resize', this.profileResizeListener);
-    this.onViewReady();
   }
 
   /** The plot div exists now: run an image-less draw that arrived before it did. */
@@ -1459,17 +1471,15 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * ignored while a form field is focused so typing isn't hijacked. Up/Down are
    * left to OpenSeadragon (panning).
    */
-  @HostListener('window:keydown', ['$event'])
-  onKeydown(e: KeyboardEvent): void {
-    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-    if (!this.imageInfo?.isStack || !this.isImageView) return;
+  private isSliceStepKey(e: KeyboardEvent): boolean {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return false;
+    if (!this.imageInfo?.isStack || !this.isImageView) return false;
     const t = e.target as HTMLElement | null;
-    if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+    if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return false;
     // The slice slider handles arrows natively when focused (also a +1 step) —
     // skip here so we don't double-step it.
-    if (t && (t.getAttribute('role') === 'slider' || t.closest('.p-slider'))) return;
-    e.preventDefault();
-    this.stepSlice(e.key === 'ArrowRight' ? 1 : -1);
+    if (t && (t.getAttribute('role') === 'slider' || t.closest('.p-slider'))) return false;
+    return true;
   }
 
   /** Move the displayed slice by `delta`, clamped to the stack bounds. */

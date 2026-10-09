@@ -1258,6 +1258,53 @@ describe('VisualizerComponent — teardown (CORE-3)', () => {
   });
 });
 
+describe('VisualizerComponent — global listeners run outside Angular (CORE-4)', () => {
+  let component: VisualizerComponent;
+  let added: { type: string; outside: boolean }[];
+
+  beforeEach(() => {
+    let outside = false;
+    added = [];
+    const realAdd = window.addEventListener.bind(window);
+    jest.spyOn(window, 'addEventListener').mockImplementation(((type: string, l: any, o?: any) => {
+      added.push({ type, outside });
+      realAdd(type, l, o);
+    }) as any);
+    component = makeComponent(mockPlotService());
+    (component as any).ngZone = {
+      run: (fn: () => unknown) => fn(),
+      runOutsideAngular: (fn: () => unknown) => {
+        outside = true;
+        try { return fn(); } finally { outside = false; }
+      },
+    };
+    component.ngAfterViewInit();
+  });
+
+  afterEach(() => {
+    component.ngOnDestroy();
+    jest.restoreAllMocks();
+  });
+
+  it('registers every window listener outside the zone, so a mousemove does not run change detection', () => {
+    const types = added.map((a) => a.type).sort();
+    expect(types).toEqual(['contextmenu', 'keydown', 'mousemove', 'mouseup', 'resize', 'wheel']);
+    expect(added.every((a) => a.outside)).toBe(true);
+  });
+
+  it('steps the slice on ArrowRight/ArrowLeft from the one keydown listener', () => {
+    component.imageInfo = { isStack: true } as any;
+    component.maxIndex = 5;
+    const press = (key: string) =>
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key }));
+    press('ArrowRight');
+    press('ArrowRight');
+    expect(component.zIndex).toBe(2);
+    press('ArrowLeft');
+    expect(component.zIndex).toBe(1);
+  });
+});
+
 describe('VisualizerComponent — autoscale from the backend (CORE-5)', () => {
   it('disarms the backend tool along with the toolbar, not just the toolbar', () => {
     const autoscale$ = new BehaviorSubject<void>(undefined);
