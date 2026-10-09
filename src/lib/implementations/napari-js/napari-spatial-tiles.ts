@@ -169,6 +169,35 @@ export class NapariSpatialTileLayers {
   private lastSelection: SpatialSelectionMask | null = null;
   private selectionRevision = 0;
 
+  // transcripts
+  /** µm per observation unit of the drawn dataset, for describing a grouped marker's area. */
+  private micronsPerUnit: number | null = null;
+
+  /** Loads in flight, per layer label, for the loading badge. */
+  private readonly loading = new Map<string, number>();
+
+  /** The loaded per-gene transcripts the in-view counts are taken from. */
+  private countSource: { merged: SpatialTranscriptTile; genes: string[] } | null = null;
+
+  // hover
+  /** What the transcript layer currently shows (written by drawing, read by hover). */
+  private drawn: DrawnTranscripts | null = null;
+  private hoverTypes: { codes: Uint16Array; meta: SpatialColumn['meta'] } | null = null;
+  /** Details already fetched, by hovered entry. */
+  private readonly hoverCache = new Map<string, string[]>();
+  private hoverKey: string | null = null;
+  private hoverTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // density + estimate
+  /** Summed per-cluster density grids (see densityFor). */
+  private readonly densityCache = new LruCache<Promise<SpatialDensityRaster>>(DENSITY_CACHE_SIZE);
+
+  /** Per-gene dataset totals for the in-view estimate, for the latest gene set. */
+  private countsCache: { key: string; counts: Promise<SpatialTranscriptCounts> } | null = null;
+
+  /** The density window in use and the densest bin, for the panel's threshold control. */
+  densityStats: { lo: number; hi: number; max: number } | null = null;
+
   constructor(private readonly port: SpatialDataPort, private readonly host: SpatialTileHost) {}
 
   // ── lifecycle ─────────────────────────────────────────────────────────────────────
@@ -212,20 +241,9 @@ export class NapariSpatialTileLayers {
       bin *= 2;
       grouped = groupTranscripts(t, bin, keyOf);
     }
-    const refCount = quantileOf(grouped.tile.weight, 0.95);
-    const binPx = bin * pxPerUnit;
-    const px = new Float32Array(grouped.tile.count);
-    for (let i = 0; i < grouped.tile.count; i++) {
-      px[i] = groupedMarkerPx(grouped.tile.weight[i], refCount, binPx, view.transcriptScale);
-    }
+    const px = groupedSizes(grouped.tile.weight, bin * pxPerUnit, view.transcriptScale);
     return { merged: grouped.tile, px, bin, group: grouped.group, names };
   }
-
-  /** µm per observation unit of the drawn dataset, for describing a grouped marker's area. */
-  private micronsPerUnit: number | null = null;
-
-  /** Loads in flight, per layer label, for the loading badge. */
-  private readonly loading = new Map<string, number>();
 
   /** Report `label` loading while `work` is in flight. */
   private async track<T>(label: string, work: Promise<T>): Promise<T> {
@@ -240,9 +258,6 @@ export class NapariSpatialTileLayers {
       this.host.loadingChanged?.([...this.loading.keys()]);
     }
   }
-
-  /** The loaded per-gene transcripts the in-view counts are taken from. */
-  private countSource: { merged: SpatialTranscriptTile; genes: string[] } | null = null;
 
   /**
    * Transcripts of each selected gene inside `rect`: each entry counts for the transcripts it
@@ -399,7 +414,7 @@ export class NapariSpatialTileLayers {
     const geometryChanged = geometryKey !== this.cellGeometryKey;
     const styleKey = [
       geometryKey, view.cellColorMode, view.cellColorGene, view.cellSingleColor,
-      this.cellTypeColumnName(dataset, view),
+      cellTypeColumnFor(dataset, view),
       this.selectionRev(selection), view.logScale, view.percentileClip.join(),
       JSON.stringify(view.continuousColormap), view.cellDraw, view.cellOpacity,
     ].join('|');
@@ -450,7 +465,6 @@ export class NapariSpatialTileLayers {
     return this.selectionRevision;
   }
 
-  /** Per-shape values + colormap for the rings' owners. */
   /**
    * Per-shape values + colormap for the rings' owners, by the view's cell-colour mode
    * (Xenium Explorer's "Cell Color"). A selection mutes what it leaves out.
@@ -493,7 +507,7 @@ export class NapariSpatialTileLayers {
 
     const name = mode === 'segmentation' && dataset.columns.some((c) => c.name === 'segmentation_method')
       ? 'segmentation_method'
-      : this.cellTypeColumnName(dataset, view);
+      : cellTypeColumnFor(dataset, view);
     const codes = name ? await this.categoricalCodes(name) : null;
     const { colormap, valueOf } = this.categoricalColormap(codes?.meta ?? null);
     const values = new Float32Array(owners.length);
@@ -510,16 +524,12 @@ export class NapariSpatialTileLayers {
     dataset: SpatialDataset, view: SpatialViewState,
   ): Promise<{ codes: Uint16Array; hidden: Uint8Array } | null> {
     if (!view.hiddenGroups.length) return null;
-    const name = this.cellTypeColumnName(dataset, view);
+    const name = cellTypeColumnFor(dataset, view);
     const col = name ? await this.categoricalCodes(name) : null;
     if (!col || col.meta.kind !== 'categorical') return null;
     const off = new Set(view.hiddenGroups);
     const hidden = Uint8Array.from(col.meta.categories, (c) => (off.has(c) ? 1 : 0));
     return { codes: col.codes, hidden };
-  }
-
-  private cellTypeColumnName(dataset: SpatialDataset, view: SpatialViewState): string | null {
-    return cellTypeColumnFor(dataset, view);
   }
 
   private async categoricalCodes(name: string):
@@ -613,7 +623,7 @@ export class NapariSpatialTileLayers {
     // Marker sizes follow the zoom, so the zoom is part of the key; a pan that keeps
     // the same tiles on screen changes nothing.
     const planKey = [
-      dataset.id, mode, job.key, view.transcriptColorBy, this.cellTypeColumnName(dataset, view),
+      dataset.id, mode, job.key, view.transcriptColorBy, cellTypeColumnFor(dataset, view),
       view.transcriptScale, view.transcriptOpacity, JSON.stringify(view.transcriptGlyphs),
       pxPerUnit.toPrecision(4), view.hiddenGroups.join('\u0001'), view.transcriptHiddenGenes.join(','),
       JSON.stringify(view.transcriptGeneColors), JSON.stringify(view.transcriptGeneGroups),
@@ -674,7 +684,7 @@ export class NapariSpatialTileLayers {
     };
     this.hoverCache.clear();
     this.micronsPerUnit = dataset.micronsPerUnit ?? null;
-    const typeColumn = this.cellTypeColumnName(dataset, view);
+    const typeColumn = cellTypeColumnFor(dataset, view);
     this.hoverTypes = typeColumn ? await this.categoricalCodes(typeColumn).catch(() => null) : null;
     if (ctx.stale()) return;
     const ref = dataset.imageRef;
@@ -760,13 +770,6 @@ export class NapariSpatialTileLayers {
   }
 
   // ── hover ─────────────────────────────────────────────────────────────────────────
-
-  private drawn: DrawnTranscripts | null = null;
-  private hoverTypes: { codes: Uint16Array; meta: SpatialColumn['meta'] } | null = null;
-  /** Details already fetched, by hovered entry. */
-  private readonly hoverCache = new Map<string, string[]>();
-  private hoverKey: string | null = null;
-  private hoverTimer: ReturnType<typeof setTimeout> | null = null;
 
   /**
    * Tooltip lines for the transcript marker under world point `(wx, wy)`, or null.
@@ -893,11 +896,6 @@ export class NapariSpatialTileLayers {
       : [`${gene} transcript`, cellLine(obs, 'in cell')];
   }
 
-  /** Physical marker size needs µm; null when the dataset's unit is unknown. */
-  private pxPerMicron(dataset: SpatialDataset, pxPerUnit: number): number | undefined {
-    return dataset.micronsPerUnit ? pxPerUnit / dataset.micronsPerUnit : undefined;
-  }
-
   /**
    * The chosen genes, at the level the zoom calls for — or coarser, while the markers in
    * view would exceed the budget.
@@ -911,7 +909,7 @@ export class NapariSpatialTileLayers {
     const first = transcriptLevelFor(pxPerUnit, meta.levels);
     const keysAt = (l: number) => tilesInRect(rect, l, meta.levels, meta.bounds, MAX_TRANSCRIPT_TILES);
     const query = { genes, quality: view.transcriptQuality };
-    const pxPerMicron = this.pxPerMicron(dataset, pxPerUnit);
+    const pxPerMicron = pxPerMicronOf(dataset, pxPerUnit);
     const mx = (rect.x1 - rect.x0) * 0.25;
     const my = (rect.y1 - rect.y0) * 0.25;
     const around: DataRect = { x0: rect.x0 - mx, y0: rect.y0 - my, x1: rect.x1 + mx, y1: rect.y1 + my };
@@ -943,7 +941,7 @@ export class NapariSpatialTileLayers {
       kind: 'genes',
       // The clip window, in quarter-view steps: a pan past the margin re-clips.
       key: `genes|${genes.join(',')}|${view.transcriptQuality}|${view.transcriptBudget}|${bin ?? 'each'}|`
-        + `${Math.floor(rect.x0 / (mx || 1))},${Math.floor(rect.y0 / (my || 1))}|${keysAt(first).map(tileId)}`,
+        + `${clipKey(rect, mx, my)}|${keysAt(first).map(tileId)}`,
       load: async (ctx) => {
         // The zoom's own level only: over the budget, the transcripts are combined into
         // larger markers (groupSelection), never fetched from slower coarse levels.
@@ -952,10 +950,8 @@ export class NapariSpatialTileLayers {
         // Only what is on screen (and a margin, so a small pan needs nothing new) counts
         // against the budget and the cap; a tile reaches far past the view.
         const merged = mergeTranscriptTiles(tiles.map((t) => clipTranscripts(t, around)), MAX_TRANSCRIPTS);
-        const px = new Float32Array(merged.count);
-        for (let i = 0; i < merged.count; i++) {
-          px[i] = transcriptMarkerPx(merged.weight[i], view.transcriptScale, pxPerMicron);
-        }
+        const px = Float32Array.from(merged.weight,
+          (w) => transcriptMarkerPx(w, view.transcriptScale, pxPerMicron));
         return baseBin > 0
           ? { merged, px, ladder: { baseBin, levels: ladder?.length ?? PYRAMID_LEVELS, start: bin } }
           : { merged, px };
@@ -987,7 +983,7 @@ export class NapariSpatialTileLayers {
     return {
       kind: 'genes',
       key: `gene-bins|${genes.join(',')}|${budget}|${first}|${JSON.stringify(view.transcriptGeneGroups)}|`
-        + `${Math.floor(rect.x0 / (mx || 1))},${Math.floor(rect.y0 / (my || 1))}`,
+        + clipKey(rect, mx, my),
       load: async (ctx) => {
         let m = first;
         for (;;) {
@@ -1055,8 +1051,6 @@ export class NapariSpatialTileLayers {
     return p;
   }
 
-  private readonly densityCache = new LruCache<Promise<SpatialDensityRaster>>(DENSITY_CACHE_SIZE);
-
   /**
    * A gene selection zoomed out: one marker per cluster per bin, from the per-gene density
    * grids. The bin starts where markers are 14 px apart and doubles until the markers fit the
@@ -1075,7 +1069,7 @@ export class NapariSpatialTileLayers {
     return {
       kind: 'genes',
       key: `clusters|${clusters.map((c) => `${c.name}:${c.genes.join('+')}`).join(';')}|${budget}|${first}|`
-        + `${Math.floor(rect.x0 / (mx || 1))},${Math.floor(rect.y0 / (my || 1))}`,
+        + clipKey(rect, mx, my),
       load: async () => {
         let bin = first;
         for (;;) {
@@ -1084,12 +1078,7 @@ export class NapariSpatialTileLayers {
           const rasters = await Promise.all(clusters.map((c) => this.densityFor(dataset.id, c.genes, fine)));
           const out = clusterMarkers(rasters, clusters.map((c) => c.slot), bin, around);
           if (out.tile.count <= budget || bin >= grid * 2 ** 12) {
-            const refCount = quantileOf(out.tile.weight, 0.95);
-            const binPx = bin * pxPerUnit;
-            const px = new Float32Array(out.tile.count);
-            for (let i = 0; i < out.tile.count; i++) {
-              px[i] = groupedMarkerPx(out.tile.weight[i], refCount, binPx, view.transcriptScale);
-            }
+            const px = groupedSizes(out.tile.weight, bin * pxPerUnit, view.transcriptScale);
             return {
               merged: out.tile, px, kind: 'genes',
               clustered: {
@@ -1131,7 +1120,7 @@ export class NapariSpatialTileLayers {
         Math.max(k.gx * size, r10(rect.x0, false)), Math.max(k.gy * size, r10(rect.y0, false)),
         Math.min((k.gx + 1) * size, r10(rect.x1, true)), Math.min((k.gy + 1) * size, r10(rect.y1, true)),
       ]);
-      const pxPerMicron = this.pxPerMicron(dataset, pxPerUnit);
+      const pxPerMicron = pxPerMicronOf(dataset, pxPerUnit);
       return {
         kind: 'individual',
         key: `all|individual|${view.transcriptBudget}|${boxes.map((b) => b.join(',')).join(';')}`,
@@ -1154,8 +1143,8 @@ export class NapariSpatialTileLayers {
             }
           }
           const merged = mergeTranscriptTiles(got, cap);
-          const px = new Float32Array(merged.count);
-          for (let i = 0; i < merged.count; i++) px[i] = transcriptMarkerPx(1, view.transcriptScale, pxPerMicron);
+          // One transcript per entry: every marker is the same size.
+          const px = new Float32Array(merged.count).fill(transcriptMarkerPx(1, view.transcriptScale, pxPerMicron));
           return { merged, px };
         },
       };
@@ -1182,13 +1171,7 @@ export class NapariSpatialTileLayers {
       load: async (ctx) => {
         const got = await this.fetchAll(ctx, keys, (k) => this.port.getTranscriptBins!(k.level, k.gx, k.gy));
         const merged = mergeTranscriptTiles(got, Math.max(view.transcriptBudget * 1.5, 1));
-        const refCount = quantileOf(merged.weight, 0.95);
-        const binPx = lv.binSize * pxPerUnit;
-        const px = new Float32Array(merged.count);
-        for (let i = 0; i < merged.count; i++) {
-          px[i] = groupedMarkerPx(merged.weight[i], refCount, binPx, view.transcriptScale);
-        }
-        return { merged, px };
+        return { merged, px: groupedSizes(merged.weight, lv.binSize * pxPerUnit, view.transcriptScale) };
       },
     };
   }
@@ -1203,7 +1186,7 @@ export class NapariSpatialTileLayers {
     if (view.transcriptColorBy === 'cluster' && clusterOf) {
       // A cluster named like a group of the cells' grouping takes that group's colour, so a
       // cluster's transcripts and its cells agree; any other cluster takes a palette colour.
-      const name = this.cellTypeColumnName(dataset, view);
+      const name = cellTypeColumnFor(dataset, view);
       const codes = name ? await this.categoricalCodes(name).catch(() => null) : null;
       const cellColor = new Map<string, string>();
       if (codes?.meta.kind === 'categorical') {
@@ -1238,7 +1221,7 @@ export class NapariSpatialTileLayers {
         || DEFAULT_CATEGORICAL_PALETTE[i % DEFAULT_CATEGORICAL_PALETTE.length]));
       codeOf = view.transcriptAllGenes ? (i) => t.gene[i] % n : (i) => t.gene[i];
     } else {
-      const name = this.cellTypeColumnName(dataset, view);
+      const name = cellTypeColumnFor(dataset, view);
       const codes = name ? await this.categoricalCodes(name) : null;
       rgb = codes?.meta.kind === 'categorical' ? resolveCategoryColors(codes.meta).map(parseHex) : [];
       codeOf = (i) => {
@@ -1309,8 +1292,6 @@ export class NapariSpatialTileLayers {
     this.host.densityChanged?.(this.densityStats);
   }
 
-  private countsCache: { key: string; counts: Promise<SpatialTranscriptCounts> } | null = null;
-
   /**
    * Transcripts in view for the visible genes: each gene's dataset total times the share
    * of the tissue on screen. An estimate — expression is not uniform — which is also what
@@ -1348,9 +1329,6 @@ export class NapariSpatialTileLayers {
       : genes.reduce((sum, g) => sum + (counts.counts[g] ?? 0), 0);
     this.host.estimateChanged?.({ points: Math.round(selected * share), max: view.transcriptBudget });
   }
-
-  /** The density window in use and the densest bin, for the panel's threshold control. */
-  densityStats: { lo: number; hi: number; max: number } | null = null;
 
   // ── layer bookkeeping ─────────────────────────────────────────────────────────────
 
@@ -1457,6 +1435,22 @@ export class NapariSpatialTileLayers {
     this.polygonsShown = shown;
     this.host.polygonsShownChanged(shown);
   }
+}
+
+/** Screen sizes of grouped markers: by weight against the 95th-percentile weight, over `binPx`. */
+function groupedSizes(weight: Uint32Array, binPx: number, scale: number): Float32Array {
+  const refCount = quantileOf(weight, 0.95);
+  return Float32Array.from(weight, (w) => groupedMarkerPx(w, refCount, binPx, scale));
+}
+
+/** The clip window in quarter-view steps, for a job key: a pan past the margin re-clips. */
+function clipKey(rect: DataRect, mx: number, my: number): string {
+  return `${Math.floor(rect.x0 / (mx || 1))},${Math.floor(rect.y0 / (my || 1))}`;
+}
+
+/** Physical marker size needs µm; undefined when the dataset's unit is unknown. */
+function pxPerMicronOf(dataset: SpatialDataset, pxPerUnit: number): number | undefined {
+  return dataset.micronsPerUnit ? pxPerUnit / dataset.micronsPerUnit : undefined;
 }
 
 /** What the transcript layer currently shows — what hovering needs to name a marker. */
