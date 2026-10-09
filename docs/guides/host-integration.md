@@ -70,11 +70,6 @@ The library loads its icons, colormap previews and `colormap-luts.json` from
 ]
 ```
 
-The region editor's help text also loads `assets/icons/polyline.svg` and
-`assets/icons/wand.svg`. Serve the same folder's top-level SVGs at
-`assets/icons/` too, as [`scripts/stage-lib.mjs`](../../scripts/stage-lib.mjs)
-does for the example.
-
 SAM and cellpose run on `onnxruntime-web`, which loads its WASM sidecars from
 `/assets/ort/`. Copy `node_modules/onnxruntime-web/dist/*.{wasm,mjs}` there, or
 call `setOrtWasmBase(url)` once at startup to load them from somewhere else, such

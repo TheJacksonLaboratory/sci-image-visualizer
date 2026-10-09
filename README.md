@@ -68,8 +68,6 @@ it working.
    { "glob": "**/*", "input": "node_modules/@jax-data-science/sci-image-visualizer/src/lib/assets",
      "output": "assets/plotting" }
    ```
-   The region editor's help also loads `assets/icons/{polyline,wand}.svg`; serve
-   the folder's top-level SVGs there too.
 4. **onnxruntime-web sidecars** at `/assets/ort/` (copy
    `node_modules/onnxruntime-web/dist/*.{wasm,mjs}`), or call `setOrtWasmBase(url)`
    once at startup.
