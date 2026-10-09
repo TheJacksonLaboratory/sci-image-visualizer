@@ -51,9 +51,6 @@ import { VIZ_ALERT_TOAST_KEY } from '../../toast-outlets';
 // './contracts/plot-type' directly, drop this re-export.
 export { PlotType } from '../../contracts/plot-type';
 
-
-(window as any).Buffer = Buffer;
-
 @Injectable({
   providedIn: 'root'
 })
