@@ -179,6 +179,19 @@ class NapariCoordinateTransform implements ICoordinateTransform {
   }
 }
 
+/** What a plot mounts, as far as a slice change is concerned. */
+type SceneKind = 'image2d' | 'volume' | 'surface' | 'scatter3d' | 'spatial3d';
+
+/** The scene kind {@link NapariVisualizerService.plot} mounts for a plot type (same dispatch). */
+function sceneKindOf(plotType: PlotType): SceneKind {
+  if (isSpatialOmics3d(plotType)) return 'spatial3d';
+  if (isSpatialOmics(plotType) || isNapariScatter(plotType)) return 'image2d';
+  if (isNapariScatter3d(plotType)) return 'scatter3d';
+  if (isNapariSurface(plotType)) return 'surface';
+  if (isNapari3d(plotType)) return 'volume';
+  return 'image2d';
+}
+
 /** Opaque handle from {@link NapariVisualizerService.load}, passed back to plot(). */
 interface NapariLoaded {
   imageInfo: IImageInfo;
@@ -379,6 +392,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private loaded: NapariLoaded | null = null;
   private lastPixels: PixelData | null = null;
   private currentPlotType: PlotType = PlotType.NAPARI_IMAGE;
+  /** The kind of scene {@link plot} mounted — fixed per plot, unlike {@link currentPlotType},
+   *  which {@link setPlotType} can change under it. Drives {@link setZIndex}. */
+  private mounted: SceneKind | null = null;
   /** napari-js high-level view owning the 3D volume layers (one additive tinted layer per channel
    *  for multichannel, or a single grayscale volume). Null in 2D. */
   private volumeView: MultiChannelVolumeView | null = null;
@@ -970,6 +986,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.host = host;
     this.plotDivId = plotDiv;
     this.currentPlotType = plotType;
+    this.mounted = sceneKindOf(plotType);
 
     const canvas = document.createElement('canvas');
     canvas.style.display = 'block';
@@ -4172,6 +4189,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   }
 
   reset(): void {
+    this.mounted = null;
     // End the previous scene: its frame loading, descriptor poll, tile counts and awaits.
     this.loading.abort();
     this.loading = new AbortController();
@@ -4305,18 +4323,31 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const v = this.viewer;
     if (!v) return;
     if (this.navigator) void this.refreshNavigatorImage(zIndex);
-    // Surface: one slice → one mesh, so re-build the height field for the new slice.
-    if (this.surfaceLayer) {
-      void this.buildSurface(v, zIndex).catch((err) =>
-        console.error('[napari-js] setZIndex surface failed:', err),
-      );
-      return;
-    }
-    // Volume / isosurface: step the volume's z plane in place.
-    if (this.volumeView) {
-      v.dims.z = zIndex;
-      this.scheduleReadback();
-      return;
+    // Dispatch on WHAT IS MOUNTED, not on which layer handle happens to be non-null: a surface
+    // still preloading (or whose first build failed) has no layer yet, and a 3D scatter or cloud
+    // has none of them — and both used to fall through to the 2D render below.
+    switch (this.mounted) {
+      case 'surface':
+        // One slice → one mesh: re-build the height field for the new slice. Not built yet →
+        // nothing to do; the build at the end of the mount reads `loaded.z`.
+        if (this.surfaceLayer) {
+          void this.buildSurface(v, zIndex).catch((err) =>
+            console.error('[napari-js] setZIndex surface failed:', err),
+          );
+        }
+        return;
+      case 'volume':
+        // Volume / isosurface: step the volume's z plane in place.
+        v.dims.z = zIndex;
+        this.scheduleReadback();
+        return;
+      case 'scatter3d':
+      case 'spatial3d':
+      case null:
+        // The whole stack (or the observations' own z) is already on screen: no plane to step.
+        return;
+      case 'image2d':
+        break;
     }
     // Tiled 2D image: just move the dims plane — the tiled visual fetches the new slice's tiles
     // (cached per z), no layer rebuild. Refresh the coarse histogram sample for the new slice.
@@ -4328,8 +4359,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       this.scheduleReadback();
       return;
     }
-    // 2D image (stitch fallback): re-render the slice (re-fetches per-channel / composite). Branch
-    // of a volume layer (not currentPlotType, which could be stale and silently no-op the swap).
+    // 2D image (stitch fallback): re-render the slice (re-fetches per-channel / composite).
     // The token lets renderImage drop a superseded scrub so a slow older slice can't clobber a newer one.
     const req = ++this.sliceReq;
     void this.renderImage(zIndex, req)

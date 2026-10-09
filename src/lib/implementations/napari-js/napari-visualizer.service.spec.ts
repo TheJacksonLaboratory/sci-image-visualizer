@@ -770,6 +770,35 @@ describe('NapariVisualizerService', () => {
     document.body.removeChild(div);
   });
 
+  it('a slice change in a 3D scene never renders the 2D image into it', async () => {
+    // Regression (NAPARI-SVC-9): setZIndex chose its branch by whichever layer handle was
+    // non-null, so a 3D scatter, or a surface whose mesh was not built yet, fell through to
+    // the 2D render — tiles fetched and 2D layers built into the 3D viewer.
+    const render = jest.spyOn(
+      service as unknown as { renderImage(z: number, t?: number): Promise<void> }, 'renderImage',
+    );
+    const div = document.createElement('div');
+    div.id = 'z-3d-host';
+    document.body.appendChild(div);
+    const loaded = await service.load(imageInfo(), 0);
+
+    await service.plot('z-3d-host', loaded, imageInfo(), 600, PlotType.NAPARI_SCATTER3D);
+    service.setZIndex(1);
+    await Promise.resolve();
+    expect(render).not.toHaveBeenCalled();
+
+    await service.plot('z-3d-host', loaded, imageInfo(), 600, PlotType.NAPARI_SURFACE);
+    // As during the preload, or after a first build that failed.
+    (service as unknown as { surfaceLayer: unknown }).surfaceLayer = null;
+    service.setZIndex(0);
+    await Promise.resolve();
+    expect(render).not.toHaveBeenCalled();
+    expect(loaded.z).toBe(0);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
   it('mounts a 3D scatter voxel cloud via addPoints3D', async () => {
     const addPoints3d = jest.spyOn(
       Viewer.prototype as unknown as { addPoints3D: (...a: unknown[]) => unknown },
