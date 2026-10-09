@@ -1432,6 +1432,49 @@ describe('SpatialChartsComponent', () => {
       expect(component.busy).toBe(false);
     });
 
+    describe('with an embedding on screen', () => {
+      const umapMeta = { name: 'X_umap', label: 'UMAP', dims: 2 as const };
+
+      beforeEach(async () => {
+        controls.getEmbedding = jest.fn(async () => ({
+          meta: umapMeta,
+          x: Float32Array.from([1, 2, 3, 4]),
+          y: Float32Array.from([5, 6, 7, 8]),
+        }));
+        dataset$.next({ ...dataset, embeddings: [umapMeta] });
+        await build(controls);
+        component.onKind('embedding');
+        await flush();
+      });
+
+      it('stays on the embedding when the map is recoloured by a categorical column', async () => {
+        // The embedding's own caption tells the reader to do exactly this.
+        view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        expect(component.kind).toBe('embedding');
+        expect(lastPlot().traces.map((t) => t.name)).toEqual(['A', 'B']);
+      });
+
+      it('keeps a categorical load that a selection redraw happened during', async () => {
+        type CatView = Awaited<ReturnType<ISpatialControls['categoricalView']>>;
+        let release: (v: CatView) => void = () => undefined;
+        controls.categoricalView
+          .mockImplementationOnce(() => new Promise<CatView>((r) => { release = r; }));
+        view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        // A lasso while the column is loading redraws the embedding.
+        selection$.next({ mask: Uint8Array.from([1, 0, 0, 0]), count: 1 });
+        await flush();
+        release({
+          name: 'region', categories: ['A', 'B'], colors: ['#f00', '#00f'],
+          codes: new Uint16Array([0, 0, 1, 1]),
+        });
+        await flush();
+        expect(component.embeddingNote).toContain('Coloured to match the map');
+        expect(lastPlot().traces.map((t) => t.name)).toEqual(['A', 'B']);
+        expect(component.busy).toBe(false);
+      });
+    });
   });
 
 });

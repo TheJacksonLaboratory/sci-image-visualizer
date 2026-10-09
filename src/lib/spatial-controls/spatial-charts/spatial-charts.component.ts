@@ -663,7 +663,9 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
         if (!current()) return; // superseded
         this.categorical = { codes: view.codes, categories: view.categories, colors: view.colors };
         this.values = null;
-        this.kind = 'counts';
+        // Only off the distribution tabs. The heatmap does not chart the colour source,
+        // and the embedding is coloured BY it — its own caption asks for exactly this.
+        if (this.kind !== 'embedding' && this.kind !== 'heatmap') this.kind = 'counts';
         this.notice = null;
       } else {
         const values = await controls.continuousValues(source);
