@@ -10,6 +10,9 @@ import { Region, Rectangle } from '../../models/region';
 import { Image } from 'image-js';
 import * as Plotly from 'plotly.js-dist-min';
 import * as path from 'path';
+import { VisualizerStore } from '../../store/visualizer-store.service';
+import { RegionStore } from '../../store/region-store.service';
+import { IChannelState } from '../../contracts/channel-histogram-api.contract';
 
 describe('PlotlyService', () => {
   let service: PlotlyService;
@@ -419,5 +422,65 @@ describe('PlotlyService viewport + stack-state methods', () => {
     service.getViewportChange$().subscribe({ next: () => (emitted = true), complete: () => (completed = true) });
     expect(emitted).toBe(false);
     expect(completed).toBe(true);
+  });
+});
+
+describe('PlotlyService service-lifetime subscriptions (review CORE-1)', () => {
+  let service: PlotlyService;
+  let imageInfo: IImageInfo;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule],
+      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+    });
+    service = TestBed.inject(PlotlyService);
+    jest.spyOn(service as unknown as { loadImage(u: string): Promise<Image> }, 'loadImage')
+      .mockImplementation((url: string) => Image.load(url));
+    imageInfo = {
+      urls: [path.join(__dirname, 'test_grayscale.png')],
+      trueImageSize: [1344, 1024],
+      scaleRatio: true,
+      isGrayscale: true,
+      showStack: false,
+    } as IImageInfo;
+    document.body.innerHTML = '<div id="plot"></div>';
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  const channel = (min: number, max: number): IChannelState =>
+    ({ index: 0, name: 'Intensity', color: '#ffffff', min, max, gamma: 1, visible: true });
+
+  it('re-arms the channel and region subscriptions on the next plot after unsubscribe()', async () => {
+    const store = TestBed.inject(VisualizerStore);
+    const regionStore = TestBed.inject(RegionStore);
+    // A destroyed VisualizerComponent tears the root singleton's subscriptions down...
+    service.unsubscribe();
+    // ...and a recreated one loads and plots the next image.
+    const loaded = await service.load(imageInfo, 0);
+    await service.plot('plot', loaded, imageInfo, 811, PlotType.HEATMAP);
+
+    const restyle = jest.spyOn(Plotly, 'restyle').mockResolvedValue(document.createElement('div') as never);
+    const emitProfiles = jest.spyOn(service as unknown as { emitProfiles(): void }, 'emitProfiles');
+    store.setChannelStates([channel(10, 20)]);
+    expect(restyle).toHaveBeenCalledWith('plot', expect.objectContaining({ zmin: 10, zmax: 20 }));
+
+    const r = new Region();
+    r.bounds = Object.assign(new Rectangle(), { x: 1, y: 1, width: 5, height: 5 });
+    regionStore.setRegions([r]);
+    expect(emitProfiles).toHaveBeenCalled();
+  });
+
+  it('does not double-subscribe when plot runs without a prior unsubscribe()', async () => {
+    const store = TestBed.inject(VisualizerStore);
+    const loaded = await service.load(imageInfo, 0);
+    await service.plot('plot', loaded, imageInfo, 811, PlotType.HEATMAP);
+    await service.plot('plot', loaded, imageInfo, 811, PlotType.HEATMAP);
+
+    const apply = jest.spyOn(service as unknown as { applyChannelDisplay(): void }, 'applyChannelDisplay')
+      .mockImplementation(() => undefined);
+    store.setChannelStates([channel(1, 2)]);
+    expect(apply).toHaveBeenCalledTimes(1);
   });
 });

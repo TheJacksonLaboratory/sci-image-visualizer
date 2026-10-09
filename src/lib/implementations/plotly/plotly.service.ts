@@ -174,8 +174,8 @@ export class PlotlyService implements IVisualizer {
   // RegionStore. Selection still drives Plotly's `_activeShapeIndex` (so a
   // single shape gets the edit handles) — see setSelectedShapeIndices().
   private imageCached = false;
-  private imageCachedSubscription: Subscription;
-  private filenameSubscription: Subscription;
+  private imageCachedSubscription?: Subscription;
+  private filenameSubscription?: Subscription;
   /** Drives the intensity inset off region adds/drags/deletes (both backends). */
   private regionUpdateSubscription?: Subscription;
   /** Live (per-frame, non-coalesced) region edits — so the inset tracks an OSD
@@ -236,6 +236,19 @@ export class PlotlyService implements IVisualizer {
     this.vertexEraserTool.bindHost(this.eraserHost);
     this.bindZoomToBoxHost();
 
+    this.ensureSubscriptions();
+  }
+
+  /**
+   * Subscribe to the shared stores (cached flag, filename, live channel recolor,
+   * profile-inset refresh). Idempotent and self-healing, like OSD's
+   * ensureColormapSubscription: this service is a root singleton, but
+   * `unsubscribe()` (called on VisualizerComponent destroy) tears these down and
+   * the constructor never runs again. So `load()`/`plot()` call this to
+   * re-establish them after a component teardown/recreate.
+   */
+  private ensureSubscriptions(): void {
+    if (this.channelSub) return;
     this.imageCachedSubscription = this.state.isImageCached$().subscribe(imageCached => {
       this.imageCached = imageCached;
     });
@@ -279,6 +292,9 @@ export class PlotlyService implements IVisualizer {
    * @return an object with data and ratio keys
    */
   public async load(imageInfo: IImageInfo, zIndex: number) {
+    // Re-establish the store subscriptions if a prior component teardown
+    // (unsubscribe()) tore them down — see ensureSubscriptions().
+    this.ensureSubscriptions();
     const urls = imageInfo.urls;
     // use zIndex provided if any, 0 otherwise
     let imageUrl;
@@ -362,6 +378,7 @@ export class PlotlyService implements IVisualizer {
    */
   public plot(plotDiv: string, imageLoaded: any, imageInfo: IImageInfo, screenHeight: number,
               plotType: PlotType, inPlace: boolean = false) {
+    this.ensureSubscriptions();
     const trueImageSize: number[] = [];
     this.zoomCoordinates = [];
     // [x0, x1, y0, y1]
@@ -2164,21 +2181,16 @@ export class PlotlyService implements IVisualizer {
    * Unsubscribe Subscriptions
    */
   unsubscribe() {
-    if (this.imageCachedSubscription) {
-      this.imageCachedSubscription.unsubscribe();
-    }
-    if (this.filenameSubscription) {
-      this.filenameSubscription.unsubscribe();
-    }
-    if (this.regionUpdateSubscription) {
-      this.regionUpdateSubscription.unsubscribe();
-    }
-    if (this.regionLiveEditSubscription) {
-      this.regionLiveEditSubscription.unsubscribe();
-    }
-    if (this.channelSub) {
-      this.channelSub.unsubscribe();
-    }
+    this.imageCachedSubscription?.unsubscribe();
+    this.imageCachedSubscription = undefined;
+    this.filenameSubscription?.unsubscribe();
+    this.filenameSubscription = undefined;
+    this.regionUpdateSubscription?.unsubscribe();
+    this.regionUpdateSubscription = undefined;
+    this.regionLiveEditSubscription?.unsubscribe();
+    this.regionLiveEditSubscription = undefined;
+    this.channelSub?.unsubscribe();
+    this.channelSub = undefined;
   }
 
   /** Live-apply the channel display window (zmin/zmax) + reverse/invert to the
