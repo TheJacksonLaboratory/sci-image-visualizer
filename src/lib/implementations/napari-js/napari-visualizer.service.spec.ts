@@ -174,6 +174,8 @@ describe('NapariVisualizerService', () => {
       // published (`requiresSpatialData`), so a host with no spatial data never
       // sees it even though the backend can render it.
       PlotType.SPATIAL_OMICS,
+      // plot() mounts it too; it was missing from the list (NAPARI-SVC-27).
+      PlotType.SPATIAL_OMICS_3D,
     ]);
   });
 

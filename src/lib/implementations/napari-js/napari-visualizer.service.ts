@@ -1,6 +1,6 @@
 import { Inject, Injectable, NgZone, Optional, inject } from '@angular/core';
 import {
-  Observable, BehaviorSubject, Subject, Subscription, combineLatest, from, of, firstValueFrom,
+  Observable, BehaviorSubject, Subject, Subscription, combineLatest, from, of,
 } from 'rxjs';
 import { Image } from 'image-js';
 import { saveAs } from 'file-saver';
@@ -3149,7 +3149,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       this.observationsLoading++;
       this.showLoading();
       try {
-        enc = await this.spatialScalar3d(dataset, view);
+        enc = await this.spatialScalar3d(view);
       } catch (err) {
         console.warn('[napari-js] spatial 3D colouring failed — falling back to a flat colour', err);
         enc = null;
@@ -3613,7 +3613,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       .sort((a, b) => b.count - a.count)
       .slice(0, NapariVisualizerService.DENSITY_MAX_CLUSTERS);
     if (counts.filter((c) => c > 0).length > ranked.length) {
-      console.info(
+      console.warn(
         `[napari-js] ${column}: drawing the ${ranked.length} largest clusters as density ` +
           'volumes; more than that stop being separable by eye',
       );
@@ -3741,9 +3741,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    * `contrastLimits` of `[-0.5, K - 0.5]` puts code `i` at the centre of block `i`, which is what
    * makes the round-trip exact instead of approximately right.
    */
-  private async spatialScalar3d(
-    dataset: SpatialDataset, view: SpatialViewState,
-  ): Promise<Spatial3dEncoding | null> {
+  private async spatialScalar3d(view: SpatialViewState): Promise<Spatial3dEncoding | null> {
     const port = this.spatialData;
     const colorBy = view.colorBy;
     if (!port || !colorBy) return null;
@@ -3753,14 +3751,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       if (isCategoricalColumn(column)) {
         return this.encodeSpatial3dCategorical(column.codes, resolveCategoryColors(column.meta));
       }
-      return this.encodeSpatial3dContinuous(
-        column.values, view, view.logScale,
-      );
+      return this.encodeSpatial3dContinuous(column.values, view);
     }
-    const values = await port.getFeatureVector(colorBy.name);
-    return this.encodeSpatial3dContinuous(
-      values, view, view.logScale,
-    );
+    return this.encodeSpatial3dContinuous(await port.getFeatureVector(colorBy.name), view);
   }
 
   /** Category codes → a stepped LUT, exact for up to {@link SPATIAL_3D_MAX_CATEGORIES}. */
@@ -3795,14 +3788,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     };
   }
 
-  /** Continuous values → the active colormap over a percentile-clipped window. */
-  private encodeSpatial3dContinuous(
-    source: Float32Array, view: SpatialViewState, log: boolean,
-  ): Spatial3dEncoding {
+  /** Continuous values → the active colormap over a percentile-clipped window (log1p first when
+   *  the view's log scale is on). */
+  private encodeSpatial3dContinuous(source: Float32Array, view: SpatialViewState): Spatial3dEncoding {
     const lut = this.spatialLut(view);
     const [lo, hi] = view.percentileClip ?? [0.01, 0.99];
     let values = source;
-    if (log) {
+    if (view.logScale) {
       values = new Float32Array(source.length);
       for (let i = 0; i < source.length; i++) values[i] = Math.log1p(Math.max(0, source[i]));
     }
@@ -3867,26 +3859,24 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       }
       // A continuous column may carry its own log hint (counts); the view's
       // toggle wins once the user has set it.
-      return toRgbaTuples(this.encodeSpatialContinuous(
-        column.values, view, view.logScale, muted,
-      ));
+      return toRgbaTuples(this.encodeSpatialContinuous(column.values, view, muted));
     }
 
     const values = await port.getFeatureVector(colorBy.name);
-    return toRgbaTuples(this.encodeSpatialContinuous(
-      values, view, view.logScale, muted,
-    ));
+    return toRgbaTuples(this.encodeSpatialContinuous(values, view, muted));
   }
 
-  /** Continuous values → RGBA through the active colormap and a clipped window. */
+  /** Continuous values → RGBA through the active colormap and a clipped window (log scale per
+   *  the view). */
   private encodeSpatialContinuous(
-    values: Float32Array, view: SpatialViewState, log: boolean,
-    muted: Uint8Array | null = null,
+    values: Float32Array, view: SpatialViewState, muted: Uint8Array | null = null,
   ): Float32Array {
     const lut = this.spatialLut(view);
     const [lo, hi] = view.percentileClip ?? [0.01, 0.99];
     const [min, max] = contrastWindow(values, lo, hi);
-    return encodeContinuous(values, { lut, min, max, log, opacity: view.opacity, muted });
+    return encodeContinuous(values, {
+      lut, min, max, log: view.logScale, opacity: view.opacity, muted,
+    });
   }
 
   /**
@@ -4551,6 +4541,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     return this.autoscaleEvent$.asObservable();
   }
 
+  /**
+   * The plot types this backend can mount — every type {@link plot} dispatches on.
+   *
+   * Contract-only in production: the router answers `getPlotTypeDescriptors` from the Plotly
+   * service, so nothing reaches this one through it; it is kept accurate for direct callers.
+   */
   getPlotTypeDescriptors(): PlotTypeDescriptor[] {
     // The WebGPU napari-js options, offered alongside (not replacing) the OSD/Plotly types.
     return [
@@ -4560,8 +4556,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_SCATTER3D]!,
       PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_VOLUME]!,
       PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_ISOSURFACE]!,
-      // Gated by `requiresSpatialData`, so the selector hides it until a dataset is published.
+      // Gated by `requiresSpatialData`, so the selector hides them until a dataset is published
+      // (the 3D one also by `requiresSpatial3d`).
       PLOT_TYPE_DESCRIPTORS[PlotType.SPATIAL_OMICS]!,
+      PLOT_TYPE_DESCRIPTORS[PlotType.SPATIAL_OMICS_3D]!,
     ];
   }
 
@@ -4874,7 +4872,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     _width: number,
     _height: number,
     _zIndex: number,
-  ): void {}
+  ): void {
+    /* Plotly owns intensity sampling */
+  }
   getViewportChange$(): Observable<{ x: number; y: number; width: number; height: number }> {
     return this.viewportChange$.asObservable();
   }
