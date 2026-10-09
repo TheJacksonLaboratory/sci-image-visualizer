@@ -386,6 +386,31 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     expect(store.currentChannelStates()[0]).toMatchObject({ min: 10, max: 90 });
   });
 
+  it('nudges the toolbar at most every 100 ms during an animation, looking it up once (OSD-PLOTLY-30)', () => {
+    document.body.innerHTML =
+      '<visualization><div class="toolbar-dock"></div><div id="osdplot"></div></visualization>';
+    const svc = service as any;
+    svc.plotDiv = 'osdplot';
+    const dock = document.querySelector('.toolbar-dock') as HTMLElement;
+    let reflows = 0;
+    Object.defineProperty(dock, 'offsetHeight', { get: () => { reflows++; return 0; } });
+    const lookup = jest.spyOn(document, 'getElementById');
+    const now = jest.spyOn(performance, 'now').mockReturnValue(1000);
+    svc.nudgeToolbarRepaint(true);
+    svc.nudgeToolbarRepaint(true); // same frame burst
+    now.mockReturnValue(1050);
+    svc.nudgeToolbarRepaint(true);
+    expect(reflows).toBe(1);
+    now.mockReturnValue(1200);
+    svc.nudgeToolbarRepaint(true);
+    svc.nudgeToolbarRepaint(); // animation-finish: always
+    expect(reflows).toBe(3);
+    expect(lookup).toHaveBeenCalledTimes(1);
+    now.mockRestore();
+    lookup.mockRestore();
+    document.body.innerHTML = '';
+  });
+
   it('getCurrentImage resolves null (Plotly-only readback)', async () => {
     await expect(service.getCurrentImage()).resolves.toBeNull();
   });

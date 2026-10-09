@@ -240,6 +240,11 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    *  opens showing raw pixels. Read at viewer creation; toggled via
    *  {@link setImageSmoothingEnabled}. */
   private smoothingEnabled = false;
+  /** The host's docked toolbar (see nudgeToolbarRepaint): undefined until looked
+   *  up for the current mount, null when there is none. */
+  private toolbarDock: HTMLElement | null | undefined = undefined;
+  private lastToolbarNudge = 0;
+  private static readonly TOOLBAR_NUDGE_INTERVAL_MS = 100;
 
   /** Overall deadline for the /tiles/info poll loop. An uncached whole-slide
    *  image (e.g. .ndpi) is cached server-side first (GCS->PVC), which can take
@@ -746,6 +751,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       return Promise.resolve(true);
     }
     this.plotDiv = plotDiv;
+    this.toolbarDock = undefined; // re-located for this mount (nudgeToolbarRepaint)
     this.currentFileName = imageInfo?.fileName;
     this.descriptor = d;
     this.infoB64 = loaded.infoB64;
@@ -1001,10 +1007,10 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
         // #plot in the <visualizer> host) is left laid-out-but-unpainted and
         // vanishes — confirmed via DevTools (DOM intact, region simply not painted).
         // CSS (z-index / isolation / contain) and DOM-reparenting don't fix it; a
-        // repaint reliably does. Nudge it each animation frame (so it never visibly
-        // drops) and on settle. The synchronous display toggle re-rasters with no
-        // visible gone-frame and no layout shift.
-        this.viewer!.addHandler('animation', () => this.nudgeToolbarRepaint());
+        // repaint reliably does. Nudge it during the animation (throttled — each
+        // nudge forces a layout) and on settle. The synchronous display toggle
+        // re-rasters with no visible gone-frame and no layout shift.
+        this.viewer!.addHandler('animation', () => this.nudgeToolbarRepaint(true));
         this.viewer!.addHandler('animation-finish', () => this.nudgeToolbarRepaint());
         if (!simple) this.cache.schedulePrefetch();
         // Force fit-to-view as the split/flex layout settles. A tall
@@ -1741,10 +1747,20 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    *  laid-out-but-unpainted (the canvas's compositing churn strands the toolbar's
    *  raster). A synchronous display toggle re-rasters it with no visible gone-frame
    *  and no layout shift. Located via the DOM since this service doesn't own the
-   *  toolbar; a no-op when there's no toolbar (e.g. embedded without one). */
-  private nudgeToolbarRepaint(): void {
-    const plotEl = this.plotDiv ? document.getElementById(this.plotDiv) : null;
-    const dock = plotEl?.closest('visualization')?.querySelector<HTMLElement>('.toolbar-dock');
+   *  toolbar; a no-op when there's no toolbar (e.g. embedded without one). The
+   *  element is looked up once per mount. `throttled` (animation frames) nudges
+   *  at most every {@link TOOLBAR_NUDGE_INTERVAL_MS}: each nudge forces a layout. */
+  private nudgeToolbarRepaint(throttled = false): void {
+    if (throttled) {
+      const now = performance.now();
+      if (now - this.lastToolbarNudge < OpenSeadragonVisualizerService.TOOLBAR_NUDGE_INTERVAL_MS) return;
+      this.lastToolbarNudge = now;
+    }
+    if (this.toolbarDock === undefined || (this.toolbarDock && !this.toolbarDock.isConnected)) {
+      const plotEl = this.plotDiv ? document.getElementById(this.plotDiv) : null;
+      this.toolbarDock = plotEl?.closest('visualization')?.querySelector<HTMLElement>('.toolbar-dock') ?? null;
+    }
+    const dock = this.toolbarDock;
     if (!dock) return;
     const prev = dock.style.display;
     dock.style.display = 'none';
