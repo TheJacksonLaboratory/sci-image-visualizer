@@ -187,7 +187,7 @@ export class SamPointToolService {
       const prompt: SamPrompt = { points: this.points.slice() };
       const res = await session.decode(this.embedding, prompt);
       const polys = this.wandService.maskToPolygons(
-        res.mask, res.width, res.height, cached.width, cached.height, 0, 0,
+        res.mask, res.width, res.height, 0, 0,
       );
       if (polys.length === 0) { this.status$.next('No mask for these points.'); return; }
       const poly = polys[0];

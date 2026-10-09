@@ -209,7 +209,7 @@ describe('WandService', () => {
       }
     }
 
-    const poly = service.maskToPolygon(accum, bw, bh, img.width, img.height, x0, y0);
+    const poly = service.maskToPolygon(accum, bw, bh, x0, y0);
     expect(poly).not.toBeNull();
     const b = bbox(poly!);
     // Boundary should span the union of both patches horizontally.
@@ -313,15 +313,30 @@ describe('WandService', () => {
 
   it('maskToPolygons traces an enclosed hole as an interior ring', () => {
     const mask = donutMask(20, 20, 7, 7, 13, 13);
-    const polys = service.maskToPolygons(mask, 20, 20, 20, 20, 0, 0, 4, 4);
+    const polys = service.maskToPolygons(mask, 20, 20, 0, 0, 4, 4);
     expect(polys.length).toBe(1);
     expect(polys[0].holes?.length).toBe(1);
     expect(polys[0].holes![0].length).toBeGreaterThanOrEqual(4);
   });
 
+  it('maskToPolygons keeps hole rings in true coords, like the exterior (RT-4)', () => {
+    // A stroke whose origin lies left of / above the readback window (negative
+    // matrix coords). The exterior is unclamped (jit-ui#102); the hole must be too,
+    // or it collapses onto the window edge.
+    const mask = donutMask(20, 20, 7, 7, 13, 13);
+    const polys = service.maskToPolygons(mask, 20, 20, -50, -50, 4, 4);
+    expect(polys.length).toBe(1);
+    expect(Math.min(...polys[0].xpoints)).toBe(-50);
+    const hole = polys[0].holes![0];
+    expect(Math.min(...hole.map((p) => p[0]))).toBe(-43);
+    expect(Math.max(...hole.map((p) => p[0]))).toBe(-38);
+    expect(Math.min(...hole.map((p) => p[1]))).toBe(-43);
+    expect(new Set(hole.map((p) => p.join(','))).size).toBeGreaterThanOrEqual(4);
+  });
+
   it('maskToPolygons drops a hole smaller than minHoleSize', () => {
     const mask = donutMask(20, 20, 9, 9, 11, 11); // 2×2 = 4px hole
-    const polys = service.maskToPolygons(mask, 20, 20, 20, 20, 0, 0, 4, 50);
+    const polys = service.maskToPolygons(mask, 20, 20, 0, 0, 4, 50);
     expect(polys.length).toBe(1);
     expect(polys[0].holes).toBeUndefined();
   });
@@ -332,7 +347,7 @@ describe('WandService', () => {
     const mask = new Uint8Array(w * h);
     mask.fill(1);
     for (let y = 8; y < 12; y++) for (let x = 15; x < 20; x++) mask[y * w + x] = 0;
-    const polys = service.maskToPolygons(mask, w, h, w, h, 0, 0, 4, 4);
+    const polys = service.maskToPolygons(mask, w, h, 0, 0, 4, 4);
     expect(polys[0].holes).toBeUndefined();
   });
 

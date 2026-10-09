@@ -77,7 +77,7 @@ export class CellSegmentToolService {
         this.status$.next(`${prefix}Tracing cells…`);
         await tick(); // paint before the (main-thread) contour tracing
         const polys = this.wandService.labelsToPolygons(
-          seg.labels, seg.width, seg.height, seg.width, seg.height, 0, 0,
+          seg.labels, seg.width, seg.height, 0, 0,
         );
         if (polys.length === 0) continue;
         for (const poly of polys) {

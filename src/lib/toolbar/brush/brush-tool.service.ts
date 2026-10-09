@@ -311,7 +311,7 @@ export class BrushToolService {
     // Trace every connected piece: an erase that cuts through the region splits
     // it into two, and both must survive (the larger keeps the region identity).
     const polys = this.wandService.maskToPolygons(
-      stroke.mask, stroke.bw, stroke.bh, cached.width, cached.height, stroke.bx, stroke.by,
+      stroke.mask, stroke.bw, stroke.bh, stroke.bx, stroke.by,
     );
     if (polys.length === 0) {
       // Erased to nothing — remove the shape(s) entirely.

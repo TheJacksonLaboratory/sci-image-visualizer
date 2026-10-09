@@ -45,9 +45,7 @@ export class RegionOpsService {
     const scale = this.opRasterScale(regions, imageWidth, imageHeight);
     const mask = this.unionMask(regions, imageWidth, imageHeight, scale);
     if (!mask) return null;
-    const sw = Math.max(1, Math.round(imageWidth * scale));
-    const sh = Math.max(1, Math.round(imageHeight * scale));
-    let polys = this.wand.maskToPolygons(mask.mask, mask.bw, mask.bh, sw, sh, mask.bx, mask.by, 1, 1);
+    let polys = this.wand.maskToPolygons(mask.mask, mask.bw, mask.bh, mask.bx, mask.by, 1, 1);
     if (scale !== 1) polys = polys.map((p) => this.scalePolygon(p, 1 / scale));
     return this.regionFromParts(polys, regions[0]);
   }

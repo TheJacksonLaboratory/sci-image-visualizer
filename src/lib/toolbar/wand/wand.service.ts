@@ -44,7 +44,7 @@ export class WandService {
   computeRegion(image: WandImage, cx: number, cy: number, options: WandOptions = {}): Polygon | null {
     const patch = this.computePatchMask(image, cx, cy, options);
     if (!patch) return null;
-    return this.maskToPolygon(patch.mask, patch.size, patch.size, image.width, image.height,
+    return this.maskToPolygon(patch.mask, patch.size, patch.size,
       Math.round(cx) - (patch.size - 1) / 2,
       Math.round(cy) - (patch.size - 1) / 2);
   }
@@ -246,11 +246,9 @@ export class WandService {
    * Polygon translated into image-pixel coordinates via (originX, originY).
    * The traced vertices are NOT clamped to the image bounds: a region drawn while
    * panned/zoomed keeps its true coordinates even where they fall outside the visible
-   * window (jit-ui#102). `imageWidth`/`imageHeight` are kept for signature compatibility
-   * but no longer used.
+   * window (jit-ui#102).
    */
   public maskToPolygon(mask: Uint8Array, w: number, h: number,
-                       _imageWidth: number, _imageHeight: number,
                        originX: number, originY: number): Polygon | null {
     const verticesLocal = this.traceContour(mask, w, h);
     if (!verticesLocal || verticesLocal.length < 3) return null;
@@ -277,13 +275,13 @@ export class WandService {
   /**
    * Trace EVERY 4-connected blob in `mask` (sized w*h) whose area is at least
    * `minSize` pixels, returning one Polygon per blob in image-pixel coordinates
-   * (translated via originX/originY, clamped to imageWidth/imageHeight), ordered
-   * largest-first. Unlike {@link maskToPolygon} (largest blob only), this lets
+   * (translated via originX/originY, not clamped — see {@link maskToPolygon}), ordered
+   * largest-first. Enclosed background runs of at least `minHoleSize` pixels become
+   * the blob's {@link Polygon.holes}. Unlike {@link maskToPolygon} (largest blob only), this lets
    * the brush eraser split a region in two when a stroke cuts through it rather
    * than discarding the smaller piece.
    */
   public maskToPolygons(mask: Uint8Array, w: number, h: number,
-                        imageWidth: number, imageHeight: number,
                         originX: number, originY: number, minSize = 4,
                         minHoleSize = minSize): Polygon[] {
     // Label all 4-connected components, recording each one's pixel count.
@@ -325,7 +323,7 @@ export class WandService {
 
     // Interior rings (holes) per foreground label — jit-ui#85.
     const holesByLabel = this.detectHoles(
-      mask, labels, w, h, originX, originY, imageWidth, imageHeight, minHoleSize);
+      mask, labels, w, h, originX, originY, minHoleSize);
 
     const polys: Polygon[] = [];
     const comp = new Uint8Array(w * h);
@@ -366,8 +364,7 @@ export class WandService {
    * polygon's `coordinates`). Holes smaller than `minHoleSize` are dropped.
    */
   private detectHoles(mask: Uint8Array, fgLabels: Int32Array, w: number, h: number,
-                      originX: number, originY: number, imageWidth: number, imageHeight: number,
-                      minHoleSize: number): Map<number, number[][][]> {
+                      originX: number, originY: number, minHoleSize: number): Map<number, number[][][]> {
     const result = new Map<number, number[][][]>();
 
     // 1. Flood-fill background reachable from the grid border ("outside").
@@ -427,11 +424,11 @@ export class WandService {
       for (const i of pixels) holeMask[i] = 1;
       const verts = this.mooreBoundary(holeMask, w, h);
       if (!verts || verts.length < 3) continue;
+      // No viewport clamp, exactly like the exterior (jit-ui#102): a hole may lie
+      // partly outside the readback window.
       const ring: number[][] = [];
       for (const v of verts) {
-        const ix = Math.max(0, Math.min(imageWidth - 1, Math.round(originX + v.x)));
-        const iy = Math.max(0, Math.min(imageHeight - 1, Math.round(originY + v.y)));
-        ring.push([ix, iy]);
+        ring.push([Math.round(originX + v.x), Math.round(originY + v.y)]);
       }
       const list = result.get(owner) ?? [];
       list.push(ring);
@@ -444,10 +441,9 @@ export class WandService {
    * Trace each instance in an integer label map (0 = background) into a Polygon
    * — used to turn a cellpose-style segmentation into region outlines. Labels
    * with area below `minSize` are skipped. Coords are translated via
-   * originX/originY and clamped to imageWidth/imageHeight.
+   * originX/originY (not clamped).
    */
   public labelsToPolygons(labels: Uint32Array, w: number, h: number,
-                          imageWidth: number, imageHeight: number,
                           originX: number, originY: number, minSize = 10): Polygon[] {
     let maxLabel = 0;
     for (let i = 0; i < labels.length; i++) if (labels[i] > maxLabel) maxLabel = labels[i];
@@ -460,7 +456,7 @@ export class WandService {
       }
       if (!any) continue;
       // Reuse the contour tracer; one label is usually a single blob.
-      for (const p of this.maskToPolygons(bin, w, h, imageWidth, imageHeight, originX, originY, minSize)) {
+      for (const p of this.maskToPolygons(bin, w, h, originX, originY, minSize)) {
         out.push(p);
       }
     }

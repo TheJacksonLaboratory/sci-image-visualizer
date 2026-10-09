@@ -361,8 +361,6 @@ export class WandToolService {
       stroke2.mask,
       stroke2.bw,
       stroke2.bh,
-      cached.width,
-      cached.height,
       stroke2.bx,
       stroke2.by,
     );

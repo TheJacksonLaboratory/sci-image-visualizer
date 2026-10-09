@@ -138,7 +138,7 @@ export class SamToolService {
         };
         const res = await session.decode(this.embedding, { box });
         const polys = this.wandService.maskToPolygons(
-          res.mask, res.width, res.height, cached.width, cached.height, 0, 0,
+          res.mask, res.width, res.height, 0, 0,
         );
         if (polys.length === 0) continue;
         // Keep the largest connected piece (maskToPolygons returns largest-first).
