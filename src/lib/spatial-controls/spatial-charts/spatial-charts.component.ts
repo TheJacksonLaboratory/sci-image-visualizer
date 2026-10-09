@@ -115,14 +115,14 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   }
   private isActive = true;
 
-  /** Per-instance, for the same reason the visualizer's plot div is
-   *  (`visualizer.component.ts`): two mounted charts sharing one DOM id means
-   *  `getElementById` hands both of them the first element, so one instance draws
-   *  into — or purges — the other's canvas. */
   /** One increment per INSTANCE — a static initializer would run once per class and
    *  hand every instance the same id, which is the bug this id exists to avoid. Declared
    *  before the ids because field initializers run in order. */
   private readonly seq = ++chartInstanceSeq;
+  /** Per-instance, for the same reason the visualizer's plot div is
+   *  (`visualizer.component.ts`): two mounted charts sharing one DOM id means
+   *  `getElementById` hands both of them the first element, so one instance draws
+   *  into — or purges — the other's canvas. */
   readonly chartDiv = `spatial-charts-plot-${this.seq}`;
   /**
    * The div inside the detached window.

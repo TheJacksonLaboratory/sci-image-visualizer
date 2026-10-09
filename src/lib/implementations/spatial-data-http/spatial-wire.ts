@@ -47,6 +47,8 @@ import {
  *
  * ENDPOINTS (base = the server root)
  * ----------------------------------
+ * Every route `SpatialDataHttpService` calls. `{id}` is the dataset id; names and
+ * gene lists are URI-encoded.
  * ```
  * GET {base}/spatial/datasets              -> { datasets: [{ id, name, count }] }
  * GET {base}/spatial/{id}/manifest         -> SpatialManifest
@@ -56,19 +58,28 @@ import {
  * GET {base}/spatial/{id}/column/{name}    -> u16[N] codes | f32[N] values
  * GET {base}/spatial/{id}/feature/{name}   -> f32[N]
  * GET {base}/spatial/{id}/features?q=&limit= -> { names: string[] }
+ * GET {base}/spatial/{id}/embedding/{name} -> f32[N] per dimension, see decodeEmbedding
  * GET {base}/spatial/{id}/polygons         -> u32 count, u32[count+1] offsets, f32[2*rings] coords
+ * GET {base}/spatial/{id}/volume           -> u8[width*height*depth]   (manifest.volume only)
  * GET {base}/spatial/{id}/polygon-tile/{set}/{level}/{gx}/{gy}
  *                                          -> u32 count, u32[count] obs, u32[count+1] offsets, f32 coords
- * GET {base}/spatial/{id}/transcript-tile/{level}/{gx}/{gy}?genes=A,B&quality=high|all
+ * GET {base}/spatial/{id}/transcript-tile/{level}/{gx}/{gy}?genes=A,B&quality=high|all&box=
  *                                          -> see decodeTranscriptTile
- * GET {base}/spatial/{id}/density?genes=A,B -> f32[rows*cols]
  * GET {base}/spatial/{id}/transcript-bins/{level}/{tx}/{ty}
  *                                          -> transcript-tile layout, one entry per bin
+ * GET {base}/spatial/{id}/gene-bins/{level}/{tx}/{ty}?genes=A,B
+ *                                          -> transcript-tile layout, per-gene bins
+ * GET {base}/spatial/{id}/density?genes=A,B&bin= -> see decodeDensity
+ * GET {base}/spatial/{id}/transcript-summary?box=&genes=&cells= -> SpatialTranscriptSummary
+ * GET {base}/spatial/{id}/transcript-counts?genes=A,B -> SpatialTranscriptCounts
+ * GET {base}/spatial/{id}/markers/{column}?n=  -> SpatialMarkerGenes
+ * POST {base}/spatial/{id}/groups?name=    (text/csv `cell_id,group`)
+ *                                          -> { column: CategoricalColumnMeta, matched }
  * ```
  *
- * The three tiled routes are optional and advertised in the manifest
- * (`polygonTiles`, `transcriptTiles`, `density`); a server without them never
- * sees them requested.
+ * The optional routes are advertised in the manifest (`polygons`, `volume`,
+ * `polygonTiles`, `transcriptTiles`, `transcriptBins`, `transcriptGeneBins`,
+ * `density`); a server without them never sees them requested.
  */
 
 /** Bumped when the layout changes incompatibly; the client refuses anything else. */

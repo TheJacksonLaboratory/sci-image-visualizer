@@ -168,18 +168,6 @@ export function regionShapes(region: Region): Shape[] {
 }
 
 /**
- * Observations inside ANY of `regions` (union). Coordinates are transformed by
- * `imageRef` first, so the test happens in the same world space the regions were
- * drawn in.
- *
- * `candidates`, when given, restricts the test to those observation indices — how
- * a 2D view of a 3D dataset keeps a drawn region meaning what it looks like it
- * means: the shape was drawn over ONE section, so it selects that section's cells
- * rather than the whole depth of the specimen behind them. The returned mask stays
- * indexed by observation, so every consumer (charts, legend, the 3D cloud) reads it
- * the same way.
- */
-/**
  * A selection from an explicit list of observation indices.
  *
  * What a lasso in a linked plot produces: the plot knows which points the user drew
@@ -202,6 +190,18 @@ export function selectByIndices(
   return { mask, count };
 }
 
+/**
+ * Observations inside ANY of `regions` (union). Coordinates are transformed by
+ * `imageRef` first, so the test happens in the same world space the regions were
+ * drawn in.
+ *
+ * `candidates`, when given, restricts the test to those observation indices — how
+ * a 2D view of a 3D dataset keeps a drawn region meaning what it looks like it
+ * means: the shape was drawn over ONE section, so it selects that section's cells
+ * rather than the whole depth of the specimen behind them. The returned mask stays
+ * indexed by observation, so every consumer (charts, legend, the 3D cloud) reads it
+ * the same way.
+ */
 export function selectInRegions(
   observations: SpatialObservations,
   imageRef: SpatialImageRef | undefined,
@@ -281,7 +281,6 @@ export function selectInRegionsProjected(
   return { mask, count: hits };
 }
 
-/** Every observation whose categorical code equals `code` — the legend click. */
 /**
  * Whether two selections hold exactly the same observations.
  *
@@ -301,6 +300,7 @@ export function sameSelection(a: SpatialSelectionMask, b: SpatialSelectionMask):
   return true;
 }
 
+/** Every observation whose categorical code equals `code` — the legend click. */
 export function selectByCategory(codes: Uint16Array, code: number): SpatialSelectionMask {
   const mask = new Uint8Array(codes.length);
   let count = 0;

@@ -35,29 +35,6 @@ import {
 import { searchGeneNames } from '../../spatial/gene-search';
 
 /**
- * Reference {@link SpatialDataPort} adapter for the wire format the bundled
- * example server speaks (see `spatial-wire.ts` and
- * `examples/tile-server/lib/spatial.mjs`).
- *
- * OPTIONAL AND UNBOUND BY DEFAULT — this service is `@Injectable()` without
- * `providedIn`, so nothing gets it unless a host explicitly provides it:
- *
- * ```ts
- * providers: [
- *   SpatialDataHttpService,
- *   { provide: SPATIAL_DATA_PORT, useExisting: SpatialDataHttpService },
- * ]
- * ```
- *
- * That mirrors `CellposeSegmenterService`: a concrete implementation the
- * library ships for convenience, not a default the port inversion is quietly
- * giving up on. A host with its own backend implements `SpatialDataPort`
- * directly and never touches this class.
- *
- * Requests go through Angular's `HttpClient` (not `fetch`) so the host's
- * interceptors — auth headers above all — apply, matching `tile-client.ts`.
- */
-/**
  * A dataset selection that a newer selection (or a `clear`) overtook.
  *
  * Thrown rather than resolved so a caller cannot mistake it for "this dataset is
@@ -91,6 +68,29 @@ function payloadBytes(value: unknown): number {
 
 const MiB = 1024 * 1024;
 
+/**
+ * Reference {@link SpatialDataPort} adapter for the wire format the bundled
+ * example server speaks (see `spatial-wire.ts` and
+ * `examples/tile-server/lib/spatial.mjs`).
+ *
+ * OPTIONAL AND UNBOUND BY DEFAULT — this service is `@Injectable()` without
+ * `providedIn`, so nothing gets it unless a host explicitly provides it:
+ *
+ * ```ts
+ * providers: [
+ *   SpatialDataHttpService,
+ *   { provide: SPATIAL_DATA_PORT, useExisting: SpatialDataHttpService },
+ * ]
+ * ```
+ *
+ * That mirrors `CellposeSegmenterService`: a concrete implementation the
+ * library ships for convenience, not a default the port inversion is quietly
+ * giving up on. A host with its own backend implements `SpatialDataPort`
+ * directly and never touches this class.
+ *
+ * Requests go through Angular's `HttpClient` (not `fetch`) so the host's
+ * interceptors — auth headers above all — apply, matching `tile-client.ts`.
+ */
 @Injectable()
 export class SpatialDataHttpService implements SpatialDataPort {
   /** Server root, normalised to end with exactly one `/`. */

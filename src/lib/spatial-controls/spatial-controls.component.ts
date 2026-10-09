@@ -941,8 +941,10 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
 
   editingMax = false;
 
-  /** The selected genes as Explorer's tree: named groups, then the ungrouped ones. */
-  /** Rebuilt when the view changes — never per change-detection pass (see buildTileOptions). */
+  /**
+   * The selected genes as Explorer's tree: named groups, then the ungrouped ones.
+   * Rebuilt when the view changes — never per change-detection pass (see buildTileOptions).
+   */
   geneTree: { name: string | null; genes: string[] }[] = [];
   geneMenu: { label: string; icon: string; command: () => void; disabled?: boolean }[] = [];
 

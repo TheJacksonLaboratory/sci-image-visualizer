@@ -25,7 +25,7 @@ import { percentileWindow } from './stats';
  * COLOUR REPRESENTATION
  * ---------------------
  * Internally everything is a flat `Float32Array` of `[r,g,b,a, …]` in 0..1 —
- * one allocation for N points, GPU-upload shaped. napari-js 0.12.0's
+ * one allocation for N points, GPU-upload shaped. napari-js (through 0.14)
  * `PointsLayer.faceColor` takes `RGBA[]` (an array of 4-tuples) instead, so
  * {@link toRgbaTuples} adapts at the boundary; when the layer accepts a typed
  * array the adapter goes away and the flat buffer is passed straight through.
@@ -243,7 +243,7 @@ export function markerDiameters(
 }
 
 /**
- * Adapt a flat RGBA buffer to the `RGBA[]` shape napari-js 0.12.0's
+ * Adapt a flat RGBA buffer to the `RGBA[]` shape napari-js's (through 0.14)
  * `PointsLayer.faceColor` accepts. One 4-element array per point — the reason
  * this is a named boundary rather than inlined: it is the one place the model
  * stops being typed-array shaped, and it is what a future napari-js taking a

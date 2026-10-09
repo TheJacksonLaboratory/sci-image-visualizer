@@ -198,11 +198,6 @@ export interface SpatialImageRef {
 }
 
 /**
- * A spatial-omics dataset: everything cheap enough to hold resident. Column and
- * feature *values*, and polygon *geometry*, are fetched through
- * {@link SpatialDataPort} as they are displayed.
- */
-/**
  * A precomputed low-dimensional embedding over the SAME observations — UMAP, t-SNE, PCA.
  *
  * Announced in the dataset and fetched on demand, exactly like a column or a gene: the
@@ -385,7 +380,6 @@ export interface SpatialTranscriptTile {
   gene: Uint16Array;
 }
 
-/** Transcript totals for an estimate of how many markers a selection would draw. */
 /** The per-gene levels: each level's bin and tile size, on the all-gene pyramid's grid. */
 export interface SpatialTranscriptGeneBinsMeta {
   origin: [number, number];
@@ -408,6 +402,7 @@ export interface SpatialMarkerGenes {
   }[];
 }
 
+/** Transcript totals for an estimate of how many markers a selection would draw. */
 export interface SpatialTranscriptCounts {
   /** Total transcripts per requested gene, over the whole dataset. */
   counts: Record<string, number>;
@@ -424,6 +419,11 @@ export interface SpatialDensityRaster {
   values: Float32Array;
 }
 
+/**
+ * A spatial-omics dataset: everything cheap enough to hold resident. Column and
+ * feature *values*, and polygon *geometry*, are fetched through
+ * {@link SpatialDataPort} as they are displayed.
+ */
 export interface SpatialDataset {
   /** Stable id — the key the port's lazy accessors are scoped to. */
   id: string;

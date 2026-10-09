@@ -180,28 +180,7 @@ export function colorExpressionField(
   return rgba;
 }
 
-/**
- * The same estimator in 3D: a gene's expression over a serially sectioned
- * specimen, on a {@link DensityGrid} lattice.
- *
- * Two modes, and the difference between them is the difference between a
- * measurement and an estimate:
- *
- *  - **sheets** (`interpolate` unset) blurs in-plane only, so exactly the z planes
- *    that hold cells are filled and the gaps between sections stay empty. This is
- *    the measured sections, stacked — the 2D gene map of each slide, at its own z.
- *  - **volume** (`interpolate` set) also smooths along z, so the planes between
- *    the sections carry an interpolated value. Smoothing the numerator and the
- *    denominator together is what makes that honest: it is Nadaraya-Watson, so an
- *    unimaged plane inherits its neighbours' MEAN rather than their sum thinned
- *    over a gap nobody sampled. Outside the sampled range the field is zeroed —
- *    "smoothed between the imaged sections" must not put expression in front of
- *    the first section or behind the last.
- *
- * Individual cells are still never interpolated: consecutive sections sample
- * different cells, so there is nothing to interpolate along. What is interpolated
- * is a field, which is legitimately defined between the planes.
- */
+/** Options for {@link expressionVolume}. */
 export interface ExpressionVolumeOptions {
   /** Kernel σ per axis, in the observations' own units. The z term is used only
    *  when {@link interpolate} is set. */
@@ -227,6 +206,28 @@ export interface ExpressionVolumeField {
   range: [number, number];
 }
 
+/**
+ * The same estimator in 3D: a gene's expression over a serially sectioned
+ * specimen, on a {@link DensityGrid} lattice.
+ *
+ * Two modes, and the difference between them is the difference between a
+ * measurement and an estimate:
+ *
+ *  - **sheets** (`interpolate` unset) blurs in-plane only, so exactly the z planes
+ *    that hold cells are filled and the gaps between sections stay empty. This is
+ *    the measured sections, stacked — the 2D gene map of each slide, at its own z.
+ *  - **volume** (`interpolate` set) also smooths along z, so the planes between
+ *    the sections carry an interpolated value. Smoothing the numerator and the
+ *    denominator together is what makes that honest: it is Nadaraya-Watson, so an
+ *    unimaged plane inherits its neighbours' MEAN rather than their sum thinned
+ *    over a gap nobody sampled. Outside the sampled range the field is zeroed —
+ *    "smoothed between the imaged sections" must not put expression in front of
+ *    the first section or behind the last.
+ *
+ * Individual cells are still never interpolated: consecutive sections sample
+ * different cells, so there is nothing to interpolate along. What is interpolated
+ * is a field, which is legitimately defined between the planes.
+ */
 export function expressionVolume(
   obs: SpatialObservations,
   grid: DensityGrid,

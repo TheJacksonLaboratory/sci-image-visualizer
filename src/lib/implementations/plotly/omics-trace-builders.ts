@@ -382,22 +382,8 @@ export function countsLayout(
   };
 }
 
-// ── heatmap ─────────────────────────────────────────────────────────────────
+// ── embedding ─────────────────────────────────────────────────────────────────
 
-/**
- * Genes × groups mean expression, as a Plotly heatmap.
- *
- * The matrix itself is computed by the pure `heatmapMatrix` in
- * `spatial/spatial-heatmap.ts`; this only shapes it for Plotly. Kept in the
- * matrix's own row-major order and flipped once here, because Plotly draws
- * `z[0]` at the BOTTOM of the y axis while the caller lists genes top-down.
- *
- * The colour scale is its own, NOT the map's `continuousColormap`. This is a
- * different quantity — a z-scored mean per group, not a per-cell value — so
- * sharing one scale would invite reading a heatmap cell as if it were a marker
- * colour. Diverging and centred on zero, because after z-scoring the sign is
- * the reading: above or below this gene's average across the groups.
- */
 /**
  * An embedding scatter — a UMAP, t-SNE or PCA plane over the same observations.
  *
@@ -706,6 +692,8 @@ export function embeddingLayout(input: OmicsEmbeddingInput): unknown {
   };
 }
 
+// ── heatmap ─────────────────────────────────────────────────────────────────
+
 export interface OmicsHeatmapInput {
   rows: string[];
   cols: string[];
@@ -732,6 +720,20 @@ const HEATMAP_SEQUENTIAL: [number, string][] = [
   [1, '#08306B'],
 ];
 
+/**
+ * Genes × groups mean expression, as a Plotly heatmap.
+ *
+ * The matrix itself is computed by the pure `heatmapMatrix` in
+ * `spatial/spatial-heatmap.ts`; this only shapes it for Plotly. Kept in the
+ * matrix's own row-major order and flipped once here, because Plotly draws
+ * `z[0]` at the BOTTOM of the y axis while the caller lists genes top-down.
+ *
+ * The colour scale is its own, NOT the map's `continuousColormap`. This is a
+ * different quantity — a z-scored mean per group, not a per-cell value — so
+ * sharing one scale would invite reading a heatmap cell as if it were a marker
+ * colour. Diverging and centred on zero, because after z-scoring the sign is
+ * the reading: above or below this gene's average across the groups.
+ */
 export function buildHeatmapTraces(input: OmicsHeatmapInput): unknown[] {
   const { rows, cols, values, counts } = input;
   if (rows.length === 0 || cols.length === 0) return [];
