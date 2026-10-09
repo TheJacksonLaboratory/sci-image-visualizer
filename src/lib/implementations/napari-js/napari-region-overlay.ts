@@ -224,17 +224,50 @@ export class NapariRegionOverlay implements IRegionOverlay {
     return Number.isFinite(per) && per > 0 ? per : 1;
   }
 
+  /**
+   * The svg's client origin, cached while a {@link withOrigin} block runs.
+   *
+   * Every vertex is converted through it, and an uncached read per vertex — interleaved with the
+   * elements a redraw appends — forced a synchronous layout per vertex.
+   */
+  private origin: { left: number; top: number } | null = null;
+
+  private svgOrigin(): { left: number; top: number } {
+    return this.origin ?? this.svg.getBoundingClientRect();
+  }
+
+  /** Run `fn` with the svg's client origin read once (nested calls reuse it). */
+  private withOrigin<T>(fn: () => T): T {
+    if (this.origin) return fn();
+    const r = this.svg.getBoundingClientRect();
+    this.origin = { left: r.left, top: r.top };
+    try {
+      return fn();
+    } finally {
+      this.origin = null;
+    }
+  }
+
+  /** Client px → SVG-local px. */
+  private clientToLocal(clientX: number, clientY: number): [number, number] {
+    const o = this.svgOrigin();
+    return [clientX - o.left, clientY - o.top];
+  }
+
   /** Image coords → SVG-local px (the svg overlays the canvas at the same client rect). */
   private toLocal(imgX: number, imgY: number): [number, number] {
     const [cx, cy] = this.viewer.worldToCanvas(imgX, imgY);
-    const r = this.svg.getBoundingClientRect();
-    return [cx - r.left, cy - r.top];
+    return this.clientToLocal(cx, cy);
   }
 
   // ── pointer handlers ──────────────────────────────────────────────────────
   private readonly onPointerDown = (e: PointerEvent): void => {
     if (this.mode === 'none') return;
     e.preventDefault();
+    this.withOrigin(() => this.pointerDown(e));
+  };
+
+  private pointerDown(e: PointerEvent): void {
     const [ix, iy] = this.toImage(e.clientX, e.clientY);
     if (this.mode === 'drawrect') {
       this.draftRect = { x0: ix, y0: iy, x1: ix, y1: iy };
@@ -254,7 +287,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
       this.handleDeletePoint(ix, iy);
     }
     this.redraw();
-  };
+  }
 
   private readonly onPointerMove = (e: PointerEvent): void => {
     const [ix, iy] = this.toImage(e.clientX, e.clientY);
@@ -367,10 +400,8 @@ export class NapariRegionOverlay implements IRegionOverlay {
       this.draftPath = [[ix, iy]];
       return;
     }
-    const [fx, fy] = this.toLocal(this.draftPath[0][0], this.draftPath[0][1]);
-    const r = this.svg.getBoundingClientRect();
     const near =
-      Math.hypot(clientX - r.left - fx, clientY - r.top - fy) <= CLOSE_SNAP_PX &&
+      this.screenDist(clientX, clientY, this.draftPath[0][0], this.draftPath[0][1]) <= CLOSE_SNAP_PX &&
       this.draftPath.length >= 3;
     if (near) {
       const pts = this.draftPath;
@@ -400,8 +431,8 @@ export class NapariRegionOverlay implements IRegionOverlay {
   /** Screen distance (px) between a client point and an image coord. */
   private screenDist(clientX: number, clientY: number, imgX: number, imgY: number): number {
     const [lx, ly] = this.toLocal(imgX, imgY);
-    const r = this.svg.getBoundingClientRect();
-    return Math.hypot(clientX - r.left - lx, clientY - r.top - ly);
+    const [px, py] = this.clientToLocal(clientX, clientY);
+    return Math.hypot(px - lx, py - ly);
   }
 
   /**
@@ -455,8 +486,10 @@ export class NapariRegionOverlay implements IRegionOverlay {
       this.svg.appendChild(this.marqueeEl);
     }
     const { x0, y0, x1, y1 } = this.marquee;
-    const [lx, ly] = this.toLocal(Math.min(x0, x1), Math.min(y0, y1));
-    const [rx, ry] = this.toLocal(Math.max(x0, x1), Math.max(y0, y1));
+    const [[lx, ly], [rx, ry]] = this.withOrigin(() => [
+      this.toLocal(Math.min(x0, x1), Math.min(y0, y1)),
+      this.toLocal(Math.max(x0, x1), Math.max(y0, y1)),
+    ]);
     this.marqueeEl.setAttribute('x', `${lx}`);
     this.marqueeEl.setAttribute('y', `${ly}`);
     this.marqueeEl.setAttribute('width', `${Math.abs(rx - lx)}`);
@@ -762,9 +795,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
 
   /** Whether a client point is within {@link OPEN_PATH_HIT_PX} screen px of an open polyline. */
   private nearPolyline(xs: number[], ys: number[], clientX: number, clientY: number): boolean {
-    const r = this.svg.getBoundingClientRect();
-    const px = clientX - r.left;
-    const py = clientY - r.top;
+    const [px, py] = this.clientToLocal(clientX, clientY);
     let [ax, ay] = this.toLocal(xs[0], ys[0]);
     for (let i = 1; i < xs.length; i++) {
       const [bx, by] = this.toLocal(xs[i], ys[i]);
@@ -782,22 +813,31 @@ export class NapariRegionOverlay implements IRegionOverlay {
     this.redraw();
   }
 
+  /**
+   * Rebuild every element from the store. Built into a fragment and swapped in once, with the
+   * svg's origin read once: the viewer's `worldToCanvas` reads the canvas rect on every call,
+   * and appending between those reads forced a layout per vertex.
+   */
   redraw(): void {
-    while (this.svg.firstChild) this.svg.removeChild(this.svg.firstChild);
-    const regions = this.regionsVisible ? this.store.getRegions() : [];
-    regions.forEach((region, i) => {
-      if (region.isProfile?.()) return;
-      const isSel = this.selected.includes(i);
-      const el = this.buildRegionEl(region, isSel);
-      if (el) this.svg.appendChild(el);
-      this.drawLabel(region);
-      if (isSel) this.drawHandles(region);
+    const out = document.createDocumentFragment();
+    this.withOrigin(() => {
+      const regions = this.regionsVisible ? this.store.getRegions() : [];
+      regions.forEach((region, i) => {
+        if (region.isProfile?.()) return;
+        const isSel = this.selected.includes(i);
+        const el = this.buildRegionEl(region, isSel);
+        if (el) out.appendChild(el);
+        this.drawLabel(region, out);
+        if (isSel) this.drawHandles(region, out);
+      });
+      this.drawDraft(out);
     });
-    this.drawDraft();
+    while (this.svg.firstChild) this.svg.removeChild(this.svg.firstChild);
+    this.svg.appendChild(out);
   }
 
   /** Draw a region's classification label at its top-left, when labels are enabled (matches OSD). */
-  private drawLabel(region: Region): void {
+  private drawLabel(region: Region, out: Node): void {
     if (!this.store.getShowShapeLabel() || region.isProfile?.()) return;
     const label = region.label;
     const b = region.bounds;
@@ -831,11 +871,11 @@ export class NapariRegionOverlay implements IRegionOverlay {
     text.setAttribute('font', '12px sans-serif');
     text.setAttribute('pointer-events', 'none');
     text.textContent = label;
-    this.svg.appendChild(text);
+    out.appendChild(text);
   }
 
   /** Draw grab handles for the selected region: rectangle corners or polygon vertices. */
-  private drawHandles(region: Region): void {
+  private drawHandles(region: Region, out: Node): void {
     const b = region.bounds;
     if (!b) return;
     const stroke = region.color || this.store.getShapeColor() || '#00ffff';
@@ -849,7 +889,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
       el.setAttribute('fill', '#fff');
       el.setAttribute('stroke', stroke);
       el.setAttribute('stroke-width', '1.5');
-      this.svg.appendChild(el);
+      out.appendChild(el);
     };
     if ('width' in b && 'x' in b) {
       const r = b as Rectangle;
@@ -867,8 +907,8 @@ export class NapariRegionOverlay implements IRegionOverlay {
       if (p.bezier) {
         const ringHandles = (xs: number[], ys: number[], handles: AnchorHandle[]): void => {
           handles.forEach((h, i) => {
-            if (h.hasOut) this.drawBezierHandle(xs[i], ys[i], h.out, stroke);
-            if (h.hasIn) this.drawBezierHandle(xs[i], ys[i], h.in, stroke);
+            if (h.hasOut) this.drawBezierHandle(xs[i], ys[i], h.out, stroke, out);
+            if (h.hasIn) this.drawBezierHandle(xs[i], ys[i], h.in, stroke, out);
           });
         };
         ringHandles(
@@ -885,7 +925,9 @@ export class NapariRegionOverlay implements IRegionOverlay {
 
   /** Draw one bezier control point as a small circle connected to its anchor by a tangent line.
    *  `handle` is the control point's absolute position in image space. */
-  private drawBezierHandle(ax: number, ay: number, handle: [number, number], stroke: string): void {
+  private drawBezierHandle(
+    ax: number, ay: number, handle: [number, number], stroke: string, out: Node,
+  ): void {
     if (handle[0] === ax && handle[1] === ay) return;
     const [alx, aly] = this.toLocal(ax, ay);
     const [hlx, hly] = this.toLocal(handle[0], handle[1]);
@@ -897,7 +939,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
     line.setAttribute('stroke', stroke);
     line.setAttribute('stroke-width', '1');
     line.setAttribute('stroke-opacity', '0.7');
-    this.svg.appendChild(line);
+    out.appendChild(line);
     const dot = document.createElementNS(SVG_NS, 'circle');
     dot.setAttribute('cx', `${hlx}`);
     dot.setAttribute('cy', `${hly}`);
@@ -905,7 +947,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
     dot.setAttribute('fill', stroke);
     dot.setAttribute('stroke', '#fff');
     dot.setAttribute('stroke-width', '1');
-    this.svg.appendChild(dot);
+    out.appendChild(dot);
   }
 
   private buildRegionEl(region: Region, isSelected: boolean): SVGElement | null {
@@ -1041,7 +1083,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
   }
 
   /** Draw the in-progress rectangle / path preview. */
-  private drawDraft(): void {
+  private drawDraft(out: Node): void {
     if (this.draftRect) {
       const { x0, y0, x1, y1 } = this.draftRect;
       const [lx, ly] = this.toLocal(Math.min(x0, x1), Math.min(y0, y1));
@@ -1052,14 +1094,14 @@ export class NapariRegionOverlay implements IRegionOverlay {
       el.setAttribute('width', `${Math.abs(rx - lx)}`);
       el.setAttribute('height', `${Math.abs(ry - ly)}`);
       this.styleDraft(el);
-      this.svg.appendChild(el);
+      out.appendChild(el);
     }
     if (this.draftPath && this.draftPath.length) {
       const pts = this.draftPath.map(([x, y]) => this.toLocal(x, y).join(',')).join(' ');
       const el = document.createElementNS(SVG_NS, 'polyline');
       el.setAttribute('points', pts);
       this.styleDraft(el);
-      this.svg.appendChild(el);
+      out.appendChild(el);
     }
   }
 

@@ -215,6 +215,15 @@ describe('NapariRegionOverlay', () => {
     expect(svgOf(overlay).style.pointerEvents).toBe('none');
   });
 
+  it('reads the svg rect once per redraw, not once per vertex (review NAPARI-BOUNDARY-10)', () => {
+    for (let i = 0; i < 5; i++) store.addRegion(triRegion()); // the last one is selected
+    store.setShowShapeLabel(true);
+    const read = jest.spyOn(svgOf(overlay), 'getBoundingClientRect');
+    viewer.cameraListeners[0]();
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(svgOf(overlay).querySelectorAll('polygon')).toHaveLength(5);
+  });
+
   it('camera change triggers a redraw without throwing', () => {
     store.addRegion(rectRegion());
     expect(() => viewer.cameraListeners[0]()).not.toThrow();
