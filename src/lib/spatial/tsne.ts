@@ -285,8 +285,19 @@ export async function tsneEmbed(
   const k = Math.max(1, Math.min(nObs - 1, Math.round(NEIGHBOUR_FACTOR * perplexity)));
   const effective = Math.min(perplexity, Math.max(1, Math.floor(k / NEIGHBOUR_FACTOR)));
 
+  // The kNN graph and the affinities are one synchronous stretch, during which a worker
+  // cannot even receive a Cancel. So stop before it if one arrived while the GPU was
+  // starting, and yield after it so one sent during it is seen before the first iteration.
+  const stopped = (): TsneResult => ({
+    embedding: new Float64Array(nObs * dims), perplexity: effective, neighbours: k, completed: false,
+  });
+  if (shouldStop?.()) return stopped();
   const knn = knnGraph(x, nObs, nDims, k);
   const { rowPtr, colIdx, val } = affinities(knn, nObs, effective);
+  if (shouldStop) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    if (shouldStop()) return stopped();
+  }
 
   const random = rng(seed);
   // The standard 1e-4 init scale: large initial coordinates put every pair far apart,

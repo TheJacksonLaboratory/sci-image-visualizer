@@ -1,6 +1,7 @@
 import {
   NEIGHBOUR_FACTOR, affinities, conditionalAffinities, knnGraph, plainRepulsion, tsneEmbed,
 } from './tsne';
+import { tileRows } from './tsne-gpu';
 
 /**
  * t-SNE's coordinates have no right answer — the objective is non-convex, the start is
@@ -172,6 +173,19 @@ describe('tsneEmbed', () => {
     expect(Array.from(result.embedding).every(Number.isFinite)).toBe(true);
   });
 
+  it('stops before the kNN phase when a cancel is already pending', async () => {
+    // The kNN graph and affinities run in one synchronous stretch a worker cannot
+    // interrupt, so a Cancel that arrived during GPU start-up must be honoured first.
+    const compute = jest.fn();
+    const result = await tsneEmbed(x, n, nDims, {
+      dims: 2, perplexity: 12, iterations: 500,
+      repulsion: { compute },
+      shouldStop: () => true,
+    });
+    expect(result.completed).toBe(false);
+    expect(compute).not.toHaveBeenCalled();
+  });
+
   it('is deterministic for a given seed, and different for another', async () => {
     const opts = { dims: 2 as const, perplexity: 8, iterations: 60 };
     const a = await tsneEmbed(x, n, nDims, { ...opts, seed: 1 });
@@ -205,5 +219,18 @@ describe('tsneEmbed', () => {
       dims: 2, perplexity: 8, iterations: 12, seed: 0, repulsion: counting,
     });
     expect(calls).toBe(12);
+  });
+});
+
+describe('tileRows', () => {
+  it('keeps the measured 2,048-row tile up to the panel cap', () => {
+    expect(tileRows(5000, 3)).toBe(2048);
+    expect(tileRows(2688, 2)).toBe(2048);
+  });
+
+  it('shortens the tile as nObs grows, so the working set stays in budget', () => {
+    expect(tileRows(19416, 2)).toBeLessThan(2048);
+    expect(tileRows(19416, 3)).toBeLessThan(tileRows(19416, 2));
+    expect(tileRows(10_000_000, 3)).toBe(64);
   });
 });

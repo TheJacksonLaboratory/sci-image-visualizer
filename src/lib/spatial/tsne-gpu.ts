@@ -4,8 +4,9 @@ import type { Repulsion } from './tsne';
  * t-SNE's all-pairs term on the GPU, via jax-js.
  *
  * This is the only part of t-SNE worth accelerating. The attractive term is sparse — a
- * few million pairs — while the repulsion is genuinely every pair against every other:
- * 377 million of them at 19,416 points, on every iteration.
+ * few hundred thousand pairs — while the repulsion is genuinely every pair against every
+ * other: 25 million of them at the panel's 5,000-observation cap
+ * (`SpatialChartsComponent.BROWSER_TSNE_MAX_OBSERVATIONS`), on every iteration.
  *
  * jax-js is loaded DYNAMICALLY. It is ~670 kB of JS and WebAssembly, and a host that
  * never computes an embedding should not pay for it, so nothing imports it until someone
@@ -15,14 +16,27 @@ import type { Repulsion } from './tsne';
  * and the fallback matters: WebGPU is absent in older Safari and behind a flag in some
  * Firefox builds, and an embedding that refuses to compute is worse than a slower one.
  *
- * WORKS IN TILES, and that is not a tuning choice. The full N x N affinity matrix at
- * 19,416 points is 377 M floats — 1.5 GB — which no browser will allocate, and jax-js's
- * WebAssembly backend has a hard 4 GiB ceiling that a 4,096-row tile already exceeds.
- * 2,048 rows was measured as the largest that fits with room to spare.
+ * WORKS IN TILES, and that is not a tuning choice. A tile of `rows` holds about three
+ * `rows x nObs x dims` float32 tensors (the differences, the weighted differences and the
+ * kernel), so its memory grows with `nObs` as well as with the rows. jax-js's WebAssembly
+ * backend has a hard 4 GiB ceiling, and 2,048 rows was measured as the largest tile that
+ * fits with room to spare at 19,416 points. At the 5,000 cap a 2,048-row 3-D tile is about
+ * 0.4 GB, which sets the budget below: the rows are derived from it, so a larger `nObs`
+ * gets shorter tiles instead of a larger working set.
  */
 
-/** Rows per tile. Raising it is what runs out of memory first — see the note above. */
-const TILE = 2048;
+/** Most rows per tile — the measured ceiling above; never raised by the budget. */
+const MAX_TILE_ROWS = 2048;
+/** Fewest rows per tile, so a huge `nObs` still advances in useful steps. */
+const MIN_TILE_ROWS = 64;
+/** Working-set budget per tile: a 2,048-row 3-D tile at the 5,000-observation cap. */
+const TILE_BUDGET_BYTES = MAX_TILE_ROWS * 5000 * 3 * 4 * 3;
+
+/** Rows per tile for `nObs` observations embedded into `dims` dimensions. */
+export function tileRows(nObs: number, dims: number): number {
+  const perRow = Math.max(1, nObs * dims * 4 * 3);
+  return Math.max(MIN_TILE_ROWS, Math.min(MAX_TILE_ROWS, Math.floor(TILE_BUDGET_BYTES / perRow)));
+}
 
 export interface GpuRepulsion extends Repulsion {
   /** Which backend actually initialised: callers surface this, since it changes the wait. */
@@ -64,8 +78,9 @@ export async function createGpuRepulsion(): Promise<GpuRepulsion> {
 
       const rep = new Float64Array(nObs * dims);
       let z = 0;
-      for (let s = 0; s < nObs; s += TILE) {
-        const rows = Math.min(TILE, nObs - s);
+      const tile = tileRows(nObs, dims);
+      for (let s = 0; s < nObs; s += tile) {
+        const rows = Math.min(tile, nObs - s);
         const yb = Y.ref.slice([s, s + rows]);
         // (rows, 1, dims) - (1, nObs, dims), broadcast to every pair in the tile.
         const diff = np.subtract(
