@@ -27,6 +27,18 @@ const ZONE_CURSOR: Record<EditZone, string> = {
   move: 'move', n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize',
   ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize',
 };
+/** A region's geometry at the start of a move/resize (see `snapshot`). */
+type EditSnapshot =
+  | { kind: 'rect'; x: number; y: number; w: number; h: number }
+  | {
+      kind: 'poly'; xs: number[]; ys: number[]; closed: boolean; bezier: boolean;
+      inOff?: number[][]; outOff?: number[][]; holes?: number[][][];
+    }
+  | {
+      kind: 'multi';
+      polygons: Array<{ xs: number[]; ys: number[]; closed: boolean; holes?: number[][][] }>;
+    };
+
 /** Screen-pixel tolerance for grabbing an edge/corner handle. */
 const EDIT_TOL = 8;
 
@@ -79,7 +91,8 @@ export class OsdRegionOverlay implements IRegionOverlay {
     handleSide: 'in' | 'out';
     id: number;
     startImg: { x: number; y: number };
-    orig: any;
+    /** Gesture-start geometry; set for 'bounds' edits only. */
+    orig: EditSnapshot | null;
   } | null = null;
   private editDragged = false;
   /** Rubber-band (marquee) multi-select in 'select' mode: press on empty space
@@ -956,7 +969,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
   }
 
   /** Snapshot the selected region's geometry at the start of an edit. */
-  private snapshot(region: Region): any {
+  private snapshot(region: Region): EditSnapshot {
     const b = region.bounds;
     if (b instanceof Rectangle) return { kind: 'rect', x: b.x, y: b.y, w: b.width, h: b.height };
     if (b instanceof Polygon) {
@@ -1017,6 +1030,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
     const dy = curImg.y - this.edit.startImg.y;
 
     const o = this.edit.orig;
+    if (!o) return;
     if (o.kind === 'rect') {
       let x0 = o.x, y0 = o.y, x1 = o.x + o.w, y1 = o.y + o.h;
       switch (this.edit.zone) {
@@ -1039,7 +1053,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
     } else if (o.kind === 'multi') {
       // Multi-part region: translate every part (and its holes) by the delta.
       const mp = new MultiPolygon();
-      mp.polygons = o.polygons.map((pp: any) => {
+      mp.polygons = o.polygons.map((pp) => {
         const xs = pp.xs.map((x: number) => Math.round(x + dx));
         const ys = pp.ys.map((y: number) => Math.round(y + dy));
         const poly = new Polygon();

@@ -950,9 +950,9 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
         // in sync with Plotly and the Region Editor. Recreate it per open() so
         // it binds to the freshly-opened viewer's canvas/MouseTracker.
         this.overlay?.destroy();
-        this.overlay = new OsdRegionOverlay(this.viewer as any, this.regionStore);
-        this.coordTransform = new OsdCoordinateTransform(this.viewer as any);
-        this.scaleBar = new OsdScaleBar(this.viewer as any, d.mppX ?? 0);
+        this.overlay = new OsdRegionOverlay(this.viewer, this.regionStore);
+        this.coordTransform = new OsdCoordinateTransform(this.viewer);
+        this.scaleBar = new OsdScaleBar(this.viewer, d.mppX ?? 0);
         this.buildToolHosts();
         // Simple mode is a single, self-contained image — no slice cache to seed.
         // Its z-scrub and recomposite re-open the viewer; one persistent handler
@@ -966,14 +966,14 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
           // group to the per-slice cache. The shared background loader / LRU then
           // pre-fills the other slices' channel groups so z-scrub is flicker-free.
           quiet(() => {
-            const it0 = (this.viewer as any).world?.getItemAt?.(0);
-            if (it0) (this.viewer as any).world.removeItem(it0);
+            const it0 = this.viewer!.world?.getItemAt?.(0);
+            if (it0) this.viewer!.world.removeItem(it0);
           });
           this.cache.addChannelSlice(this.currentZ);
         } else {
           // Seed the slice cache with the just-opened slice (world item 0), so
           // scrubbing back to it later is an instant opacity toggle, not a re-open.
-          const firstItem = (this.viewer as any).world?.getItemAt?.(0);
+          const firstItem = this.viewer!.world?.getItemAt?.(0);
           if (firstItem) this.cache.seedComposite(this.currentZ, firstItem);
         }
         // The wand samples the *rendered viewport*, so its pixel matrix is only
@@ -990,7 +990,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
         // so it doesn't receive the main viewer's tile-invalidated events. Apply
         // the same recolor pipeline to it so the minimap tracks the main image's
         // colormap/LUT instead of staying grayscale.
-        const nav = (this.viewer as any).navigator;
+        const nav = this.viewer!.navigator;
         nav?.addHandler('tile-invalidated', (event: any) => this.recolorTile(event));
         if ((this.isGrayscaleImage && this.colorLut) || this.isMultiChannel) this.invalidateWorld();
         // Prefetch adjacent z-slices once the view settles (and on each settle,
@@ -1159,7 +1159,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   private invalidateDisplay(): void {
     // Supersede any in-flight recolor round before restarting one (see displayToken).
     this.displayToken++;
-    const v: any = this.viewer;
+    const v = this.viewer;
     if (!v) return;
     if (this.simpleMultichannel) {
       void this.recompositeAndOpen(this.displayToken);
@@ -1174,7 +1174,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
 
   /** Restore and re-recolor every tile of the main viewer and the navigator. */
   private invalidateWorld(): void {
-    const v: any = this.viewer;
+    const v = this.viewer;
     if (!v) return;
     quiet(() => v.world.requestInvalidate(true));
     quiet(() => v.navigator?.world?.requestInvalidate(true));
@@ -1288,7 +1288,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    *  the navigator instance itself only exists when created with showNavigator). */
   setNavigatorVisible(visible: boolean): void {
     this.navigatorVisible = visible;
-    const navEl: HTMLElement | undefined = (this.viewer as any)?.navigator?.element;
+    const navEl: HTMLElement | undefined = this.viewer?.navigator?.element;
     if (navEl) navEl.style.display = visible ? '' : 'none';
   }
 
@@ -1296,7 +1296,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    *  next viewer creation, and applied live (with a redraw) to a mounted viewer. */
   setImageSmoothingEnabled(enabled: boolean): void {
     this.smoothingEnabled = enabled;
-    const drawer: any = (this.viewer as any)?.drawer;
+    const drawer = this.viewer?.drawer;
     if (drawer?.setImageSmoothingEnabled) {
       drawer.setImageSmoothingEnabled(enabled);
       this.viewer?.forceRedraw();
@@ -1393,7 +1393,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    * are drawn.
    */
   getDisplayedPixelData(): PixelData | null {
-    const canvas: HTMLCanvasElement | undefined = (this.viewer as any)?.drawer?.canvas;
+    const canvas: HTMLCanvasElement | undefined = this.viewer?.drawer?.canvas;
     if (!canvas || !canvas.width || !canvas.height) return null;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return null;
@@ -1411,7 +1411,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    * item 0 (see {@link viewportRectToImage}) for multi-layer accuracy.
    */
   getDisplayedSourceRect(): { x: number; y: number; width: number; height: number } | null {
-    const vp: any = this.viewer?.viewport;
+    const vp = this.viewer?.viewport;
     if (!vp || !this.descriptor) return null;
     try {
       const r = viewportRectToImage(this.viewer, vp.getBounds(true));
@@ -1429,7 +1429,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     // already reflects exactly what's on screen at the current zoom/pan. The
     // full-resolution stitched export lives in exportComposite() (Channels &
     // Histogram dialog).
-    const canvas: HTMLCanvasElement | undefined = (this.viewer as any)?.drawer?.canvas;
+    const canvas: HTMLCanvasElement | undefined = this.viewer?.drawer?.canvas;
     if (!canvas || !canvas.width || !canvas.height) return;
     const stem = (this.currentFileName || 'image').replace(/\.[^.]+$/, '');
     canvas.toBlob((blob) => {
@@ -1481,7 +1481,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   /** The current viewport's image-pixel rectangle, clamped to the image, or
    *  null when there is no laid-out viewport. */
   private visibleImageRect(): PlotModeRect | null {
-    const vp: any = this.viewer?.viewport;
+    const vp = this.viewer?.viewport;
     if (!vp || !this.descriptor) return null;
     try {
       // Route through world item 0 (osd-coords): vp.viewportToImageRectangle is
@@ -1691,7 +1691,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    *  and never corrects it, leaving a stale-size element whose visible minimap
    *  floats above the bottom-right corner. */
   private resizeNavigator(): void {
-    const v: any = this.viewer;
+    const v = this.viewer;
     const nav = v?.navigator;
     const el: HTMLElement | undefined = v?.element;
     if (!nav?.element || !el?.clientWidth || !el?.clientHeight) return;
@@ -1794,7 +1794,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    */
   private readbackViewport(): CachedImageData | null {
     if (this.viewportPixels) return this.viewportPixels;
-    const viewer = this.viewer as any;
+    const viewer = this.viewer;
     const canvas: HTMLCanvasElement | undefined = viewer?.drawer?.canvas;
     const vp = viewer?.viewport;
     if (!canvas || !canvas.width || !canvas.height || !vp) return null;
