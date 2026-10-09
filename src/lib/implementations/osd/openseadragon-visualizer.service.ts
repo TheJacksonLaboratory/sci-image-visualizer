@@ -354,9 +354,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       this.colorLut = buildColormapLut(cm?.data?.value, !!rev);
       this.channelStates = channels;
       this.invertBg = !!invert;
-      // Serverless multichannel: re-composite the current slice from its cached
-      // planes with the new channel states + re-open (no tile-invalidate path).
-      if (this.simpleMultichannel) { void this.recompositeAndOpen(); return; }
       // Multichannel: each channel is its own TiledImage — visibility is the
       // image's opacity (window/gamma/colour are applied by recolorChannelTile
       // on the invalidate below). Re-applying the current slice's reveal picks up
@@ -369,7 +366,8 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       // RGB now recolors too (per-channel window/visibility), so don't gate on
       // grayscale. Coalesced: PrimeNG's slider fires (onChange) continuously, so
       // a single drag would otherwise queue dozens of overlapping restore +
-      // re-process rounds over every channel image.
+      // re-process rounds over every channel image. (Serverless multichannel
+      // re-composites from its cached planes instead — see invalidateDisplay.)
       this.scheduleInvalidate();
     });
   }
@@ -638,7 +636,8 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    *  current channel states (colour/window/gamma/visibility) — the client-side,
    *  serverless analog of the tiled per-channel 'lighter' compositor
    *  (same display.channelRgbLut math as recolorChannelTile, applied per-plane).
-   *  Returns a blob: URL of the composite PNG, revoking the previous one. */
+   *  Returns a new blob: URL of the composite PNG, owned by the caller (see
+   *  {@link openSimpleComposite}). */
   private async compositeSimpleMultichannel(planes: SimplePlane[]): Promise<string | undefined> {
     if (!planes.length) return undefined;
     const w = planes[0].width, h = planes[0].height;
@@ -668,17 +667,41 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     ctx.putImageData(new ImageData(out, w, h), 0, 0);
     const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
     if (!blob) return undefined;
-    if (this.simpleCompositeUrl) URL.revokeObjectURL(this.simpleCompositeUrl);
-    this.simpleCompositeUrl = URL.createObjectURL(blob);
-    return this.simpleCompositeUrl;
+    return URL.createObjectURL(blob);
   }
 
   /** Re-composite the current slice from its cached planes (new channel states)
-   *  and re-open — the serverless analog of the tiled invalidate-on-channel-change. */
-  private async recompositeAndOpen(): Promise<void> {
+   *  and re-open — the serverless analog of the tiled invalidate-on-channel-change.
+   *  Runs from {@link invalidateDisplay}, so it is coalesced per frame, and drops
+   *  its composite once a newer display round (`token`) has started. */
+  private async recompositeAndOpen(token: number): Promise<void> {
     const url = await this.compositeSimpleMultichannel(this.simpleChannelPlanes);
-    if (!url || !this.viewer) return;
-    try { this.viewer.open({ type: 'image', url } as any); } catch { /* viewer gone */ }
+    if (!url) return;
+    if (token !== this.displayToken || !this.viewer) {
+      URL.revokeObjectURL(url); // superseded — never displayed
+      return;
+    }
+    this.openSimpleComposite(url);
+  }
+
+  /** Open a serverless-multichannel composite and take ownership of its URL. The
+   *  previously displayed composite is revoked only once this open settles: an
+   *  `open()` still decoding a revoked blob: URL fails. */
+  private openSimpleComposite(url: string): void {
+    const viewer = this.viewer;
+    if (!viewer) return;
+    const prev = this.simpleCompositeUrl;
+    this.simpleCompositeUrl = url;
+    if (prev && prev !== url) {
+      const revokePrev = () => {
+        viewer.removeHandler('open', revokePrev);
+        viewer.removeHandler('open-failed', revokePrev);
+        URL.revokeObjectURL(prev);
+      };
+      viewer.addHandler('open', revokePrev);
+      viewer.addHandler('open-failed', revokePrev);
+    }
+    viewer.open({ type: 'image', url } as any);
   }
 
   /** Load a URL into an HTMLImageElement (resolves once decoded). Uses
@@ -738,8 +761,12 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
         // tier's low-res URLs forever, even though the initial slice was
         // correctly swapped to full resolution here.
         this.simpleUrls = imageInfo?.urls ?? this.simpleUrls;
-        if (loaded.channelPlanes) this.commitSimpleMultichannel(loaded);
-        this.viewer.open({ type: 'image', url: loaded.url } as any);
+        if (loaded.channelPlanes) {
+          this.commitSimpleMultichannel(loaded);
+          this.openSimpleComposite(loaded.url);
+        } else {
+          this.viewer.open({ type: 'image', url: loaded.url } as any);
+        }
       }
       return Promise.resolve(true);
     }
@@ -769,6 +796,12 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       this.isMultiChannel = false;
       this.cache.clearChannelGroups();
       this.destroyViewer();
+      // The new viewer opens this image's composite (serverless multichannel):
+      // the old viewer is gone, so its composite can go now.
+      if (this.simpleCompositeUrl && this.simpleCompositeUrl !== loaded.url) {
+        URL.revokeObjectURL(this.simpleCompositeUrl);
+      }
+      this.simpleCompositeUrl = this.simpleMultichannel ? (loaded.url ?? null) : null;
       // Serverless histogram — AFTER destroyViewer (its last act is sampler.clear()).
       // Multichannel bins each cached channel plane; single-band / RGB bins the
       // decoded frame's own pixels.
@@ -1157,6 +1190,10 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     this.displayToken++;
     const v: any = this.viewer;
     if (!v) return;
+    if (this.simpleMultichannel) {
+      void this.recompositeAndOpen(this.displayToken);
+      return;
+    }
     if (this.isMultiChannel) {
       this.cache.invalidateChannelDisplay(this.currentZ);
       return;
@@ -1335,13 +1372,16 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
         if (!urls) return;
         this.currentZ = z;
         this.viewportPixels = null;
+        // A different image commits a new channelUrls array (see plot()).
+        const image = this.simpleChannelUrls;
         void (async () => {
-          this.simpleChannelPlanes = await this.loadSimpleChannelPlanes(urls);
-          if (this.currentZ !== z || !this.viewer) return;
-          this.sampler.computeSimpleMultichannelHistograms(z, this.simpleChannelPlanes);
-          const url = await this.compositeSimpleMultichannel(this.simpleChannelPlanes);
-          if (this.currentZ !== z || !this.viewer || !url) return;
-          this.viewer.open({ type: 'image', url } as any);
+          const planes = await this.loadSimpleChannelPlanes(urls);
+          // Scrubs can resolve out of order: only the current slice's planes
+          // may land, or a later recomposite would show the wrong slice.
+          if (this.currentZ !== z || this.simpleChannelUrls !== image || !this.viewer) return;
+          this.simpleChannelPlanes = planes;
+          this.sampler.computeSimpleMultichannelHistograms(z, planes);
+          this.scheduleInvalidate(); // recomposite + open, coalesced with slider changes
         })();
         return;
       }

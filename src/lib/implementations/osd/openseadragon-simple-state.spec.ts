@@ -9,7 +9,9 @@ import { IImageInfo } from '../../contracts/image.contract';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 
 /**
- * Simple-mode state must not outlive the simple image (review OSD-PLOTLY-1).
+ * Mounted-image lifecycle against a fake viewer (review OSD-PLOTLY-1, -4, -5, -6).
+ *
+ * Simple-mode state must not outlive the simple image (OSD-PLOTLY-1).
  *
  * `simpleMultichannel` used to be written only by loadSimple(), so after a
  * serverless multichannel image a later TILED image kept the flag: every
@@ -25,6 +27,7 @@ interface FakeViewer {
   destroy: jest.Mock;
   addHandler: jest.Mock;
   addOnceHandler: jest.Mock;
+  removeHandler: jest.Mock;
   world: { requestInvalidate: jest.Mock; getItemAt: () => null };
 }
 const viewers: FakeViewer[] = [];
@@ -36,6 +39,7 @@ jest.mock('./osd-lib', () => {
       destroy: jest.fn(),
       addHandler: jest.fn(),
       addOnceHandler: jest.fn(),
+      removeHandler: jest.fn(),
       world: { requestInvalidate: jest.fn(), getItemAt: () => null },
     };
     viewers.push(v);
@@ -48,7 +52,7 @@ jest.mock('./osd-lib', () => {
   return { OSD: factory };
 });
 
-describe('OpenSeadragonVisualizerService — simple-mode state reset (OSD-PLOTLY-1)', () => {
+describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode state', () => {
   let service: OpenSeadragonVisualizerService;
   let http: HttpTestingController;
   let store: VisualizerStore;
@@ -128,7 +132,7 @@ describe('OpenSeadragonVisualizerService — simple-mode state reset (OSD-PLOTLY
     return pending;
   }
 
-  it('a tiled image after a serverless multichannel one recolors via invalidation, not re-open', async () => {
+  it('a tiled image after a serverless multichannel one recolors via invalidation, not re-open (OSD-PLOTLY-1)', async () => {
     const simpleLoaded = await service.load(simpleInfo, 0);
     void service.plot('plotdiv', simpleLoaded, simpleInfo, 500, PlotType.IMAGE);
     expect(viewers.length).toBe(1);
@@ -191,5 +195,66 @@ describe('OpenSeadragonVisualizerService — simple-mode state reset (OSD-PLOTLY
     await service.load({ ...simpleInfo, fileName: 'single.png', channelUrls: undefined } as IImageInfo, 0);
     expect(internals().simpleMultichannel).toBe(true);
     expect(internals().simpleChannelPlanes).toHaveLength(2);
+  });
+  // ── serverless-multichannel scrub / recomposite races (OSD-PLOTLY-6) ──
+
+  const plane = (v: number) => ({ data: new Uint8ClampedArray([v, v, v, 255]), width: 1, height: 1 });
+  const nextFrame = () => new Promise((r) => setTimeout(r, 40));
+  const stackInfo = {
+    ...simpleInfo,
+    channelUrls: [['z0c0', 'z0c1'], ['z1c0', 'z1c1'], ['z2c0', 'z2c1']],
+  } as unknown as IImageInfo;
+
+  async function mountStack() {
+    const loaded = await service.load(stackInfo, 0);
+    void service.plot('plotdiv', loaded, stackInfo, 500, PlotType.IMAGE);
+    return viewers[viewers.length - 1];
+  }
+
+  it('a slow scrub that resolves after a newer one does not overwrite its planes', async () => {
+    await mountStack();
+    const releases: Record<string, () => void> = {};
+    (internals().loadSimpleChannelPlanes as unknown as jest.Mock).mockImplementation(
+      (urls: string[]) => new Promise((resolve) => {
+        const z = Number(urls[0][1]);
+        releases[urls[0]] = () => resolve([plane(z), plane(z)]);
+      }),
+    );
+    service.setZIndex(1);
+    service.setZIndex(2);
+    releases['z2c0']();
+    await nextFrame();
+    releases['z1c0'](); // z=1 lands last
+    await nextFrame();
+    expect((internals().simpleChannelPlanes as Array<{ data: Uint8ClampedArray }>)[0].data[0]).toBe(2);
+  });
+
+  it('coalesces a burst of channel changes into one recomposite', async () => {
+    await mountStack();
+    const composite = internals().compositeSimpleMultichannel as unknown as jest.Mock;
+    composite.mockClear();
+    for (let i = 0; i < 10; i++) {
+      store.setChannelState(0, { min: i, max: 200 });
+    }
+    await nextFrame();
+    expect(composite).toHaveBeenCalledTimes(1);
+  });
+
+  it('revokes the displayed composite only once the next one has opened', async () => {
+    // Distinct URLs: earlier tests' torn-down services may still revoke theirs.
+    const composite = internals().compositeSimpleMultichannel as unknown as jest.Mock;
+    composite.mockResolvedValue('blob:mounted');
+    const viewer = await mountStack();
+    await nextFrame(); // let the mount's own (histogram-nudge) recomposite settle
+    composite.mockResolvedValue('blob:next');
+    const revoke = jest.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    store.setChannelState(0, { min: 1, max: 200 });
+    await nextFrame();
+    expect(viewer.open).toHaveBeenLastCalledWith(expect.objectContaining({ url: 'blob:next' }));
+    expect(revoke).not.toHaveBeenCalledWith('blob:mounted');
+    const onOpen = viewer.addHandler.mock.calls.filter(([name]) => name === 'open').map(([, h]) => h);
+    onOpen.forEach((h) => h());
+    expect(revoke).toHaveBeenCalledWith('blob:mounted');
+    expect(revoke).not.toHaveBeenCalledWith('blob:next');
   });
 });
