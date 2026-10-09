@@ -1,7 +1,6 @@
 import {
+  parseSvgPath,
   parseSvgPathPolygon,
-  polygonToSvgPath,
-  shapesEqual,
   verticesToSvgPath,
 } from './geometry';
 import { BBoxMask, masksOverlap, unionMasks } from '../geometry/raster';
@@ -42,24 +41,16 @@ describe('geometry helpers', () => {
     });
   });
 
-  // ── polygonToSvgPath ────────────────────────────────────────────────
-
-  describe('polygonToSvgPath', () => {
-    it('builds a closed M…L…Z string', () => {
-      expect(polygonToSvgPath([10, 30, 50], [20, 40, 60])).toBe('M10,20L30,40L50,60Z');
+  describe('parseSvgPath', () => {
+    it('parses an open path and reports it open', () => {
+      expect(parseSvgPath('M0,0L1,2L3,4')).toEqual({ xpoints: [0, 1, 3], ypoints: [0, 2, 4], closed: false });
     });
 
-    it('returns "" for fewer than 3 vertices', () => {
-      expect(polygonToSvgPath([0, 1], [0, 1])).toBe('');
-    });
-
-    it('round-trips through parseSvgPathPolygon', () => {
-      const xs = [10, 30, 50];
-      const ys = [20, 40, 60];
-      const path = polygonToSvgPath(xs, ys);
-      const parsed = parseSvgPathPolygon(path);
-      expect(parsed!.xpoints).toEqual(xs);
-      expect(parsed!.ypoints).toEqual(ys);
+    it('round-trips verticesToSvgPath for closed and open rings', () => {
+      for (const closed of [true, false]) {
+        const p = parseSvgPath(verticesToSvgPath([10, 30, 50], [20, 40, 60], closed));
+        expect(p).toEqual({ xpoints: [10, 30, 50], ypoints: [20, 40, 60], closed });
+      }
     });
   });
 
@@ -76,27 +67,6 @@ describe('geometry helpers', () => {
 
     it('returns "" for fewer than 2 vertices', () => {
       expect(verticesToSvgPath([0], [0], true)).toBe('');
-    });
-  });
-
-  // ── shapesEqual ─────────────────────────────────────────────────────
-
-  describe('shapesEqual', () => {
-    it('compares paths by string', () => {
-      expect(shapesEqual({ path: 'M0,0L1,1Z' }, { path: 'M0,0L1,1Z' })).toBe(true);
-      expect(shapesEqual({ path: 'M0,0L1,1Z' }, { path: 'M0,0L2,2Z' })).toBe(false);
-    });
-
-    it('compares rectangles by their corners', () => {
-      const a = { x0: 0, y0: 0, x1: 10, y1: 10 };
-      const b = { x0: 0, y0: 0, x1: 10, y1: 10 };
-      const c = { x0: 0, y0: 0, x1: 11, y1: 10 };
-      expect(shapesEqual(a, b)).toBe(true);
-      expect(shapesEqual(a, c)).toBe(false);
-    });
-
-    it('returns false when neither shape descriptor matches', () => {
-      expect(shapesEqual({ foo: 1 }, { bar: 2 })).toBe(false);
     });
   });
 

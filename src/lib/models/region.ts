@@ -1,10 +1,11 @@
 import { ShapeSelection } from './shape';
+import { verticesToSvgPath } from './geometry';
 
 export class Region {
-  /** Stable, unique identity for selection and equality. Minted by
-   *  PlotlyService when a region first enters the system. Never derived
-   *  from array index — name collisions across delete/add cycles must
-   *  not break PrimeNG row selection. */
+  /** Stable, unique identity for selection and equality. Minted by the
+   *  RegionStore when a region first enters it. Never derived from array
+   *  index — name collisions across delete/add cycles must not break PrimeNG
+   *  row selection. */
   id!: number;
   name!: string;
   bounds?: Rectangle | Polygon | MultiPolygon | null = null;
@@ -39,6 +40,7 @@ export class Region {
    *  or a region drawn without a slice context (jit-ui#93). */
   z = 0;
   shapeColor? = '#00FFFF';
+  /** @deprecated Unused by the library; will be removed in the next minor release. */
   bytesPerPixel = 8;
   /**
    * resolution is the resolution at which the region
@@ -51,7 +53,9 @@ export class Region {
    * at resolution = 0
    */
   resolution = 0;
+  /** @deprecated Unused by the library; will be removed in the next minor release. */
   cropped = false;
+  /** @deprecated Unused by the library; will be removed in the next minor release. */
   tileNumber = 0;
   tileCoordinates: number[] | null = null;
 
@@ -62,25 +66,16 @@ export class Region {
     return this.kind === 'profile';
   }
 
+  /**
+   * A debug string: the rectangle's box, or the polygon's SVG path.
+   * @deprecated Unused by the library; will be removed in the next minor release.
+   */
   toString() {
-    // if shape is rectangle
     if (this.bounds instanceof Rectangle) {
       return `x: ${this.bounds.x}, y: ${this.bounds.y},
               width: ${this.bounds.width}, height: ${this.bounds.height}`;
     } else if (this.bounds instanceof Polygon) {
-      let path = 'M';
-      // display as path
-      for (let i = 0; i < this.bounds.npoints; i++) {
-        if (i < this.bounds.npoints - 1) {
-          path = `${path}${this.bounds.xpoints[i]},${this.bounds.ypoints[i]}L`;
-        } else {
-          path = `${path}${this.bounds.xpoints[i]},${this.bounds.ypoints[i]}`;
-        }
-      }
-      if (this.bounds.closed !== false) {
-        path += 'Z';
-      }
-      return path;
+      return verticesToSvgPath(this.bounds.xpoints, this.bounds.ypoints, this.bounds.closed !== false);
     }
     return '';
   }
@@ -125,18 +120,7 @@ export class Region {
       }
       if (this.isPolygon(bnds)) {
         shape.type = 'path';
-        let path = 'M';
-        for (let i = 0; i < bnds.npoints; i++) {
-          if (i < bnds.npoints - 1) {
-            path = `${path}${bnds.xpoints[i]},${bnds.ypoints[i]}L`;
-          } else {
-            path = `${path}${bnds.xpoints[i]},${bnds.ypoints[i]}`;
-          }
-        }
-        if (bnds.closed !== false) {
-          path += 'Z';
-        }
-        shape.path = path;
+        shape.path = verticesToSvgPath(bnds.xpoints, bnds.ypoints, bnds.closed !== false);
       }
     }
     return shape;

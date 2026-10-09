@@ -1,4 +1,5 @@
 import { Region, Polygon, Rectangle } from './region';
+import { parseSvgPath } from './geometry';
 import { Datum, Font, Shape, ShapeLabel, ShapeLine, XAxisName, YAxisName } from 'plotly.js-dist-min';
 
 export class ShapeSelection implements Shape {
@@ -67,21 +68,14 @@ export class ShapeSelection implements Shape {
       region.bounds.width = (this.x1 as number) - (this.x0 as number);
       region.bounds.height = (this.y1 as number) - (this.y0 as number);
     } else if (this.type === 'path') {
-      region.bounds = new Polygon();
-      const isClosed = this.path.endsWith('Z');
-      const spath = isClosed ? this.path.slice(1, -1) : this.path.slice(1); // remove M and optionally Z
-      const spoints = spath.split('L');
-      region.bounds.npoints = spoints.length;
-      region.bounds.xpoints = [];
-      region.bounds.ypoints = [];
-      region.bounds.coordinates = [];
-      region.bounds.closed = isClosed;
-      for (const point of spoints) {
-        const coords = point.split(',');
-        region.bounds.xpoints.push(parseFloat(coords[0]));
-        region.bounds.ypoints.push(parseFloat(coords[1]));
-        region.bounds.coordinates.push([parseFloat(coords[0]), parseFloat(coords[1])]);
-      }
+      const { xpoints, ypoints, closed } = parseSvgPath(this.path);
+      region.bounds = Object.assign(new Polygon(), {
+        npoints: xpoints.length,
+        xpoints,
+        ypoints,
+        coordinates: xpoints.map((x, i) => [x, ypoints[i]]),
+        closed,
+      });
     } else {
       throw new Error(`Unsupported shape type: ${this.type}`);
     }

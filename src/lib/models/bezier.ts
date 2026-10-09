@@ -128,13 +128,3 @@ export function bezierCurveFromHandles(xs: number[], ys: number[],
   }
   return { xs: outX, ys: outY };
 }
-
-/**
- * Flatten the smooth Catmull-Rom bezier through the anchors (no custom handles).
- * Falls back to the anchors when there are too few to form a curve.
- */
-export function bezierCurve(xs: number[], ys: number[], closed: boolean): CurvePoints {
-  const n = Math.min(xs.length, ys.length);
-  if (n < 3) return { xs: xs.slice(), ys: ys.slice() };
-  return bezierCurveFromHandles(xs, ys, bezierAnchorHandles(xs, ys, closed), closed);
-}
