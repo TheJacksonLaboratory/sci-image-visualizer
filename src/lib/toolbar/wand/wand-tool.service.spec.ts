@@ -320,3 +320,82 @@ describe('WandToolService — a stale stroke never resurrects a region (RT-2)', 
     expect(bbox(state.regions[0]).x1).toBe(first.x1 + 3);
   });
 });
+
+/** A box region with a rectangular hole (image coords). */
+function donutRegion(id: number): Region {
+  const r = boxRegion(4, 4, 36, 36, id);
+  (r.bounds as Polygon).holes = [[[15, 15], [25, 15], [25, 25], [15, 25]]];
+  return r;
+}
+
+/** Host that mints ids like RegionStore.setRegions, so split pieces can be tracked. */
+function mintingHost(regions: Region[]) {
+  const h = makeHost({ regions, cached: cached(40, 40) });
+  let nextId = 100;
+  h.host.setRegions = (r: Region[]) => {
+    for (const reg of r) if (reg.id == null) reg.id = nextId++;
+    h.state.regions = r;
+  };
+  return h;
+}
+
+describe('WandToolService — commits every traced piece with its holes (RT-3, RT-5)', () => {
+  let tool: WandToolService;
+
+  beforeEach(() => {
+    tool = new WandToolService(new WandService());
+  });
+
+  afterEach(() => {
+    tool.setMode(false);
+    document.body.innerHTML = '';
+  });
+
+  it('extending a donut keeps its hole', () => {
+    const { host, container, state } = mintingHost([donutRegion(5)]);
+    tool.bindHost(host);
+    tool.setMode(true, { patchSize: 5, simpleMode: true });
+
+    cv(container).dispatchEvent(mouse('mousedown', 8, 8)); // in the solid ring
+
+    expect(state.regions).toHaveLength(1);
+    expect(state.regions[0].id).toBe(5);
+    expect((state.regions[0].bounds as Polygon).holes?.length).toBe(1);
+  });
+
+  it('a Shift-erase that cuts a region in two keeps both pieces', () => {
+    const { host, container, state } = mintingHost([boxRegion(4, 4, 36, 12, 5)]);
+    tool.bindHost(host);
+    tool.setMode(true, { patchSize: 9, simpleMode: true });
+
+    cv(container).dispatchEvent(mouse('mousedown', 20, 8, { shiftKey: true }));
+
+    expect(state.regions).toHaveLength(2);
+    expect(state.regions.map((r) => r.id)).toContain(5);
+    const xs = state.regions.map((r) => bbox(r));
+    expect(Math.min(...xs.map((b) => b.x0))).toBe(4);
+    expect(Math.max(...xs.map((b) => b.x1))).toBe(36);
+  });
+
+  it('editing a region keeps its metadata (colour override, source, file name)', () => {
+    const existing = boxRegion(4, 4, 36, 36, 5);
+    existing.color = '#123456';
+    existing.colorOverridden = true;
+    existing.source = 'yolo';
+    existing.filename = 'a.tif';
+    existing.label = 'Tumor';
+    const { host, container, state } = mintingHost([existing]);
+    tool.bindHost(host);
+    tool.setMode(true, { patchSize: 5, simpleMode: true });
+
+    cv(container).dispatchEvent(mouse('mousedown', 8, 8));
+
+    const r = state.regions[0];
+    expect(r.id).toBe(5);
+    expect(r.color).toBe('#123456');
+    expect(r.colorOverridden).toBe(true);
+    expect(r.source).toBe('yolo');
+    expect(r.filename).toBe('a.tif');
+    expect(r.label).toBe('Tumor');
+  });
+});

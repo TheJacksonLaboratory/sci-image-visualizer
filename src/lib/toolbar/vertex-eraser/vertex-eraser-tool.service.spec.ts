@@ -36,7 +36,7 @@ describe('VertexEraserToolService (neutral Region)', () => {
   let invalidated: number;
 
   beforeEach(() => {
-    tool = new VertexEraserToolService(new WandService());
+    tool = new VertexEraserToolService();
     regions = [squareRegion()];
     committed = null;
     invalidated = 0;
@@ -161,5 +161,76 @@ describe('VertexEraserToolService (neutral Region)', () => {
     const canvas = container.querySelector('canvas') as HTMLCanvasElement;
     canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 10, clientY: 0, button: 0 }));
     expect((committed![0].bounds as Polygon).xpoints.length).toBe(3);
+  });
+});
+
+describe('VertexEraserToolService — keeps what it does not edit (RT-5)', () => {
+  let tool: VertexEraserToolService;
+  let committed: Region[] | null;
+  let container: HTMLDivElement;
+
+  function bind(regions: Region[]) {
+    tool.bindHost({
+      getOverlayContainer: () => container,
+      getCoordinateTransform: () => identityTransform,
+      getRegions: () => regions.slice(),
+      setRegions: (rs) => { committed = rs; },
+      invalidateWandRegion: () => undefined,
+      getCachedImageRatio: () => 1,
+    });
+    tool.setMode(true);
+    tool.setRadius(2);
+  }
+
+  beforeEach(() => {
+    tool = new VertexEraserToolService();
+    committed = null;
+    container = document.createElement('div');
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    tool.setMode(false);
+    container.remove();
+  });
+
+  const click = (x: number, y: number) => (container.querySelector('canvas') as HTMLCanvasElement)
+    .dispatchEvent(new MouseEvent('mousedown', { clientX: x, clientY: y, button: 0 }));
+
+  it('never edits an intensity-profile line', () => {
+    const line = new Region();
+    line.id = 2;
+    line.kind = 'profile';
+    const p = new Polygon();
+    p.xpoints = [10, 20, 30];
+    p.ypoints = [0, 0, 0];
+    p.npoints = 3;
+    p.coordinates = [[10, 0], [20, 0], [30, 0]];
+    p.closed = false;
+    line.bounds = p;
+    bind([line]);
+
+    click(20, 0);
+
+    expect(committed).toBeNull();
+  });
+
+  it('keeps the edited region\'s metadata', () => {
+    const r = squareRegion();
+    r.label = 'Tumor';
+    r.color = '#123456';
+    r.colorOverridden = true;
+    r.source = 'yolo';
+    r.filename = 'a.tif';
+    bind([r]);
+
+    click(10, 0);
+
+    const out = committed![0];
+    expect((out.bounds as Polygon).xpoints.length).toBe(3);
+    expect(out.colorOverridden).toBe(true);
+    expect(out.source).toBe('yolo');
+    expect(out.filename).toBe('a.tif');
+    expect(out.label).toBe('Tumor');
   });
 });

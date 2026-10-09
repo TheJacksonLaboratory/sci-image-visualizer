@@ -1,8 +1,11 @@
 import { Injectable } from '@angular/core';
 
-import { WandService } from '../wand/wand.service';
 import { IViewportHost, IRegionDataHost } from '../../contracts/coordinate-transform.contract';
 import { Region, Polygon } from '../../models/region';
+import { makePolygon, replaceBounds } from '../../models/polygon-factory';
+import { dropVerticesWithinRadius } from '../../geometry/ring';
+import type { CachedImageData } from '../wand/wand-tool.service';
+import { MatrixFrame } from '../tool-kit/matrix-frame';
 
 /**
  * Collaboration interface the vertex eraser needs from its host backend.
@@ -19,16 +22,23 @@ export interface VertexEraserToolHost extends IViewportHost, IRegionDataHost {
   /**
    * Data-coords-per-image-pixel ratio (== cachedImageRatios[0] || 1). Used to
    * convert between matrix coordinates (the eraser's native space) and the
-   * backend's data coordinates.
+   * backend's data coordinates when {@link getCachedImageData} isn't provided.
    */
   getCachedImageRatio(): number;
+  /**
+   * The readback the wand samples, if the host exposes it to the eraser. Its
+   * per-axis ratios keep the eraser circle round in image pixels on an
+   * anisotropic readback; without it `getCachedImageRatio()` is used for both
+   * axes.
+   */
+  getCachedImageData?(): CachedImageData | null;
 }
 
 /**
  * Vertex eraser. A custom canvas overlay that, on click/drag, removes any
  * polygon vertex within `radius` matrix-pixels of the cursor from every
- * `type: 'path'` shape on the plot. Polygons that fall below 3 vertices
- * (or polylines below 2) are removed entirely.
+ * annotation polygon/polyline (never an intensity-profile line). Polygons that
+ * fall below 3 vertices (or polylines below 2) are removed entirely.
  *
  * The cursor is rendered as a dashed-red circle on the overlay so the user
  * can see the active radius while moving.
@@ -47,7 +57,7 @@ export class VertexEraserToolService {
   private readonly boundMouseMove: (e: MouseEvent) => void;
   private readonly boundMouseUp: (e: MouseEvent) => void;
 
-  constructor(private wandService: WandService) {
+  constructor() {
     this.boundMouseDown = (e) => this.onMouseDown(e);
     this.boundMouseMove = (e) => this.onMouseMove(e);
     this.boundMouseUp = (e) => this.onMouseUp(e);
@@ -156,8 +166,7 @@ export class VertexEraserToolService {
     const transform = this.host.getCoordinateTransform();
     if (!transform.isReady()) return;
     // Convert matrix-pixel radius to screen-pixel radius via the data scale.
-    const rx = this.host.getCachedImageRatio();
-    const screenRadius = transform.dataLengthToScreen(this.radius * rx);
+    const screenRadius = transform.dataLengthToScreen(this.radius * this.frame().rx);
     if (!Number.isFinite(screenRadius) || screenRadius <= 0) return;
     ctx.save();
     ctx.strokeStyle = 'rgba(255, 80, 80, 0.9)';
@@ -171,10 +180,16 @@ export class VertexEraserToolService {
 
   // ── Per-tick erase logic ────────────────────────────────────────────
 
+  /** The data↔matrix frame: the host's readback when exposed, else its single ratio. */
+  private frame(): MatrixFrame {
+    const cached = this.host.getCachedImageData?.();
+    return MatrixFrame.from(cached ?? { ratios: [this.host.getCachedImageRatio()] });
+  }
+
   /**
-   * Drop every vertex of every path-shape that lies within the eraser's
-   * radius of the cursor. Polygons reduced below 3 vertices (or polylines
-   * below 2) are removed entirely.
+   * Drop every vertex of every annotation polygon/polyline that lies within the
+   * eraser's radius of the cursor. Polygons reduced below 3 vertices (or
+   * polylines below 2) are removed entirely. Edited regions keep their metadata.
    */
   private applyAtClient(e: MouseEvent) {
     if (!this.overlay) return;
@@ -185,20 +200,20 @@ export class VertexEraserToolService {
     if (!transform.isReady()) return;
     const { x: dataX, y: dataY } = transform.clientToData(e.clientX, e.clientY);
     if (!Number.isFinite(dataX) || !Number.isFinite(dataY)) return;
-    const rx = this.host.getCachedImageRatio();
-    const cmx = dataX / rx;
-    const cmy = dataY / rx;
+    const frame = this.frame();
+    const cmx = frame.toMatrixX(dataX);
+    const cmy = frame.toMatrixY(dataY);
 
     let anyChange = false;
     for (let i = regions.length - 1; i >= 0; i--) {
       const region = regions[i];
+      // Intensity-profile lines belong to the intensity tool, not the annotation set.
+      if (region?.kind === 'profile') continue;
       const b = region?.bounds;
       if (!(b instanceof Polygon) || b.xpoints.length === 0) continue;
       const closed = b.closed !== false;
-      const xs = b.xpoints.map(x => x / rx);
-      const ys = b.ypoints.map(y => y / rx);
-
-      const result = this.wandService.dropVerticesWithinRadius(xs, ys, cmx, cmy, this.radius);
+      const ring = frame.ringToMatrix(b.xpoints, b.ypoints);
+      const result = dropVerticesWithinRadius(ring.xs, ring.ys, cmx, cmy, this.radius);
 
       // Erase vertices on interior rings (a donut's inner outline) too, and drop
       // a hole that degenerates below a triangle (jit-ui#85).
@@ -206,15 +221,16 @@ export class VertexEraserToolService {
       let newHoles: number[][][] | undefined;
       if (b.holes) {
         newHoles = [];
-        for (const ring of b.holes) {
-          const hr = this.wandService.dropVerticesWithinRadius(
-            ring.map(p => p[0] / rx), ring.map(p => p[1] / rx), cmx, cmy, this.radius);
+        for (const hole of b.holes) {
+          const hr = dropVerticesWithinRadius(
+            hole.map((p) => frame.toMatrixX(p[0])), hole.map((p) => frame.toMatrixY(p[1])),
+            cmx, cmy, this.radius);
           if (hr.removed === 0) {
-            newHoles.push(ring); // untouched — keep as-is
+            newHoles.push(hole); // untouched — keep as-is
           } else {
             holesChanged = true;
             if (hr.xpoints.length >= 3) {
-              newHoles.push(hr.xpoints.map((x, k) => [x * rx, hr.ypoints[k] * rx]));
+              newHoles.push(hr.xpoints.map((x, k) => [frame.toDataX(x), frame.toDataY(hr.ypoints[k])]));
             } // else: hole collapsed — drop it
           }
         }
@@ -224,33 +240,19 @@ export class VertexEraserToolService {
       if (result.removed === 0 && !holesChanged) continue;
 
       anyChange = true;
-      const minVerts = closed ? 3 : 2;
-      if (result.xpoints.length < minVerts) {
+      if (result.xpoints.length < (closed ? 3 : 2)) {
         // Region became degenerate — remove it.
         regions.splice(i, 1);
         continue;
       }
 
-      // Rebuild the polygon in image/data coords. Drop any stored bezier
-      // handles (the anchor count changed) — they re-derive from the new anchors.
-      const xPlot = result.xpoints.map(x => x * rx);
-      const yPlot = result.ypoints.map(y => y * rx);
-      const poly = new Polygon();
-      poly.npoints = xPlot.length;
-      poly.xpoints = xPlot;
-      poly.ypoints = yPlot;
-      poly.coordinates = xPlot.map((x, k) => [x, yPlot[k]]);
-      poly.closed = closed;
-      poly.bezier = b.bezier;
-      if (newHoles && newHoles.length) poly.holes = newHoles;
-
-      const nr = new Region();
-      nr.id = region.id;
-      nr.name = region.name;
-      nr.label = region.label;
-      nr.color = region.color;
-      nr.bounds = poly;
-      regions[i] = nr;
+      // Rebuild the polygon in data coords, keeping the region's metadata. Drop
+      // any stored bezier handles (the anchor count changed) — they re-derive
+      // from the new anchors.
+      const data = frame.ringToData(result.xpoints, result.ypoints);
+      regions[i] = replaceBounds(region, makePolygon(data.xs, data.ys, {
+        closed, bezier: b.bezier, holes: newHoles,
+      }));
     }
 
     if (!anyChange) return;

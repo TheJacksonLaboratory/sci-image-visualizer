@@ -1,9 +1,11 @@
 import { Injectable } from '@angular/core';
 
 import { WandImage, WandOptions, WandService } from './wand.service';
-import { BBoxMask, masksOverlap, unionMasks } from '../../geometry/raster';
+import { BBoxMask } from '../../geometry/raster';
+import { MatrixFrame } from '../tool-kit/matrix-frame';
+import { MaskStrokeEditor } from '../tool-kit/mask-stroke-editor';
 import { IViewportHost, IRegionDataHost } from '../../contracts/coordinate-transform.contract';
-import { Region, Polygon } from '../../models/region';
+import { Region } from '../../models/region';
 
 /**
  * The pixel data and frame state PlotlyService caches for sampling. Returned
@@ -70,24 +72,14 @@ export class WandToolService {
   private overlay: HTMLCanvasElement | null = null;
   private active = false;
   /**
-   * Accumulated wand region. Every per-tick patch mask is OR'd into `mask`
-   * over a bbox that grows with the stroke, so the region keeps expanding
-   * as the user drags. The accumulator persists across mouseup/mousedown so
-   * that subsequent strokes extend the *same* region — matching QuPath's
-   * brush behaviour where the active annotation stays editable until the
-   * user switches tool.
+   * Accumulated wand region. Every per-tick patch mask is OR'd into the stroke
+   * over a bbox that grows with the stroke, so the region keeps expanding as
+   * the user drags. The accumulator persists across mouseup/mousedown so that
+   * subsequent strokes extend the *same* region — matching QuPath's brush
+   * behaviour where the active annotation stays editable until the user
+   * switches tool.
    */
-  private stroke: BBoxMask | null = null;
-  /** Id of the region this wand stroke is editing (null = a fresh region). */
-  private strokeRegionId: number | null = null;
-  /** The bounds object the stroke last committed (or adopted). Undo/redo restore
-   *  clones and every external edit (Region Editor, segmentation, vertex eraser)
-   *  replaces the bounds, so once no region holds this object the stroke no
-   *  longer describes what is on screen and must not be re-committed (RT-2). */
-  private lastCommittedBounds: Region['bounds'] = null;
-  /** Readback ratio/origin signature the active stroke's matrix coords are tied to; a change
-   *  (zoom/pan) invalidates the stroke so it isn't re-committed at a different scale (jit-ui#102). */
-  private strokeRatioSig: string | null = null;
+  private readonly editor = new MaskStrokeEditor();
   private dragging = false;
   private options: WandOptions = {};
 
@@ -188,8 +180,7 @@ export class WandToolService {
   }
 
   private resetStroke() {
-    this.stroke = null;
-    this.strokeRegionId = null;
+    this.editor.reset();
     this.dragging = false;
   }
 
@@ -210,47 +201,24 @@ export class WandToolService {
     // The current regions (neutral model). Mutated locally across this tick and
     // committed once via host.setRegions().
     const regions = this.host.getRegions();
-    // Drop a stroke whose region was undone, deleted or replaced outside the tool:
-    // re-committing it would bring the old shape back.
-    if (this.stroke && this.lastCommittedBounds && !regions.some((r) => r.bounds === this.lastCommittedBounds)) {
-      this.stroke = null;
-      this.strokeRegionId = null;
-    }
+    const editor = this.editor;
+    editor.invalidateIfStale(regions);
 
     const transform = this.host.getCoordinateTransform();
     if (!transform.isReady()) return;
     const { x: dataX, y: dataY } = transform.clientToData(e.clientX, e.clientY);
     if (!Number.isFinite(dataX) || !Number.isFinite(dataY)) return;
 
-    // ratios = [xRatio, yRatio] from both backends. Use the X ratio for the
-    // column and the Y ratio for the row: they differ when the pixel aspect
-    // isn't 1:1 (e.g. a non-square OSD viewport), and reusing ratios[0] for
-    // both would distort the sampled region vertically. Fall back to the X
-    // ratio if only one was supplied.
-    const rx = cached.ratios[0] || 1;
-    const ry = cached.ratios[1] || cached.ratios[0] || 1;
-    const ox = cached.originX ?? 0;
-    const oy = cached.originY ?? 0;
-    // The stroke accumulator is in matrix (viewport-pixel) coordinates tied to the readback's
-    // ratio/origin. If the view changed (zoom/pan) since the stroke was built, those coords no
-    // longer mean the same thing — re-committing would rescale the region by the zoom factor
-    // (jit-ui#102). Drop the stale stroke so a fresh one is built at the current view.
-    const sig = `${rx},${ry},${ox},${oy}`;
-    if (this.stroke && this.strokeRatioSig !== sig) {
-      this.stroke = null;
-      this.strokeRegionId = null;
-    }
-    this.strokeRatioSig = sig;
-    const matrixX = (dataX - ox) / rx;
-    const matrixY = (dataY - oy) / ry;
+    const frame = MatrixFrame.from(cached);
+    editor.syncFrame(frame);
+    const matrixX = frame.toMatrixX(dataX);
+    const matrixY = frame.toMatrixY(dataY);
     if (matrixX < 0 || matrixX >= cached.width) return;
     if (matrixY < 0 || matrixY >= cached.height) return;
 
     const frameIdx = this.host.getActiveFrameIndex();
-    const frame = cached.frames[frameIdx] ?? cached.frames[0];
-
     const wandImage: WandImage = {
-      data: frame,
+      data: cached.frames[frameIdx] ?? cached.frames[0],
       width: cached.width,
       height: cached.height,
       isGrayscale: cached.isGrayscale,
@@ -263,16 +231,11 @@ export class WandToolService {
       simpleMode: this.options.simpleMode || ((e.metaKey || e.ctrlKey) && !erase),
     };
 
-    // If this is the first tick of a new drag and the click is NOT inside the
-    // current accumulator and NOT inside any existing path-shape, drop the old
-    // stroke so a brand-new region starts here. Without this, the accumulator
-    // bbox grows to span both areas and `maskToPolygon` keeps only the largest
-    // connected blob — making the new click appear to do nothing.
-    if (isStart && !erase && this.stroke && !this.pointInStroke(matrixX, matrixY)) {
-      // Will fall through to tryAdoptShapeAt below; if that also misses, a
-      // fresh stroke is created from the patch.
-      this.stroke = null;
-      this.strokeRegionId = null;
+    // A new drag that starts outside the current accumulator starts a new region
+    // (or adopts the one under the cursor) instead of growing the old stroke's
+    // bbox to span both areas.
+    if (isStart && !erase && editor.stroke && !editor.contains(matrixX, matrixY)) {
+      editor.reset();
     }
 
     const patch = this.wandService.computePatchMask(wandImage, matrixX, matrixY, opts);
@@ -282,314 +245,59 @@ export class WandToolService {
     const half = (W - 1) / 2;
     const px0 = Math.round(matrixX) - half;
     const py0 = Math.round(matrixY) - half;
-    const px1 = px0 + W;
-    const py1 = py0 + W;
 
-    // If there's no active wand region, see if the click landed on an
-    // existing path-shape — adopt it so this stroke extends (or erases
-    // from) it instead of creating a new region.
-    if (!this.stroke) {
-      this.tryAdoptShapeAt(regions, matrixX, matrixY, rx, ry, cached);
-    }
+    // With no active region, a click on an existing region adopts it so this
+    // stroke extends (or erases from) it.
+    if (!editor.stroke) editor.adoptAt(regions, matrixX, matrixY, frame, cached);
 
     // Erasing requires an existing region. Shift-clicking empty space is a
     // no-op — we don't create a region only to immediately delete from it.
-    if (erase && !this.stroke) return;
+    if (erase && !editor.stroke) return;
 
-    // Grow the region's accumulated mask only when adding. Erasing never
-    // expands the region beyond its current bbox.
-    if (!this.stroke) {
-      const bx = Math.max(0, px0);
-      const by = Math.max(0, py0);
-      const bx1 = Math.min(cached.width, px1);
-      const by1 = Math.min(cached.height, py1);
-      const bw = Math.max(0, bx1 - bx);
-      const bh = Math.max(0, by1 - by);
-      if (bw === 0 || bh === 0) return;
-      this.stroke = { bx, by, bw, bh, mask: new Uint8Array(bw * bh) };
+    if (!editor.stroke) {
+      // A fresh stroke starts at the patch, clipped to the readback.
+      const ok = editor.ensureCovers(
+        Math.max(0, px0), Math.max(0, py0),
+        Math.min(cached.width, px0 + W), Math.min(cached.height, py0 + W),
+      );
+      if (!ok) return;
     } else if (!erase) {
-      // Don't clamp the accumulator to the viewport: an adopted region may extend off-screen, and
-      // clamping here would discard its off-screen part when the stroke grows (jit-ui#102).
-      const bx = Math.min(this.stroke.bx, px0);
-      const by = Math.min(this.stroke.by, py0);
-      const bx1 = Math.max(this.stroke.bx + this.stroke.bw, px1);
-      const by1 = Math.max(this.stroke.by + this.stroke.bh, py1);
-      const bw = bx1 - bx;
-      const bh = by1 - by;
-      if (bw !== this.stroke.bw || bh !== this.stroke.bh || bx !== this.stroke.bx || by !== this.stroke.by) {
-        // Reallocate the larger mask and copy the previous mask into it.
-        const next = new Uint8Array(bw * bh);
-        const dx = this.stroke.bx - bx;
-        const dy = this.stroke.by - by;
-        for (let row = 0; row < this.stroke.bh; row++) {
-          const srcOff = row * this.stroke.bw;
-          const dstOff = (row + dy) * bw + dx;
-          next.set(this.stroke.mask.subarray(srcOff, srcOff + this.stroke.bw), dstOff);
-        }
-        this.stroke = { bx, by, bw, bh, mask: next };
-      }
+      // Don't clamp a growing stroke to the viewport: an adopted region may extend
+      // off-screen, and clamping would discard that part (jit-ui#102). Erasing never
+      // grows the stroke.
+      editor.ensureCovers(px0, py0, px0 + W, py0 + W);
     }
 
     // Apply the patch: OR (add) or AND-NOT (erase).
-    const stroke = this.stroke;
+    const stroke = editor.stroke as BBoxMask;
     for (let py = 0; py < W; py++) {
-      const iy = py0 + py;
-      const my = iy - stroke.by;
+      const my = py0 + py - stroke.by;
       if (my < 0 || my >= stroke.bh) continue;
       const srcRow = py * W;
       const dstRow = my * stroke.bw;
       for (let px = 0; px < W; px++) {
         if (!patch.mask[srcRow + px]) continue;
-        const ix = px0 + px;
-        const mx = ix - stroke.bx;
+        const mx = px0 + px - stroke.bx;
         if (mx < 0 || mx >= stroke.bw) continue;
-        if (erase) stroke.mask[dstRow + mx] = 0;
-        else stroke.mask[dstRow + mx] = 1;
+        stroke.mask[dstRow + mx] = erase ? 0 : 1;
       }
     }
 
-    if (!erase) {
-      // If the grown stroke now overlaps another path-shape, fold those
-      // shapes into this one and drop them — matching QuPath's
-      // merge-on-touch behaviour.
-      this.mergeOverlappingShapes(regions, rx, ry, cached);
-    }
+    // Growing into other regions folds them in (QuPath's merge-on-touch).
+    if (!erase) editor.mergeTouching(regions, frame, cached);
 
-    // Trace the union boundary in image-pixel coords.
-    const stroke2 = this.stroke!;
-    const poly = this.wandService.maskToPolygon(
-      stroke2.mask,
-      stroke2.bw,
-      stroke2.bh,
-      stroke2.bx,
-      stroke2.by,
-    );
-
-    if (!poly) {
-      // Erased to nothing — remove the shape entirely.
-      if (erase) this.dropActiveShape(regions);
-      return;
-    }
-
-    // Convert from matrix coords back to plot data coords.
-    const xPlot = poly.xpoints.map((x) => ox + x * rx);
-    const yPlot = poly.ypoints.map((y) => oy + y * ry);
-
-    this.commitStroke(regions, xPlot, yPlot);
-  }
-
-  /** True if (matrixX, matrixY) lies inside the current stroke accumulator. */
-  private pointInStroke(matrixX: number, matrixY: number): boolean {
-    const s = this.stroke;
-    if (!s) return false;
-    const mx = Math.floor(matrixX) - s.bx;
-    const my = Math.floor(matrixY) - s.by;
-    if (mx < 0 || my < 0 || mx >= s.bw || my >= s.bh) return false;
-    return s.mask[my * s.bw + mx] === 1;
-  }
-
-  /**
-   * Remove the region referenced by `strokeRegionId` from the region list and
-   * reset the active stroke — used when an erase stroke deletes every pixel.
-   */
-  private dropActiveShape(regions: Region[]) {
-    if (this.strokeRegionId != null) {
-      const idx = regions.findIndex((r) => r.id === this.strokeRegionId);
-      if (idx >= 0) {
-        regions.splice(idx, 1);
-        this.host.setRegions(regions);
-      }
-    }
-    this.stroke = null;
-    this.strokeRegionId = null;
-  }
-
-  /**
-   * Whether a region can be faithfully rasterized into the wand stroke at the current view
-   * resolution (rx/ry = data units per matrix pixel). Editing rasterizes the region to the
-   * viewport grid and re-traces it, so a region whose matrix-space bbox exceeds the rasterizer's
-   * cap would be clipped/down-quantized and come back rescaled/corrupted (jit-ui#102) — e.g. a
-   * whole-slide annotation while zoomed out. Skip adopt/merge for those: leave them untouched and
-   * only edit them near native zoom.
-   */
-  private fitsForEdit(
-    verts: { xpoints: number[]; ypoints: number[] },
-    rx: number,
-    ry: number,
-  ): boolean {
-    const xs = verts.xpoints;
-    const ys = verts.ypoints;
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (let i = 0; i < xs.length; i++) {
-      if (xs[i] < minX) minX = xs[i];
-      if (xs[i] > maxX) maxX = xs[i];
-      if (ys[i] < minY) minY = ys[i];
-      if (ys[i] > maxY) maxY = ys[i];
-    }
-    const w = (maxX - minX) / (rx || 1);
-    const h = (maxY - minY) / (ry || 1);
-    return w > 0 && h > 0 && w * h <= 4096 * 4096;
-  }
-
-  /** A region's closed-polygon vertices (image/data coords), or null when it
-   *  isn't a fillable closed polygon (rectangles, open polylines). */
-  private regionVerts(
-    region: Region,
-  ): { xpoints: number[]; ypoints: number[]; holes?: number[][][] } | null {
-    const b = region?.bounds;
-    if (b instanceof Polygon && b.closed !== false && b.xpoints.length >= 3) {
-      return { xpoints: b.xpoints, ypoints: b.ypoints, holes: b.holes };
-    }
-    return null;
-  }
-
-  /** Convert a region's hole rings from image/data coords into matrix coords so
-   *  they line up with the stroke accumulator (jit-ui#85). */
-  private holesToMatrix(
-    holes: number[][][] | undefined, ox: number, oy: number, rx: number, ry: number,
-  ): number[][][] | undefined {
-    return holes?.map((ring) => ring.map(([x, y]) => [(x - ox) / rx, (y - oy) / ry]));
-  }
-
-  /**
-   * If (matrixX, matrixY) falls inside an existing region, rasterize it into
-   * the wand stroke accumulator so subsequent wand input extends it rather than
-   * starting a new region.
-   */
-  private tryAdoptShapeAt(
-    regions: Region[],
-    matrixX: number,
-    matrixY: number,
-    rx: number,
-    ry: number,
-    cached: CachedImageData,
-  ): boolean {
-    if (!regions || regions.length === 0) return false;
-
-    // Most-recently-added regions are on top — check them first.
-    for (let i = regions.length - 1; i >= 0; i--) {
-      const verts = this.regionVerts(regions[i]);
-      if (!verts) continue;
-      // Too large to rasterize at this zoom → don't adopt it (editing would rescale/corrupt it).
-      if (!this.fitsForEdit(verts, rx, ry)) continue;
-
-      const ox = cached.originX ?? 0;
-      const oy = cached.originY ?? 0;
-      const xs = verts.xpoints.map((x) => (x - ox) / rx);
-      const ys = verts.ypoints.map((y) => (y - oy) / ry);
-      const holes = this.holesToMatrix(verts.holes, ox, oy, rx, ry);
-
-      // Clicking inside a hole must NOT adopt the donut (it's empty there).
-      if (!this.wandService.pointInPolygonWithHoles(matrixX, matrixY, xs, ys, holes)) continue;
-
-      const raster = this.wandService.rasterizePolygon(xs, ys, cached.width, cached.height, holes);
-      if (!raster) continue;
-
-      this.stroke = raster;
-      this.strokeRegionId = regions[i].id ?? null;
-      this.lastCommittedBounds = regions[i].bounds;
-      return true;
-    }
-    return false;
-  }
-
-  /**
-   * Iterate every region; if its rasterized mask overlaps the wand stroke mask
-   * by at least one pixel, OR it into the stroke and remove it from the list.
-   * Called every tick so chained merges resolve. If the wand has no region id
-   * yet, the merged region's id is adopted so the merged region replaces it.
-   */
-  private mergeOverlappingShapes(regions: Region[], rx: number, ry: number, cached: CachedImageData) {
-    if (!this.stroke) return;
-    let didMerge = true;
-    while (didMerge) {
-      didMerge = false;
-      for (let i = regions.length - 1; i >= 0; i--) {
-        const region = regions[i];
-        if (region.id != null && region.id === this.strokeRegionId) continue;
-
-        const verts = this.regionVerts(region);
-        if (!verts) continue;
-        // Too large to rasterize at this zoom → don't merge it (would rescale/corrupt it).
-        if (!this.fitsForEdit(verts, rx, ry)) continue;
-
-        const ox = cached.originX ?? 0;
-        const oy = cached.originY ?? 0;
-        const xs = verts.xpoints.map((x) => (x - ox) / rx);
-        const ys = verts.ypoints.map((y) => (y - oy) / ry);
-
-        // Quick bbox reject before rasterizing.
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        for (let k = 0; k < xs.length; k++) {
-          if (xs[k] < minX) minX = xs[k];
-          if (xs[k] > maxX) maxX = xs[k];
-          if (ys[k] < minY) minY = ys[k];
-          if (ys[k] > maxY) maxY = ys[k];
-        }
-        const wx0 = this.stroke.bx, wy0 = this.stroke.by;
-        const wx1 = wx0 + this.stroke.bw, wy1 = wy0 + this.stroke.bh;
-        if (maxX < wx0 || minX > wx1 || maxY < wy0 || minY > wy1) continue;
-
-        const holes = this.holesToMatrix(verts.holes, ox, oy, rx, ry);
-        const raster = this.wandService.rasterizePolygon(xs, ys, cached.width, cached.height, holes);
-        if (!raster) continue;
-
-        if (!masksOverlap(this.stroke, raster)) continue;
-
-        this.stroke = unionMasks(this.stroke, raster);
-
-        if (this.strokeRegionId == null) {
-          this.strokeRegionId = region.id ?? null;
-        }
-        regions.splice(i, 1);
-        didMerge = true;
-        break;
-      }
-    }
-  }
-
-  /**
-   * Commit the in-progress polygon as a region — a new region on the first tick
-   * of a stroke, or an in-place replacement of the active region on later ticks
-   * — then ask the host to render. The store mints an id on the first commit,
-   * which we adopt so subsequent ticks replace the same region.
-   */
-  private commitStroke(regions: Region[], xPlot: number[], yPlot: number[]) {
-    if (xPlot.length < 3) return;
-
-    const existing = this.strokeRegionId != null
-      ? regions.find((r) => r.id === this.strokeRegionId) : null;
-
-    const poly = new Polygon();
-    poly.npoints = xPlot.length;
-    poly.xpoints = xPlot;
-    poly.ypoints = yPlot;
-    poly.coordinates = xPlot.map((x, i) => [x, yPlot[i]]);
-    poly.closed = true;
-
-    const region = new Region();
-    region.bounds = poly;
-    region.color = this.host.getShapeColor();
-    if (existing) {
-      // Preserve identity + class label across the stroke's drag ticks.
-      region.id = existing.id;
-      region.name = existing.name;
-    }
-    // Default class/annotation name, matching the overlay-drawn regions and the
-    // Region Editor's "Add" actions so a wand region isn't left unlabeled.
-    region.label = existing?.label ?? 'Region';
-
-    if (this.strokeRegionId == null) {
-      regions.push(region);
-    } else {
-      const idx = regions.findIndex((r) => r.id === this.strokeRegionId);
-      if (idx >= 0) regions[idx] = region;
-      else regions.push(region);
-    }
-
-    this.host.setRegions(regions);
-    // The store assigns an id on the first commit — adopt it.
-    this.strokeRegionId = region.id ?? this.strokeRegionId;
-    this.lastCommittedBounds = region.bounds;
+    editor.commit(regions, frame, this.host, {
+      erase,
+      defaultLabel: 'Region',
+      newRegion: (bounds) => {
+        const region = new Region();
+        region.bounds = bounds;
+        region.color = this.host.getShapeColor();
+        // Default class/annotation name, matching the overlay-drawn regions and the
+        // Region Editor's "Add" actions so a wand region isn't left unlabeled.
+        region.label = 'Region';
+        return region;
+      },
+    });
   }
 }

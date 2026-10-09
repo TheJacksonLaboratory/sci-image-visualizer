@@ -66,7 +66,7 @@ describe('BrushToolService', () => {
   let tool: BrushToolService;
 
   beforeEach(() => {
-    tool = new BrushToolService(new WandService());
+    tool = new BrushToolService();
   });
 
   afterEach(() => {
@@ -418,7 +418,7 @@ describe('BrushToolService — a stale stroke never resurrects a region (RT-2)',
   let tool: BrushToolService;
 
   beforeEach(() => {
-    tool = new BrushToolService(new WandService());
+    tool = new BrushToolService();
   });
 
   afterEach(() => {
@@ -460,5 +460,70 @@ describe('BrushToolService — a stale stroke never resurrects a region (RT-2)',
     canvas.dispatchEvent(mouse('mouseup', 22, 20));
     expect(state.regions).toHaveLength(1);
     expect(bbox(state.regions[0]).x1).toBeLessThan(painted.x1 - 5); // the cut part stays cut
+  });
+});
+
+describe('BrushToolService — edits keep region metadata and frame (RT-5, RT-14)', () => {
+  let tool: BrushToolService;
+
+  beforeEach(() => {
+    tool = new BrushToolService();
+  });
+
+  afterEach(() => {
+    tool.setMode(false);
+    document.body.innerHTML = '';
+  });
+
+  it('the plain brush keeps a user-picked colour and the region metadata', () => {
+    const existing = boxRegion(10, 10, 50, 50, 7);
+    existing.color = '#123456';
+    existing.colorOverridden = true;
+    existing.source = 'yolo';
+    existing.label = 'Tumor';
+    const { host, container, state } = makeHost({ regions: [existing] });
+    tool.bindHost(host);
+    tool.setMode(true, { size: 8 });
+
+    cv(container).dispatchEvent(mouse('mousedown', 48, 30));
+
+    const r = state.regions[0];
+    expect(r.id).toBe(7);
+    expect(r.color).toBe('#123456');
+    expect(r.colorOverridden).toBe(true);
+    expect(r.source).toBe('yolo');
+    expect(r.label).toBe('Tumor');
+  });
+
+  it('uses the Y ratio for rows (anisotropic readback)', () => {
+    const img = cached(60, 60);
+    img.ratios = [1, 2]; // 1 data unit per column, 2 per row
+    const { host, container, state } = makeHost({ cached: img });
+    tool.bindHost(host);
+    tool.setMode(true, { size: 10 });
+
+    cv(container).dispatchEvent(mouse('mousedown', 20, 40));
+
+    const p = state.regions[0].bounds as Polygon;
+    const w = Math.max(...p.xpoints) - Math.min(...p.xpoints);
+    const h = Math.max(...p.ypoints) - Math.min(...p.ypoints);
+    // A round dab in matrix pixels is twice as tall in data units.
+    expect(h).toBeGreaterThan(w * 1.6);
+  });
+
+  it('starting a new stroke elsewhere keeps the pieces of an earlier split', () => {
+    const existing = boxRegion(5, 20, 55, 40, 7);
+    const { host, container, state } = makeHost({ regions: [existing] });
+    tool.bindHost(host);
+    tool.setMode(true, { size: 24 });
+    const canvas = cv(container);
+    canvas.dispatchEvent(mouse('mousedown', 30, 30, { shiftKey: true }));
+    canvas.dispatchEvent(mouse('mouseup', 30, 30, { shiftKey: true }));
+    expect(state.regions).toHaveLength(2);
+
+    canvas.dispatchEvent(mouse('mousedown', 30, 54));
+    canvas.dispatchEvent(mouse('mouseup', 30, 52));
+
+    expect(state.regions).toHaveLength(3);
   });
 });
