@@ -330,8 +330,8 @@ describe('NapariVisualizerService', () => {
     type Internals = {
       host: HTMLElement | null;
       loadingBadge: { text: string } | null;
-      imageTilesGeneration: number;
-      buildTiledSource(desc: unknown, channel: number | undefined, channels: 1 | 4, scene: number): {
+      scene: AbortController;
+      buildTiledSource(desc: unknown, channel: number | undefined, channels: 1 | 4, scene: AbortSignal): {
         fetchTile(key: { level: number; col: number; row: number; z: number }): Promise<unknown>;
       };
     };
@@ -352,7 +352,7 @@ describe('NapariVisualizerService', () => {
     });
 
     it('says the image is reloading while a tile is in flight, and stops once it lands', async () => {
-      const tile = internals.buildTiledSource(desc, undefined, 4, internals.imageTilesGeneration).fetchTile(key);
+      const tile = internals.buildTiledSource(desc, undefined, 4, internals.scene.signal).fetchTile(key);
       await Promise.resolve();
       expect(internals.loadingBadge?.text).toBe('Image reloading…');
       release();
@@ -361,12 +361,12 @@ describe('NapariVisualizerService', () => {
     });
 
     it('a tile that lands after a reset leaves the new scene\'s count alone', async () => {
-      const stale = internals.buildTiledSource(desc, undefined, 4, internals.imageTilesGeneration).fetchTile(key);
+      const stale = internals.buildTiledSource(desc, undefined, 4, internals.scene.signal).fetchTile(key);
       await Promise.resolve();
       const releaseStale = release;
       service.reset();
       internals.host = document.createElement('div');
-      const fresh = internals.buildTiledSource(desc, undefined, 4, internals.imageTilesGeneration).fetchTile(key);
+      const fresh = internals.buildTiledSource(desc, undefined, 4, internals.scene.signal).fetchTile(key);
       await Promise.resolve();
       releaseStale();
       await stale;
@@ -377,7 +377,7 @@ describe('NapariVisualizerService', () => {
     });
 
     it('a disposed source\'s request after a reset never counts toward the new scene', async () => {
-      const disposed = internals.buildTiledSource(desc, undefined, 4, internals.imageTilesGeneration);
+      const disposed = internals.buildTiledSource(desc, undefined, 4, internals.scene.signal);
       service.reset();
       internals.host = document.createElement('div');
       const late = disposed.fetchTile(key);
@@ -385,7 +385,7 @@ describe('NapariVisualizerService', () => {
       expect(internals.loadingBadge?.text ?? '').toBe('');
       release();
       await late;
-      const fresh = internals.buildTiledSource(desc, undefined, 4, internals.imageTilesGeneration).fetchTile(key);
+      const fresh = internals.buildTiledSource(desc, undefined, 4, internals.scene.signal).fetchTile(key);
       await Promise.resolve();
       expect(internals.loadingBadge?.text).toBe('Image reloading…');
       release();
@@ -415,7 +415,7 @@ describe('NapariVisualizerService', () => {
       const old = service.plot('superseded-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE);
       while (infoCalls === 0) await new Promise((r) => setTimeout(r, 0));
       expect(await service.plot('superseded-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE)).toBe(true);
-      const scene = internals.imageTilesGeneration;
+      const scene = internals.scene.signal;
       const builtByNew = built.mock.calls.length;
       expect(builtByNew).toBeGreaterThan(0);
       expect(built.mock.calls.every((c) => c[3] === scene)).toBe(true);

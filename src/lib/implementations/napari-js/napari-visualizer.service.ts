@@ -459,14 +459,24 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private loadingBadge: NapariLoadingBadge | null = null;
   private tileLoading: string[] = [];
   private observationsLoading = 0;
-  /** Image tiles in flight, and the scene they belong to: a fetch that outlives {@link reset}
-   *  settles against the old generation and leaves the new scene's count alone. */
+  /** Image tiles in flight for the current scene (see {@link scene}). */
   private imageTilesLoading = 0;
-  private imageTilesGeneration = 0;
-  /** Monotonic load generation. Bumped by {@link reset} and {@link cancelLoading}; the frame-loading
-   *  loops (volume assembly, surface preload) capture it and bail when it changes, so a Cancel (or a
-   *  new plot) actually stops fetching frames instead of running to completion in the background. */
-  private loadToken = 0;
+  /**
+   * The mounted scene's lifetime: aborted by {@link reset}, so everything a plot starts — its
+   * descriptor poll, its tile fetches, its badge counts, its awaits — can tell that a newer plot
+   * has replaced it. A tile that settles after a reset belongs to the aborted scene and leaves the
+   * new scene's count alone.
+   */
+  private scene = new AbortController();
+  /**
+   * Frame loading (volume assembly, surface preload): aborted by {@link reset} AND by
+   * {@link cancelLoading}, so a Cancel actually stops fetching frames instead of running to
+   * completion in the background, while the scene itself stays mounted.
+   *
+   * The narrower per-request tokens below ({@link sliceReq}, {@link navigatorToken},
+   * {@link spatialRebuildToken}, {@link hoverSourceToken}) are "latest wins WITHIN a scene".
+   */
+  private loading = new AbortController();
   /** Decimate factor for the napari 3D types (1 = Full, 2 = ½ default, 4 = ¼, 8 = ⅛). Applied when a
    *  volume/isosurface/surface (re)loads; changing it needs a re-plot (it changes fetched data). */
   private resolutionScale = NAPARI_DEFAULT_DECIMATE;
@@ -854,7 +864,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.reset();
     // This plot's scene. A newer plot resets into the next one while this one still awaits, and
     // a superseded plot must not go on to draw (or count image tiles) into the newer scene.
-    const scene = this.imageTilesGeneration;
+    const scene = this.scene.signal;
     this.host = host;
     this.plotDivId = plotDiv;
     this.currentPlotType = plotType;
@@ -899,7 +909,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       });
       this.viewer = viewer;
       await viewer.ready;
-      if (scene !== this.imageTilesGeneration) return false;
+      if (scene.aborted) return false;
 
       if (isSpatialOmics3d(plotType)) {
         await this.mountSpatialOmics3d(viewer, host);
@@ -1000,10 +1010,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private async renderImage(z: number, token?: number): Promise<void> {
     const v = this.viewer;
     if (!v) return;
-    const scene = this.imageTilesGeneration;
+    const scene = this.scene.signal;
     const desc = await this.ensureDescriptor();
     // Reset into a newer scene while the descriptor was in flight: this render is superseded.
-    if (scene !== this.imageTilesGeneration) return;
+    if (scene.aborted) return;
     if (desc && desc.levels?.length) {
       if (token != null && token !== this.sliceReq) return;
       await this.renderImageTiled(z, desc, scene);
@@ -1106,7 +1116,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    * coordinates so regions align. Same three modes as the stitch path. Per-channel layers use the
    * REAL pyramid levels (per-channel tiles only exist there); the composite uses all levels.
    */
-  private async renderImageTiled(z: number, desc: TileDescriptor, scene: number): Promise<void> {
+  private async renderImageTiled(z: number, desc: TileDescriptor, scene: AbortSignal): Promise<void> {
     const v = this.viewer;
     if (!v) return;
     const states = this.store.currentChannelStates();
@@ -1165,12 +1175,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
 
   /** Build a pyramidal TiledSource backed by the server `/tile` endpoint. `channel` selects a band
    *  (grayscale luminance, real levels only); omit it for the composite (RGBA, all levels).
-   *  `scene` is the generation of the render that asked for it, taken before that render's awaits. */
+   *  `scene` is the signal of the render that asked for it, taken before that render's awaits. */
   private buildTiledSource(
     desc: TileDescriptor,
     channel: number | undefined,
     channels: 1 | 4,
-    scene: number,
+    scene: AbortSignal,
   ): TiledSource {
     const infoB64 = this.tiles.getSelectedInfoB64() ?? '';
     // Per-channel tiles exist only at REAL Bio-Formats levels; the composite exists at all levels.
@@ -1184,7 +1194,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const api = this.api;
     // The scene this source draws: its tiles count on the badge only while that scene is current,
     // so a request the disposed source still issues after a reset never shows on the new one.
-    const generation = scene;
     return {
       kind: 'tiled',
       width: desc.width,
@@ -1199,7 +1208,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         const res = usable[key.level]?.res ?? key.level;
         const url = `${api}tile?info=${infoB64}&res=${res}&col=${key.col}&row=${key.row}&z=${key.z}&tileSize=${tileSize}${ch}`;
         // "Image reloading…" on the loading badge while any tile of the image is in flight.
-        const counted = generation === this.imageTilesGeneration;
+        const counted = !scene.aborted;
         if (counted) {
           this.imageTilesLoading++;
           this.showLoading();
@@ -1216,7 +1225,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
           if (channels === 4) return { width: bmp.width, height: bmp.height, data: bmp };
           return this.bitmapToLuminance(bmp);
         } finally {
-          if (counted && generation === this.imageTilesGeneration) {
+          if (counted && !scene.aborted) {
             this.imageTilesLoading--;
             this.showLoading();
           }
@@ -1446,7 +1455,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     info: IImageInfo | undefined,
     plotType: PlotType,
   ): Promise<void> {
-    const token = this.loadToken; // bail before rendering if a Cancel / new plot bumps this
+    const loading = this.loading.signal; // bail before rendering on a Cancel / new plot
     const desc = await this.ensureDescriptor();
     // Serverless multichannel (tiled:false + channelUrls): no tile descriptor, so
     // derive the channel count from imageMeta and assemble each band from its own
@@ -1514,7 +1523,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       this.stackLoadingProgress$.next(0);
     }
 
-    if (!dims || !channels.length || this.loadToken !== token) return; // cancelled → don't render
+    if (!dims || !channels.length || loading.aborted) return; // cancelled → don't render
 
     // Resolution-invariant world box. Sizing the box by the sampled voxel counts made higher
     // in-plane resolution grow X/Y while the depth stayed the (constant) slice count — so Z appeared
@@ -1683,7 +1692,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     opts: { maxSlice?: number; sliceStep?: number } = {},
     channel?: number,
   ): Promise<{ data: Uint8Array; width: number; height: number; depth: number } | null> {
-    const token = this.loadToken; // bail if a Cancel / new plot bumps this while we fetch
+    const loading = this.loading.signal; // bail on a Cancel / new plot while we fetch
     const fullDepth = info?.imageMeta?.[0]?.z || info?.urls?.length || 1;
     if (fullDepth < 1) {
       console.warn('[napari-js] no slices to assemble a volume');
@@ -1749,14 +1758,14 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       const worker = async (): Promise<void> => {
         for (;;) {
           const p = pending.shift();
-          if (p === undefined || this.loadToken !== token) return;
+          if (p === undefined || loading.aborted) return;
           readSlice(p, await this.fetchSlice(zIndices[p], channel, budget));
         }
       };
       const poolSize = Math.min(VOLUME_FETCH_CONCURRENCY, Math.max(1, depth - 1));
       await Promise.all(Array.from({ length: poolSize }, () => worker()));
 
-      if (this.loadToken !== token) return null; // cancelled → don't render a partial volume
+      if (loading.aborted) return null; // cancelled → don't render a partial volume
       return { data, width, height, depth };
     } finally {
       this.stackLoadingProgress$.next(0);
@@ -3820,7 +3829,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    * concurrency keeps the connection pool busy without flooding it on a deep stack.
    */
   private async preloadSurfacePlanes(viewer: Viewer): Promise<void> {
-    const token = this.loadToken; // bail if a Cancel / new plot bumps this while we fetch
+    const loading = this.loading.signal; // bail on a Cancel / new plot while we fetch
     const info = this.loaded?.imageInfo;
     const depth = info?.imageMeta?.[0]?.z || info?.urls?.length || 1;
     const { maxGrid } = surfaceResolutionFor(this.resolutionScale);
@@ -3834,7 +3843,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       const worker = async (): Promise<void> => {
         for (;;) {
           const z = pending.shift();
-          if (z === undefined || this.viewer !== viewer || this.loadToken !== token) return;
+          if (z === undefined || this.viewer !== viewer || loading.aborted) return;
           try {
             this.surfacePlanes.set(z, await this.fetchSurfacePlane(z, maxGrid));
           } catch (err) {
@@ -4063,7 +4072,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   }
 
   reset(): void {
-    this.loadToken++; // invalidate any in-flight frame loading from the previous plot
+    // End the previous scene: its frame loading, descriptor poll, tile counts and awaits.
+    this.loading.abort();
+    this.loading = new AbortController();
+    this.scene.abort();
+    this.scene = new AbortController();
     this.displaySub?.unsubscribe();
     this.displaySub = null;
     this.scaleBar?.destroy();
@@ -4075,7 +4088,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.tileLoading = [];
     this.observationsLoading = 0;
     this.imageTilesLoading = 0;
-    this.imageTilesGeneration++;
     this.regionOverlay?.destroy();
     this.regionOverlay = null;
     this.axesLabels?.destroy();
@@ -4234,10 +4246,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.stackLoading$.next(stackLoading);
   }
 
-  /** Cancel in-flight frame loading: bump the load generation so the volume-assembly / surface
+  /** Cancel in-flight frame loading: abort {@link loading} so the volume-assembly / surface
    *  preload workers stop fetching more frames, and clear the loading flag + progress. */
   cancelLoading(): void {
-    this.loadToken++;
+    this.loading.abort();
+    this.loading = new AbortController();
     this.stackLoading$.next(false);
     this.stackLoadingProgress$.next(0);
   }
