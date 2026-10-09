@@ -22,23 +22,38 @@ const asRecords = (traces: unknown[]) => traces as Record<string, any>[];
 
 describe('omics-trace-builders', () => {
   describe('histogram', () => {
-    it('charts the full distribution', () => {
+    /** The total a bar trace counts. */
+    const total = (trace: Record<string, any>) =>
+      (trace.y as number[]).reduce((n, v) => n + v, 0);
+
+    it('charts the full distribution as pre-binned bars', () => {
       const [all] = asRecords(buildOmicsTraces('histogram', input()));
-      expect(all.type).toBe('histogram');
-      expect(all.x).toEqual([1, 2, 3, 4]);
+      expect(all.type).toBe('bar');
+      expect(total(all)).toBe(4);
+      expect(all.customdata[0][0]).toBe(1);
+      expect(all.customdata[all.customdata.length - 1][1]).toBeCloseTo(4);
       expect(all.name).toBe('All');
       expect(all.opacity).toBe(1);
     });
 
-    it('overlays a Selected trace so the two are comparable', () => {
+    it('bins by the square-root rule, between 10 and 100 bins', () => {
+      const big = Float32Array.from({ length: 2500 }, (_, i) => i);
+      const [all] = asRecords(buildOmicsTraces('histogram', input({ values: big })));
+      expect(all.x).toHaveLength(50);
+      expect(all.width).toBeCloseTo(2499 / 50);
+      expect(total(all)).toBe(2500);
+    });
+
+    it('overlays a Selected trace on the SAME bins, so the two are comparable', () => {
       const traces = asRecords(buildOmicsTraces('histogram', input({
         selection: new Uint8Array([0, 1, 1, 0]),
       })));
       expect(traces).toHaveLength(2);
-      expect(traces[0].x).toEqual([1, 2, 3, 4]);   // all, muted
+      expect(total(traces[0])).toBe(4);   // all, muted
       expect(traces[0].opacity).toBeLessThan(1);
       expect(traces[1].name).toBe('Selected');
-      expect(traces[1].x).toEqual([2, 3]);
+      expect(total(traces[1])).toBe(2);
+      expect(traces[1].x).toBe(traces[0].x);
     });
 
     it('ignores an all-zero selection mask (nothing is actually selected)', () => {
@@ -52,15 +67,17 @@ describe('omics-trace-builders', () => {
       const [all] = asRecords(buildOmicsTraces('histogram', input({
         values: new Float32Array([1, NaN, 3]),
       })));
-      expect(all.x).toEqual([1, 3]);
+      expect(total(all)).toBe(2);
+      expect(all.customdata[0][0]).toBe(1);
+      expect(all.customdata[all.customdata.length - 1][1]).toBeCloseTo(3);
     });
 
     it('log-scales when asked', () => {
       const [all] = asRecords(buildOmicsTraces('histogram', input({
         values: new Float32Array([0, 9]), log: true,
       })));
-      expect(all.x[0]).toBeCloseTo(0);
-      expect(all.x[1]).toBeCloseTo(Math.log1p(9));
+      expect(all.customdata[0][0]).toBeCloseTo(0);
+      expect(all.customdata[all.customdata.length - 1][1]).toBeCloseTo(Math.log1p(9));
     });
 
     it('clamps negatives before log so log1p never returns NaN', () => {
@@ -68,6 +85,14 @@ describe('omics-trace-builders', () => {
         values: new Float32Array([-5]), log: true,
       })));
       expect(all.x).toEqual([0]);
+      expect(all.y).toEqual([1]);
+    });
+
+    it('draws nothing, rather than failing, for no finite values', () => {
+      const [all] = asRecords(buildOmicsTraces('histogram', input({
+        values: new Float32Array([NaN]),
+      })));
+      expect(all.x).toEqual([]);
     });
   });
 

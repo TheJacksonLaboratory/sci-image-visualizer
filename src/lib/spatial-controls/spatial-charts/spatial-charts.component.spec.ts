@@ -45,6 +45,11 @@ describe('SpatialChartsComponent', () => {
     const call = calls[calls.length - 1];
     return { traces: (call?.[1] ?? []) as Record<string, any>[], layout: call?.[2] as any };
   };
+  /** What a pre-binned histogram bar trace covers: its value range and its total count. */
+  const binned = (trace: Record<string, any>) => ({
+    range: [trace.customdata[0][0], trace.customdata[trace.customdata.length - 1][1]],
+    total: (trace.y as number[]).reduce((n, v) => n + v, 0),
+  });
 
   /** Behavioural tests drive ngOnInit directly: rendering the populated body
    *  under NO_ERRORS_SCHEMA gives the ngModel inputs no value accessor. */
@@ -166,8 +171,8 @@ describe('SpatialChartsComponent', () => {
     it('charts what the map is coloured by', () => {
       expect(controls.continuousValues).toHaveBeenCalledWith({ kind: 'column', name: 'total_counts' });
       const { traces, layout } = lastPlot();
-      expect(traces[0].type).toBe('histogram');
-      expect(traces[0].x).toEqual([1, 2, 3, 4]);
+      expect(traces[0].type).toBe('bar');
+      expect(binned(traces[0])).toEqual({ range: [1, 4], total: 4 });
       expect(layout.xaxis.title.text).toBe('total_counts');
       expect(component.subject).toBe('total_counts');
       expect(component.notice).toBeNull();
@@ -185,7 +190,7 @@ describe('SpatialChartsComponent', () => {
       const { traces } = lastPlot();
       expect(traces).toHaveLength(2);
       expect(traces[1].name).toBe('Selected');
-      expect(traces[1].x).toEqual([2, 3]);
+      expect(binned(traces[1]).total).toBe(2);
       expect(component.selectionCount).toBe(2);
     });
 
@@ -220,7 +225,7 @@ describe('SpatialChartsComponent', () => {
       await component.onGroupBy('region');
       component.onKind('histogram');
       await flush();
-      expect(lastPlot().traces[0].type).toBe('histogram');
+      expect(lastPlot().traces[0].type).toBe('bar');
     });
 
     it('suggests a grouping for a violin that has none', () => {
@@ -303,7 +308,7 @@ describe('SpatialChartsComponent', () => {
       expect(component.kind).toBe('histogram');
       expect(component.kindOptions.map((k) => k.value))
         .toEqual(['histogram', 'violin', 'box', 'heatmap']);
-      expect(lastPlot().traces[0].type).toBe('histogram');
+      expect(lastPlot().traces[0].type).toBe('bar');
     });
 
     it('reports a genuine failure rather than swallowing it', async () => {
@@ -1393,12 +1398,12 @@ describe('SpatialChartsComponent', () => {
       await build(controls);
       view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'total_counts' } });
       await flush();
-      expect(lastPlot().traces[0].x).toEqual([1, 2, 3, 4]);
+      expect(binned(lastPlot().traces[0]).range).toEqual([1, 4]);
 
       controls.continuousValues.mockResolvedValue(new Float32Array([7, 7, 7, 7]));
       dataset$.next({ ...dataset, id: 'B' });
       await flush();
-      expect(lastPlot().traces[0].x).toEqual([7, 7, 7, 7]);
+      expect(binned(lastPlot().traces[0])).toEqual({ range: [6.5, 7.5], total: 4 });
     });
 
     it('does not cache a heatmap gene fetched for the previous dataset', async () => {
@@ -1437,7 +1442,7 @@ describe('SpatialChartsComponent', () => {
 
       component.onKind('histogram');
       await flush();
-      expect(lastPlot().traces[0].x).toEqual([5, 6, 7, 8]);
+      expect(binned(lastPlot().traces[0]).range).toEqual([5, 8]);
       expect(component.busy).toBe(false);
     });
 

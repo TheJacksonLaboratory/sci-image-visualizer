@@ -19,6 +19,7 @@ import { ComputeProgress, EmbeddingComputeRun } from '../../spatial/embedding-co
 import { Supersede } from '../../spatial/supersede';
 import {
   OmicsChartKind, OmicsGrouping, benefitsFromGrouping, buildCountTraces, buildHeatmapTraces,
+  countByCategory,
   buildOmicsTraces, buildEmbeddingTraces, countsLayout, heatmapLayout, omicsLayout, embeddingLayout,
 } from '../../implementations/plotly/omics-trace-builders';
 
@@ -1285,7 +1286,9 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
         selection: this.selection.count > 0 ? this.selection.mask : null,
         name: this.colorBy.name,
       };
-      await this.draw(buildCountTraces(counts), countsLayout(counts));
+      // Counted once for both: the layout's height follows the bar count.
+      const tally = countByCategory(counts);
+      await this.draw(buildCountTraces(counts, tally), countsLayout(counts, tally));
       return;
     }
     if (!this.values) return;

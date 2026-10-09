@@ -65,6 +65,66 @@ function thin(values: number[], max = MAX_POINTS_PER_TRACE): number[] {
   return out;
 }
 
+/** Bin-count bounds for the pre-binned histogram (square-root rule in between). */
+const HISTOGRAM_MIN_BINS = 10;
+const HISTOGRAM_MAX_BINS = 100;
+
+interface HistogramBins {
+  /** Bin centres, for the bars' x. */
+  centers: number[];
+  /** `[lo, hi]` per bin, for the hover. */
+  edges: [number, number][];
+  width: number;
+  all: number[];
+  selected: number[] | null;
+}
+
+/**
+ * Bin the finite (optionally log-scaled) values in TS, once, into bins shared by the
+ * full distribution and the selection.
+ *
+ * Handing Plotly all N values as a `number[]` made it re-bin every one of them on each
+ * selection change — at millions of observations, the dominant cost of a lasso. Shared
+ * bins also keep the two overlaid bars directly comparable.
+ */
+function histogramBins(input: OmicsTraceInput, selection: Uint8Array | null): HistogramBins {
+  const { values, log } = input;
+  const at = (i: number): number => {
+    const v = values[i];
+    return log ? Math.log1p(Math.max(0, v)) : v;
+  };
+  let lo = Infinity;
+  let hi = -Infinity;
+  let count = 0;
+  for (let i = 0; i < values.length; i++) {
+    if (!Number.isFinite(values[i])) continue;
+    const v = at(i);
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+    count++;
+  }
+  if (count === 0) {
+    return { centers: [], edges: [], width: 1, all: [], selected: selection ? [] : null };
+  }
+  // One bar, one unit wide, for a flat distribution: there is no spread to bin.
+  const flat = !(hi > lo);
+  const bins = flat ? 1 : Math.min(HISTOGRAM_MAX_BINS,
+    Math.max(HISTOGRAM_MIN_BINS, Math.ceil(Math.sqrt(count))));
+  const start = flat ? lo - 0.5 : lo;
+  const width = flat ? 1 : (hi - lo) / bins;
+  const all = new Array<number>(bins).fill(0);
+  const selected = selection ? new Array<number>(bins).fill(0) : null;
+  for (let i = 0; i < values.length; i++) {
+    if (!Number.isFinite(values[i])) continue;
+    // The maximum lands in the last bin rather than one past it.
+    const b = Math.min(bins - 1, Math.floor((at(i) - start) / width));
+    all[b]++;
+    if (selected && selection![i]) selected[b]++;
+  }
+  const edges = all.map((_, b): [number, number] => [start + b * width, start + (b + 1) * width]);
+  return { centers: edges.map(([a, z]) => (a + z) / 2), edges, width, all, selected };
+}
+
 /** Values per category, finite and optionally selection-restricted. */
 function byCategory(
   input: OmicsTraceInput, group: OmicsGrouping, restrict: Uint8Array | null,
@@ -94,7 +154,7 @@ function activeSelection(selection: Uint8Array | null | undefined): Uint8Array |
 /**
  * Traces for one chart kind.
  *
- * - **histogram** — the full distribution, plus an overlaid *Selected* trace
+ * - **histogram** — the full distribution as pre-binned bars, plus an overlaid *Selected* trace
  *   when a selection exists, so the two are directly comparable. That
  *   comparison is the whole point of linking the chart to the map.
  * - **violin / box** — one per category when grouped, otherwise a single trace.
@@ -106,22 +166,27 @@ export function buildOmicsTraces(kind: OmicsChartKind, input: OmicsTraceInput): 
   const color = input.color ?? DEFAULT_COLOR;
 
   if (kind === 'histogram') {
+    // Pre-binned bars rather than a Plotly `histogram` of every value: see `histogramBins`.
+    const bins = histogramBins(input, selection);
+    const bar = (counts: number[], name: string) => ({
+      type: 'bar',
+      x: bins.centers,
+      y: counts,
+      width: bins.width,
+      customdata: bins.edges,
+      name,
+      hovertemplate: `%{y} obs<br>%{customdata[0]:.4g} – %{customdata[1]:.4g}<extra>${name}</extra>`,
+    });
     const traces: unknown[] = [{
-      type: 'histogram',
-      x: prepare(input, null),
-      name: 'All',
+      ...bar(bins.all, 'All'),
       marker: { color, line: { width: 0 } },
       opacity: selection ? 0.55 : 1,
-      hovertemplate: '%{y} obs<br>%{x}<extra>All</extra>',
     }];
-    if (selection) {
+    if (bins.selected) {
       traces.push({
-        type: 'histogram',
-        x: prepare(input, selection),
-        name: 'Selected',
+        ...bar(bins.selected, 'Selected'),
         marker: { color: '#D55E00', line: { width: 0 } },
         opacity: 0.85,
-        hovertemplate: '%{y} obs<br>%{x}<extra>Selected</extra>',
       });
     }
     return traces;
@@ -206,10 +271,16 @@ export interface OmicsCountInput {
   max?: number;
 }
 
+/** What {@link countByCategory} returns. */
+export interface CategoryCounts {
+  labels: string[];
+  colors: string[];
+  totals: number[];
+  selected: number[];
+}
+
 /** Per-category counts, biggest first, with the tail folded into one bar. */
-export function countByCategory(
-  input: OmicsCountInput,
-): { labels: string[]; colors: string[]; totals: number[]; selected: number[] } {
+export function countByCategory(input: OmicsCountInput): CategoryCounts {
   const { codes, categories, colors } = input.group;
   const selection = activeSelection(input.selection);
   const totals = new Float64Array(categories.length);
@@ -254,8 +325,10 @@ export function countByCategory(
  * the legend implies without answering. Horizontal, because taxonomy labels are
  * long, and sorted, because rank is what the chart is read for.
  */
-export function buildCountTraces(input: OmicsCountInput): unknown[] {
-  const { labels, colors, totals, selected } = countByCategory(input);
+export function buildCountTraces(
+  input: OmicsCountInput, counts: CategoryCounts = countByCategory(input),
+): unknown[] {
+  const { labels, colors, totals, selected } = counts;
   const selection = activeSelection(input.selection);
   // Plotly draws the first category at the BOTTOM of a horizontal axis, so
   // reverse to put the biggest bar at the top where the eye starts.
@@ -284,8 +357,14 @@ export function buildCountTraces(input: OmicsCountInput): unknown[] {
   return traces;
 }
 
-export function countsLayout(input: OmicsCountInput & { name: string }): unknown {
-  const { labels } = countByCategory(input);
+/**
+ * Layout for {@link buildCountTraces}. Pass the same `counts` to both rather than letting
+ * each run its own full pass over the codes.
+ */
+export function countsLayout(
+  input: OmicsCountInput & { name: string }, counts: CategoryCounts = countByCategory(input),
+): unknown {
+  const { labels } = counts;
   return {
     // Room for the labels, and a height that grows with the bar count so 25
     // categories are not crushed into the same box as 3.
@@ -456,17 +535,26 @@ export function buildEmbeddingTraces(input: OmicsEmbeddingInput): unknown[] {
     dimCache.set(hex, dimmed);
     return dimmed;
   };
-  /** Per-point opacity, which only the 2D trace types honour. */
-  const opacityArray = (indices: readonly number[]): number[] | undefined =>
-    selection && !z ? indices.map(opacityFor) : undefined;
+  /** Per-point opacity is honoured only by the 2D trace types. */
+  const perPointOpacity = !!selection && !z;
+  /** Every observation's opacity, built once for the single-trace paths. */
+  const allOpacity = (): { opacity?: number[] } =>
+    (perPointOpacity ? { opacity: Array.from({ length: n }, (_, i) => opacityFor(i)) } : {});
+  /** The single-trace coordinates. `scattergl` takes the typed arrays as they are; the
+   *  3D trace is handed plain arrays. */
+  const coords = (): Record<string, unknown> => (z
+    ? {
+      x: Array.from(x.subarray(0, n)),
+      y: Array.from(y.subarray(0, n)),
+      z: Array.from(z.subarray(0, n)),
+    }
+    : { x: x.subarray(0, n), y: y.subarray(0, n) });
 
   if (!categories || categories.names.length === 0) {
     return [{
       type,
       mode: 'markers',
-      x: Array.from(x.subarray(0, n)),
-      y: Array.from(y.subarray(0, n)),
-      ...(z ? { z: Array.from(z.subarray(0, n)) } : {}),
+      ...coords(),
       // The OBSERVATION index per point, carried through so a lasso can be turned back
       // into a selection. Plotly reports a selected point by its position within its
       // trace, which is not the observation index once the points are split by category.
@@ -478,9 +566,7 @@ export function buildEmbeddingTraces(input: OmicsEmbeddingInput): unknown[] {
         color: selection && z
           ? Array.from({ length: n }, (_, i) => shade('#4c72b0', i))
           : '#4c72b0',
-        ...(opacityArray(Array.from({ length: n }, (_, i) => i))
-          ? { opacity: Array.from({ length: n }, (_, i) => opacityFor(i)) }
-          : {}),
+        ...allOpacity(),
       },
       hoverinfo: 'none',
       showlegend: false,
@@ -494,15 +580,11 @@ export function buildEmbeddingTraces(input: OmicsEmbeddingInput): unknown[] {
     return [{
       type,
       mode: 'markers',
-      x: Array.from(x.subarray(0, n)),
-      y: Array.from(y.subarray(0, n)),
-      ...(z ? { z: Array.from(z.subarray(0, n)) } : {}),
+      ...coords(),
       marker: {
         size: markerSize,
         color: Array.from({ length: n }, (_, i) => shade(colors[codes[i]] ?? '#999999', i)),
-        ...(opacityArray(Array.from({ length: n }, (_, i) => i))
-          ? { opacity: Array.from({ length: n }, (_, i) => opacityFor(i)) }
-          : {}),
+        ...allOpacity(),
       },
       customdata: Array.from({ length: n }, (_, i) => i),
       text: Array.from({ length: n }, (_, i) => names[codes[i]] ?? 'unassigned'),
@@ -538,7 +620,7 @@ export function buildEmbeddingTraces(input: OmicsEmbeddingInput): unknown[] {
         color: selection && z
           ? idx.map((i) => shade(colors[c] ?? '#999999', i))
           : (colors[c] ?? '#999999'),
-        ...(opacityArray(idx) ? { opacity: idx.map(opacityFor) } : {}),
+        ...(perPointOpacity ? { opacity: idx.map(opacityFor) } : {}),
       },
       // Split per category regardless, so hover names it and a future isolate control
       // has something to toggle; only the legend's VISIBILITY depends on the count.
