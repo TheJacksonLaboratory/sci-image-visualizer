@@ -84,6 +84,24 @@ describe('SpatialDataHttpService', () => {
   });
 
   describe('selectDataset', () => {
+    it('requests coords, ids and radius together rather than one after another', async () => {
+      // Time to first paint is the slowest of the three, not their sum: the ids JSON
+      // alone is tens of MB on a large dataset.
+      const manifest = { ...MANIFEST, hasIds: true, radius: { mode: 'per-observation' as const } };
+      const promise = service.selectDataset(manifest.id);
+      http.expectOne(`${BASE}/spatial/${manifest.id}/manifest`).flush(manifest);
+      await Promise.resolve();
+      const coords = http.expectOne(`${BASE}/spatial/${manifest.id}/coords`);
+      const ids = http.expectOne(`${BASE}/spatial/${manifest.id}/ids`);
+      const radius = http.expectOne(`${BASE}/spatial/${manifest.id}/radius`);
+      radius.flush(f32(9, 9, 9));
+      ids.flush({ ids: ['a', 'b', 'c'] });
+      coords.flush(f32(1, 2, 3, 4, 5, 6));
+      const dataset = await promise;
+      expect(dataset.observations.ids).toEqual(['a', 'b', 'c']);
+      expect(Array.from(dataset.observations.radius as Float32Array)).toEqual([9, 9, 9]);
+    });
+
     it('fetches only the manifest and coords when ids/radius are not per-observation', async () => {
       const dataset = await loadDataset();
       expect(dataset.observations.count).toBe(3);

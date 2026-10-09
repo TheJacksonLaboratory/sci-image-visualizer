@@ -146,12 +146,12 @@ export class SpatialDataHttpService implements SpatialDataPort {
 
   /**
    * Load a dataset and publish it on {@link getDataset$}. Fetches the manifest,
-   * then the vectors that are always needed (coordinates, and ids/radius when
-   * the manifest says they exist) — nothing else.
+   * then, in parallel, the vectors that are always needed (coordinates, and
+   * ids/radius when the manifest says they exist) — nothing else.
    */
   async selectDataset(id: string): Promise<SpatialDataset> {
     this.clear();
-    // Selections are SEQUENCED: this is four awaits deep, so a slower earlier
+    // Selections are SEQUENCED: this is two awaits deep, so a slower earlier
     // call would otherwise assign `this.manifest` or publish its dataset after a
     // later one — leaving the manifest and the observations from two different
     // datasets, which is worse than either being late.
@@ -164,17 +164,20 @@ export class SpatialDataHttpService implements SpatialDataPort {
     if (superseded()) throw new SupersededError(id);
     this.manifest = manifest;
 
-    const coordsBuf = await this.getBinary(`${path}/coords`);
+    // Independent of each other, so requested together: time to first paint is the
+    // slowest of them, not their sum (the ids JSON alone is tens of MB on a large dataset).
+    const [coordsBuf, ids, radiusBuf] = await Promise.all([
+      this.getBinary(`${path}/coords`),
+      manifest.hasIds
+        ? this.getJson<{ ids: string[] }>(`${path}/ids`).then((r) => r.ids)
+        : undefined,
+      manifest.radius?.mode === 'per-observation'
+        ? this.getBinary(`${path}/radius`)
+        : undefined,
+    ]);
     if (superseded()) throw new SupersededError(id);
     const coords = decodeCoords(coordsBuf, manifest.count, !!manifest.hasZ);
-
-    const ids = manifest.hasIds
-      ? (await this.getJson<{ ids: string[] }>(`${path}/ids`)).ids
-      : undefined;
-    const radius = manifest.radius?.mode === 'per-observation'
-      ? decodeRadius(await this.getBinary(`${path}/radius`), manifest.count)
-      : undefined;
-    if (superseded()) throw new SupersededError(id);
+    const radius = radiusBuf ? decodeRadius(radiusBuf, manifest.count) : undefined;
 
     const dataset = datasetFromManifest(manifest, coords, { ids, radius });
     this.dataset$.next(dataset);
