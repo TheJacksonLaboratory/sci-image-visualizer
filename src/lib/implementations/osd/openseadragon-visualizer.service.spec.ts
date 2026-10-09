@@ -192,6 +192,23 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     expect(loaded.channelPlanes).toBeUndefined();
   });
 
+  it('fetches a slice\'s channel planes in parallel, keeping channel order (OSD-PLOTLY-31)', async () => {
+    const simpleStack = (service as any).simpleStack;
+    const pending: Record<string, (u: string) => void> = {};
+    jest.spyOn(simpleStack, 'fetchAsBlobUrl').mockImplementation(
+      (u: unknown) => new Promise<string>((resolve) => { pending[u as string] = resolve; }),
+    );
+    const decode = jest.spyOn(service as any, 'decodeUrlToRgba').mockImplementation(async (u: unknown) =>
+      ({ data: new Uint8ClampedArray([Number((u as string).slice(-1)), 0, 0, 255]), width: 1, height: 1 }));
+    const run = (service as any).loadSimpleChannelPlanes(['c0', 'c1', 'c2']);
+    await Promise.resolve();
+    expect(Object.keys(pending)).toEqual(['c0', 'c1', 'c2']); // all requested up front
+    pending['c2']('blob:2'); pending['c0']('blob:0'); pending['c1']('blob:1');
+    const planes = await run;
+    expect(planes.map((p: { data: Uint8ClampedArray }) => p.data[0])).toEqual([0, 1, 2]);
+    decode.mockRestore();
+  });
+
   describe('fitWhenContainerSized (initial fit is layout-timing-independent)', () => {
     const call = (el: HTMLElement | null, refit: () => void) =>
       (service as unknown as {

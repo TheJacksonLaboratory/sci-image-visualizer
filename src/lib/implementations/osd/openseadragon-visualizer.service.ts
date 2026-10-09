@@ -598,20 +598,20 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
 
   /** Fetch + decode a slice's per-channel planes (single-band grayscale) into
    *  pixel buffers, for the SERVERLESS multichannel compositor. Auth-safe: goes
-   *  through SimpleSliceAccessService (blob:/data: as-is; http via HttpClient). */
+   *  through SimpleSliceAccessService (blob:/data: as-is; http via HttpClient).
+   *  The channels are fetched in parallel; plane c stays at index c, and a
+   *  plane that fails to load is empty (the compositor skips it). */
   private async loadSimpleChannelPlanes(urls: string[] | undefined): Promise<SimplePlane[]> {
-    const planes: SimplePlane[] = [];
-    for (const u of urls ?? []) {
+    const empty = (): SimplePlane => ({ data: new Uint8ClampedArray(0), width: 0, height: 0 });
+    return Promise.all((urls ?? []).map(async (u) => {
       try {
         const px = await this.decodeUrlToRgba(await this.simpleStack.fetchAsBlobUrl(u));
-        planes.push(px ? { data: px.data, width: px.width, height: px.height }
-          : { data: new Uint8ClampedArray(0), width: 0, height: 0 });
+        return px ? { data: px.data, width: px.width, height: px.height } : empty();
       } catch (err) {
         console.warn('[OSD] channel plane decode failed', err);
-        planes.push({ data: new Uint8ClampedArray(0), width: 0, height: 0 });
+        return empty();
       }
-    }
-    return planes;
+    }));
   }
 
   /** Composite per-channel planes into ONE RGBA image using the
