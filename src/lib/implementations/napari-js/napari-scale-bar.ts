@@ -6,7 +6,7 @@
  * Recomputes on every camera change and host resize. Hidden when the image has no physical size.
  */
 
-/** Round up to a "nice" 1/2/5 × 10ⁿ value for scale-bar lengths. */
+/** Snap to the nearest "nice" 1/2/5 × 10ⁿ value for scale-bar lengths (1.4 → 1, 1.6 → 2). */
 function niceLength(x: number): number {
   if (x <= 0) return 1;
   const base = Math.pow(10, Math.floor(Math.log10(x)));
