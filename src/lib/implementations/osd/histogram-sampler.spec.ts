@@ -68,7 +68,7 @@ describe('HistogramSampler', () => {
       .mockResolvedValue(tile(2, [40, 40, 40]));
     const twoTiles = { ...DESC, width: 128, levels: [{ width: 128, height: 64 }] }; // 2-tile grid
     await sampler.computeImageWindow(twoTiles, 'B64', 0);
-    expect(onWindow).toHaveBeenCalledWith(5, 40);
+    expect(onWindow).toHaveBeenCalledWith(5, 40, 0);
   });
 
   it('samples R/G/B histograms (no window) for RGB images', async () => {
@@ -226,6 +226,26 @@ describe('HistogramSampler', () => {
     await firstValueFrom(sampler.native$('B64', 0, 0, 64));  // other bin count
     expect(http.get).toHaveBeenCalledTimes(3);
     expect(http.get.mock.calls[2][0]).toContain('bins=64');
+  });
+
+  // ── no re-sampling of a sampled / in-flight slice (OSD-PLOTLY-13) ─────
+  it('does not re-fetch tiles for a slice already sampled or in flight', async () => {
+    (tileClient.fetchTileRgba as jest.Mock).mockResolvedValue(tile(2, [15, 15, 15]));
+    const a = sampler.computeMultiChannelHistograms(DESC, 'B64', 1);
+    const b = sampler.computeMultiChannelHistograms(DESC, 'B64', 1); // scrub back mid-flight
+    await Promise.all([a, b]);
+    await sampler.computeMultiChannelHistograms(DESC, 'B64', 1);     // and once cached
+    await sampler.computeImageWindow(DESC, 'B64', 1);
+    expect(tileClient.fetchTileRgba).toHaveBeenCalledTimes(2); // one run × 2 channels
+  });
+
+  it('reports the slice an auto-window was measured on', async () => {
+    (tileClient.fetchTileRgba as jest.Mock)
+      .mockResolvedValueOnce(tile(2, [5, 5, 5]))
+      .mockResolvedValue(tile(2, [40, 40, 40]));
+    const twoTiles = { ...DESC, width: 128, levels: [{ width: 128, height: 64 }] };
+    await sampler.computeImageWindow(twoTiles, 'B64', 3);
+    expect(onWindow).toHaveBeenCalledWith(5, 40, 3);
   });
 
   it('clear() drops both caches', async () => {

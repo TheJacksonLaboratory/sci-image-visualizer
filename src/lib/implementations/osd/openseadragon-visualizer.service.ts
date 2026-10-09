@@ -306,7 +306,11 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       // Nudge the channel-states stream so the pane re-reads getHistogram now,
       // in case its bounded retry window already lapsed.
       onChannelHistogramsSampled: () => this.store.setChannelStates(this.store.currentChannelStates()),
-      onGrayWindowSampled: (min, max) => this.seedGrayWindow(min, max),
+      // Background-preloaded slices are sampled too (histograms per slice), but
+      // only the displayed slice's window may seed or re-invalidate the display.
+      onGrayWindowSampled: (min, max, z) => {
+        if (z === this.currentZ) this.seedGrayWindow(min, max);
+      },
     });
     this.ensureColormapSubscription();
   }
@@ -380,16 +384,9 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     if (ch0 && ch0.min === 0 && ch0.max === 255) {
       this.store.setChannelState(0, { min, max });
     } else if (this.viewer && this.colorLut) {
-      try {
-        (this.viewer as any).world.requestInvalidate(true);
-      } catch {
-        /* no-op */
-      }
-      try {
-        (this.viewer as any).navigator?.world?.requestInvalidate(true);
-      } catch {
-        /* no-op */
-      }
+      // Coalesced (and visible-slice-only for multichannel) — not a raw
+      // whole-world restore + re-recolor per sampled slice.
+      this.scheduleInvalidate();
     }
   }
 

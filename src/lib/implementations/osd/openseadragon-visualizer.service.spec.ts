@@ -8,6 +8,7 @@ import { TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
 import { saveAs } from 'file-saver';
 import { OsdCoordinateTransform } from './osd-coordinate-transform';
 import * as tileClient from './tile-client';
+import { VisualizerStore } from '../../store/visualizer-store.service';
 
 jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
 
@@ -354,6 +355,18 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
       service.zoomOut();
       service.reset(); // destroyViewer with no viewer
     }).not.toThrow();
+  });
+
+  it('only the displayed slice\'s auto-window seeds the Intensity channel (OSD-PLOTLY-13)', () => {
+    const store = TestBed.inject(VisualizerStore);
+    store.setChannelStates([{ index: 0, name: 'Intensity', color: '#ffffff', min: 0, max: 255,
+      gamma: 1, visible: true }]);
+    const host = (service as any).sampler.host;
+    (service as any).currentZ = 2;
+    host.onGrayWindowSampled(10, 90, 5); // a background-preloaded slice
+    expect(store.currentChannelStates()[0]).toMatchObject({ min: 0, max: 255 });
+    host.onGrayWindowSampled(10, 90, 2);
+    expect(store.currentChannelStates()[0]).toMatchObject({ min: 10, max: 90 });
   });
 
   it('getCurrentImage resolves null (Plotly-only readback)', async () => {

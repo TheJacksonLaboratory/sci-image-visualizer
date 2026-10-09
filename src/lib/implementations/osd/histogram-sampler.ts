@@ -34,9 +34,10 @@ export interface HistogramSamplerHost {
   /** Histograms landed — nudge the pane to re-read (its retry window may have
    *  lapsed). */
   onChannelHistogramsSampled(): void;
-  /** A grayscale auto-window was measured from full-res tiles — seed the
-   *  Intensity channel (or re-invalidate if the user already windowed). */
-  onGrayWindowSampled(min: number, max: number): void;
+  /** A grayscale auto-window was measured from slice `z`'s full-res tiles —
+   *  seed the Intensity channel (or re-invalidate if the user already
+   *  windowed). Background-preloaded slices report too; the host decides. */
+  onGrayWindowSampled(min: number, max: number, z: number): void;
 }
 
 export class HistogramSampler {
@@ -57,6 +58,9 @@ export class HistogramSampler {
    *  write that image's histogram, auto-window or native histogram into the
    *  next one. */
   private generation = 0;
+  /** Slices whose tile sampling is in flight, so a scrub back to one (or a
+   *  background preload of it) doesn't fetch its tiles again. */
+  private readonly inFlight = new Set<number>();
 
   constructor(
     private http: HttpClient,
@@ -70,9 +74,16 @@ export class HistogramSampler {
     return this.sliceHistograms.get(z)?.[channelIndex] ?? null;
   }
 
+  /** Whether slice z is already sampled or being sampled (tile samplers only
+   *  run once per slice until {@link clear}). */
+  private sampledOrPending(z: number): boolean {
+    return this.sliceHistograms.has(z) || this.inFlight.has(z);
+  }
+
   /** Drop everything (teardown / image switch). */
   clear(): void {
     this.generation++;
+    this.inFlight.clear();
     this.sliceHistograms.clear();
     this.nativeHistograms.clear();
   }
@@ -83,7 +94,9 @@ export class HistogramSampler {
    * luminance. Fire-and-forget.
    */
   async computeMultiChannelHistograms(d: SampledDescriptor, infoB64: string, z: number): Promise<void> {
+    if (this.sampledOrPending(z)) return;
     const gen = this.generation;
+    this.inFlight.add(z);
     try {
       const t = d.tileSize;
       // Sample the COARSEST real level (per-channel tiles exist only at real
@@ -130,6 +143,8 @@ export class HistogramSampler {
     } catch (err) {
       // Leave histograms unset (the pane shows empty) — but say why.
       console.warn('[viz:histogram] multichannel histogram sampling failed', err);
+    } finally {
+      if (gen === this.generation) this.inFlight.delete(z);
     }
   }
 
@@ -147,8 +162,10 @@ export class HistogramSampler {
    * only). Fire-and-forget; failures leave the window unset (identity 0..255).
    */
   async computeImageWindow(d: SampledDescriptor, infoB64: string, z: number): Promise<void> {
+    if (this.sampledOrPending(z)) return;
     const gray = this.host.isGrayscale();
     const gen = this.generation;
+    this.inFlight.add(z);
     try {
       const t = d.tileSize;
       // Sample full-resolution when the grid is small (accurate for the grayscale
@@ -209,10 +226,12 @@ export class HistogramSampler {
       // Grayscale auto-window — only from full-res samples (coarsest averaging
       // is inaccurate); the host seeds the channel or re-invalidates.
       if (gray && fullRes && max > min && (min > 0 || max < 255)) {
-        this.host.onGrayWindowSampled(min, max);
+        this.host.onGrayWindowSampled(min, max, z);
       }
     } catch (err) {
       console.warn('[viz:window] per-image window compute failed — using identity 0..255', err);
+    } finally {
+      if (gen === this.generation) this.inFlight.delete(z);
     }
   }
 
