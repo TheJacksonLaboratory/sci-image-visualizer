@@ -23,7 +23,7 @@ import { ICoordinateTransform } from '../../contracts/coordinate-transform.contr
 import { OsdCoordinateTransform } from './osd-coordinate-transform';
 import { PlotModeRect, PlotModeViewport } from '../../contracts/plot-type-contribution.contract';
 import { elementToImage, imageRectToViewport, viewportRectToImage } from './osd-coords';
-import { buildTileUrl, fetchTileBitmap } from './tile-client';
+import { buildTileUrl, fetchTileBitmap, readRgba } from './tile-client';
 import { SliceCache } from './slice-cache';
 import { DisplayPipeline } from './display-pipeline';
 import { HistogramSampler } from './histogram-sampler';
@@ -589,16 +589,8 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   private async sampleSimpleHistogram(url: string | undefined, z: number): Promise<void> {
     if (!url) return;
     try {
-      const img = await this.loadImageEl(url);
-      const w = img.naturalWidth, h = img.naturalHeight;
-      if (!w || !h) return;
-      const c = document.createElement('canvas');
-      c.width = w; c.height = h;
-      const ctx = c.getContext('2d', { willReadFrequently: true });
-      if (!ctx) return;
-      ctx.drawImage(img, 0, 0);
-      const data = ctx.getImageData(0, 0, w, h).data;
-      this.sampler.computeSimpleHistogram(z, data, this.isGrayscaleImage);
+      const px = await this.decodeUrlToRgba(url);
+      if (px) this.sampler.computeSimpleHistogram(z, px.data, this.isGrayscaleImage);
     } catch (err) {
       console.warn('[OSD] simple-mode histogram sample failed', err);
     }
@@ -611,16 +603,9 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     const planes: SimplePlane[] = [];
     for (const u of urls ?? []) {
       try {
-        const previewUrl = await this.simpleStack.fetchAsBlobUrl(u);
-        const img = await this.loadImageEl(previewUrl);
-        const w = img.naturalWidth, h = img.naturalHeight;
-        if (!w || !h) { planes.push({ data: new Uint8ClampedArray(0), width: 0, height: 0 }); continue; }
-        const c = document.createElement('canvas');
-        c.width = w; c.height = h;
-        const ctx = c.getContext('2d', { willReadFrequently: true });
-        if (!ctx) { planes.push({ data: new Uint8ClampedArray(0), width: 0, height: 0 }); continue; }
-        ctx.drawImage(img, 0, 0);
-        planes.push({ data: ctx.getImageData(0, 0, w, h).data, width: w, height: h });
+        const px = await this.decodeUrlToRgba(await this.simpleStack.fetchAsBlobUrl(u));
+        planes.push(px ? { data: px.data, width: px.width, height: px.height }
+          : { data: new Uint8ClampedArray(0), width: 0, height: 0 });
       } catch (err) {
         console.warn('[OSD] channel plane decode failed', err);
         planes.push({ data: new Uint8ClampedArray(0), width: 0, height: 0 });
@@ -685,6 +670,14 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       viewer.addHandler('open-failed', revokePrev);
     }
     viewer.open({ type: 'image', url } as any);
+  }
+
+  /** Decode an image URL to RGBA pixels (null for an empty image or no 2d
+   *  context). Throws when the URL can't be decoded. */
+  private async decodeUrlToRgba(url: string): Promise<ImageData | null> {
+    const img = await this.loadImageEl(url);
+    const w = img.naturalWidth, h = img.naturalHeight;
+    return w && h ? readRgba(img, w, h) : null;
   }
 
   /** Load a URL into an HTMLImageElement (resolves once decoded). Uses
@@ -994,18 +987,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
         // colormap/LUT instead of staying grayscale.
         const nav = (this.viewer as any).navigator;
         nav?.addHandler('tile-invalidated', (event: any) => this.recolorTile(event));
-        if ((this.isGrayscaleImage && this.colorLut) || this.isMultiChannel) {
-          try {
-            (this.viewer as any).world.requestInvalidate(true);
-          } catch {
-            /* no-op */
-          }
-          try {
-            nav?.world?.requestInvalidate(true);
-          } catch {
-            /* no-op */
-          }
-        }
+        if ((this.isGrayscaleImage && this.colorLut) || this.isMultiChannel) this.invalidateWorld();
         // Prefetch adjacent z-slices once the view settles (and on each settle,
         // so it tracks the current viewport as the user pans/zooms). Simple mode
         // has a single frame, so there's nothing to prefetch.
@@ -1185,6 +1167,13 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       this.cache.invalidateChannelDisplay(this.currentZ);
       return;
     }
+    this.invalidateWorld();
+  }
+
+  /** Restore and re-recolor every tile of the main viewer and the navigator. */
+  private invalidateWorld(): void {
+    const v: any = this.viewer;
+    if (!v) return;
     try { v.world.requestInvalidate(true); } catch { /* no-op */ }
     try { v.navigator?.world?.requestInvalidate(true); } catch { /* no-op */ }
   }
@@ -1884,59 +1873,9 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       return; // RGB at default (all visible, full window, γ=1, no invert) → passthrough
     }
 
-    // Read the tile's pixels. Prefer the rendering context, but some tile caches
-    // (ajax PNG blobs) convert to an *empty* context2d — recoloring that would
-    // blank the tile (white canvas). So if the context has no opaque pixels, draw
-    // the tile's own bitmap/image and recolor that instead. We never write back
-    // unless we actually recolored something, so a tile is never blanked.
-    let ctx: CanvasRenderingContext2D | null = null;
-    try {
-      ctx = await event.getData('context2d');
-    } catch {
-      /* try bitmap below */
-    }
-    let img: ImageData | null = null;
-    if (ctx && ctx.canvas && ctx.canvas.width && ctx.canvas.height) {
-      try {
-        img = ctx.getImageData(0, 0, ctx.canvas.width, ctx.canvas.height);
-      } catch {
-        img = null;
-      }
-    }
-    if (!img || !this.hasOpaque(img.data)) {
-      // Fall back to the tile's decoded image/bitmap.
-      let src: any = null;
-      try {
-        src = await event.getData('imageBitmap');
-      } catch {
-        /* none */
-      }
-      if (!src || !src.width) {
-        try {
-          src = await event.getData('image');
-        } catch {
-          /* none */
-        }
-      }
-      if (!src || !src.width) return; // can't get pixels — leave the tile untouched
-      const c = document.createElement('canvas');
-      c.width = src.width;
-      c.height = src.height;
-      ctx = c.getContext('2d', { willReadFrequently: true });
-      if (!ctx) return;
-      ctx.drawImage(src, 0, 0);
-      img = ctx.getImageData(0, 0, c.width, c.height);
-    }
-
-    if (!this.display.applyToRgba(img.data) || !ctx) return; // nothing opaque
-    // A newer display round has already restored this tile — writing now would
-    // hand OSD a superseded canvas and destroy the cache record.
-    if (token !== this.displayToken) return;
-    ctx.putImageData(img, 0, 0);
-    // The tile's cache can still be evicted between the awaits above and here (a
-    // slice change), making setData throw a DOMException on a dead canvas.
-    // Swallow it — the tile is gone, so there's nothing to recolor.
-    try { await event.setData(ctx, 'context2d'); } catch { /* tile evicted */ }
+    const px = await this.readTilePixels(event);
+    if (!px || !this.display.applyToRgba(px.img.data)) return; // nothing opaque
+    await this.writeTilePixels(event, px, token);
   }
 
   /**
@@ -1954,32 +1893,15 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     const ch = m ? parseInt(m[1], 10) : 0;
     const st = this.channelStates[ch];
 
-    let ctx: CanvasRenderingContext2D | null = null;
-    try { ctx = await event.getData('context2d'); } catch { /* fallback below */ }
-    let img: ImageData | null = null;
-    if (ctx && ctx.canvas && ctx.canvas.width && ctx.canvas.height) {
-      try { img = ctx.getImageData(0, 0, ctx.canvas.width, ctx.canvas.height); } catch { img = null; }
-    }
-    if (!img || !this.hasOpaque(img.data)) {
-      let src: any = null;
-      try { src = await event.getData('imageBitmap'); } catch { /* none */ }
-      if (!src || !src.width) { try { src = await event.getData('image'); } catch { /* none */ } }
-      if (!src || !src.width) return;
-      const c = document.createElement('canvas');
-      c.width = src.width; c.height = src.height;
-      ctx = c.getContext('2d', { willReadFrequently: true });
-      if (!ctx) return;
-      ctx.drawImage(src, 0, 0);
-      img = ctx.getImageData(0, 0, c.width, c.height);
-    }
-    if (!ctx) return;
+    const px = await this.readTilePixels(event);
+    if (!px) return;
 
     // Precompute lum(0..255) → tinted RGB once, then map each pixel by lookup —
     // the channel tile is single-band, so this turns ~262k per-pixel
     // channelIntensity() (with Math.pow for gamma) calls into 256 — the difference
     // between a snappy and a sluggish slider on a 4-channel stack.
     const { r: rL, g: gL, b: bL } = this.display.channelRgbLut(st);
-    const d = img.data;
+    const d = px.img.data;
     let changed = false;
     for (let i = 0; i < d.length; i += 4) {
       if (d[i + 3] === 0) continue;
@@ -1991,14 +1913,50 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       changed = true;
     }
     if (!changed) return;
-    // A newer display round (the next tick of a slider drag) has already restored
-    // this tile. Writing a superseded context back makes OSD's conversion throw
-    // DOMException, which destroys the cache record and unloads the tile — do
-    // nothing and let the newer round repaint it.
+    await this.writeTilePixels(event, px, token);
+  }
+
+  /**
+   * Read a tile's pixels for recoloring. Prefers the tile's rendering context,
+   * but some tile caches (ajax PNG blobs) convert to an *empty* context2d —
+   * recoloring that would blank the tile (white canvas). So if the context has
+   * no opaque pixels, the tile's own bitmap/image is drawn to a scratch canvas
+   * and read instead. Null when no pixels can be read: leave the tile untouched.
+   */
+  private async readTilePixels(event: any): Promise<{ ctx: CanvasRenderingContext2D; img: ImageData } | null> {
+    let ctx: CanvasRenderingContext2D | null = null;
+    try { ctx = await event.getData('context2d'); } catch { /* try the bitmap below */ }
+    if (ctx && ctx.canvas && ctx.canvas.width && ctx.canvas.height) {
+      let img: ImageData | null = null;
+      try { img = ctx.getImageData(0, 0, ctx.canvas.width, ctx.canvas.height); } catch { /* tainted/gone */ }
+      if (img && this.hasOpaque(img.data)) return { ctx, img };
+    }
+    let src: any = null;
+    try { src = await event.getData('imageBitmap'); } catch { /* try the image below */ }
+    if (!src || !src.width) { try { src = await event.getData('image'); } catch { /* none */ } }
+    if (!src || !src.width) return null;
+    const c = document.createElement('canvas');
+    c.width = src.width;
+    c.height = src.height;
+    const scratch = c.getContext('2d', { willReadFrequently: true });
+    if (!scratch) return null;
+    scratch.drawImage(src, 0, 0);
+    return { ctx: scratch, img: scratch.getImageData(0, 0, c.width, c.height) };
+  }
+
+  /** Write recolored pixels back to the tile — unless a newer display round
+   *  (`token`, see {@link displayToken}) has already restored it: writing a
+   *  superseded context back makes OSD's conversion throw DOMException, which
+   *  destroys the cache record and unloads the tile. */
+  private async writeTilePixels(
+    event: any, px: { ctx: CanvasRenderingContext2D; img: ImageData }, token: number,
+  ): Promise<void> {
     if (token !== this.displayToken) return;
-    ctx.putImageData(img, 0, 0);
-    // See recolorTile: the tile cache can still die between the awaits and here.
-    try { await event.setData(ctx, 'context2d'); } catch { /* tile evicted */ }
+    px.ctx.putImageData(px.img, 0, 0);
+    // The tile's cache can still be evicted between the awaits and here (a
+    // slice change), making setData throw a DOMException on a dead canvas.
+    // Swallow it — the tile is gone, so there's nothing to recolor.
+    try { await event.setData(px.ctx, 'context2d'); } catch { /* tile evicted */ }
   }
 
   /** Per-channel histogram for the Channels & Histogram pane, from the current

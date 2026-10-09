@@ -46,12 +46,22 @@ export async function fetchTileRgba(
   http: HttpClient, url: string, timeoutMs: number,
 ): Promise<ImageData | null> {
   const bmp = await fetchTileBitmap(http, url, timeoutMs);
+  try {
+    return readRgba(bmp, bmp.width, bmp.height);
+  } finally {
+    bmp.close?.();
+  }
+}
+
+/** Draw a decoded image (bitmap, `<img>`, canvas) onto a scratch canvas and
+ *  read its pixels back as RGBA ImageData. Null when a 2d context can't be
+ *  created. */
+export function readRgba(src: CanvasImageSource, width: number, height: number): ImageData | null {
   const cv = document.createElement('canvas');
-  cv.width = bmp.width;
-  cv.height = bmp.height;
+  cv.width = width;
+  cv.height = height;
   const ctx = cv.getContext('2d', { willReadFrequently: true });
   if (!ctx) return null;
-  ctx.drawImage(bmp, 0, 0);
-  bmp.close?.();
-  return ctx.getImageData(0, 0, cv.width, cv.height);
+  ctx.drawImage(src, 0, 0);
+  return ctx.getImageData(0, 0, width, height);
 }
