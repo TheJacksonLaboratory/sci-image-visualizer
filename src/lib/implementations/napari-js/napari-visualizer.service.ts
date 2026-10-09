@@ -4320,6 +4320,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         // Over a volume-backed dataset the plane also decides which observations
         // are drawn at all, so this is what moves the cells with the section.
         this.redrawSpatialMarkers();
+        // The region-centroid scatter went with the same clear.
+        if (this.scatter2dPoints) this.rebuildScatterPoints();
         this.scheduleReadback();
       })
       .catch((err) => console.error('[napari-js] setZIndex slice failed:', err));

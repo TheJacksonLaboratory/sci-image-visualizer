@@ -692,6 +692,36 @@ describe('NapariVisualizerService', () => {
     document.body.removeChild(div);
   });
 
+  it('keeps the region-centroid points after a slice change on the stitched path', async () => {
+    // Regression (NAPARI-SVC-7): without a descriptor a slice change re-renders the image, and
+    // the render clears the layer list — the points went with it and nothing re-added them.
+    jest
+      .spyOn(regionStore, 'getRegions')
+      .mockReturnValue([{ bounds: { x: 10, y: 20, width: 4, height: 6 } }] as never);
+    // No /tiles/info on this server → the stitched (single-level) path.
+    (globalThis.fetch as jest.Mock).mockImplementation((url: string) => Promise.resolve(
+      url.includes('tiles/info')
+        ? { ok: false, status: 404 }
+        : { ok: true, status: 200, blob: () => Promise.resolve(new Blob()) },
+    ));
+    const div = document.createElement('div');
+    div.id = 'scatter2d-stitch-host';
+    document.body.appendChild(div);
+    const loaded = await service.load(imageInfo(), 0);
+    await service.plot('scatter2d-stitch-host', loaded, imageInfo(), 600, PlotType.NAPARI_SCATTER);
+    const points = () => (service as unknown as {
+      viewer: { layers: { items: readonly { faceColor?: unknown }[] } };
+    }).viewer.layers.items.filter((l) => l.faceColor !== undefined);
+    expect(points()).toHaveLength(1);
+
+    service.setZIndex(1);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(points()).toHaveLength(1);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
   it('mounts a 3D scatter voxel cloud via addPoints3D', async () => {
     const addPoints3d = jest.spyOn(
       Viewer.prototype as unknown as { addPoints3D: (...a: unknown[]) => unknown },
