@@ -1,4 +1,4 @@
-import { Inject, Injectable, Optional } from '@angular/core';
+import { Inject, Injectable, NgZone, Optional, inject } from '@angular/core';
 import {
   Observable, BehaviorSubject, Subject, Subscription, combineLatest, from, of, firstValueFrom,
 } from 'rxjs';
@@ -408,6 +408,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   ]);
 
   private readonly api: string;
+  /** napari-js's render loop and the hot pointer/timer paths run outside the Angular zone
+   *  (NAPARI-SVC-25); what they produce for the UI re-enters it through {@link inZone}. */
+  private readonly zone = inject(NgZone);
 
   private viewer: Viewer | null = null;
   private canvas: HTMLCanvasElement | null = null;
@@ -789,6 +792,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     }
   }
 
+  /** Run `fn` inside the Angular zone: for output (subjects the UI renders, store writes)
+   *  produced by work that runs outside it. */
+  private inZone<T>(fn: () => T): T {
+    return NgZone.isInAngularZone() ? fn() : this.zone.run(fn);
+  }
+
   /**
    * The pyramid descriptor of the image on screen, or null when it has none.
    *
@@ -1035,7 +1044,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const z = (imageLoaded as NapariLoaded)?.z ?? 0;
 
     try {
-      const viewer = new Viewer({
+      // Built OUTSIDE the Angular zone, so its requestAnimationFrame loop, its canvas pointer /
+      // wheel listeners and its ResizeObserver do not each trigger app-wide change detection.
+      // Whatever they cause that the UI shows re-enters the zone (see inZone).
+      const viewer = this.zone.runOutsideAngular(() => new Viewer({
         canvas,
         background: { r: 0.07, g: 0.07, b: 0.09, a: 1 },
         // Set here rather than left to napari-js's own default so the gentler
@@ -1061,7 +1073,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         ...(isSpatialOmics(plotType) || isSpatialOmics3d(plotType)
           ? { clickZoomFactor: 0 }
           : {}),
-      });
+      }));
       this.viewer = viewer;
       await viewer.ready;
       if (scene.aborted) return false;
@@ -2141,13 +2153,14 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         const node = this.currentColormap as { data?: { value?: unknown } } | null;
         return spatialContinuousLut(node?.data?.value, this.currentReverse, view.continuousColormap);
       },
-      estimateChanged: (e) => this.transcriptEstimate$.next(e),
-      geneCountsChanged: (c) => this.geneCountsInView$.next(c),
+      // These follow the camera, which moves outside the zone; the panel reads them.
+      estimateChanged: (e) => this.inZone(() => this.transcriptEstimate$.next(e)),
+      geneCountsChanged: (c) => this.inZone(() => this.geneCountsInView$.next(c)),
       loadingChanged: (layers) => {
         this.tileLoading = layers;
         this.showLoading();
       },
-      densityChanged: (d) => this.densityStats$.next(d),
+      densityChanged: (d) => this.inZone(() => this.densityStats$.next(d)),
       polygonsShownChanged: () => {
         if (this.spatialPoints) this.spatialPoints.visible = this.spatialPointsVisible();
         this.viewer?.requestRender();
@@ -2178,7 +2191,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.cameraReadbackOff = viewer.camera3d.changed.connect(() => {
       const regions = this.regionStore.getRegions();
       const kept = regions.filter((r) => foreign.has(r.id));
-      if (kept.length < regions.length) this.regionStore.setRegions(kept);
+      if (kept.length < regions.length) this.inZone(() => this.regionStore.setRegions(kept));
     });
   }
 
@@ -2270,13 +2283,17 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       // A region tool owns the pointer while it is active, and placing a polygon
       // vertex is also a click that does not move.
       if (this.regionOverlay?.toolActive) return;
-      this.selectClassAt(e.clientX, e.clientY);
+      this.inZone(() => this.selectClassAt(e.clientX, e.clientY));
     };
 
-    host.addEventListener('pointermove', onMove);
-    host.addEventListener('pointerleave', onLeave);
-    host.addEventListener('pointerdown', onDown);
-    host.addEventListener('pointerup', onUp);
+    // Outside the zone: a pointermove fires far more often than anything here changes what
+    // Angular renders (the tooltip is plain DOM); a selecting click re-enters it.
+    this.zone.runOutsideAngular(() => {
+      host.addEventListener('pointermove', onMove);
+      host.addEventListener('pointerleave', onLeave);
+      host.addEventListener('pointerdown', onDown);
+      host.addEventListener('pointerup', onUp);
+    });
     this.hoverOff.push(() => host.removeEventListener('pointermove', onMove));
     this.hoverOff.push(() => host.removeEventListener('pointerleave', onLeave));
     this.hoverOff.push(() => host.removeEventListener('pointerdown', onDown));
@@ -4269,7 +4286,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         );
       }
     };
-    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+    if (typeof requestAnimationFrame === 'function') this.zone.runOutsideAngular(() => requestAnimationFrame(run));
     else run();
   }
 
@@ -4616,7 +4633,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const y = Math.max(0, Math.min(size.height, rect.y));
     const width = Math.max(1, Math.min(size.width - x, rect.width));
     const height = Math.max(1, Math.min(size.height - y, rect.height));
-    this.viewportChange$.next({ x, y, width, height });
+    // Reached from timers armed outside the zone; subscribers are UI.
+    this.inZone(() => this.viewportChange$.next({ x, y, width, height }));
   }
 
   /**
@@ -4632,10 +4650,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       return;
     }
     if (this.viewportTimer != null) clearTimeout(this.viewportTimer);
-    this.viewportTimer = setTimeout(() => {
+    this.viewportTimer = this.zone.runOutsideAngular(() => setTimeout(() => {
       this.viewportTimer = null;
       if (this.viewer) this.emitViewport(this.viewer.visibleWorldRect());
-    }, READBACK_DEBOUNCE_MS);
+    }, READBACK_DEBOUNCE_MS));
   }
 
   /** Record whether a tool that reads the displayed pixels is active (see {@link onViewChanged}). */
@@ -4646,8 +4664,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
 
   private scheduleReadback(): void {
     if (!this.viewer) return;
-    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => void this.runReadback());
-    else setTimeout(() => void this.runReadback(), 0);
+    this.zone.runOutsideAngular(() => {
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => void this.runReadback());
+      else setTimeout(() => void this.runReadback(), 0);
+    });
   }
 
   /** Debounced readback — armed on camera changes while a pixel tool is active, so `lastPixels`
@@ -4655,10 +4675,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    *  (wand/brush/SAM) read synchronously. Coalesces rapid changes. */
   private armReadback(delayMs = READBACK_DEBOUNCE_MS): void {
     if (this.readbackTimer != null) clearTimeout(this.readbackTimer);
-    this.readbackTimer = setTimeout(() => {
+    this.readbackTimer = this.zone.runOutsideAngular(() => setTimeout(() => {
       this.readbackTimer = null;
       void this.runReadback();
-    }, delayMs);
+    }, delayMs));
   }
 
   // ── IRegionStore + classification colours ──────────────────────────────────

@@ -1,3 +1,4 @@
+import { NgZone } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { HttpClient } from '@angular/common/http';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
@@ -436,6 +437,62 @@ describe('NapariVisualizerService', () => {
     pan();
     await settle();
     expect(readback).not.toHaveBeenCalled();
+
+    sub.unsubscribe();
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('keeps the per-pointermove work outside the Angular zone, and its output inside', async () => {
+    // Regression (NAPARI-SVC-25): napari-js's render loop, every pointermove over the plot and
+    // every readback timer ran inside the zone, so each one triggered app-wide change detection.
+    // (Native async/await drops the zone across awaits under Jest, so what is checked here is
+    // WHERE the service asks to run things, not the ambient zone.)
+    const zone = TestBed.inject(NgZone);
+    let outsideDepth = 0;
+    const outside = jest.spyOn(zone, 'runOutsideAngular').mockImplementation((fn) => {
+      outsideDepth++;
+      try {
+        return fn();
+      } finally {
+        outsideDepth--;
+      }
+    });
+    const registeredOutside: Record<string, boolean> = {};
+    const add = HTMLElement.prototype.addEventListener;
+    jest.spyOn(HTMLElement.prototype, 'addEventListener').mockImplementation(function (
+      this: HTMLElement, type: string, ...rest: unknown[]
+    ) {
+      if (this.id === 'zone-host') registeredOutside[type] = outsideDepth > 0;
+      return (add as (...a: unknown[]) => void).call(this, type, ...rest);
+    });
+    const div = document.createElement('div');
+    div.id = 'zone-host';
+    document.body.appendChild(div);
+    dataset$.next(spatialDataset());
+    const loaded = await service.load(imageInfo(), 0);
+    await service.plot('zone-host', loaded, imageInfo(), 600, PlotType.SPATIAL_OMICS);
+    // The viewer (so its rAF loop and canvas listeners) and the hover listeners: outside.
+    expect(outside.mock.results.some((r) => r.value instanceof Viewer)).toBe(true);
+    expect(registeredOutside['pointermove']).toBe(true);
+    await new Promise((r) => setTimeout(r, 300));
+
+    // A pan reported from outside the zone still reaches subscribers inside it.
+    const listeners: Array<() => void> = [];
+    const internals = service as unknown as {
+      viewer: { camera: { changed: { connect(l: () => void): () => void } } };
+      install2dInteraction(v: unknown, h: HTMLElement): void;
+    };
+    internals.viewer.camera.changed.connect = (l) => {
+      listeners.push(l);
+      return () => undefined;
+    };
+    internals.install2dInteraction(internals.viewer, div);
+    const emittedInZone: boolean[] = [];
+    const sub = service.getViewportChange$().subscribe(() => emittedInZone.push(NgZone.isInAngularZone()));
+    listeners.forEach((l) => l());
+    await new Promise((r) => setTimeout(r, 300));
+    expect(emittedInZone).toEqual([true]);
 
     sub.unsubscribe();
     service.unsubscribe();
