@@ -46,13 +46,22 @@ const OPEN_PATH_HIT_PX = 6;
 /**
  * The slice of the napari Viewer the overlay needs (coord transforms + control gating).
  *
+ * COORDINATE SPACES: both transforms speak CLIENT pixels (viewport coordinates, as a pointer
+ * event's `clientX/Y`), exactly as napari-js `Viewer.canvasToWorld`/`worldToCanvas` do. The
+ * overlay subtracts its svg's client rect itself to get svg-local pixels. An implementation
+ * that returned canvas-local pixels from `worldToCanvas` would draw everything offset by the
+ * host's page position whenever the host is not at the page origin.
+ *
  * Exported because the 3D spatial mode supplies a SCREEN-SPACE implementation of it: there the
  * drawn shape is a lasso in canvas pixels, not a rectangle in image space, so "world" is the
- * canvas itself and both transforms collapse to identity. That lets the 3D view reuse this whole
- * overlay — every tool, the handles, the store round-trip — with no 3D-specific drawing code.
+ * canvas itself and both transforms are the client↔canvas offset. That lets the 3D view reuse
+ * this whole overlay — every tool, the handles, the store round-trip — with no 3D-specific
+ * drawing code.
  */
 export interface OverlayViewer {
+  /** Client px → world. */
   canvasToWorld(clientX: number, clientY: number): [number, number];
+  /** World → client px (NOT canvas-local px). */
   worldToCanvas(worldX: number, worldY: number): [number, number];
   setControlsEnabled(enabled: boolean): void;
   readonly camera: { readonly changed: { connect(listener: () => void): () => void } };
@@ -60,7 +69,8 @@ export interface OverlayViewer {
 
 /**
  * SVG region overlay for the napari-js WebGPU image view (jit-ui#102), mirroring the OSD backend's
- * {@link OsdRegionOverlay} but driven by napari's `canvasToWorld`/`worldToCanvas` transforms.
+ * {@link OsdRegionOverlay} but driven by napari's `canvasToWorld`/`worldToCanvas` transforms
+ * (see {@link OverlayViewer} for their coordinate spaces).
  * Vector shapes are drawn in an absolutely-positioned `<svg>` over the canvas (no need to push
  * them through WebGPU). It writes completed shapes to the shared {@link RegionStore} (so save /
  * undo / export work identically to OSD) and re-renders from the store on every camera move,
@@ -68,8 +78,10 @@ export interface OverlayViewer {
  *
  * Supports (jit-ui#102): rectangle / polygon / freehand path drawing, click-select and rubber-band
  * marquee select, pan/zoom gating via `setControlsEnabled`, body move, vertex move/add/delete,
- * bezier handle editing, and donut holes (including hole vertex + hole-bezier-handle editing) —
- * full parity with {@link OsdRegionOverlay}.
+ * bezier handle editing, and donut holes (including hole vertex + hole-bezier-handle editing).
+ * Rendering and hit-testing follow the OSD overlay's rules (multi-part regions, holes, open
+ * polylines, handle-less bezier curves), but the geometry is still a separate copy of OSD's
+ * until both overlays share one module (review NAPARI-BOUNDARY-13).
  */
 export class NapariRegionOverlay implements IRegionOverlay {
   private readonly svg: SVGSVGElement;

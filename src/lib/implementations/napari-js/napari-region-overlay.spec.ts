@@ -522,7 +522,7 @@ describe('NapariRegionOverlay', () => {
       const { emits } = startBodyDrag();
       overlay.destroy();
       expect(emits()).toBe(1);
-      overlay = new NapariRegionOverlay(host, viewer as any, store); // for afterEach
+      overlay = new NapariRegionOverlay(host, viewer, store); // for afterEach
     });
 
     it('pointercancel drops a rectangle being drawn', () => {
@@ -543,6 +543,56 @@ describe('NapariRegionOverlay', () => {
       ptr(overlay, 'pointerdown', 10, 20);
       ptr(overlay, 'pointerdown', 1, 1); // close
       expect((store.getRegions()[0].bounds as Polygon).xpoints).toEqual([0, 20, 10]);
+    });
+  });
+
+  /**
+   * The transforms speak CLIENT px, and the overlay maps them into its svg itself. With the
+   * host at the page origin (jsdom's default zero rects) a canvas-local transform would pass
+   * too, so these put the host at (100, 50) (review NAPARI-BOUNDARY-6).
+   */
+  describe('a host away from the page origin', () => {
+    const LEFT = 100;
+    const TOP = 50;
+    let offset: NapariRegionOverlay;
+
+    beforeEach(() => {
+      const v = fakeViewer();
+      // What napari-js does: client px = canvas rect origin + canvas-local px.
+      v.canvasToWorld = (cx: number, cy: number) => [cx - LEFT, cy - TOP];
+      v.worldToCanvas = (wx: number, wy: number) => [wx + LEFT, wy + TOP];
+      offset = new NapariRegionOverlay(host, v, store);
+      jest.spyOn(svgOf(offset), 'getBoundingClientRect').mockReturnValue(
+        { left: LEFT, top: TOP, x: LEFT, y: TOP, width: 400, height: 300 } as DOMRect,
+      );
+    });
+    afterEach(() => offset.destroy());
+
+    it('draws a region where the pointer drew it', () => {
+      offset.setMode('drawrect');
+      ptr(offset, 'pointerdown', LEFT + 2, TOP + 3);
+      ptr(offset, 'pointermove', LEFT + 12, TOP + 13);
+      ptr(offset, 'pointerup', LEFT + 12, TOP + 13);
+      const b = store.getRegions()[0].bounds as Rectangle;
+      expect([b.x, b.y, b.width, b.height]).toEqual([2, 3, 10, 10]);
+      const rect = svgOf(offset).querySelector('rect')!; // svg-local px
+      expect([rect.getAttribute('x'), rect.getAttribute('y')]).toEqual(['2', '3']);
+    });
+
+    it('closes a polygon on a click near its first vertex', () => {
+      offset.setMode('drawpolygon');
+      for (const [x, y] of [[0, 0], [20, 0], [10, 20], [1, 1]]) ptr(offset, 'pointerdown', LEFT + x, TOP + y);
+      expect((store.getRegions()[0].bounds as Polygon).xpoints).toEqual([0, 20, 10]);
+    });
+
+    it('grabs a vertex handle under the pointer', () => {
+      const id = store.addRegion(triRegion()); // selected; vertex 0 at (0,0)
+      offset.setMode('select');
+      ptr(offset, 'pointerdown', LEFT, TOP);
+      ptr(offset, 'pointermove', LEFT + 3, TOP + 4);
+      ptr(offset, 'pointerup', LEFT + 3, TOP + 4);
+      const p = store.getRegions().find((r) => r.id === id)!.bounds as Polygon;
+      expect([p.xpoints[0], p.ypoints[0]]).toEqual([3, 4]);
     });
   });
 
