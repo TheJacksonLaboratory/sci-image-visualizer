@@ -1,4 +1,4 @@
-import type { Viewer } from 'napari-js';
+import { Viewer } from 'napari-js';
 import { DEFAULT_SPATIAL_VIEW } from '../../contracts/display-types';
 import type { SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import {
@@ -533,6 +533,71 @@ describe('NapariSpatialTileLayers: reporting loads for the canvas badge', () => 
     release();
     await planned;
     expect(reports.at(-1)).toEqual([]);
+    tiles.detach();
+  });
+});
+
+/**
+ * A column, feature-vector or density request that fails must not escape `plan()`: it was an
+ * unhandled rejection that also skipped the bounded retry, so one transient error left the
+ * cells stale until the camera moved (review NAPARI-BOUNDARY-8).
+ */
+describe('NapariSpatialTileLayers: a column request that fails', () => {
+  const ring = (): SpatialPolygonTile => ({
+    count: 1, coords: new Float32Array([0, 0, 10, 0, 10, 10, 0, 10]),
+    offsets: new Uint32Array([0, 4]), observation: new Uint32Array([0]),
+  });
+  const meta = { kind: 'categorical', name: 'cluster', categories: ['A'] };
+
+  function setup() {
+    let columnCalls = 0;
+    const getColumn = jest.fn(async () => {
+      if (++columnCalls === 1) throw new Error('HTTP 503');
+      return { meta, codes: new Uint16Array(1) };
+    });
+    const port = { getPolygonTile: jest.fn(async () => ring()), getColumn } as unknown as SpatialDataPort;
+    const dataset = {
+      id: 'd', name: 'd', columns: [meta],
+      observations: { count: 1, x: new Float32Array([5]), y: new Float32Array([5]), radius: 5 },
+      polygonTiles: {
+        bounds: [0, 0, 100, 100], sets: [{ name: 'cell', label: 'Cell' }], defaultSet: 'cell',
+        levels: [{ tileSize: 200 }],
+      },
+    } as unknown as SpatialDataset;
+    const geneCounts = jest.fn();
+    const host: SpatialTileHost = {
+      latest: () => [dataset, DEFAULT_SPATIAL_VIEW, emptySelection(1)],
+      canvasSize: () => [400, 400], continuousLut: () => LUT, polygonsShownChanged: () => undefined,
+      geneCountsChanged: geneCounts,
+    };
+    const viewer = new Viewer({ canvas: document.createElement('canvas') });
+    viewer.camera.set([50, 50], 4);
+    const tiles = new NapariSpatialTileLayers(port, host);
+    tiles.attach(viewer);
+    return { tiles, viewer, getColumn, geneCounts };
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  it('resolves the plan, still reports the counts, and retries the view', async () => {
+    const { tiles, viewer, getColumn, geneCounts } = setup();
+    await expect((tiles as unknown as { plan(): Promise<void> }).plan()).resolves.toBeUndefined();
+    expect(getColumn).toHaveBeenCalledTimes(1);
+    expect(geneCounts).toHaveBeenCalled();
+    // The bounded retry runs and draws the cells this time.
+    for (let i = 0; i < 40; i++) {
+      for (let j = 0; j < 4; j++) await Promise.resolve();
+      jest.advanceTimersByTime(50);
+    }
+    expect(getColumn).toHaveBeenCalledTimes(2);
+    expect(viewer.layers.items.some((l) => tiles.owns(l))).toBe(true);
     tiles.detach();
   });
 });

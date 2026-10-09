@@ -305,7 +305,7 @@ export class NapariSpatialTileLayers {
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       this.timer = null;
-      void this.plan();
+      this.plan().catch((err) => console.warn('[napari-js] spatial tile plan failed', err));
     }, delay);
   }
 
@@ -329,11 +329,18 @@ export class NapariSpatialTileLayers {
     const pxPerUnit = pixelsPerDataUnit(viewer.camera.zoom, ref);
     if (!rect) return;
 
-    void this.planEstimate(dataset, view, viewer, w, h, stale);
+    this.planEstimate(dataset, view, viewer, w, h, stale)
+      .catch((err) => console.warn('[napari-js] transcript estimate failed', err));
+    // A group whose request failed (a column, a feature vector, a density grid) leaves the
+    // others drawn and marks the plan incomplete, so it is retried like a failed tile.
+    const settle = (group: string, work: Promise<void>) => work.catch((err) => {
+      console.warn(`[napari-js] spatial ${group} plan failed`, err);
+      this.planIncomplete = true;
+    });
     await Promise.all([
-      this.planDensity(dataset, view, stale),
-      this.planCells(dataset, view, selection, rect, pxPerUnit, stale),
-      this.planTranscripts(dataset, view, rect, pxPerUnit, stale),
+      settle('density', this.planDensity(dataset, view, stale)),
+      settle('cells', this.planCells(dataset, view, selection, rect, pxPerUnit, stale)),
+      settle('transcripts', this.planTranscripts(dataset, view, rect, pxPerUnit, stale)),
     ]);
     if (stale()) return;
     this.host.geneCountsChanged?.(this.geneCountsIn(rect));
