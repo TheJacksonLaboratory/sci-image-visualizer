@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 import { BehaviorSubject, firstValueFrom, of } from 'rxjs';
 
-import { Viewer } from 'napari-js';
+import { MultiChannelImageView, Viewer } from 'napari-js';
 
 import { NapariVisualizerService } from './napari-visualizer.service';
 import { VisualizerStore } from '../../store/visualizer-store.service';
@@ -525,7 +525,9 @@ describe('NapariVisualizerService', () => {
       { index: 0, name: 'v', color: '#00ff00', min: 20, max: 200, gamma: 2, visible: true } as IChannelState,
     ]);
     expect(volLayer.contrastLimits).toEqual([20, 200]);
-    expect(volLayer.gamma).toBe(2);
+    // The store's gamma is the ImageJ exponent (t^(1/γ), as OSD draws it); napari-js applies
+    // t^γ, so the layer gets the reciprocal (NAPARI-BOUNDARY-2).
+    expect(volLayer.gamma).toBe(0.5);
     // Channel colour tints the volume (no explicit colormap selected) — regression.
     expect(volLayer.colormap.name).toContain('00ff00');
 
@@ -576,7 +578,7 @@ describe('NapariVisualizerService', () => {
     ]);
     expect(addSurface.mock.calls.length).toBeGreaterThan(beforeWindow); // geometry rebuilt
     expect(latest().contrastLimits).toEqual([30, 210]);
-    expect(latest().gamma).toBe(1.5);
+    expect(latest().gamma).toBeCloseTo(1 / 1.5, 10); // ImageJ γ → napari-js γ
     expect(latest().colormap.name).toContain('00ff00');
 
     // A colour-only edit (invert) updates the existing layer's colormap in place — NO rebuild.
@@ -765,6 +767,30 @@ describe('NapariVisualizerService', () => {
     service.setZIndex(1);
     await new Promise((r) => setTimeout(r, 0));
     expect(points()).toHaveLength(1);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('hands napari-js the reciprocal of the store\'s (ImageJ) gamma on the 2D image', async () => {
+    // Regression (NAPARI-BOUNDARY-2): OSD draws t^(1/γ) and napari-js t^γ, and the same slider
+    // value went to both — so γ = 2 brightened the image under OSD and darkened it here.
+    const render = jest.spyOn(MultiChannelImageView.prototype, 'render');
+    const update = jest.spyOn(MultiChannelImageView.prototype, 'updateChannel');
+    store.setChannelStates([
+      { index: 0, name: 'g', color: '#ffffff', min: 0, max: 255, gamma: 2, visible: true },
+    ] as IChannelState[]);
+    const div = document.createElement('div');
+    div.id = 'gamma-host';
+    document.body.appendChild(div);
+    const loaded = await service.load(imageInfo(), 0);
+    await service.plot('gamma-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE);
+    expect((render.mock.calls.at(-1)![1] as unknown as { gamma: number }[])[0].gamma).toBe(0.5);
+
+    store.setChannelStates([
+      { index: 0, name: 'g', color: '#ffffff', min: 0, max: 255, gamma: 4, visible: true },
+    ] as IChannelState[]);
+    expect((update.mock.calls.at(-1) as unknown as [number, { gamma: number }])[1].gamma).toBe(0.25);
 
     service.unsubscribe();
     document.body.removeChild(div);

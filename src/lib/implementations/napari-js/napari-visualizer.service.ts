@@ -316,6 +316,21 @@ function rgbaToLuminance(rgba: ArrayLike<number>, out: Uint8Array, offset = 0): 
   }
 }
 
+/**
+ * `IChannelState.gamma` → the `gamma` a napari-js layer or view takes.
+ *
+ * The shared channel state follows the ImageJ/Fiji convention the OSD backend draws
+ * (`osd/display-pipeline.ts`: output = t^(1/γ), so γ > 1 BRIGHTENS the midtones), while
+ * napari-js's shaders apply `pow(t, gamma)` (napari's convention: γ > 1 darkens). Every gamma
+ * handed to napari-js goes through here, so one slider in the Channels & Histogram dialog moves
+ * both backends the same way. (Invert is still applied in a different order — napari-js does
+ * window → invert → gamma, OSD window → gamma → invert — which only matters with γ ≠ 1 and
+ * invert on; aligning that is the OSD pipeline's change, NAPARI-BOUNDARY-2.)
+ */
+function toNapariGamma(gamma: number | undefined): number {
+  return gamma != null && gamma > 0 ? 1 / gamma : 1;
+}
+
 /** Default per-channel tints (Fiji-style) when the store/descriptor offers no colour. */
 const DEFAULT_TINTS = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ffffff'];
 
@@ -1210,7 +1225,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
           tint: color,
           name: st?.name ?? `ch${c}`,
           contrastLimits: [st?.min ?? 0, st?.max ?? 255],
-          gamma: st?.gamma ?? 1,
+          gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
           visible: st?.visible ?? true,
           invert: this.invertEnabled,
           scale,
@@ -1227,7 +1242,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
             source: { kind: 'typed', width: d.width, height: d.height, channels: 1, dtype: 'uint8', data: d.data },
             colormap: this.grayscaleColormap(),
             contrastLimits: [st?.min ?? 0, st?.max ?? 255],
-            gamma: st?.gamma ?? 1,
+            gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
             invert: this.invertEnabled,
             scale,
           },
@@ -1269,7 +1284,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
           tint: color,
           name: st?.name ?? `ch${c}`,
           contrastLimits: [st?.min ?? 0, st?.max ?? 255],
-          gamma: st?.gamma ?? 1,
+          gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
           visible: st?.visible ?? true,
           invert: this.invertEnabled,
         });
@@ -1285,7 +1300,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
             source: this.buildTiledSource(desc, undefined, 1, scene),
             colormap: this.grayscaleColormap(),
             contrastLimits: [st?.min ?? 0, st?.max ?? 255],
-            gamma: st?.gamma ?? 1,
+            gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
             invert: this.invertEnabled,
           },
         ],
@@ -1434,7 +1449,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
             ...(st
               ? {
                   contrastLimits: [st.min, st.max] as [number, number],
-                  gamma: st.gamma,
+                  gamma: toNapariGamma(st.gamma), // ImageJ γ → napari-js γ
                   visible: st.visible,
                 }
               : {}),
@@ -1444,7 +1459,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         const st = channels[0];
         view.updateChannel(0, {
           colormap: this.volumeColormap(st),
-          ...(st ? { contrastLimits: [st.min, st.max] as [number, number], gamma: st.gamma } : {}),
+          ...(st ? { contrastLimits: [st.min, st.max] as [number, number], gamma: toNapariGamma(st.gamma) } : {}),
         });
       }
     });
@@ -1494,7 +1509,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
         view.updateChannel(c, {
           tint: st.color,
           contrastLimits: [st.min, st.max],
-          gamma: st.gamma,
+          gamma: toNapariGamma(st.gamma), // ImageJ γ → napari-js γ
           visible: st.visible,
           invert: this.invertEnabled,
         });
@@ -1504,7 +1519,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       view.updateChannel(0, {
         colormap: this.grayscaleColormap(),
         invert: this.invertEnabled,
-        ...(st ? { contrastLimits: [st.min, st.max] as [number, number], gamma: st.gamma } : {}),
+        ...(st ? { contrastLimits: [st.min, st.max] as [number, number], gamma: toNapariGamma(st.gamma) } : {}),
       });
     }
   }
@@ -1673,7 +1688,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
             depth: vol.depth,
             colormap: this.channelTintColormap(color),
             contrastLimits: [st?.min ?? 0, st?.max ?? 255],
-            gamma: st?.gamma ?? 1,
+            gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
             visible: st?.visible ?? true,
           });
         }
@@ -1690,7 +1705,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
             depth: vol.depth,
             colormap: this.volumeColormap(st),
             contrastLimits: [st?.min ?? 0, st?.max ?? 255],
-            gamma: st?.gamma ?? 1,
+            gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
           });
         }
       }
@@ -4159,7 +4174,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.surfaceLayer = viewer.addSurface(vertices, faces, values, {
       colormap: this.volumeColormap(st),
       contrastLimits: win,
-      gamma: st?.gamma ?? 1,
+      gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
       wireframe: this.surfaceWireframe,
     });
     if (preserveCamera) {
@@ -4220,7 +4235,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       layer.colormap = this.volumeColormap(st);
       if (st) {
         layer.contrastLimits = win;
-        layer.gamma = st.gamma;
+        layer.gamma = toNapariGamma(st.gamma); // ImageJ γ → napari-js γ
       }
       this.viewer.requestRender();
     });
