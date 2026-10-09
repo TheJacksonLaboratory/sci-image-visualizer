@@ -76,6 +76,21 @@ export class SupersededError extends Error {
  */
 type CachedPayload = SpatialColumn | Float32Array | SpatialEmbedding | SpatialDensityRaster;
 
+/**
+ * Bytes a decoded payload holds: its own typed-array views, one level deep — every
+ * payload here is a typed array or a flat record of them.
+ */
+function payloadBytes(value: unknown): number {
+  if (ArrayBuffer.isView(value)) return value.byteLength;
+  let bytes = 0;
+  if (value && typeof value === 'object') {
+    for (const v of Object.values(value)) if (ArrayBuffer.isView(v)) bytes += v.byteLength;
+  }
+  return bytes;
+}
+
+const MiB = 1024 * 1024;
+
 @Injectable()
 export class SpatialDataHttpService implements SpatialDataPort {
   /** Server root, normalised to end with exactly one `/`. */
@@ -93,11 +108,16 @@ export class SpatialDataHttpService implements SpatialDataPort {
   /**
    * Loaded vectors, keyed `column:<name>` / `feature:<name>`. Bounded LRU:
    * colouring by cluster → by a gene → back by cluster must not refetch, but an
-   * afternoon of browsing genes must not grow without limit either (one vector
-   * is `4·N` bytes — 2 MB at 500k cells).
+   * afternoon of browsing genes must not grow without limit either.
+   *
+   * Bounded by BYTES as well as entries: one vector is `4·N` bytes — 2 MB at 500k
+   * cells, but 14.8 MB at 3.7M, where 32 entries (an embedding is two or three
+   * vectors) could pin close to half a gigabyte.
    */
-  private readonly cache = new Map<string, CachedPayload>();
+  private readonly cache = new Map<string, { value: CachedPayload; bytes: number }>();
+  private cachedBytes = 0;
   private static readonly CACHE_LIMIT = 32;
+  private cacheBytes = 256 * MiB;
 
   /** In-flight requests, so double-clicking a gene issues one fetch. */
   private readonly inFlight = new Map<string, Promise<CachedPayload>>();
@@ -108,6 +128,10 @@ export class SpatialDataHttpService implements SpatialDataPort {
    */
   private readonly tileCache = new Map<string, Promise<SpatialPolygonTile | SpatialTranscriptTile>>();
   private static readonly TILE_CACHE_LIMIT = 384;
+  /** Bytes of each RESOLVED tile in {@link tileCache}; a pending one counts once it lands. */
+  private readonly tileBytes = new Map<string, number>();
+  private tileBytesTotal = 0;
+  private tileCacheBytes = 128 * MiB;
 
   private volumePromise: Promise<Uint8Array> | null = null;
   private polygonsPromise: Promise<SpatialPolygons> | null = null;
@@ -116,11 +140,20 @@ export class SpatialDataHttpService implements SpatialDataPort {
 
   // ── configuration ───────────────────────────────────────────────────────
 
-  /** Point the adapter at a server. Clears any loaded dataset. */
-  configure(options: { baseUrl: string; timeoutMs?: number }): void {
+  /**
+   * Point the adapter at a server. Clears any loaded dataset.
+   *
+   * `cacheBytes` / `tileCacheBytes` cap the decoded vectors (default 256 MiB) and tiles
+   * (default 128 MiB) kept for reuse; the most recent entry is always kept.
+   */
+  configure(options: {
+    baseUrl: string; timeoutMs?: number; cacheBytes?: number; tileCacheBytes?: number;
+  }): void {
     const raw = options.baseUrl ?? '';
     this.baseUrl = raw.endsWith('/') ? raw : `${raw}/`;
     if (options.timeoutMs !== undefined) this.timeoutMs = options.timeoutMs;
+    if (options.cacheBytes !== undefined) this.cacheBytes = options.cacheBytes;
+    if (options.tileCacheBytes !== undefined) this.tileCacheBytes = options.tileCacheBytes;
     this.clear();
   }
 
@@ -191,8 +224,11 @@ export class SpatialDataHttpService implements SpatialDataPort {
     this.selectToken++;
     this.manifest = null;
     this.cache.clear();
+    this.cachedBytes = 0;
     this.inFlight.clear();
     this.tileCache.clear();
+    this.tileBytes.clear();
+    this.tileBytesTotal = 0;
     this.summaryCache.clear();
     this.polygonsPromise = null;
     this.volumePromise = null;
@@ -393,7 +429,7 @@ export class SpatialDataHttpService implements SpatialDataPort {
     if (current && this.manifest?.id === manifest.id) {
       const columns = current.columns.filter((c) => c.name !== column.name).concat(column);
       this.manifest = { ...this.manifest, columns };
-      this.cache.delete(`column:${column.name}`);
+      this.uncache(`column:${column.name}`);
       this.dataset$.next({ ...current, columns });
     }
     return { column, matched: body.matched };
@@ -425,17 +461,43 @@ export class SpatialDataHttpService implements SpatialDataPort {
       return hit as Promise<T>;
     }
     const mine = this.selectToken;
-    const promise = load().catch((err) => {
-      if (this.tileCache.get(key) === promise) this.tileCache.delete(key);
-      throw err;
-    });
+    const promise: Promise<T> = load().then(
+      (tile) => {
+        // Sized once it lands, and only while it is still the entry under its key.
+        if (this.tileCache.get(key) === promise && !this.tileBytes.has(key)) {
+          const bytes = payloadBytes(tile);
+          this.tileBytes.set(key, bytes);
+          this.tileBytesTotal += bytes;
+          this.evictTiles();
+        }
+        return tile;
+      },
+      (err) => {
+        if (this.tileCache.get(key) === promise) this.dropTile(key);
+        throw err;
+      },
+    );
     if (mine === this.selectToken) {
       this.tileCache.set(key, promise);
-      while (this.tileCache.size > SpatialDataHttpService.TILE_CACHE_LIMIT) {
-        this.tileCache.delete(this.tileCache.keys().next().value!);
-      }
+      this.evictTiles();
     }
     return promise;
+  }
+
+  /** Oldest first, past the entry cap or the byte budget, keeping the newest. */
+  private evictTiles(): void {
+    while (this.tileCache.size > 1 && (
+      this.tileCache.size > SpatialDataHttpService.TILE_CACHE_LIMIT
+      || this.tileBytesTotal > this.tileCacheBytes
+    )) {
+      this.dropTile(this.tileCache.keys().next().value!);
+    }
+  }
+
+  private dropTile(key: string): void {
+    this.tileCache.delete(key);
+    this.tileBytesTotal -= this.tileBytes.get(key) ?? 0;
+    this.tileBytes.delete(key);
   }
 
   /**
@@ -498,7 +560,7 @@ export class SpatialDataHttpService implements SpatialDataPort {
       // Re-insert to mark most-recently-used (Map preserves insertion order).
       this.cache.delete(key);
       this.cache.set(key, hit);
-      return Promise.resolve(hit);
+      return Promise.resolve(hit.value);
     }
     const pending = this.inFlight.get(key);
     if (pending) return pending;
@@ -510,7 +572,10 @@ export class SpatialDataHttpService implements SpatialDataPort {
         // itself being torn down, and rejecting here would surface a switch as an error.
         // What must not happen is the value being kept for whoever comes next.
         if (mine === this.selectToken) {
-          this.cache.set(key, value);
+          this.uncache(key);
+          const bytes = payloadBytes(value);
+          this.cache.set(key, { value, bytes });
+          this.cachedBytes += bytes;
           this.evict();
         }
         return value;
@@ -522,12 +587,20 @@ export class SpatialDataHttpService implements SpatialDataPort {
     return promise;
   }
 
+  /** Oldest first, past the entry cap or the byte budget, keeping the newest. */
   private evict(): void {
-    while (this.cache.size > SpatialDataHttpService.CACHE_LIMIT) {
-      const oldest = this.cache.keys().next().value as string | undefined;
-      if (oldest === undefined) break;
-      this.cache.delete(oldest);
+    while (this.cache.size > 1 && (
+      this.cache.size > SpatialDataHttpService.CACHE_LIMIT || this.cachedBytes > this.cacheBytes
+    )) {
+      this.uncache(this.cache.keys().next().value!);
     }
+  }
+
+  private uncache(key: string): void {
+    const entry = this.cache.get(key);
+    if (!entry) return;
+    this.cache.delete(key);
+    this.cachedBytes -= entry.bytes;
   }
 
   private getJson<T>(path: string): Promise<T> {

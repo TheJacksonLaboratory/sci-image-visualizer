@@ -275,6 +275,52 @@ describe('SpatialDataHttpService', () => {
       await service.getFeatureVector('G32');
       http.verify();
     });
+
+    it('bounds the cache by bytes as well, since one vector is 4·N bytes', async () => {
+      // 12 bytes a vector (N = 3), a 30-byte budget: the third evicts the first.
+      service.configure({ baseUrl: BASE, cacheBytes: 30 });
+      const wide = {
+        ...MANIFEST,
+        features: { count: 3, names: ['G0', 'G1', 'G2'] },
+      };
+      await loadDataset(wide);
+      for (let i = 0; i < 3; i++) {
+        const p = service.getFeatureVector(`G${i}`);
+        http.expectOne(`${BASE}/spatial/visium-brain/feature/G${i}`).flush(f32(i, i, i));
+        await p;
+      }
+      await service.getFeatureVector('G2');
+      await service.getFeatureVector('G1');
+      http.verify();
+      const refetch = service.getFeatureVector('G0');
+      http.expectOne(`${BASE}/spatial/visium-brain/feature/G0`).flush(f32(0, 0, 0));
+      await refetch;
+    });
+
+    it('bounds the tile cache by bytes', async () => {
+      service.configure({ baseUrl: BASE, tileCacheBytes: 40 });
+      await loadDataset({
+        ...MANIFEST,
+        polygonTiles: { bounds: [0, 0, 1, 1], sets: [{ name: 'cell' }], levels: [{ tileSize: 1 }] },
+      } as SpatialManifest);
+      // One ring of three vertices: 4 (obs) + 8 (offsets) + 24 (coords) = 36 bytes viewed.
+      const tile = () => new Uint8Array([
+        ...new Uint8Array(Uint32Array.from([1, 0, 0, 3]).buffer),
+        ...new Uint8Array(new Float32Array(6).buffer),
+      ]).buffer;
+      const url = (gx: number) => `${BASE}/spatial/visium-brain/polygon-tile/cell/0/${gx}/0`;
+      for (const gx of [0, 1]) {
+        const p = service.getPolygonTile('cell', 0, gx, 0);
+        http.expectOne(url(gx)).flush(tile());
+        await p;
+      }
+      // Tile 1 alone fits; tile 0 was evicted to make room for it.
+      void service.getPolygonTile('cell', 0, 1, 0);
+      http.expectNone(url(1));
+      const again = service.getPolygonTile('cell', 0, 0, 0);
+      http.expectOne(url(0)).flush(tile());
+      await again;
+    });
   });
 
   /**
