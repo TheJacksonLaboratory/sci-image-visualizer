@@ -672,11 +672,12 @@
       click an edge of the selected polygon to insert a new vertex.</li>
     <li>"<b>Delete vertex</b>" <img src="assets/plotting/vertex-delete.svg" width="15" height="15">:
       click a vertex of the selected polygon to remove it.</li>
-    <li>"<b>Move region</b>" <img src="assets/plotting/region-move.svg" width="15" height="15">:
-      drag to move the selected region.</li>
-    <li>"<b>To Bézier</b>" <img src="assets/plotting/to-bezier.svg" width="15" height="15"> /
-      "<b>To polygon</b>" <img src="assets/plotting/to-polygon.svg" width="15" height="15">:
-      convert the selected region to a smooth Bézier curve, or back to a straight-edged polygon.</li>
+    <li><b>Moving a region</b> <img src="assets/plotting/region-move.svg" width="15" height="15">:
+      with the Select tool, drag the selected region's body (or a rectangle's handles to resize it).</li>
+    <li><b>Convert to Bézier</b> <img src="assets/plotting/to-bezier.svg" width="15" height="15"> /
+      <b>Convert to polygon</b> <img src="assets/plotting/to-polygon.svg" width="15" height="15">
+      (Image view): right-click the selected region and pick the conversion in the context menu to
+      turn it into a smooth Bézier curve, or back into a straight-edged polygon.</li>
     <li>"<b>Wand</b>" <img src="assets/plotting/wand.svg" width="15" height="15"> (<kbd>w</kbd>):
       click to grow a region from pixels with similar values around the click point. Hold
       <kbd>Ctrl</kbd>/<kbd>Cmd</kbd> for an exact-match flood fill; drag to keep extending the
@@ -746,8 +747,9 @@
       <b>patho-sam ViT-B</b> for histopathology (H&amp;E / stained tissue). All are promptable
       Segment Anything models finetuned for biomedical images; they differ in the <i>image
       encoder</i> (the heavy once-per-image step) and the training domain — box and point
-      prompting behave the same. The choice applies to <i>both</i> the box and point tools, and
-      each tool loads its own encoder, so the first click after switching re-encodes once.</li>
+      prompting behave the same. The choice applies to <i>both</i> the box and point tools, which
+      share one loaded model and image encoding, so the first run after switching models (or
+      images) downloads and encodes once for both.</li>
     <li>"<b>Cellpose</b>" <img src="assets/plotting/cells.svg" width="15" height="15">: draw rectangles, then click Cellpose to
       automatically segment every cell inside each rectangle (client-side cellpose-SAM) — one
       region per detected cell. No clicking on individual cells needed.</li>

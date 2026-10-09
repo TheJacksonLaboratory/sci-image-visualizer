@@ -14,7 +14,8 @@ import { RegionStore } from '../../store/region-store.service';
  * Collaboration interface the vertex eraser needs from its host backend.
  *
  * Extends {@link IViewportHost} for coordinate conversion + overlay attachment,
- * so the eraser is backend-agnostic (Plotly and OpenSeadragon both satisfy it).
+ * so the eraser is backend-agnostic (Plotly, OpenSeadragon and napari-js all
+ * bind one).
  */
 export interface VertexEraserToolHost extends IViewportHost, IRegionDataHost {
   /**

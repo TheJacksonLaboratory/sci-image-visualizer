@@ -11,8 +11,8 @@ import { IViewportHost, IRegionDataHost } from '../../contracts/coordinate-trans
 import { Region } from '../../models/region';
 
 /**
- * The pixel data and frame state PlotlyService caches for sampling. Returned
- * by `WandToolHost.getCachedImageData()`.
+ * The pixel readback a backend (Plotly, OpenSeadragon or napari-js) hands the
+ * canvas tools for sampling. Returned by `WandToolHost.getCachedImageData()`.
  */
 export interface CachedImageData {
   /** 2-D matrices, one per stack frame (length 1 for non-stack images). */
@@ -22,8 +22,9 @@ export interface CachedImageData {
   /** Image-pixel height of each frame matrix. */
   height: number;
   /**
-   * Plot-data-coords-per-image-pixel along x (and y — they're the same
-   * for heatmap and image traces).
+   * Data coords per matrix pixel: `[x, y]`. OSD and napari report distinct
+   * ratios for a non-square viewport; a single entry applies to both axes
+   * (see {@link MatrixFrame}).
    */
   ratios: number[];
   /** Whether each frame is a 2-D scalar matrix (true) or 3-channel RGB (false). */
@@ -40,11 +41,11 @@ export interface CachedImageData {
 }
 
 /**
- * The collaboration interface the wand tool needs from PlotlyService.
- *
- * Keeping it explicit makes the dependency one-way: WandToolService never
- * imports PlotlyService directly. PlotlyService satisfies this interface
- * structurally and binds itself via `bindHost(this)`.
+ * The collaboration interface the wand (and brush, SAM and Cellpose tools)
+ * need from a backend. Keeping it explicit makes the dependency one-way: the
+ * tools never import a backend. Each backend (Plotly, OpenSeadragon, napari-js)
+ * builds a host object and binds it with `bindHost(host)` before activating a
+ * tool.
  */
 export interface WandToolHost extends IViewportHost, IRegionDataHost {
   /** Pixel data for sampling. null when no image is loaded yet. */
@@ -59,13 +60,13 @@ export interface WandToolHost extends IViewportHost, IRegionDataHost {
 }
 
 /**
- * The wand drawing tool. Owns its own canvas overlay, mouse handlers, and
- * stroke accumulator. Reads/writes the shape list via the WandToolHost
- * interface so it stays decoupled from PlotlyService internals.
+ * The wand drawing tool. Owns its pointer overlay and stroke accumulator
+ * (shared with the brush, see {@link MaskStrokeEditor}). Reads/writes regions
+ * via the {@link WandToolHost} interface so it stays decoupled from the
+ * backends.
  *
- * Lifecycle: PlotlyService injects this service, calls `bindHost(this)` once
- * during its own construction, then calls `setMode(true | false, options)` to
- * activate/deactivate the tool.
+ * Lifecycle: the active backend binds its host with `bindHost(host)`, then
+ * calls `setMode(true | false, options)` to activate/deactivate the tool.
  */
 @Injectable({ providedIn: 'root' })
 export class WandToolService {
