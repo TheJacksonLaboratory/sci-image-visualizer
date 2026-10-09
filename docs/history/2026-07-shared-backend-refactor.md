@@ -1,5 +1,7 @@
 # Shared-backend refactor — plan
 
+> **Historical — completed in the jit-ui monorepo (jit-ui#106, 2026-07); test counts and `nx` commands no longer apply.** The result is `src/lib/implementations/base-store-visualizer.ts`; see [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
+
 Status: **DONE** (jit-ui#106, 2026-07-06). The identical store-delegation code that was duplicated
 between the OSD and napari-js `IVisualizer` backends now lives in one shared abstract base class,
 `implementations/base-store-visualizer.ts`, which both extend. Pure de-duplication — **no behavior

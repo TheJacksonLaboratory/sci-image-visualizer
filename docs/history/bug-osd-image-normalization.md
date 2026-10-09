@@ -1,5 +1,7 @@
 # Bug: DICOM / mask images render as a flat colored rectangle in OSD "image" mode
 
+> **Historical — fixed bug write-up, filed against jit-ui and jit-service before the library was extracted; paths and line numbers may no longer match.**
+
 _Filed: 2026-06-04 · Updated: 2026-06-04 (front-end + jit-service fixes, verified) · Repo:
 **jit-ui** (front-end) + **jit-service** (tile normalization) · Status: ✅ Fixed (both halves verified)_
 
@@ -116,7 +118,7 @@ range. For 16-bit sources the **server must deliver a properly windowed 8-bit ti
   *preview* request for these files currently 404s server-side (the requested path doesn't
   resolve) — worth confirming the OSD/preview path sends the right `FileInfo` for masks/DICOM.
 - **Colormap stuck after image switch** — sibling OSD bug, see
-  `docs/bug-colormap-stuck-on-image-switch.md`. Different defect (the colormap *change*
+  `docs/history/bug-colormap-stuck-on-image-switch.md`. Different defect (the colormap *change*
   is dropped), same file (`openseadragon-visualizer.service.ts`).
 
 ## Affected files

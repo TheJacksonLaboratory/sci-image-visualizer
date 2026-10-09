@@ -1,7 +1,8 @@
 # Region merge / group / inverse / simplify — implementation plan
 
-**Status:** proposed · **Owner:** TBD · **Tracking:** follow-up to jit-ui#85
-**Depends on:** [`region-holes-design.md`](./region-holes-design.md) — *must land first.*
+**Status:** shipped (jit-ui#85, 2026-06 — merge / ungroup / inverse / simplify, in every standalone release
+since 0.1.0; engine in `src/lib/region-ops.service.ts`); kept as design record · **Tracking:** follow-up to jit-ui#85
+**Depends on:** [`region-holes-design.md`](./region-holes-design.md) — *landed first.*
 
 **Decisions locked in (see §9 for rationale):** geometry = **MultiPolygon**
 (geometric union, flat model — *not* a nested group container); boolean engine =

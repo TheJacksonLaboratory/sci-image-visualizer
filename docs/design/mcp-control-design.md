@@ -1,12 +1,15 @@
 # Image-visualization MCP server — control-bridge design
 
+**Status:** proposed (SOW stage) — not implemented in this repo. The name `jax-image-visualization` below is
+the library's monorepo-era name.
+
 Design for a **Model Context Protocol (MCP) server** that lets a Claude (or any
 MCP client) session drive the `jax-image-visualization` viewer, per
 [jit-ui#97](https://github.com/TheJacksonLaboratory/jit-ui/issues/97): "open an
 image, switch plot type, pan/zoom to a region, toggle channels/colormap, create
 and edit regions, run browser-side SAM/Cellpose, and read back the current view
 or region geometry." The full SOW is in
-[`JIT_image_visualization_MCP_server_SOW.docx`](JIT_image_visualization_MCP_server_SOW.docx);
+[`JIT_image_visualization_MCP_server_SOW.docx`](../JIT_image_visualization_MCP_server_SOW.docx);
 this doc is the technical design behind it.
 
 > **Why not a stateless plot generator?** The two servers cited in the issue
@@ -293,7 +296,7 @@ segmentation and export data is a real remote-control surface.
 ## References
 
 - Issue: <https://github.com/TheJacksonLaboratory/jit-ui/issues/97>
-- SOW: [`JIT_image_visualization_MCP_server_SOW.docx`](JIT_image_visualization_MCP_server_SOW.docx)
+- SOW: [`JIT_image_visualization_MCP_server_SOW.docx`](../JIT_image_visualization_MCP_server_SOW.docx)
 - Model Context Protocol: <https://modelcontextprotocol.io> · SDK registry: <https://registry.modelcontextprotocol.io>
 - Reference servers (stateless generators, contrasted in §0): <https://mcpmarket.com/server/visualization>, <https://github.com/xlisp/visualization-mcp-server>
 - OpenSeadragon: <https://openseadragon.github.io/> · Plotly.js: <https://plotly.com/javascript/>

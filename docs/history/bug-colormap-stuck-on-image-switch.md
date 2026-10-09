@@ -1,5 +1,7 @@
 # Bug: colormap can't be changed after switching to another image (OSD)
 
+> **Historical — fixed bug write-up, filed against jit-ui before the library was extracted; paths and line numbers may no longer match.**
+
 _Filed: 2026-06-04 · Repo: **jit-ui** · Area: visualization / OSD viewer · Status: ✅ Fixed_
 
 ## Resolution
@@ -111,7 +113,7 @@ Change the colormap on the *second* image and read that line:
 
 - **DICOM/mask render as a flat colored rectangle** in the OSD image mode (works in
   heatmap) — a value-normalization/windowing gap; see
-  `docs/bug-osd-image-normalization.md` (primary fix is front-end auto-range in
+  `docs/history/bug-osd-image-normalization.md` (primary fix is front-end auto-range in
   `recolorTile`, same file as this bug).
 - **`getExistingThumbnail(null)` NPE** for these images — tracked/fixed on the
   jit-service side.

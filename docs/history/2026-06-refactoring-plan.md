@@ -1,5 +1,7 @@
 # jax-image-visualization — Architecture Improvement Plan
 
+> **Historical — executed in the jit-ui monorepo, 2026-06; the numbers, commands (`nx …`) and selector names (`jaxviz-*`) no longer apply.** For the current structure see [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
+
 _Source: architecture review of 2026-06-10 (3-scout audit of contracts/boundary, OSD backend,
 Plotly backend + components + tests). Companion to the architecture section of
 `jit-service/doc/JIT_UI_visualization_library_SOW.docx`._
@@ -244,3 +246,23 @@ out-of-campaign jit-service per-image-window fix that killed the 16-bit tiling s
 - No rewrite of the `IVisualizer` surface — capability-gating + deprecation only
 - No tuning of recolor LUT, slice-reveal opacity mechanics, or tile-invalidated wiring —
   pure moves only on the plotting hot path
+
+---
+
+## Addendum (2026-10): what no longer holds
+
+Recorded during the 0.8.3 code review (#45, REPO-4) so this plan is not read as current:
+
+- **Commands.** The gates use nx monorepo targets (`npx nx test jax-image-visualization`,
+  `npx nx build jit-ui`). The standalone repo uses `npm test`, `npm run lint`,
+  `npm run typecheck` and `npm run build`; see [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md).
+- **Selectors.** Step 6's `jaxviz-*` canonical selectors were later dropped. Every selector
+  in `src/` is unprefixed (`visualizer`, `region-editor`, …).
+- **Scoreboard.** The "Campaign complete" line counts have regressed as features landed: the
+  OSD service is ~2,100 lines again (was 1,421) and the visualizer component ~2,700 (was
+  1,054). The current god-class roadmap is in the 0.8.3 code review (#45), not this plan.
+- **Out of scope.** "No shared base class" was superseded by the completed
+  [shared-backend refactor](./2026-07-shared-backend-refactor.md)
+  (`implementations/base-store-visualizer.ts`).
+- **Names.** The library was published as `@jax-data-science/sci-image-visualizer`;
+  `jax-image-visualization` and `visualization.component.ts` are the monorepo-era names.

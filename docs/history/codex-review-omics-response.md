@@ -1,5 +1,7 @@
 # Response to the Codex review — spatial-omics branch
 
+> **Historical — response record for the spatial-omics review (PR #24), closed PASS; line numbers refer to that branch.**
+
 > Responding to: [`codex-review-omics.md`](./codex-review-omics.md)
 > PR-level review at the merge head: [`codex-review-pr-24.md`](./codex-review-pr-24.md) — **PASS**,
 > 0 critical / 0 warning / 5 informational

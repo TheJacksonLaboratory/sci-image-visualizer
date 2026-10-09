@@ -352,7 +352,7 @@ cluster) have no such limit — which is why the example server serves `subclass
 
 Still to build: hover tooltips, chart → map brushing, and a GPU layer for cell
 boundary polygons (they are served, not yet drawn) — see
-[docs/spatial-omics-plot-mode-design.md](docs/spatial-omics-plot-mode-design.md).
+[docs/design/spatial-omics-plot-mode-design.md](docs/design/spatial-omics-plot-mode-design.md).
 
 ## Regions & annotation
 
@@ -444,7 +444,7 @@ to WASM. int8 models also run on WASM (no WebGPU int8 matmul).
 micro-sam and patho-sam are distributed through micro-sam's model registry
 (`vit_*_lm`, `vit_*_histopathology`); SAM 3 is a planned addition (it needs a
 `variant: 'sam3'` decoder path, since SAM 2/3 differ in mask I/O). See
-`docs/sam-segmentation-design.md` for the design.
+`docs/design/sam-segmentation-design.md` for the design.
 
 ## In progress / roadmap
 
@@ -469,10 +469,10 @@ Work that is landed-but-unstable or planned (not yet available):
   and ~16× faster than JS, and 10⁵–10⁶ outlines draw in single-digit
   milliseconds; the constraint is napari-js's closed renderer, not WebGPU. See
   [.planning/research/cell-boundary-polygons-webgpu.md](.planning/research/cell-boundary-polygons-webgpu.md)
-  and [docs/spatial-omics-plot-mode-design.md](docs/spatial-omics-plot-mode-design.md).
+  and [docs/design/spatial-omics-plot-mode-design.md](docs/design/spatial-omics-plot-mode-design.md).
 - **SAM 3 model** *(planned)* — a `variant: 'sam3'` decoder path + export tooling
   (SAM 2/3 use a different mask I/O than the current SAM-v1 path). See
-  [docs/sam-segmentation-design.md](docs/sam-segmentation-design.md).
+  [docs/design/sam-segmentation-design.md](docs/design/sam-segmentation-design.md).
 - **int8 patho-sam validation** — the `patho-sam-vit-b-int8` option is sanity-checked
   (IoU ~0.99 vs fp16 on a synthetic prompt) but not yet validated on real H&E
   slides, where int8 ViT attention can degrade on subtle boundaries.
@@ -481,10 +481,10 @@ Work that is landed-but-unstable or planned (not yet available):
 
 Design, architecture, and planning docs for the library:
 
-- **[docs/sam-segmentation-design.md](docs/sam-segmentation-design.md)** — design of
+- **[docs/design/sam-segmentation-design.md](docs/design/sam-segmentation-design.md)** — design of
   the browser SAM segmentation: model choice, ONNX export/quantization recipe,
   encoder/decoder I/O, the engine/session architecture, and the rollout phases.
-- **[docs/spatial-omics-plot-mode-design.md](docs/spatial-omics-plot-mode-design.md)** —
+- **[docs/design/spatial-omics-plot-mode-design.md](docs/design/spatial-omics-plot-mode-design.md)** —
   design and phased plan for the spatial-omics plot mode: current-state audit,
   what the CosMx / Spatial-Live / SpatialData references contribute, the data
   plane, MoSCoW requirements, and the open questions still to settle.
@@ -503,7 +503,7 @@ Design, architecture, and planning docs for the library:
 - **[docs/JIT_UI_visualization_library_SOW.docx](docs/JIT_UI_visualization_library_SOW.docx)** —
   statement of work for extracting/publishing this library (incl. test-coverage
   results and the example-server task).
-- **[REFACTORING-PLAN.md](docs/REFACTORING-PLAN.md)** — the plan that shaped the
+- **[Refactoring plan (history)](docs/history/2026-06-refactoring-plan.md)** — the 2026-06 plan that shaped the
   current module/contract/implementation boundaries.
 
 Related (host side, in jit-ui):

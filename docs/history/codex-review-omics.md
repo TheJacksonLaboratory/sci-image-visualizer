@@ -1,5 +1,7 @@
 # Codex review — spatial-omics branch
 
+> **Historical — review record of the spatial-omics branch (PR #24), closed PASS; line numbers refer to that branch.**
+
 > Review date: 2026-09-09  
 > Branch: `feat/add-spatial-omics-plotmode`  
 > Comparison base: `origin/main`  
@@ -22,9 +24,9 @@ not part of the branch. No project source files were changed during the review.
 ### P0 — Fix t-SNE worker production packaging
 
 - **Severity:** CRITICAL
-- **Files:** [`src/lib/spatial/tsne-worker.ts:8`](../src/lib/spatial/tsne-worker.ts),
-  [`examples/browser-image/vite.config.mts:61`](../examples/browser-image/vite.config.mts), and
-  [`scripts/bundle-workers.mjs:25`](../scripts/bundle-workers.mjs)
+- **Files:** [`src/lib/spatial/tsne-worker.ts:8`](../../src/lib/spatial/tsne-worker.ts),
+  [`examples/browser-image/vite.config.mts:61`](../../examples/browser-image/vite.config.mts), and
+  [`scripts/bundle-workers.mjs:25`](../../scripts/bundle-workers.mjs)
 - **Review pass:** Correctness, consistency
 
 The staged package cannot complete a Vite production build. The new worker's dependency graph
@@ -50,7 +52,7 @@ tested before merge rather than only when Pages builds from `main`.
 ### P0 — Close the tile-server path traversal
 
 - **Severity:** CRITICAL
-- **File:** [`examples/tile-server/lib/cog.mjs:163`](../examples/tile-server/lib/cog.mjs)
+- **File:** [`examples/tile-server/lib/cog.mjs:163`](../../examples/tile-server/lib/cog.mjs)
 - **Review pass:** Security
 - **Origin:** Inherited from `main`, but present in the reviewed codebase
 
@@ -74,7 +76,7 @@ token.
 
 - **Severity:** WARNING
 - **File:**
-  [`src/lib/implementations/spatial-data-http/spatial-data-http.service.ts:298`](../src/lib/implementations/spatial-data-http/spatial-data-http.service.ts)
+  [`src/lib/implementations/spatial-data-http/spatial-data-http.service.ts:298`](../../src/lib/implementations/spatial-data-http/spatial-data-http.service.ts)
 - **Review pass:** Correctness
 
 Clearing or selecting another dataset while a feature, column, or embedding request is in flight
@@ -99,8 +101,8 @@ is the same promise completing. Cover an A-to-B dataset switch before A's vector
 
 - **Severity:** WARNING
 - **Files:**
-  [`src/lib/spatial-controls/spatial-charts/spatial-charts.component.ts:886`](../src/lib/spatial-controls/spatial-charts/spatial-charts.component.ts)
-  and [`src/lib/spatial/embedding-compute.ts:161`](../src/lib/spatial/embedding-compute.ts)
+  [`src/lib/spatial-controls/spatial-charts/spatial-charts.component.ts:886`](../../src/lib/spatial-controls/spatial-charts/spatial-charts.component.ts)
+  and [`src/lib/spatial/embedding-compute.ts:161`](../../src/lib/spatial/embedding-compute.ts)
 - **Review pass:** Correctness, performance
 
 A dataset can change while PCA scores are loading, before `computeRun` exists. The old call can then
@@ -125,7 +127,7 @@ worker execution, external termination, and component teardown.
 ### P2 — Revalidate cached dataset ownership
 
 - **Severity:** WARNING
-- **File:** [`examples/tile-server/server.mjs:283`](../examples/tile-server/server.mjs)
+- **File:** [`examples/tile-server/server.mjs:283`](../../examples/tile-server/server.mjs)
 - **Review pass:** Correctness
 
 `sourceOf` permanently remembers the first source that owns a dataset ID. If a higher-priority bundle
@@ -144,8 +146,8 @@ bundle during one server process.
 ### P2 — Add automated checks for the example server
 
 - **Severity:** WARNING
-- **Files:** [`.eslintrc.json:3`](../.eslintrc.json) and
-  [`examples/tile-server/package.json:10`](../examples/tile-server/package.json)
+- **Files:** [`.eslintrc.json:3`](../../.eslintrc.json) and
+  [`examples/tile-server/package.json:10`](../../examples/tile-server/package.json)
 - **Review pass:** Security, readability, consistency
 
 Thousands of lines of request parsing, filesystem access, cache management, and binary conversion
@@ -166,7 +168,7 @@ Run these checks in the main CI workflow.
 
 - **Severity:** INFO
 - **File:**
-  [`src/lib/implementations/napari-js/napari-visualizer.service.ts:302`](../src/lib/implementations/napari-js/napari-visualizer.service.ts)
+  [`src/lib/implementations/napari-js/napari-visualizer.service.ts:302`](../../src/lib/implementations/napari-js/napari-visualizer.service.ts)
 - **Review pass:** Readability, performance maintainability
 
 `NapariVisualizerService` is now approximately 4,497 lines, with this branch adding roughly 2,000
@@ -199,7 +201,7 @@ moving them into different files.
 The strongest upstream candidates are:
 
 1. **3D projection and picking.**
-   [`getSpatialScreenProjection()`](../src/lib/implementations/napari-js/napari-visualizer.service.ts)
+   [`getSpatialScreenProjection()`](../../src/lib/implementations/napari-js/napari-visualizer.service.ts)
    manually multiplies `Camera3D.viewProjection()` and scans projected points. Projection, clipping,
    depth awareness, and accelerated picking belong to the viewer that owns the camera and viewport.
    `napari-js` already exposes 2D `nearestPointIndex`; the 3D equivalent is missing.
@@ -207,12 +209,12 @@ The strongest upstream candidates are:
    3D layer accepts only one scalar mapped through a colormap. sci-image-visualizer consequently
    maintains a second 3D layer for selected points. Per-point color/alpha or a selection mask belongs
    in the layer API.
-3. **Camera framing policy.** [`addFramingOnce()`](../src/lib/implementations/napari-js/napari-visualizer.service.ts)
+3. **Camera framing policy.** [`addFramingOnce()`](../../src/lib/implementations/napari-js/napari-visualizer.service.ts)
    saves and restores camera internals because adding a 3D layer reframes the scene. `napari-js`
    should expose an explicit policy such as `fit: 'once' | 'always' | 'never'` and a deliberate
    `fitToLayers()` operation.
-4. **Renderer-aware overlays.** [`NapariScaleBar`](../src/lib/implementations/napari-js/napari-scale-bar.ts)
-   and [`NapariAxesLabels`](../src/lib/implementations/napari-js/napari-axes-labels.ts) are generic
+4. **Renderer-aware overlays.** [`NapariScaleBar`](../../src/lib/implementations/napari-js/napari-scale-bar.ts)
+   and [`NapariAxesLabels`](../../src/lib/implementations/napari-js/napari-axes-labels.ts) are generic
    viewer capabilities. If the core package should stay headless, they could live in an optional
    `napari-js/ui` entry point.
 5. **Generic picking events.** Tooltip DOM and observation text should remain here, but napari-js
@@ -229,8 +231,8 @@ spatial-omics datasets.
 ### P3 — Establish a clean toolchain baseline
 
 - **Severity:** INFO
-- **Files:** [`package.json:36`](../package.json), [`.eslintrc.json:45`](../.eslintrc.json), and
-  [`.github/workflows/ci-cd.yaml:21`](../.github/workflows/ci-cd.yaml)
+- **Files:** [`package.json:36`](../../package.json), [`.eslintrc.json:45`](../../.eslintrc.json), and
+  [`.github/workflows/ci-cd.yaml:21`](../../.github/workflows/ci-cd.yaml)
 - **Review pass:** Consistency
 
 The root package does not declare a Node version even though CI uses Node 24 and the tile server

@@ -1,6 +1,7 @@
 # Region holes (donuts) — implementation plan
 
-**Status:** proposed · **Owner:** TBD · **Tracking:** jit-ui#85 (brush) + follow-up
+**Status:** shipped (jit-ui#85, 2026-06 — in every standalone release since 0.1.0); kept as design record ·
+**Tracking:** jit-ui#85 (brush) + follow-up
 
 ## 1. Problem
 

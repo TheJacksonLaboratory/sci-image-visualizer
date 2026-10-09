@@ -1,5 +1,7 @@
 # Codex review — sci-image-visualizer PR #24
 
+> **Historical — review record of PR #24, closed PASS; line numbers refer to the reviewed head.**
+
 > PR: [TheJacksonLaboratory/sci-image-visualizer#24](https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/24)  
 > Title: `spatial omics modes: linked 2D/3D views, charts, selection and GPU t-SNE`  
 > Base: `main` at `54652754d3a88f6ac359f0aded33b070e06234d7`  

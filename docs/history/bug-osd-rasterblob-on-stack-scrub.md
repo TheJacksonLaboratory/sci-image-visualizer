@@ -1,5 +1,7 @@
 # Bug: `unsupported type 'rasterBlob' for the target drawer` when scrubbing a tiled multichannel z-stack
 
+> **Historical investigation record — the fix is still deferred (see Status below) and belongs in a GitHub issue; line numbers may no longer match.**
+
 _Filed: 2026-07-28 · Repo: **sci-image-visualizer** (`src/lib/implementations/osd`) · Status:
 ⏸ Deferred — fix intentionally held until the jit-service multichannel gate is fixed (see
 [Why this is deferred](#why-this-is-deferred))_

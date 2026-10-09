@@ -1,5 +1,9 @@
 # Browser SAM segmentation — ONNX export, quantization, and engine design
 
+**Status:** shipped — box and point prompts, the model picker (micro-sam ViT-T/ViT-B, patho-sam fp16/int8) and
+automatic cellpose-SAM; SAM 3 is still planned. Kept as design record; the live registry is
+`src/lib/toolbar/segmentation/sam-model-registry.ts`.
+
 Design for the client-side, promptable **Segment Anything** tooling described in
 [jit-ui#90](https://github.com/TheJacksonLaboratory/jit-ui/issues/90): the user draws
 rectangles with the existing rectangle tool, presses **Segment**, and each box is turned

@@ -3,10 +3,10 @@
 > Status: **shipped in 0.4.0** — the data plane, the 2D `Spatial omics` mode and the
 > 3D `Spatial omics 3D` mode (point cloud, reference volume, screen-space region
 > selection, per-cluster density volumes), plus the linked distribution charts.
-> Still open: hover tooltips, chart → map brushing, and a GPU shapes layer for the
-> cell-boundary polygons the example server already serves. The Open Questions
+> Hover tooltips also shipped in 0.4.0, and cell-boundary outlines (tiled polygons) in
+> 0.7.0. Still open: chart → map brushing. The Open Questions
 > below are kept as the record of what was decided and why, not as pending work.
-> Companion research (sources, verified numbers): [`.planning/research/spatial-omics-plot-mode.md`](../.planning/research/spatial-omics-plot-mode.md)
+> Companion research (sources, verified numbers): [`.planning/research/spatial-omics-plot-mode.md`](../../.planning/research/spatial-omics-plot-mode.md)
 
 ## Decisions
 
