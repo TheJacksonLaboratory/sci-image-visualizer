@@ -64,7 +64,7 @@ export class NapariLoadingBadge {
   }
 }
 
-/** "A", "A and B", "A, B and C" — the first capitalised, the rest as they are. */
+/** "A", "A and b", "A, b and c": the first as given, the rest with a lower-cased initial. */
 function listOf(names: string[]): string {
   const [first, ...rest] = names;
   const lower = rest.map((n) => n.charAt(0).toLowerCase() + n.slice(1));
