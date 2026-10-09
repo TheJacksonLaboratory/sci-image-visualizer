@@ -16,7 +16,7 @@ import {
 import { cellsAsGroups, heatmapMatrix } from '../../spatial/spatial-heatmap';
 import { geneOptionsFor } from '../../spatial/gene-search';
 import { ComputeProgress, EmbeddingComputeRun } from '../../spatial/embedding-compute';
-import { Supersede } from '../../spatial/supersede';
+import { Supersede } from '../../util/supersede';
 import {
   OmicsChartKind, OmicsGrouping, benefitsFromGrouping, buildCountTraces, buildHeatmapTraces,
   countByCategory,
@@ -438,10 +438,10 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       // same name, so the view need not re-emit. Drop them, drop anything still loading
       // for the old dataset, and fetch afresh.
       if (switched) {
-        this.valueLoad.invalidate();
-        this.groupLoad.invalidate();
-        this.heatmapLoad.invalidate();
-        this.embeddingLoad.invalidate();
+        this.valueLoad.cancel();
+        this.groupLoad.cancel();
+        this.heatmapLoad.cancel();
+        this.embeddingLoad.cancel();
         this.valueBusy = this.heatmapBusy = this.embeddingBusy = false;
         this.values = null;
         this.categorical = null;
@@ -1086,7 +1086,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    * observations nothing is showing any more.
    */
   private abandonCompute(): void {
-    this.computeLoad.invalidate();
+    this.computeLoad.cancel();
     this.computeRun?.terminate();
     this.computeRun = null;
     this.computeFraction = null;

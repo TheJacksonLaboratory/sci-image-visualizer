@@ -880,6 +880,63 @@ describe('SpatialControlsComponent', () => {
       expect(view$.value.hiddenGroups).toEqual([]);
     });
 
+    it("drops group rows the previous dataset's same-named grouping answers late", async () => {
+      // Both datasets group by `graphclust`: only the load sequence, not the name, can
+      // tell the old dataset's answer from the new one's.
+      dataset$.next(tiled);
+      const view = (categories: string[], codes: number[]) => ({
+        name: 'graphclust', categories, colors: categories.map(() => '#000'),
+        codes: Uint16Array.from(codes),
+      });
+      let resolveOld: (v: ReturnType<typeof view>) => void = () => undefined;
+      (controls as any).categoricalView = jest.fn()
+        .mockImplementationOnce(() => new Promise((r) => { resolveOld = r; }))
+        .mockResolvedValueOnce(view(['New'], [0, 0]));
+      await build(controls);
+      dataset$.next({ ...tiled, id: 'other' } as SpatialDataset);
+      await flush();
+      expect(component.groupRows.map((r) => r.label)).toEqual(['New']);
+
+      resolveOld(view(['Old'], [0, 0, 0]));
+      await flush();
+      expect(component.groupRows.map((r) => r.label)).toEqual(['New']);
+    });
+
+    it("keeps the newer grouping's rows when a superseded load fails", async () => {
+      dataset$.next(tiled);
+      let rejectOld: (e: Error) => void = () => undefined;
+      let resolveNew: (v: unknown) => void = () => undefined;
+      (controls as any).categoricalView = jest.fn()
+        .mockImplementationOnce(() => new Promise((_, reject) => { rejectOld = reject; }))
+        .mockImplementationOnce(() => new Promise((r) => { resolveNew = r; }));
+      await build(controls);
+      component.onCellTypeColumn('curated_cell_type');
+      await flush();
+      rejectOld(new Error('gone'));
+      await flush();
+      resolveNew({
+        name: 'curated_cell_type', categories: ['T cell'], colors: ['#000'], codes: Uint16Array.from([0]),
+      });
+      await flush();
+      expect(component.groupRows.map((r) => r.label)).toEqual(['T cell']);
+      expect((controls as any).categoricalView).toHaveBeenCalledTimes(2);
+    });
+
+    it("reloads the group colours for a new dataset's same-named grouping", async () => {
+      dataset$.next(tiled);
+      (controls as any).categoricalView = jest.fn(async () => ({
+        name: 'graphclust', categories: ['A', 'B'], colors: ['#000', '#000'], codes: Uint16Array.from([0]),
+      }));
+      controls.categoryColors.mockResolvedValueOnce(['#f00', '#0f0']).mockResolvedValueOnce(['#00f', '#ff0']);
+      await build(controls);
+      await flush();
+      expect([...(component as any).cellGroupColors.values()]).toEqual(['#f00', '#0f0']);
+
+      dataset$.next({ ...tiled, id: 'other' } as SpatialDataset);
+      await flush();
+      expect([...(component as any).cellGroupColors.values()]).toEqual(['#00f', '#ff0']);
+    });
+
     it('builds the selected-genes tree from gene groups, and hides genes with the eye', async () => {
       dataset$.next(tiled);
       await build(controls);

@@ -33,6 +33,7 @@ import {
   decodeTranscriptTile,
 } from './spatial-wire';
 import { searchGeneNames } from '../../spatial/gene-search';
+import { Supersede } from '../../util/supersede';
 
 /**
  * A dataset selection that a newer selection (or a `clear`) overtook.
@@ -101,9 +102,11 @@ export class SpatialDataHttpService implements SpatialDataPort {
 
   private readonly dataset$ = new BehaviorSubject<SpatialDataset | null>(null);
   private manifest: SpatialManifest | null = null;
-  /** Bumped by every `selectDataset` and every `clear`, so a selection that
-   *  finishes after a newer intent can tell and drop what it fetched. */
-  private selectToken = 0;
+  /** Advanced by every `selectDataset` and every `clear`, so a selection that
+   *  finishes after a newer intent can tell and drop what it fetched. Cache fills
+   *  take a {@link Supersede.current snapshot} of it, so a vector or tile that lands
+   *  after a switch is returned to its caller but never kept for the next dataset. */
+  private readonly selection = new Supersede();
 
   /**
    * Loaded vectors, keyed `column:<name>` / `feature:<name>`. Bounded LRU:
@@ -188,8 +191,8 @@ export class SpatialDataHttpService implements SpatialDataPort {
     // call would otherwise assign `this.manifest` or publish its dataset after a
     // later one — leaving the manifest and the observations from two different
     // datasets, which is worse than either being late.
-    const mine = ++this.selectToken;
-    const superseded = () => mine !== this.selectToken;
+    const task = this.selection.next();
+    const superseded = () => !task.isCurrent();
     const path = `spatial/${encodeURIComponent(id)}`;
 
     const manifest = await this.getJson<SpatialManifest>(`${path}/manifest`);
@@ -221,7 +224,7 @@ export class SpatialDataHttpService implements SpatialDataPort {
   clear(): void {
     // A clear is itself the newest intent, so it supersedes any selection still
     // in flight rather than letting one land afterwards.
-    this.selectToken++;
+    this.selection.cancel();
     this.manifest = null;
     this.cache.clear();
     this.cachedBytes = 0;
@@ -460,7 +463,7 @@ export class SpatialDataHttpService implements SpatialDataPort {
       this.tileCache.set(key, hit);
       return hit as Promise<T>;
     }
-    const mine = this.selectToken;
+    const generation = this.selection.current();
     const promise: Promise<T> = load().then(
       (tile) => {
         // Sized once it lands, and only while it is still the entry under its key.
@@ -477,7 +480,7 @@ export class SpatialDataHttpService implements SpatialDataPort {
         throw err;
       },
     );
-    if (mine === this.selectToken) {
+    if (generation.isCurrent()) {
       this.tileCache.set(key, promise);
       this.evictTiles();
     }
@@ -565,13 +568,13 @@ export class SpatialDataHttpService implements SpatialDataPort {
     const pending = this.inFlight.get(key);
     if (pending) return pending;
 
-    const mine = this.selectToken;
+    const generation = this.selection.current();
     const promise: Promise<CachedPayload> = load()
       .then((value) => {
         // Still returned to the caller that asked: it may well be a component that is
         // itself being torn down, and rejecting here would surface a switch as an error.
         // What must not happen is the value being kept for whoever comes next.
-        if (mine === this.selectToken) {
+        if (generation.isCurrent()) {
           this.uncache(key);
           const bytes = payloadBytes(value);
           this.cache.set(key, { value, bytes });

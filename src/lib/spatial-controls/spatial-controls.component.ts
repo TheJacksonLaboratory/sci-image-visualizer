@@ -22,7 +22,7 @@ import {
   SpatialSelectionMask, emptySelection,
 } from '../spatial/spatial-selection';
 import { searchGeneNames } from '../spatial/gene-search';
-import { Supersede } from '../spatial/supersede';
+import { Supersede } from '../util/supersede';
 
 /** One legend row for a categorical colouring. */
 export interface SpatialLegendEntry {
@@ -225,8 +225,8 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       this.selectedGene = null;
       this.geneSearchFailed = false;
       // A gene search or list preload still in flight answers for the previous dataset.
-      this.geneSearch.invalidate();
-      this.geneListLoad.invalidate();
+      this.geneSearch.cancel();
+      this.geneListLoad.cancel();
       this.geneListLoading = false;
       const names = dataset?.features?.names;
       this.genesAreRemote = !!dataset?.features && !names;
@@ -236,11 +236,14 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       this.sections = this.controls?.sampledSections() ?? null;
       this.buildTileOptions(dataset);
       this.groupRowsFor = null;
+      // Same for the group colours: a same-named grouping of the new dataset is not the old one.
+      this.cellGroupColorsFor = null;
       // A dataset with no cells to outline leads with its observations.
       this.open = { ...this.open, cells: !!(dataset?.polygonTiles || dataset?.polygons),
         observations: !(dataset?.polygonTiles || dataset?.polygons) };
       void this.refreshKey();
       void this.refreshGroups();
+      void this.refreshCellGroupColors();
     }));
 
     this.subs.add(this.controls.getViewState$().subscribe((view) => {
@@ -774,7 +777,11 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   groupRows: { label: string; color: string; count: number }[] = [];
   groupTotal = 0;
   groupsExpanded = true;
+  /** The grouping {@link groupRows} shows or is loading — a repeat request for it is a no-op. */
   private groupRowsFor: string | null = null;
+  /** Latest wins among group-row loads, so a slow one for an earlier grouping (or the
+   *  previous dataset's column of the same name) cannot land over the current one. */
+  private readonly groupRowsLoad = new Supersede();
   groupImportError: string | null = null;
   groupImporting = false;
 
@@ -782,6 +789,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     this.refreshVariants();
     const name = this.activeCellTypeColumn;
     if (!name || !this.controls) {
+      this.groupRowsLoad.cancel();
       this.groupRows = [];
       this.groupTotal = 0;
       this.groupRowsFor = null;
@@ -789,9 +797,10 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     }
     if (name === this.groupRowsFor) return;
     this.groupRowsFor = name;
+    const task = this.groupRowsLoad.next();
     try {
       const v = await this.controls.categoricalView(name);
-      if (this.groupRowsFor !== name) return;
+      if (!task.isCurrent()) return;
       const counts = new Uint32Array(v.categories.length);
       for (const c of v.codes) if (c < counts.length) counts[c]++;
       const rows = v.categories.map((label, i) => ({ label, color: v.colors[i] ?? '#999', count: counts[i] }))
@@ -801,7 +810,9 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
         this.groupTotal = rows.reduce((n, r) => n + r.count, 0);
       });
     } catch {
-      this.groupRowsFor = null;
+      // Only the current load's failure re-opens the key: a superseded one clearing it
+      // would make the newer load's result look stale and be dropped.
+      if (task.isCurrent()) this.groupRowsFor = null;
     }
   }
 
@@ -1404,12 +1415,16 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
 
   /** Colours of the cells' groups, by name — what a cluster of the same name is drawn in. */
   private cellGroupColors = new Map<string, string>();
+  /** The grouping {@link cellGroupColors} belongs to — a repeat request for it is a no-op. */
   private cellGroupColorsFor: string | null = null;
+  /** Latest wins among colour loads for {@link cellGroupColors}. */
+  private readonly cellGroupColorsLoad = new Supersede();
 
   private async refreshCellGroupColors(): Promise<void> {
     const column = this.activeCellTypeColumn;
     if (column === this.cellGroupColorsFor) return;
     this.cellGroupColorsFor = column;
+    const task = this.cellGroupColorsLoad.next();
     const map = new Map<string, string>();
     const meta = column ? this.dataset?.columns.find((c) => c.name === column) : null;
     if (meta && meta.kind === 'categorical' && this.controls) {
@@ -1421,7 +1436,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       }
     }
     // The cells' grouping changed while the colours loaded: the newer request applies its own.
-    if (this.cellGroupColorsFor !== column) return;
+    if (!task.isCurrent()) return;
     this.zone.run(() => { this.cellGroupColors = map; });
   }
 
