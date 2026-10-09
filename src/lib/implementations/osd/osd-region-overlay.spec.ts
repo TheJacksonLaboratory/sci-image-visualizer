@@ -164,6 +164,34 @@ describe('OsdRegionOverlay — vertex tools', () => {
     return emitted;
   }
 
+  it('rebuilds the SVG once per animated frame, on update-viewport only (OSD-PLOTLY-11)', () => {
+    // OSD raises both 'animation' and 'update-viewport' on every animated frame;
+    // redrawing on both rebuilt every region twice per frame.
+    const viewer: any = fakeViewer();
+    const events: string[] = [];
+    viewer.addHandler = (name: string) => events.push(name);
+    const o = new OsdRegionOverlay(viewer, store);
+    expect(events).toContain('update-viewport');
+    expect(events).not.toContain('animation');
+    o.destroy();
+  });
+
+  it('skips the rebuild on update-viewport frames where the projection did not move', () => {
+    const viewer: any = fakeViewer();
+    const handlersByName: Record<string, () => void> = {};
+    viewer.addHandler = (name: string, h: () => void) => { handlersByName[name] = h; };
+    let scale = 1;
+    viewer.viewport.imageToViewerElementCoordinates = (p: any) => ({ x: p.x * scale, y: p.y * scale });
+    const o = new OsdRegionOverlay(viewer, store);
+    const redraw = jest.spyOn(o, 'redraw');
+    handlersByName['update-viewport'](); // tile-only frame
+    expect(redraw).not.toHaveBeenCalled();
+    scale = 2; // zoomed
+    handlersByName['update-viewport']();
+    expect(redraw).toHaveBeenCalledTimes(1);
+    o.destroy();
+  });
+
   it('destroy() mid-drag closes the store batch', () => {
     startMoveDrag();
     overlay.destroy();

@@ -89,6 +89,15 @@ export class OsdRegionOverlay implements IRegionOverlay {
   private bandDragged = false;
 
   private readonly redrawHandler = () => this.redraw();
+  /** The image→element projection the SVG was last built for (see
+   *  {@link viewportHandler}). */
+  private drawnProjection = '';
+  /** 'update-viewport' also fires on frames where only tiles changed (loading,
+   *  recolor). The SVG is drawn in element pixels, so it only needs rebuilding
+   *  when the image→element projection moved. */
+  private readonly viewportHandler = () => {
+    if (this.projectionKey() !== this.drawnProjection) this.redraw();
+  };
   /** OSD's MouseTracker drops a cancelled pointer (touch interrupted, pointer
    *  capture lost to the browser) without calling releaseHandler, so the
    *  gesture is ended here instead. */
@@ -106,8 +115,9 @@ export class OsdRegionOverlay implements IRegionOverlay {
     this.viewer.canvas.appendChild(this.svg);
     (this.viewer.canvas as HTMLElement).addEventListener('pointercancel', this.pointerCancelHandler);
 
-    this.viewer.addHandler('update-viewport', this.redrawHandler);
-    this.viewer.addHandler('animation', this.redrawHandler);
+    // 'update-viewport' fires on every redrawn frame, animated ones included —
+    // also listening to 'animation' rebuilt the whole SVG twice per frame.
+    this.viewer.addHandler('update-viewport', this.viewportHandler);
     this.viewer.addHandler('resize', this.redrawHandler);
     this.viewer.addHandler('rotate', this.redrawHandler);
     // Keep wheel-zoom alive while a tool has mouse-nav disabled (see handler).
@@ -201,8 +211,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
     this.subs.unsubscribe();
     (this.viewer.element as HTMLElement | undefined)
       ?.removeEventListener('wheel', this.wheelZoomHandler);
-    this.viewer.removeHandler('update-viewport', this.redrawHandler);
-    this.viewer.removeHandler('animation', this.redrawHandler);
+    this.viewer.removeHandler('update-viewport', this.viewportHandler);
     this.viewer.removeHandler('resize', this.redrawHandler);
     this.viewer.removeHandler('rotate', this.redrawHandler);
     if (this.tracker) this.tracker.destroy();
@@ -221,7 +230,15 @@ export class OsdRegionOverlay implements IRegionOverlay {
   }
 
   // ── rendering ────────────────────────────────────────────────────────
+  /** The current image→element projection (origin + unit step), as a key. */
+  private projectionKey(): string {
+    const o = this.toPx(0, 0);
+    const u = this.toPx(1, 1);
+    return `${o.x},${o.y},${u.x},${u.y}`;
+  }
+
   redraw(): void {
+    this.drawnProjection = this.projectionKey();
     while (this.svg.firstChild) this.svg.removeChild(this.svg.firstChild);
 
     const regions = this.store.getRegions();
