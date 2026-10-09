@@ -303,7 +303,7 @@ export class PlotUtilities {
       poly.xpoints = this.round([fig.x0, fig.x1, fig.x1, fig.x0]);
       poly.ypoints = this.round([fig.y1, fig.y1, fig.y0, fig.y0]);
     } else {
-      console.log('Ignoring unrecognised shape in diagram');
+      console.warn('[visualizer] ignoring an unrecognised shape', fig?.type);
       return null;
     }
     return poly;
@@ -483,8 +483,6 @@ export class PlotUtilities {
    * @return FeatureCollection<Geometry, GeoJsonProperties>
    */
   public exportROIsToGeoJson(rois: Region[]): string {
-    console.log('Exporting ROIs to GeoJson');
-    console.log(rois);
     const features: any[] = [];
     for (const roi of rois.filter(r => (r as any).kind !== 'profile')) {
       // QuPath places the image plane inside the geometry (sibling of

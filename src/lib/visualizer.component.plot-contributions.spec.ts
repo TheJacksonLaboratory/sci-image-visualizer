@@ -180,7 +180,7 @@ function harness(contributions: unknown[] | undefined, viewport: PlotModeViewpor
   );
   component.ngOnInit();
   /** Land the most recent render, as RenderOrchestrator would once it finished. */
-  const finish = () => orchestratorHosts[orchestratorHosts.length - 1].finished(false, 'done');
+  const finish = () => orchestratorHosts[orchestratorHosts.length - 1].finished(false);
   /** Drive the most recent render's plot phase and return what it plotted with. */
   const renderPhase = async () => {
     const host = orchestratorHosts[orchestratorHosts.length - 1];
@@ -411,7 +411,7 @@ describe('contributed plot types — routing and lifecycle', () => {
     component.onSelectPlotType('dianne');
     const stale = orchestratorHosts[orchestratorHosts.length - 1];
     imageInfo$.next(infoFor('b.tif'));
-    stale.finished(false, 'stale');
+    stale.finished(false);
     expect(mode.activate).not.toHaveBeenCalled();
   });
 
@@ -577,7 +577,7 @@ describe('contributed plot types — panel rendering', () => {
     const component = fixture.componentInstance;
     imageInfo$.next(infoFor('a.tif'));
     component.onSelectPlotType('dianne');
-    orchestratorHosts[orchestratorHosts.length - 1].finished(false, 'done');
+    orchestratorHosts[orchestratorHosts.length - 1].finished(false);
     fixture.detectChanges();
     await fixture.whenStable();
     fixture.detectChanges();
@@ -941,7 +941,7 @@ describe('dialog tools — rendering', () => {
     fixture.detectChanges();
     const component = fixture.componentInstance;
     imageInfo$.next(infoFor('a.tif'));
-    orchestratorHosts[orchestratorHosts.length - 1].finished(false, 'done');
+    orchestratorHosts[orchestratorHosts.length - 1].finished(false);
     component.toggleDialogTool('dianne');
     fixture.detectChanges();
     await fixture.whenStable();

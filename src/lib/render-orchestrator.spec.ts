@@ -20,10 +20,9 @@ describe('RenderOrchestrator', () => {
       renderPhase: track('renderPhase', () => Promise.resolve(true)) as any,
       smallShown: track('smallShown') as any,
       sharpenSettled: track('sharpenSettled') as any,
-      finished: jest.fn((viaSmall: boolean, tag: string) => { calls.push(`finished(${viaSmall})`); void tag; }) as any,
+      finished: jest.fn((viaSmall: boolean) => { calls.push(`finished(${viaSmall})`); }) as any,
       sharpenFailed: track('sharpenFailed') as any,
     };
-    jest.spyOn(console, 'log').mockImplementation(() => undefined);
     jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
   });
@@ -34,14 +33,14 @@ describe('RenderOrchestrator', () => {
     await new RenderOrchestrator(host, 0).render(INFO, null);
     expect(host.renderPhase).toHaveBeenCalledTimes(1);
     expect(host.renderPhase).toHaveBeenCalledWith(INFO, false);
-    expect(host.finished).toHaveBeenCalledWith(false, 'finished plotting');
+    expect(host.finished).toHaveBeenCalledWith(false);
     expect(host.smallShown).not.toHaveBeenCalled();
   });
 
   it('single-pass failure still finalizes (overlay must never get stuck)', async () => {
     host.renderPhase.mockRejectedValueOnce(new Error('503'));
     await new RenderOrchestrator(host, 0).render(INFO, null);
-    expect(host.finished).toHaveBeenCalledWith(false, 'plotting aborted');
+    expect(host.finished).toHaveBeenCalledWith(false);
   });
 
   it('two-pass happy path: small shown → large in place → finished(viaSmall)', async () => {
@@ -57,7 +56,7 @@ describe('RenderOrchestrator', () => {
       .mockResolvedValue(true as any);
     await new RenderOrchestrator(host, 0).render(INFO, SMALL);
     expect(host.smallShown).not.toHaveBeenCalled();
-    expect(host.finished).toHaveBeenCalledWith(false, 'finished plotting (large only after small fallback)');
+    expect(host.finished).toHaveBeenCalledWith(false);
   });
 
   it('large tier retries once after the delay and succeeds', async () => {
@@ -72,7 +71,7 @@ describe('RenderOrchestrator', () => {
     await jest.advanceTimersByTimeAsync(1);
     await done;
     expect(host.renderPhase).toHaveBeenCalledTimes(3);
-    expect(host.finished).toHaveBeenCalledWith(true, expect.any(String));
+    expect(host.finished).toHaveBeenCalledWith(true);
     expect(host.sharpenFailed).not.toHaveBeenCalled();
     jest.useRealTimers();
   });

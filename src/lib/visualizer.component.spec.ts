@@ -1193,14 +1193,14 @@ describe('VisualizerComponent — render preemption (#5)', () => {
     state.setImageLoading.mockClear();
     staleHost.smallShown();
     staleHost.sharpenSettled();
-    staleHost.finished(false, 'stale render finished');
+    staleHost.finished(false);
 
     // The overlay belongs to B now, and B is still rendering.
     expect(state.setImageLoading).not.toHaveBeenCalled();
     expect((component as any).running).toBe(true);
 
     // B's own callbacks still work.
-    liveHost.finished(false, 'live render finished');
+    liveHost.finished(false);
     expect(state.setImageLoading).toHaveBeenCalledWith(false);
     expect((component as any).running).toBe(false);
   });

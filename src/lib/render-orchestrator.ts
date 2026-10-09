@@ -27,7 +27,7 @@ export interface TwoPassRenderHost {
   /** Rendering finished. `viaSmall` = the overlay was already released by the
    *  small tier (so only release the running guard + apply the ROI); otherwise
    *  do the full finalize (overlay + running + ROI). */
-  finished(viaSmall: boolean, logTag: string): void;
+  finished(viaSmall: boolean): void;
   /** Both large-tier attempts failed; the small tier stays on screen as the
    *  fallback. Surface it to the user and release the running guard + ROI. */
   sharpenFailed(err: unknown): void;
@@ -44,10 +44,10 @@ export class RenderOrchestrator {
     if (!smallInfo) {
       try {
         await this.host.renderPhase(info, false);
-        this.host.finished(false, 'finished plotting');
+        this.host.finished(false);
       } catch (err) {
         console.error('Preview failed', err);
-        this.host.finished(false, 'plotting aborted');
+        this.host.finished(false);
       }
       return;
     }
@@ -57,7 +57,6 @@ export class RenderOrchestrator {
       await this.host.renderPhase(smallInfo, false);
       this.host.smallShown();
       smallReleasedOverlay = true;
-      console.log('multi-tier: small tier rendered, starting large');
     } catch (err) {
       // Small-tier render failed (older backend without tier support, transient
       // error, …). Continue with large only; the overlay stays up until it lands.
@@ -67,11 +66,7 @@ export class RenderOrchestrator {
     try {
       await this.renderLargeWithRetry(info);
       this.host.sharpenSettled();
-      if (smallReleasedOverlay) {
-        this.host.finished(true, 'multi-tier: large tier rendered, sharpening complete');
-      } else {
-        this.host.finished(false, 'finished plotting (large only after small fallback)');
-      }
+      this.host.finished(smallReleasedOverlay);
     } catch (err) {
       this.host.sharpenSettled();
       console.error('Large-tier preview failed after retry', err);

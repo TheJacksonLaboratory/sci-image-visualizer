@@ -1085,7 +1085,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
                 if (!isCurrent()) return; // superseded by a newer image
                 this.sharpening = false;
               },
-              finished: (_viaSmall, logTag) => {
+              finished: () => {
                 if (!isCurrent()) return; // superseded by a newer image
                 // Idempotent — releases now if smallShown deferred it (caching) or was skipped.
                 releaseOverlay();
@@ -1093,7 +1093,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
                 applyRoi();
                 this.activateSelectedPlotMode();
                 this.activateOpenDialogTool();
-                console.log(logTag);
               },
               sharpenFailed: (err: any) => {
                 if (!isCurrent()) return; // superseded by a newer image
