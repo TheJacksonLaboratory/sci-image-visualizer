@@ -47,6 +47,9 @@ import { VIZ_ALERT_TOAST_KEY } from '../../toast-outlets';
 // './contracts/plot-type' directly, drop this re-export.
 export { PlotType } from '../../contracts/plot-type';
 
+/** Parallel slice fetches when loading a stack (cf. napari's volume fetch pool). */
+const PLOTLY_STACK_FETCH_CONCURRENCY = 4;
+
 @Injectable({
   providedIn: 'root'
 })
@@ -319,29 +322,29 @@ export class PlotlyService implements IVisualizer {
     this.trueImgSize = trueImageSize;
     this.fileName = imageInfo.fileName;
     if (imageInfo.isStack && imageInfo.showStack) {
-      const images: any[] = [];
+      const toMatrix = (img: any) => isGrayscale
+        ? this.plotUtilities.arrayToMatrix(Array.from(img.grey().data), img.width)
+        : this.plotUtilities.arrayToMatrix(img.getPixelsArray(), img.width);
+      // Stop loading once a new file is selected or stack loading is switched off.
+      const wanted = () => this.fileName === imageInfo.fileName && this.stackLoading$.value;
+      const images: any[] = new Array(urls.length);
+      let next = 0;
+      let loaded = 0;
       this.stackLoadingProgress$.next(0);
-      // One URL per slice — load them all (earlier `length-1` dropped the last).
-      for (let i = 0; i < urls.length; i++) {
-        // do not keep with loading if filename is different (a new file has been selected)
-        // or if the stackLoading value is set to false
-        if (this.fileName === imageInfo.fileName && this.stackLoading$.value) {
-          const image = await this.loadImage(urls[i]);
-          if (isGrayscale) {
-            const grey = image.grey();
-            const imgData = this.plotUtilities.arrayToMatrix(Array.from(grey.data), image.width);
-            images.push(imgData);
-          } else {
-            const rgbData = image.getPixelsArray();
-            const rgbMatrix = this.plotUtilities.arrayToMatrix(rgbData, image.width);
-            images.push(rgbMatrix);
-          }
-          this.stackLoadingProgress$.next(Math.round((i * 100) / urls.length));
-        } else {
-          // break stack loading
-          break;
+      // One URL per slice, fetched by a small pool of workers; each slice keeps
+      // its index.
+      const worker = async () => {
+        while (next < urls.length && wanted()) {
+          const i = next++;
+          images[i] = toMatrix(await this.loadImage(urls[i]));
+          this.stackLoadingProgress$.next(Math.round((++loaded * 100) / urls.length));
         }
-      }
+      };
+      const poolSize = Math.min(PLOTLY_STACK_FETCH_CONCURRENCY, urls.length);
+      await Promise.all(Array.from({ length: poolSize }, () => worker()));
+      // A cancelled load keeps the contiguous run of slices from the start.
+      const firstGap = images.findIndex((m) => m === undefined);
+      if (firstGap >= 0) images.length = firstGap;
       // reset stackLoading progress to 0
       this.stackLoadingProgress$.next(0);
       return { data: images, ratios: [xRatio, yRatio],

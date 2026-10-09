@@ -602,4 +602,28 @@ describe('PlotlyService async supersession (review OSD-PLOTLY-8)', () => {
     service.refreshIntensitySamplingForRoi(0, 0, 10, 10, 0);
     expect(measure.mock.calls).toEqual([['plot'], ['plot']]);
   });
+
+  it('loads a stack\'s slices in parallel, keeping slice order (OSD-PLOTLY-31)', async () => {
+    const s = service as any;
+    s.stackLoading$.next(true);
+    const pending: Array<{ url: string; resolve: (img: unknown) => void }> = [];
+    const img = (v: number) => ({ width: 1, height: 1, grey: () => ({ data: [v] }) });
+    const loadImage = jest.spyOn(s, 'loadImage').mockImplementation((url: unknown) =>
+      new Promise((resolve) => pending.push({ url: url as string, resolve })));
+    loadImage.mockImplementationOnce(() => Promise.resolve(img(-1))); // the displayed-slice probe
+    const info = { fileName: 'stack', isStack: true, showStack: true, isGrayscale: true,
+      urls: ['s0', 's1', 's2', 's3', 's4'], trueImageSize: [1, 1] } as unknown as IImageInfo;
+    const run = service.load(info, 0);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(pending.map((p) => p.url)).toEqual(['s0', 's1', 's2', 's3']); // 4 in flight
+    // Resolve out of order.
+    while (pending.length) {
+      const p = pending.pop()!;
+      p.resolve(img(Number(p.url.slice(1))));
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    const loaded = await run;
+    expect(loaded.data.map((m: number[][]) => m[0][0])).toEqual([0, 1, 2, 3, 4]);
+  });
 });
+
