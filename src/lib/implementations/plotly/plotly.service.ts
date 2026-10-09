@@ -3,7 +3,6 @@ import { Injectable, Inject, Optional } from '@angular/core';
 import * as Plotly from 'plotly.js-dist-min';
 import { Image } from 'image-js';
 import { HttpClient } from '@angular/common/http';
-import { firstValueFrom } from 'rxjs';
 
 import { Polygon, Rectangle, Region } from '../../models/region';
 import { Buffer } from 'buffer';
@@ -40,6 +39,7 @@ import { PlotlyCoordinateTransform } from './plotly-coordinate-transform';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
 import { VIZ_ALERT_TOAST_KEY } from '../../toast-outlets';
+import { firstValueFromAbortable, throwIfAborted } from '../tile-server/transport';
 
 // Re-exported so existing consumers can keep importing PlotType from this
 // module while it physically lives in the backend-neutral contracts/ dir.
@@ -294,9 +294,12 @@ export class PlotlyService implements IVisualizer {
    * Load image
    * @param imageInfo
    * @param zIndex index of the image to load
+   * @param signal aborts the image (and stack-slice) requests: the load then
+   *   rejects with an `AbortError`
    * @return an object with data and ratio keys
    */
-  public async load(imageInfo: IImageInfo, zIndex: number) {
+  public async load(imageInfo: IImageInfo, zIndex: number, signal?: AbortSignal) {
+    throwIfAborted(signal);
     // Re-establish the store subscriptions if a prior component teardown
     // (unsubscribe()) tore them down — see ensureSubscriptions().
     this.ensureSubscriptions();
@@ -309,7 +312,7 @@ export class PlotlyService implements IVisualizer {
       imageUrl = urls[0];
     }
     const isGrayscale = imageInfo.isGrayscale;
-    const image = await this.loadImage(imageUrl);
+    const image = await this.loadImage(imageUrl, signal);
     const xRatio = imageInfo.trueImageSize[0] / image.width;
     const yRatio = imageInfo.trueImageSize[1] / image.height;
 
@@ -325,8 +328,10 @@ export class PlotlyService implements IVisualizer {
       const toMatrix = (img: any) => isGrayscale
         ? this.plotUtilities.arrayToMatrix(Array.from(img.grey().data), img.width)
         : this.plotUtilities.arrayToMatrix(img.getPixelsArray(), img.width);
-      // Stop loading once a new file is selected or stack loading is switched off.
-      const wanted = () => this.fileName === imageInfo.fileName && this.stackLoading$.value;
+      // Stop loading once a new file is selected, stack loading is switched off,
+      // or the host aborts the load.
+      const wanted = () =>
+        this.fileName === imageInfo.fileName && this.stackLoading$.value && !signal?.aborted;
       const images: any[] = new Array(urls.length);
       let next = 0;
       let loaded = 0;
@@ -336,12 +341,18 @@ export class PlotlyService implements IVisualizer {
       const worker = async () => {
         while (next < urls.length && wanted()) {
           const i = next++;
-          images[i] = toMatrix(await this.loadImage(urls[i]));
+          images[i] = toMatrix(await this.loadImage(urls[i], signal));
           this.stackLoadingProgress$.next(Math.round((++loaded * 100) / urls.length));
         }
       };
       const poolSize = Math.min(PLOTLY_STACK_FETCH_CONCURRENCY, urls.length);
-      await Promise.all(Array.from({ length: poolSize }, () => worker()));
+      try {
+        await Promise.all(Array.from({ length: poolSize }, () => worker()));
+      } catch (err) {
+        this.stackLoadingProgress$.next(0);
+        throw err;
+      }
+      throwIfAborted(signal);
       // A cancelled load keeps the contiguous run of slices from the start.
       const firstGap = images.findIndex((m) => m === undefined);
       if (firstGap >= 0) images.length = firstGap;
@@ -1776,9 +1787,9 @@ export class PlotlyService implements IVisualizer {
    * are applied, then decode it with image-js. This avoids raw browser fetch()
    * calls that bypass the interceptor chain and fail behind an OAuth2 proxy.
    */
-  private async loadImage(url: string): Promise<Image> {
-    const buffer = await firstValueFrom(
-      this.http.get(url, { responseType: 'arraybuffer' })
+  private async loadImage(url: string, signal?: AbortSignal): Promise<Image> {
+    const buffer = await firstValueFromAbortable(
+      this.http.get(url, { responseType: 'arraybuffer' }), signal,
     );
     return Image.load(Buffer.from(buffer));
   }

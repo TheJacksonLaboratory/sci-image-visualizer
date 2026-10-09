@@ -662,6 +662,24 @@ describe('OpenSeadragonVisualizerService (tiled load via /tiles/info)', () => {
     await expect(pending).rejects.toThrow(/no descriptor/);
     warn.mockRestore();
   });
+
+  it('cancels the /tiles/info poll and rejects with an AbortError when the load is aborted', async () => {
+    const ctl = new AbortController();
+    const pending = service.load(BIG_SVS, 0, ctl.signal);
+    await new Promise((r) => setTimeout(r, 0));
+    const req = http.expectOne((r) => r.url.includes('tiles/info'));
+    ctl.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(req.cancelled).toBe(true);
+  });
+
+  it('rejects an already-aborted load without polling', async () => {
+    const ctl = new AbortController();
+    ctl.abort();
+    await expect(service.load(BIG_SVS, 0, ctl.signal))
+      .rejects.toMatchObject({ name: 'AbortError' });
+    http.expectNone((r) => r.url.includes('tiles/info'));
+  });
 });
 
 /**

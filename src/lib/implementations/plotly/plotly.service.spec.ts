@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { HttpClientTestingModule } from '@angular/common/http/testing';
+import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 
 import { PlotlyService, PlotType } from './plotly.service';
 import { VIZ_PORT_STUBS } from '../../testing/viz-port-stubs';
@@ -624,6 +624,56 @@ describe('PlotlyService async supersession (review OSD-PLOTLY-8)', () => {
     }
     const loaded = await run;
     expect(loaded.data.map((m: number[][]) => m[0][0])).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  // ── IDataRenderer.load(info, z, signal) (review CORE-11) ──────────────
+  it('cancels the image request and rejects with an AbortError when the load is aborted', async () => {
+    const http = TestBed.inject(HttpTestingController);
+    const ctl = new AbortController();
+    const info = { fileName: 'a.png', urls: ['a.png'], trueImageSize: [1, 1] } as unknown as IImageInfo;
+    const run = service.load(info, 0, ctl.signal);
+    const req = http.expectOne('a.png');
+    ctl.abort();
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' });
+    expect(req.cancelled).toBe(true);
+  });
+
+  it('rejects an already-aborted load without requesting anything', async () => {
+    const http = TestBed.inject(HttpTestingController);
+    const ctl = new AbortController();
+    ctl.abort();
+    const info = { fileName: 'a.png', urls: ['a.png'], trueImageSize: [1, 1] } as unknown as IImageInfo;
+    await expect(service.load(info, 0, ctl.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    http.expectNone('a.png');
+  });
+
+  it('stops a stack load when aborted: no further slices are requested', async () => {
+    const s = service as unknown as {
+      stackLoading$: Subject<boolean>; stackLoadingProgress$: { value: number };
+      loadImage(url: string, signal?: AbortSignal): Promise<unknown>;
+    };
+    s.stackLoading$.next(true);
+    const img = { width: 1, height: 1, grey: () => ({ data: [0] }) };
+    const requested: string[] = [];
+    jest.spyOn(s, 'loadImage').mockImplementation((url: unknown, signal: unknown) => {
+      requested.push(url as string);
+      if (url === 's0' && requested.length === 1) return Promise.resolve(img); // the displayed-slice probe
+      return new Promise((resolve, reject) => {
+        (signal as AbortSignal).addEventListener('abort', () =>
+          reject(new DOMException('aborted', 'AbortError')));
+      });
+    });
+    const ctl = new AbortController();
+    const info = { fileName: 'stack', isStack: true, showStack: true, isGrayscale: true,
+      urls: ['s0', 's1', 's2', 's3', 's4', 's5'], trueImageSize: [1, 1] } as unknown as IImageInfo;
+    const run = service.load(info, 0, ctl.signal);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(requested).toEqual(['s0', 's0', 's1', 's2', 's3']); // probe + 4 in flight
+    ctl.abort();
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(requested).toHaveLength(5); // s4, s5 never requested
+    expect(s.stackLoadingProgress$.value).toBe(0);
   });
 });
 

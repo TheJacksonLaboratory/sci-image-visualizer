@@ -395,6 +395,16 @@ describe('NapariVisualizerService', () => {
     });
   });
 
+  it('rejects an aborted load with an AbortError and keeps the recorded image (CORE-11)', async () => {
+    const first = await service.load(imageInfo(), 0);
+    const ctl = new AbortController();
+    ctl.abort();
+    await expect(service.load({ ...imageInfo(), fileName: 'other.tif' }, 0, ctl.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    expect((service as unknown as { loaded: unknown }).loaded).toBe(first);
+  });
+
   it('cache-busts the native /histogram request like the OSD backend (OSD-PLOTLY-15)', async () => {
     // Regression: napari's /histogram URL lacked the per-app-load `_=` token, so after a
     // reload the server's 24 h-cached answer was shown instead of the live one.

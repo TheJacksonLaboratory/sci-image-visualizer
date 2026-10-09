@@ -143,6 +143,7 @@ import {
   isAbortError,
   nativeHistogram,
   pollDescriptor,
+  throwIfAborted,
   tilesInfoUrl,
 } from '../tile-server';
 import { SimpleSliceAccessService } from '../simple-slice-access.service';
@@ -967,7 +968,14 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   }
 
   // ── IDataRenderer: load / render / viewport ───────────────────────────────
-  async load(imageInfo: IImageInfo, zIndex: number): Promise<NapariLoaded> {
+  /**
+   * Record the image to draw. No network work happens here — the descriptor poll and the tile,
+   * volume and spatial fetches all run in {@link plot} under its scene signal, which a newer plot,
+   * {@link reset} or `cancelLoading()` aborts — so `signal` is only checked: an already-aborted
+   * load rejects with an `AbortError` and leaves the recorded image alone.
+   */
+  async load(imageInfo: IImageInfo, zIndex: number, signal?: AbortSignal): Promise<NapariLoaded> {
+    throwIfAborted(signal);
     // Keeps SimpleSliceAccessService's blob cache in sync even when the user
     // switches backends (e.g. OSD Image → napari Volume) on the same file —
     // whichever backend loads a genuinely different file first evicts it.

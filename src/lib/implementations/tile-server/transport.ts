@@ -1,4 +1,5 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { Observable } from 'rxjs';
 
 /**
  * Transport for the jit-service tile protocol.
@@ -61,32 +62,57 @@ export function fetchJsonWithAuth(auth: AuthHeaderSource): FetchJson {
  * which cancels the XHR.
  */
 export function httpFetchJson(http: HttpClient): FetchJson {
-  return <T>(url: string, signal?: AbortSignal): Promise<JsonResponse<T>> =>
-    new Promise<JsonResponse<T>>((resolve, reject) => {
-      if (signal?.aborted) {
-        reject(abortError());
-        return;
-      }
-      const onAbort = (): void => {
-        sub.unsubscribe();
-        reject(abortError());
-      };
-      const sub = http.get<T>(url, { observe: 'response' }).subscribe({
-        next: (resp) => {
-          signal?.removeEventListener('abort', onAbort);
-          resolve({ status: resp.status, body: resp.body ?? null });
-        },
-        error: (err: unknown) => {
-          signal?.removeEventListener('abort', onAbort);
-          if (err instanceof HttpErrorResponse && err.status > 0) {
-            resolve({ status: err.status, body: null });
-          } else {
-            reject(err);
-          }
-        },
-      });
-      signal?.addEventListener('abort', onAbort, { once: true });
+  return async <T>(url: string, signal?: AbortSignal): Promise<JsonResponse<T>> => {
+    try {
+      const resp = await firstValueFromAbortable(http.get<T>(url, { observe: 'response' }), signal);
+      return { status: resp.status, body: resp.body ?? null };
+    } catch (err) {
+      if (err instanceof HttpErrorResponse && err.status > 0) return { status: err.status, body: null };
+      throw err;
+    }
+  };
+}
+
+/**
+ * `firstValueFrom` that unsubscribes (for `HttpClient`, cancels the XHR) and rejects with an
+ * {@link abortError} as soon as `signal` aborts. The subscription is made synchronously.
+ */
+export function firstValueFromAbortable<T>(source: Observable<T>, signal?: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortError());
+      return;
+    }
+    let settled = false;
+    const settle = (): void => {
+      settled = true;
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const onAbort = (): void => {
+      settle();
+      sub.unsubscribe();
+      reject(abortError());
+    };
+    const sub = source.subscribe({
+      next: (v) => {
+        if (settled) return;
+        settle();
+        resolve(v);
+        queueMicrotask(() => sub?.unsubscribe());
+      },
+      error: (err: unknown) => {
+        if (settled) return;
+        settle();
+        reject(err);
+      },
+      complete: () => {
+        if (settled) return;
+        settle();
+        reject(new Error('no elements in sequence'));
+      },
     });
+    if (!settled) signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 // ── AbortSignal helpers ─────────────────────────────────────────────────────
