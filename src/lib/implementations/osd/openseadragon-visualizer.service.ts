@@ -1751,14 +1751,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       corner.style.right = '12px';
     }
     Object.assign(nav.element.style, { position: 'relative', top: '', left: '', bottom: '', right: '', margin: '0' });
-    // TODO(debug): remove after verification
-    const ner = nav.element.getBoundingClientRect();
-    const wr = wrapper?.getBoundingClientRect();
-    const cr = corner?.getBoundingClientRect();
-    const per = el.getBoundingClientRect();
-    console.warn(`[viz:nav] navBottom=${Math.round(ner.bottom)} wrapBottom=${Math.round(wr?.bottom ?? -1)} ` +
-      `cornerBottom=${Math.round(cr?.bottom ?? -1)} plotBottom=${Math.round(per.bottom)} ` +
-      `navH=${Math.round(ner.height)} wrapH=${Math.round(wr?.height ?? -1)} cornerH=${Math.round(cr?.height ?? -1)}`);
   }
 
   /** Force the docked toolbar to repaint after an OSD zoom. Chrome leaves it

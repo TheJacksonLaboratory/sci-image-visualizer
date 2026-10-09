@@ -321,7 +321,6 @@ export class PlotlyService implements IVisualizer {
       this.stackLoadingProgress$.next(0);
       // One URL per slice — load them all (earlier `length-1` dropped the last).
       for (let i = 0; i < urls.length; i++) {
-        console.log(`image stack ${i}`);
         // do not keep with loading if filename is different (a new file has been selected)
         // or if the stackLoading value is set to false
         if (this.fileName === imageInfo.fileName && this.stackLoading$.value) {
@@ -1508,8 +1507,6 @@ export class PlotlyService implements IVisualizer {
                           zoom on the selected area once more.` });
       this.state.setLoadingError(true);
       this.state.setImageLoading(false);
-    }, complete: () => {
-      console.log('zooming complete');
     } });
   }
 
