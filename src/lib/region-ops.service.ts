@@ -3,6 +3,7 @@ import { Injectable } from '@angular/core';
 import { Region, Rectangle, Polygon, MultiPolygon } from './models/region';
 import { BBoxMask, unionMasks } from './geometry/raster';
 import { simplifyRing } from './geometry/ring';
+import { clonePolygon, makePolygon, rectToRing } from './models/polygon-factory';
 import { WandService } from './toolbar/wand/wand.service';
 
 /**
@@ -75,14 +76,10 @@ export class RegionOpsService {
 
   /** A copy of `p` with every coordinate (and hole coordinate) multiplied by `s`. */
   private scalePolygon(p: Polygon, s: number): Polygon {
-    const poly = new Polygon();
-    poly.xpoints = p.xpoints.map((x) => x * s);
-    poly.ypoints = p.ypoints.map((y) => y * s);
-    poly.npoints = poly.xpoints.length;
-    poly.closed = p.closed;
-    poly.coordinates = poly.xpoints.map((x, i) => [x, poly.ypoints[i]]);
-    if (p.holes) poly.holes = p.holes.map((ring) => ring.map(([x, y]) => [x * s, y * s]));
-    return poly;
+    return makePolygon(p.xpoints.map((x) => x * s), p.ypoints.map((y) => y * s), {
+      closed: p.closed,
+      holes: p.holes?.map((ring) => ring.map(([x, y]) => [x * s, y * s])),
+    });
   }
 
   /**
@@ -107,8 +104,7 @@ export class RegionOpsService {
     if (comps.length === 0) return null;
 
     // Image rectangle exterior with every component outline as a hole.
-    const rect = this.ringPolygon(
-      [0, imageWidth, imageWidth, 0], [0, 0, imageHeight, imageHeight]);
+    const rect = makePolygon([0, imageWidth, imageWidth, 0], [0, 0, imageHeight, imageHeight]);
     rect.holes = comps.map((c) => c.xpoints.map((x, i) => [x, c.ypoints[i]]));
 
     // Each component's own hole (donut interior) is *outside* the region, so it
@@ -117,23 +113,12 @@ export class RegionOpsService {
     for (const c of comps) {
       if (c.holes) {
         for (const ring of c.holes) {
-          parts.push(this.ringPolygon(ring.map((p) => p[0]), ring.map((p) => p[1])));
+          parts.push(makePolygon(ring.map((p) => p[0]), ring.map((p) => p[1])));
         }
       }
     }
     const bounds = parts.length === 1 ? parts[0] : Object.assign(new MultiPolygon(), { polygons: parts });
     return this.makeRegion(bounds, regions[0]);
-  }
-
-  /** A closed straight-edged Polygon from parallel coord arrays. */
-  private ringPolygon(xs: number[], ys: number[]): Polygon {
-    const p = new Polygon();
-    p.xpoints = xs.slice();
-    p.ypoints = ys.slice();
-    p.npoints = xs.length;
-    p.coordinates = xs.map((x, i) => [x, ys[i]]);
-    p.closed = true;
-    return p;
   }
 
   /**
@@ -146,7 +131,7 @@ export class RegionOpsService {
     if (b instanceof MultiPolygon) {
       return b.polygons
         .filter((p) => p.xpoints.length >= 3)
-        .map((p) => this.makeRegion(this.clonePolygon(p), region));
+        .map((p) => this.makeRegion(clonePolygon(p), region));
     }
     return [region];
   }
@@ -187,20 +172,11 @@ export class RegionOpsService {
       return s.xs.length >= 3 ? s : { xs: xs.slice(), ys: ys.slice() };
     };
     const ext = keepOrSrc(p.xpoints, p.ypoints);
-    const poly = new Polygon();
-    poly.npoints = ext.xs.length;
-    poly.xpoints = ext.xs;
-    poly.ypoints = ext.ys;
-    poly.coordinates = ext.xs.map((x, i) => [x, ext.ys[i]]);
-    poly.closed = true;
-    if (p.holes) {
-      const holes = p.holes.map((ring) => {
-        const s = keepOrSrc(ring.map((q) => q[0]), ring.map((q) => q[1]));
-        return s.xs.map((x, i) => [x, s.ys[i]]);
-      });
-      if (holes.length) poly.holes = holes;
-    }
-    return poly;
+    const holes = p.holes?.map((ring) => {
+      const s = keepOrSrc(ring.map((q) => q[0]), ring.map((q) => q[1]));
+      return s.xs.map((x, i) => [x, s.ys[i]]);
+    });
+    return makePolygon(ext.xs, ext.ys, { holes });
   }
 
   // ── internals ──────────────────────────────────────────────────────────
@@ -229,9 +205,8 @@ export class RegionOpsService {
       !holes || scale === 1 ? holes : holes.map((ring) => ring.map(([x, y]) => [x * scale, y * scale]));
     const b = region?.bounds;
     if (b instanceof Rectangle) {
-      const xs = [b.x, b.x + b.width, b.x + b.width, b.x];
-      const ys = [b.y, b.y, b.y + b.height, b.y + b.height];
-      return this.wand.rasterizePolygon(sc(xs), sc(ys), sw, sh);
+      const ring = rectToRing(b);
+      return this.wand.rasterizePolygon(sc(ring.xs), sc(ring.ys), sw, sh);
     }
     if (b instanceof Polygon) {
       if (b.closed === false || b.xpoints.length < 3) return null;
@@ -265,17 +240,5 @@ export class RegionOpsService {
     r.color = proto?.color;
     r.label = proto?.label ?? 'Region';
     return r;
-  }
-
-  private clonePolygon(p: Polygon): Polygon {
-    const poly = new Polygon();
-    poly.npoints = p.npoints;
-    poly.xpoints = p.xpoints.slice();
-    poly.ypoints = p.ypoints.slice();
-    poly.coordinates = p.coordinates.map((c) => c.slice());
-    poly.closed = p.closed;
-    poly.bezier = p.bezier;
-    if (p.holes) poly.holes = p.holes.map((ring) => ring.map((pt) => pt.slice()));
-    return poly;
   }
 }

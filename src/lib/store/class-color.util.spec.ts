@@ -1,5 +1,7 @@
 import { defaultPresetSet, PresetSet } from '../models/class-preset';
-import { colorForLabel, fallbackColorFor, findPreset, hashString, normalizeLabel } from './class-color.util';
+import {
+  colorForLabel, fallbackColorFor, findPreset, hashString, hslToHex, normalizeLabel, presetKey,
+} from './class-color.util';
 
 describe('class-color.util (jit-ui#70 colour engine)', () => {
   const baseSet = (): PresetSet => ({
@@ -76,5 +78,18 @@ describe('class-color.util (jit-ui#70 colour engine)', () => {
       expect(set.classes.find((c) => c.name === 'Tumor')?.color).toBe('#FF4444');
       expect(set.fallbackPalette.length).toBeGreaterThan(0);
     });
+  });
+});
+
+describe('presetKey / hslToHex', () => {
+  it('compares names exactly or normalized per the match mode', () => {
+    expect(presetKey({ matchMode: 'exact' }, ' Tumor ')).toBe(' Tumor ');
+    expect(presetKey({ matchMode: 'normalized' }, ' Tumor ')).toBe('tumor');
+  });
+
+  it('converts HSL to upper-case hex', () => {
+    expect(hslToHex(0, 100, 50)).toBe('#FF0000');
+    expect(hslToHex(120, 100, 25)).toBe('#008000');
+    expect(hslToHex(0, 0, 100)).toBe('#FFFFFF');
   });
 });

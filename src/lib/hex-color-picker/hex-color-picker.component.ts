@@ -3,6 +3,8 @@ import {
   EventEmitter, HostListener, Input, OnDestroy, Output, Renderer2, ViewChild,
 } from '@angular/core';
 
+import { hslToHex } from '../store/class-color.util';
+
 @Component({
   // Canonical prefixed selector first; the unprefixed original is kept as an
   // alias for one release (pre-publication back-compat).
@@ -151,7 +153,7 @@ export class HexColorPickerComponent implements OnDestroy {
   }
 
   onHslChange() {
-    const hex = this.hslToHex(this.hue, this.saturation, this.lightness);
+    const hex = hslToHex(this.hue, this.saturation, this.lightness);
     this._color = hex;
     this.syncRgbFromHex(hex);
     this.colorChange.emit(hex);
@@ -273,15 +275,4 @@ export class HexColorPickerComponent implements OnDestroy {
     return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
   }
 
-  private hslToHex(h: number, s: number, l: number): string {
-    s /= 100;
-    l /= 100;
-    const a = s * Math.min(l, 1 - l);
-    const f = (n: number) => {
-      const k = (n + h / 30) % 12;
-      const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
-      return Math.round(255 * color);
-    };
-    return this.rgbToHex(f(0), f(8), f(4));
-  }
 }

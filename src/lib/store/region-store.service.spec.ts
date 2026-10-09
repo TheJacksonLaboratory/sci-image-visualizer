@@ -801,12 +801,10 @@ describe('RegionStore', () => {
   });
 
   describe('colour / label + previous-shapes accessors', () => {
-    it('round-trips the show-label, shape-colour and fill-colour toggles', () => {
-      store.setShowShapeLabel(true);
-      store.setShapeColor('#abcdef');
-      store.setFillColor('#fedcba');
+    it('takes the show-label and fill-colour defaults from setRegions', () => {
+      store.setRegions([], true, true, '#fedcba');
       expect(store.getShowShapeLabel()).toBe(true);
-      expect(store.getShapeColor()).toBe('#abcdef');
+      expect(store.getShapeColor()).toBe('#00FFFF');
       expect(store.getFillColor()).toBe('#fedcba');
     });
 

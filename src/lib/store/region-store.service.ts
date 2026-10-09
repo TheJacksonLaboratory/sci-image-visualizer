@@ -8,8 +8,8 @@ import { VisualizerStore } from './visualizer-store.service';
 import { defaultHandleOffsets } from '../models/bezier';
 import { IRegionStore } from '../contracts/visualizer.contract';
 import { IRegionEditApi } from '../contracts/region-store.contract';
-import { findPreset, fallbackColorFor } from './class-color.util';
-import { regionPolygons } from '../models/polygon-factory';
+import { colorForLabel, presetKey } from './class-color.util';
+import { cloneBounds, makePolygon, rectToRing, regionPolygons } from '../models/polygon-factory';
 
 /**
  * Backend-neutral region store — the single source of truth for region state.
@@ -377,21 +377,26 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   getShapeColor(): string { return this.shapeColor; }
   getFillColor(): string { return this.fillColor; }
 
-  /** Convenience setters (not on the contract) for toolbar wiring. */
+  /** Show or hide region labels (not on the contract; specs drive it directly).
+   *  @deprecated Nothing in the library calls it; will be removed next minor. */
   setShowShapeLabel(show: boolean): void { this.showShapeLabel = show; }
-  setShapeColor(color: string): void { this.shapeColor = color; }
-  setFillColor(color: string): void { this.fillColor = color; }
 
   getClassificationColors(): Map<string, string> { return this.store.getClassificationColors(); }
   setClassificationColor(label: string, color: string): void { this.store.setClassificationColor(label, color); }
 
   // ── IRegionStore: previous-shapes buffer ───────────────────────────────
+  // Nothing reads this buffer back (only setPreviousShapes is ever called), and
+  // it aliases live instances, so it isn't a snapshot either (RT-24). It stays
+  // until the IRegionStore contract drops it.
 
-  /** Re-show the last saved snapshot (transient — does not alter stored state). */
+  /** Re-show the last saved snapshot (transient — does not alter stored state).
+   *  @deprecated Never called; will be removed with the contract member. */
   plotPreviousShapes(): void {
     this.regionUpdate$.next(this.previousRegions.slice());
   }
+  /** @deprecated Write-only; will be removed with the contract member. */
   setPreviousShapes(shapes: any[]): void { this.previousRegions = (shapes as Region[]).slice(); }
+  /** @deprecated Never called; will be removed with the contract member. */
   getPreviousShapes(): any[] { return this.previousRegions.slice(); }
 
   // ── IRegionStore: undo / redo (jit-ui#85) ──────────────────────────────
@@ -532,7 +537,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   private cloneRegion(r: Region): Region {
     const c = new Region();
     Object.assign(c, r);
-    c.bounds = r.bounds ? this.cloneBounds(r.bounds) : r.bounds;
+    c.bounds = r.bounds ? cloneBounds(r.bounds) : r.bounds;
     if (Array.isArray(r.tileCoordinates)) c.tileCoordinates = r.tileCoordinates.slice();
     return c;
   }
@@ -584,7 +589,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     const r = this.findById(id);
     if (!r) return;
     this.recordUndoSnapshot();
-    r.bounds = this.cloneBounds(bounds);
+    r.bounds = cloneBounds(bounds);
     this.syncCache();
     this.emit();
   }
@@ -728,15 +733,8 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     } else if (r.bounds instanceof Rectangle && bezier) {
       this.recordUndoSnapshot();
       // Smoothing a rectangle: convert it to a 4-anchor closed polygon first.
-      const b = r.bounds;
-      const xs = [b.x, b.x + b.width, b.x + b.width, b.x];
-      const ys = [b.y, b.y, b.y + b.height, b.y + b.height];
-      const poly = new Polygon();
-      poly.npoints = 4;
-      poly.xpoints = xs;
-      poly.ypoints = ys;
-      poly.coordinates = xs.map((x, i) => [x, ys[i]]);
-      poly.closed = true;
+      const ring = rectToRing(r.bounds);
+      const poly = makePolygon(ring.xs, ring.ys);
       this.applyBezier(poly, true);
       r.bounds = poly;
     } else {
@@ -913,20 +911,13 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
    */
   private applyClassificationColors(regions: Region[]): void {
     const set = this.store.getPresetSet();
-    const keyOf = (label: string) =>
-      set.matchMode === 'normalized' ? label.trim().toLowerCase() : label;
-    const known = new Set(set.classes.map((c) => keyOf(c.name)));
+    const known = new Set(set.classes.map((c) => presetKey(set, c.name)));
     for (const region of regions) {
       if (!region.label || region.colorOverridden) continue;
-      const preset = findPreset(region.label, set);
-      if (preset) {
-        region.color = preset.color;
-        continue;
-      }
-      const color = fallbackColorFor(region.label, set.fallbackPalette);
+      const color = colorForLabel(region.label, set);
       region.color = color;
-      if (set.autoPromote && !known.has(keyOf(region.label))) {
-        known.add(keyOf(region.label));
+      if (set.autoPromote && !known.has(presetKey(set, region.label))) {
+        known.add(presetKey(set, region.label));
         // In normalized mode, trim the promoted name so leading/trailing
         // whitespace doesn't create invisible duplicates or odd display names.
         const name = set.matchMode === 'normalized' ? region.label.trim() : region.label;
@@ -984,36 +975,6 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   private polygonOf(id: number): Polygon | undefined {
     const r = this.findById(id);
     return r && r.bounds instanceof Polygon ? r.bounds : undefined;
-  }
-
-  private clonePolygon(p: Polygon): Polygon {
-    const poly = new Polygon();
-    poly.npoints = p.npoints;
-    poly.xpoints = p.xpoints.slice();
-    poly.ypoints = p.ypoints.slice();
-    poly.coordinates = p.coordinates.map(c => c.slice());
-    poly.closed = p.closed;
-    poly.bezier = p.bezier;
-    if (p.handlesIn) poly.handlesIn = p.handlesIn.map(o => o.slice());
-    if (p.handlesOut) poly.handlesOut = p.handlesOut.map(o => o.slice());
-    if (p.holes) poly.holes = p.holes.map(ring => ring.map(pt => pt.slice()));
-    if (p.holeHandlesIn) poly.holeHandlesIn = p.holeHandlesIn.map(r => r.map(o => o.slice()));
-    if (p.holeHandlesOut) poly.holeHandlesOut = p.holeHandlesOut.map(r => r.map(o => o.slice()));
-    return poly;
-  }
-
-  private cloneBounds(bounds: Rectangle | Polygon | MultiPolygon): Rectangle | Polygon | MultiPolygon {
-    if (bounds instanceof Rectangle) {
-      const rect = new Rectangle();
-      rect.x = bounds.x; rect.y = bounds.y; rect.width = bounds.width; rect.height = bounds.height;
-      return rect;
-    }
-    if (bounds instanceof MultiPolygon) {
-      const mp = new MultiPolygon();
-      mp.polygons = bounds.polygons.map(p => this.clonePolygon(p));
-      return mp;
-    }
-    return this.clonePolygon(bounds);
   }
 
   private regionsEqual(a: Region, b: Region): boolean {

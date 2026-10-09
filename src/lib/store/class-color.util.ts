@@ -26,7 +26,16 @@ export function hashString(s: string): number {
   return h < 0 ? ~h : h;
 }
 
-function hslToHex(hDeg: number, sPct: number, lPct: number): string {
+/**
+ * The key two class names are compared by under the set's match mode: the name
+ * itself for `exact`, trimmed and lower-cased for `normalized`.
+ */
+export function presetKey(set: Pick<PresetSet, 'matchMode'>, label: string): string {
+  return set?.matchMode === 'normalized' ? normalizeLabel(label) : label;
+}
+
+/** `#RRGGBB` (upper-case) for an HSL colour: hue in degrees, saturation and lightness in %. */
+export function hslToHex(hDeg: number, sPct: number, lPct: number): string {
   const s = sPct / 100;
   const l = lPct / 100;
   const k = (n: number) => (n + hDeg / 30) % 12;

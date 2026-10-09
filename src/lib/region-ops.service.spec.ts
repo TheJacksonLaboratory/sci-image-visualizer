@@ -143,6 +143,22 @@ describe('RegionOpsService', () => {
       expect(parts.every(p => p.bounds instanceof Polygon)).toBe(true);
     });
 
+    it('keeps a bézier part\'s hand-edited handles (RT-26)', () => {
+      const part = poly([0, 10, 10, 0], [0, 0, 10, 10]).bounds as Polygon;
+      part.bezier = true;
+      part.handlesIn = [[-1, 0], [0, -1], [1, 0], [0, 1]];
+      part.handlesOut = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+      const other = poly([50, 60, 60, 50], [50, 50, 60, 60]).bounds as Polygon;
+      const r = new Region();
+      r.bounds = Object.assign(new MultiPolygon(), { polygons: [part, other] });
+      const [first] = ops.ungroup(r);
+      const b = first.bounds as Polygon;
+      expect(b.bezier).toBe(true);
+      expect(b.handlesIn).toEqual(part.handlesIn);
+      expect(b.handlesOut).toEqual(part.handlesOut);
+      expect(b.handlesIn).not.toBe(part.handlesIn); // a copy
+    });
+
     it('is a no-op (single-element) for a connected polygon', () => {
       const r = poly([0, 10, 10, 0], [0, 0, 10, 10]);
       expect(ops.ungroup(r)).toEqual([r]);
