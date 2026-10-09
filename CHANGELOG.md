@@ -9,6 +9,21 @@ file was added.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Plotly views stopped recolouring** and the intensity inset stopped updating after the
+  visualizer was destroyed and recreated (CORE-1).
+- **Cmd/Ctrl+D deleted the selected region**, and Ctrl+S/F/P/L/W toggled tools; modified keys
+  no longer trigger the bare-key shortcuts (CORE-2).
+- **A tiled OSD image showed the previous serverless multichannel image** on any channel change
+  (OSD-PLOTLY-1).
+- **Plotly wand, brush and SAM sampled the wrong pixels** after a high-def zoom (OSD-PLOTLY-2).
+- **Merged MultiPolygon regions were invisible and unclickable** in the napari view
+  (NAPARI-BOUNDARY-1).
+- **Undo did nothing for Region Editor edits**, and a cancelled label edit was kept
+  (RT-1, RT-18).
+- **Wand/brush brought back an undone or deleted region** on the next click (RT-2).
+
 ## [0.8.3] — 2026-10-08
 
 The napari canvas says when the tissue image is fetching new tiles.
