@@ -473,7 +473,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   /** Bumped whenever the cached positions go stale: a marker rebuild, or — in 3D
    *  only, where the projection depends on it — a camera move. */
   private spatialSceneRev = 0;
-  private hoverPointer: { x: number; y: number; clientX: number; clientY: number } | null = null;
+  private hoverPointer: { clientX: number; clientY: number } | null = null;
   private hoverFrame = 0;
   private hoverOff: (() => void)[] = [];
   /** Observation indices the cached 3D positions belong to, in the same order;
@@ -2121,15 +2121,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.spatialTooltip = new NapariSpatialTooltip(host);
 
     const onMove = (e: PointerEvent) => {
-      const canvas = this.canvas;
-      if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
-      this.hoverPointer = {
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top,
-        clientX: e.clientX,
-        clientY: e.clientY,
-      };
+      if (!this.canvas) return;
+      this.hoverPointer = { clientX: e.clientX, clientY: e.clientY };
       if (this.hoverFrame) return;
       this.hoverFrame = requestAnimationFrame(() => {
         this.hoverFrame = 0;
@@ -2221,27 +2214,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       }
     }
 
-    const positions = this.hoverPositionsFor(dataset.observations);
-    if (!positions) {
-      tip.hide();
-      return;
-    }
-    // 3D compares screen pixels directly; 2D holds world positions, so the radius
-    // is converted once instead of projecting the whole cloud.
-    const zoom = is3d ? 1 : (this.viewer?.camera.zoom ?? 1);
-    const radius = NapariVisualizerService.HOVER_RADIUS_PX / (zoom > 0 ? zoom : 1);
-    let x = pointer.x;
-    let y = pointer.y;
-    if (!is3d) {
-      const world = this.viewer?.canvasToWorld(pointer.clientX, pointer.clientY);
-      if (!world) {
-        tip.hide();
-        return;
-      }
-      [x, y] = world;
-    }
-
-    const hit = this.pickObservation(positions, x, y, radius, is3d);
+    const hit = this.hitTest(dataset.observations, pointer.clientX, pointer.clientY);
     const lines = hoverText(this.hoverSource, hit);
     if (!lines) {
       tip.hide();
@@ -2269,23 +2242,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // there is no set of cells that "is" a value.
     if (!store || !dataset || source?.kind !== 'categorical') return;
 
-    const positions = this.hoverPositionsFor(dataset.observations);
-    if (!positions) return;
-    const canvas = this.canvas;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const is3d = isSpatialOmics3d(this.currentPlotType);
-    const zoom = is3d ? 1 : (this.viewer?.camera.zoom ?? 1);
-    const radius = NapariVisualizerService.HOVER_RADIUS_PX / (zoom > 0 ? zoom : 1);
-    let x = clientX - rect.left;
-    let y = clientY - rect.top;
-    if (!is3d) {
-      const world = this.viewer?.canvasToWorld(clientX, clientY);
-      if (!world) return;
-      [x, y] = world;
-    }
-
-    const hit = nearestObservation(positions, x, y, radius);
+    // The same pick the tooltip makes — depth-aware in 3D — so a click selects the class the
+    // tooltip names, not an occluded marker's.
+    const hit = this.hitTest(dataset.observations, clientX, clientY);
     if (hit < 0) return;
     const code = source.codes[hit];
     // A cell the annotation does not cover has no class to select.
@@ -2298,6 +2257,27 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       return;
     }
     store.set(next);
+  }
+
+  /**
+   * The observation under a client position, or -1: the one hit-test the hover tooltip and the
+   * click-to-select share. 3D compares canvas pixels against the projected cloud; 2D holds world
+   * positions, so the pointer and the radius are converted once instead of projecting the cloud.
+   */
+  private hitTest(obs: SpatialObservations, clientX: number, clientY: number): number {
+    const positions = this.hoverPositionsFor(obs);
+    const canvas = this.canvas;
+    if (!positions || !canvas) return -1;
+    const is3d = isSpatialOmics3d(this.currentPlotType);
+    const zoom = is3d ? 1 : (this.viewer?.camera.zoom ?? 1);
+    const radius = NapariVisualizerService.HOVER_RADIUS_PX / (zoom > 0 ? zoom : 1);
+    if (is3d) {
+      const rect = canvas.getBoundingClientRect();
+      return this.pickObservation(positions, clientX - rect.left, clientY - rect.top, radius, true);
+    }
+    const world = this.viewer?.canvasToWorld(clientX, clientY);
+    if (!world) return -1;
+    return this.pickObservation(positions, world[0], world[1], radius, false);
   }
 
   /**

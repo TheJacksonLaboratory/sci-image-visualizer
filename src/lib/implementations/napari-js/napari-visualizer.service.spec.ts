@@ -1176,6 +1176,43 @@ describe('NapariVisualizerService', () => {
         await hover(x, y);
         expect(tip()?.style.display).toBe('none');
       });
+
+      it('selects the class the tooltip names when markers overlap on screen', async () => {
+        // Regression (NAPARI-SVC-5): the tooltip picked the FRONT-most marker, the click the
+        // one nearest the cursor's centre ignoring depth — so in a dense cloud a click selected
+        // an occluded cell's class while the tooltip named the one drawn over it.
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical', name: 'region', categories: ['Front', 'Back'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 1]),
+        });
+        // The front marker comes FIRST: a depth-blind "later point wins" tie rule picks the
+        // one behind it.
+        const stacked: SpatialDataset = {
+          ...spatialDataset3d(2),
+          observations: {
+            count: 2, x: new Float32Array([0, 0]), y: new Float32Array([0, 0]),
+            z: new Float32Array([5, 50]), radius: 27.5,
+          },
+        };
+        await mount3d(stacked);
+        // A projection with depth: w = z + 1, so both markers land on the canvas centre and
+        // observation 0 (z = 5) is in front of observation 1 (z = 50).
+        (service as unknown as { viewer: { camera3d: { viewProjection: () => number[] } } })
+          .viewer.camera3d.viewProjection = () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1];
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+
+        const [x, y] = screenOf(0);
+        await hover(x, y);
+        expect(tip()?.textContent).toContain('Front');
+
+        host().dispatchEvent(new MouseEvent('pointerdown', { clientX: x, clientY: y, bubbles: true }));
+        host().dispatchEvent(new MouseEvent('pointerup', { clientX: x, clientY: y, bubbles: true }));
+        expect(Array.from(TestBed.inject(SpatialSelectionStore).current().mask)).toEqual([1, 0]);
+      });
     });
 
     describe('screen projection', () => {
