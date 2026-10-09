@@ -1,6 +1,7 @@
+import { Viewer } from 'napari-js';
+
 import {
   NAVIGATOR_SIZE_RATIO, NapariNavigator, NavigatorCamera, navigatorLayout, navigatorToWorld,
-  viewportWorldRect,
 } from './napari-navigator';
 
 /** A camera that behaves like napari's: setting `center` emits `changed`, zoom untouched. */
@@ -38,10 +39,6 @@ describe('navigator geometry', () => {
     expect(navigatorLayout(300, 1000, 1000)!.width).toBe(110);
     expect(navigatorLayout(5000, 1000, 1000)!.width).toBe(300);
     expect(navigatorLayout(1000, 0, 10)).toBeNull();
-  });
-
-  it('computes the viewport in world units from centre and zoom', () => {
-    expect(viewportWorldRect([500, 400], 2, 800, 600)).toEqual([300, 250, 700, 550]);
   });
 
   it('maps a navigator point to the world, clamped to the image', () => {
@@ -127,6 +124,33 @@ describe('NapariNavigator', () => {
     const before = parseFloat(region.style.left);
     cam.center = [2500, 2500];
     expect(parseFloat(region.style.left)).toBeGreaterThan(before);
+  });
+
+  it('draws the viewport from the host size when given only a camera', () => {
+    const h = host(800, 600);
+    nav = new NapariNavigator(h, fakeCamera([500, 400], 2), 1000, 1000);
+    const region = h.querySelector('.napari-navigator > div') as HTMLElement;
+    const scale = parseFloat((h.querySelector('.napari-navigator') as HTMLElement).style.width) / 1000;
+    // 800 x 600 px at zoom 2 is 400 x 300 world units around (500, 400).
+    expect(parseFloat(region.style.left)).toBeCloseTo(300 * scale, 3);
+    expect(parseFloat(region.style.width)).toBeCloseTo(400 * scale, 3);
+  });
+
+  it('draws the viewport the viewer reports, sized from its canvas rather than the host', () => {
+    // A host holding more than the canvas (here 200 px wider): napari-js's own rect is right.
+    const h = host(1000, 600);
+    const canvas = document.createElement('canvas');
+    Object.defineProperty(canvas, 'clientWidth', { value: 800 });
+    Object.defineProperty(canvas, 'clientHeight', { value: 600 });
+    const viewer = new Viewer({ canvas });
+    viewer.camera.set([500, 400], 2);
+    nav = new NapariNavigator(h, viewer, 1000, 1000);
+    const region = h.querySelector('.napari-navigator > div') as HTMLElement;
+    const scale = parseFloat((h.querySelector('.napari-navigator') as HTMLElement).style.width) / 1000;
+    expect(parseFloat(region.style.left)).toBeCloseTo(300 * scale, 3);
+    expect(parseFloat(region.style.width)).toBeCloseTo(400 * scale, 3);
+    viewer.camera.center = [600, 400]; // follows the viewer's camera
+    expect(parseFloat(region.style.left)).toBeCloseTo(400 * scale, 3);
   });
 
   it('releases its listeners on destroy', () => {
