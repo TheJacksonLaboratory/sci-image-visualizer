@@ -57,7 +57,7 @@ import { PIXEL_WORLD_QUANTUM, worldQuantumForExtent } from '../../spatial/world-
 import { observationsInSlice, volumeImageRef } from '../../spatial/spatial-volume-image';
 import { defaultSigma, densityGrid, rasterizeDensity } from '../../spatial/spatial-density';
 import { observationsInSection, sectionsOf } from '../../spatial/spatial-sections';
-import { type HoverSource, hoverText, nearestObservation } from '../../spatial/spatial-hover';
+import { type HoverSource, hoverText, nearestObservation, PointGridIndex } from '../../spatial/spatial-hover';
 import { NapariSpatialTooltip } from './napari-spatial-tooltip';
 import { NapariSpatialTileLayers, TranscriptEstimate } from './napari-spatial-tiles';
 import { NapariNavigator } from './napari-navigator';
@@ -66,7 +66,7 @@ import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
 import { NAPARI_WHEEL_ZOOM_SPEED } from './napari-zoom';
 import {
   type ExpressionField, type ExpressionVolumeField, colorExpressionField,
-  encodeExpressionVolume, expressionField, expressionVolume,
+  encodeExpressionVolume, expressionField, expressionVolume, fieldContrastWindow,
 } from '../../spatial/spatial-expression';
 
 /**
@@ -586,6 +586,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
    * 0.066 ms.
    */
   private hoverIndex: ScreenIndex | null = null;
+  /** The 2D counterpart of {@link hoverIndex}: a grid over the world positions. */
+  private hoverGrid2d: PointGridIndex | null = null;
   /** Bumped whenever the cached positions go stale: a marker rebuild, or — in 3D
    *  only, where the projection depends on it — a camera move. */
   private spatialSceneRev = 0;
@@ -1613,7 +1615,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.navigator = null;
     if (!this.viewer || !this.host || !this.imageW || !this.imageH) return;
     this.navigator = new NapariNavigator(
-      this.host, this.viewer.camera, this.imageW, this.imageH, () => this.spatialTooltip?.hide(),
+      this.host, this.viewer, this.imageW, this.imageH, () => this.spatialTooltip?.hide(),
     );
     this.navigator.setVisible(this.navigatorVisible);
     void this.refreshNavigatorImage(z);
@@ -2343,6 +2345,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     this.hoverPositions = null;
     this.hoverPositionsRev = -1;
     this.hoverIndex = null;
+    this.hoverGrid2d = null;
   }
 
   /** Hit-test the last pointer position and show or hide the tooltip. */
@@ -2457,7 +2460,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     radius: number,
     is3d: boolean,
   ): number {
-    if (!is3d) return nearestObservation(positions, x, y, radius);
+    if (!is3d) {
+      return this.hoverGrid2d
+        ? this.hoverGrid2d.nearest(x, y, radius)
+        : nearestObservation(positions, x, y, radius);
+    }
     // The cloud draws a selected marker LARGER, so the pick has to use the same radius the
     // renderer used — otherwise the highlighted cells, the ones a reader is most likely to
     // be pointing at, are the hardest to hover.
@@ -2493,6 +2500,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // scene moved and not on every frame of an orbit. Only worth it past the point where
     // the linear scan stops being free; below that the build costs more than it saves.
     this.hoverIndex = null;
+    // 2D: the world positions only change with the dataset or section, so a grid built once
+    // replaces a linear scan of every observation per pointermove.
+    this.hoverGrid2d = !is3d && built ? PointGridIndex.build(built) : null;
     if (is3d && built && this.canvas && built.length / 2 >= SCREEN_INDEX_MIN_POINTS) {
       const w = this.canvas.clientWidth || this.canvas.width;
       const h = this.canvas.clientHeight || this.canvas.height;
@@ -3013,7 +3023,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     if (!field) return;
 
     const lut = this.spatialLut(view);
-    const [lo, hi] = contrastWindow(field.mean, clip[0], clip[1]);
+    // Over the measured pixels only: unmeasured ones are 0 and would drag the low end down.
+    const [lo, hi] = fieldContrastWindow(field, clip[0], clip[1]);
     const rgba = colorExpressionField(field, lut, [lo, hi], {
       log: view.logScale,
       // The MAP's own opacity: reading a field under the cells means turning the
@@ -3417,7 +3428,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     const field = this.geneMapVolumeField;
     if (!field) return;
 
-    const [lo, hi] = contrastWindow(field.mean, clip[0], clip[1]);
+    // The high end over the MEASURED voxels only (the unmeasured zeros would pull it down and
+    // saturate the map), but the low end stays 0: in a volume the value is also the opacity and
+    // 0 reads as "nothing here", so starting at the lowest measured value would erase it.
+    const [, hi] = fieldContrastWindow(field, clip[0], clip[1]);
+    const lo = 0;
     const data = encodeExpressionVolume(field, [lo, hi], { log: view.logScale });
     const lut = this.spatialLut(view);
     this.geneMapVolumeLayer = viewer.addVolume(
