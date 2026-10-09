@@ -762,6 +762,10 @@ export class PlotlyService implements IVisualizer {
   /** Emits the full set of intensity profiles (one per profile-line region)
    *  whenever a profile line is added, moved, or removed. */
   public getIntensityProfile$(): Observable<IntensityProfile[]> {
+    // A recreated VisualizerComponent subscribes here on init, before any Plotly
+    // load/plot — and with OSD/napari active none may follow. Re-arm the region
+    // subscriptions that drive the profiles (see ensureSubscriptions()).
+    this.ensureSubscriptions();
     return this.intensityProfile$.asObservable();
   }
 

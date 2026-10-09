@@ -472,6 +472,20 @@ describe('PlotlyService service-lifetime subscriptions (review CORE-1)', () => {
     expect(emitProfiles).toHaveBeenCalled();
   });
 
+  it('re-arms the profile subscriptions when a recreated component subscribes, with no Plotly plot', () => {
+    const regionStore = TestBed.inject(RegionStore);
+    // OSD/napari owns the view: after the teardown, the next component only
+    // subscribes to the profiles — Plotly never loads or plots.
+    service.unsubscribe();
+    service.getIntensityProfile$().subscribe();
+
+    const emitProfiles = jest.spyOn(service as unknown as { emitProfiles(): void }, 'emitProfiles');
+    const r = new Region();
+    r.bounds = Object.assign(new Rectangle(), { x: 1, y: 1, width: 5, height: 5 });
+    regionStore.setRegions([r]);
+    expect(emitProfiles).toHaveBeenCalled();
+  });
+
   it('does not double-subscribe when plot runs without a prior unsubscribe()', async () => {
     const store = TestBed.inject(VisualizerStore);
     const loaded = await service.load(imageInfo, 0);
