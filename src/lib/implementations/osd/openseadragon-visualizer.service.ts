@@ -1,7 +1,6 @@
 import { Injectable, Inject, Optional } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, EMPTY, Observable, firstValueFrom, of } from 'rxjs';
-import { timeout } from 'rxjs/operators';
+import { BehaviorSubject, EMPTY, Observable, of } from 'rxjs';
 import { Image } from 'image-js';
 import * as OpenSeadragon from 'openseadragon';
 import { OSD, quiet } from './osd-lib';
@@ -23,11 +22,12 @@ import { OsdViewportAdapter } from './osd-viewport';
 import { OsdNavigatorChrome } from './osd-navigator-chrome';
 import { PlotModeViewport } from '../../contracts/plot-type-contribution.contract';
 import { elementToImage } from './osd-coords';
-import { buildTileUrl, fetchTileBitmap } from './tile-client';
 import { buildOsdTileSource, planTiledMount } from './osd-tile-source';
 import { SliceCache } from './slice-cache';
 import { OsdTileRecolorer } from './tile-recolor';
 import { OsdLoaded, OsdSimpleSource } from './simple-source';
+import { readDrawerPixels, readbackViewportFrame, saveDrawerSnapshot } from './osd-pixel-readback';
+import { fetchTiffExport, fileStem, renderCompositePng } from './osd-export';
 import { HistogramSampler } from './histogram-sampler';
 import {
   TileDescriptor, exportTiffFilename, exportTiffUrl, httpFetchJson, pollDescriptor, throwIfAborted,
@@ -40,7 +40,6 @@ import { CachedImageData, CanvasToolHost } from '../../toolbar/tool-kit/canvas-t
 import { CanvasToolManager } from '../../toolbar/tool-kit/canvas-tool-manager';
 import { createCanvasToolManager } from '../../toolbar/canvas-tools';
 import { WandService } from '../../toolbar/wand/wand.service';
-import { packedFrame } from '../../toolbar/tool-kit/frame-pixels';
 import { SamToolService } from '../../toolbar/segmentation/sam-tool.service';
 import { SamPointToolService } from '../../toolbar/segmentation/sam-point-tool.service';
 import { CellSegmentToolService } from '../../toolbar/segmentation/cell-segment-tool.service';
@@ -635,13 +634,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    * are drawn.
    */
   getDisplayedPixelData(): PixelData | null {
-    const canvas: HTMLCanvasElement | undefined = this.viewer?.drawer?.canvas;
-    if (!canvas || !canvas.width || !canvas.height) return null;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return null;
-    const { width, height } = canvas;
-    const img = ctx.getImageData(0, 0, width, height);
-    return { width, height, channels: 4, data: img.data };
+    return readDrawerPixels(this.viewer);
   }
 
   /** Image-pixel rectangle the drawer canvas (what {@link getDisplayedPixelData}
@@ -650,20 +643,12 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     return this.viewport.displayedSourceRect();
   }
 
+  /** Snapshot the currently rendered view as a PNG (WYSIWYG) — the parallel to
+   *  Plotly's downloadImage. The drawer canvas already carries the display
+   *  settings (the recolor pipeline bakes them into the tiles); the full-resolution
+   *  stitched export is exportComposite(). */
   downloadImage(): void {
-    // Snapshot the currently rendered OSD view as a PNG (WYSIWYG) — the parallel
-    // to Plotly's downloadImage. OSD uses the 2D canvas drawer and bakes the
-    // active display settings (window / gamma / colormap / per-channel colours /
-    // invert) into the tiles via the recolor pipeline, so the drawer canvas
-    // already reflects exactly what's on screen at the current zoom/pan. The
-    // full-resolution stitched export lives in exportComposite() (Channels &
-    // Histogram dialog).
-    const canvas: HTMLCanvasElement | undefined = this.viewer?.drawer?.canvas;
-    if (!canvas || !canvas.width || !canvas.height) return;
-    const stem = (this.currentFileName || 'image').replace(/\.[^.]+$/, '');
-    canvas.toBlob((blob) => {
-      if (blob) saveAs(blob, `${stem}.png`);
-    }, 'image/png');
+    saveDrawerSnapshot(this.viewer, (blob) => saveAs(blob, `${fileStem(this.currentFileName)}.png`));
   }
 
   setPlotType(_plotType: PlotType): void {
@@ -765,48 +750,10 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     return this.plotDiv ? document.getElementById(this.plotDiv) : null;
   }
 
-  /**
-   * Read back the *currently rendered* OSD canvas as the pixel tools' frame.
-   * The matrix covers only the visible viewport at screen resolution, so when
-   * the user is zoomed into a sub-region the wand samples that region's detail
-   * (rather than the whole image at preview resolution). `originX/originY` and
-   * `ratios` map image coords <-> readback-pixel coords for the wand's
-   * data/ratio/origin model. Cached until the viewport changes.
-   */
+  /** The pixel tools' frame: the rendered viewport, read back once and cached
+   *  until the viewport changes (see readbackViewportFrame). */
   private readbackViewport(): CachedImageData | null {
-    if (this.viewportPixels) return this.viewportPixels;
-    const viewer = this.viewer;
-    const canvas: HTMLCanvasElement | undefined = viewer?.drawer?.canvas;
-    const vp = viewer?.viewport;
-    if (!canvas || !canvas.width || !canvas.height || !vp) return null;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return null;
-
-    const w = canvas.width; // device pixels
-    const h = canvas.height;
-    // The RGBA readback is the tools' frame as-is (packed, RT-17): no per-pixel arrays.
-    const data = ctx.getImageData(0, 0, w, h).data;
-
-    // Image-coord span the readback covers (CSS px in, image coords out). Route
-    // through world item 0 (osd-coords) so it stays accurate — and quiet — when
-    // the world holds multiple images (per-channel multichannel layers).
-    const elW = canvas.clientWidth || w;
-    const elH = canvas.clientHeight || h;
-    const tl = elementToImage(this.viewer, 0, 0);
-    const br = elementToImage(this.viewer, elW, elH);
-    const ratioX = (br.x - tl.x) / w; // image px per readback px
-    const ratioY = (br.y - tl.y) / h;
-
-    this.viewportPixels = {
-      frames: [packedFrame(data, w, h)],
-      width: w,
-      height: h,
-      ratios: [ratioX, ratioY],
-      isGrayscale: false, // canvas readback is always RGBA
-      originX: tl.x,
-      originY: tl.y,
-    };
-    return this.viewportPixels;
+    return this.viewportPixels ??= readbackViewportFrame(this.viewer);
   }
 
   /** Per-channel histogram for the Channels & Histogram pane, from the current
@@ -847,110 +794,22 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     const visible = states.filter((c) => c.visible).map((c) => c.index);
     const url = exportTiffUrl(this.api, this.infoB64, this.currentZ, visible, states.length);
     const saveName = exportTiffFilename(this.currentFileName);
-    try {
-      const resp = await firstValueFrom(
-        this.http
-          .get(url, { observe: 'response', responseType: 'blob' })
-          .pipe(timeout(600000)), // large exports stream slowly; generous deadline
-      );
-      if (resp.status === 202) {
-        console.warn('[OSD] 16-bit export: file still caching — try again shortly.');
-        return;
-      }
-      const blob = resp.body;
-      if (blob) saveAs(blob, saveName);
-    } catch (err) {
-      console.warn('[OSD] 16-bit TIFF export failed', err);
-    }
+    const blob = await fetchTiffExport(this.http, url);
+    if (blob) saveAs(blob, saveName);
   }
 
   /**
    * Export the current slice as a publication-ready PNG composited with the
-   * active display settings (window / gamma / colormap or per-channel pseudo-
-   * colours / invert). Picks the largest pyramid level under a pixel cap (the
-   * coarser overview for huge whole-slides), fetches that level's tile grid,
-   * stitches it into one canvas, runs the shared display pipeline, and saves it.
-   * A per-channel (multichannel) image is exported the way it is drawn: each
-   * visible channel's tiles are stitched and merged additively with its tint.
+   * active display settings, the way it is drawn (see renderCompositePng).
    */
   async exportComposite(): Promise<void> {
-    const desc = this.descriptor;
-    // Per-channel tiles exist only at the real Bio-Formats levels.
-    const levels = (this.isMultiChannel ? desc?.levels.slice(0, this.realLevels) : desc?.levels) ?? [];
-    if (!desc || !this.infoB64 || !levels.length) return;
-    const CAP = 32_000_000; // ~32 MP — bounds memory for whole-slide images
-    let res = levels.length - 1; // coarsest fallback
-    for (let i = 0; i < levels.length; i++) {
-      if (levels[i].width * levels[i].height <= CAP) { res = i; break; }
-    }
-    const lw = levels[res].width;
-    const lh = levels[res].height;
-    const t = desc.tileSize;
-    const cols = Math.max(1, Math.ceil(lw / t));
-    const rows = Math.max(1, Math.ceil(lh / t));
-    const canvas = document.createElement('canvas');
-    canvas.width = lw;
-    canvas.height = lh;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return;
-    const z = this.currentZ;
-    const infoB64 = this.infoB64;
-    /** Stitch the level's tile grid (server composite, or one channel) into the canvas. */
-    const stitch = async (channel?: number): Promise<void> => {
-      ctx.clearRect(0, 0, lw, lh);
-      const jobs: Promise<void>[] = [];
-      for (let row = 0; row < rows; row++) {
-        for (let col = 0; col < cols; col++) {
-          const url = buildTileUrl(this.api, infoB64, { res, col, row, z, tileSize: t, channel });
-          jobs.push(
-            (async () => {
-              try {
-                const bmp = await fetchTileBitmap(this.http, url, 30000);
-                ctx.drawImage(bmp, col * t, row * t);
-                bmp.close?.();
-              } catch (err) {
-                // Skip a failed tile — the exported composite has a gap there.
-                console.warn('[viz:export] composite tile fetch failed, skipping', url, err);
-              }
-            })(),
-          );
-        }
-      }
-      await Promise.all(jobs);
-    };
-    try {
-      if (this.isMultiChannel) {
-        const states = this.recolor.channelStates;
-        const nCh = Math.max(1, states.length || (desc.channels ?? 1));
-        let out: Uint8ClampedArray | null = null;
-        let imageData: ImageData | null = null;
-        for (let c = 0; c < nCh; c++) {
-          if (states[c]?.visible === false) continue;
-          await stitch(c);
-          imageData = ctx.getImageData(0, 0, lw, lh);
-          out ??= new Uint8ClampedArray(imageData.data.length);
-          this.recolor.display.addChannel(out, imageData.data, states[c]);
-        }
-        if (imageData && out) {
-          for (let i = 3; i < out.length; i += 4) out[i] = 255; // opaque
-          imageData.data.set(out);
-          ctx.putImageData(imageData, 0, 0);
-        } else {
-          ctx.clearRect(0, 0, lw, lh); // every channel hidden
-        }
-      } else {
-        await stitch();
-        const imageData = ctx.getImageData(0, 0, lw, lh);
-        if (this.recolor.display.applyToRgba(imageData.data)) ctx.putImageData(imageData, 0, 0);
-      }
-    } catch (err) {
-      // Keep the un-recolored composite if readback fails — but say why.
-      console.warn('[viz:export] composite recolor readback failed — exporting raw tiles', err);
-    }
-    const stem = (this.currentFileName || 'image').replace(/\.[^.]+$/, '');
-    canvas.toBlob((blob) => {
-      if (blob) saveAs(blob, `${stem}_composite.png`);
-    }, 'image/png');
+    if (!this.descriptor) return;
+    const blob = await renderCompositePng({
+      http: this.http, api: this.api, descriptor: this.descriptor, infoB64: this.infoB64, z: this.currentZ,
+      multiChannel: this.isMultiChannel, realLevels: this.realLevels,
+      channelStates: this.recolor.channelStates, display: this.recolor.display,
+    });
+    if (blob) saveAs(blob, `${fileStem(this.currentFileName)}_composite.png`);
   }
 
   // ── IDisplayOptions ──────────────────────────────────────────────────
