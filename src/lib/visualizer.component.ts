@@ -62,6 +62,9 @@ import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-da
 import { SpatialDataset } from './contracts/spatial-dataset.contract';
 import { buildVolumeStackImage } from './spatial/spatial-volume-image';
 import { applyImageRois } from './visualizer/region-load';
+import {
+  ContextMenuActions, ContextMenuState, buildContextMenu, buildRegionActionItems, opEligible, regionsAt,
+} from './visualizer/visualizer-context-menu';
 
 /** Per-instance plot-div id source. The mount element's id must be unique so two
  *  live viewers (e.g. the main diagram + a modal preview) don't collide on the
@@ -1703,20 +1706,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
 
   /** The currently-selected regions (live store instances). */
   private get selectedRegions(): Region[] {
-    const all = this.plotService.getRegions();
-    return this.selectedIndices
-      .map((i) => all[i])
-      .filter((r): r is Region => !!r);
-  }
-
-  /** Regions eligible for set-ops: closed areas (rect / closed polygon /
-   *  multi-polygon), excluding intensity-profile lines. */
-  private opEligible(regions: Region[]): Region[] {
-    return regions.filter((r) => r.kind !== 'profile' && (
-      r.bounds instanceof Rectangle ||
-      r.bounds instanceof MultiPolygon ||
-      (r.bounds instanceof Polygon && r.bounds.closed !== false)
-    ));
+    return regionsAt(this.plotService.getRegions(), this.selectedIndices);
   }
 
   /** Image pixel dimensions for the raster ops; falls back to the selection's
@@ -1751,7 +1741,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
 
   /** Merge the selected regions into a single (possibly multi-part) region. */
   mergeRegions(): void {
-    const sel = this.opEligible(this.selectedRegions);
+    const sel = opEligible(this.selectedRegions);
     if (sel.length < 2) return;
     const { w, h } = this.opImageDims(sel);
     const merged = this.regionOps.merge(sel, w, h);
@@ -1769,7 +1759,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
 
   /** Replace the selection with its inverse inside the image rectangle. */
   inverseRegions(): void {
-    const sel = this.opEligible(this.selectedRegions);
+    const sel = opEligible(this.selectedRegions);
     if (sel.length === 0) return;
     const { w, h } = this.opImageDims(sel);
     const inv = this.regionOps.inverse(sel, w, h);
@@ -1786,7 +1776,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
 
   /** Douglas–Peucker simplify each selected region by `thresholdPx`. */
   simplifyRegions(thresholdPx: number): void {
-    const sel = this.opEligible(this.selectedRegions);
+    const sel = opEligible(this.selectedRegions);
     if (sel.length === 0) return;
     this.replaceRegions(sel, sel.map((r) => this.regionOps.simplify(r, thresholdPx)));
     this.displaySimplifyDialog = false;
@@ -2002,215 +1992,44 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.plotService.getRegionOverlay()?.setSelectedBezier(false);
   }
 
-  /**
-   * Immediate region actions on the current selection (jit-ui#85): merge,
-   * ungroup, inverse, simplify, the Bézier conversions, and delete — the
-   * one-shot geometry transforms, grouped apart from the tool/mode toggles and
-   * shown only when something is selected. Each item is gated on what the
-   * selection supports.
-   */
-  private buildRegionActionItems(): MenuItem[] {
-    const all = this.plotService.getRegions();
-    const selectable = all.filter((r) => r.kind !== 'profile');
-    if (selectable.length === 0) return [];
-    const items: MenuItem[] = [];
-
-    // Select all — available whenever the image has regions, regardless of the
-    // current selection.
-    items.push({
-      label: 'Select all regions', icon: 'pi pi-check-square',
-      command: () => this.selectAllRegions(),
-    });
-
-    const selAll = this.selectedRegions;
-    if (selAll.length === 0) return items;
-    const eligible = this.opEligible(selAll);
-
-    if (eligible.length >= 2) {
-      items.push({ label: 'Merge / group', icon: 'pi pi-link', command: () => this.mergeRegions() });
-    }
-    if (selAll.some((r) => this.regionOps.canUngroup(r))) {
-      items.push({ label: 'Ungroup', icon: 'pi pi-sitemap', command: () => this.ungroupRegions() });
-    }
-    if (eligible.length >= 1) {
-      items.push(
-        { label: 'Inverse', icon: 'pi pi-clone', command: () => this.inverseRegions() },
-        {
-          label: 'Simplify', icon: 'pi pi-chart-line',
-          items: [
-            { label: 'Light (1 px)', command: () => this.simplifyRegions(1) },
-            { label: 'Medium (3 px)', command: () => this.simplifyRegions(3) },
-            { label: 'Strong (8 px)', command: () => this.simplifyRegions(8) },
-            { separator: true },
-            { label: 'Custom…', command: () => this.openSimplifyDialog() },
-          ],
-        },
-      );
-    }
-    // Bézier conversions are vertex-level edits — Image (OpenSeadragon) view
-    // only — gated on the selection's current form.
-    if (this.basePlotType === PlotType.IMAGE) {
-      const hasStraight = selAll.some((r) =>
-        (r.bounds instanceof Polygon && !r.bounds.bezier) || r.bounds instanceof Rectangle);
-      const hasBezier = selAll.some((r) => r.bounds instanceof Polygon && r.bounds.bezier);
-      if (hasStraight) {
-        items.push({ label: 'Convert to Bézier', icon: 'to-bezier-icon', command: () => this.toBezierRegion() });
-      }
-      if (hasBezier) {
-        items.push({ label: 'Convert to polygon', icon: 'to-polygon-icon', command: () => this.toPolygonRegion() });
-      }
-    }
-    items.push({ label: 'Delete region', icon: 'pi pi-trash', command: () => this.deleteRegion() });
-    return items;
-  }
-
+  /** The right-click menu for the current view, armed mode and selection. */
   private buildContextMenuItems(): MenuItem[] {
-    const active = this.activeDragMode;
-    const activeClass = 'context-menu-active';
-    const items: MenuItem[] = [];
-    // Selected-region actions lead the menu (separated from the tool toggles).
-    if (this.isHeatmap) {
-      const actions = this.buildRegionActionItems();
-      if (actions.length) items.push(...actions, { separator: true });
-    }
-    if (this.isHeatmap) {
-      items.push(
-        { label: 'Autoscale', icon: 'pi pi-window-maximize', command: () => this.autoscaleImage() },
-        { separator: true },
-      );
-      // 'Zoom selection' is Plotly's rubber-band zoom; it doesn't apply to the
-      // OpenSeadragon-backed Image view (use 'Zoom to box' there instead).
-      if (!this.isImageView) {
-        items.push({
-          label: 'Zoom selection',
-          icon: 'pi pi-search',
-          styleClass: active === 'zoom' ? activeClass : '',
-          command: () => this.toggleDragMode('zoom'),
-        });
-      }
-      items.push({
-        label: 'Zoom to box',
-        icon: 'zoom-box-off-icon',
-        styleClass: active === 'zoomToBox' ? activeClass : '',
-        command: () => this.toggleDragMode('zoomToBox'),
-      });
-    }
-    if (this.isHeatmap) {
-      items.push({
-        label: 'Pan',
-        icon: 'pi pi-arrows-alt',
-        styleClass: active === 'pan' ? activeClass : '',
-        command: () => this.toggleDragMode('pan'),
-      });
-    } else {
-      const s3d = this.activeSurface3dMode;
-      items.push(
-        {
-          label: 'Zoom',
-          icon: 'pi pi-search',
-          styleClass: s3d === 'zoom' ? activeClass : '',
-          command: () => this.toggleSurface3dMode('zoom'),
-        },
-        {
-          label: 'Pan',
-          icon: 'pi pi-arrows-alt',
-          styleClass: s3d === 'pan' ? activeClass : '',
-          command: () => this.toggleSurface3dMode('pan'),
-        },
-        {
-          label: 'Orbital rotation',
-          icon: 'pi pi-globe',
-          styleClass: s3d === 'orbit' ? activeClass : '',
-          command: () => this.toggleSurface3dMode('orbit'),
-        },
-        {
-          label: 'Turntable rotation',
-          icon: 'pi pi-sync',
-          styleClass: s3d === 'turntable' ? activeClass : '',
-          command: () => this.toggleSurface3dMode('turntable'),
-        },
-        { separator: true },
-        { label: 'Reset camera', icon: 'pi pi-home', command: () => this.resetSurfaceCamera() },
-      );
-    }
-    if (this.isHeatmap) {
-      items.push(
-        { label: 'Zoom in', icon: 'pi pi-search-plus', command: () => this.zoomIn() },
-        { label: 'Zoom out', icon: 'pi pi-search-minus', command: () => this.zoomOut() },
-        { separator: true },
-        {
-          label: 'Select',
-          icon: 'pi pi-arrow-up-right',
-          styleClass: active === 'select' ? activeClass : '',
-          command: () => this.toggleDragMode('select'),
-        },
-        {
-          label: 'Freeform',
-          icon: 'pi pi-pencil',
-          styleClass: active === 'drawclosedpath' ? activeClass : '',
-          command: () => this.toggleDragMode('drawclosedpath'),
-        },
-        {
-          label: 'Brush',
-          icon: 'brush-icon',
-          styleClass: active === 'brush' ? activeClass : '',
-          command: () => this.toggleDragMode('brush'),
-        },
-        {
-          label: 'Polyline',
-          icon: 'polyline-icon',
-          styleClass: active === 'drawopenpath' ? activeClass : '',
-          command: () => this.toggleDragMode('drawopenpath'),
-        },
-        {
-          label: 'Rectangle',
-          icon: 'pi pi-stop',
-          styleClass: active === 'drawrect' ? activeClass : '',
-          command: () => this.toggleDragMode('drawrect'),
-        },
-        {
-          label: 'Wand',
-          icon: 'wand-icon',
-          styleClass: active === 'wand' ? activeClass : '',
-          command: () => this.toggleDragMode('wand'),
-        },
-        {
-          label: 'Vertex eraser',
-          icon: 'pi pi-eraser',
-          styleClass: active === 'eraseVertex' ? activeClass : '',
-          command: () => this.toggleDragMode('eraseVertex'),
-        },
-      );
-      // Vertex editing runs on the OpenSeadragon overlay, which
-      // backs the Image plot type. Hidden for other 2D types (Plotly), where
-      // these modes are no-ops.
-      if (this.basePlotType === PlotType.IMAGE) {
-        items.push(
-          {
-            label: 'Polygon (click vertices)',
-            icon: 'polygon-vertices-icon',
-            styleClass: active === 'drawpolygon' ? activeClass : '',
-            command: () => this.toggleDragMode('drawpolygon'),
-          },
-          {
-            label: 'Add vertex',
-            icon: 'vertex-add-icon',
-            styleClass: active === 'addpoint' ? activeClass : '',
-            command: () => this.toggleDragMode('addpoint'),
-          },
-          {
-            label: 'Delete vertex',
-            icon: 'vertex-delete-icon',
-            styleClass: active === 'deletepoint' ? activeClass : '',
-            command: () => this.toggleDragMode('deletepoint'),
-          },
-        );
-      }
-      // Bézier conversions + Delete are immediate selection *actions*, now in the
-      // "Selected region(s)" group at the top (see buildRegionActionItems).
-    }
-    return items;
+    return buildContextMenu(this.contextMenuState(), this.contextMenuActions);
   }
+
+  private buildRegionActionItems(): MenuItem[] {
+    return buildRegionActionItems(this.contextMenuState(), this.contextMenuActions);
+  }
+
+  private contextMenuState(): ContextMenuState {
+    return {
+      isHeatmap: this.isHeatmap,
+      basePlotType: this.basePlotType,
+      activeDragMode: this.activeDragMode,
+      activeSurface3dMode: this.activeSurface3dMode,
+      regions: this.plotService.getRegions(),
+      selectedIndices: this.selectedIndices,
+      canUngroup: (r) => this.regionOps.canUngroup(r),
+    };
+  }
+
+  private readonly contextMenuActions: ContextMenuActions = {
+    autoscale: () => this.autoscaleImage(),
+    zoomIn: () => this.zoomIn(),
+    zoomOut: () => this.zoomOut(),
+    toggleDragMode: (mode) => this.toggleDragMode(mode),
+    toggleSurface3dMode: (mode) => this.toggleSurface3dMode(mode),
+    resetSurfaceCamera: () => this.resetSurfaceCamera(),
+    selectAllRegions: () => this.selectAllRegions(),
+    mergeRegions: () => this.mergeRegions(),
+    ungroupRegions: () => this.ungroupRegions(),
+    inverseRegions: () => this.inverseRegions(),
+    simplifyRegions: (px) => this.simplifyRegions(px),
+    openSimplifyDialog: () => this.openSimplifyDialog(),
+    toBezierRegion: () => this.toBezierRegion(),
+    toPolygonRegion: () => this.toPolygonRegion(),
+    deleteRegion: () => this.deleteRegion(),
+  };
 
   toggleSurface3dMode(mode: string) {
     this.activeSurface3dMode = mode;
