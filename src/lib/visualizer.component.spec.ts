@@ -17,6 +17,7 @@ jest.mock('./render-orchestrator', () => {
   };
 });
 
+import { destroyComponent, own, testDestroyRef } from './testing/test-destroy-ref';
 import { VisualizerComponent } from './visualizer.component';
 import { PlotType, PLOT_TYPE_DESCRIPTORS } from './contracts/plot-type';
 import { VisualizerStore } from './store/visualizer-store.service';
@@ -94,7 +95,8 @@ function mockPlotService(): any {
 }
 
 function makeComponent(plot: any, spatialData?: any): VisualizerComponent {
-  return new VisualizerComponent(
+  const destroyRef = testDestroyRef();
+  return own(new VisualizerComponent(
       { setDiagram: jest.fn(), setImageLoading: jest.fn(), setImageInfo: jest.fn() } as any, // ImageStatePort
       plot,
       { add: jest.fn(), clear: jest.fn() } as any, // MessageService
@@ -123,16 +125,20 @@ function makeComponent(plot: any, spatialData?: any): VisualizerComponent {
       undefined, // VIZ_CONFIG
       undefined, // TOOLBAR_TOOLS
       spatialData, // SPATIAL_DATA_PORT (optional — absent for image-only hosts)
-    );
+      undefined, // PLOT_TYPE_CONTRIBUTIONS
+      undefined, // Injector
+      undefined, // host ElementRef
+      destroyRef,
+    ), destroyRef);
 }
 
 /** Move the pointer over a viewer's plot (creating the div when there is no template),
  *  so its keyboard shortcuts apply: keys are scoped per viewer (CORE-2). */
 function hover(c: VisualizerComponent): HTMLElement {
-  let el = document.getElementById(c.plotDivName);
+  let el = document.getElementById(c['plotDivName']);
   if (!el) {
     el = document.createElement('div');
-    el.id = c.plotDivName;
+    el.id = c['plotDivName'];
     document.body.appendChild(el);
   }
   el.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
@@ -214,7 +220,8 @@ function harness(overrides: Record<string, unknown> = {}) {
   const toolFeeds = () => ({ status$: subject(''), busy$: subject(false), progress$: subject(-1) }) as any;
   const messages = { add: jest.fn(), clear: jest.fn() };
   const store = new VisualizerStore();
-  const component = new VisualizerComponent(
+  const destroyRef = testDestroyRef();
+  const component = own(new VisualizerComponent(
     state,
     plot,
     messages as any,
@@ -225,7 +232,9 @@ function harness(overrides: Record<string, unknown> = {}) {
     toolFeeds(),
     toolFeeds(),
     new RegionOpsService(),
-  );
+    undefined, undefined, undefined, undefined, undefined, undefined,
+    destroyRef,
+  ), destroyRef);
   component.ngOnInit();
   return { component, plot, state, imageInfo$, subjects, messages, store };
 }
@@ -261,24 +270,24 @@ describe('VisualizerComponent (UI shell)', () => {
 
       live().add(first);
       live().add(second);
-      expect(first.ownsSharedToasts).toBe(true);
-      expect(second.ownsSharedToasts).toBe(false); // no duplicate outlet
+      expect(first['ownsSharedToasts']).toBe(true);
+      expect(second['ownsSharedToasts']).toBe(false); // no duplicate outlet
 
       // Tearing down the owner must not leave the outlets unrendered — that
       // would silently drop every notice raised by the root-provided service.
       live().delete(first);
-      expect(second.ownsSharedToasts).toBe(true);
+      expect(second['ownsSharedToasts']).toBe(true);
     });
 
     it('renders no outlet when nothing is live', () => {
-      expect(component.ownsSharedToasts).toBe(false);
+      expect(component['ownsSharedToasts']).toBe(false);
     });
   });
 
   it('gives each instance its own intensity-inset div id (CORE-9)', () => {
     const other = makeComponent(mockPlotService());
-    expect(component.intensityInsetDiv).not.toBe(other.intensityInsetDiv);
-    expect(component.intensityInsetDiv).not.toBe(component.plotDivName);
+    expect(component['intensityInsetDiv']).not.toBe(other['intensityInsetDiv']);
+    expect(component['intensityInsetDiv']).not.toBe(component['plotDivName']);
   });
 
   it('constructs and reads the plot-type descriptors through the service', () => {
@@ -300,7 +309,7 @@ describe('VisualizerComponent (UI shell)', () => {
     it('default selector shows only the curated set, under suffix-free labels', () => {
       component.testMode = false;
       (component as any).computePlotTypeOptions();
-      const byType = new Map(component.plotTypeOptions.map((d) => [d.type, d.label]));
+      const byType = new Map(component['plotTypeOptions'].map((d) => [d.type, d.label]));
 
       // curated + relabeled
       expect(byType.get(PlotType.IMAGE)).toBe('Image');
@@ -322,7 +331,7 @@ describe('VisualizerComponent (UI shell)', () => {
     it('test mode shows every type under its backend-suffixed label', () => {
       component.testMode = true;
       (component as any).computePlotTypeOptions();
-      const byType = new Map(component.plotTypeOptions.map((d) => [d.type, d.label]));
+      const byType = new Map(component['plotTypeOptions'].map((d) => [d.type, d.label]));
 
       // Test mode lifts the `productionLabel` CURATION, not the capability gates:
       // the spatial types still need a dataset, exactly as a volume still needs a
@@ -332,7 +341,7 @@ describe('VisualizerComponent (UI shell)', () => {
       expect(gated.map((d) => d.type).sort()).toEqual(
         [PlotType.SPATIAL_OMICS, PlotType.SPATIAL_OMICS_3D].sort(),
       );
-      expect(component.plotTypeOptions.length).toBe(ALL_DESCRIPTORS.length - gated.length);
+      expect(component['plotTypeOptions'].length).toBe(ALL_DESCRIPTORS.length - gated.length);
       expect(byType.has(PlotType.SPATIAL_OMICS)).toBe(false);
       expect(byType.has(PlotType.SPATIAL_OMICS_3D)).toBe(false);
       expect(byType.get(PlotType.IMAGE)).toBe('Image (OSD)');
@@ -346,23 +355,23 @@ describe('VisualizerComponent (UI shell)', () => {
       // default (testMode=false): the curated set excludes the napari Image mode
       component.testMode = false;
       (component as any).computePlotTypeOptions();
-      expect(component.plotTypeOptions.some((d) => d.type === PlotType.NAPARI_IMAGE)).toBe(false);
+      expect(component['plotTypeOptions'].some((d) => d.type === PlotType.NAPARI_IMAGE)).toBe(false);
       // host binds testMode=true → ngOnChanges recomputes → it now appears,
       // without waiting for an image to (re)load
       component.testMode = true;
       component.ngOnChanges({ testMode: {} } as any);
-      expect(component.plotTypeOptions.some((d) => d.type === PlotType.NAPARI_IMAGE)).toBe(true);
+      expect(component['plotTypeOptions'].some((d) => d.type === PlotType.NAPARI_IMAGE)).toBe(true);
     });
 
     it('falls back to Image when test mode turns off while a test-only type is active', () => {
       // test mode on, and a test-only type (napari Image) is the active selection
       component.testMode = true;
       component.ngOnChanges({ testMode: {} } as any);
-      component.selectedPlotType = PlotType.NAPARI_IMAGE;
+      component['selectedPlotType'] = PlotType.NAPARI_IMAGE;
       // turning test mode off drops that option → selection reconciled to Image
       component.testMode = false;
       component.ngOnChanges({ testMode: {} } as any);
-      expect(component.selectedPlotType).toBe(PlotType.IMAGE);
+      expect(component['selectedPlotType']).toBe(PlotType.IMAGE);
       expect(plotService.setPlotType).toHaveBeenCalledWith(PlotType.IMAGE);
     });
   });
@@ -383,7 +392,7 @@ describe('VisualizerComponent (UI shell)', () => {
     const DESCRIPTORS = [PLOT_TYPE_DESCRIPTORS[PlotType.IMAGE], SPATIAL_DESCRIPTOR] as any[];
 
     const offered = (c: VisualizerComponent) =>
-      c.plotTypeOptions.some((d) => d.type === SPATIAL_DESCRIPTOR.type);
+      c['plotTypeOptions'].some((d) => d.type === SPATIAL_DESCRIPTOR.type);
 
     let dataset$: BehaviorSubject<any>;
     let port: any;
@@ -401,7 +410,7 @@ describe('VisualizerComponent (UI shell)', () => {
       (c as any).watchSpatialDataset();
       (c as any).computePlotTypeOptions();
       expect(offered(c)).toBe(false);
-      expect(c.plotTypeOptions.some((d) => d.type === PlotType.IMAGE)).toBe(true);
+      expect(c['plotTypeOptions'].some((d) => d.type === PlotType.IMAGE)).toBe(true);
     });
 
     it('hides it while the port is bound but no dataset is selected', () => {
@@ -426,14 +435,14 @@ describe('VisualizerComponent (UI shell)', () => {
       dataset$.next({ id: 'visium-brain', observations: { count: 2 } });
 
       // The spatial mode is the active selection…
-      c.selectedPlotType = SPATIAL_DESCRIPTOR.type;
+      c['selectedPlotType'] = SPATIAL_DESCRIPTOR.type;
       c.plotType = SPATIAL_DESCRIPTOR.type;
 
       // …and the host deselects the dataset.
       dataset$.next(null);
 
       expect(offered(c)).toBe(false);
-      expect(c.selectedPlotType).toBe(PlotType.IMAGE);
+      expect(c['selectedPlotType']).toBe(PlotType.IMAGE);
       expect(plotService.setPlotType).toHaveBeenCalledWith(PlotType.IMAGE);
     });
 
@@ -454,14 +463,14 @@ describe('VisualizerComponent (UI shell)', () => {
       dataset$.next({ id: 'visium-brain', observations: { count: 2 } });
 
       expect(offered(c)).toBe(true);
-      expect(c.plotTypeOptions.some((d) => d.type === PlotType.NAPARI_VOLUME)).toBe(false);
+      expect(c['plotTypeOptions'].some((d) => d.type === PlotType.NAPARI_VOLUME)).toBe(false);
     });
 
     it('unsubscribes on destroy', () => {
       const c = makeComponent(plotService, port);
       (c as any).watchSpatialDataset();
       expect(dataset$.observed).toBe(true);
-      c.ngOnDestroy();
+      destroyComponent(c);
       expect(dataset$.observed).toBe(false);
     });
 
@@ -500,13 +509,13 @@ describe('VisualizerComponent (UI shell)', () => {
         (c as any).imageInfo = undefined; // before the volume image is published
         (c as any).watchSpatialDataset();
         dataset$.next(VOLUME_DATASET);
-        expect(c.plotTypeOptions.length).toBe(0);
+        expect(c['plotTypeOptions'].length).toBe(0);
 
         // …and after: the shape `buildVolumeStackImage` publishes.
         (c as any).imageInfo = { isStack: true, isGrayscale: true };
         (c as any).computePlotTypeOptions();
 
-        const offeredTypes = c.plotTypeOptions.map((d) => d.type);
+        const offeredTypes = c['plotTypeOptions'].map((d) => d.type);
         expect(offeredTypes).toContain(PlotType.NAPARI_VOLUME);
         expect(offeredTypes).toContain(PlotType.NAPARI_ISOSURFACE);
       });
@@ -519,7 +528,7 @@ describe('VisualizerComponent (UI shell)', () => {
         const c = makeComponent(plotService, port);
         // The user was on the 3D cloud (the previous dataset), so this also covers
         // the mode actually switching rather than merely already being Image.
-        c.selectedPlotType = PlotType.SPATIAL_OMICS_3D;
+        c['selectedPlotType'] = PlotType.SPATIAL_OMICS_3D;
         (c as any).watchSpatialDataset();
         dataset$.next({
           ...VOLUME_DATASET,
@@ -656,10 +665,10 @@ describe('VisualizerComponent (UI shell)', () => {
         });
         await flush();
 
-        const sources = c.plotTypeOptions.map((d) => d.source);
+        const sources = c['plotTypeOptions'].map((d) => d.source);
         expect(sources).not.toContain('image');
         // …and the spatial mode it CAN draw is still there.
-        expect(c.plotTypeOptions.some((d) => d.type === PlotType.SPATIAL_OMICS)).toBe(true);
+        expect(c['plotTypeOptions'].some((d) => d.type === PlotType.SPATIAL_OMICS)).toBe(true);
       });
 
       it('keeps the pixel modes while a REGISTERED dataset waits for its image', async () => {
@@ -673,7 +682,7 @@ describe('VisualizerComponent (UI shell)', () => {
         });
         await flush();
 
-        expect(c.plotTypeOptions.some((d) => d.type === PlotType.IMAGE)).toBe(true);
+        expect(c['plotTypeOptions'].some((d) => d.type === PlotType.IMAGE)).toBe(true);
       });
 
       it('keeps the pixel modes for a volume-backed dataset with no imageRef', async () => {
@@ -688,7 +697,7 @@ describe('VisualizerComponent (UI shell)', () => {
         });
         await flush();
 
-        expect(c.plotTypeOptions.some((d) => d.source === 'image')).toBe(true);
+        expect(c['plotTypeOptions'].some((d) => d.source === 'image')).toBe(true);
       });
 
       it('keeps Image on offer when there is no dataset at all', async () => {
@@ -699,7 +708,7 @@ describe('VisualizerComponent (UI shell)', () => {
         dataset$.next(null);
         await flush();
 
-        expect(c.plotTypeOptions.some((d) => d.type === PlotType.IMAGE)).toBe(true);
+        expect(c['plotTypeOptions'].some((d) => d.type === PlotType.IMAGE)).toBe(true);
       });
 
       it('opens the 2D scatter for a one-plane dataset with no image', async () => {
@@ -945,40 +954,40 @@ describe('VisualizerComponent (UI shell)', () => {
           r.bounds = p; return r; })(),
       ]);
       (component as any).regionActions.selectedIndices = [0];
-      component.displaySimplifyDialog = true;
+      component['displaySimplifyDialog'] = true;
       component.simplifyRegions(2);
       expect((read()[0].bounds as Polygon).xpoints.length).toBe(4); // bump removed
-      expect(component.displaySimplifyDialog).toBe(false);
+      expect(component['displaySimplifyDialog']).toBe(false);
     });
   });
 
   it('onZScrub debounces slice swaps while dragging (last value wins)', () => {
-    component.onZScrub(1);
-    component.onZScrub(2);
-    component.onZScrub(3);
+    component['onZScrub'](1);
+    component['onZScrub'](2);
+    component['onZScrub'](3);
     expect(plotService.setZIndex).not.toHaveBeenCalled();
     jest.advanceTimersByTime(120);
     expect(plotService.setZIndex).toHaveBeenCalledTimes(1);
     expect(plotService.setZIndex).toHaveBeenCalledWith(3);
-    expect(component.zIndex).toBe(3);
+    expect(component['zIndex']).toBe(3);
   });
 
   it('onZSlide applies immediately and cancels a pending scrub', () => {
-    component.onZScrub(2);
-    component.onZSlide(5);
+    component['onZScrub'](2);
+    component['onZSlide'](5);
     expect(plotService.setZIndex).toHaveBeenCalledWith(5);
     jest.advanceTimersByTime(500);
     expect(plotService.setZIndex).toHaveBeenCalledTimes(1); // scrub dropped
   });
 
   it('stepSlice clamps to the stack bounds', () => {
-    component.maxIndex = 4;
-    component.zIndex = 4;
+    component['maxIndex'] = 4;
+    component['zIndex'] = 4;
     component.stepSlice(1); // already at the end
     expect(plotService.setZIndex).not.toHaveBeenCalled();
     component.stepSlice(-1);
     expect(plotService.setZIndex).toHaveBeenCalledWith(3);
-    component.zIndex = 0;
+    component['zIndex'] = 0;
     plotService.setZIndex.mockClear();
     component.stepSlice(-1); // already at the start
     expect(plotService.setZIndex).not.toHaveBeenCalled();
@@ -996,24 +1005,24 @@ describe('VisualizerComponent (UI shell)', () => {
     // per-slice swap/preserve semantics themselves are covered in
     // region-store.service.spec (enterStackMode / setDisplaySlice / getSliceRegions).
     it('routes the committed slice to the store via setDisplaySlice', () => {
-      component.onZSlide(2); // commit is synchronous
+      component['onZSlide'](2); // commit is synchronous
       expect(plotService.setZIndex).toHaveBeenCalledWith(2);
       expect(plotService.setDisplaySlice).toHaveBeenCalledWith(2);
     });
 
     it('does not re-import geojson or replace regions on scrub (the store owns the swap)', () => {
-      component.imageInfo = { roiJsonStrs: ['GEO-0', 'GEO-1', null] } as any;
+      component['imageInfo'] = { roiJsonStrs: ['GEO-0', 'GEO-1', null] } as any;
 
-      component.onZSlide(1);
+      component['onZSlide'](1);
       expect(plotService.setDisplaySlice).toHaveBeenCalledWith(1);
       expect(plotService.importRegions).not.toHaveBeenCalled();
       expect(plotService.setRegions).not.toHaveBeenCalled();
     });
 
     it('debounced scrub commits the last slice to the store once', () => {
-      component.onZScrub(1);
-      component.onZScrub(2);
-      component.onZScrub(3);
+      component['onZScrub'](1);
+      component['onZScrub'](2);
+      component['onZScrub'](3);
       expect(plotService.setDisplaySlice).not.toHaveBeenCalled();
       jest.advanceTimersByTime(120);
       expect(plotService.setDisplaySlice).toHaveBeenCalledTimes(1);
@@ -1022,18 +1031,18 @@ describe('VisualizerComponent (UI shell)', () => {
   });
 
   it('openChannelHistogram shows the dialog; dockToolbar re-docks it', () => {
-    expect(component.showChannelHistogram).toBe(false);
-    component.openChannelHistogram();
-    expect(component.showChannelHistogram).toBe(true);
+    expect(component['showChannelHistogram']).toBe(false);
+    component['openChannelHistogram']();
+    expect(component['showChannelHistogram']).toBe(true);
 
-    component.toolbarFloating = true;
-    component.dockToolbar();
-    expect(component.toolbarFloating).toBe(false);
+    component['toolbarFloating'] = true;
+    component['dockToolbar']();
+    expect(component['toolbarFloating']).toBe(false);
   });
 
   describe('toolbar + region handler delegation', () => {
     it('simple viewport actions delegate to the service', () => {
-      component.downloadImage();
+      component['downloadImage']();
       component.autoscaleImage();
       component.resetAxes();
       component.zoomIn();
@@ -1048,9 +1057,9 @@ describe('VisualizerComponent (UI shell)', () => {
     });
 
     it('onToggleImageSmoothing flips state and applies it', () => {
-      expect(component.imageSmoothingEnabled).toBe(false);
-      component.onToggleImageSmoothing();
-      expect(component.imageSmoothingEnabled).toBe(true);
+      expect(component['imageSmoothingEnabled']).toBe(false);
+      component['onToggleImageSmoothing']();
+      expect(component['imageSmoothingEnabled']).toBe(true);
       expect(plotService.setImageSmoothingEnabled).toHaveBeenCalledWith(true);
     });
 
@@ -1062,27 +1071,27 @@ describe('VisualizerComponent (UI shell)', () => {
     });
 
     it('onWandSensitivityChange updates state + service and guards bad values', () => {
-      component.onWandSensitivityChange(3.5);
-      expect(component.wandSensitivity).toBe(3.5);
+      component['onWandSensitivityChange'](3.5);
+      expect(component['wandSensitivity']).toBe(3.5);
       expect(plotService.setWandOptions).toHaveBeenCalledWith({ sensitivity: 3.5 });
-      component.onWandSensitivityChange(undefined);
-      component.onWandSensitivityChange(NaN);
+      component['onWandSensitivityChange'](undefined);
+      component['onWandSensitivityChange'](NaN);
       expect(plotService.setWandOptions).toHaveBeenCalledTimes(1); // bad values ignored
     });
 
     it('onVertexEraserRadiusChange updates state + service', () => {
-      component.onVertexEraserRadiusChange(7);
-      expect(component.vertexEraserRadius).toBe(7);
+      component['onVertexEraserRadiusChange'](7);
+      expect(component['vertexEraserRadius']).toBe(7);
       expect(plotService.setVertexEraserRadius).toHaveBeenCalledWith(7);
     });
 
     it('onIsoRangeChange updates the isosurface controls and guards short arrays', () => {
       const controls = { setIsoRange: jest.fn() };
       plotService.getIsosurfaceControls.mockReturnValue(controls);
-      component.onIsoRangeChange([10, 200]);
+      component['onIsoRangeChange']([10, 200]);
       expect(controls.setIsoRange).toHaveBeenCalledWith(10, 200);
-      component.onIsoRangeChange([5]); // too short → ignored
-      component.onIsoRangeChange(undefined);
+      component['onIsoRangeChange']([5]); // too short → ignored
+      component['onIsoRangeChange'](undefined);
       expect(controls.setIsoRange).toHaveBeenCalledTimes(1);
     });
 
@@ -1090,10 +1099,10 @@ describe('VisualizerComponent (UI shell)', () => {
       const overlay = mockOverlay();
       plotService.getRegionOverlay.mockReturnValue(overlay);
       component.toggleDragMode('drawrect');
-      expect(component.activeDragMode).toBe('drawrect');
+      expect(component['activeDragMode']).toBe('drawrect');
       expect(overlay.setMode).toHaveBeenLastCalledWith('drawrect');
       component.toggleDragMode('drawrect'); // re-select → toggle off
-      expect(component.activeDragMode).toBeNull();
+      expect(component['activeDragMode']).toBeNull();
       expect(overlay.setMode).toHaveBeenLastCalledWith('none');
     });
 
@@ -1103,13 +1112,13 @@ describe('VisualizerComponent (UI shell)', () => {
     });
 
     it('toggleDragMode wand arms the wand with the current sensitivity', () => {
-      component.wandSensitivity = 2.5;
+      component['wandSensitivity'] = 2.5;
       component.toggleDragMode('wand');
       expect(plotService.setActiveTool).toHaveBeenCalledWith('wand', { sensitivity: 2.5 });
     });
 
     it('toggleDragMode eraseVertex arms the eraser with its radius', () => {
-      component.vertexEraserRadius = 12;
+      component['vertexEraserRadius'] = 12;
       component.toggleDragMode('eraseVertex');
       expect(plotService.setActiveTool).toHaveBeenLastCalledWith('eraseVertex', { radius: 12 });
     });
@@ -1136,16 +1145,16 @@ describe('VisualizerComponent (UI shell)', () => {
     });
 
     it('cancelLoading resets the loading flags and slice index', () => {
-      component.cancelLoading();
+      component['cancelLoading']();
       expect(plotService.setZIndex).toHaveBeenCalledWith(0);
       expect(plotService.setStackLoading).toHaveBeenCalledWith(false);
     });
 
     it('updateZIndex clamps the index into range before pushing it', () => {
-      component.maxIndex = 5;
-      component.zIndex = 99;
-      component.updateZIndex();
-      expect(component.zIndex).toBe(5);
+      component['maxIndex'] = 5;
+      component['zIndex'] = 99;
+      component['updateZIndex']();
+      expect(component['zIndex']).toBe(5);
       expect(plotService.setZIndex).toHaveBeenCalledWith(5);
     });
   });
@@ -1172,8 +1181,8 @@ describe('VisualizerComponent — keyboard shortcuts with modifiers (CORE-2)', (
   });
 
   afterEach(() => {
-    component.ngOnDestroy();
-    document.getElementById(component.plotDivName)?.remove();
+    destroyComponent(component);
+    document.getElementById(component['plotDivName'])?.remove();
   });
 
   const press = (init: KeyboardEventInit) =>
@@ -1229,8 +1238,8 @@ describe('VisualizerComponent — keyboard shortcuts are scoped to one viewer (C
 
   afterEach(() => {
     for (const c of [a, b]) {
-      c.ngOnDestroy();
-      document.getElementById(c.plotDivName)?.remove();
+      destroyComponent(c);
+      document.getElementById(c['plotDivName'])?.remove();
     }
   });
 
@@ -1267,7 +1276,7 @@ describe('VisualizerComponent — keyboard shortcuts are scoped to one viewer (C
 
   it('a destroyed viewer no longer takes keys', () => {
     hover(a);
-    a.ngOnDestroy();
+    destroyComponent(a);
     press('d');
     expect(plotA.deleteActiveShape).not.toHaveBeenCalled();
   });
@@ -1358,7 +1367,7 @@ describe('VisualizerComponent — teardown (CORE-3)', () => {
   it('leaves no subscription behind on the ports or the backend after ngOnDestroy', () => {
     const { component, subjects } = harness();
     expect(subjects.some((s) => s.observed)).toBe(true); // sanity: init subscribed
-    component.ngOnDestroy();
+    destroyComponent(component);
     const leaked = subjects.filter((s) => s.observed);
     expect(leaked).toHaveLength(0);
   });
@@ -1370,11 +1379,11 @@ describe('VisualizerComponent — teardown (CORE-3)', () => {
       getStackLoadingProgress: () => progress$,
       isStackLoading: () => loading$,
     });
-    component.ngOnDestroy();
+    destroyComponent(component);
     progress$.next(42);
     loading$.next(true);
-    expect(component.loadingPercentage).toBe(0);
-    expect(component.stackLoading).toBe(false);
+    expect(component['loadingPercentage']()).toBe(0);
+    expect(component['stackLoading']()).toBe(false);
   });
 });
 
@@ -1403,7 +1412,7 @@ describe('VisualizerComponent — global listeners run outside Angular (CORE-4)'
   });
 
   afterEach(() => {
-    component.ngOnDestroy();
+    destroyComponent(component);
     jest.restoreAllMocks();
   });
 
@@ -1417,15 +1426,15 @@ describe('VisualizerComponent — global listeners run outside Angular (CORE-4)'
 
   it('steps the slice on ArrowRight/ArrowLeft from the one keydown listener', () => {
     hover(component).remove();
-    component.imageInfo = { isStack: true } as IImageInfo;
-    component.maxIndex = 5;
+    component['imageInfo'] = { isStack: true } as IImageInfo;
+    component['maxIndex'] = 5;
     const press = (key: string) =>
       document.body.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key }));
     press('ArrowRight');
     press('ArrowRight');
-    expect(component.zIndex).toBe(2);
+    expect(component['zIndex']).toBe(2);
     press('ArrowLeft');
-    expect(component.zIndex).toBe(1);
+    expect(component['zIndex']).toBe(1);
   });
 });
 
@@ -1443,7 +1452,7 @@ describe('VisualizerComponent — failed and superseded renders (CORE-11)', () =
     imageInfo$.next(info('A.tif'));
     const [host] = orchestratorHosts;
     await expect(host.renderPhase(info('A.tif'), false)).rejects.toThrow();
-    component.ngOnDestroy();
+    destroyComponent(component);
   });
 
   it('tells the user when the current render failed, and stays quiet for a superseded one', () => {
@@ -1455,7 +1464,7 @@ describe('VisualizerComponent — failed and superseded renders (CORE-11)', () =
     expect(messages.add).not.toHaveBeenCalled();
     live.renderFailed(new Error('no WebGPU'));
     expect(messages.add).toHaveBeenCalledWith(expect.objectContaining({ severity: 'error' }));
-    component.ngOnDestroy();
+    destroyComponent(component);
   });
 
   it('hands load() an AbortSignal and aborts it when a newer image supersedes the render', async () => {
@@ -1467,19 +1476,19 @@ describe('VisualizerComponent — failed and superseded renders (CORE-11)', () =
     expect(signal.aborted).toBe(false);
     imageInfo$.next(info('B.tif'));
     expect(signal.aborted).toBe(true);
-    component.ngOnDestroy();
+    destroyComponent(component);
   });
 
   it('aborts the in-flight load on cancel and on destroy', async () => {
     const { component, plot, imageInfo$ } = harness();
     imageInfo$.next(info('A.tif'));
     await orchestratorHosts[0].renderPhase(info('A.tif'), false);
-    component.cancelLoading();
+    component['cancelLoading']();
     expect(plot.load.mock.calls[0][2].aborted).toBe(true);
 
     imageInfo$.next(info('B.tif'));
     await orchestratorHosts[1].renderPhase(info('B.tif'), false);
-    component.ngOnDestroy();
+    destroyComponent(component);
     expect(plot.load.mock.calls[1][2].aborted).toBe(true);
   });
 });
@@ -1494,14 +1503,14 @@ describe('VisualizerComponent — a cancelled render is superseded', () => {
       trueImageSize: [1, 1], imageMeta: [], scaleRatio: true, roiJsonStr: '{}',
     });
     const [host] = orchestratorHosts;
-    component.cancelLoading();
+    component['cancelLoading']();
     // The aborted load rejects, and the orchestrator reports it as it would any failure.
     host.finished(false);
     host.renderFailed(new DOMException('The operation was aborted.', 'AbortError'));
     expect(messages.add).not.toHaveBeenCalled();
     expect(plot.setRegions).not.toHaveBeenCalled();
     expect(plot.resetUndoHistory).not.toHaveBeenCalled();
-    component.ngOnDestroy();
+    destroyComponent(component);
   });
 });
 
@@ -1515,27 +1524,27 @@ describe('VisualizerComponent — host-owned image info is never mutated (CORE-1
     const { component, imageInfo$ } = harness();
     const info = stack({ initialZIndex: 2 });
     expect(() => imageInfo$.next(info)).not.toThrow();
-    expect(component.zIndex).toBe(2);
+    expect(component['zIndex']).toBe(2);
     // Re-driving the pipeline from the component's copy must not jump back to the hint.
-    expect(component.imageInfo?.initialZIndex).toBeUndefined();
-    component.ngOnDestroy();
+    expect(component['imageInfo']?.initialZIndex).toBeUndefined();
+    destroyComponent(component);
   });
 
   it('publishes the image meta keyed by file name, so channel edits do not leak across images (CORE-8)', () => {
     const { component, imageInfo$, plot } = harness();
     imageInfo$.next(stack());
     expect(plot.setImageMeta).toHaveBeenCalledWith([], 'series.tif');
-    component.ngOnDestroy();
+    destroyComponent(component);
   });
 
   it('does not re-apply the hint when the host re-emits the very same object', () => {
     const { component, imageInfo$ } = harness();
     const info = stack({ initialZIndex: 2 });
     imageInfo$.next(info);
-    component.zIndex = 3; // the user scrubbed
+    component['zIndex'] = 3; // the user scrubbed
     imageInfo$.next(info);
-    expect(component.zIndex).toBe(3);
-    component.ngOnDestroy();
+    expect(component['zIndex']).toBe(3);
+    destroyComponent(component);
   });
 
   it('switching to a stack-only Plotly type re-emits a copy with showStack on', () => {
@@ -1547,7 +1556,7 @@ describe('VisualizerComponent — host-owned image info is never mutated (CORE-1
     const sent = state.setImageInfo.mock.calls.at(-1)[0];
     expect(sent).toMatchObject({ fileName: 'series.tif', showStack: true });
     expect(sent).not.toBe(info);
-    component.ngOnDestroy();
+    destroyComponent(component);
   });
 });
 
@@ -1563,12 +1572,12 @@ describe('VisualizerComponent — host handle (CORE-10)', () => {
     expect(handle.hasRegions()).toBe(true);
     handle.getRegionPolygons();
     expect(plot.getRegionPolygons).toHaveBeenCalled();
-    component.ngOnDestroy();
+    destroyComponent(component);
   });
 
   it('clears the registration on destroy so the host does not keep a dead viewer', () => {
     const { component, state } = harness();
-    component.ngOnDestroy();
+    destroyComponent(component);
     expect(state.setDiagram).toHaveBeenLastCalledWith(null);
   });
 });
@@ -1581,12 +1590,12 @@ describe('VisualizerComponent — autoscale from the backend (CORE-5)', () => {
     expect(plot.setActiveTool).toHaveBeenLastCalledWith('wand', expect.anything());
 
     autoscale$.next(); // the context-menu "Autoscale" on OSD / napari
-    expect(component.activeDragMode).toBeNull();
+    expect(component['activeDragMode']).toBeNull();
     expect(plot.setActiveTool).toHaveBeenLastCalledWith(null, undefined);
     let tool: string | null = 'unset';
     store.getActiveTool$().subscribe((t) => (tool = t)).unsubscribe();
     expect(tool).toBeNull();
-    component.ngOnDestroy();
+    destroyComponent(component);
   });
 });
 
@@ -1633,7 +1642,7 @@ describe('VisualizerComponent — ROI import on load (characterization)', () => 
     expect(layout).toBe('per-slice-file');
     expect(plot.setRegions).not.toHaveBeenCalled();
     expect(plot.resetUndoHistory).not.toHaveBeenCalled();
-    component.ngOnDestroy();
+    destroyComponent(component);
   });
 
   it('folder stack with no geojson yet still enters the per-slice-file layout (empty slices)', () => {
@@ -1642,7 +1651,7 @@ describe('VisualizerComponent — ROI import on load (characterization)', () => 
     expect(asObject(slices)).toEqual({ 0: [], 1: [] });
     expect(z).toBe(0);
     expect(layout).toBe('per-slice-file');
-    component.ngOnDestroy();
+    destroyComponent(component);
   });
 
   it('single-file stack with z-indexed geojson: buckets by Region.z, combined layout', () => {
@@ -1651,7 +1660,7 @@ describe('VisualizerComponent — ROI import on load (characterization)', () => 
     expect(asObject(slices)).toEqual({ 0: [Z[0]], 2: [Z[1], Z[2]] });
     expect(layout).toBe('combined');
     expect(plot.setRegions).not.toHaveBeenCalled();
-    component.ngOnDestroy();
+    destroyComponent(component);
   });
 
   it('single-file stack with no geojson: an empty combined session to author against', () => {
@@ -1659,7 +1668,7 @@ describe('VisualizerComponent — ROI import on load (characterization)', () => 
     const [slices, , layout] = plot.enterStackMode.mock.calls[0];
     expect(slices.size).toBe(0);
     expect(layout).toBe('combined');
-    component.ngOnDestroy();
+    destroyComponent(component);
   });
 
   it('single-file stack whose regions are all on plane 0 stays global (legacy), undo history reset', () => {
@@ -1667,7 +1676,7 @@ describe('VisualizerComponent — ROI import on load (characterization)', () => 
     expect(plot.enterStackMode).not.toHaveBeenCalled();
     expect(plot.setRegions).toHaveBeenCalledWith(FLAT);
     expect(plot.resetUndoHistory).toHaveBeenCalledTimes(1);
-    component.ngOnDestroy();
+    destroyComponent(component);
   });
 
   it('single plane with and without a geojson', () => {
@@ -1675,12 +1684,12 @@ describe('VisualizerComponent — ROI import on load (characterization)', () => 
     expect(withRoi.plot.setRegions).toHaveBeenCalledWith(A);
     expect(withRoi.plot.resetUndoHistory).toHaveBeenCalledTimes(1);
     expect(withRoi.plot.enterStackMode).not.toHaveBeenCalled();
-    withRoi.component.ngOnDestroy();
+    destroyComponent(withRoi.component);
 
     const without = landed(stack({ isStack: false, urls: ['/0'] }));
     expect(without.plot.setRegions).not.toHaveBeenCalled();
     expect(without.plot.resetUndoHistory).toHaveBeenCalledTimes(1);
-    without.component.ngOnDestroy();
+    destroyComponent(without.component);
   });
 });
 
@@ -1703,13 +1712,13 @@ describe('VisualizerComponent — context menu (characterization)', () => {
   const menu = () => describeMenu(items());
 
   function view(type: PlotType, is3d = false) {
-    component.selectedPlotTypeId = type;
+    component['selectedPlotTypeId'] = type;
     component.plotType = type;
-    component.isHeatmap = !is3d;
+    component['isHeatmap'] = !is3d;
   }
   function select(regions: Region[], indices: number[]) {
     plot.getRegions.mockReturnValue(regions);
-    component.regionActions.selectedIndices = indices;
+    component['regionActions'].selectedIndices = indices;
   }
 
   beforeEach(() => {
@@ -1725,7 +1734,7 @@ describe('VisualizerComponent — context menu (characterization)', () => {
 
   it('Image view, no regions, Select armed', () => {
     view(PlotType.IMAGE);
-    component.activeDragMode = 'select';
+    component['activeDragMode'] = 'select';
     expect(menu()).toEqual([
       'Autoscale', '---', 'Zoom to box', 'Pan',
       ...TOOLS_2D.map((l) => (l === 'Select' ? 'Select*' : l)), ...VERTEX_TOOLS,
@@ -1753,7 +1762,7 @@ describe('VisualizerComponent — context menu (characterization)', () => {
 
   it('Heatmap (Plotly 2D), a merged region selected, Zoom selection armed: no vertex or Bézier items', () => {
     view(PlotType.HEATMAP);
-    component.activeDragMode = 'zoom';
+    component['activeDragMode'] = 'zoom';
     const multi = new Region(); const mp = new MultiPolygon();
     const part = () => {
       const q = new Polygon();
@@ -1771,7 +1780,7 @@ describe('VisualizerComponent — context menu (characterization)', () => {
 
   it('3D scene: camera modes only, the active one highlighted', () => {
     view(PlotType.SURFACE, true);
-    component.activeSurface3dMode = 'orbit';
+    component['activeSurface3dMode'] = 'orbit';
     select([rectRegion(0, 0, 5, 5)], [0]); // region actions are 2D-only
     expect(menu()).toEqual(['Zoom', 'Pan', 'Orbital rotation*', 'Turntable rotation', '---', 'Reset camera']);
   });
@@ -1784,10 +1793,10 @@ describe('VisualizerComponent — context menu (characterization)', () => {
     run('Autoscale');
     expect(plot.fitToView).toHaveBeenCalled();
     run('Rectangle');
-    expect(component.activeDragMode).toBe('drawrect');
+    expect(component['activeDragMode']).toBe('drawrect');
     view(PlotType.SURFACE, true);
     run('Pan');
-    expect(component.activeSurface3dMode).toBe('pan');
+    expect(component['activeSurface3dMode']).toBe('pan');
     run('Reset camera');
     expect(plot.getSurface3dControls().resetSurfaceCamera).toHaveBeenCalled();
   });
@@ -1809,7 +1818,7 @@ describe('VisualizerComponent — shortcut map (characterization)', () => {
     plot = mockPlotService();
     component = makeComponent(plot);
     plotEl = document.createElement('div');
-    plotEl.id = component.plotDivName;
+    plotEl.id = component['plotDivName'];
     document.body.appendChild(plotEl);
     menuShow.mockClear();
     component.contextMenu = { show: menuShow } as unknown as VisualizerComponent['contextMenu'];
@@ -1819,7 +1828,7 @@ describe('VisualizerComponent — shortcut map (characterization)', () => {
   });
 
   afterEach(() => {
-    component.ngOnDestroy();
+    destroyComponent(component);
     plotEl.remove();
   });
 
@@ -1857,7 +1866,7 @@ describe('VisualizerComponent — shortcut map (characterization)', () => {
   });
 
   it('in SAM point mode Enter commits and Escape clears the prompt', () => {
-    component.activeDragMode = 'samPoint';
+    component['activeDragMode'] = 'samPoint';
     press({ key: 'Enter' });
     expect(plot.commitSamPoints).toHaveBeenCalledTimes(1);
     press({ key: 'Escape' });
@@ -1865,7 +1874,7 @@ describe('VisualizerComponent — shortcut map (characterization)', () => {
   });
 
   it('the wheel steps the zoom over a 2D plot, and is left alone elsewhere', () => {
-    component.selectedPlotTypeId = PlotType.HEATMAP;
+    component['selectedPlotTypeId'] = PlotType.HEATMAP;
     const wheel = (deltaY: number, target: EventTarget) =>
       target.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY }));
     wheel(-1, plotEl);
@@ -1873,7 +1882,7 @@ describe('VisualizerComponent — shortcut map (characterization)', () => {
     expect(plot.zoomIn).toHaveBeenCalledTimes(1);
     expect(plot.zoomOut).toHaveBeenCalledTimes(1);
     wheel(-1, document.body); // outside the plot
-    component.isHeatmap = false; // a 3D scene orbits on its own
+    component['isHeatmap'] = false; // a 3D scene orbits on its own
     wheel(-1, plotEl);
     expect(plot.zoomIn).toHaveBeenCalledTimes(1);
   });
@@ -1885,6 +1894,6 @@ describe('VisualizerComponent — shortcut map (characterization)', () => {
     expect(menuShow).not.toHaveBeenCalled();
     ctx(plotEl);
     expect(menuShow).toHaveBeenCalledTimes(1);
-    expect(component.contextMenuItems.length).toBeGreaterThan(0);
+    expect(component['contextMenuItems'].length).toBeGreaterThan(0);
   });
 });

@@ -1,145 +1,38 @@
 import { NgModule } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
-
-import { ToolbarModule } from 'primeng/toolbar';
-import { ButtonModule } from 'primeng/button';
-import { MenuModule } from 'primeng/menu';
-import { DropdownModule } from 'primeng/dropdown';
-import { SliderModule } from 'primeng/slider';
-import { TreeSelectModule } from 'primeng/treeselect';
-import { InputNumberModule } from 'primeng/inputnumber';
-import { DialogModule } from 'primeng/dialog';
-import { ContextMenuModule } from 'primeng/contextmenu';
-import { ProgressBarModule } from 'primeng/progressbar';
-import { ToastModule } from 'primeng/toast';
-import { TooltipModule } from 'primeng/tooltip';
-import { RippleModule } from 'primeng/ripple';
-import { TableModule } from 'primeng/table';
-import { PaginatorModule } from 'primeng/paginator';
-import { OverlayPanelModule } from 'primeng/overlaypanel';
-import { ConfirmDialogModule } from 'primeng/confirmdialog';
-import { InputTextModule } from 'primeng/inputtext';
-import { CheckboxModule } from 'primeng/checkbox';
-import { MultiSelectModule } from 'primeng/multiselect';
-import { RadioButtonModule } from 'primeng/radiobutton';
-import { SelectButtonModule } from 'primeng/selectbutton';
-import { AutoCompleteModule } from 'primeng/autocomplete';
 
 import { VisualizerComponent } from './visualizer.component';
-import { ToolbarComponent } from './toolbar/toolbar.component';
 import { RegionEditorComponent } from './region-editor/region-editor.component';
-import { SaveMaskDialogComponent } from './region-editor/save-mask-dialog/save-mask-dialog.component';
-import { SaveRegionsDialogComponent } from './region-editor/save-regions-dialog/save-regions-dialog.component';
-import { RegionEditorHelpComponent } from './region-editor/region-editor-help/region-editor-help.component';
-import { RegionColorDialogComponent } from './region-editor/region-color-dialog/region-color-dialog.component';
-import {
-  ManageClassesDialogComponent,
-} from './region-editor/manage-classes-dialog/manage-classes-dialog.component';
-import { ClassesPanelComponent } from './region-editor/classes-panel/classes-panel.component';
-import { RegionTableComponent } from './region-editor/region-table/region-table.component';
 import { HexColorPickerComponent } from './hex-color-picker/hex-color-picker.component';
 import { ChannelHistogramComponent } from './channel-histogram/channel-histogram.component';
 import { SpatialControlsComponent } from './spatial-controls/spatial-controls.component';
 import { SpatialChartsComponent } from './spatial-controls/spatial-charts/spatial-charts.component';
-import {
-  SpatialHeatmapControlsComponent,
-} from './spatial-controls/spatial-charts/spatial-heatmap-controls/spatial-heatmap-controls.component';
-import {
-  SpatialEmbeddingControlsComponent,
-} from './spatial-controls/spatial-charts/spatial-embedding-controls/spatial-embedding-controls.component';
-import {
-  SpatialChartWindowComponent,
-} from './spatial-controls/spatial-charts/spatial-chart-window/spatial-chart-window.component';
-import { SpatialKeyComponent } from './spatial-controls/spatial-key/spatial-key.component';
-import { SpatialCellsPanelComponent } from './spatial-controls/spatial-cells-panel/spatial-cells-panel.component';
-import { SpatialGroupsPanelComponent } from './spatial-controls/spatial-groups-panel/spatial-groups-panel.component';
-import {
-  SpatialTranscriptsPanelComponent,
-} from './spatial-controls/spatial-transcripts-panel/spatial-transcripts-panel.component';
-import {
-  SpatialObservationsPanelComponent,
-} from './spatial-controls/spatial-observations-panel/spatial-observations-panel.component';
-import { SpatialGeneTreeComponent } from './spatial-controls/spatial-gene-tree/spatial-gene-tree.component';
-import {
-  SpatialMarkerGenesFormComponent,
-} from './spatial-controls/spatial-marker-genes-form/spatial-marker-genes-form.component';
 import { VISUALIZER_TOKEN_BINDINGS } from './provide-visualization';
-import { IntensityInsetComponent } from './intensity-inset/intensity-inset.component';
-import { FloatingDragDirective } from './visualizer/floating-drag.directive';
+
+/** The embeddable components, all standalone. */
+const PUBLIC_COMPONENTS = [
+  VisualizerComponent, RegionEditorComponent, HexColorPickerComponent,
+  ChannelHistogramComponent, SpatialControlsComponent, SpatialChartsComponent,
+];
 
 /**
  * Self-contained plotting UI: the {@link VisualizerComponent} (plot surface
- * + render orchestration), its {@link ToolbarComponent}, and the
- * {@link RegionEditorComponent} (the Regions tab table/editor). Consumers embed
- * `<visualizer>` / `<region-editor>` and need know nothing about the toolbar,
- * the rendering backends, or region file I/O (supplied via the REGION_IO_PORT).
+ * + render orchestration, with its toolbar), the {@link RegionEditorComponent}
+ * (the Regions table/editor), {@link HexColorPickerComponent}
+ * (`<hex-color-picker>`, `[color]` in, `(colorChange)` out),
+ * {@link ChannelHistogramComponent}, {@link SpatialControlsComponent} and
+ * {@link SpatialChartsComponent}. Consumers embed `<visualizer>` /
+ * `<region-editor>` and need know nothing about the toolbar, the rendering
+ * backends, or region file I/O (supplied via the REGION_IO_PORT).
  *
- * Also exports {@link HexColorPickerComponent} (`<hex-color-picker>`) as a
- * standalone reusable picker (`[color]` in, `(colorChange)` out) so consuming
- * apps can use it on its own, the same way as the visualizer and region editor.
+ * @deprecated A re-export shim, kept for one minor release: every component is
+ * standalone now. Import the components themselves (`imports: [VisualizerComponent]`)
+ * and bind the backend chain with {@link provideVisualization} — in the application's
+ * providers for one app-wide viewer chain, or a component's for an isolated one —
+ * instead of the root bindings this module adds.
  */
 @NgModule({
-  declarations: [
-    VisualizerComponent,
-  ],
-  imports: [
-    // Standalone components used by the declared ones.
-    ToolbarComponent,
-    IntensityInsetComponent,
-    FloatingDragDirective,
-    HexColorPickerComponent,
-    RegionEditorComponent,
-    ChannelHistogramComponent,
-    SpatialControlsComponent,
-    SpatialChartsComponent,
-    SpatialHeatmapControlsComponent,
-    SpatialEmbeddingControlsComponent,
-    SpatialChartWindowComponent,
-    SpatialKeyComponent,
-    SpatialCellsPanelComponent,
-    SpatialGroupsPanelComponent,
-    SpatialTranscriptsPanelComponent,
-    SpatialGeneTreeComponent,
-    SpatialMarkerGenesFormComponent,
-    SpatialObservationsPanelComponent,
-    SaveMaskDialogComponent,
-    SaveRegionsDialogComponent,
-    RegionEditorHelpComponent,
-    RegionColorDialogComponent,
-    ManageClassesDialogComponent,
-    ClassesPanelComponent,
-    RegionTableComponent,
-    CommonModule,
-    FormsModule,
-    ToolbarModule,
-    ButtonModule,
-    MenuModule,
-    DropdownModule,
-    SliderModule,
-    TreeSelectModule,
-    InputNumberModule,
-    DialogModule,
-    ContextMenuModule,
-    ProgressBarModule,
-    ToastModule,
-    TooltipModule,
-    RippleModule,
-    TableModule,
-    PaginatorModule,
-    OverlayPanelModule,
-    ConfirmDialogModule,
-    InputTextModule,
-    CheckboxModule,
-    MultiSelectModule,
-    RadioButtonModule,
-    SelectButtonModule,
-    AutoCompleteModule,
-  ],
-  exports: [
-    VisualizerComponent, RegionEditorComponent, HexColorPickerComponent,
-    ChannelHistogramComponent, SpatialControlsComponent, SpatialChartsComponent,
-  ],
+  imports: PUBLIC_COMPONENTS,
+  exports: PUBLIC_COMPONENTS,
   providers: [
     // Internal backend wiring. All three host-facing contracts are served by the
     // RoutingVisualizerService (the Plotly/OpenSeadragon selector), so consumers

@@ -1,13 +1,25 @@
 import {
-  AfterViewInit, ChangeDetectorRef, Component, ElementRef, EventEmitter, Inject, Injector, Input, NgZone,
-  OnChanges, OnDestroy, OnInit, Optional, Output, SimpleChanges, ViewChild,
+  AfterViewInit, ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, ElementRef, EventEmitter,
+  Inject, Injector, Input, NgZone, OnChanges, OnDestroy, OnInit, Optional, Output, SimpleChanges, ViewChild,
+  computed, signal,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 
-import { Observable, Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+import { Observable } from 'rxjs';
 
-import { MenuItem, MessageService } from 'primeng/api';
-import { ContextMenu } from 'primeng/contextmenu';
+import { MenuItem, MessageService, SharedModule } from 'primeng/api';
+import { ButtonModule } from 'primeng/button';
+import { CheckboxModule } from 'primeng/checkbox';
+import { ContextMenu, ContextMenuModule } from 'primeng/contextmenu';
+import { DialogModule } from 'primeng/dialog';
+import { DropdownModule } from 'primeng/dropdown';
+import { InputNumberModule } from 'primeng/inputnumber';
+import { ProgressBarModule } from 'primeng/progressbar';
+import { SliderModule } from 'primeng/slider';
+import { ToastModule } from 'primeng/toast';
+import { TooltipModule } from 'primeng/tooltip';
 import { IImageInfo } from './contracts/image.contract';
 import { ImageStatePort, IMAGE_STATE_PORT } from './contracts/ports/image-state.port';
 import { Polygon } from './models/region';
@@ -55,9 +67,13 @@ import {
 import { RegionActions } from './visualizer/region-actions';
 import { ToolModes } from './visualizer/tool-modes';
 import { ShortcutHost, ViewerShortcuts } from './visualizer/viewer-shortcuts';
-import { FloatingPos } from './visualizer/floating-drag.directive';
+import { FloatingDragDirective, FloatingPos } from './visualizer/floating-drag.directive';
 import { IntensityInsetComponent } from './intensity-inset/intensity-inset.component';
 import { SpatialDatasetBinder } from './visualizer/spatial-dataset-binder';
+import { ToolbarComponent } from './toolbar/toolbar.component';
+import { RegionEditorComponent } from './region-editor/region-editor.component';
+import { ChannelHistogramComponent } from './channel-histogram/channel-histogram.component';
+import { SpatialControlsComponent } from './spatial-controls/spatial-controls.component';
 
 /** Per-instance plot-div id source. The mount element's id must be unique so two
  *  live viewers (e.g. the main diagram + a modal preview) don't collide on the
@@ -65,10 +81,29 @@ import { SpatialDatasetBinder } from './visualizer/spatial-dataset-binder';
  *  Styling hangs off the `.viz-plot` class instead of the id. */
 let plotInstanceSeq = 0;
 
+/**
+ * The viewer (`<visualizer>`): the plot surface, its toolbar, the loading overlay and
+ * the dialogs it opens (Channels & Histogram, spatial-omics controls, Region Editor,
+ * contributed modes and tools). It orchestrates rendering through the `VISUALIZER`
+ * contract and reads the image from the host's `IMAGE_STATE_PORT`.
+ *
+ * OnPush. Template events re-render it; state that lands asynchronously goes through
+ * {@link changed} (or a signal: the loading overlay), and the collaborators that must
+ * render synchronously (the render session's overlay, a contributed panel's slot, the
+ * context menu before it opens) still call `detectChanges()`.
+ */
 @Component({
   selector: 'visualizer',
+  standalone: true,
+  imports: [
+    CommonModule, FormsModule, SharedModule, ButtonModule, CheckboxModule, ContextMenuModule, DialogModule,
+    DropdownModule, InputNumberModule, ProgressBarModule, SliderModule, ToastModule, TooltipModule,
+    FloatingDragDirective, ToolbarComponent, IntensityInsetComponent, ChannelHistogramComponent,
+    SpatialControlsComponent, RegionEditorComponent,
+  ],
   templateUrl: './visualizer.component.html',
   styleUrls: ['./visualizer.component.scss'],
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, OnDestroy, ContextMenuActions {
   /** Per-instance toast key. MessageService is a global singleton, so two live
@@ -90,8 +125,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * releases on destroy, so the surviving viewer picks them up.
    */
   private static readonly liveInstances = new Set<VisualizerComponent>();
-  readonly vizToastKey = VIZ_TOAST_KEY;
-  readonly vizAlertToastKey = VIZ_ALERT_TOAST_KEY;
+  protected readonly vizToastKey = VIZ_TOAST_KEY;
+  protected readonly vizAlertToastKey = VIZ_ALERT_TOAST_KEY;
   /**
    * Whether this instance renders the shared outlets. The owner is simply the
    * oldest live visualizer — a `Set` iterates in insertion order, so when the
@@ -101,13 +136,15 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * initialised would leave nobody rendering the outlets, and every notice from
    * the root service would silently vanish again.
    */
-  get ownsSharedToasts(): boolean {
+  protected get ownsSharedToasts(): boolean {
     const oldest = VisualizerComponent.liveInstances.values().next();
     return !oldest.done && oldest.value === this;
   }
 
+  /** Each new image: whether it is a z-stack. */
   @Output()
   isStackEvent = new EventEmitter(false);
+  /** Each new image: whether it is single-channel (grayscale). */
   @Output()
   isGrayscaleEvent = new EventEmitter(false);
 
@@ -131,63 +168,70 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
 
   /** Image-smoothing state for the toolbar's Smoothen toggle (OSD only).
    *  Defaults to `false` so OSD shows raw pixels (nearest-neighbour). */
-  imageSmoothingEnabled = false;
-  loadingMessage = 'Loading image...';
-  zoom = false;
+  protected imageSmoothingEnabled = false;
   fileName: string | undefined;
   private loadedFileName: string | undefined;
-  imageInfo: IImageInfo | undefined;
+  protected imageInfo: IImageInfo | undefined;
 
-  /** Completes on destroy; every subscription the component makes is `takeUntil` it. */
-  private unsub = new Subject<void>();
-
-  public stackLoading = false;
-  public imgLoading = false;
-  public loadingPercentage = 0;
+  // ── The loading overlay, as signals: it is fed by the host's and the backends' streams
+  // and by the render session, all of which land outside this view's template events. ──
+  protected readonly loadingMessage = signal('Loading image...');
+  /** The host is loading at zoom (the overlay message moves out of the way). */
+  protected readonly zoom = signal(false);
+  protected readonly stackLoading = signal(false);
+  protected readonly imgLoading = signal(false);
+  protected readonly loadingPercentage = signal(0);
   // Non-null (0..100) while jit-service is copying the source file into the
   // local cache PVC on first click. When set, the loading overlay swaps the
   // spinner for a determinate progress bar with a "Caching image" message.
-  public cacheProgress: number | null = null;
+  protected readonly cacheProgress = signal<number | null>(null);
   /** A jit-service cache copy is actively in progress (determinate 0..99). Drives the cache
    *  progress bar independently of `imgLoading` so the bar can't be dropped — or masked by the
    *  "Sharpening preview..." overlay — mid-download if the loading flag flips early. */
-  get isCaching(): boolean {
-    return this.cacheProgress !== null && this.cacheProgress < 100;
-  }
+  protected readonly isCaching = computed(() => {
+    const p = this.cacheProgress();
+    return p !== null && p < 100;
+  });
+
+  /** Emits once when this view is destroyed; the collaborators end their subscriptions on it. */
+  private readonly destroyed$ = new Observable<void>((subscriber) => this.destroyRef.onDestroy(() => {
+    subscriber.next();
+    subscriber.complete();
+  }));
   /** Host image-info objects whose one-shot `initialZIndex` was already applied. */
   private readonly consumedSliceHints = new WeakSet<IImageInfo>();
-  public zIndex = 0;
-  public maxIndex = 0;
+  protected zIndex = 0;
+  protected maxIndex = 0;
 
   @ViewChild('cm') contextMenu!: ContextMenu;
-  contextMenuItems: MenuItem[] = [];
+  protected contextMenuItems: MenuItem[] = [];
 
   /** The armed tool mode and the toolbar's tool settings. */
-  readonly tools = new ToolModes(this.plotService, this.session, this.ngZone,
+  protected readonly tools = new ToolModes(this.plotService, this.session, this.ngZone,
     (mode) => { if (mode !== 'samPoint') this.segmentation.hide(); }, // leaving point mode drops its toast
     () => this.cdr.markForCheck());
-  get activeDragMode(): string | null { return this.tools.active; }
-  set activeDragMode(mode: string | null) { this.tools.active = mode; }
-  get wandSensitivity(): number { return this.tools.wandSensitivity; }
-  set wandSensitivity(v: number) { this.tools.wandSensitivity = v; }
-  get brushSize(): number { return this.tools.brushSize; }
-  get vertexEraserRadius(): number { return this.tools.vertexEraserRadius; }
-  set vertexEraserRadius(v: number) { this.tools.vertexEraserRadius = v; }
+  protected get activeDragMode(): string | null { return this.tools.active; }
+  protected set activeDragMode(mode: string | null) { this.tools.active = mode; }
+  protected get wandSensitivity(): number { return this.tools.wandSensitivity; }
+  protected set wandSensitivity(v: number) { this.tools.wandSensitivity = v; }
+  protected get brushSize(): number { return this.tools.brushSize; }
+  protected get vertexEraserRadius(): number { return this.tools.vertexEraserRadius; }
+  protected set vertexEraserRadius(v: number) { this.tools.vertexEraserRadius = v; }
 
   /** Region set-operations on the selection, and the store mirrors they read (jit-ui#85). */
-  readonly regionActions = new RegionActions(
+  protected readonly regionActions = new RegionActions(
     this.plotService, this.regionOps, () => this.imageInfo?.trueImageSize,
     (m) => this.messageService.add({ key: this.resultToastKey, ...m }),
   );
   /** Custom-threshold Simplify dialog visibility (see {@link RegionActions}). */
-  get displaySimplifyDialog(): boolean { return this.regionActions.displaySimplifyDialog; }
-  set displaySimplifyDialog(v: boolean) { this.regionActions.displaySimplifyDialog = v; }
+  protected get displaySimplifyDialog(): boolean { return this.regionActions.displaySimplifyDialog; }
+  protected set displaySimplifyDialog(v: boolean) { this.regionActions.displaySimplifyDialog = v; }
 
   /** SAM model picker options + current selection (jit-ui#90 P1). Only models
    *  with a hosted ONNX pair (configured via setSamModelUrls at app init) are
    *  offered, so the picker can't select a model that can't run. */
-  samModels = SAM_MODELS.filter(isSamModelReady).map((m) => ({ id: m.id, label: m.label }));
-  samModelId = getDefaultSamModelId();
+  protected samModels = SAM_MODELS.filter(isSamModelReady).map((m) => ({ id: m.id, label: m.label }));
+  protected samModelId = getDefaultSamModelId();
 
   /**
    * No-prompt tools registered through {@link TOOLBAR_TOOLS}, filtered to those
@@ -195,52 +239,52 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * supplies them — so an open build has an empty array here and the toolbar
    * and help dialog simply omit that group.
    */
-  contributedTools: ToolbarToolContribution[] = [];
+  protected contributedTools: ToolbarToolContribution[] = [];
   /** Checkpoints and parameter values of {@link contributedTools}, and their dialog. */
-  readonly toolParams: ToolParamsModel;
+  protected readonly toolParams: ToolParamsModel;
   /** Contributed plot modes and dialog tools, and their live sessions. */
   readonly contributions: ContributionHost;
   /** Dialog tools registered through {@link TOOLBAR_TOOLS} (`kind: 'dialog'`). */
-  get dialogTools(): ToolbarDialogToolContribution[] { return this.contributions.dialogTools; }
+  protected get dialogTools(): ToolbarDialogToolContribution[] { return this.contributions.dialogTools; }
   /** The dialog tool the user has open (its session may be between renders). */
-  get openDialogToolId(): string | null { return this.contributions.openDialogToolId; }
+  protected get openDialogToolId(): string | null { return this.contributions.openDialogToolId; }
   /** The open dialog tool's live dialog, as the template renders it. */
-  get toolDialog(): ToolDialogView | null { return this.contributions.toolDialog; }
-  readonly samToastKey = `sam-${VisualizerComponent.nextToastId++}`;
+  protected get toolDialog(): ToolDialogView | null { return this.contributions.toolDialog; }
+  protected readonly samToastKey = `sam-${VisualizerComponent.nextToastId++}`;
   /**
    * Outlet for the library's own result/error notices, keyed to this instance so they
    * do not depend on the host mounting a keyless `<p-toast>` (most hosts don't, and a
    * failed segmentation then looked like a dead button). Deliberately NOT the sticky
    * toast's key: that is cleared when a run settles, which would wipe the result.
    */
-  readonly resultToastKey = `${this.samToastKey}-result`;
+  protected readonly resultToastKey = `${this.samToastKey}-result`;
   /** Segmentation runs and their sticky progress toast. */
-  readonly segmentation = new SegmentationRunner(
-    this.messageService, this.samToastKey, this.resultToastKey, () => this.cdr.detectChanges());
+  protected readonly segmentation = new SegmentationRunner(
+    this.messageService, this.samToastKey, this.resultToastKey, () => this.changed());
 
   /** Channels & Histogram dialog visibility (opened from the toolbar). */
-  showChannelHistogram = false;
+  protected showChannelHistogram = false;
   /** Spatial-omics controls dialog visibility (toolbar button). */
-  showSpatialControls = false;
+  protected showSpatialControls = false;
   /** Region Editor dialog visibility (opened from the toolbar). */
-  showRegionEditor = false;
+  protected showRegionEditor = false;
   /** Region Editor dialog width. On open it is set to the configured host
    *  element's current width, or — when no selector is configured / the element
    *  isn't found — to a quarter of the page (see openRegionEditor). */
-  regionEditorWidth = '25vw';
-  readonly plotDivName = `viz-plot-${plotInstanceSeq++}`;
+  protected regionEditorWidth = '25vw';
+  protected readonly plotDivName = `viz-plot-${plotInstanceSeq++}`;
   /** The render pipeline: the newest image (or image-less dataset) always wins. */
-  readonly render: ImageRenderSession = new ImageRenderSession({
+  protected readonly render: ImageRenderSession = new ImageRenderSession({
     plotDivName: this.plotDivName,
     visualizer: this.plotService,
     zIndex: () => this.zIndex,
     plotType: () => this.plotType,
     isHeatmap: () => this.isHeatmap,
-    isCaching: () => this.isCaching,
+    isCaching: () => this.isCaching(),
     beforeReset: () => this.contributions.endSessions(),
     prepare: (info) => this.layOutSlices(info),
     releaseOverlay: (info) => {
-      if (info.isStack && info.showStack) this.stackLoading = false;
+      if (info.isStack && info.showStack) this.stackLoading.set(false);
       this.state.setImageLoading(false);
     },
     landed: (info) => {
@@ -253,29 +297,29 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     detectChanges: () => this.cdr.detectChanges(),
   });
   plotType = PlotType.IMAGE;
-  isHeatmap = true;
-  activeSurface3dMode = 'turntable';
+  protected isHeatmap = true;
+  protected activeSurface3dMode = 'turntable';
   /** Whether the napari 3D coordinate-axes / scale gizmo is shown (volume/isosurface). */
-  axesVisible = true;
-  wireframeActive = false;
+  protected axesVisible = true;
+  protected wireframeActive = false;
   /** napari 3D decimate factor (1 = Full … 8 = ⅛; default ½); changing it re-plots. */
-  resolutionScale = NAPARI_DEFAULT_DECIMATE;
+  protected resolutionScale = NAPARI_DEFAULT_DECIMATE;
 
   /** The selector's entries: the built-in plot types the active backend
    *  advertises (3D gated by capability), then any contributed modes
    *  ({@link PLOT_TYPE_CONTRIBUTIONS}). */
-  plotTypeMenu: PlotTypeOption[] = [];
+  protected plotTypeMenu: PlotTypeOption[] = [];
   /**
    * The built-in plot types on offer — {@link plotTypeMenu} without contributed
    * modes. Kept with its original type so existing readers are unaffected.
    */
-  plotTypeOptions: PlotTypeDescriptor[] = [];
+  protected plotTypeOptions: PlotTypeDescriptor[] = [];
   /**
    * What the selector shows: a built-in type or a contributed mode's id. Every
    * rendering and tool decision goes through {@link basePlotType} instead, so a
    * contributed mode behaves exactly like the built-in type it rides on.
    */
-  selectedPlotTypeId: PlotTypeId = PlotType.IMAGE;
+  protected selectedPlotTypeId: PlotTypeId = PlotType.IMAGE;
 
   /**
    * The built-in plot type being rendered. With no contributed mode active this
@@ -283,17 +327,17 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * original `PlotType` type for existing readers — use {@link selectedPlotTypeId}
    * for the selector's id. Assigning selects that built-in type.
    */
-  get selectedPlotType(): PlotType {
+  protected get selectedPlotType(): PlotType {
     return this.basePlotType;
   }
-  set selectedPlotType(type: PlotType) {
+  protected set selectedPlotType(type: PlotType) {
     this.selectedPlotTypeId = type;
   }
 
   /** Contributed plot modes and their single live session. */
   get plotModes(): PlotModeController { return this.contributions.plotModes; }
   /** The live contributed mode's side panel; null while no contributed session is live. */
-  get plotModePanel(): PlotModePanelView | null { return this.contributions.plotModePanel; }
+  protected get plotModePanel(): PlotModePanelView | null { return this.contributions.plotModePanel; }
 
   /** Where a `mount` panel's host element is attached once the dialog renders. */
   @ViewChild('plotModePanelSlot')
@@ -303,22 +347,22 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
 
   /** The built-in type actually rendered for {@link selectedPlotTypeId}: itself
    *  for a built-in type, `baseType` for a contributed mode. */
-  get basePlotType(): PlotType {
+  protected get basePlotType(): PlotType {
     return this.plotModes.baseTypeOf(this.selectedPlotTypeId);
   }
 
   /** Div the floating intensity-profile inset is charted into. Per instance, like
    *  {@link plotDivName}: the backend resolves it by id, so a fixed id made two live
    *  viewers draw both insets into whichever div came first in the document. */
-  readonly intensityInsetDiv = `${this.plotDivName}-inset`;
+  protected readonly intensityInsetDiv = `${this.plotDivName}-inset`;
 
   /** Toolbar docking: docked across the top by default; dragging its handle
    *  detaches it into a floating, movable window (frees the top row for the
    *  visualization). */
-  toolbarFloating = false;
-  toolbarPos = { x: 8, y: 8 };
+  protected toolbarFloating = false;
+  protected toolbarPos = { x: 8, y: 8 };
   /** Where a toolbar-handle drag starts from: grabbing the docked toolbar floats it. */
-  readonly toolbarDragOrigin = (): FloatingPos => {
+  protected readonly toolbarDragOrigin = (): FloatingPos => {
     if (!this.toolbarFloating) {
       this.toolbarFloating = true;
       this.toolbarPos = { x: 8, y: 8 };
@@ -331,26 +375,26 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   /** True while the 3D spatial cloud is the active mode. The controls drop the ROI
    *  selection there: region tools are screen-space, and against an orbiting
    *  camera a drawn rectangle has no fixed meaning in the data. */
-  get isSpatial3dMode(): boolean {
+  protected get isSpatial3dMode(): boolean {
     return isSpatialOmics3d(this.basePlotType);
   }
 
   /** True for the Image plot type, which renders as a natively pan/zoom-able
    *  raster — so the backend-agnostic zoom/pan toolbar tools are hidden. The
    *  component drives this off the plot type, not the active backend. */
-  get isImageView(): boolean {
+  protected get isImageView(): boolean {
     return this.basePlotType === PlotType.IMAGE;
   }
 
   /** Isosurface band as a 0–255 slider position, mapped onto the volume's real
    *  intensity range by the renderer. Defaults to the full range. */
-  isoRange: number[] = [0, 255];
+  protected isoRange: number[] = [0, 255];
 
   /** The spatial-omics dataset on offer and the gates it puts on the selector. */
-  readonly spatial: SpatialDatasetBinder;
+  protected readonly spatial: SpatialDatasetBinder;
   /** Whether a spatial-omics dataset is published on `SPATIAL_DATA_PORT` — gates the
    *  spatial plot types; the toolbar offers the plot modes for an image-less one too. */
-  get hasSpatialDataset(): boolean { return this.spatial.hasDataset; }
+  protected get hasSpatialDataset(): boolean { return this.spatial.hasDataset; }
 
   /** Keyboard, wheel and context-menu handling; created once the view exists. */
   private shortcuts?: ViewerShortcuts;
@@ -365,6 +409,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   });
 
   constructor(
+    // The constructor parameters below are the injection points; none is public API.
     @Inject(IMAGE_STATE_PORT) private state: ImageStatePort,
     @Inject(VISUALIZER) public plotService: IVisualizer,
     public messageService: MessageService,
@@ -391,6 +436,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     @Optional() private injector?: Injector,
     // The `<visualizer>` element: keyboard shortcuts are scoped to it (CORE-2).
     @Optional() private hostRef?: ElementRef<HTMLElement>,
+    // Ends the subscriptions (`takeUntilDestroyed`). A parameter, like the rest, so the
+    // specs' `new` can pass one; Angular always provides it.
+    private readonly destroyRef: DestroyRef = undefined as unknown as DestroyRef,
   ) {
     this.contributedTools = visibleToolContributions(toolContributions);
     this.toolParams = new ToolParamsModel(this.contributedTools);
@@ -420,9 +468,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       setImageLoading: (loading) => this.state.setImageLoading(loading),
       settled: () => {
         this.reconcileSelectedPlotType();
-        this.cdr.detectChanges();
+        this.changed();
       },
-      detectChanges: () => this.cdr.detectChanges(),
+      detectChanges: () => this.changed(),
     });
     this.computePlotTypeOptions();
   }
@@ -430,7 +478,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   /** Follow the spatial-omics dataset: a dataset appearing, switching or being cleared
    *  re-gates the selector exactly as the image stream and the test-mode toggle do. */
   private watchSpatialDataset(): void {
-    this.spatial.bind(this.unsub);
+    this.spatial.bind(this.destroyed$);
   }
 
   /** Recompute the selector's entries for the current image, dataset and test mode
@@ -483,7 +531,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // Nothing is left stranded: an image is cleared because a spatial dataset that
     // brings none is being opened, and that dataset's own subscription selects the
     // mode its coordinates support a moment later.
-    this.cdr.detectChanges();
+    this.changed();
   }
 
   /** If the active plot type is no longer in the offered options (e.g. test mode
@@ -510,28 +558,31 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.watchSpatialDataset();
     // OSD and napari-js emit this from their own "fit to view": disarm the tool on
     // the backend too, not only the toolbar's highlight.
-    this.plotService.getAutoscaleEvent().pipe(takeUntil(this.unsub)).subscribe(() => this.tools.apply(null));
-    // Loading/overlay UI mirrors.
-    this.mirror(this.state.isImageLoading$(), (v) => (this.imgLoading = v));
-    this.mirror(this.plotService.getStackLoadingProgress(), (v) => (this.loadingPercentage = v));
-    this.mirror(this.plotService.isStackLoading(), (v) => (this.stackLoading = v));
-    this.mirror(this.state.getImageLoadingMessage$(), (v) => (this.loadingMessage = v));
-    this.mirror(this.state.getCacheProgress$(), (v) => (this.cacheProgress = v));
-    this.mirror(this.state.isZoom$(), (v) => (this.zoom = v));
+    this.plotService.getAutoscaleEvent().pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.tools.apply(null));
+    // Loading/overlay UI mirrors (signals: they re-render the view themselves).
+    this.mirror(this.state.isImageLoading$(), (v) => this.imgLoading.set(v));
+    this.mirror(this.plotService.getStackLoadingProgress(), (v) => this.loadingPercentage.set(v));
+    this.mirror(this.plotService.isStackLoading(), (v) => this.stackLoading.set(v));
+    this.mirror(this.state.getImageLoadingMessage$(), (v) => this.loadingMessage.set(v));
+    this.mirror(this.state.getCacheProgress$(), (v) => this.cacheProgress.set(v));
+    this.mirror(this.state.isZoom$(), (v) => this.zoom.set(v));
     this.mirror(this.state.getFilename$(), (v) => { if (v) this.fileName = v; });
-    this.regionActions.bind(this.unsub, () => this.cdr.detectChanges());
-    this.segmentation.bindPointTool(this.samPointTool, this.unsub);
+    this.regionActions.bind(this.destroyed$, () => this.changed());
+    this.segmentation.bindPointTool(this.samPointTool, this.destroyed$);
     this.mirror(this.state.getPanelWidth$(), () => {
       this.plotService.relayout();
       // The intensity inset is a separate chart in a floating panel; reflow it too.
       this.inset?.reflow();
     });
-    this.state.getImageInfo$().pipe(takeUntil(this.unsub)).subscribe({
+    this.state.getImageInfo$().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (imgInfo) => {
         if (!imgInfo) {
           this.onImageCleared();
           return;
         }
+        // The selector, the stack controls and the inset all follow the image.
+        this.changed();
         if (imgInfo) {
           this.imageInfo = imgInfo;
           // Stack-only plot types (isosurface, scatter3d) depend on whether this
@@ -574,7 +625,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
           detail: `The following error occured while getting image info: ${msg}.
                    Please try to open the image again through the file navigator.`,
         });
-        this.stackLoading = false;
+        this.stackLoading.set(false);
         this.state.setImageLoading(false);
         this.render.running = false;
         this.plotService.reset();
@@ -584,7 +635,17 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
 
   /** Follow `source` until destroy. */
   private mirror<T>(source: Observable<T>, apply: (value: T) => void): void {
-    source.pipe(takeUntil(this.unsub)).subscribe(apply);
+    source.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(apply);
+  }
+
+  /**
+   * State this view shows changed outside one of its template events (a stream, a
+   * resolved promise, a host call): mark the OnPush view for check, re-entering the
+   * zone when it changed outside it so a change-detection pass follows.
+   */
+  private changed(): void {
+    if (NgZone.isInAngularZone()) this.cdr.markForCheck();
+    else this.ngZone.run(() => this.cdr.markForCheck());
   }
 
   /**
@@ -596,7 +657,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * the component keeps a copy without the hint, and remembers the host object.
    */
   private layOutSlices(info: IImageInfo): void {
-    this.stackLoading = info.isStack && info.showStack;
+    this.stackLoading.set(info.isStack && info.showStack);
     this.maxIndex = info.urls.length > 1 ? info.urls.length - 1 : 0;
     if (info.initialZIndex !== undefined) {
       if (!this.consumedSliceHints.has(info)) {
@@ -622,26 +683,31 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.render.viewIsReady(this.spatial.dataset, !!this.imageInfo);
   }
 
-  /** What the keyboard, wheel and context-menu shortcuts act on. */
+  /** What the keyboard, wheel and context-menu shortcuts act on. Their listeners live
+   *  outside this view, so every action that changes what it shows marks it for check. */
   private shortcutHost(): ShortcutHost {
+    const marked = <A extends unknown[]>(act: (...args: A) => void) => (...args: A): void => {
+      act(...args);
+      this.changed();
+    };
     return {
       plotDivName: this.plotDivName,
       hostElement: this.hostRef?.nativeElement ?? null,
       activeDragMode: () => this.activeDragMode,
       canStepSlice: () => !!this.imageInfo?.isStack && this.isImageView,
       wheelZooms: () => !rendererOwnsWheel(this.basePlotType) && this.isHeatmap,
-      stepSlice: (delta) => this.stepSlice(delta),
-      resolveSamPrompt: (commit) => {
+      stepSlice: marked((delta: number) => this.stepSlice(delta)),
+      resolveSamPrompt: marked((commit: boolean) => {
         if (commit) this.plotService.commitSamPoints();
         else this.plotService.clearSamPoints();
         this.segmentation.hide(); // prompt resolved → dismiss the status toast
-      },
-      undo: () => this.undoRegion(),
-      redo: () => this.redoRegion(),
-      deleteRegion: () => this.deleteRegion(),
-      zoomIn: () => this.zoomIn(),
-      zoomOut: () => this.zoomOut(),
-      toggleDragMode: (mode) => this.toggleDragMode(mode),
+      }),
+      undo: marked(() => this.undoRegion()),
+      redo: marked(() => this.redoRegion()),
+      deleteRegion: marked(() => this.deleteRegion()),
+      zoomIn: marked(() => this.zoomIn()),
+      zoomOut: marked(() => this.zoomOut()),
+      toggleDragMode: marked((mode: string) => this.toggleDragMode(mode)),
       openContextMenu: (event) => {
         this.contextMenuItems = this.buildContextMenuItems();
         this.cdr.detectChanges();
@@ -651,12 +717,12 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   }
 
   /** Snap the floating toolbar back to its docked position across the top. */
-  dockToolbar() {
+  protected dockToolbar() {
     this.toolbarFloating = false;
   }
 
   /** Toolbar "Intensity" group: add another line ROI (next bright colour). */
-  async addProfileLine(): Promise<void> {
+  protected async addProfileLine(): Promise<void> {
     const region = await this.inset?.addProfileLine();
     // OSD only draws a selected region's handles in an edit mode, so a line in
     // 'none' mode looks unselected. Switch to 'select' so the new line shows its
@@ -668,14 +734,14 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // A contributed mode's session ends first, while the viewer it drew over
     // still exists. The panel goes with this view, so no change detection.
     this.contributions.destroy();
-    // Leave the live set so the next-oldest visualizer picks up the outlets.
+    // Leave the live set so the next-oldest visualizer picks up the outlets — on its
+    // next check, which an OnPush sibling needs asking for.
     VisualizerComponent.liveInstances.delete(this);
+    for (const other of VisualizerComponent.liveInstances) other.cdr.markForCheck();
     this.state.setDiagram(null);
     this.render.cancel();
     this.spatial.dispose();
     this.scrubber.cancel();
-    this.unsub.next();
-    this.unsub.complete();
     this.shortcuts?.detach();
     this.plotService.detach();
   }
@@ -700,19 +766,19 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   }
 
   /** Open the Channels & Histogram dialog (toolbar button). */
-  openChannelHistogram() {
+  protected openChannelHistogram() {
     this.showChannelHistogram = true;
   }
 
   /** Toolbar → open the spatial-omics controls. */
-  openSpatialControls(): void {
+  protected openSpatialControls(): void {
     this.showSpatialControls = true;
   }
 
   /** Open the Region Editor dialog (toolbar button). The editor stays linked to
    *  this plotting instance through the root RegionStore singleton, so it works
    *  the same as the former right-panel Regions tab. */
-  openRegionEditor() {
+  protected openRegionEditor() {
     // Size the dialog to match the host's configured element (e.g. the app's
     // right panel) at open time. Measured once — it intentionally does not
     // track later browser/split resizes. Falls back to a quarter of the page
@@ -726,9 +792,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   }
 
   /** The toolbar's Single image / Stack toggle. */
-  selectStackOption(selectedStackOption: { name: string; val: string }) {
+  protected selectStackOption(selectedStackOption: { name: string; val: string }) {
     const showstack = selectedStackOption.val === 'true';
-    this.stackLoading = showstack;
+    this.stackLoading.set(showstack);
     this.state.setImageLoading(!showstack);
     // Stack mode is always a 2D heatmap — reset surface mode if active
     if (!this.isHeatmap) {
@@ -741,7 +807,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   }
 
   /** Clamp the slice index into [0, maxIndex] and push it to the renderer. */
-  updateZIndex() {
+  protected updateZIndex() {
     if (this.zIndex > this.maxIndex) {
       this.zIndex = this.maxIndex;
     }
@@ -756,7 +822,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * slice in place (no re-mount), so dragging the slider steps through the
    * stack the same way the heatmap frame slider does.
    */
-  onZSlide(z: number | undefined) {
+  protected onZSlide(z: number | undefined) {
     if (z === undefined) return;
     this.zIndex = z;
     this.scrubber.commit(z);
@@ -769,7 +835,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * slice as the user drags, but coalesce rapid changes so we don't fire a
    * slice swap on every pixel. The final value also lands via onZSlide (onSlideEnd).
    */
-  onZScrub(z: number | undefined) {
+  protected onZScrub(z: number | undefined) {
     if (z === undefined) return;
     this.zIndex = z;
     this.scrubber.scrub(z);
@@ -782,7 +848,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.onZSlide(next);
   }
 
-  reloadAndPlot() {
+  protected reloadAndPlot() {
     this.state.setImageLoading(true);
     // Re-drive the render pipeline from the current image info (the source of
     // truth, with real urls/fileName). Don't use plotService.reloadAndPlot():
@@ -800,22 +866,22 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     }
   }
 
-  cancelLoading() {
+  protected cancelLoading() {
     // Stop any in-flight frame streaming (napari-js volume/surface preload) so the fetch loops
     // actually abort — clearing the flag alone only routed to Plotly and left napari fetching.
     this.plotService.cancelLoading?.();
     // The cancelled render is superseded, not just aborted: its aborted load must not
     // come back as "Could not draw the image", nor apply ROIs for an image left unshown.
     this.render.cancel();
-    this.stackLoading = false;
-    this.imgLoading = false;
+    this.stackLoading.set(false);
+    this.imgLoading.set(false);
     this.state.setImageLoading(false);
     this.zIndex = 0;
     this.plotService.setZIndex(this.zIndex);
     this.plotService.setStackLoading(false);
   }
 
-  downloadImage() {
+  protected downloadImage() {
     this.plotService.downloadImage();
   }
 
@@ -824,7 +890,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   }
 
   /** Toolbar pixel/smooth toggle: flip smoothing and apply to the active backend. */
-  onToggleImageSmoothing(): void {
+  protected onToggleImageSmoothing(): void {
     this.imageSmoothingEnabled = !this.imageSmoothingEnabled;
     this.plotService.setImageSmoothingEnabled(this.imageSmoothingEnabled);
   }
@@ -839,15 +905,15 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
 
   /** Live-update the isosurface as the range slider moves. The control is only
    *  available when the active backend renders isosurfaces (ISOSURFACE mode). */
-  onIsoRangeChange(values: number[] | undefined) {
+  protected onIsoRangeChange(values: number[] | undefined) {
     if (!values || values.length < 2) return;
     this.isoRange = values;
     this.plotService.getIsosurfaceControls()?.setIsoRange(values[0], values[1]);
   }
 
-  onWandSensitivityChange(value: number | undefined) { this.tools.setWandSensitivity(value); }
-  onBrushSizeChange(value: number | undefined) { this.tools.setBrushSize(value); }
-  onVertexEraserRadiusChange(value: number | undefined) { this.tools.setVertexEraserRadius(value); }
+  protected onWandSensitivityChange(value: number | undefined) { this.tools.setWandSensitivity(value); }
+  protected onBrushSizeChange(value: number | undefined) { this.tools.setBrushSize(value); }
+  protected onVertexEraserRadiusChange(value: number | undefined) { this.tools.setVertexEraserRadius(value); }
 
   zoomIn() {
     this.plotService.zoomIn();
@@ -862,12 +928,12 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   }
 
   /** Undo the most recent region action (jit-ui#85). Up to 10 steps back. */
-  undoRegion() {
+  protected undoRegion() {
     this.plotService.undo();
   }
 
   /** Redo the most recently undone region action (jit-ui#85). */
-  redoRegion() {
+  protected redoRegion() {
     this.plotService.redo();
   }
 
@@ -882,14 +948,14 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   /** Box-prompted SAM segmentation of the drawn rectangles (jit-ui#90). A sticky
    *  `sam` toast shows live status + a download progress bar (first run pulls the
    *  encoder, ~170 MB); it stays open until the run finishes (bar hits 100%). */
-  async segmentRegions() {
+  protected async segmentRegions() {
     await this.segmentation.run('SAM', this.samTool, () => this.plotService.segmentRectangles());
   }
 
   /** Auto-segment cells inside each drawn rectangle with cellpose-SAM, client-side
    *  (jit-ui#90). Each box is cropped (browser slide-crop) then run through the
    *  cellpose-js model; the same sticky `sam` toast + progress bar is reused. */
-  async segmentCellpose() {
+  protected async segmentCellpose() {
     await this.segmentation.run('Cellpose', this.cellSegmentTool, () =>
       this.plotService.segmentRectanglesCellpose(),
     );
@@ -897,17 +963,17 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
 
   // ── contributed tool parameters (see ToolParamsModel) ─────────────────
   paramsFor(toolId: string): Record<string, unknown> { return this.toolParams.paramsFor(toolId); }
-  onToolModelChange(e: { toolId: string; modelId: string }): void {
+  protected onToolModelChange(e: { toolId: string; modelId: string }): void {
     this.toolParams.setModel(e.toolId, e.modelId);
   }
-  openToolParams(toolId: string): void { this.toolParams.open(toolId); }
-  closeToolParams(): void { this.toolParams.close(); }
-  resetToolParams(toolId: string): void { this.toolParams.reset(toolId); }
+  protected openToolParams(toolId: string): void { this.toolParams.open(toolId); }
+  protected closeToolParams(): void { this.toolParams.close(); }
+  protected resetToolParams(toolId: string): void { this.toolParams.reset(toolId); }
 
   /** Run a contributed tool over the current view. No prompt: these sweep the
    *  whole view rather than being pointed at something. Reuses the shared
    *  segmentation toast so progress reads the same as the SAM/cellpose tools. */
-  async runTool(toolId: string): Promise<void> {
+  protected async runTool(toolId: string): Promise<void> {
     const tool = this.toolParams.find(toolId);
     if (!tool) return;
     const params = this.toolParams.runParams(tool);
@@ -915,7 +981,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   }
 
   /** Pick the SAM model the segment tools use (jit-ui#90 P1). */
-  onSamModelChange(id: string) {
+  protected onSamModelChange(id: string) {
     this.samModelId = id;
     this.plotService.setSamModel(id);
   }
@@ -963,20 +1029,20 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
 
   /** Toggle the napari 3D coordinate-axes / scale gizmo (volume/isosurface). No-op on backends
    *  that don't render one (the control method is optional). */
-  toggleAxes() {
+  protected toggleAxes() {
     this.axesVisible = !this.axesVisible;
     this.plotService.getSurface3dControls()?.setAxesVisible?.(this.axesVisible);
   }
 
   /** Toggle the napari surface wireframe (edges vs filled). No-op on backends without a surface. */
-  toggleWireframe() {
+  protected toggleWireframe() {
     this.wireframeActive = !this.wireframeActive;
     this.plotService.getSurface3dControls()?.setWireframe?.(this.wireframeActive);
   }
 
   /** Change the napari 3D decimate factor. Decimation changes the fetched/assembled data, so this
    *  re-plots the current 3D type at the new resolution (unlike axes/wireframe, which are live). */
-  selectResolution(scale: number) {
+  protected selectResolution(scale: number) {
     if (scale === this.resolutionScale) return;
     this.resolutionScale = scale;
     this.plotService.setResolutionScale?.(scale);
@@ -990,6 +1056,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * moving to a 3D type, then re-plots.
    */
   onSelectPlotType(selected: PlotTypeId) {
+    // Also called by the host directly, outside this view's events: the selector, the
+    // toolbar's tool groups and the dialogs all follow the type.
+    this.changed();
     // A contributed id whose provider is gone (e.g. restored from a previous
     // session) has nothing to activate — take the default Image view instead.
     if (!isBuiltinPlotType(selected) && !this.plotModes.find(selected)) {
@@ -1038,7 +1107,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       // Plotly's stack-loading flag (keeps its frame-fetch loop alive) and
       // re-emit the image info with showStack on so the pipeline reloads on
       // Plotly regardless of which backend was on screen.
-      this.stackLoading = true;
+      this.stackLoading.set(true);
       this.plotService.setStackLoading(true);
       if (this.imageInfo) {
         // A copy: the image info may be the host's own (possibly frozen) object.
@@ -1052,10 +1121,10 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   // ── dialog tools (TOOLBAR_TOOLS, kind: 'dialog') ─────────────────────────
 
   /** The toolbar button: open the tool's dialog, or close it if it is open. */
-  toggleDialogTool(id: string): void { this.contributions.toggleDialogTool(id); }
+  protected toggleDialogTool(id: string): void { this.contributions.toggleDialogTool(id); }
 
   /** Close the open dialog tool: its body is torn down, then its session ends. */
-  closeDialogTool(): void { this.contributions.closeDialogTool(); }
+  protected closeDialogTool(): void { this.contributions.closeDialogTool(); }
 
   /** Where the open dialog tool's host element is attached once its dialog renders. */
   @ViewChild('toolDialogSlot')

@@ -21,6 +21,7 @@ jest.mock('./render-orchestrator', () => {
   };
 });
 
+import { destroyComponent, own, testDestroyRef } from './testing/test-destroy-ref';
 import { VisualizerComponent } from './visualizer.component';
 import { PlotType, PLOT_TYPE_DESCRIPTORS } from './contracts/plot-type';
 import {
@@ -162,7 +163,8 @@ function harness(contributions: unknown[] | undefined, viewport: PlotModeViewpor
     setImageInfo: jest.fn((info: any) => imageInfo$.next(info)),
   });
   const messages = { add: jest.fn(), clear: jest.fn() };
-  const component = new VisualizerComponent(
+  const destroyRef = testDestroyRef();
+  const component = own(new VisualizerComponent(
     state,
     plot,
     messages as any,
@@ -176,7 +178,9 @@ function harness(contributions: unknown[] | undefined, viewport: PlotModeViewpor
     undefined, // SPATIAL_DATA_PORT
     contributions as any, // PLOT_TYPE_CONTRIBUTIONS
     Injector.create({ providers: [] }),
-  );
+    undefined, // host ElementRef
+    destroyRef,
+  ), destroyRef);
   component.ngOnInit();
   /** Land the most recent render, as RenderOrchestrator would once it finished. */
   const finish = () => orchestratorHosts[orchestratorHosts.length - 1].finished(false);
@@ -198,6 +202,15 @@ beforeEach(() => {
 });
 afterEach(() => jest.restoreAllMocks());
 
+
+/** Render the visualizer's own template with real dialogs; everything else (the toolbar,
+ *  the panels, the other PrimeNG elements) stays an unknown element. */
+function shallowVisualizer(): void {
+  TestBed.overrideComponent(VisualizerComponent, {
+    set: { imports: [CommonModule, DialogModule], schemas: [NO_ERRORS_SCHEMA] },
+  });
+}
+
 describe('PLOT_TYPE_CONTRIBUTIONS', () => {
   it('has no factory: with no provider it is simply absent', () => {
     expect(Injector.create({ providers: [] }).get(PLOT_TYPE_CONTRIBUTIONS, null)).toBeNull();
@@ -218,22 +231,22 @@ describe('PLOT_TYPE_CONTRIBUTIONS', () => {
 });
 
 describe('contributed plot types — the selector', () => {
-  const types = (c: VisualizerComponent) => c.plotTypeMenu.map((d) => d.type);
+  const types = (c: VisualizerComponent) => c['plotTypeMenu'].map((d) => d.type);
 
   it('is unchanged when nothing is contributed', () => {
     const withNone = harness(undefined).component;
     const withEmpty = harness([]).component;
     expect(types(withNone)).toContain(PlotType.IMAGE);
     expect(types(withNone).every((t) => (Object.values(PlotType) as string[]).includes(t))).toBe(true);
-    expect(withEmpty.plotTypeMenu).toEqual(withNone.plotTypeMenu);
+    expect(withEmpty['plotTypeMenu']).toEqual(withNone['plotTypeMenu']);
     // …and a contribution only ever adds to the end of that list.
     const withOne = harness([dianne()]).component;
-    expect(withOne.plotTypeMenu.slice(0, -1)).toEqual(withNone.plotTypeMenu);
+    expect(withOne['plotTypeMenu'].slice(0, -1)).toEqual(withNone['plotTypeMenu']);
   });
 
   it('appends contributed modes after every built-in one, under the production label', () => {
     const { component } = harness([dianne()]);
-    const opts = component.plotTypeMenu;
+    const opts = component['plotTypeMenu'];
     expect(opts[opts.length - 1]).toEqual(expect.objectContaining({
       type: 'dianne', label: 'DIANNE', baseType: PlotType.IMAGE, source: 'image', dimensions: '2d',
     }));
@@ -248,7 +261,7 @@ describe('contributed plot types — the selector', () => {
 
     component.testMode = true;
     component.ngOnChanges({ testMode: {} as any });
-    expect(component.plotTypeMenu.find((d) => d.type === 'dianne')?.label)
+    expect(component['plotTypeMenu'].find((d) => d.type === 'dianne')?.label)
       .toBe('Digital Pathology - DIANNE');
   });
 
@@ -278,21 +291,21 @@ describe('contributed plot types — the selector', () => {
     expect(types(component)).not.toContain('spatial');
     expect(types(component)).not.toContain('spatial3d');
 
-    component.spatial.hasDataset = true;
-    component.spatial.hasPixels = true; // a tissue image under the observations
+    component['spatial'].hasDataset = true;
+    component['spatial'].hasPixels = true; // a tissue image under the observations
     c.computePlotTypeOptions();
     expect(types(component)).toContain('spatial');
     expect(types(component)).not.toContain('spatial3d');
 
-    component.spatial.has3d = true;
+    component['spatial'].has3d = true;
     c.computePlotTypeOptions();
     expect(types(component)).toContain('spatial3d');
   });
 
   it('hides an Image-based mode wherever Image itself is hidden (a spatial dataset without pixels)', () => {
     const { component } = harness([dianne()]);
-    component.spatial.hasDataset = true;
-    component.spatial.hasPixels = false;
+    component['spatial'].hasDataset = true;
+    component['spatial'].hasPixels = false;
     (component as any).computePlotTypeOptions();
     expect(types(component)).not.toContain(PlotType.IMAGE);
     expect(types(component)).not.toContain('dianne');
@@ -302,25 +315,25 @@ describe('contributed plot types — the selector', () => {
     const none = harness([]).component;
     const { component } = harness([dianne()]);
     // plotTypeOptions: still exactly the built-in list, as before contributions existed.
-    expect(component.plotTypeOptions).toEqual(none.plotTypeOptions);
-    expect(component.plotTypeOptions.every((d) => Object.values(PlotType).includes(d.type))).toBe(true);
-    expect(component.plotTypeMenu.map((d) => d.type)).toContain('dianne');
+    expect(component['plotTypeOptions']).toEqual(none['plotTypeOptions']);
+    expect(component['plotTypeOptions'].every((d) => Object.values(PlotType).includes(d.type))).toBe(true);
+    expect(component['plotTypeMenu'].map((d) => d.type)).toContain('dianne');
     // selectedPlotType: the built-in type on screen; equals the selection for built-ins.
     component.onSelectPlotType(PlotType.HEATMAP);
-    expect(component.selectedPlotType).toBe(PlotType.HEATMAP);
+    expect(component['selectedPlotType']).toBe(PlotType.HEATMAP);
     component.onSelectPlotType('dianne');
-    expect(component.selectedPlotTypeId).toBe('dianne');
-    expect(component.selectedPlotType).toBe(PlotType.IMAGE); // its baseType
-    component.selectedPlotType = PlotType.HEATMAP; // writing still selects a built-in
-    expect(component.selectedPlotTypeId).toBe(PlotType.HEATMAP);
+    expect(component['selectedPlotTypeId']).toBe('dianne');
+    expect(component['selectedPlotType']).toBe(PlotType.IMAGE); // its baseType
+    component['selectedPlotType'] = PlotType.HEATMAP; // writing still selects a built-in
+    expect(component['selectedPlotTypeId']).toBe(PlotType.HEATMAP);
   });
 
   it('drops a contribution whose id clashes with a built-in type', () => {
     const clash = dianne();
     clash.descriptor = { ...clash.descriptor, type: PlotType.HEATMAP, label: 'Impostor' };
     const { component } = harness([clash]);
-    expect(component.plotTypeMenu.filter((d) => d.type === PlotType.HEATMAP)).toHaveLength(1);
-    expect(component.plotTypeMenu.find((d) => d.type === PlotType.HEATMAP)?.label).toBe('Heatmap');
+    expect(component['plotTypeMenu'].filter((d) => d.type === PlotType.HEATMAP)).toHaveLength(1);
+    expect(component['plotTypeMenu'].find((d) => d.type === PlotType.HEATMAP)?.label).toBe('Heatmap');
   });
 });
 
@@ -330,12 +343,12 @@ describe('contributed plot types — routing and lifecycle', () => {
     imageInfo$.next(infoFor('a.tif'));
     component.onSelectPlotType('dianne');
 
-    expect(component.selectedPlotTypeId).toBe('dianne');
+    expect(component['selectedPlotTypeId']).toBe('dianne');
     expect(component.plotType).toBe(PlotType.IMAGE);
-    expect(component.basePlotType).toBe(PlotType.IMAGE);
+    expect(component['basePlotType']).toBe(PlotType.IMAGE);
     expect(plot.setPlotType).toHaveBeenLastCalledWith(PlotType.IMAGE);
-    expect(component.isImageView).toBe(true);
-    expect(component.isHeatmap).toBe(true);
+    expect(component['isImageView']).toBe(true);
+    expect(component['isHeatmap']).toBe(true);
     const plotted = await renderPhase();
     expect(plotted[4]).toBe(PlotType.IMAGE);
   });
@@ -386,7 +399,7 @@ describe('contributed plot types — routing and lifecycle', () => {
     imageInfo$.next(infoFor('b.tif'));
     expect(events.slice(0, 2)).toEqual(['deactivate', 'reset']);
     expect(mode.sessions[0].deactivate).toHaveBeenCalledTimes(1);
-    expect(component.selectedPlotTypeId).toBe('dianne');
+    expect(component['selectedPlotTypeId']).toBe('dianne');
 
     finish();
     expect(mode.activate).toHaveBeenCalledTimes(2);
@@ -399,7 +412,7 @@ describe('contributed plot types — routing and lifecycle', () => {
     imageInfo$.next(infoFor('a.tif'));
     component.onSelectPlotType('dianne');
     finish();
-    component.ngOnDestroy();
+    destroyComponent(component);
     expect(mode.sessions[0].deactivate).toHaveBeenCalledTimes(1);
   });
 
@@ -428,21 +441,21 @@ describe('contributed plot types — routing and lifecycle', () => {
     const { component, plot, imageInfo$ } = harness([]);
     imageInfo$.next(infoFor('a.tif'));
     component.onSelectPlotType('dianne');
-    expect(component.selectedPlotTypeId).toBe(PlotType.IMAGE);
+    expect(component['selectedPlotTypeId']).toBe(PlotType.IMAGE);
     expect(plot.setPlotType).toHaveBeenLastCalledWith(PlotType.IMAGE);
 
     // …and a selection restored behind the component's back is reconciled too.
-    component.selectedPlotTypeId = 'dianne';
+    component['selectedPlotTypeId'] = 'dianne';
     (component as any).reconcileSelectedPlotType();
-    expect(component.selectedPlotTypeId).toBe(PlotType.IMAGE);
+    expect(component['selectedPlotTypeId']).toBe(PlotType.IMAGE);
   });
 });
 
 describe('contributed plot types — isolation', () => {
   function expectFellBack(h: ReturnType<typeof harness>) {
-    expect(h.component.selectedPlotTypeId).toBe(PlotType.IMAGE);
+    expect(h.component['selectedPlotTypeId']).toBe(PlotType.IMAGE);
     expect(h.component.plotType).toBe(PlotType.IMAGE);
-    expect(h.component.plotModePanel).toBeNull();
+    expect(h.component['plotModePanel']).toBeNull();
     expect(h.messages.add).toHaveBeenCalledWith(expect.objectContaining({ severity: 'warn' }));
   }
 
@@ -474,7 +487,7 @@ describe('contributed plot types — isolation', () => {
     h.component.onSelectPlotType('dianne');
     h.finish();
     expect(() => h.component.onSelectPlotType(PlotType.HEATMAP)).not.toThrow();
-    expect(h.component.selectedPlotTypeId).toBe(PlotType.HEATMAP);
+    expect(h.component['selectedPlotTypeId']).toBe(PlotType.HEATMAP);
   });
 
   it('falls back when the backend on screen offers no viewport (e.g. OSD fell back to Plotly)', () => {
@@ -497,14 +510,14 @@ describe('contributed plot types — panel state', () => {
     component.onSelectPlotType('dianne');
     finish();
 
-    const panel = component.plotModePanel!;
+    const panel = component['plotModePanel']!;
     expect(panel.title).toBe('DIANNE');
     expect(panel.component).toBe(Panel);
     expect(panel.injector!.get(PLOT_MODE_SESSION)).toBe(mode.sessions[0]);
     expect(panel.injector!.get(PLOT_MODE_CONTEXT).viewport).toBeTruthy();
 
     component.onSelectPlotType(PlotType.HEATMAP);
-    expect(component.plotModePanel).toBeNull();
+    expect(component['plotModePanel']).toBeNull();
   });
 
   it('a mount panel is handed a host element, torn down before deactivate', () => {
@@ -516,14 +529,14 @@ describe('contributed plot types — panel state', () => {
     component.onSelectPlotType('dianne');
     finish();
 
-    const host = component.plotModePanel!.host!;
+    const host = component['plotModePanel']!.host!;
     expect(host.textContent).toBe('mounted');
     expect(mount).toHaveBeenCalledWith(host, expect.any(Object), mode.sessions[0]);
     events = [];
     component.onSelectPlotType(PlotType.HEATMAP);
     expect(events.slice(0, 2)).toEqual(['teardown', 'deactivate']);
     expect(teardown).toHaveBeenCalledTimes(1);
-    expect(component.plotModePanel).toBeNull();
+    expect(component['plotModePanel']).toBeNull();
   });
 });
 
@@ -557,9 +570,10 @@ describe('contributed plot types — panel rendering', () => {
       getFilename$: () => new BehaviorSubject(undefined),
       getImageLoadingMessage$: () => new BehaviorSubject(''),
     });
+    shallowVisualizer();
     await TestBed.configureTestingModule({
-      declarations: [VisualizerComponent, ModePanelComponent, ...extra],
-      imports: [CommonModule, DialogModule, NoopAnimationsModule],
+      declarations: [ModePanelComponent, ...extra],
+      imports: [VisualizerComponent, NoopAnimationsModule],
       providers: [
         { provide: IMAGE_STATE_PORT, useValue: state },
         { provide: VISUALIZER, useValue: plot },
@@ -611,7 +625,7 @@ describe('contributed plot types — panel rendering', () => {
     const { fixture, component, mode } = await mountWith([BrokenPanelComponent], {
       title: 'Broken', component: BrokenPanelComponent,
     });
-    expect(component.selectedPlotTypeId).toBe(PlotType.IMAGE);
+    expect(component['selectedPlotTypeId']).toBe(PlotType.IMAGE);
     expect(mode.sessions[0].deactivate).toHaveBeenCalledTimes(1);
     expect(document.body.querySelector('.plot-mode-panel')).toBeNull();
     errors.mockRestore();
@@ -654,9 +668,9 @@ describe('contributed plot types — toolbar tools (ctx.tools)', () => {
 
     tools.armBrush({ label: 'dianne:positive', color: '#1E88E5' });
 
-    expect(component.activeDragMode).toBe('brush');
+    expect(component['activeDragMode']).toBe('brush');
     expect(plot.setActiveTool).toHaveBeenLastCalledWith('brush', {
-      size: component.brushSize, label: 'dianne:positive', color: '#1E88E5',
+      size: component['brushSize'], label: 'dianne:positive', color: '#1E88E5',
     });
     expect(armed[armed.length - 1]).toBe('brush');
   });
@@ -669,15 +683,15 @@ describe('contributed plot types — toolbar tools (ctx.tools)', () => {
     tools.armBrush({ label: 'neg', color: '#f00' });
 
     expect(plot.setActiveTool.mock.calls.length).toBe(armCalls);
-    expect(plot.setBrushOptions).toHaveBeenLastCalledWith({ size: component.brushSize, label: 'neg', color: '#f00' });
-    expect(component.activeDragMode).toBe('brush');
+    expect(plot.setBrushOptions).toHaveBeenLastCalledWith({ size: component['brushSize'], label: 'neg', color: '#f00' });
+    expect(component['activeDragMode']).toBe('brush');
   });
 
   it('the size slider keeps the class (size-only update)', () => {
     const { component, plot, tools } = activeCtx();
     tools.armBrush({ label: 'pos', color: '#00f' });
 
-    component.onBrushSizeChange(12);
+    component['onBrushSizeChange'](12);
 
     expect(plot.setBrushOptions).toHaveBeenLastCalledWith({ size: 12 });
   });
@@ -690,7 +704,7 @@ describe('contributed plot types — toolbar tools (ctx.tools)', () => {
     expect(armed[armed.length - 1]).toBe('pan');
     component.toggleDragMode('brush');
 
-    expect(plot.setActiveTool).toHaveBeenLastCalledWith('brush', { size: component.brushSize });
+    expect(plot.setActiveTool).toHaveBeenLastCalledWith('brush', { size: component['brushSize'] });
   });
 
   it('disarm clears the armed tool', () => {
@@ -699,7 +713,7 @@ describe('contributed plot types — toolbar tools (ctx.tools)', () => {
 
     tools.disarm();
 
-    expect(component.activeDragMode).toBeNull();
+    expect(component['activeDragMode']).toBeNull();
     expect(plot.setActiveTool).toHaveBeenLastCalledWith(null, undefined);
     expect(armed[armed.length - 1]).toBeNull();
   });
@@ -755,9 +769,9 @@ describe('dialog tools (TOOLBAR_TOOLS, kind: dialog)', () => {
     const h = harness(undefined, mockViewport(), [d.tool]);
     h.imageInfo$.next(infoFor('a.tif'));
     h.finish();
-    h.component.toggleDialogTool('dianne');
+    h.component['toggleDialogTool']('dianne');
     const attachHost = () => {
-      const host = h.component.toolDialog?.host;
+      const host = h.component['toolDialog']?.host;
       if (host) document.body.appendChild(host);
       runFrames();
     };
@@ -767,8 +781,8 @@ describe('dialog tools (TOOLBAR_TOOLS, kind: dialog)', () => {
 
   it('lists dialog tools apart from the run tools', () => {
     const { component } = opened();
-    expect(component.dialogTools.map((t) => t.id)).toEqual(['dianne']);
-    expect(component.contributedTools).toEqual([]);
+    expect(component['dialogTools'].map((t) => t.id)).toEqual(['dianne']);
+    expect(component['contributedTools']).toEqual([]);
   });
 
   it('opening starts a session with the Image view context and mounts the body in the dialog', () => {
@@ -777,15 +791,15 @@ describe('dialog tools (TOOLBAR_TOOLS, kind: dialog)', () => {
     const ctx = (tool.activate as jest.Mock).mock.calls[0][0];
     expect(ctx.visualizer).toBe(plot);
     expect(typeof ctx.tools.armBrush).toBe('function');
-    expect(component.openDialogToolId).toBe('dianne');
-    expect(component.toolDialog?.title).toBe('DIANNE');
-    expect(component.toolDialog?.host.textContent).toBe('body');
+    expect(component['openDialogToolId']).toBe('dianne');
+    expect(component['toolDialog']?.title).toBe('DIANNE');
+    expect(component['toolDialog']?.host.textContent).toBe('body');
   });
 
   it('mounts the body only once its host is in the document', () => {
     const { component, tool, attachHost } = opened({}, false);
     expect(tool.activate).toHaveBeenCalledTimes(1);
-    expect(component.toolDialog).not.toBeNull(); // the dialog renders first
+    expect(component['toolDialog']).not.toBeNull(); // the dialog renders first
     expect(tool.mount).not.toHaveBeenCalled();
     runFrames(3); // still detached: keeps waiting
     expect(tool.mount).not.toHaveBeenCalled();
@@ -807,7 +821,7 @@ describe('dialog tools (TOOLBAR_TOOLS, kind: dialog)', () => {
 
   it('closing before the host attaches never mounts, and ends the session once', () => {
     const { component, tool, sessions } = opened({}, false);
-    component.closeDialogTool();
+    component['closeDialogTool']();
     runFrames(61);
     expect(tool.mount).not.toHaveBeenCalled();
     expect(sessions[0].deactivate).toHaveBeenCalledTimes(1);
@@ -817,8 +831,8 @@ describe('dialog tools (TOOLBAR_TOOLS, kind: dialog)', () => {
     const { component, sessions, messages } = opened({
       mount: jest.fn(() => { throw new Error('mount failed'); }),
     });
-    expect(component.openDialogToolId).toBeNull();
-    expect(component.toolDialog).toBeNull();
+    expect(component['openDialogToolId']).toBeNull();
+    expect(component['toolDialog']).toBeNull();
     expect(sessions[0].deactivate).toHaveBeenCalledTimes(1);
     expect(messages.add).toHaveBeenCalledWith(expect.objectContaining({ summary: 'DIANNE is unavailable' }));
   });
@@ -828,7 +842,7 @@ describe('dialog tools (TOOLBAR_TOOLS, kind: dialog)', () => {
     const { component, sessions } = opened({
       mount: jest.fn(() => () => { throw new Error('teardown failed'); }),
     });
-    component.closeDialogTool();
+    component['closeDialogTool']();
     expect(sessions[0].deactivate).toHaveBeenCalledTimes(1);
     expect(errors).toHaveBeenCalledWith(expect.stringContaining('teardown threw'), expect.any(Error));
   });
@@ -836,18 +850,18 @@ describe('dialog tools (TOOLBAR_TOOLS, kind: dialog)', () => {
   it('clicking again closes it: body torn down, then the session ends, once', () => {
     const { component, sessions } = opened();
     events = [];
-    component.toggleDialogTool('dianne');
+    component['toggleDialogTool']('dianne');
     expect(events).toEqual(['teardown', 'deactivate']);
     expect(sessions[0].deactivate).toHaveBeenCalledTimes(1);
-    expect(component.openDialogToolId).toBeNull();
-    expect(component.toolDialog).toBeNull();
+    expect(component['openDialogToolId']).toBeNull();
+    expect(component['toolDialog']).toBeNull();
   });
 
   it('closing the dialog (X) ends the session', () => {
     const { component, sessions } = opened();
-    component.closeDialogTool();
+    component['closeDialogTool']();
     expect(sessions[0].deactivate).toHaveBeenCalledTimes(1);
-    expect(component.toolDialog).toBeNull();
+    expect(component['toolDialog']).toBeNull();
   });
 
   it('an image switch ends the session and starts a fresh one once the new view has plotted', async () => {
@@ -856,25 +870,25 @@ describe('dialog tools (TOOLBAR_TOOLS, kind: dialog)', () => {
     await renderPhase();
     expect(teardowns[0]).toHaveBeenCalledTimes(1);
     expect(sessions[0].deactivate).toHaveBeenCalledTimes(1);
-    expect(component.openDialogToolId).toBe('dianne'); // still open
+    expect(component['openDialogToolId']).toBe('dianne'); // still open
     finish();
     attachHost();
     expect(tool.activate).toHaveBeenCalledTimes(2);
     expect(tool.mount).toHaveBeenCalledTimes(2);
-    expect(component.toolDialog).not.toBeNull();
+    expect(component['toolDialog']).not.toBeNull();
   });
 
   it('leaving the Image view closes the dialog', () => {
     const { component, sessions } = opened();
     component.onSelectPlotType(PlotType.HEATMAP);
     expect(sessions[0].deactivate).toHaveBeenCalledTimes(1);
-    expect(component.openDialogToolId).toBeNull();
+    expect(component['openDialogToolId']).toBeNull();
   });
 
   it('a throwing activate() closes it with a warning, and the viewer keeps working', () => {
     const { component, messages } = opened({ activate: jest.fn(() => { throw new Error('boom'); }) });
-    expect(component.openDialogToolId).toBeNull();
-    expect(component.toolDialog).toBeNull();
+    expect(component['openDialogToolId']).toBeNull();
+    expect(component['toolDialog']).toBeNull();
     expect(messages.add).toHaveBeenCalledWith(expect.objectContaining({ summary: 'DIANNE is unavailable' }));
   });
 
@@ -883,14 +897,14 @@ describe('dialog tools (TOOLBAR_TOOLS, kind: dialog)', () => {
     const h = harness(undefined, null, [d.tool]);
     h.imageInfo$.next(infoFor('a.tif'));
     h.finish();
-    h.component.toggleDialogTool('dianne');
+    h.component['toggleDialogTool']('dianne');
     expect(d.tool.activate).not.toHaveBeenCalled();
-    expect(h.component.openDialogToolId).toBeNull();
+    expect(h.component['openDialogToolId']).toBeNull();
   });
 
   it('ends the session on destroy, once', () => {
     const { component, sessions } = opened();
-    component.ngOnDestroy();
+    destroyComponent(component);
     expect(sessions[0].deactivate).toHaveBeenCalledTimes(1);
   });
 });
@@ -922,9 +936,9 @@ describe('dialog tools — rendering', () => {
       getFilename$: () => new BehaviorSubject(undefined),
       getImageLoadingMessage$: () => new BehaviorSubject(''),
     });
+    shallowVisualizer();
     await TestBed.configureTestingModule({
-      declarations: [VisualizerComponent],
-      imports: [CommonModule, DialogModule, NoopAnimationsModule],
+      imports: [VisualizerComponent, NoopAnimationsModule],
       providers: [
         { provide: IMAGE_STATE_PORT, useValue: state },
         { provide: VISUALIZER, useValue: plot },
@@ -941,7 +955,7 @@ describe('dialog tools — rendering', () => {
     const component = fixture.componentInstance;
     imageInfo$.next(infoFor('a.tif'));
     orchestratorHosts[orchestratorHosts.length - 1].finished(false);
-    component.toggleDialogTool('dianne');
+    component['toggleDialogTool']('dianne');
     fixture.detectChanges();
     await fixture.whenStable();
     fixture.detectChanges();
@@ -955,7 +969,7 @@ describe('dialog tools — rendering', () => {
     expect(dialog?.textContent).toContain('Digital Pathology - DIANNE');
     expect(dialog?.querySelector('.tool-dialog-slot .dialog-body')?.textContent).toBe('hi');
 
-    component.closeDialogTool();
+    component['closeDialogTool']();
     fixture.detectChanges();
     expect(teardown).toHaveBeenCalledTimes(1);
     expect(document.body.querySelector('.dialog-body')).toBeNull();
