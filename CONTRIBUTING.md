@@ -15,6 +15,7 @@ git lfs pull           # sample images for the browser example (Git LFS)
 
 npm run typecheck      # tsc --noEmit over the library
 npm run lint           # eslint: src/**/*.ts, src/**/*.html, the example tile server
+npm run format         # prettier --write (CI runs npm run format:check)
 npm test               # jest (jest-preset-angular)
 npm run test:coverage  # jest with coverage; fails below the floor in jest.config.ts
 npm run build          # ng-packagr → dist/, then bundle the workers into dist/fesm2022/
@@ -36,7 +37,7 @@ cd examples/tile-server && npm ci && npm test
 ```
 
 CI ([`.github/workflows/ci-cd.yaml`](.github/workflows/ci-cd.yaml)) runs
-typecheck, lint, the tests, the library build, the example build against the
+typecheck, lint, the Prettier check, the tests, the library build, the example build against the
 staged package, and the tile-server tests. A pull request needs all of them
 green.
 
