@@ -734,3 +734,159 @@ describe('NapariSpatialTileLayers: layer order', () => {
     tiles.detach();
   });
 });
+
+/**
+ * What hovering a transcript marker says, for each kind of marker the plan can draw: an
+ * individual transcript of "all genes", an all-gene bin, a selected gene's transcript (alone
+ * or aggregated), and a gene selection grouped by cluster. The server's details arrive once
+ * the pointer rests on a marker, and are cached.
+ */
+describe('NapariSpatialTileLayers: hovering a transcript', () => {
+  const meta = { kind: 'categorical', name: 'cluster', categories: ['T cell', 'B cell'] };
+  const entries = (o: { x: number[]; weight?: number; gene?: number[]; aggregated?: boolean }) => {
+    const n = o.x.length;
+    return {
+      count: n, aggregated: !!o.aggregated, x: Float32Array.from(o.x), y: new Float32Array(n).fill(5),
+      z: new Float32Array(n), weight: new Uint32Array(n).fill(o.weight ?? 1),
+      observation: Uint32Array.from({ length: n }, (_v, i) => i),
+      gene: o.gene ? Uint16Array.from(o.gene) : new Uint16Array(n),
+    } as SpatialTranscriptTile;
+  };
+
+  function setup(o: {
+    view: Partial<typeof DEFAULT_SPATIAL_VIEW>; zoom: number; tile: SpatialTranscriptTile;
+    bins?: SpatialTranscriptTile; allGenes?: boolean; summary?: boolean;
+  }) {
+    const getTranscriptSummary = jest.fn(async () => ({
+      transcripts: 4, genes: 3, cells: 1, unassigned: 0,
+      topGenes: [{ name: 'CD3E', count: 2 }, { name: 'MS4A1', count: 1 }],
+      cellIds: { 0: 'cell-0' },
+    }));
+    const port = {
+      getTranscriptTile: jest.fn(async () => o.tile),
+      ...(o.bins ? { getTranscriptBins: jest.fn(async () => o.bins) } : {}),
+      getColumn: jest.fn(async () => ({ meta, codes: Uint16Array.of(0, 1, 0, 1) })),
+      ...(o.summary === false ? {} : { getTranscriptSummary }),
+    } as unknown as SpatialDataPort;
+    const dataset = {
+      id: 'd', name: 'd', columns: [meta],
+      observations: { count: 4, x: new Float32Array(4), y: new Float32Array(4) },
+      transcriptTiles: { bounds: [0, 0, 100, 100], count: 10, levels: [{ tileSize: 200 }] },
+      transcriptBins: {
+        bounds: [0, 0, 100, 100], origin: [0, 0], count: 10,
+        levels: (o.allGenes ? [25] : [1, 2, 4, 8]).map((k) => ({ binSize: k, tileSize: 200 })),
+      },
+    } as unknown as SpatialDataset;
+    const view = { ...DEFAULT_SPATIAL_VIEW, transcriptMode: 'circles' as const, ...o.view };
+    const items: unknown[] = [];
+    const viewer = {
+      camera: { center: [5, 5], zoom: o.zoom, changed: { connect: () => () => undefined } },
+      layers: {
+        items, add: (l: unknown) => items.push(l), remove: (l: unknown) => items.splice(items.indexOf(l), 1),
+      },
+      addPoints: jest.fn(() => { const l = {}; items.push(l); return l; }),
+      addShapes: jest.fn(() => { const l = {}; items.push(l); return l; }),
+      addImage: jest.fn(() => { const l = {}; items.push(l); return l; }),
+      requestRender: () => undefined,
+    } as unknown as Viewer;
+    const tiles = new NapariSpatialTileLayers(port, {
+      latest: () => [dataset, view, emptySelection(4)],
+      canvasSize: () => [400, 400], continuousLut: () => LUT, polygonsShownChanged: () => undefined,
+    });
+    tiles.attach(viewer);
+    const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
+    return { tiles, plan, getTranscriptSummary, items };
+  }
+
+  const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
+
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  it('says nothing before anything is drawn, or away from every marker', async () => {
+    const { tiles, plan } = setup({ view: { transcriptGenes: ['G0'] }, zoom: 20, tile: entries({ x: [5, 7] }) });
+    expect(tiles.hoverAt(5, 5, 0.1, () => undefined)).toBeNull();
+    await plan();
+    expect(tiles.hoverAt(50, 50, 0.1, () => undefined)).toBeNull();
+    tiles.detach();
+  });
+
+  it('names an individual transcript of every gene, then its gene and cell from the server', async () => {
+    const { tiles, plan, getTranscriptSummary } = setup({
+      view: { transcriptAllGenes: true, transcriptBudget: 1000 }, zoom: 4, allGenes: true,
+      tile: entries({ x: [5, 7] }),
+    });
+    await plan();
+    const details = jest.fn();
+    expect(tiles.hoverAt(5, 5, 0.1, details)).toEqual(['Transcript', 'in cell #0 · T cell', 'loading details…']);
+    jest.advanceTimersByTime(150);
+    await flush();
+    expect(getTranscriptSummary).toHaveBeenCalledWith({ box: [4.98, 4.98, 5.02, 5.02], cells: [0] });
+    expect(details).toHaveBeenCalledWith(['CD3E transcript', 'in cell cell-0 · T cell']);
+    // Cached: the next hover of the same marker answers at once.
+    expect(tiles.hoverAt(5, 5, 0.1, details)).toEqual(['CD3E transcript', 'in cell cell-0 · T cell']);
+    tiles.detach();
+  });
+
+  it('describes an all-gene bin by its count and area, then its genes and cells', async () => {
+    const { tiles, plan, getTranscriptSummary } = setup({
+      view: { transcriptAllGenes: true, transcriptBudget: 1000 }, zoom: 4, allGenes: true,
+      tile: entries({ x: Array.from({ length: 5000 }, () => 5) }),
+      bins: entries({ x: [5, 30], weight: 4, aggregated: true }),
+    });
+    await plan();
+    const details = jest.fn();
+    expect(tiles.hoverAt(5, 5, 0.1, details)).toEqual([
+      '4 transcripts · all genes', '25.0 × 25.0 µm area', 'mostly cell #0 · T cell', 'loading details…',
+    ]);
+    jest.advanceTimersByTime(150);
+    await flush();
+    expect(getTranscriptSummary).toHaveBeenCalledWith({ box: [0, 0, 25, 25], cells: [0] });
+    expect(details).toHaveBeenCalledWith([
+      '4 transcripts · all genes', '25.0 × 25.0 µm area', '3 distinct genes · 1 cell',
+      'top genes: CD3E 2, MS4A1 1', 'mostly cell cell-0 · T cell',
+    ]);
+    tiles.detach();
+  });
+
+  it('names a selected gene\'s transcript, alone or aggregated (the server adds only the cell id)', async () => {
+    const one = setup({ view: { transcriptGenes: ['G0'] }, zoom: 20, tile: entries({ x: [5, 7] }) });
+    await one.plan();
+    expect(one.tiles.hoverAt(7, 5, 0.1, () => undefined)).toEqual(['G0 transcript', 'in cell #1 · B cell']);
+    jest.advanceTimersByTime(150);
+    await flush();
+    expect(one.getTranscriptSummary).toHaveBeenCalledWith({ cells: [1] });
+    one.tiles.detach();
+
+    const many = setup({
+      view: { transcriptGenes: ['G0'] }, zoom: 20, tile: entries({ x: [5, 7], weight: 3, aggregated: true }),
+      summary: false,
+    });
+    await many.plan();
+    expect(many.tiles.hoverAt(5, 5, 0.1, () => undefined))
+      .toEqual(['G0 · 3 transcripts', 'grouped: zoom in to split', 'near cell #0 · T cell']);
+    many.tiles.detach();
+  });
+
+  it('names a grouped selection marker by its cluster, area and dominant gene', async () => {
+    // Zoomed out (2 px per unit): one marker per cluster per 8-unit bin.
+    const { tiles, plan } = setup({
+      view: { transcriptGenes: ['G0'], transcriptGeneGroups: [{ name: 'Cluster 0', genes: ['G0'] }] },
+      zoom: 2, tile: entries({ x: [5, 6, 7] }), summary: false,
+    });
+    await plan();
+    expect(tiles.hoverAt(6, 5, 0.1, () => undefined)).toEqual([
+      'Cluster 0 · 3 transcripts', 'mostly G0', '8.0 × 8.0 µm area · zoom in to split', 'mostly cell #0 · T cell',
+    ]);
+    tiles.detach();
+  });
+
+  it('says nothing once the transcript layer is gone from the viewer', async () => {
+    const { tiles, plan, items } = setup({ view: { transcriptGenes: ['G0'] }, zoom: 20, tile: entries({ x: [5] }) });
+    await plan();
+    expect(tiles.hoverAt(5, 5, 0.1, () => undefined)).not.toBeNull();
+    items.length = 0;
+    expect(tiles.hoverAt(5, 5, 0.1, () => undefined)).toBeNull();
+    tiles.detach();
+  });
+});
