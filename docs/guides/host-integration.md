@@ -95,22 +95,27 @@ The library never imports host code. It reaches the host through these DI
 tokens, which you provide at the root or on the component that embeds
 `<visualizer>`:
 
-| Token | Required | What it is |
-|---|---|---|
-| `IMAGE_STATE_PORT` | yes | Your image/loading state: current image info, loading flags, zoom; the library writes updates back |
-| `TILE_ACCESS_PORT` | yes | The selected file's tile info, server-side zoom crops, auth headers for OpenSeadragon's own tile requests |
-| `REGION_IO_PORT` | for `<region-editor>` | Saving and checking ROI GeoJSON files |
-| `VIZ_CONFIG` | yes | `{ slideCropServer, regionEditorWidthSelector?, useNapariRenderer? }` |
-| `PREFERENCES_PORT` | no | Persists class presets |
-| `SPATIAL_DATA_PORT` | no | Spatial-omics datasets; see [spatial-omics.md](./spatial-omics.md) |
-| `CELL_SEGMENTER` | no | Override the automatic segmenter (defaults to `CellposeSegmenterService`) |
-| `TOOLBAR_TOOLS` | no | Contributed tools; see [dialog-tools.md](./dialog-tools.md) |
-| `PLOT_TYPE_CONTRIBUTIONS` | no | Contributed plot modes; see [plot-type-contributions.md](./plot-type-contributions.md) |
+| Token                     | Required              | What it is                                                                                                |
+| ------------------------- | --------------------- | --------------------------------------------------------------------------------------------------------- |
+| `IMAGE_STATE_PORT`        | yes                   | Your image/loading state: current image info, loading flags, zoom; the library writes updates back        |
+| `TILE_ACCESS_PORT`        | yes                   | The selected file's tile info, server-side zoom crops, auth headers for OpenSeadragon's own tile requests |
+| `REGION_IO_PORT`          | for `<region-editor>` | Saving and checking ROI GeoJSON files                                                                     |
+| `VIZ_CONFIG`              | yes                   | `{ slideCropServer, regionEditorWidthSelector?, useNapariRenderer? }`                                     |
+| `PREFERENCES_PORT`        | no                    | Persists class presets                                                                                    |
+| `SPATIAL_DATA_PORT`       | no                    | Spatial-omics datasets; see [spatial-omics.md](./spatial-omics.md)                                        |
+| `CELL_SEGMENTER`          | no                    | Override the automatic segmenter (defaults to `CellposeSegmenterService`)                                 |
+| `TOOLBAR_TOOLS`           | no                    | Contributed tools; see [dialog-tools.md](./dialog-tools.md)                                               |
+| `PLOT_TYPE_CONTRIBUTIONS` | no                    | Contributed plot modes; see [plot-type-contributions.md](./plot-type-contributions.md)                    |
 
 ```ts
 import {
-  VisualizerComponent, RegionEditorComponent, provideVisualization,
-  IMAGE_STATE_PORT, TILE_ACCESS_PORT, REGION_IO_PORT, VIZ_CONFIG,
+  VisualizerComponent,
+  RegionEditorComponent,
+  provideVisualization,
+  IMAGE_STATE_PORT,
+  TILE_ACCESS_PORT,
+  REGION_IO_PORT,
+  VIZ_CONFIG,
 } from '@jax-data-science/sci-image-visualizer';
 
 @Component({
@@ -141,14 +146,14 @@ own ports.
 All are standalone components (import them directly; the deprecated `VisualizationModule`
 re-exports them for NgModule hosts) and use unprefixed selectors.
 
-| Selector | Inputs | Outputs |
-|---|---|---|
-| `visualizer` | `toolbarTools` (partial `ToolbarToolVisibility`; hides toolbar groups), `testMode` (show test-only plot types) | `isStackEvent`, `isGrayscaleEvent` (emit, on each image load, whether it is a z-stack / grayscale) |
-| `region-editor` | none | none |
-| `channel-histogram` | `visible` | `visibleChange` |
-| `spatial-controls` | `visible`, `is3d` | `visibleChange` |
-| `spatial-charts` | `active` (draw only while the host panel is on screen) | none |
-| `hex-color-picker` | `color` (hex string) | `colorChange` |
+| Selector            | Inputs                                                                                                         | Outputs                                                                                            |
+| ------------------- | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `visualizer`        | `toolbarTools` (partial `ToolbarToolVisibility`; hides toolbar groups), `testMode` (show test-only plot types) | `isStackEvent`, `isGrayscaleEvent` (emit, on each image load, whether it is a z-stack / grayscale) |
+| `region-editor`     | none                                                                                                           | none                                                                                               |
+| `channel-histogram` | `visible`                                                                                                      | `visibleChange`                                                                                    |
+| `spatial-controls`  | `visible`, `is3d`                                                                                              | `visibleChange`                                                                                    |
+| `spatial-charts`    | `active` (draw only while the host panel is on screen)                                                         | none                                                                                               |
+| `hex-color-picker`  | `color` (hex string)                                                                                           | `colorChange`                                                                                      |
 
 The viewer is driven through the `VISUALIZER` token (`IVisualizer`), and the
 Regions panel through `REGION_EDITOR_API`. Inject the tokens, not

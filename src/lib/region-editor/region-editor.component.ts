@@ -1,5 +1,13 @@
 import {
-  ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, Inject, OnDestroy, OnInit, ViewChild, inject,
+  ChangeDetectionStrategy,
+  ChangeDetectorRef,
+  Component,
+  DestroyRef,
+  Inject,
+  OnDestroy,
+  OnInit,
+  ViewChild,
+  inject,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
@@ -47,10 +55,23 @@ import { PixelSize, formatArea, pickMpp, regionAreaPx } from './region-metrics';
   selector: 'region-editor',
   standalone: true,
   imports: [
-    CommonModule, FormsModule, SharedModule, ButtonModule, ConfirmDialogModule, DropdownModule, InputTextModule,
-    OverlayPanelModule, ToolbarModule, TooltipModule,
-    ClassesPanelComponent, RegionTableComponent, SaveRegionsDialogComponent, SaveMaskDialogComponent,
-    RegionColorDialogComponent, ManageClassesDialogComponent, RegionEditorHelpComponent,
+    CommonModule,
+    FormsModule,
+    SharedModule,
+    ButtonModule,
+    ConfirmDialogModule,
+    DropdownModule,
+    InputTextModule,
+    OverlayPanelModule,
+    ToolbarModule,
+    TooltipModule,
+    ClassesPanelComponent,
+    RegionTableComponent,
+    SaveRegionsDialogComponent,
+    SaveMaskDialogComponent,
+    RegionColorDialogComponent,
+    ManageClassesDialogComponent,
+    RegionEditorHelpComponent,
   ],
   templateUrl: './region-editor.component.html',
   styleUrls: ['./region-editor.component.scss'],
@@ -181,21 +202,25 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
     // The update event is just a change signal; re-read the regions from the
     // visualizer rather than parsing whatever payload it carries.
-    this.regionApi.getRegionUpdateEvent().pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
-      if (this._updatingFromEditor) return;
-      const updated = this.applyRegionColors(this.regionApi.getAnnotationRegions());
-      // preserve selection for regions that still exist (by id, since name
-      // is a user-editable display label and may collide)
-      const selectedIds = new Set(this.selectedRegions.map((r) => r.id));
-      this.regions = updated;
-      this.selectedRegions = updated.filter((r) => selectedIds.has(r.id));
-      this.clampPaginatorFirst();
-      this.syncClassesFromRegions(updated);
-      this.recomputeClassCounts();
-      this.cdr.markForCheck();
-    });
+    this.regionApi
+      .getRegionUpdateEvent()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        if (this._updatingFromEditor) return;
+        const updated = this.applyRegionColors(this.regionApi.getAnnotationRegions());
+        // preserve selection for regions that still exist (by id, since name
+        // is a user-editable display label and may collide)
+        const selectedIds = new Set(this.selectedRegions.map((r) => r.id));
+        this.regions = updated;
+        this.selectedRegions = updated.filter((r) => selectedIds.has(r.id));
+        this.clampPaginatorFirst();
+        this.syncClassesFromRegions(updated);
+        this.recomputeClassCounts();
+        this.cdr.markForCheck();
+      });
 
-    this.persistence.fileExists(this.saveAsCheck$)
+    this.persistence
+      .fileExists(this.saveAsCheck$)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((exists) => {
         this.saveAsFileExists = exists;
@@ -203,31 +228,35 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       });
 
     // Physical pixel size of the active image (for region areas in µm²/mm²).
-    this.regionApi.getImageMeta().pipe(takeUntilDestroyed(this.destroyRef)).subscribe((meta) => {
-      this.mpp = pickMpp(meta);
-      this.cdr.markForCheck();
-    });
+    this.regionApi
+      .getImageMeta()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((meta) => {
+        this.mpp = pickMpp(meta);
+        this.cdr.markForCheck();
+      });
 
-    this.regionApi.getSelectedRegions$().pipe(takeUntilDestroyed(this.destroyRef)).subscribe((selected) => {
-      if (this._suppressSelectionSyncToPlot) return;
-      // Map the contract's selected regions to the editor's own instances by id.
-      const next = selected
-        .map((s) => this.regions.find((r) => r.id === s.id))
-        .filter((r): r is Region => !!r);
-      const same =
-        next.length === this.selectedRegions.length &&
-        next.every((r, i) => r.id === this.selectedRegions[i]?.id);
-      if (!same) this.selectedRegions = next;
-      // Scroll the paginator so the most-recently-selected row is visible.
-      if (next.length > 0) {
-        const lastIdx = this.regions.findIndex((r) => r.id === next[next.length - 1].id);
-        if (lastIdx >= 0) {
-          const pageStart = Math.floor(lastIdx / this.paginatorRows) * this.paginatorRows;
-          if (pageStart !== this.paginatorFirst) this.paginatorFirst = pageStart;
+    this.regionApi
+      .getSelectedRegions$()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((selected) => {
+        if (this._suppressSelectionSyncToPlot) return;
+        // Map the contract's selected regions to the editor's own instances by id.
+        const next = selected.map((s) => this.regions.find((r) => r.id === s.id)).filter((r): r is Region => !!r);
+        const same =
+          next.length === this.selectedRegions.length &&
+          next.every((r, i) => r.id === this.selectedRegions[i]?.id);
+        if (!same) this.selectedRegions = next;
+        // Scroll the paginator so the most-recently-selected row is visible.
+        if (next.length > 0) {
+          const lastIdx = this.regions.findIndex((r) => r.id === next[next.length - 1].id);
+          if (lastIdx >= 0) {
+            const pageStart = Math.floor(lastIdx / this.paginatorRows) * this.paginatorRows;
+            if (pageStart !== this.paginatorFirst) this.paginatorFirst = pageStart;
+          }
         }
-      }
-      this.cdr.markForCheck();
-    });
+        this.cdr.markForCheck();
+      });
   }
 
   /** Cancels a running GeoJSON save (aborts its upload) and mask export (terminates
@@ -261,9 +290,11 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
    */
   private applyRegionColors(regions: Region[]): Region[] {
     const classColors = this.regionApi.getClassificationColors();
-    return regions.map((region) => region.color
-      ? region
-      : withRegionPatch(region, { color: classColors.get(region.label ?? '') || this.shapeColor }));
+    return regions.map((region) =>
+      region.color
+        ? region
+        : withRegionPatch(region, { color: classColors.get(region.label ?? '') || this.shapeColor }),
+    );
   }
 
   /**
@@ -307,8 +338,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     if (copies.size) {
       this.selectedRegions = (this.selectedRegions ?? []).map((r) => copies.get(r) ?? r);
       if ([...copies.keys()].some((r) => this.editingLabelRegions.has(r))) {
-        this.editingLabelRegions = new Map(
-          [...this.editingLabelRegions].map(([r, d]) => [copies.get(r) ?? r, d]));
+        this.editingLabelRegions = new Map([...this.editingLabelRegions].map(([r, d]) => [copies.get(r) ?? r, d]));
       }
     }
     return copies;
@@ -400,10 +430,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   }
 
   private clampPaginatorFirst() {
-    const maxFirst = Math.max(
-      0,
-      Math.floor((this.regions.length - 1) / this.paginatorRows) * this.paginatorRows,
-    );
+    const maxFirst = Math.max(0, Math.floor((this.regions.length - 1) / this.paginatorRows) * this.paginatorRows);
     if (this.paginatorFirst > maxFirst) {
       this.paginatorFirst = maxFirst;
     }
@@ -679,9 +706,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     // Classes dropped in the dialog: their regions revert to the default "Region"
     // class (else syncClassesFromRegions would just re-add them) (jit-ui#70).
     const kept = new Set(classes.map((c) => keyOf(c.name)));
-    const removed = this.presetSet.classes
-      .map((c) => c.name)
-      .filter((n) => !kept.has(keyOf(n)));
+    const removed = this.presetSet.classes.map((c) => c.name).filter((n) => !kept.has(keyOf(n)));
     this.reassignRegionsToDefaultClass(removed);
     this.regionApi.setPresetSet(this.presetDraft);
     this.commit(); // recolour existing (non-overridden) regions from the new presets
@@ -708,11 +733,19 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       this.regionApi.setPresetSet(set);
       this.presetDraft = this.clonePresetSet(this.regionApi.getPresetSet());
       this.commit();
-      this.messageService.add({ key: VIZ_TOAST_KEY, severity: 'success',
-        summary: 'Classes imported', detail: 'Annotation classes loaded.' });
+      this.messageService.add({
+        key: VIZ_TOAST_KEY,
+        severity: 'success',
+        summary: 'Classes imported',
+        detail: 'Annotation classes loaded.',
+      });
     } catch (err) {
-      this.messageService.add({ key: VIZ_TOAST_KEY, severity: 'error',
-        summary: 'Import failed', detail: `${(err as Error)?.message ?? err}` });
+      this.messageService.add({
+        key: VIZ_TOAST_KEY,
+        severity: 'error',
+        summary: 'Import failed',
+        detail: `${(err as Error)?.message ?? err}`,
+      });
     }
     this.cdr.markForCheck();
   }
@@ -783,33 +816,43 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.maskBusy = true;
     this.maskEncoding = false;
     this.maskProgress = 0;
-    this.maskJob = this.maskExport.export({
-      regions: this.regions, imageSize: size, mode: this.maskMode,
-      sourceName: this.persistence.selectedFileName(),
-    }).subscribe({
-      next: (e) => {
-        this.cdr.markForCheck();
-        switch (e.type) {
-          case 'planned':
-            if (e.scale < 1) {
-              this.messageService.add({
-                key: VIZ_TOAST_KEY,
-                severity: 'info',
-                summary: 'Mask downscaled',
-                detail: `Image too large for a full-resolution mask; saving at ${e.width}×${e.height}.`,
-              });
-            }
-            break;
-          case 'progress': this.maskProgress = e.percent; break;
-          case 'encoding': this.maskEncoding = true; break;
-          case 'done': this.finishMask(e.blob, filename); break;
-        }
-      },
-      error: (err: Error) => {
-        this.maskError(err.message);
-        this.cdr.markForCheck();
-      },
-    });
+    this.maskJob = this.maskExport
+      .export({
+        regions: this.regions,
+        imageSize: size,
+        mode: this.maskMode,
+        sourceName: this.persistence.selectedFileName(),
+      })
+      .subscribe({
+        next: (e) => {
+          this.cdr.markForCheck();
+          switch (e.type) {
+            case 'planned':
+              if (e.scale < 1) {
+                this.messageService.add({
+                  key: VIZ_TOAST_KEY,
+                  severity: 'info',
+                  summary: 'Mask downscaled',
+                  detail: `Image too large for a full-resolution mask; saving at ${e.width}×${e.height}.`,
+                });
+              }
+              break;
+            case 'progress':
+              this.maskProgress = e.percent;
+              break;
+            case 'encoding':
+              this.maskEncoding = true;
+              break;
+            case 'done':
+              this.finishMask(e.blob, filename);
+              break;
+          }
+        },
+        error: (err: Error) => {
+          this.maskError(err.message);
+          this.cdr.markForCheck();
+        },
+      });
   }
 
   /** Cancel an in-progress mask export (terminates its worker) and reset state. */
@@ -866,7 +909,11 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       next: () => {
         this.saveAsBusy = false;
         this.cdr.markForCheck();
-        this.toast('success', 'Regions saved', `Saved ROIs for ${slices.length} slice${slices.length === 1 ? '' : 's'}`);
+        this.toast(
+          'success',
+          'Regions saved',
+          `Saved ROIs for ${slices.length} slice${slices.length === 1 ? '' : 's'}`,
+        );
       },
       error: (err) => {
         this.saveAsBusy = false;
@@ -892,19 +939,21 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       this.saveAsBusy = true;
       // Also run from the overwrite confirmation, which the host's dialog may answer.
       this.cdr.markForCheck();
-      this._saveAsSub = this.persistence.save(() => this.regionsForSave(), filename).subscribe({
-        next: () => {
-          this.saveAsBusy = false;
-          this.showSaveAsDialog = false;
-          this.cdr.markForCheck();
-          this.toast('success', 'Regions saved', `Saved as ${filename}`);
-        },
-        error: (err) => {
-          this.saveAsBusy = false;
-          this.cdr.markForCheck();
-          this.toast('error', 'Error saving regions', `${(err as Error)?.message || err}`);
-        },
-      });
+      this._saveAsSub = this.persistence
+        .save(() => this.regionsForSave(), filename)
+        .subscribe({
+          next: () => {
+            this.saveAsBusy = false;
+            this.showSaveAsDialog = false;
+            this.cdr.markForCheck();
+            this.toast('success', 'Regions saved', `Saved as ${filename}`);
+          },
+          error: (err) => {
+            this.saveAsBusy = false;
+            this.cdr.markForCheck();
+            this.toast('error', 'Error saving regions', `${(err as Error)?.message || err}`);
+          },
+        });
     };
 
     if (this.saveAsFileExists) {

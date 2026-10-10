@@ -31,7 +31,10 @@ export function grayscaleColormap(s: DisplaySnapshot): Colormap | string {
   const lut = value != null ? buildColormapLut(value, s.reverse) : null;
   if (lut) return colormapFromLut('gray-cmap', lut);
   return s.reverse
-    ? colormapFromLut('gray-rev', [[255, 255, 255], [0, 0, 0]] as Rgb[])
+    ? colormapFromLut('gray-rev', [
+        [255, 255, 255],
+        [0, 0, 0],
+      ] as Rgb[])
     : 'gray';
 }
 
@@ -58,9 +61,7 @@ export function volumeColormap(st: IChannelState | undefined, s: DisplaySnapshot
   const grayFamily = label === '' || label.includes('grey') || label.includes('gray');
   const value = node?.data?.value;
   const lut = !grayFamily && value != null ? buildColormapLut(value, false) : null;
-  let cmap: Colormap | string = lut
-    ? colormapFromLut('vol-cmap', lut)
-    : tintColormap(st?.color ?? '#ffffff');
+  let cmap: Colormap | string = lut ? colormapFromLut('vol-cmap', lut) : tintColormap(st?.color ?? '#ffffff');
   // Reverse-scale and invert each flip the ramp (the VolumeLayer has no per-layer invert).
   if (s.reverse) cmap = reverseColormap(cmap);
   if (s.invert) cmap = reverseColormap(cmap);
@@ -83,11 +84,7 @@ export function spatialLut(view: SpatialViewState, s: DisplaySnapshot): Rgb[] {
  * recoloured and the map under them did not.
  */
 export function continuousColormapKey(view: SpatialViewState, s: DisplaySnapshot): string {
-  return [
-    colormapId(view.continuousColormap),
-    colormapId(colormapValue(s)),
-    s.reverse ? 'rev' : '',
-  ].join(':');
+  return [colormapId(view.continuousColormap), colormapId(colormapValue(s)), s.reverse ? 'rev' : ''].join(':');
 }
 
 /**

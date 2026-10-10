@@ -1,6 +1,15 @@
 import {
-  ChangeDetectionStrategy, ChangeDetectorRef, Component, ElementRef, EventEmitter, Input, NgZone, OnChanges,
-  Output, SimpleChanges, ViewChild,
+  ChangeDetectionStrategy,
+  ChangeDetectorRef,
+  Component,
+  ElementRef,
+  EventEmitter,
+  Input,
+  NgZone,
+  OnChanges,
+  Output,
+  SimpleChanges,
+  ViewChild,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -18,12 +27,21 @@ import { TreeSelectModule } from 'primeng/treeselect';
 import type { ISpatialControls } from '../../contracts/visualizer.contract';
 import type { SpatialDataset } from '../../contracts/spatial-dataset.contract';
 import {
-  ColormapNode, DEFAULT_SPATIAL_VIEW, SpatialViewState, TranscriptGlyphName,
+  ColormapNode,
+  DEFAULT_SPATIAL_VIEW,
+  SpatialViewState,
+  TranscriptGlyphName,
 } from '../../contracts/display-types';
 import { defaultGlyphFor } from '../../spatial/spatial-tiles';
 import {
-  GLYPH_OPTIONS, PanelOption, allGenesPreparingNote, densityColorBarCss, importGeneGroupsPatch,
-  markerColumnOptions, parseGeneGroups, tileOptions,
+  GLYPH_OPTIONS,
+  PanelOption,
+  allGenesPreparingNote,
+  densityColorBarCss,
+  importGeneGroupsPatch,
+  markerColumnOptions,
+  parseGeneGroups,
+  tileOptions,
 } from '../../spatial/spatial-panel-model';
 import type { GenePickerModel } from '../spatial-gene-picker';
 import { colormapNodeFor } from '../spatial-key/spatial-key.component';
@@ -52,9 +70,20 @@ export interface GeneMenuItem {
   selector: 'spatial-transcripts-panel',
   standalone: true,
   imports: [
-    CommonModule, FormsModule, SharedModule, CheckboxModule, DropdownModule, InputNumberModule, MenuModule,
-    MultiSelectModule, SelectButtonModule, SliderModule, TooltipModule, TreeSelectModule,
-    SpatialGeneTreeComponent, SpatialMarkerGenesFormComponent,
+    CommonModule,
+    FormsModule,
+    SharedModule,
+    CheckboxModule,
+    DropdownModule,
+    InputNumberModule,
+    MenuModule,
+    MultiSelectModule,
+    SelectButtonModule,
+    SliderModule,
+    TooltipModule,
+    TreeSelectModule,
+    SpatialGeneTreeComponent,
+    SpatialMarkerGenesFormComponent,
   ],
   templateUrl: './spatial-transcripts-panel.component.html',
   styleUrls: ['./spatial-transcripts-panel.component.scss'],
@@ -85,11 +114,15 @@ export class SpatialTranscriptsPanelComponent implements OnChanges {
   /** Virtual-scrolled only past this many options (see the cells panel's gene dropdown). */
   protected readonly geneVirtualScrollFrom = 200;
   protected readonly transcriptColorOptions: PanelOption<SpatialViewState['transcriptColorBy']>[] = [
-    { label: 'Cluster', value: 'cluster' }, { label: 'Cell type', value: 'cellType' }, { label: 'Gene', value: 'gene' },
+    { label: 'Cluster', value: 'cluster' },
+    { label: 'Cell type', value: 'cellType' },
+    { label: 'Gene', value: 'gene' },
   ];
   protected readonly glyphOptions = GLYPH_OPTIONS;
-  protected readonly budgetOptions = [25_000, 50_000, 100_000, 200_000, 400_000]
-    .map((n) => ({ label: n.toLocaleString(), value: n }));
+  protected readonly budgetOptions = [25_000, 50_000, 100_000, 200_000, 400_000].map((n) => ({
+    label: n.toLocaleString(),
+    value: n,
+  }));
   protected readonly densityBins = [10, 20, 40, 80];
 
   /**
@@ -164,8 +197,8 @@ export class SpatialTranscriptsPanelComponent implements OnChanges {
   protected onTranscriptMode(mode: SpatialViewState['transcriptMode']): void {
     // Seed the gene list from the gene being coloured by, so switching transcripts on
     // shows something straight away.
-    const seed = !this.view.transcriptGenes.length && this.view.colorBy?.kind === 'feature'
-      ? [this.view.colorBy.name] : null;
+    const seed =
+      !this.view.transcriptGenes.length && this.view.colorBy?.kind === 'feature' ? [this.view.colorBy.name] : null;
     this.controls?.setViewState({ transcriptMode: mode, ...(seed ? { transcriptGenes: seed } : {}) });
   }
 
@@ -175,8 +208,9 @@ export class SpatialTranscriptsPanelComponent implements OnChanges {
 
   /** Real genes in the panel — the tree's denominator. */
   protected get geneTotal(): number {
-    return this.dataset?.transcriptTiles?.geneCount ?? this.dataset?.features?.count
-      ?? this.genes?.residentCount ?? 0;
+    return (
+      this.dataset?.transcriptTiles?.geneCount ?? this.dataset?.features?.count ?? this.genes?.residentCount ?? 0
+    );
   }
 
   /** "All genes" needs the grouping pyramid, or at least tiles to draw individually. */
@@ -330,8 +364,8 @@ export class SpatialTranscriptsPanelComponent implements OnChanges {
   }
 
   private refreshDensityWindow(): void {
-    const next: [number, number] = this.view.densityRange
-      ?? (this.densityStats ? [this.densityStats.lo, this.densityStats.hi] : [0, 1]);
+    const next: [number, number] =
+      this.view.densityRange ?? (this.densityStats ? [this.densityStats.lo, this.densityStats.hi] : [0, 1]);
     if (next[0] !== this.densityWindow[0] || next[1] !== this.densityWindow[1]) this.densityWindow = next;
     this.densitySliderMax = Math.max(this.densityStats?.max ?? 1, this.densityWindow[1]);
     this.densityStep = this.densitySliderMax / 200;
@@ -341,24 +375,32 @@ export class SpatialTranscriptsPanelComponent implements OnChanges {
   private buildGeneMenu(): GeneMenuItem[] {
     return [
       {
-        label: 'Add marker genes of clusters…', icon: 'pi pi-sitemap',
-        disabled: !this.canAddMarkers, command: () => this.openMarkers(),
+        label: 'Add marker genes of clusters…',
+        icon: 'pi pi-sitemap',
+        disabled: !this.canAddMarkers,
+        command: () => this.openMarkers(),
       },
       {
-        label: 'New group from selected genes', icon: 'pi pi-folder-plus',
-        disabled: !this.view.transcriptGenes.length, command: () => this.onNewGeneGroup(),
+        label: 'New group from selected genes',
+        icon: 'pi pi-folder-plus',
+        disabled: !this.view.transcriptGenes.length,
+        command: () => this.onNewGeneGroup(),
       },
       {
-        label: 'Import gene groups (CSV)…', icon: 'pi pi-upload',
+        label: 'Import gene groups (CSV)…',
+        icon: 'pi pi-upload',
         command: () => this.geneGroupFileRef?.nativeElement.click(),
       },
       {
-        label: 'Remove gene groups', icon: 'pi pi-times',
+        label: 'Remove gene groups',
+        icon: 'pi pi-times',
         disabled: !this.view.transcriptGeneGroups.length,
         command: () => this.controls?.setViewState({ transcriptGeneGroups: [] }),
       },
       {
-        label: 'Clear selection', icon: 'pi pi-ban', disabled: !this.view.transcriptGenes.length,
+        label: 'Clear selection',
+        icon: 'pi pi-ban',
+        disabled: !this.view.transcriptGenes.length,
         command: () => this.controls?.setViewState({ transcriptGenes: [], transcriptHiddenGenes: [] }),
       },
     ];

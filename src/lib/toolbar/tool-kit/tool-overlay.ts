@@ -57,8 +57,14 @@ export class ToolOverlayCanvas {
     if (this.canvas) return this.canvas;
     const canvas = document.createElement('canvas');
     Object.assign(canvas.style, {
-      position: 'absolute', top: '0', left: '0', width: '100%', height: '100%',
-      cursor, zIndex: '100', touchAction: 'none',
+      position: 'absolute',
+      top: '0',
+      left: '0',
+      width: '100%',
+      height: '100%',
+      cursor,
+      zIndex: '100',
+      touchAction: 'none',
     });
     container.appendChild(canvas);
     this.canvas = canvas;

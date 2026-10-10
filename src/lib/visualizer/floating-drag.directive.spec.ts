@@ -9,16 +9,23 @@ describe('FloatingDragDirective', () => {
     let outside = false;
     added = [];
     const realAdd = window.addEventListener.bind(window);
-    jest.spyOn(window, 'addEventListener').mockImplementation(
-      (type: string, l: EventListenerOrEventListenerObject, o?: boolean | AddEventListenerOptions) => {
-        added.push({ type, outside });
-        realAdd(type, l, o);
-      });
+    jest
+      .spyOn(window, 'addEventListener')
+      .mockImplementation(
+        (type: string, l: EventListenerOrEventListenerObject, o?: boolean | AddEventListenerOptions) => {
+          added.push({ type, outside });
+          realAdd(type, l, o);
+        },
+      );
     drag = new FloatingDragDirective({
       run: (fn: () => unknown) => fn(),
       runOutsideAngular: (fn: () => unknown) => {
         outside = true;
-        try { return fn(); } finally { outside = false; }
+        try {
+          return fn();
+        } finally {
+          outside = false;
+        }
       },
     } as never);
     drag.origin = () => ({ x: 100, y: 50 });
@@ -37,7 +44,10 @@ describe('FloatingDragDirective', () => {
   it('listens to the window only while dragging, outside the zone', () => {
     expect(added).toEqual([]);
     drag.onMouseDown(mouse('mousedown', 10, 10));
-    expect(added).toEqual([{ type: 'mousemove', outside: true }, { type: 'mouseup', outside: true }]);
+    expect(added).toEqual([
+      { type: 'mousemove', outside: true },
+      { type: 'mouseup', outside: true },
+    ]);
   });
 
   it('moves the panel by the pointer delta from where the drag started', () => {
@@ -51,7 +61,10 @@ describe('FloatingDragDirective', () => {
 
   it('asks for the origin at mousedown, so the host can detach a docked panel then', () => {
     let floating = false;
-    drag.origin = () => { floating = true; return { x: 8, y: 8 }; };
+    drag.origin = () => {
+      floating = true;
+      return { x: 8, y: 8 };
+    };
     drag.onMouseDown(mouse('mousedown', 0, 0));
     expect(floating).toBe(true);
     window.dispatchEvent(mouse('mousemove', 2, 3));

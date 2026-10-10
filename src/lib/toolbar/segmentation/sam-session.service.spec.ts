@@ -13,7 +13,10 @@ import { CachedImageData } from '../wand/wand-tool.service';
 function slowSession() {
   let finish!: () => void;
   let fail!: (e: Error) => void;
-  const loaded = new Promise<void>((res, rej) => { finish = res; fail = rej; });
+  const loaded = new Promise<void>((res, rej) => {
+    finish = res;
+    fail = rej;
+  });
   const progress: Array<(f: number) => void> = [];
   const session: ISamSession & { model?: SamModelDef } = {
     loadModel: jest.fn(async (model: SamModelDef, onProgress?: (f: number) => void) => {
@@ -23,8 +26,13 @@ function slowSession() {
     }),
     isLoaded: () => true,
     dispose: jest.fn(),
-    embed: jest.fn(async (): Promise<SamEmbedding> =>
-      ({ data: new Float32Array(1), dims: [1], scale: 1, imageWidth: 2, imageHeight: 2 })),
+    embed: jest.fn(async (): Promise<SamEmbedding> => ({
+      data: new Float32Array(1),
+      dims: [1],
+      scale: 1,
+      imageWidth: 2,
+      imageHeight: 2,
+    })),
     decode: jest.fn(),
   };
   return { session, finish, fail, progress };
@@ -55,15 +63,16 @@ describe('SamSessionService', () => {
     expect(await a).toBe(s.session);
     expect(await b).toBe(s.session);
     expect(factory).toHaveBeenCalledTimes(1);
-    expect(seen).toEqual([[0, 0.5], [0, 0.5]]); // 0 when the wait starts
+    expect(seen).toEqual([
+      [0, 0.5],
+      [0, 0.5],
+    ]); // 0 when the wait starts
   });
 
   it('disposes a session whose load failed, and the next call retries (RT-7)', async () => {
     const bad = slowSession();
     const good = slowSession();
-    const factory = jest.fn()
-      .mockResolvedValueOnce(bad.session)
-      .mockResolvedValueOnce(good.session);
+    const factory = jest.fn().mockResolvedValueOnce(bad.session).mockResolvedValueOnce(good.session);
     svc.useSessionFactory(factory);
     const first = svc.ensureSession();
     await flush();
@@ -100,7 +109,16 @@ describe('SamSessionService', () => {
     svc.useSessionFactory(async () => s.session);
     const session = await svc.ensureSession();
     const cached: CachedImageData = {
-      frames: [[[1, 2], [3, 4]]], width: 2, height: 2, ratios: [1], isGrayscale: true,
+      frames: [
+        [
+          [1, 2],
+          [3, 4],
+        ],
+      ],
+      width: 2,
+      height: 2,
+      ratios: [1],
+      isGrayscale: true,
     };
     await svc.embed(session, cached, 0, 'img|0');
     await svc.embed(session, cached, 0, 'img|0');

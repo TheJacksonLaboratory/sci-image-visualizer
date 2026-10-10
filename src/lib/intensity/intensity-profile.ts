@@ -23,7 +23,12 @@ export const PROFILE_PALETTE: readonly string[] = [
 ];
 
 /** A sampling line in image (data) coordinates. */
-export interface ProfileLine { x0: number; y0: number; x1: number; y1: number; }
+export interface ProfileLine {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
 
 /** One frame to sample and how it maps onto the image. */
 export interface SamplingFrame {
@@ -51,20 +56,25 @@ export function imageMpp(meta: IImageMetadata[] | undefined): { mppX: number | n
  * (anisotropic mppX/mppY applied per axis, so diagonals measure their true
  * length), otherwise in image pixels. One sample per frame pixel along the line.
  */
-export function sampleLine(src: SamplingFrame, line: ProfileLine,
-                           mpp: { mppX: number | null; mppY: number | null }): IntensityProfile {
+export function sampleLine(
+  src: SamplingFrame,
+  line: ProfileLine,
+  mpp: { mppX: number | null; mppY: number | null },
+): IntensityProfile {
   const frame = src.frame;
   if (!frame?.length) return { positions: [], values: [] };
   const rx = src.ratios[0] || 1;
   const ry = src.ratios[1] || rx;
   const [ox, oy] = src.origin;
-  const x0 = +line.x0, y0 = +line.y0, x1 = +line.x1, y1 = +line.y1;
-  const dxData = x1 - x0, dyData = y1 - y0;
+  const x0 = +line.x0,
+    y0 = +line.y0,
+    x1 = +line.x1,
+    y1 = +line.y1;
+  const dxData = x1 - x0,
+    dyData = y1 - y0;
   const { mppX, mppY } = mpp;
   const useMicrons = mppX != null;
-  const lenData = useMicrons
-    ? Math.hypot(dxData * mppX, dyData * (mppY ?? mppX))
-    : Math.hypot(dxData, dyData);
+  const lenData = useMicrons ? Math.hypot(dxData * mppX, dyData * (mppY ?? mppX)) : Math.hypot(dxData, dyData);
   const lenPx = Math.hypot(dxData / rx, dyData / ry);
   const n = Math.max(2, Math.round(lenPx));
   const h = frame.length;
@@ -92,15 +102,25 @@ export function sampleLine(src: SamplingFrame, line: ProfileLine,
  *  store the bounds can be a plain object, so this matches on the point arrays. */
 export function profileLineOf(region: Region): ProfileLine | null {
   const poly = region.bounds as { xpoints?: unknown; ypoints?: unknown } | undefined;
-  if (!poly || !Array.isArray(poly.xpoints) || !Array.isArray(poly.ypoints) ||
-      poly.xpoints.length < 2 || poly.ypoints.length < 2) {
+  if (
+    !poly ||
+    !Array.isArray(poly.xpoints) ||
+    !Array.isArray(poly.ypoints) ||
+    poly.xpoints.length < 2 ||
+    poly.ypoints.length < 2
+  ) {
     return null;
   }
   return { x0: poly.xpoints[0], y0: poly.ypoints[0], x1: poly.xpoints[1], y1: poly.ypoints[1] };
 }
 
 /** An image-pixel rectangle. */
-export interface PixelRect { x: number; y: number; width: number; height: number; }
+export interface PixelRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 /**
  * Where the `count`-th profile line goes: a horizontal line spanning 2/3 of
@@ -108,12 +128,20 @@ export interface PixelRect { x: number; y: number; width: number; height: number
  * `[x0, x1, y0, y1]`; else the whole image), centred, staggered down the visible
  * band so successive lines stay distinct.
  */
-export function placeProfileLine(extent: number[], roi: PixelRect | null, count: number):
-  { x0: number; x1: number; y: number } {
+export function placeProfileLine(
+  extent: number[],
+  roi: PixelRect | null,
+  count: number,
+): { x0: number; x1: number; y: number } {
   const [imgX0, imgX1, imgTop, imgBottom] = extent;
-  const overlaps = !!roi && roi.width > 0 && roi.height > 0
-    && roi.x < imgX1 && roi.x + roi.width > imgX0
-    && roi.y < imgBottom && roi.y + roi.height > imgTop;
+  const overlaps =
+    !!roi &&
+    roi.width > 0 &&
+    roi.height > 0 &&
+    roi.x < imgX1 &&
+    roi.x + roi.width > imgX0 &&
+    roi.y < imgBottom &&
+    roi.y + roi.height > imgTop;
   const x0v = overlaps ? Math.max(imgX0, roi!.x) : imgX0;
   const x1v = overlaps ? Math.min(imgX1, roi!.x + roi!.width) : imgX1;
   const topV = overlaps ? Math.max(imgTop, roi!.y) : imgTop;

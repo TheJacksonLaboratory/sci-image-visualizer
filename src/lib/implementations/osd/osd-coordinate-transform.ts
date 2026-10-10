@@ -9,7 +9,6 @@ import { OsdViewerLike } from './osd-viewer-like';
  * viewport gives a clean screen<->image mapping that holds across pan/zoom.
  */
 export class OsdCoordinateTransform implements ICoordinateTransform {
-
   constructor(private viewer: OsdViewerLike) {}
 
   isReady(): boolean {

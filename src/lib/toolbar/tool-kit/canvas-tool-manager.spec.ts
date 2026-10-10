@@ -8,10 +8,18 @@ function fakeTool(id: CanvasToolId): ICanvasTool<{ v?: number }> & { log: string
   return {
     id,
     log,
-    activate: (_host, options) => { log.push(`activate:${options?.v ?? '-'}`); },
-    deactivate: () => { log.push('deactivate'); },
-    setOptions: (options) => { log.push(`options:${options.v}`); },
-    reset: () => { log.push('reset'); },
+    activate: (_host, options) => {
+      log.push(`activate:${options?.v ?? '-'}`);
+    },
+    deactivate: () => {
+      log.push('deactivate');
+    },
+    setOptions: (options) => {
+      log.push(`options:${options.v}`);
+    },
+    reset: () => {
+      log.push('reset');
+    },
   };
 }
 

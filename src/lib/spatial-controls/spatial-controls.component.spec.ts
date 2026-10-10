@@ -18,9 +18,7 @@ import { SpatialTranscriptsPanelComponent } from './spatial-transcripts-panel/sp
 import { SpatialGeneTreeComponent } from './spatial-gene-tree/spatial-gene-tree.component';
 import { SpatialObservationsPanelComponent } from './spatial-observations-panel/spatial-observations-panel.component';
 import { SpatialMarkerGenesFormComponent } from './spatial-marker-genes-form/spatial-marker-genes-form.component';
-import {
-  SpatialSelectionMask, emptySelection,
-} from '../spatial/spatial-selection';
+import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selection';
 
 const dataset: SpatialDataset = {
   id: 'demo',
@@ -61,17 +59,19 @@ describe('SpatialControlsComponent', () => {
     });
     await TestBed.configureTestingModule({
       imports: [SpatialControlsComponent],
-      providers: [{
-        provide: VISUALIZER,
-        useValue: {
-          getSpatialControls: () => spatial,
-          getColormap: () => of({ label: 'Viridis', data: { value: 'Viridis' } }),
-          getReverseScale: () => of(false),
-          // The library's real option tree, so the picker's lookup is tested
-          // against the values a host actually gets.
-          getColormapOptions: () => COLORMAP_OPTIONS,
+      providers: [
+        {
+          provide: VISUALIZER,
+          useValue: {
+            getSpatialControls: () => spatial,
+            getColormap: () => of({ label: 'Viridis', data: { value: 'Viridis' } }),
+            getReverseScale: () => of(false),
+            // The library's real option tree, so the picker's lookup is tested
+            // against the values a host actually gets.
+            getColormapOptions: () => COLORMAP_OPTIONS,
+          },
         },
-      }],
+      ],
     }).compileComponents();
     fixture = TestBed.createComponent(SpatialControlsComponent);
     component = fixture.componentInstance;
@@ -90,10 +90,10 @@ describe('SpatialControlsComponent', () => {
       getViewState$: jest.fn(() => view$),
       viewState: jest.fn(() => view$.value),
       setViewState: jest.fn((partial) => view$.next({ ...view$.value, ...partial })),
-      colorByColumn: jest.fn((name: string) =>
-        view$.next({ ...view$.value, colorBy: { kind: 'column', name } })),
+      colorByColumn: jest.fn((name: string) => view$.next({ ...view$.value, colorBy: { kind: 'column', name } })),
       colorByFeature: jest.fn((name: string) =>
-        view$.next({ ...view$.value, colorBy: { kind: 'feature', name } })),
+        view$.next({ ...view$.value, colorBy: { kind: 'feature', name } }),
+      ),
       clearColorBy: jest.fn(() => view$.next({ ...view$.value, colorBy: null })),
       searchFeatures: jest.fn(async () => ['Ttr']),
       categoryColors: jest.fn(async () => ['#ff0000', '#0000ff']),
@@ -136,7 +136,7 @@ describe('SpatialControlsComponent', () => {
   describe('gene picker', () => {
     beforeEach(async () => build(controls));
 
-    it('lists the dataset\'s own gene names, so the options exist before typing', () => {
+    it("lists the dataset's own gene names, so the options exist before typing", () => {
       // The fixture inlines its names, which is the targeted-panel case.
       expect(component.geneOptions.map((o) => o.value)).toEqual(['Ttr', 'Mbp']);
       expect(component.genesAreRemote).toBe(false);
@@ -197,13 +197,12 @@ describe('SpatialControlsComponent', () => {
       await component.onGeneFilter('ttr');
       expect(component.geneSearchFailed).toBe(false);
     });
-
   });
 
   describe('key', () => {
     beforeEach(async () => build(controls));
 
-    it('builds a legend for a categorical column from the renderer\'s own colours', async () => {
+    it("builds a legend for a categorical column from the renderer's own colours", async () => {
       controls.colorByColumn('region');
       await flush();
       expect(controls.categoryColors).toHaveBeenCalledWith('region');
@@ -302,7 +301,12 @@ describe('SpatialControlsComponent', () => {
       await flush();
       let resolveSlow: (v: string[]) => void = () => undefined;
       controls.searchFeatures
-        .mockImplementationOnce(() => new Promise((r) => { resolveSlow = r; }))
+        .mockImplementationOnce(
+          () =>
+            new Promise((r) => {
+              resolveSlow = r;
+            }),
+        )
         .mockResolvedValueOnce(['Ttr']);
 
       const slow = component.onGeneFilter('Tt');
@@ -324,7 +328,12 @@ describe('SpatialControlsComponent', () => {
       await flush();
       let resolveA: (v: string[]) => void = () => undefined;
       controls.searchFeatures
-        .mockImplementationOnce(() => new Promise((r) => { resolveA = r; }))
+        .mockImplementationOnce(
+          () =>
+            new Promise((r) => {
+              resolveA = r;
+            }),
+        )
         .mockResolvedValueOnce(['B-gene']);
 
       const loadingA = component.ensureGeneList();
@@ -346,16 +355,18 @@ describe('SpatialControlsComponent', () => {
       // land: `region` (2 categories) answering after `zone` (1).
       dataset$.next({
         ...dataset,
-        columns: [
-          ...dataset.columns,
-          { kind: 'categorical', name: 'zone', categories: ['Z'], colors: ['#0f0'] },
-        ],
+        columns: [...dataset.columns, { kind: 'categorical', name: 'zone', categories: ['Z'], colors: ['#0f0'] }],
       } as SpatialDataset);
       await flush();
 
       let resolveSlow: (v: string[]) => void = () => undefined;
       controls.categoryColors
-        .mockImplementationOnce(() => new Promise((r) => { resolveSlow = r; }))
+        .mockImplementationOnce(
+          () =>
+            new Promise((r) => {
+              resolveSlow = r;
+            }),
+        )
         .mockResolvedValueOnce(['#0f0']);
 
       view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
@@ -504,9 +515,7 @@ describe('SpatialControlsComponent', () => {
     });
   });
 
-
   describe('cells and transcripts', () => {
-
     it('offers the controls only for a dataset that has the geometry', async () => {
       await build(controls);
       expect(component['hasCells']).toBe(false);
@@ -518,7 +527,8 @@ describe('SpatialControlsComponent', () => {
 
     it('parses gene groups from a group,gene table', () => {
       expect(parseGeneGroups('group,gene\nPlasma,IGHG3\nPlasma,IGKC\nEndo,AQP1\n')).toEqual([
-        { name: 'Plasma', genes: ['IGHG3', 'IGKC'] }, { name: 'Endo', genes: ['AQP1'] },
+        { name: 'Plasma', genes: ['IGHG3', 'IGKC'] },
+        { name: 'Endo', genes: ['AQP1'] },
       ]);
     });
 
@@ -552,7 +562,8 @@ describe('SpatialControlsComponent', () => {
 
 describe('SpatialControlsComponent — OnPush (SPATIAL-15)', () => {
   @Component({
-    standalone: true, imports: [SpatialControlsComponent],
+    standalone: true,
+    imports: [SpatialControlsComponent],
     template: '<spatial-controls [visible]="true"></spatial-controls>',
   })
   class HostComponent {}
@@ -561,24 +572,34 @@ describe('SpatialControlsComponent — OnPush (SPATIAL-15)', () => {
     const fake = fakeSpatialControls(TILED_DATASET);
     TestBed.resetTestingModule();
     // Every panel shallow (PrimeNG unrendered), as in the DOM spec.
-    for (const leaf of [SpatialKeyComponent, SpatialGroupsPanelComponent, SpatialGeneTreeComponent,
-      SpatialMarkerGenesFormComponent]) shallowPanel(leaf);
+    for (const leaf of [
+      SpatialKeyComponent,
+      SpatialGroupsPanelComponent,
+      SpatialGeneTreeComponent,
+      SpatialMarkerGenesFormComponent,
+    ])
+      shallowPanel(leaf);
     shallowPanel(SpatialCellsPanelComponent, [SpatialGroupsPanelComponent]);
     shallowPanel(SpatialObservationsPanelComponent, [SpatialKeyComponent]);
     shallowPanel(SpatialTranscriptsPanelComponent, [SpatialGeneTreeComponent, SpatialMarkerGenesFormComponent]);
-    shallowPanel(SpatialControlsComponent,
-      [SpatialCellsPanelComponent, SpatialTranscriptsPanelComponent, SpatialObservationsPanelComponent]);
+    shallowPanel(SpatialControlsComponent, [
+      SpatialCellsPanelComponent,
+      SpatialTranscriptsPanelComponent,
+      SpatialObservationsPanelComponent,
+    ]);
     await TestBed.configureTestingModule({
       imports: [HostComponent],
-      providers: [{
-        provide: VISUALIZER,
-        useValue: {
-          getSpatialControls: () => fake.controls,
-          getColormap: () => of(null),
-          getReverseScale: () => of(false),
-          getColormapOptions: () => COLORMAP_OPTIONS,
+      providers: [
+        {
+          provide: VISUALIZER,
+          useValue: {
+            getSpatialControls: () => fake.controls,
+            getColormap: () => of(null),
+            getReverseScale: () => of(false),
+            getColormapOptions: () => COLORMAP_OPTIONS,
+          },
         },
-      }],
+      ],
     }).compileComponents();
     const host = TestBed.createComponent(HostComponent);
     host.detectChanges();
@@ -598,4 +619,3 @@ describe('SpatialControlsComponent — OnPush (SPATIAL-15)', () => {
     host.destroy();
   });
 });
-

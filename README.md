@@ -33,16 +33,16 @@ npm install @angular/animations @angular/router primeng primeicons primeflex \
 
 ### Peer dependencies
 
-| Package | Range | Notes |
-|---|---|---|
-| `@angular/common` · `core` · `forms` · `animations` · `router` | `^17.3.0` | Angular 17. The library does not use animations or the router itself; PrimeNG's dialog, table, toast and menus need them |
-| `rxjs` | `^7.8.0` | |
-| `primeng` | `^17.18.0` | toolbar / dialogs / table / dropdown UI |
-| `primeicons` · `primeflex` | `^7.0.0` · `^4.0.0` | optional peers, but the templates use their icon and utility classes; load their CSS (see [Host setup](#host-setup)) |
-| `image-js` | `^0.35.6` | client-side image processing |
-| `file-saver` | `^2.0.5` | GeoJSON / mask export |
-| `buffer` | `^5.7.1` | Node `Buffer` polyfill for the Plotly backend |
-| `onnxruntime-web` | `~1.26.0` | browser SAM / cellpose inference (WebGPU/WASM) |
+| Package                                                        | Range               | Notes                                                                                                                    |
+| -------------------------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `@angular/common` · `core` · `forms` · `animations` · `router` | `^17.3.0`           | Angular 17. The library does not use animations or the router itself; PrimeNG's dialog, table, toast and menus need them |
+| `rxjs`                                                         | `^7.8.0`            |                                                                                                                          |
+| `primeng`                                                      | `^17.18.0`          | toolbar / dialogs / table / dropdown UI                                                                                  |
+| `primeicons` · `primeflex`                                     | `^7.0.0` · `^4.0.0` | optional peers, but the templates use their icon and utility classes; load their CSS (see [Host setup](#host-setup))     |
+| `image-js`                                                     | `^0.35.6`           | client-side image processing                                                                                             |
+| `file-saver`                                                   | `^2.0.5`            | GeoJSON / mask export                                                                                                    |
+| `buffer`                                                       | `^5.7.1`            | Node `Buffer` polyfill for the Plotly backend                                                                            |
+| `onnxruntime-web`                                              | `~1.26.0`           | browser SAM / cellpose inference (WebGPU/WASM)                                                                           |
 
 The rendering backends and helpers — `openseadragon`, `plotly.js-dist-min`,
 `napari-js`, `cellpose-js`, `fast-png`, and `tslib` — are declared as regular
@@ -65,8 +65,11 @@ it working.
 3. **Assets:** serve the package's `src/lib/assets` at `assets/plotting/`
    (icons, colormap previews, `colormap-luts.json`). In `angular.json`:
    ```json
-   { "glob": "**/*", "input": "node_modules/@jax-data-science/sci-image-visualizer/src/lib/assets",
-     "output": "assets/plotting" }
+   {
+     "glob": "**/*",
+     "input": "node_modules/@jax-data-science/sci-image-visualizer/src/lib/assets",
+     "output": "assets/plotting"
+   }
    ```
 4. **onnxruntime-web sidecars** at `/assets/ort/` (copy
    `node_modules/onnxruntime-web/dist/*.{wasm,mjs}`), or call `setOrtWasmBase(url)`
@@ -86,14 +89,22 @@ it working.
 ```ts
 import { Component } from '@angular/core';
 import {
-  VisualizerComponent, RegionEditorComponent, provideVisualization,
-  IMAGE_STATE_PORT, TILE_ACCESS_PORT, REGION_IO_PORT, VIZ_CONFIG, setSamModelUrls,
+  VisualizerComponent,
+  RegionEditorComponent,
+  provideVisualization,
+  IMAGE_STATE_PORT,
+  TILE_ACCESS_PORT,
+  REGION_IO_PORT,
+  VIZ_CONFIG,
+  setSamModelUrls,
 } from '@jax-data-science/sci-image-visualizer';
 
 // Once at startup: where the SAM model files are hosted.
-setSamModelUrls('microsam-vit-t-lm',
+setSamModelUrls(
+  'microsam-vit-t-lm',
   'https://huggingface.co/jax-image-tools/microsam-vit-t-lm-onnx/resolve/main/encoder.fp16.onnx',
-  'https://huggingface.co/jax-image-tools/microsam-vit-t-lm-onnx/resolve/main/decoder.onnx');
+  'https://huggingface.co/jax-image-tools/microsam-vit-t-lm-onnx/resolve/main/decoder.onnx',
+);
 
 @Component({
   selector: 'app-viewer',
@@ -181,6 +192,7 @@ Open an image and it renders through whichever backend best fits it; the
 state (regions, channels, zoom) consistent across them.
 
 ### OpenSeadragon — tiled image view
+
 The default **Image** view is a natively tiled, deeply zoomable raster powered by
 [OpenSeadragon](https://openseadragon.github.io/). It streams pyramid tiles (the
 host supplies them through the `TILE_ACCESS_PORT`, e.g. a `/tiles/info` + `/tile`
@@ -204,6 +216,7 @@ resolution there is no finer level to switch to, and the setting only moves the
 jump to full-resolution tiles to a lower zoom.
 
 ### Plotly — plots & 3D
+
 Non-image plot types render with [Plotly](https://plotly.com/javascript/) and
 support "real zooming" — a downscaled overview that re-fetches higher-resolution
 data as you zoom in:
@@ -215,6 +228,7 @@ data as you zoom in:
 - scalar/3D types expect a grayscale image (the volume types also need a z-stack).
 
 ### napari-js — WebGPU
+
 GPU-accelerated renderings via [napari-js](https://www.npmjs.com/package/napari-js)
 (WebGPU), selectable from the plot-type menu as the "napari · WebGPU" variants of
 Image, Scatter 2D, Surface, Scatter 3D, **Volume**, **Isosurface**, and the two
@@ -242,7 +256,8 @@ false`) — the latter (e.g. a host-assembled folder of numbered files) fetches
 matching ROI GeoJSON per slice (`IImageInfo.roiJsonStrs`), which the viewer
 shows for the displayed slice and swaps as you scrub.
 
-### Intensity profiles *(work in progress)*
+### Intensity profiles _(work in progress)_
+
 A line-ROI tool draws coloured lines and plots intensity along each one in a live
 floating inset chart that re-samples at the current zoom. It works today but the
 API/UX are still stabilizing (see [In progress / roadmap](#in-progress--roadmap)).
@@ -337,14 +352,14 @@ no Angular compiler required:
 
 ## In progress / roadmap
 
-- **Intensity profile tool** *(work in progress — not yet stable)* — coloured line
+- **Intensity profile tool** _(work in progress — not yet stable)_ — coloured line
   ROIs with a floating inset chart that plots intensity along each line and updates
   live as the line is dragged. Usable today but the API/UX and multi-line/stack
   behaviour are still settling.
-- **Chart → map brushing** *(planned)* — brushing a selection in a spatial-omics
+- **Chart → map brushing** _(planned)_ — brushing a selection in a spatial-omics
   distribution chart back onto the map. See
   [docs/design/spatial-omics-plot-mode-design.md](docs/design/spatial-omics-plot-mode-design.md).
-- **SAM 3 model** *(planned)* — a `variant: 'sam3'` decoder path + export tooling
+- **SAM 3 model** _(planned)_ — a `variant: 'sam3'` decoder path + export tooling
   (SAM 2/3 use a different mask I/O than the current SAM-v1 path). See
   [docs/design/sam-segmentation-design.md](docs/design/sam-segmentation-design.md).
 - **int8 patho-sam validation** — the `patho-sam-vit-b-int8` option is sanity-checked
@@ -377,6 +392,7 @@ no Angular compiler required:
 
   The PNG/SVG renders in `docs/img/` are of the earlier, pre-napari diagrams that
   the SOW documents embed.
+
 - **[docs/JIT_UI_visualization_library_SOW.docx](docs/JIT_UI_visualization_library_SOW.docx)** —
   statement of work for extracting/publishing this library.
 - **History** ([docs/history/](docs/history/)) — the 2026-06 refactoring plan, the
@@ -396,27 +412,33 @@ Related (host side, in jit-ui):
 ## Scientific references
 
 **Segment Anything (SAM)** — the promptable segmentation foundation model.
-> Kirillov, A. et al. *Segment Anything.* ICCV 2023. arXiv:[2304.02643](https://arxiv.org/abs/2304.02643).
+
+> Kirillov, A. et al. _Segment Anything._ ICCV 2023. arXiv:[2304.02643](https://arxiv.org/abs/2304.02643).
 > Code: [facebookresearch/segment-anything](https://github.com/facebookresearch/segment-anything).
 
 **micro-sam** — SAM finetuned for microscopy (the `*_lm` models; default tool).
-> Archit, A. et al. *Segment Anything for Microscopy.* Nature Methods (2025); bioRxiv:[2023.08.21.554208](https://doi.org/10.1101/2023.08.21.554208).
+
+> Archit, A. et al. _Segment Anything for Microscopy._ Nature Methods (2025); bioRxiv:[2023.08.21.554208](https://doi.org/10.1101/2023.08.21.554208).
 > Code: [computational-cell-analytics/micro-sam](https://github.com/computational-cell-analytics/micro-sam).
 
 **patho-sam** — SAM finetuned for histopathology (the `*_histopathology` models).
-> *Segment Anything for Histopathology.* arXiv:[2502.00408](https://arxiv.org/abs/2502.00408) (computational-cell-analytics).
+
+> _Segment Anything for Histopathology._ arXiv:[2502.00408](https://arxiv.org/abs/2502.00408) (computational-cell-analytics).
 > Code: [computational-cell-analytics/patho-sam](https://github.com/computational-cell-analytics/patho-sam).
 
 **Cellpose** — generalist cellular segmentation (flow-field algorithm).
-> Stringer, C. et al. *Cellpose: a generalist algorithm for cellular segmentation.* Nature Methods 18, 100–106 (2021). doi:[10.1038/s41592-020-01018-x](https://doi.org/10.1038/s41592-020-01018-x).
+
+> Stringer, C. et al. _Cellpose: a generalist algorithm for cellular segmentation._ Nature Methods 18, 100–106 (2021). doi:[10.1038/s41592-020-01018-x](https://doi.org/10.1038/s41592-020-01018-x).
 > Code: [MouseLand/cellpose](https://github.com/MouseLand/cellpose).
 
 **Cellpose-SAM** — Cellpose built on a SAM ViT backbone (the automatic tool).
-> Stringer, C. & Pachitariu, M. *Cellpose-SAM: superhuman generalization for cellular segmentation.* bioRxiv:[2025.04.28.651001](https://doi.org/10.1101/2025.04.28.651001).
+
+> Stringer, C. & Pachitariu, M. _Cellpose-SAM: superhuman generalization for cellular segmentation._ bioRxiv:[2025.04.28.651001](https://doi.org/10.1101/2025.04.28.651001).
 > Model: [mouseland/cellpose-sam](https://huggingface.co/mouseland/cellpose-sam).
 
 **MobileSAM** — the TinyViT encoder behind micro-sam ViT-T.
-> Zhang, C. et al. *Faster Segment Anything: Towards Lightweight SAM for Mobile Applications.* arXiv:[2306.14289](https://arxiv.org/abs/2306.14289) (2023).
+
+> Zhang, C. et al. _Faster Segment Anything: Towards Lightweight SAM for Mobile Applications._ arXiv:[2306.14289](https://arxiv.org/abs/2306.14289) (2023).
 > Code: [ChaoningZhang/MobileSAM](https://github.com/ChaoningZhang/MobileSAM).
 
 **Rendering & runtime libraries**

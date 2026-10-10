@@ -217,7 +217,10 @@ describe('EmbeddingComputeRun', () => {
     beforeEach(() => {
       deliver = () => undefined;
       slow = new EmbeddingComputeRun(
-        () => new Promise<Worker>((resolve) => { deliver = resolve; }),
+        () =>
+          new Promise<Worker>((resolve) => {
+            deliver = resolve;
+          }),
       );
     });
 

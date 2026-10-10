@@ -55,7 +55,8 @@ export interface FramePixels {
 /** The accessor for `frame`; `isGrayscale` describes a nested frame's cells. */
 export function framePixels(frame: CachedFrame | undefined, isGrayscale: boolean): FramePixels {
   if (isPackedFrame(frame)) return packedPixels(frame);
-  return isGrayscale ? nestedGrayPixels(frame as number[][] | undefined)
+  return isGrayscale
+    ? nestedGrayPixels(frame as number[][] | undefined)
     : nestedRgbPixels(frame as number[][][] | undefined);
 }
 
@@ -65,7 +66,9 @@ function packedPixels(frame: PackedFrame): FramePixels {
     rgb(x, y, out) {
       if (x < 0 || y < 0 || x >= width || y >= height) return false;
       const s = (y * width + x) * 4;
-      out[0] = data[s]; out[1] = data[s + 1]; out[2] = data[s + 2];
+      out[0] = data[s];
+      out[1] = data[s + 1];
+      out[2] = data[s + 2];
       return true;
     },
     rgbaRow(y, x0, w, dst, o) {
@@ -74,7 +77,9 @@ function packedPixels(frame: PackedFrame): FramePixels {
         const ix = x0 + x;
         if (inRow && ix >= 0 && ix < width) {
           const s = (y * width + ix) * 4;
-          dst[o] = data[s]; dst[o + 1] = data[s + 1]; dst[o + 2] = data[s + 2];
+          dst[o] = data[s];
+          dst[o + 1] = data[s + 1];
+          dst[o + 2] = data[s + 2];
         }
         dst[o + 3] = 255;
       }
@@ -87,14 +92,20 @@ function nestedGrayPixels(frame: number[][] | undefined): FramePixels {
     rgb(x, y, out) {
       const v = frame?.[y]?.[x];
       if (v == null) return false;
-      out[0] = v; out[1] = v; out[2] = v;
+      out[0] = v;
+      out[1] = v;
+      out[2] = v;
       return true;
     },
     rgbaRow(y, x0, w, dst, o) {
       const row = frame?.[y];
       for (let x = 0; x < w; x++, o += 4) {
         const v = row?.[x0 + x];
-        if (v != null) { dst[o] = v; dst[o + 1] = v; dst[o + 2] = v; }
+        if (v != null) {
+          dst[o] = v;
+          dst[o + 1] = v;
+          dst[o + 2] = v;
+        }
         dst[o + 3] = 255;
       }
     },
@@ -106,14 +117,20 @@ function nestedRgbPixels(frame: number[][][] | undefined): FramePixels {
     rgb(x, y, out) {
       const t = frame?.[y]?.[x];
       if (t == null) return false;
-      out[0] = t[0]; out[1] = t[1]; out[2] = t[2];
+      out[0] = t[0];
+      out[1] = t[1];
+      out[2] = t[2];
       return true;
     },
     rgbaRow(y, x0, w, dst, o) {
       const row = frame?.[y];
       for (let x = 0; x < w; x++, o += 4) {
         const t = row?.[x0 + x];
-        if (t != null) { dst[o] = t[0]; dst[o + 1] = t[1]; dst[o + 2] = t[2]; }
+        if (t != null) {
+          dst[o] = t[0];
+          dst[o + 1] = t[1];
+          dst[o + 2] = t[2];
+        }
         dst[o + 3] = 255;
       }
     },

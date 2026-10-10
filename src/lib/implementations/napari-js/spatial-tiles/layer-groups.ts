@@ -3,7 +3,8 @@ import type { Layer, ShapesLayer, Viewer } from 'napari-js';
 import type { SpatialPolygons } from '../../../contracts/spatial-dataset.contract';
 
 /** The layer groups of the 2D spatial tile view. */
-export type TileGroup = 'density' | 'cellFill' | 'cellOutline' | 'nucleusOutline' | 'transcripts' | 'transcriptOutline';
+export type TileGroup =
+  'density' | 'cellFill' | 'cellOutline' | 'nucleusOutline' | 'transcripts' | 'transcriptOutline';
 
 /**
  * Bottom to top: cell fill, cell outline, nucleus outline, the transcript density, then the
@@ -11,7 +12,12 @@ export type TileGroup = 'density' | 'cellFill' | 'cellOutline' | 'nucleusOutline
  * dots it would only show in the gaps between cells.
  */
 export const TILE_LAYER_ORDER: readonly TileGroup[] = [
-  'cellFill', 'cellOutline', 'nucleusOutline', 'density', 'transcripts', 'transcriptOutline',
+  'cellFill',
+  'cellOutline',
+  'nucleusOutline',
+  'density',
+  'transcripts',
+  'transcriptOutline',
 ];
 
 /**
@@ -89,7 +95,10 @@ export class OrderedLayerGroups<G extends string> {
    * colour-only change mutates values/colormap on the existing one.
    */
   upsertShapes(
-    group: G, wanted: boolean, geometryChanged: boolean, rings: SpatialPolygons,
+    group: G,
+    wanted: boolean,
+    geometryChanged: boolean,
+    rings: SpatialPolygons,
     opts: Parameters<Viewer['addShapes']>[2] & object,
   ): void {
     if (!wanted) {
@@ -136,7 +145,10 @@ export class OrderedLayerGroups<G extends string> {
     const wanted = this.order.map((g) => this.layers.get(g)).filter((l): l is Layer => !!l && items.includes(l));
     const ours = new Set<Layer>(wanted);
     let lastOther = -1;
-    if (aboveOthers) items.forEach((l, i) => { if (!ours.has(l)) lastOther = i; });
+    if (aboveOthers)
+      items.forEach((l, i) => {
+        if (!ours.has(l)) lastOther = i;
+      });
     const current = items.filter((l) => ours.has(l));
     let k = 0;
     while (k < wanted.length && current[k] === wanted[k] && items.indexOf(wanted[k]) > lastOther) k++;

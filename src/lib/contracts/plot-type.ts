@@ -136,24 +136,139 @@ export interface PlotTypeDescriptor {
 //    `productionLabel`, so it appears only when the host enables test mode.
 export const PLOT_TYPE_DESCRIPTORS: Partial<Record<PlotType, PlotTypeDescriptor>> = {
   // ── Default ──
-  [PlotType.IMAGE]:      { type: PlotType.IMAGE,      label: 'Image (OSD)',           productionLabel: 'Image',      icon: 'pi pi-image',                    dimensions: '2d', source: 'image' },
+  [PlotType.IMAGE]: {
+    type: PlotType.IMAGE,
+    label: 'Image (OSD)',
+    productionLabel: 'Image',
+    icon: 'pi pi-image',
+    dimensions: '2d',
+    source: 'image',
+  },
   // ── Plotly ──
-  [PlotType.HEATMAP]:    { type: PlotType.HEATMAP,    label: 'Heatmap (Plotly)',      productionLabel: 'Heatmap',    icon: 'assets/plotting/heatmap.svg',    dimensions: '2d', source: 'image' },
-  [PlotType.CONTOUR]:    { type: PlotType.CONTOUR,    label: 'Contour (Plotly)',      productionLabel: 'Contour',    icon: 'assets/plotting/contour.svg',    dimensions: '2d', source: 'image', requiresGrayscale: true },
-  [PlotType.SCATTER]:    { type: PlotType.SCATTER,    label: 'Scatter 2D (Plotly)',   icon: 'pi pi-chart-scatter',            dimensions: '2d', source: 'regions' },
-  [PlotType.SURFACE]:    { type: PlotType.SURFACE,    label: 'Surface (Plotly)',      icon: 'assets/plotting/surface.svg',    dimensions: '3d', source: 'image', requiresGrayscale: true },
-  [PlotType.SCATTER3D]:  { type: PlotType.SCATTER3D,  label: 'Scatter 3D (Plotly)',   icon: 'assets/plotting/3d-coordinates.svg', dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
-  [PlotType.ISOSURFACE]: { type: PlotType.ISOSURFACE, label: 'Isosurface (Plotly)',   icon: 'assets/plotting/isosurface.svg', dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
+  [PlotType.HEATMAP]: {
+    type: PlotType.HEATMAP,
+    label: 'Heatmap (Plotly)',
+    productionLabel: 'Heatmap',
+    icon: 'assets/plotting/heatmap.svg',
+    dimensions: '2d',
+    source: 'image',
+  },
+  [PlotType.CONTOUR]: {
+    type: PlotType.CONTOUR,
+    label: 'Contour (Plotly)',
+    productionLabel: 'Contour',
+    icon: 'assets/plotting/contour.svg',
+    dimensions: '2d',
+    source: 'image',
+    requiresGrayscale: true,
+  },
+  [PlotType.SCATTER]: {
+    type: PlotType.SCATTER,
+    label: 'Scatter 2D (Plotly)',
+    icon: 'pi pi-chart-scatter',
+    dimensions: '2d',
+    source: 'regions',
+  },
+  [PlotType.SURFACE]: {
+    type: PlotType.SURFACE,
+    label: 'Surface (Plotly)',
+    icon: 'assets/plotting/surface.svg',
+    dimensions: '3d',
+    source: 'image',
+    requiresGrayscale: true,
+  },
+  [PlotType.SCATTER3D]: {
+    type: PlotType.SCATTER3D,
+    label: 'Scatter 3D (Plotly)',
+    icon: 'assets/plotting/3d-coordinates.svg',
+    dimensions: '3d',
+    source: 'image',
+    requiresStack: true,
+    requiresGrayscale: true,
+  },
+  [PlotType.ISOSURFACE]: {
+    type: PlotType.ISOSURFACE,
+    label: 'Isosurface (Plotly)',
+    icon: 'assets/plotting/isosurface.svg',
+    dimensions: '3d',
+    source: 'image',
+    requiresStack: true,
+    requiresGrayscale: true,
+  },
   // ── napari-js WebGPU (jit-ui#102). The 3D types take a runtime decimate factor. ──
-  [PlotType.NAPARI_IMAGE]:      { type: PlotType.NAPARI_IMAGE,      label: 'Image (napari · WebGPU)',      icon: 'pi pi-image',                        dimensions: '2d', source: 'image' },
-  [PlotType.NAPARI_SCATTER]:    { type: PlotType.NAPARI_SCATTER,    label: 'Scatter 2D (napari · WebGPU)', icon: 'pi pi-chart-scatter',                dimensions: '2d', source: 'regions' },
-  [PlotType.NAPARI_SURFACE]:    { type: PlotType.NAPARI_SURFACE,    label: 'Surface (napari · WebGPU)',    productionLabel: 'Surface',    icon: 'assets/plotting/surface.svg',        dimensions: '3d', source: 'image' }, // a height-field is z=intensity of one plane — works for any grayscale/RGB image (RGB→luminance), no stack needed
-  [PlotType.NAPARI_SCATTER3D]:  { type: PlotType.NAPARI_SCATTER3D,  label: 'Scatter 3D (napari · WebGPU)', icon: 'assets/plotting/3d-coordinates.svg', dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
-  [PlotType.NAPARI_VOLUME]:     { type: PlotType.NAPARI_VOLUME,     label: 'Volume (napari · WebGPU)',     productionLabel: 'Volume',     icon: 'assets/plotting/cube-3d.svg',        dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
-  [PlotType.NAPARI_ISOSURFACE]: { type: PlotType.NAPARI_ISOSURFACE, label: 'Isosurface (napari · WebGPU)', productionLabel: 'Isosurface', icon: 'assets/plotting/isosurface.svg',     dimensions: '3d', source: 'image', requiresStack: true, requiresGrayscale: true },
+  [PlotType.NAPARI_IMAGE]: {
+    type: PlotType.NAPARI_IMAGE,
+    label: 'Image (napari · WebGPU)',
+    icon: 'pi pi-image',
+    dimensions: '2d',
+    source: 'image',
+  },
+  [PlotType.NAPARI_SCATTER]: {
+    type: PlotType.NAPARI_SCATTER,
+    label: 'Scatter 2D (napari · WebGPU)',
+    icon: 'pi pi-chart-scatter',
+    dimensions: '2d',
+    source: 'regions',
+  },
+  [PlotType.NAPARI_SURFACE]: {
+    type: PlotType.NAPARI_SURFACE,
+    label: 'Surface (napari · WebGPU)',
+    productionLabel: 'Surface',
+    icon: 'assets/plotting/surface.svg',
+    dimensions: '3d',
+    source: 'image',
+    // A height field is z = intensity of one plane: it works for any grayscale or RGB
+    // image (RGB → luminance) and needs no stack.
+  },
+  [PlotType.NAPARI_SCATTER3D]: {
+    type: PlotType.NAPARI_SCATTER3D,
+    label: 'Scatter 3D (napari · WebGPU)',
+    icon: 'assets/plotting/3d-coordinates.svg',
+    dimensions: '3d',
+    source: 'image',
+    requiresStack: true,
+    requiresGrayscale: true,
+  },
+  [PlotType.NAPARI_VOLUME]: {
+    type: PlotType.NAPARI_VOLUME,
+    label: 'Volume (napari · WebGPU)',
+    productionLabel: 'Volume',
+    icon: 'assets/plotting/cube-3d.svg',
+    dimensions: '3d',
+    source: 'image',
+    requiresStack: true,
+    requiresGrayscale: true,
+  },
+  [PlotType.NAPARI_ISOSURFACE]: {
+    type: PlotType.NAPARI_ISOSURFACE,
+    label: 'Isosurface (napari · WebGPU)',
+    productionLabel: 'Isosurface',
+    icon: 'assets/plotting/isosurface.svg',
+    dimensions: '3d',
+    source: 'image',
+    requiresStack: true,
+    requiresGrayscale: true,
+  },
   // ── Spatial omics ──
-  [PlotType.SPATIAL_OMICS]:     { type: PlotType.SPATIAL_OMICS,     label: 'Spatial omics (napari · WebGPU)', productionLabel: 'Spatial omics', icon: 'assets/plotting/spatial-omics.svg',  dimensions: '2d', source: 'spatial', requiresSpatialData: true },
-  [PlotType.SPATIAL_OMICS_3D]:  { type: PlotType.SPATIAL_OMICS_3D,  label: 'Spatial omics 3D (napari · WebGPU)', productionLabel: 'Spatial omics 3D', icon: 'assets/plotting/spatial-omics-3d.svg', dimensions: '3d', source: 'spatial', requiresSpatialData: true, requiresSpatial3d: true },
+  [PlotType.SPATIAL_OMICS]: {
+    type: PlotType.SPATIAL_OMICS,
+    label: 'Spatial omics (napari · WebGPU)',
+    productionLabel: 'Spatial omics',
+    icon: 'assets/plotting/spatial-omics.svg',
+    dimensions: '2d',
+    source: 'spatial',
+    requiresSpatialData: true,
+  },
+  [PlotType.SPATIAL_OMICS_3D]: {
+    type: PlotType.SPATIAL_OMICS_3D,
+    label: 'Spatial omics 3D (napari · WebGPU)',
+    productionLabel: 'Spatial omics 3D',
+    icon: 'assets/plotting/spatial-omics-3d.svg',
+    dimensions: '3d',
+    source: 'spatial',
+    requiresSpatialData: true,
+    requiresSpatial3d: true,
+  },
 };
 
 /** The built-in descriptor (label, icon, dimensions, data source) of a plot type, if any. */
@@ -214,9 +329,7 @@ export function rendererOwnsWheel(type: PlotType): boolean {
 /** Any napari-js 3D plot type (volume, isosurface, surface, or 3D scatter). Resolution is a runtime
  *  decimate factor (Full / ½ / ¼ / ⅛) — see the service's `resolutionScale`. */
 export function isNapari3d(type: PlotType): boolean {
-  return (
-    isNapariVolume(type) || isNapariIsosurface(type) || isNapariSurface(type) || isNapariScatter3d(type)
-  );
+  return isNapariVolume(type) || isNapariIsosurface(type) || isNapariSurface(type) || isNapariScatter3d(type);
 }
 
 /** Decimate factors offered by the Resolution control (1 = Full … 8 = ⅛). */

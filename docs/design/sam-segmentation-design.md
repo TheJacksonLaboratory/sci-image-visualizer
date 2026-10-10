@@ -13,8 +13,8 @@ quantized models (micro-sam first, then SAM3, pathoSAM, …).
 
 > **Why not cellpose-SAM?** Cellpose-SAM deletes SAM's prompt encoder + mask decoder and
 > keeps only the ViT image encoder feeding a Cellpose flow head, so it is **not
-> promptable** — it can only do automatic "segment all cells". It stays as the *automatic*
-> tool; the *promptable* box/point tool needs a real SAM (encoder + prompt encoder + mask
+> promptable** — it can only do automatic "segment all cells". It stays as the _automatic_
+> tool; the _promptable_ box/point tool needs a real SAM (encoder + prompt encoder + mask
 > decoder). micro-sam is exactly that, fine-tuned for microscopy.
 
 ---
@@ -26,11 +26,11 @@ encoder + prompt encoder + mask decoder) trained on microscopy, plus an optional
 decoder for automatic instance segmentation (AIS). Because they are vanilla SAM
 architectures, the standard SAM ONNX export applies.
 
-| Variant | Encoder params | Browser fit | Use |
-|---|---|---|---|
-| `vit_t_lm` (MobileSAM-based) | ~5–10M | best | default for the browser MVP |
-| `vit_b_lm` | ~90M | good (fp16/int8) | higher quality |
-| `vit_l_lm` | ~300M | heavy | desktop/WebGPU-strong only |
+| Variant                      | Encoder params | Browser fit      | Use                         |
+| ---------------------------- | -------------- | ---------------- | --------------------------- |
+| `vit_t_lm` (MobileSAM-based) | ~5–10M         | best             | default for the browser MVP |
+| `vit_b_lm`                   | ~90M           | good (fp16/int8) | higher quality              |
+| `vit_l_lm`                   | ~300M          | heavy            | desktop/WebGPU-strong only  |
 
 `_lm` = light-microscopy fine-tune; `_em_organelles` etc. exist for EM. Start with
 `vit_t_lm`/`vit_b_lm`. The same recipe later covers **SAM3** and **pathoSAM** (both
@@ -77,17 +77,17 @@ python -m segment_anything.utils.onnx \
 
 Decoder I/O (SAM v1):
 
-| Name | Shape | Notes |
-|---|---|---|
-| `image_embeddings` | `(1,256,64,64)` | from the encoder |
-| `point_coords` | `(1,N,2)` | prompt points in **1024-resized** coords |
-| `point_labels` | `(1,N)` | `1`=pos, `0`=neg, `2`=box TL, `3`=box BR, `-1`=pad |
-| `mask_input` | `(1,1,256,256)` | prior low-res logits (zeros if none) |
-| `has_mask_input` | `(1,)` | `1.0` if `mask_input` used |
-| `orig_im_size` | `(2,)` | original `[H, W]` |
-| → `masks` | `(1,M,H,W)` | logits, already upscaled to orig size |
-| → `iou_predictions` | `(1,M)` | quality score; pick argmax |
-| → `low_res_masks` | `(1,M,256,256)` | feed back as `mask_input` to refine |
+| Name                | Shape           | Notes                                              |
+| ------------------- | --------------- | -------------------------------------------------- |
+| `image_embeddings`  | `(1,256,64,64)` | from the encoder                                   |
+| `point_coords`      | `(1,N,2)`       | prompt points in **1024-resized** coords           |
+| `point_labels`      | `(1,N)`         | `1`=pos, `0`=neg, `2`=box TL, `3`=box BR, `-1`=pad |
+| `mask_input`        | `(1,1,256,256)` | prior low-res logits (zeros if none)               |
+| `has_mask_input`    | `(1,)`          | `1.0` if `mask_input` used                         |
+| `orig_im_size`      | `(2,)`          | original `[H, W]`                                  |
+| → `masks`           | `(1,M,H,W)`     | logits, already upscaled to orig size              |
+| → `iou_predictions` | `(1,M)`         | quality score; pick argmax                         |
+| → `low_res_masks`   | `(1,M,256,256)` | feed back as `mask_input` to refine                |
 
 ### 2.3 Export the encoder
 
@@ -193,30 +193,32 @@ ToolbarComponent ──(@Output segment)──► VisualizationComponent.segment
 
 ```ts
 interface SamModelDef {
-  id: string;                 // 'microsam-vit-b-lm'
-  label: string;              // 'micro-sam ViT-B (light microscopy)'
-  encoderUrl: string;         // HF / GCS URL
+  id: string; // 'microsam-vit-b-lm'
+  label: string; // 'micro-sam ViT-B (light microscopy)'
+  encoderUrl: string; // HF / GCS URL
   decoderUrl: string;
-  variant: 'sam1' | 'sam2' | 'sam3';   // governs decoder I/O + mask output size
-  inputSize: number;          // 1024
+  variant: 'sam1' | 'sam2' | 'sam3'; // governs decoder I/O + mask output size
+  inputSize: number; // 1024
   promptable: true;
   microscopy?: boolean;
 }
 ```
+
 First entry: `microsam-vit-b-lm` (and `-vit-t-lm`). SAM3 / pathoSAM are added as entries
-later. **cellpose-SAM is NOT here** — it lives in the cellpose engine as the *automatic*
+later. **cellpose-SAM is NOT here** — it lives in the cellpose engine as the _automatic_
 tool.
 
 ### 4.2 `SamSession` (worker-backed, no Angular)
 
 ```ts
 class SamSession {
-  loadModel(def: SamModelDef): Promise<void>;     // create ORT sessions, cache weights (IndexedDB)
-  embed(img: {data: Uint8ClampedArray; width: number; height: number}): Promise<Embedding>;
-  decode(emb: Embedding, prompts: Prompt[]): Promise<{mask: Uint8Array; w: number; h: number; iou: number}>;
+  loadModel(def: SamModelDef): Promise<void>; // create ORT sessions, cache weights (IndexedDB)
+  embed(img: { data: Uint8ClampedArray; width: number; height: number }): Promise<Embedding>;
+  decode(emb: Embedding, prompts: Prompt[]): Promise<{ mask: Uint8Array; w: number; h: number; iou: number }>;
   dispose(): void;
 }
 ```
+
 - Encoder session: `executionProviders: ['webgpu', 'wasm']` (feature-detect WebGPU, fall
   back to WASM); decoder: `['wasm']` or `['webgpu']` (it's light either way).
 - Runs in a dedicated module Worker so the heavy encoder pass never blocks the UI; ORT
@@ -227,6 +229,7 @@ class SamSession {
 ### 4.3 `SamToolService` (viz library, Angular)
 
 Mirrors `WandToolService`/`BrushToolService`:
+
 - `bindHost(host)` — the host (OSD/Plotly backend) supplies `getCachedImageData()`, the
   coordinate transform, `getRegions()/setRegions()`, `getShapeColor()`, `getFileName()`,
   `getActiveFrameIndex()`.
@@ -251,8 +254,8 @@ Mirrors `WandToolService`/`BrushToolService`:
 
 ### 4.5 Coordinate caveat (important)
 
-Rectangles live in **image/data coords**. The OSD `getCachedImageData()` is a *viewport
-readback* (zoom-dependent, with `originX/originY` + `ratios`), Plotly's is the full frame.
+Rectangles live in **image/data coords**. The OSD `getCachedImageData()` is a _viewport
+readback_ (zoom-dependent, with `originX/originY` + `ratios`), Plotly's is the full frame.
 For the MVP, run SAM on the same readback the wand uses and map boxes via origin/ratio —
 consistent within the current view. A later refinement runs the encoder on a fixed
 full-resolution image and caches one embedding per image/slice regardless of zoom.
@@ -261,13 +264,13 @@ full-resolution image and caches one embedding per image/slice regardless of zoo
 
 ## 5. Phasing
 
-| Phase | Scope |
-|---|---|
-| **P0 (issue #90)** | Box prompts on rectangles → masks. `SamSession` + registry (`microsam-vit-t/b-lm`) + `SamToolService` + Segment button. One embedding per image, multi-box. |
-| **P1** | Interactive point refinement (pos/neg points, live decoder, `mask_input` feedback), commit/clear buffers (micro-sam UX), model dropdown. |
-| **P2** | Automatic mode — AMG point-grid or micro-sam **AIS** decoder; unify with the cellpose-SAM automatic tool. |
-| **P3** | 3D / stack propagation: per-slice embeddings, project box/centroid prompt to `k±1`, link instances across slices by IoU (micro-sam "Segment All Slices"); time series. |
-| **P4** | Additional models via the registry: **SAM3**, **pathoSAM**; quantization variants and per-model decoder I/O. |
+| Phase              | Scope                                                                                                                                                                  |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **P0 (issue #90)** | Box prompts on rectangles → masks. `SamSession` + registry (`microsam-vit-t/b-lm`) + `SamToolService` + Segment button. One embedding per image, multi-box.            |
+| **P1**             | Interactive point refinement (pos/neg points, live decoder, `mask_input` feedback), commit/clear buffers (micro-sam UX), model dropdown.                               |
+| **P2**             | Automatic mode — AMG point-grid or micro-sam **AIS** decoder; unify with the cellpose-SAM automatic tool.                                                              |
+| **P3**             | 3D / stack propagation: per-slice embeddings, project box/centroid prompt to `k±1`, link instances across slices by IoU (micro-sam "Segment All Slices"); time series. |
+| **P4**             | Additional models via the registry: **SAM3**, **pathoSAM**; quantization variants and per-model decoder I/O.                                                           |
 
 ## 6. Reuse map (already in the repo)
 

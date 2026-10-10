@@ -36,7 +36,6 @@ export type MaskExportEvent =
  */
 @Injectable({ providedIn: 'root' })
 export class MaskExportService {
-
   export(request: MaskExportRequest): Observable<MaskExportEvent> {
     return new Observable<MaskExportEvent>((subscriber) => {
       const { imageSize: size } = request;
@@ -46,8 +45,11 @@ export class MaskExportService {
       subscriber.next({ type: 'planned', width, height, scale });
 
       const payload = {
-        width, height,
-        originalWidth: size.width, originalHeight: size.height, scale,
+        width,
+        height,
+        originalWidth: size.width,
+        originalHeight: size.height,
+        scale,
         mode: request.mode,
         sourceName: request.sourceName,
         regions: request.regions.map((r) => scaleParts(regionToParts(r), scale)),
@@ -55,37 +57,56 @@ export class MaskExportService {
 
       let worker: Worker | undefined;
       let closed = false;
-      const stop = () => { worker?.terminate(); worker = undefined; };
-      const fail = (message: string) => { stop(); subscriber.error(new Error(message)); };
+      const stop = () => {
+        worker?.terminate();
+        worker = undefined;
+      };
+      const fail = (message: string) => {
+        stop();
+        subscriber.error(new Error(message));
+      };
 
       // The worker is created asynchronously; a cancel while it loads
       // terminates it as soon as it resolves, before it is sent any work.
-      this.createWorker().then((w) => {
-        if (closed) { w.terminate(); return; }
-        worker = w;
-        w.onmessage = ({ data }: MessageEvent) => {
-          switch (data?.type) {
-            case 'progress':
-              subscriber.next({ type: 'progress', percent: data.total ? Math.round((data.done / data.total) * 100) : 0 });
-              break;
-            case 'encoding':
-              subscriber.next({ type: 'encoding' });
-              break;
-            case 'done':
-              stop();
-              subscriber.next({ type: 'done', blob: new Blob([data.png], { type: 'image/png' }) });
-              subscriber.complete();
-              break;
-            case 'error':
-              fail(data.error || 'The mask could not be generated.');
-              break;
+      this.createWorker()
+        .then((w) => {
+          if (closed) {
+            w.terminate();
+            return;
           }
-        };
-        w.onerror = () => fail('The mask worker failed.');
-        w.postMessage(payload);
-      }).catch(() => { if (!closed) fail('The mask worker failed to start.'); });
+          worker = w;
+          w.onmessage = ({ data }: MessageEvent) => {
+            switch (data?.type) {
+              case 'progress':
+                subscriber.next({
+                  type: 'progress',
+                  percent: data.total ? Math.round((data.done / data.total) * 100) : 0,
+                });
+                break;
+              case 'encoding':
+                subscriber.next({ type: 'encoding' });
+                break;
+              case 'done':
+                stop();
+                subscriber.next({ type: 'done', blob: new Blob([data.png], { type: 'image/png' }) });
+                subscriber.complete();
+                break;
+              case 'error':
+                fail(data.error || 'The mask could not be generated.');
+                break;
+            }
+          };
+          w.onerror = () => fail('The mask worker failed.');
+          w.postMessage(payload);
+        })
+        .catch(() => {
+          if (!closed) fail('The mask worker failed to start.');
+        });
 
-      return () => { closed = true; stop(); };
+      return () => {
+        closed = true;
+        stop();
+      };
     });
   }
 

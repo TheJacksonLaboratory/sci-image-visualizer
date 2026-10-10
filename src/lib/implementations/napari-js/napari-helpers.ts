@@ -146,10 +146,7 @@ export function create2dCanvas(
     canvas.width = width;
     canvas.height = height;
   }
-  const ctx = canvas.getContext('2d') as
-    | CanvasRenderingContext2D
-    | OffscreenCanvasRenderingContext2D
-    | null;
+  const ctx = canvas.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
   if (!ctx) throw new Error(`[napari-js] ${what}: 2D context unavailable`);
   return { canvas, ctx };
 }

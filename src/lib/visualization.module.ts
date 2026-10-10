@@ -10,8 +10,12 @@ import { VISUALIZER_TOKEN_BINDINGS } from './provide-visualization';
 
 /** The embeddable components, all standalone. */
 const PUBLIC_COMPONENTS = [
-  VisualizerComponent, RegionEditorComponent, HexColorPickerComponent,
-  ChannelHistogramComponent, SpatialControlsComponent, SpatialChartsComponent,
+  VisualizerComponent,
+  RegionEditorComponent,
+  HexColorPickerComponent,
+  ChannelHistogramComponent,
+  SpatialControlsComponent,
+  SpatialChartsComponent,
 ];
 
 /**

@@ -60,8 +60,9 @@ self.onmessage = async (event: MessageEvent<Incoming>) => {
       backend = 'cpu';
       self.postMessage({
         type: 'warning',
-        message: `GPU acceleration unavailable (${(err as Error)?.message ?? err}); `
-          + 'falling back to a plain loop, which is far slower at this size.',
+        message:
+          `GPU acceleration unavailable (${(err as Error)?.message ?? err}); ` +
+          'falling back to a plain loop, which is far slower at this size.',
       });
     }
     self.postMessage({ type: 'backend', backend });

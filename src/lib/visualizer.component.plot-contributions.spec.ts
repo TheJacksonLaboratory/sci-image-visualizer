@@ -52,7 +52,11 @@ import { CellSegmentToolService } from './toolbar/segmentation/cell-segment-tool
 const BUILT_INS = Object.values(PLOT_TYPE_DESCRIPTORS).filter(Boolean) as any[];
 
 function toolFeeds(): any {
-  return { status$: new BehaviorSubject(''), busy$: new BehaviorSubject(false), progress$: new BehaviorSubject(-1) };
+  return {
+    status$: new BehaviorSubject(''),
+    busy$: new BehaviorSubject(false),
+    progress$: new BehaviorSubject(-1),
+  };
 }
 
 /** Any unlisted `getX$()` / `isX()` answers with a BehaviorSubject, anything else
@@ -62,9 +66,7 @@ function selfCompleting(base: any): any {
     has: () => true,
     get(target, prop: any) {
       if (typeof prop !== 'string' || prop in target) return target[prop];
-      target[prop] = /\$$|^(get|is)[A-Z]/.test(prop)
-        ? jest.fn(() => new BehaviorSubject(false))
-        : jest.fn();
+      target[prop] = /\$$|^(get|is)[A-Z]/.test(prop) ? jest.fn(() => new BehaviorSubject(false)) : jest.fn();
       return target[prop];
     },
   });
@@ -147,8 +149,11 @@ function plotBase(viewport: PlotModeViewport | null): any {
   };
 }
 
-function harness(contributions: unknown[] | undefined, viewport: PlotModeViewport | null = mockViewport(),
-                 toolContributions?: unknown[]) {
+function harness(
+  contributions: unknown[] | undefined,
+  viewport: PlotModeViewport | null = mockViewport(),
+  toolContributions?: unknown[],
+) {
   const plot = selfCompleting(plotBase(viewport));
   const imageInfo$ = new BehaviorSubject<any>(null);
   const state = selfCompleting({
@@ -164,23 +169,28 @@ function harness(contributions: unknown[] | undefined, viewport: PlotModeViewpor
   });
   const messages = { add: jest.fn(), clear: jest.fn() };
   const destroyRef = testDestroyRef();
-  const component = own(new VisualizerComponent(
-    state,
-    plot,
-    messages as any,
-    { run: (fn: () => void) => fn(), runOutsideAngular: (fn: () => void) => fn() } as any,
-    { detectChanges: jest.fn(), markForCheck: jest.fn() } as any,
-    new VisualizerStore(),
-    toolFeeds(), toolFeeds(), toolFeeds(),
-    new RegionOpsService(),
-    undefined, // VIZ_CONFIG
-    toolContributions as any, // TOOLBAR_TOOLS
-    undefined, // SPATIAL_DATA_PORT
-    contributions as any, // PLOT_TYPE_CONTRIBUTIONS
-    Injector.create({ providers: [] }),
-    undefined, // host ElementRef
+  const component = own(
+    new VisualizerComponent(
+      state,
+      plot,
+      messages as any,
+      { run: (fn: () => void) => fn(), runOutsideAngular: (fn: () => void) => fn() } as any,
+      { detectChanges: jest.fn(), markForCheck: jest.fn() } as any,
+      new VisualizerStore(),
+      toolFeeds(),
+      toolFeeds(),
+      toolFeeds(),
+      new RegionOpsService(),
+      undefined, // VIZ_CONFIG
+      toolContributions as any, // TOOLBAR_TOOLS
+      undefined, // SPATIAL_DATA_PORT
+      contributions as any, // PLOT_TYPE_CONTRIBUTIONS
+      Injector.create({ providers: [] }),
+      undefined, // host ElementRef
+      destroyRef,
+    ),
     destroyRef,
-  ), destroyRef);
+  );
   component.ngOnInit();
   /** Land the most recent render, as RenderOrchestrator would once it finished. */
   const finish = () => orchestratorHosts[orchestratorHosts.length - 1].finished(false);
@@ -201,7 +211,6 @@ beforeEach(() => {
   jest.spyOn(console, 'error').mockImplementation(() => undefined);
 });
 afterEach(() => jest.restoreAllMocks());
-
 
 /** Render the visualizer's own template with real dialogs; everything else (the toolbar,
  *  the panels, the other PrimeNG elements) stays an unknown element. */
@@ -247,9 +256,15 @@ describe('contributed plot types — the selector', () => {
   it('appends contributed modes after every built-in one, under the production label', () => {
     const { component } = harness([dianne()]);
     const opts = component['plotTypeMenu'];
-    expect(opts[opts.length - 1]).toEqual(expect.objectContaining({
-      type: 'dianne', label: 'DIANNE', baseType: PlotType.IMAGE, source: 'image', dimensions: '2d',
-    }));
+    expect(opts[opts.length - 1]).toEqual(
+      expect.objectContaining({
+        type: 'dianne',
+        label: 'DIANNE',
+        baseType: PlotType.IMAGE,
+        source: 'image',
+        dimensions: '2d',
+      }),
+    );
     expect(types(component).indexOf('dianne')).toBe(opts.length - 1);
   });
 
@@ -261,8 +276,7 @@ describe('contributed plot types — the selector', () => {
 
     component.testMode = true;
     component.ngOnChanges({ testMode: {} as any });
-    expect(component['plotTypeMenu'].find((d) => d.type === 'dianne')?.label)
-      .toBe('Digital Pathology - DIANNE');
+    expect(component['plotTypeMenu'].find((d) => d.type === 'dianne')?.label).toBe('Digital Pathology - DIANNE');
   });
 
   it('applies requiresGrayscale and requiresStack like the built-ins do', () => {
@@ -460,7 +474,11 @@ describe('contributed plot types — isolation', () => {
   }
 
   it('a throwing activate() falls back to the base type without breaking the render', () => {
-    const mode = dianne({ activate: jest.fn(() => { throw new Error('boom'); }) });
+    const mode = dianne({
+      activate: jest.fn(() => {
+        throw new Error('boom');
+      }),
+    });
     const h = harness([mode]);
     h.imageInfo$.next(infoFor('a.tif'));
     h.component.onSelectPlotType('dianne');
@@ -480,7 +498,11 @@ describe('contributed plot types — isolation', () => {
 
   it('a throwing deactivate() does not stop the next mode', () => {
     const mode = dianne({
-      activate: jest.fn(() => ({ deactivate: () => { throw new Error('bad'); } })),
+      activate: jest.fn(() => ({
+        deactivate: () => {
+          throw new Error('bad');
+        },
+      })),
     });
     const h = harness([mode]);
     h.imageInfo$.next(infoFor('a.tif'));
@@ -522,7 +544,10 @@ describe('contributed plot types — panel state', () => {
 
   it('a mount panel is handed a host element, torn down before deactivate', () => {
     const teardown = jest.fn(() => events.push('teardown'));
-    const mount = jest.fn((host: HTMLElement) => { host.textContent = 'mounted'; return teardown; });
+    const mount = jest.fn((host: HTMLElement) => {
+      host.textContent = 'mounted';
+      return teardown;
+    });
     const mode = dianne({ panel: { title: 'DIANNE', mount } });
     const { component, imageInfo$, finish } = harness([mode]);
     imageInfo$.next(infoFor('a.tif'));
@@ -550,8 +575,10 @@ describe('contributed plot types — panel rendering', () => {
   @Component({ selector: 'test-mode-panel', template: '<span class="probe">{{ label }}</span>' })
   class ModePanelComponent {
     label: string;
-    constructor(@Inject(PLOT_MODE_CONTEXT) ctx: PlotModeContext,
-                @Inject(PLOT_MODE_SESSION) session: PlotModeSession) {
+    constructor(
+      @Inject(PLOT_MODE_CONTEXT) ctx: PlotModeContext,
+      @Inject(PLOT_MODE_SESSION) session: PlotModeSession,
+    ) {
       this.label = `${ctx.viewport.isReady() ? 'ready' : 'not-ready'}:${typeof session.deactivate}`;
     }
   }
@@ -619,11 +646,14 @@ describe('contributed plot types — panel rendering', () => {
   it('falls back to Image when the component panel throws while it is created', async () => {
     @Component({ selector: 'test-broken-panel', template: '<i></i>' })
     class BrokenPanelComponent {
-      constructor() { throw new Error('panel constructor failed'); }
+      constructor() {
+        throw new Error('panel constructor failed');
+      }
     }
     const errors = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     const { fixture, component, mode } = await mountWith([BrokenPanelComponent], {
-      title: 'Broken', component: BrokenPanelComponent,
+      title: 'Broken',
+      component: BrokenPanelComponent,
     });
     expect(component['selectedPlotTypeId']).toBe(PlotType.IMAGE);
     expect(mode.sessions[0].deactivate).toHaveBeenCalledTimes(1);
@@ -632,11 +662,14 @@ describe('contributed plot types — panel rendering', () => {
     fixture.destroy();
   });
 
-  it('attaches a mount panel\'s host inside the dialog', async () => {
+  it("attaches a mount panel's host inside the dialog", async () => {
     const teardown = jest.fn();
     const { fixture, component } = await mount({
       title: 'DIANNE',
-      mount: (host) => { host.innerHTML = '<b class="mounted">hi</b>'; return teardown; },
+      mount: (host) => {
+        host.innerHTML = '<b class="mounted">hi</b>';
+        return teardown;
+      },
     });
     const slot = document.body.querySelector('.plot-mode-panel-slot');
     expect(slot?.querySelector('.mounted')?.textContent).toBe('hi');
@@ -670,7 +703,9 @@ describe('contributed plot types — toolbar tools (ctx.tools)', () => {
 
     expect(component['activeDragMode']).toBe('brush');
     expect(plot.setActiveTool).toHaveBeenLastCalledWith('brush', {
-      size: component['brushSize'], label: 'dianne:positive', color: '#1E88E5',
+      size: component['brushSize'],
+      label: 'dianne:positive',
+      color: '#1E88E5',
     });
     expect(armed[armed.length - 1]).toBe('brush');
   });
@@ -683,7 +718,11 @@ describe('contributed plot types — toolbar tools (ctx.tools)', () => {
     tools.armBrush({ label: 'neg', color: '#f00' });
 
     expect(plot.setActiveTool.mock.calls.length).toBe(armCalls);
-    expect(plot.setBrushOptions).toHaveBeenLastCalledWith({ size: component['brushSize'], label: 'neg', color: '#f00' });
+    expect(plot.setBrushOptions).toHaveBeenLastCalledWith({
+      size: component['brushSize'],
+      label: 'neg',
+      color: '#f00',
+    });
     expect(component['activeDragMode']).toBe('brush');
   });
 
@@ -829,7 +868,9 @@ describe('dialog tools (TOOLBAR_TOOLS, kind: dialog)', () => {
 
   it('a throwing mount() closes it with a warning and ends the session once', () => {
     const { component, sessions, messages } = opened({
-      mount: jest.fn(() => { throw new Error('mount failed'); }),
+      mount: jest.fn(() => {
+        throw new Error('mount failed');
+      }),
     });
     expect(component['openDialogToolId']).toBeNull();
     expect(component['toolDialog']).toBeNull();
@@ -840,7 +881,9 @@ describe('dialog tools (TOOLBAR_TOOLS, kind: dialog)', () => {
   it('a throwing teardown is logged and the session still ends', () => {
     const errors = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     const { component, sessions } = opened({
-      mount: jest.fn(() => () => { throw new Error('teardown failed'); }),
+      mount: jest.fn(() => () => {
+        throw new Error('teardown failed');
+      }),
     });
     component['closeDialogTool']();
     expect(sessions[0].deactivate).toHaveBeenCalledTimes(1);
@@ -886,7 +929,11 @@ describe('dialog tools (TOOLBAR_TOOLS, kind: dialog)', () => {
   });
 
   it('a throwing activate() closes it with a warning, and the viewer keeps working', () => {
-    const { component, messages } = opened({ activate: jest.fn(() => { throw new Error('boom'); }) });
+    const { component, messages } = opened({
+      activate: jest.fn(() => {
+        throw new Error('boom');
+      }),
+    });
     expect(component['openDialogToolId']).toBeNull();
     expect(component['toolDialog']).toBeNull();
     expect(messages.add).toHaveBeenCalledWith(expect.objectContaining({ summary: 'DIANNE is unavailable' }));
@@ -919,7 +966,11 @@ describe('dialog tools — rendering', () => {
     const teardown = jest.fn();
     let connectedAtMount: boolean | null = null;
     const tool: ToolbarDialogToolContribution = {
-      kind: 'dialog', id: 'dianne', label: 'DIANNE', icon: { pi: 'pi-pencil' }, tooltip: 't',
+      kind: 'dialog',
+      id: 'dianne',
+      label: 'DIANNE',
+      icon: { pi: 'pi-pencil' },
+      tooltip: 't',
       dialog: { title: 'Digital Pathology - DIANNE' },
       activate: () => ({ deactivate: jest.fn() }),
       mount: (host) => {

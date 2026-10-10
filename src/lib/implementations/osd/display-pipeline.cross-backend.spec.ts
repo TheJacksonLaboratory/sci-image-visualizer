@@ -20,7 +20,9 @@ import { Rgb } from '../../contracts/colormap-lut';
  */
 type WindowGamma = (value: number, lo: number, hi: number, gamma: number, invert: boolean) => number;
 type RGB = [number, number, number];
-interface NapariColormap { sample(t: number): RGB }
+interface NapariColormap {
+  sample(t: number): RGB;
+}
 type MapScalar = (
   value: number,
   opts: { climLo: number; climHi: number; gamma: number; invert: boolean; colormap: NapariColormap },

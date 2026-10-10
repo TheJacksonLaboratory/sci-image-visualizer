@@ -41,7 +41,10 @@ export async function renderCompositePng(input: CompositeExportInput): Promise<B
   if (!infoB64 || !levels.length) return null;
   let res = levels.length - 1; // coarsest fallback
   for (let i = 0; i < levels.length; i++) {
-    if (levels[i].width * levels[i].height <= EXPORT_PIXEL_CAP) { res = i; break; }
+    if (levels[i].width * levels[i].height <= EXPORT_PIXEL_CAP) {
+      res = i;
+      break;
+    }
   }
   const lw = levels[res].width;
   const lh = levels[res].height;
@@ -116,9 +119,7 @@ export async function renderCompositePng(input: CompositeExportInput): Promise<B
 export async function fetchTiffExport(http: HttpClient, url: string): Promise<Blob | null> {
   try {
     const resp = await firstValueFrom(
-      http
-        .get(url, { observe: 'response', responseType: 'blob' })
-        .pipe(timeout(600000)), // large exports stream slowly; generous deadline
+      http.get(url, { observe: 'response', responseType: 'blob' }).pipe(timeout(600000)), // large exports stream slowly; generous deadline
     );
     if (resp.status === 202) {
       console.warn('[OSD] 16-bit export: file still caching — try again shortly.');

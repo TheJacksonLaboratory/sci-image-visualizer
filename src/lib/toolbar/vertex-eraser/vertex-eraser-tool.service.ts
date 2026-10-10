@@ -181,8 +181,12 @@ export class VertexEraserTool implements ICanvasTool<IVertexEraserOptions> {
         newHoles = [];
         for (const hole of b.holes) {
           const hr = dropVerticesWithinRadius(
-            hole.map((p) => frame.toMatrixX(p[0])), hole.map((p) => frame.toMatrixY(p[1])),
-            cmx, cmy, this.radius);
+            hole.map((p) => frame.toMatrixX(p[0])),
+            hole.map((p) => frame.toMatrixY(p[1])),
+            cmx,
+            cmy,
+            this.radius,
+          );
           if (hr.removed === 0) {
             newHoles.push(hole); // untouched — keep as-is
           } else {
@@ -208,9 +212,14 @@ export class VertexEraserTool implements ICanvasTool<IVertexEraserOptions> {
       // any stored bezier handles (the anchor count changed) — they re-derive
       // from the new anchors.
       const data = frame.ringToData(result.xpoints, result.ypoints);
-      regions[i] = replaceBounds(region, makePolygon(data.xs, data.ys, {
-        closed, bezier: b.bezier, holes: newHoles,
-      }));
+      regions[i] = replaceBounds(
+        region,
+        makePolygon(data.xs, data.ys, {
+          closed,
+          bezier: b.bezier,
+          holes: newHoles,
+        }),
+      );
     }
 
     if (!anyChange) return;

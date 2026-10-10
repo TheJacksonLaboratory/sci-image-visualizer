@@ -15,13 +15,17 @@ describe('StackControlsComponent', () => {
     jest.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
       if (!String(args[0]).includes('Could not parse CSS stylesheet')) consoleError(...args);
     });
-    await TestBed.configureTestingModule({ imports: [VisualizationModule, NoopAnimationsModule] })
-      .compileComponents();
+    await TestBed.configureTestingModule({
+      imports: [VisualizationModule, NoopAnimationsModule],
+    }).compileComponents();
     fixture = TestBed.createComponent(StackControlsComponent);
     stack = fixture.componentInstance;
   });
 
-  afterEach(() => { fixture.destroy(); jest.restoreAllMocks(); });
+  afterEach(() => {
+    fixture.destroy();
+    jest.restoreAllMocks();
+  });
 
   it('the live scrubber shows the slice of the stack', () => {
     fixture.componentRef.setInput('liveScrubber', true);

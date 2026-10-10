@@ -30,10 +30,18 @@ export class MatrixFrame {
     return `${this.rx},${this.ry},${this.ox},${this.oy}`;
   }
 
-  toMatrixX(x: number): number { return (x - this.ox) / this.rx; }
-  toMatrixY(y: number): number { return (y - this.oy) / this.ry; }
-  toDataX(mx: number): number { return this.ox + mx * this.rx; }
-  toDataY(my: number): number { return this.oy + my * this.ry; }
+  toMatrixX(x: number): number {
+    return (x - this.ox) / this.rx;
+  }
+  toMatrixY(y: number): number {
+    return (y - this.oy) / this.ry;
+  }
+  toDataX(mx: number): number {
+    return this.ox + mx * this.rx;
+  }
+  toDataY(my: number): number {
+    return this.oy + my * this.ry;
+  }
 
   /** A ring (parallel arrays) from data to matrix coords. */
   ringToMatrix(xs: number[], ys: number[]): { xs: number[]; ys: number[] } {

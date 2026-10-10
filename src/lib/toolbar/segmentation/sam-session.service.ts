@@ -104,7 +104,7 @@ export class SamSessionService implements OnDestroy {
     if (!isSamModelReady(this.model)) {
       throw new Error(
         `SAM model "${this.model.id}" is not configured yet (no ONNX URLs). ` +
-        'Host it and call setSamModelUrls(), then retry.',
+          'Host it and call setSamModelUrls(), then retry.',
       );
     }
     if (onProgress) {
@@ -126,14 +126,21 @@ export class SamSessionService implements OnDestroy {
    * identity: file, frame, readback frame) and the model are unchanged.
    * `onEncode` is called only when the encoder actually runs.
    */
-  async embed(session: ISamSession, cached: CachedImageData, frameIndex: number, key: string,
-              onEncode?: () => void): Promise<SamEmbedding> {
+  async embed(
+    session: ISamSession,
+    cached: CachedImageData,
+    frameIndex: number,
+    key: string,
+    onEncode?: () => void,
+  ): Promise<SamEmbedding> {
     const fullKey = `${key}|${this.model.id}`;
     if (this.embedding && this.embeddingKey === fullKey) return this.embedding;
     onEncode?.();
     const generation = this.generation;
     const embedding = await session.embed({
-      data: frameToRgba(cached, frameIndex), width: cached.width, height: cached.height,
+      data: frameToRgba(cached, frameIndex),
+      width: cached.width,
+      height: cached.height,
     });
     if (generation === this.generation) {
       this.embedding = embedding;
@@ -175,9 +182,11 @@ export class SamSessionService implements OnDestroy {
       this.session = session;
       return session;
     })();
-    load.catch(() => undefined).finally(() => {
-      if (this.loading === load) this.loading = null;
-    });
+    load
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.loading === load) this.loading = null;
+      });
     return load;
   }
 }

@@ -1,7 +1,9 @@
 jest.mock('plotly.js-dist-min', () => ({
   react: jest.fn().mockResolvedValue(undefined),
   relayout: jest.fn(),
-  purge: jest.fn(() => { throw new Error('no plot'); }),
+  purge: jest.fn(() => {
+    throw new Error('no plot');
+  }),
 }));
 import * as Plotly from 'plotly.js-dist-min';
 
@@ -44,7 +46,9 @@ describe('PlotlyChartHost', () => {
   it('turns a selection into observation indices, and an empty one into a clear', () => {
     const listeners: Record<string, (ev?: unknown) => void> = {};
     Object.assign(div, {
-      on: (name: string, fn: (ev?: unknown) => void) => { listeners[name] = fn; },
+      on: (name: string, fn: (ev?: unknown) => void) => {
+        listeners[name] = fn;
+      },
       removeAllListeners: jest.fn(),
     });
     const selected = jest.fn();
@@ -56,8 +60,9 @@ describe('PlotlyChartHost', () => {
     listeners['plotly_deselect']();
     expect(deselected).toHaveBeenCalledTimes(2);
     host.unbindSelection('host-test');
-    expect((div as unknown as { removeAllListeners: jest.Mock }).removeAllListeners)
-      .toHaveBeenCalledWith('plotly_deselect');
+    expect((div as unknown as { removeAllListeners: jest.Mock }).removeAllListeners).toHaveBeenCalledWith(
+      'plotly_deselect',
+    );
   });
 
   it('reads back a 3D camera, or a 2D range only once zoomed', () => {

@@ -1,6 +1,17 @@
 import {
-  ChangeDetectionStrategy, ChangeDetectorRef, Component, ElementRef,
-  EventEmitter, Input, NgZone, OnDestroy, Output, Renderer2, ViewChild, computed, signal,
+  ChangeDetectionStrategy,
+  ChangeDetectorRef,
+  Component,
+  ElementRef,
+  EventEmitter,
+  Input,
+  NgZone,
+  OnDestroy,
+  Output,
+  Renderer2,
+  ViewChild,
+  computed,
+  signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -9,8 +20,10 @@ import { hslToHex } from '../store/class-color.util';
 import { hexToRgb, rgbToHex } from '../contracts/color';
 
 /** The hue slider's track: the full hue wheel, the same for every picker. */
-const HUE_GRADIENT = `linear-gradient(to right, ${
-  Array.from({ length: 13 }, (_, i) => `hsl(${i * 30}, 100%, 50%)`).join(', ')})`;
+const HUE_GRADIENT = `linear-gradient(to right, ${Array.from(
+  { length: 13 },
+  (_, i) => `hsl(${i * 30}, 100%, 50%)`,
+).join(', ')})`;
 
 /**
  * A compact colour picker: a swatch button that opens a honeycomb palette with a
@@ -30,7 +43,6 @@ const HUE_GRADIENT = `linear-gradient(to right, ${
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class HexColorPickerComponent implements OnDestroy {
-
   private static readonly DROPDOWN_WIDTH = 280;
 
   /** The colour shown (the swatch, the hex field, the selected cell). */
@@ -68,11 +80,13 @@ export class HexColorPickerComponent implements OnDestroy {
   /** Slider tracks: hue is fixed; saturation and lightness follow the other two. */
   protected readonly hueGradient = HUE_GRADIENT;
   protected readonly satGradient = computed(() => {
-    const h = this.hue(), l = this.lightness();
+    const h = this.hue(),
+      l = this.lightness();
     return `linear-gradient(to right, hsl(${h}, 0%, ${l}%), hsl(${h}, 100%, ${l}%))`;
   });
   protected readonly lightGradient = computed(() => {
-    const h = this.hue(), s = this.saturation();
+    const h = this.hue(),
+      s = this.saturation();
     return `linear-gradient(to right, hsl(${h}, ${s}%, 0%), hsl(${h}, ${s}%, 50%), hsl(${h}, ${s}%, 100%))`;
   });
 
@@ -88,15 +102,79 @@ export class HexColorPickerComponent implements OnDestroy {
     // Row 4: 10
     ['#339966', '#00CC99', '#00FFCC', '#00FFFF', '#33CCFF', '#3399FF', '#6699FF', '#6666FF', '#6600FF', '#6600CC'],
     // Row 5: 11
-    ['#339933', '#00CC66', '#00FF99', '#66FFCC', '#66FFFF', '#66CCFF', '#99CCFF', '#9999FF', '#9966FF', '#9933FF', '#9900FF'],
+    [
+      '#339933',
+      '#00CC66',
+      '#00FF99',
+      '#66FFCC',
+      '#66FFFF',
+      '#66CCFF',
+      '#99CCFF',
+      '#9999FF',
+      '#9966FF',
+      '#9933FF',
+      '#9900FF',
+    ],
     // Row 6: 12
-    ['#006600', '#00CC00', '#00FF00', '#66FF99', '#99FFCC', '#CCFFFF', '#CCCCFF', '#CC99FF', '#CC66FF', '#CC33FF', '#CC00FF', '#9900CC'],
+    [
+      '#006600',
+      '#00CC00',
+      '#00FF00',
+      '#66FF99',
+      '#99FFCC',
+      '#CCFFFF',
+      '#CCCCFF',
+      '#CC99FF',
+      '#CC66FF',
+      '#CC33FF',
+      '#CC00FF',
+      '#9900CC',
+    ],
     // Row 7: 13 (center)
-    ['#003300', '#009933', '#33CC33', '#66FF66', '#99FF99', '#CCFFCC', '#FFFFFF', '#FFCCFF', '#FF99FF', '#FF66FF', '#FF00FF', '#CC00CC', '#660066'],
+    [
+      '#003300',
+      '#009933',
+      '#33CC33',
+      '#66FF66',
+      '#99FF99',
+      '#CCFFCC',
+      '#FFFFFF',
+      '#FFCCFF',
+      '#FF99FF',
+      '#FF66FF',
+      '#FF00FF',
+      '#CC00CC',
+      '#660066',
+    ],
     // Row 8: 12
-    ['#336600', '#009900', '#66FF33', '#99FF66', '#CCFF99', '#FFFFCC', '#FFCCCC', '#FF99CC', '#FF66CC', '#FF33CC', '#CC0099', '#993399'],
+    [
+      '#336600',
+      '#009900',
+      '#66FF33',
+      '#99FF66',
+      '#CCFF99',
+      '#FFFFCC',
+      '#FFCCCC',
+      '#FF99CC',
+      '#FF66CC',
+      '#FF33CC',
+      '#CC0099',
+      '#993399',
+    ],
     // Row 9: 11
-    ['#333300', '#669900', '#99FF33', '#CCFF66', '#FFFF99', '#FFCC99', '#FF9999', '#FF6699', '#FF3399', '#CC3399', '#990099'],
+    [
+      '#333300',
+      '#669900',
+      '#99FF33',
+      '#CCFF66',
+      '#FFFF99',
+      '#FFCC99',
+      '#FF9999',
+      '#FF6699',
+      '#FF3399',
+      '#CC3399',
+      '#990099',
+    ],
     // Row 10: 10
     ['#666633', '#99CC00', '#CCFF33', '#FFFF66', '#FFCC66', '#FF9966', '#FF6666', '#FF0066', '#CC6699', '#993366'],
     // Row 11: 9
@@ -123,8 +201,12 @@ export class HexColorPickerComponent implements OnDestroy {
     this.syncFromHex(normalizedColor);
   }
 
-  constructor(private elRef: ElementRef, private renderer: Renderer2, private cdr: ChangeDetectorRef,
-              private ngZone: NgZone) {}
+  constructor(
+    private elRef: ElementRef,
+    private renderer: Renderer2,
+    private cdr: ChangeDetectorRef,
+    private ngZone: NgZone,
+  ) {}
 
   ngOnDestroy() {
     this.stopListeningForOutsideClicks();
@@ -318,5 +400,4 @@ export class HexColorPickerComponent implements OnDestroy {
     }
     return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
   }
-
 }

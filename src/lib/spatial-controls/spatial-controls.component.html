@@ -1,24 +1,25 @@
-<p-dialog header="Spatial omics"
-          [visible]="visible" (visibleChange)="onVisibleChange($event)"
-          [modal]="false" [resizable]="true" [draggable]="true"
-          position="left"
-          (onResizeEnd)="onResizeEnd()"
-          [style]="{ width: '30rem' }"
-          [breakpoints]="{ '960px': '90vw' }"
-          styleClass="spatial-controls-dialog">
-
+<p-dialog
+  header="Spatial omics"
+  [visible]="visible"
+  (visibleChange)="onVisibleChange($event)"
+  [modal]="false"
+  [resizable]="true"
+  [draggable]="true"
+  position="left"
+  (onResizeEnd)="onResizeEnd()"
+  [style]="{ width: '30rem' }"
+  [breakpoints]="{ '960px': '90vw' }"
+  styleClass="spatial-controls-dialog"
+>
   <!-- No port bound: say why rather than showing controls that do nothing. -->
   <div class="sc-empty" *ngIf="!controls">
     No spatial-omics data source is configured. A host provides one by binding
     <code>SPATIAL_DATA_PORT</code>.
   </div>
 
-  <div class="sc-empty" *ngIf="controls && !dataset">
-    No dataset is loaded.
-  </div>
+  <div class="sc-empty" *ngIf="controls && !dataset">No dataset is loaded.</div>
 
   <div class="sc-body" *ngIf="controls && dataset as ds">
-
     <div class="sc-dataset">
       <span class="sc-dataset-name">{{ ds.name }}</span>
       <span class="sc-dataset-count">{{ ds.observations.count | number }} observations</span>
@@ -30,82 +31,122 @@
     <!-- Images -->
     <div class="sc-panel" *ngIf="ds.imageRef && !is3d" [class.open]="open.images">
       <div class="sc-panel-head" (click)="toggleSection('images')">
-        <p-checkbox [binary]="true" [ngModel]="view.showImage" (click)="$event.stopPropagation()"
-                    (onChange)="onShowImage($event.checked)"></p-checkbox>
+        <p-checkbox
+          [binary]="true"
+          [ngModel]="view.showImage"
+          (click)="$event.stopPropagation()"
+          (onChange)="onShowImage($event.checked)"
+        ></p-checkbox>
         <span class="sc-panel-title">Images</span>
         <i class="pi" [class.pi-chevron-down]="open.images" [class.pi-chevron-right]="!open.images"></i>
       </div>
       <div class="sc-panel-body" *ngIf="open.images">
-        <small class="sc-hint">
-          Channels, colours and contrast are in the Channels &amp; Histogram dialog.
-        </small>
+        <small class="sc-hint"> Channels, colours and contrast are in the Channels &amp; Histogram dialog. </small>
       </div>
     </div>
 
     <!-- Cells -->
-    <spatial-cells-panel *ngIf="hasCells && !is3d"
-                         [controls]="controls" [dataset]="ds" [view]="view" [genes]="genes"
-                         [colorBarCss]="colorBarCss"
-                         [open]="open.cells" (openChange)="setOpen('cells', $event)"></spatial-cells-panel>
+    <spatial-cells-panel
+      *ngIf="hasCells && !is3d"
+      [controls]="controls"
+      [dataset]="ds"
+      [view]="view"
+      [genes]="genes"
+      [colorBarCss]="colorBarCss"
+      [open]="open.cells"
+      (openChange)="setOpen('cells', $event)"
+    ></spatial-cells-panel>
 
     <!-- Transcripts -->
-    <spatial-transcripts-panel *ngIf="hasTranscripts && !is3d"
-                               [controls]="controls" [dataset]="ds" [view]="view" [genes]="genes"
-                               [estimate]="estimate" [densityStats]="densityStats" [geneCounts]="geneCounts"
-                               [colormapOptions]="colormapOptions"
-                               [open]="open.transcripts" (openChange)="setOpen('transcripts', $event)">
+    <spatial-transcripts-panel
+      *ngIf="hasTranscripts && !is3d"
+      [controls]="controls"
+      [dataset]="ds"
+      [view]="view"
+      [genes]="genes"
+      [estimate]="estimate"
+      [densityStats]="densityStats"
+      [geneCounts]="geneCounts"
+      [colormapOptions]="colormapOptions"
+      [open]="open.transcripts"
+      (openChange)="setOpen('transcripts', $event)"
+    >
     </spatial-transcripts-panel>
 
     <!-- Annotations: the drawn regions, and selecting what they enclose. -->
     <div class="sc-panel" [class.open]="open.annotations">
       <div class="sc-panel-head" (click)="toggleSection('annotations')">
-        <p-checkbox [binary]="true" [ngModel]="view.showAnnotations !== false" (click)="$event.stopPropagation()"
-                    (onChange)="onShowAnnotations($event.checked)" pTooltip="Show the drawn regions"
-                    tooltipPosition="top"></p-checkbox>
+        <p-checkbox
+          [binary]="true"
+          [ngModel]="view.showAnnotations !== false"
+          (click)="$event.stopPropagation()"
+          (onChange)="onShowAnnotations($event.checked)"
+          pTooltip="Show the drawn regions"
+          tooltipPosition="top"
+        ></p-checkbox>
         <span class="sc-panel-title">Annotations</span>
         <i class="pi" [class.pi-chevron-down]="open.annotations" [class.pi-chevron-right]="!open.annotations"></i>
       </div>
       <div class="sc-panel-body" *ngIf="open.annotations">
         <div class="sc-row">
-          <p-button label="Select from ROIs" icon="pi pi-object-group" size="small"
-                    [outlined]="true" (onClick)="selectFromRegions()"
-                    pTooltip="Select every observation inside the drawn regions"
-                    tooltipPosition="top"></p-button>
-          <p-button *ngIf="hasSelection" label="Clear" size="small" [text]="true"
-                    (onClick)="clearSelection()"></p-button>
+          <p-button
+            label="Select from ROIs"
+            icon="pi pi-object-group"
+            size="small"
+            [outlined]="true"
+            (onClick)="selectFromRegions()"
+            pTooltip="Select every observation inside the drawn regions"
+            tooltipPosition="top"
+          ></p-button>
+          <p-button
+            *ngIf="hasSelection"
+            label="Clear"
+            size="small"
+            [text]="true"
+            (onClick)="clearSelection()"
+          ></p-button>
         </div>
         <small class="sc-hint" *ngIf="hasSelection">
-          {{ selection.count | number }} of {{ ds.observations.count | number }} selected —
-          the rest are muted.
+          {{ selection.count | number }} of {{ ds.observations.count | number }} selected — the rest are muted.
         </small>
-        <small class="sc-hint" *ngIf="selectionMissed">
-          No observations fell inside the drawn regions.
-        </small>
+        <small class="sc-hint" *ngIf="selectionMissed"> No observations fell inside the drawn regions. </small>
         <small class="sc-hint" *ngIf="is3d">
-          In 3D a region cuts through the cloud's full depth. Orbit and draw again
-          to cut from another angle.
+          In 3D a region cuts through the cloud's full depth. Orbit and draw again to cut from another angle.
         </small>
       </div>
     </div>
 
     <!-- Observations, then what else draws them: the gene map, the 3D scene, and the
          continuous-only knobs. -->
-    <spatial-observations-panel [controls]="controls" [dataset]="ds" [view]="view" [genes]="genes"
-                                [legend]="legend" [colorBarCss]="colorBarCss" [selection]="selection"
-                                [selectedCategory]="selectedCategory" [colormapOptions]="colormapOptions"
-                                [is3d]="is3d" [open]="open.observations"
-                                (openChange)="setOpen('observations', $event)"
-                                (categoryClicked)="selectCategory($event)"></spatial-observations-panel>
+    <spatial-observations-panel
+      [controls]="controls"
+      [dataset]="ds"
+      [view]="view"
+      [genes]="genes"
+      [legend]="legend"
+      [colorBarCss]="colorBarCss"
+      [selection]="selection"
+      [selectedCategory]="selectedCategory"
+      [colormapOptions]="colormapOptions"
+      [is3d]="is3d"
+      [open]="open.observations"
+      (openChange)="setOpen('observations', $event)"
+      (categoryClicked)="selectCategory($event)"
+    ></spatial-observations-panel>
 
     <!-- Distributions of whatever the map is coloured by. In the SAME dialog as
          the colour controls on purpose: changing the gene and watching the
          distribution move is one action, and two floating windows made that
          harder to see rather than easier. -->
     <div class="sc-section sc-charts">
-      <button type="button" class="sc-disclosure" (click)="toggleCharts()"
-              [attr.aria-expanded]="chartsOpen" [attr.aria-controls]="chartsBodyId">
-        <i class="pi" [class.pi-chevron-right]="!chartsOpen"
-           [class.pi-chevron-down]="chartsOpen"></i>
+      <button
+        type="button"
+        class="sc-disclosure"
+        (click)="toggleCharts()"
+        [attr.aria-expanded]="chartsOpen"
+        [attr.aria-controls]="chartsBodyId"
+      >
+        <i class="pi" [class.pi-chevron-right]="!chartsOpen" [class.pi-chevron-down]="chartsOpen"></i>
         <span>Distribution</span>
         <small *ngIf="!chartsOpen && view.colorBy">of {{ colorByLabel }}</small>
       </button>
@@ -120,6 +161,5 @@
     <div class="sc-btns">
       <p-button label="Reset" size="small" [text]="true" (onClick)="reset()"></p-button>
     </div>
-
   </div>
 </p-dialog>

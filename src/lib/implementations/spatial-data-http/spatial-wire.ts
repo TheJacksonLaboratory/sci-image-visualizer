@@ -16,7 +16,8 @@ import {
   SpatialPolygonTile,
   SpatialPolygonTilesMeta,
   SpatialPolygons,
-  SpatialTranscriptBinsMeta, SpatialTranscriptGeneBinsMeta,
+  SpatialTranscriptBinsMeta,
+  SpatialTranscriptGeneBinsMeta,
   SpatialTranscriptBinsStatus,
   SpatialTranscriptTile,
   SpatialTranscriptTilesMeta,
@@ -86,9 +87,7 @@ import {
 export const SPATIAL_WIRE_VERSION = 1;
 
 /** Per-observation marker radius: one shared value, or a served f32 vector. */
-export type SpatialRadiusSpec =
-  | { mode: 'uniform'; value: number }
-  | { mode: 'per-observation' };
+export type SpatialRadiusSpec = { mode: 'uniform'; value: number } | { mode: 'per-observation' };
 
 /** `GET /spatial/{id}/manifest` — everything cheap enough to send up front. */
 export interface SpatialManifest {
@@ -132,7 +131,7 @@ function assertLittleEndian(): void {
   if (!isLittleEndian()) {
     throw new Error(
       '[spatial] wire format is little-endian; this platform is big-endian. ' +
-      'Serve JSON vectors, or byte-swap in a custom SpatialDataPort adapter.',
+        'Serve JSON vectors, or byte-swap in a custom SpatialDataPort adapter.',
     );
   }
 }
@@ -142,7 +141,7 @@ function assertByteLength(buf: ArrayBuffer, expected: number, what: string): voi
   if (buf.byteLength !== expected) {
     throw new Error(
       `[spatial] ${what}: expected ${expected} bytes, got ${buf.byteLength}. ` +
-      'Manifest count and served vector length disagree.',
+        'Manifest count and served vector length disagree.',
     );
   }
 }
@@ -158,7 +157,7 @@ export function assertManifestVersion(manifest: SpatialManifest): void {
   if (manifest.version !== SPATIAL_WIRE_VERSION) {
     throw new Error(
       `[spatial] unsupported wire version ${manifest.version} ` +
-      `(this client speaks ${SPATIAL_WIRE_VERSION}). Update the server or the library.`,
+        `(this client speaks ${SPATIAL_WIRE_VERSION}). Update the server or the library.`,
     );
   }
   if (!Number.isSafeInteger(manifest.count) || manifest.count < 0) {
@@ -211,7 +210,9 @@ function assertHeader(buf: ArrayBuffer, bytes: number, what: string): void {
  * the dataset changes underneath.
  */
 export function decodeCoords(
-  buf: ArrayBuffer, count: number, hasZ = false,
+  buf: ArrayBuffer,
+  count: number,
+  hasZ = false,
 ): Pick<SpatialObservations, 'x' | 'y' | 'z'> {
   assertLittleEndian();
   const axes = hasZ ? 3 : 2;
@@ -235,9 +236,7 @@ export function decodeRadius(buf: ArrayBuffer, count: number): Float32Array {
  * Struct of arrays, not interleaved: every dimension is contiguous, so an axis can be handed to
  * the renderer as a view with no copy and no stride.
  */
-export function decodeEmbedding(
-  buf: ArrayBuffer, meta: SpatialEmbeddingMeta, count: number,
-): SpatialEmbedding {
+export function decodeEmbedding(buf: ArrayBuffer, meta: SpatialEmbeddingMeta, count: number): SpatialEmbedding {
   assertLittleEndian();
   assertEmbeddingDims(meta);
   assertByteLength(buf, count * meta.dims * 4, `embedding "${meta.name}"`);
@@ -262,9 +261,7 @@ export function decodeFeatureVector(buf: ArrayBuffer, count: number): Float32Arr
  * list are normalised to {@link NO_CATEGORY} so a renderer can trust the
  * invariant instead of bounds-checking every point.
  */
-export function decodeColumn(
-  buf: ArrayBuffer, meta: SpatialColumnMeta, count: number,
-): SpatialColumn {
+export function decodeColumn(buf: ArrayBuffer, meta: SpatialColumnMeta, count: number): SpatialColumn {
   assertLittleEndian();
   if (meta.kind === 'categorical') {
     assertByteLength(buf, count * 2, `column "${meta.name}"`);
@@ -321,7 +318,9 @@ export function decodePolygonTile(buf: ArrayBuffer, observations?: number): Spat
   assertByteLength(buf, coordsByteOffset + vertexCount * 8, 'polygon tile');
   assertObservations(observation, observations, 'polygon tile');
   return {
-    count, observation, offsets,
+    count,
+    observation,
+    offsets,
     coords: new Float32Array(buf, coordsByteOffset, vertexCount * 2),
   };
 }
@@ -335,7 +334,8 @@ export function decodePolygonTile(buf: ArrayBuffer, observations?: number): Spat
  * N, and `genes` the length of the gene list the codes index (omit it for `ALL_GENES`).
  */
 export function decodeTranscriptTile(
-  buf: ArrayBuffer, limits: { observations?: number; genes?: number } = {},
+  buf: ArrayBuffer,
+  limits: { observations?: number; genes?: number } = {},
 ): SpatialTranscriptTile {
   assertLittleEndian();
   if (buf.byteLength < 8) {
@@ -350,9 +350,7 @@ export function decodeTranscriptTile(
   if (limits.genes !== undefined) {
     for (let i = 0; i < n; i++) {
       if (gene[i] >= limits.genes) {
-        throw new Error(
-          `[spatial] transcript tile: gene code ${gene[i]} is past the ${limits.genes} asked for`,
-        );
+        throw new Error(`[spatial] transcript tile: gene code ${gene[i]} is past the ${limits.genes} asked for`);
       }
     }
   }
@@ -398,9 +396,7 @@ export function datasetFromManifest(
   extras: { ids?: string[]; radius?: Float32Array } = {},
 ): SpatialDataset {
   assertManifestVersion(manifest);
-  const radius = manifest.radius?.mode === 'uniform'
-    ? manifest.radius.value
-    : extras.radius;
+  const radius = manifest.radius?.mode === 'uniform' ? manifest.radius.value : extras.radius;
   const observations: SpatialObservations = {
     count: manifest.count,
     x: coords.x,
@@ -419,9 +415,7 @@ export function datasetFromManifest(
     ...(manifest.imageRef ? { imageRef: manifest.imageRef } : {}),
     ...(manifest.volume ? { volume: manifest.volume } : {}),
     ...(manifest.embeddings?.length ? { embeddings: manifest.embeddings } : {}),
-    ...(manifest.micronsPerUnit !== undefined
-      ? { micronsPerUnit: manifest.micronsPerUnit }
-      : {}),
+    ...(manifest.micronsPerUnit !== undefined ? { micronsPerUnit: manifest.micronsPerUnit } : {}),
     ...(manifest.polygonTiles ? { polygonTiles: manifest.polygonTiles } : {}),
     ...(manifest.transcriptTiles ? { transcriptTiles: manifest.transcriptTiles } : {}),
     ...(manifest.density ? { density: manifest.density } : {}),

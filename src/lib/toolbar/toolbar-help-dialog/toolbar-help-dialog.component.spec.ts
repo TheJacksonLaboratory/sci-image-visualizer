@@ -16,8 +16,9 @@ describe('ToolbarHelpDialogComponent', () => {
   afterEach(() => jest.restoreAllMocks());
 
   it('names the contributed tools and lists their help; Ok closes', async () => {
-    await TestBed.configureTestingModule({ imports: [VisualizationModule, NoopAnimationsModule] })
-      .compileComponents();
+    await TestBed.configureTestingModule({
+      imports: [VisualizationModule, NoopAnimationsModule],
+    }).compileComponents();
     const fixture = TestBed.createComponent(ToolbarHelpDialogComponent);
     const closed = jest.fn();
     fixture.componentInstance.visibleChange.subscribe(closed);

@@ -12,11 +12,22 @@ import { OSD_ZOOM_PER_SCROLL } from './osd-zoom';
 import { translateBounds } from '../../models/polygon-edit';
 import { makePolygon } from '../../models/polygon-factory';
 import {
-  OPEN_PATH_TOL_PX, ToScreen, hitHandle, nearestEdge, regionContains, regionsInRect, topmostRegionAt,
+  OPEN_PATH_TOL_PX,
+  ToScreen,
+  hitHandle,
+  nearestEdge,
+  regionContains,
+  regionsInRect,
+  topmostRegionAt,
 } from '../../region-overlay/region-geometry';
 import { SvgRegionRenderer, affineFromProjection } from '../../region-overlay/svg-region-renderer';
 import {
-  drawDraftPath, drawDraftRect, drawRegionLabel, drawSelectionBand, drawSelectionHandles, styleRegionShape,
+  drawDraftPath,
+  drawDraftRect,
+  drawRegionLabel,
+  drawSelectionBand,
+  drawSelectionHandles,
+  styleRegionShape,
   vertexMarker,
 } from './osd-region-overlay-draw';
 import { EDIT_TOL_PX, EditZone, ZONE_CURSOR, rectZone, resizeRect } from '../../region-overlay/region-hit-test';
@@ -37,8 +48,7 @@ const SVGNS = 'http://www.w3.org/2000/svg';
  *  box for a resize, or the polygon/multi-polygon bounds themselves for a move — the
  *  store is copy-on-write, so the gesture-start instance never changes under the drag. */
 type EditSnapshot =
-  | { kind: 'rect'; x: number; y: number; w: number; h: number }
-  | { kind: 'shape'; bounds: Polygon | MultiPolygon };
+  { kind: 'rect'; x: number; y: number; w: number; h: number } | { kind: 'shape'; bounds: Polygon | MultiPolygon };
 
 /**
  * OpenSeadragon implementation of {@link IRegionOverlay}.
@@ -55,7 +65,6 @@ type EditSnapshot =
  * readback), the same singleton tool services the Plotly backend uses.
  */
 export class OsdRegionOverlay implements IRegionOverlay {
-
   private readonly svg: SVGSVGElement;
   private readonly subs = new Subscription();
   private selected: number[] = [];
@@ -64,7 +73,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
   private tracker: OpenSeadragon.MouseTracker;
   private rectStart: { x: number; y: number } | null = null; // image coords
   private rectCurrent: { x: number; y: number } | null = null;
-  private polyPoints: { x: number; y: number }[] = [];        // image coords
+  private polyPoints: { x: number; y: number }[] = []; // image coords
   /** True while dragging a freehand path (freeform / polyline). */
   private freehandDragging = false;
   /** True while placing a click-to-add polygon ('drawpolygon' mode). */
@@ -112,10 +121,17 @@ export class OsdRegionOverlay implements IRegionOverlay {
     this.redraw();
   };
 
-  constructor(private viewer: OsdViewerLike, private store: RegionEditStore) {
+  constructor(
+    private viewer: OsdViewerLike,
+    private store: RegionEditStore,
+  ) {
     this.svg = document.createElementNS(SVGNS, 'svg') as SVGSVGElement;
     Object.assign(this.svg.style, {
-      position: 'absolute', left: '0', top: '0', width: '100%', height: '100%',
+      position: 'absolute',
+      left: '0',
+      top: '0',
+      width: '100%',
+      height: '100%',
       pointerEvents: 'none', // OSD handles navigation unless we're drawing
     });
     this.viewer.canvas.appendChild(this.svg);
@@ -135,8 +151,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
     this.viewer.addHandler('resize', this.cameraHandler);
     this.viewer.addHandler('rotate', this.cameraHandler);
     // Keep wheel-zoom alive while a tool has mouse-nav disabled (see handler).
-    this.viewer.element
-      ?.addEventListener('wheel', this.wheelZoomHandler, { passive: false });
+    this.viewer.element?.addEventListener('wheel', this.wheelZoomHandler, { passive: false });
 
     this.tracker = new OSD.MouseTracker({
       element: this.viewer.canvas,
@@ -149,10 +164,12 @@ export class OsdRegionOverlay implements IRegionOverlay {
     this.tracker.setTracking(false);
 
     this.subs.add(this.store.getRegionUpdateEvent().subscribe(this.redrawHandler));
-    this.subs.add(this.store.getSelectedShapeIndices$().subscribe(idx => {
-      this.selected = idx || [];
-      this.redraw();
-    }));
+    this.subs.add(
+      this.store.getSelectedShapeIndices$().subscribe((idx) => {
+        this.selected = idx || [];
+        this.redraw();
+      }),
+    );
 
     this.redraw();
   }
@@ -195,8 +212,14 @@ export class OsdRegionOverlay implements IRegionOverlay {
    *  in select mode). */
   private updateCursor(overRegion: boolean): void {
     const canvas = this.viewer.canvas;
-    if (this.mode === 'drawrect' || this.mode === 'drawclosedpath' || this.mode === 'drawopenpath'
-        || this.mode === 'drawpolygon' || this.mode === 'addpoint' || this.mode === 'deletepoint') {
+    if (
+      this.mode === 'drawrect' ||
+      this.mode === 'drawclosedpath' ||
+      this.mode === 'drawopenpath' ||
+      this.mode === 'drawpolygon' ||
+      this.mode === 'addpoint' ||
+      this.mode === 'deletepoint'
+    ) {
       canvas.style.cursor = 'crosshair';
     } else if (this.mode === 'move') {
       canvas.style.cursor = 'move';
@@ -213,8 +236,12 @@ export class OsdRegionOverlay implements IRegionOverlay {
    *  its vertices. Suppressed only while actively drawing a brand-new shape,
    *  where stray handles would be noise. */
   private get showsSelectedVertices(): boolean {
-    return this.mode !== 'drawrect' && this.mode !== 'drawpolygon'
-      && this.mode !== 'drawclosedpath' && this.mode !== 'drawopenpath';
+    return (
+      this.mode !== 'drawrect' &&
+      this.mode !== 'drawpolygon' &&
+      this.mode !== 'drawclosedpath' &&
+      this.mode !== 'drawopenpath'
+    );
   }
 
   destroy(): void {
@@ -223,8 +250,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
     this.endGesture();
     this.viewer.canvas.removeEventListener('pointercancel', this.pointerCancelHandler);
     this.subs.unsubscribe();
-    this.viewer.element
-      ?.removeEventListener('wheel', this.wheelZoomHandler);
+    this.viewer.element?.removeEventListener('wheel', this.wheelZoomHandler);
     this.viewer.removeHandler('update-viewport', this.cameraHandler);
     this.viewer.removeHandler('resize', this.cameraHandler);
     this.viewer.removeHandler('rotate', this.cameraHandler);
@@ -358,12 +384,24 @@ export class OsdRegionOverlay implements IRegionOverlay {
 
   /** Begin an edit gesture (move/resize or single-vertex drag) and open a store
    *  batch so the live drag emits once on release. */
-  private startEdit(kind: 'bounds' | 'vertex' | 'handle', zone: EditZone, vertexIndex: number,
-                    region: Region, startImg: { x: number; y: number },
-                    handleSide: 'in' | 'out' = 'out', ring = -1): void {
+  private startEdit(
+    kind: 'bounds' | 'vertex' | 'handle',
+    zone: EditZone,
+    vertexIndex: number,
+    region: Region,
+    startImg: { x: number; y: number },
+    handleSide: 'in' | 'out' = 'out',
+    ring = -1,
+  ): void {
     this.edit = {
-      kind, zone, vertexIndex, ring, handleSide, id: region.id,
-      startImg, orig: kind === 'bounds' ? this.snapshot(region) : null,
+      kind,
+      zone,
+      vertexIndex,
+      ring,
+      handleSide,
+      id: region.id,
+      startImg,
+      orig: kind === 'bounds' ? this.snapshot(region) : null,
     };
     this.editDragged = false;
     this.store.beginBatch();
@@ -427,8 +465,10 @@ export class OsdRegionOverlay implements IRegionOverlay {
       const start = this.bandStart;
       const end = this.bandCurrent ?? start;
       this.bandStart = this.bandCurrent = null;
-      const x0 = Math.min(start.x, end.x), y0 = Math.min(start.y, end.y);
-      const x1 = Math.max(start.x, end.x), y1 = Math.max(start.y, end.y);
+      const x0 = Math.min(start.x, end.x),
+        y0 = Math.min(start.y, end.y);
+      const x1 = Math.max(start.x, end.x),
+        y1 = Math.max(start.y, end.y);
       // Only a real drag selects; a click-sized band falls through to onClick.
       if (this.bandDragged && (x1 - x0 > 2 || y1 - y0 > 2)) {
         this.store.setSelectedShapeIndices(regionsInRect(this.store.getRegions(), x0, y0, x1, y1));
@@ -441,8 +481,14 @@ export class OsdRegionOverlay implements IRegionOverlay {
     if (this.mode === 'select') {
       // A move/resize/vertex drag or a rubber-band drag also ends with a click
       // event — don't treat it as a re-selection.
-      if (this.editDragged) { this.editDragged = false; return; }
-      if (this.bandDragged) { this.bandDragged = false; return; }
+      if (this.editDragged) {
+        this.editDragged = false;
+        return;
+      }
+      if (this.bandDragged) {
+        this.bandDragged = false;
+        return;
+      }
       // Shift (or Cmd/Ctrl) toggles the clicked region in/out of the current
       // selection; a plain click replaces it.
       const oe = e.originalEvent;
@@ -533,8 +579,12 @@ export class OsdRegionOverlay implements IRegionOverlay {
     if (b instanceof Rectangle) {
       const a = this.toPx(b.x, b.y);
       const c = this.toPx(b.x + b.width, b.y + b.height);
-      const zone = rectZone(position.x, position.y,
-        { x0: Math.min(a.x, c.x), y0: Math.min(a.y, c.y), x1: Math.max(a.x, c.x), y1: Math.max(a.y, c.y) });
+      const zone = rectZone(position.x, position.y, {
+        x0: Math.min(a.x, c.x),
+        y0: Math.min(a.y, c.y),
+        x1: Math.max(a.x, c.x),
+        y1: Math.max(a.y, c.y),
+      });
       return zone ? { zone, index } : null;
     }
     if (b instanceof Polygon || b instanceof MultiPolygon) {
@@ -555,8 +605,10 @@ export class OsdRegionOverlay implements IRegionOverlay {
   /** The bezier control handle (when `bezier`) or vertex of the selected polygon
    *  under the cursor (screen-pixel tolerance), or null. Rectangles have no
    *  editable vertices (their corners are resize zones, see {@link rectZone}). */
-  private hitPolygonHandle(position: { x: number; y: number }, bezier = true):
-    { kind: 'vertex' | 'bezier'; ring: number; index: number; side: 'in' | 'out' } | null {
+  private hitPolygonHandle(
+    position: { x: number; y: number },
+    bezier = true,
+  ): { kind: 'vertex' | 'bezier'; ring: number; index: number; side: 'in' | 'out' } | null {
     const sel = this.selectedRegionInfo();
     if (!sel || !(sel.region.bounds instanceof Polygon)) return null;
     const hit = hitHandle(sel.region, position.x, position.y, this.toScreen, EDIT_TOL_PX, { bezier });
@@ -566,8 +618,10 @@ export class OsdRegionOverlay implements IRegionOverlay {
 
   /** The edge of `region`'s polygon nearest the cursor (within tolerance), with
    *  the clicked point in image coords as the insertion position, or null. */
-  private hitEdge(position: { x: number; y: number }, region: Region):
-    { ring: number; segIndex: number; x: number; y: number } | null {
+  private hitEdge(
+    position: { x: number; y: number },
+    region: Region,
+  ): { ring: number; segIndex: number; x: number; y: number } | null {
     const edge = nearestEdge(region, position.x, position.y, this.toScreen);
     if (!edge || edge.dist > EDIT_TOL_PX) return null;
     const img = this.toImage(position);
@@ -608,7 +662,12 @@ export class OsdRegionOverlay implements IRegionOverlay {
         this.store.moveBezierHandle(this.edit.id, this.edit.vertexIndex, this.edit.handleSide, curImg.x, curImg.y);
       } else {
         this.store.moveHoleBezierHandle(
-          this.edit.id, this.edit.ring, this.edit.vertexIndex, this.edit.handleSide, curImg.x, curImg.y,
+          this.edit.id,
+          this.edit.ring,
+          this.edit.vertexIndex,
+          this.edit.handleSide,
+          curImg.x,
+          curImg.y,
         );
       }
       this.redraw();
@@ -640,8 +699,9 @@ export class OsdRegionOverlay implements IRegionOverlay {
       // the subscription), so it's the source of truth without a sync getter.
       const cur = this.selected.slice();
       const at = cur.indexOf(idx);
-      if (at >= 0) cur.splice(at, 1); // toggle off
-      else cur.push(idx);             // toggle on
+      if (at >= 0)
+        cur.splice(at, 1); // toggle off
+      else cur.push(idx); // toggle on
       this.store.setSelectedShapeIndices(cur);
       return;
     }
@@ -686,16 +746,26 @@ export class OsdRegionOverlay implements IRegionOverlay {
   private commitRectangle(x: number, y: number, w: number, h: number): void {
     const region = new Region();
     const rect = new Rectangle();
-    rect.x = x; rect.y = y; rect.width = w; rect.height = h;
+    rect.x = x;
+    rect.y = y;
+    rect.width = w;
+    rect.height = h;
     region.bounds = rect;
     region.color = this.store.getShapeColor();
     this.commitRegion(region);
   }
 
   private commitPolygon(closed: boolean): void {
-    if (this.polyPoints.length < (closed ? 3 : 2)) { this.resetInProgress(); return; }
+    if (this.polyPoints.length < (closed ? 3 : 2)) {
+      this.resetInProgress();
+      return;
+    }
     const region = new Region();
-    region.bounds = makePolygon(this.polyPoints.map(p => p.x), this.polyPoints.map(p => p.y), { closed });
+    region.bounds = makePolygon(
+      this.polyPoints.map((p) => p.x),
+      this.polyPoints.map((p) => p.y),
+      { closed },
+    );
     region.color = this.store.getShapeColor();
     this.resetInProgress();
     this.commitRegion(region);

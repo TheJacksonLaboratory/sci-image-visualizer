@@ -113,12 +113,24 @@ export class VisualizerControlAdapter {
   /** Stable, serializable command catalogue. Names are the MCP tool ids. */
   async exec(command: string, args: Record<string, unknown>): Promise<CommandResult> {
     switch (command) {
-      case 'setPlotType':   this.viz.setPlotType(args.plotType as PlotType); return ok();
-      case 'setColormap':   this.viz.setColormap(args.colormap as ColormapNode); return ok();
-      case 'setReverseScale': this.viz.setReverseScale(!!args.reverse); return ok();
-      case 'zoomIn':        this.viz.zoomIn(); return ok();
-      case 'zoomOut':       this.viz.zoomOut(); return ok();
-      case 'setZIndex':     this.viz.setZIndex(args.z as number); return ok();
+      case 'setPlotType':
+        this.viz.setPlotType(args.plotType as PlotType);
+        return ok();
+      case 'setColormap':
+        this.viz.setColormap(args.colormap as ColormapNode);
+        return ok();
+      case 'setReverseScale':
+        this.viz.setReverseScale(!!args.reverse);
+        return ok();
+      case 'zoomIn':
+        this.viz.zoomIn();
+        return ok();
+      case 'zoomOut':
+        this.viz.zoomOut();
+        return ok();
+      case 'setZIndex':
+        this.viz.setZIndex(args.z as number);
+        return ok();
       case 'setRegionsGeoJson':
         this.viz.setRegions(this.viz.importRegions(args.geojson as string), true, false, undefined, !!args.append);
         return ok();
@@ -127,16 +139,16 @@ export class VisualizerControlAdapter {
       case 'segmentRectangles':
         return json({ added: await this.viz.segmentRectangles() });
       case 'getScreenshotPng':
-        return image(await this.snapshotPng());   // base64 PNG via canvas readback
+        return image(await this.snapshotPng()); // base64 PNG via canvas readback
       case 'getState':
-        return json(this.snapshotState());         // plotType, zIndex, region count, image size
+        return json(this.snapshotState()); // plotType, zIndex, region count, image size
       default:
         throw new UnknownCommandError(command);
     }
   }
 
   /** Drives the MCP tool list AND the tool-schema generation in the server. */
-  static readonly CATALOGUE: CommandSpec[] = [ /* name, argsSchema, returns, capability? */ ];
+  static readonly CATALOGUE: CommandSpec[] = [/* name, argsSchema, returns, capability? */];
 }
 ```
 
@@ -196,26 +208,26 @@ one-line catalogue entry + the `exec` case — no parallel edits in the server.
 
 ## 3. Command catalogue (target)
 
-| MCP tool | IVisualizer call(s) | Returns | Capability |
-|---|---|---|---|
-| `viz.getState` | several getters | json (plotType, zIndex, regionCount, imageSize) | — |
-| `viz.loadImage` | `load` + `plot` | ok | — |
-| `viz.setPlotType` | `setPlotType` | ok | — |
-| `viz.setColormap` | `setColormap` | ok | — |
-| `viz.setReverseScale` | `setReverseScale` | ok | — |
-| `viz.zoomIn` / `viz.zoomOut` | `zoomIn`/`zoomOut` | ok | — |
-| `viz.setZIndex` / `viz.setShowStack` | `setZIndex`/`setShowStack` | ok | stack |
-| `viz.getRegionsGeoJson` | `getGeoJsonString(getRegions())` | json | — |
-| `viz.setRegionsGeoJson` | `importRegions` → `setRegions` | ok | — |
-| `viz.selectRegion` / `viz.deleteActiveShape` | `selectRegion`/`deleteActiveShape` | ok | — |
-| `viz.undo` / `viz.redo` | `undo`/`redo` | ok | — |
-| `viz.segmentRectangles` | `segmentRectangles` | json (added) | — |
-| `viz.segmentRectanglesCellpose` | `segmentRectanglesCellpose` | json (added) | — |
-| `viz.setSamModel` | `setSamModel` | ok | — |
-| `viz.setSurfaceDragMode` / `viz.resetSurfaceCamera` | `getSurface3dControls()…` | ok | surface3d |
-| `viz.setIsoRange` | `getIsosurfaceControls().setIsoRange` | ok | isosurface |
-| `viz.getScreenshotPng` | canvas readback / `exportComposite` | image | — |
-| `viz.exportComposite` / `viz.exportData` | `exportComposite`/`exportData` | ok | — |
+| MCP tool                                            | IVisualizer call(s)                   | Returns                                         | Capability |
+| --------------------------------------------------- | ------------------------------------- | ----------------------------------------------- | ---------- |
+| `viz.getState`                                      | several getters                       | json (plotType, zIndex, regionCount, imageSize) | —          |
+| `viz.loadImage`                                     | `load` + `plot`                       | ok                                              | —          |
+| `viz.setPlotType`                                   | `setPlotType`                         | ok                                              | —          |
+| `viz.setColormap`                                   | `setColormap`                         | ok                                              | —          |
+| `viz.setReverseScale`                               | `setReverseScale`                     | ok                                              | —          |
+| `viz.zoomIn` / `viz.zoomOut`                        | `zoomIn`/`zoomOut`                    | ok                                              | —          |
+| `viz.setZIndex` / `viz.setShowStack`                | `setZIndex`/`setShowStack`            | ok                                              | stack      |
+| `viz.getRegionsGeoJson`                             | `getGeoJsonString(getRegions())`      | json                                            | —          |
+| `viz.setRegionsGeoJson`                             | `importRegions` → `setRegions`        | ok                                              | —          |
+| `viz.selectRegion` / `viz.deleteActiveShape`        | `selectRegion`/`deleteActiveShape`    | ok                                              | —          |
+| `viz.undo` / `viz.redo`                             | `undo`/`redo`                         | ok                                              | —          |
+| `viz.segmentRectangles`                             | `segmentRectangles`                   | json (added)                                    | —          |
+| `viz.segmentRectanglesCellpose`                     | `segmentRectanglesCellpose`           | json (added)                                    | —          |
+| `viz.setSamModel`                                   | `setSamModel`                         | ok                                              | —          |
+| `viz.setSurfaceDragMode` / `viz.resetSurfaceCamera` | `getSurface3dControls()…`             | ok                                              | surface3d  |
+| `viz.setIsoRange`                                   | `getIsosurfaceControls().setIsoRange` | ok                                              | isosurface |
+| `viz.getScreenshotPng`                              | canvas readback / `exportComposite`   | image                                           | —          |
+| `viz.exportComposite` / `viz.exportData`            | `exportComposite`/`exportData`        | ok                                              | —          |
 
 ---
 
@@ -229,7 +241,7 @@ Read state + **five** commands proves the whole bridge before building the rest:
 4. `viz.setRegionsGeoJson`
 5. `viz.getScreenshotPng` (+ `viz.getState`)
 
-That demonstrates *"Claude drives the viewer and sees the result"* and validates
+That demonstrates _"Claude drives the viewer and sees the result"_ and validates
 the transport, handshake, and serializable boundary. Expand the catalogue
 (segmentation, tools, 3D) only once the MVP is green.
 
@@ -266,12 +278,12 @@ segmentation and export data is a real remote-control surface.
 
 ## 7. Phasing
 
-| Phase | Scope |
-|---|---|
-| **P1 — MVP bridge** | `VisualizerControlAdapter` (5 commands + `getState`), host WebSocket + handshake (dev/flagged), MCP server generating those tools. Acceptance: from a Claude session, load → setPlotType → setColormap → setRegionsGeoJson → getScreenshot drives a real jit-ui tab. |
-| **P2 — Full catalogue** | Remaining `IVisualizer` commands as MCP tools with validated schemas, capability gating, region/pixel read-back. |
-| **P3 — Security hardening** | oauth2-proxy + Auth0 on the channel; enforced handshake; remove the dev-only flag for a controlled deployment. |
-| **P4 — Headless (optional)** | Playwright-driven headless browser against the example server; CI-runnable; no human tab. Depends on SOW D7. |
+| Phase                        | Scope                                                                                                                                                                                                                                                                |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **P1 — MVP bridge**          | `VisualizerControlAdapter` (5 commands + `getState`), host WebSocket + handshake (dev/flagged), MCP server generating those tools. Acceptance: from a Claude session, load → setPlotType → setColormap → setRegionsGeoJson → getScreenshot drives a real jit-ui tab. |
+| **P2 — Full catalogue**      | Remaining `IVisualizer` commands as MCP tools with validated schemas, capability gating, region/pixel read-back.                                                                                                                                                     |
+| **P3 — Security hardening**  | oauth2-proxy + Auth0 on the channel; enforced handshake; remove the dev-only flag for a controlled deployment.                                                                                                                                                       |
+| **P4 — Headless (optional)** | Playwright-driven headless browser against the example server; CI-runnable; no human tab. Depends on SOW D7.                                                                                                                                                         |
 
 ---
 

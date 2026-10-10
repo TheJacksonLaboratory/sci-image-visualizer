@@ -1,62 +1,115 @@
 <span class="toolbar-separator"></span>
 <!-- Region Editor: opens the editor as a floating dialog (formerly the
      right-panel Regions tab). Sits with the region drawing tools. -->
-<p-button size="small" [text]="true" ariaLabel="Open the Region Editor"
-          pTooltip="Open the Region Editor" tooltipPosition="bottom"
-          (onClick)="openRegionEditor.emit()">
-  <img src="assets/plotting/region-editor.svg" class="toolbar-icon-dark" style="width: 1rem" alt=""/>
+<p-button
+  size="small"
+  [text]="true"
+  ariaLabel="Open the Region Editor"
+  pTooltip="Open the Region Editor"
+  tooltipPosition="bottom"
+  (onClick)="openRegionEditor.emit()"
+>
+  <img src="assets/plotting/region-editor.svg" class="toolbar-icon-dark" style="width: 1rem" alt="" />
 </p-button>
 
 <!-- Region drawing tools, from REGION_TOOL_BUTTONS. A tool's parameter slider
      follows its button while it is active. -->
 <ng-container *ngFor="let b of buttons; trackBy: trackByMode">
-  <p-button *ngIf="shown(b)" size="small" [icon]="b.icon" [ariaLabel]="b.label"
-            [text]="activeDragMode !== b.mode"
-            [pTooltip]="b.tooltip" [escape]="false" tooltipPosition="bottom"
-            (onClick)="toggleDragMode.emit(b.mode)">
-    <img *ngIf="b.img" [src]="'assets/plotting/' + b.img" alt="" style="width: 1rem"
-         [class]="activeDragMode === b.mode ? 'toolbar-icon-active' : 'toolbar-icon-dark'"/>
+  <p-button
+    *ngIf="shown(b)"
+    size="small"
+    [icon]="b.icon"
+    [ariaLabel]="b.label"
+    [text]="activeDragMode !== b.mode"
+    [pTooltip]="b.tooltip"
+    [escape]="false"
+    tooltipPosition="bottom"
+    (onClick)="toggleDragMode.emit(b.mode)"
+  >
+    <img
+      *ngIf="b.img"
+      [src]="'assets/plotting/' + b.img"
+      alt=""
+      style="width: 1rem"
+      [class]="activeDragMode === b.mode ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+    />
   </p-button>
   <ng-container *ngIf="shown(b) && b.slider && activeDragMode === b.mode" [ngSwitch]="b.slider">
-    <toolbar-tool-slider *ngSwitchCase="'brush'" label="Size" [value]="brushSize"
-                         [min]="brushSizeMin" [max]="brushSizeMax" [step]="brushSizeStep"
-                         tooltip="Brush diameter in image pixels." [valueText]="'' + brushSize"
-                         (valueChange)="brushSizeChange.emit(asNumber($event))">
+    <toolbar-tool-slider
+      *ngSwitchCase="'brush'"
+      label="Size"
+      [value]="brushSize"
+      [min]="brushSizeMin"
+      [max]="brushSizeMax"
+      [step]="brushSizeStep"
+      tooltip="Brush diameter in image pixels."
+      [valueText]="'' + brushSize"
+      (valueChange)="brushSizeChange.emit(asNumber($event))"
+    >
     </toolbar-tool-slider>
-    <toolbar-tool-slider *ngSwitchCase="'wand'" label="Sens." [value]="wandSensitivity"
-                         [min]="wandSensitivityMin" [max]="wandSensitivityMax" [step]="wandSensitivityStep"
-                         tooltip="Higher = stricter (smaller selection); lower = looser.
+    <toolbar-tool-slider
+      *ngSwitchCase="'wand'"
+      label="Sens."
+      [value]="wandSensitivity"
+      [min]="wandSensitivityMin"
+      [max]="wandSensitivityMax"
+      [step]="wandSensitivityStep"
+      tooltip="Higher = stricter (smaller selection); lower = looser.
                          Takes effect from the next click/drag tick."
-                         [valueText]="wandSensitivity.toFixed(1)"
-                         (valueChange)="wandSensitivityChange.emit(asNumber($event))">
+      [valueText]="wandSensitivity.toFixed(1)"
+      (valueChange)="wandSensitivityChange.emit(asNumber($event))"
+    >
     </toolbar-tool-slider>
-    <toolbar-tool-slider *ngSwitchCase="'eraser'" label="Radius" [value]="vertexEraserRadius"
-                         [min]="vertexEraserRadiusMin" [max]="vertexEraserRadiusMax"
-                         [step]="vertexEraserRadiusStep"
-                         tooltip="Eraser radius in image pixels.
+    <toolbar-tool-slider
+      *ngSwitchCase="'eraser'"
+      label="Radius"
+      [value]="vertexEraserRadius"
+      [min]="vertexEraserRadiusMin"
+      [max]="vertexEraserRadiusMax"
+      [step]="vertexEraserRadiusStep"
+      tooltip="Eraser radius in image pixels.
                          Vertices within this distance of the cursor are removed."
-                         [valueText]="'' + vertexEraserRadius"
-                         (valueChange)="vertexEraserRadiusChange.emit(asNumber($event))">
+      [valueText]="'' + vertexEraserRadius"
+      (valueChange)="vertexEraserRadiusChange.emit(asNumber($event))"
+    >
     </toolbar-tool-slider>
   </ng-container>
 </ng-container>
 
-<p-button size="small" [text]="true" [disabled]="!canUndo" ariaLabel="Undo"
-          pTooltip="Undo the last region action (<kbd>Ctrl</kbd>+<kbd>Z</kbd>).
+<p-button
+  size="small"
+  [text]="true"
+  [disabled]="!canUndo"
+  ariaLabel="Undo"
+  pTooltip="Undo the last region action (<kbd>Ctrl</kbd>+<kbd>Z</kbd>).
           Up to 10 actions can be undone."
-          [escape]="false" tooltipPosition="bottom"
-          (onClick)="undoRegion.emit()">
-  <img src="assets/plotting/undo.svg" class="toolbar-icon-dark" style="width: 1rem" alt=""/>
+  [escape]="false"
+  tooltipPosition="bottom"
+  (onClick)="undoRegion.emit()"
+>
+  <img src="assets/plotting/undo.svg" class="toolbar-icon-dark" style="width: 1rem" alt="" />
 </p-button>
-<p-button size="small" [text]="true" [disabled]="!canRedo" ariaLabel="Redo"
-          pTooltip="Redo the last undone region action
+<p-button
+  size="small"
+  [text]="true"
+  [disabled]="!canRedo"
+  ariaLabel="Redo"
+  pTooltip="Redo the last undone region action
           (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd>)."
-          [escape]="false" tooltipPosition="bottom"
-          (onClick)="redoRegion.emit()">
-  <img src="assets/plotting/redo.svg" class="toolbar-icon-dark" style="width: 1rem" alt=""/>
+  [escape]="false"
+  tooltipPosition="bottom"
+  (onClick)="redoRegion.emit()"
+>
+  <img src="assets/plotting/redo.svg" class="toolbar-icon-dark" style="width: 1rem" alt="" />
 </p-button>
-<p-button icon="pi pi-trash" size="small" [text]="true" ariaLabel="Delete selected region"
-          pTooltip="Delete selected region (<kbd>Del</kbd>)"
-          [escape]="false" tooltipPosition="bottom"
-          (onClick)="deleteRegion.emit()">
+<p-button
+  icon="pi pi-trash"
+  size="small"
+  [text]="true"
+  ariaLabel="Delete selected region"
+  pTooltip="Delete selected region (<kbd>Del</kbd>)"
+  [escape]="false"
+  tooltipPosition="bottom"
+  (onClick)="deleteRegion.emit()"
+>
 </p-button>

@@ -95,7 +95,10 @@ function downsampleMatrix(matrix: number[][], sx: number, sy: number): number[][
   const out: number[][] = [];
   for (let r = 0; r < matrix.length; r += sy) {
     const row = matrix[r];
-    if (sx <= 1) { out.push(row); continue; }
+    if (sx <= 1) {
+      out.push(row);
+      continue;
+    }
     const sampled: number[] = [];
     for (let c = 0; c < row.length; c += sx) sampled.push(row[c]);
     out.push(sampled);
@@ -145,16 +148,18 @@ function buildScatterTraces(input: TraceBuildInput): any[] {
     ys.push(c[1]);
     text.push(`R${i + 1}`);
   });
-  return [{
-    x: xs,
-    y: ys,
-    text,
-    type: 'scatter',
-    mode: 'markers+text',
-    textposition: 'top center',
-    marker: { size: 10, color: input.shapeColor, line: { color: '#000', width: 1 } },
-    name: 'Region centroids',
-  }];
+  return [
+    {
+      x: xs,
+      y: ys,
+      text,
+      type: 'scatter',
+      mode: 'markers+text',
+      textposition: 'top center',
+      marker: { size: 10, color: input.shapeColor, line: { color: '#000', width: 1 } },
+      name: 'Region centroids',
+    },
+  ];
 }
 
 /**
@@ -163,7 +168,7 @@ function buildScatterTraces(input: TraceBuildInput): any[] {
  * A single-frame image is thickened to two z-planes so 3D traces render.
  */
 function sampleVolume(input: TraceBuildInput, maxXY: number, maxZ: number) {
-  let frames = input.frames.map(f => toScalarFrame(f, input.isGrayscale));
+  let frames = input.frames.map((f) => toScalarFrame(f, input.isGrayscale));
   if (frames.length < 2) frames = [frames[0] || [], frames[0] || []];
 
   const height = frames[0].length;
@@ -193,19 +198,23 @@ function sampleVolume(input: TraceBuildInput, maxXY: number, maxZ: number) {
 /** SCATTER3D — downsampled voxels as intensity-coloured 3D markers. */
 function buildScatter3dTraces(input: TraceBuildInput): any[] {
   const { x, y, z, value } = sampleVolume(input, 48, 40);
-  return [{
-    type: 'scatter3d',
-    mode: 'markers',
-    x, y, z,
-    marker: {
-      size: 2,
-      color: value,
-      colorscale: input.colorscale,
-      reversescale: input.reversescale,
-      opacity: 0.8,
+  return [
+    {
+      type: 'scatter3d',
+      mode: 'markers',
+      x,
+      y,
+      z,
+      marker: {
+        size: 2,
+        color: value,
+        colorscale: input.colorscale,
+        reversescale: input.reversescale,
+        opacity: 0.8,
+      },
+      name: 'Voxels',
     },
-    name: 'Voxels',
-  }];
+  ];
 }
 
 /** ISOSURFACE — iso-intensity surfaces over the downsampled volume grid.
@@ -217,29 +226,34 @@ function buildIsosurfaceTraces(input: TraceBuildInput): any[] {
   // We only guard ordering here.
   const isoMin = Math.min(input.isoMin, input.isoMax);
   const isoMax = Math.max(input.isoMin, input.isoMax);
-  return [{
-    type: 'isosurface',
-    x, y, z, value,
-    isomin: isoMin,
-    isomax: isoMax,
-    // A few nested levels (not just the two band extremes): even if an extreme
-    // grazes the data edge and draws nothing, an interior level still renders,
-    // so the volume is never silently empty.
-    surface: { count: 3 },
-    colorscale: input.colorscale,
-    reversescale: input.reversescale,
-    opacity: 0.6,
-    caps: { x: { show: false }, y: { show: false }, z: { show: false } },
-    name: 'Isosurface',
-  }];
+  return [
+    {
+      type: 'isosurface',
+      x,
+      y,
+      z,
+      value,
+      isomin: isoMin,
+      isomax: isoMax,
+      // A few nested levels (not just the two band extremes): even if an extreme
+      // grazes the data edge and draws nothing, an interior level still renders,
+      // so the volume is never silently empty.
+      surface: { count: 3 },
+      colorscale: input.colorscale,
+      reversescale: input.reversescale,
+      opacity: 0.6,
+      caps: { x: { show: false }, y: { show: false }, z: { show: false } },
+      name: 'Isosurface',
+    },
+  ];
 }
 
 /** Registry of the pluggable (non-original) plot types. */
 export const PLOTLY_PLOT_TYPE_IMPLS: Partial<Record<PlotType, PlotlyPlotTypeImpl>> = {
-  [PlotType.CONTOUR]:    { buildTraces: buildContourTraces,    layoutKind: '2d-image',   threeD: false },
-  [PlotType.SCATTER]:    { buildTraces: buildScatterTraces,    layoutKind: '2d-overlay', threeD: false },
-  [PlotType.SCATTER3D]:  { buildTraces: buildScatter3dTraces,  layoutKind: '3d-volume',  threeD: true },
-  [PlotType.ISOSURFACE]: { buildTraces: buildIsosurfaceTraces, layoutKind: '3d-volume',  threeD: true },
+  [PlotType.CONTOUR]: { buildTraces: buildContourTraces, layoutKind: '2d-image', threeD: false },
+  [PlotType.SCATTER]: { buildTraces: buildScatterTraces, layoutKind: '2d-overlay', threeD: false },
+  [PlotType.SCATTER3D]: { buildTraces: buildScatter3dTraces, layoutKind: '3d-volume', threeD: true },
+  [PlotType.ISOSURFACE]: { buildTraces: buildIsosurfaceTraces, layoutKind: '3d-volume', threeD: true },
 };
 
 // ── HEATMAP / SURFACE / RGB image (the original renderers) ─────────────────
@@ -249,8 +263,13 @@ export const PLOTLY_PLOT_TYPE_IMPLS: Partial<Record<PlotType, PlotlyPlotTypeImpl
  * slider switches them). `trueImgSize` is [x0, x1, y0, y1]; `ratios` the data
  * units per pixel. No per-cell hover text: building it for every pixel is too slow.
  */
-export function buildHeatmapTraces(frames: any[], trueImgSize: number[], ratios: number[],
-                                   colorscale: unknown, reversescale: boolean): any[] {
+export function buildHeatmapTraces(
+  frames: any[],
+  trueImgSize: number[],
+  ratios: number[],
+  colorscale: unknown,
+  reversescale: boolean,
+): any[] {
   return frames.map((z, index) => ({
     x0: trueImgSize[0],
     dx: ratios[0],
@@ -272,8 +291,13 @@ export function buildSurfaceTraces(frames: any[], colorscale: unknown, reversesc
 }
 
 /** One RGB `image` trace per z-plane (width × height pixels), only the first visible. */
-export function buildRgbImageTraces(frames: any[], trueImgSize: number[], ratios: number[],
-                                    width: number, height: number): any[] {
+export function buildRgbImageTraces(
+  frames: any[],
+  trueImgSize: number[],
+  ratios: number[],
+  width: number,
+  height: number,
+): any[] {
   return frames.map((z, index) => ({
     x0: trueImgSize[0],
     dx: ratios[0],

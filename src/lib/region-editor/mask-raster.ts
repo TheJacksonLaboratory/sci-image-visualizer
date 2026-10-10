@@ -56,10 +56,12 @@ export function scaleParts(parts: MaskPart[], scale: number): MaskPart[] {
 export function regionToParts(region: Region): MaskPart[] {
   const b = region.bounds;
   if (b instanceof Rectangle) {
-    return [{
-      xpoints: [b.x, b.x + b.width, b.x + b.width, b.x],
-      ypoints: [b.y, b.y, b.y + b.height, b.y + b.height],
-    }];
+    return [
+      {
+        xpoints: [b.x, b.x + b.width, b.x + b.width, b.x],
+        ypoints: [b.y, b.y, b.y + b.height, b.y + b.height],
+      },
+    ];
   }
   if (b instanceof Polygon) {
     return [{ xpoints: b.xpoints, ypoints: b.ypoints, holes: b.holes }];
@@ -109,8 +111,7 @@ export function regionsToMask(
 
   const multiclass = mode === 'multiclass';
   const bitDepth: 8 | 16 = multiclass && regions.length > 255 ? 16 : 8;
-  const out: Uint8Array | Uint16Array =
-    bitDepth === 16 ? new Uint16Array(W * H) : new Uint8Array(W * H);
+  const out: Uint8Array | Uint16Array = bitDepth === 16 ? new Uint16Array(W * H) : new Uint8Array(W * H);
   let painted = false;
   for (let i = 0; i < regions.length; i++) {
     // Binary → 255 (viewable, standard). Multi-class → 1-based class id.

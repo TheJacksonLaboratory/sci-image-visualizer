@@ -110,7 +110,10 @@ export class NapariToolBridge {
   private viewportTimer: ReturnType<typeof setTimeout> | null = null;
   private cameraOff: (() => void) | null = null;
 
-  constructor(private readonly host: ToolBridgeHost, private readonly deps: ToolBridgeDeps) {
+  constructor(
+    private readonly host: ToolBridgeHost,
+    private readonly deps: ToolBridgeDeps,
+  ) {
     const { regionStore } = deps;
     // The pixel tools read displayed pixels synchronously from the last readback and convert
     // pointer coords via the napari camera, mirroring the OSD host. This backend owns its own tool
@@ -134,7 +137,9 @@ export class NapariToolBridge {
       applyZoomToBox: (coords) => this.applyZoomToBox(coords),
     };
     this.canvasTools = createCanvasToolManager(this.toolHost, {
-      wandService: deps.wandService, regionStore, samPoint: deps.samPointTool,
+      wandService: deps.wandService,
+      regionStore,
+      samPoint: deps.samPointTool,
     });
   }
 
@@ -175,7 +180,10 @@ export class NapariToolBridge {
     // (No mid-gesture case to guard: the overlay disables the camera controls while drawing.)
     const foreign = new Set(regionStore.getRegions().map((r) => r.id));
     this.cameraOff = viewer.camera3d.changed.connect(() => {
-      const drawn = regionStore.getRegions().filter((r) => !foreign.has(r.id)).map((r) => r.id);
+      const drawn = regionStore
+        .getRegions()
+        .filter((r) => !foreign.has(r.id))
+        .map((r) => r.id);
       // Not an edit of the user's: no undo step (NAPARI-SVC-11).
       if (drawn.length) this.host.inZone(() => regionStore.removeRegions(drawn, { recordUndo: false }));
     });
@@ -261,10 +269,12 @@ export class NapariToolBridge {
    *  (wand/brush/SAM) read synchronously. Coalesces rapid changes. */
   armReadback(delayMs = READBACK_DEBOUNCE_MS): void {
     if (this.readbackTimer != null) clearTimeout(this.readbackTimer);
-    this.readbackTimer = this.host.outsideZone(() => setTimeout(() => {
-      this.readbackTimer = null;
-      void this.runReadback();
-    }, delayMs));
+    this.readbackTimer = this.host.outsideZone(() =>
+      setTimeout(() => {
+        this.readbackTimer = null;
+        void this.runReadback();
+      }, delayMs),
+    );
   }
 
   /** Emit the visible region, clamped to the image. */
@@ -291,11 +301,13 @@ export class NapariToolBridge {
       return;
     }
     if (this.viewportTimer != null) clearTimeout(this.viewportTimer);
-    this.viewportTimer = this.host.outsideZone(() => setTimeout(() => {
-      this.viewportTimer = null;
-      const viewer = this.host.viewer();
-      if (viewer) this.emitViewport(viewer.visibleWorldRect());
-    }, READBACK_DEBOUNCE_MS));
+    this.viewportTimer = this.host.outsideZone(() =>
+      setTimeout(() => {
+        this.viewportTimer = null;
+        const viewer = this.host.viewer();
+        if (viewer) this.emitViewport(viewer.visibleWorldRect());
+      }, READBACK_DEBOUNCE_MS),
+    );
   }
 
   /** Build the pixel tools' coordinate transform for the current viewer. */

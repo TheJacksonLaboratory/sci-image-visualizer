@@ -2,14 +2,26 @@ import type { ImageLayer, PointsLayer, Viewer } from 'napari-js';
 
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
 import {
-  NO_CATEGORY, SpatialColumn, SpatialDataset, SpatialImageRef, SpatialObservations, isCategoricalColumn,
+  NO_CATEGORY,
+  SpatialColumn,
+  SpatialDataset,
+  SpatialImageRef,
+  SpatialObservations,
+  isCategoricalColumn,
 } from '../../contracts/spatial-dataset.contract';
 import { SpatialViewState } from '../../contracts/display-types';
 import {
-  encodeCategorical, markerDiameters, resolveCategoryColors, toRgbaTuples, type RGBA,
+  encodeCategorical,
+  markerDiameters,
+  resolveCategoryColors,
+  toRgbaTuples,
+  type RGBA,
 } from '../../spatial/spatial-encoding';
 import {
-  SpatialSelectionMask, emptySelection, maskToIndices, mutedFromSelection,
+  SpatialSelectionMask,
+  emptySelection,
+  maskToIndices,
+  mutedFromSelection,
 } from '../../spatial/spatial-selection';
 import { framePositions } from '../../spatial/spatial-framing';
 import { PIXEL_WORLD_QUANTUM, worldQuantumForExtent } from '../../spatial/world-grid';
@@ -22,8 +34,14 @@ import { isAbortError } from '../tile-server';
 import { NapariSpatialTileLayers } from './napari-spatial-tiles';
 import { Image2dScene } from './napari-image-2d-scene';
 import {
-  GENE_MAP_MAX_SIDE, GENE_MAP_SIGMA, SPATIAL_FALLBACK_RADIUS, SPATIAL_NEUTRAL_COLOR, SPATIAL_NEUTRAL_HEX,
-  SPATIAL_SLICE_MIN_DIAMETER_PX, encodeSpatialContinuous, gatherColors,
+  GENE_MAP_MAX_SIDE,
+  GENE_MAP_SIGMA,
+  SPATIAL_FALLBACK_RADIUS,
+  SPATIAL_NEUTRAL_COLOR,
+  SPATIAL_NEUTRAL_HEX,
+  SPATIAL_SLICE_MIN_DIAMETER_PX,
+  encodeSpatialContinuous,
+  gatherColors,
 } from './napari-spatial-encoding';
 import { SpatialSceneBase, SpatialSession, SpatialTileOwner } from './napari-spatial-scene';
 import type { NapariScene, SceneContext } from './napari-scene';
@@ -176,7 +194,8 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
 
   /** (Re)build the observation marker layer for the current dataset + view state. */
   protected async rebuild(
-    dataset: SpatialDataset | null, view: SpatialViewState,
+    dataset: SpatialDataset | null,
+    view: SpatialViewState,
     selection: SpatialSelectionMask = emptySelection(),
   ): Promise<void> {
     const viewer = this.ctx.viewer;
@@ -225,13 +244,11 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
     const base = markerDiameters(obs, SPATIAL_FALLBACK_RADIUS);
     const scale = view.pointScale > 0 ? view.pointScale : 1;
     const floor = slab?.minDiameter ?? 0;
-    const sizeOf = (i: number) =>
-      Math.max(typeof base === 'number' ? base : base[i], floor) * scale;
+    const sizeOf = (i: number) => Math.max(typeof base === 'number' ? base : base[i], floor) * scale;
     const size: number | Float32Array =
       typeof base === 'number' && !slab
         ? Math.max(base, floor) * scale
-        : Float32Array.from(slab?.indices ?? { length: obs.count }, (_v, i) =>
-            sizeOf(slab ? slab.indices[i] : i));
+        : Float32Array.from(slab?.indices ?? { length: obs.count }, (_v, i) => sizeOf(slab ? slab.indices[i] : i));
 
     // napari's image view CLEARS the whole layer list on every render, so the
     // markers go with it whenever the image is re-rendered — a scrub, a contrast
@@ -319,7 +336,10 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
       overlay.setWorldQuantum(PIXEL_WORLD_QUANTUM);
       return;
     }
-    let minX = Infinity; let maxX = -Infinity; let minY = Infinity; let maxY = -Infinity;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
     for (let i = 0; i < positions.length; i += 2) {
       const x = positions[i];
       const y = positions[i + 1];
@@ -417,8 +437,11 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
    * that plane's observations are included — the same rule the markers follow.
    */
   private async ensureGeneMap(
-    viewer: Viewer, dataset: SpatialDataset, view: SpatialViewState,
-    selection: SpatialSelectionMask, slab: Slab | null,
+    viewer: Viewer,
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    selection: SpatialSelectionMask,
+    slab: Slab | null,
   ): Promise<void> {
     const gene = view.geneMap && view.colorBy?.kind === 'feature' ? view.colorBy.name : null;
     const port = this.session.port;
@@ -434,9 +457,12 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
       : null;
     const key = fieldKey
       ? [
-        fieldKey, clip.join(','), view.logScale ? 'log' : 'lin', view.geneMapOpacity,
-        this.ctx.display.continuousColormapKey(view),
-      ].join('|')
+          fieldKey,
+          clip.join(','),
+          view.logScale ? 'log' : 'lin',
+          view.geneMapOpacity,
+          this.ctx.display.continuousColormapKey(view),
+        ].join('|')
       : null;
     if (key === this.geneMapKey) return;
 
@@ -485,17 +511,21 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
       const inSelection = selection.count > 0 ? maskToIndices(selection.mask) : undefined;
       let estimated: ExpressionField | null;
       try {
-        estimated = await computeExpressionFieldAsync(dataset.observations, {
-          ref: slab?.ref ?? dataset.imageRef,
-          width: Math.ceil(imageW / step),
-          height: Math.ceil(imageH / step),
-          step,
-          sigma: GENE_MAP_SIGMA * smoothing,
-          values,
-          // A plane wins over a selection: the 2D view is showing one section, so a
-          // field spanning the specimen's depth would not be the thing on screen.
-          indices: slab?.indices ?? inSelection,
-        }, { signal: load.signal });
+        estimated = await computeExpressionFieldAsync(
+          dataset.observations,
+          {
+            ref: slab?.ref ?? dataset.imageRef,
+            width: Math.ceil(imageW / step),
+            height: Math.ceil(imageH / step),
+            step,
+            sigma: GENE_MAP_SIGMA * smoothing,
+            values,
+            // A plane wins over a selection: the 2D view is showing one section, so a
+            // field spanning the specimen's depth would not be the thing on screen.
+            indices: slab?.indices ?? inSelection,
+          },
+          { signal: load.signal },
+        );
       } catch (err) {
         if (isAbortError(err)) return; // superseded by a newer map, or the scene went away
         throw err;
@@ -562,7 +592,9 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
    * and gene vectors go through the active colormap with a percentile-clipped window.
    */
   private async faceColors(
-    dataset: SpatialDataset, view: SpatialViewState, selection: SpatialSelectionMask,
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    selection: SpatialSelectionMask,
   ): Promise<RGBA[] | RGBA> {
     const port = this.session.port;
     const colorBy = view.colorBy;
@@ -578,11 +610,13 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
       // has to be per-point. Returning the constant tuple here is what made the
       // Opacity slider do nothing in the default state, which is the state anyone
       // lands in before picking a colour source.
-      return toRgbaTuples(encodeCategorical(new Uint16Array(dataset.observations.count), {
-        colors: [SPATIAL_NEUTRAL_HEX],
-        opacity: view.opacity,
-        muted,
-      }));
+      return toRgbaTuples(
+        encodeCategorical(new Uint16Array(dataset.observations.count), {
+          colors: [SPATIAL_NEUTRAL_HEX],
+          opacity: view.opacity,
+          muted,
+        }),
+      );
     }
 
     if (colorBy.kind === 'column') {
@@ -618,7 +652,11 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
   /** Continuous values → RGBA through the active colormap and a clipped window. */
   encodeContinuous(values: Float32Array, view: SpatialViewState, muted: Uint8Array | null = null): Float32Array {
     return encodeSpatialContinuous(
-      values, view, this.ctx.display.spatialLut(view), this.session.contrastWindows, muted,
+      values,
+      view,
+      this.ctx.display.spatialLut(view),
+      this.session.contrastWindows,
+      muted,
     );
   }
 }

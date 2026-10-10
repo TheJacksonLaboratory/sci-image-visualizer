@@ -86,10 +86,10 @@ export class SamToolService {
       }
       try {
         // Encode once per image; reuse the embedding across all boxes.
-        const key = [host.getFileName() ?? '', frameIdx, `${cached.width}x${cached.height}`, frame.sig]
-          .join('|');
-        const embedding = await this.sessions.embed(session, cached, frameIdx, key,
-          () => this.status$.next('Encoding image…'));
+        const key = [host.getFileName() ?? '', frameIdx, `${cached.width}x${cached.height}`, frame.sig].join('|');
+        const embedding = await this.sessions.embed(session, cached, frameIdx, key, () =>
+          this.status$.next('Encoding image…'),
+        );
 
         const masks: Region[] = [];
         const consumed: Region[] = []; // prompt rectangles that produced a mask
@@ -125,7 +125,6 @@ export class SamToolService {
     });
     return added ?? 0;
   }
-
 }
 
 function makeSamRegion(poly: Polygon, frame: MatrixFrame, color: string): Region {

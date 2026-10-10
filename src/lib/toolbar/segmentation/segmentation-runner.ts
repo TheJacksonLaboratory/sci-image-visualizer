@@ -67,12 +67,14 @@ export class SegmentationRunner {
     let lastStatus = '';
     const subs = new Subscription();
     subs.add(tool.progress$.subscribe((f) => this.onProgress(f)));
-    subs.add(tool.status$.subscribe((m) => {
-      if (!m) return;
-      lastStatus = m;
-      this.status = m;
-      this.changed();
-    }));
+    subs.add(
+      tool.status$.subscribe((m) => {
+        if (!m) return;
+        lastStatus = m;
+        this.status = m;
+        this.changed();
+      }),
+    );
     this.show(label);
     try {
       const n = await op();

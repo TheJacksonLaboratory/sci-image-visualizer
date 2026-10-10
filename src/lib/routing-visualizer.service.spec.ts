@@ -243,7 +243,10 @@ describe('RoutingVisualizerService (characterization)', () => {
   it('does not fall back to another backend for a load that was aborted', async () => {
     router.setPlotType(PlotType.IMAGE);
     const ctl = new AbortController();
-    osd.load.mockImplementation(() => { ctl.abort(); return Promise.reject(new Error('aborted')); });
+    osd.load.mockImplementation(() => {
+      ctl.abort();
+      return Promise.reject(new Error('aborted'));
+    });
     await expect(router.load(IMAGE_INFO, 0, ctl.signal)).rejects.toThrow('aborted');
     expect(plotly.load).not.toHaveBeenCalled();
   });
@@ -346,7 +349,13 @@ describe('RoutingVisualizerService (characterization)', () => {
   // ── auto-contrast windowing math ──────────────────────────────────────
   function seedChannel(): void {
     const ch: IChannelState = {
-      index: 0, name: 'Intensity', color: '#ffffff', min: 0, max: 255, gamma: 1, visible: true,
+      index: 0,
+      name: 'Intensity',
+      color: '#ffffff',
+      min: 0,
+      max: 255,
+      gamma: 1,
+      visible: true,
     };
     store.setChannelStates([ch]);
   }
@@ -602,7 +611,10 @@ describe('RoutingVisualizerService (characterization)', () => {
     osd.getIntensitySampling.mockReturnValue({ getViewportChange$: () => osd$ });
     napari.getIntensitySampling.mockReturnValue({ getViewportChange$: () => napari$ });
     const seen: number[] = [];
-    router.getIntensitySampling().getViewportChange$().subscribe((r) => seen.push(r.x));
+    router
+      .getIntensitySampling()
+      .getViewportChange$()
+      .subscribe((r) => seen.push(r.x));
     router.getViewportChange$().subscribe((r) => seen.push(r.x * 10)); // deprecated alias
     osd$.next({ x: 1, y: 0, width: 1, height: 1 });
     napari$.next({ x: 2, y: 0, width: 1, height: 1 });
@@ -664,8 +676,9 @@ describe('RoutingVisualizerService (characterization)', () => {
     expect(intensity['refreshIntensitySamplingForRoi']).toHaveBeenCalledWith(1, 2, 3, 4, 2);
     // Each call points the service at the plot div first.
     expect(intensity['setSamplingElement'].mock.calls).toEqual([['viz-plot-1'], ['viz-plot-1']]);
-    expect(intensity['setSamplingElement'].mock.invocationCallOrder[1])
-      .toBeLessThan(intensity['refreshIntensitySamplingForRoi'].mock.invocationCallOrder[0]);
+    expect(intensity['setSamplingElement'].mock.invocationCallOrder[1]).toBeLessThan(
+      intensity['refreshIntensitySamplingForRoi'].mock.invocationCallOrder[0],
+    );
     for (const b of [plotly, osd, napari]) expect(b.refreshIntensitySamplingForRoi).not.toHaveBeenCalled();
   });
 
@@ -717,7 +730,8 @@ describe('RoutingVisualizerService (characterization)', () => {
  */
 describe('RoutingVisualizerService — spatial controls', () => {
   const dataset: SpatialDataset = {
-    id: 'demo', name: 'Demo',
+    id: 'demo',
+    name: 'Demo',
     observations: { count: 2, x: new Float32Array(2), y: new Float32Array(2) },
     columns: [
       { kind: 'categorical', name: 'region', categories: ['A', 'B'], colors: ['#ff0000', '#0000ff'] },
@@ -759,7 +773,10 @@ describe('RoutingVisualizerService — spatial controls', () => {
   function roi(x: number, y: number, w: number, h: number): Region {
     const r = new Region();
     const b = new Rectangle();
-    b.x = x; b.y = y; b.width = w; b.height = h;
+    b.x = x;
+    b.y = y;
+    b.width = w;
+    b.height = h;
     r.bounds = b;
     return r;
   }
@@ -774,9 +791,11 @@ describe('RoutingVisualizerService — spatial controls', () => {
         columns: [{ kind: 'continuous', name: 'total_counts', logScaleHint: true }],
         features: { count: 1, names: ['Ttr'], logScaleHint: true },
       };
-      const { router, store } = build(mockPort({
-        getDataset$: () => new BehaviorSubject<SpatialDataset | null>(hinted),
-      }));
+      const { router, store } = build(
+        mockPort({
+          getDataset$: () => new BehaviorSubject<SpatialDataset | null>(hinted),
+        }),
+      );
       const controls = router.getSpatialControls()!;
 
       controls.colorByColumn('total_counts');
@@ -814,7 +833,8 @@ describe('RoutingVisualizerService — spatial controls', () => {
       // A different dataset with no `region`: keeping the source would leave the
       // map flat while the panel and the charts kept naming it.
       dataset$.next({
-        ...dataset, id: 'other',
+        ...dataset,
+        id: 'other',
         columns: [{ kind: 'categorical', name: 'zone', categories: ['Z'] }],
       });
 
@@ -858,10 +878,12 @@ describe('RoutingVisualizerService — spatial controls', () => {
     };
 
     function withDataset(over: Record<string, unknown> = {}) {
-      const built = build(mockPort({
-        getDataset$: () => new BehaviorSubject<SpatialDataset | null>(spatial),
-        ...over,
-      }));
+      const built = build(
+        mockPort({
+          getDataset$: () => new BehaviorSubject<SpatialDataset | null>(spatial),
+          ...over,
+        }),
+      );
       return {
         ...built,
         regions: TestBed.inject(RegionStore),
@@ -901,11 +923,11 @@ describe('RoutingVisualizerService — spatial controls', () => {
     it('rejects a category selection on a continuous column', async () => {
       const { router } = withDataset({
         getColumn: jest.fn().mockResolvedValue({
-          meta: { kind: 'continuous', name: 'counts' }, values: new Float32Array(3),
+          meta: { kind: 'continuous', name: 'counts' },
+          values: new Float32Array(3),
         }),
       });
-      await expect(router.getSpatialControls()!.selectCategory('counts', 0))
-        .rejects.toThrow(/continuous/);
+      await expect(router.getSpatialControls()!.selectCategory('counts', 0)).rejects.toThrow(/continuous/);
     });
 
     it('clears the selection', () => {
@@ -930,9 +952,11 @@ describe('RoutingVisualizerService — spatial controls', () => {
     });
 
     it('selects nothing when no dataset is loaded', () => {
-      const { router } = build(mockPort({
-        getDataset$: () => new BehaviorSubject<SpatialDataset | null>(null),
-      }));
+      const { router } = build(
+        mockPort({
+          getDataset$: () => new BehaviorSubject<SpatialDataset | null>(null),
+        }),
+      );
       expect(router.getSpatialControls()!.selectFromRegions()).toBe(0);
     });
   });
@@ -975,9 +999,7 @@ describe('RoutingVisualizerService — spatial controls', () => {
     expect(store.currentSpatialView().colorBy).toBeNull();
 
     controls.setViewState({ pointScale: 3, opacity: 0.5 });
-    expect(store.currentSpatialView()).toEqual(
-      expect.objectContaining({ pointScale: 3, opacity: 0.5 }),
-    );
+    expect(store.currentSpatialView()).toEqual(expect.objectContaining({ pointScale: 3, opacity: 0.5 }));
   });
 
   it('exposes the dataset stream for pickers and legends', async () => {
@@ -1013,14 +1035,15 @@ describe('RoutingVisualizerService — spatial controls', () => {
     it('resolves legend swatches with the same function the renderer uses', async () => {
       const column: CategoricalColumn = {
         meta: {
-          kind: 'categorical', name: 'region', categories: ['A', 'B'],
+          kind: 'categorical',
+          name: 'region',
+          categories: ['A', 'B'],
           colors: ['#ff0000', '#0000ff'],
         },
         codes: new Uint16Array([0, 1]),
       };
       const { router } = build(mockPort({ getColumn: jest.fn().mockResolvedValue(column) }));
-      expect(await router.getSpatialControls()!.categoryColors('region'))
-        .toEqual(['#ff0000', '#0000ff']);
+      expect(await router.getSpatialControls()!.categoryColors('region')).toEqual(['#ff0000', '#0000ff']);
     });
 
     it('rejects for a continuous column instead of returning an empty legend', async () => {
@@ -1029,8 +1052,9 @@ describe('RoutingVisualizerService — spatial controls', () => {
         values: new Float32Array(2),
       };
       const { router } = build(mockPort({ getColumn: jest.fn().mockResolvedValue(column) }));
-      await expect(router.getSpatialControls()!.categoryColors('counts'))
-        .rejects.toThrow(/continuous .* no categories/);
+      await expect(router.getSpatialControls()!.categoryColors('counts')).rejects.toThrow(
+        /continuous .* no categories/,
+      );
     });
   });
 });

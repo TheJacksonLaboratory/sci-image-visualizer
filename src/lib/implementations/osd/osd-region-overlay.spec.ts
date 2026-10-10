@@ -13,11 +13,22 @@ import { fakeOsdViewer } from '../../testing/fake-osd-viewer';
 jest.mock('openseadragon', () => ({
   __esModule: true,
   MouseTracker: class {
-    constructor(opts: any) { (global as any).__trackerOpts = opts; }
-    setTracking() { /* noop */ }
-    destroy() { /* noop */ }
+    constructor(opts: any) {
+      (global as any).__trackerOpts = opts;
+    }
+    setTracking() {
+      /* noop */
+    }
+    destroy() {
+      /* noop */
+    }
   },
-  Point: class { constructor(public x: number, public y: number) {} },
+  Point: class {
+    constructor(
+      public x: number,
+      public y: number,
+    ) {}
+  },
 }));
 
 /** The captured MouseTracker handlers (press/drag/release/click/move). */
@@ -31,7 +42,11 @@ function triRegion(): Region {
   p.npoints = 3;
   p.xpoints = [0, 10, 5];
   p.ypoints = [0, 0, 10];
-  p.coordinates = [[0, 0], [10, 0], [5, 10]];
+  p.coordinates = [
+    [0, 0],
+    [10, 0],
+    [5, 10],
+  ];
   p.closed = true;
   r.bounds = p;
   return r;
@@ -40,7 +55,10 @@ function triRegion(): Region {
 function rectRegion(): Region {
   const r = new Region();
   const rect = new Rectangle();
-  rect.x = 0; rect.y = 0; rect.width = 10; rect.height = 10;
+  rect.x = 0;
+  rect.y = 0;
+  rect.width = 10;
+  rect.height = 10;
   r.bounds = rect;
   return r;
 }
@@ -48,7 +66,10 @@ function rectRegion(): Region {
 function rectRegionAt(x: number, y: number, w: number, h: number): Region {
   const r = new Region();
   const rect = new Rectangle();
-  rect.x = x; rect.y = y; rect.width = w; rect.height = h;
+  rect.x = x;
+  rect.y = y;
+  rect.width = w;
+  rect.height = h;
   r.bounds = rect;
   return r;
 }
@@ -67,10 +88,10 @@ describe('OsdRegionOverlay — vertex tools', () => {
   it('drawpolygon: clicks place vertices and clicking the first vertex closes it', () => {
     overlay.setMode('drawpolygon');
     const h = handlers();
-    h.clickHandler({ position: { x: 0, y: 0 } });   // start
-    h.clickHandler({ position: { x: 10, y: 0 } });  // vertex 2
-    h.clickHandler({ position: { x: 5, y: 10 } });  // vertex 3
-    h.clickHandler({ position: { x: 0, y: 0 } });   // click first -> close
+    h.clickHandler({ position: { x: 0, y: 0 } }); // start
+    h.clickHandler({ position: { x: 10, y: 0 } }); // vertex 2
+    h.clickHandler({ position: { x: 5, y: 10 } }); // vertex 3
+    h.clickHandler({ position: { x: 0, y: 0 } }); // click first -> close
 
     const regions = store.getRegions();
     expect(regions.length).toBe(1);
@@ -83,11 +104,11 @@ describe('OsdRegionOverlay — vertex tools', () => {
     const id = store.addRegion(triRegion()); // addRegion selects it
     overlay.setMode('select');
     const h = handlers();
-    h.pressHandler({ position: { x: 0, y: 0 } });   // grab vertex 0
+    h.pressHandler({ position: { x: 0, y: 0 } }); // grab vertex 0
     h.dragHandler({ position: { x: 3, y: 4 } });
     h.releaseHandler({ position: { x: 3, y: 4 } });
 
-    const poly = store.getRegions().find(r => r.id === id)!.bounds as Polygon;
+    const poly = store.getRegions().find((r) => r.id === id)!.bounds as Polygon;
     expect(poly.xpoints[0]).toBe(3);
     expect(poly.ypoints[0]).toBe(4);
     expect(poly.xpoints[1]).toBe(10); // others untouched
@@ -98,7 +119,7 @@ describe('OsdRegionOverlay — vertex tools', () => {
     overlay.setMode('addpoint');
     handlers().clickHandler({ position: { x: 5, y: 0 } }); // midpoint of edge 0
 
-    const poly = store.getRegions().find(r => r.id === id)!.bounds as Polygon;
+    const poly = store.getRegions().find((r) => r.id === id)!.bounds as Polygon;
     expect(poly.xpoints).toEqual([0, 5, 10, 5]);
     expect(poly.npoints).toBe(4);
   });
@@ -112,7 +133,7 @@ describe('OsdRegionOverlay — vertex tools', () => {
     overlay.setMode('deletepoint');
     handlers().clickHandler({ position: { x: 10, y: 0 } }); // vertex 1
 
-    const poly = store.getRegions().find(r2 => r2.id === id)!.bounds as Polygon;
+    const poly = store.getRegions().find((r2) => r2.id === id)!.bounds as Polygon;
     expect(poly.xpoints.length).toBe(3);
     expect(poly.xpoints).toEqual([0, 10, 0]);
   });
@@ -122,10 +143,10 @@ describe('OsdRegionOverlay — vertex tools', () => {
     overlay.setMode('move');
     const h = handlers();
     h.pressHandler({ position: { x: 5, y: 5 } }); // inside the rect
-    h.dragHandler({ position: { x: 8, y: 9 } });  // delta (3, 4)
+    h.dragHandler({ position: { x: 8, y: 9 } }); // delta (3, 4)
     h.releaseHandler({ position: { x: 8, y: 9 } });
 
-    const b = store.getRegions().find(r => r.id === id)!.bounds as Rectangle;
+    const b = store.getRegions().find((r) => r.id === id)!.bounds as Rectangle;
     expect(b.x).toBe(3);
     expect(b.y).toBe(4);
     expect(b.width).toBe(10);
@@ -144,7 +165,9 @@ describe('OsdRegionOverlay — vertex tools', () => {
   }
   function regionUpdatesFlow(): boolean {
     let emitted = false;
-    const sub = store.getRegionUpdateEvent().subscribe(() => { emitted = true; });
+    const sub = store.getRegionUpdateEvent().subscribe(() => {
+      emitted = true;
+    });
     emitted = false; // ignore a replayed value, if any
     store.addRegion(rectRegionAt(50, 50, 5, 5));
     sub.unsubscribe();
@@ -166,7 +189,9 @@ describe('OsdRegionOverlay — vertex tools', () => {
   it('follows a camera move by rewriting one transform, not rebuilding the regions (OSD-PLOTLY-11)', () => {
     const viewer = fakeOsdViewer();
     const handlersByName: Record<string, () => void> = {};
-    viewer.addHandler = (name, h) => { handlersByName[name] = h; };
+    viewer.addHandler = (name, h) => {
+      handlersByName[name] = h;
+    };
     let scale = 1;
     viewer.viewport.imageToViewerElementCoordinates = (p) => ({ x: p.x * scale, y: p.y * scale });
     const o = new OsdRegionOverlay(viewer, store);
@@ -190,7 +215,12 @@ describe('OsdRegionOverlay — vertex tools', () => {
     expect(shape.getAttribute('points')).toBe('0,0 10,0 10,10 0,10'); // …still in image coordinates
     expect(shape.parentElement!.getAttribute('transform')).toBe('matrix(2 0 0 2 0 0)');
     // The screen-sized corner handles were re-positioned in place.
-    expect(Array.from(svg.querySelectorAll('circle')).map((c) => c.getAttribute('cx'))).toEqual(['0', '20', '20', '0']);
+    expect(Array.from(svg.querySelectorAll('circle')).map((c) => c.getAttribute('cx'))).toEqual([
+      '0',
+      '20',
+      '20',
+      '0',
+    ]);
     o.destroy();
   });
 
@@ -226,36 +256,39 @@ describe('OsdRegionOverlay — vertex tools', () => {
     expect(regionUpdatesFlow()).toBe(true);
   });
 
-  it('draws the selected region\'s vertex handles in its own colour', () => {
+  it("draws the selected region's vertex handles in its own colour", () => {
     const r = triRegion();
     r.color = '#ff8800';
     store.addRegion(r); // selects it
     overlay.setMode('select'); // vertex-edit mode → handles drawn
     const svg = (overlay as any).svg as SVGSVGElement;
-    const markers = Array.from(svg.querySelectorAll('circle'))
-      .filter(c => c.getAttribute('stroke') === '#ff8800');
+    const markers = Array.from(svg.querySelectorAll('circle')).filter(
+      (c) => c.getAttribute('stroke') === '#ff8800',
+    );
     expect(markers.length).toBeGreaterThanOrEqual(3); // the three anchor handles
   });
 
-  it('shows the selected polygon\'s vertices in none (display) mode too', () => {
+  it("shows the selected polygon's vertices in none (display) mode too", () => {
     const r = triRegion();
     r.color = '#00bcd4';
-    store.addRegion(r);          // selects it
-    overlay.setMode('none');     // no tool active — selection should still reveal vertices
+    store.addRegion(r); // selects it
+    overlay.setMode('none'); // no tool active — selection should still reveal vertices
     const svg = (overlay as any).svg as SVGSVGElement;
-    const markers = Array.from(svg.querySelectorAll('circle'))
-      .filter(c => c.getAttribute('stroke') === '#00bcd4');
+    const markers = Array.from(svg.querySelectorAll('circle')).filter(
+      (c) => c.getAttribute('stroke') === '#00bcd4',
+    );
     expect(markers.length).toBeGreaterThanOrEqual(3);
   });
 
-  it('shows a selected rectangle\'s four corner handles', () => {
+  it("shows a selected rectangle's four corner handles", () => {
     const r = rectRegion();
     r.color = '#00bcd4';
-    store.addRegion(r);          // selects it
+    store.addRegion(r); // selects it
     overlay.setMode('none');
     const svg = (overlay as any).svg as SVGSVGElement;
-    const markers = Array.from(svg.querySelectorAll('circle'))
-      .filter(c => c.getAttribute('stroke') === '#00bcd4');
+    const markers = Array.from(svg.querySelectorAll('circle')).filter(
+      (c) => c.getAttribute('stroke') === '#00bcd4',
+    );
     expect(markers.length).toBe(4);
   });
 
@@ -265,43 +298,44 @@ describe('OsdRegionOverlay — vertex tools', () => {
     store.addRegion(r);
     overlay.setMode('drawrect'); // mid-draw → no stray handles
     const svg = (overlay as any).svg as SVGSVGElement;
-    const markers = Array.from(svg.querySelectorAll('circle'))
-      .filter(c => c.getAttribute('stroke') === '#00bcd4');
+    const markers = Array.from(svg.querySelectorAll('circle')).filter(
+      (c) => c.getAttribute('stroke') === '#00bcd4',
+    );
     expect(markers.length).toBe(0);
   });
 
   it('plain click selects a single region (replacing the selection)', () => {
-    store.addRegion(rectRegionAt(0, 0, 10, 10));       // index 0
-    store.addRegion(rectRegionAt(100, 100, 10, 10));   // index 1 (selected)
+    store.addRegion(rectRegionAt(0, 0, 10, 10)); // index 0
+    store.addRegion(rectRegionAt(100, 100, 10, 10)); // index 1 (selected)
     overlay.setMode('select');
     handlers().clickHandler({ position: { x: 5, y: 5 } }); // click region 0, no modifier
     expect(store.getSelectedShapeIndices()).toEqual([0]);
   });
 
   it('shift-click adds another region to the selection (multi-select)', () => {
-    store.addRegion(rectRegionAt(0, 0, 10, 10));       // index 0
-    store.addRegion(rectRegionAt(100, 100, 10, 10));   // index 1 (selected)
+    store.addRegion(rectRegionAt(0, 0, 10, 10)); // index 0
+    store.addRegion(rectRegionAt(100, 100, 10, 10)); // index 1 (selected)
     overlay.setMode('select');
     handlers().clickHandler({ position: { x: 5, y: 5 }, originalEvent: { shiftKey: true } });
     expect(store.getSelectedShapeIndices().slice().sort()).toEqual([0, 1]);
   });
 
   it('shift-click again toggles a region back out of the selection', () => {
-    store.addRegion(rectRegionAt(0, 0, 10, 10));       // index 0 (selected)
+    store.addRegion(rectRegionAt(0, 0, 10, 10)); // index 0 (selected)
     overlay.setMode('select');
     const h = handlers();
     h.clickHandler({ position: { x: 105, y: 105 }, originalEvent: { shiftKey: true } }); // empty → no-op
-    h.clickHandler({ position: { x: 5, y: 5 }, originalEvent: { shiftKey: true } });     // toggle 0 off
+    h.clickHandler({ position: { x: 5, y: 5 }, originalEvent: { shiftKey: true } }); // toggle 0 off
     expect(store.getSelectedShapeIndices()).toEqual([]);
   });
 
   it('rubber-band drag selects every region it intersects', () => {
-    store.addRegion(rectRegionAt(0, 0, 10, 10));       // index 0
-    store.addRegion(rectRegionAt(100, 100, 10, 10));   // index 1 (selected)
+    store.addRegion(rectRegionAt(0, 0, 10, 10)); // index 0
+    store.addRegion(rectRegionAt(100, 100, 10, 10)); // index 1 (selected)
     overlay.setMode('select');
     const h = handlers();
-    h.pressHandler({ position: { x: 50, y: 50 } });    // press empty space
-    h.dragHandler({ position: { x: -1, y: -1 } });     // drag a band over region 0 only
+    h.pressHandler({ position: { x: 50, y: 50 } }); // press empty space
+    h.dragHandler({ position: { x: -1, y: -1 } }); // drag a band over region 0 only
     h.releaseHandler({ position: { x: -1, y: -1 } });
     expect(store.getSelectedShapeIndices()).toEqual([0]);
   });
@@ -309,23 +343,23 @@ describe('OsdRegionOverlay — vertex tools', () => {
   it('setSelectedBezier toggles the bezier flag on the selected region', () => {
     const id = store.addRegion(triRegion()); // addRegion selects it
     overlay.setSelectedBezier(true);
-    expect((store.getRegions().find(r => r.id === id)!.bounds as Polygon).bezier).toBe(true);
+    expect((store.getRegions().find((r) => r.id === id)!.bounds as Polygon).bezier).toBe(true);
     overlay.setSelectedBezier(false);
-    expect((store.getRegions().find(r => r.id === id)!.bounds as Polygon).bezier).toBe(false);
+    expect((store.getRegions().find((r) => r.id === id)!.bounds as Polygon).bezier).toBe(false);
   });
 
   it('lets a bezier control handle be dragged', () => {
     const id = store.addRegion(triRegion()); // anchor 0 is (0,0)
     overlay.setSelectedBezier(true); // seeds smooth handles
     overlay.setMode('select');
-    const poly = store.getRegions().find(r => r.id === id)!.bounds as Polygon;
+    const poly = store.getRegions().find((r) => r.id === id)!.bounds as Polygon;
     const outAbs = { x: poly.xpoints[0] + poly.handlesOut![0][0], y: poly.ypoints[0] + poly.handlesOut![0][1] };
     const h = handlers();
-    h.pressHandler({ position: outAbs });                 // grab vertex 0's out-handle
+    h.pressHandler({ position: outAbs }); // grab vertex 0's out-handle
     h.dragHandler({ position: { x: 20, y: 5 } });
     h.releaseHandler({ position: { x: 20, y: 5 } });
-    const after = store.getRegions().find(r => r.id === id)!.bounds as Polygon;
-    expect(after.handlesOut![0]).toEqual([20, 5]);        // offset = handle - anchor(0,0)
+    const after = store.getRegions().find((r) => r.id === id)!.bounds as Polygon;
+    expect(after.handlesOut![0]).toEqual([20, 5]); // offset = handle - anchor(0,0)
   });
 
   it('edit gestures coalesce into a single store emit on release', () => {
@@ -342,7 +376,7 @@ describe('OsdRegionOverlay — vertex tools', () => {
     h.releaseHandler({ position: { x: 3, y: 3 } });
     expect(emits).toBe(1); // one emit on release
 
-    const poly = store.getRegions().find(r => r.id === id)!.bounds as Polygon;
+    const poly = store.getRegions().find((r) => r.id === id)!.bounds as Polygon;
     expect(poly.xpoints[0]).toBe(3); // last drag position wins
   });
 
@@ -357,7 +391,14 @@ describe('OsdRegionOverlay — vertex tools', () => {
     p.npoints = 4;
     p.coordinates = p.xpoints.map((x, i) => [x, p.ypoints[i]]);
     p.closed = true;
-    p.holes = [[[7, 7], [13, 7], [13, 13], [7, 13]]];
+    p.holes = [
+      [
+        [7, 7],
+        [13, 7],
+        [13, 13],
+        [7, 13],
+      ],
+    ];
     r.bounds = p;
     return r;
   }
@@ -366,13 +407,18 @@ describe('OsdRegionOverlay — vertex tools', () => {
     const id = store.addRegion(donutRegion()); // addRegion selects it
     overlay.setMode('move');
     const h = handlers();
-    h.pressHandler({ position: { x: 2, y: 2 } });   // press in the solid ring
-    h.dragHandler({ position: { x: 102, y: 2 } });  // +100 in x
+    h.pressHandler({ position: { x: 2, y: 2 } }); // press in the solid ring
+    h.dragHandler({ position: { x: 102, y: 2 } }); // +100 in x
     h.releaseHandler({ position: { x: 102, y: 2 } });
 
-    const poly = store.getRegions().find(r => r.id === id)!.bounds as Polygon;
+    const poly = store.getRegions().find((r) => r.id === id)!.bounds as Polygon;
     expect(poly.holes?.length).toBe(1);
-    expect(poly.holes![0]).toEqual([[107, 7], [113, 7], [113, 13], [107, 13]]);
+    expect(poly.holes![0]).toEqual([
+      [107, 7],
+      [113, 7],
+      [113, 13],
+      [107, 13],
+    ]);
   });
 
   /** Two disjoint 10×10 squares: part A at x0–10, part B at x20–30. */
@@ -412,12 +458,12 @@ describe('OsdRegionOverlay — vertex tools', () => {
     store.setSelectedShapeIndices([]);
     overlay.setMode('select');
     const h = handlers();
-    h.clickHandler({ position: { x: 5, y: 5 } });   // inside part A
+    h.clickHandler({ position: { x: 5, y: 5 } }); // inside part A
     expect(store.getSelectedShapeIndices()).toEqual([0]);
     store.setSelectedShapeIndices([]);
-    h.clickHandler({ position: { x: 15, y: 5 } });  // in the gap → nothing
+    h.clickHandler({ position: { x: 15, y: 5 } }); // in the gap → nothing
     expect(store.getSelectedShapeIndices()).toEqual([]);
-    h.clickHandler({ position: { x: 25, y: 5 } });  // inside part B
+    h.clickHandler({ position: { x: 25, y: 5 } }); // inside part B
     expect(store.getSelectedShapeIndices()).toEqual([0]);
   });
 
@@ -439,14 +485,14 @@ describe('OsdRegionOverlay — vertex tools', () => {
     const id = store.addRegion(donutRegion()); // hole [[7,7],[13,7],[13,13],[7,13]]
     overlay.setMode('select');
     const h = handlers();
-    h.pressHandler({ position: { x: 7, y: 7 } });   // grab hole vertex 0
+    h.pressHandler({ position: { x: 7, y: 7 } }); // grab hole vertex 0
     h.dragHandler({ position: { x: 9, y: 8 } });
     h.releaseHandler({ position: { x: 9, y: 8 } });
 
-    const poly = store.getRegions().find(r => r.id === id)!.bounds as Polygon;
+    const poly = store.getRegions().find((r) => r.id === id)!.bounds as Polygon;
     expect(poly.holes![0][0]).toEqual([9, 8]);
-    expect(poly.holes![0][1]).toEqual([13, 7]);     // sibling hole vertex untouched
-    expect(poly.xpoints).toEqual([0, 20, 20, 0]);   // exterior untouched
+    expect(poly.holes![0][1]).toEqual([13, 7]); // sibling hole vertex untouched
+    expect(poly.xpoints).toEqual([0, 20, 20, 0]); // exterior untouched
   });
 
   it('addpoint: clicking a hole edge inserts a vertex on that ring', () => {
@@ -454,26 +500,34 @@ describe('OsdRegionOverlay — vertex tools', () => {
     overlay.setMode('addpoint');
     handlers().clickHandler({ position: { x: 10, y: 7 } }); // midpoint of hole edge 0
 
-    const ring = (store.getRegions().find(r => r.id === id)!.bounds as Polygon).holes![0];
+    const ring = (store.getRegions().find((r) => r.id === id)!.bounds as Polygon).holes![0];
     expect(ring.length).toBe(5);
     expect(ring[1]).toEqual([10, 7]);
     // Exterior unchanged.
-    expect((store.getRegions().find(r => r.id === id)!.bounds as Polygon).xpoints.length).toBe(4);
+    expect((store.getRegions().find((r) => r.id === id)!.bounds as Polygon).xpoints.length).toBe(4);
   });
 
   it('deletepoint: clicking a hole vertex removes it from that ring', () => {
     const r = donutRegion();
-    (r.bounds as Polygon).holes = [[[7, 7], [13, 7], [13, 13], [7, 13], [9, 9]]]; // 5-vertex hole
+    (r.bounds as Polygon).holes = [
+      [
+        [7, 7],
+        [13, 7],
+        [13, 13],
+        [7, 13],
+        [9, 9],
+      ],
+    ]; // 5-vertex hole
     const id = store.addRegion(r);
     overlay.setMode('deletepoint');
     handlers().clickHandler({ position: { x: 7, y: 7 } }); // hole vertex 0
 
-    const ring = (store.getRegions().find(r2 => r2.id === id)!.bounds as Polygon).holes![0];
+    const ring = (store.getRegions().find((r2) => r2.id === id)!.bounds as Polygon).holes![0];
     expect(ring.length).toBe(4);
     expect(ring[0]).toEqual([13, 7]);
   });
 
-  it('drags a bezier donut\'s default hole handle when none is stored (as napari)', () => {
+  it("drags a bezier donut's default hole handle when none is stored (as napari)", () => {
     const r = donutRegion();
     (r.bounds as Polygon).bezier = true; // e.g. a GeoJSON import: no stored hole handles
     const id = store.addRegion(r);
@@ -483,9 +537,9 @@ describe('OsdRegionOverlay — vertex tools', () => {
     h.pressHandler({ position: { x: 8, y: 6 } });
     h.dragHandler({ position: { x: 5, y: 6 } });
     h.releaseHandler({ position: { x: 5, y: 6 } });
-    const poly = store.getRegions().find(r2 => r2.id === id)!.bounds as Polygon;
-    expect(poly.holes![0][0]).toEqual([7, 7]);              // the vertex stayed put
-    expect(poly.holeHandlesOut![0][0]).toEqual([-2, -1]);   // the handle moved
+    const poly = store.getRegions().find((r2) => r2.id === id)!.bounds as Polygon;
+    expect(poly.holes![0][0]).toEqual([7, 7]); // the vertex stayed put
+    expect(poly.holeHandlesOut![0][0]).toEqual([-2, -1]); // the handle moved
   });
 
   it('clicking inside the hole does not select the donut; the solid ring does', () => {
@@ -495,7 +549,7 @@ describe('OsdRegionOverlay — vertex tools', () => {
     const h = handlers();
     h.clickHandler({ position: { x: 10, y: 10 } }); // dead centre = in the hole
     expect(store.getSelectedShapeIndices()).toEqual([]);
-    h.clickHandler({ position: { x: 2, y: 2 } });   // solid ring
+    h.clickHandler({ position: { x: 2, y: 2 } }); // solid ring
     expect(store.getSelectedShapeIndices()).toEqual([0]);
   });
 });
@@ -541,12 +595,14 @@ describe('OsdRegionOverlay — regions arriving as JSON (jit-ui#124)', () => {
   });
 
   it('draws a JSON multi-polygon as one even-odd path', () => {
-    store.setRegions([jsonRegion({
-      polygons: [
-        { npoints: 3, xpoints: [0, 10, 5], ypoints: [0, 0, 10] },
-        { npoints: 3, xpoints: [20, 30, 25], ypoints: [20, 20, 30] },
-      ],
-    })]);
+    store.setRegions([
+      jsonRegion({
+        polygons: [
+          { npoints: 3, xpoints: [0, 10, 5], ypoints: [0, 0, 10] },
+          { npoints: 3, xpoints: [20, 30, 25], ypoints: [20, 20, 30] },
+        ],
+      }),
+    ]);
 
     const paths = svg.querySelectorAll('path');
     expect(paths.length).toBe(1);

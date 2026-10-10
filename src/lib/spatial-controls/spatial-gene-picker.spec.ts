@@ -4,13 +4,15 @@ import { GENE_OPTIONS_MAX } from '../spatial/gene-search';
 import { GenePickerModel } from './spatial-gene-picker';
 
 const withNames = (names: string[]): SpatialDataset => ({
-  id: 'inline', name: 'inline',
+  id: 'inline',
+  name: 'inline',
   observations: { count: 0, x: new Float32Array(0), y: new Float32Array(0) },
   columns: [],
   features: { count: names.length, names },
 });
 const remote = (id: string): SpatialDataset => ({
-  id, name: id,
+  id,
+  name: id,
   observations: { count: 0, x: new Float32Array(0), y: new Float32Array(0) },
   columns: [],
   features: { count: 31_000 },
@@ -26,7 +28,10 @@ describe('GenePickerModel', () => {
     searchFeatures = jest.fn(async () => ['Ttr']);
     chosen = [];
     const controls = { searchFeatures } as unknown as ISpatialControls;
-    picker = new GenePickerModel(() => controls, () => chosen);
+    picker = new GenePickerModel(
+      () => controls,
+      () => chosen,
+    );
   });
 
   it('starts empty and local', () => {
@@ -93,7 +98,12 @@ describe('GenePickerModel', () => {
     it('keeps the answer for the query in the box, not an earlier slower one', async () => {
       let resolveSlow: (v: string[]) => void = () => undefined;
       searchFeatures
-        .mockImplementationOnce(() => new Promise((r) => { resolveSlow = r; }))
+        .mockImplementationOnce(
+          () =>
+            new Promise((r) => {
+              resolveSlow = r;
+            }),
+        )
         .mockResolvedValueOnce(['Ttr']);
       const slow = picker.onFilter('Tt');
       await picker.onFilter('Ttr');
@@ -117,7 +127,12 @@ describe('GenePickerModel', () => {
     it("drops a list fetched for the previous dataset, and loads the new one's", async () => {
       let resolveA: (v: string[]) => void = () => undefined;
       searchFeatures
-        .mockImplementationOnce(() => new Promise((r) => { resolveA = r; }))
+        .mockImplementationOnce(
+          () =>
+            new Promise((r) => {
+              resolveA = r;
+            }),
+        )
         .mockResolvedValueOnce(['B-gene']);
       const loadingA = picker.ensureList();
       picker.setDataset(remote('B'));
@@ -129,10 +144,14 @@ describe('GenePickerModel', () => {
       expect(values()).toEqual(['B-gene']);
     });
 
-    it('applies async results through the owner\'s `run`', async () => {
+    it("applies async results through the owner's `run`", async () => {
       const run = jest.fn((fn: () => void) => fn());
       const controls = { searchFeatures } as unknown as ISpatialControls;
-      const zoned = new GenePickerModel(() => controls, () => [], run);
+      const zoned = new GenePickerModel(
+        () => controls,
+        () => [],
+        run,
+      );
       zoned.setDataset(remote('A'));
       await zoned.onFilter('tt');
       expect(run).toHaveBeenCalled();
@@ -140,7 +159,10 @@ describe('GenePickerModel', () => {
   });
 
   it('does nothing remote without a port', async () => {
-    const orphan = new GenePickerModel(() => null, () => []);
+    const orphan = new GenePickerModel(
+      () => null,
+      () => [],
+    );
     orphan.setDataset(remote('A'));
     await orphan.onFilter('tt');
     await orphan.ensureList();

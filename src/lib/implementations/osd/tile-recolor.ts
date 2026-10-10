@@ -76,7 +76,10 @@ export class OsdTileRecolorer {
   private invalidateHandle: number | null = null;
   private sub: Subscription | null = null;
 
-  constructor(private readonly host: TileRecolorHost, private readonly store: VisualizerStore) {}
+  constructor(
+    private readonly host: TileRecolorHost,
+    private readonly store: VisualizerStore,
+  ) {}
 
   /** Whether display round `token` is still the current one. */
   isCurrent(token: number): boolean {
@@ -261,7 +264,9 @@ export class OsdTileRecolorer {
     let changed = false;
     for (let i = 0; i < d.length; i += 4) {
       if (d[i + 3] === 0) continue;
-      const r = d[i], g = d[i + 1], b = d[i + 2];
+      const r = d[i],
+        g = d[i + 1],
+        b = d[i + 2];
       const lum = r >= g ? (r >= b ? r : b) : g >= b ? g : b; // single-band → max
       d[i] = rL[lum];
       d[i + 1] = gL[lum];
@@ -281,16 +286,34 @@ export class OsdTileRecolorer {
    */
   private async readTilePixels(event: TileEvent): Promise<TilePixels | null> {
     let ctx: CanvasRenderingContext2D | null = null;
-    try { ctx = await event.getData('context2d') as CanvasRenderingContext2D; } catch { /* try the bitmap below */ }
+    try {
+      ctx = (await event.getData('context2d')) as CanvasRenderingContext2D;
+    } catch {
+      /* try the bitmap below */
+    }
     if (ctx && ctx.canvas && ctx.canvas.width && ctx.canvas.height) {
       let img: ImageData | null = null;
-      try { img = ctx.getImageData(0, 0, ctx.canvas.width, ctx.canvas.height); } catch { /* tainted/gone */ }
+      try {
+        img = ctx.getImageData(0, 0, ctx.canvas.width, ctx.canvas.height);
+      } catch {
+        /* tainted/gone */
+      }
       if (img && hasOpaque(img.data)) return { ctx, img };
     }
     type Drawable = CanvasImageSource & { width: number; height: number };
     let src: Drawable | null = null;
-    try { src = await event.getData('imageBitmap') as Drawable; } catch { /* try the image below */ }
-    if (!src || !src.width) { try { src = await event.getData('image') as Drawable; } catch { /* none */ } }
+    try {
+      src = (await event.getData('imageBitmap')) as Drawable;
+    } catch {
+      /* try the image below */
+    }
+    if (!src || !src.width) {
+      try {
+        src = (await event.getData('image')) as Drawable;
+      } catch {
+        /* none */
+      }
+    }
     if (!src || !src.width) return null;
     const c = document.createElement('canvas');
     c.width = src.width;
@@ -311,7 +334,11 @@ export class OsdTileRecolorer {
     // The tile's cache can still be evicted between the awaits and here (a
     // slice change), making setData throw a DOMException on a dead canvas.
     // Swallow it — the tile is gone, so there's nothing to recolor.
-    try { await event.setData(px.ctx, 'context2d'); } catch { /* tile evicted */ }
+    try {
+      await event.setData(px.ctx, 'context2d');
+    } catch {
+      /* tile evicted */
+    }
   }
 }
 

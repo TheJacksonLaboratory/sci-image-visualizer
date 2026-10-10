@@ -24,21 +24,19 @@ export class OverlayProjection {
   /** The svg's client origin, cached while a {@link withOrigin} block runs. */
   private origin: { left: number; top: number } | null = null;
 
-  constructor(private readonly svg: SVGSVGElement, private readonly viewer: OverlayViewer) {}
+  constructor(
+    private readonly svg: SVGSVGElement,
+    private readonly viewer: OverlayViewer,
+  ) {}
 
   setWorldQuantum(quantum: number): void {
-    this.worldQuantum = Number.isFinite(quantum) && quantum > 0
-      ? quantum
-      : PIXEL_WORLD_QUANTUM;
+    this.worldQuantum = Number.isFinite(quantum) && quantum > 0 ? quantum : PIXEL_WORLD_QUANTUM;
   }
 
   /** Pointer client coords → world coords, snapped to the world quantum (for placing vertices). */
   toImage(clientX: number, clientY: number): [number, number] {
     const [wx, wy] = this.viewer.canvasToWorld(clientX, clientY);
-    return [
-      snapToWorldGrid(wx, this.worldQuantum),
-      snapToWorldGrid(wy, this.worldQuantum),
-    ];
+    return [snapToWorldGrid(wx, this.worldQuantum), snapToWorldGrid(wy, this.worldQuantum)];
   }
 
   /** Pointer client coords → world coords, exact (for picking: snapping is for placing). */

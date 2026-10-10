@@ -55,7 +55,7 @@ export class NapariLoadingBadge {
 
   /** The text currently set (shown or about to be). */
   get text(): string {
-    return this.names.length ? this.el.textContent ?? '' : '';
+    return this.names.length ? (this.el.textContent ?? '') : '';
   }
 
   destroy(): void {

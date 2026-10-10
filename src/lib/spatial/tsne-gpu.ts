@@ -84,10 +84,7 @@ export async function createGpuRepulsion(): Promise<GpuRepulsion> {
         const rows = Math.min(tile, nObs - s);
         const yb = Y.ref.slice([s, s + rows]);
         // (rows, 1, dims) - (1, nObs, dims), broadcast to every pair in the tile.
-        const diff = np.subtract(
-          np.reshape(yb, [rows, 1, dims]),
-          np.reshape(Y.ref, [1, nObs, dims]),
-        );
+        const diff = np.subtract(np.reshape(yb, [rows, 1, dims]), np.reshape(Y.ref, [1, nObs, dims]));
         const w = np.divide(1, np.add(1, np.sum(np.square(diff.ref), 2)));
         // Z counts ordered pairs i≠j. The diagonal contributes w_ii = 1 per row and is
         // removed by subtracting the row count — masking it would cost another

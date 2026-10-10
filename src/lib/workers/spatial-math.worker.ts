@@ -1,7 +1,5 @@
 /// <reference lib="webworker" />
-import {
-  SpatialMathMessage, SpatialMathReply, resultTransferables, runSpatialMath,
-} from './spatial-math-ops';
+import { SpatialMathMessage, SpatialMathReply, resultTransferables, runSpatialMath } from './spatial-math-ops';
 
 /**
  * Spatial field and density math Web Worker.

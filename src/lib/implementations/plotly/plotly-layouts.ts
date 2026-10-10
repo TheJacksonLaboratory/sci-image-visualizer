@@ -29,7 +29,12 @@ export function sliderSteps(sliceCount: number): Array<{ label: number; method: 
     steps.push({
       label: i + 1,
       method: 'restyle',
-      args: ['visible', Array(sliceCount).fill(false).fill(true, i, i + 1)],
+      args: [
+        'visible',
+        Array(sliceCount)
+          .fill(false)
+          .fill(true, i, i + 1),
+      ],
     });
   }
   return steps;
@@ -40,7 +45,11 @@ function imageAxes(ctx: ImageLayoutContext, xRange: number[], yRange: number[]) 
   return {
     xaxis: { constrain: 'range', constraintoward: 'center', side: 'top', ticks: '', range: xRange },
     yaxis: {
-      constrain: 'range', constraintoward: 'center', range: yRange, ticks: '', ticksuffix: '  ',
+      constrain: 'range',
+      constraintoward: 'center',
+      range: yRange,
+      ticks: '',
+      ticksuffix: '  ',
       // autorange off so that Plotly does not overwrite the range for the y axis
       autorange: false,
       scaleanchor: ctx.scaleratio ? 'x' : false,
@@ -54,11 +63,13 @@ export function heatmapLayout(ctx: ImageLayoutContext, xRange: number[], yRange:
     ...imageAxes(ctx, xRange, yRange),
     margin: { t: 30, b: 5, l: 55, r: 5 },
     height: ctx.screenHeight,
-    sliders: [{
-      pad: { t: 50 },
-      currentvalue: { visible: true, prefix: 'Z-plane:', xanchor: 'right' },
-      steps: sliderSteps(sliceCount),
-    }],
+    sliders: [
+      {
+        pad: { t: 50 },
+        currentvalue: { visible: true, prefix: 'Z-plane:', xanchor: 'right' },
+        steps: sliderSteps(sliceCount),
+      },
+    ],
     autosize: true,
     shapes: ctx.shapes,
     activeshape: { fillcolor: ctx.fillColor },

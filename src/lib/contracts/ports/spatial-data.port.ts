@@ -2,8 +2,16 @@ import { InjectionToken } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import {
-  SpatialColumn, SpatialDataset, SpatialDensityRaster, SpatialEmbedding, SpatialPolygonTile,
-  CategoricalColumnMeta, SpatialMarkerGenes, SpatialPolygons, SpatialTranscriptCounts, SpatialTranscriptSummary,
+  SpatialColumn,
+  SpatialDataset,
+  SpatialDensityRaster,
+  SpatialEmbedding,
+  SpatialPolygonTile,
+  CategoricalColumnMeta,
+  SpatialMarkerGenes,
+  SpatialPolygons,
+  SpatialTranscriptCounts,
+  SpatialTranscriptSummary,
   SpatialTranscriptTile,
 } from '../spatial-dataset.contract';
 
@@ -107,7 +115,10 @@ export interface SpatialDataPort {
    * Optional: only datasets that advertise `transcriptTiles` need it.
    */
   getTranscriptTile?(
-    level: number, gx: number, gy: number, query: TranscriptTileQuery,
+    level: number,
+    gx: number,
+    gy: number,
+    query: TranscriptTileQuery,
   ): Promise<SpatialTranscriptTile>;
 
   /**
@@ -129,7 +140,9 @@ export interface SpatialDataPort {
    * transcript markers.
    */
   getTranscriptSummary?(query: {
-    box?: [number, number, number, number]; genes?: string[]; cells?: number[];
+    box?: [number, number, number, number];
+    genes?: string[];
+    cells?: number[];
   }): Promise<SpatialTranscriptSummary>;
 
   /**

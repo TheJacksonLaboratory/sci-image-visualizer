@@ -29,7 +29,10 @@ import { buildRegionActionItems } from './visualizer/visualizer-context-menu';
 function rectRegion(x: number, y: number, w: number, h: number): Region {
   const r = new Region();
   const b = new Rectangle();
-  b.x = x; b.y = y; b.width = w; b.height = h;
+  b.x = x;
+  b.y = y;
+  b.width = w;
+  b.height = h;
   r.bounds = b;
   return r;
 }
@@ -97,7 +100,8 @@ function mockPlotService(): any {
 
 function makeComponent(plot: any, spatialData?: any): VisualizerComponent {
   const destroyRef = testDestroyRef();
-  return own(new VisualizerComponent(
+  return own(
+    new VisualizerComponent(
       { setDiagram: jest.fn(), setImageLoading: jest.fn(), setImageInfo: jest.fn() } as any, // ImageStatePort
       plot,
       { add: jest.fn(), clear: jest.fn() } as any, // MessageService
@@ -130,7 +134,9 @@ function makeComponent(plot: any, spatialData?: any): VisualizerComponent {
       undefined, // Injector
       undefined, // host ElementRef
       destroyRef,
-    ), destroyRef);
+    ),
+    destroyRef,
+  );
 }
 
 /** Move the pointer over a viewer's plot (creating the div when there is no template),
@@ -165,39 +171,42 @@ function harness(overrides: Record<string, unknown> = {}) {
     subjects.push(s as BehaviorSubject<unknown>);
     return s;
   };
-  const selfCompleting = (base: any): any => new Proxy(base, {
-    has: () => true,
-    get(target, prop: string | symbol) {
-      if (typeof prop !== 'string' || prop in target) return target[prop];
-      target[prop] = /\$$|^(get|is)[A-Z]/.test(prop)
-        ? jest.fn(() => subject(false))
-        : jest.fn();
-      return target[prop];
-    },
-  });
+  const selfCompleting = (base: any): any =>
+    new Proxy(base, {
+      has: () => true,
+      get(target, prop: string | symbol) {
+        if (typeof prop !== 'string' || prop in target) return target[prop];
+        target[prop] = /\$$|^(get|is)[A-Z]/.test(prop) ? jest.fn(() => subject(false)) : jest.fn();
+        return target[prop];
+      },
+    });
   const plotBase: any = mockPlotService();
-  Object.assign(plotBase, {
-    getAutoscaleEvent: () => subject(''),
-    getIntensityProfile$: () => subject([]),
-    getStackLoadingProgress: () => subject(0),
-    getViewportChange$: () => subject({ x: 0, y: 0, width: 1, height: 1 }),
-    isStackLoading: () => subject(false),
-    getCanUndo$: () => subject(false),
-    getCanRedo$: () => subject(false),
-    getSelectedShapeIndices$: () => subject([]),
-    relayout: jest.fn(),
-    refreshIntensitySamplingForRoi: jest.fn(),
-    setImageMeta: jest.fn(),
-    reset: jest.fn(),
-    cancelLoading: jest.fn(),
-    load: jest.fn().mockImplementation((info: any) => Promise.resolve({ filename: info.fileName })),
-    plot: jest.fn().mockResolvedValue(undefined),
-    getShowShapeLabel: jest.fn().mockReturnValue(false),
-    importRegions: jest.fn().mockReturnValue([]),
-    setRegions: jest.fn(),
-    resetUndoHistory: jest.fn(),
-    setStackLoading: jest.fn(),
-  }, overrides);
+  Object.assign(
+    plotBase,
+    {
+      getAutoscaleEvent: () => subject(''),
+      getIntensityProfile$: () => subject([]),
+      getStackLoadingProgress: () => subject(0),
+      getViewportChange$: () => subject({ x: 0, y: 0, width: 1, height: 1 }),
+      isStackLoading: () => subject(false),
+      getCanUndo$: () => subject(false),
+      getCanRedo$: () => subject(false),
+      getSelectedShapeIndices$: () => subject([]),
+      relayout: jest.fn(),
+      refreshIntensitySamplingForRoi: jest.fn(),
+      setImageMeta: jest.fn(),
+      reset: jest.fn(),
+      cancelLoading: jest.fn(),
+      load: jest.fn().mockImplementation((info: any) => Promise.resolve({ filename: info.fileName })),
+      plot: jest.fn().mockResolvedValue(undefined),
+      getShowShapeLabel: jest.fn().mockReturnValue(false),
+      importRegions: jest.fn().mockReturnValue([]),
+      setRegions: jest.fn(),
+      resetUndoHistory: jest.fn(),
+      setStackLoading: jest.fn(),
+    },
+    overrides,
+  );
   const plot: any = selfCompleting(plotBase);
   const imageInfo$ = subject<IImageInfo | null>(null);
   const stateBase: any = {
@@ -222,20 +231,28 @@ function harness(overrides: Record<string, unknown> = {}) {
   const messages = { add: jest.fn(), clear: jest.fn() };
   const store = new VisualizerStore();
   const destroyRef = testDestroyRef();
-  const component = own(new VisualizerComponent(
-    state,
-    plot,
-    messages as any,
-    { run: (fn: () => void) => fn(), runOutsideAngular: (fn: () => void) => fn() } as any,
-    { detectChanges: jest.fn(), markForCheck: jest.fn() } as any,
-    store,
-    toolFeeds(),
-    toolFeeds(),
-    toolFeeds(),
-    new RegionOpsService(),
-    undefined, undefined, undefined, undefined, undefined, undefined,
+  const component = own(
+    new VisualizerComponent(
+      state,
+      plot,
+      messages as any,
+      { run: (fn: () => void) => fn(), runOutsideAngular: (fn: () => void) => fn() } as any,
+      { detectChanges: jest.fn(), markForCheck: jest.fn() } as any,
+      store,
+      toolFeeds(),
+      toolFeeds(),
+      toolFeeds(),
+      new RegionOpsService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      destroyRef,
+    ),
     destroyRef,
-  ), destroyRef);
+  );
   component.ngOnInit();
   return { component, plot, state, imageInfo$, subjects, messages, store };
 }
@@ -322,8 +339,13 @@ describe('VisualizerComponent (UI shell)', () => {
 
       // test-only — hidden (all scatters, napari Image, Plotly surface/isosurface)
       for (const t of [
-        PlotType.SCATTER, PlotType.SCATTER3D, PlotType.SURFACE, PlotType.ISOSURFACE,
-        PlotType.NAPARI_IMAGE, PlotType.NAPARI_SCATTER, PlotType.NAPARI_SCATTER3D,
+        PlotType.SCATTER,
+        PlotType.SCATTER3D,
+        PlotType.SURFACE,
+        PlotType.ISOSURFACE,
+        PlotType.NAPARI_IMAGE,
+        PlotType.NAPARI_SCATTER,
+        PlotType.NAPARI_SCATTER3D,
       ]) {
         expect(byType.has(t)).toBe(false);
       }
@@ -339,9 +361,7 @@ describe('VisualizerComponent (UI shell)', () => {
       // stack. This fixture has no dataset, so every spatial mode is held back —
       // the 3D one doubly so, since it also needs observations with a z.
       const gated = ALL_DESCRIPTORS.filter((d) => d.requiresSpatialData);
-      expect(gated.map((d) => d.type).sort()).toEqual(
-        [PlotType.SPATIAL_OMICS, PlotType.SPATIAL_OMICS_3D].sort(),
-      );
+      expect(gated.map((d) => d.type).sort()).toEqual([PlotType.SPATIAL_OMICS, PlotType.SPATIAL_OMICS_3D].sort());
       expect(component['plotTypeOptions'].length).toBe(ALL_DESCRIPTORS.length - gated.length);
       expect(byType.has(PlotType.SPATIAL_OMICS)).toBe(false);
       expect(byType.has(PlotType.SPATIAL_OMICS_3D)).toBe(false);
@@ -447,7 +467,7 @@ describe('VisualizerComponent (UI shell)', () => {
       expect(plotService.setPlotType).toHaveBeenCalledWith(PlotType.IMAGE);
     });
 
-    it('does not recompute on the port\'s initial null emission', () => {
+    it("does not recompute on the port's initial null emission", () => {
       const c = makeComponent(plotService, port);
       const spy = jest.spyOn(c as any, 'computePlotTypeOptions');
       (c as any).watchSpatialDataset(); // BehaviorSubject replays null immediately
@@ -456,7 +476,8 @@ describe('VisualizerComponent (UI shell)', () => {
 
     it('leaves the other gates intact — a stack-only type stays hidden with a dataset loaded', () => {
       plotService.getPlotTypeDescriptors.mockReturnValue([
-        ...DESCRIPTORS, PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_VOLUME],
+        ...DESCRIPTORS,
+        PLOT_TYPE_DESCRIPTORS[PlotType.NAPARI_VOLUME],
       ] as any[]);
       const c = makeComponent(plotService, port);
       (c as any).imageInfo = { isStack: false, isGrayscale: true };
@@ -523,7 +544,8 @@ describe('VisualizerComponent (UI shell)', () => {
 
       it('publishes the volume AS the image and opens the 2D Image view on it', async () => {
         plotService.getPlotTypeDescriptors.mockReturnValue([
-          PLOT_TYPE_DESCRIPTORS[PlotType.IMAGE], SPATIAL_DESCRIPTOR,
+          PLOT_TYPE_DESCRIPTORS[PlotType.IMAGE],
+          SPATIAL_DESCRIPTOR,
         ] as any[]);
         port.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 4 * 4));
         const c = makeComponent(plotService, port);
@@ -581,7 +603,7 @@ describe('VisualizerComponent (UI shell)', () => {
         expect(infos.filter((i: any) => i?.isStack).length).toBe(2);
       });
 
-      it('a superseded volume build leaves the newer build\'s loading overlay up (CORE-12)', async () => {
+      it("a superseded volume build leaves the newer build's loading overlay up (CORE-12)", async () => {
         const pending: ((v: Uint8Array) => void)[] = [];
         port.getVolume = jest.fn(() => new Promise<Uint8Array>((resolve) => pending.push(resolve)));
         const c = makeComponent(plotService, port);
@@ -617,8 +639,13 @@ describe('VisualizerComponent (UI shell)', () => {
 
         // A Visium-style dataset in between: it brings its own tissue image, which
         // is now what the Image view shows.
-        dataset$.next({ id: 'visium', name: 'V', observations: { count: 2 }, columns: [],
-          imageRef: { imageId: 'tissue' } });
+        dataset$.next({
+          id: 'visium',
+          name: 'V',
+          observations: { count: 2 },
+          columns: [],
+          imageRef: { imageId: 'tissue' },
+        });
         await flush();
         // Back to the volume dataset — its image has to be published AGAIN, or the
         // Image view keeps the Visium tissue under a whole-brain cloud's controls.
@@ -662,7 +689,10 @@ describe('VisualizerComponent (UI shell)', () => {
         const c = makeComponent(plotService, port);
         (c as any).watchSpatialDataset();
         dataset$.next({
-          id: 'seqfish', name: 'seqFISH', observations: { count: 3 }, columns: [],
+          id: 'seqfish',
+          name: 'seqFISH',
+          observations: { count: 3 },
+          columns: [],
         });
         await flush();
 
@@ -678,7 +708,10 @@ describe('VisualizerComponent (UI shell)', () => {
         const c = makeComponent(plotService, port);
         (c as any).watchSpatialDataset();
         dataset$.next({
-          id: 'demo', name: 'Demo', observations: { count: 3 }, columns: [],
+          id: 'demo',
+          name: 'Demo',
+          observations: { count: 3 },
+          columns: [],
           imageRef: { imageId: 'slide-1' },
         });
         await flush();
@@ -733,7 +766,7 @@ describe('VisualizerComponent (UI shell)', () => {
         expect(plotService.setPlotType).not.toHaveBeenCalledWith(PlotType.SPATIAL_OMICS_3D);
       });
 
-      it('draws an image-less dataset when no image was ever loaded (a host\'s first view)', async () => {
+      it("draws an image-less dataset when no image was ever loaded (a host's first view)", async () => {
         // jit-ui opens a Xenium zip straight from the file tree: no image has been loaded, so
         // there is no image info to re-drive. Redrawing through the renderer's own state threw
         // from Plotly's never-set image size and left a white canvas.
@@ -747,8 +780,13 @@ describe('VisualizerComponent (UI shell)', () => {
         await flush();
 
         expect(plotService.reloadAndPlot).not.toHaveBeenCalled();
-        expect(plotService.plot).toHaveBeenCalledWith(expect.any(String), null,
-          expect.objectContaining({ fileName: 'spatial:xenium', urls: [] }), expect.any(Number), PlotType.SPATIAL_OMICS);
+        expect(plotService.plot).toHaveBeenCalledWith(
+          expect.any(String),
+          null,
+          expect.objectContaining({ fileName: 'spatial:xenium', urls: [] }),
+          expect.any(Number),
+          PlotType.SPATIAL_OMICS,
+        );
       });
 
       it('waits for the view before drawing an image-less dataset published before it (jit-ui)', async () => {
@@ -804,7 +842,9 @@ describe('VisualizerComponent (UI shell)', () => {
         (c as any).onViewReady();
         await flush();
         // Only the newer dataset's draw is waiting: it is drawn once, the older never.
-        expect((plotService.plot as jest.Mock).mock.calls.map((call) => call[2].fileName)).toEqual(['spatial:two']);
+        expect((plotService.plot as jest.Mock).mock.calls.map((call) => call[2].fileName)).toEqual([
+          'spatial:two',
+        ]);
       });
 
       it('drops a waiting image-less draw when an image or another dataset arrived first', async () => {
@@ -820,9 +860,14 @@ describe('VisualizerComponent (UI shell)', () => {
         expect(plotService.plot).not.toHaveBeenCalled();
       });
 
-      it('a superseded image-less draw leaves the newer render\'s loading state alone', async () => {
+      it("a superseded image-less draw leaves the newer render's loading state alone", async () => {
         let finish!: (ok: boolean) => void;
-        plotService.plot = jest.fn(() => new Promise<boolean>((resolve) => { finish = resolve; }));
+        plotService.plot = jest.fn(
+          () =>
+            new Promise<boolean>((resolve) => {
+              finish = resolve;
+            }),
+        );
         const c = makeComponent(plotService, port);
         (c as any).imageInfo = undefined;
         (c as any).render.viewReady = true;
@@ -846,7 +891,8 @@ describe('VisualizerComponent (UI shell)', () => {
         dataset$.next({ id: 'one', name: 'One', observations: { count: 3 }, columns: [] });
         await flush();
         expect((c as any).messageService.add).toHaveBeenCalledWith(
-          expect.objectContaining({ severity: 'error', summary: 'Could not draw the dataset' }));
+          expect.objectContaining({ severity: 'error', summary: 'Could not draw the dataset' }),
+        );
         expect((c as any).state.setImageLoading).toHaveBeenLastCalledWith(false);
       });
 
@@ -863,8 +909,10 @@ describe('VisualizerComponent (UI shell)', () => {
         dataset$.next({ id: 'two', name: 'Two', observations: { count: 3 }, columns: [] });
         await flush();
 
-        expect((plotService.plot as jest.Mock).mock.calls.map((call) => call[2].fileName))
-          .toEqual(['spatial:one', 'spatial:two']);
+        expect((plotService.plot as jest.Mock).mock.calls.map((call) => call[2].fileName)).toEqual([
+          'spatial:one',
+          'spatial:two',
+        ]);
       });
 
       it('leaves a dataset that HAS an image alone, to be drawn over it', async () => {
@@ -884,7 +932,6 @@ describe('VisualizerComponent (UI shell)', () => {
         expect(plotService.setPlotType).not.toHaveBeenCalledWith(PlotType.SPATIAL_OMICS);
         expect(plotService.setPlotType).not.toHaveBeenCalledWith(PlotType.SPATIAL_OMICS_3D);
       });
-
     });
   });
 
@@ -894,7 +941,10 @@ describe('VisualizerComponent (UI shell)', () => {
       let regions = initial.slice();
       plotService.getRegions = jest.fn(() => regions.slice());
       plotService.setRegions = jest.fn((rs: Region[]) => {
-        regions = rs.map((r, i) => { if (r.id == null) r.id = 100 + i; return r; });
+        regions = rs.map((r, i) => {
+          if (r.id == null) r.id = 100 + i;
+          return r;
+        });
       });
       plotService.setSelectedShapeIndices = jest.fn();
       return () => regions;
@@ -903,8 +953,8 @@ describe('VisualizerComponent (UI shell)', () => {
     it('offers Merge / Ungroup / Inverse in the context menu according to the selection', () => {
       statefulRegions([rectRegion(0, 0, 10, 10), rectRegion(50, 50, 10, 10)]);
       const c = component as any;
-      const labels = () => (buildRegionActionItems(c.contextMenuState(), c) as { label?: string }[])
-        .map((i) => i.label);
+      const labels = () =>
+        (buildRegionActionItems(c.contextMenuState(), c) as { label?: string }[]).map((i) => i.label);
       (component as any).regionActions.selectedIndices = [0, 1];
       expect(labels()).toContain('Merge / group');
       expect(labels()).toContain('Inverse');
@@ -916,7 +966,9 @@ describe('VisualizerComponent (UI shell)', () => {
     });
 
     it('selectAllRegions selects every non-profile region', () => {
-      const profile = new Region(); profile.kind = 'profile'; profile.bounds = new Rectangle();
+      const profile = new Region();
+      profile.kind = 'profile';
+      profile.bounds = new Rectangle();
       statefulRegions([rectRegion(0, 0, 10, 10), profile, rectRegion(50, 50, 10, 10)]);
       component.selectAllRegions();
       expect(plotService.setSelectedShapeIndices).toHaveBeenCalledWith([0, 2]); // profile (1) excluded
@@ -927,8 +979,8 @@ describe('VisualizerComponent (UI shell)', () => {
       (component as any).regionActions.selectedIndices = [0, 1];
       component.mergeRegions();
       expect(plotService.setRegions).toHaveBeenCalled();
-      expect(read().length).toBe(1);                       // two → one
-      expect(read()[0].bounds).toBeInstanceOf(Polygon);    // overlapping → connected
+      expect(read().length).toBe(1); // two → one
+      expect(read()[0].bounds).toBeInstanceOf(Polygon); // overlapping → connected
       expect(plotService.setSelectedShapeIndices).toHaveBeenCalled();
     });
 
@@ -942,18 +994,25 @@ describe('VisualizerComponent (UI shell)', () => {
     it('ungroupRegions splits a multi-part region back into parts', () => {
       const read = statefulRegions([rectRegion(0, 0, 10, 10), rectRegion(50, 50, 10, 10)]);
       (component as any).regionActions.selectedIndices = [0, 1];
-      component.mergeRegions();          // → one MultiPolygon
+      component.mergeRegions(); // → one MultiPolygon
       (component as any).regionActions.selectedIndices = [0];
       component.ungroupRegions();
-      expect(read().length).toBe(2);     // split back into two regions
+      expect(read().length).toBe(2); // split back into two regions
     });
 
     it('simplifyRegions replaces the selection and closes the dialog', () => {
       const read = statefulRegions([
-        (() => { const r = new Region(); const p = new Polygon();
-          p.xpoints = [0, 50, 100, 100, 0]; p.ypoints = [0, 1, 0, 100, 100];
-          p.npoints = 5; p.coordinates = p.xpoints.map((x, i) => [x, p.ypoints[i]]); p.closed = true;
-          r.bounds = p; return r; })(),
+        (() => {
+          const r = new Region();
+          const p = new Polygon();
+          p.xpoints = [0, 50, 100, 100, 0];
+          p.ypoints = [0, 1, 0, 100, 100];
+          p.npoints = 5;
+          p.coordinates = p.xpoints.map((x, i) => [x, p.ypoints[i]]);
+          p.closed = true;
+          r.bounds = p;
+          return r;
+        })(),
       ]);
       (component as any).regionActions.selectedIndices = [0];
       component['displaySimplifyDialog'] = true;
@@ -1131,8 +1190,14 @@ describe('VisualizerComponent (UI shell)', () => {
       expect(plotService.setActiveTool).toHaveBeenLastCalledWith('samPoint', undefined);
       component.toggleDragMode('drawrect'); // a region mode arms no canvas tool
       expect(plotService.setActiveTool).toHaveBeenLastCalledWith('drawrect', undefined);
-      for (const setter of ['setWandMode', 'setBrushMode', 'setVertexEraserMode', 'setZoomToBoxMode',
-        'setSamPointMode', 'setVertexEraserRadius'] as const) {
+      for (const setter of [
+        'setWandMode',
+        'setBrushMode',
+        'setVertexEraserMode',
+        'setZoomToBoxMode',
+        'setSamPointMode',
+        'setVertexEraserRadius',
+      ] as const) {
         expect(plotService[setter]).not.toHaveBeenCalled();
       }
     });
@@ -1397,17 +1462,24 @@ describe('VisualizerComponent — global listeners run outside Angular (CORE-4)'
     let outside = false;
     added = [];
     const realAdd = window.addEventListener.bind(window);
-    jest.spyOn(window, 'addEventListener').mockImplementation(
-      (type: string, l: EventListenerOrEventListenerObject, o?: boolean | AddEventListenerOptions) => {
-        added.push({ type, outside });
-        realAdd(type, l, o);
-      });
+    jest
+      .spyOn(window, 'addEventListener')
+      .mockImplementation(
+        (type: string, l: EventListenerOrEventListenerObject, o?: boolean | AddEventListenerOptions) => {
+          added.push({ type, outside });
+          realAdd(type, l, o);
+        },
+      );
     component = makeComponent(mockPlotService());
     (component as any).ngZone = {
       run: (fn: () => unknown) => fn(),
       runOutsideAngular: (fn: () => unknown) => {
         outside = true;
-        try { return fn(); } finally { outside = false; }
+        try {
+          return fn();
+        } finally {
+          outside = false;
+        }
       },
     };
     component.ngAfterViewInit();
@@ -1442,11 +1514,19 @@ describe('VisualizerComponent — global listeners run outside Angular (CORE-4)'
 
 describe('VisualizerComponent — failed and superseded renders (CORE-11)', () => {
   const info = (fileName: string): IImageInfo => ({
-    fileName, urls: [`/p/${fileName}`], isStack: false, showStack: false, isGrayscale: true,
-    trueImageSize: [10, 10], imageMeta: [], scaleRatio: true,
+    fileName,
+    urls: [`/p/${fileName}`],
+    isStack: false,
+    showStack: false,
+    isGrayscale: true,
+    trueImageSize: [10, 10],
+    imageMeta: [],
+    scaleRatio: true,
   });
 
-  beforeEach(() => { orchestratorHosts.length = 0; });
+  beforeEach(() => {
+    orchestratorHosts.length = 0;
+  });
 
   it('treats plot() resolving false as a failure, not a finished render', async () => {
     const { component, plot, imageInfo$ } = harness();
@@ -1496,13 +1576,22 @@ describe('VisualizerComponent — failed and superseded renders (CORE-11)', () =
 });
 
 describe('VisualizerComponent — a cancelled render is superseded', () => {
-  beforeEach(() => { orchestratorHosts.length = 0; });
+  beforeEach(() => {
+    orchestratorHosts.length = 0;
+  });
 
   it('reports no failure and applies no ROIs once the user cancelled it', () => {
     const { component, plot, imageInfo$, messages } = harness();
     imageInfo$.next({
-      fileName: 'A.tif', urls: ['/a'], isStack: false, showStack: false, isGrayscale: true,
-      trueImageSize: [1, 1], imageMeta: [], scaleRatio: true, roiJsonStr: '{}',
+      fileName: 'A.tif',
+      urls: ['/a'],
+      isStack: false,
+      showStack: false,
+      isGrayscale: true,
+      trueImageSize: [1, 1],
+      imageMeta: [],
+      scaleRatio: true,
+      roiJsonStr: '{}',
     });
     const [host] = orchestratorHosts;
     component['cancelLoading']();
@@ -1517,10 +1606,18 @@ describe('VisualizerComponent — a cancelled render is superseded', () => {
 });
 
 describe('VisualizerComponent — host-owned image info is never mutated (CORE-13)', () => {
-  const stack = (extra: Partial<IImageInfo> = {}): IImageInfo => Object.freeze({
-    fileName: 'series.tif', urls: ['/0', '/1', '/2', '/3'], isStack: true, showStack: false,
-    isGrayscale: true, trueImageSize: [10, 10], imageMeta: [], scaleRatio: true, ...extra,
-  });
+  const stack = (extra: Partial<IImageInfo> = {}): IImageInfo =>
+    Object.freeze({
+      fileName: 'series.tif',
+      urls: ['/0', '/1', '/2', '/3'],
+      isStack: true,
+      showStack: false,
+      isGrayscale: true,
+      trueImageSize: [10, 10],
+      imageMeta: [],
+      scaleRatio: true,
+      ...extra,
+    });
 
   it('honours the one-shot initialZIndex without writing to the host object', () => {
     const { component, imageInfo$ } = harness();
@@ -1595,7 +1692,10 @@ describe('VisualizerComponent — autoscale from the backend (CORE-5)', () => {
     expect(component['activeDragMode']).toBeNull();
     expect(plot.setActiveTool).toHaveBeenLastCalledWith(null, undefined);
     let tool: string | null = 'unset';
-    store.getActiveTool$().subscribe((t) => (tool = t)).unsubscribe();
+    store
+      .getActiveTool$()
+      .subscribe((t) => (tool = t))
+      .unsubscribe();
     expect(tool).toBeNull();
     destroyComponent(component);
   });
@@ -1620,8 +1720,15 @@ describe('VisualizerComponent — ROI import on load (characterization)', () => 
   const FIXTURES: Record<string, Region[]> = { A, C, Z, FLAT };
 
   const stack = (over: Partial<IImageInfo>): IImageInfo => ({
-    fileName: 'f.tif', urls: ['/0', '/1', '/2'], isStack: true, showStack: false, isGrayscale: true,
-    trueImageSize: [4, 4], imageMeta: [], scaleRatio: true, ...over,
+    fileName: 'f.tif',
+    urls: ['/0', '/1', '/2'],
+    isStack: true,
+    showStack: false,
+    isGrayscale: true,
+    trueImageSize: [4, 4],
+    imageMeta: [],
+    scaleRatio: true,
+    ...over,
   });
 
   function landed(info: IImageInfo) {
@@ -1634,9 +1741,13 @@ describe('VisualizerComponent — ROI import on load (characterization)', () => 
   const asObject = (m: Map<number, Region[]>) => Object.fromEntries([...m].map(([z, rs]) => [z, rs]));
 
   it('folder stack (tiled=false): one slice per url, each from its own geojson, per-slice-file layout', () => {
-    const { component, plot } = landed(stack({
-      tiled: false, roiJsonStrs: ['A', null as unknown as string, 'C'], initialZIndex: 1,
-    }));
+    const { component, plot } = landed(
+      stack({
+        tiled: false,
+        roiJsonStrs: ['A', null as unknown as string, 'C'],
+        initialZIndex: 1,
+      }),
+    );
     expect(plot.enterStackMode).toHaveBeenCalledTimes(1);
     const [slices, z, layout] = plot.enterStackMode.mock.calls[0];
     expect(asObject(slices)).toEqual({ 0: A, 1: [], 2: C });
@@ -1704,11 +1815,12 @@ describe('VisualizerComponent — context menu (characterization)', () => {
   let plot: ReturnType<typeof mockPlotService>;
   let component: VisualizerComponent;
 
-  const describeMenu = (items: MenuItem[]): string[] => items.map((i) => {
-    if (i.separator) return '---';
-    const sub = i.items ? `[${i.items.map((s) => (s.separator ? '---' : s.label)).join(',')}]` : '';
-    return `${i.label}${i.styleClass === 'context-menu-active' ? '*' : ''}${sub}`;
-  });
+  const describeMenu = (items: MenuItem[]): string[] =>
+    items.map((i) => {
+      if (i.separator) return '---';
+      const sub = i.items ? `[${i.items.map((s) => (s.separator ? '---' : s.label)).join(',')}]` : '';
+      return `${i.label}${i.styleClass === 'context-menu-active' ? '*' : ''}${sub}`;
+    });
   const items = (): MenuItem[] =>
     (component as unknown as { buildContextMenuItems(): MenuItem[] }).buildContextMenuItems();
   const menu = () => describeMenu(items());
@@ -1730,16 +1842,30 @@ describe('VisualizerComponent — context menu (characterization)', () => {
     component = makeComponent(plot);
   });
 
-  const TOOLS_2D = ['Zoom in', 'Zoom out', '---', 'Select', 'Freeform', 'Brush', 'Polyline', 'Rectangle', 'Wand',
-    'Vertex eraser'];
+  const TOOLS_2D = [
+    'Zoom in',
+    'Zoom out',
+    '---',
+    'Select',
+    'Freeform',
+    'Brush',
+    'Polyline',
+    'Rectangle',
+    'Wand',
+    'Vertex eraser',
+  ];
   const VERTEX_TOOLS = ['Polygon (click vertices)', 'Add vertex', 'Delete vertex'];
 
   it('Image view, no regions, Select armed', () => {
     view(PlotType.IMAGE);
     component['activeDragMode'] = 'select';
     expect(menu()).toEqual([
-      'Autoscale', '---', 'Zoom to box', 'Pan',
-      ...TOOLS_2D.map((l) => (l === 'Select' ? 'Select*' : l)), ...VERTEX_TOOLS,
+      'Autoscale',
+      '---',
+      'Zoom to box',
+      'Pan',
+      ...TOOLS_2D.map((l) => (l === 'Select' ? 'Select*' : l)),
+      ...VERTEX_TOOLS,
     ]);
   });
 
@@ -1751,32 +1877,58 @@ describe('VisualizerComponent — context menu (characterization)', () => {
 
   it('Image view, a straight and a Bézier polygon selected (profile lines never count)', () => {
     view(PlotType.IMAGE);
-    const bez = new Region(); const p = new Polygon();
-    p.xpoints = [0, 5, 5]; p.ypoints = [0, 0, 5]; p.npoints = 3; p.closed = true; p.bezier = true; bez.bounds = p;
-    const profile = new Region(); profile.kind = 'profile'; profile.bounds = new Rectangle();
+    const bez = new Region();
+    const p = new Polygon();
+    p.xpoints = [0, 5, 5];
+    p.ypoints = [0, 0, 5];
+    p.npoints = 3;
+    p.closed = true;
+    p.bezier = true;
+    bez.bounds = p;
+    const profile = new Region();
+    profile.kind = 'profile';
+    profile.bounds = new Rectangle();
     select([rectRegion(0, 0, 5, 5), bez, profile], [0, 1]);
     expect(menu().slice(0, 8)).toEqual([
-      'Select all regions', 'Merge / group', 'Inverse',
+      'Select all regions',
+      'Merge / group',
+      'Inverse',
       'Simplify[Light (1 px),Medium (3 px),Strong (8 px),---,Custom…]',
-      'Convert to Bézier', 'Convert to polygon', 'Delete region', '---',
+      'Convert to Bézier',
+      'Convert to polygon',
+      'Delete region',
+      '---',
     ]);
   });
 
   it('Heatmap (Plotly 2D), a merged region selected, Zoom selection armed: no vertex or Bézier items', () => {
     view(PlotType.HEATMAP);
     component['activeDragMode'] = 'zoom';
-    const multi = new Region(); const mp = new MultiPolygon();
+    const multi = new Region();
+    const mp = new MultiPolygon();
     const part = () => {
       const q = new Polygon();
-      q.xpoints = [0, 1, 1]; q.ypoints = [0, 0, 1]; q.npoints = 3;
+      q.xpoints = [0, 1, 1];
+      q.ypoints = [0, 0, 1];
+      q.npoints = 3;
       return q;
     };
-    mp.polygons = [part(), part()]; multi.bounds = mp;
+    mp.polygons = [part(), part()];
+    multi.bounds = mp;
     select([multi], [0]);
     expect(menu()).toEqual([
-      'Select all regions', 'Ungroup', 'Inverse', 'Simplify[Light (1 px),Medium (3 px),Strong (8 px),---,Custom…]',
-      'Delete region', '---',
-      'Autoscale', '---', 'Zoom selection*', 'Zoom to box', 'Pan', ...TOOLS_2D,
+      'Select all regions',
+      'Ungroup',
+      'Inverse',
+      'Simplify[Light (1 px),Medium (3 px),Strong (8 px),---,Custom…]',
+      'Delete region',
+      '---',
+      'Autoscale',
+      '---',
+      'Zoom selection*',
+      'Zoom to box',
+      'Pan',
+      ...TOOLS_2D,
     ]);
   });
 
@@ -1789,7 +1941,10 @@ describe('VisualizerComponent — context menu (characterization)', () => {
 
   it('items run their actions', () => {
     view(PlotType.IMAGE);
-    const run = (label: string) => items().find((i) => i.label === label)?.command?.({});
+    const run = (label: string) =>
+      items()
+        .find((i) => i.label === label)
+        ?.command?.({});
     run('Zoom in');
     expect(plot.zoomIn).toHaveBeenCalled();
     run('Autoscale');
@@ -1838,8 +1993,14 @@ describe('VisualizerComponent — shortcut map (characterization)', () => {
     target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, ...init }));
 
   it.each([
-    ['p', 'pan'], ['b', 'zoomToBox'], ['r', 'drawrect'], ['f', 'drawclosedpath'], ['w', 'wand'],
-    ['e', 'eraseVertex'], ['s', 'select'], ['l', 'drawopenpath'],
+    ['p', 'pan'],
+    ['b', 'zoomToBox'],
+    ['r', 'drawrect'],
+    ['f', 'drawclosedpath'],
+    ['w', 'wand'],
+    ['e', 'eraseVertex'],
+    ['s', 'select'],
+    ['l', 'drawopenpath'],
   ])('%s toggles %s', (key, mode) => {
     press({ key });
     expect(toggle).toHaveBeenCalledWith(mode);
@@ -1851,8 +2012,10 @@ describe('VisualizerComponent — shortcut map (characterization)', () => {
   });
 
   it('+ / = zoom in, - / _ zoom out', () => {
-    press({ key: '+' }); press({ key: '=' });
-    press({ key: '-' }); press({ key: '_' });
+    press({ key: '+' });
+    press({ key: '=' });
+    press({ key: '-' });
+    press({ key: '_' });
     expect(plot.zoomIn).toHaveBeenCalledTimes(2);
     expect(plot.zoomOut).toHaveBeenCalledTimes(2);
   });
@@ -1889,7 +2052,7 @@ describe('VisualizerComponent — shortcut map (characterization)', () => {
     expect(plot.zoomIn).toHaveBeenCalledTimes(1);
   });
 
-  it('a right-click on the plot opens the built menu; elsewhere it is the browser\'s', () => {
+  it("a right-click on the plot opens the built menu; elsewhere it is the browser's", () => {
     const ctx = (target: EventTarget) =>
       target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     ctx(document.body);

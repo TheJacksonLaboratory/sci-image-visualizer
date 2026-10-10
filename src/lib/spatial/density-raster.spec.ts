@@ -2,7 +2,11 @@ import { lutFor } from './spatial-encoding';
 import { INFERNO_SCALE, discreteColormapStops } from './density-raster';
 
 describe('discreteColormapStops', () => {
-  const rgb: [number, number, number][] = [[255, 0, 0], [0, 255, 0], [0, 0, 255]];
+  const rgb: [number, number, number][] = [
+    [255, 0, 0],
+    [0, 255, 0],
+    [0, 0, 255],
+  ];
 
   it('gives each category a band and samples at its centre', () => {
     const { valueOf } = discreteColormapStops(rgb, [128, 128, 128]);

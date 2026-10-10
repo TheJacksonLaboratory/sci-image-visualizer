@@ -7,7 +7,8 @@ const SLIDER_MAX = 255;
 /** Min/max intensity over every voxel of the frames (RGB → luminance), or null
  *  for empty or flat input. */
 export function measureIntensityRange(frames: any[], isGrayscale: boolean): [number, number] | null {
-  let min = Infinity, max = -Infinity;
+  let min = Infinity,
+    max = -Infinity;
   for (const frame of frames || []) {
     for (const row of frame || []) {
       for (const cell of row || []) {
@@ -18,7 +19,7 @@ export function measureIntensityRange(frames: any[], isGrayscale: boolean): [num
       }
     }
   }
-  return (Number.isFinite(min) && Number.isFinite(max) && max > min) ? [min, max] : null;
+  return Number.isFinite(min) && Number.isFinite(max) && max > min ? [min, max] : null;
 }
 
 /**
@@ -41,8 +42,10 @@ export class PlotlyIsosurfaceControls implements IIsosurfaceControls {
    * @param isLive whether an isosurface is on screen now
    * @param restyle restyles the live isosurface's `isomin`/`isomax`
    */
-  constructor(private readonly isLive: () => boolean,
-              private readonly restyle: (update: { isomin: number[]; isomax: number[] }) => void) {}
+  constructor(
+    private readonly isLive: () => boolean,
+    private readonly restyle: (update: { isomin: number[]; isomax: number[] }) => void,
+  ) {}
 
   /** Measure the volume about to be rendered, so the band maps onto its range. */
   measure(frames: any[], isGrayscale: boolean): void {
@@ -75,7 +78,11 @@ export class PlotlyIsosurfaceControls implements IIsosurfaceControls {
       const usable = span - 2 * pad;
       lo = vMin + pad + (lo / SLIDER_MAX) * usable;
       hi = vMin + pad + (hi / SLIDER_MAX) * usable;
-      if (lo > hi) { const t = lo; lo = hi; hi = t; }
+      if (lo > hi) {
+        const t = lo;
+        lo = hi;
+        hi = t;
+      }
     }
     return [lo, hi];
   }

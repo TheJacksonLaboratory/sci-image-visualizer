@@ -39,13 +39,19 @@ export class RegionScopeCache {
   }
 
   /** True while a z-stack is loaded and regions are held per slice. */
-  get stackMode(): boolean { return this.stack; }
+  get stackMode(): boolean {
+    return this.stack;
+  }
 
   /** The current display slice (zero-based; 0 outside stack mode unless set). */
-  get displaySlice(): number { return this.sliceZ; }
+  get displaySlice(): number {
+    return this.sliceZ;
+  }
 
   /** How the current stack persists; meaningless outside stack mode. */
-  get saveLayout(): StackSaveLayout { return this.layout; }
+  get saveLayout(): StackSaveLayout {
+    return this.layout;
+  }
 
   /** Record `live` as the current image's regions. */
   sync(live: Region[]): void {
@@ -100,7 +106,10 @@ export class RegionScopeCache {
    */
   showSlice(z: number, live: Region[]): Region[] | null {
     const next = z || 0;
-    if (!this.stack) { this.sliceZ = next; return null; }
+    if (!this.stack) {
+      this.sliceZ = next;
+      return null;
+    }
     if (this.sliceZ === next) return null;
     this.bySlice.set(this.sliceZ, live.slice());
     this.sliceZ = next;
@@ -130,7 +139,10 @@ export class RegionScopeCache {
     const zs = new Set<number>(this.initialNonEmpty);
     for (const [z, regs] of this.bySlice) if (regs.length) zs.add(z);
     for (const z of Array.from(zs).sort((a, b) => a - b)) {
-      out.set(z, (this.bySlice.get(z) ?? []).map((r) => withRegionZ(r, z)));
+      out.set(
+        z,
+        (this.bySlice.get(z) ?? []).map((r) => withRegionZ(r, z)),
+      );
     }
     return out;
   }

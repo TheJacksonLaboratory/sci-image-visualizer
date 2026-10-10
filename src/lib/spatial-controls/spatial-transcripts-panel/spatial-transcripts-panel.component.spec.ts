@@ -7,7 +7,11 @@ import { SpatialMarkerGenesFormComponent } from '../spatial-marker-genes-form/sp
 import { SpatialDataset } from '../../contracts/spatial-dataset.contract';
 import { COLORMAP_OPTIONS } from '../../plot.utilities';
 import {
-  SpatialControlsFake, TILED_DATASET, bindInputs, fakeSpatialControls, shallowPanel,
+  SpatialControlsFake,
+  TILED_DATASET,
+  bindInputs,
+  fakeSpatialControls,
+  shallowPanel,
 } from '../../testing/spatial-panel-testing';
 
 describe('SpatialTranscriptsPanelComponent', () => {
@@ -31,8 +35,13 @@ describe('SpatialTranscriptsPanelComponent', () => {
     component = fixture.componentInstance;
     root = fixture.nativeElement as HTMLElement;
     bindInputs(fixture, {
-      controls: fake.controls, dataset: fake.dataset$, view: fake.view$, densityStats: densityStats$,
-      colormapOptions: COLORMAP_OPTIONS, open: true, ...inputs,
+      controls: fake.controls,
+      dataset: fake.dataset$,
+      view: fake.view$,
+      densityStats: densityStats$,
+      colormapOptions: COLORMAP_OPTIONS,
+      open: true,
+      ...inputs,
     });
   }
 
@@ -85,10 +94,16 @@ describe('SpatialTranscriptsPanelComponent', () => {
     component['onTranscriptScale'](2);
     component['onTranscriptOpacity'](0.5);
     component['onGlyph']('*', 'square');
-    expect(fake.view$.value).toEqual(expect.objectContaining({
-      transcriptGenes: ['A'], transcriptQuality: 'all', transcriptColorBy: 'gene',
-      transcriptScale: 2, transcriptOpacity: 0.5, transcriptGlyphs: { '*': 'square' },
-    }));
+    expect(fake.view$.value).toEqual(
+      expect.objectContaining({
+        transcriptGenes: ['A'],
+        transcriptQuality: 'all',
+        transcriptColorBy: 'gene',
+        transcriptScale: 2,
+        transcriptOpacity: 0.5,
+        transcriptGlyphs: { '*': 'square' },
+      }),
+    );
     expect(component['glyphOf']('*', 0)).toBe('square');
   });
 
@@ -151,7 +166,8 @@ describe('SpatialTranscriptsPanelComponent', () => {
       const prompt = jest.spyOn(globalThis, 'prompt').mockReturnValue(' Mine ');
       item('New group from selected genes').command();
       expect(fake.view$.value.transcriptGeneGroups).toEqual([
-        { name: 'old', genes: ['A'] }, { name: 'Mine', genes: ['A', 'B'] },
+        { name: 'old', genes: ['A'] },
+        { name: 'Mine', genes: ['A', 'B'] },
       ]);
       prompt.mockRestore();
       item('Remove gene groups').command();
@@ -162,7 +178,8 @@ describe('SpatialTranscriptsPanelComponent', () => {
 
     it('imports gene groups from a CSV, and says so when it has none', async () => {
       await build();
-      const file = (text: string) => ({ files: [{ text: async () => text }], value: 'x' }) as unknown as HTMLInputElement;
+      const file = (text: string) =>
+        ({ files: [{ text: async () => text }], value: 'x' }) as unknown as HTMLInputElement;
       await component['onImportGeneGroups'](file('group,gene\nPlasma,IGHG3\nPlasma,IGKC'));
       expect(fake.view$.value.transcriptGeneGroups).toEqual([{ name: 'Plasma', genes: ['IGHG3', 'IGKC'] }]);
       expect(fake.view$.value.transcriptGenes).toEqual(['IGHG3', 'IGKC']);

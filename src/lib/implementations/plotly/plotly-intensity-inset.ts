@@ -22,13 +22,18 @@ export function renderIntensityInset(divId: string, profiles: IntensityProfile[]
   }));
   const unit = (profiles ?? []).find((p) => p.unit)?.unit ?? 'px';
   const xTitle = unit === 'µm' ? 'Position (µm)' : 'Position (px)';
-  void Plotly.react(el, traces as unknown as Plotly.Data[], {
-    margin: { t: 6, r: 8, b: 38, l: 40 },
-    xaxis: { title: xTitle, zeroline: false, color: '#ddd' },
-    yaxis: { title: 'Intensity', zeroline: false, color: '#ddd' },
-    showlegend: false,
-    paper_bgcolor: 'rgba(25,25,25,0.9)',
-    plot_bgcolor: 'rgba(25,25,25,0.9)',
-    font: { color: '#eee', size: 10 },
-  } as unknown as Plotly.Layout, { displayModeBar: false, responsive: true } as unknown as Plotly.Config);
+  void Plotly.react(
+    el,
+    traces as unknown as Plotly.Data[],
+    {
+      margin: { t: 6, r: 8, b: 38, l: 40 },
+      xaxis: { title: xTitle, zeroline: false, color: '#ddd' },
+      yaxis: { title: 'Intensity', zeroline: false, color: '#ddd' },
+      showlegend: false,
+      paper_bgcolor: 'rgba(25,25,25,0.9)',
+      plot_bgcolor: 'rgba(25,25,25,0.9)',
+      font: { color: '#eee', size: 10 },
+    } as unknown as Plotly.Layout,
+    { displayModeBar: false, responsive: true } as unknown as Plotly.Config,
+  );
 }

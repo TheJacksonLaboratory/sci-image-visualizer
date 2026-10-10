@@ -6,8 +6,10 @@ import { ViewControlsComponent } from './view-controls.component';
 
 describe('ViewControlsComponent', () => {
   let fixture: ComponentFixture<ViewControlsComponent>;
-  const labels = () => Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('p-button button'))
-    .map((b) => b.getAttribute('aria-label'));
+  const labels = () =>
+    Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('p-button button')).map((b) =>
+      b.getAttribute('aria-label'),
+    );
 
   beforeEach(async () => {
     // jsdom can't parse PrimeNG's component stylesheets; drop just that noise.
@@ -15,12 +17,16 @@ describe('ViewControlsComponent', () => {
     jest.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
       if (!String(args[0]).includes('Could not parse CSS stylesheet')) consoleError(...args);
     });
-    await TestBed.configureTestingModule({ imports: [VisualizationModule, NoopAnimationsModule] })
-      .compileComponents();
+    await TestBed.configureTestingModule({
+      imports: [VisualizationModule, NoopAnimationsModule],
+    }).compileComponents();
     fixture = TestBed.createComponent(ViewControlsComponent);
   });
 
-  afterEach(() => { fixture.destroy(); jest.restoreAllMocks(); });
+  afterEach(() => {
+    fixture.destroy();
+    jest.restoreAllMocks();
+  });
 
   it('2D: the zoom tools, drag-zoom only outside the Image view', () => {
     fixture.detectChanges();
@@ -38,12 +44,20 @@ describe('ViewControlsComponent', () => {
     fixture.componentRef.setInput('isNapariMode', true);
     fixture.componentRef.setInput('isNapariSurfaceMode', true);
     fixture.detectChanges();
-    expect(labels()).toEqual(['Zoom', 'Pan', 'Orbital rotation', 'Turntable rotation', 'Reset camera',
-      'Toggle 3D axes', 'Toggle wireframe']);
+    expect(labels()).toEqual([
+      'Zoom',
+      'Pan',
+      'Orbital rotation',
+      'Turntable rotation',
+      'Reset camera',
+      'Toggle 3D axes',
+      'Toggle wireframe',
+    ]);
     const modes: string[] = [];
     fixture.componentInstance.toggleSurface3dMode.subscribe((m) => modes.push(m));
-    ((fixture.nativeElement as HTMLElement).querySelector('button[aria-label="Orbital rotation"]') as HTMLElement)
-      .click();
+    (
+      (fixture.nativeElement as HTMLElement).querySelector('button[aria-label="Orbital rotation"]') as HTMLElement
+    ).click();
     expect(modes).toEqual(['orbit']);
   });
 });

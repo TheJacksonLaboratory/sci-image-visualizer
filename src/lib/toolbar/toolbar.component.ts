@@ -6,7 +6,18 @@ import { ToolbarModule } from 'primeng/toolbar';
 import { TooltipModule } from 'primeng/tooltip';
 
 import { IImageInfo } from '../contracts/image.contract';
-import { PlotType, PlotTypeId, isBuiltinPlotType, isNapari3d, isNapariIsosurface, isNapariSurface, isNapariScatter, NAPARI_DEFAULT_DECIMATE, isSpatialOmics, isSpatialOmics3d } from '../contracts/plot-type';
+import {
+  PlotType,
+  PlotTypeId,
+  isBuiltinPlotType,
+  isNapari3d,
+  isNapariIsosurface,
+  isNapariSurface,
+  isNapariScatter,
+  NAPARI_DEFAULT_DECIMATE,
+  isSpatialOmics,
+  isSpatialOmics3d,
+} from '../contracts/plot-type';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from '../contracts/toolbar-config';
 import { ToolbarDialogToolContribution, ToolbarToolContribution } from '../contracts/toolbar-tool.contract';
 import { PlotTypeOption } from '../contracts/plot-type-contribution.contract';
@@ -33,9 +44,17 @@ import { SegmentationToolsComponent } from './segmentation-tools/segmentation-to
   selector: 'plotting-toolbar',
   standalone: true,
   imports: [
-    CommonModule, ButtonModule, RippleModule, ToolbarModule, TooltipModule,
-    ToolbarHelpDialogComponent, PlotTypeSelectorComponent, StackControlsComponent,
-    ViewControlsComponent, RegionToolsComponent, SegmentationToolsComponent,
+    CommonModule,
+    ButtonModule,
+    RippleModule,
+    ToolbarModule,
+    TooltipModule,
+    ToolbarHelpDialogComponent,
+    PlotTypeSelectorComponent,
+    StackControlsComponent,
+    ViewControlsComponent,
+    RegionToolsComponent,
+    SegmentationToolsComponent,
   ],
   templateUrl: './toolbar.component.html',
   styleUrls: ['./toolbar.component.scss'],
@@ -106,8 +125,10 @@ export class ToolbarComponent {
    *  out the Redo button when false. */
   @Input() canRedo = false;
   /** The single-image / stack choices of the Plotly stack toggle. */
-  @Input() stackOptions: { name: string; val: string }[] =
-    [{ name: 'Single image', val: 'false' }, { name: 'Stack', val: 'true' }];
+  @Input() stackOptions: { name: string; val: string }[] = [
+    { name: 'Single image', val: 'false' },
+    { name: 'Stack', val: 'true' },
+  ];
   /** Which toolbar groups to show. Defaults to the full toolbar; the host forwards
    *  the consumer's choice (e.g. the pipeline shows only zoom + region tools). */
   @Input() tools: Required<ToolbarToolVisibility> = ALL_TOOLBAR_TOOLS;
@@ -234,10 +255,7 @@ export class ToolbarComponent {
   /** Backends with a vertex-editing region overlay: OSD Image and napari-js WebGPU image
    *  (jit-ui#102). Gates the polygon / add-vertex / delete-vertex / Bézier-convert tools. */
   protected get supportsRegionVertexTools(): boolean {
-    return (
-      this.effectivePlotType === PlotType.IMAGE ||
-      this.effectivePlotType === PlotType.NAPARI_IMAGE
-    );
+    return this.effectivePlotType === PlotType.IMAGE || this.effectivePlotType === PlotType.NAPARI_IMAGE;
   }
 
   /** Plot types that scrub a z-stack live (the renderer swaps the slice in place): the OSD Image
@@ -267,9 +285,7 @@ export class ToolbarComponent {
 
   /** ISOSURFACE (Plotly or napari-js WebGPU, either resolution) shows the isovalue range slider. */
   protected get isIsosurfaceMode(): boolean {
-    return (
-      this.effectivePlotType === PlotType.ISOSURFACE || isNapariIsosurface(this.effectivePlotType)
-    );
+    return this.effectivePlotType === PlotType.ISOSURFACE || isNapariIsosurface(this.effectivePlotType);
   }
 
   /** The napari-js WebGPU surface — shows the wireframe toggle. */

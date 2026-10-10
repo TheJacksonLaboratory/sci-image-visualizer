@@ -12,7 +12,8 @@ import {
   SpatialPolygonTile,
   SpatialPolygons,
   CategoricalColumnMeta,
-  SpatialMarkerGenes, SpatialTranscriptCounts,
+  SpatialMarkerGenes,
+  SpatialTranscriptCounts,
   SpatialTranscriptSummary,
   SpatialTranscriptTile,
   findColumnMeta,
@@ -149,9 +150,7 @@ export class SpatialDataHttpService implements SpatialDataPort {
    * `cacheBytes` / `tileCacheBytes` cap the decoded vectors (default 256 MiB) and tiles
    * (default 128 MiB) kept for reuse; the most recent entry is always kept.
    */
-  configure(options: {
-    baseUrl: string; timeoutMs?: number; cacheBytes?: number; tileCacheBytes?: number;
-  }): void {
+  configure(options: { baseUrl: string; timeoutMs?: number; cacheBytes?: number; tileCacheBytes?: number }): void {
     const raw = options.baseUrl ?? '';
     this.baseUrl = raw.endsWith('/') ? raw : `${raw}/`;
     if (options.timeoutMs !== undefined) this.timeoutMs = options.timeoutMs;
@@ -162,8 +161,7 @@ export class SpatialDataHttpService implements SpatialDataPort {
 
   /** Datasets this server offers, for a host-side picker. */
   listDatasets(): Promise<SpatialDatasetSummary[]> {
-    return this.getJson<{ datasets: SpatialDatasetSummary[] }>('spatial/datasets')
-      .then((r) => r.datasets ?? []);
+    return this.getJson<{ datasets: SpatialDatasetSummary[] }>('spatial/datasets').then((r) => r.datasets ?? []);
   }
 
   /**
@@ -173,11 +171,10 @@ export class SpatialDataHttpService implements SpatialDataPort {
    * dataset to find out.
    */
   readManifest(id: string): Promise<SpatialManifest> {
-    return this.getJson<SpatialManifest>(`spatial/${encodeURIComponent(id)}/manifest`)
-      .then((manifest) => {
-        assertManifestVersion(manifest);
-        return manifest;
-      });
+    return this.getJson<SpatialManifest>(`spatial/${encodeURIComponent(id)}/manifest`).then((manifest) => {
+      assertManifestVersion(manifest);
+      return manifest;
+    });
   }
 
   /**
@@ -204,12 +201,8 @@ export class SpatialDataHttpService implements SpatialDataPort {
     // slowest of them, not their sum (the ids JSON alone is tens of MB on a large dataset).
     const [coordsBuf, ids, radiusBuf] = await Promise.all([
       this.getBinary(`${path}/coords`),
-      manifest.hasIds
-        ? this.getJson<{ ids: string[] }>(`${path}/ids`).then((r) => r.ids)
-        : undefined,
-      manifest.radius?.mode === 'per-observation'
-        ? this.getBinary(`${path}/radius`)
-        : undefined,
+      manifest.hasIds ? this.getJson<{ ids: string[] }>(`${path}/ids`).then((r) => r.ids) : undefined,
+      manifest.radius?.mode === 'per-observation' ? this.getBinary(`${path}/radius`) : undefined,
     ]);
     if (superseded()) throw new SupersededError(id);
     const coords = decodeCoords(coordsBuf, manifest.count, !!manifest.hasZ);
@@ -251,14 +244,16 @@ export class SpatialDataHttpService implements SpatialDataPort {
     if (!meta) {
       // Reject rather than resolve empty: a typo must surface as an error, not
       // as a plot that silently renders every point as "no data".
-      return Promise.reject(new Error(
-        `[spatial] unknown column "${name}". Available: ${dataset.columns.map((c) => c.name).join(', ')}`,
-      ));
+      return Promise.reject(
+        new Error(
+          `[spatial] unknown column "${name}". Available: ${dataset.columns.map((c) => c.name).join(', ')}`,
+        ),
+      );
     }
-    return this.fetchCached(
-      `column:${name}`,
-      () => this.getBinary(`spatial/${encodeURIComponent(manifest.id)}/column/${encodeURIComponent(name)}`)
-        .then((buf) => decodeColumn(buf, meta, manifest.count)),
+    return this.fetchCached(`column:${name}`, () =>
+      this.getBinary(`spatial/${encodeURIComponent(manifest.id)}/column/${encodeURIComponent(name)}`).then((buf) =>
+        decodeColumn(buf, meta, manifest.count),
+      ),
     ) as Promise<SpatialColumn>;
   }
 
@@ -268,11 +263,10 @@ export class SpatialDataHttpService implements SpatialDataPort {
     if (!meta) {
       return Promise.reject(new Error(`[spatial] unknown embedding "${name}"`));
     }
-    return this.fetchCached(
-      `embedding:${name}`,
-      () => this.getBinary(
-        `spatial/${encodeURIComponent(manifest.id)}/embedding/${encodeURIComponent(name)}`,
-      ).then((buf) => decodeEmbedding(buf, meta, manifest.count)),
+    return this.fetchCached(`embedding:${name}`, () =>
+      this.getBinary(`spatial/${encodeURIComponent(manifest.id)}/embedding/${encodeURIComponent(name)}`).then(
+        (buf) => decodeEmbedding(buf, meta, manifest.count),
+      ),
     ) as Promise<SpatialEmbedding>;
   }
 
@@ -282,10 +276,10 @@ export class SpatialDataHttpService implements SpatialDataPort {
     if (names && !names.includes(name)) {
       return Promise.reject(new Error(`[spatial] unknown feature "${name}"`));
     }
-    return this.fetchCached(
-      `feature:${name}`,
-      () => this.getBinary(`spatial/${encodeURIComponent(manifest.id)}/feature/${encodeURIComponent(name)}`)
-        .then((buf) => decodeFeatureVector(buf, manifest.count)),
+    return this.fetchCached(`feature:${name}`, () =>
+      this.getBinary(`spatial/${encodeURIComponent(manifest.id)}/feature/${encodeURIComponent(name)}`).then(
+        (buf) => decodeFeatureVector(buf, manifest.count),
+      ),
     ) as Promise<Float32Array>;
   }
 
@@ -295,8 +289,8 @@ export class SpatialDataHttpService implements SpatialDataPort {
     // no round-trip for a keystroke — and ranked as the picker ranks them.
     const names = manifest.features?.names;
     if (names) return searchGeneNames(names, query, limit);
-    const url = `spatial/${encodeURIComponent(manifest.id)}/features`
-      + `?q=${encodeURIComponent(query)}&limit=${limit}`;
+    const url =
+      `spatial/${encodeURIComponent(manifest.id)}/features` + `?q=${encodeURIComponent(query)}&limit=${limit}`;
     return (await this.getJson<{ names: string[] }>(url)).names ?? [];
   }
 
@@ -307,10 +301,12 @@ export class SpatialDataHttpService implements SpatialDataPort {
     }
     // Geometry is one large blob rather than a per-name vector, so it gets its
     // own single-flight slot instead of a cache entry.
-    this.polygonsPromise ??= this
-      .getBinary(`spatial/${encodeURIComponent(manifest.id)}/polygons`)
+    this.polygonsPromise ??= this.getBinary(`spatial/${encodeURIComponent(manifest.id)}/polygons`)
       .then(decodePolygons)
-      .catch((err) => { this.polygonsPromise = null; throw err; });
+      .catch((err) => {
+        this.polygonsPromise = null;
+        throw err;
+      });
     return this.polygonsPromise;
   }
 
@@ -319,16 +315,19 @@ export class SpatialDataHttpService implements SpatialDataPort {
     if (!manifest.polygonTiles) {
       return Promise.reject(new Error('[spatial] this dataset has no tiled polygons'));
     }
-    const path = `spatial/${encodeURIComponent(manifest.id)}/polygon-tile/`
-      + `${encodeURIComponent(set)}/${level}/${gx}/${gy}`;
-    return this.cachedTile(
-      path, () => this.getBinary(path).then((buf) => decodePolygonTile(buf, manifest.count)),
-    ) as
-      Promise<SpatialPolygonTile>;
+    const path =
+      `spatial/${encodeURIComponent(manifest.id)}/polygon-tile/` +
+      `${encodeURIComponent(set)}/${level}/${gx}/${gy}`;
+    return this.cachedTile(path, () =>
+      this.getBinary(path).then((buf) => decodePolygonTile(buf, manifest.count)),
+    ) as Promise<SpatialPolygonTile>;
   }
 
   getTranscriptTile(
-    level: number, gx: number, gy: number, query: TranscriptTileQuery,
+    level: number,
+    gx: number,
+    gy: number,
+    query: TranscriptTileQuery,
   ): Promise<SpatialTranscriptTile> {
     const manifest = this.requireManifest();
     if (!manifest.transcriptTiles) {
@@ -336,16 +335,18 @@ export class SpatialDataHttpService implements SpatialDataPort {
     }
     const genes = query.genes.map(encodeURIComponent).join(',');
     const box = query.box ? `&box=${query.box.join(',')}` : '';
-    const path = `spatial/${encodeURIComponent(manifest.id)}/transcript-tile/${level}/${gx}/${gy}`
-      + `?genes=${genes}&quality=${query.quality ?? 'high'}${box}`;
+    const path =
+      `spatial/${encodeURIComponent(manifest.id)}/transcript-tile/${level}/${gx}/${gy}` +
+      `?genes=${genes}&quality=${query.quality ?? 'high'}${box}`;
     // The codes index the genes asked for — except for ALL_GENES, whose list the
     // server owns, so only the observations can be bounded there.
     const limits = {
       observations: manifest.count,
       ...(query.genes.includes(ALL_GENES) ? {} : { genes: query.genes.length }),
     };
-    return this.cachedTile(path, () => this.getBinary(path).then((buf) => decodeTranscriptTile(buf, limits))) as
-      Promise<SpatialTranscriptTile>;
+    return this.cachedTile(path, () =>
+      this.getBinary(path).then((buf) => decodeTranscriptTile(buf, limits)),
+    ) as Promise<SpatialTranscriptTile>;
   }
 
   getTranscriptGeneBins(level: number, tx: number, ty: number, genes: string[]): Promise<SpatialTranscriptTile> {
@@ -353,14 +354,16 @@ export class SpatialDataHttpService implements SpatialDataPort {
     if (!manifest.transcriptGeneBins) {
       return Promise.reject(new Error('[spatial] this dataset has no per-gene bins'));
     }
-    const path = `spatial/${encodeURIComponent(manifest.id)}/gene-bins/${level}/${tx}/${ty}`
-      + `?genes=${genes.map(encodeURIComponent).join(',')}`;
+    const path =
+      `spatial/${encodeURIComponent(manifest.id)}/gene-bins/${level}/${tx}/${ty}` +
+      `?genes=${genes.map(encodeURIComponent).join(',')}`;
     const limits = {
       observations: manifest.count,
       ...(genes.includes(ALL_GENES) ? {} : { genes: genes.length }),
     };
-    return this.cachedTile(path, () => this.getBinary(path).then((buf) => decodeTranscriptTile(buf, limits))) as
-      Promise<SpatialTranscriptTile>;
+    return this.cachedTile(path, () =>
+      this.getBinary(path).then((buf) => decodeTranscriptTile(buf, limits)),
+    ) as Promise<SpatialTranscriptTile>;
   }
 
   getTranscriptBins(level: number, tx: number, ty: number): Promise<SpatialTranscriptTile> {
@@ -369,17 +372,18 @@ export class SpatialDataHttpService implements SpatialDataPort {
       return Promise.reject(new Error('[spatial] this dataset has no transcript pyramid'));
     }
     const path = `spatial/${encodeURIComponent(manifest.id)}/transcript-bins/${level}/${tx}/${ty}`;
-    return this.cachedTile(
-      path, () => this.getBinary(path).then((buf) => decodeTranscriptTile(buf, { observations: manifest.count })),
-    ) as
-      Promise<SpatialTranscriptTile>;
+    return this.cachedTile(path, () =>
+      this.getBinary(path).then((buf) => decodeTranscriptTile(buf, { observations: manifest.count })),
+    ) as Promise<SpatialTranscriptTile>;
   }
 
   /** Small JSON answers, keyed by URL — hovering back and forth must not refetch. */
   private readonly summaryCache = new Map<string, Promise<SpatialTranscriptSummary>>();
 
   getTranscriptSummary(query: {
-    box?: [number, number, number, number]; genes?: string[]; cells?: number[];
+    box?: [number, number, number, number];
+    genes?: string[];
+    cells?: number[];
   }): Promise<SpatialTranscriptSummary> {
     const manifest = this.requireManifest();
     const params: string[] = [];
@@ -402,9 +406,8 @@ export class SpatialDataHttpService implements SpatialDataPort {
     if (!manifest.density) return Promise.reject(new Error('[spatial] this dataset has no density raster'));
     const list = [...genes];
     const bin = binSize ? `&bin=${binSize}` : '';
-    return this.fetchCached(
-      `density:${list.join(',')}:${binSize ?? ''}`,
-      () => this.getBinary(
+    return this.fetchCached(`density:${list.join(',')}:${binSize ?? ''}`, () =>
+      this.getBinary(
         `spatial/${encodeURIComponent(manifest.id)}/density?genes=${list.map(encodeURIComponent).join(',')}${bin}`,
       ).then((buf) => decodeDensity(buf, list)),
     ) as Promise<SpatialDensityRaster>;
@@ -418,9 +421,11 @@ export class SpatialDataHttpService implements SpatialDataPort {
     let body: { column: CategoricalColumnMeta; matched: number };
     try {
       body = await firstValueFrom(
-        this.http.post<{ column: CategoricalColumnMeta; matched: number }>(url, table, {
-          headers: { 'Content-Type': 'text/csv' },
-        }).pipe(timeout(this.timeoutMs)),
+        this.http
+          .post<{ column: CategoricalColumnMeta; matched: number }>(url, table, {
+            headers: { 'Content-Type': 'text/csv' },
+          })
+          .pipe(timeout(this.timeoutMs)),
       );
     } catch (err) {
       const e = err as HttpErrorResponse;
@@ -441,9 +446,11 @@ export class SpatialDataHttpService implements SpatialDataPort {
   getMarkerGenes(column: string, perGroup = 5): Promise<SpatialMarkerGenes> {
     const manifest = this.requireManifest();
     // No per-request timeout: the first computation is a pass over the whole matrix.
-    return firstValueFrom(this.http.get<SpatialMarkerGenes>(
-      `${this.baseUrl}spatial/${encodeURIComponent(manifest.id)}/markers/${encodeURIComponent(column)}?n=${perGroup}`,
-    ));
+    return firstValueFrom(
+      this.http.get<SpatialMarkerGenes>(
+        `${this.baseUrl}spatial/${encodeURIComponent(manifest.id)}/markers/${encodeURIComponent(column)}?n=${perGroup}`,
+      ),
+    );
   }
 
   getTranscriptCounts(genes: string[]): Promise<SpatialTranscriptCounts> {
@@ -455,7 +462,8 @@ export class SpatialDataHttpService implements SpatialDataPort {
 
   /** LRU over tile promises, so concurrent asks share one request and a failure is not kept. */
   private cachedTile<T extends SpatialPolygonTile | SpatialTranscriptTile>(
-    key: string, load: () => Promise<T>,
+    key: string,
+    load: () => Promise<T>,
   ): Promise<T> {
     const hit = this.tileCache.get(key);
     if (hit) {
@@ -489,10 +497,10 @@ export class SpatialDataHttpService implements SpatialDataPort {
 
   /** Oldest first, past the entry cap or the byte budget, keeping the newest. */
   private evictTiles(): void {
-    while (this.tileCache.size > 1 && (
-      this.tileCache.size > SpatialDataHttpService.TILE_CACHE_LIMIT
-      || this.tileBytesTotal > this.tileCacheBytes
-    )) {
+    while (
+      this.tileCache.size > 1 &&
+      (this.tileCache.size > SpatialDataHttpService.TILE_CACHE_LIMIT || this.tileBytesTotal > this.tileCacheBytes)
+    ) {
       this.dropTile(this.tileCache.keys().next().value!);
     }
   }
@@ -517,19 +525,21 @@ export class SpatialDataHttpService implements SpatialDataPort {
     if (!meta) {
       return Promise.reject(new Error('[spatial] this dataset has no reference volume'));
     }
-    this.volumePromise ??= this
-      .getBinary(`spatial/${encodeURIComponent(manifest.id)}/volume`)
+    this.volumePromise ??= this.getBinary(`spatial/${encodeURIComponent(manifest.id)}/volume`)
       .then((buf) => {
         const want = meta.width * meta.height * meta.depth;
         if (buf.byteLength !== want) {
           throw new Error(
-            `[spatial] volume is ${buf.byteLength} bytes, expected ${want} `
-            + `(${meta.width}x${meta.height}x${meta.depth})`,
+            `[spatial] volume is ${buf.byteLength} bytes, expected ${want} ` +
+              `(${meta.width}x${meta.height}x${meta.depth})`,
           );
         }
         return new Uint8Array(buf);
       })
-      .catch((err) => { this.volumePromise = null; throw err; });
+      .catch((err) => {
+        this.volumePromise = null;
+        throw err;
+      });
     return this.volumePromise;
   }
 
@@ -592,9 +602,10 @@ export class SpatialDataHttpService implements SpatialDataPort {
 
   /** Oldest first, past the entry cap or the byte budget, keeping the newest. */
   private evict(): void {
-    while (this.cache.size > 1 && (
-      this.cache.size > SpatialDataHttpService.CACHE_LIMIT || this.cachedBytes > this.cacheBytes
-    )) {
+    while (
+      this.cache.size > 1 &&
+      (this.cache.size > SpatialDataHttpService.CACHE_LIMIT || this.cachedBytes > this.cacheBytes)
+    ) {
       this.uncache(this.cache.keys().next().value!);
     }
   }
@@ -607,15 +618,12 @@ export class SpatialDataHttpService implements SpatialDataPort {
   }
 
   private getJson<T>(path: string): Promise<T> {
-    return firstValueFrom(
-      this.http.get<T>(`${this.baseUrl}${path}`).pipe(timeout(this.timeoutMs)),
-    );
+    return firstValueFrom(this.http.get<T>(`${this.baseUrl}${path}`).pipe(timeout(this.timeoutMs)));
   }
 
   private getBinary(path: string): Promise<ArrayBuffer> {
     return firstValueFrom(
-      this.http.get(`${this.baseUrl}${path}`, { responseType: 'arraybuffer' })
-        .pipe(timeout(this.timeoutMs)),
+      this.http.get(`${this.baseUrl}${path}`, { responseType: 'arraybuffer' }).pipe(timeout(this.timeoutMs)),
     );
   }
 }

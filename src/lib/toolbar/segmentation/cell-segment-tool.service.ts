@@ -41,7 +41,10 @@ export class CellSegmentToolService {
   async segmentBoxes(host: CanvasToolHost, segmenter: ICellSegmenter): Promise<number> {
     if (this.state.busy) return 0;
     const cached = host.getCachedImageData();
-    if (!cached || cached.frames.length === 0) { this.status$.next('No image loaded.'); return 0; }
+    if (!cached || cached.frames.length === 0) {
+      this.status$.next('No image loaded.');
+      return 0;
+    }
 
     const rects = host.getRegions().filter((r) => r.bounds instanceof Rectangle);
     if (rects.length === 0) {
@@ -62,9 +65,12 @@ export class CellSegmentToolService {
           const prefix = rects.length > 1 ? `Box ${i + 1}/${rects.length}: ` : '';
           this.status$.next(`${prefix}Cropping…`);
           await tick(); // let the status paint before the (main-thread) crop
-          const crop = cropImageRegion(
-            cached, frameIdx, { x0: b.x, y0: b.y, x1: b.x + b.width, y1: b.y + b.height },
-          );
+          const crop = cropImageRegion(cached, frameIdx, {
+            x0: b.x,
+            y0: b.y,
+            x1: b.x + b.width,
+            y1: b.y + b.height,
+          });
           if (!crop) continue;
           const seg = await segmenter.segmentCells(
             { data: crop.data, width: crop.width, height: crop.height },
@@ -94,11 +100,9 @@ export class CellSegmentToolService {
     });
     return added ?? 0;
   }
-
 }
 
-function makeCellRegion(xData: number[], yData: number[], holes: number[][][] | undefined,
-                        color: string): Region {
+function makeCellRegion(xData: number[], yData: number[], holes: number[][][] | undefined, color: string): Region {
   const region = new Region();
   region.bounds = makePolygon(xData, yData, { holes });
   // The source box's color, else the host default.

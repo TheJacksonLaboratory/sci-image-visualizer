@@ -1,6 +1,4 @@
-import {
-  ChangeDetectionStrategy, Component, EventEmitter, Input, OnChanges, Output,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, EventEmitter, Input, OnChanges, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SharedModule } from 'primeng/api';
@@ -10,7 +8,10 @@ import { TreeSelectModule } from 'primeng/treeselect';
 import type { ISpatialControls } from '../../contracts/visualizer.contract';
 import type { SpatialDataset } from '../../contracts/spatial-dataset.contract';
 import {
-  ColormapNode, ColormapValue, DEFAULT_SPATIAL_VIEW, SpatialViewState,
+  ColormapNode,
+  ColormapValue,
+  DEFAULT_SPATIAL_VIEW,
+  SpatialViewState,
 } from '../../contracts/display-types';
 import type { SpatialLegendEntry } from './spatial-key.model';
 
@@ -68,9 +69,8 @@ export class SpatialKeyComponent implements OnChanges {
   ngOnChanges(): void {
     const by = this.view.colorBy;
     this.colorByLabel = colorByLabel(this.view);
-    this.activeDescription = by?.kind === 'column'
-      ? this.dataset?.columns.find((c) => c.name === by.name)?.description ?? null
-      : null;
+    this.activeDescription =
+      by?.kind === 'column' ? (this.dataset?.columns.find((c) => c.name === by.name)?.description ?? null) : null;
     this.selectedColormapNode = colormapNodeFor(this.colormapOptions, this.view.continuousColormap);
   }
 
@@ -110,7 +110,8 @@ export function colorByLabel(view: Pick<SpatialViewState, 'colorBy'>): string {
 
 /** The tree node holding a colormap value, so the picker shows what is in use. */
 export function colormapNodeFor(
-  options: readonly ColormapNode[], value: ColormapValue | null,
+  options: readonly ColormapNode[],
+  value: ColormapValue | null,
 ): ColormapNode | null {
   if (!value) return null;
   for (const group of options) {

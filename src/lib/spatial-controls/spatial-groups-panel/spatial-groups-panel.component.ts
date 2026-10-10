@@ -1,5 +1,11 @@
 import {
-  ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, NgZone, OnChanges, SimpleChanges,
+  ChangeDetectionStrategy,
+  ChangeDetectorRef,
+  Component,
+  Input,
+  NgZone,
+  OnChanges,
+  SimpleChanges,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -12,8 +18,16 @@ import type { SpatialDataset } from '../../contracts/spatial-dataset.contract';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../../contracts/display-types';
 import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
 import {
-  FAMILY_PREFIX, GroupOptionSection, GroupRow, PanelOption, countGroupRows, familyMembers, groupEntryFor,
-  groupOptions, groupVariantOptions, toggleHidden,
+  FAMILY_PREFIX,
+  GroupOptionSection,
+  GroupRow,
+  PanelOption,
+  countGroupRows,
+  familyMembers,
+  groupEntryFor,
+  groupOptions,
+  groupVariantOptions,
+  toggleHidden,
 } from '../../spatial/spatial-panel-model';
 import { Supersede } from '../../util/supersede';
 
@@ -145,9 +159,13 @@ export class SpatialGroupsPanelComponent implements OnChanges {
       const { column } = await this.controls.importGroups(label, await file.text());
       this.apply(() => this.onCellTypeColumn(column.name));
     } catch (err) {
-      this.apply(() => { this.groupImportError = String((err as Error)?.message ?? err); });
+      this.apply(() => {
+        this.groupImportError = String((err as Error)?.message ?? err);
+      });
     } finally {
-      this.apply(() => { this.groupImporting = false; });
+      this.apply(() => {
+        this.groupImporting = false;
+      });
     }
   }
 

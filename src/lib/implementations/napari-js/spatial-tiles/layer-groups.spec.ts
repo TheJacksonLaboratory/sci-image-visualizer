@@ -6,7 +6,9 @@ import { OrderedLayerGroups } from './layer-groups';
 
 describe('OrderedLayerGroups', () => {
   const square: SpatialPolygons = {
-    count: 1, coords: new Float32Array([0, 0, 10, 0, 10, 10, 0, 10]), offsets: new Uint32Array([0, 4]),
+    count: 1,
+    coords: new Float32Array([0, 0, 10, 0, 10, 10, 0, 10]),
+    offsets: new Uint32Array([0, 4]),
   };
 
   function setup() {
@@ -45,7 +47,12 @@ describe('OrderedLayerGroups', () => {
     const { viewer, groups } = setup();
     groups.upsertShapes('low', true, true, square, { name: 'cells', draw: 'fill', color: [1, 0, 0, 1] });
     const first = viewer.layers.items[0] as ShapesLayer;
-    groups.upsertShapes('low', true, false, square, { name: 'cells', draw: 'fill', color: [0, 1, 0, 1], opacity: 0.3 });
+    groups.upsertShapes('low', true, false, square, {
+      name: 'cells',
+      draw: 'fill',
+      color: [0, 1, 0, 1],
+      opacity: 0.3,
+    });
     expect(viewer.layers.items).toEqual([first]);
     expect(first.opacity).toBe(0.3);
     groups.upsertShapes('low', true, true, square, { name: 'cells', draw: 'fill', color: [0, 0, 1, 1] });

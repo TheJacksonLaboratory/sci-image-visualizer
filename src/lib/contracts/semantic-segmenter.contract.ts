@@ -1,6 +1,5 @@
 import { InjectionToken } from '@angular/core';
 
-
 /**
  * Port for a **semantic** segmenter — one that assigns every pixel a class from
  * a fixed set, with no notion of separate objects.

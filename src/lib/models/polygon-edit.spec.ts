@@ -12,12 +12,30 @@ function deepFreeze<T>(o: T): T {
 }
 
 function poly(xs: number[], ys: number[], extra: Partial<Polygon> = {}): Polygon {
-  return Object.assign(new Polygon(), {
-    npoints: xs.length, xpoints: xs, ypoints: ys, coordinates: xs.map((x, i) => [x, ys[i]]), closed: true,
-  }, extra);
+  return Object.assign(
+    new Polygon(),
+    {
+      npoints: xs.length,
+      xpoints: xs,
+      ypoints: ys,
+      coordinates: xs.map((x, i) => [x, ys[i]]),
+      closed: true,
+    },
+    extra,
+  );
 }
 const square = () => poly([0, 10, 10, 0], [0, 0, 10, 10]);
-const donut = () => poly([0, 20, 20, 0], [0, 0, 20, 20], { holes: [[[7, 7], [13, 7], [13, 13], [7, 13]]] });
+const donut = () =>
+  poly([0, 20, 20, 0], [0, 0, 20, 20], {
+    holes: [
+      [
+        [7, 7],
+        [13, 7],
+        [13, 13],
+        [7, 13],
+      ],
+    ],
+  });
 const bezierDonut = () => {
   const p = donut();
   const off = defaultHandleOffsets(p.xpoints, p.ypoints, true);
@@ -38,10 +56,16 @@ describe('polygon-edit (copy-on-write)', () => {
     ['setBezier on', donut, (p) => edit.setBezier(p, true)],
     ['setBezier off', bezierDonut, (p) => edit.setBezier(p, false)],
     ['moveBezierHandle', bezierDonut, (p) => edit.moveBezierHandle(p, 0, 'out', 5, -5)],
-    ['moveBezierHandle (seeds)', () => Object.assign(square(), { bezier: true }),
-      (p) => edit.moveBezierHandle(p, 0, 'in', -1, 0)],
-    ['moveHoleBezierHandle (seeds)', () => Object.assign(donut(), { bezier: true }),
-      (p) => edit.moveHoleBezierHandle(p, 0, 0, 'out', 5, 6)],
+    [
+      'moveBezierHandle (seeds)',
+      () => Object.assign(square(), { bezier: true }),
+      (p) => edit.moveBezierHandle(p, 0, 'in', -1, 0),
+    ],
+    [
+      'moveHoleBezierHandle (seeds)',
+      () => Object.assign(donut(), { bezier: true }),
+      (p) => edit.moveHoleBezierHandle(p, 0, 0, 'out', 5, 6),
+    ],
     ['translatePolygon', donut, (p) => edit.translatePolygon(p, 3, 4)],
   ];
   it.each(ops)('%s returns a new polygon and leaves the input untouched', (_name, make, apply) => {
@@ -96,11 +120,28 @@ describe('polygon-edit (copy-on-write)', () => {
 
   it('hole edits', () => {
     expect(edit.moveHoleVertex(donut(), 0, 1, 14, 6)!.holes![0][1]).toEqual([14, 6]);
-    expect(edit.addHoleVertex(donut(), 0, 0, 10, 7)!.holes![0])
-      .toEqual([[7, 7], [10, 7], [13, 7], [13, 13], [7, 13]]);
-    expect(edit.deleteHoleVertex(donut(), 0, 0)!.holes![0]).toEqual([[13, 7], [13, 13], [7, 13]]);
+    expect(edit.addHoleVertex(donut(), 0, 0, 10, 7)!.holes![0]).toEqual([
+      [7, 7],
+      [10, 7],
+      [13, 7],
+      [13, 13],
+      [7, 13],
+    ]);
+    expect(edit.deleteHoleVertex(donut(), 0, 0)!.holes![0]).toEqual([
+      [13, 7],
+      [13, 13],
+      [7, 13],
+    ]);
     // A triangle hole cannot lose a vertex and stay a ring: the hole goes.
-    const tri = poly([0, 20, 20, 0], [0, 0, 20, 20], { holes: [[[7, 7], [13, 7], [13, 13]]] });
+    const tri = poly([0, 20, 20, 0], [0, 0, 20, 20], {
+      holes: [
+        [
+          [7, 7],
+          [13, 7],
+          [13, 13],
+        ],
+      ],
+    });
     expect(edit.deleteHoleVertex(tri, 0, 0)!.holes).toBeUndefined();
   });
 
@@ -120,16 +161,23 @@ describe('polygon-edit (copy-on-write)', () => {
 
   it('bezier handles store offsets relative to their anchor', () => {
     expect(edit.moveBezierHandle(bezierDonut(), 1, 'in', 15, 5)!.handlesIn![1]).toEqual([-5, 5]);
-    expect(edit.moveHoleBezierHandle(Object.assign(donut(), { bezier: true }), 0, 0, 'out', 5, 6)!
-      .holeHandlesOut![0][0]).toEqual([-2, -1]);
+    expect(
+      edit.moveHoleBezierHandle(Object.assign(donut(), { bezier: true }), 0, 0, 'out', 5, 6)!
+        .holeHandlesOut![0][0],
+    ).toEqual([-2, -1]);
   });
 
   it('translateBounds moves rectangles, polygons with holes and every part, optionally rounded', () => {
     const rect = Object.assign(new Rectangle(), { x: 1, y: 2, width: 3, height: 4 });
-    expect(edit.translateBounds(rect, 10, 20))
-      .toEqual(Object.assign(new Rectangle(), { x: 11, y: 22, width: 3, height: 4 }));
+    expect(edit.translateBounds(rect, 10, 20)).toEqual(
+      Object.assign(new Rectangle(), { x: 11, y: 22, width: 3, height: 4 }),
+    );
     const moved = edit.translateBounds(donut(), 0.4, 0.6, Math.round) as Polygon;
-    expect([moved.xpoints, moved.holes![0][0], moved.coordinates[1]]).toEqual([[0, 20, 20, 0], [7, 8], [20, 1]]);
+    expect([moved.xpoints, moved.holes![0][0], moved.coordinates[1]]).toEqual([
+      [0, 20, 20, 0],
+      [7, 8],
+      [20, 1],
+    ]);
     const multi = Object.assign(new MultiPolygon(), { polygons: [square(), donut()] });
     const mm = edit.translateBounds(deepFreeze(multi), 1, 1) as MultiPolygon;
     expect(mm.polygons.map((p) => p.xpoints[0])).toEqual([1, 1]);

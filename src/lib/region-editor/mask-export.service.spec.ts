@@ -8,7 +8,9 @@ class FakeWorker {
   onerror: ((e: unknown) => void) | null = null;
   postMessage = jest.fn();
   terminate = jest.fn();
-  emit(data: unknown) { this.onmessage?.({ data }); }
+  emit(data: unknown) {
+    this.onmessage?.({ data });
+  }
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -31,12 +33,25 @@ describe('MaskExportService', () => {
     const events: MaskExportEvent[] = [];
     let completed = false;
     const request = { regions: [region], imageSize: { width: 8, height: 4 }, sourceName: 'a.tif' };
-    service.export({ ...request, mode: 'multiclass' }).subscribe({ next: (e) => events.push(e), complete: () => { completed = true; } });
+    service.export({ ...request, mode: 'multiclass' }).subscribe({
+      next: (e) => events.push(e),
+      complete: () => {
+        completed = true;
+      },
+    });
     expect(events).toEqual([{ type: 'planned', width: 8, height: 4, scale: 1 }]);
     await flush();
-    expect(worker.postMessage).toHaveBeenCalledWith(expect.objectContaining({
-      width: 8, height: 4, originalWidth: 8, originalHeight: 4, scale: 1, mode: 'multiclass', sourceName: 'a.tif',
-    }));
+    expect(worker.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        width: 8,
+        height: 4,
+        originalWidth: 8,
+        originalHeight: 4,
+        scale: 1,
+        mode: 'multiclass',
+        sourceName: 'a.tif',
+      }),
+    );
     worker.emit({ type: 'progress', done: 1, total: 4 });
     worker.emit({ type: 'encoding' });
     worker.emit({ type: 'done', png: new Uint8Array([1]) });
@@ -48,7 +63,8 @@ describe('MaskExportService', () => {
 
   it('downscales a whole-slide image to the pixel budget', () => {
     const events: MaskExportEvent[] = [];
-    const sub = service.export({ regions: [], imageSize: { width: 100_000, height: 100_000 }, mode: 'binary' })
+    const sub = service
+      .export({ regions: [], imageSize: { width: 100_000, height: 100_000 }, mode: 'binary' })
       .subscribe((e) => events.push(e));
     const planned = events[0] as Extract<MaskExportEvent, { type: 'planned' }>;
     expect(planned.scale).toBeLessThan(1);
@@ -57,7 +73,9 @@ describe('MaskExportService', () => {
   });
 
   it('unsubscribing before the worker loads terminates it unused', async () => {
-    const sub = service.export({ regions: [region], imageSize: { width: 8, height: 8 }, mode: 'binary' }).subscribe();
+    const sub = service
+      .export({ regions: [region], imageSize: { width: 8, height: 8 }, mode: 'binary' })
+      .subscribe();
     sub.unsubscribe();
     await flush();
     expect(worker.terminate).toHaveBeenCalled();
@@ -66,7 +84,8 @@ describe('MaskExportService', () => {
 
   it('a worker error is an error with its message; the worker is terminated', async () => {
     const errors: string[] = [];
-    service.export({ regions: [region], imageSize: { width: 8, height: 8 }, mode: 'binary' })
+    service
+      .export({ regions: [region], imageSize: { width: 8, height: 8 }, mode: 'binary' })
       .subscribe({ error: (e: Error) => errors.push(e.message) });
     await flush();
     worker.emit({ type: 'error', error: 'boom' });
@@ -78,7 +97,8 @@ describe('MaskExportService', () => {
     const factory = service as unknown as { createWorker: () => Promise<never> };
     factory.createWorker = () => Promise.reject(new Error('x'));
     const errors: string[] = [];
-    service.export({ regions: [region], imageSize: { width: 8, height: 8 }, mode: 'binary' })
+    service
+      .export({ regions: [region], imageSize: { width: 8, height: 8 }, mode: 'binary' })
       .subscribe({ error: (e: Error) => errors.push(e.message) });
     await flush();
     expect(errors).toEqual(['The mask worker failed to start.']);

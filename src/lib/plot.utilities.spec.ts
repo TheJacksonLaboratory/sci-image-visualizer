@@ -3,7 +3,6 @@ import { PlotUtilities } from './plot.utilities';
 import { ShapeSelection } from './models/shape';
 
 describe('PlotUtilities', () => {
-
   let plotUtilities: PlotUtilities;
 
   beforeEach(() => {
@@ -14,16 +13,21 @@ describe('PlotUtilities', () => {
     jest.clearAllMocks();
   });
 
-  it('Test roundPathCoordinates', ()=> {
+  it('Test roundPathCoordinates', () => {
     const path = 'M13.54,54.566L35.44,33.3L36.22,89.6Z';
     const resultRoundPath = plotUtilities.roundPathCoordinates(path);
     expect(resultRoundPath).toBe('M14,55L35,33L36,90Z');
   });
 
   it('Test arrayToMatrix', () => {
-    const inputUint8Array = new Uint8Array([ 5, 6, 9, 7, 7, 7, 3, 2, 1, 1, 0, 0, 1, 5, 4, 6 ]);
+    const inputUint8Array = new Uint8Array([5, 6, 9, 7, 7, 7, 3, 2, 1, 1, 0, 0, 1, 5, 4, 6]);
     const outputMatrix = plotUtilities.arrayToMatrix(inputUint8Array, 4);
-    expect(outputMatrix).toEqual([[5, 6, 9, 7 ], [7, 7, 3, 2], [1, 1, 0, 0], [1, 5, 4, 6]]);
+    expect(outputMatrix).toEqual([
+      [5, 6, 9, 7],
+      [7, 7, 3, 2],
+      [1, 1, 0, 0],
+      [1, 5, 4, 6],
+    ]);
   });
 
   it('Test get Rectangle Inside', () => {
@@ -99,9 +103,13 @@ describe('PlotUtilities', () => {
   });
 
   it('Test arrayToMatrix', () => {
-    const array = [ 0, 10, 0, 15, 20, 16, 9, 5, 17 ];
+    const array = [0, 10, 0, 15, 20, 16, 9, 5, 17];
     const matrix = plotUtilities.arrayToMatrix(array, 3);
-    expect(matrix).toStrictEqual([[0, 10, 0], [15, 20, 16], [9, 5, 17]]);
+    expect(matrix).toStrictEqual([
+      [0, 10, 0],
+      [15, 20, 16],
+      [9, 5, 17],
+    ]);
   });
 
   it('Test Zoom same as Image size', () => {
@@ -117,7 +125,7 @@ describe('PlotUtilities', () => {
     expect(result).toBe(true);
   });
 
-  it('Test rounding of rectangular selection',  () => {
+  it('Test rounding of rectangular selection', () => {
     const rectangleSelection = new ShapeSelection();
     rectangleSelection.x0 = 23.55;
     rectangleSelection.x1 = 67.5055;
@@ -130,7 +138,7 @@ describe('PlotUtilities', () => {
     expect(roundedRectangle.y1).toBe(77);
   });
 
-  it('Test rounding of polygon selection',  () => {
+  it('Test rounding of polygon selection', () => {
     const polygonSelection = new ShapeSelection();
     polygonSelection.path = 'M45.6663,87.1224L677.1099,590.0567L12.789,98.0004Z';
     const roundedPolygon = plotUtilities.snapRegion(polygonSelection);
@@ -142,31 +150,32 @@ describe('PlotUtilities', () => {
     expect(plotUtilities.round(list)).toEqual([3, 5, 6, 5]);
   });
 
-  it('Test getPolygon', ()=> {
+  it('Test getPolygon', () => {
     // test shape
     const shape = { type: 'path', path: 'M45.6663,87.1224L677.1099,590.0567L12.789,98.0004Z' };
     const resultPoly1 = plotUtilities.getPolygon(shape);
     const expectedPoly1 = new Polygon();
     expectedPoly1.npoints = 3;
-    expectedPoly1.xpoints = [ 46, 677, 13 ];
-    expectedPoly1.ypoints = [ 87, 590, 98 ];
+    expectedPoly1.xpoints = [46, 677, 13];
+    expectedPoly1.ypoints = [87, 590, 98];
     expect(resultPoly1).toEqual(expectedPoly1);
     // test rectangle
     const rectangle = { type: 'rect', x0: 10.15, x1: 15, y0: 20, y1: 25.7 };
     const resultPoly2 = plotUtilities.getPolygon(rectangle);
     const expectedPoly2 = new Polygon();
     expectedPoly2.npoints = 4;
-    expectedPoly2.xpoints = [ 10, 15, 15, 10 ];
-    expectedPoly2.ypoints = [ 26, 26, 20, 20 ];
+    expectedPoly2.xpoints = [10, 15, 15, 10];
+    expectedPoly2.ypoints = [26, 26, 20, 20];
     expect(resultPoly2).toEqual(expectedPoly2);
   });
 
   it('Test importROIsFromGeoJson', () => {
-    const geoJson = '{ "type": "FeatureCollection", "features": [ { "type": "Feature", "id": "188c53c6-acfc-4088-8099-1831971e3632", "geometry": { "type": "Polygon", "coordinates": [[[ 403, 1123 ], [ 455, 1123 ], [ 455, 1162 ], [ 403, 1162 ], [ 403, 1123 ]]]}, "properties": { "objectType": "annotation", "classification": { "name": "Two-cell-embryo", "color": [ 0, 0, 255 ]}}}, { "type": "Feature", "id": "a829812c-a03b-4a92-937f-88d9e12ad6a0", "geometry": { "type": "Polygon", "coordinates": [[[ 352, 334 ], [ 352, 336 ], [ 350, 338 ], [ 349, 338 ], [ 343, 344 ], [ 340, 344 ], [ 340, 357 ], [ 343, 357 ], [ 352, 334 ]]]}, "properties": { "objectType": "annotation", "classification": { "name": "Two-cell-embryo", "color": [ 0, 0, 255 ] }}}]}';
+    const geoJson =
+      '{ "type": "FeatureCollection", "features": [ { "type": "Feature", "id": "188c53c6-acfc-4088-8099-1831971e3632", "geometry": { "type": "Polygon", "coordinates": [[[ 403, 1123 ], [ 455, 1123 ], [ 455, 1162 ], [ 403, 1162 ], [ 403, 1123 ]]]}, "properties": { "objectType": "annotation", "classification": { "name": "Two-cell-embryo", "color": [ 0, 0, 255 ]}}}, { "type": "Feature", "id": "a829812c-a03b-4a92-937f-88d9e12ad6a0", "geometry": { "type": "Polygon", "coordinates": [[[ 352, 334 ], [ 352, 336 ], [ 350, 338 ], [ 349, 338 ], [ 343, 344 ], [ 340, 344 ], [ 340, 357 ], [ 343, 357 ], [ 352, 334 ]]]}, "properties": { "objectType": "annotation", "classification": { "name": "Two-cell-embryo", "color": [ 0, 0, 255 ] }}}]}';
     const result = plotUtilities.importROIsFromGeoJson(geoJson);
     const region1 = new Region();
     region1.label = 'Two-cell-embryo';
-    region1.name = 'shape0'
+    region1.name = 'shape0';
     region1.bounds = new Rectangle();
     region1.bounds.x = 403;
     region1.bounds.y = 1123;
@@ -175,13 +184,21 @@ describe('PlotUtilities', () => {
     region1.color = '#0000ff';
     const region2 = new Region();
     region2.label = 'Two-cell-embryo';
-    region2.name = 'shape1'
+    region2.name = 'shape1';
     region2.bounds = new Polygon();
     region2.bounds.npoints = 8;
-    region2.bounds.xpoints = [ 352, 352, 350, 349, 343, 340, 340, 343 ];
-    region2.bounds.ypoints = [ 334, 336, 338, 338, 344, 344, 357, 357 ];
-    region2.bounds.coordinates = [[ 352, 334 ], [ 352, 336 ], [ 350, 338 ], [ 349, 338 ],
-      [ 343, 344 ], [ 340, 344 ], [ 340, 357 ], [ 343, 357 ]];
+    region2.bounds.xpoints = [352, 352, 350, 349, 343, 340, 340, 343];
+    region2.bounds.ypoints = [334, 336, 338, 338, 344, 344, 357, 357];
+    region2.bounds.coordinates = [
+      [352, 334],
+      [352, 336],
+      [350, 338],
+      [349, 338],
+      [343, 344],
+      [340, 344],
+      [340, 357],
+      [343, 357],
+    ];
     region2.color = '#0000ff';
     expect(result).toEqual([region1, region2]);
   });
@@ -202,7 +219,8 @@ describe('PlotUtilities', () => {
     regions.push(region2);
 
     const result = plotUtilities.exportROIsToGeoJson(regions);
-    const expected = '{"features":[{"type":"Feature","properties":{"classification":{"name":"region1","color":[0,0,0]}},"geometry":{"type":"Polygon","coordinates":[[[0,0],[0,0],[0,0],[0,0],[0,0]]]}},{"type":"Feature","properties":{"classification":{"name":"region2","color":[0,0,0]}},"geometry":{"type":"Polygon","coordinates":[[null]]}}],"type":"FeatureCollection"}';
+    const expected =
+      '{"features":[{"type":"Feature","properties":{"classification":{"name":"region1","color":[0,0,0]}},"geometry":{"type":"Polygon","coordinates":[[[0,0],[0,0],[0,0],[0,0],[0,0]]]}},{"type":"Feature","properties":{"classification":{"name":"region2","color":[0,0,0]}},"geometry":{"type":"Polygon","coordinates":[[null]]}}],"type":"FeatureCollection"}';
     expect(result).toEqual(expected);
   });
 
@@ -216,7 +234,8 @@ describe('PlotUtilities', () => {
   });
 
   it('Test importROIsFromGeoJson with polyline (LineString)', () => {
-    const geoJson = '{"features":[{"type":"Feature","properties":{"classification":{"name":"legend","color":[0,255,255]}},"geometry":{"type":"LineString","coordinates":[[4067,4802],[4105,5150],[4260,5421],[4512,6388],[4724,6582],[4995,6717],[5691,6737],[6233,6640],[6562,6543],[6620,6427],[6562,6253],[5421,4725],[5363,4628]]}}],"type":"FeatureCollection"}';
+    const geoJson =
+      '{"features":[{"type":"Feature","properties":{"classification":{"name":"legend","color":[0,255,255]}},"geometry":{"type":"LineString","coordinates":[[4067,4802],[4105,5150],[4260,5421],[4512,6388],[4724,6582],[4995,6717],[5691,6737],[6233,6640],[6562,6543],[6620,6427],[6562,6253],[5421,4725],[5363,4628]]}}],"type":"FeatureCollection"}';
     const result = plotUtilities.importROIsFromGeoJson(geoJson);
     expect(result.length).toBe(1);
     const region = result[0];
@@ -230,9 +249,19 @@ describe('PlotUtilities', () => {
     expect(poly.xpoints).toEqual([4067, 4105, 4260, 4512, 4724, 4995, 5691, 6233, 6562, 6620, 6562, 5421, 5363]);
     expect(poly.ypoints).toEqual([4802, 5150, 5421, 6388, 6582, 6717, 6737, 6640, 6543, 6427, 6253, 4725, 4628]);
     expect(poly.coordinates).toEqual([
-      [4067, 4802], [4105, 5150], [4260, 5421], [4512, 6388], [4724, 6582],
-      [4995, 6717], [5691, 6737], [6233, 6640], [6562, 6543], [6620, 6427],
-      [6562, 6253], [5421, 4725], [5363, 4628]
+      [4067, 4802],
+      [4105, 5150],
+      [4260, 5421],
+      [4512, 6388],
+      [4724, 6582],
+      [4995, 6717],
+      [5691, 6737],
+      [6233, 6640],
+      [6562, 6543],
+      [6620, 6427],
+      [6562, 6253],
+      [5421, 4725],
+      [5363, 4628],
     ]);
   });
 
@@ -247,9 +276,19 @@ describe('PlotUtilities', () => {
     poly.xpoints = [4067, 4105, 4260, 4512, 4724, 4995, 5691, 6233, 6562, 6620, 6562, 5421, 5363];
     poly.ypoints = [4802, 5150, 5421, 6388, 6582, 6717, 6737, 6640, 6543, 6427, 6253, 4725, 4628];
     poly.coordinates = [
-      [4067, 4802], [4105, 5150], [4260, 5421], [4512, 6388], [4724, 6582],
-      [4995, 6717], [5691, 6737], [6233, 6640], [6562, 6543], [6620, 6427],
-      [6562, 6253], [5421, 4725], [5363, 4628]
+      [4067, 4802],
+      [4105, 5150],
+      [4260, 5421],
+      [4512, 6388],
+      [4724, 6582],
+      [4995, 6717],
+      [5691, 6737],
+      [6233, 6640],
+      [6562, 6543],
+      [6620, 6427],
+      [6562, 6253],
+      [5421, 4725],
+      [5363, 4628],
     ];
     region.bounds = poly;
 
@@ -263,9 +302,19 @@ describe('PlotUtilities', () => {
     expect(feature.properties.classification.name).toBe('legend');
     expect(feature.properties.classification.color).toEqual([0, 255, 255]);
     expect(feature.geometry.coordinates).toEqual([
-      [4067, 4802], [4105, 5150], [4260, 5421], [4512, 6388], [4724, 6582],
-      [4995, 6717], [5691, 6737], [6233, 6640], [6562, 6543], [6620, 6427],
-      [6562, 6253], [5421, 4725], [5363, 4628]
+      [4067, 4802],
+      [4105, 5150],
+      [4260, 5421],
+      [4512, 6388],
+      [4724, 6582],
+      [4995, 6717],
+      [5691, 6737],
+      [6233, 6640],
+      [6562, 6543],
+      [6620, 6427],
+      [6562, 6253],
+      [5421, 4725],
+      [5363, 4628],
     ]);
   });
 
@@ -280,7 +329,12 @@ describe('PlotUtilities', () => {
     poly.npoints = 4;
     poly.xpoints = [0, 30, 30, 0];
     poly.ypoints = [0, 0, 30, 30];
-    poly.coordinates = [[0, 0], [30, 0], [30, 30], [0, 30]];
+    poly.coordinates = [
+      [0, 0],
+      [30, 0],
+      [30, 30],
+      [0, 30],
+    ];
     region.bounds = poly;
 
     const json = plotUtilities.exportROIsToGeoJson([region]);
@@ -291,7 +345,12 @@ describe('PlotUtilities', () => {
     expect(feature.geometry.type).toBe('Polygon');
     expect(feature.geometry.coordinates[0].length).toBeGreaterThan(5);
     expect(feature.properties.isBezier).toBe(true);
-    expect(feature.properties.bezierAnchors).toEqual([[0, 0], [30, 0], [30, 30], [0, 30]]);
+    expect(feature.properties.bezierAnchors).toEqual([
+      [0, 0],
+      [30, 0],
+      [30, 30],
+      [0, 30],
+    ]);
 
     // Re-import reconstructs the editable bezier region from the anchors.
     const back = plotUtilities.importROIsFromGeoJson(json)[0];
@@ -314,10 +373,25 @@ describe('PlotUtilities', () => {
     poly.npoints = 4;
     poly.xpoints = [0, 30, 30, 0];
     poly.ypoints = [0, 0, 30, 30];
-    poly.coordinates = [[0, 0], [30, 0], [30, 30], [0, 30]];
+    poly.coordinates = [
+      [0, 0],
+      [30, 0],
+      [30, 30],
+      [0, 30],
+    ];
     // A hand-edited (non-default) handle on vertex 0.
-    poly.handlesIn = [[-5, -2], [0, 0], [0, 0], [0, 0]];
-    poly.handlesOut = [[8, 3], [0, 0], [0, 0], [0, 0]];
+    poly.handlesIn = [
+      [-5, -2],
+      [0, 0],
+      [0, 0],
+      [0, 0],
+    ];
+    poly.handlesOut = [
+      [8, 3],
+      [0, 0],
+      [0, 0],
+      [0, 0],
+    ];
     region.bounds = poly;
 
     const json = plotUtilities.exportROIsToGeoJson([region]);
@@ -341,8 +415,20 @@ describe('PlotUtilities', () => {
     poly.npoints = 4;
     poly.xpoints = [0, 30, 30, 0];
     poly.ypoints = [0, 0, 30, 30];
-    poly.coordinates = [[0, 0], [30, 0], [30, 30], [0, 30]];
-    poly.holes = [[[10, 10], [20, 10], [20, 20], [10, 20]]];
+    poly.coordinates = [
+      [0, 0],
+      [30, 0],
+      [30, 30],
+      [0, 30],
+    ];
+    poly.holes = [
+      [
+        [10, 10],
+        [20, 10],
+        [20, 20],
+        [10, 20],
+      ],
+    ];
     region.bounds = poly;
 
     const json = plotUtilities.exportROIsToGeoJson([region]);
@@ -355,7 +441,12 @@ describe('PlotUtilities', () => {
     const back = plotUtilities.importROIsFromGeoJson(json)[0].bounds as Polygon;
     expect(back).toBeInstanceOf(Polygon);
     expect(back.holes?.length).toBe(1);
-    expect(back.holes![0]).toEqual([[10, 10], [20, 10], [20, 20], [10, 20]]);
+    expect(back.holes![0]).toEqual([
+      [10, 10],
+      [20, 10],
+      [20, 20],
+      [10, 20],
+    ]);
   });
 
   it('a square with a hole is not collapsed to a rectangle on import — jit-ui#85', () => {
@@ -363,17 +454,31 @@ describe('PlotUtilities', () => {
     // the extra hole ring must keep it a Polygon.
     const geoJson = JSON.stringify({
       type: 'FeatureCollection',
-      features: [{
-        type: 'Feature',
-        properties: { classification: { name: 'legend', color: [0, 255, 255] } },
-        geometry: {
-          type: 'Polygon',
-          coordinates: [
-            [[0, 0], [30, 0], [30, 30], [0, 30], [0, 0]],
-            [[10, 10], [20, 10], [20, 20], [10, 20], [10, 10]],
-          ],
+      features: [
+        {
+          type: 'Feature',
+          properties: { classification: { name: 'legend', color: [0, 255, 255] } },
+          geometry: {
+            type: 'Polygon',
+            coordinates: [
+              [
+                [0, 0],
+                [30, 0],
+                [30, 30],
+                [0, 30],
+                [0, 0],
+              ],
+              [
+                [10, 10],
+                [20, 10],
+                [20, 20],
+                [10, 20],
+                [10, 10],
+              ],
+            ],
+          },
         },
-      }],
+      ],
     });
     const back = plotUtilities.importROIsFromGeoJson(geoJson)[0].bounds as Polygon;
     expect(back).toBeInstanceOf(Polygon);
@@ -395,14 +500,24 @@ describe('PlotUtilities', () => {
     region.label = 'legend';
     region.color = '#00ffff';
     const mp = new MultiPolygon();
-    mp.polygons = [part(0, [[[2, 2], [5, 2], [5, 5], [2, 5]]]), part(20)];
+    mp.polygons = [
+      part(0, [
+        [
+          [2, 2],
+          [5, 2],
+          [5, 5],
+          [2, 5],
+        ],
+      ]),
+      part(20),
+    ];
     region.bounds = mp;
 
     const json = plotUtilities.exportROIsToGeoJson([region]);
     const feature = JSON.parse(json).features[0];
     expect(feature.geometry.type).toBe('MultiPolygon');
-    expect(feature.geometry.coordinates.length).toBe(2);          // two parts
-    expect(feature.geometry.coordinates[0].length).toBe(2);       // part A: exterior + hole
+    expect(feature.geometry.coordinates.length).toBe(2); // two parts
+    expect(feature.geometry.coordinates[0].length).toBe(2); // part A: exterior + hole
 
     const back = plotUtilities.importROIsFromGeoJson(json)[0].bounds as MultiPolygon;
     expect(back).toBeInstanceOf(MultiPolygon);
@@ -422,24 +537,55 @@ describe('PlotUtilities', () => {
       const geoJson = JSON.stringify({
         type: 'FeatureCollection',
         features: [
-          { type: 'Feature', properties: { classification: { name: 'A', color: [1, 2, 3] } },
-            geometry: { type: 'Polygon', coordinates: [[[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]]],
-              plane: { c: -1, z: 3, t: 0 } } },
-          { type: 'Feature', properties: { classification: { name: 'B', color: [1, 2, 3] } },
-            geometry: { type: 'Polygon', coordinates: [[[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]]] } },
+          {
+            type: 'Feature',
+            properties: { classification: { name: 'A', color: [1, 2, 3] } },
+            geometry: {
+              type: 'Polygon',
+              coordinates: [
+                [
+                  [0, 0],
+                  [4, 0],
+                  [4, 4],
+                  [0, 4],
+                  [0, 0],
+                ],
+              ],
+              plane: { c: -1, z: 3, t: 0 },
+            },
+          },
+          {
+            type: 'Feature',
+            properties: { classification: { name: 'B', color: [1, 2, 3] } },
+            geometry: {
+              type: 'Polygon',
+              coordinates: [
+                [
+                  [0, 0],
+                  [4, 0],
+                  [4, 4],
+                  [0, 4],
+                  [0, 0],
+                ],
+              ],
+            },
+          },
         ],
       });
       const regions = plotUtilities.importROIsFromGeoJson(geoJson);
-      expect(regions[0].z).toBe(3);       // from geometry.plane.z
-      expect(regions[1].z).toBe(0);       // no plane key → default slice 0
+      expect(regions[0].z).toBe(3); // from geometry.plane.z
+      expect(regions[1].z).toBe(0); // no plane key → default slice 0
     });
 
     it('exports geometry.plane only for a non-default slice (QuPath omit-default)', () => {
       const onSlice2 = new Region();
-      onSlice2.name = 'r2'; onSlice2.color = '#ff0000'; onSlice2.z = 2;
+      onSlice2.name = 'r2';
+      onSlice2.color = '#ff0000';
+      onSlice2.z = 2;
       onSlice2.bounds = Object.assign(new Rectangle(), { x: 0, y: 0, width: 4, height: 4 });
       const onSlice0 = new Region();
-      onSlice0.name = 'r0'; onSlice0.color = '#ff0000'; // z defaults to 0
+      onSlice0.name = 'r0';
+      onSlice0.color = '#ff0000'; // z defaults to 0
       onSlice0.bounds = Object.assign(new Rectangle(), { x: 0, y: 0, width: 4, height: 4 });
 
       const parsed = JSON.parse(plotUtilities.exportROIsToGeoJson([onSlice2, onSlice0]));
@@ -451,7 +597,10 @@ describe('PlotUtilities', () => {
 
     it('round-trips the slice index through export → import', () => {
       const region = new Region();
-      region.name = 'r'; region.color = '#00ff00'; region.label = 'Tumour'; region.z = 5;
+      region.name = 'r';
+      region.color = '#00ff00';
+      region.label = 'Tumour';
+      region.z = 5;
       region.bounds = Object.assign(new Rectangle(), { x: 1, y: 1, width: 2, height: 2 });
       const back = plotUtilities.importROIsFromGeoJson(plotUtilities.exportROIsToGeoJson([region]));
       expect(back[0].z).toBe(5);
@@ -494,13 +643,17 @@ describe('PlotUtilities', () => {
     region2.bounds.npoints = 4;
     region2.bounds.xpoints = [10, 40, 40, 10];
     region2.bounds.ypoints = [20, 20, 60, 60];
-    region2.bounds.coordinates = [[10, 20], [40, 20], [40, 60], [10, 60]];
+    region2.bounds.coordinates = [
+      [10, 20],
+      [40, 20],
+      [40, 60],
+      [10, 60],
+    ];
     const shape2: ShapeSelection = region2.getShape(true);
     expect(shape2.name).toBe('region1');
     expect(shape2.type).toBe('path');
     expect(shape2.path).toBe('M10,20L40,20L40,60L10,60Z');
-
-  })
+  });
 
   it('test Shape getRegion', () => {
     // Test for Rectangle bounds
@@ -536,13 +689,20 @@ describe('PlotUtilities', () => {
     expect((<Polygon>region2.bounds).npoints).toBe(4);
     expect((<Polygon>region2.bounds).xpoints).toEqual([10, 40, 40, 10]);
     expect((<Polygon>region2.bounds).ypoints).toEqual([20, 20, 60, 60]);
-    expect((<Polygon>region2.bounds).coordinates).toEqual([[10, 20], [40, 20], [40, 60], [10, 60]]);
-  })
+    expect((<Polygon>region2.bounds).coordinates).toEqual([
+      [10, 20],
+      [40, 20],
+      [40, 60],
+      [10, 60],
+    ]);
+  });
 
-  it('getDomRectangle measures the plot div\'s own parent (CORE-24)', () => {
+  it("getDomRectangle measures the plot div's own parent (CORE-24)", () => {
     document.body.innerHTML = '<section id="outer"><div id="host"><div id="plot"></div></div></section>';
     const host = document.getElementById('host')!;
-    jest.spyOn(host, 'getBoundingClientRect').mockReturnValue({ x: 1.4, y: 2.6, width: 300.2, height: 199.7 } as DOMRect);
+    jest
+      .spyOn(host, 'getBoundingClientRect')
+      .mockReturnValue({ x: 1.4, y: 2.6, width: 300.2, height: 199.7 } as DOMRect);
     const r = plotUtilities.getDomRectangle('plot');
     expect([r.x, r.y, r.width, r.height]).toEqual([1, 3, 300, 200]);
     // No such element → the empty Rectangle.

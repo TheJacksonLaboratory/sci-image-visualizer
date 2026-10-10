@@ -1,5 +1,8 @@
 import type {
-  CategoricalColumnMeta, SpatialColumnMeta, SpatialDataset, SpatialMarkerGenes,
+  CategoricalColumnMeta,
+  SpatialColumnMeta,
+  SpatialDataset,
+  SpatialMarkerGenes,
 } from '../contracts/spatial-dataset.contract';
 import type { SpatialCategoricalView } from '../contracts/visualizer.contract';
 import type { ColormapValue, SpatialViewState, TranscriptGlyphName } from '../contracts/display-types';
@@ -68,9 +71,10 @@ export function parseGeneGroups(text: string): { name: string; genes: string[] }
 
 /** `name — 2 categories` / `name — counts`: a column as the pickers list it. */
 export function columnLabel(c: SpatialColumnMeta): string {
-  const kind = c.kind === 'categorical'
-    ? `${(c as CategoricalColumnMeta).categories.length} categories`
-    : c.unit ?? 'continuous';
+  const kind =
+    c.kind === 'categorical'
+      ? `${(c as CategoricalColumnMeta).categories.length} categories`
+      : (c.unit ?? 'continuous');
   return `${c.name} — ${kind}`;
 }
 
@@ -98,8 +102,9 @@ export interface TileOptions {
 /** {@link TileOptions} for `ds`: short labels, cell set first, "Both" when there are two —
  *  as Xenium Explorer. */
 export function tileOptions(ds: SpatialDataset | null): TileOptions {
-  const sets = [...(ds?.polygonTiles?.sets ?? [])]
-    .sort((a, b) => (a.name === 'cell' ? -1 : b.name === 'cell' ? 1 : 0));
+  const sets = [...(ds?.polygonTiles?.sets ?? [])].sort((a, b) =>
+    a.name === 'cell' ? -1 : b.name === 'cell' ? 1 : 0,
+  );
   const has = (name: string) => !!ds?.columns.some((c) => c.name === name);
   return {
     cellSetOptions: [
@@ -107,16 +112,20 @@ export function tileOptions(ds: SpatialDataset | null): TileOptions {
       ...(sets.length > 1 ? [{ label: 'Both', value: 'both' }] : []),
     ],
     transcriptModeOptions: [
-      ...(ds?.transcriptTiles ? [
-        { label: 'Points', value: 'circles' as const },
-        { label: 'Icons', value: 'glyphs' as const },
-      ] : []),
+      ...(ds?.transcriptTiles
+        ? [
+            { label: 'Points', value: 'circles' as const },
+            { label: 'Icons', value: 'glyphs' as const },
+          ]
+        : []),
       ...(ds?.density ? [{ label: 'Density Map', value: 'density' as const }] : []),
     ],
     cellColorOptions: [
       { label: 'Group Affiliation', value: 'group' },
       ...(ds?.features ? [{ label: 'Gene Expression', value: 'gene' as const }] : []),
-      ...(has('transcript_density') ? [{ label: 'Transcript Density Map', value: 'transcriptDensity' as const }] : []),
+      ...(has('transcript_density')
+        ? [{ label: 'Transcript Density Map', value: 'transcriptDensity' as const }]
+        : []),
       { label: 'Single Color', value: 'single' },
       ...(has('segmentation_method') ? [{ label: 'Segmentation Method', value: 'segmentation' as const }] : []),
     ],
@@ -177,9 +186,7 @@ export function familyMembers(ds: SpatialDataset | null, id: string): Categorica
 /** Variants of the active column's family (k = 2…10), or none when it has no family. */
 export function groupVariantOptions(ds: SpatialDataset | null, column: string | null): PanelOption<string>[] {
   const family = categoricalMeta(ds, column)?.family;
-  return family
-    ? familyMembers(ds, family.id).map((c) => ({ label: c.family!.variant, value: c.name }))
-    : [];
+  return family ? familyMembers(ds, family.id).map((c) => ({ label: c.family!.variant, value: c.name })) : [];
 }
 
 /** One row of the groups list: a category with its colour and cell count. */
@@ -191,11 +198,13 @@ export interface GroupRow {
 
 /** A grouping's categories with colours and cell counts, largest first, and their total. */
 export function countGroupRows(v: Pick<SpatialCategoricalView, 'categories' | 'colors' | 'codes'>): {
-  rows: GroupRow[]; total: number;
+  rows: GroupRow[];
+  total: number;
 } {
   const counts = new Uint32Array(v.categories.length);
   for (const c of v.codes) if (c < counts.length) counts[c]++;
-  const rows = v.categories.map((label, i) => ({ label, color: v.colors[i] ?? '#999', count: counts[i] }))
+  const rows = v.categories
+    .map((label, i) => ({ label, color: v.colors[i] ?? '#999', count: counts[i] }))
     .sort((a, b) => b.count - a.count);
   return { rows, total: rows.reduce((n, r) => n + r.count, 0) };
 }
@@ -218,7 +227,8 @@ export interface GeneTreeNode {
 
 /** The selected genes as Explorer's tree: named groups, then the ungrouped ones. */
 export function buildGeneTree(
-  selected: readonly string[], groups: readonly { name: string; genes: readonly string[] }[],
+  selected: readonly string[],
+  groups: readonly { name: string; genes: readonly string[] }[],
 ): GeneTreeNode[] {
   const chosen = new Set(selected);
   const grouped = new Set<string>();
@@ -247,7 +257,8 @@ export function markerColumnOptions(columns: readonly SpatialColumnMeta[] | unde
  * clusters left with no gene are dropped.
  */
 export function markerGeneGroups(
-  result: Pick<SpatialMarkerGenes, 'groups'>, picked: ReadonlySet<string>,
+  result: Pick<SpatialMarkerGenes, 'groups'>,
+  picked: ReadonlySet<string>,
 ): { name: string; genes: string[] }[] {
   const best = new Map<string, { group: string; score: number }>();
   for (const g of result.groups) {
@@ -268,7 +279,8 @@ export function markerGeneGroups(
 
 /** `groups` merged into the view's gene groups (replacing any of the same name). */
 export function withGeneGroups(
-  view: Pick<SpatialViewState, 'transcriptGeneGroups'>, groups: { name: string; genes: string[] }[],
+  view: Pick<SpatialViewState, 'transcriptGeneGroups'>,
+  groups: { name: string; genes: string[] }[],
 ): SpatialViewState['transcriptGeneGroups'] {
   const names = new Set(groups.map((g) => g.name));
   return [...view.transcriptGeneGroups.filter((g) => !names.has(g.name)), ...groups];
@@ -320,7 +332,9 @@ export function gradientCss(lut: readonly Rgb[], steps = 16): string {
  * black-to-white ramp while the canvas drew Viridis, which makes the key worse than none.
  */
 export function continuousColorBarCss(
-  colormap: unknown, reverse: boolean, override: ColormapValue | null,
+  colormap: unknown,
+  reverse: boolean,
+  override: ColormapValue | null,
 ): string {
   return gradientCss(spatialContinuousLut(colormap, reverse, override));
 }
@@ -348,7 +362,8 @@ export function sectionLabel(sections: ArrayLike<number> | null, at: number | nu
 export function allGenesPreparingNote(ds: SpatialDataset | null): string | null {
   const st = ds?.transcriptBinsStatus;
   if (!st || ds?.transcriptBins) return null;
-  if (st.state === 'failed') return `"All genes" is unavailable: preparing it failed (${st.message ?? 'unknown error'}).`;
+  if (st.state === 'failed')
+    return `"All genes" is unavailable: preparing it failed (${st.message ?? 'unknown error'}).`;
   const pct = st.total ? ` — ${Math.floor((100 * (st.done ?? 0)) / st.total)}% when this dataset was opened` : '';
   return `"All genes" is being prepared on the server${pct}; reopen the dataset once it is done.`;
 }

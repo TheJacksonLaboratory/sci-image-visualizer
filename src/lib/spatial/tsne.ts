@@ -44,9 +44,7 @@ const MOMENTUM_LATE = 0.8;
 
 /** The all-pairs term: `Σ_j w²(y_i − y_j)` per point, and `Z = Σ_{i≠j} w`. */
 export interface Repulsion {
-  compute(
-    y: Float64Array, nObs: number, dims: number,
-  ): Promise<{ rep: Float64Array; z: number }>;
+  compute(y: Float64Array, nObs: number, dims: number): Promise<{ rep: Float64Array; z: number }>;
   dispose?(): void;
 }
 
@@ -124,7 +122,10 @@ export const plainRepulsion: Repulsion = {
  * candidate costs one comparison. A heap would pay log(k) on all of them.
  */
 export function knnGraph(
-  x: Float32Array | Float64Array, nObs: number, nDims: number, k: number,
+  x: Float32Array | Float64Array,
+  nObs: number,
+  nDims: number,
+  k: number,
 ): { indices: Int32Array; distances: Float32Array; k: number } {
   const indices = new Int32Array(nObs * k);
   const distances = new Float32Array(nObs * k);
@@ -185,7 +186,9 @@ export function knnGraph(
  * the search wandered; only a tight perplexity, which needs a large β, revealed it.
  */
 export function conditionalAffinities(
-  knn: { distances: Float32Array; k: number }, nObs: number, perplexity: number,
+  knn: { distances: Float32Array; k: number },
+  nObs: number,
+  perplexity: number,
 ): Float64Array {
   const { distances, k } = knn;
   const target = Math.log(perplexity);
@@ -278,12 +281,20 @@ export function affinities(
 
 /** Embed `x` (row-major `nObs x nDims`) into `dims` dimensions. */
 export async function tsneEmbed(
-  x: Float32Array | Float64Array, nObs: number, nDims: number, options: TsneOptions = {},
+  x: Float32Array | Float64Array,
+  nObs: number,
+  nDims: number,
+  options: TsneOptions = {},
 ): Promise<TsneResult> {
   const {
-    dims = 2, perplexity = 30, iterations = 1000, seed = 0,
+    dims = 2,
+    perplexity = 30,
+    iterations = 1000,
+    seed = 0,
     learningRate = Math.max(200, nObs / 12),
-    repulsion = plainRepulsion, onProgress, shouldStop,
+    repulsion = plainRepulsion,
+    onProgress,
+    shouldStop,
   } = options;
 
   // Perplexity cannot exceed the neighbourhood it is calibrated over, and n-1 caps both.
@@ -294,7 +305,10 @@ export async function tsneEmbed(
   // cannot even receive a Cancel. So stop before it if one arrived while the GPU was
   // starting, and yield after it so one sent during it is seen before the first iteration.
   const stopped = (): TsneResult => ({
-    embedding: new Float64Array(nObs * dims), perplexity: effective, neighbours: k, completed: false,
+    embedding: new Float64Array(nObs * dims),
+    perplexity: effective,
+    neighbours: k,
+    completed: false,
   });
   if (shouldStop?.()) return stopped();
   const knn = knnGraph(x, nObs, nDims, k);
@@ -316,7 +330,10 @@ export async function tsneEmbed(
   const exaggerationIters = Math.min(EXAGGERATION_ITERS, Math.floor(iterations / 2));
   let completed = true;
   for (let iter = 0; iter < iterations; iter++) {
-    if (shouldStop?.()) { completed = false; break; }
+    if (shouldStop?.()) {
+      completed = false;
+      break;
+    }
     const exaggerate = iter < exaggerationIters ? EXAGGERATION : 1;
     const momentum = iter < exaggerationIters ? MOMENTUM_EARLY : MOMENTUM_LATE;
 
@@ -344,7 +361,7 @@ export async function tsneEmbed(
     // and shrink where it flips, which lets one learning rate serve both the early
     // spreading and the late settling.
     for (let i = 0; i < y.length; i++) {
-      const sameSign = (grad[i] > 0) === (velocity[i] > 0);
+      const sameSign = grad[i] > 0 === velocity[i] > 0;
       gains[i] = Math.max(0.01, sameSign ? gains[i] * 0.8 : gains[i] + 0.2);
       velocity[i] = momentum * velocity[i] - learningRate * gains[i] * grad[i];
       y[i] += velocity[i];

@@ -1,17 +1,25 @@
 import { buildOsdTileSource, planTiledMount } from './osd-tile-source';
 import { TileDescriptor } from '../tile-server';
 
-const desc = (over: Partial<TileDescriptor> = {}): TileDescriptor => ({
-  width: 1000, height: 700, tileSize: 256, z: 1, channels: 1, realLevels: 2,
-  // Two real Bio-Formats levels, then one synthetic overview.
-  levels: [
-    { res: 0, width: 1000, height: 700 }, { res: 1, width: 500, height: 351 }, { res: 2, width: 125, height: 88 },
-  ],
-  ...over,
-} as TileDescriptor);
+const desc = (over: Partial<TileDescriptor> = {}): TileDescriptor =>
+  ({
+    width: 1000,
+    height: 700,
+    tileSize: 256,
+    z: 1,
+    channels: 1,
+    realLevels: 2,
+    // Two real Bio-Formats levels, then one synthetic overview.
+    levels: [
+      { res: 0, width: 1000, height: 700 },
+      { res: 1, width: 500, height: 351 },
+      { res: 2, width: 125, height: 88 },
+    ],
+    ...over,
+  }) as TileDescriptor;
 
 describe('planTiledMount', () => {
-  it('counts the coarsest REAL level\'s tiles, ignoring synthetic overviews', () => {
+  it("counts the coarsest REAL level's tiles, ignoring synthetic overviews", () => {
     expect(planTiledMount(desc())).toEqual({ realLevels: 2, multiChannel: false, coarseTiles: 2 * 2 });
   });
 
@@ -43,13 +51,13 @@ describe('buildOsdTileSource', () => {
 
   it('maps OSD levels (coarsest first) onto backend resolutions (full-res first)', () => {
     const ts = build();
-    expect(ts.getLevelScale(2)).toBe(1);        // res 0
-    expect(ts.getLevelScale(0)).toBe(0.125);    // res 2
+    expect(ts.getLevelScale(2)).toBe(1); // res 0
+    expect(ts.getLevelScale(0)).toBe(0.125); // res 2
     expect(ts.getTileUrl(2, 3, 1)).toContain('res=0');
     expect(ts.getTileUrl(0, 0, 0)).toContain('res=2');
   });
 
-  it('counts tiles from each level\'s own size, so it never requests out-of-range tiles', () => {
+  it("counts tiles from each level's own size, so it never requests out-of-range tiles", () => {
     const ts = build();
     expect(ts.getNumTiles(1)).toMatchObject({ x: 2, y: 2 }); // 500x351 at 256
     expect(ts.getNumTiles(9)).toMatchObject({ x: 0, y: 0 });

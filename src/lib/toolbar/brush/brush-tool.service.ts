@@ -105,9 +105,8 @@ export class BrushTool implements ICanvasTool<BrushOptions> {
   setOptions(options: BrushOptions = {}) {
     if (options.size != null) this.setSize(options.size);
     if (!('label' in options) && !('color' in options)) return;
-    const next = options.label != null || options.color != null
-      ? { label: options.label, color: options.color }
-      : null;
+    const next =
+      options.label != null || options.color != null ? { label: options.label, color: options.color } : null;
     if (next?.label !== this.paintClass?.label || next?.color !== this.paintClass?.color) {
       this.resetStroke();
     }
@@ -269,7 +268,10 @@ export class BrushTool implements ICanvasTool<BrushOptions> {
 
     if (!erase) {
       const ok = this.editor.ensureCovers(
-        Math.max(0, px0), Math.max(0, py0), Math.min(cached.width, px1), Math.min(cached.height, py1),
+        Math.max(0, px0),
+        Math.max(0, py0),
+        Math.min(cached.width, px1),
+        Math.min(cached.height, py1),
       );
       if (!ok) return;
     }

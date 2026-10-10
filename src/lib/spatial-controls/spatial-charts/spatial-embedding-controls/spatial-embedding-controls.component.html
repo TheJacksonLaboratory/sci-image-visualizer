@@ -2,30 +2,49 @@
      against a heatmap is the same argument as a UMAP read against the map. -->
 <div class="sx-controls">
   <!-- A picker only when the dataset publishes more than one embedding. -->
-  <p-dropdown *ngIf="isEmbedding && embeddings.length > 1"
-              [options]="embeddings" optionLabel="label" optionValue="name"
-              [ngModel]="embedding?.name" (ngModelChange)="embeddingChange.emit($event)"
-              appendTo="body"
-              pTooltip="Which embedding to draw" tooltipPosition="top"></p-dropdown>
+  <p-dropdown
+    *ngIf="isEmbedding && embeddings.length > 1"
+    [options]="embeddings"
+    optionLabel="label"
+    optionValue="name"
+    [ngModel]="embedding?.name"
+    (ngModelChange)="embeddingChange.emit($event)"
+    appendTo="body"
+    pTooltip="Which embedding to draw"
+    tooltipPosition="top"
+  ></p-dropdown>
   <!-- Offered only for an embedding this dataset does not publish. It runs in a Web
        Worker on the GPU, so the panel stays usable while it goes. -->
-  <p-button *ngIf="isEmbedding && computable && !computed && !running"
-            icon="pi pi-play" size="small" [text]="true"
-            [label]="'Compute (' + estimateLabel + ')'"
-            pTooltip="Run t-SNE here, in a background worker on the GPU, from this dataset's PCA. The panel stays usable, and it can be cancelled."
-            tooltipPosition="top"
-            (onClick)="compute.emit()"></p-button>
-  <p-button *ngIf="running"
-            icon="pi pi-times" size="small" [text]="true" severity="secondary"
-            label="Cancel" (onClick)="cancel.emit()"></p-button>
-  <p-button [icon]="detached ? 'pi pi-window-minimize' : 'pi pi-external-link'"
-            size="small" [text]="true"
-            [label]="detached ? 'Put back' : 'Detach'"
-            [pTooltip]="detached
-              ? 'Show this chart in the panel again'
-              : 'Open this chart in its own window, alongside this panel'"
-            tooltipPosition="top"
-            (onClick)="detachedToggle.emit()"></p-button>
+  <p-button
+    *ngIf="isEmbedding && computable && !computed && !running"
+    icon="pi pi-play"
+    size="small"
+    [text]="true"
+    [label]="'Compute (' + estimateLabel + ')'"
+    pTooltip="Run t-SNE here, in a background worker on the GPU, from this dataset's PCA. The panel stays usable, and it can be cancelled."
+    tooltipPosition="top"
+    (onClick)="compute.emit()"
+  ></p-button>
+  <p-button
+    *ngIf="running"
+    icon="pi pi-times"
+    size="small"
+    [text]="true"
+    severity="secondary"
+    label="Cancel"
+    (onClick)="cancel.emit()"
+  ></p-button>
+  <p-button
+    [icon]="detached ? 'pi pi-window-minimize' : 'pi pi-external-link'"
+    size="small"
+    [text]="true"
+    [label]="detached ? 'Put back' : 'Detach'"
+    [pTooltip]="
+      detached ? 'Show this chart in the panel again' : 'Open this chart in its own window, alongside this panel'
+    "
+    tooltipPosition="top"
+    (onClick)="detachedToggle.emit()"
+  ></p-button>
 </div>
 
 <!-- Progress while a computation runs. `mode="indeterminate"` until the first report,
@@ -34,9 +53,10 @@
 <div class="sx-compute" *ngIf="running">
   <p-progressBar
     [mode]="state.fraction === null ? 'indeterminate' : 'determinate'"
-    [value]="state.fraction === null ? 0 : (state.fraction * 100)"
+    [value]="state.fraction === null ? 0 : state.fraction * 100"
     [showValue]="state.fraction !== null"
-    [style]="{ height: '0.6rem' }"></p-progressBar>
+    [style]="{ height: '0.6rem' }"
+  ></p-progressBar>
   <small class="sx-hint">
     {{ state.fraction === null ? 'Building the neighbour graph…' : 'Optimising…' }}
     <ng-container *ngIf="state.backend"> on {{ state.backend }}</ng-container>

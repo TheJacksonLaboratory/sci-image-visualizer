@@ -110,7 +110,7 @@ export class PlotlyChartHost {
    * redraw the plot had ever had.
    */
   bindSelection(div: string, handlers: PlotSelectionHandlers): void {
-    const el = document.getElementById(div) as (Plotly.PlotlyHTMLElement | null);
+    const el = document.getElementById(div) as Plotly.PlotlyHTMLElement | null;
     if (!el?.on) return;
     el.removeAllListeners?.('plotly_selected');
     el.removeAllListeners?.('plotly_deselect');
@@ -139,7 +139,7 @@ export class PlotlyChartHost {
    * for an embedding would make the first click on a bar clear the map's selection.
    */
   unbindSelection(div: string): void {
-    const el = document.getElementById(div) as (Plotly.PlotlyHTMLElement | null);
+    const el = document.getElementById(div) as Plotly.PlotlyHTMLElement | null;
     if (!el?.removeAllListeners) return;
     el.removeAllListeners('plotly_selected');
     el.removeAllListeners('plotly_deselect');
@@ -156,13 +156,15 @@ export class PlotlyChartHost {
    */
   liveView(div: string): LivePlotView | null {
     const el = document.getElementById(div);
-    const full = (el as {
-      _fullLayout?: {
-        scene?: { camera?: unknown };
-        xaxis?: { range?: unknown; autorange?: boolean };
-        yaxis?: { range?: unknown; autorange?: boolean };
-      };
-    } | null)?._fullLayout;
+    const full = (
+      el as {
+        _fullLayout?: {
+          scene?: { camera?: unknown };
+          xaxis?: { range?: unknown; autorange?: boolean };
+          yaxis?: { range?: unknown; autorange?: boolean };
+        };
+      } | null
+    )?._fullLayout;
     if (!full) return null;
     if (full.scene?.camera) return { camera: full.scene.camera };
     const zoomed = full.xaxis?.autorange === false && full.yaxis?.autorange === false;

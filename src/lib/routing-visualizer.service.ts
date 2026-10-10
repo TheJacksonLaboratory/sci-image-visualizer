@@ -8,10 +8,27 @@ import { Polygon, Region } from './models/region';
 import { ClassPreset, PresetSet } from './models/class-preset';
 import { PlotlyService } from './implementations/plotly/plotly.service';
 import { OpenSeadragonVisualizerService } from './implementations/osd/openseadragon-visualizer.service';
-import { PlotType, PlotTypeDescriptor, isNapari3d, isNapariScatter, isSpatialOmics, isSpatialOmics3d } from './contracts/plot-type';
 import {
-  IViewerBackend, IVisualizer, LoadedImage, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls,
-  ISurface3dControls, ISpatialControls, IIntensitySampling, IOsdViewOptions, IVolumeResolution,
+  PlotType,
+  PlotTypeDescriptor,
+  isNapari3d,
+  isNapariScatter,
+  isSpatialOmics,
+  isSpatialOmics3d,
+} from './contracts/plot-type';
+import {
+  IViewerBackend,
+  IVisualizer,
+  LoadedImage,
+  PixelData,
+  IntensityProfile,
+  IIsosurfaceControls,
+  IIntensityControls,
+  ISurface3dControls,
+  ISpatialControls,
+  IIntensitySampling,
+  IOsdViewOptions,
+  IVolumeResolution,
 } from './contracts/visualizer.contract';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-data.port';
 import { CanvasToolOptions, ColormapNode, IBrushOptions, IWandOptions } from './contracts/display-types';
@@ -59,7 +76,6 @@ function isProfileRegion(r: { kind?: string } | null | undefined): boolean {
  */
 @Injectable({ providedIn: 'root' })
 export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, IChannelHistogramApi, OnDestroy {
-
   private currentPlotType: PlotType = PlotType.IMAGE;
   private lastRendered: IViewerBackend | null = null;
   /** OSD failed for the *current* render cycle (e.g. a fresh file still caching
@@ -76,18 +92,21 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   /** The div the backends render into (every backend shares it); '' before the first plot. */
   private plotDiv = '';
 
-  constructor(private plotly: PlotlyService,
-              private osd: OpenSeadragonVisualizerService,
-              private napari: NapariVisualizerService,
-              private store: VisualizerStore,
-              @Inject(VIZ_CONFIG) private config: VizConfig,
-              // Optional: a host that serves no spatial-omics data binds nothing,
-              // and `getSpatialControls()` then returns null.
-              private regionStore: RegionStore,
-              private selectionStore: SpatialSelectionStore,
-              private intensity: IntensityProfileService,
-              @Optional() @Inject(SPATIAL_DATA_PORT)
-              private spatialData: SpatialDataPort | null = null) {}
+  constructor(
+    private plotly: PlotlyService,
+    private osd: OpenSeadragonVisualizerService,
+    private napari: NapariVisualizerService,
+    private store: VisualizerStore,
+    @Inject(VIZ_CONFIG) private config: VizConfig,
+    // Optional: a host that serves no spatial-omics data binds nothing,
+    // and `getSpatialControls()` then returns null.
+    private regionStore: RegionStore,
+    private selectionStore: SpatialSelectionStore,
+    private intensity: IntensityProfileService,
+    @Optional()
+    @Inject(SPATIAL_DATA_PORT)
+    private spatialData: SpatialDataPort | null = null,
+  ) {}
 
   private isImageType(t: PlotType): boolean {
     return t === PlotType.IMAGE;
@@ -144,7 +163,9 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
 
   // System capabilities are Plotly's (the full-featured backend) so the UI
   // keeps offering every plot type regardless of which one is on screen.
-  get capabilities(): ViewerCapabilities { return this.plotly.capabilities; }
+  get capabilities(): ViewerCapabilities {
+    return this.plotly.capabilities;
+  }
 
   // ── render / viewport → active renderer ──────────────────────────────
   async load(imageInfo: IImageInfo, zIndex: number, signal?: AbortSignal): Promise<LoadedImage> {
@@ -177,8 +198,11 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   }
 
   /** Try OSD; on failure fall back to Plotly for this image (not permanent — see reset()). */
-  private async loadViaOsdThenPlotly(imageInfo: IImageInfo, zIndex: number,
-                                     signal?: AbortSignal): Promise<LoadedImage> {
+  private async loadViaOsdThenPlotly(
+    imageInfo: IImageInfo,
+    zIndex: number,
+    signal?: AbortSignal,
+  ): Promise<LoadedImage> {
     try {
       return await this.osd.load(imageInfo, zIndex, signal);
     } catch (err) {
@@ -188,8 +212,14 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       return this.plotly.load(imageInfo, zIndex, signal);
     }
   }
-  plot(plotDiv: string, imageLoaded: unknown, imageInfo: IImageInfo, screenHeight: number,
-       plotType: PlotType, inPlace?: boolean): Promise<boolean> {
+  plot(
+    plotDiv: string,
+    imageLoaded: unknown,
+    imageInfo: IImageInfo,
+    screenHeight: number,
+    plotType: PlotType,
+    inPlace?: boolean,
+  ): Promise<boolean> {
     this.currentPlotType = plotType;
     this.plottedFileName = imageInfo?.fileName;
     this.plotDiv = plotDiv;
@@ -209,7 +239,9 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.lastRendered = next;
     return next.plot(plotDiv, imageLoaded, imageInfo, screenHeight, plotType, inPlace);
   }
-  reloadAndPlot(): void { this.plotly.reloadAndPlot(); }
+  reloadAndPlot(): void {
+    this.plotly.reloadAndPlot();
+  }
   reset(): void {
     // Start of a render cycle: re-enable napari-js/OSD attempts (clear any prior
     // per-image fallback) and tear down whatever's on screen.
@@ -217,14 +249,28 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.napariFellBack = false;
     this.renderer().reset();
   }
-  relayout(trueImageSize?: number[]): void { this.renderer().relayout(trueImageSize); }
-  resetAxes(): void { this.renderer().resetAxes(); }
-  fitToView(): void { this.renderer().fitToView(); }
+  relayout(trueImageSize?: number[]): void {
+    this.renderer().relayout(trueImageSize);
+  }
+  resetAxes(): void {
+    this.renderer().resetAxes();
+  }
+  fitToView(): void {
+    this.renderer().fitToView();
+  }
   /** @deprecated Use {@link fitToView}. */
-  autoscale(): void { this.fitToView(); }
-  zoomIn(): void { this.renderer().zoomIn(); }
-  zoomOut(): void { this.renderer().zoomOut(); }
-  setDragMode(mode: string | false): void { this.renderer().setDragMode(mode); }
+  autoscale(): void {
+    this.fitToView();
+  }
+  zoomIn(): void {
+    this.renderer().zoomIn();
+  }
+  zoomOut(): void {
+    this.renderer().zoomOut();
+  }
+  setDragMode(mode: string | false): void {
+    this.renderer().setDragMode(mode);
+  }
   /** Every backend, on screen or not. */
   private backends(): IViewerBackend[] {
     return [this.plotly, this.osd, this.napari];
@@ -236,7 +282,9 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
    * `renderer()` is still the Plotly default, and OSD/napari-js must receive them
    * to honour them at viewer creation.
    */
-  getOsdViewOptions(): IOsdViewOptions { return this.viewOptions; }
+  getOsdViewOptions(): IOsdViewOptions {
+    return this.viewOptions;
+  }
   private readonly viewOptions: IOsdViewOptions = {
     setNavigatorVisible: (visible) => {
       for (const b of this.backends()) b.getOsdViewOptions()?.setNavigatorVisible(visible);
@@ -246,37 +294,63 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     },
   };
   /** @deprecated Use `getOsdViewOptions().setNavigatorVisible()`. */
-  setNavigatorVisible(visible: boolean): void { this.viewOptions.setNavigatorVisible(visible); }
+  setNavigatorVisible(visible: boolean): void {
+    this.viewOptions.setNavigatorVisible(visible);
+  }
   /** @deprecated Use `getOsdViewOptions().setImageSmoothingEnabled()`. */
-  setImageSmoothingEnabled(enabled: boolean): void { this.viewOptions.setImageSmoothingEnabled(enabled); }
-  setShowStack(showstack: boolean): void { this.renderer().setShowStack(showstack); }
+  setImageSmoothingEnabled(enabled: boolean): void {
+    this.viewOptions.setImageSmoothingEnabled(enabled);
+  }
+  setShowStack(showstack: boolean): void {
+    this.renderer().setShowStack(showstack);
+  }
   setZIndex(zIndex: number): void {
     this.currentZIndex = zIndex;
     this.renderer().setZIndex(zIndex);
   }
-  getTrueImageSize(): { width: number; height: number } | null { return this.renderer().getTrueImageSize(); }
-  getCurrentImage(): Promise<Image | null> { return this.renderer().getCurrentImage(); }
-  getDisplayedPixelData(): PixelData | null { return this.renderer().getDisplayedPixelData(); }
+  getTrueImageSize(): { width: number; height: number } | null {
+    return this.renderer().getTrueImageSize();
+  }
+  getCurrentImage(): Promise<Image | null> {
+    return this.renderer().getCurrentImage();
+  }
+  getDisplayedPixelData(): PixelData | null {
+    return this.renderer().getDisplayedPixelData();
+  }
   getDisplayedSourceRect(): { x: number; y: number; width: number; height: number } | null {
     return this.renderer().getDisplayedSourceRect();
   }
-  downloadImage(): void { this.renderer().downloadImage(); }
-  exportComposite(): void { this.renderer().exportComposite(); }
+  downloadImage(): void {
+    this.renderer().downloadImage();
+  }
+  exportComposite(): void {
+    this.renderer().exportComposite();
+  }
 
   setPlotType(plotType: PlotType): void {
     this.currentPlotType = plotType;
     this.plotly.setPlotType(plotType);
   }
   /** @deprecated Use `getSurface3dControls()`. */
-  setSurfaceDragMode(mode: string): void { this.getSurface3dControls()?.setSurfaceDragMode(mode); }
+  setSurfaceDragMode(mode: string): void {
+    this.getSurface3dControls()?.setSurfaceDragMode(mode);
+  }
   /** @deprecated Use `getSurface3dControls()`. */
-  resetSurfaceCamera(): void { this.getSurface3dControls()?.resetSurfaceCamera(); }
+  resetSurfaceCamera(): void {
+    this.getSurface3dControls()?.resetSurfaceCamera();
+  }
   /** The 3D decimate factor of the backend on screen (napari-js), else null. */
-  getVolumeResolution(): IVolumeResolution | null { return this.renderer().getVolumeResolution(); }
+  getVolumeResolution(): IVolumeResolution | null {
+    return this.renderer().getVolumeResolution();
+  }
   /** @deprecated Use `getVolumeResolution()?.set()`. */
-  setResolutionScale(scale: number): void { this.getVolumeResolution()?.set(scale); }
+  setResolutionScale(scale: number): void {
+    this.getVolumeResolution()?.set(scale);
+  }
   /** @deprecated Use `getVolumeResolution()?.get()`. */
-  getResolutionScale(): number { return this.getVolumeResolution()?.get() ?? 1; }
+  getResolutionScale(): number {
+    return this.getVolumeResolution()?.get() ?? 1;
+  }
   /** The viewport of the backend on screen, for a contributed plot mode. Null
    *  when that backend cannot provide one (e.g. OSD fell back to Plotly). */
   getPlotModeViewport(): PlotModeViewport | null {
@@ -289,7 +363,9 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   }
 
   // ── long-lived observables + stack flags ──────────────────────────────────
-  setStackLoading(b: boolean): void { this.plotly.setStackLoading(b); }
+  setStackLoading(b: boolean): void {
+    this.plotly.setStackLoading(b);
+  }
   // Cancel in-flight loading on every backend — the user's Cancel shouldn't depend on which one is
   // active. Only backends that stream frames (napari-js) do real work; the rest no-op. The concrete
   // backend classes don't all declare the optional contract method, so call it via IViewerBackend.
@@ -333,11 +409,14 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     ).pipe(map(() => undefined));
   }
   /** The line-ROI profiles: sampled by the backend-neutral IntensityProfileService. */
-  getIntensityProfile$(): Observable<IntensityProfile[]> { return this.intensity.getIntensityProfile$(); }
+  getIntensityProfile$(): Observable<IntensityProfile[]> {
+    return this.intensity.getIntensityProfile$();
+  }
   // The intensity inset is a Plotly LINE chart — render it through Plotly whichever
   // backend draws the main image.
   renderIntensityInset(divId: string, profiles: IntensityProfile[]): void {
-    this.plotly.renderIntensityInset(divId, profiles); }
+    this.plotly.renderIntensityInset(divId, profiles);
+  }
 
   // ── regions ──────────────────────────────────────────────────────────
   // Region state lives in the shared RegionStore, so every read and write goes
@@ -345,54 +424,129 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   // napari-js overlays and Plotly's shape projection redraw on its region-update
   // and selection streams, and the canvas tools reset on getRegionSetReplaced$
   // (undo, redo, a slice switch).
-  setRegions(regions: Region[], showRegionLabel?: boolean, isRegionSaveOn?: boolean,
-             fillColor?: string, append?: boolean): void {
+  setRegions(
+    regions: Region[],
+    showRegionLabel?: boolean,
+    isRegionSaveOn?: boolean,
+    fillColor?: string,
+    append?: boolean,
+  ): void {
     this.regionStore.setRegions(regions, showRegionLabel, isRegionSaveOn, fillColor, append);
   }
-  getRegions(): Region[] { return this.regionStore.getRegions(); }
-  getRegionPolygons(): Polygon[] { return this.regionStore.getRegionPolygons(); }
-  getRegionUpdateEvent(): Observable<Region[]> { return this.regionStore.getRegionUpdateEvent(); }
-  setSelectedShapeIndices(indices: number[]): void { this.regionStore.setSelectedShapeIndices(indices); }
-  selectRegion(region: Region): void { this.regionStore.selectRegion(region); }
-  getSelectedShapeIndices$(): Observable<number[]> { return this.regionStore.getSelectedShapeIndices$(); }
-  deleteActiveShape(): void { this.regionStore.deleteActiveShape(); }
-  getShowShapeLabel(): boolean { return this.regionStore.getShowShapeLabel(); }
-  getShapeColor(): string { return this.regionStore.getShapeColor(); }
-  getFillColor(): string { return this.regionStore.getFillColor(); }
-  getClassificationColors(): Map<string, string> { return this.store.getClassificationColors(); }
+  getRegions(): Region[] {
+    return this.regionStore.getRegions();
+  }
+  getRegionPolygons(): Polygon[] {
+    return this.regionStore.getRegionPolygons();
+  }
+  getRegionUpdateEvent(): Observable<Region[]> {
+    return this.regionStore.getRegionUpdateEvent();
+  }
+  setSelectedShapeIndices(indices: number[]): void {
+    this.regionStore.setSelectedShapeIndices(indices);
+  }
+  selectRegion(region: Region): void {
+    this.regionStore.selectRegion(region);
+  }
+  getSelectedShapeIndices$(): Observable<number[]> {
+    return this.regionStore.getSelectedShapeIndices$();
+  }
+  deleteActiveShape(): void {
+    this.regionStore.deleteActiveShape();
+  }
+  getShowShapeLabel(): boolean {
+    return this.regionStore.getShowShapeLabel();
+  }
+  getShapeColor(): string {
+    return this.regionStore.getShapeColor();
+  }
+  getFillColor(): string {
+    return this.regionStore.getFillColor();
+  }
+  getClassificationColors(): Map<string, string> {
+    return this.store.getClassificationColors();
+  }
   setClassificationColor(label: string, color: string): void {
-    this.store.setClassificationColor(label, color); }
+    this.store.setClassificationColor(label, color);
+  }
   // Annotation-class presets live in the shared VisualizerStore (backend-neutral
   // session state), so route straight to it rather than through renderer(). (jit-ui#70)
-  getPresetSet(): PresetSet { return this.store.getPresetSet(); }
-  getPresetSet$(): Observable<PresetSet> { return this.store.getPresetSet$(); }
-  setPresetSet(set: PresetSet): void { this.store.setPresetSet(set); }
-  upsertClass(preset: ClassPreset): void { this.store.upsertClass(preset); }
-  removeClass(name: string): void { this.store.removeClass(name); }
-  resetPresets(): void { this.store.resetPresets(); }
-  undo(): void { this.regionStore.undo(); }
-  redo(): void { this.regionStore.redo(); }
-  canUndo(): boolean { return this.regionStore.canUndo(); }
-  canRedo(): boolean { return this.regionStore.canRedo(); }
-  getCanUndo$(): Observable<boolean> { return this.regionStore.getCanUndo$(); }
-  getCanRedo$(): Observable<boolean> { return this.regionStore.getCanRedo$(); }
-  resetUndoHistory(): void { this.regionStore.resetUndoHistory(); }
-  importRegions(geoJsonStr: string): Region[] { return this.regionStore.importRegions(geoJsonStr); }
+  getPresetSet(): PresetSet {
+    return this.store.getPresetSet();
+  }
+  getPresetSet$(): Observable<PresetSet> {
+    return this.store.getPresetSet$();
+  }
+  setPresetSet(set: PresetSet): void {
+    this.store.setPresetSet(set);
+  }
+  upsertClass(preset: ClassPreset): void {
+    this.store.upsertClass(preset);
+  }
+  removeClass(name: string): void {
+    this.store.removeClass(name);
+  }
+  resetPresets(): void {
+    this.store.resetPresets();
+  }
+  undo(): void {
+    this.regionStore.undo();
+  }
+  redo(): void {
+    this.regionStore.redo();
+  }
+  canUndo(): boolean {
+    return this.regionStore.canUndo();
+  }
+  canRedo(): boolean {
+    return this.regionStore.canRedo();
+  }
+  getCanUndo$(): Observable<boolean> {
+    return this.regionStore.getCanUndo$();
+  }
+  getCanRedo$(): Observable<boolean> {
+    return this.regionStore.getCanRedo$();
+  }
+  resetUndoHistory(): void {
+    this.regionStore.resetUndoHistory();
+  }
+  importRegions(geoJsonStr: string): Region[] {
+    return this.regionStore.importRegions(geoJsonStr);
+  }
   /** Download `regions` as GeoJSON, named after the image last plotted. */
-  exportRegions(regions: Region[]): void { this.regionStore.exportRegions(regions, this.plottedFileName); }
-  getGeoJsonString(regions: Region[]): string { return this.regionStore.getGeoJsonString(regions); }
+  exportRegions(regions: Region[]): void {
+    this.regionStore.exportRegions(regions, this.plottedFileName);
+  }
+  getGeoJsonString(regions: Region[]): string {
+    return this.regionStore.getGeoJsonString(regions);
+  }
 
   // ── Per-slice z-stack regions (jit-ui#93), from the shared RegionStore. ──
-  enterStackMode(slices: Map<number, Region[]>, initialZ?: number,
-                 saveLayout?: 'combined' | 'per-slice-file'): void {
+  enterStackMode(
+    slices: Map<number, Region[]>,
+    initialZ?: number,
+    saveLayout?: 'combined' | 'per-slice-file',
+  ): void {
     this.regionStore.enterStackMode(slices, initialZ, saveLayout);
   }
-  exitStackMode(): void { this.regionStore.exitStackMode(); }
-  isStackMode(): boolean { return this.regionStore.isStackMode(); }
-  getStackSaveLayout(): 'combined' | 'per-slice-file' { return this.regionStore.getStackSaveLayout(); }
-  setDisplaySlice(z: number): void { this.regionStore.setDisplaySlice(z); }
-  getSliceRegions(): Region[] { return this.regionStore.getSliceRegions(); }
-  getStackSaveSlices(): Map<number, Region[]> { return this.regionStore.getStackSaveSlices(); }
+  exitStackMode(): void {
+    this.regionStore.exitStackMode();
+  }
+  isStackMode(): boolean {
+    return this.regionStore.isStackMode();
+  }
+  getStackSaveLayout(): 'combined' | 'per-slice-file' {
+    return this.regionStore.getStackSaveLayout();
+  }
+  setDisplaySlice(z: number): void {
+    this.regionStore.setDisplaySlice(z);
+  }
+  getSliceRegions(): Region[] {
+    return this.regionStore.getSliceRegions();
+  }
+  getStackSaveSlices(): Map<number, Region[]> {
+    return this.regionStore.getStackSaveSlices();
+  }
   /** All slices' ANNOTATION regions for a z-stack save (jit-ui#93), each tagged
    *  with its zero-based Region.z; profile lines excluded. Flat annotation set
    *  outside stack mode. */
@@ -405,7 +559,10 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   getStackSaveAnnotationSlices(): Map<number, Region[]> {
     const out = new Map<number, Region[]>();
     for (const [z, regs] of this.regionStore.getStackSaveSlices()) {
-      out.set(z, regs.filter((r) => !isProfileRegion(r)));
+      out.set(
+        z,
+        regs.filter((r) => !isProfileRegion(r)),
+      );
     }
     return out;
   }
@@ -417,8 +574,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
    *  fully laid out, which would otherwise crash mask creation. */
   getMaskImageSize(): { width: number; height: number } | null {
     const valid = (s: { width: number; height: number } | null | undefined) =>
-      s && Number.isFinite(s.width) && Number.isFinite(s.height) &&
-      s.width >= 1 && s.height >= 1
+      s && Number.isFinite(s.width) && Number.isFinite(s.height) && s.width >= 1 && s.height >= 1
         ? { width: Math.round(s.width), height: Math.round(s.height) }
         : null;
 
@@ -426,7 +582,9 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     if (fromRenderer) return fromRenderer;
 
     let meta: IImageMetadata[] = [];
-    this.getImageMeta().subscribe((m) => (meta = m)).unsubscribe();
+    this.getImageMeta()
+      .subscribe((m) => (meta = m))
+      .unsubscribe();
     const m0 = meta?.[0];
     return m0 ? valid({ width: m0.x, height: m0.y }) : null;
   }
@@ -440,8 +598,12 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   getAnnotationRegions(): Region[] {
     return this.regionStore.getRegions().filter((r) => !isProfileRegion(r));
   }
-  setAnnotationRegions(regions: Region[], showRegionLabel?: boolean,
-                       isRegionSaveOn?: boolean, fillColor?: string): void {
+  setAnnotationRegions(
+    regions: Region[],
+    showRegionLabel?: boolean,
+    isRegionSaveOn?: boolean,
+    fillColor?: string,
+  ): void {
     // Re-append the store's profile lines so an editor save/delete can't drop them.
     const profiles = this.regionStore.getRegions().filter((r) => isProfileRegion(r));
     const annotations = (regions || []).filter((r) => !isProfileRegion(r));
@@ -452,17 +614,13 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     return this.getSelectedShapeIndices$().pipe(
       map((idxs) => {
         const regs = this.regionStore.getRegions();
-        return idxs
-          .map((i) => regs[i])
-          .filter((r): r is Region => !!r && !isProfileRegion(r));
+        return idxs.map((i) => regs[i]).filter((r): r is Region => !!r && !isProfileRegion(r));
       }),
     );
   }
   setSelectedRegions(regions: Region[]): void {
     const regs = this.regionStore.getRegions();
-    const indices = (regions || [])
-      .map((r) => regs.findIndex((x) => x.id === r.id))
-      .filter((i) => i >= 0);
+    const indices = (regions || []).map((r) => regs.findIndex((x) => x.id === r.id)).filter((i) => i >= 0);
     this.setSelectedShapeIndices(indices);
   }
 
@@ -474,24 +632,52 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.renderer().setActiveTool(id, options);
   }
   /** @deprecated Use {@link setActiveTool}. */
-  setWandMode(active: boolean, options?: IWandOptions): void { this.renderer().setWandMode(active, options); }
-  setWandOptions(options: IWandOptions): void { this.renderer().setWandOptions(options); }
-  clearActiveWandRegion(): void { this.renderer().clearActiveWandRegion(); }
+  setWandMode(active: boolean, options?: IWandOptions): void {
+    this.renderer().setWandMode(active, options);
+  }
+  setWandOptions(options: IWandOptions): void {
+    this.renderer().setWandOptions(options);
+  }
+  clearActiveWandRegion(): void {
+    this.renderer().clearActiveWandRegion();
+  }
   /** @deprecated Use {@link setActiveTool}. */
-  setBrushMode(active: boolean, options?: IBrushOptions): void { this.renderer().setBrushMode(active, options); }
-  setBrushOptions(options: IBrushOptions): void { this.renderer().setBrushOptions(options); }
+  setBrushMode(active: boolean, options?: IBrushOptions): void {
+    this.renderer().setBrushMode(active, options);
+  }
+  setBrushOptions(options: IBrushOptions): void {
+    this.renderer().setBrushOptions(options);
+  }
   /** @deprecated Use {@link setActiveTool}. */
-  setVertexEraserMode(active: boolean): void { this.renderer().setVertexEraserMode(active); }
-  setVertexEraserRadius(radius: number): void { this.renderer().setVertexEraserRadius(radius); }
+  setVertexEraserMode(active: boolean): void {
+    this.renderer().setVertexEraserMode(active);
+  }
+  setVertexEraserRadius(radius: number): void {
+    this.renderer().setVertexEraserRadius(radius);
+  }
   /** @deprecated Use {@link setActiveTool}. */
-  setZoomToBoxMode(active: boolean): void { this.renderer().setZoomToBoxMode(active); }
-  segmentRectangles(): Promise<number> { return this.renderer().segmentRectangles(); }
-  segmentRectanglesCellpose(): Promise<number> { return this.renderer().segmentRectanglesCellpose(); }
-  setSamModel(id: string): void { this.renderer().setSamModel(id); }
+  setZoomToBoxMode(active: boolean): void {
+    this.renderer().setZoomToBoxMode(active);
+  }
+  segmentRectangles(): Promise<number> {
+    return this.renderer().segmentRectangles();
+  }
+  segmentRectanglesCellpose(): Promise<number> {
+    return this.renderer().segmentRectanglesCellpose();
+  }
+  setSamModel(id: string): void {
+    this.renderer().setSamModel(id);
+  }
   /** @deprecated Use {@link setActiveTool}. */
-  setSamPointMode(active: boolean): void { this.renderer().setSamPointMode(active); }
-  commitSamPoints(): void { this.renderer().commitSamPoints(); }
-  clearSamPoints(): void { this.renderer().clearSamPoints(); }
+  setSamPointMode(active: boolean): void {
+    this.renderer().setSamPointMode(active);
+  }
+  commitSamPoints(): void {
+    this.renderer().commitSamPoints();
+  }
+  clearSamPoints(): void {
+    this.renderer().clearSamPoints();
+  }
 
   // ── display options ──────────────────────────────────────────────────
   // State lives in the shared VisualizerStore — reads go straight to it.
@@ -499,15 +685,27 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   // carry render glue beyond the store write (a live Plotly.restyle of
   // colorscale/reversescale on the mounted heatmap); OSD recolors via its own
   // store subscription either way.
-  getColormap(): Observable<ColormapNode | null> { return this.store.getColormap(); }
-  setColormap(colormap: ColormapNode): void { this.plotly.setColormap(colormap); }
-  getColormapOptions(): ColormapNode[] { return this.store.getColormapOptions(); }
-  getReverseScale(): Observable<boolean> { return this.store.getReverseScale(); }
-  setReverseScale(reverse: boolean): void { this.plotly.setReverseScale(reverse); }
+  getColormap(): Observable<ColormapNode | null> {
+    return this.store.getColormap();
+  }
+  setColormap(colormap: ColormapNode): void {
+    this.plotly.setColormap(colormap);
+  }
+  getColormapOptions(): ColormapNode[] {
+    return this.store.getColormapOptions();
+  }
+  getReverseScale(): Observable<boolean> {
+    return this.store.getReverseScale();
+  }
+  setReverseScale(reverse: boolean): void {
+    this.plotly.setReverseScale(reverse);
+  }
   setImageMeta(imageMeta: IImageMetadata[], imageKey?: string): void {
     this.store.setImageMeta(imageMeta, imageKey);
   }
-  getImageMeta(): Observable<IImageMetadata[]> { return this.store.getImageMeta(); }
+  getImageMeta(): Observable<IImageMetadata[]> {
+    return this.store.getImageMeta();
+  }
 
   // ── IChannelHistogramApi: Channels & Histogram pane surface ───────────
   // Channel/grayscale/invert state lives in the shared VisualizerStore; both
@@ -520,9 +718,15 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     return this.renderer().getHistogram$(channelIndex, bins);
   }
   /** Export the underlying data (16-bit multi-band TIFF) via the active backend. */
-  exportData(): void { this.renderer().exportData(); }
-  getChannels$(): Observable<IChannelState[]> { return this.store.getChannelStates(); }
-  setSelectedChannel(index: number): void { this.store.setSelectedChannel(index); }
+  exportData(): void {
+    this.renderer().exportData();
+  }
+  getChannels$(): Observable<IChannelState[]> {
+    return this.store.getChannelStates();
+  }
+  setSelectedChannel(index: number): void {
+    this.store.setSelectedChannel(index);
+  }
   setChannelState(index: number, partial: Partial<IChannelState>): void {
     this.store.setChannelState(index, partial);
   }
@@ -540,10 +744,18 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       if (max > min) this.store.setChannelState(i, { min, max });
     }
   }
-  getGrayscale$(): Observable<boolean> { return this.store.getGrayscale(); }
-  setGrayscale(on: boolean): void { this.store.setGrayscale(on); }
-  getInvert$(): Observable<boolean> { return this.store.getInvert(); }
-  setInvert(on: boolean): void { this.store.setInvert(on); }
+  getGrayscale$(): Observable<boolean> {
+    return this.store.getGrayscale();
+  }
+  setGrayscale(on: boolean): void {
+    this.store.setGrayscale(on);
+  }
+  getInvert$(): Observable<boolean> {
+    return this.store.getInvert();
+  }
+  setInvert(on: boolean): void {
+    this.store.setInvert(on);
+  }
 
   /**
    * The active backend's region overlay. Falls back to Plotly's when the active backend
@@ -562,16 +774,22 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   }
 
   /** Isosurface controls of the backend on screen, when it renders isosurfaces. */
-  getIsosurfaceControls(): IIsosurfaceControls | null { return this.renderer().getIsosurfaceControls(); }
+  getIsosurfaceControls(): IIsosurfaceControls | null {
+    return this.renderer().getIsosurfaceControls();
+  }
 
   /** 3D scene controls of the backend on screen (Plotly or napari-js), or null on a
    *  2D-only one. */
-  getSurface3dControls(): ISurface3dControls | null { return this.renderer().getSurface3dControls(); }
+  getSurface3dControls(): ISurface3dControls | null {
+    return this.renderer().getSurface3dControls();
+  }
 
   /** Intensity (line-ROI) controls, whichever backend draws the image: the
    *  IntensityProfileService adds the line to the store, and every backend
    *  (Plotly included) draws it from the store's update event. */
-  getIntensityControls(): IIntensityControls | null { return this.intensity; }
+  getIntensityControls(): IIntensityControls | null {
+    return this.intensity;
+  }
 
   /**
    * Spatial-omics controls, or null when no `SPATIAL_DATA_PORT` is bound. Served by a
@@ -611,7 +829,9 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
    * backend that reports them (OpenSeadragon, napari-js), merged into one stable
    * stream the inset subscribes to once.
    */
-  getIntensitySampling(): IIntensitySampling { return this.intensitySampling; }
+  getIntensitySampling(): IIntensitySampling {
+    return this.intensitySampling;
+  }
   private readonly intensitySampling: IIntensitySampling = {
     // Load the displayed slice's pixels for a backend that has no frames of its own
     // (OpenSeadragon, napari-js; Plotly feeds its frames to the service when it plots).
@@ -624,9 +844,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       this.pointSamplingAtPlot();
       this.intensity.refreshIntensitySamplingForRoi(x, y, width, height, zIndex);
     },
-    getViewportChange$: () => merge(
-      ...this.backends().map((b) => b.getIntensitySampling()?.getViewportChange$() ?? EMPTY),
-    ),
+    getViewportChange$: () =>
+      merge(...this.backends().map((b) => b.getIntensitySampling()?.getViewportChange$() ?? EMPTY)),
   };
   /** @deprecated Use `getIntensitySampling().ensureIntensitySampling()`. */
   ensureIntensitySampling(imageInfo: IImageInfo, zIndex: number): Promise<void> {

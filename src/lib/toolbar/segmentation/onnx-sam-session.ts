@@ -1,8 +1,6 @@
 import * as ort from 'onnxruntime-web';
 
-import {
-  ISamSession, SamEmbedding, SamMaskResult, SamModelDef, SamPrompt,
-} from '../../contracts/sam.contract';
+import { ISamSession, SamEmbedding, SamMaskResult, SamModelDef, SamPrompt } from '../../contracts/sam.contract';
 import { fetchModel, runEncoder, runDecoder, type CoreEmbedding } from './sam-onnx-core';
 import { getOrtWasmBase } from './ort-runtime-config';
 import { PendingCalls, WorkerReply } from './pending-calls';
@@ -57,15 +55,19 @@ export class OnnxSamSession implements ISamSession {
       this.encoder = await ort.InferenceSession.create(encBuf, { executionProviders: eps });
       this.decoder = await ort.InferenceSession.create(decBuf, { executionProviders: ['wasm'] });
     } else {
-      await this.call({
-        type: 'load',
-        encoderUrl: model.encoderUrl,
-        decoderUrl: model.decoderUrl,
-        revision: model.revision,
-        wasmPaths: getOrtWasmBase(),
-        inputSize: model.inputSize,
-        encoderProviders: model.encoderProviders,
-      }, [], onProgress);
+      await this.call(
+        {
+          type: 'load',
+          encoderUrl: model.encoderUrl,
+          decoderUrl: model.decoderUrl,
+          revision: model.revision,
+          wasmPaths: getOrtWasmBase(),
+          inputSize: model.inputSize,
+          encoderProviders: model.encoderProviders,
+        },
+        [],
+        onProgress,
+      );
     }
     this.loaded = true;
   }
@@ -81,16 +83,23 @@ export class OnnxSamSession implements ISamSession {
       this.embeddings.set(token, e);
       if (this.embeddings.size > 3) this.embeddings.delete(this.embeddings.keys().next().value as number);
       return {
-        data: new Float32Array(0), dims: e.dims, scale: e.scale,
-        imageWidth: e.imageWidth, imageHeight: e.imageHeight, token,
+        data: new Float32Array(0),
+        dims: e.dims,
+        scale: e.scale,
+        imageWidth: e.imageWidth,
+        imageHeight: e.imageHeight,
+        token,
       };
     }
     // worker: transfer the RGBA buffer (callers pass a fresh frame buffer).
     const buffer = image.data.buffer;
     const res = await this.call({ type: 'embed', width: image.width, height: image.height, buffer }, [buffer]);
     return {
-      data: new Float32Array(0), dims: res['dims'] as number[], scale: res['scale'] as number,
-      imageWidth: res['imageWidth'] as number, imageHeight: res['imageHeight'] as number,
+      data: new Float32Array(0),
+      dims: res['dims'] as number[],
+      scale: res['scale'] as number,
+      imageWidth: res['imageWidth'] as number,
+      imageHeight: res['imageHeight'] as number,
       token: res['token'] as number,
     };
   }
@@ -104,7 +113,9 @@ export class OnnxSamSession implements ISamSession {
     const res = await this.call({ type: 'decode', token: embedding.token, prompt });
     return {
       mask: new Uint8Array(res['buffer'] as ArrayBuffer),
-      width: res['width'] as number, height: res['height'] as number, iou: res['iou'] as number,
+      width: res['width'] as number,
+      height: res['height'] as number,
+      iou: res['iou'] as number,
     };
   }
 
@@ -143,8 +154,11 @@ export class OnnxSamSession implements ISamSession {
     this.calls.rejectAll(err);
   }
 
-  private call(msg: Record<string, unknown>, transfer: Transferable[] = [],
-               onProgress?: (f: number) => void): Promise<WorkerReply> {
+  private call(
+    msg: Record<string, unknown>,
+    transfer: Transferable[] = [],
+    onProgress?: (f: number) => void,
+  ): Promise<WorkerReply> {
     const worker = this.ensureWorker();
     const { id, promise } = this.calls.open(onProgress);
     worker.postMessage({ ...msg, id }, transfer);

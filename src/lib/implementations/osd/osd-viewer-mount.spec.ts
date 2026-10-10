@@ -6,7 +6,9 @@ import { OSD_OPEN_TIMEOUT_MS, openViewer } from './osd-viewer-mount';
 function fakeViewer() {
   const once: Record<string, (e?: unknown) => void> = {};
   const viewer = {
-    addOnceHandler: (name: string, fn: (e?: unknown) => void) => { once[name] = fn; },
+    addOnceHandler: (name: string, fn: (e?: unknown) => void) => {
+      once[name] = fn;
+    },
     open: jest.fn(),
   };
   const fire = (name: string, e?: unknown) => once[name]?.(e);

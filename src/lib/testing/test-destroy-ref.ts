@@ -10,7 +10,9 @@ export class TestDestroyRef implements DestroyRef {
 
   onDestroy(callback: () => void): () => void {
     this.callbacks.push(callback);
-    return () => { this.callbacks = this.callbacks.filter((c) => c !== callback); };
+    return () => {
+      this.callbacks = this.callbacks.filter((c) => c !== callback);
+    };
   }
 
   destroy(): void {

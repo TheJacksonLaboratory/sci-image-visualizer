@@ -17,8 +17,7 @@ import * as OpenSeadragon from 'openseadragon';
  * (plotly.js-dist-min needs no equivalent: it sets `__esModule`, so webpack gives
  * it real named exports and plain member access works.)
  */
-export const OSD: typeof OpenSeadragon =
-  (OpenSeadragon as any).default ?? OpenSeadragon;
+export const OSD: typeof OpenSeadragon = (OpenSeadragon as any).default ?? OpenSeadragon;
 
 /**
  * Run an operation on an OSD tiled image, navigator or viewer that may already

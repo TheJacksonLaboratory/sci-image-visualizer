@@ -53,10 +53,19 @@ export class RegionOpsService {
   /** Downscale factor (≤ 1) keeping the selection's clipped bbox within
    *  {@link MAX_OP_PIXELS}; 1 when it already fits. */
   private opRasterScale(regions: Region[], W: number, H: number): number {
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
     const scan = (xs: number[], ys: number[]) => {
-      for (const x of xs) { if (x < minX) minX = x; if (x > maxX) maxX = x; }
-      for (const y of ys) { if (y < minY) minY = y; if (y > maxY) maxY = y; }
+      for (const x of xs) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+      }
+      for (const y of ys) {
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
     };
     for (const r of regions || []) {
       const b = r?.bounds;
@@ -74,10 +83,14 @@ export class RegionOpsService {
 
   /** A copy of `p` with every coordinate (and hole coordinate) multiplied by `s`. */
   private scalePolygon(p: Polygon, s: number): Polygon {
-    return makePolygon(p.xpoints.map((x) => x * s), p.ypoints.map((y) => y * s), {
-      closed: p.closed,
-      holes: p.holes?.map((ring) => ring.map(([x, y]) => [x * s, y * s])),
-    });
+    return makePolygon(
+      p.xpoints.map((x) => x * s),
+      p.ypoints.map((y) => y * s),
+      {
+        closed: p.closed,
+        holes: p.holes?.map((ring) => ring.map(([x, y]) => [x * s, y * s])),
+      },
+    );
   }
 
   /**
@@ -96,9 +109,12 @@ export class RegionOpsService {
     if (imageWidth <= 0 || imageHeight <= 0) return null;
     const merged = this.merge(regions, imageWidth, imageHeight);
     if (!merged) return null;
-    const comps: Polygon[] = merged.bounds instanceof MultiPolygon
-      ? merged.bounds.polygons
-      : merged.bounds instanceof Polygon ? [merged.bounds] : [];
+    const comps: Polygon[] =
+      merged.bounds instanceof MultiPolygon
+        ? merged.bounds.polygons
+        : merged.bounds instanceof Polygon
+          ? [merged.bounds]
+          : [];
     if (comps.length === 0) return null;
 
     // Image rectangle exterior with every component outline as a hole.
@@ -111,7 +127,12 @@ export class RegionOpsService {
     for (const c of comps) {
       if (c.holes) {
         for (const ring of c.holes) {
-          parts.push(makePolygon(ring.map((p) => p[0]), ring.map((p) => p[1])));
+          parts.push(
+            makePolygon(
+              ring.map((p) => p[0]),
+              ring.map((p) => p[1]),
+            ),
+          );
         }
       }
     }
@@ -127,9 +148,7 @@ export class RegionOpsService {
   ungroup(region: Region): Region[] {
     const b = region.bounds;
     if (b instanceof MultiPolygon) {
-      return b.polygons
-        .filter((p) => p.xpoints.length >= 3)
-        .map((p) => this.makeRegion(clonePolygon(p), region));
+      return b.polygons.filter((p) => p.xpoints.length >= 3).map((p) => this.makeRegion(clonePolygon(p), region));
     }
     return [region];
   }
@@ -171,7 +190,10 @@ export class RegionOpsService {
     };
     const ext = keepOrSrc(p.xpoints, p.ypoints);
     const holes = p.holes?.map((ring) => {
-      const s = keepOrSrc(ring.map((q) => q[0]), ring.map((q) => q[1]));
+      const s = keepOrSrc(
+        ring.map((q) => q[0]),
+        ring.map((q) => q[1]),
+      );
       return s.xs.map((x, i) => [x, s.ys[i]]);
     });
     return makePolygon(ext.xs, ext.ys, { holes });

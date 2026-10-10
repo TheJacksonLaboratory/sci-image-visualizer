@@ -29,14 +29,17 @@ const myTool: ToolbarDialogToolContribution = {
   // so the body can measure itself.
   mount(host, ctx, session) {
     host.textContent = 'Hello';
-    return () => { host.textContent = ''; };   // teardown, before deactivate()
+    return () => {
+      host.textContent = '';
+    }; // teardown, before deactivate()
   },
 };
 
-providers: [{ provide: TOOLBAR_TOOLS, useValue: myTool, multi: true }]
+providers: [{ provide: TOOLBAR_TOOLS, useValue: myTool, multi: true }];
 ```
 
 **Lifecycle:**
+
 - Clicking the button again, or closing the dialog, tears the body down and then
   calls `session.deactivate()`, exactly once.
 - Re-rendering the Image view (another image or slice) ends the session. The

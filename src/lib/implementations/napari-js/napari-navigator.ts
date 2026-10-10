@@ -52,7 +52,10 @@ const NAVIGATOR_MAX_PX = 300;
 
 /** Box size and scale for a `worldW × worldH` image in a host `hostW` wide. */
 export function navigatorLayout(
-  hostW: number, worldW: number, worldH: number, ratio = NAVIGATOR_SIZE_RATIO,
+  hostW: number,
+  worldW: number,
+  worldH: number,
+  ratio = NAVIGATOR_SIZE_RATIO,
 ): NavigatorLayout | null {
   if (!(worldW > 0) || !(worldH > 0) || !(hostW > 0)) return null;
   const longest = Math.min(NAVIGATOR_MAX_PX, Math.max(NAVIGATOR_MIN_PX, hostW * ratio));
@@ -62,7 +65,11 @@ export function navigatorLayout(
 
 /** A point in the navigator box → world coordinates, clamped to the image. */
 export function navigatorToWorld(
-  px: number, py: number, layout: NavigatorLayout, worldW: number, worldH: number,
+  px: number,
+  py: number,
+  layout: NavigatorLayout,
+  worldW: number,
+  worldH: number,
 ): [number, number] {
   const x = Math.min(worldW, Math.max(0, px / layout.scale));
   const y = Math.min(worldH, Math.max(0, py / layout.scale));
@@ -100,9 +107,8 @@ export class NapariNavigator {
       this.visibleRect = () => view.visibleWorldRect();
     } else {
       this.camera = view;
-      this.visibleRect = () => worldViewport(
-        view.center[0], view.center[1], view.zoom, host.clientWidth, host.clientHeight,
-      );
+      this.visibleRect = () =>
+        worldViewport(view.center[0], view.center[1], view.zoom, host.clientWidth, host.clientHeight);
     }
 
     this.box = document.createElement('div');
@@ -230,7 +236,11 @@ export class NapariNavigator {
     if (!l) return;
     const rect = this.box.getBoundingClientRect();
     this.camera.center = navigatorToWorld(
-      e.clientX - rect.left, e.clientY - rect.top, l, this.worldW, this.worldH,
+      e.clientX - rect.left,
+      e.clientY - rect.top,
+      l,
+      this.worldW,
+      this.worldH,
     );
   }
 

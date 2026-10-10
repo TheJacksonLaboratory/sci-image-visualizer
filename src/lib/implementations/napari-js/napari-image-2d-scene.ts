@@ -7,9 +7,7 @@ import { TileDescriptor } from '../tile-server';
 import { regionCentroids } from '../region-centroids';
 import { NapariScaleBar } from './napari-scale-bar';
 import { NapariNavigator } from './napari-navigator';
-import {
-  LumaPlane, tintFor, tintedComposite, toIHistogram, toNapariGamma, typedPlane,
-} from './napari-helpers';
+import { LumaPlane, tintFor, tintedComposite, toIHistogram, toNapariGamma, typedPlane } from './napari-helpers';
 import type { NapariScene, SceneContext } from './napari-scene';
 
 /** What the scenes built over the 2D image add to it. */
@@ -60,7 +58,10 @@ export class Image2dScene implements NapariScene {
   private navigatorTintKey = '';
   private displaySub: Subscription | null = null;
 
-  constructor(private readonly ctx: SceneContext, private readonly opts: Image2dOptions = {}) {}
+  constructor(
+    private readonly ctx: SceneContext,
+    private readonly opts: Image2dOptions = {},
+  ) {}
 
   private get hasImage(): boolean {
     return this.opts.image !== false;
@@ -214,8 +215,8 @@ export class Image2dScene implements NapariScene {
     // world coordinates (level-0 pixels) so the camera, readback and — critically — pre-saved
     // regions (stored in full-res coords, e.g. ndpi) all line up regardless of which level is shown.
     // This mirrors OSD, whose coordinate system is always level 0.
-    const texW = mode === 'rgb' ? (bitmap as ImageBitmap).width : planes[0]?.width ?? 0;
-    const texH = mode === 'rgb' ? (bitmap as ImageBitmap).height : planes[0]?.height ?? 0;
+    const texW = mode === 'rgb' ? (bitmap as ImageBitmap).width : (planes[0]?.width ?? 0);
+    const texH = mode === 'rgb' ? (bitmap as ImageBitmap).height : (planes[0]?.height ?? 0);
     const fullW = desc?.width || texW || 1;
     const fullH = desc?.height || texH || 1;
     const scale: [number, number] = [texW ? fullW / texW : 1, texH ? fullH / texH : 1];
@@ -254,7 +255,8 @@ export class Image2dScene implements NapariScene {
     if (multichannel) {
       this.imageMode = 'multichannel';
       const views = Array.from({ length: channelCount }, (_, c) =>
-        this.tintedChannelView(c, states, desc, this.tiledSource(desc, c, 1, scene)));
+        this.tintedChannelView(c, states, desc, this.tiledSource(desc, c, 1, scene)),
+      );
       this.channelView.render('multichannel', views, { interpolation });
     } else if (channelCount === 1) {
       this.imageMode = 'grayscale';
@@ -275,7 +277,10 @@ export class Image2dScene implements NapariScene {
   /** A pyramidal TiledSource whose tiles count on the loading badge while `scene` (the render that
    *  asked for it, taken before its awaits) is current. */
   tiledSource(
-    desc: TileDescriptor, channel: number | undefined, channels: 1 | 4, scene: AbortSignal,
+    desc: TileDescriptor,
+    channel: number | undefined,
+    channels: 1 | 4,
+    scene: AbortSignal,
   ): TiledSource {
     return this.ctx.tiles.tiledSource(desc, channel, channels, scene, () => this.ctx.badge.begin('Image'));
   }
@@ -327,7 +332,7 @@ export class Image2dScene implements NapariScene {
     this.histSamples.clear();
     if (this.imageMode === 'rgb') return; // RGB uses the displayed-pixel readback (rgbHistogram)
     const multichannel = this.imageMode === 'multichannel';
-    const channelCount = multichannel ? desc.channels ?? 1 : 1;
+    const channelCount = multichannel ? (desc.channels ?? 1) : 1;
     const info = this.ctx.info();
     const samples = await Promise.all(
       Array.from({ length: channelCount }, (_, c) =>
@@ -401,8 +406,8 @@ export class Image2dScene implements NapariScene {
     this.navigator = null;
     const { width, height } = ctx.imageSize();
     if (!width || !height) return;
-    this.navigator = new NapariNavigator(
-      ctx.host, ctx.viewer, width, height, () => this.opts.onNavigatorInteract?.(),
+    this.navigator = new NapariNavigator(ctx.host, ctx.viewer, width, height, () =>
+      this.opts.onNavigatorInteract?.(),
     );
     this.navigator.setVisible(ctx.settings.navigatorVisible);
     void this.refreshNavigatorImage(z);
@@ -423,7 +428,7 @@ export class Image2dScene implements NapariScene {
       const desc = await tiles.ensureDescriptor(info);
       // Superseded (a newer slice, or the scene was torn down): fetch nothing.
       if (token !== this.navigatorToken || this.navigator !== nav) return;
-      const channels = desc?.multichannel ? desc.channelInfo ?? [] : [];
+      const channels = desc?.multichannel ? (desc.channelInfo ?? []) : [];
       if (channels.length > 1) {
         const bitmaps = await Promise.all(channels.map((_c, c) => tiles.fetchSlice(info, z, c, 1)));
         if (token !== this.navigatorToken || this.navigator !== nav) return;
@@ -468,7 +473,12 @@ export class Image2dScene implements NapariScene {
     const key = shown.map((ch) => `${bitmaps.indexOf(ch.bmp)}:${ch.color}`).join('|');
     if (key === this.navigatorTintKey) return;
     this.navigatorTintKey = key;
-    nav.setImage(tintedComposite(shown.map((ch) => ch.bmp), shown.map((ch) => ch.color)));
+    nav.setImage(
+      tintedComposite(
+        shown.map((ch) => ch.bmp),
+        shown.map((ch) => ch.color),
+      ),
+    );
   }
 }
 

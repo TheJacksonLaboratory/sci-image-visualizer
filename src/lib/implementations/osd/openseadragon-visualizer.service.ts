@@ -12,8 +12,13 @@ import { TileAccessPort, TILE_ACCESS_PORT } from '../../contracts/ports/tile-acc
 import { VizConfig, VIZ_CONFIG } from '../../contracts/viz-config';
 import { PlotType, PLOT_TYPE_DESCRIPTORS, PlotTypeDescriptor } from '../../contracts/plot-type';
 import {
-  IViewerBackend, PixelData, IIsosurfaceControls, IIntensityControls, ISurface3dControls,
-  IOsdViewOptions, IIntensityViewportSource,
+  IViewerBackend,
+  PixelData,
+  IIsosurfaceControls,
+  IIntensityControls,
+  ISurface3dControls,
+  IOsdViewOptions,
+  IIntensityViewportSource,
 } from '../../contracts/visualizer.contract';
 import { ViewerCapabilities, ViewerFeature, capabilitiesOf } from '../../contracts/capabilities.contract';
 import { OsdRegionOverlay } from './osd-region-overlay';
@@ -33,7 +38,12 @@ import { readDrawerPixels, readbackViewportFrame, saveDrawerSnapshot } from './o
 import { fetchTiffExport, fileStem, renderCompositePng } from './osd-export';
 import { HistogramSampler } from './histogram-sampler';
 import {
-  TileDescriptor, exportTiffFilename, exportTiffUrl, httpFetchJson, pollDescriptor, throwIfAborted,
+  TileDescriptor,
+  exportTiffFilename,
+  exportTiffUrl,
+  httpFetchJson,
+  pollDescriptor,
+  throwIfAborted,
   tilesInfoUrl,
 } from '../tile-server';
 import { BaseStoreVisualizer } from '../base-store-visualizer';
@@ -55,7 +65,14 @@ const OSD_TILES_INFO_POLL_INTERVAL_MS = 1500;
 
 /** The drag modes the SVG region overlay handles itself (see setDragMode). */
 const OVERLAY_MODES = new Set<RegionToolMode>([
-  'drawrect', 'drawclosedpath', 'drawopenpath', 'drawpolygon', 'addpoint', 'deletepoint', 'move', 'select',
+  'drawrect',
+  'drawclosedpath',
+  'drawopenpath',
+  'drawpolygon',
+  'addpoint',
+  'deletepoint',
+  'move',
+  'select',
 ]);
 
 /**
@@ -129,34 +146,40 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   /** Window/gamma/colormap/invert and per-channel tints, applied to the tiles
    *  through OSD's pixel pipeline (see OsdTileRecolorer and the README's recolor
    *  invariant). Its DisplayPipeline also drives the compositor and the export. */
-  private readonly recolor: OsdTileRecolorer = new OsdTileRecolorer({
-    viewer: () => this.viewer,
-    isGrayscale: () => this.isGrayscaleImage,
-    isMultiChannel: () => this.isMultiChannel,
-    isSimpleMultichannel: () => this.simple.multichannel,
-    currentZ: () => this.currentZ,
-    revealChannelSlice: (z) => this.cache.revealChannelSlice(z),
-    invalidateChannelDisplay: (z) => this.cache.invalidateChannelDisplay(z),
-    recomposite: (token) => void this.simple.recompositeAndOpen(token),
-  }, this.store);
+  private readonly recolor: OsdTileRecolorer = new OsdTileRecolorer(
+    {
+      viewer: () => this.viewer,
+      isGrayscale: () => this.isGrayscaleImage,
+      isMultiChannel: () => this.isMultiChannel,
+      isSimpleMultichannel: () => this.simple.multichannel,
+      currentZ: () => this.currentZ,
+      revealChannelSlice: (z) => this.cache.revealChannelSlice(z),
+      invalidateChannelDisplay: (z) => this.cache.invalidateChannelDisplay(z),
+      recomposite: (token) => void this.simple.recompositeAndOpen(token),
+    },
+    this.store,
+  );
 
   /** The serverless (`tiled: false`) image source and all its state (see
    *  OsdSimpleSource). */
-  private readonly simple: OsdSimpleSource = new OsdSimpleSource({
-    viewer: () => this.viewer,
-    descriptor: () => this.descriptor,
-    isGrayscale: () => this.isGrayscaleImage,
-    currentZ: () => this.currentZ,
-    setCurrentZ: (z) => {
-      this.currentZ = z;
-      this.viewportPixels = null; // the readback is slice-specific
+  private readonly simple: OsdSimpleSource = new OsdSimpleSource(
+    {
+      viewer: () => this.viewer,
+      descriptor: () => this.descriptor,
+      isGrayscale: () => this.isGrayscaleImage,
+      currentZ: () => this.currentZ,
+      setCurrentZ: (z) => {
+        this.currentZ = z;
+        this.viewportPixels = null; // the readback is slice-specific
+      },
+      sampler: () => this.sampler,
+      display: () => this.recolor.display,
+      channelStates: () => this.store.currentChannelStates(),
+      isCurrentDisplay: (token) => this.recolor.isCurrent(token),
+      scheduleInvalidate: () => this.recolor.scheduleInvalidate(),
     },
-    sampler: () => this.sampler,
-    display: () => this.recolor.display,
-    channelStates: () => this.store.currentChannelStates(),
-    isCurrentDisplay: (token) => this.recolor.isCurrent(token),
-    scheduleInvalidate: () => this.recolor.scheduleInvalidate(),
-  }, this.simpleStack);
+    this.simpleStack,
+  );
 
   /** Histogram + auto-window sampling (see HistogramSampler). Constructed in
    *  the ctor body because it captures the resolved API base URL. */
@@ -207,7 +230,9 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       applyZoomToBox: (coords) => this.viewport.applyZoomToBox(coords),
     };
     this.canvasTools = createCanvasToolManager(this.toolHost, {
-      wandService, regionStore, samPoint: samPointTool,
+      wandService,
+      regionStore,
+      samPoint: samPointTool,
     });
     this.api = config.slideCropServer;
     this.sampler = new HistogramSampler(this.http, this.api, {
@@ -445,10 +470,17 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
 
   /** The `GET /tile` source for slice `z` (one channel's, when given) — see
    *  {@link buildOsdTileSource}. Multichannel draws off the real levels only. */
-  private buildTileSource(d: TileDescriptor, infoB64: string, z: number,
-                          channel?: number): Record<string, unknown> {
+  private buildTileSource(
+    d: TileDescriptor,
+    infoB64: string,
+    z: number,
+    channel?: number,
+  ): Record<string, unknown> {
     return buildOsdTileSource(d, {
-      api: this.api, infoB64, z, channel,
+      api: this.api,
+      infoB64,
+      z,
+      channel,
       realLevelsOnly: this.isMultiChannel ? this.realLevels : undefined,
     });
   }
@@ -498,7 +530,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   private toOverlayMode(mode: string | false): RegionToolMode {
     return OVERLAY_MODES.has(mode as RegionToolMode) ? (mode as RegionToolMode) : 'none';
   }
-
 
   reloadAndPlot(): void {
     /* host re-drives plot() via the image-info stream */
@@ -664,7 +695,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     return [PLOT_TYPE_DESCRIPTORS[PlotType.HEATMAP]!];
   }
 
-
   // ── IRegionStore + classification colours ────────────────────────────
   // Inherited from BaseStoreVisualizer — pure delegations to the shared
   // RegionStore / VisualizerStore (identical to napari-js). The OSD region
@@ -712,7 +742,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   /** The pixel tools' frame: the rendered viewport, read back once and cached
    *  until the viewport changes (see readbackViewportFrame). */
   private readbackViewport(): CachedImageData | null {
-    return this.viewportPixels ??= readbackViewportFrame(this.viewer);
+    return (this.viewportPixels ??= readbackViewportFrame(this.viewer));
   }
 
   /** Per-channel histogram for the Channels & Histogram pane, from the current
@@ -764,9 +794,15 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   async exportComposite(): Promise<void> {
     if (!this.descriptor) return;
     const blob = await renderCompositePng({
-      http: this.http, api: this.api, descriptor: this.descriptor, infoB64: this.infoB64, z: this.currentZ,
-      multiChannel: this.isMultiChannel, realLevels: this.realLevels,
-      channelStates: this.recolor.channelStates, display: this.recolor.display,
+      http: this.http,
+      api: this.api,
+      descriptor: this.descriptor,
+      infoB64: this.infoB64,
+      z: this.currentZ,
+      multiChannel: this.isMultiChannel,
+      realLevels: this.realLevels,
+      channelStates: this.recolor.channelStates,
+      display: this.recolor.display,
     });
     if (blob) saveAs(blob, `${fileStem(this.currentFileName)}_composite.png`);
   }

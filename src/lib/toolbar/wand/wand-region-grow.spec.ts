@@ -3,7 +3,8 @@ import { WandService } from './wand.service';
 
 /** A 120×120 image: a bright disc (r=25) at (60,60) with a gradient-ish dark surround. */
 function discImage(rgb: boolean): WandImage {
-  const W = 120, H = 120;
+  const W = 120,
+    H = 120;
   const data: (number | number[])[][] = [];
   for (let y = 0; y < H; y++) {
     const row: (number | number[])[] = [];
@@ -35,15 +36,19 @@ describe('wand-region-grow', () => {
 
   // LAB_DISTANCE thresholds on the mean distance, so on this two-tone image it
   // leaks into the surround; the equality case above pins it.
-  it.each(cases.filter(([n]) => !n.includes('LAB')))('%s: grows a region roughly covering the disc', (_n, rgb, opts) => {
-    const poly = computeWandRegion(discImage(rgb), 60, 60, opts);
-    expect(poly).not.toBeNull();
-    const xs = poly!.xpoints, ys = poly!.ypoints;
-    expect(Math.min(...xs)).toBeGreaterThanOrEqual(30);
-    expect(Math.max(...xs)).toBeLessThanOrEqual(90);
-    expect(Math.min(...ys)).toBeGreaterThanOrEqual(30);
-    expect(Math.max(...ys)).toBeLessThanOrEqual(90);
-  });
+  it.each(cases.filter(([n]) => !n.includes('LAB')))(
+    '%s: grows a region roughly covering the disc',
+    (_n, rgb, opts) => {
+      const poly = computeWandRegion(discImage(rgb), 60, 60, opts);
+      expect(poly).not.toBeNull();
+      const xs = poly!.xpoints,
+        ys = poly!.ypoints;
+      expect(Math.min(...xs)).toBeGreaterThanOrEqual(30);
+      expect(Math.max(...xs)).toBeLessThanOrEqual(90);
+      expect(Math.min(...ys)).toBeGreaterThanOrEqual(30);
+      expect(Math.max(...ys)).toBeLessThanOrEqual(90);
+    },
+  );
 
   it('the patch mask is size×size and centred on the click', () => {
     const patch = computeWandPatchMask(discImage(false), 60, 60, { patchSize: 21, simpleMode: false })!;

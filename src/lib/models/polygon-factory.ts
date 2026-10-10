@@ -58,7 +58,10 @@ export function clonePolygon(p: Polygon): Polygon {
 export function cloneBounds(bounds: Rectangle | Polygon | MultiPolygon): Rectangle | Polygon | MultiPolygon {
   if (bounds instanceof Rectangle) {
     const rect = new Rectangle();
-    rect.x = bounds.x; rect.y = bounds.y; rect.width = bounds.width; rect.height = bounds.height;
+    rect.x = bounds.x;
+    rect.y = bounds.y;
+    rect.width = bounds.width;
+    rect.height = bounds.height;
     return rect;
   }
   if (bounds instanceof MultiPolygon) {
@@ -90,13 +93,21 @@ function roundedPolygon(xs: number[], ys: number[], holes?: number[][][]): Polyg
 function flattenPolygon(p: Polygon): Polygon {
   if (!p.bezier) return roundedPolygon(p.xpoints, p.ypoints, p.holes);
   const closed = p.closed !== false;
-  const curve = bezierCurveFromHandles(p.xpoints, p.ypoints,
-    resolveHandles(p.xpoints, p.ypoints, closed, p.handlesIn, p.handlesOut), closed);
+  const curve = bezierCurveFromHandles(
+    p.xpoints,
+    p.ypoints,
+    resolveHandles(p.xpoints, p.ypoints, closed, p.handlesIn, p.handlesOut),
+    closed,
+  );
   const holes = p.holes?.map((ring, h) => {
     const hx = ring.map((pt) => pt[0]);
     const hy = ring.map((pt) => pt[1]);
-    const c = bezierCurveFromHandles(hx, hy,
-      resolveHandles(hx, hy, true, p.holeHandlesIn?.[h], p.holeHandlesOut?.[h]), true);
+    const c = bezierCurveFromHandles(
+      hx,
+      hy,
+      resolveHandles(hx, hy, true, p.holeHandlesIn?.[h], p.holeHandlesOut?.[h]),
+      true,
+    );
     return dropClosingPoint(c.xs, c.ys).xs.map((x, i) => [x, c.ys[i]]);
   });
   const ring = dropClosingPoint(curve.xs, curve.ys);
@@ -121,8 +132,7 @@ export function regionPolygons(region: Region): Polygon[] {
   const b = region.bounds;
   if (b instanceof Rectangle) {
     // Bottom-left first, as the previous Plotly-shape projection produced.
-    return [roundedPolygon([b.x, b.x + b.width, b.x + b.width, b.x],
-      [b.y + b.height, b.y + b.height, b.y, b.y])];
+    return [roundedPolygon([b.x, b.x + b.width, b.x + b.width, b.x], [b.y + b.height, b.y + b.height, b.y, b.y])];
   }
   if (b instanceof Polygon) return b.closed === false ? [] : [flattenPolygon(b)];
   if (b instanceof MultiPolygon) return b.polygons.filter((p) => p.closed !== false).map(flattenPolygon);

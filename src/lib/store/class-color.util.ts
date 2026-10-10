@@ -44,7 +44,9 @@ export function hslToHex(hDeg: number, sPct: number, lPct: number): string {
   const a = s * Math.min(l, 1 - l);
   const channel = (n: number) => {
     const v = l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
-    return Math.round(255 * v).toString(16).padStart(2, '0');
+    return Math.round(255 * v)
+      .toString(16)
+      .padStart(2, '0');
   };
   return `#${channel(0)}${channel(8)}${channel(4)}`.toUpperCase();
 }
@@ -105,8 +107,11 @@ export interface ApplyPresetColorsOptions {
  * Returns a new array; regions whose colour is already right are the same
  * instances.
  */
-export function applyPresetColors(regions: Region[], set: PresetSet,
-                                  opts: ApplyPresetColorsOptions = {}): Region[] {
+export function applyPresetColors(
+  regions: Region[],
+  set: PresetSet,
+  opts: ApplyPresetColorsOptions = {},
+): Region[] {
   const known = new Set(set.classes.map((c) => presetKey(set, c.name)));
   return regions.map((region) => {
     if (!region.label || region.colorOverridden) return region;

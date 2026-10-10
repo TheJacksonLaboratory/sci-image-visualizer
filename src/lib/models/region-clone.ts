@@ -24,7 +24,8 @@ export function withRegionZ(r: Region, z: number): Region {
  * kinds are never equal.
  */
 export function regionsEqual(a: Region, b: Region): boolean {
-  const ba = a.bounds, bb = b.bounds;
+  const ba = a.bounds,
+    bb = b.bounds;
   if (ba instanceof Rectangle && bb instanceof Rectangle) {
     return ba.x === bb.x && ba.y === bb.y && ba.width === bb.width && ba.height === bb.height;
   }
@@ -52,10 +53,12 @@ export function polygonsEqual(pa: Polygon, pb: Polygon): boolean {
 }
 
 function holesEqual(a: number[][][] | undefined, b: number[][][] | undefined): boolean {
-  const na = a?.length ?? 0, nb = b?.length ?? 0;
+  const na = a?.length ?? 0,
+    nb = b?.length ?? 0;
   if (na !== nb) return false;
   for (let h = 0; h < na; h++) {
-    const ra = (a as number[][][])[h], rb = (b as number[][][])[h];
+    const ra = (a as number[][][])[h],
+      rb = (b as number[][][])[h];
     if (ra.length !== rb.length) return false;
     for (let i = 0; i < ra.length; i++) {
       if (ra[i][0] !== rb[i][0] || ra[i][1] !== rb[i][1]) return false;

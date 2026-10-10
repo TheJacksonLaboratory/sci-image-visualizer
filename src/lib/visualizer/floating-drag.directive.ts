@@ -33,10 +33,13 @@ export class FloatingDragDirective implements OnDestroy {
     this.end?.();
     const from = this.origin();
     const start = { mx: e.clientX, my: e.clientY, x: from.x, y: from.y };
-    const move = (ev: MouseEvent) => this.zone.run(() => this.vizFloatingDragMove.emit({
-      x: start.x + (ev.clientX - start.mx),
-      y: start.y + (ev.clientY - start.my),
-    }));
+    const move = (ev: MouseEvent) =>
+      this.zone.run(() =>
+        this.vizFloatingDragMove.emit({
+          x: start.x + (ev.clientX - start.mx),
+          y: start.y + (ev.clientY - start.my),
+        }),
+      );
     const up = () => this.end?.();
     this.zone.runOutsideAngular(() => {
       window.addEventListener('mousemove', move);

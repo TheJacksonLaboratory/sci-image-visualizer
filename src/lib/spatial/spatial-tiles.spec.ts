@@ -10,7 +10,10 @@ import * as transcriptGrouping from './transcript-grouping';
  */
 describe('spatial-tiles (deprecated re-exports)', () => {
   it.each([
-    ['lod', lod], ['transcript-grouping', transcriptGrouping], ['glyphs', glyphs], ['density-raster', densityRaster],
+    ['lod', lod],
+    ['transcript-grouping', transcriptGrouping],
+    ['glyphs', glyphs],
+    ['density-raster', densityRaster],
   ] as const)('re-exports everything from %s', (_name, mod) => {
     for (const [key, value] of Object.entries(mod)) {
       expect((spatialTiles as Record<string, unknown>)[key]).toBe(value);

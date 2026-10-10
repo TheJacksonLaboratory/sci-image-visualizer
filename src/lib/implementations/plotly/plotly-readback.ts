@@ -50,14 +50,16 @@ export function frameHistogram(frame: any[], channelIndex: number): IHistogram {
     for (const cell of row) {
       let v: number;
       if (Array.isArray(cell)) {
-        v = channelIndex >= 0 && channelIndex < cell.length
-          ? cell[channelIndex]
-          : Math.round(bt601Luminance(cell[0], cell[1], cell[2]));
+        v =
+          channelIndex >= 0 && channelIndex < cell.length
+            ? cell[channelIndex]
+            : Math.round(bt601Luminance(cell[0], cell[1], cell[2]));
       } else {
         v = cell;
       }
       v = v | 0;
-      if (v < 0) v = 0; else if (v > 255) v = 255;
+      if (v < 0) v = 0;
+      else if (v > 255) v = 255;
       counts[v]++;
     }
   }
@@ -71,8 +73,11 @@ type Rect = { x: number; y: number; width: number; height: number };
  * zoom the axes are relaid out to the crop's bounds, so the ranges ARE the
  * crop — else the whole image `[x0, x1, y0, y1]`, else null.
  */
-export function axesSourceRect(xr: number[] | undefined, yr: number[] | undefined,
-                               trueImgSize: number[] | undefined): Rect | null {
+export function axesSourceRect(
+  xr: number[] | undefined,
+  yr: number[] | undefined,
+  trueImgSize: number[] | undefined,
+): Rect | null {
   if (xr && yr) {
     const x0 = Math.min(xr[0], xr[1]);
     const y0 = Math.min(yr[0], yr[1]); // y axis is reversed for image layouts
@@ -93,14 +98,19 @@ export function axesSourceRect(xr: number[] | undefined, yr: number[] | undefine
  * Intensity channel's window — cmin/cmax for the 3D plot types, zmin/zmax for
  * heatmap/contour. A trace without a colour scale ignores these attributes.
  */
-export function channelDisplayRestyle(channels: IChannelState[], reverse: boolean, invert: boolean,
-                                      colorscale: unknown, plotType: PlotType): Record<string, unknown> {
+export function channelDisplayRestyle(
+  channels: IChannelState[],
+  reverse: boolean,
+  invert: boolean,
+  colorscale: unknown,
+  plotType: PlotType,
+): Record<string, unknown> {
   const update: Record<string, unknown> = { reversescale: reverse !== invert };
   if (colorscale != null) update['colorscale'] = colorscale;
   const ch = channels?.[0];
   if (ch) {
-    const threeD = plotType === PlotType.ISOSURFACE || plotType === PlotType.SURFACE ||
-      plotType === PlotType.SCATTER3D;
+    const threeD =
+      plotType === PlotType.ISOSURFACE || plotType === PlotType.SURFACE || plotType === PlotType.SCATTER3D;
     if (threeD) Object.assign(update, { cmin: ch.min, cmax: ch.max, cauto: false });
     else Object.assign(update, { zmin: ch.min, zmax: ch.max, zauto: false });
   }

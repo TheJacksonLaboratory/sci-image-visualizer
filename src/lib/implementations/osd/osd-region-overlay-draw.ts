@@ -79,8 +79,10 @@ export function drawSelectionHandles(layer: ScreenLayer, region: Region, color: 
   } else if (b instanceof Rectangle) {
     // The four corners as grab/resize handles.
     const corners: [number, number][] = [
-      [b.x, b.y], [b.x + b.width, b.y],
-      [b.x + b.width, b.y + b.height], [b.x, b.y + b.height],
+      [b.x, b.y],
+      [b.x + b.width, b.y],
+      [b.x + b.width, b.y + b.height],
+      [b.x, b.y + b.height],
     ];
     for (const [cx, cy] of corners) vertexMarker(layer, cx, cy, false, color);
   }
@@ -119,7 +121,8 @@ function drawHandle(layer: ScreenLayer, ax: number, ay: number, ctrl: [number, n
 function anchorSquare(layer: ScreenLayer, x: number, y: number, color: string): void {
   const r = 3.5;
   const rect = svgEl('rect');
-  rect.setAttribute('width', `${2 * r}`); rect.setAttribute('height', `${2 * r}`);
+  rect.setAttribute('width', `${2 * r}`);
+  rect.setAttribute('height', `${2 * r}`);
   rect.setAttribute('fill', '#ffffff');
   rect.setAttribute('stroke', color);
   rect.setAttribute('stroke-width', '2');
@@ -128,7 +131,12 @@ function anchorSquare(layer: ScreenLayer, x: number, y: number, color: string): 
 
 /** Marquee rectangle for rubber-band multi-select (dashed outline + faint fill). */
 export function drawSelectionBand(layer: ScreenLayer, a: Pt, b: Pt): void {
-  const el = layer.poly('polygon', [{ x: a.x, y: a.y }, { x: b.x, y: a.y }, { x: b.x, y: b.y }, { x: a.x, y: b.y }]);
+  const el = layer.poly('polygon', [
+    { x: a.x, y: a.y },
+    { x: b.x, y: a.y },
+    { x: b.x, y: b.y },
+    { x: a.x, y: b.y },
+  ]);
   el.setAttribute('fill', 'rgba(120,170,255,0.15)');
   el.setAttribute('stroke', '#4a90e2');
   el.setAttribute('stroke-dasharray', '4 3');
@@ -137,8 +145,15 @@ export function drawSelectionBand(layer: ScreenLayer, a: Pt, b: Pt): void {
 
 /** The rectangle being dragged out ('drawrect'). */
 export function drawDraftRect(layer: ScreenLayer, a: Pt, b: Pt, color: string): void {
-  styleDraft(layer.poly('polygon', [{ x: a.x, y: a.y }, { x: b.x, y: a.y }, { x: b.x, y: b.y }, { x: a.x, y: b.y }]),
-    color);
+  styleDraft(
+    layer.poly('polygon', [
+      { x: a.x, y: a.y },
+      { x: b.x, y: a.y },
+      { x: b.x, y: b.y },
+      { x: a.x, y: b.y },
+    ]),
+    color,
+  );
 }
 
 /** The path traced or placed so far (freehand, polyline, click-to-place polygon). */

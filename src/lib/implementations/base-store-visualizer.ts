@@ -3,7 +3,11 @@ import { Observable } from 'rxjs';
 import { IDisplayOptions, IRegionStore } from '../contracts/visualizer.contract';
 import { Region } from '../models/region';
 import {
-  CanvasToolId, CanvasToolOptions, ColormapNode, IBrushOptions, IWandOptions,
+  CanvasToolId,
+  CanvasToolOptions,
+  ColormapNode,
+  IBrushOptions,
+  IWandOptions,
 } from '../contracts/display-types';
 import type { CanvasToolManager } from '../toolbar/tool-kit/canvas-tool-manager';
 import type { SamPointTool } from '../toolbar/segmentation/sam-point-tool.service';
@@ -48,43 +52,103 @@ export abstract class BaseStoreVisualizer implements IRegionStore, IDisplayOptio
   }
 
   // ── IRegionStore → shared RegionStore ────────────────────────────────────
-  setRegions(regions: Region[], showRegionLabel?: boolean, isRegionSaveOn?: boolean,
-             fillColor?: string, append?: boolean): void {
+  setRegions(
+    regions: Region[],
+    showRegionLabel?: boolean,
+    isRegionSaveOn?: boolean,
+    fillColor?: string,
+    append?: boolean,
+  ): void {
     this.regionStore.setRegions(regions, showRegionLabel, isRegionSaveOn, fillColor, append);
   }
-  getRegions(): Region[] { return this.regionStore.getRegions(); }
-  getRegionPolygons(): any[] { return this.regionStore.getRegionPolygons(); }
-  getRegionUpdateEvent(): Observable<any[]> { return this.regionStore.getRegionUpdateEvent(); }
-  setSelectedShapeIndices(indices: number[]): void { this.regionStore.setSelectedShapeIndices(indices); }
-  getSelectedShapeIndices$(): Observable<number[]> { return this.regionStore.getSelectedShapeIndices$(); }
-  selectRegion(region: Region): void { this.regionStore.selectRegion(region); }
-  deleteActiveShape(): void { this.regionStore.deleteActiveShape(); }
-  getShowShapeLabel(): boolean { return this.regionStore.getShowShapeLabel(); }
-  getShapeColor(): string { return this.regionStore.getShapeColor(); }
-  getFillColor(): string { return this.regionStore.getFillColor(); }
+  getRegions(): Region[] {
+    return this.regionStore.getRegions();
+  }
+  getRegionPolygons(): any[] {
+    return this.regionStore.getRegionPolygons();
+  }
+  getRegionUpdateEvent(): Observable<any[]> {
+    return this.regionStore.getRegionUpdateEvent();
+  }
+  setSelectedShapeIndices(indices: number[]): void {
+    this.regionStore.setSelectedShapeIndices(indices);
+  }
+  getSelectedShapeIndices$(): Observable<number[]> {
+    return this.regionStore.getSelectedShapeIndices$();
+  }
+  selectRegion(region: Region): void {
+    this.regionStore.selectRegion(region);
+  }
+  deleteActiveShape(): void {
+    this.regionStore.deleteActiveShape();
+  }
+  getShowShapeLabel(): boolean {
+    return this.regionStore.getShowShapeLabel();
+  }
+  getShapeColor(): string {
+    return this.regionStore.getShapeColor();
+  }
+  getFillColor(): string {
+    return this.regionStore.getFillColor();
+  }
   // Undo/redo reset the canvas tools through the store's getRegionSetReplaced$ (see the constructor).
-  undo(): void { this.regionStore.undo(); }
-  redo(): void { this.regionStore.redo(); }
-  canUndo(): boolean { return this.regionStore.canUndo(); }
-  canRedo(): boolean { return this.regionStore.canRedo(); }
-  getCanUndo$(): Observable<boolean> { return this.regionStore.getCanUndo$(); }
-  getCanRedo$(): Observable<boolean> { return this.regionStore.getCanRedo$(); }
-  resetUndoHistory(): void { this.regionStore.resetUndoHistory(); }
-  importRegions(geoJsonStr: string): Region[] { return this.regionStore.importRegions(geoJsonStr); }
-  exportRegions(regions: Region[]): void { this.regionStore.exportRegions(regions); }
-  getGeoJsonString(regions: Region[]): string { return this.regionStore.getGeoJsonString(regions); }
+  undo(): void {
+    this.regionStore.undo();
+  }
+  redo(): void {
+    this.regionStore.redo();
+  }
+  canUndo(): boolean {
+    return this.regionStore.canUndo();
+  }
+  canRedo(): boolean {
+    return this.regionStore.canRedo();
+  }
+  getCanUndo$(): Observable<boolean> {
+    return this.regionStore.getCanUndo$();
+  }
+  getCanRedo$(): Observable<boolean> {
+    return this.regionStore.getCanRedo$();
+  }
+  resetUndoHistory(): void {
+    this.regionStore.resetUndoHistory();
+  }
+  importRegions(geoJsonStr: string): Region[] {
+    return this.regionStore.importRegions(geoJsonStr);
+  }
+  exportRegions(regions: Region[]): void {
+    this.regionStore.exportRegions(regions);
+  }
+  getGeoJsonString(regions: Region[]): string {
+    return this.regionStore.getGeoJsonString(regions);
+  }
 
   // ── Per-slice z-stack regions → RegionStore (jit-ui#93) ──────────────────
-  enterStackMode(slices: Map<number, Region[]>, initialZ?: number,
-                 saveLayout?: 'combined' | 'per-slice-file'): void {
+  enterStackMode(
+    slices: Map<number, Region[]>,
+    initialZ?: number,
+    saveLayout?: 'combined' | 'per-slice-file',
+  ): void {
     this.regionStore.enterStackMode(slices, initialZ, saveLayout);
   }
-  exitStackMode(): void { this.regionStore.exitStackMode(); }
-  isStackMode(): boolean { return this.regionStore.isStackMode(); }
-  getStackSaveLayout(): 'combined' | 'per-slice-file' { return this.regionStore.getStackSaveLayout(); }
-  setDisplaySlice(z: number): void { this.regionStore.setDisplaySlice(z); }
-  getSliceRegions(): Region[] { return this.regionStore.getSliceRegions(); }
-  getStackSaveSlices(): Map<number, Region[]> { return this.regionStore.getStackSaveSlices(); }
+  exitStackMode(): void {
+    this.regionStore.exitStackMode();
+  }
+  isStackMode(): boolean {
+    return this.regionStore.isStackMode();
+  }
+  getStackSaveLayout(): 'combined' | 'per-slice-file' {
+    return this.regionStore.getStackSaveLayout();
+  }
+  setDisplaySlice(z: number): void {
+    this.regionStore.setDisplaySlice(z);
+  }
+  getSliceRegions(): Region[] {
+    return this.regionStore.getSliceRegions();
+  }
+  getStackSaveSlices(): Map<number, Region[]> {
+    return this.regionStore.getStackSaveSlices();
+  }
 
   // ── IToolController: on-canvas tools → this backend's CanvasToolManager ──
 
@@ -115,21 +179,43 @@ export abstract class BaseStoreVisualizer implements IRegionStore, IDisplayOptio
   }
 
   /** @deprecated Use {@link setActiveTool}(`'wand'`, options) / (null). */
-  setWandMode(active: boolean, options?: IWandOptions): void { this.setToolMode('wand', active, options); }
-  setWandOptions(options: IWandOptions): void { this.canvasTools.setOptions('wand', options); }
-  clearActiveWandRegion(): void { this.canvasTools.reset('wand'); }
+  setWandMode(active: boolean, options?: IWandOptions): void {
+    this.setToolMode('wand', active, options);
+  }
+  setWandOptions(options: IWandOptions): void {
+    this.canvasTools.setOptions('wand', options);
+  }
+  clearActiveWandRegion(): void {
+    this.canvasTools.reset('wand');
+  }
   /** @deprecated Use {@link setActiveTool}(`'brush'`, options) / (null). */
-  setBrushMode(active: boolean, options?: IBrushOptions): void { this.setToolMode('brush', active, options); }
-  setBrushOptions(options: IBrushOptions): void { this.canvasTools.setOptions('brush', options ?? {}); }
+  setBrushMode(active: boolean, options?: IBrushOptions): void {
+    this.setToolMode('brush', active, options);
+  }
+  setBrushOptions(options: IBrushOptions): void {
+    this.canvasTools.setOptions('brush', options ?? {});
+  }
   /** @deprecated Use {@link setActiveTool}(`'eraseVertex'`, { radius }) / (null). */
-  setVertexEraserMode(active: boolean): void { this.setToolMode('eraseVertex', active); }
-  setVertexEraserRadius(radius: number): void { this.canvasTools.setOptions('eraseVertex', { radius }); }
+  setVertexEraserMode(active: boolean): void {
+    this.setToolMode('eraseVertex', active);
+  }
+  setVertexEraserRadius(radius: number): void {
+    this.canvasTools.setOptions('eraseVertex', { radius });
+  }
   /** @deprecated Use {@link setActiveTool}(`'zoomToBox'`) / (null). */
-  setZoomToBoxMode(active: boolean): void { this.setToolMode('zoomToBox', active); }
+  setZoomToBoxMode(active: boolean): void {
+    this.setToolMode('zoomToBox', active);
+  }
   /** @deprecated Use {@link setActiveTool}(`'samPoint'`) / (null). */
-  setSamPointMode(active: boolean): void { this.setToolMode('samPoint', active); }
-  commitSamPoints(): void { this.canvasTools.get<SamPointTool>('samPoint')?.commit(); }
-  clearSamPoints(): void { this.canvasTools.get<SamPointTool>('samPoint')?.clear(); }
+  setSamPointMode(active: boolean): void {
+    this.setToolMode('samPoint', active);
+  }
+  commitSamPoints(): void {
+    this.canvasTools.get<SamPointTool>('samPoint')?.commit();
+  }
+  clearSamPoints(): void {
+    this.canvasTools.get<SamPointTool>('samPoint')?.clear();
+  }
 
   /** A per-tool setter: arm `id`, or disarm it if it is the armed tool. */
   private setToolMode(id: CanvasToolId, active: boolean, options?: CanvasToolOptions): void {
@@ -143,26 +229,46 @@ export abstract class BaseStoreVisualizer implements IRegionStore, IDisplayOptio
   abstract unsubscribe(): void;
 
   /** The view is going away: release what is bound to it (`IViewerBackend.detach`). */
-  detach(): void { this.unsubscribe(); }
+  detach(): void {
+    this.unsubscribe();
+  }
 
   /** Each backend's own fit (Plotly autorange, OSD home, napari camera fit). */
   abstract autoscale(): void;
 
   /** Fit the image into the view (`IViewerBackend.fitToView`). */
-  fitToView(): void { this.autoscale(); }
+  fitToView(): void {
+    this.autoscale();
+  }
 
   // ── Classification colours → shared VisualizerStore ──────────────────────
-  getClassificationColors(): Map<string, string> { return this.store.getClassificationColors(); }
+  getClassificationColors(): Map<string, string> {
+    return this.store.getClassificationColors();
+  }
   setClassificationColor(label: string, color: string): void {
     this.store.setClassificationColor(label, color);
   }
 
   // ── IDisplayOptions → shared VisualizerStore ─────────────────────────────
-  getColormap(): Observable<ColormapNode | null> { return this.store.getColormap(); }
-  setColormap(colormap: ColormapNode): void { this.store.setColormap(colormap); }
-  getColormapOptions(): ColormapNode[] { return this.store.getColormapOptions(); }
-  getReverseScale(): Observable<boolean> { return this.store.getReverseScale(); }
-  setReverseScale(reverscale: boolean): void { this.store.setReverseScale(reverscale); }
-  setImageMeta(imageMeta: IImageMetadata[]): void { this.store.setImageMeta(imageMeta); }
-  getImageMeta(): Observable<IImageMetadata[]> { return this.store.getImageMeta(); }
+  getColormap(): Observable<ColormapNode | null> {
+    return this.store.getColormap();
+  }
+  setColormap(colormap: ColormapNode): void {
+    this.store.setColormap(colormap);
+  }
+  getColormapOptions(): ColormapNode[] {
+    return this.store.getColormapOptions();
+  }
+  getReverseScale(): Observable<boolean> {
+    return this.store.getReverseScale();
+  }
+  setReverseScale(reverscale: boolean): void {
+    this.store.setReverseScale(reverscale);
+  }
+  setImageMeta(imageMeta: IImageMetadata[]): void {
+    this.store.setImageMeta(imageMeta);
+  }
+  getImageMeta(): Observable<IImageMetadata[]> {
+    return this.store.getImageMeta();
+  }
 }

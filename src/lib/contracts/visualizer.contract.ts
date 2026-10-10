@@ -9,13 +9,20 @@ import { ViewerCapabilities } from './capabilities.contract';
 import { IRegionOverlay } from './region-overlay.contract';
 import { IHistogram } from './channel-histogram-api.contract';
 import {
-  CanvasToolOptions, ColormapNode, IWandOptions, IBrushOptions, SpatialViewState, SpatialColorBy,
+  CanvasToolOptions,
+  ColormapNode,
+  IWandOptions,
+  IBrushOptions,
+  SpatialViewState,
+  SpatialColorBy,
 } from './display-types';
 import {
   CategoricalColumnMeta,
   SpatialDataset,
   SpatialEmbedding,
-  SpatialMarkerGenes, SpatialSelectionMask, SpatialTranscriptCounts,
+  SpatialMarkerGenes,
+  SpatialSelectionMask,
+  SpatialTranscriptCounts,
 } from './spatial-dataset.contract';
 import type { PlotModeViewport } from './plot-type-contribution.contract';
 
@@ -75,8 +82,14 @@ export interface IDataRenderer {
   /** `imageLoaded` is the {@link LoadedImage} handle returned by `load()` (or null
    *  for a draw with no image) — pass it straight through. Resolves false when the
    *  backend could not draw (no plot target, no WebGPU, …). */
-  plot(plotDiv: string, imageLoaded: unknown, imageInfo: IImageInfo, screenHeight: number,
-       plotType: PlotType, inPlace?: boolean): Promise<boolean>;
+  plot(
+    plotDiv: string,
+    imageLoaded: unknown,
+    imageInfo: IImageInfo,
+    screenHeight: number,
+    plotType: PlotType,
+    inPlace?: boolean,
+  ): Promise<boolean>;
   /** @deprecated Plotly-specific re-render; the OSD backend no-ops it. The host
    *  re-drives `plot()` from its image stream instead. */
   reloadAndPlot(): void;
@@ -121,7 +134,7 @@ export interface IDataRenderer {
    * the crop's origin + extent; when zoomed out/panned beyond the edges, the
    * rectangle may extend outside the image bounds (matching the pixel readback
    * canvas). Lets a consumer map displayed-pixel coordinates back to the original
-   * image via `origin + displayedPx * (extent / displayedDim)`. 
+   * image via `origin + displayedPx * (extent / displayedDim)`.
    *
    * Returns `null` when the viewport isn't laid out yet or the backend can't
    * report it — callers should then fall back to the full-image scale (treat
@@ -159,8 +172,13 @@ export interface IDataRenderer {
 
 /** Region/shape state: CRUD, selection, classification colours, GeoJSON I/O. */
 export interface IRegionStore {
-  setRegions(regions: Region[], showRegionLabel?: boolean, isRegionSaveOn?: boolean,
-             fillColor?: string, append?: boolean): void;
+  setRegions(
+    regions: Region[],
+    showRegionLabel?: boolean,
+    isRegionSaveOn?: boolean,
+    fillColor?: string,
+    append?: boolean,
+  ): void;
   /** Framework-neutral accessor — the canonical way to read current regions. */
   getRegions(): Region[];
   /** The current regions as polygons (rectangles expanded), for server requests. */
@@ -213,8 +231,11 @@ export interface IRegionStore {
    *  slice persist. `saveLayout` records how the stack persists — `combined`
    *  (one z-indexed geojson, single-file z-stack) or `per-slice-file` (folder
    *  stack). See {@link setDisplaySlice}, {@link getSliceRegions}. */
-  enterStackMode(slices: Map<number, Region[]>, initialZ?: number,
-                 saveLayout?: 'combined' | 'per-slice-file'): void;
+  enterStackMode(
+    slices: Map<number, Region[]>,
+    initialZ?: number,
+    saveLayout?: 'combined' | 'per-slice-file',
+  ): void;
   /** End the per-slice session (single-plane image, or the stack was closed). */
   exitStackMode(): void;
   /** True while a per-slice z-stack session is active. */
@@ -474,8 +495,7 @@ export interface IIntensitySampling extends IIntensityViewportSource {
   ensureIntensitySampling(imageInfo: IImageInfo, zIndex: number): Promise<void>;
   /** Re-sample the profiles from a fresh crop of the given image-pixel ROI at
    *  display resolution. */
-  refreshIntensitySamplingForRoi(x: number, y: number, width: number, height: number,
-                                 zIndex: number): void;
+  refreshIntensitySamplingForRoi(x: number, y: number, width: number, height: number, zIndex: number): void;
 }
 
 /**
@@ -510,8 +530,8 @@ export interface IVolumeResolution {
  * The host-facing composite contract, implemented by the router (`VISUALIZER`). A
  * rendering backend implements {@link IViewerBackend} instead.
  */
-export interface IVisualizer extends IDataRenderer, IRegionStore, IToolController, IDisplayOptions,
-  IIntensitySampling {
+export interface IVisualizer
+  extends IDataRenderer, IRegionStore, IToolController, IDisplayOptions, IIntensitySampling {
   readonly capabilities: ViewerCapabilities;
   /** This backend's region renderer. May be null until a plot is mounted
    *  (OpenSeadragon). Drives region draw/select modes uniformly. */
@@ -538,8 +558,7 @@ export interface IVisualizer extends IDataRenderer, IRegionStore, IToolControlle
   /** @deprecated Use `getIntensitySampling().ensureIntensitySampling()`. */
   ensureIntensitySampling(imageInfo: IImageInfo, zIndex: number): Promise<void>;
   /** @deprecated Use `getIntensitySampling().refreshIntensitySamplingForRoi()`. */
-  refreshIntensitySamplingForRoi(x: number, y: number, width: number, height: number,
-                                 zIndex: number): void;
+  refreshIntensitySamplingForRoi(x: number, y: number, width: number, height: number, zIndex: number): void;
   /** @deprecated Use `getIntensitySampling().getViewportChange$()`. */
   getViewportChange$(): Observable<{ x: number; y: number; width: number; height: number }>;
   /** Spatial-omics controls when a `SPATIAL_DATA_PORT` is bound, else null.
@@ -589,8 +608,14 @@ export interface IViewerBackend extends IToolController {
 
   // ── render lifecycle ──────────────────────────────────────────────────
   load(imageInfo: IImageInfo, zIndex: number, signal?: AbortSignal): Promise<LoadedImage>;
-  plot(plotDiv: string, imageLoaded: unknown, imageInfo: IImageInfo, screenHeight: number,
-       plotType: PlotType, inPlace?: boolean): Promise<boolean>;
+  plot(
+    plotDiv: string,
+    imageLoaded: unknown,
+    imageInfo: IImageInfo,
+    screenHeight: number,
+    plotType: PlotType,
+    inPlace?: boolean,
+  ): Promise<boolean>;
   reset(): void;
   relayout(trueImageSize?: number[]): void;
   /** The view is going away: release what is bound to it. */

@@ -106,7 +106,10 @@ export class RegionPersistenceService {
         }
         upload = this.io.saveGeoJson(geoJsonStr, filename).subscribe(subscriber);
       });
-      return () => { clearTimeout(timer); upload?.unsubscribe(); };
+      return () => {
+        clearTimeout(timer);
+        upload?.unsubscribe();
+      };
     });
   }
 

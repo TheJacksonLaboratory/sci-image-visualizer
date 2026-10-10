@@ -14,8 +14,12 @@ class FakeResponse {
 /** One Cache API store keyed by URL, honouring `ignoreSearch` on delete. */
 class FakeCache {
   readonly entries = new Map<string, FakeResponse>();
-  async match(key: string) { return this.entries.get(key); }
-  async put(key: string, value: FakeResponse) { this.entries.set(key, value); }
+  async match(key: string) {
+    return this.entries.get(key);
+  }
+  async put(key: string, value: FakeResponse) {
+    this.entries.set(key, value);
+  }
   async delete(key: string, opts?: { ignoreSearch?: boolean }) {
     const strip = (k: string) => (opts?.ignoreSearch ? k.split('?')[0] : k);
     let removed = false;
@@ -32,7 +36,9 @@ describe('SAM model cache', () => {
   const g = globalThis as unknown as Record<string, unknown>;
 
   const served = (bytes: number[]) => ({
-    ok: true, status: 200, body: null,
+    ok: true,
+    status: 200,
+    body: null,
     headers: { get: () => null },
     arrayBuffer: async () => Uint8Array.from(bytes).buffer,
   });
@@ -64,7 +70,9 @@ describe('SAM model cache', () => {
     });
 
     it('adds the revision as a query parameter, after any the URL already has', () => {
-      expect(modelCacheKey('https://hf.co/m/encoder.onnx', '2')).toBe('https://hf.co/m/encoder.onnx?siv-model-rev=2');
+      expect(modelCacheKey('https://hf.co/m/encoder.onnx', '2')).toBe(
+        'https://hf.co/m/encoder.onnx?siv-model-rev=2',
+      );
       expect(modelCacheKey('https://x/e.onnx?sig=a', 'r 1')).toBe('https://x/e.onnx?sig=a&siv-model-rev=r%201');
     });
   });

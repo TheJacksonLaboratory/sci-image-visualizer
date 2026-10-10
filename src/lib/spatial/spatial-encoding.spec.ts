@@ -1,12 +1,18 @@
 import {
-  isGrayscaleLut, spatialContinuousLut,
-  DEFAULT_CATEGORICAL_PALETTE, DEFAULT_MUTED_OPACITY, MISSING_COLOR, contrastWindow,
-  encodeCategorical, encodeContinuous, lutFor, markerDiameters, resolveCategoryColors,
+  isGrayscaleLut,
+  spatialContinuousLut,
+  DEFAULT_CATEGORICAL_PALETTE,
+  DEFAULT_MUTED_OPACITY,
+  MISSING_COLOR,
+  contrastWindow,
+  encodeCategorical,
+  encodeContinuous,
+  lutFor,
+  markerDiameters,
+  resolveCategoryColors,
   toRgbaTuples,
 } from './spatial-encoding';
-import {
-  CategoricalColumnMeta, NO_CATEGORY, SpatialObservations,
-} from '../contracts/spatial-dataset.contract';
+import { CategoricalColumnMeta, NO_CATEGORY, SpatialObservations } from '../contracts/spatial-dataset.contract';
 
 /** RGBA of point i, as 0–255 ints plus alpha, for readable assertions.
  *  Alpha is rounded because the buffer is `Float32Array`: 0.15 stores as
@@ -14,20 +20,21 @@ import {
 function colorAt(flat: Float32Array, i: number) {
   const o = i * 4;
   return {
-    rgb: [
-      Math.round(flat[o] * 255), Math.round(flat[o + 1] * 255), Math.round(flat[o + 2] * 255),
-    ],
+    rgb: [Math.round(flat[o] * 255), Math.round(flat[o + 1] * 255), Math.round(flat[o + 2] * 255)],
     a: Math.round(flat[o + 3] * 10000) / 10000,
   };
 }
 
 const meta = (over: Partial<CategoricalColumnMeta> = {}): CategoricalColumnMeta => ({
-  kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'], ...over,
+  kind: 'categorical',
+  name: 'region',
+  categories: ['Cortex', 'Thalamus'],
+  ...over,
 });
 
 describe('spatial-encoding', () => {
   describe('resolveCategoryColors', () => {
-    it('prefers the column\'s authored colours so the viewer matches upstream figures', () => {
+    it("prefers the column's authored colours so the viewer matches upstream figures", () => {
       const colors = resolveCategoryColors(meta({ colors: ['#ff0000', '#00ff00'] }));
       expect(colors).toEqual(['#ff0000', '#00ff00']);
     });
@@ -78,7 +85,9 @@ describe('spatial-encoding', () => {
 
     it('mutes the points the mask marks, keeping their hue for context', () => {
       const out = encodeCategorical(new Uint16Array([0, 0]), {
-        colors, muted: new Uint8Array([0, 1]), mutedOpacity: 0.2,
+        colors,
+        muted: new Uint8Array([0, 1]),
+        mutedOpacity: 0.2,
       });
       expect(colorAt(out, 0)).toEqual({ rgb: [255, 0, 0], a: 1 });
       expect(colorAt(out, 1)).toEqual({ rgb: [255, 0, 0], a: 0.2 });
@@ -92,7 +101,10 @@ describe('spatial-encoding', () => {
 
   describe('encodeContinuous', () => {
     // A blunt two-stop LUT makes position in the ramp readable in assertions.
-    const lut = lutFor([[0, '#000000'], [1, '#ffffff']]);
+    const lut = lutFor([
+      [0, '#000000'],
+      [1, '#ffffff'],
+    ]);
 
     it('maps the window onto the full ramp', () => {
       const out = encodeContinuous(new Float32Array([0, 5, 10]), { lut, min: 0, max: 10 });
@@ -131,7 +143,10 @@ describe('spatial-encoding', () => {
 
     it('applies the mute mask', () => {
       const out = encodeContinuous(new Float32Array([10, 10]), {
-        lut, min: 0, max: 10, muted: new Uint8Array([0, 1]),
+        lut,
+        min: 0,
+        max: 10,
+        muted: new Uint8Array([0, 1]),
       });
       expect(colorAt(out, 0).a).toBe(1);
       expect(colorAt(out, 1).a).toBe(DEFAULT_MUTED_OPACITY);
@@ -170,7 +185,9 @@ describe('spatial-encoding', () => {
 
   describe('markerDiameters', () => {
     const obs = (radius?: number | Float32Array): SpatialObservations => ({
-      count: 2, x: new Float32Array(2), y: new Float32Array(2),
+      count: 2,
+      x: new Float32Array(2),
+      y: new Float32Array(2),
       ...(radius !== undefined ? { radius } : {}),
     });
 
@@ -191,13 +208,21 @@ describe('spatial-encoding', () => {
   describe('toRgbaTuples', () => {
     it('adapts the flat buffer to napari-js RGBA[] without reordering', () => {
       const flat = new Float32Array([1, 0, 0, 1, 0, 1, 0, 0.5]);
-      expect(toRgbaTuples(flat)).toEqual([[1, 0, 0, 1], [0, 1, 0, 0.5]]);
+      expect(toRgbaTuples(flat)).toEqual([
+        [1, 0, 0, 1],
+        [0, 1, 0, 0.5],
+      ]);
     });
   });
 
   describe('lutFor', () => {
     it('builds a 256-entry table from a colormap value', () => {
-      expect(lutFor([[0, '#000000'], [1, '#ffffff']])).toHaveLength(256);
+      expect(
+        lutFor([
+          [0, '#000000'],
+          [1, '#ffffff'],
+        ]),
+      ).toHaveLength(256);
     });
 
     it('falls back to Viridis for an unresolvable colormap rather than returning null', () => {
@@ -233,7 +258,10 @@ describe('spatial-encoding', () => {
       // Half of COLORMAP_OPTIONS carries `[stop, colour]` arrays rather than
       // names, so an override path that only handles strings drops half the
       // library's colormaps on the floor.
-      const inline: [number, string][] = [[0, 'rgb(0,0,0)'], [1, 'rgb(255,0,0)']];
+      const inline: [number, string][] = [
+        [0, 'rgb(0,0,0)'],
+        [1, 'rgb(255,0,0)'],
+      ];
       const lut = spatialContinuousLut('Viridis', false, inline);
       expect(lut).toEqual(lutFor(inline));
       expect(lut[255]).toEqual([255, 0, 0]);
@@ -250,8 +278,18 @@ describe('spatial-encoding', () => {
     });
 
     it('detects a grayscale LUT from its values, not its name', () => {
-      expect(isGrayscaleLut([[0, 0, 0], [128, 128, 128]])).toBe(true);
-      expect(isGrayscaleLut([[0, 0, 0], [128, 128, 129]])).toBe(false);
+      expect(
+        isGrayscaleLut([
+          [0, 0, 0],
+          [128, 128, 128],
+        ]),
+      ).toBe(true);
+      expect(
+        isGrayscaleLut([
+          [0, 0, 0],
+          [128, 128, 129],
+        ]),
+      ).toBe(false);
     });
   });
 });

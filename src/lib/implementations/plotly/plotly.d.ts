@@ -36,10 +36,16 @@ export interface PlotlyHTMLElement extends HTMLElement {
 }
 
 export declare function newPlot(
-  root: Root, data: Data[], layout?: Layout, config?: Config,
+  root: Root,
+  data: Data[],
+  layout?: Layout,
+  config?: Config,
 ): Promise<PlotlyHTMLElement>;
 export declare function react(
-  root: Root, data: Data[], layout?: Layout, config?: Config,
+  root: Root,
+  data: Data[],
+  layout?: Layout,
+  config?: Config,
 ): Promise<PlotlyHTMLElement>;
 export declare function relayout(root: Root, update: Layout): Promise<PlotlyHTMLElement>;
 export declare function restyle(root: Root, update: Data, traces?: number | number[]): Promise<PlotlyHTMLElement>;
@@ -74,10 +80,18 @@ export interface ShapeLabel {
   text: string;
   textangle: 'auto' | number;
   textposition:
-    | 'top left' | 'top center' | 'top right'
-    | 'middle left' | 'middle center' | 'middle right'
-    | 'bottom left' | 'bottom center' | 'bottom right'
-    | 'start' | 'middle' | 'end';
+    | 'top left'
+    | 'top center'
+    | 'top right'
+    | 'middle left'
+    | 'middle center'
+    | 'middle right'
+    | 'bottom left'
+    | 'bottom center'
+    | 'bottom right'
+    | 'start'
+    | 'middle'
+    | 'end';
   texttemplate: string;
   xanchor: 'auto' | 'left' | 'center' | 'right';
   yanchor: 'top' | 'middle' | 'bottom';

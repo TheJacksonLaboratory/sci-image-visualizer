@@ -3,7 +3,9 @@ import type { ShapesLayer } from 'napari-js';
 import { DEFAULT_SPATIAL_VIEW } from '../../contracts/display-types';
 import type { SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import {
-  SpatialDataset, SpatialPolygonTile, SpatialTranscriptTile,
+  SpatialDataset,
+  SpatialPolygonTile,
+  SpatialTranscriptTile,
 } from '../../contracts/spatial-dataset.contract';
 import { densityAutoRange } from '../../spatial/density-raster';
 import * as spatialEncoding from '../../spatial/spatial-encoding';
@@ -11,7 +13,10 @@ import { emptySelection } from '../../spatial/spatial-selection';
 import { NapariSpatialTileLayers, SpatialTileHost } from './napari-spatial-tiles';
 
 /** A minimal valid continuous LUT: napari-js's colormapFromLut rejects fewer than two rows. */
-const LUT: [number, number, number][] = [[0, 0, 0], [255, 255, 255]];
+const LUT: [number, number, number][] = [
+  [0, 0, 0],
+  [255, 255, 255],
+];
 
 /** What the transcript layer last drew, as the hover holds it (private; read by the specs). */
 function drawnOf<T = { kind: string; bin?: { size: number }; merged: SpatialTranscriptTile }>(
@@ -22,9 +27,11 @@ function drawnOf<T = { kind: string; bin?: { size: number }; merged: SpatialTran
 
 /** The transcript job planner (private; its density-grid cache is poked by the specs). */
 function jobsOf(tiles: NapariSpatialTileLayers) {
-  return (tiles as unknown as {
-    jobs: { port: unknown; densityFor(d: string, g: string[], b: number): Promise<unknown> };
-  }).jobs;
+  return (
+    tiles as unknown as {
+      jobs: { port: unknown; densityFor(d: string, g: string[], b: number): Promise<unknown> };
+    }
+  ).jobs;
 }
 
 /** The transcript layers (private; their colouring and count source are read by the specs). */
@@ -34,8 +41,10 @@ function transcriptsOf<T>(tiles: NapariSpatialTileLayers): T {
 
 describe('NapariSpatialTileLayers: a tile that fails to load', () => {
   const ring = (): SpatialPolygonTile => ({
-    count: 1, coords: new Float32Array([0, 0, 10, 0, 10, 10, 0, 10]),
-    offsets: new Uint32Array([0, 4]), observation: new Uint32Array([0]),
+    count: 1,
+    coords: new Float32Array([0, 0, 10, 0, 10, 10, 0, 10]),
+    offsets: new Uint32Array([0, 4]),
+    observation: new Uint32Array([0]),
   });
 
   function setup(failFirst: number) {
@@ -46,10 +55,14 @@ describe('NapariSpatialTileLayers: a tile that fails to load', () => {
     });
     const port = { getPolygonTile } as unknown as SpatialDataPort;
     const dataset = {
-      id: 'd', name: 'd', columns: [],
+      id: 'd',
+      name: 'd',
+      columns: [],
       observations: { count: 1, x: new Float32Array([5]), y: new Float32Array([5]), radius: 5 },
       polygonTiles: {
-        bounds: [0, 0, 100, 100], sets: [{ name: 'cell', label: 'Cell' }], defaultSet: 'cell',
+        bounds: [0, 0, 100, 100],
+        sets: [{ name: 'cell', label: 'Cell' }],
+        defaultSet: 'cell',
         levels: [{ tileSize: 200 }], // the whole view is one tile
       },
     } as unknown as SpatialDataset;
@@ -62,20 +75,41 @@ describe('NapariSpatialTileLayers: a tile that fails to load', () => {
     };
     const listeners: (() => void)[] = [];
     const items: unknown[] = [];
-    const layer = () => { const l = { values: null }; return l; };
+    const layer = () => {
+      const l = { values: null };
+      return l;
+    };
     const viewer = {
       camera: {
-        center: [50, 50], zoom: 4,
-        changed: { connect: (f: () => void) => { listeners.push(f); return () => undefined; } },
+        center: [50, 50],
+        zoom: 4,
+        changed: {
+          connect: (f: () => void) => {
+            listeners.push(f);
+            return () => undefined;
+          },
+        },
       },
       layers: {
         items,
         add: (l: unknown) => items.push(l),
         remove: (l: unknown) => items.splice(items.indexOf(l), 1),
       },
-      addShapes: jest.fn(() => { const l = layer(); items.push(l); return l; }),
-      addPoints: jest.fn(() => { const l = layer(); items.push(l); return l; }),
-      addImage: jest.fn(() => { const l = layer(); items.push(l); return l; }),
+      addShapes: jest.fn(() => {
+        const l = layer();
+        items.push(l);
+        return l;
+      }),
+      addPoints: jest.fn(() => {
+        const l = layer();
+        items.push(l);
+        return l;
+      }),
+      addImage: jest.fn(() => {
+        const l = layer();
+        items.push(l);
+        return l;
+      }),
       requestRender: () => undefined,
     } as unknown as Viewer;
     const tiles = new NapariSpatialTileLayers(port, host);
@@ -106,7 +140,7 @@ describe('NapariSpatialTileLayers: a tile that fails to load', () => {
     moveCamera();
     await settle(200);
     expect(getPolygonTile).toHaveBeenCalledTimes(1); // failed
-    await settle(1200);                               // the retry
+    await settle(1200); // the retry
     expect(getPolygonTile).toHaveBeenCalledTimes(2);
     // Complete now: a pan over the same tiles is a no-op, and no further retries run.
     moveCamera();
@@ -126,9 +160,14 @@ describe('NapariSpatialTileLayers: a tile that fails to load', () => {
 
 describe('NapariSpatialTileLayers: every gene at once', () => {
   const tile = (n: number): SpatialTranscriptTile => ({
-    count: n, aggregated: false,
-    x: new Float32Array(n).fill(5), y: new Float32Array(n).fill(5), z: new Float32Array(n),
-    weight: new Uint32Array(n).fill(1), observation: new Uint32Array(n), gene: new Uint16Array(n),
+    count: n,
+    aggregated: false,
+    x: new Float32Array(n).fill(5),
+    y: new Float32Array(n).fill(5),
+    z: new Float32Array(n),
+    weight: new Uint32Array(n).fill(1),
+    observation: new Uint32Array(n),
+    gene: new Uint16Array(n),
   });
 
   function setup(individualCount: number, colorBy: 'cellType' | 'gene') {
@@ -137,20 +176,31 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
     const port = { getTranscriptTile, getTranscriptBins } as unknown as SpatialDataPort;
     // Sparse on average (10 transcripts over the bounds), so the plan starts individual.
     const dataset = {
-      id: 'd', name: 'd', columns: [],
+      id: 'd',
+      name: 'd',
+      columns: [],
       observations: { count: 1, x: new Float32Array([5]), y: new Float32Array([5]) },
       transcriptTiles: { bounds: [0, 0, 100, 100], count: 10, levels: [{ tileSize: 200 }] },
       transcriptBins: {
-        bounds: [0, 0, 100, 100], origin: [0, 0], count: 10, levels: [{ binSize: 25, tileSize: 200 }],
+        bounds: [0, 0, 100, 100],
+        origin: [0, 0],
+        count: 10,
+        levels: [{ binSize: 25, tileSize: 200 }],
       },
     } as unknown as SpatialDataset;
     const view = {
-      ...DEFAULT_SPATIAL_VIEW, transcriptMode: 'circles' as const, transcriptAllGenes: true,
-      transcriptGenes: [], transcriptBudget: 1000, transcriptColorBy: colorBy,
+      ...DEFAULT_SPATIAL_VIEW,
+      transcriptMode: 'circles' as const,
+      transcriptAllGenes: true,
+      transcriptGenes: [],
+      transcriptBudget: 1000,
+      transcriptColorBy: colorBy,
     };
     const host: SpatialTileHost = {
       latest: () => [dataset, view, emptySelection(1)],
-      canvasSize: () => [400, 400], continuousLut: () => LUT, polygonsShownChanged: () => undefined,
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
     };
     const items: unknown[] = [];
     const viewer = {
@@ -160,9 +210,21 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
         add: (l: unknown) => items.push(l),
         remove: (l: unknown) => items.splice(items.indexOf(l), 1),
       },
-      addPoints: jest.fn(() => { const l = {}; items.push(l); return l; }),
-      addShapes: jest.fn(() => { const l = {}; items.push(l); return l; }),
-      addImage: jest.fn(() => { const l = {}; items.push(l); return l; }),
+      addPoints: jest.fn(() => {
+        const l = {};
+        items.push(l);
+        return l;
+      }),
+      addShapes: jest.fn(() => {
+        const l = {};
+        items.push(l);
+        return l;
+      }),
+      addImage: jest.fn(() => {
+        const l = {};
+        items.push(l);
+        return l;
+      }),
       requestRender: () => undefined,
     } as unknown as Viewer;
     const tiles = new NapariSpatialTileLayers(port, host);
@@ -204,18 +266,24 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
 });
 
 describe('NapariSpatialTileLayers: per-gene counts in view', () => {
-  it('counts each gene\'s transcripts inside the view, weighting aggregates', () => {
+  it("counts each gene's transcripts inside the view, weighting aggregates", () => {
     const tiles = new NapariSpatialTileLayers({} as SpatialDataPort, {
-      latest: () => null, canvasSize: () => [0, 0], continuousLut: () => LUT,
+      latest: () => null,
+      canvasSize: () => [0, 0],
+      continuousLut: () => LUT,
       polygonsShownChanged: () => undefined,
     });
     expect(tiles.geneCountsIn({ x0: 0, y0: 0, x1: 10, y1: 10 })).toBeNull();
     transcriptsOf<{ countSource: unknown }>(tiles).countSource = {
       genes: ['CD163', 'MRC1', 'CHIT1'],
       merged: {
-        count: 4, aggregated: true,
-        x: new Float32Array([1, 2, 50, 3]), y: new Float32Array([1, 2, 50, 3]), z: new Float32Array(4),
-        weight: new Uint32Array([5, 1, 9, 2]), observation: new Uint32Array(4),
+        count: 4,
+        aggregated: true,
+        x: new Float32Array([1, 2, 50, 3]),
+        y: new Float32Array([1, 2, 50, 3]),
+        z: new Float32Array(4),
+        weight: new Uint32Array([5, 1, 9, 2]),
+        observation: new Uint32Array(4),
         gene: new Uint16Array([0, 1, 0, 0]),
       },
     };
@@ -229,39 +297,64 @@ describe('NapariSpatialTileLayers: a gene selection follows the zoom', () => {
     const n = 400;
     const x = new Float32Array(n);
     const y = new Float32Array(n);
-    for (let i = 0; i < n; i++) { x[i] = (i % 20) * 0.5; y[i] = Math.floor(i / 20) * 0.5; }
+    for (let i = 0; i < n; i++) {
+      x[i] = (i % 20) * 0.5;
+      y[i] = Math.floor(i / 20) * 0.5;
+    }
     // With several clusters, transcript i belongs to gene i % clusters, each gene its own cluster.
     const gene = Uint16Array.from({ length: n }, (_v, i) => i % clusters);
     const tile: SpatialTranscriptTile = {
-      count: n, aggregated: false, x, y, z: new Float32Array(n),
-      weight: new Uint32Array(n).fill(1), observation: new Uint32Array(n), gene,
+      count: n,
+      aggregated: false,
+      x,
+      y,
+      z: new Float32Array(n),
+      weight: new Uint32Array(n).fill(1),
+      observation: new Uint32Array(n),
+      gene,
     };
     const port = { getTranscriptTile: jest.fn(async () => tile) } as unknown as SpatialDataPort;
     const dataset = {
-      id: 'd', name: 'd', columns: [],
+      id: 'd',
+      name: 'd',
+      columns: [],
       observations: { count: 1, x: new Float32Array([5]), y: new Float32Array([5]) },
       transcriptTiles: { bounds: [0, 0, 100, 100], count: n, levels: [{ tileSize: 200 }] },
       transcriptBins: {
-        bounds: [0, 0, 100, 100], origin: [0, 0], count: n,
+        bounds: [0, 0, 100, 100],
+        origin: [0, 0],
+        count: n,
         levels: [1, 2, 4, 8].map((k) => ({ binSize: k, tileSize: 200 })),
       },
     } as unknown as SpatialDataset;
     const view = {
-      ...DEFAULT_SPATIAL_VIEW, transcriptMode: mode,
+      ...DEFAULT_SPATIAL_VIEW,
+      transcriptMode: mode,
       transcriptGenes: Array.from({ length: clusters }, (_v, i) => `G${i}`),
-      transcriptGeneGroups: Array.from({ length: clusters }, (_v, i) => ({ name: `Cluster ${i}`, genes: [`G${i}`] })),
+      transcriptGeneGroups: Array.from({ length: clusters }, (_v, i) => ({
+        name: `Cluster ${i}`,
+        genes: [`G${i}`],
+      })),
       transcriptBudget: budget,
     };
     const items: unknown[] = [];
     const viewer = {
       camera: { center: [5, 5], zoom, changed: { connect: () => () => undefined } },
       layers: { items, add: (l: unknown) => items.push(l), remove: () => undefined },
-      addPoints: jest.fn(() => { const l = {}; items.push(l); return l; }),
-      addShapes: jest.fn(() => ({})), addImage: jest.fn(() => ({})), requestRender: () => undefined,
+      addPoints: jest.fn(() => {
+        const l = {};
+        items.push(l);
+        return l;
+      }),
+      addShapes: jest.fn(() => ({})),
+      addImage: jest.fn(() => ({})),
+      requestRender: () => undefined,
     } as unknown as Viewer;
     const tiles = new NapariSpatialTileLayers(port, {
       latest: () => [dataset, view, emptySelection(1)],
-      canvasSize: () => [400, 400], continuousLut: () => LUT, polygonsShownChanged: () => undefined,
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
     });
     tiles.attach(viewer);
     return tiles;
@@ -291,7 +384,10 @@ describe('NapariSpatialTileLayers: a gene selection follows the zoom', () => {
     const tiles = setup(20, 'glyphs', 4, 50);
     await (tiles as unknown as { plan(): Promise<void> }).plan();
     const d = drawn(tiles) as unknown as {
-      bin?: { size: number }; merged: SpatialTranscriptTile; entryGroup: Int32Array; groupNames: string[];
+      bin?: { size: number };
+      merged: SpatialTranscriptTile;
+      entryGroup: Int32Array;
+      groupNames: string[];
     };
     expect(d.bin).toBeDefined();
     expect(d.merged.count).toBeLessThanOrEqual(50);
@@ -320,46 +416,81 @@ describe('NapariSpatialTileLayers: a gene selection from the per-gene pyramid le
       const genes: number[] = [];
       for (let y = 0; y < 100; y += bin) {
         for (let x = 0; x < 100; x += bin) {
-          for (const g of [0, 1]) { xs.push(x + bin / 2); ys.push(y + bin / 2); genes.push(g); }
+          for (const g of [0, 1]) {
+            xs.push(x + bin / 2);
+            ys.push(y + bin / 2);
+            genes.push(g);
+          }
         }
       }
       const n = xs.length;
       return {
-        count: n, aggregated: true, x: Float32Array.from(xs), y: Float32Array.from(ys), z: new Float32Array(n),
-        weight: new Uint32Array(n).fill(bin * bin), observation: new Uint32Array(n).fill(3),
+        count: n,
+        aggregated: true,
+        x: Float32Array.from(xs),
+        y: Float32Array.from(ys),
+        z: new Float32Array(n),
+        weight: new Uint32Array(n).fill(bin * bin),
+        observation: new Uint32Array(n).fill(3),
         gene: Uint16Array.from(genes),
       } as SpatialTranscriptTile;
     });
-    const getTranscriptTile = jest.fn(async () => ({
-      count: 0, aggregated: false, x: new Float32Array(0), y: new Float32Array(0), z: new Float32Array(0),
-      weight: new Uint32Array(0), observation: new Uint32Array(0), gene: new Uint16Array(0),
-    } as SpatialTranscriptTile));
-    const port = { getTranscriptGeneBins, ...(quality === 'all' ? { getTranscriptTile } : {}) } as unknown as SpatialDataPort;
+    const getTranscriptTile = jest.fn(
+      async () =>
+        ({
+          count: 0,
+          aggregated: false,
+          x: new Float32Array(0),
+          y: new Float32Array(0),
+          z: new Float32Array(0),
+          weight: new Uint32Array(0),
+          observation: new Uint32Array(0),
+          gene: new Uint16Array(0),
+        }) as SpatialTranscriptTile,
+    );
+    const port = {
+      getTranscriptGeneBins,
+      ...(quality === 'all' ? { getTranscriptTile } : {}),
+    } as unknown as SpatialDataPort;
     const dataset = {
-      id: 'd', name: 'd', columns: [],
+      id: 'd',
+      name: 'd',
+      columns: [],
       observations: { count: 1, x: new Float32Array([5]), y: new Float32Array([5]) },
       transcriptTiles: { bounds: [0, 0, 100, 100], count: 1, levels: [{ tileSize: 1000 }] },
-      transcriptBins: { bounds: [0, 0, 100, 100], origin: [0, 0], count: 1,
-        levels: [1, 2, 4, 8, 16].map((k) => ({ binSize: k, tileSize: 1000 })) },
+      transcriptBins: {
+        bounds: [0, 0, 100, 100],
+        origin: [0, 0],
+        count: 1,
+        levels: [1, 2, 4, 8, 16].map((k) => ({ binSize: k, tileSize: 1000 })),
+      },
       transcriptGeneBins: {
-        origin: [0, 0], levels: [1, 2, 4, 8, 16].map((k) => ({ binSize: k, tileSize: 1000 })),
+        origin: [0, 0],
+        levels: [1, 2, 4, 8, 16].map((k) => ({ binSize: k, tileSize: 1000 })),
       },
     } as unknown as SpatialDataset;
     const view = {
-      ...DEFAULT_SPATIAL_VIEW, transcriptMode: 'glyphs' as const, transcriptGenes: ['A', 'B'],
-      transcriptGeneGroups: [{ name: 'Cluster 1', genes: ['A', 'B'] }], transcriptBudget: budget,
+      ...DEFAULT_SPATIAL_VIEW,
+      transcriptMode: 'glyphs' as const,
+      transcriptGenes: ['A', 'B'],
+      transcriptGeneGroups: [{ name: 'Cluster 1', genes: ['A', 'B'] }],
+      transcriptBudget: budget,
       transcriptQuality: quality,
     };
     const items: unknown[] = [];
     const viewer = {
       camera: { center: [50, 50], zoom, changed: { connect: () => () => undefined } },
       layers: { items, add: (l: unknown) => items.push(l), remove: () => undefined },
-      addPoints: jest.fn(() => ({})), addShapes: jest.fn(() => ({})), addImage: jest.fn(() => ({})),
+      addPoints: jest.fn(() => ({})),
+      addShapes: jest.fn(() => ({})),
+      addImage: jest.fn(() => ({})),
       requestRender: () => undefined,
     } as unknown as Viewer;
     const tiles = new NapariSpatialTileLayers(port, {
       latest: () => [dataset, view, emptySelection(1)],
-      canvasSize: () => [400, 400], continuousLut: () => LUT, polygonsShownChanged: () => undefined,
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
     });
     tiles.attach(viewer);
     return { tiles, getTranscriptGeneBins, getTranscriptTile };
@@ -385,7 +516,7 @@ describe('NapariSpatialTileLayers: a gene selection from the per-gene pyramid le
     tiles.detach();
   });
 
-  it('keeps each dataset\'s density grids apart, though their genes and bins match', async () => {
+  it("keeps each dataset's density grids apart, though their genes and bins match", async () => {
     const { tiles } = setup(4, 100_000);
     const getDensity = jest.fn(async () => ({}));
     jobsOf(tiles).port = { getDensity };
@@ -436,21 +567,37 @@ describe('NapariSpatialTileLayers: colouring transcripts by cluster', () => {
   const tile = (genes: number[]): SpatialTranscriptTile => {
     const n = genes.length;
     return {
-      count: n, aggregated: false, x: new Float32Array(n), y: new Float32Array(n), z: new Float32Array(n),
-      weight: new Uint32Array(n).fill(1), observation: new Uint32Array(n), gene: Uint16Array.from(genes),
+      count: n,
+      aggregated: false,
+      x: new Float32Array(n),
+      y: new Float32Array(n),
+      z: new Float32Array(n),
+      weight: new Uint32Array(n).fill(1),
+      observation: new Uint32Array(n),
+      gene: Uint16Array.from(genes),
     };
   };
-  type Colors = (d: unknown, v: unknown, t: SpatialTranscriptTile, c?: (i: number) => string | null) =>
-    Promise<{ rgba: number[][] }>;
+  type Colors = (
+    d: unknown,
+    v: unknown,
+    t: SpatialTranscriptTile,
+    c?: (i: number) => string | null,
+  ) => Promise<{ rgba: number[][] }>;
 
   it('gives a cluster one colour, the colour of the cell group of the same name', async () => {
-    const meta = { kind: 'categorical', name: 'graphclust', categories: ['Cluster 1', 'Cluster 2'],
-      colors: ['#ff0000', '#00ff00'] };
+    const meta = {
+      kind: 'categorical',
+      name: 'graphclust',
+      categories: ['Cluster 1', 'Cluster 2'],
+      colors: ['#ff0000', '#00ff00'],
+    };
     const port = {
       getColumn: async () => ({ meta, codes: new Uint16Array(1) }),
     } as unknown as SpatialDataPort;
     const tiles = new NapariSpatialTileLayers(port, {
-      latest: () => null, canvasSize: () => [0, 0], continuousLut: () => LUT,
+      latest: () => null,
+      canvasSize: () => [0, 0],
+      continuousLut: () => LUT,
       polygonsShownChanged: () => undefined,
     });
     const dataset = { id: 'd', columns: [meta] } as unknown as SpatialDataset;
@@ -459,10 +606,10 @@ describe('NapariSpatialTileLayers: colouring transcripts by cluster', () => {
     const transcripts = transcriptsOf<{ transcriptColors: Colors }>(tiles);
     const colors = transcripts.transcriptColors.bind(transcripts);
     const { rgba } = await colors(dataset, view, tile([0, 1, 2, 3]), (i) => clusters[i]);
-    expect(rgba[0]).toEqual(rgba[1]);           // genes 0 and 1: one cluster, one colour
-    expect(rgba[0]).toEqual([0, 1, 0, 1]);      // Cluster 2's cells are green
-    expect(rgba[2]).toEqual([1, 0, 0, 1]);      // Cluster 1's are red
-    expect(rgba[3]).not.toEqual(rgba[0]);       // a cluster no cell group names: a palette colour
+    expect(rgba[0]).toEqual(rgba[1]); // genes 0 and 1: one cluster, one colour
+    expect(rgba[0]).toEqual([0, 1, 0, 1]); // Cluster 2's cells are green
+    expect(rgba[2]).toEqual([1, 0, 0, 1]); // Cluster 1's are red
+    expect(rgba[3]).not.toEqual(rgba[0]); // a cluster no cell group names: a palette colour
   });
 });
 
@@ -470,26 +617,47 @@ describe('NapariSpatialTileLayers: reporting loads for the canvas badge', () => 
   it('reports "Transcripts" while a selection loads, and nothing once it is drawn', async () => {
     const reports: string[][] = [];
     let release!: () => void;
-    const gate = new Promise<void>((r) => { release = r; });
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
     const tile: SpatialTranscriptTile = {
-      count: 1, aggregated: false, x: Float32Array.of(5), y: Float32Array.of(5), z: new Float32Array(1),
-      weight: Uint32Array.of(1), observation: new Uint32Array(1), gene: new Uint16Array(1),
+      count: 1,
+      aggregated: false,
+      x: Float32Array.of(5),
+      y: Float32Array.of(5),
+      z: new Float32Array(1),
+      weight: Uint32Array.of(1),
+      observation: new Uint32Array(1),
+      gene: new Uint16Array(1),
     };
-    const port = { getTranscriptTile: async () => { await gate; return tile; } } as unknown as SpatialDataPort;
+    const port = {
+      getTranscriptTile: async () => {
+        await gate;
+        return tile;
+      },
+    } as unknown as SpatialDataPort;
     const dataset = {
-      id: 'd', name: 'd', columns: [], observations: { count: 1, x: Float32Array.of(5), y: Float32Array.of(5) },
+      id: 'd',
+      name: 'd',
+      columns: [],
+      observations: { count: 1, x: Float32Array.of(5), y: Float32Array.of(5) },
       transcriptTiles: { bounds: [0, 0, 100, 100], count: 1, levels: [{ tileSize: 200 }] },
     } as unknown as SpatialDataset;
     const view = { ...DEFAULT_SPATIAL_VIEW, transcriptMode: 'circles' as const, transcriptGenes: ['A'] };
     const viewer = {
       camera: { center: [50, 50], zoom: 40, changed: { connect: () => () => undefined } },
       layers: { items: [] as unknown[], add: () => undefined, remove: () => undefined },
-      addPoints: jest.fn(() => ({})), addShapes: jest.fn(() => ({})), addImage: jest.fn(() => ({})),
+      addPoints: jest.fn(() => ({})),
+      addShapes: jest.fn(() => ({})),
+      addImage: jest.fn(() => ({})),
       requestRender: () => undefined,
     } as unknown as Viewer;
     const tiles = new NapariSpatialTileLayers(port, {
-      latest: () => [dataset, view, emptySelection(1)], canvasSize: () => [400, 400], continuousLut: () => LUT,
-      polygonsShownChanged: () => undefined, loadingChanged: (l) => reports.push(l),
+      latest: () => [dataset, view, emptySelection(1)],
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
+      loadingChanged: (l) => reports.push(l),
     });
     tiles.attach(viewer);
     const planned = (tiles as unknown as { plan(): Promise<void> }).plan();
@@ -509,8 +677,10 @@ describe('NapariSpatialTileLayers: reporting loads for the canvas badge', () => 
  */
 describe('NapariSpatialTileLayers: a column request that fails', () => {
   const ring = (): SpatialPolygonTile => ({
-    count: 1, coords: new Float32Array([0, 0, 10, 0, 10, 10, 0, 10]),
-    offsets: new Uint32Array([0, 4]), observation: new Uint32Array([0]),
+    count: 1,
+    coords: new Float32Array([0, 0, 10, 0, 10, 10, 0, 10]),
+    offsets: new Uint32Array([0, 4]),
+    observation: new Uint32Array([0]),
   });
   const meta = { kind: 'categorical', name: 'cluster', categories: ['A'] };
 
@@ -522,17 +692,23 @@ describe('NapariSpatialTileLayers: a column request that fails', () => {
     });
     const port = { getPolygonTile: jest.fn(async () => ring()), getColumn } as unknown as SpatialDataPort;
     const dataset = {
-      id: 'd', name: 'd', columns: [meta],
+      id: 'd',
+      name: 'd',
+      columns: [meta],
       observations: { count: 1, x: new Float32Array([5]), y: new Float32Array([5]), radius: 5 },
       polygonTiles: {
-        bounds: [0, 0, 100, 100], sets: [{ name: 'cell', label: 'Cell' }], defaultSet: 'cell',
+        bounds: [0, 0, 100, 100],
+        sets: [{ name: 'cell', label: 'Cell' }],
+        defaultSet: 'cell',
         levels: [{ tileSize: 200 }],
       },
     } as unknown as SpatialDataset;
     const geneCounts = jest.fn();
     const host: SpatialTileHost = {
       latest: () => [dataset, DEFAULT_SPATIAL_VIEW, emptySelection(1)],
-      canvasSize: () => [400, 400], continuousLut: () => LUT, polygonsShownChanged: () => undefined,
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
       geneCountsChanged: geneCounts,
     };
     const viewer = new Viewer({ canvas: document.createElement('canvas') });
@@ -574,8 +750,10 @@ describe('NapariSpatialTileLayers: a column request that fails', () => {
  */
 describe('NapariSpatialTileLayers: overlapping plans', () => {
   const ring = (): SpatialPolygonTile => ({
-    count: 1, coords: new Float32Array([0, 0, 10, 0, 10, 10, 0, 10]),
-    offsets: new Uint32Array([0, 4]), observation: new Uint32Array([0]),
+    count: 1,
+    coords: new Float32Array([0, 0, 10, 0, 10, 10, 0, 10]),
+    offsets: new Uint32Array([0, 4]),
+    observation: new Uint32Array([0]),
   });
 
   beforeEach(() => {
@@ -587,28 +765,39 @@ describe('NapariSpatialTileLayers: overlapping plans', () => {
     jest.restoreAllMocks();
   });
 
-  it('a stale plan\'s failed tile does not mark the current plan incomplete', async () => {
+  it("a stale plan's failed tile does not mark the current plan incomplete", async () => {
     const pending: { resolve(t: SpatialPolygonTile): void; reject(e: Error): void }[] = [];
-    const getPolygonTile = jest.fn(() => new Promise<SpatialPolygonTile>((resolve, reject) => {
-      pending.push({ resolve, reject });
-    }));
+    const getPolygonTile = jest.fn(
+      () =>
+        new Promise<SpatialPolygonTile>((resolve, reject) => {
+          pending.push({ resolve, reject });
+        }),
+    );
     const dataset = {
-      id: 'd', name: 'd', columns: [],
+      id: 'd',
+      name: 'd',
+      columns: [],
       observations: { count: 1, x: new Float32Array([5]), y: new Float32Array([5]), radius: 5 },
       polygonTiles: {
-        bounds: [0, 0, 100, 100], sets: [{ name: 'cell', label: 'Cell' }], defaultSet: 'cell',
+        bounds: [0, 0, 100, 100],
+        sets: [{ name: 'cell', label: 'Cell' }],
+        defaultSet: 'cell',
         levels: [{ tileSize: 200 }],
       },
     } as unknown as SpatialDataset;
     const view = { ...DEFAULT_SPATIAL_VIEW, cellColorMode: 'single' as const };
     const tiles = new NapariSpatialTileLayers({ getPolygonTile } as unknown as SpatialDataPort, {
       latest: () => [dataset, view, emptySelection(1)],
-      canvasSize: () => [400, 400], continuousLut: () => LUT, polygonsShownChanged: () => undefined,
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
     });
     const viewer = new Viewer({ canvas: document.createElement('canvas') });
     viewer.camera.set([50, 50], 4);
     tiles.attach(viewer);
-    const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
+    const flush = async () => {
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+    };
     const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
 
     const stale = plan();
@@ -639,12 +828,20 @@ describe('NapariSpatialTileLayers: overlapping plans', () => {
  */
 describe('NapariSpatialTileLayers: layer order', () => {
   const ring = (): SpatialPolygonTile => ({
-    count: 1, coords: new Float32Array([0, 0, 10, 0, 10, 10, 0, 10]),
-    offsets: new Uint32Array([0, 4]), observation: new Uint32Array([0]),
+    count: 1,
+    coords: new Float32Array([0, 0, 10, 0, 10, 10, 0, 10]),
+    offsets: new Uint32Array([0, 4]),
+    observation: new Uint32Array([0]),
   });
   const transcripts: SpatialTranscriptTile = {
-    count: 1, aggregated: false, x: Float32Array.of(5), y: Float32Array.of(5), z: new Float32Array(1),
-    weight: Uint32Array.of(1), observation: new Uint32Array(1), gene: new Uint16Array(1),
+    count: 1,
+    aggregated: false,
+    x: Float32Array.of(5),
+    y: Float32Array.of(5),
+    z: new Float32Array(1),
+    weight: Uint32Array.of(1),
+    observation: new Uint32Array(1),
+    gene: new Uint16Array(1),
   };
 
   function setup() {
@@ -653,27 +850,42 @@ describe('NapariSpatialTileLayers: layer order', () => {
       getTranscriptTile: jest.fn(async () => transcripts),
     } as unknown as SpatialDataPort;
     const dataset = {
-      id: 'd', name: 'd', columns: [],
+      id: 'd',
+      name: 'd',
+      columns: [],
       observations: { count: 1, x: Float32Array.of(5), y: Float32Array.of(5), radius: 5 },
       polygonTiles: {
-        bounds: [0, 0, 100, 100], sets: [{ name: 'cell', label: 'Cell' }, { name: 'nucleus', label: 'Nucleus' }],
-        defaultSet: 'cell', levels: [{ tileSize: 200 }],
+        bounds: [0, 0, 100, 100],
+        sets: [
+          { name: 'cell', label: 'Cell' },
+          { name: 'nucleus', label: 'Nucleus' },
+        ],
+        defaultSet: 'cell',
+        levels: [{ tileSize: 200 }],
       },
       transcriptTiles: { bounds: [0, 0, 100, 100], count: 1, levels: [{ tileSize: 200 }] },
     } as unknown as SpatialDataset;
     let view = {
-      ...DEFAULT_SPATIAL_VIEW, cellColorMode: 'single' as const, cellDraw: 'both' as const,
-      cellSet: 'cell', transcriptMode: 'circles' as const, transcriptGenes: ['A'],
+      ...DEFAULT_SPATIAL_VIEW,
+      cellColorMode: 'single' as const,
+      cellDraw: 'both' as const,
+      cellSet: 'cell',
+      transcriptMode: 'circles' as const,
+      transcriptGenes: ['A'],
     };
     const tiles = new NapariSpatialTileLayers(port, {
       latest: () => [dataset, view, emptySelection(1)],
-      canvasSize: () => [400, 400], continuousLut: () => LUT, polygonsShownChanged: () => undefined,
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
     });
     const viewer = new Viewer({ canvas: document.createElement('canvas') });
     viewer.camera.set([50, 50], 40);
     tiles.attach(viewer);
     const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
-    const setView = (patch: Partial<typeof view>) => { view = { ...view, ...patch }; };
+    const setView = (patch: Partial<typeof view>) => {
+      view = { ...view, ...patch };
+    };
     return { tiles, viewer, plan, setView };
   }
   const names = (viewer: Viewer) => viewer.layers.items.map((l) => l.name);
@@ -722,20 +934,34 @@ describe('NapariSpatialTileLayers: hovering a transcript', () => {
   const entries = (o: { x: number[]; weight?: number; gene?: number[]; aggregated?: boolean }) => {
     const n = o.x.length;
     return {
-      count: n, aggregated: !!o.aggregated, x: Float32Array.from(o.x), y: new Float32Array(n).fill(5),
-      z: new Float32Array(n), weight: new Uint32Array(n).fill(o.weight ?? 1),
+      count: n,
+      aggregated: !!o.aggregated,
+      x: Float32Array.from(o.x),
+      y: new Float32Array(n).fill(5),
+      z: new Float32Array(n),
+      weight: new Uint32Array(n).fill(o.weight ?? 1),
       observation: Uint32Array.from({ length: n }, (_v, i) => i),
       gene: o.gene ? Uint16Array.from(o.gene) : new Uint16Array(n),
     } as SpatialTranscriptTile;
   };
 
   function setup(o: {
-    view: Partial<typeof DEFAULT_SPATIAL_VIEW>; zoom: number; tile: SpatialTranscriptTile;
-    bins?: SpatialTranscriptTile; allGenes?: boolean; summary?: boolean;
+    view: Partial<typeof DEFAULT_SPATIAL_VIEW>;
+    zoom: number;
+    tile: SpatialTranscriptTile;
+    bins?: SpatialTranscriptTile;
+    allGenes?: boolean;
+    summary?: boolean;
   }) {
     const getTranscriptSummary = jest.fn(async () => ({
-      transcripts: 4, genes: 3, cells: 1, unassigned: 0,
-      topGenes: [{ name: 'CD3E', count: 2 }, { name: 'MS4A1', count: 1 }],
+      transcripts: 4,
+      genes: 3,
+      cells: 1,
+      unassigned: 0,
+      topGenes: [
+        { name: 'CD3E', count: 2 },
+        { name: 'MS4A1', count: 1 },
+      ],
       cellIds: { 0: 'cell-0' },
     }));
     const port = {
@@ -745,11 +971,15 @@ describe('NapariSpatialTileLayers: hovering a transcript', () => {
       ...(o.summary === false ? {} : { getTranscriptSummary }),
     } as unknown as SpatialDataPort;
     const dataset = {
-      id: 'd', name: 'd', columns: [meta],
+      id: 'd',
+      name: 'd',
+      columns: [meta],
       observations: { count: 4, x: new Float32Array(4), y: new Float32Array(4) },
       transcriptTiles: { bounds: [0, 0, 100, 100], count: 10, levels: [{ tileSize: 200 }] },
       transcriptBins: {
-        bounds: [0, 0, 100, 100], origin: [0, 0], count: 10,
+        bounds: [0, 0, 100, 100],
+        origin: [0, 0],
+        count: 10,
         levels: (o.allGenes ? [25] : [1, 2, 4, 8]).map((k) => ({ binSize: k, tileSize: 200 })),
       },
     } as unknown as SpatialDataset;
@@ -758,23 +988,41 @@ describe('NapariSpatialTileLayers: hovering a transcript', () => {
     const viewer = {
       camera: { center: [5, 5], zoom: o.zoom, changed: { connect: () => () => undefined } },
       layers: {
-        items, add: (l: unknown) => items.push(l), remove: (l: unknown) => items.splice(items.indexOf(l), 1),
+        items,
+        add: (l: unknown) => items.push(l),
+        remove: (l: unknown) => items.splice(items.indexOf(l), 1),
       },
-      addPoints: jest.fn(() => { const l = {}; items.push(l); return l; }),
-      addShapes: jest.fn(() => { const l = {}; items.push(l); return l; }),
-      addImage: jest.fn(() => { const l = {}; items.push(l); return l; }),
+      addPoints: jest.fn(() => {
+        const l = {};
+        items.push(l);
+        return l;
+      }),
+      addShapes: jest.fn(() => {
+        const l = {};
+        items.push(l);
+        return l;
+      }),
+      addImage: jest.fn(() => {
+        const l = {};
+        items.push(l);
+        return l;
+      }),
       requestRender: () => undefined,
     } as unknown as Viewer;
     const tiles = new NapariSpatialTileLayers(port, {
       latest: () => [dataset, view, emptySelection(4)],
-      canvasSize: () => [400, 400], continuousLut: () => LUT, polygonsShownChanged: () => undefined,
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
     });
     tiles.attach(viewer);
     const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
     return { tiles, plan, getTranscriptSummary, items };
   }
 
-  const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
+  const flush = async () => {
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+  };
 
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => jest.useRealTimers());
@@ -789,7 +1037,9 @@ describe('NapariSpatialTileLayers: hovering a transcript', () => {
 
   it('names an individual transcript of every gene, then its gene and cell from the server', async () => {
     const { tiles, plan, getTranscriptSummary } = setup({
-      view: { transcriptAllGenes: true, transcriptBudget: 1000 }, zoom: 4, allGenes: true,
+      view: { transcriptAllGenes: true, transcriptBudget: 1000 },
+      zoom: 4,
+      allGenes: true,
       tile: entries({ x: [5, 7] }),
     });
     await plan();
@@ -806,26 +1056,34 @@ describe('NapariSpatialTileLayers: hovering a transcript', () => {
 
   it('describes an all-gene bin by its count and area, then its genes and cells', async () => {
     const { tiles, plan, getTranscriptSummary } = setup({
-      view: { transcriptAllGenes: true, transcriptBudget: 1000 }, zoom: 4, allGenes: true,
+      view: { transcriptAllGenes: true, transcriptBudget: 1000 },
+      zoom: 4,
+      allGenes: true,
       tile: entries({ x: Array.from({ length: 5000 }, () => 5) }),
       bins: entries({ x: [5, 30], weight: 4, aggregated: true }),
     });
     await plan();
     const details = jest.fn();
     expect(tiles.hoverAt(5, 5, 0.1, details)).toEqual([
-      '4 transcripts · all genes', '25.0 × 25.0 µm area', 'mostly cell #0 · T cell', 'loading details…',
+      '4 transcripts · all genes',
+      '25.0 × 25.0 µm area',
+      'mostly cell #0 · T cell',
+      'loading details…',
     ]);
     jest.advanceTimersByTime(150);
     await flush();
     expect(getTranscriptSummary).toHaveBeenCalledWith({ box: [0, 0, 25, 25], cells: [0] });
     expect(details).toHaveBeenCalledWith([
-      '4 transcripts · all genes', '25.0 × 25.0 µm area', '3 distinct genes · 1 cell',
-      'top genes: CD3E 2, MS4A1 1', 'mostly cell cell-0 · T cell',
+      '4 transcripts · all genes',
+      '25.0 × 25.0 µm area',
+      '3 distinct genes · 1 cell',
+      'top genes: CD3E 2, MS4A1 1',
+      'mostly cell cell-0 · T cell',
     ]);
     tiles.detach();
   });
 
-  it('names a selected gene\'s transcript, alone or aggregated (the server adds only the cell id)', async () => {
+  it("names a selected gene's transcript, alone or aggregated (the server adds only the cell id)", async () => {
     const one = setup({ view: { transcriptGenes: ['G0'] }, zoom: 20, tile: entries({ x: [5, 7] }) });
     await one.plan();
     expect(one.tiles.hoverAt(7, 5, 0.1, () => undefined)).toEqual(['G0 transcript', 'in cell #1 · B cell']);
@@ -835,12 +1093,17 @@ describe('NapariSpatialTileLayers: hovering a transcript', () => {
     one.tiles.detach();
 
     const many = setup({
-      view: { transcriptGenes: ['G0'] }, zoom: 20, tile: entries({ x: [5, 7], weight: 3, aggregated: true }),
+      view: { transcriptGenes: ['G0'] },
+      zoom: 20,
+      tile: entries({ x: [5, 7], weight: 3, aggregated: true }),
       summary: false,
     });
     await many.plan();
-    expect(many.tiles.hoverAt(5, 5, 0.1, () => undefined))
-      .toEqual(['G0 · 3 transcripts', 'grouped: zoom in to split', 'near cell #0 · T cell']);
+    expect(many.tiles.hoverAt(5, 5, 0.1, () => undefined)).toEqual([
+      'G0 · 3 transcripts',
+      'grouped: zoom in to split',
+      'near cell #0 · T cell',
+    ]);
     many.tiles.detach();
   });
 
@@ -848,17 +1111,26 @@ describe('NapariSpatialTileLayers: hovering a transcript', () => {
     // Zoomed out (2 px per unit): one marker per cluster per 8-unit bin.
     const { tiles, plan } = setup({
       view: { transcriptGenes: ['G0'], transcriptGeneGroups: [{ name: 'Cluster 0', genes: ['G0'] }] },
-      zoom: 2, tile: entries({ x: [5, 6, 7] }), summary: false,
+      zoom: 2,
+      tile: entries({ x: [5, 6, 7] }),
+      summary: false,
     });
     await plan();
     expect(tiles.hoverAt(6, 5, 0.1, () => undefined)).toEqual([
-      'Cluster 0 · 3 transcripts', 'mostly G0', '8.0 × 8.0 µm area · zoom in to split', 'mostly cell #0 · T cell',
+      'Cluster 0 · 3 transcripts',
+      'mostly G0',
+      '8.0 × 8.0 µm area · zoom in to split',
+      'mostly cell #0 · T cell',
     ]);
     tiles.detach();
   });
 
   it('says nothing once the transcript layer is gone from the viewer', async () => {
-    const { tiles, plan, items } = setup({ view: { transcriptGenes: ['G0'] }, zoom: 20, tile: entries({ x: [5] }) });
+    const { tiles, plan, items } = setup({
+      view: { transcriptGenes: ['G0'] },
+      zoom: 20,
+      tile: entries({ x: [5] }),
+    });
     await plan();
     expect(tiles.hoverAt(5, 5, 0.1, () => undefined)).not.toBeNull();
     items.length = 0;
@@ -872,11 +1144,14 @@ describe('NapariSpatialTileLayers: the transcript density', () => {
   function setup(patch: Partial<typeof DEFAULT_SPATIAL_VIEW> = {}) {
     // 2 × 2 grid cells of 2 × 2 units: per unit area 0, 1, 2 and 10.
     const getDensity = jest.fn(async () => ({
-      meta: { gridSize: [2, 2], origin: [0, 0], rows: 2, cols: 2 }, genes: ['A'],
+      meta: { gridSize: [2, 2], origin: [0, 0], rows: 2, cols: 2 },
+      genes: ['A'],
       values: Float32Array.of(0, 4, 8, 40),
     }));
     const dataset = {
-      id: 'd', name: 'd', columns: [],
+      id: 'd',
+      name: 'd',
+      columns: [],
       observations: { count: 1, x: new Float32Array(1), y: new Float32Array(1) },
       density: { gridSize: [2, 2], origin: [0, 0], rows: 2, cols: 2 },
     } as unknown as SpatialDataset;
@@ -885,21 +1160,32 @@ describe('NapariSpatialTileLayers: the transcript density', () => {
     const viewer = {
       camera: { center: [2, 2], zoom: 40, changed: { connect: () => () => undefined } },
       layers: {
-        items, add: (l: unknown) => items.push(l), remove: (l: unknown) => items.splice(items.indexOf(l), 1),
+        items,
+        add: (l: unknown) => items.push(l),
+        remove: (l: unknown) => items.splice(items.indexOf(l), 1),
       },
-      addPoints: jest.fn(() => ({})), addShapes: jest.fn(() => ({})),
-      addImage: jest.fn(() => { const l = {}; items.push(l); return l; }),
+      addPoints: jest.fn(() => ({})),
+      addShapes: jest.fn(() => ({})),
+      addImage: jest.fn(() => {
+        const l = {};
+        items.push(l);
+        return l;
+      }),
       requestRender: () => undefined,
     } as unknown as Viewer;
     const densityChanged = jest.fn();
     const tiles = new NapariSpatialTileLayers({ getDensity } as unknown as SpatialDataPort, {
       latest: () => [dataset, view, emptySelection(1)],
-      canvasSize: () => [400, 400], continuousLut: () => LUT, polygonsShownChanged: () => undefined,
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
       densityChanged,
     });
     tiles.attach(viewer);
     const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
-    const setView = (p: Partial<typeof view>) => { view = { ...view, ...p }; };
+    const setView = (p: Partial<typeof view>) => {
+      view = { ...view, ...p };
+    };
     return { tiles, plan, setView, getDensity, viewer, densityChanged };
   }
 
@@ -946,36 +1232,49 @@ describe('NapariSpatialTileLayers: the transcript density', () => {
 describe('NapariSpatialTileLayers: the transcripts-in-view estimate', () => {
   function setup(zoom: number, patch: Partial<typeof DEFAULT_SPATIAL_VIEW> = {}) {
     const getTranscriptCounts = jest.fn(async () => ({
-      counts: { A: 400, B: 100 }, total: 1000, bounds: [0, 0, 100, 100] as [number, number, number, number],
+      counts: { A: 400, B: 100 },
+      total: 1000,
+      bounds: [0, 0, 100, 100] as [number, number, number, number],
     }));
     const dataset = {
-      id: 'd', name: 'd', columns: [],
+      id: 'd',
+      name: 'd',
+      columns: [],
       observations: { count: 1, x: new Float32Array(1), y: new Float32Array(1) },
       transcriptTiles: { bounds: [0, 0, 100, 100], count: 1000, levels: [{ tileSize: 200 }] },
     } as unknown as SpatialDataset;
     const view = {
-      ...DEFAULT_SPATIAL_VIEW, transcriptMode: 'density' as const, transcriptGenes: ['A', 'B'],
-      transcriptHiddenGenes: ['B'], ...patch,
+      ...DEFAULT_SPATIAL_VIEW,
+      transcriptMode: 'density' as const,
+      transcriptGenes: ['A', 'B'],
+      transcriptHiddenGenes: ['B'],
+      ...patch,
     };
     const viewer = {
       camera: { center: [50, 50], zoom, changed: { connect: () => () => undefined } },
       layers: { items: [], add: () => undefined, remove: () => undefined },
-      addPoints: jest.fn(() => ({})), addShapes: jest.fn(() => ({})), addImage: jest.fn(() => ({})),
+      addPoints: jest.fn(() => ({})),
+      addShapes: jest.fn(() => ({})),
+      addImage: jest.fn(() => ({})),
       requestRender: () => undefined,
     } as unknown as Viewer;
     const estimateChanged = jest.fn();
     const tiles = new NapariSpatialTileLayers({ getTranscriptCounts } as unknown as SpatialDataPort, {
       latest: () => [dataset, view, emptySelection(1)],
-      canvasSize: () => [400, 400], continuousLut: () => LUT, polygonsShownChanged: () => undefined,
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
       estimateChanged,
     });
     tiles.attach(viewer);
     const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
     return { tiles, plan, getTranscriptCounts, estimateChanged };
   }
-  const settled = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
+  const settled = async () => {
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+  };
 
-  it('scales the visible genes\' totals by the share of the tissue on screen', async () => {
+  it("scales the visible genes' totals by the share of the tissue on screen", async () => {
     const whole = setup(4); // the view is exactly the 100 × 100 tissue
     await whole.plan();
     await settled();
@@ -1018,7 +1317,9 @@ describe('NapariSpatialTileLayers: drawing cells', () => {
   const meta = { kind: 'categorical', name: 'cluster', categories: ['T cell', 'B cell'] };
   // Two cells (observations 0 and 1), side by side.
   const rings = (): SpatialPolygonTile => ({
-    count: 2, observation: Uint32Array.of(0, 1), offsets: Uint32Array.of(0, 4, 8),
+    count: 2,
+    observation: Uint32Array.of(0, 1),
+    offsets: Uint32Array.of(0, 4, 8),
     coords: Float32Array.of(0, 0, 10, 0, 10, 10, 0, 10, 20, 0, 30, 0, 30, 10, 20, 10),
   });
 
@@ -1031,11 +1332,18 @@ describe('NapariSpatialTileLayers: drawing cells', () => {
     let expression = Float32Array.of(3, 40);
     const getFeatureVector = jest.fn(async () => expression);
     const dataset = {
-      id: 'd', name: 'd', columns: [meta],
+      id: 'd',
+      name: 'd',
+      columns: [meta],
       observations: { count: 2, x: Float32Array.of(5, 25), y: Float32Array.of(5, 5), radius: 5 },
       polygonTiles: {
-        bounds: [0, 0, 100, 100], sets: [{ name: 'cell', label: 'Cell' }, { name: 'nucleus', label: 'Nucleus' }],
-        defaultSet: 'cell', levels: [{ tileSize: 200 }],
+        bounds: [0, 0, 100, 100],
+        sets: [
+          { name: 'cell', label: 'Cell' },
+          { name: 'nucleus', label: 'Nucleus' },
+        ],
+        defaultSet: 'cell',
+        levels: [{ tileSize: 200 }],
       },
     } as unknown as SpatialDataset;
     let view = { ...DEFAULT_SPATIAL_VIEW, ...patch };
@@ -1043,16 +1351,22 @@ describe('NapariSpatialTileLayers: drawing cells', () => {
     const port = { getPolygonTile, getColumn, getFeatureVector } as unknown as SpatialDataPort;
     const tiles = new NapariSpatialTileLayers(port, {
       latest: () => [dataset, view, emptySelection(2)],
-      canvasSize: () => [400, 400], continuousLut: () => LUT, polygonsShownChanged: shown,
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: shown,
     });
     const viewer = new Viewer({ canvas: document.createElement('canvas') });
     viewer.camera.set([50, 50], 4);
     tiles.attach(viewer);
     const addShapes = jest.spyOn(viewer, 'addShapes');
     const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
-    const setView = (p: Partial<typeof view>) => { view = { ...view, ...p }; };
+    const setView = (p: Partial<typeof view>) => {
+      view = { ...view, ...p };
+    };
     const layers = () => viewer.layers.items as unknown as ShapesLayer[];
-    const setExpression = (v: Float32Array) => { expression = v; };
+    const setExpression = (v: Float32Array) => {
+      expression = v;
+    };
     return { tiles, viewer, plan, setView, setExpression, addShapes, layers, getPolygonTile, shown };
   }
 
@@ -1067,7 +1381,7 @@ describe('NapariSpatialTileLayers: drawing cells', () => {
     tiles.detach();
   });
 
-  it('draws outlines alone in the cells\' colours, or dark over a fill, and nuclei over the cells', async () => {
+  it("draws outlines alone in the cells' colours, or dark over a fill, and nuclei over the cells", async () => {
     const outline = setup({ cellDraw: 'outline' });
     await outline.plan();
     expect(outline.layers().map((l) => [l.name, l.draw])).toEqual([['cell outlines', 'outline']]);
@@ -1087,7 +1401,7 @@ describe('NapariSpatialTileLayers: drawing cells', () => {
     nuclei.tiles.detach();
   });
 
-  it('leaves a switched-off group\'s cells out of the geometry', async () => {
+  it("leaves a switched-off group's cells out of the geometry", async () => {
     const { tiles, plan, layers } = setup({ hiddenGroups: ['B cell'] });
     await plan();
     expect(count(layers()[0])).toBe(1);
@@ -1113,15 +1427,13 @@ describe('NapariSpatialTileLayers: drawing cells', () => {
     tiles.detach();
   });
 
-  it('computes a gene colouring\'s contrast window once per (vector, clip, log) (SPATIAL-12)', async () => {
+  it("computes a gene colouring's contrast window once per (vector, clip, log) (SPATIAL-12)", async () => {
     const sort = jest.spyOn(spatialEncoding, 'contrastWindow');
     const { tiles, plan, setView, setExpression, layers } = setup({ cellColorMode: 'gene', cellColorGene: 'G' });
     await plan();
     expect(sort).toHaveBeenCalledTimes(1);
     // The window is taken on the log1p values (gene expression is log-scaled).
-    const window = spatialEncoding.contrastWindow(
-      Float32Array.of(Math.log1p(3), Math.log1p(40)), 0.01, 0.99,
-    );
+    const window = spatialEncoding.contrastWindow(Float32Array.of(Math.log1p(3), Math.log1p(40)), 0.01, 0.99);
     expect(layers()[0].contrastLimits).toEqual(window);
     sort.mockClear();
 
@@ -1169,8 +1481,14 @@ describe('NapariSpatialTileLayers: a transcript plan superseded at its last step
   it('lets the newer plan of the same view draw it', async () => {
     const meta = { kind: 'categorical', name: 'cluster', categories: ['T cell'] };
     const tile: SpatialTranscriptTile = {
-      count: 1, aggregated: false, x: Float32Array.of(5), y: Float32Array.of(5), z: new Float32Array(1),
-      weight: Uint32Array.of(1), observation: new Uint32Array(1), gene: new Uint16Array(1),
+      count: 1,
+      aggregated: false,
+      x: Float32Array.of(5),
+      y: Float32Array.of(5),
+      z: new Float32Array(1),
+      weight: Uint32Array.of(1),
+      observation: new Uint32Array(1),
+      gene: new Uint16Array(1),
     };
     let gate: Promise<void> | null = null;
     const getColumn = jest.fn(async () => {
@@ -1179,29 +1497,40 @@ describe('NapariSpatialTileLayers: a transcript plan superseded at its last step
     });
     const port = { getTranscriptTile: jest.fn(async () => tile), getColumn } as unknown as SpatialDataPort;
     const dataset = {
-      id: 'd', name: 'd', columns: [meta], observations: { count: 1, x: Float32Array.of(5), y: Float32Array.of(5) },
+      id: 'd',
+      name: 'd',
+      columns: [meta],
+      observations: { count: 1, x: Float32Array.of(5), y: Float32Array.of(5) },
       transcriptTiles: { bounds: [0, 0, 100, 100], count: 1, levels: [{ tileSize: 200 }] },
     } as unknown as SpatialDataset;
     let view = {
-      ...DEFAULT_SPATIAL_VIEW, transcriptMode: 'circles' as const, transcriptGenes: ['A'],
+      ...DEFAULT_SPATIAL_VIEW,
+      transcriptMode: 'circles' as const,
+      transcriptGenes: ['A'],
       transcriptColorBy: 'gene' as const,
     };
     const tiles = new NapariSpatialTileLayers(port, {
       latest: () => [dataset, view, emptySelection(1)],
-      canvasSize: () => [400, 400], continuousLut: () => LUT, polygonsShownChanged: () => undefined,
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
     });
     const viewer = new Viewer({ canvas: document.createElement('canvas') });
     viewer.camera.set([50, 50], 40);
     tiles.attach(viewer);
     const addPoints = jest.spyOn(viewer, 'addPoints');
     const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
-    const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
+    const flush = async () => {
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+    };
 
     await plan(); // view A drawn
     expect(addPoints).toHaveBeenCalledTimes(1);
     view = { ...view, transcriptGenes: ['A', 'B'] }; // view B
     let release!: () => void;
-    gate = new Promise<void>((r) => { release = r; });
+    gate = new Promise<void>((r) => {
+      release = r;
+    });
     const stale = plan(); // reaches the cell-type lookup and waits there…
     await flush();
     gate = null;

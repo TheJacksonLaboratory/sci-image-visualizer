@@ -31,7 +31,10 @@ export class RegionHistory<T> {
   private readonly canUndoSubject = new BehaviorSubject<boolean>(false);
   private readonly canRedoSubject = new BehaviorSubject<boolean>(false);
 
-  constructor(private readonly limit = 10, private readonly coalesceMs = 250) {}
+  constructor(
+    private readonly limit = 10,
+    private readonly coalesceMs = 250,
+  ) {}
 
   /** Whether an undo step is available (drives the toolbar's Undo button). */
   readonly canUndo$: Observable<boolean> = this.canUndoSubject.asObservable();
@@ -53,7 +56,8 @@ export class RegionHistory<T> {
   record(before: T): void {
     if (this.restoring) return;
     const startsBurst = !this.burstOpen;
-    if (this.gestureDepth > 0) this.burstOpen = true; // closed by endGesture()
+    if (this.gestureDepth > 0)
+      this.burstOpen = true; // closed by endGesture()
     else this.armBurst();
     if (!startsBurst) return;
     this.push(this.undoStack, before);
@@ -137,7 +141,8 @@ export class RegionHistory<T> {
   }
 
   private emit(): void {
-    const canUndo = this.canUndo(), canRedo = this.canRedo();
+    const canUndo = this.canUndo(),
+      canRedo = this.canRedo();
     if (this.canUndoSubject.value !== canUndo) this.canUndoSubject.next(canUndo);
     if (this.canRedoSubject.value !== canRedo) this.canRedoSubject.next(canRedo);
   }

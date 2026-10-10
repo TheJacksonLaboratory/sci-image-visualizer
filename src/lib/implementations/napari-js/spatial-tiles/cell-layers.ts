@@ -5,14 +5,29 @@ import type { Rgb } from '../../../contracts/colormap-lut';
 import type { SpatialDataPort } from '../../../contracts/ports/spatial-data.port';
 import type { SpatialViewState } from '../../../contracts/display-types';
 import {
-  NO_CATEGORY, SpatialColumn, SpatialDataset, SpatialPolygonTile, SpatialPolygons, isCategoricalColumn,
+  NO_CATEGORY,
+  SpatialColumn,
+  SpatialDataset,
+  SpatialPolygonTile,
+  SpatialPolygons,
+  isCategoricalColumn,
 } from '../../../contracts/spatial-dataset.contract';
 import {
-  DEFAULT_CATEGORICAL_PALETTE, MISSING_COLOR, contrastWindow, parseHex, resolveCategoryColors,
+  DEFAULT_CATEGORICAL_PALETTE,
+  MISSING_COLOR,
+  contrastWindow,
+  parseHex,
+  resolveCategoryColors,
 } from '../../../spatial/spatial-encoding';
 import { SpatialSelectionMask } from '../../../spatial/spatial-selection';
 import {
-  DataRect, POLYGON_LEVEL_MIN_CELL_PX, cellTypeColumnFor, cellsShown, polygonLevelFor, tileId, tilesInRect,
+  DataRect,
+  POLYGON_LEVEL_MIN_CELL_PX,
+  cellTypeColumnFor,
+  cellsShown,
+  polygonLevelFor,
+  tileId,
+  tilesInRect,
   typicalCellDiameter,
 } from '../../../spatial/lod';
 import { discreteColormapStops } from '../../../spatial/density-raster';
@@ -73,8 +88,12 @@ export class CellLayers {
 
   /** Draw the cells covering `rect` at the level `pxPerUnit` calls for, or drop them. */
   async plan(
-    dataset: SpatialDataset, view: SpatialViewState, selection: SpatialSelectionMask,
-    rect: DataRect, pxPerUnit: number, ctx: PlanContext,
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    selection: SpatialSelectionMask,
+    rect: DataRect,
+    pxPerUnit: number,
+    ctx: PlanContext,
   ): Promise<void> {
     const tiled = dataset.polygonTiles;
     const whole = !tiled && dataset.polygons && this.port.getPolygons;
@@ -87,7 +106,9 @@ export class CellLayers {
     // soon as a cell is big enough to read as a shape rather than a dot.
     const level = tiled
       ? polygonLevelFor(pxPerUnit, diameter, tiled.levels.length)
-      : (pxPerUnit * diameter >= POLYGON_LEVEL_MIN_CELL_PX[2] ? 0 : -1);
+      : pxPerUnit * diameter >= POLYGON_LEVEL_MIN_CELL_PX[2]
+        ? 0
+        : -1;
     if (level < 0) {
       this.drop();
       return;
@@ -96,18 +117,24 @@ export class CellLayers {
     // Groups switched off in the list: their cells are left out of the geometry.
     const hidden = await this.lookup.hiddenCodes(dataset, view);
     if (ctx.stale()) return;
-    const label = view.cellSet === 'both' ? 'Cells and nuclei'
-      : view.cellSet === 'nucleus' ? 'Nuclei' : 'Cells';
+    const label = view.cellSet === 'both' ? 'Cells and nuclei' : view.cellSet === 'nucleus' ? 'Nuclei' : 'Cells';
     const geometry = await ctx.track(label, this.cellGeometry(dataset, view, rect, level, hidden, ctx));
     if (!geometry) return;
     const { rings, nuclei, geometryKey } = geometry;
 
     const geometryChanged = geometryKey !== this.cellGeometryKey;
     const styleKey = [
-      geometryKey, view.cellColorMode, view.cellColorGene, view.cellSingleColor,
+      geometryKey,
+      view.cellColorMode,
+      view.cellColorGene,
+      view.cellSingleColor,
       cellTypeColumnFor(dataset, view),
-      this.selectionRev(selection), view.logScale, view.percentileClip.join(),
-      JSON.stringify(view.continuousColormap), view.cellDraw, view.cellOpacity,
+      this.selectionRev(selection),
+      view.logScale,
+      view.percentileClip.join(),
+      JSON.stringify(view.continuousColormap),
+      view.cellDraw,
+      view.cellOpacity,
     ].join('|');
     const present = (['cellFill', 'cellOutline', 'nucleusOutline'] as const).some((g) => this.groups.shown(g));
     if (!geometryChanged && styleKey === this.cellStyleKey && present) {
@@ -128,16 +155,30 @@ export class CellLayers {
     const outline = view.cellDraw !== 'fill';
 
     this.groups.upsertShapes('cellFill', fill, geometryChanged, rings, {
-      name: 'cells', draw: 'fill', opacity: view.cellOpacity, ...colors, ...common,
+      name: 'cells',
+      draw: 'fill',
+      opacity: view.cellOpacity,
+      ...colors,
+      ...common,
     });
-    this.groups.upsertShapes('cellOutline', outline, geometryChanged, rings, fill
-      // Over a fill, a dark outline separates neighbours of the same type.
-      ? { name: 'cell outlines', draw: 'outline', color: [0.08, 0.08, 0.1, 1], opacity: 0.7, ...common }
-      : { name: 'cell outlines', draw: 'outline', opacity: 1, ...colors, ...common });
+    this.groups.upsertShapes(
+      'cellOutline',
+      outline,
+      geometryChanged,
+      rings,
+      fill
+        ? // Over a fill, a dark outline separates neighbours of the same type.
+          { name: 'cell outlines', draw: 'outline', color: [0.08, 0.08, 0.1, 1], opacity: 0.7, ...common }
+        : { name: 'cell outlines', draw: 'outline', opacity: 1, ...colors, ...common },
+    );
     // "Both": nuclei outlined over the cells, light so they read against any fill.
     if (nuclei) {
       this.groups.upsertShapes('nucleusOutline', true, geometryChanged, nuclei, {
-        name: 'nucleus outlines', draw: 'outline', color: [0.95, 0.95, 0.98, 1], opacity: 0.8, ...common,
+        name: 'nucleus outlines',
+        draw: 'outline',
+        color: [0.95, 0.95, 0.98, 1],
+        opacity: 0.8,
+        ...common,
       });
     } else {
       this.groups.drop('nucleusOutline');
@@ -158,7 +199,9 @@ export class CellLayers {
    * (Xenium Explorer's "Cell Color"). A selection mutes what it leaves out.
    */
   private async cellColors(
-    dataset: SpatialDataset, view: SpatialViewState, selection: SpatialSelectionMask,
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    selection: SpatialSelectionMask,
     owners: Uint32Array,
   ): Promise<{ values?: Float32Array; colormap?: Colormap; contrastLimits?: [number, number]; color?: RGBA }> {
     const muted = selection.count > 0 ? selection.mask : null;
@@ -177,9 +220,9 @@ export class CellLayers {
       }
       const [clipLo, clipHi] = view.percentileClip;
       // Keyed by the SOURCE vector (the log copy would be new on every call), as the 3D cloud's.
-      const [lo, hi] = this.contrastWindows.get(raw, clipLo, clipHi, log, () => contrastWindow(
-        log ? raw.map((v) => Math.log1p(Math.max(0, v))) : raw, clipLo, clipHi,
-      ));
+      const [lo, hi] = this.contrastWindows.get(raw, clipLo, clipHi, log, () =>
+        contrastWindow(log ? raw.map((v) => Math.log1p(Math.max(0, v))) : raw, clipLo, clipHi),
+      );
       return {
         values,
         colormap: colormapFromLut('spatial-continuous', this.host.continuousLut(view)),
@@ -194,9 +237,10 @@ export class CellLayers {
       if (!isCategoricalColumn(column)) return continuous(column.values, false);
     }
 
-    const name = mode === 'segmentation' && dataset.columns.some((c) => c.name === 'segmentation_method')
-      ? 'segmentation_method'
-      : cellTypeColumnFor(dataset, view);
+    const name =
+      mode === 'segmentation' && dataset.columns.some((c) => c.name === 'segmentation_method')
+        ? 'segmentation_method'
+        : cellTypeColumnFor(dataset, view);
     const codes = name ? await this.lookup.codes(name) : null;
     const { colormap, valueOf } = this.categoricalColormap(codes?.meta ?? null);
     const values = new Float32Array(owners.length);
@@ -208,11 +252,13 @@ export class CellLayers {
     return { values, colormap, contrastLimits: [0, 1] };
   }
 
-  private categoricalColormap(meta: SpatialColumn['meta'] | null):
-    { colormap: Colormap; valueOf: (code: number) => number; rgb: Rgb[] } {
-    const hex = meta && meta.kind === 'categorical'
-      ? resolveCategoryColors(meta)
-      : [DEFAULT_CATEGORICAL_PALETTE[0]];
+  private categoricalColormap(meta: SpatialColumn['meta'] | null): {
+    colormap: Colormap;
+    valueOf: (code: number) => number;
+    rgb: Rgb[];
+  } {
+    const hex =
+      meta && meta.kind === 'categorical' ? resolveCategoryColors(meta) : [DEFAULT_CATEGORICAL_PALETTE[0]];
     const rgb = hex.map(parseHex);
     const { stops, valueOf } = discreteColormapStops(rgb, MISSING_COLOR);
     return { colormap: new Colormap('spatial-categories', stops), valueOf, rgb };
@@ -224,8 +270,12 @@ export class CellLayers {
    * view went stale or the dataset has no set to draw.
    */
   private async cellGeometry(
-    dataset: SpatialDataset, view: SpatialViewState, rect: DataRect, level: number,
-    hidden: HiddenCodes | null, ctx: PlanContext,
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    rect: DataRect,
+    level: number,
+    hidden: HiddenCodes | null,
+    ctx: PlanContext,
   ): Promise<{ rings: SpatialPolygonTile; nuclei: SpatialPolygonTile | null; geometryKey: string } | null> {
     const tiled = dataset.polygonTiles;
     const hiddenKey = view.hiddenGroups.join('\u0001');
@@ -234,8 +284,10 @@ export class CellLayers {
     let geometryKey: string;
     if (tiled) {
       const both = view.cellSet === 'both';
-      const set = !both && view.cellSet && tiled.sets.some((s) => s.name === view.cellSet)
-        ? view.cellSet : (tiled.defaultSet ?? tiled.sets[0]?.name);
+      const set =
+        !both && view.cellSet && tiled.sets.some((s) => s.name === view.cellSet)
+          ? view.cellSet
+          : (tiled.defaultSet ?? tiled.sets[0]?.name);
       if (!set) return null;
       const nucleusSet = both ? tiled.sets.find((s) => s.name !== set)?.name : undefined;
       const keys = tilesInRect(rect, level, tiled.levels, tiled.bounds, MAX_CELL_TILES);
@@ -263,7 +315,8 @@ export class CellLayers {
         if (ctx.stale()) return null;
         // Whole-dataset rings are index-aligned with the observations.
         rings = filterRings(
-          { ...polys, observation: Uint32Array.from({ length: polys.count }, (_v, i) => i) }, hidden,
+          { ...polys, observation: Uint32Array.from({ length: polys.count }, (_v, i) => i) },
+          hidden,
         );
       }
     }

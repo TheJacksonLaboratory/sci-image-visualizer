@@ -9,9 +9,7 @@ const W = 40;
 const H = 30;
 function rgbAt(x: number, y: number): [number, number, number] {
   const inDisc = (x - 18) ** 2 + (y - 14) ** 2 < 64;
-  return inDisc
-    ? [220, 200 + ((x * 3) % 20), 180]
-    : [(x * 7 + y * 3) % 40, (x * 5) % 30, (y * 11) % 50];
+  return inDisc ? [220, 200 + ((x * 3) % 20), 180] : [(x * 7 + y * 3) % 40, (x * 5) % 30, (y * 11) % 50];
 }
 
 function nestedRgb(): number[][][] {
@@ -105,8 +103,9 @@ describe('nested and packed frames are equivalent for every pixel tool', () => {
   });
 
   it('SAM: the same encoder RGBA', () => {
-    expect(Array.from(frameToRgba(cached(packedRgba()), 0)))
-      .toEqual(Array.from(frameToRgba(cached(nestedRgb()), 0)));
+    expect(Array.from(frameToRgba(cached(packedRgba()), 0))).toEqual(
+      Array.from(frameToRgba(cached(nestedRgb()), 0)),
+    );
   });
 
   it('Cellpose crop: the same crop and origin', () => {

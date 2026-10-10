@@ -39,21 +39,23 @@ export class DensityLayer {
   ) {}
 
   /** Draw the view's density, or drop it; an unchanged (genes, bin, window, colormap) is a no-op. */
-  async plan(
-    dataset: SpatialDataset, view: SpatialViewState, ctx: PlanContext,
-  ): Promise<void> {
+  async plan(dataset: SpatialDataset, view: SpatialViewState, ctx: PlanContext): Promise<void> {
     const hiddenGenes = new Set(view.transcriptHiddenGenes);
-    const genes = view.transcriptAllGenes
-      ? [ALL_GENES]
-      : view.transcriptGenes.filter((g) => !hiddenGenes.has(g));
+    const genes = view.transcriptAllGenes ? [ALL_GENES] : view.transcriptGenes.filter((g) => !hiddenGenes.has(g));
     if (!dataset.density || !this.port.getDensity || view.transcriptMode !== 'density' || !genes.length) {
       this.groups.drop('density');
       this.stats = null;
       return;
     }
     const lut = lutFor(view.densityColormap ?? INFERNO_SCALE);
-    const key = [dataset.id, genes.join(','), view.densityBin, view.densityOpacity,
-      JSON.stringify(view.densityRange), JSON.stringify(view.densityColormap)].join('|');
+    const key = [
+      dataset.id,
+      genes.join(','),
+      view.densityBin,
+      view.densityOpacity,
+      JSON.stringify(view.densityRange),
+      JSON.stringify(view.densityColormap),
+    ].join('|');
     if (key === this.groups.key('density') && this.groups.has('density')) return;
     const raster = await ctx.track('Transcript density', this.port.getDensity(genes, view.densityBin));
     if (ctx.stale()) return;
@@ -107,7 +109,11 @@ export class TranscriptEstimator {
    * Xenium Explorer shows; it tells the user whether the budget will force grouping.
    */
   async plan(
-    dataset: SpatialDataset, view: SpatialViewState, viewer: Viewer, w: number, h: number,
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    viewer: Viewer,
+    w: number,
+    h: number,
     ctx: PlanContext,
   ): Promise<void> {
     const tiles = dataset.transcriptTiles;

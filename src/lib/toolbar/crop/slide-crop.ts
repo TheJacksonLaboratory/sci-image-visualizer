@@ -15,7 +15,12 @@ export interface CroppedImage {
 }
 
 /** A box in image *data* coordinates (as stored on a Rectangle region). */
-export interface DataBox { x0: number; y0: number; x1: number; y1: number; }
+export interface DataBox {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
 
 /**
  * Browser "slide crop": extract the box region (data coords) from a cached image
@@ -26,9 +31,7 @@ export interface DataBox { x0: number; y0: number; x1: number; y1: number; }
  * crop, then offset the resulting masks by (matrixX0, matrixY0) to place them
  * back on the full frame.
  */
-export function cropImageRegion(
-  cached: CachedImageData, frameIndex: number, box: DataBox,
-): CroppedImage | null {
+export function cropImageRegion(cached: CachedImageData, frameIndex: number, box: DataBox): CroppedImage | null {
   const frame = MatrixFrame.from(cached);
   // data -> image (matrix) coords, normalized + clamped to the frame.
   const clampX = (v: number) => Math.max(0, Math.min(cached.width, v));
@@ -51,7 +54,12 @@ export function cropImageRegion(
  * opaque black.
  */
 export function frameRegionToRgba(
-  cached: CachedImageData, frameIndex: number, x0: number, y0: number, w: number, h: number,
+  cached: CachedImageData,
+  frameIndex: number,
+  x0: number,
+  y0: number,
+  w: number,
+  h: number,
 ): Uint8ClampedArray {
   const pixels = framePixels(cached.frames[frameIndex] ?? cached.frames[0], cached.isGrayscale);
   const data = new Uint8ClampedArray(w * h * 4);

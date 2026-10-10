@@ -9,7 +9,9 @@
   color: var(--text-color-secondary, #6c757d);
 }
 
-.sc-error { color: var(--red-600, #c62828); }
+.sc-error {
+  color: var(--red-600, #c62828);
+}
 
 .sc-section {
   display: flex;
@@ -173,13 +175,29 @@
 
 // Picker + side buttons on one line: [ dropdown ][k][+]
 .sc-row-picker {
-  p-dropdown, p-multiSelect, p-treeSelect { flex: 1 1 0; min-width: 0; }
-  :host ::ng-deep & .sc-variant { width: 6.5rem; }
+  p-dropdown,
+  p-multiSelect,
+  p-treeSelect {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  :host ::ng-deep & .sc-variant {
+    width: 6.5rem;
+  }
 }
-:host ::ng-deep .sc-row-picker p-multiselect .p-multiselect { width: 100%; }
-:host ::ng-deep .sc-row-picker p-dropdown:has(.sc-variant) { flex: 0 0 6.5rem; }
-:host ::ng-deep .sc-row-picker p-treeselect:has(.sc-palette) { flex: 0 0 3rem; }
-:host ::ng-deep .sc-palette .p-treeselect-label { width: 0; padding: 0; }
+:host ::ng-deep .sc-row-picker p-multiselect .p-multiselect {
+  width: 100%;
+}
+:host ::ng-deep .sc-row-picker p-dropdown:has(.sc-variant) {
+  flex: 0 0 6.5rem;
+}
+:host ::ng-deep .sc-row-picker p-treeselect:has(.sc-palette) {
+  flex: 0 0 3rem;
+}
+:host ::ng-deep .sc-palette .p-treeselect-label {
+  width: 0;
+  padding: 0;
+}
 
 .sc-icon-btn {
   flex: 0 0 auto;
@@ -192,9 +210,17 @@
   color: var(--text-color, #333);
   border-radius: 4px;
 
-  &:hover { background: var(--surface-200, #e9ecef); }
-  &.active { color: var(--primary-color, #2196f3); font-weight: 700; }
-  &:disabled { opacity: 0.5; cursor: default; }
+  &:hover {
+    background: var(--surface-200, #e9ecef);
+  }
+  &.active {
+    color: var(--primary-color, #2196f3);
+    font-weight: 700;
+  }
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
 }
 
 .sc-small-btn {
@@ -247,7 +273,10 @@
 .sc-gene-root,
 .sc-gene-group {
   font-weight: 600;
-  .sc-icon-btn { margin-left: auto; font-size: 0.85rem; }
+  .sc-icon-btn {
+    margin-left: auto;
+    font-size: 0.85rem;
+  }
 }
 
 .sc-count {
@@ -284,8 +313,17 @@
 // Slider with a number box: [────●────] [80]
 .sc-row-number,
 .sc-row-range {
-  p-slider { flex: 1 1 0; min-width: 0; }
+  p-slider {
+    flex: 1 1 0;
+    min-width: 0;
+  }
 }
-:host ::ng-deep .sc-num { width: 4.5rem; padding: 0.3rem 0.4rem; text-align: center; }
+:host ::ng-deep .sc-num {
+  width: 4.5rem;
+  padding: 0.3rem 0.4rem;
+  text-align: center;
+}
 :host ::ng-deep .sc-row-number p-inputnumber,
-:host ::ng-deep .sc-row-range p-inputnumber { flex: 0 0 auto; }
+:host ::ng-deep .sc-row-range p-inputnumber {
+  flex: 0 0 auto;
+}

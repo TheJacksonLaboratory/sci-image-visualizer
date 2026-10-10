@@ -1,4 +1,3 @@
-
 import type { Layer, Viewer } from 'napari-js';
 
 import type { Rgb } from '../../contracts/colormap-lut';
@@ -10,7 +9,10 @@ import { DataRect, pixelsPerDataUnit, visibleDataRect } from '../../spatial/lod'
 import { CategoricalLookup } from './spatial-tiles/categorical-lookup';
 import { CellLayers } from './spatial-tiles/cell-layers';
 import {
-  DensityLayer, DensityStats, TranscriptEstimate, TranscriptEstimator,
+  DensityLayer,
+  DensityStats,
+  TranscriptEstimate,
+  TranscriptEstimator,
 } from './spatial-tiles/density-layer';
 import { OrderedLayerGroups, TILE_LAYER_ORDER, TileGroup } from './spatial-tiles/layer-groups';
 import { LoadTracker, PlanContext } from './spatial-tiles/plan-context';
@@ -101,7 +103,10 @@ export class NapariSpatialTileLayers {
   private readonly hover: TranscriptHover;
   private readonly transcripts: TranscriptLayers;
 
-  constructor(port: SpatialDataPort, private readonly host: SpatialTileHost) {
+  constructor(
+    port: SpatialDataPort,
+    private readonly host: SpatialTileHost,
+  ) {
     this.lookup = new CategoricalLookup(port);
     this.jobs = new TranscriptJobPlanner(port);
     this.cells = new CellLayers(port, this.groups, this.lookup, host);
@@ -207,14 +212,16 @@ export class NapariSpatialTileLayers {
     const pxPerUnit = pixelsPerDataUnit(viewer.camera.zoom, ref);
     if (!rect) return;
 
-    this.estimator.plan(dataset, view, viewer, w, h, ctx)
+    this.estimator
+      .plan(dataset, view, viewer, w, h, ctx)
       .catch((err) => console.warn('[napari-js] transcript estimate failed', err));
     // A group whose request failed (a column, a feature vector, a density grid) leaves the
     // others drawn and marks the plan incomplete, so it is retried like a failed tile.
-    const settle = (group: string, work: Promise<void>) => work.catch((err) => {
-      console.warn(`[napari-js] spatial ${group} plan failed`, err);
-      ctx.markIncomplete();
-    });
+    const settle = (group: string, work: Promise<void>) =>
+      work.catch((err) => {
+        console.warn(`[napari-js] spatial ${group} plan failed`, err);
+        ctx.markIncomplete();
+      });
     await Promise.all([
       settle('density', this.density.plan(dataset, view, ctx)),
       settle('cells', this.cells.plan(dataset, view, selection, rect, pxPerUnit, ctx)),

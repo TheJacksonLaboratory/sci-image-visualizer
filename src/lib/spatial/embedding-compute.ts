@@ -101,9 +101,7 @@ export class EmbeddingComputeRun {
     try {
       // Awaited only when it IS a promise: a synchronous factory keeps the worker
       // receiving its start message in the same tick, as callers already rely on.
-      const made = this.factory
-        ? this.factory()
-        : import('./tsne-worker').then((m) => m.createTsneWorker());
+      const made = this.factory ? this.factory() : import('./tsne-worker').then((m) => m.createTsneWorker());
       worker = made instanceof Promise ? await made : made;
     } finally {
       if (generation === this.generation) this.starting = false;
@@ -115,10 +113,7 @@ export class EmbeddingComputeRun {
     }
     this.worker = worker;
 
-    const {
-      scores, nObs, nDims, dims,
-      perplexity = 30, iterations = 1000, seed = 0,
-    } = request;
+    const { scores, nObs, nDims, dims, perplexity = 30, iterations = 1000, seed = 0 } = request;
     let backend: string | null = null;
 
     return new Promise<SpatialEmbedding | null>((resolve, reject) => {
@@ -162,17 +157,20 @@ export class EmbeddingComputeRun {
               for (let i = 0; i < nObs; i++) plane[i] = flat[i * data.dims + d];
               planes.push(plane);
             }
-            finish(() => resolve({
-              meta: {
-                ...meta,
-                derived: true,
-                params: `PCA(${nDims}) then t-SNE, perplexity ${data.perplexity}, `
-                  + `${iterations} iterations, seed ${seed}`,
-              },
-              x: planes[0],
-              y: planes[1],
-              ...(planes[2] ? { z: planes[2] } : {}),
-            }));
+            finish(() =>
+              resolve({
+                meta: {
+                  ...meta,
+                  derived: true,
+                  params:
+                    `PCA(${nDims}) then t-SNE, perplexity ${data.perplexity}, ` +
+                    `${iterations} iterations, seed ${seed}`,
+                },
+                x: planes[0],
+                y: planes[1],
+                ...(planes[2] ? { z: planes[2] } : {}),
+              }),
+            );
             break;
           }
           case 'error':
@@ -184,9 +182,8 @@ export class EmbeddingComputeRun {
       };
       // A worker that dies takes the promise with it; without this the caller waits for
       // ever on a progress bar that has stopped moving.
-      worker.onerror = (event) => finish(
-        () => reject(new Error(`embedding worker failed: ${event.message ?? 'unknown'}`)),
-      );
+      worker.onerror = (event) =>
+        finish(() => reject(new Error(`embedding worker failed: ${event.message ?? 'unknown'}`)));
 
       // Copied, then transferred: the caller keeps its scores, and the worker gets the
       // buffer without a structured clone.

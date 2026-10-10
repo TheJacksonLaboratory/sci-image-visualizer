@@ -1,6 +1,5 @@
 import { InjectionToken } from '@angular/core';
 
-
 /**
  * Port for an automatic **instance** segmenter — one that returns discrete,
  * classified objects rather than a per-pixel label map.

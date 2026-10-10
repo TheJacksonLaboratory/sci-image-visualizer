@@ -2,10 +2,10 @@
 
 **Status:** shipped (jit-ui#85, 2026-06 — merge / ungroup / inverse / simplify, in every standalone release
 since 0.1.0; engine in `src/lib/region-ops.service.ts`); kept as design record · **Tracking:** follow-up to jit-ui#85
-**Depends on:** [`region-holes-design.md`](./region-holes-design.md) — *landed first.*
+**Depends on:** [`region-holes-design.md`](./region-holes-design.md) — _landed first._
 
 **Decisions locked in (see §9 for rationale):** geometry = **MultiPolygon**
-(geometric union, flat model — *not* a nested group container); boolean engine =
+(geometric union, flat model — _not_ a nested group container); boolean engine =
 **raster/mask** (reuse the wand/brush pipeline); **inverse** is relative to the
 **full image rectangle**; **simplify** = **Douglas–Peucker**, epsilon in image
 pixels. A reversible logical "group" — if ever needed — is a flat `groupId?` tag
@@ -16,12 +16,12 @@ on `Region`, never a hierarchy (§2).
 Add region-set operations driven from the region context menu (right-click on a
 region in the plot, or on the selection in the Region Editor):
 
-| Op | Shown when | Effect |
-|----|-----------|--------|
-| **Merge / Group** | ≥2 selected | Geometric **union** of the selected regions → one region. |
-| **Ungroup** | ≥1 selected that is multi-part | Split a region into its disconnected pieces, each its own region. |
-| **Inverse** | ≥1 selected | Replace the selection with its inverse inside the image bounds. |
-| **Simplify…** | ≥1 selected | Douglas–Peucker simplify each ring by an *altitude threshold* (px). |
+| Op                | Shown when                     | Effect                                                              |
+| ----------------- | ------------------------------ | ------------------------------------------------------------------- |
+| **Merge / Group** | ≥2 selected                    | Geometric **union** of the selected regions → one region.           |
+| **Ungroup**       | ≥1 selected that is multi-part | Split a region into its disconnected pieces, each its own region.   |
+| **Inverse**       | ≥1 selected                    | Replace the selection with its inverse inside the image bounds.     |
+| **Simplify…**     | ≥1 selected                    | Douglas–Peucker simplify each ring by an _altitude threshold_ (px). |
 
 All four go through the shared `RegionStore` mutate path, so they are covered by
 undo/redo (jit-ui#85) automatically (§6).
@@ -33,7 +33,7 @@ holes work first** and then generalises the geometry from one ring to a
 
 ## 2. Why it depends on holes (and adds MultiPolygon)
 
-- **Holes** — the inverse of a blob is the image rectangle *with a hole* where
+- **Holes** — the inverse of a blob is the image rectangle _with a hole_ where
   the blob was; merging a ring yields a donut. Holes are specified in
   `region-holes-design.md` (adds `Polygon.holes`).
 - **MultiPolygon** — merging two disjoint regions, or inverting a region into
@@ -68,14 +68,14 @@ site must learn about `MultiPolygon`. Inventory (audit before starting):
 
 **Why not a nested group container.** A parent region holding intact child
 regions (ungroup restores exact children) gives perfect reversibility but
-introduces a *tree* into a flat, geometry-first model: selection, the Region
+introduces a _tree_ into a flat, geometry-first model: selection, the Region
 Editor table, rendering, GeoJSON (no native group — needs a custom encoding
 QuPath won't read), and undo all become group-aware. It fights the existing
 design and is a much larger, riskier change, and it does **not** itself produce
 donuts/sparse geometry. The request ("merge/group", "donut", "bits not
 connected", "ungroup") describes geometric union, so MultiPolygon is the choice.
 
-**If reversible grouping is ever required**, do it *without* hierarchy: add a
+**If reversible grouping is ever required**, do it _without_ hierarchy: add a
 flat `groupId?: string` tag on `Region`. Same-`groupId` regions
 render/select/move together; "group" sets the tag, "ungroup" clears it; the list
 stays flat and the ops stay pure. This is a separate, additive feature from the
@@ -104,7 +104,7 @@ the single place the store and any future caller go through.
 - **Ungroup** = if `MultiPolygon`, emit one region per `polygons[]` part
   (each keeps its holes); if a single `Polygon`, also offer split-by-connected-
   components via a one-shot rasterize→`maskToPolygons`. No-op/disabled for a
-  single connected part. *Note:* ungroup splits by connectivity — it does **not**
+  single connected part. _Note:_ ungroup splits by connectivity — it does **not**
   recover pre-merge originals that overlapped. Document this.
 - **Simplify** = **vector**, not raster: Douglas–Peucker per ring with
   `epsilon = altitudeThresholdPx`. (Add `simplifyRing(xs, ys, eps)` to
@@ -112,12 +112,12 @@ the single place the store and any future caller go through.
   degenerates below 3 vertices (and the part if its exterior degenerates).
 
 **Why raster, not a vector clipping lib.** The codebase is already
-raster-centric for *building* regions: the wand and brush trace masks
+raster-centric for _building_ regions: the wand and brush trace masks
 (`rasterizePolygon` → `unionMasks` → `maskToPolygons`). "Merge two regions" is
 the same operation the brush does when you paint across two blobs — so sharing
 the mask pipeline means **one code path and identical geometry** between
 "brush together" and "select + merge". A vector lib (martinez /
-polygon-clipping) would be a *second, parallel* geometry pipeline with its own
+polygon-clipping) would be a _second, parallel_ geometry pipeline with its own
 edge cases — two sources of truth for "combine polygons", and merge would
 subtly diverge from the brush. Donuts + multi-part also fall out of
 `maskToPolygons` for free. **Cost:** sub-pixel rounding at ring edges
@@ -151,6 +151,7 @@ splice out the inputs, push the result(s), set selection, `syncCache()`,
 ## 5. UI
 
 ### 5.1 Plot context menu
+
 `buildContextMenuItems()` (`visualization.component.ts:1091`) is currently a
 static toolbar mirror. Make it **selection-aware**: read
 `plotService.getSelectedShapeIndices()` and prepend a "Region" group when ≥1
@@ -165,12 +166,14 @@ selects it first (today the menu is generic). Capture the clicked region via the
 overlay/Plotly hit-test, add it to the selection if not already selected.
 
 ### 5.2 Region Editor
+
 The editor already multi-selects rows (PrimeNG table). Add the same four actions
 as a row context menu or a small action bar above the table, routed through the
 `IRegionEditorApi` (`routing-visualizer.service.ts:240` `getAnnotationRegions` /
 `setAnnotationRegions`) so profile lines stay untouched.
 
 ### 5.3 Simplify parameter
+
 "Altitude threshold in pixels" = Douglas–Peucker epsilon. Use a tiny dialog (or
 overlay slider) defaulting to ~2 px, range 0.5–20. Live-preview is optional
 (simplify is cheap; could preview on the overlay before commit).
@@ -199,7 +202,7 @@ is a single undo step. Add explicit tests that undo/redo round-trips each op.
 
 0. **Holes** (`region-holes-design.md`) — prerequisite.
 1. **MultiPolygon model** — type + `cloneBounds`/`regionsEqual` + render + hit-test
-   + GeoJSON; no ops yet (build dark behind the holes flag).
+   - GeoJSON; no ops yet (build dark behind the holes flag).
 2. **RegionOpsService** — merge, inverse, ungroup (raster); store methods + undo;
    unit tests on the pure service.
 3. **Simplify** — `simplifyRing` (Douglas–Peucker) + store method + param UI.
@@ -208,12 +211,12 @@ is a single undo step. Add explicit tests that undo/redo round-trips each op.
 
 ## 9. Decisions (resolved)
 
-Chosen for architectural fit — each *extends* the flat, geometry-first,
+Chosen for architectural fit — each _extends_ the flat, geometry-first,
 raster-centric region subsystem instead of grafting a new paradigm onto it.
 
 1. **Group semantics → geometric union → MultiPolygon.** Flat model, additive
    bounds type, maps 1:1 onto GeoJSON `MultiPolygon` and QuPath's own
-   (JTS) geometry. A nested group *container* (tree) was rejected as it fights
+   (JTS) geometry. A nested group _container_ (tree) was rejected as it fights
    the flat model and isn't QuPath-encodable. §2.
 2. **Boolean engine → raster/mask.** Same pipeline the wand/brush already use,
    so "select + merge" yields identical geometry to "brush together"; one code
@@ -221,11 +224,11 @@ raster-centric region subsystem instead of grafting a new paradigm onto it.
 3. **Inverse bounds → full image rectangle.** Deterministic; independent of
    transient viewport/zoom state.
 4. **Ungroup → split by connected components.** Geometric merge is lossy by
-   design; *undoing* a merge is the undo stack's job, not ungroup's. §3.
+   design; _undoing_ a merge is the undo stack's job, not ungroup's. §3.
 5. **Simplify → Douglas–Peucker**, epsilon = "altitude threshold" in image
    pixels; default ≈2 px (range 0.5–20). §3, §5.3.
 
-**Deferred (product call, not architectural):** a *reversible* logical group, if
+**Deferred (product call, not architectural):** a _reversible_ logical group, if
 ever wanted, is a flat `groupId?` tag on `Region` (not a hierarchy), and is a
 separate, additive feature from the lossy geometric Merge. §2.
 

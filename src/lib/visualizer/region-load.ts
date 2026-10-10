@@ -3,8 +3,10 @@ import { IRegionStore } from '../contracts/visualizer.contract';
 import { Region } from '../models/region';
 
 /** The region-store members {@link applyImageRois} writes through. */
-export type RegionLoadTarget = Pick<IRegionStore, 'importRegions' | 'enterStackMode' | 'setRegions' |
-  'resetUndoHistory'>;
+export type RegionLoadTarget = Pick<
+  IRegionStore,
+  'importRegions' | 'enterStackMode' | 'setRegions' | 'resetUndoHistory'
+>;
 
 /**
  * Apply an image's saved ROIs once its render has landed, choosing the region

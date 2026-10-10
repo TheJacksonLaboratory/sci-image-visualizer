@@ -1,7 +1,11 @@
 import { Viewer } from 'napari-js';
 
 import {
-  NAVIGATOR_SIZE_RATIO, NapariNavigator, NavigatorCamera, navigatorLayout, navigatorToWorld,
+  NAVIGATOR_SIZE_RATIO,
+  NapariNavigator,
+  NavigatorCamera,
+  navigatorLayout,
+  navigatorToWorld,
 } from './napari-navigator';
 
 /** A camera that behaves like napari's: setting `center` emits `changed`, zoom untouched. */
@@ -10,12 +14,19 @@ function fakeCamera(center: [number, number], zoom: number) {
   const cam = {
     _center: center,
     zoom,
-    get center() { return this._center; },
+    get center() {
+      return this._center;
+    },
     set center(v: readonly [number, number]) {
       this._center = [v[0], v[1]];
       listeners.forEach((l) => l());
     },
-    changed: { connect: (l: () => void) => { listeners.add(l); return () => listeners.delete(l); } },
+    changed: {
+      connect: (l: () => void) => {
+        listeners.add(l);
+        return () => listeners.delete(l);
+      },
+    },
   };
   return cam as NavigatorCamera & { _center: [number, number]; zoom: number };
 }

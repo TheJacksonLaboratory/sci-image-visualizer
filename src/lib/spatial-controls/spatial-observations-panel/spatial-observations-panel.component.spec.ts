@@ -6,7 +6,11 @@ import { ISpatialControls } from '../../contracts/visualizer.contract';
 import { SpatialDataset } from '../../contracts/spatial-dataset.contract';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../../contracts/display-types';
 import {
-  bindInputs, fakeSpatialControls, one, panelNamed, shallowPanel,
+  bindInputs,
+  fakeSpatialControls,
+  one,
+  panelNamed,
+  shallowPanel,
 } from '../../testing/spatial-panel-testing';
 
 const dataset: SpatialDataset = {
@@ -198,7 +202,8 @@ describe('SpatialObservationsPanelComponent', () => {
       // reads — so the panel says why, and what does render it.
       component.is3d = true;
       component.legend = Array.from({ length: 338 }, (_, i) => ({
-        label: `s${i}`, color: '#888888',
+        label: `s${i}`,
+        color: '#888888',
       }));
       expect(component['exceedsCloudPalette']).toBe(true);
       // 95, not 96: one of the LUT's 96 distinguishable blocks is reserved for a

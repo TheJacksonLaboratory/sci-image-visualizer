@@ -12,7 +12,13 @@ import { Polygon, Rectangle, Region } from '../models/region';
 import { RegionStore } from '../store/region-store.service';
 import { PlotUtilities } from '../plot.utilities';
 import {
-  PROFILE_PALETTE, PixelRect, ProfileLine, imageMpp, placeProfileLine, profileLineOf, sampleLine,
+  PROFILE_PALETTE,
+  PixelRect,
+  ProfileLine,
+  imageMpp,
+  placeProfileLine,
+  profileLineOf,
+  sampleLine,
 } from './intensity-profile';
 
 /** The pixels the profiles are sampled from, and the image they belong to. */
@@ -69,11 +75,17 @@ export class IntensityProfileService implements IIntensityControls, OnDestroy {
   private readonly subs = new Subscription();
   private readonly utils = new PlotUtilities();
 
-  constructor(private readonly http: HttpClient,
-              @Inject(TILE_ACCESS_PORT) private readonly tiles: TileAccessPort,
-              @Inject(IMAGE_STATE_PORT) state: ImageStatePort,
-              private readonly regionStore: RegionStore) {
-    this.subs.add(state.getFilename$().subscribe((f) => { this.fileName = f; }));
+  constructor(
+    private readonly http: HttpClient,
+    @Inject(TILE_ACCESS_PORT) private readonly tiles: TileAccessPort,
+    @Inject(IMAGE_STATE_PORT) state: ImageStatePort,
+    private readonly regionStore: RegionStore,
+  ) {
+    this.subs.add(
+      state.getFilename$().subscribe((f) => {
+        this.fileName = f;
+      }),
+    );
     // Profile lines are store regions: any change (add/drag/delete, on any
     // backend) refreshes the inset. The live-edit stream fires per frame during
     // a drag (OSD coalesces regionUpdate$ until release), so the inset tracks it.
@@ -121,10 +133,13 @@ export class IntensityProfileService implements IIntensityControls, OnDestroy {
     const gen = this.supersede();
     const slice = await this.loadSlice(imageInfo, zIndex || 0);
     if (!this.isCurrent(gen)) return; // superseded (another image / a crop)
-    this.setFrames({ frames: [slice.frame], ratios: slice.ratios }, {
-      imageInfo,
-      extent: [0, imageInfo.trueImageSize[0], 0, imageInfo.trueImageSize[1]],
-    });
+    this.setFrames(
+      { frames: [slice.frame], ratios: slice.ratios },
+      {
+        imageInfo,
+        extent: [0, imageInfo.trueImageSize[0], 0, imageInfo.trueImageSize[1]],
+      },
+    );
     this.emitProfiles();
   }
 
@@ -137,7 +152,10 @@ export class IntensityProfileService implements IIntensityControls, OnDestroy {
     if (width <= 0 || height <= 0) return;
     this.lastVisibleRoi = { x, y, width, height };
     const roi = Object.assign(new Rectangle(), {
-      x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height),
+      x: Math.round(x),
+      y: Math.round(y),
+      width: Math.round(width),
+      height: Math.round(height),
     });
     // Sized from the viewer's own plot div, not a host element id (CORE-24).
     const screen = this.utils.getDomRectangle(this.elementId);
@@ -149,12 +167,16 @@ export class IntensityProfileService implements IIntensityControls, OnDestroy {
           if (this.fileName !== reqName || !this.isCurrent(gen)) return;
           const frame = this.toMatrix(image, !!this.image?.imageInfo?.isGrayscale);
           this.setFrames({
-            frames: [frame], ratios: [roi.width / image.width, roi.height / image.height], origin: [roi.x, roi.y],
+            frames: [frame],
+            ratios: [roi.width / image.width, roi.height / image.height],
+            origin: [roi.x, roi.y],
           });
           this.emitProfiles();
         });
       },
-      error: () => { /* keep the previous sampling frame on a failed crop fetch */ },
+      error: () => {
+        /* keep the previous sampling frame on a failed crop fetch */
+      },
     });
   }
 
@@ -172,7 +194,10 @@ export class IntensityProfileService implements IIntensityControls, OnDestroy {
     poly.npoints = 2;
     poly.xpoints = [x0, x1];
     poly.ypoints = [y, y];
-    poly.coordinates = [[x0, y], [x1, y]];
+    poly.coordinates = [
+      [x0, y],
+      [x1, y],
+    ];
     poly.closed = false;
     const region = new Region();
     region.bounds = poly;
@@ -186,14 +211,16 @@ export class IntensityProfileService implements IIntensityControls, OnDestroy {
   /** Recompute and broadcast every profile line's profile (tagged with the
    *  line's id and colour, so the inset trace matches its line). */
   emitProfiles(): void {
-    this.profiles$.next(this.profileRegions().map((r) => {
-      const line = profileLineOf(r);
-      return {
-        ...(line ? this.computeIntensityProfile(line) : { positions: [], values: [] }),
-        id: r.id,
-        color: r.color,
-      };
-    }));
+    this.profiles$.next(
+      this.profileRegions().map((r) => {
+        const line = profileLineOf(r);
+        return {
+          ...(line ? this.computeIntensityProfile(line) : { positions: [], values: [] }),
+          id: r.id,
+          color: r.color,
+        };
+      }),
+    );
   }
 
   /** Sample the active frame along `line` (see sampleLine). */
@@ -204,8 +231,11 @@ export class IntensityProfileService implements IIntensityControls, OnDestroy {
     const index = frames.length <= 1 ? 0 : (this.image?.frameIndex?.() ?? 0);
     const frame = frames[index] ?? frames[0];
     if (!frame?.length) return empty;
-    return sampleLine({ frame, ratios: this.frames!.ratios, origin: this.frames!.origin! }, line,
-      imageMpp(this.image?.imageInfo?.imageMeta));
+    return sampleLine(
+      { frame, ratios: this.frames!.ratios, origin: this.frames!.origin! },
+      line,
+      imageMpp(this.image?.imageInfo?.imageMeta),
+    );
   }
 
   /** The profile-line regions in the store. */
@@ -217,7 +247,8 @@ export class IntensityProfileService implements IIntensityControls, OnDestroy {
   private async loadSlice(imageInfo: IImageInfo, z: number): Promise<{ frame: any[]; ratios: number[] }> {
     const url = imageInfo.urls[z] || imageInfo.urls[0];
     const buffer = await new Promise<ArrayBuffer>((resolve, reject) =>
-      this.http.get(url, { responseType: 'arraybuffer' }).subscribe({ next: resolve, error: reject }));
+      this.http.get(url, { responseType: 'arraybuffer' }).subscribe({ next: resolve, error: reject }),
+    );
     const image = await Image.load(Buffer.from(buffer));
     return {
       frame: this.toMatrix(image, !!imageInfo.isGrayscale),

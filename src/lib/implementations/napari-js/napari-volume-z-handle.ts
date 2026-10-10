@@ -125,10 +125,7 @@ export class NapariVolumeZHandle {
     // Up (negative dy) → taller. Exponential so each `pixelsPerDouble` px doubles/halves the height.
     const dy = e.clientY - this.startY;
     const factor = Math.pow(2, -dy / this.opts.pixelsPerDouble);
-    const next = Math.min(
-      this.opts.maxScale,
-      Math.max(this.opts.minScale, this.startScale * factor),
-    );
+    const next = Math.min(this.opts.maxScale, Math.max(this.opts.minScale, this.startScale * factor));
     this.opts.setScale(next);
     this.reposition();
   };

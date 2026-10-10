@@ -161,7 +161,7 @@ describe('HexColorPickerComponent', () => {
   });
 
   it('should have color rows forming a diamond pattern', () => {
-    const lengths = component['colorRows'].map(r => r.length);
+    const lengths = component['colorRows'].map((r) => r.length);
     // Should grow to a middle row then shrink: 7,8,9,10,11,12,13,12,11,10,9,8,7
     expect(lengths).toEqual([7, 8, 9, 10, 11, 12, 13, 12, 11, 10, 9, 8, 7]);
   });
@@ -202,7 +202,10 @@ describe('HexColorPickerComponent', () => {
     it('slider moves preview through colorInput; the release commits colorChange once', () => {
       const input = jest.spyOn(component.colorInput, 'emit');
       const change = jest.spyOn(component.colorChange, 'emit');
-      for (const h of [10, 20, 30]) { component['hue'].set(h); component['onHslChange'](); }
+      for (const h of [10, 20, 30]) {
+        component['hue'].set(h);
+        component['onHslChange']();
+      }
       expect(input).toHaveBeenCalledTimes(3);
       expect(change).not.toHaveBeenCalled();
       component['commitColor']();

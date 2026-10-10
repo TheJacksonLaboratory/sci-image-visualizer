@@ -95,7 +95,11 @@ function triRegion(): Region {
   p.npoints = 3;
   p.xpoints = [0, 10, 5];
   p.ypoints = [0, 0, 10];
-  p.coordinates = [[0, 0], [10, 0], [5, 10]];
+  p.coordinates = [
+    [0, 0],
+    [10, 0],
+    [5, 10],
+  ];
   p.closed = true;
   r.bounds = p;
   return r;
@@ -132,7 +136,14 @@ function donutRegion(): Region {
   p.npoints = 4;
   p.coordinates = p.xpoints.map((x, i) => [x, p.ypoints[i]]);
   p.closed = true;
-  p.holes = [[[7, 7], [13, 7], [13, 13], [7, 13]]];
+  p.holes = [
+    [
+      [7, 7],
+      [13, 7],
+      [13, 13],
+      [7, 13],
+    ],
+  ];
   r.bounds = p;
   return r;
 }
@@ -150,7 +161,14 @@ function multiRegion(): Region {
     return p;
   };
   const a = square(0, 0, 20, 20);
-  a.holes = [[[7, 7], [13, 7], [13, 13], [7, 13]]];
+  a.holes = [
+    [
+      [7, 7],
+      [13, 7],
+      [13, 13],
+      [7, 13],
+    ],
+  ];
   const mp = new MultiPolygon();
   mp.polygons = [a, square(50, 50, 60, 60)];
   const r = new Region();
@@ -243,18 +261,19 @@ describe('NapariRegionOverlay', () => {
     viewer.cameraListeners[0]();
     const records = observer.takeRecords();
     observer.disconnect();
-    expect(records.map((r) => [r.type, r.attributeName, (r.target as Element).getAttribute?.('data-layer')]))
-      .toEqual([['attributes', 'transform', 'regions']]);
+    expect(
+      records.map((r) => [r.type, r.attributeName, (r.target as Element).getAttribute?.('data-layer')]),
+    ).toEqual([['attributes', 'transform', 'regions']]);
     expect(svg.querySelector('polygon')).toBe(shape);
     expect(shape.parentElement!.getAttribute('transform')).toBe('matrix(3 0 0 3 5 0)');
   });
 
-  it('a camera move re-positions the selected region\'s handles in place', () => {
+  it("a camera move re-positions the selected region's handles in place", () => {
     let zoom = 1;
     viewer.worldToCanvas = (x: number, y: number) => [x * zoom, y * zoom];
     store.addRegion(rectRegionAt(0, 0, 10, 10)); // selected → four corner handles
-    const handles = () => Array.from(svgOf(overlay).querySelectorAll('rect'))
-      .filter((el) => el.getAttribute('fill') === '#fff');
+    const handles = () =>
+      Array.from(svgOf(overlay).querySelectorAll('rect')).filter((el) => el.getAttribute('fill') === '#fff');
     const before = handles();
     zoom = 2;
     viewer.cameraListeners[0]();
@@ -434,7 +453,7 @@ describe('NapariRegionOverlay', () => {
     return store.getSelectedShapeIndices();
   }
 
-  it('select: a click inside a donut\'s hole does not select the donut (as OSD)', () => {
+  it("select: a click inside a donut's hole does not select the donut (as OSD)", () => {
     store.addRegion(rectRegionAt(200, 200, 10, 10)); // index 0
     store.addRegion(donutRegion()); // index 1, hole 7–13
     overlay.setMode('select');
@@ -600,9 +619,9 @@ describe('NapariRegionOverlay', () => {
       v.canvasToWorld = (cx: number, cy: number) => [cx - LEFT, cy - TOP];
       v.worldToCanvas = (wx: number, wy: number) => [wx + LEFT, wy + TOP];
       offset = new NapariRegionOverlay(host, v, store);
-      jest.spyOn(svgOf(offset), 'getBoundingClientRect').mockReturnValue(
-        { left: LEFT, top: TOP, x: LEFT, y: TOP, width: 400, height: 300 } as DOMRect,
-      );
+      jest
+        .spyOn(svgOf(offset), 'getBoundingClientRect')
+        .mockReturnValue({ left: LEFT, top: TOP, x: LEFT, y: TOP, width: 400, height: 300 } as DOMRect);
     });
     afterEach(() => offset.destroy());
 
@@ -619,7 +638,13 @@ describe('NapariRegionOverlay', () => {
 
     it('closes a polygon on a click near its first vertex', () => {
       offset.setMode('drawpolygon');
-      for (const [x, y] of [[0, 0], [20, 0], [10, 20], [1, 1]]) ptr(offset, 'pointerdown', LEFT + x, TOP + y);
+      for (const [x, y] of [
+        [0, 0],
+        [20, 0],
+        [10, 20],
+        [1, 1],
+      ])
+        ptr(offset, 'pointerdown', LEFT + x, TOP + y);
       expect((store.getRegions()[0].bounds as Polygon).xpoints).toEqual([0, 20, 10]);
     });
 
@@ -666,19 +691,38 @@ describe('NapariRegionOverlay', () => {
     ptr(overlay, 'pointerdown', 10, 7); // midpoint of hole edge 0
     ptr(overlay, 'pointerup', 10, 7);
     const p = store.getRegions().find((r) => r.id === id)!.bounds as Polygon;
-    expect(p.holes![0]).toEqual([[7, 7], [10, 7], [13, 7], [13, 13], [7, 13]]);
+    expect(p.holes![0]).toEqual([
+      [7, 7],
+      [10, 7],
+      [13, 7],
+      [13, 13],
+      [7, 13],
+    ]);
     expect(p.npoints).toBe(4); // exterior unchanged
   });
 
   it('deletepoint: clicking a hole vertex removes it from that ring (as OSD)', () => {
     const r = donutRegion();
-    (r.bounds as Polygon).holes = [[[7, 7], [13, 7], [13, 13], [7, 13], [9, 9]]];
+    (r.bounds as Polygon).holes = [
+      [
+        [7, 7],
+        [13, 7],
+        [13, 13],
+        [7, 13],
+        [9, 9],
+      ],
+    ];
     const id = store.addRegion(r);
     overlay.setMode('deletepoint');
     ptr(overlay, 'pointerdown', 7, 7); // hole vertex 0
     ptr(overlay, 'pointerup', 7, 7);
     const p = store.getRegions().find((r2) => r2.id === id)!.bounds as Polygon;
-    expect(p.holes![0]).toEqual([[13, 7], [13, 13], [7, 13], [9, 9]]);
+    expect(p.holes![0]).toEqual([
+      [13, 7],
+      [13, 13],
+      [7, 13],
+      [9, 9],
+    ]);
     expect(p.xpoints).toEqual([0, 20, 20, 0]);
   });
 

@@ -112,31 +112,36 @@ export class VisualizerStore {
   private loadColormapLuts(): void {
     const http = this.http;
     if (!http || colormapLutsLoads.has(http)) return;
-    colormapLutsLoads.set(http, firstValueFrom(
-      http.get<Record<string, [number, string][]>>('assets/plotting/colormap-luts.json'),
-    ).then(
-      (luts) => {
-        for (const group of COLORMAP_OPTIONS) {
-          for (const child of group.children ?? []) {
-            const data = child.data as { value: unknown } | null;
-            const key = data?.value;
-            if (data && typeof key === 'string' && luts[key]) data.value = luts[key];
+    colormapLutsLoads.set(
+      http,
+      firstValueFrom(http.get<Record<string, [number, string][]>>('assets/plotting/colormap-luts.json')).then(
+        (luts) => {
+          for (const group of COLORMAP_OPTIONS) {
+            for (const child of group.children ?? []) {
+              const data = child.data as { value: unknown } | null;
+              const key = data?.value;
+              if (data && typeof key === 'string' && luts[key]) data.value = luts[key];
+            }
           }
-        }
-      },
-      (err: unknown) => {
-        // Named Plotly scales still work with the keys unresolved; let a later store retry.
-        console.warn('[visualizer] colormap LUTs unavailable', err);
-        colormapLutsLoads.delete(http);
-      },
-    ));
+        },
+        (err: unknown) => {
+          // Named Plotly scales still work with the keys unresolved; let a later store retry.
+          console.warn('[visualizer] colormap LUTs unavailable', err);
+          colormapLutsLoads.delete(http);
+        },
+      ),
+    );
   }
 
   // ── Preset persistence (jit-ui#70) ───────────────────────────────────
   private initPresetPersistence(): void {
     // Debounced write-back so a burst of edits collapses into one PUT.
     this.savePresets$.pipe(debounceTime(800)).subscribe(() => {
-      this.prefsPort?.savePresetSet(this.presetSet).subscribe({ error: () => { /* keep local copy */ } });
+      this.prefsPort?.savePresetSet(this.presetSet).subscribe({
+        error: () => {
+          /* keep local copy */
+        },
+      });
     });
     // Load the user's saved set (if any); otherwise keep the seeded defaults.
     this.prefsPort?.loadPresetSet().subscribe({
@@ -147,7 +152,9 @@ export class VisualizerStore {
         }
         this.presetsLoaded = true;
       },
-      error: () => { this.presetsLoaded = true; },
+      error: () => {
+        this.presetsLoaded = true;
+      },
     });
   }
 
@@ -175,7 +182,11 @@ export class VisualizerStore {
    *  debounce. Used for explicit bulk actions (Apply / Import / Reset). */
   private savePresetsNow(): void {
     if (this.presetsLoaded) {
-      this.prefsPort?.savePresetSet(this.presetSet).subscribe({ error: () => { /* keep local copy */ } });
+      this.prefsPort?.savePresetSet(this.presetSet).subscribe({
+        error: () => {
+          /* keep local copy */
+        },
+      });
     }
   }
 
@@ -219,7 +230,8 @@ export class VisualizerStore {
    * Editor) show µm²/mm² instead of px². No-op when neither axis is positive.
    */
   setPhysicalPixelSize(mppX?: number, mppY?: number): void {
-    const hasX = (mppX ?? 0) > 0, hasY = (mppY ?? 0) > 0;
+    const hasX = (mppX ?? 0) > 0,
+      hasY = (mppY ?? 0) > 0;
     if (!hasX && !hasY) return;
     const cur = this.imageMeta$.value;
     const meta = (cur && cur.length ? cur : [{} as IImageMetadata]).map((e) => ({ ...e }));
@@ -288,8 +300,12 @@ export class VisualizerStore {
     return this.channelStates$.value;
   }
   /** The channel selected in the pane (drives a single-scalar 3D Surface). */
-  getSelectedChannel(): Observable<number> { return this.selectedChannel$.asObservable(); }
-  currentSelectedChannel(): number { return this.selectedChannel$.value; }
+  getSelectedChannel(): Observable<number> {
+    return this.selectedChannel$.asObservable();
+  }
+  currentSelectedChannel(): number {
+    return this.selectedChannel$.value;
+  }
   setSelectedChannel(index: number): void {
     if (this.selectedChannel$.value !== index) this.selectedChannel$.next(index);
   }

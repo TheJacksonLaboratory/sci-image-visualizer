@@ -6,15 +6,23 @@ import { PlotType } from './contracts/plot-type';
  *  CORE-11, image-less datasets); these cover it on its own. */
 describe('ImageRenderSession', () => {
   const info = (fileName: string, over: Partial<IImageInfo> = {}): IImageInfo => ({
-    fileName, urls: ['/0'], isStack: false, showStack: false, isGrayscale: true,
-    trueImageSize: [1, 1], imageMeta: [], scaleRatio: true, ...over,
+    fileName,
+    urls: ['/0'],
+    isStack: false,
+    showStack: false,
+    isGrayscale: true,
+    trueImageSize: [1, 1],
+    imageMeta: [],
+    scaleRatio: true,
+    ...over,
   });
 
   function setup(over: Partial<RenderSessionHost> = {}) {
     const visualizer = {
       load: jest.fn(
         (i: IImageInfo, _z?: number, _signal?: AbortSignal): Promise<{ filename: string | undefined }> =>
-          Promise.resolve({ filename: i.fileName })),
+          Promise.resolve({ filename: i.fileName }),
+      ),
       plot: jest.fn().mockResolvedValue(true),
       reset: jest.fn(),
       cancelLoading: jest.fn(),
@@ -44,8 +52,9 @@ describe('ImageRenderSession', () => {
     const { session, host, visualizer } = setup();
     session.render(info('a'));
     expect(session.running).toBe(true);
-    expect((host.beforeReset as jest.Mock).mock.invocationCallOrder[0])
-      .toBeLessThan(visualizer.reset.mock.invocationCallOrder[0]);
+    expect((host.beforeReset as jest.Mock).mock.invocationCallOrder[0]).toBeLessThan(
+      visualizer.reset.mock.invocationCallOrder[0],
+    );
     expect(host.prepare).toHaveBeenCalled();
     await settle();
     expect(host.releaseOverlay).toHaveBeenCalledTimes(1);
@@ -53,10 +62,15 @@ describe('ImageRenderSession', () => {
     expect(session.running).toBe(false);
   });
 
-  it('a newer render aborts the older one\'s load and makes its result inert', async () => {
+  it("a newer render aborts the older one's load and makes its result inert", async () => {
     let resolveA!: (v: { filename: string | undefined }) => void;
     const { session, host, visualizer } = setup();
-    visualizer.load.mockImplementationOnce(() => new Promise((r) => { resolveA = r; }));
+    visualizer.load.mockImplementationOnce(
+      () =>
+        new Promise((r) => {
+          resolveA = r;
+        }),
+    );
     session.render(info('a'));
     const signalA = visualizer.load.mock.calls[0][2] as AbortSignal;
     session.render(info('b'));
@@ -70,8 +84,10 @@ describe('ImageRenderSession', () => {
 
   it('cancel makes the render in flight inert', async () => {
     const { session, host, visualizer } = setup();
-    visualizer.load.mockImplementationOnce((_i, _z, signal) =>
-      new Promise((_, reject) => signal?.addEventListener('abort', () => reject(new Error('aborted')))));
+    visualizer.load.mockImplementationOnce(
+      (_i, _z, signal) =>
+        new Promise((_, reject) => signal?.addEventListener('abort', () => reject(new Error('aborted')))),
+    );
     session.render(info('a'));
     session.cancel();
     await settle();

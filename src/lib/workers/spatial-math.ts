@@ -1,14 +1,19 @@
 import type { SpatialObservations } from '../contracts/spatial-dataset.contract';
 import type { DensityGrid, DensityOptions } from '../spatial/spatial-density';
 import type {
-  ExpressionField, ExpressionFieldOptions, ExpressionVolumeField, ExpressionVolumeOptions,
+  ExpressionField,
+  ExpressionFieldOptions,
+  ExpressionVolumeField,
+  ExpressionVolumeOptions,
 } from '../spatial/spatial-expression';
-import type {
-  HeatmapGene, HeatmapGroups, HeatmapMatrix, HeatmapMatrixOptions,
-} from '../spatial/spatial-heatmap';
+import type { HeatmapGene, HeatmapGroups, HeatmapMatrix, HeatmapMatrixOptions } from '../spatial/spatial-heatmap';
 import {
-  SpatialMathMessage, SpatialMathReply, SpatialMathRequest, SpatialMathResults,
-  runSpatialMath, slimObservations,
+  SpatialMathMessage,
+  SpatialMathReply,
+  SpatialMathRequest,
+  SpatialMathResults,
+  runSpatialMath,
+  slimObservations,
 } from './spatial-math-ops';
 
 /**
@@ -81,7 +86,9 @@ export class SpatialMathClient {
 
   /** Run `request`, in the worker when `size` reaches the threshold and a worker can run. */
   async run<R extends SpatialMathRequest>(
-    request: R, size: number, options: SpatialMathCallOptions = {},
+    request: R,
+    size: number,
+    options: SpatialMathCallOptions = {},
   ): Promise<SpatialMathResults[R['op']]> {
     const { signal } = options;
     if (signal?.aborted) throw abortError();
@@ -114,7 +121,9 @@ export class SpatialMathClient {
       };
       signal?.addEventListener('abort', onAbort, { once: true });
       this.pending.set(id, {
-        request, resolve, reject,
+        request,
+        resolve,
+        reject,
         detach: () => signal?.removeEventListener('abort', onAbort),
       });
       worker.postMessage({ ...request, id } as SpatialMathMessage);
@@ -129,7 +138,9 @@ export class SpatialMathClient {
       // settles (never by the start itself: a synchronous factory settles it at once).
       const starting = this.startWorker();
       this.starting = starting;
-      void starting.then(() => { if (this.starting === starting) this.starting = null; });
+      void starting.then(() => {
+        if (this.starting === starting) this.starting = null;
+      });
     }
     return this.starting;
   }
@@ -189,7 +200,7 @@ export class SpatialMathClient {
 
 let shared: SpatialMathClient | null = null;
 function sharedClient(): SpatialMathClient {
-  return shared ??= new SpatialMathClient();
+  return (shared ??= new SpatialMathClient());
 }
 
 /** Observations a computation covers: its `indices`, or every observation. */
@@ -199,42 +210,55 @@ function covered(indices: Uint32Array | undefined, count: number): number {
 
 /** {@link expressionField}, off the main thread when it is big enough to matter. */
 export function computeExpressionFieldAsync(
-  obs: SpatialObservations, opts: ExpressionFieldOptions, options?: SpatialMathCallOptions,
+  obs: SpatialObservations,
+  opts: ExpressionFieldOptions,
+  options?: SpatialMathCallOptions,
 ): Promise<ExpressionField | null> {
   return sharedClient().run(
     { op: 'expressionField', obs: slimObservations(obs), opts },
-    covered(opts.indices, obs.count), options,
+    covered(opts.indices, obs.count),
+    options,
   );
 }
 
 /** {@link expressionVolume}, off the main thread when it is big enough to matter. */
 export function computeExpressionVolumeAsync(
-  obs: SpatialObservations, grid: DensityGrid, opts: ExpressionVolumeOptions,
+  obs: SpatialObservations,
+  grid: DensityGrid,
+  opts: ExpressionVolumeOptions,
   options?: SpatialMathCallOptions,
 ): Promise<ExpressionVolumeField | null> {
   return sharedClient().run(
     { op: 'expressionVolume', obs: slimObservations(obs), grid, opts },
-    covered(opts.indices, obs.count), options,
+    covered(opts.indices, obs.count),
+    options,
   );
 }
 
 /** {@link rasterizeDensity}, off the main thread when it is big enough to matter. */
 export function rasterizeDensityAsync(
-  obs: SpatialObservations, grid: DensityGrid, opts: DensityOptions, options?: SpatialMathCallOptions,
+  obs: SpatialObservations,
+  grid: DensityGrid,
+  opts: DensityOptions,
+  options?: SpatialMathCallOptions,
 ): Promise<Uint8Array | null> {
   return sharedClient().run(
     { op: 'rasterizeDensity', obs: slimObservations(obs), grid, opts },
-    covered(opts.indices, obs.count), options,
+    covered(opts.indices, obs.count),
+    options,
   );
 }
 
 /** {@link heatmapMatrix}, off the main thread when it is big enough to matter. */
 export function computeHeatmapMatrixAsync(
-  genes: readonly HeatmapGene[], groups: HeatmapGroups, opts: HeatmapMatrixOptions = {},
+  genes: readonly HeatmapGene[],
+  groups: HeatmapGroups,
+  opts: HeatmapMatrixOptions = {},
   options?: SpatialMathCallOptions,
 ): Promise<HeatmapMatrix | null> {
   return sharedClient().run(
     { op: 'heatmapMatrix', genes, groups, opts },
-    covered(opts.indices, groups.codes.length) * Math.max(1, genes.length), options,
+    covered(opts.indices, groups.codes.length) * Math.max(1, genes.length),
+    options,
   );
 }

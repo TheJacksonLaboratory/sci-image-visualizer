@@ -15,12 +15,17 @@ describe('RenderOrchestrator', () => {
   beforeEach(() => {
     calls = [];
     const track = (name: string, impl?: (...a: any[]) => any) =>
-      jest.fn((...a: any[]) => { calls.push(name); return impl?.(...a); });
+      jest.fn((...a: any[]) => {
+        calls.push(name);
+        return impl?.(...a);
+      });
     host = {
       renderPhase: track('renderPhase', () => Promise.resolve(true)),
       smallShown: track('smallShown'),
       sharpenSettled: track('sharpenSettled'),
-      finished: jest.fn((viaSmall: boolean) => { calls.push(`finished(${viaSmall})`); }),
+      finished: jest.fn((viaSmall: boolean) => {
+        calls.push(`finished(${viaSmall})`);
+      }),
       sharpenFailed: track('sharpenFailed'),
       renderFailed: track('renderFailed'),
     } as unknown as jest.Mocked<TwoPassRenderHost>;
@@ -65,9 +70,7 @@ describe('RenderOrchestrator', () => {
   });
 
   it('small-tier failure falls back to large with the overlay kept up', async () => {
-    host.renderPhase
-      .mockRejectedValueOnce(new Error('no tiers'))
-      .mockResolvedValue(true as any);
+    host.renderPhase.mockRejectedValueOnce(new Error('no tiers')).mockResolvedValue(true as any);
     await new RenderOrchestrator(host, 0).render(INFO, SMALL);
     expect(host.smallShown).not.toHaveBeenCalled();
     expect(host.finished).toHaveBeenCalledWith(false);
@@ -76,9 +79,9 @@ describe('RenderOrchestrator', () => {
   it('large tier retries once after the delay and succeeds', async () => {
     jest.useFakeTimers();
     host.renderPhase
-      .mockResolvedValueOnce(true as any)            // small
-      .mockRejectedValueOnce(new Error('503'))       // large, attempt 1
-      .mockResolvedValueOnce(true as any);           // large, attempt 2
+      .mockResolvedValueOnce(true as any) // small
+      .mockRejectedValueOnce(new Error('503')) // large, attempt 1
+      .mockResolvedValueOnce(true as any); // large, attempt 2
     const done = new RenderOrchestrator(host, 1000).render(INFO, SMALL);
     await jest.advanceTimersByTimeAsync(999);
     expect(host.renderPhase).toHaveBeenCalledTimes(2); // retry not fired yet
@@ -92,10 +95,10 @@ describe('RenderOrchestrator', () => {
 
   it('both large attempts failing reports sharpenFailed (small stays as fallback)', async () => {
     host.renderPhase
-      .mockResolvedValueOnce(true as any)            // small
-      .mockRejectedValue(new Error('503'));          // large, both attempts
+      .mockResolvedValueOnce(true as any) // small
+      .mockRejectedValue(new Error('503')); // large, both attempts
     await new RenderOrchestrator(host, 0).render(INFO, SMALL);
-    expect(host.sharpenSettled).toHaveBeenCalled();  // spinner always released
+    expect(host.sharpenSettled).toHaveBeenCalled(); // spinner always released
     expect(host.sharpenFailed).toHaveBeenCalled();
     expect(host.finished).not.toHaveBeenCalled();
   });
@@ -108,7 +111,9 @@ describe('SliceScrubber', () => {
   it('coalesces rapid scrubs into one application of the last value', () => {
     const apply = jest.fn();
     const s = new SliceScrubber(apply, 120);
-    s.scrub(1); s.scrub(2); s.scrub(3);
+    s.scrub(1);
+    s.scrub(2);
+    s.scrub(3);
     expect(apply).not.toHaveBeenCalled();
     jest.advanceTimersByTime(120);
     expect(apply).toHaveBeenCalledTimes(1);

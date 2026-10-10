@@ -1,7 +1,15 @@
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
 import {
-  POLYGON_LEVEL_MIN_CELL_PX, cellTypeColumnFor, cellsShown, pixelsPerDataUnit, polygonLevelFor, tileId,
-  tilesInRect, transcriptLevelFor, typicalCellDiameter, visibleDataRect,
+  POLYGON_LEVEL_MIN_CELL_PX,
+  cellTypeColumnFor,
+  cellsShown,
+  pixelsPerDataUnit,
+  polygonLevelFor,
+  tileId,
+  tilesInRect,
+  transcriptLevelFor,
+  typicalCellDiameter,
+  visibleDataRect,
 } from './lod';
 
 /**
@@ -61,7 +69,7 @@ describe('tilesInRect', () => {
     expect(keys).toEqual([{ level: 0, gx: 2, gy: 2 }]);
   });
 
-  it('uses the level\'s own tile size', () => {
+  it("uses the level's own tile size", () => {
     const keys = tilesInRect({ x0: 0, y0: 0, x1: 999, y1: 999 }, 2, levels(4));
     expect(keys).toEqual([{ level: 2, gx: 0, gy: 0 }]);
     expect(tileId(keys[0])).toBe('2/0/0');
@@ -129,30 +137,43 @@ describe('pixelsPerDataUnit', () => {
 });
 
 describe('cellTypeColumnFor', () => {
-  const ds = (names: [string, 'categorical' | 'continuous'][]) => ({
-    columns: names.map(([name, kind]) => kind === 'categorical'
-      ? { kind, name, categories: ['a'] } : { kind, name }),
-  }) as unknown as SpatialDataset;
+  const ds = (names: [string, 'categorical' | 'continuous'][]) =>
+    ({
+      columns: names.map(([name, kind]) =>
+        kind === 'categorical' ? { kind, name, categories: ['a'] } : { kind, name },
+      ),
+    }) as unknown as SpatialDataset;
 
   it('prefers the pipeline clustering over a curated annotation by default', () => {
-    const d = ds([['cell_area', 'continuous'], ['curated_cell_type', 'categorical'], ['graphclust', 'categorical']]);
+    const d = ds([
+      ['cell_area', 'continuous'],
+      ['curated_cell_type', 'categorical'],
+      ['graphclust', 'categorical'],
+    ]);
     expect(cellTypeColumnFor(d, { cellTypeColumn: null })).toBe('graphclust');
   });
 
   it('honours an explicit choice, including the curated one', () => {
-    const d = ds([['graphclust', 'categorical'], ['curated_cell_type', 'categorical']]);
+    const d = ds([
+      ['graphclust', 'categorical'],
+      ['curated_cell_type', 'categorical'],
+    ]);
     expect(cellTypeColumnFor(d, { cellTypeColumn: 'curated_cell_type' })).toBe('curated_cell_type');
   });
 
   it('ignores a choice this dataset does not have, and a continuous column', () => {
-    const d = ds([['graphclust', 'categorical'], ['cell_area', 'continuous']]);
+    const d = ds([
+      ['graphclust', 'categorical'],
+      ['cell_area', 'continuous'],
+    ]);
     expect(cellTypeColumnFor(d, { cellTypeColumn: 'nope' })).toBe('graphclust');
     expect(cellTypeColumnFor(d, { cellTypeColumn: 'cell_area' })).toBe('graphclust');
   });
 
   it('falls back to a curated column when it is the only categorical', () => {
-    expect(cellTypeColumnFor(ds([['curated_cell_type', 'categorical']]), { cellTypeColumn: null }))
-      .toBe('curated_cell_type');
+    expect(cellTypeColumnFor(ds([['curated_cell_type', 'categorical']]), { cellTypeColumn: null })).toBe(
+      'curated_cell_type',
+    );
     expect(cellTypeColumnFor(ds([['cell_area', 'continuous']]), { cellTypeColumn: null })).toBeNull();
   });
 });

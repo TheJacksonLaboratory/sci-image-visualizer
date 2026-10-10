@@ -1,5 +1,13 @@
 import {
-  ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, Inject, Input, NgZone, OnDestroy, OnInit,
+  ChangeDetectionStrategy,
+  ChangeDetectorRef,
+  Component,
+  DestroyRef,
+  Inject,
+  Input,
+  NgZone,
+  OnDestroy,
+  OnInit,
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -63,24 +71,30 @@ export class IntensityInsetComponent implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit(): void {
-    this.visualizer.getIntensityProfile$().pipe(takeUntilDestroyed(this.destroyRef)).subscribe((profiles) => {
-      this.profiles = profiles;
-      this.hasProfiles.set(profiles.length > 0);
-      // The panel is behind *ngIf. detectChanges() materializes it synchronously (the
-      // stream may fire outside the zone, e.g. from an OSD drag). Render on the next
-      // frame, AFTER layout: drawn synchronously, Plotly sizes a fresh chart to a zero
-      // box and keeps it, so the inset stays blank.
-      this.cdr.detectChanges();
-      requestAnimationFrame(() => this.render());
-    });
+    this.visualizer
+      .getIntensityProfile$()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((profiles) => {
+        this.profiles = profiles;
+        this.hasProfiles.set(profiles.length > 0);
+        // The panel is behind *ngIf. detectChanges() materializes it synchronously (the
+        // stream may fire outside the zone, e.g. from an OSD drag). Render on the next
+        // frame, AFTER layout: drawn synchronously, Plotly sizes a fresh chart to a zero
+        // box and keeps it, so the inset stays blank.
+        this.cdr.detectChanges();
+        requestAnimationFrame(() => this.render());
+      });
     // When the OSD view settles at a new zoom/pan, re-sample from a crop of the
     // visible region so the inset reflects the zoom-level resolution (Plotly's own
     // high-def zoom updates the sampling cache inline).
-    this.visualizer.getViewportChange$().pipe(takeUntilDestroyed(this.destroyRef)).subscribe((roi) => {
-      if (this.hasProfiles() && this.imageView) {
-        this.visualizer.refreshIntensitySamplingForRoi(roi.x, roi.y, roi.width, roi.height, this.zIndex);
-      }
-    });
+    this.visualizer
+      .getViewportChange$()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((roi) => {
+        if (this.hasProfiles() && this.imageView) {
+          this.visualizer.refreshIntensitySamplingForRoi(roi.x, roi.y, roi.width, roi.height, this.zIndex);
+        }
+      });
     this.zone.runOutsideAngular(() => window.addEventListener('resize', this.onResize));
   }
 

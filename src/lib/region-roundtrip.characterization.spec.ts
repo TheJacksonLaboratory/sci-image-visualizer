@@ -34,7 +34,10 @@ describe('PlotlyService region round-trip (characterization)', () => {
     r.id = id;
     r.name = `rect${id}`;
     const rect = new Rectangle();
-    rect.x = x; rect.y = y; rect.width = w; rect.height = h;
+    rect.x = x;
+    rect.y = y;
+    rect.width = w;
+    rect.height = h;
     r.bounds = rect;
     return r;
   }
@@ -56,10 +59,7 @@ describe('PlotlyService region round-trip (characterization)', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule],
-      providers: [
-        PlotlyService, ...VIZ_PORT_STUBS,
-        MessageService,
-      ],
+      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
     });
     service = TestBed.inject(PlotlyService);
 
@@ -99,7 +99,9 @@ describe('PlotlyService region round-trip (characterization)', () => {
         makeRectRegion(1, 0, 0, 10, 10),
         makePolyRegion(3, [0, 10, 5], [0, 0, 10], false), // open — annotation only
       ],
-      false, true, '#ffffff',
+      false,
+      true,
+      '#ffffff',
     );
 
     const polys = service.getRegionPolygons();
@@ -135,18 +137,45 @@ describe('Region GeoJSON round trip (characterization)', () => {
     return Object.assign(new Region(), { name: 'r', label: 'Tumor', color: '#ff8000', bounds }, extra);
   }
   function poly(xs: number[], ys: number[], extra: Partial<Polygon> = {}): Polygon {
-    return Object.assign(new Polygon(), {
-      npoints: xs.length, xpoints: xs, ypoints: ys, coordinates: xs.map((x, i) => [x, ys[i]]), closed: true,
-    }, extra);
+    return Object.assign(
+      new Polygon(),
+      {
+        npoints: xs.length,
+        xpoints: xs,
+        ypoints: ys,
+        coordinates: xs.map((x, i) => [x, ys[i]]),
+        closed: true,
+      },
+      extra,
+    );
   }
   const rect = Object.assign(new Rectangle(), { x: 10, y: 20, width: 30, height: 40 });
-  const donut = poly([0, 20, 20, 0], [0, 0, 20, 20], { holes: [[[7, 7], [13, 7], [13, 13], [7, 13]]] });
+  const donut = poly([0, 20, 20, 0], [0, 0, 20, 20], {
+    holes: [
+      [
+        [7, 7],
+        [13, 7],
+        [13, 13],
+        [7, 13],
+      ],
+    ],
+  });
   const multi = Object.assign(new MultiPolygon(), {
     polygons: [poly([0, 10, 10, 0], [0, 0, 10, 10]), poly([20, 30, 30, 20], [0, 0, 10, 10])],
   });
   const open = poly([0, 10, 20], [0, 5, 0], { closed: false });
   const bezier = poly([0, 10, 5], [0, 0, 10], {
-    bezier: true, handlesIn: [[-1, 0], [0, -1], [1, 1]], handlesOut: [[1, 0], [0, 1], [-1, -1]],
+    bezier: true,
+    handlesIn: [
+      [-1, 0],
+      [0, -1],
+      [1, 1],
+    ],
+    handlesOut: [
+      [1, 0],
+      [0, 1],
+      [-1, -1],
+    ],
   });
 
   const fixture = (): Region[] => [
@@ -164,16 +193,26 @@ describe('Region GeoJSON round trip (characterization)', () => {
     expect(back[0].bounds).toEqual(rect);
     expect((back[1].bounds as Polygon).holes).toEqual(donut.holes);
     expect((back[1].bounds as Polygon).xpoints).toEqual(donut.xpoints);
-    expect((back[2].bounds as MultiPolygon).polygons.map((p) => p.xpoints))
-      .toEqual([[0, 10, 10, 0], [20, 30, 30, 20]]);
+    expect((back[2].bounds as MultiPolygon).polygons.map((p) => p.xpoints)).toEqual([
+      [0, 10, 10, 0],
+      [20, 30, 30, 20],
+    ]);
     expect((back[3].bounds as Polygon).closed).toBe(false);
     expect((back[3].bounds as Polygon).xpoints).toEqual([0, 10, 20]);
     const b = back[4].bounds as Polygon;
-    expect([b.bezier, b.xpoints, b.handlesIn, b.handlesOut])
-      .toEqual([true, [0, 10, 5], bezier.handlesIn, bezier.handlesOut]);
+    expect([b.bezier, b.xpoints, b.handlesIn, b.handlesOut]).toEqual([
+      true,
+      [0, 10, 5],
+      bezier.handlesIn,
+      bezier.handlesOut,
+    ]);
     expect(back[4].z).toBe(3);
     expect(back.map((r) => [r.label, r.color])).toEqual([
-      ['Tumor', '#ff8000'], ['Tumor', '#ff8000'], ['Tumor', '#ff8000'], ['Line', '#ff8000'], ['Tumor', '#ff8000'],
+      ['Tumor', '#ff8000'],
+      ['Tumor', '#ff8000'],
+      ['Tumor', '#ff8000'],
+      ['Line', '#ff8000'],
+      ['Tumor', '#ff8000'],
     ]);
   });
 

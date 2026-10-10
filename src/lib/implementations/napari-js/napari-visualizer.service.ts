@@ -15,12 +15,27 @@ import { VIZ_CONFIG, VizConfig } from '../../contracts/viz-config';
 import { ICellSegmenter, CELL_SEGMENTER } from '../../contracts/cell-segmenter.contract';
 import { ViewerCapabilities, ViewerFeature, capabilitiesOf } from '../../contracts/capabilities.contract';
 import {
-  PlotType, PlotTypeDescriptor, PLOT_TYPE_DESCRIPTORS, NAPARI_DEFAULT_DECIMATE, isNapari3d,
-  isNapariIsosurface, isNapariScatter, isNapariScatter3d, isNapariSurface, isSpatialOmics, isSpatialOmics3d,
+  PlotType,
+  PlotTypeDescriptor,
+  PLOT_TYPE_DESCRIPTORS,
+  NAPARI_DEFAULT_DECIMATE,
+  isNapari3d,
+  isNapariIsosurface,
+  isNapariScatter,
+  isNapariScatter3d,
+  isNapariSurface,
+  isSpatialOmics,
+  isSpatialOmics3d,
 } from '../../contracts/plot-type';
 import {
-  IViewerBackend, PixelData, IIsosurfaceControls, IIntensityControls, ISurface3dControls,
-  IOsdViewOptions, IVolumeResolution, IIntensityViewportSource,
+  IViewerBackend,
+  PixelData,
+  IIsosurfaceControls,
+  IIntensityControls,
+  ISurface3dControls,
+  IOsdViewOptions,
+  IVolumeResolution,
+  IIntensityViewportSource,
 } from '../../contracts/visualizer.contract';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
@@ -181,18 +196,21 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       densityChanged: (d) => this.inZone(() => this.densityStats$.next(d)),
       loadingChanged: (layers) => this.badge.setTileLayers(layers),
     });
-    this.tools = new NapariToolBridge({
-      viewer: () => this.viewer,
-      host: () => this.host,
-      canvas: () => this.canvas,
-      imageSize: () => this.getTrueImageSize(),
-      frameIndex: () => this.loaded?.z ?? 0,
-      fileName: () => this.loaded?.filename,
-      // Reached from timers armed outside the zone; subscribers are UI.
-      viewportChanged: (rect) => this.inZone(() => this.viewportChange$.next(rect)),
-      outsideZone: (fn) => this.zone.runOutsideAngular(fn),
-      inZone: (fn) => this.inZone(fn),
-    }, { regionStore, wandService, samTool, samPointTool, cellSegmentTool, cellSegmenter });
+    this.tools = new NapariToolBridge(
+      {
+        viewer: () => this.viewer,
+        host: () => this.host,
+        canvas: () => this.canvas,
+        imageSize: () => this.getTrueImageSize(),
+        frameIndex: () => this.loaded?.z ?? 0,
+        fileName: () => this.loaded?.filename,
+        // Reached from timers armed outside the zone; subscribers are UI.
+        viewportChanged: (rect) => this.inZone(() => this.viewportChange$.next(rect)),
+        outsideZone: (fn) => this.zone.runOutsideAngular(fn),
+        inZone: (fn) => this.inZone(fn),
+      },
+      { regionStore, wandService, samTool, samPointTool, cellSegmentTool, cellSegmenter },
+    );
     this.canvasTools = this.tools.canvasTools;
   }
 
@@ -286,33 +304,34 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       // Built OUTSIDE the Angular zone, so its requestAnimationFrame loop, its canvas pointer /
       // wheel listeners and its ResizeObserver do not each trigger app-wide change detection.
       // Whatever they cause that the UI shows re-enters the zone (see inZone).
-      const viewer = this.zone.runOutsideAngular(() => new Viewer({
-        canvas,
-        background: { r: 0.07, g: 0.07, b: 0.09, a: 1 },
-        // Set here rather than left to napari-js's own default so the gentler
-        // step applies with the version currently installed. Chosen to match the
-        // OSD backend's step (see OSD_ZOOM_PER_SCROLL): the wheel should feel the
-        // same on an image whichever renderer is drawing it. The step applies per
-        // scroll EVENT, and a trackpad sends a burst of them per swipe, so a step
-        // tuned to a mouse notch runs away under a trackpad.
-        wheelZoomSpeed: NAPARI_WHEEL_ZOOM_SPEED,
-        // The FIRST 3D layer of a scene frames the orbit camera; every later one leaves the
-        // pose alone. A spatial scene is built from several layers and rebuilt constantly —
-        // recolouring by a class, picking a gene, stepping a section — and with napari-js's
-        // previous unconditional framing each of those threw away an orbit the user had set.
-        // The pose it snapped back to depended on WHICH layer was rebuilt, so isolating one
-        // section zoomed to that section's bounds. `resetFit3D()` on a dataset change is what
-        // lets the next scene frame itself.
-        fit3d: 'once',
-        // In the spatial modes a plain click SELECTS the class under the cursor,
-        // so napari's OSD-style click-to-zoom is turned off there: otherwise one
-        // click would both select a class and zoom 2x about the cursor, and the
-        // zoom would then halve the pixel radius the next click hit-tests with.
-        // Zooming is still on the wheel, the zoom buttons and the zoom-box tool.
-        ...(isSpatialOmics(plotType) || isSpatialOmics3d(plotType)
-          ? { clickZoomFactor: 0 }
-          : {}),
-      }));
+      const viewer = this.zone.runOutsideAngular(
+        () =>
+          new Viewer({
+            canvas,
+            background: { r: 0.07, g: 0.07, b: 0.09, a: 1 },
+            // Set here rather than left to napari-js's own default so the gentler
+            // step applies with the version currently installed. Chosen to match the
+            // OSD backend's step (see OSD_ZOOM_PER_SCROLL): the wheel should feel the
+            // same on an image whichever renderer is drawing it. The step applies per
+            // scroll EVENT, and a trackpad sends a burst of them per swipe, so a step
+            // tuned to a mouse notch runs away under a trackpad.
+            wheelZoomSpeed: NAPARI_WHEEL_ZOOM_SPEED,
+            // The FIRST 3D layer of a scene frames the orbit camera; every later one leaves the
+            // pose alone. A spatial scene is built from several layers and rebuilt constantly —
+            // recolouring by a class, picking a gene, stepping a section — and with napari-js's
+            // previous unconditional framing each of those threw away an orbit the user had set.
+            // The pose it snapped back to depended on WHICH layer was rebuilt, so isolating one
+            // section zoomed to that section's bounds. `resetFit3D()` on a dataset change is what
+            // lets the next scene frame itself.
+            fit3d: 'once',
+            // In the spatial modes a plain click SELECTS the class under the cursor,
+            // so napari's OSD-style click-to-zoom is turned off there: otherwise one
+            // click would both select a class and zoom 2x about the cursor, and the
+            // zoom would then halve the pixel radius the next click hit-tests with.
+            // Zooming is still on the wheel, the zoom buttons and the zoom-box tool.
+            ...(isSpatialOmics(plotType) || isSpatialOmics3d(plotType) ? { clickZoomFactor: 0 } : {}),
+          }),
+      );
       this.viewer = viewer;
       await viewer.ready;
       if (scene.aborted) return false;
@@ -331,7 +350,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
 
   /** The scene a plot type mounts. */
   private createScene(
-    plotType: PlotType, ctx: SceneContext, info: IImageInfo | undefined, noImage: boolean,
+    plotType: PlotType,
+    ctx: SceneContext,
+    info: IImageInfo | undefined,
+    noImage: boolean,
   ): NapariScene {
     if (isSpatialOmics3d(plotType)) return new Spatial3dScene(ctx, this.spatial);
     if (isSpatialOmics(plotType)) return new Spatial2dScene(ctx, this.spatial, noImage);
@@ -423,7 +445,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private zoomBy(factor: number): void {
     const v = this.viewer;
     if (!v) return;
-    if (v.dims.ndisplay === 3) v.camera3d.zoomBy(1 / factor); // zoomBy scales the distance
+    if (v.dims.ndisplay === 3)
+      v.camera3d.zoomBy(1 / factor); // zoomBy scales the distance
     else v.camera.zoom = v.camera.zoom * factor;
   }
 
@@ -631,8 +654,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   getHistogram$(channelIndex: number, bins: number): Observable<IHistogram | null> {
     // >8-bit channels: the true native distribution from the server (the displayed pixels are
     // 8-bit, so the client histogram would be clipped). 8-bit channels use the client path.
-    return this.tileClient.nativeHistogram$(this.loaded?.imageInfo, this.loaded?.z ?? 0, channelIndex, bins)
-      ?? of(this.getHistogram(channelIndex, bins));
+    return (
+      this.tileClient.nativeHistogram$(this.loaded?.imageInfo, this.loaded?.z ?? 0, channelIndex, bins) ??
+      of(this.getHistogram(channelIndex, bins))
+    );
   }
 
   /** Save the displayed composite as a PNG. Through file-saver, which (unlike revoking an object
@@ -650,11 +675,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
    *  only (omitted when all are visible → server default). Mirrors the OSD backend. */
   async exportData(): Promise<void> {
     await this.tileClient.exportTiff(
-      this.loaded?.z ?? 0, this.store.currentChannelStates(), this.loaded?.filename,
+      this.loaded?.z ?? 0,
+      this.store.currentChannelStates(),
+      this.loaded?.filename,
     );
   }
   unsubscribe(): void {
     this.reset();
   }
 }
-

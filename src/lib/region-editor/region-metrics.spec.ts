@@ -9,7 +9,12 @@ const square = (x0: number, w: number) => makePolygon([x0, x0 + w, x0 + w, x0], 
 describe('region-metrics', () => {
   it('pickMpp reads calibration off a non-[0] entry and squares a single axis', () => {
     const pick = (m: unknown) => pickMpp(m as IImageMetadata[]);
-    expect(pick([{ mppX: 0, mppY: 0 }, { mppX: 0.5, mppY: 0.5 }])).toEqual({ mppX: 0.5, mppY: 0.5 });
+    expect(
+      pick([
+        { mppX: 0, mppY: 0 },
+        { mppX: 0.5, mppY: 0.5 },
+      ]),
+    ).toEqual({ mppX: 0.5, mppY: 0.5 });
     expect(pick([{ mppX: 0.25 }])).toEqual({ mppX: 0.25, mppY: 0.25 });
     expect(pick([{ mppX: 0, mppY: 0 }])).toEqual({ mppX: undefined, mppY: undefined });
     expect(pick(undefined)).toEqual({ mppX: undefined, mppY: undefined });
@@ -18,10 +23,18 @@ describe('region-metrics', () => {
   it('regionAreaPx: rectangle, polygon minus holes, multi-polygon sum, else 0', () => {
     expect(regionAreaPx(region(Object.assign(new Rectangle(), { width: -30, height: 40 })))).toBe(1200);
     const donut = square(0, 10);
-    donut.holes = [[[3, 3], [7, 3], [7, 7], [3, 7]]];
+    donut.holes = [
+      [
+        [3, 3],
+        [7, 3],
+        [7, 7],
+        [3, 7],
+      ],
+    ];
     expect(regionAreaPx(region(donut))).toBe(84);
-    expect(regionAreaPx(region(Object.assign(new MultiPolygon(), { polygons: [square(0, 10), square(20, 5)] }))))
-      .toBe(125);
+    expect(
+      regionAreaPx(region(Object.assign(new MultiPolygon(), { polygons: [square(0, 10), square(20, 5)] }))),
+    ).toBe(125);
     expect(regionAreaPx(region(makePolygon([0, 1], [0, 1])))).toBe(0);
     expect(regionAreaPx(region(undefined as unknown as Region['bounds']))).toBe(0);
   });

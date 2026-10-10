@@ -7,13 +7,13 @@ describe('CategoricalLookup', () => {
   const meta = { kind: 'categorical', name: 'cluster', categories: ['T cell', 'B cell', 'NK'] };
   const codes = Uint16Array.of(0, 2, 1);
   const port = {
-    getColumn: jest.fn(async (name: string) => (name === 'cluster'
-      ? { meta, codes }
-      : { meta: { kind: 'continuous', name }, values: new Float32Array(3) })),
+    getColumn: jest.fn(async (name: string) =>
+      name === 'cluster' ? { meta, codes } : { meta: { kind: 'continuous', name }, values: new Float32Array(3) },
+    ),
   } as unknown as SpatialDataPort;
   const dataset = { columns: [meta] } as unknown as SpatialDataset;
 
-  it('reads a categorical column\'s codes, and nothing for a continuous one', async () => {
+  it("reads a categorical column's codes, and nothing for a continuous one", async () => {
     const lookup = new CategoricalLookup(port);
     expect(await lookup.codes('cluster')).toEqual({ codes, meta });
     expect(await lookup.codes('area')).toBeNull();

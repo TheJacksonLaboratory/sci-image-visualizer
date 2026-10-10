@@ -1,5 +1,11 @@
 import {
-  ChangeDetectionStrategy, Component, EventEmitter, Input, OnChanges, Output, SimpleChanges,
+  ChangeDetectionStrategy,
+  Component,
+  EventEmitter,
+  Input,
+  OnChanges,
+  Output,
+  SimpleChanges,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -14,7 +20,11 @@ import { ColormapNode, DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../../cont
 import { SPATIAL_3D_MAX_CATEGORIES } from '../../spatial/spatial-encoding';
 import { SpatialSelectionMask, emptySelection } from '../../spatial/spatial-selection';
 import {
-  CLIP_OPTIONS, PanelOption, columnOptions, middleSection, sectionLabel,
+  CLIP_OPTIONS,
+  PanelOption,
+  columnOptions,
+  middleSection,
+  sectionLabel,
 } from '../../spatial/spatial-panel-model';
 import type { GenePickerModel } from '../spatial-gene-picker';
 import type { SpatialLegendEntry } from '../spatial-key/spatial-key.model';
@@ -34,7 +44,12 @@ import { SpatialKeyComponent } from '../spatial-key/spatial-key.component';
   selector: 'spatial-observations-panel',
   standalone: true,
   imports: [
-    CommonModule, FormsModule, CheckboxModule, DropdownModule, SliderModule, TooltipModule,
+    CommonModule,
+    FormsModule,
+    CheckboxModule,
+    DropdownModule,
+    SliderModule,
+    TooltipModule,
     SpatialKeyComponent,
   ],
   templateUrl: './spatial-observations-panel.component.html',
@@ -208,16 +223,22 @@ export class SpatialObservationsPanelComponent implements OnChanges {
   protected get geneMapVolumeNote(): string {
     const total = this.sections?.length ?? 0;
     if (this.view.geneMapVolume) {
-      return 'Interpolated along z: the planes between the imaged sections carry an '
-        + 'ESTIMATE, smoothed from their neighbours\' mean. Nothing is drawn beyond the '
-        + 'outermost section.';
+      return (
+        'Interpolated along z: the planes between the imaged sections carry an ' +
+        "ESTIMATE, smoothed from their neighbours' mean. Nothing is drawn beyond the " +
+        'outermost section.'
+      );
     }
     if (this.geneMapOneSection) {
-      return 'One imaged section\'s field — measured, not interpolated. Hide the '
-        + 'observations to read it, or leave them on to check the field against them.';
+      return (
+        "One imaged section's field — measured, not interpolated. Hide the " +
+        'observations to read it, or leave them on to check the field against them.'
+      );
     }
-    return `One field per imaged section${total ? ` (${total})` : ''}, at its own depth, `
-      + 'with the gaps between sections empty. Kernel-weighted mean per cell, not a sum.';
+    return (
+      `One field per imaged section${total ? ` (${total})` : ''}, at its own depth, ` +
+      'with the gaps between sections empty. Kernel-weighted mean per cell, not a sum.'
+    );
   }
 
   /** True while a gene is the colour source — the only thing a gene map can map. */
@@ -284,8 +305,10 @@ export class SpatialObservationsPanelComponent implements OnChanges {
   protected get densityNote(): string {
     const capped = `the ${SpatialObservationsPanelComponent.DENSITY_MAX_CLUSTERS} largest clusters`;
     const what = this.legend ? capped : this.hasSelection ? 'the selected cells' : 'all cells';
-    return `Density estimate over ${what} — smoothed between the imaged sections, `
-      + 'not measured cells. Lower Opacity to read the fields under the cloud.';
+    return (
+      `Density estimate over ${what} — smoothed between the imaged sections, ` +
+      'not measured cells. Lower Opacity to read the fields under the cloud.'
+    );
   }
 
   /** Mirrors the renderer's cap, for the note only. */

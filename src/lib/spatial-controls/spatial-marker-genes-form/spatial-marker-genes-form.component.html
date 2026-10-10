@@ -2,32 +2,53 @@
 <div class="sc-markers" *ngIf="open">
   <div class="sc-row">
     <span class="sc-lbl">Clusters from</span>
-    <p-dropdown [options]="markerColumnOptions" optionLabel="label" optionValue="value"
-                [ngModel]="markerColumn" (ngModelChange)="onMarkerColumn($event)"
-                appendTo="body" [filter]="markerColumnOptions.length > 8"></p-dropdown>
+    <p-dropdown
+      [options]="markerColumnOptions"
+      optionLabel="label"
+      optionValue="value"
+      [ngModel]="markerColumn"
+      (ngModelChange)="onMarkerColumn($event)"
+      appendTo="body"
+      [filter]="markerColumnOptions.length > 8"
+    ></p-dropdown>
   </div>
   <div class="sc-row">
     <span class="sc-lbl">Per cluster</span>
-    <p-dropdown [options]="markerPerGroupOptions" optionLabel="label" optionValue="value"
-                [(ngModel)]="markerPerGroup" appendTo="body"></p-dropdown>
+    <p-dropdown
+      [options]="markerPerGroupOptions"
+      optionLabel="label"
+      optionValue="value"
+      [(ngModel)]="markerPerGroup"
+      appendTo="body"
+    ></p-dropdown>
   </div>
   <div class="sc-row">
     <span class="sc-lbl">Clusters</span>
-    <p-multiSelect [options]="markerClusterOptions" optionLabel="label" optionValue="value"
-                   [(ngModel)]="markerClusters" appendTo="body" [filter]="true"
-                   selectedItemsLabel="{0} clusters" [maxSelectedLabels]="2"
-                   placeholder="Pick clusters"></p-multiSelect>
+    <p-multiSelect
+      [options]="markerClusterOptions"
+      optionLabel="label"
+      optionValue="value"
+      [(ngModel)]="markerClusters"
+      appendTo="body"
+      [filter]="true"
+      selectedItemsLabel="{0} clusters"
+      [maxSelectedLabels]="2"
+      placeholder="Pick clusters"
+    ></p-multiSelect>
   </div>
   <small class="sc-hint" *ngIf="markerLoading">
-    Finding marker genes… the first time for a grouping reads the whole expression matrix,
-    which can take a minute.
+    Finding marker genes… the first time for a grouping reads the whole expression matrix, which can take a minute.
   </small>
   <small class="sc-hint sc-error" *ngIf="markerError">{{ markerError }}</small>
   <div class="sc-row sc-markers-actions">
-    <p-button label="Add marker genes" icon="pi pi-sitemap" size="small"
-              [loading]="markerLoading" [disabled]="!markerClusters.length"
-              (onClick)="addMarkerGenes()"></p-button>
-    <p-button label="Cancel" size="small" [text]="true" [disabled]="markerLoading"
-              (onClick)="close()"></p-button>
+    <p-button
+      label="Add marker genes"
+      icon="pi pi-sitemap"
+      size="small"
+      [loading]="markerLoading"
+      [disabled]="!markerClusters.length"
+      (onClick)="addMarkerGenes()"
+    ></p-button>
+    <p-button label="Cancel" size="small" [text]="true" [disabled]="markerLoading" (onClick)="close()"></p-button>
   </div>
 </div>

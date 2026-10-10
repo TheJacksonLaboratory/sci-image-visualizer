@@ -11,15 +11,20 @@ import { NapariVolumeZHandle } from './napari-volume-z-handle';
 import { AssembledVolume } from './napari-tile-client';
 import { Axes3dGizmo, Box3, surface3dControls } from './napari-axes-gizmo';
 import {
-  SCATTER3D_MAX_POINTS, SCATTER3D_MAX_XY, VOLUME_WORLD_INPLANE_REF, isServerlessMultichannel,
-  stackDepth, tintFor, toIHistogram, toNapariGamma, volumeResolutionFor,
+  SCATTER3D_MAX_POINTS,
+  SCATTER3D_MAX_XY,
+  VOLUME_WORLD_INPLANE_REF,
+  isServerlessMultichannel,
+  stackDepth,
+  tintFor,
+  toIHistogram,
+  toNapariGamma,
+  volumeResolutionFor,
 } from './napari-helpers';
 import type { NapariScene, SceneContext } from './napari-scene';
 
 /** The intensity histogram of an assembled uint8 channel (or the single grayscale volume, key 0). */
-function channelHistogram(
-  data: Map<number, Uint8Array>, channel: number, bins: number,
-): IHistogram | null {
+function channelHistogram(data: Map<number, Uint8Array>, channel: number, bins: number): IHistogram | null {
   if (!data.size) return null;
   const plane = data.get(channel) ?? data.get(0);
   return plane ? toIHistogram(histogramScalar(plane, bins, 0, 255)) : null;
@@ -28,7 +33,9 @@ function channelHistogram(
 /** Assemble `info`'s stack into a uint8 volume under the stack progress bar; null on a Cancel or a
  *  new plot. The caller owns the loading flag (a multichannel volume assembles channels in turn). */
 function assemble(
-  ctx: SceneContext, info: IImageInfo | undefined, opts: { maxSlice?: number; sliceStep?: number },
+  ctx: SceneContext,
+  info: IImageInfo | undefined,
+  opts: { maxSlice?: number; sliceStep?: number },
   channel?: number,
 ): Promise<AssembledVolume | null> {
   return ctx.tiles.assembleVolume(info, opts, channel, {
@@ -370,7 +377,10 @@ export class Scatter3dScene implements NapariScene {
   private readonly channelData = new Map<number, Uint8Array>();
   private displaySub: Subscription | null = null;
 
-  constructor(private readonly ctx: SceneContext, private readonly info: IImageInfo | undefined) {}
+  constructor(
+    private readonly ctx: SceneContext,
+    private readonly info: IImageInfo | undefined,
+  ) {}
 
   async mount(): Promise<void> {
     const { ctx } = this;

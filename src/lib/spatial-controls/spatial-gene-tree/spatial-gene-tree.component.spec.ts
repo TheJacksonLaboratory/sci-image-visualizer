@@ -4,7 +4,11 @@ import { BehaviorSubject } from 'rxjs';
 import { SpatialGeneTreeComponent } from './spatial-gene-tree.component';
 import { SpatialDataset } from '../../contracts/spatial-dataset.contract';
 import {
-  SpatialControlsFake, TILED_DATASET, bindInputs, fakeSpatialControls, shallowPanel,
+  SpatialControlsFake,
+  TILED_DATASET,
+  bindInputs,
+  fakeSpatialControls,
+  shallowPanel,
 } from '../../testing/spatial-panel-testing';
 
 describe('SpatialGeneTreeComponent', () => {
@@ -23,7 +27,11 @@ describe('SpatialGeneTreeComponent', () => {
     component = fixture.componentInstance;
     root = fixture.nativeElement as HTMLElement;
     bindInputs(fixture, {
-      controls: fake.controls, dataset: fake.dataset$, view: fake.view$, geneTotal: 27000, ...inputs,
+      controls: fake.controls,
+      dataset: fake.dataset$,
+      view: fake.view$,
+      geneTotal: 27000,
+      ...inputs,
     });
     await flush();
   }
@@ -35,7 +43,8 @@ describe('SpatialGeneTreeComponent', () => {
   it('draws each row from the derived row view: eye, swatch and count follow the inputs', async () => {
     await build();
     fake.controls.setViewState({
-      transcriptGenes: ['DMBT1', 'KRT5'], transcriptGeneColors: { KRT5: '#123456' },
+      transcriptGenes: ['DMBT1', 'KRT5'],
+      transcriptGeneColors: { KRT5: '#123456' },
       transcriptHiddenGenes: ['DMBT1'],
     });
     fixture.componentRef.setInput('geneCounts', { KRT5: 9 });
@@ -128,7 +137,8 @@ describe('SpatialGeneTreeComponent', () => {
     await build();
     setView({
       transcriptGenes: ['A', 'B'],
-      transcriptGlyphs: { A: 'x', B: 'hexagon' }, transcriptGeneColors: { A: '#111111', B: '#222222' },
+      transcriptGlyphs: { A: 'x', B: 'hexagon' },
+      transcriptGeneColors: { A: '#111111', B: '#222222' },
     });
     component['resetGeneStyle']('A');
     expect(fake.view$.value.transcriptGlyphs).toEqual({ B: 'hexagon' });
@@ -139,7 +149,8 @@ describe('SpatialGeneTreeComponent', () => {
   it("in Cluster colouring, shows every gene of a cluster in the cluster's colour", async () => {
     await build();
     setView({
-      transcriptColorBy: 'cluster', transcriptGenes: ['A', 'B', 'C'],
+      transcriptColorBy: 'cluster',
+      transcriptGenes: ['A', 'B', 'C'],
       transcriptGeneGroups: [{ name: 'K1', genes: ['A', 'B'] }],
     });
     expect(component['geneSwatchOf']('A')).toBe(component['geneSwatchOf']('B'));

@@ -4,7 +4,14 @@ import { SpatialCellsPanelComponent } from './spatial-cells-panel.component';
 import { SpatialDataset } from '../../contracts/spatial-dataset.contract';
 import { GenePickerModel } from '../spatial-gene-picker';
 import {
-  SpatialControlsFake, TILED_DATASET, bindInputs, fakeSpatialControls, fire, one, panelNamed, rowLabelled,
+  SpatialControlsFake,
+  TILED_DATASET,
+  bindInputs,
+  fakeSpatialControls,
+  fire,
+  one,
+  panelNamed,
+  rowLabelled,
   shallowPanel,
 } from '../../testing/spatial-panel-testing';
 
@@ -40,9 +47,13 @@ describe('SpatialCellsPanelComponent', () => {
   it('offers the boundary sets cell first, with Both, labelled briefly to fit one row', async () => {
     await build({
       ...TILED_DATASET,
-      polygonTiles: { ...TILED_DATASET.polygonTiles!, sets: [
-        { name: 'nucleus', label: 'Nucleus boundaries' }, { name: 'cell', label: 'Cell boundaries' },
-      ] },
+      polygonTiles: {
+        ...TILED_DATASET.polygonTiles!,
+        sets: [
+          { name: 'nucleus', label: 'Nucleus boundaries' },
+          { name: 'cell', label: 'Cell boundaries' },
+        ],
+      },
     });
     expect(component['cellSetOptions'].map((o) => o.label)).toEqual(['Cell', 'Nucleus', 'Both']);
     expect(component['cellSetOptions'].map((o) => o.value)).toEqual(['cell', 'nucleus', 'both']);
@@ -57,9 +68,14 @@ describe('SpatialCellsPanelComponent', () => {
     component['onCellSet']('nucleus');
     component['onCellDraw']('both');
     component['onCellOpacity'](0.3);
-    expect(fake.view$.value).toEqual(expect.objectContaining({
-      showCells: true, cellSet: 'nucleus', cellDraw: 'both', cellOpacity: 0.3,
-    }));
+    expect(fake.view$.value).toEqual(
+      expect.objectContaining({
+        showCells: true,
+        cellSet: 'nucleus',
+        cellDraw: 'both',
+        cellOpacity: 0.3,
+      }),
+    );
     expect(component['activeCellSet']).toBe('nucleus');
     (fake.controls.setViewState as jest.Mock).mockClear();
     component['onCellOpacity'](undefined);
@@ -71,25 +87,35 @@ describe('SpatialCellsPanelComponent', () => {
   });
 
   it('offers the colourings the dataset supports, and the gene list behind them', async () => {
-    const genes = new GenePickerModel(() => fake.controls, () => []);
+    const genes = new GenePickerModel(
+      () => fake.controls,
+      () => [],
+    );
     genes.setDataset({ ...TILED_DATASET, features: { count: 2, names: ['Ttr', 'Mbp'] } });
     await build(TILED_DATASET, { genes });
     expect(component['cellColorOptions'].map((o) => o.value)).toEqual(['group', 'gene', 'single']);
     component['onCellColorMode']('gene');
     const gene = one(rowLabelled(root, 'Gene'), 'p-dropdown');
-    expect((gene as unknown as { options: { value: string }[] }).options.map((o) => o.value)).toEqual(['Ttr', 'Mbp']);
+    expect((gene as unknown as { options: { value: string }[] }).options.map((o) => o.value)).toEqual([
+      'Ttr',
+      'Mbp',
+    ]);
     // The shared model filters, and the OnPush panel follows it.
     fire(gene, 'onFilter', { filter: 'mb' });
     fixture.detectChanges();
     expect((gene as unknown as { options: { value: string }[] }).options.map((o) => o.value)).toEqual(['Mbp']);
     component['onCellColorGene']('Mbp');
     component['onCellSingleColor']('#123456');
-    expect(fake.view$.value).toEqual(expect.objectContaining({
-      cellColorMode: 'gene', cellColorGene: 'Mbp', cellSingleColor: '#123456',
-    }));
+    expect(fake.view$.value).toEqual(
+      expect.objectContaining({
+        cellColorMode: 'gene',
+        cellColorGene: 'Mbp',
+        cellSingleColor: '#123456',
+      }),
+    );
   });
 
-  it('shows the observations colour bar for a gene colouring, else the density map\'s', async () => {
+  it("shows the observations colour bar for a gene colouring, else the density map's", async () => {
     await build(TILED_DATASET, { colorBarCss: 'linear-gradient(red, blue)' });
     expect(component['densityColorBarCss']).toContain('linear-gradient');
     const inferno = component['densityColorBarCss'];

@@ -1,64 +1,115 @@
-<p-dialog header="Manage annotation classes" [visible]="visible" (visibleChange)="visibleChange.emit($event)"
-          [modal]="true" appendTo="body"
-          [style]="{width: '34rem'}" [draggable]="true" [resizable]="false">
+<p-dialog
+  header="Manage annotation classes"
+  [visible]="visible"
+  (visibleChange)="visibleChange.emit($event)"
+  [modal]="true"
+  appendTo="body"
+  [style]="{ width: '34rem' }"
+  [draggable]="true"
+  [resizable]="false"
+>
   <div *ngIf="draft" class="manage-dialog flex flex-column gap-3 pt-2">
     <div class="manage-classes flex flex-column gap-2">
-      <div *ngFor="let c of draft.classes; let i = index; trackBy: trackByIndex"
-           class="manage-class-row flex align-items-center gap-2">
+      <div
+        *ngFor="let c of draft.classes; let i = index; trackBy: trackByIndex"
+        class="manage-class-row flex align-items-center gap-2"
+      >
         <hex-color-picker [color]="c.color" (colorChange)="patchClass(i, { color: $event })"></hex-color-picker>
-        <input type="text" pInputText class="p-inputtext-sm flex-1"
-               [ngModel]="c.name" (ngModelChange)="patchClass(i, { name: $event })"
-               placeholder="Class name" aria-label="Class name"/>
-        <button pButton type="button" icon="pi pi-trash"
-                class="p-button-sm p-button-text p-button-warning"
-                pTooltip="Remove class" tooltipPosition="bottom" aria-label="Remove class"
-                (click)="removeClass(i)"></button>
+        <input
+          type="text"
+          pInputText
+          class="p-inputtext-sm flex-1"
+          [ngModel]="c.name"
+          (ngModelChange)="patchClass(i, { name: $event })"
+          placeholder="Class name"
+          aria-label="Class name"
+        />
+        <button
+          pButton
+          type="button"
+          icon="pi pi-trash"
+          class="p-button-sm p-button-text p-button-warning"
+          pTooltip="Remove class"
+          tooltipPosition="bottom"
+          aria-label="Remove class"
+          (click)="removeClass(i)"
+        ></button>
       </div>
-      <button pButton type="button" icon="pi pi-plus" label="Add class"
-              class="p-button-sm p-button-text align-self-start" (click)="addClass()"></button>
+      <button
+        pButton
+        type="button"
+        icon="pi pi-plus"
+        label="Add class"
+        class="p-button-sm p-button-text align-self-start"
+        (click)="addClass()"
+      ></button>
     </div>
 
     <div class="manage-section flex flex-column gap-2">
-      <span class="section-title font-medium">Fallback palette
-        <small class="text-color-secondary">— colours for classes not listed</small></span>
+      <span class="section-title font-medium"
+        >Fallback palette <small class="text-color-secondary">— colours for classes not listed</small></span
+      >
       <div class="fallback-palette flex align-items-center flex-wrap gap-2">
-        <span *ngFor="let col of draft.fallbackPalette; let i = index; trackBy: trackByIndex"
-              class="fallback-swatch flex align-items-center">
+        <span
+          *ngFor="let col of draft.fallbackPalette; let i = index; trackBy: trackByIndex"
+          class="fallback-swatch flex align-items-center"
+        >
           <hex-color-picker [color]="col" (colorChange)="setFallbackColor(i, $event)"></hex-color-picker>
-          <i class="pi pi-times icon-hover ml-1" pTooltip="Remove" tooltipPosition="bottom"
-             (click)="removeFallbackColor(i)"></i>
+          <i
+            class="pi pi-times icon-hover ml-1"
+            pTooltip="Remove"
+            tooltipPosition="bottom"
+            (click)="removeFallbackColor(i)"
+          ></i>
         </span>
-        <button pButton type="button" icon="pi pi-plus"
-                class="p-button-sm p-button-text" pTooltip="Add fallback colour"
-                tooltipPosition="bottom" aria-label="Add fallback colour" (click)="addFallbackColor()"></button>
+        <button
+          pButton
+          type="button"
+          icon="pi pi-plus"
+          class="p-button-sm p-button-text"
+          pTooltip="Add fallback colour"
+          tooltipPosition="bottom"
+          aria-label="Add fallback colour"
+          (click)="addFallbackColor()"
+        ></button>
       </div>
     </div>
 
     <div class="flex align-items-center gap-2">
-      <p-checkbox [ngModel]="draft.autoPromote" (ngModelChange)="setAutoPromote($event)"
-                  [binary]="true" inputId="autoPromote"></p-checkbox>
+      <p-checkbox
+        [ngModel]="draft.autoPromote"
+        (ngModelChange)="setAutoPromote($event)"
+        [binary]="true"
+        inputId="autoPromote"
+      ></p-checkbox>
       <label for="autoPromote">Auto-add detected classes to this list as they appear</label>
     </div>
 
     <div class="flex align-items-center gap-3">
       <span class="font-medium">Label matching</span>
-      <p-selectButton [options]="matchModeOptions" [ngModel]="draft.matchMode"
-                      (ngModelChange)="setMatchMode($event)"
-                      optionLabel="label" optionValue="value"></p-selectButton>
+      <p-selectButton
+        [options]="matchModeOptions"
+        [ngModel]="draft.matchMode"
+        (ngModelChange)="setMatchMode($event)"
+        optionLabel="label"
+        optionValue="value"
+      ></p-selectButton>
     </div>
   </div>
 
   <ng-template pTemplate="footer">
     <div class="manage-footer flex align-items-center flex-wrap gap-2 w-full">
       <span class="flex align-items-center flex-wrap gap-1">
-        <p-button label="Reset" icon="pi pi-refresh" [text]="true"
-                  (onClick)="resetDefaults.emit()"></p-button>
-        <p-button label="Import" icon="pi pi-upload" [text]="true"
-                  (onClick)="presetFileInput.click()"></p-button>
-        <input #presetFileInput type="file" accept=".json,application/json" hidden
-               (change)="importFile.emit($event); presetFileInput.value = ''"/>
-        <p-button label="Export" icon="pi pi-download" [text]="true"
-                  (onClick)="export.emit()"></p-button>
+        <p-button label="Reset" icon="pi pi-refresh" [text]="true" (onClick)="resetDefaults.emit()"></p-button>
+        <p-button label="Import" icon="pi pi-upload" [text]="true" (onClick)="presetFileInput.click()"></p-button>
+        <input
+          #presetFileInput
+          type="file"
+          accept=".json,application/json"
+          hidden
+          (change)="importFile.emit($event); presetFileInput.value = ''"
+        />
+        <p-button label="Export" icon="pi pi-download" [text]="true" (onClick)="export.emit()"></p-button>
       </span>
       <span class="flex-1"></span>
       <!-- Apply persists to the server and closes. -->

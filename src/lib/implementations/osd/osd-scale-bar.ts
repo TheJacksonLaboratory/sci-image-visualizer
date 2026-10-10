@@ -12,7 +12,10 @@ export class OsdScaleBar {
   private readonly el: ScaleBarElement;
   private readonly redrawHandler = () => this.update();
 
-  constructor(private viewer: OsdViewerLike, private mppX: number) {
+  constructor(
+    private viewer: OsdViewerLike,
+    private mppX: number,
+  ) {
     this.el = createScaleBarElement(this.viewer.canvas);
     this.viewer.addHandler('update-viewport', this.redrawHandler);
     this.viewer.addHandler('animation', this.redrawHandler);

@@ -1,9 +1,7 @@
 import { Rgb, buildColormapLut } from '../contracts/colormap-lut';
 import { parseCssColor } from '../contracts/color';
 import { fallbackColorFor } from '../store/class-color.util';
-import {
-  CategoricalColumnMeta, NO_CATEGORY, SpatialObservations,
-} from '../contracts/spatial-dataset.contract';
+import { CategoricalColumnMeta, NO_CATEGORY, SpatialObservations } from '../contracts/spatial-dataset.contract';
 import { ColormapValue } from '../contracts/display-types';
 import { percentileWindow } from './stats';
 
@@ -77,8 +75,16 @@ export const SPATIAL_3D_LUT_BLOCKS = SPATIAL_3D_MAX_CATEGORIES + 1;
  * Okabe–Ito, plus two greys for long tails.
  */
 export const DEFAULT_CATEGORICAL_PALETTE: string[] = [
-  '#0072B2', '#E69F00', '#009E73', '#CC79A7', '#56B4E9',
-  '#D55E00', '#F0E442', '#000000', '#7F7F7F', '#BFBFBF',
+  '#0072B2',
+  '#E69F00',
+  '#009E73',
+  '#CC79A7',
+  '#56B4E9',
+  '#D55E00',
+  '#F0E442',
+  '#000000',
+  '#7F7F7F',
+  '#BFBFBF',
 ];
 
 interface MuteOptions {
@@ -130,7 +136,8 @@ function alphaAt(i: number, opts: MuteOptions): number {
  * 40-cluster column still gets stable, distinct-ish colours.
  */
 export function resolveCategoryColors(
-  meta: CategoricalColumnMeta, palette: string[] = DEFAULT_CATEGORICAL_PALETTE,
+  meta: CategoricalColumnMeta,
+  palette: string[] = DEFAULT_CATEGORICAL_PALETTE,
 ): string[] {
   const authored = meta.colors;
   return meta.categories.map((name, i) => {
@@ -142,9 +149,7 @@ export function resolveCategoryColors(
 }
 
 /** Categorical column → flat per-point RGBA (length `4 * codes.length`). */
-export function encodeCategorical(
-  codes: Uint16Array, opts: CategoricalEncodingOptions,
-): Float32Array {
+export function encodeCategorical(codes: Uint16Array, opts: CategoricalEncodingOptions): Float32Array {
   const n = codes.length;
   const out = new Float32Array(n * 4);
   // Resolve each category once — parsing a hex string per point would dominate.
@@ -158,17 +163,16 @@ export function encodeCategorical(
     out[o + 1] = c[1] / 255;
     out[o + 2] = c[2] / 255;
     // A point with no category is background by definition — never emphasised.
-    out[o + 3] = code === NO_CATEGORY
-      ? Math.min(alphaAt(i, opts), opts.mutedOpacity ?? DEFAULT_MUTED_OPACITY)
-      : alphaAt(i, opts);
+    out[o + 3] =
+      code === NO_CATEGORY
+        ? Math.min(alphaAt(i, opts), opts.mutedOpacity ?? DEFAULT_MUTED_OPACITY)
+        : alphaAt(i, opts);
   }
   return out;
 }
 
 /** Continuous column / gene vector → flat per-point RGBA. */
-export function encodeContinuous(
-  values: Float32Array, opts: ContinuousEncodingOptions,
-): Float32Array {
+export function encodeContinuous(values: Float32Array, opts: ContinuousEncodingOptions): Float32Array {
   const n = values.length;
   const out = new Float32Array(n * 4);
   const missing = opts.missingColor ?? MISSING_COLOR;
@@ -210,9 +214,7 @@ export function encodeContinuous(
  * `spatial/stats.ts` — because this runs on every recolour, and sorting millions
  * of values each time cost most of a second.
  */
-export function contrastWindow(
-  values: Float32Array, lo = 0.01, hi = 0.99,
-): [number, number] {
+export function contrastWindow(values: Float32Array, lo = 0.01, hi = 0.99): [number, number] {
   return percentileWindow(values, lo, hi);
 }
 
@@ -224,9 +226,7 @@ export function contrastWindow(
  * `fallbackRadius` covers a dataset that declares no radius (segmented cells
  * often don't); it is in image pixels, like everything else in this space.
  */
-export function markerDiameters(
-  observations: SpatialObservations, fallbackRadius = 4,
-): number | Float32Array {
+export function markerDiameters(observations: SpatialObservations, fallbackRadius = 4): number | Float32Array {
   const r = observations.radius;
   if (typeof r === 'number') return r * 2;
   if (r instanceof Float32Array) {
@@ -256,8 +256,7 @@ export function toRgbaTuples(flat: Float32Array): RGBA[] {
 
 /** Convenience: a 256-entry LUT for a colormap value, falling back to Viridis. */
 export function lutFor(colormapValue: unknown, reverse = false): Rgb[] {
-  return buildColormapLut(colormapValue, reverse)
-    ?? buildColormapLut('Viridis', reverse)!;
+  return buildColormapLut(colormapValue, reverse) ?? buildColormapLut('Viridis', reverse)!;
 }
 
 /** True when every entry of a LUT is a neutral grey. Tested on the VALUES rather
@@ -283,7 +282,9 @@ export function isGrayscaleLut(lut: readonly Rgb[]): boolean {
  * them can disagree about what a colour means, whichever way the choice falls.
  */
 export function spatialContinuousLut(
-  colormapValue: unknown, reverse = false, override?: ColormapValue | null,
+  colormapValue: unknown,
+  reverse = false,
+  override?: ColormapValue | null,
 ): Rgb[] {
   // An inline scale is an array, so emptiness has to be checked as well as
   // presence: `[]` is truthy and would resolve to the fallback LUT silently.

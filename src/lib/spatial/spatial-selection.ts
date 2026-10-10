@@ -78,9 +78,7 @@ interface Shape {
 }
 
 /** Polygon-with-holes: inside the exterior and outside every hole. */
-function polygonShape(
-  xs: number[], ys: number[], holes?: number[][][],
-): Shape | null {
+function polygonShape(xs: number[], ys: number[], holes?: number[][][]): Shape | null {
   if (xs.length < 3) return null;
   const bounds = ringBounds(xs, ys);
   // Split and bounded ONCE per shape: the hit test runs for every candidate point
@@ -114,16 +112,26 @@ function polygonShape(
 export function regionShapes(region: Region): Shape[] {
   // Profile lines belong to the intensity tool, not the annotation set.
   if ((region as unknown as { kind?: string })?.kind === 'profile') return [];
-  const b = region?.bounds as unknown as {
-    x?: number; y?: number; width?: number; height?: number;
-    xpoints?: number[]; ypoints?: number[]; closed?: boolean; holes?: number[][][];
-    polygons?: { xpoints: number[]; ypoints: number[]; closed?: boolean; holes?: number[][][] }[];
-  } | null | undefined;
+  const b = region?.bounds as unknown as
+    | {
+        x?: number;
+        y?: number;
+        width?: number;
+        height?: number;
+        xpoints?: number[];
+        ypoints?: number[];
+        closed?: boolean;
+        holes?: number[][][];
+        polygons?: { xpoints: number[]; ypoints: number[]; closed?: boolean; holes?: number[][][] }[];
+      }
+    | null
+    | undefined;
   if (!b) return [];
 
   if (Array.isArray(b.polygons)) {
     return b.polygons.flatMap((p) =>
-      p.closed === false ? [] : (polygonShape(p.xpoints ?? [], p.ypoints ?? [], p.holes) ?? []));
+      p.closed === false ? [] : (polygonShape(p.xpoints ?? [], p.ypoints ?? [], p.holes) ?? []),
+    );
   }
   if (Array.isArray(b.xpoints)) {
     if (b.closed === false) return []; // open polyline encloses nothing
@@ -154,9 +162,7 @@ export function regionShapes(region: Region): Shape[] {
  * point twice, and a stale index from a plot drawn before a dataset change must not
  * throw in the middle of a selection gesture.
  */
-export function selectByIndices(
-  indices: Iterable<number>, observationCount: number,
-): SpatialSelectionMask {
+export function selectByIndices(indices: Iterable<number>, observationCount: number): SpatialSelectionMask {
   const mask = new Uint8Array(observationCount);
   let count = 0;
   for (const i of indices) {

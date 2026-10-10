@@ -30,8 +30,11 @@ describe('intensity helpers (shared by both backends)', () => {
 });
 
 describe('autoWindowFromHistogram (router and channel histogram)', () => {
-  const hist = (counts: number[], bins = counts.map((_, i) => i)) =>
-    ({ bins, counts, max: Math.max(0, ...counts) });
+  const hist = (counts: number[], bins = counts.map((_, i) => i)) => ({
+    bins,
+    counts,
+    max: Math.max(0, ...counts),
+  });
 
   it('clips about `saturation` of the pixels at each end', () => {
     // 100 pixels spread evenly over bins 0..9; 10% saturation clips one bin each side.

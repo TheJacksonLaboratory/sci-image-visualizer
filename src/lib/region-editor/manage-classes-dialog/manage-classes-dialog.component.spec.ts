@@ -17,10 +17,14 @@ describe('ManageClassesDialogComponent', () => {
     jest.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
       if (!String(args[0]).includes('Could not parse CSS stylesheet')) consoleError(...args);
     });
-    await TestBed.configureTestingModule({ imports: [VisualizationModule, NoopAnimationsModule] })
-      .compileComponents();
+    await TestBed.configureTestingModule({
+      imports: [VisualizationModule, NoopAnimationsModule],
+    }).compileComponents();
     draft = {
-      classes: [{ name: 'Tumor', color: '#FF4444' }, { name: 'Stroma', color: '#44AAFF' }],
+      classes: [
+        { name: 'Tumor', color: '#FF4444' },
+        { name: 'Stroma', color: '#44AAFF' },
+      ],
       fallbackPalette: ['#111111', '#222222'],
       autoPromote: false,
       matchMode: 'exact',
@@ -34,7 +38,10 @@ describe('ManageClassesDialogComponent', () => {
     fixture.detectChanges();
   });
 
-  afterEach(() => { fixture.destroy(); jest.restoreAllMocks(); });
+  afterEach(() => {
+    fixture.destroy();
+    jest.restoreAllMocks();
+  });
 
   it('renders one row per class and one swatch per fallback colour', () => {
     expect(document.querySelectorAll('.manage-class-row').length).toBe(2);
@@ -76,7 +83,9 @@ describe('ManageClassesDialogComponent', () => {
   });
 
   it('footer buttons emit reset / export / apply', () => {
-    const reset = jest.fn(), exp = jest.fn(), apply = jest.fn();
+    const reset = jest.fn(),
+      exp = jest.fn(),
+      apply = jest.fn();
     dialog.resetDefaults.subscribe(reset);
     dialog.export.subscribe(exp);
     dialog.apply.subscribe(apply);

@@ -81,7 +81,9 @@ export class DisplayPipeline {
       const tints = chans.map((c) => this.tint01(c));
       for (let i = 0; i < d.length; i += 4) {
         if (d[i + 3] === 0) continue;
-        let oR = 0, oG = 0, oB = 0;
+        let oR = 0,
+          oG = 0,
+          oB = 0;
         for (let k = 0; k < 3; k++) {
           const c = chans[k];
           if (c && !c.visible) continue;
@@ -193,7 +195,11 @@ export class DisplayPipeline {
     for (let k = 0; k < 3; k++) {
       const c = channelStates[k];
       if (
-        c && (!c.visible || c.min !== 0 || c.max !== 255 || c.gamma !== 1 ||
+        c &&
+        (!c.visible ||
+          c.min !== 0 ||
+          c.max !== 255 ||
+          c.gamma !== 1 ||
           (c.color || '').toLowerCase() !== defaults[k])
       ) {
         return true;

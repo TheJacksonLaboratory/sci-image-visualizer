@@ -1,13 +1,8 @@
-import {
-  parseSvgPath,
-  parseSvgPathPolygon,
-  verticesToSvgPath,
-} from './geometry';
+import { parseSvgPath, parseSvgPathPolygon, verticesToSvgPath } from './geometry';
 import { BBoxMask, masksOverlap, unionMasks } from '../geometry/raster';
 import { simplifyRing } from '../geometry/ring';
 
 describe('geometry helpers', () => {
-
   // ── parseSvgPathPolygon ─────────────────────────────────────────────
 
   describe('parseSvgPathPolygon', () => {

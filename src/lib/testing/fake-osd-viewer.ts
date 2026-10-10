@@ -1,6 +1,4 @@
-import {
-  OsdRectLike, OsdTiledImageLike, OsdViewerLike, OsdXY,
-} from '../implementations/osd/osd-viewer-like';
+import { OsdRectLike, OsdTiledImageLike, OsdViewerLike, OsdXY } from '../implementations/osd/osd-viewer-like';
 
 /** Overrides for {@link fakeOsdViewer}: any top-level member, plus any subset of
  *  the viewport's and the world's members. */
@@ -71,7 +69,15 @@ export function fakeOsdTiledImage(parts: Partial<OsdTiledImageLike> = {}): OsdTi
 export function fakeCanvasAt(left: number, top: number): HTMLElement {
   const canvas = document.createElement('div');
   canvas.getBoundingClientRect = () => ({
-    left, top, x: left, y: top, right: left, bottom: top, width: 0, height: 0, toJSON: () => ({}),
+    left,
+    top,
+    x: left,
+    y: top,
+    right: left,
+    bottom: top,
+    width: 0,
+    height: 0,
+    toJSON: () => ({}),
   });
   return canvas;
 }

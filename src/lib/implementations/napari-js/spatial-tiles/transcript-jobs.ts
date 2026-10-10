@@ -3,11 +3,20 @@ import { LruCache } from 'napari-js';
 import { ALL_GENES, type SpatialDataPort } from '../../../contracts/ports/spatial-data.port';
 import type { SpatialViewState } from '../../../contracts/display-types';
 import {
-  SpatialBounds, SpatialDataset, SpatialDensityRaster, SpatialTranscriptTile,
+  SpatialBounds,
+  SpatialDataset,
+  SpatialDensityRaster,
+  SpatialTranscriptTile,
 } from '../../../contracts/spatial-dataset.contract';
 import { DataRect, tileId, tilesInRect, tilesInRectFrom, transcriptLevelFor } from '../../../spatial/lod';
 import {
-  allGenesPlan, clipTranscripts, geneBinSize, groupTranscripts, groupedMarkerPx, quantileOf, transcriptMarkerPx,
+  allGenesPlan,
+  clipTranscripts,
+  geneBinSize,
+  groupTranscripts,
+  groupedMarkerPx,
+  quantileOf,
+  transcriptMarkerPx,
 } from '../../../spatial/transcript-grouping';
 import { clusterMarkers, mergeTranscriptTiles } from '../../../spatial/spatial-tile-merge';
 import type { PlanContext } from './plan-context';
@@ -68,7 +77,10 @@ export class TranscriptJobPlanner {
    * view draws none or the port cannot serve them.
    */
   jobFor(
-    dataset: SpatialDataset, view: SpatialViewState, rect: DataRect, pxPerUnit: number,
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    rect: DataRect,
+    pxPerUnit: number,
   ): TranscriptJob | null {
     const mode = view.transcriptMode;
     if (mode !== 'circles' && mode !== 'glyphs') return null;
@@ -84,7 +96,10 @@ export class TranscriptJobPlanner {
    * view would exceed the budget.
    */
   private geneJob(
-    dataset: SpatialDataset, view: SpatialViewState, rect: DataRect, pxPerUnit: number,
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    rect: DataRect,
+    pxPerUnit: number,
   ): TranscriptJob | null {
     const meta = dataset.transcriptTiles;
     const genes = view.transcriptGenes;
@@ -100,8 +115,8 @@ export class TranscriptJobPlanner {
     // so a gene selection reads like "all genes" does: one marker per gene per area, sized
     // by how many it holds; zoomed in far enough, every transcript is its own marker.
     const ladder = dataset.transcriptBins?.levels;
-    const baseBin = ladder?.[0]?.binSize
-      ?? (dataset.micronsPerUnit ? PYRAMID_BASE_BIN_UM / dataset.micronsPerUnit : 0);
+    const baseBin =
+      ladder?.[0]?.binSize ?? (dataset.micronsPerUnit ? PYRAMID_BASE_BIN_UM / dataset.micronsPerUnit : 0);
     const bin = geneBinSize(pxPerUnit, baseBin, ladder?.length ?? PYRAMID_LEVELS);
     // Zoomed out to bins as wide as the density grid, a selection is drawn from the per-gene
     // density grids — one cached request per cluster — rather than 10x's coarse per-gene
@@ -123,18 +138,24 @@ export class TranscriptJobPlanner {
     return {
       kind: 'genes',
       // The clip window, in quarter-view steps: a pan past the margin re-clips.
-      key: `genes|${genes.join(',')}|${view.transcriptQuality}|${view.transcriptBudget}|${bin ?? 'each'}|`
-        + `${clipKey(rect, mx, my)}|${keysAt(first).map(tileId)}`,
+      key:
+        `genes|${genes.join(',')}|${view.transcriptQuality}|${view.transcriptBudget}|${bin ?? 'each'}|` +
+        `${clipKey(rect, mx, my)}|${keysAt(first).map(tileId)}`,
       load: async (ctx) => {
         // The zoom's own level only: over the budget, the transcripts are combined into
         // larger markers (groupSelection), never fetched from slower coarse levels.
-        const tiles = await ctx.fetchAll(keysAt(first),
-          (k) => this.port.getTranscriptTile!(k.level, k.gx, k.gy, query));
+        const tiles = await ctx.fetchAll(keysAt(first), (k) =>
+          this.port.getTranscriptTile!(k.level, k.gx, k.gy, query),
+        );
         // Only what is on screen (and a margin, so a small pan needs nothing new) counts
         // against the budget and the cap; a tile reaches far past the view.
-        const merged = mergeTranscriptTiles(tiles.map((t) => clipTranscripts(t, around)), MAX_TRANSCRIPTS);
-        const px = Float32Array.from(merged.weight,
-          (w) => transcriptMarkerPx(w, view.transcriptScale, pxPerMicron));
+        const merged = mergeTranscriptTiles(
+          tiles.map((t) => clipTranscripts(t, around)),
+          MAX_TRANSCRIPTS,
+        );
+        const px = Float32Array.from(merged.weight, (w) =>
+          transcriptMarkerPx(w, view.transcriptScale, pxPerMicron),
+        );
         return baseBin > 0
           ? { merged, px, ladder: { baseBin, levels: ladder?.length ?? PYRAMID_LEVELS, start: bin } }
           : { merged, px };
@@ -149,8 +170,14 @@ export class TranscriptJobPlanner {
    * counts in view still show) and dropped before drawing; grouping by cluster happens there.
    */
   private geneBinsJob(
-    dataset: SpatialDataset, view: SpatialViewState, around: DataRect,
-    meta: NonNullable<SpatialDataset['transcriptGeneBins']>, startBin: number, mx: number, my: number, rect: DataRect,
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    around: DataRect,
+    meta: NonNullable<SpatialDataset['transcriptGeneBins']>,
+    startBin: number,
+    mx: number,
+    my: number,
+    rect: DataRect,
   ): TranscriptJob {
     const genes = view.transcriptGenes;
     const levels = meta.levels;
@@ -161,17 +188,26 @@ export class TranscriptJobPlanner {
     const clusters = this.selectionClusters(view);
     const clusterOf = new Map<number, number>();
     clusters.forEach((c, ci) => c.genes.forEach((g) => clusterOf.set(genes.indexOf(g), ci)));
-    const keysAt = (m: number) => tilesInRectFrom(meta.origin, around, m,
-      levels.map((l) => ({ tileSize: l.tileSize })), null, MAX_BIN_TILES);
+    const keysAt = (m: number) =>
+      tilesInRectFrom(
+        meta.origin,
+        around,
+        m,
+        levels.map((l) => ({ tileSize: l.tileSize })),
+        null,
+        MAX_BIN_TILES,
+      );
     return {
       kind: 'genes',
-      key: `gene-bins|${genes.join(',')}|${budget}|${first}|${JSON.stringify(view.transcriptGeneGroups)}|`
-        + clipKey(rect, mx, my),
+      key:
+        `gene-bins|${genes.join(',')}|${budget}|${first}|${JSON.stringify(view.transcriptGeneGroups)}|` +
+        clipKey(rect, mx, my),
       load: async (ctx) => {
         let m = first;
         for (;;) {
-          const tiles = await ctx.fetchAll(keysAt(m),
-            (k) => this.port.getTranscriptGeneBins!(k.level, k.gx, k.gy, genes));
+          const tiles = await ctx.fetchAll(keysAt(m), (k) =>
+            this.port.getTranscriptGeneBins!(k.level, k.gx, k.gy, genes),
+          );
           const clipped = tiles.map((t) => clipTranscripts(t, around));
           // Past the cap a merge would drop whole genes (the tail of every tile): go coarser.
           if (clipped.reduce((n, t) => n + t.count, 0) > MAX_TRANSCRIPTS && m < levels.length - 1) {
@@ -241,8 +277,14 @@ export class TranscriptJobPlanner {
    * follow the tissue rather than a lattice.
    */
   private clusterDensityJob(
-    dataset: SpatialDataset, view: SpatialViewState, around: DataRect, pxPerUnit: number, startBin: number,
-    mx: number, my: number, rect: DataRect,
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    around: DataRect,
+    pxPerUnit: number,
+    startBin: number,
+    mx: number,
+    my: number,
+    rect: DataRect,
   ): TranscriptJob {
     const grid = dataset.density!.gridSize[0];
     const clusters = this.selectionClusters(view);
@@ -251,21 +293,32 @@ export class TranscriptJobPlanner {
     const budget = Math.max(1, view.transcriptBudget);
     return {
       kind: 'genes',
-      key: `clusters|${clusters.map((c) => `${c.name}:${c.genes.join('+')}`).join(';')}|${budget}|${first}|`
-        + clipKey(rect, mx, my),
+      key:
+        `clusters|${clusters.map((c) => `${c.name}:${c.genes.join('+')}`).join(';')}|${budget}|${first}|` +
+        clipKey(rect, mx, my),
       load: async () => {
         let bin = first;
         for (;;) {
           // The finer grid gives each marker its centre; the server bins 1, 2, 4 or 8 cells.
           const fine = Math.min(bin >= grid * 2 ? bin / 2 : bin, grid * 8);
           const rasters = await Promise.all(clusters.map((c) => this.densityFor(dataset.id, c.genes, fine)));
-          const out = clusterMarkers(rasters, clusters.map((c) => c.slot), bin, around);
+          const out = clusterMarkers(
+            rasters,
+            clusters.map((c) => c.slot),
+            bin,
+            around,
+          );
           if (out.tile.count <= budget || bin >= grid * 2 ** 12) {
             const px = groupedSizes(out.tile.weight, bin * pxPerUnit, view.transcriptScale);
             return {
-              merged: out.tile, px, kind: 'genes',
+              merged: out.tile,
+              px,
+              kind: 'genes',
               clustered: {
-                group: out.group, names: clusters.map((c) => c.name), genes: clusters.map((c) => c.genes), bin,
+                group: out.group,
+                names: clusters.map((c) => c.name),
+                genes: clusters.map((c) => c.genes),
+                bin,
                 origin: rasters[0]?.meta.origin ?? [0, 0],
               },
             };
@@ -281,14 +334,20 @@ export class TranscriptJobPlanner {
    * all-gene pyramid sized by how many transcripts each holds.
    */
   private allGenesJob(
-    dataset: SpatialDataset, view: SpatialViewState, rect: DataRect, pxPerUnit: number,
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    rect: DataRect,
+    pxPerUnit: number,
   ): TranscriptJob | null {
     const bins = dataset.transcriptBins;
     const tiles = dataset.transcriptTiles;
     const bounds = bins?.bounds ?? tiles?.bounds;
     if (!bounds) return null;
     const plan = allGenesPlan({
-      rect, bounds, pxPerUnit, budget: view.transcriptBudget,
+      rect,
+      bounds,
+      pxPerUnit,
+      budget: view.transcriptBudget,
       total: bins?.count ?? tiles?.count ?? 0,
       levels: bins && this.port.getTranscriptBins ? bins.levels : [],
       canIndividual: !!tiles,
@@ -300,16 +359,20 @@ export class TranscriptJobPlanner {
       const r10 = (v: number, up: boolean) => (up ? Math.ceil(v / 10) : Math.floor(v / 10)) * 10;
       const size = tiles.levels[0].tileSize;
       const boxes = keys.map((k): [number, number, number, number] => [
-        Math.max(k.gx * size, r10(rect.x0, false)), Math.max(k.gy * size, r10(rect.y0, false)),
-        Math.min((k.gx + 1) * size, r10(rect.x1, true)), Math.min((k.gy + 1) * size, r10(rect.y1, true)),
+        Math.max(k.gx * size, r10(rect.x0, false)),
+        Math.max(k.gy * size, r10(rect.y0, false)),
+        Math.min((k.gx + 1) * size, r10(rect.x1, true)),
+        Math.min((k.gy + 1) * size, r10(rect.y1, true)),
       ]);
       const pxPerMicron = pxPerMicronOf(dataset, pxPerUnit);
       return {
         kind: 'individual',
         key: `all|individual|${view.transcriptBudget}|${boxes.map((b) => b.join(',')).join(';')}`,
         load: async (ctx) => {
-          const got = await ctx.fetchAll(keys.map((k, i) => ({ ...k, box: boxes[i] })),
-            (k) => this.port.getTranscriptTile!(0, k.gx, k.gy, { genes: [ALL_GENES], box: k.box }));
+          const got = await ctx.fetchAll(
+            keys.map((k, i) => ({ ...k, box: boxes[i] })),
+            (k) => this.port.getTranscriptTile!(0, k.gx, k.gy, { genes: [ALL_GENES], box: k.box }),
+          );
           // The plan estimated the view from the dataset's average density; expression is
           // uneven, so a dense view can hold far more. Rather than cut the excess off, show
           // it grouped — the bin level the planner would pick if it had known.
@@ -317,8 +380,13 @@ export class TranscriptJobPlanner {
           const loaded = got.reduce((n, t) => n + t.count, 0);
           if (loaded > cap && bins && this.port.getTranscriptBins) {
             const fallback = allGenesPlan({
-              rect, bounds, pxPerUnit, budget: view.transcriptBudget, total: bins.count,
-              levels: bins.levels, canIndividual: false,
+              rect,
+              bounds,
+              pxPerUnit,
+              budget: view.transcriptBudget,
+              total: bins.count,
+              levels: bins.levels,
+              canIndividual: false,
             });
             if (fallback.kind === 'bins') {
               const job = this.binsJob(view, rect, pxPerUnit, bounds, bins, fallback.level);
@@ -341,12 +409,22 @@ export class TranscriptJobPlanner {
 
   /** Bins of the all-gene pyramid at `level`, sized by how many transcripts each holds. */
   private binsJob(
-    view: SpatialViewState, rect: DataRect, pxPerUnit: number, bounds: SpatialBounds,
-    bins: NonNullable<SpatialDataset['transcriptBins']>, level: number,
+    view: SpatialViewState,
+    rect: DataRect,
+    pxPerUnit: number,
+    bounds: SpatialBounds,
+    bins: NonNullable<SpatialDataset['transcriptBins']>,
+    level: number,
   ): TranscriptJob {
     const lv = bins.levels[level];
-    const keys = tilesInRectFrom(bins.origin, rect, level,
-      bins.levels.map((l) => ({ tileSize: l.tileSize })), bounds, MAX_BIN_TILES);
+    const keys = tilesInRectFrom(
+      bins.origin,
+      rect,
+      level,
+      bins.levels.map((l) => ({ tileSize: l.tileSize })),
+      bounds,
+      MAX_BIN_TILES,
+    );
     return {
       kind: 'bins',
       bin: { size: lv.binSize, origin: bins.origin },
@@ -367,7 +445,9 @@ export class TranscriptJobPlanner {
  * Null to draw every transcript: zoomed in, with the selection within the budget.
  */
 export function groupSelection(
-  t: SpatialTranscriptTile, view: SpatialViewState, ladder: NonNullable<TranscriptLoad['ladder']>,
+  t: SpatialTranscriptTile,
+  view: SpatialViewState,
+  ladder: NonNullable<TranscriptLoad['ladder']>,
   pxPerUnit: number,
 ): { merged: SpatialTranscriptTile; px: Float32Array; bin: number; group: Int32Array; names: string[] } | null {
   const budget = Math.max(1, view.transcriptBudget);

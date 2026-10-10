@@ -132,7 +132,10 @@ export class HistogramSampler {
       }
       await Promise.all(jobs);
       if (gen !== this.generation) return; // cleared meanwhile (image switch)
-      this.sliceHistograms.set(z, counts.map((c) => histogram256(c)));
+      this.sliceHistograms.set(
+        z,
+        counts.map((c) => histogram256(c)),
+      );
       this.host.onChannelHistogramsSampled();
     } catch (err) {
       // Leave histograms unset (the pane shows empty) — but say why.
@@ -215,7 +218,8 @@ export class HistogramSampler {
       if (gen !== this.generation) return; // cleared meanwhile (image switch)
       // Cache per-channel histograms: grayscale → [intensity]; RGB → [R, G, B].
       this.sliceHistograms.set(
-        z, gray ? [histogram256(cR)] : [histogram256(cR), histogram256(cG!), histogram256(cB!)],
+        z,
+        gray ? [histogram256(cR)] : [histogram256(cR), histogram256(cG!), histogram256(cB!)],
       );
       // Grayscale auto-window — only from full-res samples (coarsest averaging
       // is inaccurate); the host seeds the channel or re-invalidates.
@@ -252,7 +256,8 @@ export class HistogramSampler {
       }
     }
     this.sliceHistograms.set(
-      z, gray ? [histogram256(cR)] : [histogram256(cR), histogram256(cG!), histogram256(cB!)],
+      z,
+      gray ? [histogram256(cR)] : [histogram256(cR), histogram256(cG!), histogram256(cB!)],
     );
     this.host.onChannelHistogramsSampled();
   }
@@ -262,9 +267,7 @@ export class HistogramSampler {
    * each already-decoded channel plane's own pixels (no tile server). One
    * histogram per channel, so the pane's per-channel selector works serverlessly.
    */
-  computeSimpleMultichannelHistograms(
-    z: number, planes: Array<{ data: Uint8ClampedArray | Uint8Array }>,
-  ): void {
+  computeSimpleMultichannelHistograms(z: number, planes: Array<{ data: Uint8ClampedArray | Uint8Array }>): void {
     this.sliceHistograms.set(
       z,
       planes.map((p) => {
@@ -296,7 +299,11 @@ export class HistogramSampler {
    *  (the shared jit-service client, which adds the per-app-load cache-buster
    *  that defeats the server's 24 h cache). */
   private async fetchNative(
-    infoB64: string, z: number, channel: number, bins: number, key: string,
+    infoB64: string,
+    z: number,
+    channel: number,
+    bins: number,
+    key: string,
   ): Promise<IHistogram | null> {
     const gen = this.generation;
     try {
@@ -304,7 +311,11 @@ export class HistogramSampler {
       // ajax tile loader, which needs authHeaders) — mirror the other fetches.
       const req = timeoutSignal(undefined, 45000);
       const out = await nativeHistogram(
-        httpFetchJson(this.http), this.api, infoB64, { z, channel, bins }, req.signal,
+        httpFetchJson(this.http),
+        this.api,
+        infoB64,
+        { z, channel, bins },
+        req.signal,
       ).finally(req.done);
       if (!out) return null; // 202 (still caching) → null; the pane retries
       // Cleared meanwhile (image switch): the histogram belongs to the previous

@@ -20,8 +20,16 @@ describe('contracts/color', () => {
     });
 
     it.each([
-      [''], ['   '], ['red'], ['#12'], ['#12345'], ['#zzzzzz'], ['rgb(1,2)'], ['rgb(a,b,c)'],
-      ['hsl(0, 100%, 50%)'], ['#1234567'],
+      [''],
+      ['   '],
+      ['red'],
+      ['#12'],
+      ['#12345'],
+      ['#zzzzzz'],
+      ['rgb(1,2)'],
+      ['rgb(a,b,c)'],
+      ['hsl(0, 100%, 50%)'],
+      ['#1234567'],
     ])('rejects %j', (input) => {
       expect(parseCssColor(input)).toBeNull();
     });

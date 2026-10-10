@@ -30,7 +30,9 @@ class FakeMaskWorker {
   onerror: ((e: any) => void) | null = null;
   postMessage = jest.fn();
   terminate = jest.fn();
-  emit(data: any) { this.onmessage?.({ data }); }
+  emit(data: any) {
+    this.onmessage?.({ data });
+  }
 }
 
 /** Seed a 512×512 rectangle row and commit it, as the toolbar's drawing would. */
@@ -46,14 +48,19 @@ function addRect(component: RegionEditorComponent): void {
 function addPoly(component: RegionEditorComponent): void {
   const region = new Region();
   const p = new Polygon();
-  p.xpoints = [0, 10, 5]; p.ypoints = [0, 0, 10];
-  p.coordinates = [[0, 0], [10, 0], [5, 10]]; p.npoints = 3;
+  p.xpoints = [0, 10, 5];
+  p.ypoints = [0, 0, 10];
+  p.coordinates = [
+    [0, 0],
+    [10, 0],
+    [5, 10],
+  ];
+  p.npoints = 3;
   region.bounds = p;
   region.label = 'Region';
   component['regions'] = [...component['regions'], region];
   (component as any).commit();
 }
-
 
 /** Render the editor's own template only: its children and PrimeNG stay unknown elements. */
 function shallowEditor(): void {
@@ -108,7 +115,7 @@ describe('RegionEditorComponent', () => {
           } as RegionIoPort,
         },
       ],
-      schemas: [NO_ERRORS_SCHEMA]
+      schemas: [NO_ERRORS_SCHEMA],
     }).compileComponents();
 
     fixture = TestBed.createComponent(RegionEditorComponent);
@@ -276,7 +283,9 @@ describe('RegionEditorComponent', () => {
   });
 
   it('a failed region import shows its error toast in the library outlet (RT-32)', () => {
-    (mockVisualizer.importRegions as jest.Mock).mockImplementation(() => { throw new Error('bad geojson'); });
+    (mockVisualizer.importRegions as jest.Mock).mockImplementation(() => {
+      throw new Error('bad geojson');
+    });
     const add = jest.spyOn(component['messageService'], 'add');
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
     (component as any).applyImportedRois('garbage');
@@ -299,7 +308,6 @@ describe('RegionEditorComponent', () => {
     component['showHelp']();
     expect(component['displayHelpDialog']).toBe(true);
   });
-
 });
 
 describe('RegionEditorComponent with shapes', () => {
@@ -310,24 +318,30 @@ describe('RegionEditorComponent with shapes', () => {
     {
       name: 'shape0',
       type: 'rect',
-      x0: 100, y0: 200, x1: 612, y1: 714,
+      x0: 100,
+      y0: 200,
+      x1: 612,
+      y1: 714,
       line: { color: '#FF0000' },
-      legend: 'tumor'
+      legend: 'tumor',
     },
     {
       name: 'shape1',
       type: 'path',
       path: 'M10,20L30,40L50,60Z',
       line: { color: '#00FF00' },
-      legend: 'normal'
+      legend: 'normal',
     },
     {
       name: 'shape2',
       type: 'rect',
-      x0: 0, y0: 0, x1: 512, y1: 512,
+      x0: 0,
+      y0: 0,
+      x1: 512,
+      y1: 512,
       line: {},
-      legend: undefined
-    }
+      legend: undefined,
+    },
   ];
 
   describe('Class cell editing', () => {
@@ -412,7 +426,7 @@ describe('RegionEditorComponent with shapes', () => {
       getSelectedRegions$: () => EMPTY,
       getImageMeta: () => EMPTY,
       setSelectedRegions: jest.fn(),
-      getAnnotationRegions: () => mockShapes.map(s => Object.assign(new ShapeSelection(), s as any).getRegion()),
+      getAnnotationRegions: () => mockShapes.map((s) => Object.assign(new ShapeSelection(), s as any).getRegion()),
       setAnnotationRegions: jest.fn(),
     });
 
@@ -433,7 +447,7 @@ describe('RegionEditorComponent with shapes', () => {
           } as RegionIoPort,
         },
       ],
-      schemas: [NO_ERRORS_SCHEMA]
+      schemas: [NO_ERRORS_SCHEMA],
     }).compileComponents();
 
     fixture = TestBed.createComponent(RegionEditorComponent);
@@ -473,9 +487,11 @@ describe('RegionEditorComponent with shapes', () => {
     expect(component['regions'][1].label).toBe('normal');
   });
 
-  it('keeps each labelled region\'s own colour (class colours are derived, not cached)', () => {
-    expect(component['regions'].map((r) => [r.label, r.color]).slice(0, 2))
-      .toEqual([['tumor', '#FF0000'], ['normal', '#00FF00']]);
+  it("keeps each labelled region's own colour (class colours are derived, not cached)", () => {
+    expect(component['regions'].map((r) => [r.label, r.color]).slice(0, 2)).toEqual([
+      ['tumor', '#FF0000'],
+      ['normal', '#00FF00'],
+    ]);
   });
 });
 
@@ -489,8 +505,8 @@ describe('SelectionDialogComponent with open path shape', () => {
       type: 'path',
       path: 'M10,20L30,40L50,60',
       line: { color: '#FF0000' },
-      legend: 'annotation'
-    }
+      legend: 'annotation',
+    },
   ];
 
   beforeEach(async () => {
@@ -504,7 +520,7 @@ describe('SelectionDialogComponent with open path shape', () => {
       getImageMeta: () => EMPTY,
       setSelectedRegions: jest.fn(),
       getAnnotationRegions: () =>
-        openPathShapes.map(s => Object.assign(new ShapeSelection(), s as any).getRegion()),
+        openPathShapes.map((s) => Object.assign(new ShapeSelection(), s as any).getRegion()),
       setAnnotationRegions: jest.fn(),
     });
 
@@ -525,7 +541,7 @@ describe('SelectionDialogComponent with open path shape', () => {
           } as RegionIoPort,
         },
       ],
-      schemas: [NO_ERRORS_SCHEMA]
+      schemas: [NO_ERRORS_SCHEMA],
     }).compileComponents();
 
     fixture = TestBed.createComponent(RegionEditorComponent);
@@ -860,9 +876,7 @@ describe('RegionEditorComponent persist / save-as', () => {
       '{"type":"FeatureCollection","features":[]}',
       'existing.geojson',
     );
-    expect(mockMessageService.add).toHaveBeenCalledWith(
-      expect.objectContaining({ severity: 'success' }),
-    );
+    expect(mockMessageService.add).toHaveBeenCalledWith(expect.objectContaining({ severity: 'success' }));
   }));
 
   it('saves EVERY slice as one combined z-indexed geojson for a single-file z-stack — jit-ui#93', fakeAsync(() => {
@@ -872,8 +886,8 @@ describe('RegionEditorComponent persist / save-as', () => {
     mockVisualizer.isStackMode = jest.fn(() => true);
     mockVisualizer.getStackSaveLayout = jest.fn(() => 'combined');
     mockVisualizer.getSliceAnnotationRegions = jest.fn(() => allSlices);
-    (mockVisualizer.getGeoJsonString as jest.Mock).mockImplementation(
-      (regs: any[]) => JSON.stringify({ count: regs.length }),
+    (mockVisualizer.getGeoJsonString as jest.Mock).mockImplementation((regs: any[]) =>
+      JSON.stringify({ count: regs.length }),
     );
 
     component['saveAsFilename'] = 'stack.geojson';
@@ -884,24 +898,26 @@ describe('RegionEditorComponent persist / save-as', () => {
 
     expect(mockVisualizer.getSliceAnnotationRegions).toHaveBeenCalled();
     expect(mockVisualizer.getGeoJsonString).toHaveBeenCalledWith(allSlices);
-    expect(mockRegionIo.saveGeoJson).toHaveBeenCalledWith(
-      JSON.stringify({ count: 3 }),
-      'stack.geojson',
-    );
+    expect(mockRegionIo.saveGeoJson).toHaveBeenCalledWith(JSON.stringify({ count: 3 }), 'stack.geojson');
   }));
 
   it('saves one geojson per slice-file for a folder stack (per-slice-file layout) — jit-ui#93', () => {
     // Folder stack: persistRegions should skip the single-file save-as dialog
     // and write each slice's regions back to its own slice-file's geojson.
-    const s0 = new Region(); s0.bounds = Object.assign(new Rectangle(), { x: 0, y: 0, width: 4, height: 4 });
-    const s2 = new Region(); s2.bounds = Object.assign(new Rectangle(), { x: 2, y: 2, width: 4, height: 4 });
-    const bySlice = new Map<number, Region[]>([[0, [s0]], [2, [s2]]]);
+    const s0 = new Region();
+    s0.bounds = Object.assign(new Rectangle(), { x: 0, y: 0, width: 4, height: 4 });
+    const s2 = new Region();
+    s2.bounds = Object.assign(new Rectangle(), { x: 2, y: 2, width: 4, height: 4 });
+    const bySlice = new Map<number, Region[]>([
+      [0, [s0]],
+      [2, [s2]],
+    ]);
 
     mockVisualizer.isStackMode = jest.fn(() => true);
     mockVisualizer.getStackSaveLayout = jest.fn(() => 'per-slice-file');
     mockVisualizer.getStackSaveAnnotationSlices = jest.fn(() => bySlice);
-    (mockVisualizer.getGeoJsonString as jest.Mock).mockImplementation(
-      (regs: any[]) => JSON.stringify({ n: regs.length, z: regs[0]?.z }),
+    (mockVisualizer.getGeoJsonString as jest.Mock).mockImplementation((regs: any[]) =>
+      JSON.stringify({ n: regs.length, z: regs[0]?.z }),
     );
 
     component['persistRegions']();
@@ -918,9 +934,7 @@ describe('RegionEditorComponent persist / save-as', () => {
   });
 
   it('should show error toast when save fails', fakeAsync(() => {
-    (mockRegionIo.saveGeoJson as jest.Mock).mockReturnValue(
-      throwError(() => new Error('Server error')),
-    );
+    (mockRegionIo.saveGeoJson as jest.Mock).mockReturnValue(throwError(() => new Error('Server error')));
     component['saveAsFilename'] = 'regions.geojson';
     component['saveAsFileExists'] = false;
 
@@ -998,10 +1012,7 @@ describe('RegionEditorComponent persist / save-as', () => {
     component['confirmSaveAs']();
     tick();
 
-    expect(mockRegionIo.saveGeoJson).toHaveBeenCalledWith(
-      expect.any(String),
-      'my_custom_name.geojson',
-    );
+    expect(mockRegionIo.saveGeoJson).toHaveBeenCalledWith(expect.any(String), 'my_custom_name.geojson');
   }));
 
   it('should trigger initial existence check when dialog opens', fakeAsync(() => {
@@ -1205,22 +1216,39 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
   });
 
   function rect(): Region {
-    const r = new Region(); r.id = 1;
-    const b = new Rectangle(); b.x = 10; b.y = 20; b.width = 30; b.height = 40;
-    r.bounds = b; return r;
+    const r = new Region();
+    r.id = 1;
+    const b = new Rectangle();
+    b.x = 10;
+    b.y = 20;
+    b.width = 30;
+    b.height = 40;
+    r.bounds = b;
+    return r;
   }
   function poly(): Region {
-    const r = new Region(); r.id = 2;
+    const r = new Region();
+    r.id = 2;
     const p = new Polygon();
-    p.xpoints = [0, 10, 10, 0]; p.ypoints = [0, 0, 10, 10];
-    p.coordinates = [[0, 0], [10, 0], [10, 10], [0, 10]]; p.npoints = 4; p.closed = true;
-    r.bounds = p; return r;
+    p.xpoints = [0, 10, 10, 0];
+    p.ypoints = [0, 0, 10, 10];
+    p.coordinates = [
+      [0, 0],
+      [10, 0],
+      [10, 10],
+      [0, 10],
+    ];
+    p.npoints = 4;
+    p.closed = true;
+    r.bounds = p;
+    return r;
   }
 
   it('regionArea reports px² for rect + polygon, blank when degenerate', () => {
     expect(component['regionArea'](rect())).toContain('px²'); // 30·40 = 1200
     expect(component['regionArea'](poly())).toContain('px²'); // shoelace = 100
-    const degenerate = rect(); (degenerate.bounds as Rectangle).width = 0;
+    const degenerate = rect();
+    (degenerate.bounds as Rectangle).width = 0;
     expect(component['regionArea'](degenerate)).toBe('');
   });
 
@@ -1237,9 +1265,12 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
   });
 
   it('applyColorToSelected recolours each selected region by its class and commits', () => {
-    const a = poly(); a.label = 'Tumor';
-    const b = poly(); b.label = 'Tumor';
-    const c = rect(); c.label = 'Stroma';
+    const a = poly();
+    a.label = 'Tumor';
+    const b = poly();
+    b.label = 'Tumor';
+    const c = rect();
+    c.label = 'Stroma';
     (component as any).regions = [a, b, c];
     component['selectedRegions'] = [a, b, c];
     const spy = api.setAnnotationRegions as jest.Mock;
@@ -1256,10 +1287,18 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
   });
 
   it('openColorDialog builds one colour editor per unique class in the selection', () => {
-    const a = poly(); a.label = 'Tumor'; a.color = '#112233';
-    const b = poly(); b.label = 'Tumor'; b.color = '#999999';
-    const c = poly(); c.label = 'Stroma'; c.color = '#445566';
-    const d = poly(); d.label = ''; d.color = '#778899';
+    const a = poly();
+    a.label = 'Tumor';
+    a.color = '#112233';
+    const b = poly();
+    b.label = 'Tumor';
+    b.color = '#999999';
+    const c = poly();
+    c.label = 'Stroma';
+    c.color = '#445566';
+    const d = poly();
+    d.label = '';
+    d.color = '#778899';
     component['selectedRegions'] = [a, b, c, d];
     component['openColorDialog']();
     expect(component['classColorEdits']).toEqual([
@@ -1271,7 +1310,8 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
   });
 
   it('openColorDialog seeds a class picker with its class colour when the region has none', () => {
-    const a = poly(); a.label = 'Tumor';
+    const a = poly();
+    a.label = 'Tumor';
     component['selectedRegions'] = [a];
     component['openColorDialog']();
     expect(component['classColorEdits']).toEqual([{ label: 'Tumor', color: component['colorForName']('Tumor') }]);
@@ -1298,7 +1338,8 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
   });
 
   it('changeRegionColor is a no-op when the colour is unchanged', () => {
-    const r = poly(); r.color = '#123456';
+    const r = poly();
+    r.color = '#123456';
     (component as any).regions = [r];
     const spy = api.setAnnotationRegions as jest.Mock;
     spy.mockClear();
@@ -1325,7 +1366,14 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
 
   it('regionArea subtracts hole area (donut, not filled circle) — jit-ui#85', () => {
     const donut = poly(); // 10×10 exterior = 100
-    (donut.bounds as Polygon).holes = [[[3, 3], [7, 3], [7, 7], [3, 7]]]; // 4×4 hole = 16
+    (donut.bounds as Polygon).holes = [
+      [
+        [3, 3],
+        [7, 3],
+        [7, 7],
+        [3, 7],
+      ],
+    ]; // 4×4 hole = 16
     expect(component['regionArea'](donut)).toBe('84 px²'); // 100 − 16
   });
 
@@ -1371,11 +1419,15 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
       setSelectedRegions: jest.fn(),
       getAnnotationRegions: () => [],
       setAnnotationRegions: jest.fn((regions: Region[]) => {
-        for (const r of regions ?? []) { if (r.id == null) r.id = idc++; }
+        for (const r of regions ?? []) {
+          if (r.id == null) r.id = idc++;
+        }
       }),
       getPresetSet: () => currentSet,
       getPresetSet$: () => of(currentSet),
-      setPresetSet: jest.fn((s: PresetSet) => { currentSet = s; }),
+      setPresetSet: jest.fn((s: PresetSet) => {
+        currentSet = s;
+      }),
       upsertClass: jest.fn(),
       removeClass: jest.fn(),
       resetPresets: jest.fn(),
@@ -1461,7 +1513,7 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
     component['openManageDialog']();
     component['presetDraft']!.classes = [
       { name: 'Tumor', color: '#FF0000' },
-      { name: '   ', color: '#000000' },   // blank -> dropped
+      { name: '   ', color: '#000000' }, // blank -> dropped
       { name: 'Tumor', color: '#00FF00' }, // duplicate -> dropped
       { name: 'New', color: '#123456' },
     ];
@@ -1488,8 +1540,13 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
 
   it('deleteClass reverts its regions to the default "Region" class', () => {
     component['presetSet'] = {
-      classes: [{ name: 'Tumor', color: '#FF4444' }, { name: 'Region', color: '#00FFFF' }],
-      fallbackPalette: ['#111111'], autoPromote: false, matchMode: 'exact',
+      classes: [
+        { name: 'Tumor', color: '#FF4444' },
+        { name: 'Region', color: '#00FFFF' },
+      ],
+      fallbackPalette: ['#111111'],
+      autoPromote: false,
+      matchMode: 'exact',
     };
     const a = Object.assign(new Region(), { id: 1, label: 'Tumor', color: '#FF4444', colorOverridden: true });
     const b = Object.assign(new Region(), { id: 2, label: 'Stroma', color: '#44AAFF' });
@@ -1507,8 +1564,13 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
 
   it('applyManageDialog reverts regions of a dropped class to "Region"', () => {
     component['presetSet'] = {
-      classes: [{ name: 'Tumor', color: '#FF4444' }, { name: 'Region', color: '#00FFFF' }],
-      fallbackPalette: ['#111111'], autoPromote: false, matchMode: 'exact',
+      classes: [
+        { name: 'Tumor', color: '#FF4444' },
+        { name: 'Region', color: '#00FFFF' },
+      ],
+      fallbackPalette: ['#111111'],
+      autoPromote: false,
+      matchMode: 'exact',
     };
     const a = Object.assign(new Region(), { id: 1, label: 'Tumor', color: '#FF4444' });
     component['regions'] = [a];
@@ -1525,10 +1587,10 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
 
   it('auto-adds classes found on loaded regions (not already presets), ignoring legend/empty', () => {
     const loaded = [
-      Object.assign(new Region(), { id: 1, label: 'Tumor', color: '#FF4444' }),      // already a preset
+      Object.assign(new Region(), { id: 1, label: 'Tumor', color: '#FF4444' }), // already a preset
       Object.assign(new Region(), { id: 2, label: 'Optic-disc', color: '#123456' }), // new -> added
-      Object.assign(new Region(), { id: 3, label: 'legend', color: '#00FFFF' }),      // placeholder -> ignored
-      Object.assign(new Region(), { id: 4, label: '', color: '#000000' }),            // empty -> ignored
+      Object.assign(new Region(), { id: 3, label: 'legend', color: '#00FFFF' }), // placeholder -> ignored
+      Object.assign(new Region(), { id: 4, label: '', color: '#000000' }), // empty -> ignored
     ];
     (component as any).syncClassesFromRegions(loaded);
     const added = (api.upsertClass as jest.Mock).mock.calls.map((c) => c[0]);

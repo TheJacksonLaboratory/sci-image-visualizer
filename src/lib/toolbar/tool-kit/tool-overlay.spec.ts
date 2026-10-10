@@ -1,7 +1,12 @@
 import { ToolOverlayCanvas } from './tool-overlay';
 
 /** A pointer event (jsdom has no PointerEvent constructor). */
-interface PointerInit { button?: number; clientX?: number; clientY?: number; pointerId?: number }
+interface PointerInit {
+  button?: number;
+  clientX?: number;
+  clientY?: number;
+  pointerId?: number;
+}
 
 function pointer(type: string, init: PointerInit = {}) {
   const e = new MouseEvent(type, { button: init.button ?? 0, clientX: init.clientX, clientY: init.clientY });

@@ -16,7 +16,10 @@ describe('IntensityInsetComponent', () => {
 
   beforeEach(() => {
     jest.useFakeTimers();
-    jest.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => { cb(0); return 0; });
+    jest.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      cb(0);
+      return 0;
+    });
     profiles$ = new BehaviorSubject<IntensityProfile[]>([]);
     viewport$ = new Subject();
     viz = {
@@ -33,15 +36,31 @@ describe('IntensityInsetComponent', () => {
       run: (fn: () => unknown) => fn(),
       runOutsideAngular: (fn: () => unknown) => {
         outside = true;
-        try { return fn(); } finally { outside = false; }
+        try {
+          return fn();
+        } finally {
+          outside = false;
+        }
       },
     };
     // A DestroyRef whose callbacks run in destroy(), as Angular runs them after ngOnDestroy.
     const onDestroy: (() => void)[] = [];
-    const destroyRef = { onDestroy: (cb: () => void) => { onDestroy.push(cb); return () => undefined; } };
-    destroy = () => { inset.ngOnDestroy(); onDestroy.splice(0).forEach((cb) => cb()); };
+    const destroyRef = {
+      onDestroy: (cb: () => void) => {
+        onDestroy.push(cb);
+        return () => undefined;
+      },
+    };
+    destroy = () => {
+      inset.ngOnDestroy();
+      onDestroy.splice(0).forEach((cb) => cb());
+    };
     inset = new IntensityInsetComponent(
-      viz as never, { detectChanges: jest.fn() } as never, zone as never, destroyRef as never);
+      viz as never,
+      { detectChanges: jest.fn() } as never,
+      zone as never,
+      destroyRef as never,
+    );
     inset.divId = 'viz-plot-9-inset';
     inset.plotDivName = 'viz-plot-9';
   });
@@ -74,8 +93,9 @@ describe('IntensityInsetComponent', () => {
   it('reflows on a window resize, listening outside the zone, and stops on destroy', () => {
     const added: boolean[] = [];
     const realAdd = window.addEventListener.bind(window);
-    jest.spyOn(window, 'addEventListener').mockImplementation(
-      (type: string, l: EventListenerOrEventListenerObject) => {
+    jest
+      .spyOn(window, 'addEventListener')
+      .mockImplementation((type: string, l: EventListenerOrEventListenerObject) => {
         if (type === 'resize') added.push(outside);
         realAdd(type, l);
       });

@@ -53,11 +53,17 @@ export class SpatialDatasetBinder implements SpatialGates {
   /** Blob URLs backing that image — ours to revoke. */
   private volumeImageUrls: string[] = [];
 
-  constructor(private readonly port: SpatialDataPort | undefined, private readonly host: SpatialBinderHost) {}
+  constructor(
+    private readonly port: SpatialDataPort | undefined,
+    private readonly host: SpatialBinderHost,
+  ) {}
 
   /** Follow the port's dataset until `until$` emits. */
   bind(until$: Observable<unknown>): void {
-    this.port?.getDataset$().pipe(takeUntil(until$)).subscribe((dataset) => this.onDataset(dataset ?? null));
+    this.port
+      ?.getDataset$()
+      .pipe(takeUntil(until$))
+      .subscribe((dataset) => this.onDataset(dataset ?? null));
   }
 
   /** Revoke the published volume image's blob URLs (teardown). */
@@ -77,8 +83,9 @@ export class SpatialDatasetBinder implements SpatialGates {
     // shape, and comparing only that skipped the switch — leaving the previous
     // dataset's volume image on screen underneath the new one's observations.
     const key = dataset
-      ? `${dataset.id}|${has3d}|${hasVolume}|${dataset.volume
-        ? `${dataset.volume.width}x${dataset.volume.height}x${dataset.volume.depth}` : ''}`
+      ? `${dataset.id}|${has3d}|${hasVolume}|${
+          dataset.volume ? `${dataset.volume.width}x${dataset.volume.height}x${dataset.volume.depth}` : ''
+        }`
       : null;
     if (key === this.key) return;
     this.key = key;

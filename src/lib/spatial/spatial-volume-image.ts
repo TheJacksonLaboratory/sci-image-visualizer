@@ -1,6 +1,9 @@
 import { IImageInfo } from '../contracts/image.contract';
 import {
-  SpatialDataset, SpatialImageRef, SpatialObservations, SpatialVolumeMeta,
+  SpatialDataset,
+  SpatialImageRef,
+  SpatialObservations,
+  SpatialVolumeMeta,
 } from '../contracts/spatial-dataset.contract';
 
 /**
@@ -69,10 +72,7 @@ export async function buildVolumeStackImage(
     canvas.width = width;
     canvas.height = height;
   }
-  const ctx = canvas.getContext('2d') as
-    | CanvasRenderingContext2D
-    | OffscreenCanvasRenderingContext2D
-    | null;
+  const ctx = canvas.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
   if (!ctx) throw new Error('[spatial] volume slice encode: 2D context unavailable');
 
   // One canvas and one RGBA buffer for the whole stack — a canvas per plane would
@@ -122,9 +122,7 @@ export async function buildVolumeStackImage(
       // and a name SHARED by two datasets (only `id` is required to be unique)
       // would serve one dataset's slices for the other.
       fileName: `${dataset.name} · reference volume [${dataset.id}]`,
-      imageMeta: [
-        { channelCount: 1, rgbChannels: 1, x: width, y: height, z: depth, mppX, mppY, mppZ },
-      ],
+      imageMeta: [{ channelCount: 1, rgbChannels: 1, x: width, y: height, z: depth, mppX, mppY, mppZ }],
       // Blob URLs are complete images: OSD must open them directly, not ask a tile
       // server for a pyramid that does not exist.
       tiled: false,
@@ -150,9 +148,7 @@ export async function buildVolumeStackImage(
  * selection then take the SAME transform they take for a dataset that ships a
  * real `imageRef`, instead of each growing a volume special case.
  */
-export function volumeImageRef(
-  volume: SpatialVolumeMeta, micronsPerUnit?: number,
-): SpatialImageRef {
+export function volumeImageRef(volume: SpatialVolumeMeta, micronsPerUnit?: number): SpatialImageRef {
   const [vx, vy] = volume.voxelSize;
   return {
     scale: [1 / vx, 1 / vy],
@@ -181,7 +177,9 @@ export function sliceIndexOf(z: number, volume: SpatialVolumeMeta): number {
  * flat dataset over a volume has nothing to filter on.
  */
 export function observationsInSlice(
-  obs: SpatialObservations, volume: SpatialVolumeMeta, slice: number,
+  obs: SpatialObservations,
+  volume: SpatialVolumeMeta,
+  slice: number,
 ): Uint32Array {
   const z = obs.z;
   if (!z) return Uint32Array.from({ length: obs.count }, (_, i) => i);

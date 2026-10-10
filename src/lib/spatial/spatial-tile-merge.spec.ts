@@ -1,9 +1,19 @@
 import { DEFAULT_SPATIAL_VIEW } from '../contracts/display-types';
 import {
-  NO_CATEGORY, NO_OBSERVATION, SpatialDensityRaster, SpatialPolygonTile, SpatialTranscriptTile,
+  NO_CATEGORY,
+  NO_OBSERVATION,
+  SpatialDensityRaster,
+  SpatialPolygonTile,
+  SpatialTranscriptTile,
 } from '../contracts/spatial-dataset.contract';
 import {
-  clusterMarkers, filterRings, filterTranscripts, hiddenGeneSlots, median, mergePolygonTiles, mergeTranscriptTiles,
+  clusterMarkers,
+  filterRings,
+  filterTranscripts,
+  hiddenGeneSlots,
+  median,
+  mergePolygonTiles,
+  mergeTranscriptTiles,
 } from './spatial-tile-merge';
 
 const tile = (xs: number[], ys: number[], weight = 1): SpatialTranscriptTile => ({
@@ -26,7 +36,8 @@ describe('tile merging', () => {
 
   it('drops a ring listed by two tiles', () => {
     const t = (obs: number[]) => ({
-      count: obs.length, observation: Uint32Array.from(obs),
+      count: obs.length,
+      observation: Uint32Array.from(obs),
       offsets: Uint32Array.from(obs.map((_o, i) => i * 3).concat(obs.length * 3)),
       coords: new Float32Array(obs.length * 6).map((_v, i) => i),
     });
@@ -37,13 +48,19 @@ describe('tile merging', () => {
 });
 
 describe('clusterMarkers (a zoomed-out selection, from density grids)', () => {
-  it('sums each cluster\'s grid cells per square, at their count-weighted centre', () => {
+  it("sums each cluster's grid cells per square, at their count-weighted centre", () => {
     const raster = (values: number[]): SpatialDensityRaster => ({
-      meta: { gridSize: [10, 10], origin: [0, 0], rows: 2, cols: 2 }, genes: [], values: Float32Array.from(values),
+      meta: { gridSize: [10, 10], origin: [0, 0], rows: 2, cols: 2 },
+      genes: [],
+      values: Float32Array.from(values),
     });
     // One 20-unit square holds all four cells. Cluster 0 is mostly in the top-left cell.
-    const { tile, group } = clusterMarkers([raster([3, 1, 0, 0]), raster([0, 0, 0, 2])], [5, 7], 20,
-      { x0: 0, y0: 0, x1: 20, y1: 20 });
+    const { tile, group } = clusterMarkers([raster([3, 1, 0, 0]), raster([0, 0, 0, 2])], [5, 7], 20, {
+      x0: 0,
+      y0: 0,
+      x1: 20,
+      y1: 20,
+    });
     expect(tile.count).toBe(2);
     expect(Array.from(group)).toEqual([0, 1]);
     expect(Array.from(tile.weight)).toEqual([4, 2]);
@@ -60,7 +77,9 @@ describe('filtering hidden groups and genes', () => {
 
   it('drops the rings of cells in a hidden group, keeping their vertices aligned', () => {
     const rings: SpatialPolygonTile = {
-      count: 3, observation: Uint32Array.of(0, 1, 2), offsets: Uint32Array.of(0, 3, 6, 9),
+      count: 3,
+      observation: Uint32Array.of(0, 1, 2),
+      offsets: Uint32Array.of(0, 3, 6, 9),
       coords: new Float32Array(18).map((_v, i) => i),
     };
     const out = filterRings(rings, hidden);

@@ -26,7 +26,9 @@ function makeItem(z: number, fullyLoaded = true): FakeItem {
 function makeViewer() {
   const items: OsdTiledImageLike[] = [];
   const pending: OsdAddTiledImageOptions[] = [];
-  const addTiledImage = jest.fn((opts: OsdAddTiledImageOptions) => { pending.push(opts); });
+  const addTiledImage = jest.fn((opts: OsdAddTiledImageOptions) => {
+    pending.push(opts);
+  });
   const viewer = fakeOsdViewer({
     world: {
       getIndexOfItem: (it) => items.indexOf(it),

@@ -1,5 +1,12 @@
 import {
-  ChangeDetectionStrategy, ChangeDetectorRef, Component, EventEmitter, Input, NgZone, OnChanges, Output,
+  ChangeDetectionStrategy,
+  ChangeDetectorRef,
+  Component,
+  EventEmitter,
+  Input,
+  NgZone,
+  OnChanges,
+  Output,
   SimpleChanges,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
@@ -13,7 +20,10 @@ import type { SpatialDataset } from '../../contracts/spatial-dataset.contract';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../../contracts/display-types';
 import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
 import {
-  PanelOption, markerColumnOptions, markerGeneGroups, markerGenesPatch,
+  PanelOption,
+  markerColumnOptions,
+  markerGeneGroups,
+  markerGenesPatch,
 } from '../../spatial/spatial-panel-model';
 
 /**
@@ -109,7 +119,9 @@ export class SpatialMarkerGenesFormComponent implements OnChanges {
         this.markerError = e?.error?.error ?? e?.message ?? 'Could not compute marker genes.';
       });
     } finally {
-      this.apply(() => { this.markerLoading = false; });
+      this.apply(() => {
+        this.markerLoading = false;
+      });
     }
   }
 
@@ -119,7 +131,7 @@ export class SpatialMarkerGenesFormComponent implements OnChanges {
     const options = this.markerColumnOptions;
     const active = this.dataset ? cellTypeColumnFor(this.dataset, this.view) : null;
     if (!this.markerColumn || !options.some((o) => o.value === this.markerColumn)) {
-      this.markerColumn = active && options.some((o) => o.value === active) ? active : options[0]?.value ?? null;
+      this.markerColumn = active && options.some((o) => o.value === active) ? active : (options[0]?.value ?? null);
     }
     this.markerError = null;
     this.refreshMarkerClusters();

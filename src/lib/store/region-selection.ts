@@ -1,7 +1,9 @@
 import { BehaviorSubject, Observable } from 'rxjs';
 
 /** The part of a region the selection reads: its stable id. */
-interface HasId { id: number }
+interface HasId {
+  id: number;
+}
 
 /**
  * Region selection, held by region *id* (stable across edits, reorders and
@@ -19,10 +21,14 @@ export class RegionSelection {
   readonly indices$: Observable<number[]> = this.indicesSubject.asObservable();
 
   /** The selected indices as last projected by {@link sync}. */
-  get indices(): number[] { return this.indicesSubject.value; }
+  get indices(): number[] {
+    return this.indicesSubject.value;
+  }
 
   /** The selected ids, in selection order. */
-  get ids(): readonly number[] { return this.selected; }
+  get ids(): readonly number[] {
+    return this.selected;
+  }
 
   /** Replace the selected ids (no emit until {@link sync}). */
   replace(ids: number[]): void {
@@ -44,7 +50,10 @@ export class RegionSelection {
     for (const i of indices || []) {
       if (!Number.isFinite(i) || i < 0 || i >= regions.length) continue;
       const id = regions[i].id;
-      if (!seen.has(id)) { seen.add(id); ids.push(id); }
+      if (!seen.has(id)) {
+        seen.add(id);
+        ids.push(id);
+      }
     }
     this.selected = ids;
     this.sync(regions);
@@ -54,12 +63,17 @@ export class RegionSelection {
    *  and emit if the index set changed. */
   sync(regions: readonly HasId[]): void {
     const indexOf = new Map<number, number>();
-    regions.forEach((r, i) => { if (!indexOf.has(r.id)) indexOf.set(r.id, i); });
+    regions.forEach((r, i) => {
+      if (!indexOf.has(r.id)) indexOf.set(r.id, i);
+    });
     const indices: number[] = [];
     const live: number[] = [];
     for (const id of this.selected) {
       const idx = indexOf.get(id);
-      if (idx !== undefined) { indices.push(idx); live.push(id); }
+      if (idx !== undefined) {
+        indices.push(idx);
+        live.push(id);
+      }
     }
     this.selected = live;
     if (!sameIndices(this.indicesSubject.value, indices)) this.indicesSubject.next(indices);

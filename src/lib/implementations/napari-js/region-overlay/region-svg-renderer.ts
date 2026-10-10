@@ -1,9 +1,7 @@
 import { Polygon, Rectangle, Region } from '../../../models/region';
 import type { RegionStore } from '../../../store/region-store.service';
 import { regionBBox, ringHandles, ringOf } from '../../../region-overlay/region-geometry';
-import {
-  Affine, ScreenLayer, SvgRegionRenderer, svgEl,
-} from '../../../region-overlay/svg-region-renderer';
+import { Affine, ScreenLayer, SvgRegionRenderer, svgEl } from '../../../region-overlay/svg-region-renderer';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 /** Rendered handle size (screen px). */
@@ -34,7 +32,10 @@ export class NapariRegionSvgRenderer {
   /** Dedicated marquee rect element, updated directly during the drag (no full region redraw). */
   private marqueeEl: SVGRectElement | null = null;
 
-  constructor(private readonly svg: SVGSVGElement, private readonly store: RegionStore) {
+  constructor(
+    private readonly svg: SVGSVGElement,
+    private readonly store: RegionStore,
+  ) {
     this.renderer = new SvgRegionRenderer(svg, {
       rectElement: 'rect',
       styleShape: (el, region, selected) => this.style(el, this.strokeOf(region), selected),
@@ -150,7 +151,11 @@ export class NapariRegionSvgRenderer {
   /** Draw one bezier control point as a small circle connected to its anchor by a tangent line.
    *  `handle` is the control point's absolute position in image space. */
   private drawBezierHandle(
-    ax: number, ay: number, handle: [number, number], stroke: string, layer: ScreenLayer,
+    ax: number,
+    ay: number,
+    handle: [number, number],
+    stroke: string,
+    layer: ScreenLayer,
   ): void {
     if (handle[0] === ax && handle[1] === ay) return;
     const line = layer.line(ax, ay, handle[0], handle[1]);
@@ -188,7 +193,12 @@ export class NapariRegionSvgRenderer {
       this.styleDraft(el);
     }
     if (draft.path && draft.path.length) {
-      this.styleDraft(layer.poly('polyline', draft.path.map(([x, y]) => ({ x, y }))));
+      this.styleDraft(
+        layer.poly(
+          'polyline',
+          draft.path.map(([x, y]) => ({ x, y })),
+        ),
+      );
     }
   }
 

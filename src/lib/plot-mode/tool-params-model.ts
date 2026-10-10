@@ -1,5 +1,8 @@
 import {
-  NumberParamSpec, SelectParamSpec, ToolParamSpec, ToolbarToolContribution,
+  NumberParamSpec,
+  SelectParamSpec,
+  ToolParamSpec,
+  ToolbarToolContribution,
 } from '../contracts/toolbar-tool.contract';
 
 /** The open parameter dialog, as its template binds it. */

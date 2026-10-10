@@ -68,9 +68,7 @@ describe('NapariAxesLabels', () => {
   it('hides all labels when toggled off and removes them on destroy', () => {
     const overlay = new NapariAxesLabels(host, camera3d, labels);
     overlay.setVisible(false);
-    expect(Array.from(host.querySelectorAll('span')).every((s) => s.style.display === 'none')).toBe(
-      true,
-    );
+    expect(Array.from(host.querySelectorAll('span')).every((s) => s.style.display === 'none')).toBe(true);
     overlay.setVisible(true);
     expect(host.querySelectorAll('span')[0].style.display).not.toBe('none');
     overlay.destroy();

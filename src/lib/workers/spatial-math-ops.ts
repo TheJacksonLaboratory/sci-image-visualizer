@@ -1,13 +1,19 @@
 import type { SpatialObservations } from '../contracts/spatial-dataset.contract';
+import { DensityGrid, DensityOptions, rasterizeDensity } from '../spatial/spatial-density';
 import {
-  DensityGrid, DensityOptions, rasterizeDensity,
-} from '../spatial/spatial-density';
-import {
-  ExpressionField, ExpressionFieldOptions, ExpressionVolumeField, ExpressionVolumeOptions,
-  expressionField, expressionVolume,
+  ExpressionField,
+  ExpressionFieldOptions,
+  ExpressionVolumeField,
+  ExpressionVolumeOptions,
+  expressionField,
+  expressionVolume,
 } from '../spatial/spatial-expression';
 import {
-  HeatmapGene, HeatmapGroups, HeatmapMatrix, HeatmapMatrixOptions, heatmapMatrix,
+  HeatmapGene,
+  HeatmapGroups,
+  HeatmapMatrix,
+  HeatmapMatrixOptions,
+  heatmapMatrix,
 } from '../spatial/spatial-heatmap';
 
 /**
@@ -26,14 +32,18 @@ export type SpatialMathObservations = Pick<SpatialObservations, 'count' | 'x' | 
 export type SpatialMathRequest =
   | { op: 'expressionField'; obs: SpatialMathObservations; opts: ExpressionFieldOptions }
   | {
-    op: 'expressionVolume'; obs: SpatialMathObservations; grid: DensityGrid;
-    opts: ExpressionVolumeOptions;
-  }
+      op: 'expressionVolume';
+      obs: SpatialMathObservations;
+      grid: DensityGrid;
+      opts: ExpressionVolumeOptions;
+    }
   | { op: 'rasterizeDensity'; obs: SpatialMathObservations; grid: DensityGrid; opts: DensityOptions }
   | {
-    op: 'heatmapMatrix'; genes: readonly HeatmapGene[]; groups: HeatmapGroups;
-    opts: HeatmapMatrixOptions;
-  };
+      op: 'heatmapMatrix';
+      genes: readonly HeatmapGene[];
+      groups: HeatmapGroups;
+      opts: HeatmapMatrixOptions;
+    };
 
 /** What each {@link SpatialMathRequest} op resolves to. */
 export interface SpatialMathResults {
@@ -60,16 +70,16 @@ export function slimObservations(obs: SpatialMathObservations): SpatialMathObser
 export function runSpatialMath<R extends SpatialMathRequest>(request: R): SpatialMathResults[R['op']] {
   const r = request as SpatialMathRequest;
   switch (r.op) {
-  case 'expressionField':
-    return expressionField(r.obs as SpatialObservations, r.opts) as SpatialMathResults[R['op']];
-  case 'expressionVolume':
-    return expressionVolume(r.obs as SpatialObservations, r.grid, r.opts) as SpatialMathResults[R['op']];
-  case 'rasterizeDensity':
-    return rasterizeDensity(r.obs as SpatialObservations, r.grid, r.opts) as SpatialMathResults[R['op']];
-  case 'heatmapMatrix':
-    return heatmapMatrix(r.genes, r.groups, r.opts) as SpatialMathResults[R['op']];
-  default:
-    throw new Error(`unknown spatial-math op "${(r as { op: string }).op}"`);
+    case 'expressionField':
+      return expressionField(r.obs as SpatialObservations, r.opts) as SpatialMathResults[R['op']];
+    case 'expressionVolume':
+      return expressionVolume(r.obs as SpatialObservations, r.grid, r.opts) as SpatialMathResults[R['op']];
+    case 'rasterizeDensity':
+      return rasterizeDensity(r.obs as SpatialObservations, r.grid, r.opts) as SpatialMathResults[R['op']];
+    case 'heatmapMatrix':
+      return heatmapMatrix(r.genes, r.groups, r.opts) as SpatialMathResults[R['op']];
+    default:
+      throw new Error(`unknown spatial-math op "${(r as { op: string }).op}"`);
   }
 }
 

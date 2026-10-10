@@ -1,62 +1,87 @@
 <div class="sx-body" *ngIf="controls">
-
   <!-- The chart follows whatever the map is coloured by, so the two can never
        disagree about what is being shown. -->
   <div class="sx-head">
     <span class="sx-subject" *ngIf="subject">{{ subject }}</span>
     <span class="sx-subject sx-muted" *ngIf="!subject">nothing selected to chart</span>
-    <span class="sx-badge" *ngIf="selectionCount">
-      {{ selectionCount | number }} selected
-    </span>
+    <span class="sx-badge" *ngIf="selectionCount"> {{ selectionCount | number }} selected </span>
     <i class="pi pi-spin pi-spinner sx-busy" *ngIf="busy" aria-label="loading"></i>
   </div>
 
   <div class="sx-controls">
-    <p-selectButton [options]="kindOptions" optionLabel="label" optionValue="value"
-                    [ngModel]="kind" (ngModelChange)="onKind($event)"
-                    styleClass="sx-kind"></p-selectButton>
-    <p-dropdown [options]="groupOptions" optionLabel="label" optionValue="value"
-                [ngModel]="groupBy" (ngModelChange)="onGroupBy($event)"
-                placeholder="No grouping" appendTo="body"
-                [disabled]="kind === 'histogram'"
-                [pTooltip]="kind === 'heatmap'
-                  ? 'The categorical column the heatmap\'s columns come from'
-                  : 'Split a violin or box by a categorical column'"
-                tooltipPosition="top"></p-dropdown>
+    <p-selectButton
+      [options]="kindOptions"
+      optionLabel="label"
+      optionValue="value"
+      [ngModel]="kind"
+      (ngModelChange)="onKind($event)"
+      styleClass="sx-kind"
+    ></p-selectButton>
+    <p-dropdown
+      [options]="groupOptions"
+      optionLabel="label"
+      optionValue="value"
+      [ngModel]="groupBy"
+      (ngModelChange)="onGroupBy($event)"
+      placeholder="No grouping"
+      appendTo="body"
+      [disabled]="kind === 'histogram'"
+      [pTooltip]="
+        kind === 'heatmap'
+          ? 'The categorical column the heatmap\'s columns come from'
+          : 'Split a violin or box by a categorical column'
+      "
+      tooltipPosition="top"
+    ></p-dropdown>
     <!-- What the chart on screen shows, and what it must NOT be read for. Each of these
          answers a different question and two are routinely over-read, so the caveat
          travels with the explanation. -->
-    <i class="pi pi-question-circle sx-help"
-       [pTooltip]="kindHelp" [escape]="false" tooltipPosition="left"
-       tooltipStyleClass="sx-help-tip"
-       [attr.aria-label]="'About the ' + kind + ' chart'" tabindex="0"></i>
+    <i
+      class="pi pi-question-circle sx-help"
+      [pTooltip]="kindHelp"
+      [escape]="false"
+      tooltipPosition="left"
+      tooltipStyleClass="sx-help-tip"
+      [attr.aria-label]="'About the ' + kind + ' chart'"
+      tabindex="0"
+    ></i>
   </div>
 
-  <spatial-heatmap-controls *ngIf="kind === 'heatmap'"
-                            [geneOptions]="geneOptions" [genes]="heatmapGenes" [zScore]="heatmapZScore"
-                            (genesChange)="onHeatmapGenes($event)" (filterChange)="onGeneFilter($event)"
-                            (zScoreChange)="onHeatmapZScore($event)"></spatial-heatmap-controls>
+  <spatial-heatmap-controls
+    *ngIf="kind === 'heatmap'"
+    [geneOptions]="geneOptions"
+    [genes]="heatmapGenes"
+    [zScore]="heatmapZScore"
+    (genesChange)="onHeatmapGenes($event)"
+    (filterChange)="onGeneFilter($event)"
+    (zScoreChange)="onHeatmapZScore($event)"
+  ></spatial-heatmap-controls>
 
-  <spatial-embedding-controls [isEmbedding]="kind === 'embedding'"
-                              [embeddings]="embeddings" [embedding]="embedding"
-                              [computable]="isComputable" [computed]="isComputed" [running]="isComputing"
-                              [state]="computeState" [estimateLabel]="computeEstimateLabel"
-                              [tooLargeNote]="tsneTooLarge ? tsneTooLargeNote : null"
-                              [detached]="detached"
-                              (embeddingChange)="onEmbedding($event)" (compute)="computeEmbedding()"
-                              (cancel)="cancelCompute()" (detachedToggle)="toggleDetached()">
+  <spatial-embedding-controls
+    [isEmbedding]="kind === 'embedding'"
+    [embeddings]="embeddings"
+    [embedding]="embedding"
+    [computable]="isComputable"
+    [computed]="isComputed"
+    [running]="isComputing"
+    [state]="computeState"
+    [estimateLabel]="computeEstimateLabel"
+    [tooLargeNote]="tsneTooLarge ? tsneTooLargeNote : null"
+    [detached]="detached"
+    (embeddingChange)="onEmbedding($event)"
+    (compute)="computeEmbedding()"
+    (cancel)="cancelCompute()"
+    (detachedToggle)="toggleDetached()"
+  >
   </spatial-embedding-controls>
 
   <div [id]="chartDiv" class="sx-plot" *ngIf="!detached"></div>
 
   <!-- Detached: the chart keeps drawing, in its own window. Says so rather than
        leaving a blank panel that looks broken. -->
-  <div class="sx-detached" *ngIf="detached">
-    Shown in its own window.
-  </div>
+  <div class="sx-detached" *ngIf="detached">Shown in its own window.</div>
 
   <ng-container *ngTemplateOutlet="hints"></ng-container>
-
 </div>
 
 <!-- Declared once and rendered in both the panel and the detached window: the ladder is
@@ -64,9 +89,7 @@
      collapsing it to a single expression would drop a hint rather than move it. -->
 <ng-template #hints>
   <small class="sx-hint" *ngIf="notice">{{ notice }}</small>
-  <small class="sx-hint" *ngIf="!notice && suggestsGrouping">
-    Pick a grouping to compare categories.
-  </small>
+  <small class="sx-hint" *ngIf="!notice && suggestsGrouping"> Pick a grouping to compare categories. </small>
   <small class="sx-hint" *ngIf="!notice && selectionCount && kind === 'histogram'">
     The selection is overlaid on the full distribution.
   </small>
@@ -77,9 +100,14 @@
   <small class="sx-hint" *ngIf="!notice && kind === 'embedding'">{{ embeddingNote }}</small>
 </ng-template>
 
-<spatial-chart-window *ngIf="detached"
-                      [title]="detachedTitle" [divId]="detachedDiv" [fixedHeight]="hasFixedHeight"
-                      (closed)="toggleDetached()" (shown)="onDetachedWindowShown()"
-                      (resizeEnd)="onDetachedResizeEnd()">
+<spatial-chart-window
+  *ngIf="detached"
+  [title]="detachedTitle"
+  [divId]="detachedDiv"
+  [fixedHeight]="hasFixedHeight"
+  (closed)="toggleDetached()"
+  (shown)="onDetachedWindowShown()"
+  (resizeEnd)="onDetachedResizeEnd()"
+>
   <ng-container *ngTemplateOutlet="hints"></ng-container>
 </spatial-chart-window>

@@ -6,7 +6,9 @@ const reg = (id: number, z?: number): Region => Object.assign(new Region(), { id
 
 describe('RegionScopeCache', () => {
   let cache: RegionScopeCache;
-  beforeEach(() => { cache = new RegionScopeCache(); });
+  beforeEach(() => {
+    cache = new RegionScopeCache();
+  });
 
   it('keys an image by its first URL, else its file name', () => {
     expect(RegionScopeCache.imageKey(undefined)).toBeUndefined();
@@ -35,7 +37,14 @@ describe('RegionScopeCache', () => {
   it('showSlice captures the live slice and returns the target; null when nothing swaps', () => {
     expect(cache.showSlice(4, [])).toBeNull();
     expect(cache.displaySlice).toBe(4); // recorded outside stack mode
-    const live0 = cache.enterStack(new Map([[0, [reg(1, 0)]], [2, [reg(2, 2)]]]), 0, 'combined');
+    const live0 = cache.enterStack(
+      new Map([
+        [0, [reg(1, 0)]],
+        [2, [reg(2, 2)]],
+      ]),
+      0,
+      'combined',
+    );
     expect(live0.map((r) => r.id)).toEqual([1]);
     const edited = [reg(1, 0), reg(3, 0)];
     expect(cache.showSlice(2, edited)!.map((r) => r.id)).toEqual([2]);
@@ -45,14 +54,31 @@ describe('RegionScopeCache', () => {
 
   it('sliceRegions flattens every slice in order, tagging copies with z', () => {
     const untagged = reg(2);
-    cache.enterStack(new Map([[3, [untagged]], [1, [reg(1, 1)]]]), 1, 'combined');
+    cache.enterStack(
+      new Map([
+        [3, [untagged]],
+        [1, [reg(1, 1)]],
+      ]),
+      1,
+      'combined',
+    );
     const all = cache.sliceRegions([reg(1, 1)]);
-    expect(all.map((r) => [r.id, r.z])).toEqual([[1, 1], [2, 3]]);
+    expect(all.map((r) => [r.id, r.z])).toEqual([
+      [1, 1],
+      [2, 3],
+    ]);
     expect(untagged.z).toBeUndefined();
   });
 
   it('stackSaveSlices includes slices loaded non-empty that are now empty', () => {
-    cache.enterStack(new Map([[0, [reg(1, 0)]], [1, []]]), 0, 'per-slice-file');
+    cache.enterStack(
+      new Map([
+        [0, [reg(1, 0)]],
+        [1, []],
+      ]),
+      0,
+      'per-slice-file',
+    );
     const save = cache.stackSaveSlices([]);
     expect(Array.from(save.keys())).toEqual([0]);
     expect(save.get(0)).toEqual([]);

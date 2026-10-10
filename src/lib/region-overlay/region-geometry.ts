@@ -93,9 +93,13 @@ export function regionBBox(region: Pick<Region, 'bounds'>): BBox | null {
   }
   if (!kind) return null;
   const parts = kind === 'poly' ? [b as Polygon] : (b as MultiPolygon).polygons;
-  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  let x0 = Infinity,
+    y0 = Infinity,
+    x1 = -Infinity,
+    y1 = -Infinity;
   for (const p of parts) {
-    const xs = p.xpoints ?? [], ys = p.ypoints ?? [];
+    const xs = p.xpoints ?? [],
+      ys = p.ypoints ?? [];
     for (let i = 0; i < xs.length; i++) {
       if (xs[i] < x0) x0 = xs[i];
       if (xs[i] > x1) x1 = xs[i];
@@ -108,7 +112,8 @@ export function regionBBox(region: Pick<Region, 'bounds'>): BBox | null {
 
 /** Shortest distance from (px,py) to the segment (ax,ay)–(bx,by), in the units given. */
 export function segmentDistance(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
-  const dx = bx - ax, dy = by - ay;
+  const dx = bx - ax,
+    dy = by - ay;
   const len2 = dx * dx + dy * dy;
   if (len2 === 0) return Math.hypot(px - ax, py - ay);
   let t = ((px - ax) * dx + (py - ay) * dy) / len2;
@@ -130,8 +135,12 @@ export interface ContainsOptions {
  * part (minus that part's holes); an open polyline — which has no interior —
  * within `tolPx` screen pixels of its line.
  */
-export function regionContains(region: Pick<Region, 'bounds'>, x: number, y: number,
-                               opts: ContainsOptions = {}): boolean {
+export function regionContains(
+  region: Pick<Region, 'bounds'>,
+  x: number,
+  y: number,
+  opts: ContainsOptions = {},
+): boolean {
   const b = region.bounds;
   switch (boundsKind(b)) {
     case 'rect': {
@@ -168,8 +177,11 @@ function nearPolyline(xs: number[], ys: number[], x: number, y: number, toScreen
 }
 
 /** Index of the topmost (last) region containing (x, y), or -1. */
-export function topmostRegionAt(regions: ReadonlyArray<Pick<Region, 'bounds'>>, x: number, y: number,
-                                opts: ContainsOptions & { skip?: (r: Pick<Region, 'bounds'>) => boolean } = {},
+export function topmostRegionAt(
+  regions: ReadonlyArray<Pick<Region, 'bounds'>>,
+  x: number,
+  y: number,
+  opts: ContainsOptions & { skip?: (r: Pick<Region, 'bounds'>) => boolean } = {},
 ): number {
   for (let i = regions.length - 1; i >= 0; i--) {
     if (opts.skip?.(regions[i])) continue;
@@ -183,8 +195,14 @@ export function topmostRegionAt(regions: ReadonlyArray<Pick<Region, 'bounds'>>, 
  * [x0,y0]–[x1,y1] (rubber-band selection). `skipProfiles` leaves out
  * intensity-profile lines.
  */
-export function regionsInRect(regions: ReadonlyArray<Region>, x0: number, y0: number, x1: number, y1: number,
-                              opts: { skipProfiles?: boolean } = {}): number[] {
+export function regionsInRect(
+  regions: ReadonlyArray<Region>,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  opts: { skipProfiles?: boolean } = {},
+): number[] {
   const out: number[] = [];
   regions.forEach((r, i) => {
     if (opts.skipProfiles && r.isProfile?.()) return;
@@ -209,11 +227,19 @@ export interface RingHandleOffsets {
  * match the ring (via `resolveHandles`). Closed rings end in `Z`. '' for fewer
  * than two vertices.
  */
-export function ringPathD(xs: number[], ys: number[], closed: boolean, toScreen: ToScreen,
-                          handles?: RingHandleOffsets): string {
+export function ringPathD(
+  xs: number[],
+  ys: number[],
+  closed: boolean,
+  toScreen: ToScreen,
+  handles?: RingHandleOffsets,
+): string {
   const n = Math.min(xs.length, ys.length);
   if (n < 2) return '';
-  const pt = (x: number, y: number) => { const q = toScreen(x, y); return `${q[0]},${q[1]}`; };
+  const pt = (x: number, y: number) => {
+    const q = toScreen(x, y);
+    return `${q[0]},${q[1]}`;
+  };
   let d = `M ${pt(xs[0], ys[0])}`;
   if (handles) {
     const h = resolveHandles(xs, ys, closed, handles.in, handles.out);
@@ -239,8 +265,12 @@ export function regionPathD(region: Pick<Region, 'bounds'>, toScreen: ToScreen =
   switch (boundsKind(b)) {
     case 'rect': {
       const r = b as Rectangle;
-      return ringPathD([r.x, r.x + r.width, r.x + r.width, r.x], [r.y, r.y, r.y + r.height, r.y + r.height],
-        true, toScreen);
+      return ringPathD(
+        [r.x, r.x + r.width, r.x + r.width, r.x],
+        [r.y, r.y, r.y + r.height, r.y + r.height],
+        true,
+        toScreen,
+      );
     }
     case 'poly':
       return polygonPathD(b as Polygon, toScreen, true);
@@ -257,14 +287,26 @@ export function regionPathD(region: Pick<Region, 'bounds'>, toScreen: ToScreen =
 function polygonPathD(p: Polygon, toScreen: ToScreen, allowBezier: boolean): string {
   const closed = p.closed !== false;
   const bezier = allowBezier && !!p.bezier && (p.xpoints?.length ?? 0) >= 2;
-  let d = ringPathD(p.xpoints ?? [], p.ypoints ?? [], closed, toScreen,
-    bezier ? { in: p.handlesIn, out: p.handlesOut } : undefined);
+  let d = ringPathD(
+    p.xpoints ?? [],
+    p.ypoints ?? [],
+    closed,
+    toScreen,
+    bezier ? { in: p.handlesIn, out: p.handlesOut } : undefined,
+  );
   if (!closed) return d;
   (p.holes ?? []).forEach((ring, hi) => {
     if (ring.length < 3) return;
     const { xs, ys } = ringOf(p, hi);
-    d += ' ' + ringPathD(xs, ys, true, toScreen,
-      bezier ? { in: p.holeHandlesIn?.[hi], out: p.holeHandlesOut?.[hi] } : undefined);
+    d +=
+      ' ' +
+      ringPathD(
+        xs,
+        ys,
+        true,
+        toScreen,
+        bezier ? { in: p.holeHandlesIn?.[hi], out: p.holeHandlesOut?.[hi] } : undefined,
+      );
   });
   return d;
 }
@@ -297,8 +339,14 @@ export type HandleHit =
  * they must win), then the vertices (exterior, then each hole). Pass
  * `{ bezier: false }` to test vertices only.
  */
-export function hitHandle(region: Pick<Region, 'bounds'>, sx: number, sy: number, toScreen: ToScreen,
-                          radius: number, opts: { bezier?: boolean } = {}): HandleHit | null {
+export function hitHandle(
+  region: Pick<Region, 'bounds'>,
+  sx: number,
+  sy: number,
+  toScreen: ToScreen,
+  radius: number,
+  opts: { bezier?: boolean } = {},
+): HandleHit | null {
   const b = region.bounds;
   const near = (x: number, y: number) => {
     const q = toScreen(x, y);
@@ -307,9 +355,15 @@ export function hitHandle(region: Pick<Region, 'bounds'>, sx: number, sy: number
   const kind = boundsKind(b);
   if (kind === 'rect') {
     const r = b as Rectangle;
-    const x0 = r.x, y0 = r.y, x1 = r.x + r.width, y1 = r.y + r.height;
+    const x0 = r.x,
+      y0 = r.y,
+      x1 = r.x + r.width,
+      y1 = r.y + r.height;
     const corners: Array<[number, number, [number, number]]> = [
-      [x0, y0, [x1, y1]], [x1, y0, [x0, y1]], [x0, y1, [x1, y0]], [x1, y1, [x0, y0]],
+      [x0, y0, [x1, y1]],
+      [x1, y0, [x0, y1]],
+      [x0, y1, [x1, y0]],
+      [x1, y1, [x0, y0]],
     ];
     for (let i = 0; i < corners.length; i++) {
       if (near(corners[i][0], corners[i][1])) return { kind: 'corner', index: i, anchor: corners[i][2] };
@@ -343,8 +397,12 @@ export function hitHandle(region: Pick<Region, 'bounds'>, sx: number, sy: number
  * hole: its ring (-1 = exterior), the index of its start vertex, and the
  * distance in screen pixels. Null when the region is not a polygon.
  */
-export function nearestEdge(region: Pick<Region, 'bounds'>, sx: number, sy: number,
-                            toScreen: ToScreen): { ring: number; segIndex: number; dist: number } | null {
+export function nearestEdge(
+  region: Pick<Region, 'bounds'>,
+  sx: number,
+  sy: number,
+  toScreen: ToScreen,
+): { ring: number; segIndex: number; dist: number } | null {
   const b = region.bounds;
   if (boundsKind(b) !== 'poly') return null;
   const p = b as Polygon;
@@ -369,7 +427,10 @@ export function nearestEdge(region: Pick<Region, 'bounds'>, sx: number, sy: numb
  * hole, with its distance in world units. Null when the region is not a
  * polygon or has no vertices.
  */
-export function nearestVertex(region: Pick<Region, 'bounds'>, x: number, y: number,
+export function nearestVertex(
+  region: Pick<Region, 'bounds'>,
+  x: number,
+  y: number,
 ): { ring: number; index: number; dist: number } | null {
   const b = region.bounds;
   if (boundsKind(b) !== 'poly') return null;

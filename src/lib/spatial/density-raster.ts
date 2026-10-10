@@ -17,7 +17,8 @@ import { quantiles } from './stats';
  * category".
  */
 export function discreteColormapStops(
-  rgb: readonly (readonly [number, number, number])[], missing: readonly [number, number, number],
+  rgb: readonly (readonly [number, number, number])[],
+  missing: readonly [number, number, number],
 ): { stops: { t: number; color: [number, number, number] }[]; valueOf: (code: number) => number } {
   const bands = [...rgb, missing];
   const n = bands.length;
@@ -51,8 +52,11 @@ export function densityAutoRange(values: ArrayLike<number>): [number, number] {
  * image under it; bins at or above `hi` saturate.
  */
 export function colorDensityWindow(
-  values: ArrayLike<number>, lut: readonly (readonly [number, number, number])[],
-  opacity: number, lo: number, hi: number,
+  values: ArrayLike<number>,
+  lut: readonly (readonly [number, number, number])[],
+  opacity: number,
+  lo: number,
+  hi: number,
 ): Uint8Array {
   const n = values.length;
   const rgba = new Uint8Array(n * 4);
@@ -77,6 +81,13 @@ export function colorDensityWindow(
  * at runtime by the store, which the renderer does not see.
  */
 export const INFERNO_SCALE: [number, string][] = [
-  [0, '#000004'], [0.125, '#1b0c41'], [0.25, '#4a0c6b'], [0.375, '#781c6d'], [0.5, '#a52c60'],
-  [0.625, '#cf4446'], [0.75, '#ed6925'], [0.875, '#fb9b06'], [1, '#fcffa4'],
+  [0, '#000004'],
+  [0.125, '#1b0c41'],
+  [0.25, '#4a0c6b'],
+  [0.375, '#781c6d'],
+  [0.5, '#a52c60'],
+  [0.625, '#cf4446'],
+  [0.75, '#ed6925'],
+  [0.875, '#fb9b06'],
+  [1, '#fcffa4'],
 ];

@@ -7,8 +7,7 @@ import { SaveMaskDialogComponent } from './save-mask-dialog.component';
 describe('SaveMaskDialogComponent', () => {
   let fixture: ComponentFixture<SaveMaskDialogComponent>;
   let dialog: SaveMaskDialogComponent;
-  const buttons = () =>
-    Array.from(document.querySelectorAll('.p-dialog-footer button')) as HTMLButtonElement[];
+  const buttons = () => Array.from(document.querySelectorAll('.p-dialog-footer button')) as HTMLButtonElement[];
 
   beforeEach(async () => {
     // jsdom can't parse PrimeNG's component stylesheets; drop just that noise.
@@ -16,8 +15,9 @@ describe('SaveMaskDialogComponent', () => {
     jest.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
       if (!String(args[0]).includes('Could not parse CSS stylesheet')) consoleError(...args);
     });
-    await TestBed.configureTestingModule({ imports: [VisualizationModule, NoopAnimationsModule] })
-      .compileComponents();
+    await TestBed.configureTestingModule({
+      imports: [VisualizationModule, NoopAnimationsModule],
+    }).compileComponents();
     fixture = TestBed.createComponent(SaveMaskDialogComponent);
     dialog = fixture.componentInstance;
     fixture.componentRef.setInput('visible', true);
@@ -25,7 +25,10 @@ describe('SaveMaskDialogComponent', () => {
     fixture.detectChanges();
   });
 
-  afterEach(() => { fixture.destroy(); jest.restoreAllMocks(); });
+  afterEach(() => {
+    fixture.destroy();
+    jest.restoreAllMocks();
+  });
 
   it('idle: Download emits confirm; Cancel closes', () => {
     const confirm = jest.fn();

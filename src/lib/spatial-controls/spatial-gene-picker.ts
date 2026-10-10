@@ -161,9 +161,11 @@ export class GenePickerModel {
         if (current()) this.listLoading = false;
       }
     }
-    this.run(() => this.set({
-      options: this.withChosen(this.remote ? [] : searchGeneNames(this.names, '')),
-    }));
+    this.run(() =>
+      this.set({
+        options: this.withChosen(this.remote ? [] : searchGeneNames(this.names, '')),
+      }),
+    );
   }
 
   /** Options for `names`, plus the genes already chosen. */

@@ -24,11 +24,16 @@ import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selecti
 @Directive({
   standalone: true,
   // eslint-disable-next-line @angular-eslint/directive-selector
-  selector: 'p-checkbox[ngModel],p-dropdown[ngModel],p-selectButton[ngModel],p-slider[ngModel],'
-    + 'p-inputNumber[ngModel],p-multiSelect[ngModel],p-treeSelect[ngModel]',
-  providers: [{
-    provide: NG_VALUE_ACCESSOR, useExisting: forwardRef(() => StubValueAccessorDirective), multi: true,
-  }],
+  selector:
+    'p-checkbox[ngModel],p-dropdown[ngModel],p-selectButton[ngModel],p-slider[ngModel],' +
+    'p-inputNumber[ngModel],p-multiSelect[ngModel],p-treeSelect[ngModel]',
+  providers: [
+    {
+      provide: NG_VALUE_ACCESSOR,
+      useExisting: forwardRef(() => StubValueAccessorDirective),
+      multi: true,
+    },
+  ],
 })
 export class StubValueAccessorDirective implements ControlValueAccessor {
   /** Claimed here so the binding does not reach the DOM property of the same name, which
@@ -82,24 +87,27 @@ export function one(root: ParentNode, selector: string): HTMLElement {
 
 /** The collapsible `.sc-panel` whose title is `title`. */
 export function panelNamed(root: ParentNode, title: string): HTMLElement {
-  const panel = Array.from(root.querySelectorAll<HTMLElement>('.sc-panel'))
-    .find((p) => p.querySelector('.sc-panel-title')?.textContent?.trim() === title);
+  const panel = Array.from(root.querySelectorAll<HTMLElement>('.sc-panel')).find(
+    (p) => p.querySelector('.sc-panel-title')?.textContent?.trim() === title,
+  );
   if (!panel) throw new Error(`no panel titled ${title}`);
   return panel;
 }
 
 /** The `.sc-row` whose `.sc-lbl` reads `label` (the first, when several do). */
 export function rowLabelled(root: ParentNode, label: string): HTMLElement {
-  const row = Array.from(root.querySelectorAll<HTMLElement>('.sc-row'))
-    .find((r) => r.querySelector('.sc-lbl')?.textContent?.trim() === label);
+  const row = Array.from(root.querySelectorAll<HTMLElement>('.sc-row')).find(
+    (r) => r.querySelector('.sc-lbl')?.textContent?.trim() === label,
+  );
   if (!row) throw new Error(`no row labelled ${label}`);
   return row;
 }
 
 /** The control element directly after the `.sc-lbl` reading `label`, for unrowed labels. */
 export function afterLabel(root: ParentNode, label: string, selector: string): HTMLElement {
-  const lbl = Array.from(root.querySelectorAll<HTMLElement>('.sc-lbl'))
-    .find((l) => l.textContent?.trim() === label);
+  const lbl = Array.from(root.querySelectorAll<HTMLElement>('.sc-lbl')).find(
+    (l) => l.textContent?.trim() === label,
+  );
   let el = lbl?.nextElementSibling ?? null;
   // Lower-cased: jsdom matches element names case-sensitively, and `p-selectButton` is
   // created as `p-selectbutton`.
@@ -110,8 +118,9 @@ export function afterLabel(root: ParentNode, label: string, selector: string): H
 
 /** The stub accessor on `el`, to read what was bound into it or to {@link StubValueAccessorDirective.pick}. */
 export function accessorOf<T>(fixture: ComponentFixture<T>, el: Element): StubValueAccessorDirective {
-  const de = fixture.debugElement.query((d) => d.nativeElement === el)
-    ?? fixture.debugElement.queryAll(By.directive(StubValueAccessorDirective)).find((d) => d.nativeElement === el);
+  const de =
+    fixture.debugElement.query((d) => d.nativeElement === el) ??
+    fixture.debugElement.queryAll(By.directive(StubValueAccessorDirective)).find((d) => d.nativeElement === el);
   if (!de) throw new Error('element is not under the fixture');
   return de.injector.get(StubValueAccessorDirective);
 }
@@ -131,15 +140,19 @@ export function click(el: Element): void {
  * observable's every emission is set and rendered. Returns the subscription to end it.
  */
 export function bindInputs<T>(
-  fixture: ComponentFixture<T>, inputs: Record<string, unknown>, render = true,
+  fixture: ComponentFixture<T>,
+  inputs: Record<string, unknown>,
+  render = true,
 ): Subscription {
   const subs = new Subscription();
   for (const [name, value] of Object.entries(inputs)) {
     if (isObservable(value)) {
-      subs.add(value.subscribe((v) => {
-        fixture.componentRef.setInput(name, v);
-        if (render) fixture.detectChanges();
-      }));
+      subs.add(
+        value.subscribe((v) => {
+          fixture.componentRef.setInput(name, v);
+          if (render) fixture.detectChanges();
+        }),
+      );
     } else {
       fixture.componentRef.setInput(name, value);
     }
@@ -197,17 +210,24 @@ export const TILED_DATASET: SpatialDataset = {
   features: { count: 27000 },
   polygonTiles: {
     bounds: [0, 0, 100, 100],
-    sets: [{ name: 'nucleus', label: 'Nuclei' }, { name: 'cell', label: 'Cells' }],
+    sets: [
+      { name: 'nucleus', label: 'Nuclei' },
+      { name: 'cell', label: 'Cells' },
+    ],
     defaultSet: 'cell',
     levels: [{ tileSize: 250 }],
   },
   transcriptTiles: {
-    bounds: [0, 0, 100, 100], geneCount: 27000, hasZ: true,
+    bounds: [0, 0, 100, 100],
+    geneCount: 27000,
+    hasZ: true,
     levels: [{ tileSize: 250, aggregated: false }],
   },
   density: { gridSize: [10, 10], origin: [0, 0], rows: 10, cols: 10 },
   transcriptBins: {
-    bounds: [0, 0, 100, 100], origin: [0, 0], count: 1000,
+    bounds: [0, 0, 100, 100],
+    origin: [0, 0],
+    count: 1000,
     levels: [{ binSize: 2, tileSize: 128 }],
   },
 };

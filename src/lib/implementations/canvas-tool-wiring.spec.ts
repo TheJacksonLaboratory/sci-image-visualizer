@@ -16,8 +16,8 @@ type Backend = PlotlyService | OpenSeadragonVisualizerService | NapariVisualizer
 const tools = (b: Backend) => (b as unknown as { canvasTools: CanvasToolManager }).canvasTools;
 // napari's host lives on its tool bridge; Plotly and OSD keep it on the service.
 const host = (b: Backend): CanvasToolHost =>
-  (b as unknown as { toolHost?: CanvasToolHost }).toolHost
-  ?? (b as unknown as { tools: { toolHost: CanvasToolHost } }).tools.toolHost;
+  (b as unknown as { toolHost?: CanvasToolHost }).toolHost ??
+  (b as unknown as { tools: { toolHost: CanvasToolHost } }).tools.toolHost;
 
 /**
  * The canvas tools were root singletons that every backend re-bound to its own
@@ -30,8 +30,13 @@ describe('canvas tools per backend (RT-21)', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule],
-      providers: [PlotlyService, OpenSeadragonVisualizerService, NapariVisualizerService,
-        MessageService, ...VIZ_PORT_STUBS],
+      providers: [
+        PlotlyService,
+        OpenSeadragonVisualizerService,
+        NapariVisualizerService,
+        MessageService,
+        ...VIZ_PORT_STUBS,
+      ],
     });
     backends = [
       TestBed.inject(PlotlyService),
@@ -49,7 +54,7 @@ describe('canvas tools per backend (RT-21)', () => {
     }
   });
 
-  it('arming a tool on one backend leaves another backend\'s armed tool and host alone', () => {
+  it("arming a tool on one backend leaves another backend's armed tool and host alone", () => {
     const [plotly, osd] = backends;
     osd.setActiveTool('wand', { sensitivity: 2 });
     plotly.setActiveTool('wand', { sensitivity: 3 });
@@ -68,7 +73,7 @@ describe('canvas tools per backend (RT-21)', () => {
     }
   });
 
-  it('drops the tools\' work in progress on undo and redo', () => {
+  it("drops the tools' work in progress on undo and redo", () => {
     for (const b of backends) {
       const resetAll = jest.spyOn(tools(b), 'resetAll');
       b.undo();
@@ -80,12 +85,14 @@ describe('canvas tools per backend (RT-21)', () => {
 
   // The router writes undo/redo/slice switches straight to the store (IVisualizer split (d)),
   // so the resets must come from the store's event, not from the backend's own members.
-  it('resets every backend\'s tools on a store undo, redo or slice switch — not on an ordinary edit', () => {
+  it("resets every backend's tools on a store undo, redo or slice switch — not on an ordinary edit", () => {
     const regionStore = TestBed.inject(RegionStore);
     const spies = backends.map((b) => jest.spyOn(tools(b), 'resetAll'));
-    regionStore.setRegions([Object.assign(new Region(), {
-      bounds: Object.assign(new Rectangle(), { x: 0, y: 0, width: 4, height: 4 }),
-    })]);
+    regionStore.setRegions([
+      Object.assign(new Region(), {
+        bounds: Object.assign(new Rectangle(), { x: 0, y: 0, width: 4, height: 4 }),
+      }),
+    ]);
     for (const spy of spies) expect(spy).not.toHaveBeenCalled();
     regionStore.undo();
     regionStore.redo();

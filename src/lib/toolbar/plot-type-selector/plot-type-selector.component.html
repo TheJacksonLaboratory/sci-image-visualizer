@@ -1,10 +1,18 @@
 <span class="toolbar-separator"></span>
-<p-dropdown [options]="options" optionLabel="label" optionValue="type"
-            [ngModel]="selected" ariaLabel="Plot type" appendTo="body"
-            pTooltip="Select plot type" tooltipPosition="bottom"
-            [style]="{'min-width': '11rem'}"
-            styleClass="plotmode-dropdown" panelStyleClass="plotmode-panel"
-            (onChange)="selectPlotType.emit($event.value)">
+<p-dropdown
+  [options]="options"
+  optionLabel="label"
+  optionValue="type"
+  [ngModel]="selected"
+  ariaLabel="Plot type"
+  appendTo="body"
+  pTooltip="Select plot type"
+  tooltipPosition="bottom"
+  [style]="{ 'min-width': '11rem' }"
+  styleClass="plotmode-dropdown"
+  panelStyleClass="plotmode-panel"
+  (onChange)="selectPlotType.emit($event.value)"
+>
   <ng-template let-opt pTemplate="selectedItem">
     <span class="plotmode-item" *ngIf="opt">
       <i *ngIf="isPiIcon(opt.icon)" [class]="opt.icon"></i>
@@ -21,14 +29,20 @@
   </ng-template>
 </p-dropdown>
 <ng-container *ngIf="isosurface">
-  <toolbar-tool-slider label="Iso" [value]="isoRange" [range]="true"
-                       [min]="isoValueMin" [max]="isoValueMax" [step]="isoValueStep"
-                       tooltip="Isosurface band (0–255), mapped onto the volume's
+  <toolbar-tool-slider
+    label="Iso"
+    [value]="isoRange"
+    [range]="true"
+    [min]="isoValueMin"
+    [max]="isoValueMax"
+    [step]="isoValueStep"
+    tooltip="Isosurface band (0–255), mapped onto the volume's
                        actual intensity range. Surfaces are drawn for voxels whose
                        intensity falls in the selected band — narrow it to isolate
                        features, widen it to see the whole structure."
-                       [valueText]="isoRange[0] + '–' + isoRange[1]"
-                       (valueChange)="onIsoRange($event)">
+    [valueText]="isoRange[0] + '–' + isoRange[1]"
+    (valueChange)="onIsoRange($event)"
+  >
   </toolbar-tool-slider>
 </ng-container>
 <!-- Intensity tools (Heatmap / Image mode): add another colored line ROI.
@@ -38,11 +52,16 @@
      Region Editor and exports. -->
 <ng-container *ngIf="intensityLines">
   <span class="toolbar-separator"></span>
-  <p-button size="small" [text]="true" ariaLabel="Add an intensity line"
-            pTooltip="Add an intensity line (new colour). Click a line to select it,
+  <p-button
+    size="small"
+    [text]="true"
+    ariaLabel="Add an intensity line"
+    pTooltip="Add an intensity line (new colour). Click a line to select it,
             then use the trash tool to remove it."
-            [escape]="false" tooltipPosition="bottom"
-            (onClick)="addProfileLine.emit()">
-    <img src="assets/plotting/spline-chart.svg" class="toolbar-icon-dark" style="width: 1rem" alt=""/>
+    [escape]="false"
+    tooltipPosition="bottom"
+    (onClick)="addProfileLine.emit()"
+  >
+    <img src="assets/plotting/spline-chart.svg" class="toolbar-icon-dark" style="width: 1rem" alt="" />
   </p-button>
 </ng-container>

@@ -72,7 +72,10 @@ export interface SvgRegionRendererOptions {
 export class ScreenLayer {
   private readonly placed: Array<{ el: SVGElement; place: Placement<SVGElement> }> = [];
 
-  constructor(readonly group: SVGGElement, private readonly project: Project) {}
+  constructor(
+    readonly group: SVGGElement,
+    private readonly project: Project,
+  ) {}
 
   /** Append `el`, positioned by `place` now and after every camera change. */
   place<T extends SVGElement>(el: T, place: Placement<T>): T {
@@ -83,8 +86,12 @@ export class ScreenLayer {
   }
 
   /** Append `el` with attributes `x`/`y` (e.g. `'cx'`/`'cy'`) at a world point, offset in pixels. */
-  at<T extends SVGElement>(el: T, wx: number, wy: number,
-                           attrs: { x?: string; y?: string; dx?: number; dy?: number } = {}): T {
+  at<T extends SVGElement>(
+    el: T,
+    wx: number,
+    wy: number,
+    attrs: { x?: string; y?: string; dx?: number; dy?: number } = {},
+  ): T {
     const { x = 'x', y = 'y', dx = 0, dy = 0 } = attrs;
     return this.place(el, (e, project) => {
       const [sx, sy] = project(wx, wy);
@@ -141,7 +148,10 @@ export class SvgRegionRenderer {
   /** World → svg-local pixels through the current camera. */
   readonly project: Project = (x, y) => applyAffine(this.camera, x, y);
 
-  constructor(private readonly svg: SVGSVGElement, private readonly opts: SvgRegionRendererOptions) {
+  constructor(
+    private readonly svg: SVGSVGElement,
+    private readonly opts: SvgRegionRendererOptions,
+  ) {
     this.world.setAttribute('data-layer', 'regions');
     this.labels = new ScreenLayer(svgEl('g'), this.project);
     this.labels.group.setAttribute('data-layer', 'labels');
@@ -235,8 +245,10 @@ export class SvgRegionRenderer {
     switch (boundsKind(b)) {
       case 'rect': {
         const r = b as Rectangle;
-        const x0 = Math.min(r.x, r.x + r.width), y0 = Math.min(r.y, r.y + r.height);
-        const w = Math.abs(r.width), h = Math.abs(r.height);
+        const x0 = Math.min(r.x, r.x + r.width),
+          y0 = Math.min(r.y, r.y + r.height);
+        const w = Math.abs(r.width),
+          h = Math.abs(r.height);
         if (this.opts.rectElement === 'rect') {
           const el = svgEl('rect');
           el.setAttribute('x', `${x0}`);

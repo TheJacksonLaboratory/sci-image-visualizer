@@ -5,10 +5,16 @@ import type { Rgb } from '../../../contracts/colormap-lut';
 import { ALL_GENES } from '../../../contracts/ports/spatial-data.port';
 import type { SpatialViewState } from '../../../contracts/display-types';
 import {
-  NO_CATEGORY, NO_OBSERVATION, SpatialDataset, SpatialTranscriptTile,
+  NO_CATEGORY,
+  NO_OBSERVATION,
+  SpatialDataset,
+  SpatialTranscriptTile,
 } from '../../../contracts/spatial-dataset.contract';
 import {
-  DEFAULT_CATEGORICAL_PALETTE, MISSING_COLOR, parseHex, resolveCategoryColors,
+  DEFAULT_CATEGORICAL_PALETTE,
+  MISSING_COLOR,
+  parseHex,
+  resolveCategoryColors,
 } from '../../../spatial/spatial-encoding';
 import { DataRect, cellTypeColumnFor } from '../../../spatial/lod';
 import { clusterColorMap } from '../../../spatial/transcript-grouping';
@@ -26,10 +32,17 @@ const GLYPH_OUTLINE_MAX = 20_000;
 const GLYPH_OUTLINE_MIN_PX = 8;
 
 /** Where a layer sits in world space: the dataset's affine onto its tissue image. */
-interface Placement { scale: [number, number]; translate: [number, number] }
+interface Placement {
+  scale: [number, number];
+  translate: [number, number];
+}
 
 /** Transcript colours: per-entry RGBA for points, values + colormap for shapes. */
-interface TranscriptFaces { rgba: RGBA[]; values: Float32Array; colormap: Colormap }
+interface TranscriptFaces {
+  rgba: RGBA[];
+  values: Float32Array;
+  colormap: Colormap;
+}
 
 const UNASSIGNED_RGBA: RGBA = [0.62, 0.62, 0.62, 0.55];
 
@@ -77,7 +90,10 @@ export class TranscriptLayers {
 
   /** Draw the view's transcript markers (or drop them); an unchanged plan key is a no-op. */
   async plan(
-    dataset: SpatialDataset, view: SpatialViewState, rect: DataRect, pxPerUnit: number,
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    rect: DataRect,
+    pxPerUnit: number,
     ctx: PlanContext,
   ): Promise<void> {
     const mode = view.transcriptMode;
@@ -92,10 +108,19 @@ export class TranscriptLayers {
     // Marker sizes follow the zoom, so the zoom is part of the key; a pan that keeps
     // the same tiles on screen changes nothing.
     const planKey = [
-      dataset.id, mode, job.key, view.transcriptColorBy, cellTypeColumnFor(dataset, view),
-      view.transcriptScale, view.transcriptOpacity, JSON.stringify(view.transcriptGlyphs),
-      pxPerUnit.toPrecision(4), view.hiddenGroups.join('\u0001'), view.transcriptHiddenGenes.join(','),
-      JSON.stringify(view.transcriptGeneColors), JSON.stringify(view.transcriptGeneGroups),
+      dataset.id,
+      mode,
+      job.key,
+      view.transcriptColorBy,
+      cellTypeColumnFor(dataset, view),
+      view.transcriptScale,
+      view.transcriptOpacity,
+      JSON.stringify(view.transcriptGlyphs),
+      pxPerUnit.toPrecision(4),
+      view.hiddenGroups.join('\u0001'),
+      view.transcriptHiddenGenes.join(','),
+      JSON.stringify(view.transcriptGeneColors),
+      JSON.stringify(view.transcriptGeneGroups),
     ].join('|');
     if (planKey === this.groups.key('transcripts') && this.groups.shown('transcripts')) {
       return;
@@ -105,14 +130,21 @@ export class TranscriptLayers {
     // Per-gene counts in view come from what was loaded, before hidden genes are dropped:
     // a hidden gene still has transcripts there. Summed density grids (no per-gene levels,
     // zoomed out) hold clusters, not genes: no per-gene counts there, rather than a guess.
-    this.countSource = (loaded.kind ?? job.kind) === 'genes' && !loaded.clustered
-      ? { merged: loaded.merged, genes: [...view.transcriptGenes] } : null;
+    this.countSource =
+      (loaded.kind ?? job.kind) === 'genes' && !loaded.clustered
+        ? { merged: loaded.merged, genes: [...view.transcriptGenes] }
+        : null;
     const hidden = await this.lookup.hiddenCodes(dataset, view);
     if (ctx.stale()) return;
     // Density-grid markers carry no cells and were built from the visible genes only.
-    const filtered = loaded.clustered ? { merged: loaded.merged, px: loaded.px }
-      : filterTranscripts(loaded.merged, loaded.px, hidden,
-        (loaded.kind ?? job.kind) === 'genes' ? hiddenGeneSlots(view) : null);
+    const filtered = loaded.clustered
+      ? { merged: loaded.merged, px: loaded.px }
+      : filterTranscripts(
+          loaded.merged,
+          loaded.px,
+          hidden,
+          (loaded.kind ?? job.kind) === 'genes' ? hiddenGeneSlots(view) : null,
+        );
     let { merged, px } = filtered;
     let selectionBin: number | null = loaded.clustered?.bin ?? null;
     let entryGroup: Int32Array | null = loaded.clustered?.group ?? null;
@@ -124,18 +156,25 @@ export class TranscriptLayers {
     // A bin of the all-gene pyramid mixes genes and carries none, so it cannot be coloured
     // by gene: colour it by its dominant cell's type until individual transcripts show.
     const kind = loaded.kind ?? job.kind;
-    const colorView = kind === 'bins' && view.transcriptColorBy !== 'cellType'
-      ? { ...view, transcriptColorBy: 'cellType' as const }
-      // Density-grid markers have no cell to take a type from: they take their cluster's colour.
-      : loaded.clustered && view.transcriptColorBy === 'cellType'
-        ? { ...view, transcriptColorBy: 'cluster' as const } : view;
+    const colorView =
+      kind === 'bins' && view.transcriptColorBy !== 'cellType'
+        ? { ...view, transcriptColorBy: 'cellType' as const }
+        : // Density-grid markers have no cell to take a type from: they take their cluster's colour.
+          loaded.clustered && view.transcriptColorBy === 'cellType'
+          ? { ...view, transcriptColorBy: 'cluster' as const }
+          : view;
     // Each entry's cluster: its marker's group, or the gene-tree group its gene is in.
-    const geneCluster = view.transcriptGenes.map((g) =>
-      view.transcriptGeneGroups.find((x) => x.genes.includes(g))?.name ?? g);
-    const clusterOf = (i: number): string | null => (entryGroup && groupNames
-      ? groupNames[entryGroup[i]] ?? null
-      : geneCluster[merged.gene[i]] ?? null);
-    const faces = await this.transcriptColors(dataset, colorView, merged, kind === 'genes' ? clusterOf : undefined);
+    const geneCluster = view.transcriptGenes.map(
+      (g) => view.transcriptGeneGroups.find((x) => x.genes.includes(g))?.name ?? g,
+    );
+    const clusterOf = (i: number): string | null =>
+      entryGroup && groupNames ? (groupNames[entryGroup[i]] ?? null) : (geneCluster[merged.gene[i]] ?? null);
+    const faces = await this.transcriptColors(
+      dataset,
+      colorView,
+      merged,
+      kind === 'genes' ? clusterOf : undefined,
+    );
     const typeColumn = cellTypeColumnFor(dataset, view);
     const types = typeColumn ? await this.lookup.codes(typeColumn).catch(() => null) : null;
     // Nothing is recorded before the last await: a superseded plan that had already keyed the
@@ -145,15 +184,24 @@ export class TranscriptLayers {
     if (ctx.incomplete) this.groups.forgetKey('transcripts');
     else this.groups.setKey('transcripts', planKey);
     const diam = px.map((d) => d / pxPerUnit);
-    this.hover.setDrawn({
-      kind: loaded.kind ?? job.kind,
-      bin: selectionBin ? { size: selectionBin, origin: loaded.clustered?.origin ?? [0, 0] }
-        : (loaded.kind ? loaded.bin : job.bin),
-      merged, radius: diam.map((d) => d / 2),
-      genes: [...view.transcriptGenes], ref: dataset.imageRef ?? null, grid: null,
-      ...(entryGroup && groupNames ? { entryGroup, groupNames } : {}),
-      ...(loaded.clustered ? { groupGenes: loaded.clustered.genes } : {}),
-    }, dataset.micronsPerUnit ?? null);
+    this.hover.setDrawn(
+      {
+        kind: loaded.kind ?? job.kind,
+        bin: selectionBin
+          ? { size: selectionBin, origin: loaded.clustered?.origin ?? [0, 0] }
+          : loaded.kind
+            ? loaded.bin
+            : job.bin,
+        merged,
+        radius: diam.map((d) => d / 2),
+        genes: [...view.transcriptGenes],
+        ref: dataset.imageRef ?? null,
+        grid: null,
+        ...(entryGroup && groupNames ? { entryGroup, groupNames } : {}),
+        ...(loaded.clustered ? { groupGenes: loaded.clustered.genes } : {}),
+      },
+      dataset.micronsPerUnit ?? null,
+    );
     this.hover.setTypes(types);
     const ref = dataset.imageRef;
     const place: Placement = { scale: ref?.scale ?? [1, 1], translate: ref?.translate ?? [0, 0] };
@@ -167,7 +215,10 @@ export class TranscriptLayers {
 
   /** One sized circle per entry, the size saying how many transcripts it stands for. */
   private drawTranscriptCircles(
-    merged: SpatialTranscriptTile, diam: Float32Array, rgba: RGBA[], view: SpatialViewState,
+    merged: SpatialTranscriptTile,
+    diam: Float32Array,
+    rgba: RGBA[],
+    view: SpatialViewState,
     { scale, translate }: Placement,
   ): void {
     const positions = new Float32Array(merged.count * 2);
@@ -191,8 +242,12 @@ export class TranscriptLayers {
   }
 
   private drawTranscriptGlyphs(
-    merged: SpatialTranscriptTile, diam: Float32Array, faces: TranscriptFaces, view: SpatialViewState,
-    { scale, translate }: Placement, pxPerUnit: number,
+    merged: SpatialTranscriptTile,
+    diam: Float32Array,
+    faces: TranscriptFaces,
+    view: SpatialViewState,
+    { scale, translate }: Placement,
+    pxPerUnit: number,
   ): void {
     // Glyphs: each entry becomes its gene's icon polygon, filled through a discrete
     // colormap and outlined dark so small icons stay readable over the tissue. With every
@@ -205,9 +260,7 @@ export class TranscriptLayers {
       : null;
     const outlines = single ? [] : genes.map((_g, slot) => glyphOutline(glyphFor(slot)));
     const radius = diam.map((d) => d / 2);
-    const { coords, offsets } = glyphRings(
-      merged.x, merged.y, radius, (i) => single ?? outlines[merged.gene[i]],
-    );
+    const { coords, offsets } = glyphRings(merged.x, merged.y, radius, (i) => single ?? outlines[merged.gene[i]]);
     const fill = this.groups.viewer!.addShapes(coords, offsets, {
       name: 'transcripts',
       draw: 'fill',
@@ -239,7 +292,9 @@ export class TranscriptLayers {
 
   /** Per-entry colours both as RGBA (points) and as colormap values (glyph shapes). */
   private async transcriptColors(
-    dataset: SpatialDataset, view: SpatialViewState, t: SpatialTranscriptTile,
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    t: SpatialTranscriptTile,
     clusterOf?: (i: number) => string | null,
   ): Promise<TranscriptFaces> {
     let rgb: Rgb[];
@@ -254,8 +309,12 @@ export class TranscriptLayers {
         const colors = resolveCategoryColors(codes.meta);
         codes.meta.categories.forEach((c, k) => cellColor.set(c, colors[k]));
       }
-      const colors = clusterColorMap(view.transcriptGenes, view.transcriptGeneGroups, cellColor,
-        DEFAULT_CATEGORICAL_PALETTE);
+      const colors = clusterColorMap(
+        view.transcriptGenes,
+        view.transcriptGeneGroups,
+        cellColor,
+        DEFAULT_CATEGORICAL_PALETTE,
+      );
       const index = new Map<string, number>();
       const hex: string[] = [];
       const codeFor = (cluster: string) => {
@@ -277,9 +336,12 @@ export class TranscriptLayers {
     } else if (view.transcriptColorBy === 'gene' || view.transcriptColorBy === 'cluster') {
       // All genes: codes are the dataset's gene indices, folded onto the palette.
       const n = view.transcriptAllGenes ? DEFAULT_CATEGORICAL_PALETTE.length : view.transcriptGenes.length;
-      rgb = Array.from({ length: n }, (_g, i) => parseHex(
-        (!view.transcriptAllGenes && view.transcriptGeneColors[view.transcriptGenes[i]])
-        || DEFAULT_CATEGORICAL_PALETTE[i % DEFAULT_CATEGORICAL_PALETTE.length]));
+      rgb = Array.from({ length: n }, (_g, i) =>
+        parseHex(
+          (!view.transcriptAllGenes && view.transcriptGeneColors[view.transcriptGenes[i]]) ||
+            DEFAULT_CATEGORICAL_PALETTE[i % DEFAULT_CATEGORICAL_PALETTE.length],
+        ),
+      );
       codeOf = view.transcriptAllGenes ? (i) => t.gene[i] % n : (i) => t.gene[i];
     } else {
       const name = cellTypeColumnFor(dataset, view);

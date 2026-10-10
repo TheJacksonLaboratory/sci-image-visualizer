@@ -21,17 +21,24 @@ import {
 import { buildTileUrl as osdBuildTileUrl } from '../osd/tile-client';
 
 const DESC: TileDescriptor = {
-  width: 8, height: 8, tileSize: 512, z: 1, channels: 1, levels: [{ res: 0, width: 8, height: 8 }],
+  width: 8,
+  height: 8,
+  tileSize: 512,
+  z: 1,
+  channels: 1,
+  levels: [{ res: 0, width: 8, height: 8 }],
 };
 
 describe('tile-server: URLs', () => {
   it('builds the /tiles/info, /histogram and /export/tiff URLs', () => {
     expect(tilesInfoUrl('a/', 'I')).toBe('a/tiles/info?info=I');
-    expect(nativeHistogramUrl('a/', 'I', { z: 2, channel: 1, bins: 64 }, 7))
-      .toBe('a/histogram?info=I&channel=1&z=2&bins=64&_=7');
+    expect(nativeHistogramUrl('a/', 'I', { z: 2, channel: 1, bins: 64 }, 7)).toBe(
+      'a/histogram?info=I&channel=1&z=2&bins=64&_=7',
+    );
     // The default cache-buster is the per-app-load one.
-    expect(nativeHistogramUrl('a/', 'I', { z: 0, channel: 0, bins: 256 }))
-      .toContain(`&_=${HISTOGRAM_CACHE_BUSTER}`);
+    expect(nativeHistogramUrl('a/', 'I', { z: 0, channel: 0, bins: 256 })).toContain(
+      `&_=${HISTOGRAM_CACHE_BUSTER}`,
+    );
   });
 
   it('sends `channels` only when some, but not all, channels are visible', () => {
@@ -133,8 +140,10 @@ describe('tile-server: pollDescriptor', () => {
   });
 
   it('rejects with an AbortError when aborted mid-request, passing the abort to the transport', async () => {
-    const fetchJson = jest.fn((_u: string, signal?: AbortSignal) =>
-      new Promise((_r, reject) => signal!.addEventListener('abort', () => reject(new Error('cancelled'))))) as unknown as FetchJson;
+    const fetchJson = jest.fn(
+      (_u: string, signal?: AbortSignal) =>
+        new Promise((_r, reject) => signal!.addEventListener('abort', () => reject(new Error('cancelled')))),
+    ) as unknown as FetchJson;
     const ctl = new AbortController();
     const p = pollDescriptor(fetchJson, 'u', { ...opts, signal: ctl.signal });
     ctl.abort();
@@ -173,7 +182,9 @@ describe('tile-server: transports', () => {
     const auth = { getAuthHeaders: () => Promise.resolve({}) };
     globalThis.fetch = jest.fn().mockResolvedValue({ status: 200, json: () => Promise.resolve(DESC) }) as never;
     await expect(fetchJsonWithAuth(auth)('u')).resolves.toEqual({ status: 200, body: DESC });
-    globalThis.fetch = jest.fn().mockResolvedValue({ status: 202, json: () => Promise.reject(new Error('empty')) }) as never;
+    globalThis.fetch = jest
+      .fn()
+      .mockResolvedValue({ status: 202, json: () => Promise.reject(new Error('empty')) }) as never;
     await expect(fetchJsonWithAuth(auth)('u')).resolves.toEqual({ status: 202, body: null });
   });
 
@@ -187,13 +198,17 @@ describe('tile-server: transports', () => {
 
   it('httpFetchJson resolves the response status, including HTTP error statuses', async () => {
     const http = (o: Observable<unknown>) => ({ get: jest.fn().mockReturnValue(o) }) as never;
-    await expect(httpFetchJson(http(of(new HttpResponse({ status: 202, body: null }))))('u'))
-      .resolves.toEqual({ status: 202, body: null });
-    await expect(httpFetchJson(http(throwError(() => new HttpErrorResponse({ status: 500 }))))('u'))
-      .resolves.toEqual({ status: 500, body: null });
+    await expect(httpFetchJson(http(of(new HttpResponse({ status: 202, body: null }))))('u')).resolves.toEqual({
+      status: 202,
+      body: null,
+    });
+    await expect(
+      httpFetchJson(http(throwError(() => new HttpErrorResponse({ status: 500 }))))('u'),
+    ).resolves.toEqual({ status: 500, body: null });
     // No response at all (status 0) is a transport failure.
-    await expect(httpFetchJson(http(throwError(() => new HttpErrorResponse({ status: 0 }))))('u'))
-      .rejects.toBeInstanceOf(HttpErrorResponse);
+    await expect(
+      httpFetchJson(http(throwError(() => new HttpErrorResponse({ status: 0 }))))('u'),
+    ).rejects.toBeInstanceOf(HttpErrorResponse);
   });
 
   it('httpFetchJson cancels the request on abort and rejects with an AbortError', async () => {
@@ -210,7 +225,13 @@ describe('tile-server: transports', () => {
 
 describe('tile-server: nativeHistogram', () => {
   const WIRE = {
-    bitDepth: 16, rangeMin: 96, rangeMax: 150, observedMin: 96, observedMax: 150, binWidth: 0.5, counts: [4, 0, 8],
+    bitDepth: 16,
+    rangeMin: 96,
+    rangeMax: 150,
+    observedMin: 96,
+    observedMax: 150,
+    binWidth: 0.5,
+    counts: [4, 0, 8],
   };
 
   it('maps HistogramInfo to native bin edges, from the cache-busted URL', async () => {
@@ -223,7 +244,8 @@ describe('tile-server: nativeHistogram', () => {
   });
 
   it('answers null while the server is caching (202) or has no counts', async () => {
-    const fetchJson = jest.fn()
+    const fetchJson = jest
+      .fn()
       .mockResolvedValueOnce({ status: 202, body: null })
       .mockResolvedValueOnce({ status: 200, body: {} }) as unknown as FetchJson;
     await expect(nativeHistogram(fetchJson, 'a/', 'I', { z: 0, channel: 0, bins: 3 })).resolves.toBeNull();

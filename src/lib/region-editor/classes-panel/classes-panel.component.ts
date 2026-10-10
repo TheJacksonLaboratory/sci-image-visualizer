@@ -1,6 +1,4 @@
-import {
-  ChangeDetectionStrategy, Component, EventEmitter, Input, OnChanges, Output,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, EventEmitter, Input, OnChanges, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ButtonModule } from 'primeng/button';
 import { TooltipModule } from 'primeng/tooltip';

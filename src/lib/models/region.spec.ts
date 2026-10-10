@@ -115,7 +115,11 @@ describe('hydrateBounds', () => {
 
     expect(bounds).toBeInstanceOf(Polygon);
     expect(bounds.npoints).toBe(3);
-    expect(bounds.coordinates).toEqual([[0, 0], [4, 0], [4, 6]]);
+    expect(bounds.coordinates).toEqual([
+      [0, 0],
+      [4, 0],
+      [4, 6],
+    ]);
     expect(bounds.closed).toBe(true);
   });
 

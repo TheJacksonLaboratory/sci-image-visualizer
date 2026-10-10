@@ -57,7 +57,10 @@ describe('RegionEditorComponent — edits commit undoably (RT-1 / RT-18)', () =>
   function rect(): Region {
     const r = new Region();
     const b = new Rectangle();
-    b.x = 10; b.y = 20; b.width = 300; b.height = 700;
+    b.x = 10;
+    b.y = 20;
+    b.width = 300;
+    b.height = 700;
     r.bounds = b;
     r.label = 'Box';
     r.color = '#123456';
@@ -105,8 +108,17 @@ describe('RegionEditorComponent — edits commit undoably (RT-1 / RT-18)', () =>
     // The editor's template with the real table and form controls; its other children stay unknown elements.
     TestBed.overrideComponent(RegionEditorComponent, {
       set: {
-        imports: [CommonModule, FormsModule, RegionTableComponent, TableModule, DropdownModule, InputTextModule,
-          RadioButtonModule, SelectButtonModule, CheckboxModule],
+        imports: [
+          CommonModule,
+          FormsModule,
+          RegionTableComponent,
+          TableModule,
+          DropdownModule,
+          InputTextModule,
+          RadioButtonModule,
+          SelectButtonModule,
+          CheckboxModule,
+        ],
         schemas: [NO_ERRORS_SCHEMA],
       },
     });
@@ -198,7 +210,7 @@ describe('RegionEditorComponent — edits commit undoably (RT-1 / RT-18)', () =>
     plain.bounds = Object.assign(new Rectangle(), { x: 0, y: 0, width: 5, height: 5 });
     seed(plain);
     expect(editor['regions'][0].color).toBe('#00ffff'); // the editor shows the default
-    expect(live().color).toBeUndefined();           // the stored region is untouched
+    expect(live().color).toBeUndefined(); // the stored region is untouched
     expect(store.canUndo()).toBe(false);
   });
 

@@ -1,12 +1,15 @@
 import { Injectable } from '@angular/core';
 import { getOrtWasmBase } from './ort-runtime-config';
 
-import type { ICellSegmenter, CellSegmentation, CellSegmentProgress } from '../../contracts/cell-segmenter.contract';
+import type {
+  ICellSegmenter,
+  CellSegmentation,
+  CellSegmentProgress,
+} from '../../contracts/cell-segmenter.contract';
 import type { Cellpose } from 'cellpose-js';
 
 /** Hosted cellpose-SAM ONNX (CPSAM, fp16). Override via {@link setModelUrl}. */
-const DEFAULT_MODEL_URL =
-  'https://huggingface.co/jax-image-tools/cellpose-sam-onnx/resolve/main/cpsam_fp16.onnx';
+const DEFAULT_MODEL_URL = 'https://huggingface.co/jax-image-tools/cellpose-sam-onnx/resolve/main/cpsam_fp16.onnx';
 
 /**
  * Default in-library {@link ICellSegmenter} backed by cellpose-js (WebGPU/WASM
@@ -69,9 +72,10 @@ export class CellposeSegmenterService implements ICellSegmenter {
         // cellpose-js runs inference in its worker (these fire between tiles) and
         // averaging/dynamics on the main thread; surface both so the toast shows
         // real progress instead of looking stuck.
-        onTileProgress: (done, total) => progress?.onStatus?.(
-          done < total ? `Running inference (tile ${done}/${total})…` : 'Computing flow dynamics…',
-        ),
+        onTileProgress: (done, total) =>
+          progress?.onStatus?.(
+            done < total ? `Running inference (tile ${done}/${total})…` : 'Computing flow dynamics…',
+          ),
       },
     );
     return { labels: out.masks, width: out.width, height: out.height, count: out.count };
@@ -115,9 +119,11 @@ export class CellposeSegmenterService implements ICellSegmenter {
       this.loading = load;
       // A failed load is not cached: the next call retries (a network blip or a
       // WebGPU init failure must not need a page reload).
-      load.catch(() => undefined).finally(() => {
-        if (this.loading === load) this.loading = null;
-      });
+      load
+        .catch(() => undefined)
+        .finally(() => {
+          if (this.loading === load) this.loading = null;
+        });
     }
     return this.loading.finally(() => {
       if (onProgress) this.progressListeners.delete(onProgress);

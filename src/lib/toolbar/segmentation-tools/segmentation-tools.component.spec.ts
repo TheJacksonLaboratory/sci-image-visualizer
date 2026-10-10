@@ -22,7 +22,9 @@ function contributedTool(): ToolbarToolContribution {
 
 describe('SegmentationToolsComponent — model menus', () => {
   let tools: SegmentationToolsComponent;
-  beforeEach(() => { tools = new SegmentationToolsComponent(); });
+  beforeEach(() => {
+    tools = new SegmentationToolsComponent();
+  });
 
   it('carries each SAM model description on its menu item as `tooltip`', () => {
     tools.samModels = [{ id: 'microsam-vit-t-lm', label: 'micro-sam ViT-T' }];
@@ -36,7 +38,7 @@ describe('SegmentationToolsComponent — model menus', () => {
     expect(tools['samMenuItems'][0].icon).toBe('pi pi-check');
   });
 
-  it('builds a contributed tool\'s menu from the tool\'s own model info', () => {
+  it("builds a contributed tool's menu from the tool's own model info", () => {
     // Contributed tools describe their own checkpoints: this library ships no
     // copy for models it does not know about, so the description must come off
     // the contribution rather than out of MODEL_INFO.
@@ -82,7 +84,7 @@ describe('SegmentationToolsComponent — model info accessibility', () => {
     expect(out).not.toMatch(/[<>]/);
   });
 
-  it('builds each info button\'s accessible name with the menu, stripped of markup', () => {
+  it("builds each info button's accessible name with the menu, stripped of markup", () => {
     const c = new SegmentationToolsComponent();
     c.contributedTools = [contributedTool()];
     c.samModels = [{ id: 'some-unregistered-model', label: 'Unknown' }];

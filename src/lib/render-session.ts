@@ -84,8 +84,10 @@ export class ImageRenderSession {
     host.prepare(info);
     this.running = true;
     const smallCount = info.smallUrls?.length ?? 0;
-    const small = host.isHeatmap() && smallCount > 0 && smallCount === urls.length
-      ? { ...info, urls: info.smallUrls as string[] } : null;
+    const small =
+      host.isHeatmap() && smallCount > 0 && smallCount === urls.length
+        ? { ...info, urls: info.smallUrls as string[] }
+        : null;
     let overlayReleased = false;
     const releaseOverlay = () => {
       if (overlayReleased) return;
@@ -108,7 +110,8 @@ export class ImageRenderSession {
           if (!task.isCurrent()) return null;
           // Guard against a newer click reaching us mid-render.
           if (phaseInfo.fileName !== loaded.filename) return null;
-          return viz.plot(host.plotDivName, loaded, phaseInfo, screenHeight, host.plotType(), inPlace)
+          return viz
+            .plot(host.plotDivName, loaded, phaseInfo, screenHeight, host.plotType(), inPlace)
             .then((drawn) => {
               // A backend that cannot draw (no plot target, no WebGPU, no tile descriptor)
               // resolves false: a failed phase, so the retry/failure paths run.
@@ -138,14 +141,21 @@ export class ImageRenderSession {
       sharpenFailed: (err: unknown) => {
         if (!task.isCurrent()) return;
         // The small tier stays on screen as the fallback.
-        host.alert('warn', 'Preview not sharpened', `The full-resolution preview did not load (${errorMessage(err)}). `
-          + 'The low-resolution preview is still shown. Try clicking the image again.');
+        host.alert(
+          'warn',
+          'Preview not sharpened',
+          `The full-resolution preview did not load (${errorMessage(err)}). ` +
+            'The low-resolution preview is still shown. Try clicking the image again.',
+        );
         settle();
       },
       renderFailed: (err: unknown) => {
         if (!task.isCurrent()) return;
-        host.alert('error', 'Could not draw the image',
-          `${info.fileName ?? 'The image'}: ${errorMessage(err)}. Try opening it again.`);
+        host.alert(
+          'error',
+          'Could not draw the image',
+          `${info.fileName ?? 'The image'}: ${errorMessage(err)}. Try opening it again.`,
+        );
       },
     }).render(info, small);
   }
@@ -165,8 +175,14 @@ export class ImageRenderSession {
     const host = this.host;
     const task = this.supersede.next();
     const info: IImageInfo = {
-      isGrayscale: false, trueImageSize: [0, 0], urls: [], isStack: false, showStack: false,
-      scaleRatio: true, fileName: `spatial:${dataset.id}`, imageMeta: [],
+      isGrayscale: false,
+      trueImageSize: [0, 0],
+      urls: [],
+      isStack: false,
+      showStack: false,
+      scaleRatio: true,
+      fileName: `spatial:${dataset.id}`,
+      imageMeta: [],
     };
     const height = document.getElementById(host.plotDivName)?.offsetHeight || 500;
     let failure: unknown = null;
@@ -185,7 +201,11 @@ export class ImageRenderSession {
       const e = failure as { message?: string };
       // An image-less dataset has no tissue image to fall back on, so say so rather than
       // leave an empty canvas that looks finished.
-      host.alert('error', 'Could not draw the dataset', `${dataset.name ?? dataset.id}: ${e?.message ?? String(failure)}.`);
+      host.alert(
+        'error',
+        'Could not draw the dataset',
+        `${dataset.name ?? dataset.id}: ${e?.message ?? String(failure)}.`,
+      );
     }
     host.setImageLoading(false);
     host.detectChanges();

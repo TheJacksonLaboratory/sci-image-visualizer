@@ -40,7 +40,15 @@ describe('region-clone', () => {
     expect(polygonsEqual(a, makePolygon([0, 4, 4, 0], [0, 0, 4, 4]))).toBe(true);
     expect(polygonsEqual(a, makePolygon([0, 4, 4, 0], [0, 0, 4, 4], { closed: false }))).toBe(false);
     expect(polygonsEqual(a, makePolygon([0, 4, 4, 1], [0, 0, 4, 4]))).toBe(false);
-    const holed = makePolygon([0, 4, 4, 0], [0, 0, 4, 4], { holes: [[[1, 1], [2, 1], [2, 2]]] });
+    const holed = makePolygon([0, 4, 4, 0], [0, 0, 4, 4], {
+      holes: [
+        [
+          [1, 1],
+          [2, 1],
+          [2, 2],
+        ],
+      ],
+    });
     expect(polygonsEqual(a, holed)).toBe(false);
   });
 

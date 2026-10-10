@@ -7,7 +7,10 @@ import { ClassColorEdit, RegionColorDialogComponent } from './region-color-dialo
 describe('RegionColorDialogComponent', () => {
   let fixture: ComponentFixture<RegionColorDialogComponent>;
   let dialog: RegionColorDialogComponent;
-  const seeded: ClassColorEdit[] = [{ label: 'Tumor', color: '#111111' }, { label: '', color: '#222222' }];
+  const seeded: ClassColorEdit[] = [
+    { label: 'Tumor', color: '#111111' },
+    { label: '', color: '#222222' },
+  ];
 
   beforeEach(async () => {
     // jsdom can't parse PrimeNG's component stylesheets; drop just that noise.
@@ -15,8 +18,9 @@ describe('RegionColorDialogComponent', () => {
     jest.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
       if (!String(args[0]).includes('Could not parse CSS stylesheet')) consoleError(...args);
     });
-    await TestBed.configureTestingModule({ imports: [VisualizationModule, NoopAnimationsModule] })
-      .compileComponents();
+    await TestBed.configureTestingModule({
+      imports: [VisualizationModule, NoopAnimationsModule],
+    }).compileComponents();
     fixture = TestBed.createComponent(RegionColorDialogComponent);
     dialog = fixture.componentInstance;
     fixture.componentRef.setInput('visible', true);
@@ -25,7 +29,10 @@ describe('RegionColorDialogComponent', () => {
     fixture.detectChanges();
   });
 
-  afterEach(() => { fixture.destroy(); jest.restoreAllMocks(); });
+  afterEach(() => {
+    fixture.destroy();
+    jest.restoreAllMocks();
+  });
 
   it('lists one picker per class, unclassified last as labelled', () => {
     const text = document.querySelector('.p-dialog-content')?.textContent ?? '';
@@ -40,7 +47,10 @@ describe('RegionColorDialogComponent', () => {
     dialog.apply.subscribe(applied);
     dialog['setColor'](0, '#abcdef');
     (document.querySelectorAll('.p-dialog-footer button')[1] as HTMLButtonElement).click();
-    expect(applied).toHaveBeenCalledWith([{ label: 'Tumor', color: '#abcdef' }, { label: '', color: '#222222' }]);
+    expect(applied).toHaveBeenCalledWith([
+      { label: 'Tumor', color: '#abcdef' },
+      { label: '', color: '#222222' },
+    ]);
     expect(seeded[0].color).toBe('#111111');
   });
 });

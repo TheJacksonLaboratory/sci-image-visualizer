@@ -146,9 +146,11 @@ export class EmbeddingComputeCoordinator {
 
   /** Why the option is absent, when a dataset is past the threshold. */
   get tooLargeNote(): string {
-    return `t-SNE is not offered here for ${this.observationCount.toLocaleString()} observations — it is `
-      + `quadratic, so it would take roughly ${this.estimateLabel} in the browser. `
-      + 'Compute it offline and serve it with the dataset.';
+    return (
+      `t-SNE is not offered here for ${this.observationCount.toLocaleString()} observations — it is ` +
+      `quadratic, so it would take roughly ${this.estimateLabel} in the browser. ` +
+      'Compute it offline and serve it with the dataset.'
+    );
   }
 
   /**
@@ -163,7 +165,9 @@ export class EmbeddingComputeCoordinator {
    *   abandoned, failed (see {@link state}), or already running.
    */
   async start(
-    meta: SpatialEmbeddingMeta, embeddings: readonly SpatialEmbeddingMeta[], getEmbedding: EmbeddingSource,
+    meta: SpatialEmbeddingMeta,
+    embeddings: readonly SpatialEmbeddingMeta[],
+    getEmbedding: EmbeddingSource,
   ): Promise<SpatialEmbedding | null> {
     if (this.running) return null;
     this.patch({ ...IDLE });
@@ -253,7 +257,8 @@ export class EmbeddingComputeCoordinator {
  * three components instead of two for the same request.
  */
 export async function loadPcaScores(
-  embeddings: readonly SpatialEmbeddingMeta[], getEmbedding: EmbeddingSource,
+  embeddings: readonly SpatialEmbeddingMeta[],
+  getEmbedding: EmbeddingSource,
 ): Promise<{ scores: Float32Array; nObs: number; nDims: number } | null> {
   const candidates = embeddings
     .filter((e) => /pca/i.test(e.label ?? e.name) && !e.name.startsWith('local:'))

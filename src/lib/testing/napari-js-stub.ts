@@ -104,7 +104,11 @@ class StubLayerList<L = unknown> implements Iterable<L> {
 
 /** Mirrors napari-js's `worldViewport` (io/pyramid): the world rect a camera shows. */
 export function worldViewport(
-  centerX: number, centerY: number, zoom: number, vw: number, vh: number,
+  centerX: number,
+  centerY: number,
+  zoom: number,
+  vw: number,
+  vh: number,
 ): { x: number; y: number; width: number; height: number } {
   const hw = vw / 2 / Math.max(zoom, 1e-9);
   const hh = vh / 2 / Math.max(zoom, 1e-9);
@@ -416,12 +420,7 @@ export function projectPoints(
   screen.fill(NaN);
   depth.fill(NaN);
   for (let i = 0; i < n; i++) {
-    const one = projectPoint(
-      mvp,
-      [positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]],
-      vw,
-      vh,
-    );
+    const one = projectPoint(mvp, [positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]], vw, vh);
     if (!one.visible) continue;
     screen[i * 2] = one.x;
     screen[i * 2 + 1] = one.y;
@@ -531,10 +530,10 @@ export class ScreenIndex {
     opts?: { radiusAt?: (i: number) => number; pickable?: (i: number) => boolean },
   ): number {
     const pickable = opts?.pickable;
-    return nearestProjectedIndex(
-      this.projected.screen, x, y, radius, this.projected.depth ?? null,
-      { ...opts, pickable: (i) => this.indexedMask[i] === 1 && (!pickable || pickable(i)) },
-    );
+    return nearestProjectedIndex(this.projected.screen, x, y, radius, this.projected.depth ?? null, {
+      ...opts,
+      pickable: (i) => this.indexedMask[i] === 1 && (!pickable || pickable(i)),
+    });
   }
 }
 
@@ -560,7 +559,9 @@ export const WHEEL_DELTA_CLAMP = 24;
  * blend.
  */
 export function colormapFromLut(
-  name: string, lut: ReadonlyArray<readonly [number, number, number]>, _maxValue = 255,
+  name: string,
+  lut: ReadonlyArray<readonly [number, number, number]>,
+  _maxValue = 255,
 ): Colormap {
   if (lut.length < 2) throw new Error(`colormapFromLut("${name}") needs at least two LUT entries.`);
   return new Colormap(name, lut);
@@ -659,13 +660,7 @@ export interface VolumeChannel {
 }
 
 export interface VolumeHost {
-  addVolume(
-    data: Uint8Array,
-    width: number,
-    height: number,
-    depth: number,
-    opts?: unknown,
-  ): VolumeLayer;
+  addVolume(data: Uint8Array, width: number, height: number, depth: number, opts?: unknown): VolumeLayer;
   readonly layers: { clear(): void };
   requestRender(): void;
 }
@@ -780,11 +775,7 @@ export class Viewer {
     return false;
   }
 
-  constructor(options: {
-    canvas: HTMLCanvasElement;
-    clickZoomFactor?: number;
-    fit3d?: Fit3D;
-  }) {
+  constructor(options: { canvas: HTMLCanvasElement; clickZoomFactor?: number; fit3d?: Fit3D }) {
     this.fit3dPolicy = options.fit3d ?? 'always';
     this.options = options;
   }
@@ -858,9 +849,15 @@ export class Viewer {
     return layer;
   }
   addAxes(width = 1, height = 1, depth = 1): AxesLayer {
-    return this.mount(
-      { visible: true, tickCount: 5, boundingBox: true, voxelSize: [1, 1, 1], width, height, depth },
-    );
+    return this.mount({
+      visible: true,
+      tickCount: 5,
+      boundingBox: true,
+      voxelSize: [1, 1, 1],
+      width,
+      height,
+      depth,
+    });
   }
   addSurface(
     _vertices?: Float32Array,
@@ -949,9 +946,15 @@ export class Viewer {
     positions?: Float32Array,
     values?: Float32Array,
     opts?: {
-      colormap?: unknown; contrastLimits?: [number, number]; size?: number;
-      opacity?: number; name?: string; visible?: boolean;
-      alphas?: Float32Array; sizes?: Float32Array; fit?: 'always' | 'once' | 'never';
+      colormap?: unknown;
+      contrastLimits?: [number, number];
+      size?: number;
+      opacity?: number;
+      name?: string;
+      visible?: boolean;
+      alphas?: Float32Array;
+      sizes?: Float32Array;
+      fit?: 'always' | 'once' | 'never';
     },
   ): Points3DLayer {
     const o = opts ?? {};
@@ -1024,10 +1027,7 @@ export class Viewer {
     const rect = this.options.canvas.getBoundingClientRect();
     const [cx, cy] = this.camera.center;
     const { zoom } = this.camera;
-    return [
-      rect.left + rect.width / 2 + (worldX - cx) * zoom,
-      rect.top + rect.height / 2 + (worldY - cy) * zoom,
-    ];
+    return [rect.left + rect.width / 2 + (worldX - cx) * zoom, rect.top + rect.height / 2 + (worldY - cy) * zoom];
   }
   async readDisplayedPixels(): Promise<{
     width: number;

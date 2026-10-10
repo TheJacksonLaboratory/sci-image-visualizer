@@ -5,7 +5,11 @@ import { Region, Rectangle, Polygon } from '../../models/region';
 import { RegionStore } from '../../store/region-store.service';
 
 import {
-  hitHandle, nearestEdge, nearestVertex, regionContains, regionsInRect,
+  hitHandle,
+  nearestEdge,
+  nearestVertex,
+  regionContains,
+  regionsInRect,
 } from '../../region-overlay/region-geometry';
 
 import { DragBox, NapariRegionSvgRenderer } from './region-overlay/region-svg-renderer';
@@ -519,9 +523,9 @@ export class NapariRegionOverlay implements IRegionOverlay {
 
   /** Rebuild the screen-space overlay only: the selected regions' handles and the draft. */
   private renderOverlay(): void {
-    this.renderer.renderOverlay(
-      this.regionsVisible ? this.store.getRegions() : [], this.selected,
-      { rect: this.draftRect, path: this.draftPath },
-    );
+    this.renderer.renderOverlay(this.regionsVisible ? this.store.getRegions() : [], this.selected, {
+      rect: this.draftRect,
+      path: this.draftPath,
+    });
   }
 }

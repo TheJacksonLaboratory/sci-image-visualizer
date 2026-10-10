@@ -5,10 +5,17 @@ import { Message } from 'primeng/api';
 import { IImageInfo } from '../contracts/image.contract';
 import { PlotType, PlotTypeId } from '../contracts/plot-type';
 import {
-  PLOT_MODE_CONTEXT, PLOT_MODE_SESSION, PlotModeContext, PlotModeTools, PlotTypeContribution,
+  PLOT_MODE_CONTEXT,
+  PLOT_MODE_SESSION,
+  PlotModeContext,
+  PlotModeTools,
+  PlotTypeContribution,
 } from '../contracts/plot-type-contribution.contract';
 import {
-  ToolDialogContext, ToolbarContribution, ToolbarDialogToolContribution, dialogToolContributions,
+  ToolDialogContext,
+  ToolbarContribution,
+  ToolbarDialogToolContribution,
+  dialogToolContributions,
 } from '../contracts/toolbar-tool.contract';
 import { IVisualizer } from '../contracts/visualizer.contract';
 import { ActivePlotMode, PlotModeController } from './plot-mode-controller';
@@ -171,8 +178,10 @@ export class ContributionHost {
     if (!contribution || this.viewer.renderedType() !== contribution.descriptor.baseType) return;
     const ctx = this.context();
     if (!ctx) {
-      console.error(`[visualizer] plot-type contribution '${contribution.descriptor.type}': the backend `
-        + 'on screen provides no viewport to draw over — falling back.');
+      console.error(
+        `[visualizer] plot-type contribution '${contribution.descriptor.type}': the backend ` +
+          'on screen provides no viewport to draw over — falling back.',
+      );
       this.fallBackFromPlotMode(contribution);
       return;
     }
@@ -249,7 +258,8 @@ export class ContributionHost {
       this.viewer.notify({
         severity: 'warn',
         summary: `${contribution.descriptor.productionLabel ?? contribution.descriptor.label} is unavailable`,
-        detail: 'The plot mode could not start, so the plain image is shown instead. See the browser console for details.',
+        detail:
+          'The plot mode could not start, so the plain image is shown instead. See the browser console for details.',
       });
       this.detectChangesSafely();
     });
@@ -282,15 +292,20 @@ export class ContributionHost {
    * {@link TOOL_DIALOG_ATTACH_FRAMES} it is mounted anyway, with a warning, rather than
    * leaving an empty dialog. A throwing `mount()` fails the session like a failed start.
    */
-  private mountToolDialogBody(tool: ToolbarDialogToolContribution, active: ActivePlotMode,
-                              host: HTMLElement, frames: number): void {
+  private mountToolDialogBody(
+    tool: ToolbarDialogToolContribution,
+    active: ActivePlotMode,
+    host: HTMLElement,
+    frames: number,
+  ): void {
     this.toolDialogFrame = null;
     // The session ended (or was replaced) while waiting: nothing to mount into.
     if (this.toolDialogs.current !== active || this.toolDialog?.host !== host) return;
     if (!host.isConnected) {
       if (frames < TOOL_DIALOG_ATTACH_FRAMES) {
-        this.toolDialogFrame = requestAnimationFrame(
-          () => this.mountToolDialogBody(tool, active, host, frames + 1));
+        this.toolDialogFrame = requestAnimationFrame(() =>
+          this.mountToolDialogBody(tool, active, host, frames + 1),
+        );
         return;
       }
       console.warn(`[visualizer] dialog tool '${tool.id}': the dialog body never attached; mounting it detached.`);

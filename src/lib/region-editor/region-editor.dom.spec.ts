@@ -50,7 +50,9 @@ describe('RegionEditorComponent (DOM)', () => {
   }
 
   const texts = (sel: string) => Array.from(el.querySelectorAll(sel)).map((n) => (n.textContent ?? '').trim());
-  const render = () => { fixture.detectChanges(); };
+  const render = () => {
+    fixture.detectChanges();
+  };
 
   beforeEach(async () => {
     const consoleError = console.error;
@@ -115,14 +117,26 @@ describe('RegionEditorComponent (DOM)', () => {
   });
 
   it('renders the toolbar actions, enabled by the region set', () => {
-    const icons = Array.from(el.querySelectorAll('.region-toolbar p-button'))
-      .map((b) => b.getAttribute('icon') ?? b.getAttribute('label') ?? '');
+    const icons = Array.from(el.querySelectorAll('.region-toolbar p-button')).map(
+      (b) => b.getAttribute('icon') ?? b.getAttribute('label') ?? '',
+    );
     expect(icons).toEqual([
-      'pi pi-tag', 'pi pi-upload', 'pi pi-download', 'pi pi-save', '', 'x512',
-      'pi pi-check-square', 'pi pi-tags', 'pi pi-palette', 'pi pi-trash', 'pi pi-times-circle', 'pi pi-question',
+      'pi pi-tag',
+      'pi pi-upload',
+      'pi pi-download',
+      'pi pi-save',
+      '',
+      'x512',
+      'pi pi-check-square',
+      'pi pi-tags',
+      'pi pi-palette',
+      'pi pi-trash',
+      'pi pi-times-circle',
+      'pi pi-question',
     ]);
-    const disabled = Array.from(el.querySelectorAll('.region-toolbar p-button button'))
-      .map((b) => (b as HTMLButtonElement).disabled);
+    const disabled = Array.from(el.querySelectorAll('.region-toolbar p-button button')).map(
+      (b) => (b as HTMLButtonElement).disabled,
+    );
     // Selection-dependent actions (tags, palette, trash) start disabled.
     expect(disabled).toEqual([false, false, false, false, false, false, false, true, true, true, false, false]);
   });
@@ -187,8 +201,9 @@ describe('RegionEditorComponent (DOM)', () => {
     // The dialogs are appended to <body>.
     const headers = Array.from(document.querySelectorAll('.p-dialog-title')).map((n) => n.textContent?.trim());
     expect(headers).toEqual(expect.arrayContaining(['Save Regions As', 'Save Mask', 'Export Regions']));
-    const values = Array.from(document.querySelectorAll('.p-dialog input[type=text]'))
-      .map((i) => (i as HTMLInputElement).value);
+    const values = Array.from(document.querySelectorAll('.p-dialog input[type=text]')).map(
+      (i) => (i as HTMLInputElement).value,
+    );
     expect(values).toEqual(expect.arrayContaining(['slide.geojson', 'slide_mask.png']));
   });
 });

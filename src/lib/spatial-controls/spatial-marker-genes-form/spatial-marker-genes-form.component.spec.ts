@@ -2,7 +2,12 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 
 import { SpatialMarkerGenesFormComponent } from './spatial-marker-genes-form.component';
 import {
-  SpatialControlsFake, TILED_DATASET, bindInputs, fakeSpatialControls, fire, shallowPanel,
+  SpatialControlsFake,
+  TILED_DATASET,
+  bindInputs,
+  fakeSpatialControls,
+  fire,
+  shallowPanel,
 } from '../../testing/spatial-panel-testing';
 
 describe('SpatialMarkerGenesFormComponent', () => {
@@ -30,19 +35,29 @@ describe('SpatialMarkerGenesFormComponent', () => {
   });
 
   it("adds each cluster's marker genes as a gene group, each gene once", async () => {
-    const scan = markerGenes(jest.fn(async () => ({
-      column: 'curated_cell_type',
-      groups: [
-        { name: 'T cell', cells: 10, genes: [
-          { name: 'CD3E', score: 2, pctIn: 0.8, pctOut: 0.1 },
-          { name: 'SHARED', score: 0.5, pctIn: 0.4, pctOut: 0.2 },
-        ] },
-        { name: 'Tumour', cells: 20, genes: [
-          { name: 'KRT5', score: 3, pctIn: 0.9, pctOut: 0.1 },
-          { name: 'SHARED', score: 1.5, pctIn: 0.6, pctOut: 0.2 },
-        ] },
-      ],
-    })));
+    const scan = markerGenes(
+      jest.fn(async () => ({
+        column: 'curated_cell_type',
+        groups: [
+          {
+            name: 'T cell',
+            cells: 10,
+            genes: [
+              { name: 'CD3E', score: 2, pctIn: 0.8, pctOut: 0.1 },
+              { name: 'SHARED', score: 0.5, pctIn: 0.4, pctOut: 0.2 },
+            ],
+          },
+          {
+            name: 'Tumour',
+            cells: 20,
+            genes: [
+              { name: 'KRT5', score: 3, pctIn: 0.9, pctOut: 0.1 },
+              { name: 'SHARED', score: 1.5, pctIn: 0.6, pctOut: 0.2 },
+            ],
+          },
+        ],
+      })),
+    );
     fake.view$.next({ ...fake.view$.value, cellTypeColumn: 'curated_cell_type', transcriptGenes: ['EPCAM'] });
     await build();
     expect(component['markerColumn']).toBe('curated_cell_type'); // the cells' grouping
@@ -63,12 +78,21 @@ describe('SpatialMarkerGenesFormComponent', () => {
 
   it('applies the clusters picked when asked, even if the form changes while the scan runs', async () => {
     let finish!: () => void;
-    markerGenes(jest.fn(() => new Promise((resolve) => {
-      finish = () => resolve({ column: 'graphclust', groups: [
-        { name: 'A', cells: 5, genes: [{ name: 'GA', score: 1, pctIn: 0.5, pctOut: 0.1 }] },
-        { name: 'B', cells: 5, genes: [{ name: 'GB', score: 1, pctIn: 0.5, pctOut: 0.1 }] },
-      ] });
-    })));
+    markerGenes(
+      jest.fn(
+        () =>
+          new Promise((resolve) => {
+            finish = () =>
+              resolve({
+                column: 'graphclust',
+                groups: [
+                  { name: 'A', cells: 5, genes: [{ name: 'GA', score: 1, pctIn: 0.5, pctOut: 0.1 }] },
+                  { name: 'B', cells: 5, genes: [{ name: 'GB', score: 1, pctIn: 0.5, pctOut: 0.1 }] },
+                ],
+              });
+          }),
+      ),
+    );
     await build();
     component['onMarkerColumn']('graphclust');
     component['markerClusters'] = ['A'];
@@ -80,9 +104,15 @@ describe('SpatialMarkerGenesFormComponent', () => {
   });
 
   it('adds only the clusters picked, and says so when none pass', async () => {
-    markerGenes(jest.fn(async () => ({
-      column: 'graphclust', groups: [{ name: 'A', cells: 5, genes: [] }, { name: 'B', cells: 5, genes: [] }],
-    })));
+    markerGenes(
+      jest.fn(async () => ({
+        column: 'graphclust',
+        groups: [
+          { name: 'A', cells: 5, genes: [] },
+          { name: 'B', cells: 5, genes: [] },
+        ],
+      })),
+    );
     await build();
     component['onMarkerColumn']('graphclust');
     component['markerClusters'] = ['A'];
@@ -94,7 +124,11 @@ describe('SpatialMarkerGenesFormComponent', () => {
   });
 
   it('reports a failed scan, and keeps the column picked across a re-open', async () => {
-    markerGenes(jest.fn(async () => { throw new Error('matrix unavailable'); }));
+    markerGenes(
+      jest.fn(async () => {
+        throw new Error('matrix unavailable');
+      }),
+    );
     await build();
     component['onMarkerColumn']('graphclust');
     await component['addMarkerGenes']();

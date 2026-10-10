@@ -15,7 +15,14 @@ import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../contracts/display-typ
 import { COLORMAP_OPTIONS } from '../plot.utilities';
 import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selection';
 import {
-  accessorOf, afterLabel, click, fire, one, panelNamed, rowLabelled, shallowPanel,
+  accessorOf,
+  afterLabel,
+  click,
+  fire,
+  one,
+  panelNamed,
+  rowLabelled,
+  shallowPanel,
 } from '../testing/spatial-panel-testing';
 
 /**
@@ -34,11 +41,17 @@ const dataset: SpatialDataset = {
   columns: [
     { kind: 'categorical', name: 'graphclust', categories: ['A', 'B'], colors: ['#f00', '#00f'] },
     {
-      kind: 'categorical', name: 'kmeans_2', categories: ['k0', 'k1'], section: 'Clusters',
+      kind: 'categorical',
+      name: 'kmeans_2',
+      categories: ['k0', 'k1'],
+      section: 'Clusters',
       family: { id: 'kmeans', label: 'K-means', variant: 'k = 2' },
     },
     {
-      kind: 'categorical', name: 'kmeans_3', categories: ['k0', 'k1', 'k2'], section: 'Clusters',
+      kind: 'categorical',
+      name: 'kmeans_3',
+      categories: ['k0', 'k1', 'k2'],
+      section: 'Clusters',
       family: { id: 'kmeans', label: 'K-means', variant: 'k = 3' },
     },
     { kind: 'continuous', name: 'total_counts', unit: 'counts' },
@@ -48,17 +61,24 @@ const dataset: SpatialDataset = {
   volume: { width: 2, height: 2, depth: 2, voxelSize: [1, 1, 1] },
   polygonTiles: {
     bounds: [0, 0, 100, 100],
-    sets: [{ name: 'nucleus', label: 'Nuclei' }, { name: 'cell', label: 'Cells' }],
+    sets: [
+      { name: 'nucleus', label: 'Nuclei' },
+      { name: 'cell', label: 'Cells' },
+    ],
     defaultSet: 'cell',
     levels: [{ tileSize: 250 }],
   },
   transcriptTiles: {
-    bounds: [0, 0, 100, 100], geneCount: 3, hasZ: true,
+    bounds: [0, 0, 100, 100],
+    geneCount: 3,
+    hasZ: true,
     levels: [{ tileSize: 250, aggregated: false }],
   },
   density: { gridSize: [10, 10], origin: [0, 0], rows: 10, cols: 10 },
   transcriptBins: {
-    bounds: [0, 0, 100, 100], origin: [0, 0], count: 1000,
+    bounds: [0, 0, 100, 100],
+    origin: [0, 0],
+    count: 1000,
     levels: [{ binSize: 2, tileSize: 128 }],
   },
 } as SpatialDataset;
@@ -107,24 +127,34 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
   async function build(opts: { is3d?: boolean } = {}) {
     TestBed.resetTestingModule();
     // The dialog and every panel it is made of, each shallow (PrimeNG unrendered).
-    for (const leaf of [SpatialKeyComponent, SpatialGroupsPanelComponent, SpatialGeneTreeComponent,
-      SpatialMarkerGenesFormComponent]) shallowPanel(leaf);
+    for (const leaf of [
+      SpatialKeyComponent,
+      SpatialGroupsPanelComponent,
+      SpatialGeneTreeComponent,
+      SpatialMarkerGenesFormComponent,
+    ])
+      shallowPanel(leaf);
     shallowPanel(SpatialCellsPanelComponent, [SpatialGroupsPanelComponent]);
     shallowPanel(SpatialObservationsPanelComponent, [SpatialKeyComponent]);
     shallowPanel(SpatialTranscriptsPanelComponent, [SpatialGeneTreeComponent, SpatialMarkerGenesFormComponent]);
-    shallowPanel(SpatialControlsComponent,
-      [SpatialCellsPanelComponent, SpatialTranscriptsPanelComponent, SpatialObservationsPanelComponent]);
+    shallowPanel(SpatialControlsComponent, [
+      SpatialCellsPanelComponent,
+      SpatialTranscriptsPanelComponent,
+      SpatialObservationsPanelComponent,
+    ]);
     await TestBed.configureTestingModule({
       imports: [SpatialControlsComponent],
-      providers: [{
-        provide: VISUALIZER,
-        useValue: {
-          getSpatialControls: () => controls,
-          getColormap: () => of({ label: 'Viridis', data: { value: 'Viridis' } }),
-          getReverseScale: () => of(false),
-          getColormapOptions: () => COLORMAP_OPTIONS,
+      providers: [
+        {
+          provide: VISUALIZER,
+          useValue: {
+            getSpatialControls: () => controls,
+            getColormap: () => of({ label: 'Viridis', data: { value: 'Viridis' } }),
+            getReverseScale: () => of(false),
+            getColormapOptions: () => COLORMAP_OPTIONS,
+          },
         },
-      }],
+      ],
     }).compileComponents();
     fixture = TestBed.createComponent(SpatialControlsComponent);
     component = fixture.componentInstance;
@@ -145,15 +175,17 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       getViewState$: jest.fn(() => view$),
       viewState: jest.fn(() => view$.value),
       setViewState: jest.fn((partial) => view$.next({ ...view$.value, ...partial })),
-      colorByColumn: jest.fn((name: string) =>
-        view$.next({ ...view$.value, colorBy: { kind: 'column', name } })),
+      colorByColumn: jest.fn((name: string) => view$.next({ ...view$.value, colorBy: { kind: 'column', name } })),
       colorByFeature: jest.fn((name: string) =>
-        view$.next({ ...view$.value, colorBy: { kind: 'feature', name } })),
+        view$.next({ ...view$.value, colorBy: { kind: 'feature', name } }),
+      ),
       clearColorBy: jest.fn(() => view$.next({ ...view$.value, colorBy: null })),
       searchFeatures: jest.fn(async () => ['Ttr']),
       categoryColors: jest.fn(async () => ['#ff0000', '#0000ff']),
       categoricalView: jest.fn(async () => ({
-        name: 'graphclust', categories: ['A', 'B'], colors: ['#f00', '#00f'],
+        name: 'graphclust',
+        categories: ['A', 'B'],
+        colors: ['#f00', '#00f'],
         codes: new Uint16Array([0, 0, 0, 1]),
       })),
       categoricalColumns: jest.fn(() => ['graphclust', 'kmeans_2', 'kmeans_3']),
@@ -172,7 +204,13 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       markerGenes: jest.fn(async () => ({
         column: 'graphclust',
         groups: [
-          { name: 'A', genes: [{ name: 'Ttr', score: 3 }, { name: 'Mbp', score: 1 }] },
+          {
+            name: 'A',
+            genes: [
+              { name: 'Ttr', score: 3 },
+              { name: 'Mbp', score: 1 },
+            ],
+          },
           { name: 'B', genes: [{ name: 'Mbp', score: 2 }] },
         ],
       })),
@@ -228,8 +266,9 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       // The shared gene picker: the dropdown filters through it.
       emit(gene, 'onFilter', { filter: 'sn' });
       await settle();
-      expect((gene as unknown as { options: { value: string }[] }).options.map((o) => o.value))
-        .toEqual(['Snap25']);
+      expect((gene as unknown as { options: { value: string }[] }).options.map((o) => o.value)).toEqual([
+        'Snap25',
+      ]);
       expect(one(panelNamed(root, 'Cells'), '.sc-colorbar')).toBeTruthy();
 
       pick(one(rowLabelled(panelNamed(root, 'Cells'), 'Cell Color'), 'p-dropdown'), 'single');
@@ -309,9 +348,15 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       // The tree: one row per gene, each with its own eye.
       let tree = one(panelNamed(root, 'Transcripts'), '.sc-gene-tree');
       const leaves = tree.querySelectorAll('.sc-gene-leaf');
-      expect(Array.from(leaves).map((l) => l.querySelector('.sc-group-label')?.textContent)).toEqual(['Ttr', 'Mbp']);
+      expect(Array.from(leaves).map((l) => l.querySelector('.sc-group-label')?.textContent)).toEqual([
+        'Ttr',
+        'Mbp',
+      ]);
       // The renderer's per-gene count in view, and 0 for a gene it reported none of.
-      expect(Array.from(leaves).map((l) => l.querySelector('.sc-gene-count')?.textContent?.trim())).toEqual(['12', '0']);
+      expect(Array.from(leaves).map((l) => l.querySelector('.sc-gene-count')?.textContent?.trim())).toEqual([
+        '12',
+        '0',
+      ]);
       click(one(leaves[0] as HTMLElement, '.sc-eye'));
       expect(lastWrite()).toEqual({ transcriptHiddenGenes: ['Ttr'] });
       await settle();
@@ -320,8 +365,9 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       expect(lastWrite()).toEqual({ transcriptHiddenGenes: ['Ttr', 'Mbp'] });
 
       // '±' — every gene, then back.
-      const all = Array.from(panelNamed(root, 'Transcripts').querySelectorAll('.sc-row-picker .sc-icon-btn'))
-        .find((b) => b.textContent?.trim() === '±')!;
+      const all = Array.from(panelNamed(root, 'Transcripts').querySelectorAll('.sc-row-picker .sc-icon-btn')).find(
+        (b) => b.textContent?.trim() === '±',
+      )!;
       click(all);
       expect(lastWrite()).toEqual({ transcriptAllGenes: true });
 
@@ -353,7 +399,10 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       await settle();
       expect(controls.markerGenes).toHaveBeenCalledWith('graphclust', 3);
       expect(lastWrite()).toEqual({
-        transcriptGeneGroups: [{ name: 'A', genes: ['Ttr'] }, { name: 'B', genes: ['Mbp'] }],
+        transcriptGeneGroups: [
+          { name: 'A', genes: ['Ttr'] },
+          { name: 'B', genes: ['Mbp'] },
+        ],
         transcriptGenes: ['Ttr', 'Mbp'],
         transcriptColorBy: 'cluster',
         transcriptMode: 'circles',
@@ -371,8 +420,11 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
 
       // The estimate meter, and its budget behind "Edit Max".
       expect(one(panelNamed(root, 'Transcripts'), '.sc-meter-fill').classList.contains('over')).toBe(true);
-      click(Array.from(panelNamed(root, 'Transcripts').querySelectorAll('.sc-small-btn'))
-        .find((b) => b.textContent?.includes('Edit Max'))!);
+      click(
+        Array.from(panelNamed(root, 'Transcripts').querySelectorAll('.sc-small-btn')).find((b) =>
+          b.textContent?.includes('Edit Max'),
+        )!,
+      );
       fixture.detectChanges();
       pick(one(rowLabelled(panelNamed(root, 'Transcripts'), 'Max markers'), 'p-dropdown'), 200_000);
       expect(lastWrite()).toEqual({ transcriptBudget: 200_000 });
@@ -401,7 +453,9 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       expect(lastWrite()).toEqual({ densityOpacity: 0.6 });
       pick(one(opacity, 'p-inputNumber'), 30);
       expect(lastWrite()).toEqual({ densityOpacity: 0.3 });
-      emit(afterLabel(panelNamed(root, 'Transcripts'), 'Density map bin size', 'p-slider'), 'onChange', { value: 2 });
+      emit(afterLabel(panelNamed(root, 'Transcripts'), 'Density map bin size', 'p-slider'), 'onChange', {
+        value: 2,
+      });
       expect(lastWrite()).toEqual({ densityBin: 40 });
 
       // The threshold window: derived from the renderer's stats until set.
@@ -412,8 +466,11 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       expect(lastWrite()).toEqual({ densityRange: [0.2, 0.4] });
       pick(range.querySelectorAll('p-inputNumber')[1], 0.9);
       expect(lastWrite()).toEqual({ densityRange: [0.2, 0.9] });
-      click(Array.from(panelNamed(root, 'Transcripts').querySelectorAll('.sc-small-btn'))
-        .find((b) => b.textContent?.trim() === 'Auto')!);
+      click(
+        Array.from(panelNamed(root, 'Transcripts').querySelectorAll('.sc-small-btn')).find(
+          (b) => b.textContent?.trim() === 'Auto',
+        )!,
+      );
       expect(lastWrite()).toEqual({ densityRange: null });
 
       const cmap = one(panelNamed(root, 'Transcripts'), 'p-treeSelect');
@@ -453,8 +510,9 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       pick(one(panelNamed(root, 'Observations'), 'p-dropdown[inputId=sc-gene]'), 'Mbp');
       expect(controls.colorByFeature).toHaveBeenCalledWith('Mbp');
       await fixture.whenStable();
-      expect(accessorOf(fixture, one(panelNamed(root, 'Observations'), 'p-dropdown[inputId=sc-column]')).value)
-        .toBeNull();
+      expect(
+        accessorOf(fixture, one(panelNamed(root, 'Observations'), 'p-dropdown[inputId=sc-column]')).value,
+      ).toBeNull();
       pick(one(panelNamed(root, 'Observations'), 'p-dropdown[inputId=sc-gene]'), null);
       expect(controls.clearColorBy).toHaveBeenCalled();
 
@@ -474,8 +532,9 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       click(rows[1]);
       await settle();
       expect(controls.selectCategory).toHaveBeenCalledWith('graphclust', 1);
-      expect(panelNamed(root, 'Observations').querySelectorAll('.sc-legend-btn')[1].classList.contains('selected'))
-        .toBe(true);
+      expect(
+        panelNamed(root, 'Observations').querySelectorAll('.sc-legend-btn')[1].classList.contains('selected'),
+      ).toBe(true);
       click(panelNamed(root, 'Observations').querySelectorAll('.sc-legend-btn')[1]);
       await settle();
       expect(controls.clearSelection).toHaveBeenCalled();
@@ -558,7 +617,8 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       expect(lastWrite()).toEqual({ densityVolume: true });
       fixture.detectChanges();
       const smoothing = Array.from(root.querySelectorAll<HTMLElement>('.sc-row'))
-        .filter((r) => r.querySelector('.sc-lbl')?.textContent?.trim() === 'Smoothing').pop()!;
+        .filter((r) => r.querySelector('.sc-lbl')?.textContent?.trim() === 'Smoothing')
+        .pop()!;
       emit(one(smoothing, 'p-slider'), 'onChange', { value: 3 });
       expect(lastWrite()).toEqual({ densitySmoothing: 3 });
       expect(root.textContent).toContain('Density estimate over all cells');

@@ -11,7 +11,6 @@ import { Datum, Font, Shape, ShapeLabel, ShapeLine, XAxisName, YAxisName } from 
  * `path` shapes — anything else throws).
  */
 export class ShapeSelection implements Shape {
-
   /** Stable, unique identity carried alongside the shape so it round-trips
    *  through Plotly's relayout untouched. Plotly preserves unknown
    *  properties on shape objects, so this survives the same way `legend`

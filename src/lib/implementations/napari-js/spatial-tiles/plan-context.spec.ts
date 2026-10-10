@@ -5,7 +5,9 @@ describe('LoadTracker', () => {
     const reports: string[][] = [];
     const loads = new LoadTracker((l) => reports.push(l));
     let release!: () => void;
-    const gate = new Promise<void>((r) => { release = r; });
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
     const first = loads.track('Cells', gate);
     const second = loads.track('Cells', Promise.resolve());
     await second;
@@ -32,7 +34,9 @@ describe('PlanContext', () => {
     const loads = new LoadTracker(() => undefined);
     const mine = new PlanContext(() => false, loads);
     const other = new PlanContext(() => false, loads);
-    const got = await mine.fetchAll([1, 2, 3], (k) => (k === 2 ? Promise.reject(new Error('503')) : Promise.resolve(k)));
+    const got = await mine.fetchAll([1, 2, 3], (k) =>
+      k === 2 ? Promise.reject(new Error('503')) : Promise.resolve(k),
+    );
     expect(got).toEqual([1, 3]);
     expect(mine.incomplete).toBe(true);
     expect(other.incomplete).toBe(false);

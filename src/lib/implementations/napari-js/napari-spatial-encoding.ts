@@ -5,8 +5,13 @@ import { Rgb } from '../../contracts/colormap-lut';
 import { CategoricalColumn, NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
 import { SpatialViewState } from '../../contracts/display-types';
 import {
-  contrastWindow, encodeContinuous, parseHex, resolveCategoryColors, MISSING_COLOR,
-  SPATIAL_3D_MAX_CATEGORIES, type RGBA,
+  contrastWindow,
+  encodeContinuous,
+  parseHex,
+  resolveCategoryColors,
+  MISSING_COLOR,
+  SPATIAL_3D_MAX_CATEGORIES,
+  type RGBA,
 } from '../../spatial/spatial-encoding';
 import { SpatialSelectionMask, maskToIndices } from '../../spatial/spatial-selection';
 
@@ -51,9 +56,12 @@ export const SPATIAL_3D_BASE_SIZE = 3;
 export const SPATIAL_NEUTRAL_COLOR: [number, number, number, number] = [0.35, 0.72, 0.95, 0.9];
 /** {@link SPATIAL_NEUTRAL_COLOR} as a hex colour (alpha dropped), for the encoders and the
  *  density-volume tint. */
-export const SPATIAL_NEUTRAL_HEX = `#${SPATIAL_NEUTRAL_COLOR
-  .slice(0, 3)
-  .map((c) => Math.round(c * 255).toString(16).padStart(2, '0'))
+export const SPATIAL_NEUTRAL_HEX = `#${SPATIAL_NEUTRAL_COLOR.slice(0, 3)
+  .map((c) =>
+    Math.round(c * 255)
+      .toString(16)
+      .padStart(2, '0'),
+  )
   .join('')}`;
 
 /**
@@ -120,16 +128,13 @@ export function encodeSpatial3dCategorical(codes: Uint16Array, colors: string[])
   // ceiling is 95 categories rather than the LUT's 96 distinguishable blocks.
   if (colors.length > SPATIAL_3D_MAX_CATEGORIES) {
     console.warn(
-      `[napari-js] ${colors.length} categories exceeds the ${SPATIAL_3D_MAX_CATEGORIES} the 3D `
-      + "layer's 256-entry LUT can hold distinctly; drawing flat instead of with wrong colours",
+      `[napari-js] ${colors.length} categories exceeds the ${SPATIAL_3D_MAX_CATEGORIES} the 3D ` +
+        "layer's 256-entry LUT can hold distinctly; drawing flat instead of with wrong colours",
     );
     return null;
   }
   const k = colors.length + 1;
-  const palette: Rgb[] = [
-    MISSING_COLOR,
-    ...colors.map(parseHex),
-  ];
+  const palette: Rgb[] = [MISSING_COLOR, ...colors.map(parseHex)];
   const lut: Rgb[] = new Array(LUT_SIZE);
   for (let j = 0; j < LUT_SIZE; j++) {
     lut[j] = palette[Math.min(k - 1, Math.floor((j * k) / LUT_SIZE))];
@@ -148,7 +153,10 @@ export function encodeSpatial3dCategorical(codes: Uint16Array, colors: string[])
 /** Continuous values → `lut` over a percentile-clipped window (log1p first when the view's log
  *  scale is on), for the 3D cloud's scalar channel. */
 export function encodeSpatial3dContinuous(
-  source: Float32Array, view: SpatialViewState, lut: Rgb[], windows: ContrastWindowCache,
+  source: Float32Array,
+  view: SpatialViewState,
+  lut: Rgb[],
+  windows: ContrastWindowCache,
 ): Spatial3dEncoding {
   const [lo, hi] = view.percentileClip ?? [0.01, 0.99];
   const log = !!view.logScale;
@@ -170,14 +178,22 @@ export function encodeSpatial3dContinuous(
 /** Continuous values → per-point RGBA through `lut` and a clipped window (log scale per the
  *  view), for the 2D markers. */
 export function encodeSpatialContinuous(
-  values: Float32Array, view: SpatialViewState, lut: Rgb[], windows: ContrastWindowCache,
+  values: Float32Array,
+  view: SpatialViewState,
+  lut: Rgb[],
+  windows: ContrastWindowCache,
   muted: Uint8Array | null = null,
 ): Float32Array {
   const [lo, hi] = view.percentileClip ?? [0.01, 0.99];
   // The window is taken on the raw values (encodeContinuous applies the log itself).
   const [min, max] = windows.get(values, lo, hi, false, () => contrastWindow(values, lo, hi));
   return encodeContinuous(values, {
-    lut, min, max, log: view.logScale, opacity: view.opacity, muted,
+    lut,
+    min,
+    max,
+    log: view.logScale,
+    opacity: view.opacity,
+    muted,
   });
 }
 
@@ -220,7 +236,10 @@ export function totalDensityGroup(selection: SpatialSelectionMask): DensityGroup
  * there is one, so "select a region, check the box" answers which clusters live there.
  */
 export function rankDensityGroups(
-  columnName: string, column: CategoricalColumn, count: number, selection: SpatialSelectionMask,
+  columnName: string,
+  column: CategoricalColumn,
+  count: number,
+  selection: SpatialSelectionMask,
 ): DensityGroup[] {
   const inSelection = selection.count > 0 ? selection.mask : null;
   const colors = resolveCategoryColors(column.meta);

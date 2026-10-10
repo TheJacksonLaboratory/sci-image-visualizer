@@ -10,12 +10,12 @@
 
 ## Decisions
 
-| # | Decision | Date | Rationale |
-|---|---|---|---|
-| D1 | **Data reaches the library through a server endpoint + host port adapter** (option A of three; the alternatives were a host-supplied in-memory object, or reading SpatialData Zarr in the browser). | 2026-09-01 | The store is Zarr v3 + AnnData conventions + GeoParquet — three parsers — and its matrix is observation-major, so reading one gene means scanning every row. A server pre-transposes once; a browser cannot. Option A also keeps the package's runtime dependencies unchanged. The port is narrow enough that a browser Zarr reader can implement it later without a breaking change. |
-| D2 | The feature matrix is stored and served **gene-major**. | 2026-09-01 | Turns a per-gene fetch into a contiguous ranged read at `geneIndex · N · 4`, independent of gene count, and keeps the matrix out of server memory. This is the concrete payoff of D1. |
-| D3 | `SpatialDataHttpService` ships **in** the library but **unbound by default** (`@Injectable()` with no `providedIn`). | 2026-09-01 | Every host would otherwise write the same fetch/decode code, and shipping it documents the wire format executably. Leaving it out of the DI graph keeps the port inversion honest — mirrors `CellposeSegmenterService`. |
-| D4 | The spatial plot types are **hidden from the selector until a dataset is published** on `SPATIAL_DATA_PORT`, via a declarative `requiresSpatialData` flag on `PlotTypeDescriptor`. | 2026-09-01 | Same shape of gate as `requiresStack` (no volume without a z-stack) and `requiresGrayscale` (no contour on RGB): the mode has nothing to draw without observations. Declarative, so the filter stays one line and a host that never provides the port never sees the mode. |
+| #   | Decision                                                                                                                                                                                            | Date       | Rationale                                                                                                                                                                                                                                                                                                                                                                             |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | **Data reaches the library through a server endpoint + host port adapter** (option A of three; the alternatives were a host-supplied in-memory object, or reading SpatialData Zarr in the browser). | 2026-09-01 | The store is Zarr v3 + AnnData conventions + GeoParquet — three parsers — and its matrix is observation-major, so reading one gene means scanning every row. A server pre-transposes once; a browser cannot. Option A also keeps the package's runtime dependencies unchanged. The port is narrow enough that a browser Zarr reader can implement it later without a breaking change. |
+| D2  | The feature matrix is stored and served **gene-major**.                                                                                                                                             | 2026-09-01 | Turns a per-gene fetch into a contiguous ranged read at `geneIndex · N · 4`, independent of gene count, and keeps the matrix out of server memory. This is the concrete payoff of D1.                                                                                                                                                                                                 |
+| D3  | `SpatialDataHttpService` ships **in** the library but **unbound by default** (`@Injectable()` with no `providedIn`).                                                                                | 2026-09-01 | Every host would otherwise write the same fetch/decode code, and shipping it documents the wire format executably. Leaving it out of the DI graph keeps the port inversion honest — mirrors `CellposeSegmenterService`.                                                                                                                                                               |
+| D4  | The spatial plot types are **hidden from the selector until a dataset is published** on `SPATIAL_DATA_PORT`, via a declarative `requiresSpatialData` flag on `PlotTypeDescriptor`.                  | 2026-09-01 | Same shape of gate as `requiresStack` (no volume without a z-stack) and `requiresGrayscale` (no contour on RGB): the mode has nothing to draw without observations. Declarative, so the filter stays one line and a host that never provides the port never sees the mode.                                                                                                            |
 
 Add a plot mode to `@jax-data-science/sci-image-visualizer` that visualizes spatial-omics
 datasets — per-cell / per-spot measurements laid over the tissue image they came from — with
@@ -30,20 +30,20 @@ violins go through **Plotly**.
 
 Read from source, not assumed:
 
-| Piece | Today | File |
-|---|---|---|
-| Data intake | Images only: URLs + `imageMeta` + `tiled`/`isStack` | `contracts/image.contract.ts:44` |
-| Plot registry | `PlotType` enum + `PLOT_TYPE_DESCRIPTORS` (label, icon, 2d/3d, source, gates) | `contracts/plot-type.ts` |
-| Data-source tag | `PlotDataSource = 'image' \| 'regions'` — **declarative only, zero consumers** | `contracts/plot-type.ts:46` |
-| Backend routing | Per plot type: OSD → Plotly → napari-js, with fallback chains | `routing-visualizer.service.ts:119` |
-| Regions | Shared store, GeoJSON model, class colours, undo/redo, stack-aware | `store/region-store.service.ts` |
-| ROI drawing on napari-js | SVG overlay: rect/polygon/freehand, vertex+Bézier edit, rubber-band select | `implementations/napari-js/napari-region-overlay.ts` |
-| Display state | Colormap/LUT, per-channel window + gamma, invert, reverse — shared across backends | `store/visualizer-store.service.ts`, `contracts/channel-histogram-api.contract.ts` |
-| Plotly builders | Pure `TraceBuildInput → traces[]` registry, image-matrix-shaped | `implementations/plotly/plotly-trace-builders.ts:29` |
-| Plotly bundle | `plotly.js-dist-min` — **already contains `violin`, `box`, `histogram`, `scattergl`** | verified in `node_modules` |
-| napari-js | `Image`, `Points`, `Points3D`, `Labels`, `Volume`, `Surface`, `Axes` layers | `napari-js@0.11.1` `dist/index.d.ts` |
+| Piece                    | Today                                                                                 | File                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Data intake              | Images only: URLs + `imageMeta` + `tiled`/`isStack`                                   | `contracts/image.contract.ts:44`                                                   |
+| Plot registry            | `PlotType` enum + `PLOT_TYPE_DESCRIPTORS` (label, icon, 2d/3d, source, gates)         | `contracts/plot-type.ts`                                                           |
+| Data-source tag          | `PlotDataSource = 'image' \| 'regions'` — **declarative only, zero consumers**        | `contracts/plot-type.ts:46`                                                        |
+| Backend routing          | Per plot type: OSD → Plotly → napari-js, with fallback chains                         | `routing-visualizer.service.ts:119`                                                |
+| Regions                  | Shared store, GeoJSON model, class colours, undo/redo, stack-aware                    | `store/region-store.service.ts`                                                    |
+| ROI drawing on napari-js | SVG overlay: rect/polygon/freehand, vertex+Bézier edit, rubber-band select            | `implementations/napari-js/napari-region-overlay.ts`                               |
+| Display state            | Colormap/LUT, per-channel window + gamma, invert, reverse — shared across backends    | `store/visualizer-store.service.ts`, `contracts/channel-histogram-api.contract.ts` |
+| Plotly builders          | Pure `TraceBuildInput → traces[]` registry, image-matrix-shaped                       | `implementations/plotly/plotly-trace-builders.ts:29`                               |
+| Plotly bundle            | `plotly.js-dist-min` — **already contains `violin`, `box`, `histogram`, `scattergl`** | verified in `node_modules`                                                         |
+| napari-js                | `Image`, `Points`, `Points3D`, `Labels`, `Volume`, `Surface`, `Axes` layers           | `napari-js@0.11.1` `dist/index.d.ts`                                               |
 
-**The one-line conclusion:** this feature is 70% a *data-plane* problem and 30% a rendering
+**The one-line conclusion:** this feature is 70% a _data-plane_ problem and 30% a rendering
 problem. The renderers are largely in place; there is no contract in the library that can
 express "N observations with categorical and continuous columns".
 
@@ -51,21 +51,21 @@ express "N observations with categorical and continuous columns".
 
 ## 2. What we take from the references
 
-**CosMx Analysis Scratch Space** — the *encoding* rules. Grey low-alpha background points;
+**CosMx Analysis Scratch Space** — the _encoding_ rules. Grey low-alpha background points;
 categorical cell type on a stable palette (collapse to 5–10 major types when there are many);
 continuous expression on viridis/magma, log-scaled, outliers percentile-capped; highlight-vs-mute
 (bold border + full alpha on the cells of interest, everything else muted); **subsample background
 to ~5% while keeping 100% of the highlighted category**; faceted gallery, one category per panel
 over a shared background; scale bar sized to ~¼ of the axis. These are controls, not polish.
 
-**Spatial-Live** — the *model*. A variable's type picks its visual layer:
+**Spatial-Live** — the _model_. A variable's type picks its visual layer:
 categorical → coloured dots, numerical → extruded columns whose **height ∝ value**, gene →
 Gaussian-smoothed heat bitmap, GeoJSON → shapes. Input is a PNG defining the pixel coordinate
 space plus a CSV with `id:spot`, `pos:pixel_x`, `pos:pixel_y` and prefixed variable columns
 (`char:`, `num:`, `gene:`). Its thesis — **stack layers in one space instead of switching between
 2D views** — is the reason this proposal is one layered mode rather than six plot types.
 
-**SpatialData / Visium** — the *shape of real input*: images (`hires`/`lowres`, `cyx`), spot
+**SpatialData / Visium** — the _shape of real input_: images (`hires`/`lowres`, `cyx`), spot
 **shapes** (circles with a radius), an AnnData **table** (`obs` = per-spot annotations, `var` =
 genes), and named **coordinate systems with transformations** tying them together. Our contract
 mirrors that split rather than inventing a new one.
@@ -74,8 +74,8 @@ mirrors that split rather than inventing a new one.
 `https://s3.embl.de/spatialdata/spatialdata-sandbox/visium_spatialdata_0.7.1.zip`.
 Visium v1 geometry: 55 µm spots, 100 µm pitch, 4,992 spots per capture area — small enough that
 every encoding can be exercised before performance becomes a variable.
-*(The short names on the scverse docs page are not URLs; the real S3 keys carry a
-`_spatialdata_<version>` suffix.)*
+_(The short names on the scverse docs page are not URLs; the real S3 keys carry a
+`_spatialdata_<version>` suffix.)_
 
 ---
 
@@ -96,19 +96,21 @@ export interface SpatialObservations {
   /** Coordinates in the reference image's pixel space. */
   x: Float32Array;
   y: Float32Array;
-  z?: Float32Array;                       // serial sections / true 3D
+  z?: Float32Array; // serial sections / true 3D
   /** Marker radius in image pixels — per-obs, or one value (Visium: 55 µm ÷ mpp). */
   radius?: Float32Array | number;
 }
 
 export interface CategoricalColumn {
-  kind: 'categorical'; name: string;
-  codes: Uint16Array;                     // index into `categories`
+  kind: 'categorical';
+  name: string;
+  codes: Uint16Array; // index into `categories`
   categories: string[];
-  colors?: string[];                      // optional authored palette
+  colors?: string[]; // optional authored palette
 }
 export interface ContinuousColumn {
-  kind: 'continuous'; name: string;
+  kind: 'continuous';
+  name: string;
   values: Float32Array;
   unit?: string;
   /** Hint that this column reads best log-scaled (counts). */
@@ -119,13 +121,13 @@ export type SpatialColumn = CategoricalColumn | ContinuousColumn;
 /** Genes/features are lazy — the full matrix never crosses the wire. */
 export interface FeatureIndex {
   names: string[];
-  getVector(name: string): Promise<Float32Array>;   // length = count
+  getVector(name: string): Promise<Float32Array>; // length = count
 }
 
 /** Cell/spot boundaries as flat rings + offsets (NOT GeoJSON objects at 10^5 scale). */
 export interface SpatialPolygons {
-  coords: Float32Array;                   // x0,y0,x1,y1,…
-  offsets: Uint32Array;                   // ring start indices, length N+1
+  coords: Float32Array; // x0,y0,x1,y1,…
+  offsets: Uint32Array; // ring start indices, length N+1
 }
 
 export interface SpatialDataset {
@@ -138,7 +140,8 @@ export interface SpatialDataset {
   imageRef?: {
     scale: [number, number];
     translate: [number, number];
-    mppX?: number; mppY?: number;
+    mppX?: number;
+    mppY?: number;
   };
 }
 ```
@@ -162,6 +165,7 @@ Plus `PlotDataSource` gains `'spatial'` — free, since nothing consumes it yet.
 
 The thing that makes this more than a picture. One observable set of observation indices,
 peered with `RegionStore`, written by any of:
+
 - a rectangle/lasso drag on the spatial view,
 - **point-in-polygon over the existing `RegionStore` regions** — which means every existing ROI
   tool (rect, polygon, freehand, wand, brush) becomes a spatial-omics selection tool for free,
@@ -178,20 +182,20 @@ viewer on change; spatial omics is inherently multi-layer; and `PlotTypeDescript
 static, so a mode that toggled 2D↔3D internally would fight the contract.
 
 ```ts
-SPATIAL_OMICS     // '2d', source: 'spatial'  — v1
-SPATIAL_OMICS_3D  // '3d', source: 'spatial'  — phase 5, elevation ∝ value
+SPATIAL_OMICS; // '2d', source: 'spatial'  — v1
+SPATIAL_OMICS_3D; // '3d', source: 'spatial'  — phase 5, elevation ∝ value
 ```
 
 Inside the mode, a **layer stack** panel (mirroring the Channels & Histogram pane's shape):
 
-| Layer | Renderer | Data |
-|---|---|---|
-| Tissue image | existing napari-js `ImageLayer` / tiled path | `IImageInfo` (unchanged) |
-| Observations (spots/cells) | napari-js `PointsLayer` | `x`, `y`, `radius`, colour-by column |
-| Boundaries | napari-js **shapes layer (new)** | `SpatialPolygons` |
-| Density | napari-js `ImageLayer` fed a CPU/GPU KDE raster | one feature vector |
-| Columns (3D) | napari-js `Points3D`/**column layer (new)** | numeric column → elevation |
-| ROIs / annotations | existing SVG region overlay | `RegionStore` |
+| Layer                      | Renderer                                        | Data                                 |
+| -------------------------- | ----------------------------------------------- | ------------------------------------ |
+| Tissue image               | existing napari-js `ImageLayer` / tiled path    | `IImageInfo` (unchanged)             |
+| Observations (spots/cells) | napari-js `PointsLayer`                         | `x`, `y`, `radius`, colour-by column |
+| Boundaries                 | napari-js **shapes layer (new)**                | `SpatialPolygons`                    |
+| Density                    | napari-js `ImageLayer` fed a CPU/GPU KDE raster | one feature vector                   |
+| Columns (3D)               | napari-js `Points3D`/**column layer (new)**     | numeric column → elevation           |
+| ROIs / annotations         | existing SVG region overlay                     | `RegionStore`                        |
 
 Colour-by resolves through the existing machinery: categorical → palette (reuse
 `store/class-color.util.ts`), continuous → the existing colormap LUTs + contrast window
@@ -213,14 +217,14 @@ Confirmed missing against the shipped `0.11.1` typings — these are the asks on
 4. **Screen-space size floor for 2D points.** `PointsLayer.size` is in data units (correct for
    55 µm Visium spots) but individual cells vanish when zoomed out; want
    `sizeUnits: 'data' | 'screen'` or a min-screen-diameter clamp.
-5. *(3D mode only)* **A column/extruded-marker layer** for the Spatial-Live elevation look, or an
+5. _(3D mode only)_ **A column/extruded-marker layer** for the Spatial-Live elevation look, or an
    agreed decision to approximate it with elevated 3D points.
 
 6. **`PointsLayer.faceColor` should accept a `Float32Array`.** It currently takes `RGBA[]` — an
    array of 4-element tuples — so per-point colour costs N small arrays that `buildInstanceData()`
    immediately flattens again. Negligible for Visium (~2k), real allocation churn at 10⁵–10⁶.
    `spatial-encoding.ts` already computes a flat `Float32Array` and adapts at the boundary
-   (`toRgbaTuples`), so this ask is purely a deletion on our side. *(Found while building P2.)*
+   (`toRgbaTuples`), so this ask is purely a deletion on our side. _(Found while building P2.)_
 
 Items 1, 3, 4 and 6 are small. Item 2 is the substantial one.
 
@@ -240,7 +244,7 @@ shaped, and wrong for "one value per cell". Plan:
 - Reuse the existing `'2d-chart'` `layoutKind` (already used by intensity profiles).
 - `ISpatialChartsApi` + a dockable panel component, built like `ChannelHistogramComponent`
   (contract-only dependency, injected token, never reaching the concrete visualizer).
-- Selection-aware: charts show *all* vs *selected* as overlaid traces.
+- Selection-aware: charts show _all_ vs _selected_ as overlaid traces.
 
 ---
 
@@ -252,7 +256,7 @@ shaped, and wrong for "one value per cell". Plan:
 2. `PlotType.SPATIAL_OMICS` (2D) descriptor + routing to napari-js in `RoutingVisualizerService`.
    The descriptor carries `requiresSpatialData: true`, so the mode is offered **only while a
    dataset is selected** and disappears (falling back to Image) when one is cleared — the gating
-   mechanism is already in place, so this is a one-line descriptor addition. *(D4)*
+   mechanism is already in place, so this is a one-line descriptor addition. _(D4)_
 3. Tissue image underlay, with observation coordinates registered to it (`imageRef` transform).
 4. Observation points layer: per-point position, radius, colour.
 5. ~~**Colour by categorical column** — stable palette, legend.~~ **Done.**
@@ -266,7 +270,7 @@ shaped, and wrong for "one value per cell". Plan:
    selected obs highlighted, non-selected muted via alpha.~~ **Done.** The drag-rectangle
    case is covered by the existing rectangle ROI tool, so no separate marquee was built.
 10. ~~Linked **histogram** of the active continuous column, selection-aware.~~ **Done** —
-    plus violin and box (Should 14). The histogram overlays *Selected* on the full distribution;
+    plus violin and box (Should 14). The histogram overlays _Selected_ on the full distribution;
     violin/box narrow to the selection and split by a categorical column.
 11. Display controls: ~~point size/scale, global alpha~~ **done**; log scale and outlier clip
     also landed. Background subsample fraction still open (gated on the scale question, Q4).
@@ -320,15 +324,15 @@ shaped, and wrong for "one value per cell". Plan:
 
 Each phase ends green on `npm run typecheck && npm run lint && npm test`.
 
-| Phase | Work | End condition |
-|---|---|---|
-| **P0 — Spike** (~1–2 d) | Hard-code the Visium spots into a `PointsLayer` over the tissue image in the example app. No contracts. | A screenshot of ~3k spots coloured by cluster over mouse brain. Kills or confirms the approach. |
-| **P1 — Data plane** ✅ **done** | `SpatialDataset` contract, `SPATIAL_DATA_PORT`, `SpatialDataHttpService`, `PlotDataSource: 'spatial'`; example-server endpoints, synthetic demo generator, end-to-end smoke check, Python converter for real SpatialData Zarr stores. *(`SelectionStore` moved to P3, where it is actually consumed.)* | ✅ Contracts exported from `src/index.ts`; 45 new unit tests; `smoke-spatial` green; typecheck · lint · test (965) · build all pass. Also landed: the `requiresSpatialData` selector gate (D4). Converter is written but not yet run against a live store. |
-| **P2 — 2D mode** ⏳ **renderer done, host controls not** | ✅ `SPATIAL_OMICS` plot type + descriptor + routing to napari-js; ✅ observation markers over the tissue image with the dataset's data→world affine; ✅ categorical colouring (column palette) and continuous colouring (active colormap, log scale, percentile-clipped window); ✅ gene colouring through the port's lazy vector fetch; ✅ point-size scale + opacity via `VisualizerStore`. ✅ `ISpatialControls` (`getSpatialControls()`) — the host-facing surface for colour-by, view state, feature search and legend colours, implemented on the router because the state is backend-neutral; ✅ end-to-end demo: `make-spatial-demo` now emits a matching tissue-image pyramid with a real (non-identity) `imageRef` affine, and the browser example loads image + dataset together. ✅ `<spatial-controls>` panel: column dropdown, gene typeahead, categorical legend, continuous colour bar, point-size / opacity / log-scale / outlier-clip. ❌ Still to build: hover tooltip, background subsampling. | Renderer + encodings + controls covered by 37 napari, 26 encoding and 9 router specs; `smoke-spatial` checks every spot lands inside the image under the affine. |
-| **P3 — Selection** ✅ **done** | `SpatialSelectionStore` + pure `spatial-selection.ts` (ray-cast point-in-polygon with holes, bbox pre-reject, `imageRef` affine applied); selection from the drawn ROIs and from a legend click; unselected observations muted per the CosMx rule. **No separate marquee** — every existing ROI tool (rect, polygon, freehand, wand, brush) becomes a selection tool. | ✅ Must-have 9. 20 geometry specs, 5 store specs, 7 router specs, 7 panel specs. |
-| **P4 — Linked charts** ✅ **done** | `omics-trace-builders.ts` (pure: histogram / violin / box, kept separate from the image-shaped `plotly-trace-builders`), `<spatial-charts>` panel, `ISpatialControls.continuousValues` / `categoricalView` / `categoricalColumns`. The chart follows whatever the MAP is coloured by, so the two cannot disagree. | ✅ Must-have 10, Should 14. 21 builder specs + 16 panel specs. Violin needed no bundling — `plotly.js-dist-min` already carries it. |
-| **P5 — 3D** | napari-js per-point colour/size in 3D; `SPATIAL_OMICS_3D` with elevation. | Should 18. |
-| **P6 — Scale** | napari-js shapes layer; boundary rendering; point LOD/tiling; validate on a Xenium/CosMx dataset. | Should 16, Might 23. |
+| Phase                                                    | Work                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | End condition                                                                                                                                                                                                                                              |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **P0 — Spike** (~1–2 d)                                  | Hard-code the Visium spots into a `PointsLayer` over the tissue image in the example app. No contracts.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | A screenshot of ~3k spots coloured by cluster over mouse brain. Kills or confirms the approach.                                                                                                                                                            |
+| **P1 — Data plane** ✅ **done**                          | `SpatialDataset` contract, `SPATIAL_DATA_PORT`, `SpatialDataHttpService`, `PlotDataSource: 'spatial'`; example-server endpoints, synthetic demo generator, end-to-end smoke check, Python converter for real SpatialData Zarr stores. _(`SelectionStore` moved to P3, where it is actually consumed.)_                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | ✅ Contracts exported from `src/index.ts`; 45 new unit tests; `smoke-spatial` green; typecheck · lint · test (965) · build all pass. Also landed: the `requiresSpatialData` selector gate (D4). Converter is written but not yet run against a live store. |
+| **P2 — 2D mode** ⏳ **renderer done, host controls not** | ✅ `SPATIAL_OMICS` plot type + descriptor + routing to napari-js; ✅ observation markers over the tissue image with the dataset's data→world affine; ✅ categorical colouring (column palette) and continuous colouring (active colormap, log scale, percentile-clipped window); ✅ gene colouring through the port's lazy vector fetch; ✅ point-size scale + opacity via `VisualizerStore`. ✅ `ISpatialControls` (`getSpatialControls()`) — the host-facing surface for colour-by, view state, feature search and legend colours, implemented on the router because the state is backend-neutral; ✅ end-to-end demo: `make-spatial-demo` now emits a matching tissue-image pyramid with a real (non-identity) `imageRef` affine, and the browser example loads image + dataset together. ✅ `<spatial-controls>` panel: column dropdown, gene typeahead, categorical legend, continuous colour bar, point-size / opacity / log-scale / outlier-clip. ❌ Still to build: hover tooltip, background subsampling. | Renderer + encodings + controls covered by 37 napari, 26 encoding and 9 router specs; `smoke-spatial` checks every spot lands inside the image under the affine.                                                                                           |
+| **P3 — Selection** ✅ **done**                           | `SpatialSelectionStore` + pure `spatial-selection.ts` (ray-cast point-in-polygon with holes, bbox pre-reject, `imageRef` affine applied); selection from the drawn ROIs and from a legend click; unselected observations muted per the CosMx rule. **No separate marquee** — every existing ROI tool (rect, polygon, freehand, wand, brush) becomes a selection tool.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | ✅ Must-have 9. 20 geometry specs, 5 store specs, 7 router specs, 7 panel specs.                                                                                                                                                                           |
+| **P4 — Linked charts** ✅ **done**                       | `omics-trace-builders.ts` (pure: histogram / violin / box, kept separate from the image-shaped `plotly-trace-builders`), `<spatial-charts>` panel, `ISpatialControls.continuousValues` / `categoricalView` / `categoricalColumns`. The chart follows whatever the MAP is coloured by, so the two cannot disagree.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | ✅ Must-have 10, Should 14. 21 builder specs + 16 panel specs. Violin needed no bundling — `plotly.js-dist-min` already carries it.                                                                                                                        |
+| **P5 — 3D**                                              | napari-js per-point colour/size in 3D; `SPATIAL_OMICS_3D` with elevation.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Should 18.                                                                                                                                                                                                                                                 |
+| **P6 — Scale**                                           | napari-js shapes layer; boundary rendering; point LOD/tiling; validate on a Xenium/CosMx dataset.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Should 16, Might 23.                                                                                                                                                                                                                                       |
 
 napari-js work (§3.4 items 1, 3, 4) lands with P2/P3; item 2 with P6. Both repos version
 independently, so each phase pins a napari-js version the way `0.5.0`/`0.11.1` were pinned before.
@@ -337,14 +341,14 @@ independently, so each phase pins a napari-js version the way `0.5.0`/`0.11.1` w
 
 ## 6. Risks
 
-| Risk | Mitigation |
-|---|---|
-| The feature bloats the core bundle for hosts that only view images. | Consider a secondary entry point (`@jax-data-science/sci-image-visualizer/spatial`). See Q15. |
-| Scale: Visium (~3k spots) proves nothing about Xenium (~10⁵ cells) or transcripts (10⁷). | Pick the *second* dataset early (Q4) and treat it as the perf gate, rather than tuning against a dataset that can't fail. |
-| Two-repo coupling — a napari-js API change blocks the library. | Keep v1's napari-js asks small (per-point colour/size, lasso). The shapes layer, the big one, is deferred to P6. |
-| WebGPU unavailability. | **Live gap:** `SPATIAL_OMICS` routes napari-js → OSD → Plotly, and the fallbacks render the tissue image *without* the observation layer — partial, not degraded. Should-have 17 (Plotly `scattergl` spatial mode) is the real fix. |
-| Coordinate-space drift between spots, image and ROIs. | Single `imageRef` transform in the contract; assert against the existing full-resolution world-coordinate convention the napari backend already uses for ndpi alignment. |
-| Categorical palettes diverging from the analysts' R/Python figures. | Accept authored `colors[]` on `CategoricalColumn` so a palette can be passed in rather than re-derived. |
+| Risk                                                                                     | Mitigation                                                                                                                                                                                                                          |
+| ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The feature bloats the core bundle for hosts that only view images.                      | Consider a secondary entry point (`@jax-data-science/sci-image-visualizer/spatial`). See Q15.                                                                                                                                       |
+| Scale: Visium (~3k spots) proves nothing about Xenium (~10⁵ cells) or transcripts (10⁷). | Pick the _second_ dataset early (Q4) and treat it as the perf gate, rather than tuning against a dataset that can't fail.                                                                                                           |
+| Two-repo coupling — a napari-js API change blocks the library.                           | Keep v1's napari-js asks small (per-point colour/size, lasso). The shapes layer, the big one, is deferred to P6.                                                                                                                    |
+| WebGPU unavailability.                                                                   | **Live gap:** `SPATIAL_OMICS` routes napari-js → OSD → Plotly, and the fallbacks render the tissue image _without_ the observation layer — partial, not degraded. Should-have 17 (Plotly `scattergl` spatial mode) is the real fix. |
+| Coordinate-space drift between spots, image and ROIs.                                    | Single `imageRef` transform in the contract; assert against the existing full-resolution world-coordinate convention the napari backend already uses for ndpi alignment.                                                            |
+| Categorical palettes diverging from the analysts' R/Python figures.                      | Accept authored `colors[]` on `CategoricalColumn` so a palette can be passed in rather than re-derived.                                                                                                                             |
 
 ---
 
@@ -353,6 +357,7 @@ independently, so each phase pins a napari-js version the way `0.5.0`/`0.11.1` w
 These change the design, not just the estimate. **Not guessed at — please answer.**
 
 ### A. Data & ingest
+
 1. ~~**Where does the data come from in production?**~~ **Answered (D1):** a server endpoint,
    consumed through `SPATIAL_DATA_PORT`. The bundled example server implements it.
 2. ~~**Do we get to define the wire format?**~~ **Answered (D1):** yes — defined in
@@ -363,6 +368,7 @@ These change the design, not just the estimate. **Not guessed at — please answ
    This single answer decides whether point LOD and the GPU shapes layer are v1 or P6.
 
 ### B. Scope & UX
+
 5. **One layered `SPATIAL_OMICS` mode, or several discrete plot types** in the existing selector?
    (Recommendation: one mode + layer stack, plus a separate `SPATIAL_OMICS_3D` entry.)
 6. Does the mode live inside `<visualizer>` with the current toolbar, or is it a **separate
@@ -372,23 +378,26 @@ These change the design, not just the estimate. **Not guessed at — please answ
    Histogram), or an exported API the host renders wherever it likes?
 
 ### C. napari-js
+
 9. **Do we own napari-js changes in this cycle?** i.e. can we ship a `0.12.x` with new layers, or
    must v1 fit inside `0.11.1`'s existing API?
 10. **"Overlay/ROI support on the napari-js side" — which of these do you mean?**
     (a) bulk GPU rendering of 10⁴–10⁵ cell-boundary polygons, (b) lasso/rectangle selection
-    returning observation indices, (c) something else? *Interactive ROI drawing already exists*
+    returning observation indices, (c) something else? _Interactive ROI drawing already exists_
     via `napari-region-overlay.ts` (rect/polygon/freehand, vertex + Bézier edit, rubber-band
     select), so I read the gap as (a) and (b) — please confirm.
 11. OK to add **per-point colour + per-point size to `Points3DLayer`**, and a screen-space size
     floor to `PointsLayer`? Both are additive and backwards-compatible.
 
 ### D. Plotly
+
 12. **Violin is already in the bundle we ship** (verified). Do you still want a hand-rolled violin
     — e.g. for control over the KDE bandwidth, or half-violins / raincloud layouts Plotly won't do
     — or is the built-in trace acceptable?
 13. Is **two-way brushing** (chart ⇄ space) in v1, or is one-way (space → charts) enough to start?
 
 ### E. Release & fit
+
 14. Should the new plot types ship **default-visible, or test-mode-only** at first? (The
     `productionLabel` field on `PlotTypeDescriptor` is exactly this switch.)
 15. Minor release of this package, or a **secondary entry point** (`/spatial`) so image-only hosts

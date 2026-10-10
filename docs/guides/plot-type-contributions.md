@@ -8,18 +8,16 @@ library behaves exactly as before. A contribution is a plain object, so the
 contributing package needs no Angular compiler and no decorators.
 
 ```ts
-import {
-  PLOT_TYPE_CONTRIBUTIONS, PlotType, PlotTypeContribution,
-} from '@jax-data-science/sci-image-visualizer';
+import { PLOT_TYPE_CONTRIBUTIONS, PlotType, PlotTypeContribution } from '@jax-data-science/sci-image-visualizer';
 
 const myMode: PlotTypeContribution = {
   descriptor: {
-    type: 'my-mode',                  // namespaced; must not clash with a PlotType
-    label: 'Image + my overlay',      // test-mode label
-    productionLabel: 'My overlay',    // omit to make the mode test-only
+    type: 'my-mode', // namespaced; must not clash with a PlotType
+    label: 'Image + my overlay', // test-mode label
+    productionLabel: 'My overlay', // omit to make the mode test-only
     icon: 'pi pi-pencil',
     dimensions: '2d',
-    baseType: PlotType.IMAGE,         // v1: only the OpenSeadragon Image view
+    baseType: PlotType.IMAGE, // v1: only the OpenSeadragon Image view
   },
   activate(ctx) {
     // ctx.visualizer — the public IVisualizer (regions, region overlay, undo…)
@@ -38,13 +36,15 @@ const myMode: PlotTypeContribution = {
     title: 'My overlay',
     mount(host, ctx, session) {
       host.textContent = 'Hello';
-      return () => { host.textContent = ''; };   // teardown
+      return () => {
+        host.textContent = '';
+      }; // teardown
     },
   },
 };
 
 // Host composition root:
-providers: [{ provide: PLOT_TYPE_CONTRIBUTIONS, useValue: myMode, multi: true }]
+providers: [{ provide: PLOT_TYPE_CONTRIBUTIONS, useValue: myMode, multi: true }];
 ```
 
 Selecting the mode plots exactly as its `baseType` would (same backend, toolbar,

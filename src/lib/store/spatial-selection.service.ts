@@ -1,9 +1,7 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable } from 'rxjs';
 
-import {
-  SpatialSelectionMask, emptySelection,
-} from '../spatial/spatial-selection';
+import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selection';
 
 /**
  * The set of currently-selected spatial observations, shared the way

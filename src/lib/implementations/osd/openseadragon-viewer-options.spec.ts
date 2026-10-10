@@ -115,22 +115,36 @@ describe('OpenSeadragonVisualizerService — viewer options', () => {
   /** The options for a single, flat image — straight from the pure builder. */
   const options = (over: Partial<Parameters<typeof buildViewerOptions>[0]> = {}): any =>
     buildViewerOptions({
-      id: 'plotdiv', navigatorVisible: true, smoothing: false, authHeaders: {}, sliceCount: 1, maxSlices: 8,
+      id: 'plotdiv',
+      navigatorVisible: true,
+      smoothing: false,
+      authHeaders: {},
+      sliceCount: 1,
+      maxSlices: 8,
       ...over,
     });
 
-  it('hands the factory the builder\'s options for the image being mounted', () => {
+  it("hands the factory the builder's options for the image being mounted", () => {
     const o = optionsFromPlot();
-    expect(o).toEqual(buildViewerOptions({
-      id: 'plotdiv', navigatorVisible: true, smoothing: false,
-      authHeaders: {}, sliceCount: 1, maxSlices: 0,
-    }));
+    expect(o).toEqual(
+      buildViewerOptions({
+        id: 'plotdiv',
+        navigatorVisible: true,
+        smoothing: false,
+        authHeaders: {},
+        sliceCount: 1,
+        maxSlices: 0,
+      }),
+    );
   });
 
   it('passes the navigator, smoothing and auth through, and sizes the tile cache by the stack', () => {
     const o = options({ navigatorVisible: false, smoothing: true, authHeaders: { Authorization: 'Bearer t' } });
-    expect(o).toMatchObject({ showNavigator: false, imageSmoothingEnabled: true,
-      ajaxHeaders: { Authorization: 'Bearer t' } });
+    expect(o).toMatchObject({
+      showNavigator: false,
+      imageSmoothingEnabled: true,
+      ajaxHeaders: { Authorization: 'Bearer t' },
+    });
     expect(o.maxImageCacheCount).toBe(150); // a single image keeps the lean default
     expect(options({ sliceCount: 5, maxSlices: 8 }).maxImageCacheCount).toBe(600);
     expect(options({ sliceCount: 50, maxSlices: 30 }).maxImageCacheCount).toBe(1200);

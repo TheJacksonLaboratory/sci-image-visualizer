@@ -41,7 +41,9 @@ export function histogram256(counts: number[]): IHistogram {
  * falls back to the full byte range, the channel histogram to its slider bounds.
  */
 export function autoWindowFromHistogram(
-  h: IHistogram, saturation: number, fallback: readonly [number, number],
+  h: IHistogram,
+  saturation: number,
+  fallback: readonly [number, number],
 ): [number, number] {
   const counts = h.counts.slice();
   const n = counts.length;
@@ -56,13 +58,19 @@ export function autoWindowFromHistogram(
   let min = h.bins[0];
   for (let i = 0; i < n; i++) {
     acc += counts[i];
-    if (acc > target) { min = h.bins[i]; break; }
+    if (acc > target) {
+      min = h.bins[i];
+      break;
+    }
   }
   acc = 0;
   let max = h.bins[n - 1];
   for (let i = n - 1; i >= 0; i--) {
     acc += counts[i];
-    if (acc > target) { max = h.bins[i]; break; }
+    if (acc > target) {
+      max = h.bins[i];
+      break;
+    }
   }
   return [min, max];
 }

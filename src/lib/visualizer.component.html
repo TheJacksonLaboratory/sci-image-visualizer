@@ -5,9 +5,17 @@
     <div style="flex: 1; min-width: 16rem">
       <div class="font-bold mb-1">{{ message.summary }}</div>
       <div>{{ segmentation.status || message.detail }}</div>
-      <p-progressBar *ngIf="segmentation.downloading" [value]="segmentation.progress" styleClass="mt-2 sam-progress"></p-progressBar>
-      <p-progressBar *ngIf="segmentation.busy && !segmentation.downloading" mode="indeterminate" styleClass="mt-2"
-                     [style]="{ height: '4px' }"></p-progressBar>
+      <p-progressBar
+        *ngIf="segmentation.downloading"
+        [value]="segmentation.progress"
+        styleClass="mt-2 sam-progress"
+      ></p-progressBar>
+      <p-progressBar
+        *ngIf="segmentation.busy && !segmentation.downloading"
+        mode="indeterminate"
+        styleClass="mt-2"
+        [style]="{ height: '4px' }"
+      ></p-progressBar>
     </div>
   </ng-template>
 </p-toast>
@@ -27,82 +35,99 @@
 
 <!-- Toolbar dock: docked across the top by default; drag the handle to detach
      it into a floating, movable window (frees the top row for the image). -->
-<div class="toolbar-dock" [class.floating]="toolbarFloating"
-     [style.left.px]="toolbarFloating ? toolbarPos.x : null"
-     [style.top.px]="toolbarFloating ? toolbarPos.y : null">
-  <div class="toolbar-drag-handle" [vizFloatingDrag]="toolbarDragOrigin" (vizFloatingDragMove)="toolbarPos = $event"
-       pTooltip="Drag to float the toolbar" tooltipPosition="bottom">
+<div
+  class="toolbar-dock"
+  [class.floating]="toolbarFloating"
+  [style.left.px]="toolbarFloating ? toolbarPos.x : null"
+  [style.top.px]="toolbarFloating ? toolbarPos.y : null"
+>
+  <div
+    class="toolbar-drag-handle"
+    [vizFloatingDrag]="toolbarDragOrigin"
+    (vizFloatingDragMove)="toolbarPos = $event"
+    pTooltip="Drag to float the toolbar"
+    tooltipPosition="bottom"
+  >
     <i class="pi pi-bars"></i>
   </div>
-<plotting-toolbar
-  [imageInfo]="imageInfo"
-  [hasSpatialDataset]="hasSpatialDataset"
-  [plotTypeOptions]="plotTypeMenu"
-  [selectedPlotType]="selectedPlotTypeId"
-  [basePlotType]="basePlotType"
-  [isoRange]="isoRange"
-  [maxIndex]="maxIndex"
-  [zIndex]="zIndex"
-  [isHeatmap]="isHeatmap"
-  [is3dRegions]="isSpatial3dMode"
-  [activeDragMode]="activeDragMode"
-  [activeSurface3dMode]="activeSurface3dMode"
-  [axesVisible]="axesVisible"
-  [wireframeActive]="wireframeActive"
-  [resolutionScale]="resolutionScale"
-  [wandSensitivity]="wandSensitivity"
-  [brushSize]="brushSize"
-  [samModels]="samModels"
-  [samModelId]="samModelId"
-  [contributedTools]="contributedTools"
-  [dialogTools]="dialogTools"
-  [openDialogToolId]="openDialogToolId"
-  (toggleDialogTool)="toggleDialogTool($event)"
-  [toolModelIds]="toolParams.toolModelIds"
-  [vertexEraserRadius]="vertexEraserRadius"
-  [canUndo]="regionActions.canUndo"
-  [canRedo]="regionActions.canRedo"
-  [tools]="toolbarTools"
-  [imageSmoothingEnabled]="imageSmoothingEnabled"
-  (selectPlotType)="onSelectPlotType($event)"
-  (toggleImageSmoothing)="onToggleImageSmoothing()"
-  (addProfileLine)="addProfileLine()"
-  (isoRangeChange)="onIsoRangeChange($event)"
-  (openChannelHistogram)="openChannelHistogram()"
-  (openSpatialControls)="openSpatialControls()"
-  (openRegionEditor)="openRegionEditor()"
-  (selectStackOption)="selectStackOption($event)"
-  (zScrub)="onZScrub($event)"
-  (zSlide)="onZSlide($event)"
-  (zIndexInput)="zIndex = $event; updateZIndex()"
-  (reloadAndPlot)="reloadAndPlot()"
-  (downloadImage)="downloadImage()"
-  (autoscaleImage)="autoscaleImage()"
-  (toggleDragMode)="toggleDragMode($event)"
-  (zoomIn)="zoomIn()"
-  (zoomOut)="zoomOut()"
-  (toggleSurface3dMode)="toggleSurface3dMode($event)"
-  (resetSurfaceCamera)="resetSurfaceCamera()"
-  (toggleAxes)="toggleAxes()"
-  (toggleWireframe)="toggleWireframe()"
-  (selectResolution)="selectResolution($event)"
-  (deleteRegion)="deleteRegion()"
-  (undoRegion)="undoRegion()"
-  (redoRegion)="redoRegion()"
-  (segmentRegions)="segmentRegions()"
-  (segmentCellpose)="segmentCellpose()"
-  (samModelChange)="onSamModelChange($event)"
-  (runTool)="runTool($event)"
-  (toolModelChange)="onToolModelChange($event)"
-  (openToolParams)="openToolParams($event)"
-  (wandSensitivityChange)="onWandSensitivityChange($event)"
-  (brushSizeChange)="onBrushSizeChange($event)"
-  (vertexEraserRadiusChange)="onVertexEraserRadiusChange($event)">
-  <!-- Host-projected custom toolbar buttons, forwarded into the toolbar. -->
-  <ng-content></ng-content>
-</plotting-toolbar>
-  <p-button *ngIf="toolbarFloating" class="toolbar-dock-btn" icon="pi pi-thumbtack" size="small" [text]="true"
-            pTooltip="Dock to top" tooltipPosition="bottom" (onClick)="dockToolbar()">
+  <plotting-toolbar
+    [imageInfo]="imageInfo"
+    [hasSpatialDataset]="hasSpatialDataset"
+    [plotTypeOptions]="plotTypeMenu"
+    [selectedPlotType]="selectedPlotTypeId"
+    [basePlotType]="basePlotType"
+    [isoRange]="isoRange"
+    [maxIndex]="maxIndex"
+    [zIndex]="zIndex"
+    [isHeatmap]="isHeatmap"
+    [is3dRegions]="isSpatial3dMode"
+    [activeDragMode]="activeDragMode"
+    [activeSurface3dMode]="activeSurface3dMode"
+    [axesVisible]="axesVisible"
+    [wireframeActive]="wireframeActive"
+    [resolutionScale]="resolutionScale"
+    [wandSensitivity]="wandSensitivity"
+    [brushSize]="brushSize"
+    [samModels]="samModels"
+    [samModelId]="samModelId"
+    [contributedTools]="contributedTools"
+    [dialogTools]="dialogTools"
+    [openDialogToolId]="openDialogToolId"
+    (toggleDialogTool)="toggleDialogTool($event)"
+    [toolModelIds]="toolParams.toolModelIds"
+    [vertexEraserRadius]="vertexEraserRadius"
+    [canUndo]="regionActions.canUndo"
+    [canRedo]="regionActions.canRedo"
+    [tools]="toolbarTools"
+    [imageSmoothingEnabled]="imageSmoothingEnabled"
+    (selectPlotType)="onSelectPlotType($event)"
+    (toggleImageSmoothing)="onToggleImageSmoothing()"
+    (addProfileLine)="addProfileLine()"
+    (isoRangeChange)="onIsoRangeChange($event)"
+    (openChannelHistogram)="openChannelHistogram()"
+    (openSpatialControls)="openSpatialControls()"
+    (openRegionEditor)="openRegionEditor()"
+    (selectStackOption)="selectStackOption($event)"
+    (zScrub)="onZScrub($event)"
+    (zSlide)="onZSlide($event)"
+    (zIndexInput)="zIndex = $event; updateZIndex()"
+    (reloadAndPlot)="reloadAndPlot()"
+    (downloadImage)="downloadImage()"
+    (autoscaleImage)="autoscaleImage()"
+    (toggleDragMode)="toggleDragMode($event)"
+    (zoomIn)="zoomIn()"
+    (zoomOut)="zoomOut()"
+    (toggleSurface3dMode)="toggleSurface3dMode($event)"
+    (resetSurfaceCamera)="resetSurfaceCamera()"
+    (toggleAxes)="toggleAxes()"
+    (toggleWireframe)="toggleWireframe()"
+    (selectResolution)="selectResolution($event)"
+    (deleteRegion)="deleteRegion()"
+    (undoRegion)="undoRegion()"
+    (redoRegion)="redoRegion()"
+    (segmentRegions)="segmentRegions()"
+    (segmentCellpose)="segmentCellpose()"
+    (samModelChange)="onSamModelChange($event)"
+    (runTool)="runTool($event)"
+    (toolModelChange)="onToolModelChange($event)"
+    (openToolParams)="openToolParams($event)"
+    (wandSensitivityChange)="onWandSensitivityChange($event)"
+    (brushSizeChange)="onBrushSizeChange($event)"
+    (vertexEraserRadiusChange)="onVertexEraserRadiusChange($event)"
+  >
+    <!-- Host-projected custom toolbar buttons, forwarded into the toolbar. -->
+    <ng-content></ng-content>
+  </plotting-toolbar>
+  <p-button
+    *ngIf="toolbarFloating"
+    class="toolbar-dock-btn"
+    icon="pi pi-thumbtack"
+    size="small"
+    [text]="true"
+    pTooltip="Dock to top"
+    tooltipPosition="bottom"
+    (onClick)="dockToolbar()"
+  >
   </p-button>
 </div>
 
@@ -131,16 +156,20 @@
              has no determinate progress, so fall through to the spinner template
              rather than parking a full bar under "Loading image...". -->
         <p-progressBar class="progress" [value]="cacheProgress()"></p-progressBar>
-        <span class="text-loading">{{loadingMessage()}}</span>
+        <span class="text-loading">{{ loadingMessage() }}</span>
       </ng-container>
       <ng-template #spinnerLoading>
         <div *ngIf="imgLoading()" class="spinner"></div>
-        <span *ngIf="imgLoading() && !zoom()" class="text-loading">{{loadingMessage()}}</span>
-        <span *ngIf="imgLoading() && zoom()" class="zoom-text-loading">{{loadingMessage()}}</span>
+        <span *ngIf="imgLoading() && !zoom()" class="text-loading">{{ loadingMessage() }}</span>
+        <span *ngIf="imgLoading() && zoom()" class="zoom-text-loading">{{ loadingMessage() }}</span>
       </ng-template>
     </ng-template>
-    <p-button *ngIf="stackLoading() || imgLoading()" class="cancel-loading " label="Cancel"
-              (onClick)="cancelLoading()">
+    <p-button
+      *ngIf="stackLoading() || imgLoading()"
+      class="cancel-loading"
+      label="Cancel"
+      (onClick)="cancelLoading()"
+    >
     </p-button>
   </div>
   <!-- Translucent "sharpening" overlay shown after the small-tier preview is
@@ -152,21 +181,25 @@
     <div class="spinner"></div>
     <span class="text-loading">Sharpening preview...</span>
   </div>
-
 </div>
 
 <!-- Floating, draggable intensity-profile inset, shown while any intensity line
      exists. Kept OUTSIDE the plot div and fixed to the viewport, so it floats over
      the whole page rather than being clipped to the canvas. -->
-<viz-intensity-inset [divId]="intensityInsetDiv" [plotDivName]="plotDivName" [zIndex]="zIndex"
-                     [imageView]="isImageView" [imageInfo]="imageInfo"></viz-intensity-inset>
+<viz-intensity-inset
+  [divId]="intensityInsetDiv"
+  [plotDivName]="plotDivName"
+  [zIndex]="zIndex"
+  [imageView]="isImageView"
+  [imageInfo]="imageInfo"
+></viz-intensity-inset>
 
 <!-- Channels & Histogram: non-modal floating dialog opened from the toolbar. -->
 <channel-histogram [(visible)]="showChannelHistogram"></channel-histogram>
 
 <!-- Spatial-omics controls. Renders its own empty state when no dataset (or no
      SPATIAL_DATA_PORT) is present, so it is always safe to host. -->
-<spatial-controls [(visible)]="showSpatialControls" [is3d]="isSpatial3dMode" ></spatial-controls>
+<spatial-controls [(visible)]="showSpatialControls" [is3d]="isSpatial3dMode"></spatial-controls>
 
 <!-- Side panel of the active contributed plot mode (PLOT_TYPE_CONTRIBUTIONS),
      in the same right-hand area as the spatial controls and the Region Editor.
@@ -174,11 +207,20 @@
      because leaving the mode is what ends it. A component panel gets
      PLOT_MODE_CONTEXT / PLOT_MODE_SESSION from its injector; a `mount` panel's
      host element is attached to the slot below (see plotModePanelSlot). -->
-<p-dialog *ngIf="plotModePanel as panel" [header]="panel.title" [visible]="true"
-          [modal]="false" [closable]="false" [resizable]="true" [draggable]="true"
-          appendTo="body" position="right" styleClass="plot-mode-panel"
-          [style]="{ width: '22rem', maxHeight: '85vh' }"
-          [contentStyle]="{ overflow: 'auto' }">
+<p-dialog
+  *ngIf="plotModePanel as panel"
+  [header]="panel.title"
+  [visible]="true"
+  [modal]="false"
+  [closable]="false"
+  [resizable]="true"
+  [draggable]="true"
+  appendTo="body"
+  position="right"
+  styleClass="plot-mode-panel"
+  [style]="{ width: '22rem', maxHeight: '85vh' }"
+  [contentStyle]="{ overflow: 'auto' }"
+>
   <ng-container *ngIf="panel.component">
     <ng-container *ngComponentOutlet="panel.component; injector: panel.injector ?? undefined"></ng-container>
   </ng-container>
@@ -189,12 +231,21 @@
      keep working on the image, e.g. painting with the brush the tool armed. The
      tool renders its body into a host element attached to the slot below (see
      toolDialogSlot); closing the dialog ends the tool's session. -->
-<p-dialog *ngIf="toolDialog as dlg" [header]="dlg.title" [visible]="true"
-          (visibleChange)="$event || closeDialogTool()"
-          [modal]="false" [closable]="true" [resizable]="true" [draggable]="true"
-          appendTo="body" position="right" styleClass="tool-dialog"
-          [style]="{ width: dlg.width, maxHeight: '85vh' }"
-          [contentStyle]="{ overflow: 'auto' }">
+<p-dialog
+  *ngIf="toolDialog as dlg"
+  [header]="dlg.title"
+  [visible]="true"
+  (visibleChange)="$event || closeDialogTool()"
+  [modal]="false"
+  [closable]="true"
+  [resizable]="true"
+  [draggable]="true"
+  appendTo="body"
+  position="right"
+  styleClass="tool-dialog"
+  [style]="{ width: dlg.width, maxHeight: '85vh' }"
+  [contentStyle]="{ overflow: 'auto' }"
+>
   <div #toolDialogSlot class="tool-dialog-slot"></div>
 </p-dialog>
 
@@ -203,26 +254,45 @@
      still be drawn/selected on the plot while it's open; stays linked to this
      plotting instance via the root RegionStore singleton. Opens over the right
      side of the view. -->
-<p-dialog header="Region Editor" [(visible)]="showRegionEditor"
-          [modal]="false" [resizable]="true" [draggable]="true"
-          [maximizable]="true" appendTo="body" position="right"
-          [style]="{ width: regionEditorWidth, height: '85vh' }"
-          [contentStyle]="{ overflow: 'auto' }">
+<p-dialog
+  header="Region Editor"
+  [(visible)]="showRegionEditor"
+  [modal]="false"
+  [resizable]="true"
+  [draggable]="true"
+  [maximizable]="true"
+  appendTo="body"
+  position="right"
+  [style]="{ width: regionEditorWidth, height: '85vh' }"
+  [contentStyle]="{ overflow: 'auto' }"
+>
   <region-editor></region-editor>
 </p-dialog>
 
 <!-- Simplify (Douglas–Peucker): custom px-threshold picker for the selected
      region(s), opened from the right-click "Simplify ▸ Custom…" action. -->
-<p-dialog header="Simplify region(s)" [(visible)]="displaySimplifyDialog" [modal]="true"
-          [style]="{width: '22rem'}" [draggable]="false" [resizable]="false">
+<p-dialog
+  header="Simplify region(s)"
+  [(visible)]="displaySimplifyDialog"
+  [modal]="true"
+  [style]="{ width: '22rem' }"
+  [draggable]="false"
+  [resizable]="false"
+>
   <div class="flex flex-column gap-2">
-    <span>Altitude threshold: <b>{{ regionActions.simplifyThreshold }} px</b></span>
+    <span
+      >Altitude threshold: <b>{{ regionActions.simplifyThreshold }} px</b></span
+    >
     <p-slider [(ngModel)]="regionActions.simplifyThreshold" [min]="1" [max]="20" [step]="1"></p-slider>
     <small>Vertices within this distance of the line between their neighbours are removed.</small>
   </div>
   <ng-template pTemplate="footer">
     <p-button label="Cancel" [text]="true" (onClick)="displaySimplifyDialog = false"></p-button>
-    <p-button label="Apply" icon="pi pi-check" (onClick)="simplifyRegions(regionActions.simplifyThreshold)"></p-button>
+    <p-button
+      label="Apply"
+      icon="pi pi-check"
+      (onClick)="simplifyRegions(regionActions.simplifyThreshold)"
+    ></p-button>
   </ng-template>
 </p-dialog>
 
@@ -231,48 +301,68 @@
      the toolbar can lay every tool out the same way and a plugin needs no
      PrimeNG of its own. Defaults come from the active checkpoint, since they
      encode what it was trained for. -->
-<p-dialog *ngIf="toolParams.openParams as open"
-          [header]="open.tool.label + ' parameters'"
-          [visible]="true" (visibleChange)="closeToolParams()"
-          [modal]="true"
-          [style]="{width: '30rem'}" [draggable]="false" [resizable]="false" appendTo="body">
+<p-dialog
+  *ngIf="toolParams.openParams as open"
+  [header]="open.tool.label + ' parameters'"
+  [visible]="true"
+  (visibleChange)="closeToolParams()"
+  [modal]="true"
+  [style]="{ width: '30rem' }"
+  [draggable]="false"
+  [resizable]="false"
+  appendTo="body"
+>
   <div class="grid formgrid p-fluid">
     <ng-container *ngFor="let f of open.fields">
       <div class="field" [ngClass]="f.spec.type === 'boolean' ? 'col-12' : 'col-6'">
-
         <ng-container *ngIf="f.number as n">
           <label class="text-sm" [pTooltip]="n.tooltip || ''">{{ n.label }}</label>
-          <p-inputNumber [ngModel]="open.values[n.id]"
-                         (ngModelChange)="open.values[n.id] = $event"
-                         [min]="n.min" [max]="n.max" [step]="n.step"
-                         [minFractionDigits]="n.fractionDigits"
-                         [showButtons]="true"></p-inputNumber>
+          <p-inputNumber
+            [ngModel]="open.values[n.id]"
+            (ngModelChange)="open.values[n.id] = $event"
+            [min]="n.min"
+            [max]="n.max"
+            [step]="n.step"
+            [minFractionDigits]="n.fractionDigits"
+            [showButtons]="true"
+          ></p-inputNumber>
         </ng-container>
 
         <ng-container *ngIf="f.select as sel">
           <label class="text-sm" [pTooltip]="sel.tooltip || ''">{{ sel.label }}</label>
-          <p-dropdown [options]="sel.options" optionLabel="label" optionValue="value"
-                      [ngModel]="open.values[sel.id]"
-                      (ngModelChange)="open.values[sel.id] = $event"
-                      appendTo="body"></p-dropdown>
+          <p-dropdown
+            [options]="sel.options"
+            optionLabel="label"
+            optionValue="value"
+            [ngModel]="open.values[sel.id]"
+            (ngModelChange)="open.values[sel.id] = $event"
+            appendTo="body"
+          ></p-dropdown>
         </ng-container>
 
         <!-- Checkbox label sits beside the box and may run to a sentence, so
              it does not get the stacked label the other types use. -->
         <div *ngIf="f.spec.type === 'boolean'" class="flex align-items-center gap-2">
-          <p-checkbox [ngModel]="open.values[f.spec.id]"
-                      (ngModelChange)="open.values[f.spec.id] = $event"
-                      [binary]="true" [inputId]="open.tool.id + '-' + f.spec.id"></p-checkbox>
-          <label [for]="open.tool.id + '-' + f.spec.id" class="text-sm mb-0"
-                 [pTooltip]="f.spec.tooltip || ''">{{ f.spec.label }}</label>
+          <p-checkbox
+            [ngModel]="open.values[f.spec.id]"
+            (ngModelChange)="open.values[f.spec.id] = $event"
+            [binary]="true"
+            [inputId]="open.tool.id + '-' + f.spec.id"
+          ></p-checkbox>
+          <label [for]="open.tool.id + '-' + f.spec.id" class="text-sm mb-0" [pTooltip]="f.spec.tooltip || ''">{{
+            f.spec.label
+          }}</label>
         </div>
-
       </div>
     </ng-container>
   </div>
   <ng-template pTemplate="footer">
-    <p-button label="Reset to model defaults" [text]="true" size="small"
-              (onClick)="resetToolParams(open.tool.id)"></p-button>
+    <p-button
+      label="Reset to model defaults"
+      [text]="true"
+      size="small"
+      (onClick)="resetToolParams(open.tool.id)"
+    ></p-button>
     <p-button label="Close" size="small" (onClick)="closeToolParams()"></p-button>
   </ng-template>
 </p-dialog>

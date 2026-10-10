@@ -14,21 +14,21 @@
 /** The colour source a tooltip describes, as the renderer already has it. */
 export type HoverSource =
   | {
-    kind: 'categorical';
-    /** Column name, for the tooltip's first line. */
-    name: string;
-    categories: readonly string[];
-    /** Per-observation category index, or `NO_CATEGORY`. */
-    codes: Uint16Array;
-  }
+      kind: 'categorical';
+      /** Column name, for the tooltip's first line. */
+      name: string;
+      categories: readonly string[];
+      /** Per-observation category index, or `NO_CATEGORY`. */
+      codes: Uint16Array;
+    }
   | {
-    kind: 'continuous';
-    /** Column or gene name. */
-    name: string;
-    values: Float32Array;
-    /** Unit for the value, when the dataset declares one. */
-    unit?: string;
-  };
+      kind: 'continuous';
+      /** Column or gene name. */
+      name: string;
+      values: Float32Array;
+      /** Unit for the value, when the dataset declares one. */
+      unit?: string;
+    };
 
 /**
  * Index of the drawn observation nearest `(x, y)` within `maxDist` screen pixels,
@@ -41,12 +41,7 @@ export type HoverSource =
  * Ties go to the LATER observation, which is the one drawn on top and therefore
  * the one the user believes they are pointing at.
  */
-export function nearestObservation(
-  screen: Float32Array,
-  x: number,
-  y: number,
-  maxDist: number,
-): number {
+export function nearestObservation(screen: Float32Array, x: number, y: number, maxDist: number): number {
   const limit = maxDist * maxDist;
   let best = -1;
   let bestDist = Infinity;

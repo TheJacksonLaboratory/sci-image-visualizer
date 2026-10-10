@@ -1,6 +1,11 @@
 import {
-  SAM_MODELS, DEFAULT_SAM_MODEL_ID, getSamModel, isSamModelReady, setSamModelUrls,
-  getDefaultSamModelId, setDefaultSamModel,
+  SAM_MODELS,
+  DEFAULT_SAM_MODEL_ID,
+  getSamModel,
+  isSamModelReady,
+  setSamModelUrls,
+  getDefaultSamModelId,
+  setDefaultSamModel,
 } from './sam-model-registry';
 
 describe('sam-model-registry', () => {

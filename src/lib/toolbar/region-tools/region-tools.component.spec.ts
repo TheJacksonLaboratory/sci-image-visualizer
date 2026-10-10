@@ -10,8 +10,8 @@ describe('RegionToolsComponent', () => {
   let fixture: ComponentFixture<RegionToolsComponent>;
   let tools: RegionToolsComponent;
   const el = () => fixture.nativeElement as HTMLElement;
-  const labels = () => Array.from(el().querySelectorAll('p-button button'))
-    .map((b) => b.getAttribute('aria-label'));
+  const labels = () =>
+    Array.from(el().querySelectorAll('p-button button')).map((b) => b.getAttribute('aria-label'));
 
   beforeEach(async () => {
     // jsdom can't parse PrimeNG's component stylesheets; drop just that noise.
@@ -19,20 +19,28 @@ describe('RegionToolsComponent', () => {
     jest.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
       if (!String(args[0]).includes('Could not parse CSS stylesheet')) consoleError(...args);
     });
-    await TestBed.configureTestingModule({ imports: [VisualizationModule, NoopAnimationsModule] })
-      .compileComponents();
+    await TestBed.configureTestingModule({
+      imports: [VisualizationModule, NoopAnimationsModule],
+    }).compileComponents();
     fixture = TestBed.createComponent(RegionToolsComponent);
     tools = fixture.componentInstance;
     fixture.detectChanges();
   });
 
-  afterEach(() => { fixture.destroy(); jest.restoreAllMocks(); });
+  afterEach(() => {
+    fixture.destroy();
+    jest.restoreAllMocks();
+  });
 
   it('every button has an accessible name; the table drives the drawing tools', () => {
     expect(labels().every((l) => !!l)).toBe(true);
-    expect(labels()).toEqual(['Open the Region Editor',
+    expect(labels()).toEqual([
+      'Open the Region Editor',
       ...REGION_TOOL_BUTTONS.filter((b) => b.gate !== 'vertex').map((b) => b.label),
-      'Undo', 'Redo', 'Delete selected region']);
+      'Undo',
+      'Redo',
+      'Delete selected region',
+    ]);
   });
 
   it('gates the vertex tools on the backend and the brush / polyline on 3D', () => {
@@ -64,8 +72,8 @@ describe('RegionToolsComponent', () => {
   });
 
   it('undo / redo follow canUndo / canRedo', () => {
-    const disabled = () => ['Undo', 'Redo']
-      .map((l) => (el().querySelector(`button[aria-label="${l}"]`) as HTMLButtonElement).disabled);
+    const disabled = () =>
+      ['Undo', 'Redo'].map((l) => (el().querySelector(`button[aria-label="${l}"]`) as HTMLButtonElement).disabled);
     expect(disabled()).toEqual([true, true]);
     fixture.componentRef.setInput('canUndo', true);
     fixture.detectChanges();

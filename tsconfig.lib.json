@@ -8,14 +8,6 @@
     "types": [],
     "noUnusedLocals": true
   },
-  "exclude": [
-    "src/**/*.spec.ts",
-    "src/**/*.test.ts",
-    "src/lib/testing/**",
-    "jest.config.ts",
-    "src/test-setup.ts"
-  ],
-  "include": [
-    "src/**/*.ts"
-  ]
+  "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts", "src/lib/testing/**", "jest.config.ts", "src/test-setup.ts"],
+  "include": ["src/**/*.ts"]
 }

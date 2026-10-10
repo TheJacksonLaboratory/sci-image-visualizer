@@ -35,15 +35,21 @@ conforms<typeof Real.SCREEN_INDEX_MIN_POINTS>(Stub.SCREEN_INDEX_MIN_POINTS);
 // ── classes ─────────────────────────────────────────────────────────────────────
 type PublicOf<T, K extends keyof T> = Pick<T, K>;
 
-conforms<new (
-  ...a: ConstructorParameters<typeof Real.ScreenIndex>
-) => PublicOf<Real.ScreenIndex, 'pick' | 'indexed' | 'cell' | 'cols' | 'rows' | 'margin'>>(Stub.ScreenIndex);
+conforms<
+  new (
+    ...a: ConstructorParameters<typeof Real.ScreenIndex>
+  ) => PublicOf<Real.ScreenIndex, 'pick' | 'indexed' | 'cell' | 'cols' | 'rows' | 'margin'>
+>(Stub.ScreenIndex);
 
-conforms<new (
-  ...a: ConstructorParameters<typeof Real.LruCache<number>>
-) => PublicOf<Real.LruCache<number>, 'get' | 'set' | 'has' | 'delete' | 'clear' | 'size'>>(Stub.LruCache<number>);
+conforms<
+  new (
+    ...a: ConstructorParameters<typeof Real.LruCache<number>>
+  ) => PublicOf<Real.LruCache<number>, 'get' | 'set' | 'has' | 'delete' | 'clear' | 'size'>
+>(Stub.LruCache<number>);
 
-conforms<new (...a: ConstructorParameters<typeof Real.Colormap>) => PublicOf<Real.Colormap, 'name'>>(Stub.Colormap);
+conforms<new (...a: ConstructorParameters<typeof Real.Colormap>) => PublicOf<Real.Colormap, 'name'>>(
+  Stub.Colormap,
+);
 
 /** The Viewer members SIV calls whose types the stub can match exactly. */
 type ViewerSurface = PublicOf<
@@ -77,14 +83,17 @@ export type CameraEventConforms = Assert<
 /** The layer list: order and structural events (the spatial overlays reorder by re-adding). */
 type StubLayers = Stub.Viewer['layers'];
 export type LayerListConforms = Assert<
-  Assignable<StubLayers, PublicOf<Real.LayerList, 'length' | 'clear'> & {
-    readonly items: readonly unknown[];
-    add(layer: Real.Layer): unknown;
-    remove(layer: Real.Layer): boolean;
-    readonly added: { connect(listener: () => void): () => void };
-    readonly removed: { connect(listener: () => void): () => void };
-    readonly changed: { connect(listener: () => void): () => void };
-  }>
+  Assignable<
+    StubLayers,
+    PublicOf<Real.LayerList, 'length' | 'clear'> & {
+      readonly items: readonly unknown[];
+      add(layer: Real.Layer): unknown;
+      remove(layer: Real.Layer): boolean;
+      readonly added: { connect(listener: () => void): () => void };
+      readonly removed: { connect(listener: () => void): () => void };
+      readonly changed: { connect(listener: () => void): () => void };
+    }
+  >
 >;
 
 // ── value exports: nothing the real package lacks ───────────────────────────────
@@ -123,9 +132,9 @@ describe('napari-js stub conformance', () => {
     expect(index.pick(-10, 50, 5)).toBe(1);
     // worldToCanvas returns CLIENT px: the canvas rect's origin is added.
     const canvas = document.createElement('canvas');
-    jest.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(
-      { left: 100, top: 50, width: 0, height: 0 } as DOMRect,
-    );
+    jest
+      .spyOn(canvas, 'getBoundingClientRect')
+      .mockReturnValue({ left: 100, top: 50, width: 0, height: 0 } as DOMRect);
     const viewer = new Stub.Viewer({ canvas });
     expect(viewer.worldToCanvas(2, 3)).toEqual([102, 53]);
     expect(viewer.canvasToWorld(102, 53)).toEqual([2, 3]);

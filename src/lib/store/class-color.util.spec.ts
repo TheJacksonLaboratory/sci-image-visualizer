@@ -1,7 +1,14 @@
 import { defaultPresetSet, PresetSet } from '../models/class-preset';
 import { Region } from '../models/region';
 import {
-  applyPresetColors, colorForLabel, fallbackColorFor, findPreset, hashString, hslToHex, normalizeLabel, presetKey,
+  applyPresetColors,
+  colorForLabel,
+  fallbackColorFor,
+  findPreset,
+  hashString,
+  hslToHex,
+  normalizeLabel,
+  presetKey,
 } from './class-color.util';
 
 describe('class-color.util (jit-ui#70 colour engine)', () => {
@@ -133,8 +140,11 @@ describe('applyPresetColors', () => {
     applyPresetColors([reg('Stroma')], set(), { onPromote });
     expect(onPromote).not.toHaveBeenCalled();
 
-    const out = applyPresetColors([reg(' Stroma '), reg('stroma')], set({ autoPromote: true, matchMode: 'normalized' }),
-      { onPromote });
+    const out = applyPresetColors(
+      [reg(' Stroma '), reg('stroma')],
+      set({ autoPromote: true, matchMode: 'normalized' }),
+      { onPromote },
+    );
     expect(out[0].color).toBe('#111111');
     expect(onPromote).toHaveBeenCalledTimes(1);
     expect(onPromote).toHaveBeenCalledWith({ name: 'Stroma', color: '#111111', source: 'auto' });

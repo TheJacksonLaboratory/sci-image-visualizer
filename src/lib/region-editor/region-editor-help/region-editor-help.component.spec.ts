@@ -15,8 +15,9 @@ describe('RegionEditorHelpComponent', () => {
   afterEach(() => jest.restoreAllMocks());
 
   it('shows the help when visible; Ok closes it', async () => {
-    await TestBed.configureTestingModule({ imports: [VisualizationModule, NoopAnimationsModule] })
-      .compileComponents();
+    await TestBed.configureTestingModule({
+      imports: [VisualizationModule, NoopAnimationsModule],
+    }).compileComponents();
     const fixture = TestBed.createComponent(RegionEditorHelpComponent);
     const closed = jest.fn();
     fixture.componentInstance.visibleChange.subscribe(closed);

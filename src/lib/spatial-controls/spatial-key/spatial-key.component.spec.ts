@@ -4,16 +4,25 @@ import { SpatialKeyComponent, colorByLabel, colormapNodeFor } from './spatial-ke
 import { SpatialDataset } from '../../contracts/spatial-dataset.contract';
 import { COLORMAP_OPTIONS } from '../../plot.utilities';
 import {
-  SpatialControlsFake, accessorOf, bindInputs, fakeSpatialControls, fire, one, shallowPanel,
+  SpatialControlsFake,
+  accessorOf,
+  bindInputs,
+  fakeSpatialControls,
+  fire,
+  one,
+  shallowPanel,
 } from '../../testing/spatial-panel-testing';
 
 const dataset: SpatialDataset = {
-  id: 'demo', name: 'Demo brain',
+  id: 'demo',
+  name: 'Demo brain',
   observations: { count: 3, x: new Float32Array(3), y: new Float32Array(3) },
   columns: [
     { kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'] },
     {
-      kind: 'categorical', name: 'cluster', categories: ['a', 'b'],
+      kind: 'categorical',
+      name: 'cluster',
+      categories: ['a', 'b'],
       description: 'k-means (k=8) — derived for the demo',
     },
     { kind: 'continuous', name: 'total_counts', unit: 'counts' },
@@ -34,8 +43,11 @@ describe('SpatialKeyComponent', () => {
     key = fixture.componentInstance;
     root = fixture.nativeElement as HTMLElement;
     bindInputs(fixture, {
-      controls: fake.controls, dataset: fake.dataset$, view: fake.view$,
-      colormapOptions: COLORMAP_OPTIONS, ...inputs,
+      controls: fake.controls,
+      dataset: fake.dataset$,
+      view: fake.view$,
+      colormapOptions: COLORMAP_OPTIONS,
+      ...inputs,
     });
   }
 
@@ -73,7 +85,10 @@ describe('SpatialKeyComponent', () => {
   });
 
   describe('a categorical colouring', () => {
-    const legend = [{ label: 'Cortex', color: '#ff0000' }, { label: 'Thalamus', color: '#0000ff' }];
+    const legend = [
+      { label: 'Cortex', color: '#ff0000' },
+      { label: 'Thalamus', color: '#0000ff' },
+    ];
 
     it('lists the legend, highlights the selected row, and reports a click', async () => {
       await build({ legend, selectedCategory: 1 });
@@ -125,7 +140,12 @@ describe('SpatialKeyComponent', () => {
       // the dropdown and changes nothing on screen, which is the worst of both.
       const resolved = {
         label: 'Plasma',
-        data: { value: [[0, 'rgb(12,7,134)'], [1, 'rgb(239,248,33)']] as [number, string][] },
+        data: {
+          value: [
+            [0, 'rgb(12,7,134)'],
+            [1, 'rgb(239,248,33)'],
+          ] as [number, string][],
+        },
       };
       key['onContinuousColormap'](resolved);
       expect(fake.controls.setViewState).toHaveBeenCalledWith({ continuousColormap: resolved.data.value });

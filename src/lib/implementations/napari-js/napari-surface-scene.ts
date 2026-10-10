@@ -8,8 +8,15 @@ import { formatUm } from '../../overlays/scale-bar-core';
 import { AxisLabelSpec } from './napari-axes-labels';
 import { Axes3dGizmo, surface3dControls } from './napari-axes-gizmo';
 import {
-  LumaPlane, SURFACE_Z_ASPECT, VOLUME_FETCH_CONCURRENCY, isServerlessMultichannel, mapPool,
-  stackDepth, surfaceResolutionFor, toIHistogram, toNapariGamma,
+  LumaPlane,
+  SURFACE_Z_ASPECT,
+  VOLUME_FETCH_CONCURRENCY,
+  isServerlessMultichannel,
+  mapPool,
+  stackDepth,
+  surfaceResolutionFor,
+  toIHistogram,
+  toNapariGamma,
 } from './napari-helpers';
 import type { NapariScene, SceneContext } from './napari-scene';
 
@@ -78,7 +85,13 @@ export class SurfaceScene implements NapariScene {
   }
 
   surface3dControls(): ISurface3dControls | null {
-    return this.layer ? surface3dControls(this.ctx, () => this.gizmo, () => this.layer) : null;
+    return this.layer
+      ? surface3dControls(
+          this.ctx,
+          () => this.gizmo,
+          () => this.layer,
+        )
+      : null;
   }
 
   dispose(): void {
@@ -105,7 +118,9 @@ export class SurfaceScene implements NapariScene {
     const imageW = ctx.imageSize().width;
     const voxel = mppX > 0 ? (mppX * (desc?.width ?? imageW)) / Math.max(1, imageW) : 1;
     this.gizmo = new Axes3dGizmo(
-      ctx.viewer, ctx.host, { width: boxW, height: boxH, depth: boxD },
+      ctx.viewer,
+      ctx.host,
+      { width: boxW, height: boxH, depth: boxD },
       this.axesLabels(boxW, boxH, boxD, mppX),
       { visible: ctx.settings.axesVisible, voxelSize: [voxel, voxel, 1] },
     );
@@ -152,20 +167,25 @@ export class SurfaceScene implements NapariScene {
     try {
       let done = 0;
       const slices = Array.from({ length: depth }, (_, z) => z);
-      await mapPool(slices, VOLUME_FETCH_CONCURRENCY, async (z) => {
-        try {
-          const plane = await this.fetchPlane(z, maxGrid);
-          // Superseded while in flight: this plane may be the OLD band, and the cache is not
-          // this preload's any more.
-          if (stale()) return;
-          this.planes.set(z, plane);
-        } catch (err) {
-          if (stale()) return;
-          console.warn(`[napari-js] surface slice ${z} preload failed`, err);
-        }
-        done++;
-        ctx.stack.progress(Math.round((done / depth) * 100));
-      }, stale);
+      await mapPool(
+        slices,
+        VOLUME_FETCH_CONCURRENCY,
+        async (z) => {
+          try {
+            const plane = await this.fetchPlane(z, maxGrid);
+            // Superseded while in flight: this plane may be the OLD band, and the cache is not
+            // this preload's any more.
+            if (stale()) return;
+            this.planes.set(z, plane);
+          } catch (err) {
+            if (stale()) return;
+            console.warn(`[napari-js] surface slice ${z} preload failed`, err);
+          }
+          done++;
+          ctx.stack.progress(Math.round((done / depth) * 100));
+        },
+        stale,
+      );
     } finally {
       // Only the newest preload ends the progress bar; a superseded one would hide it while
       // its successor is still loading.
@@ -267,9 +287,7 @@ export class SurfaceScene implements NapariScene {
       const windowChanged = !this.window || win[0] !== this.window[0] || win[1] !== this.window[1];
       if (windowChanged) {
         // Height follows the contrast window → rebuild the mesh for the new [min,max] (camera kept).
-        void this.build(ctx.z()).catch((err) =>
-          console.error('[napari-js] surface window rebuild failed:', err),
-        );
+        void this.build(ctx.z()).catch((err) => console.error('[napari-js] surface window rebuild failed:', err));
         return;
       }
       // Colour-only change: update uniforms in place, no geometry rebuild.

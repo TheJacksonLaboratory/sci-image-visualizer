@@ -14,7 +14,10 @@ describe('glyphs', () => {
   it('expands entries into scaled, translated rings', () => {
     const tri = glyphOutline('triangle');
     const { coords, offsets } = glyphRings(
-      Float32Array.from([10, 20]), Float32Array.from([0, 5]), Float32Array.from([1, 2]), () => tri,
+      Float32Array.from([10, 20]),
+      Float32Array.from([0, 5]),
+      Float32Array.from([1, 2]),
+      () => tri,
     );
     expect(Array.from(offsets)).toEqual([0, 3, 6]);
     expect(coords[0]).toBeCloseTo(10 + tri[0], 6);

@@ -1,6 +1,10 @@
 import type { SpatialDataPort } from '../../../contracts/ports/spatial-data.port';
 import {
-  NO_CATEGORY, NO_OBSERVATION, SpatialImageRef, SpatialTranscriptSummary, SpatialTranscriptTile,
+  NO_CATEGORY,
+  NO_OBSERVATION,
+  SpatialImageRef,
+  SpatialTranscriptSummary,
+  SpatialTranscriptTile,
 } from '../../../contracts/spatial-dataset.contract';
 import type { CategoricalCodes } from './categorical-lookup';
 
@@ -34,7 +38,10 @@ export class TranscriptHover {
   private timer: ReturnType<typeof setTimeout> | null = null;
 
   /** `layerShown` says whether the transcript layer is on screen now (it may have been dropped). */
-  constructor(private readonly port: SpatialDataPort, private readonly layerShown: () => boolean) {}
+  constructor(
+    private readonly port: SpatialDataPort,
+    private readonly layerShown: () => boolean,
+  ) {}
 
   /** The transcript layer was redrawn: hover names these entries now (cached details are dropped). */
   setDrawn(drawn: DrawnTranscripts, micronsPerUnit: number | null): void {
@@ -67,9 +74,7 @@ export class TranscriptHover {
    * server — distinct genes in a group, its top genes and cells, the cell's display id —
    * arrives through `onDetails` once the pointer has rested on the marker briefly.
    */
-  hoverAt(
-    wx: number, wy: number, radiusWorld: number, onDetails: (lines: string[]) => void,
-  ): string[] | null {
+  hoverAt(wx: number, wy: number, radiusWorld: number, onDetails: (lines: string[]) => void): string[] | null {
     const d = this.drawn;
     if (!d || !this.layerShown() || !d.merged.count) {
       this.key = null;
@@ -96,7 +101,10 @@ export class TranscriptHover {
   }
 
   private async fetchDetails(
-    d: DrawnTranscripts, i: number, key: string, onDetails: (lines: string[]) => void,
+    d: DrawnTranscripts,
+    i: number,
+    key: string,
+    onDetails: (lines: string[]) => void,
   ): Promise<void> {
     if (!this.port.getTranscriptSummary || this.key !== key) return;
     const obs = d.merged.observation[i];
@@ -134,7 +142,7 @@ export class TranscriptHover {
       const types = this.types;
       if (!types || o === NO_OBSERVATION || types.meta.kind !== 'categorical') return null;
       const c = types.codes[o];
-      return c === NO_CATEGORY ? null : types.meta.categories[c] ?? null;
+      return c === NO_CATEGORY ? null : (types.meta.categories[c] ?? null);
     };
     const cellLine = (o: number, prefix: string) => {
       if (o === NO_OBSERVATION) return 'outside any cell';
@@ -147,10 +155,17 @@ export class TranscriptHover {
       const lines = [`${fmt(n)} transcripts · all genes`];
       if (d.bin) lines.push(`${d.bin.size.toFixed(1)} × ${d.bin.size.toFixed(1)} µm area`);
       if (s?.transcripts !== undefined) {
-        lines.push(`${fmt(s.genes ?? 0)} distinct genes · ${fmt(s.cells ?? 0)} cell${s.cells === 1 ? '' : 's'}`
-          + (s.unassigned ? ` · ${fmt(s.unassigned)} outside cells` : ''));
+        lines.push(
+          `${fmt(s.genes ?? 0)} distinct genes · ${fmt(s.cells ?? 0)} cell${s.cells === 1 ? '' : 's'}` +
+            (s.unassigned ? ` · ${fmt(s.unassigned)} outside cells` : ''),
+        );
         if (s.topGenes?.length) {
-          lines.push(`top genes: ${s.topGenes.slice(0, 5).map((g) => `${g.name} ${fmt(g.count)}`).join(', ')}`);
+          lines.push(
+            `top genes: ${s.topGenes
+              .slice(0, 5)
+              .map((g) => `${g.name} ${fmt(g.count)}`)
+              .join(', ')}`,
+          );
         }
       }
       lines.push(cellLine(obs, 'mostly cell'));
@@ -170,7 +185,13 @@ export class TranscriptHover {
       const um = d.bin.size * (this.micronsPerUnit ?? 1);
       const group = d.entryGroup && d.groupNames ? d.groupNames[d.entryGroup[i]] : gene;
       const top = s?.topGenes?.length
-        ? [s.topGenes.slice(0, 6).map((g) => `${g.name} ${fmt(g.count)}`).join(', ')] : [];
+        ? [
+            s.topGenes
+              .slice(0, 6)
+              .map((g) => `${g.name} ${fmt(g.count)}`)
+              .join(', '),
+          ]
+        : [];
       return [
         `${group} · ${fmt(n)} transcript${n === 1 ? '' : 's'}`,
         ...(d.groupGenes ? top : group !== gene ? [`mostly ${gene}`] : []),
@@ -205,7 +226,10 @@ export interface DrawnTranscripts {
 
 /** Index of the entry under `(x, y)` — within its own radius or `tolerance` — or -1. */
 export function pickNearest(
-  d: Pick<DrawnTranscripts, 'merged' | 'radius' | 'grid'>, x: number, y: number, tolerance: number,
+  d: Pick<DrawnTranscripts, 'merged' | 'radius' | 'grid'>,
+  x: number,
+  y: number,
+  tolerance: number,
 ): number {
   const t = d.merged;
   if (!d.grid) {

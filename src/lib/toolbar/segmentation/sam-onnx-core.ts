@@ -25,10 +25,13 @@ let staleCachesPurged: Promise<void> | null = null;
 
 /** Delete model caches from earlier versions (once per page/worker). */
 function purgeStaleModelCaches(): Promise<void> {
-  staleCachesPurged ??= caches.keys()
-    .then((names) => Promise.all(names
-      .filter((n) => n.startsWith(MODEL_CACHE_PREFIX) && n !== MODEL_CACHE)
-      .map((n) => caches.delete(n))))
+  staleCachesPurged ??= caches
+    .keys()
+    .then((names) =>
+      Promise.all(
+        names.filter((n) => n.startsWith(MODEL_CACHE_PREFIX) && n !== MODEL_CACHE).map((n) => caches.delete(n)),
+      ),
+    )
     .then(() => undefined)
     .catch(() => undefined); // best effort: a stale cache only wastes space
   return staleCachesPurged;
@@ -91,12 +94,17 @@ async function cacheModel(cache: Cache, url: string, key: string, body: Response
  *  API (so it isn't re-downloaded) under {@link modelCacheKey}. Cache hit → progress
  *  jumps to 1. Works on the main thread and in a worker (both have `fetch` + `caches`). */
 export async function fetchModel(
-  url: string, onProgress?: (f: number) => void, revision?: string,
+  url: string,
+  onProgress?: (f: number) => void,
+  revision?: string,
 ): Promise<ArrayBuffer> {
   const key = modelCacheKey(url, revision);
   const cache = await openModelCache();
   const hit = cache ? await cache.match(key) : null;
-  if (hit) { onProgress?.(1); return await hit.arrayBuffer(); }
+  if (hit) {
+    onProgress?.(1);
+    return await hit.arrayBuffer();
+  }
 
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`fetch ${url} failed: HTTP ${resp.status}`);
@@ -119,7 +127,10 @@ export async function fetchModel(
   }
   const out = new Uint8Array(received);
   let off = 0;
-  for (const c of chunks) { out.set(c, off); off += c.length; }
+  for (const c of chunks) {
+    out.set(c, off);
+    off += c.length;
+  }
   if (cache) {
     // The Response copies its body, so no extra full-size copy of the model here.
     await cacheModel(cache, url, key, new Response(out, { headers: { 'content-length': String(received) } }));
@@ -130,7 +141,11 @@ export async function fetchModel(
 
 /** Resize (long side → size, bilinear), pad to size×size, SAM-normalize → CHW float32. */
 export function preprocess(
-  data: Uint8ClampedArray, width: number, height: number, size: number, scale: number,
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  size: number,
+  scale: number,
 ): Float32Array {
   const newW = Math.round(width * scale);
   const newH = Math.round(height * scale);
@@ -164,17 +179,24 @@ export function preprocess(
  *  (resized) space. Box = two points labelled 2/3; points use 1/0; a points-only
  *  prompt pads the absent box slot with `[0,0]` labelled -1. */
 export function buildDecoderPrompt(
-  prompt: SamPrompt, scale: number,
+  prompt: SamPrompt,
+  scale: number,
 ): { pointCoords: Float32Array; pointLabels: Float32Array; numPoints: number } {
   const coords: number[] = [];
   const labels: number[] = [];
-  for (const p of prompt.points ?? []) { coords.push(p.x * scale, p.y * scale); labels.push(p.label); }
+  for (const p of prompt.points ?? []) {
+    coords.push(p.x * scale, p.y * scale);
+    labels.push(p.label);
+  }
   if (prompt.box) {
     const b = prompt.box;
-    coords.push(b.x0 * scale, b.y0 * scale); labels.push(2);
-    coords.push(b.x1 * scale, b.y1 * scale); labels.push(3);
+    coords.push(b.x0 * scale, b.y0 * scale);
+    labels.push(2);
+    coords.push(b.x1 * scale, b.y1 * scale);
+    labels.push(3);
   } else if (labels.length > 0) {
-    coords.push(0, 0); labels.push(-1);
+    coords.push(0, 0);
+    labels.push(-1);
   }
   return {
     pointCoords: Float32Array.from(coords),
@@ -199,7 +221,11 @@ export function bestMaskIndex(iou: Float32Array | number[]): number {
 
 /** Run the encoder on an RGBA image → a reusable embedding. */
 export async function runEncoder(
-  encoder: ort.InferenceSession, data: Uint8ClampedArray, width: number, height: number, inputSize: number,
+  encoder: ort.InferenceSession,
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  inputSize: number,
 ): Promise<CoreEmbedding> {
   const scale = inputSize / Math.max(width, height);
   const input = preprocess(data, width, height, inputSize, scale);
@@ -208,14 +234,19 @@ export async function runEncoder(
   });
   const emb = out[encoder.outputNames[0]];
   return {
-    data: emb.data as Float32Array, dims: emb.dims as number[],
-    scale, imageWidth: width, imageHeight: height,
+    data: emb.data as Float32Array,
+    dims: emb.dims as number[],
+    scale,
+    imageWidth: width,
+    imageHeight: height,
   };
 }
 
 /** Run the decoder for one prompt against a cached embedding → a binary mask. */
 export async function runDecoder(
-  decoder: ort.InferenceSession, e: CoreEmbedding, prompt: SamPrompt,
+  decoder: ort.InferenceSession,
+  e: CoreEmbedding,
+  prompt: SamPrompt,
 ): Promise<CoreMask> {
   const { pointCoords, pointLabels, numPoints } = buildDecoderPrompt(prompt, e.scale);
   const out = await decoder.run({

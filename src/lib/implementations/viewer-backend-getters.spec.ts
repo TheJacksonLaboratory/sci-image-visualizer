@@ -23,8 +23,13 @@ describe('IViewerBackend capability-gated getters', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule],
-      providers: [PlotlyService, OpenSeadragonVisualizerService, NapariVisualizerService,
-        MessageService, ...VIZ_PORT_STUBS],
+      providers: [
+        PlotlyService,
+        OpenSeadragonVisualizerService,
+        NapariVisualizerService,
+        MessageService,
+        ...VIZ_PORT_STUBS,
+      ],
     });
     plotly = TestBed.inject(PlotlyService);
     osd = TestBed.inject(OpenSeadragonVisualizerService);
@@ -38,9 +43,11 @@ describe('IViewerBackend capability-gated getters', () => {
   });
 
   it('OpenSeadragon: view options forward to its navigator chrome; no volume resolution', () => {
-    const chrome = (osd as unknown as {
-      chrome: { setNavigatorVisible(v: boolean): void; setImageSmoothingEnabled(e: boolean): void };
-    }).chrome;
+    const chrome = (
+      osd as unknown as {
+        chrome: { setNavigatorVisible(v: boolean): void; setImageSmoothingEnabled(e: boolean): void };
+      }
+    ).chrome;
     const nav = jest.spyOn(chrome, 'setNavigatorVisible');
     const smooth = jest.spyOn(chrome, 'setImageSmoothingEnabled');
     osd.getOsdViewOptions().setNavigatorVisible(false);
@@ -53,15 +60,20 @@ describe('IViewerBackend capability-gated getters', () => {
   it('OpenSeadragon reports where its view settled', () => {
     const viewport = (osd as unknown as { viewport: { viewportChange$: Subject<Rect> } }).viewport;
     const seen: Rect[] = [];
-    osd.getIntensitySampling().getViewportChange$().subscribe((r) => seen.push(r));
+    osd
+      .getIntensitySampling()
+      .getViewportChange$()
+      .subscribe((r) => seen.push(r));
     viewport.viewportChange$.next({ x: 1, y: 2, width: 3, height: 4 });
     expect(seen).toEqual([{ x: 1, y: 2, width: 3, height: 4 }]);
   });
 
   it('napari-js: view options, the volume resolution and its camera viewport', () => {
-    const settings = (napari as unknown as {
-      settings: { navigatorVisible: boolean; imageSmoothing: boolean };
-    }).settings;
+    const settings = (
+      napari as unknown as {
+        settings: { navigatorVisible: boolean; imageSmoothing: boolean };
+      }
+    ).settings;
     napari.getOsdViewOptions().setNavigatorVisible(false);
     napari.getOsdViewOptions().setImageSmoothingEnabled(true);
     expect(settings.navigatorVisible).toBe(false);
@@ -75,7 +87,10 @@ describe('IViewerBackend capability-gated getters', () => {
 
     const viewport$ = (napari as unknown as { viewportChange$: Subject<Rect> }).viewportChange$;
     const seen: Rect[] = [];
-    napari.getIntensitySampling().getViewportChange$().subscribe((r) => seen.push(r));
+    napari
+      .getIntensitySampling()
+      .getViewportChange$()
+      .subscribe((r) => seen.push(r));
     viewport$.next({ x: 5, y: 6, width: 7, height: 8 });
     expect(seen).toEqual([{ x: 5, y: 6, width: 7, height: 8 }]);
   });

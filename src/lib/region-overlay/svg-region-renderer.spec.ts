@@ -1,6 +1,11 @@
 import { MultiPolygon, Polygon, Rectangle, Region } from '../models/region';
 import {
-  Affine, SvgRegionRenderer, SvgRegionRendererOptions, affineFromProjection, applyAffine, svgEl,
+  Affine,
+  SvgRegionRenderer,
+  SvgRegionRendererOptions,
+  affineFromProjection,
+  applyAffine,
+  svgEl,
 } from './svg-region-renderer';
 
 /** The world-space renderer behind both region overlays (NAPARI-BOUNDARY-10, OSD-PLOTLY-11). */
@@ -35,7 +40,9 @@ function mutations(root: Node, fn: () => void): MutationRecord[] {
 }
 
 describe('SvgRegionRenderer', () => {
-  afterEach(() => { document.body.innerHTML = ''; });
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
 
   it('affineFromProjection recovers a scaled, rotated and translated projection', () => {
     const m: Affine = [0, 2, -2, 0, 7, -3]; // 90° rotation, 2x zoom, offset
@@ -57,10 +64,24 @@ describe('SvgRegionRenderer', () => {
 
   it('a camera change mutates only the transform attribute', () => {
     const { svg, renderer } = setup();
-    renderer.render([
-      region(rect(0, 0, 10, 10)), region(poly([0, 10, 5], [0, 0, 10])),
-      region(poly([0, 20, 20, 0], [0, 0, 20, 20], { holes: [[[7, 7], [13, 7], [13, 13]]] })),
-    ], [1]);
+    renderer.render(
+      [
+        region(rect(0, 0, 10, 10)),
+        region(poly([0, 10, 5], [0, 0, 10])),
+        region(
+          poly([0, 20, 20, 0], [0, 0, 20, 20], {
+            holes: [
+              [
+                [7, 7],
+                [13, 7],
+                [13, 13],
+              ],
+            ],
+          }),
+        ),
+      ],
+      [1],
+    );
     const records = mutations(svg, () => expect(renderer.setCamera([3, 0, 0, 3, -5, 4])).toBe(true));
     expect(records).toHaveLength(1);
     expect(records[0].type).toBe('attributes');
@@ -88,7 +109,10 @@ describe('SvgRegionRenderer', () => {
     renderer.renderOverlay((layer) => {
       layer.at(svgEl('circle'), 1, 1, { x: 'cx', y: 'cy' });
       layer.line(0, 0, 2, 2);
-      layer.poly('polyline', [{ x: 0, y: 0 }, { x: 1, y: 2 }]);
+      layer.poly('polyline', [
+        { x: 0, y: 0 },
+        { x: 1, y: 2 },
+      ]);
     });
     const text = svg.querySelector('text')!;
     const circle = svg.querySelector('circle')!;
@@ -108,11 +132,29 @@ describe('SvgRegionRenderer', () => {
     ['rectangle as a rect (napari)', rect(0, 0, 10, 10), { rectElement: 'rect' }, 'rect', null],
     ['closed polygon', poly([0, 10, 5], [0, 0, 10]), {}, 'polygon', null],
     ['open polyline', poly([0, 10, 5], [0, 0, 10], { closed: false }), {}, 'polyline', null],
-    ['donut', poly([0, 20, 20, 0], [0, 0, 20, 20], { holes: [[[7, 7], [13, 7], [13, 13]]] }), {}, 'path',
-      'evenodd'],
+    [
+      'donut',
+      poly([0, 20, 20, 0], [0, 0, 20, 20], {
+        holes: [
+          [
+            [7, 7],
+            [13, 7],
+            [13, 13],
+          ],
+        ],
+      }),
+      {},
+      'path',
+      'evenodd',
+    ],
     ['bezier', poly([0, 10, 5], [0, 0, 10], { bezier: true }), {}, 'path', null],
-    ['multi-polygon', Object.assign(new MultiPolygon(), { polygons: [poly([0, 1, 1], [0, 0, 1])] }), {}, 'path',
-      'evenodd'],
+    [
+      'multi-polygon',
+      Object.assign(new MultiPolygon(), { polygons: [poly([0, 1, 1], [0, 0, 1])] }),
+      {},
+      'path',
+      'evenodd',
+    ],
     ['JSON rectangle', { x: 0, y: 0, width: 1, height: 1 }, {}, 'polygon', null],
   ])('draws a %s', (_name, bounds, opts, tag, fillRule) => {
     const { svg, renderer } = setup(opts);
@@ -129,11 +171,16 @@ describe('SvgRegionRenderer', () => {
       skip: (r) => r.kind === 'profile',
       styleShape: (_el, _r, selected) => selectedOf.push(selected),
     });
-    renderer.render([
-      region(rect(0, 0, 1, 1), { kind: 'profile' }), region(null), region(poly([], [])),
-      region(Object.assign(new MultiPolygon(), { polygons: [poly([0, 1], [0, 1])] })),
-      region(rect(0, 0, 1, 1)),
-    ], [4]);
+    renderer.render(
+      [
+        region(rect(0, 0, 1, 1), { kind: 'profile' }),
+        region(null),
+        region(poly([], [])),
+        region(Object.assign(new MultiPolygon(), { polygons: [poly([0, 1], [0, 1])] })),
+        region(rect(0, 0, 1, 1)),
+      ],
+      [4],
+    );
     expect(svg.querySelector('g[data-layer="regions"]')!.children).toHaveLength(1);
     expect(selectedOf).toEqual([true]);
   });

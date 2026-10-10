@@ -100,7 +100,7 @@ export interface SpatialViewState {
   logScale: boolean;
   /** Percentile clip for the contrast window as `[lo, hi]` fractions, so a
    *  handful of saturated observations don't flatten the rest. */
-   percentileClip: [number, number];
+  percentileClip: [number, number];
   /**
    * Colormap for CONTINUOUS spatial colouring — a gene, a numeric column — as a
    * {@link ColormapValue}, the same shape the display colormap carries: a scale
@@ -300,8 +300,7 @@ export interface SpatialViewState {
 
 /** Transcript glyph names — see `TRANSCRIPT_GLYPHS` in `spatial/spatial-tiles.ts`. */
 export type TranscriptGlyphName =
-  | 'circle' | 'star' | 'triangle' | 'square' | 'diamond' | 'cross' | 'hexagon'
-  | 'triangle-down' | 'pentagon' | 'x';
+  'circle' | 'star' | 'triangle' | 'square' | 'diamond' | 'cross' | 'hexagon' | 'triangle-down' | 'pentagon' | 'x';
 
 /**
  * The spatial view a dataset opens with: no colour source, points and volume shown, the

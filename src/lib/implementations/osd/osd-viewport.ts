@@ -56,7 +56,8 @@ export class OsdViewportAdapter {
       // inaccurate and warns when the world holds multiple images (per-channel
       // multichannel layers), which fed the intensity inset a wrong ROI.
       const r = viewportRectToImage(viewer, vp.getBounds(true));
-      const iw = d.width, ih = d.height;
+      const iw = d.width,
+        ih = d.height;
       const x = Math.max(0, Math.min(iw, r.x));
       const y = Math.max(0, Math.min(ih, r.y));
       const width = Math.max(1, Math.min(iw - x, r.width));
@@ -159,10 +160,11 @@ export class OsdViewportAdapter {
     const vp = this.host.viewer()?.viewport;
     if (!vp) return;
     const bounds = vp.getBounds(true);
-    const restore = () => quiet(() => {
-      this.host.viewer()?.viewport.fitBounds(bounds, true);
-      this.host.viewer()?.viewport.applyConstraints(true);
-    });
+    const restore = () =>
+      quiet(() => {
+        this.host.viewer()?.viewport.fitBounds(bounds, true);
+        this.host.viewer()?.viewport.applyConstraints(true);
+      });
     requestAnimationFrame(restore);
     setTimeout(restore, 350);
   }

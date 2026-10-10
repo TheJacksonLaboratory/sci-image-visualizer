@@ -120,8 +120,14 @@ export class MaskStrokeEditor {
    * If matrix point (mx, my) lies inside a region `accept`s (topmost first, not
    * in a hole), rasterize it into the stroke so this stroke extends it.
    */
-  adoptAt(regions: Region[], mx: number, my: number, frame: MatrixFrame, image: StrokeImage,
-          accept: (r: Region) => boolean = () => true): boolean {
+  adoptAt(
+    regions: Region[],
+    mx: number,
+    my: number,
+    frame: MatrixFrame,
+    image: StrokeImage,
+    accept: (r: Region) => boolean = () => true,
+  ): boolean {
     for (let i = regions.length - 1; i >= 0; i--) {
       const region = regions[i];
       if (!accept(region)) continue;
@@ -147,8 +153,12 @@ export class MaskStrokeEditor {
    * chained merges resolve. With no region yet, the first merged region's
    * identity and metadata are adopted.
    */
-  mergeTouching(regions: Region[], frame: MatrixFrame, image: StrokeImage,
-                accept: (r: Region) => boolean = () => true): void {
+  mergeTouching(
+    regions: Region[],
+    frame: MatrixFrame,
+    image: StrokeImage,
+    accept: (r: Region) => boolean = () => true,
+  ): void {
     let merged = true;
     while (merged && this.stroke) {
       merged = false;
@@ -211,11 +221,20 @@ export class MaskStrokeEditor {
     for (let i = 1; i < pieces.length; i++) {
       const prev = this.owner(regions, prevExtras[i - 1] ?? null);
       // A new split piece inherits the edited region's class and metadata.
-      extras.push(prev
-        ? this.upsert(regions, prev, pieces[i], opts)
-        : this.insert(regions, owner
-          ? replaceBounds(owner, pieces[i], { ...this.patchFor(owner, opts), id: undefined, name: undefined })
-          : opts.newRegion(pieces[i])));
+      extras.push(
+        prev
+          ? this.upsert(regions, prev, pieces[i], opts)
+          : this.insert(
+              regions,
+              owner
+                ? replaceBounds(owner, pieces[i], {
+                    ...this.patchFor(owner, opts),
+                    id: undefined,
+                    name: undefined,
+                  })
+                : opts.newRegion(pieces[i]),
+            ),
+      );
     }
 
     host.setRegions(regions);
@@ -232,7 +251,10 @@ export class MaskStrokeEditor {
     let changed = false;
     for (const id of ids) {
       const idx = regions.findIndex((r) => r.id === id);
-      if (idx >= 0) { regions.splice(idx, 1); changed = true; }
+      if (idx >= 0) {
+        regions.splice(idx, 1);
+        changed = true;
+      }
     }
     if (changed) host.setRegions(regions);
     this.reset();
@@ -248,8 +270,7 @@ export class MaskStrokeEditor {
   }
 
   /** Replace `existing` in place (or append it if a merge removed it). */
-  private upsert(regions: Region[], existing: Region | null, bounds: Polygon,
-                 opts: StrokeCommitOptions): Region {
+  private upsert(regions: Region[], existing: Region | null, bounds: Polygon, opts: StrokeCommitOptions): Region {
     if (!existing) return this.insert(regions, opts.newRegion(bounds));
     const region = replaceBounds(existing, bounds, this.patchFor(existing, opts));
     const idx = regions.findIndex((r) => r.id === existing.id);
@@ -274,13 +295,16 @@ export class MaskStrokeEditor {
    * multi-polygons), or too large to rasterize faithfully at this zoom — editing
    * would clip or down-quantize it and bring it back rescaled (jit-ui#102).
    */
-  private editableRing(region: Region, frame: MatrixFrame)
-    : { xs: number[]; ys: number[]; holes?: number[][][] } | null {
+  private editableRing(
+    region: Region,
+    frame: MatrixFrame,
+  ): { xs: number[]; ys: number[]; holes?: number[][][] } | null {
     const b = region?.bounds;
     if (!(b instanceof Polygon) || b.closed === false || b.xpoints.length < 3) return null;
     const ring = frame.ringToMatrix(b.xpoints, b.ypoints);
     const r = ringBounds(ring.xs, ring.ys);
-    const w = r.maxX - r.minX, h = r.maxY - r.minY;
+    const w = r.maxX - r.minX,
+      h = r.maxY - r.minY;
     if (!(w > 0 && h > 0 && w * h <= MAX_RASTER_PIXELS)) return null;
     return { xs: ring.xs, ys: ring.ys, holes: frame.holesToMatrix(b.holes) };
   }

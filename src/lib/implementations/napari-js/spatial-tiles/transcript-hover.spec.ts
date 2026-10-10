@@ -14,7 +14,9 @@ const tile = (xs: number[], ys: number[]): SpatialTranscriptTile => ({
 
 describe('pickNearest (transcript hover)', () => {
   const drawn = (t: SpatialTranscriptTile, r: number) => ({
-    merged: t, radius: new Float32Array(t.count).fill(r), grid: null,
+    merged: t,
+    radius: new Float32Array(t.count).fill(r),
+    grid: null,
   });
 
   it('finds the marker under the cursor, within its radius', () => {

@@ -48,11 +48,13 @@ export function regionsAt(regions: Region[], indices: number[]): Region[] {
 /** Regions eligible for set-ops: closed areas (rect / closed polygon / multi-polygon),
  *  excluding intensity-profile lines. */
 export function opEligible(regions: Region[]): Region[] {
-  return regions.filter((r) => r.kind !== 'profile' && (
-    r.bounds instanceof Rectangle ||
-    r.bounds instanceof MultiPolygon ||
-    (r.bounds instanceof Polygon && r.bounds.closed !== false)
-  ));
+  return regions.filter(
+    (r) =>
+      r.kind !== 'profile' &&
+      (r.bounds instanceof Rectangle ||
+        r.bounds instanceof MultiPolygon ||
+        (r.bounds instanceof Polygon && r.bounds.closed !== false)),
+  );
 }
 
 /**
@@ -64,14 +66,19 @@ export function buildContextMenu(state: ContextMenuState, actions: ContextMenuAc
   if (!state.isHeatmap) return surface3dItems(state, actions);
   const active = state.activeDragMode;
   const toggle = (label: string, icon: string, mode: string): MenuItem => ({
-    label, icon, styleClass: active === mode ? ACTIVE : '', command: () => actions.toggleDragMode(mode),
+    label,
+    icon,
+    styleClass: active === mode ? ACTIVE : '',
+    command: () => actions.toggleDragMode(mode),
   });
   const isImageView = state.basePlotType === PlotType.IMAGE;
   const items: MenuItem[] = [];
   const regionActions = buildRegionActionItems(state, actions);
   if (regionActions.length) items.push(...regionActions, { separator: true });
-  items.push({ label: 'Autoscale', icon: 'pi pi-window-maximize', command: () => actions.autoscaleImage() },
-    { separator: true });
+  items.push(
+    { label: 'Autoscale', icon: 'pi pi-window-maximize', command: () => actions.autoscaleImage() },
+    { separator: true },
+  );
   // 'Zoom selection' is Plotly's rubber-band zoom; it doesn't apply to the
   // OpenSeadragon-backed Image view (use 'Zoom to box' there instead).
   if (!isImageView) items.push(toggle('Zoom selection', 'pi pi-search', 'zoom'));
@@ -104,7 +111,9 @@ export function buildContextMenu(state: ContextMenuState, actions: ContextMenuAc
 /** A 3D scene's camera modes and reset. */
 function surface3dItems(state: ContextMenuState, actions: ContextMenuActions): MenuItem[] {
   const mode = (label: string, icon: string, m: string): MenuItem => ({
-    label, icon, styleClass: state.activeSurface3dMode === m ? ACTIVE : '',
+    label,
+    icon,
+    styleClass: state.activeSurface3dMode === m ? ACTIVE : '',
     command: () => actions.toggleSurface3dMode(m),
   });
   return [
@@ -142,7 +151,8 @@ export function buildRegionActionItems(state: ContextMenuState, actions: Context
     items.push(
       { label: 'Inverse', icon: 'pi pi-clone', command: () => actions.inverseRegions() },
       {
-        label: 'Simplify', icon: 'pi pi-chart-line',
+        label: 'Simplify',
+        icon: 'pi pi-chart-line',
         items: [
           { label: 'Light (1 px)', command: () => actions.simplifyRegions(1) },
           { label: 'Medium (3 px)', command: () => actions.simplifyRegions(3) },
@@ -160,7 +170,11 @@ export function buildRegionActionItems(state: ContextMenuState, actions: Context
       items.push({ label: 'Convert to Bézier', icon: 'to-bezier-icon', command: () => actions.toBezierRegion() });
     }
     if (selected.some((r) => r.bounds instanceof Polygon && r.bounds.bezier)) {
-      items.push({ label: 'Convert to polygon', icon: 'to-polygon-icon', command: () => actions.toPolygonRegion() });
+      items.push({
+        label: 'Convert to polygon',
+        icon: 'to-polygon-icon',
+        command: () => actions.toPolygonRegion(),
+      });
     }
   }
   items.push({ label: 'Delete region', icon: 'pi pi-trash', command: () => actions.deleteRegion() });

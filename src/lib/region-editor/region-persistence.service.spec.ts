@@ -10,8 +10,16 @@ jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
 import { saveAs } from 'file-saver';
 
 describe('RegionPersistenceService', () => {
-  let api: jest.Mocked<Pick<IRegionEditorApi, 'isStackMode' | 'getStackSaveLayout' | 'getSliceAnnotationRegions'
-    | 'getStackSaveAnnotationSlices' | 'getGeoJsonString'>>;
+  let api: jest.Mocked<
+    Pick<
+      IRegionEditorApi,
+      | 'isStackMode'
+      | 'getStackSaveLayout'
+      | 'getSliceAnnotationRegions'
+      | 'getStackSaveAnnotationSlices'
+      | 'getGeoJsonString'
+    >
+  >;
   let io: jest.Mocked<RegionIoPort>;
   let svc: RegionPersistenceService;
   const r = (z?: number) => Object.assign(new Region(), { id: 1, z });
@@ -21,7 +29,13 @@ describe('RegionPersistenceService', () => {
       isStackMode: jest.fn(() => false),
       getStackSaveLayout: jest.fn(() => 'combined' as const),
       getSliceAnnotationRegions: jest.fn(() => [r(0), r(1)]),
-      getStackSaveAnnotationSlices: jest.fn(() => new Map([[2, [r(2)]], [3, []]])),
+      getStackSaveAnnotationSlices: jest.fn(
+        () =>
+          new Map([
+            [2, [r(2)]],
+            [3, []],
+          ]),
+      ),
       getGeoJsonString: jest.fn((regs: Region[]) => JSON.stringify(regs.map((x) => x.z))),
     };
     io = {
@@ -76,14 +90,19 @@ describe('RegionPersistenceService', () => {
     expect(done).toHaveBeenCalled();
 
     io.saveGeoJson.mockClear();
-    svc.save(() => [r()], 'y.geojson').subscribe().unsubscribe();
+    svc
+      .save(() => [r()], 'y.geojson')
+      .subscribe()
+      .unsubscribe();
     tick();
     expect(io.saveGeoJson).not.toHaveBeenCalled();
   }));
 
   it('save reports a serialize failure and an upload failure as errors', fakeAsync(() => {
     const errors: unknown[] = [];
-    api.getGeoJsonString.mockImplementationOnce(() => { throw new Error('ser'); });
+    api.getGeoJsonString.mockImplementationOnce(() => {
+      throw new Error('ser');
+    });
     svc.save(() => [], 'a').subscribe({ error: (e) => errors.push((e as Error).message) });
     io.saveGeoJson.mockReturnValueOnce(throwError(() => new Error('up')));
     svc.save(() => [], 'b').subscribe({ error: (e) => errors.push((e as Error).message) });
@@ -92,7 +111,10 @@ describe('RegionPersistenceService', () => {
   }));
 
   it('serializes per-slice files on the default plane, empty slices included', () => {
-    expect(svc.sliceGeoJsons()).toEqual([{ z: 2, geoJsonStr: '[0]' }, { z: 3, geoJsonStr: '[]' }]);
+    expect(svc.sliceGeoJsons()).toEqual([
+      { z: 2, geoJsonStr: '[0]' },
+      { z: 3, geoJsonStr: '[]' },
+    ]);
   });
 
   it('download writes the GeoJSON blob under the given name', () => {

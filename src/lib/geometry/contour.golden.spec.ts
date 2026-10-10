@@ -34,8 +34,9 @@ function blobMask(seed: number, w: number, h: number, shapes: number): Uint8Arra
   const r = rng(seed);
   const mask = new Uint8Array(w * h);
   for (let s = 0; s < shapes; s++) {
-    const cx = r() * w, cy = r() * h;
-    const ro = 2 + r() * Math.min(w, h) / 4;
+    const cx = r() * w,
+      cy = r() * h;
+    const ro = 2 + (r() * Math.min(w, h)) / 4;
     const ri = r() < 0.5 ? ro * (0.2 + r() * 0.5) : 0;
     const erase = r() < 0.15;
     for (let y = 0; y < h; y++) {
@@ -58,7 +59,8 @@ function labelMap(seed: number, w: number, h: number, cells: number): Uint32Arra
   const r = rng(seed);
   const labels = new Uint32Array(w * h);
   for (let c = 1; c <= cells; c++) {
-    const cx = r() * w, cy = r() * h;
+    const cx = r() * w,
+      cy = r() * h;
     const ro = 1 + r() * 7;
     const ri = r() < 0.3 ? ro * 0.4 : 0;
     for (let y = 0; y < h; y++) {
@@ -75,7 +77,8 @@ const digest = (polys: unknown[]) => fnv(JSON.stringify(polys));
 
 describe('contour tracing golden output', () => {
   it('traces a small donut exactly', () => {
-    const w = 8, h = 7;
+    const w = 8,
+      h = 7;
     const mask = new Uint8Array(w * h);
     for (let y = 1; y < 6; y++) for (let x = 1; x < 7; x++) mask[y * w + x] = 1;
     for (let y = 3; y < 5; y++) for (let x = 3; x < 5; x++) mask[y * w + x] = 0;
@@ -83,7 +86,14 @@ describe('contour tracing golden output', () => {
     expect(polys.length).toBe(1);
     expect(polys[0].xpoints).toEqual([11, 12, 13, 14, 15, 16, 16, 16, 16, 16, 15, 14, 13, 12, 11, 11, 11, 11]);
     expect(polys[0].ypoints).toEqual([21, 21, 21, 21, 21, 21, 22, 23, 24, 25, 25, 25, 25, 25, 25, 24, 23, 22]);
-    expect(polys[0].holes).toEqual([[[13, 23], [14, 23], [14, 24], [13, 24]]]);
+    expect(polys[0].holes).toEqual([
+      [
+        [13, 23],
+        [14, 23],
+        [14, 24],
+        [13, 24],
+      ],
+    ]);
   });
 
   it.each([

@@ -126,14 +126,18 @@ export class SpatialSession {
    * time: `continuousColormap: null` means "follow the image's colormap", and a setting that only
    * takes effect at the next unrelated rebuild is not one. Null without a spatial port.
    */
-  changes$(store: VisualizerStore): Observable<
-    [SpatialDataset | null, SpatialViewState, SpatialSelectionMask, unknown, boolean]
-  > | null {
+  changes$(
+    store: VisualizerStore,
+  ): Observable<[SpatialDataset | null, SpatialViewState, SpatialSelectionMask, unknown, boolean]> | null {
     const port = this.port;
     if (!port) return null;
     const selection$ = this.selection?.getSelection$() ?? of(emptySelection());
     return combineLatest([
-      port.getDataset$(), store.getSpatialView$(), selection$, store.getColormap(), store.getReverseScale(),
+      port.getDataset$(),
+      store.getSpatialView$(),
+      selection$,
+      store.getColormap(),
+      store.getReverseScale(),
     ]);
   }
 }
@@ -173,8 +177,8 @@ export abstract class SpatialSceneBase {
   /** Rebuild on every dataset, view, selection or colormap change. */
   protected subscribeSpatial(): void {
     this.sub?.unsubscribe();
-    this.sub = this.session.changes$(this.ctx.store)?.subscribe(
-      ([dataset, view, selection, colormap, reverse]) => {
+    this.sub =
+      this.session.changes$(this.ctx.store)?.subscribe(([dataset, view, selection, colormap, reverse]) => {
         this.ctx.display.record((colormap as ColormapNode) ?? null, !!reverse);
         // Kept so a slice change can redraw the markers for the new plane, which
         // arrives through setZIndex rather than through any of these streams.
@@ -185,13 +189,14 @@ export abstract class SpatialSceneBase {
         void this.hover.resolveSource(dataset, view);
         void this.rebuild(dataset, view, selection);
         this.afterChange();
-      },
-    ) ?? null;
+      }) ?? null;
   }
 
   /** (Re)build the scene's layers for the current dataset + view state. */
   protected abstract rebuild(
-    dataset: SpatialDataset | null, view: SpatialViewState, selection?: SpatialSelectionMask,
+    dataset: SpatialDataset | null,
+    view: SpatialViewState,
+    selection?: SpatialSelectionMask,
   ): Promise<void>;
   /** Run after each rebuild is started (the 2D tile layers refresh here). */
   protected afterChange(): void {

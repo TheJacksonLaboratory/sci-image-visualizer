@@ -17,9 +17,9 @@ describe('cropImage', () => {
     expect(out.width).toBe(4);
     expect(out.height).toBe(5);
     expect(out.channels).toBe(4);
-    expect(out.data[0]).toBe(32 % 256);       // top-left → source (2,3) = index 32
-    expect(out.data[4]).toBe(33 % 256);       // one px right → (3,3) = 33
-    expect(out.data[4 * 4]).toBe(42 % 256);   // one row down → (2,4) = 42
+    expect(out.data[0]).toBe(32 % 256); // top-left → source (2,3) = index 32
+    expect(out.data[4]).toBe(33 % 256); // one px right → (3,3) = 33
+    expect(out.data[4 * 4]).toBe(42 % 256); // one row down → (2,4) = 42
   });
 
   it('clamps an over-sized / out-of-bounds rectangle to the image', () => {
@@ -30,7 +30,7 @@ describe('cropImage', () => {
 
   it('downsamples by 2^level when level > 0', () => {
     const out = cropImage(rampImage(16, 16), { x: 0, y: 0, width: 16, height: 16, level: 2 });
-    expect(out.width).toBe(4);   // 16 / 2^2
+    expect(out.width).toBe(4); // 16 / 2^2
     expect(out.height).toBe(4);
   });
 

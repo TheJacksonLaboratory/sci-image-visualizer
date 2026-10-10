@@ -1,6 +1,5 @@
 <p-toolbar>
   <div class="p-toolbar-group-start flex-wrap align-items-center gap-1">
-
     <!-- Host-provided custom toolbar buttons, shown first (e.g. app-specific
          actions the visualization view itself doesn't own). -->
     <ng-content></ng-content>
@@ -9,118 +8,190 @@
          like the host's own buttons above, so they sit right beside them. Image view
          only, the view their dialog draws over. Highlighted while the dialog is open. -->
     <ng-container *ngIf="isImageView">
-      <p-button *ngFor="let tool of dialogTools; trackBy: trackToolById"
-                size="small" [text]="openDialogToolId !== tool.id"
-                [pTooltip]="tool.tooltip" tooltipPosition="bottom"
-                [ariaLabel]="tool.label"
-                [attr.aria-pressed]="openDialogToolId === tool.id"
-                (onClick)="toggleDialogTool.emit(tool.id)">
-        <img *ngIf="tool.icon.src" [src]="tool.icon.src" style="width: 1rem" [alt]="tool.label"
-             [class]="openDialogToolId === tool.id ? 'toolbar-icon-active' : 'toolbar-icon-dark'" />
+      <p-button
+        *ngFor="let tool of dialogTools; trackBy: trackToolById"
+        size="small"
+        [text]="openDialogToolId !== tool.id"
+        [pTooltip]="tool.tooltip"
+        tooltipPosition="bottom"
+        [ariaLabel]="tool.label"
+        [attr.aria-pressed]="openDialogToolId === tool.id"
+        (onClick)="toggleDialogTool.emit(tool.id)"
+      >
+        <img
+          *ngIf="tool.icon.src"
+          [src]="tool.icon.src"
+          style="width: 1rem"
+          [alt]="tool.label"
+          [class]="openDialogToolId === tool.id ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+        />
         <i *ngIf="tool.icon.pi" class="pi {{ tool.icon.pi }}"></i>
       </p-button>
     </ng-container>
 
     <!-- Plot type: available for any image (grayscale or RGB), and for a spatial dataset
          that brings none (its spatial modes are still a choice). -->
-    <toolbar-plot-type-selector *ngIf="showPlotTypes"
-                                [options]="plotTypeOptions" [selected]="selectedPlotType"
-                                [isosurface]="isIsosurfaceMode" [isoRange]="isoRange"
-                                [intensityLines]="isIntensityCapable"
-                                (selectPlotType)="selectPlotType.emit($event)"
-                                (isoRangeChange)="isoRangeChange.emit($event)"
-                                (addProfileLine)="addProfileLine.emit()">
+    <toolbar-plot-type-selector
+      *ngIf="showPlotTypes"
+      [options]="plotTypeOptions"
+      [selected]="selectedPlotType"
+      [isosurface]="isIsosurfaceMode"
+      [isoRange]="isoRange"
+      [intensityLines]="isIntensityCapable"
+      (selectPlotType)="selectPlotType.emit($event)"
+      (isoRangeChange)="isoRangeChange.emit($event)"
+      (addProfileLine)="addProfileLine.emit()"
+    >
     </toolbar-plot-type-selector>
     <!-- Channels & Histogram: brightness/contrast, gamma, per-channel display,
          colormap/reverse/invert — opens the floating dialog. -->
-    <p-button *ngIf="tools.specialTools" pRipple size="small" [text]="true"
-              ariaLabel="Channels &amp; Histogram" pTooltip="Channels &amp; Histogram (brightness/contrast, colormap)"
-              tooltipPosition="bottom"
-              (onClick)="openChannelHistogram.emit()">
-      <img src="assets/plotting/invert.svg" class="toolbar-icon-dark" style="width: 1rem"/>
+    <p-button
+      *ngIf="tools.specialTools"
+      pRipple
+      size="small"
+      [text]="true"
+      ariaLabel="Channels &amp; Histogram"
+      pTooltip="Channels &amp; Histogram (brightness/contrast, colormap)"
+      tooltipPosition="bottom"
+      (onClick)="openChannelHistogram.emit()"
+    >
+      <img src="assets/plotting/invert.svg" class="toolbar-icon-dark" style="width: 1rem" />
     </p-button>
 
     <!-- Spatial-omics controls. Only meaningful in the spatial mode, which is
          itself only offered while a dataset is loaded — so this button appears
          exactly when there is something for it to control. -->
-    <p-button *ngIf="tools.specialTools && isSpatialMode" pRipple size="small" [text]="true"
-              ariaLabel="Spatial omics controls" pTooltip="Spatial omics (colour by column or gene, legend, selection, distributions)"
-              tooltipPosition="bottom"
-              (onClick)="openSpatialControls.emit()">
-      <img src="assets/plotting/spatial-omics.svg" class="toolbar-icon-dark" style="width: 1rem"/>
+    <p-button
+      *ngIf="tools.specialTools && isSpatialMode"
+      pRipple
+      size="small"
+      [text]="true"
+      ariaLabel="Spatial omics controls"
+      pTooltip="Spatial omics (colour by column or gene, legend, selection, distributions)"
+      tooltipPosition="bottom"
+      (onClick)="openSpatialControls.emit()"
+    >
+      <img src="assets/plotting/spatial-omics.svg" class="toolbar-icon-dark" style="width: 1rem" />
     </p-button>
 
     <!-- Smoothen toggle: bilinear smoothing vs nearest-neighbour raw pixels (Image
          view only — it's an OpenSeadragon drawer setting). Highlighted when smoothing on. -->
-    <p-button *ngIf="tools.specialTools && isImageView" size="small"
-              [text]="!imageSmoothingEnabled"
-              ariaLabel="Smoothen" pTooltip="Smoothen (turn on image smoothing)" tooltipPosition="bottom"
-              (onClick)="toggleImageSmoothing.emit()">
-      <img src="assets/plotting/smooth.svg" style="width: 1rem"
-           [class]="imageSmoothingEnabled ? 'toolbar-icon-active' : 'toolbar-icon-dark'"/>
+    <p-button
+      *ngIf="tools.specialTools && isImageView"
+      size="small"
+      [text]="!imageSmoothingEnabled"
+      ariaLabel="Smoothen"
+      pTooltip="Smoothen (turn on image smoothing)"
+      tooltipPosition="bottom"
+      (onClick)="toggleImageSmoothing.emit()"
+    >
+      <img
+        src="assets/plotting/smooth.svg"
+        style="width: 1rem"
+        [class]="imageSmoothingEnabled ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+      />
     </p-button>
 
     <!-- Stack controls -->
-    <toolbar-stack-controls *ngIf="imageInfo?.isStack"
-                            [liveScrubber]="showsLiveSliceScrubber"
-                            [stackToggle]="!showsLiveSliceScrubber && !isNapariMode && !isSpatialMode"
-                            [showStack]="!!imageInfo?.showStack" [stackOptions]="stackOptions"
-                            [zIndex]="zIndex" [maxIndex]="maxIndex"
-                            (zScrub)="zScrub.emit($event)" (zSlide)="zSlide.emit($event)"
-                            (selectStackOption)="selectStackOption.emit($event)"
-                            (zIndexInput)="zIndexInput.emit($event)" (reloadAndPlot)="reloadAndPlot.emit()">
+    <toolbar-stack-controls
+      *ngIf="imageInfo?.isStack"
+      [liveScrubber]="showsLiveSliceScrubber"
+      [stackToggle]="!showsLiveSliceScrubber && !isNapariMode && !isSpatialMode"
+      [showStack]="!!imageInfo?.showStack"
+      [stackOptions]="stackOptions"
+      [zIndex]="zIndex"
+      [maxIndex]="maxIndex"
+      (zScrub)="zScrub.emit($event)"
+      (zSlide)="zSlide.emit($event)"
+      (selectStackOption)="selectStackOption.emit($event)"
+      (zIndexInput)="zIndexInput.emit($event)"
+      (reloadAndPlot)="reloadAndPlot.emit()"
+    >
     </toolbar-stack-controls>
 
     <!-- Image actions (special tools) -->
     <ng-container *ngIf="tools.specialTools">
       <span class="toolbar-separator"></span>
-      <p-button icon="pi pi-download" size="small" [text]="true"
-                ariaLabel="Download image as PNG" pTooltip="Download image as PNG" tooltipPosition="bottom"
-                (onClick)="downloadImage.emit()">
+      <p-button
+        icon="pi pi-download"
+        size="small"
+        [text]="true"
+        ariaLabel="Download image as PNG"
+        pTooltip="Download image as PNG"
+        tooltipPosition="bottom"
+        (onClick)="downloadImage.emit()"
+      >
       </p-button>
-      <p-button *ngIf="isHeatmap" icon="pi pi-window-maximize" size="small" [text]="true"
-                ariaLabel="Fit to view" pTooltip="Fit to view" tooltipPosition="bottom"
-                (onClick)="autoscaleImage.emit()">
+      <p-button
+        *ngIf="isHeatmap"
+        icon="pi pi-window-maximize"
+        size="small"
+        [text]="true"
+        ariaLabel="Fit to view"
+        pTooltip="Fit to view"
+        tooltipPosition="bottom"
+        (onClick)="autoscaleImage.emit()"
+      >
       </p-button>
     </ng-container>
 
-    <toolbar-view-controls [isHeatmap]="isHeatmap" [zoomTools]="tools.zoomTools" [isImageView]="isImageView"
-                           [activeDragMode]="activeDragMode" [activeSurface3dMode]="activeSurface3dMode"
-                           [isNapariMode]="isNapariMode" [isNapariSurfaceMode]="isNapariSurfaceMode"
-                           [isNapari3dMode]="isNapari3dMode" [axesVisible]="axesVisible"
-                           [wireframeActive]="wireframeActive" [resolutionScale]="resolutionScale"
-                           (toggleDragMode)="toggleDragMode.emit($event)"
-                           (zoomIn)="zoomIn.emit()" (zoomOut)="zoomOut.emit()"
-                           (toggleSurface3dMode)="toggleSurface3dMode.emit($event)"
-                           (resetSurfaceCamera)="resetSurfaceCamera.emit()"
-                           (toggleAxes)="toggleAxes.emit()" (toggleWireframe)="toggleWireframe.emit()"
-                           (selectResolution)="selectResolution.emit($event)">
+    <toolbar-view-controls
+      [isHeatmap]="isHeatmap"
+      [zoomTools]="tools.zoomTools"
+      [isImageView]="isImageView"
+      [activeDragMode]="activeDragMode"
+      [activeSurface3dMode]="activeSurface3dMode"
+      [isNapariMode]="isNapariMode"
+      [isNapariSurfaceMode]="isNapariSurfaceMode"
+      [isNapari3dMode]="isNapari3dMode"
+      [axesVisible]="axesVisible"
+      [wireframeActive]="wireframeActive"
+      [resolutionScale]="resolutionScale"
+      (toggleDragMode)="toggleDragMode.emit($event)"
+      (zoomIn)="zoomIn.emit()"
+      (zoomOut)="zoomOut.emit()"
+      (toggleSurface3dMode)="toggleSurface3dMode.emit($event)"
+      (resetSurfaceCamera)="resetSurfaceCamera.emit()"
+      (toggleAxes)="toggleAxes.emit()"
+      (toggleWireframe)="toggleWireframe.emit()"
+      (selectResolution)="selectResolution.emit($event)"
+    >
     </toolbar-view-controls>
 
     <ng-container *ngIf="(isHeatmap || is3dRegions) && tools.regionTools">
-      <toolbar-region-tools [activeDragMode]="activeDragMode" [is3dRegions]="is3dRegions"
-                            [vertexTools]="supportsRegionVertexTools"
-                            [wandSensitivity]="wandSensitivity" [brushSize]="brushSize"
-                            [vertexEraserRadius]="vertexEraserRadius"
-                            [canUndo]="canUndo" [canRedo]="canRedo"
-                            (openRegionEditor)="openRegionEditor.emit()"
-                            (toggleDragMode)="toggleDragMode.emit($event)"
-                            (undoRegion)="undoRegion.emit()" (redoRegion)="redoRegion.emit()"
-                            (deleteRegion)="deleteRegion.emit()"
-                            (wandSensitivityChange)="wandSensitivityChange.emit($event)"
-                            (brushSizeChange)="brushSizeChange.emit($event)"
-                            (vertexEraserRadiusChange)="vertexEraserRadiusChange.emit($event)">
+      <toolbar-region-tools
+        [activeDragMode]="activeDragMode"
+        [is3dRegions]="is3dRegions"
+        [vertexTools]="supportsRegionVertexTools"
+        [wandSensitivity]="wandSensitivity"
+        [brushSize]="brushSize"
+        [vertexEraserRadius]="vertexEraserRadius"
+        [canUndo]="canUndo"
+        [canRedo]="canRedo"
+        (openRegionEditor)="openRegionEditor.emit()"
+        (toggleDragMode)="toggleDragMode.emit($event)"
+        (undoRegion)="undoRegion.emit()"
+        (redoRegion)="redoRegion.emit()"
+        (deleteRegion)="deleteRegion.emit()"
+        (wandSensitivityChange)="wandSensitivityChange.emit($event)"
+        (brushSizeChange)="brushSizeChange.emit($event)"
+        (vertexEraserRadiusChange)="vertexEraserRadiusChange.emit($event)"
+      >
       </toolbar-region-tools>
-      <toolbar-segmentation-tools [activeDragMode]="activeDragMode"
-                                  [samModels]="samModels" [samModelId]="samModelId"
-                                  [contributedTools]="contributedTools" [toolModelIds]="toolModelIds"
-                                  (segmentRegions)="segmentRegions.emit()"
-                                  (segmentCellpose)="segmentCellpose.emit()"
-                                  (toggleDragMode)="toggleDragMode.emit($event)"
-                                  (samModelChange)="samModelChange.emit($event)"
-                                  (runTool)="runTool.emit($event)"
-                                  (toolModelChange)="toolModelChange.emit($event)"
-                                  (openToolParams)="openToolParams.emit($event)">
+      <toolbar-segmentation-tools
+        [activeDragMode]="activeDragMode"
+        [samModels]="samModels"
+        [samModelId]="samModelId"
+        [contributedTools]="contributedTools"
+        [toolModelIds]="toolModelIds"
+        (segmentRegions)="segmentRegions.emit()"
+        (segmentCellpose)="segmentCellpose.emit()"
+        (toggleDragMode)="toggleDragMode.emit($event)"
+        (samModelChange)="samModelChange.emit($event)"
+        (runTool)="runTool.emit($event)"
+        (toolModelChange)="toolModelChange.emit($event)"
+        (openToolParams)="openToolParams.emit($event)"
+      >
       </toolbar-segmentation-tools>
     </ng-container>
 
@@ -128,14 +199,22 @@
       <span class="toolbar-separator"></span>
 
       <!-- Help -->
-      <p-button icon="pi pi-question-circle" size="small" [text]="true"
-                ariaLabel="Help" pTooltip="Help" tooltipPosition="bottom"
-                (onClick)="showHelp()">
+      <p-button
+        icon="pi pi-question-circle"
+        size="small"
+        [text]="true"
+        ariaLabel="Help"
+        pTooltip="Help"
+        tooltipPosition="bottom"
+        (onClick)="showHelp()"
+      >
       </p-button>
     </ng-container>
-
   </div>
 </p-toolbar>
-<toolbar-help-dialog [(visible)]="displayHelpDialog"
-                     [contributedTools]="contributedTools" [dialogTools]="dialogTools">
+<toolbar-help-dialog
+  [(visible)]="displayHelpDialog"
+  [contributedTools]="contributedTools"
+  [dialogTools]="dialogTools"
+>
 </toolbar-help-dialog>

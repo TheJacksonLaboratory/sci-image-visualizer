@@ -31,9 +31,7 @@ export async function fetchTileBitmap(http: HttpClient, url: string, timeoutMs: 
 /** Fetch a tile and read its pixels back as RGBA ImageData (via an offscreen
  *  canvas). Returns null only when a 2d context can't be created; throws on
  *  network/decode failure (the caller's tagged catch handles it). */
-export async function fetchTileRgba(
-  http: HttpClient, url: string, timeoutMs: number,
-): Promise<ImageData | null> {
+export async function fetchTileRgba(http: HttpClient, url: string, timeoutMs: number): Promise<ImageData | null> {
   const bmp = await fetchTileBitmap(http, url, timeoutMs);
   try {
     return readRgba(bmp, bmp.width, bmp.height);

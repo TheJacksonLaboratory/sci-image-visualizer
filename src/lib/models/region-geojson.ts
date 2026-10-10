@@ -37,7 +37,7 @@ export function regionsFromGeoJson(geoJsonStr: string): Region[] {
     throw new Error('Error parsing json string: ' + error);
   }
   if (!geoJson.features) {
-    throw new Error('Invalid GeoJson file: must contain the \'features\' key.');
+    throw new Error("Invalid GeoJson file: must contain the 'features' key.");
   }
   let idx = 0;
   for (const feature of geoJson.features) {
@@ -73,9 +73,9 @@ export function regionsFromGeoJson(geoJsonStr: string): Region[] {
       polygon.bezier = true;
       polygon.closed = feature.geometry?.type !== 'LineString';
       polygon.npoints = anchors.length;
-      polygon.xpoints = anchors.map(a => a[0]);
-      polygon.ypoints = anchors.map(a => a[1]);
-      polygon.coordinates = anchors.map(a => [a[0], a[1]]);
+      polygon.xpoints = anchors.map((a) => a[0]);
+      polygon.ypoints = anchors.map((a) => a[1]);
+      polygon.coordinates = anchors.map((a) => [a[0], a[1]]);
       // Restore the edited control handles when present (else they'll fall back
       // to the smooth Catmull-Rom default at render time).
       if (feature.properties.bezierHandlesIn) polygon.handlesIn = feature.properties.bezierHandlesIn;
@@ -91,15 +91,15 @@ export function regionsFromGeoJson(geoJsonStr: string): Region[] {
 
     const coordinates = feature.geometry.coordinates;
     if (!coordinates) {
-      throw new Error('Invalid GeoJson file: must contain the \'coordinates\' key.');
+      throw new Error("Invalid GeoJson file: must contain the 'coordinates' key.");
     }
     // Multi-part region: GeoJSON MultiPolygon → one Polygon per part, each
     // with its own holes (jit-ui#85).
     if (feature.geometry.type === 'MultiPolygon') {
       const mp = new MultiPolygon();
       mp.polygons = (coordinates as number[][][][])
-        .map(rings => polygonFromRings(rings))
-        .filter(p => p.xpoints.length >= 3);
+        .map((rings) => polygonFromRings(rings))
+        .filter((p) => p.xpoints.length >= 3);
       region.bounds = mp;
       regions.push(region);
       continue;
@@ -118,23 +118,25 @@ export function regionsFromGeoJson(geoJsonStr: string): Region[] {
         polygon.coordinates.push([coordinates[i][0], coordinates[i][1]]);
       }
       region.bounds = polygon;
-    // Polygon: check if it encodes a rectangle (single ring only — a polygon
-    // with holes must never be collapsed to a rectangle).
-    } else if (coordinates.length === 1
-      && coordinates[0].length === 5
-      && JSON.stringify(coordinates[0][0]) === JSON.stringify(coordinates[0][4])
-      && coordinates[0][0][0] === coordinates[0][3][0]
-      && coordinates[0][0][1] === coordinates[0][1][1]
-      && coordinates[0][1][0] === coordinates[0][2][0]
-      && coordinates[0][2][1] === coordinates[0][3][1]) {
+      // Polygon: check if it encodes a rectangle (single ring only — a polygon
+      // with holes must never be collapsed to a rectangle).
+    } else if (
+      coordinates.length === 1 &&
+      coordinates[0].length === 5 &&
+      JSON.stringify(coordinates[0][0]) === JSON.stringify(coordinates[0][4]) &&
+      coordinates[0][0][0] === coordinates[0][3][0] &&
+      coordinates[0][0][1] === coordinates[0][1][1] &&
+      coordinates[0][1][0] === coordinates[0][2][0] &&
+      coordinates[0][2][1] === coordinates[0][3][1]
+    ) {
       const rectangle = new Rectangle();
       rectangle.x = coordinates[0][0][0];
       rectangle.y = coordinates[0][0][1];
       rectangle.width = coordinates[0][2][0] - coordinates[0][0][0];
       rectangle.height = coordinates[0][2][1] - coordinates[0][0][1];
       region.bounds = rectangle;
-
-    } else { // polygon is a freeform closed polygon
+    } else {
+      // polygon is a freeform closed polygon
       const polygon = new Polygon();
       polygon.npoints = coordinates[0].length - 1;
       polygon.xpoints = [];
@@ -161,7 +163,7 @@ export function regionsFromGeoJson(geoJsonStr: string): Region[] {
  */
 export function regionsToGeoJson(rois: readonly Region[]): string {
   const features: object[] = [];
-  for (const roi of rois.filter(r => r.kind !== 'profile')) {
+  for (const roi of rois.filter((r) => r.kind !== 'profile')) {
     const colorRgb = hexToRgb(roi?.color) ?? [0, 0, 0];
     // QuPath places the image plane inside the geometry (sibling of
     // type/coordinates), zero-based, and omits it for the default plane
@@ -179,15 +181,17 @@ export function regionsToGeoJson(rois: readonly Region[]): string {
         },
         geometry: {
           type: 'Polygon',
-          coordinates: [[
-            [roi.bounds.x, roi.bounds.y],
-            [roi.bounds.x + roi.bounds.width, roi.bounds.y],
-            [roi.bounds.x + roi.bounds.width, roi.bounds.y + roi.bounds.height],
-            [roi.bounds.x, roi.bounds.y + roi.bounds.height],
-            [roi.bounds.x, roi.bounds.y]
-          ]],
-          ...planeProp
-        }
+          coordinates: [
+            [
+              [roi.bounds.x, roi.bounds.y],
+              [roi.bounds.x + roi.bounds.width, roi.bounds.y],
+              [roi.bounds.x + roi.bounds.width, roi.bounds.y + roi.bounds.height],
+              [roi.bounds.x, roi.bounds.y + roi.bounds.height],
+              [roi.bounds.x, roi.bounds.y],
+            ],
+          ],
+          ...planeProp,
+        },
       };
       features.push(rectangle);
     } else if (roi.bounds instanceof Polygon) {
@@ -198,16 +202,21 @@ export function regionsToGeoJson(rois: readonly Region[]): string {
       // the editable anchors + flag ride along in properties for JIT.
       const geomCoords = isBezier
         ? (() => {
-          const handles = resolveHandles(roi.bounds.xpoints, roi.bounds.ypoints, closed,
-            roi.bounds.handlesIn, roi.bounds.handlesOut);
-          const c = bezierCurveFromHandles(roi.bounds.xpoints, roi.bounds.ypoints, handles, closed);
-          return c.xs.map((x, i) => [x, c.ys[i]]);
-        })()
+            const handles = resolveHandles(
+              roi.bounds.xpoints,
+              roi.bounds.ypoints,
+              closed,
+              roi.bounds.handlesIn,
+              roi.bounds.handlesOut,
+            );
+            const c = bezierCurveFromHandles(roi.bounds.xpoints, roi.bounds.ypoints, handles, closed);
+            return c.xs.map((x, i) => [x, c.ys[i]]);
+          })()
         : roi.bounds.coordinates;
       const properties: Record<string, unknown> = {
         classification: {
           name: roi.label ? roi.label : roi.name,
-          color: colorRgb
+          color: colorRgb,
         },
       };
       if (isBezier) {
@@ -238,7 +247,9 @@ export function regionsToGeoJson(rois: readonly Region[]): string {
               const hxs = hole.map((p) => p[0]);
               const hys = hole.map((p) => p[1]);
               const hh = resolveHandles(
-                hxs, hys, true,
+                hxs,
+                hys,
+                true,
                 (roi.bounds as Polygon).holeHandlesIn?.[hi],
                 (roi.bounds as Polygon).holeHandlesOut?.[hi],
               );
@@ -252,21 +263,21 @@ export function regionsToGeoJson(rois: readonly Region[]): string {
         features.push({
           type: 'Feature',
           properties,
-          geometry: { type: 'Polygon', coordinates: rings, ...planeProp }
+          geometry: { type: 'Polygon', coordinates: rings, ...planeProp },
         });
       } else {
         features.push({
           type: 'Feature',
           properties,
-          geometry: { type: 'LineString', coordinates: geomCoords, ...planeProp }
+          geometry: { type: 'LineString', coordinates: geomCoords, ...planeProp },
         });
       }
     } else if (roi.bounds instanceof MultiPolygon) {
       // Multi-part region → GeoJSON MultiPolygon: one ring-set per part
       // (exterior + holes), each ring closed (jit-ui#85).
       const coordinates = roi.bounds.polygons
-        .filter(part => part.xpoints.length >= 3)
-        .map(part => {
+        .filter((part) => part.xpoints.length >= 3)
+        .map((part) => {
           const ext = part.xpoints.map((x, i) => [x, part.ypoints[i]]);
           const rings: number[][][] = [[...ext, ext[0]]];
           if (part.holes) {
@@ -279,13 +290,13 @@ export function regionsToGeoJson(rois: readonly Region[]): string {
       features.push({
         type: 'Feature',
         properties: { classification: { name: roi.label ? roi.label : roi.name, color: colorRgb } },
-        geometry: { type: 'MultiPolygon', coordinates, ...planeProp }
+        geometry: { type: 'MultiPolygon', coordinates, ...planeProp },
       });
     }
   }
   const geoJsonData = {
     features: features,
-    type: 'FeatureCollection'
+    type: 'FeatureCollection',
   };
 
   return JSON.stringify(geoJsonData);
@@ -301,7 +312,9 @@ function polygonFromRings(rings: number[][][]): Polygon {
   const last = ext.length - 1;
   const closed = ext.length > 1 && ext[0][0] === ext[last][0] && ext[0][1] === ext[last][1];
   const n = closed ? last : ext.length;
-  poly.xpoints = []; poly.ypoints = []; poly.coordinates = [];
+  poly.xpoints = [];
+  poly.ypoints = [];
+  poly.coordinates = [];
   for (let i = 0; i < n; i++) {
     poly.xpoints.push(ext[i][0]);
     poly.ypoints.push(ext[i][1]);

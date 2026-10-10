@@ -29,9 +29,20 @@ import {
   buildSurfaceTraces,
 } from './plotly-trace-builders';
 import {
-  ImageLayoutContext, chartLayout, heatmapLayout, overlayLayout, surfaceLayout, volumeLayout,
+  ImageLayoutContext,
+  chartLayout,
+  heatmapLayout,
+  overlayLayout,
+  surfaceLayout,
+  volumeLayout,
 } from './plotly-layouts';
-import { IViewerBackend, IntensityProfile, IIsosurfaceControls, IIntensityControls, PixelData } from '../../contracts/visualizer.contract';
+import {
+  IViewerBackend,
+  IntensityProfile,
+  IIsosurfaceControls,
+  IIntensityControls,
+  PixelData,
+} from '../../contracts/visualizer.contract';
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { ViewerCapabilities, ViewerFeature, capabilitiesOf } from '../../contracts/capabilities.contract';
 import { IRegionOverlay } from '../../contracts/region-overlay.contract';
@@ -58,10 +69,9 @@ import { throwIfAborted } from '../tile-server/transport';
 export { PlotType } from '../../contracts/plot-type';
 
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend {
-
   /**
    * Plotly is the full-featured data backend: it supports every feature,
    * including 3D scenes, live scalar colormaps, pixel readback and the
@@ -81,7 +91,9 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   /** Plotly's render projection of the shared RegionStore (the shape dicts) and
    *  the selection ↔ active-shape mapping (see PlotlyShapeProjection). */
   private readonly shapeProjection = new PlotlyShapeProjection(
-    { plotDiv: () => this.plotDiv, fileName: () => this.fileName }, this.regionStore);
+    { plotDiv: () => this.plotDiv, fileName: () => this.fileName },
+    this.regionStore,
+  );
   /** Step/box zoom, autoscale and the high-def zoom re-fetch (see PlotlyZoomController). */
   private readonly zoom: PlotlyZoomController;
   private imageLength!: number;
@@ -147,49 +159,61 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   protected readonly canvasTools: CanvasToolManager;
   /** This backend's region renderer (lazily created in getRegionOverlay). */
   private regionOverlay?: IRegionOverlay;
-  private readonly coordinateTransform: ICoordinateTransform =
-    new PlotlyCoordinateTransform(
-      () => document.getElementById(this.plotDiv),
-      () => this.getOverlayContainer());
+  private readonly coordinateTransform: ICoordinateTransform = new PlotlyCoordinateTransform(
+    () => document.getElementById(this.plotDiv),
+    () => this.getOverlayContainer(),
+  );
 
-  constructor(@Inject(TILE_ACCESS_PORT) private tiles: TileAccessPort,
-              @Inject(IMAGE_STATE_PORT) private state: ImageStatePort,
-              public messageService: MessageService, http: HttpClient,
-              wandService: WandService,
-              private samTool: SamToolService,
-              private samPointTool: SamPointToolService,
-              private cellSegmentTool: CellSegmentToolService,
-              @Optional() @Inject(CELL_SEGMENTER) private cellSegmenter: ICellSegmenter | null,
-              store: VisualizerStore,
-              regionStore: RegionStore,
-              private intensity: IntensityProfileService) {
+  constructor(
+    @Inject(TILE_ACCESS_PORT) private tiles: TileAccessPort,
+    @Inject(IMAGE_STATE_PORT) private state: ImageStatePort,
+    public messageService: MessageService,
+    http: HttpClient,
+    wandService: WandService,
+    private samTool: SamToolService,
+    private samPointTool: SamPointToolService,
+    private cellSegmentTool: CellSegmentToolService,
+    @Optional() @Inject(CELL_SEGMENTER) private cellSegmenter: ICellSegmenter | null,
+    store: VisualizerStore,
+    regionStore: RegionStore,
+    private intensity: IntensityProfileService,
+  ) {
     super(regionStore, store);
     this.loader = new PlotlyImageLoader(http);
-    this.zoom = new PlotlyZoomController({
-      plotDiv: () => this.plotDiv,
-      trueImgSize: () => this.trueImgSize,
-      imageInfo: () => this.imageInfo,
-      fileName: () => this.fileName,
-      imageCached: () => this.imageCached,
-      zIndex: () => this.zIndex.value,
-      nextRenderGen: () => ++this.renderGen,
-      isCurrentRender: (gen) => gen === this.renderGen,
-      heatmapLayout: (x, y) => this.getHeatmapLayout(x, y),
-      setScreenHeight: (h) => { this.screenHeight = h; },
-      cropSampler: () => {
-        const gen = this.intensity.supersede();
-        return (frames, ratios, origin) => {
-          if (!this.intensity.isCurrent(gen)) return;
-          this.setSamplingFrames(frames, ratios, origin);
-          this.intensity.emitProfiles();
-        };
+    this.zoom = new PlotlyZoomController(
+      {
+        plotDiv: () => this.plotDiv,
+        trueImgSize: () => this.trueImgSize,
+        imageInfo: () => this.imageInfo,
+        fileName: () => this.fileName,
+        imageCached: () => this.imageCached,
+        zIndex: () => this.zIndex.value,
+        nextRenderGen: () => ++this.renderGen,
+        isCurrentRender: (gen) => gen === this.renderGen,
+        heatmapLayout: (x, y) => this.getHeatmapLayout(x, y),
+        setScreenHeight: (h) => {
+          this.screenHeight = h;
+        },
+        cropSampler: () => {
+          const gen = this.intensity.supersede();
+          return (frames, ratios, origin) => {
+            if (!this.intensity.isCurrent(gen)) return;
+            this.setSamplingFrames(frames, ratios, origin);
+            this.intensity.emitProfiles();
+          };
+        },
+        renderCrop: (frame, ratios, size, imageSize, fileName) =>
+          this.renderZoomCrop(frame, ratios, size, imageSize, fileName),
+        reset: () => this.reset(),
       },
-      renderCrop: (frame, ratios, size, imageSize, fileName) =>
-        this.renderZoomCrop(frame, ratios, size, imageSize, fileName),
-      reset: () => this.reset(),
-    }, state, tiles, messageService);
+      state,
+      tiles,
+      messageService,
+    );
     // relayout event router
-    this.onRelayoutEvent = (event: any) => { this.relayoutEventHandler(event); };
+    this.onRelayoutEvent = (event: any) => {
+      this.relayoutEventHandler(event);
+    };
 
     // The canvas tools read/mutate our state through one host, and this backend
     // owns its own tool instances (RT-21) — nothing to re-bind on activation.
@@ -206,7 +230,9 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
       applyZoomToBox: (coords) => this.zoom.applyZoomToBox(coords),
     };
     this.canvasTools = createCanvasToolManager(this.toolHost, {
-      wandService, regionStore, samPoint: samPointTool,
+      wandService,
+      regionStore,
+      samPoint: samPointTool,
     });
 
     this.ensureSubscriptions();
@@ -225,10 +251,10 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
    */
   private ensureSubscriptions(): void {
     if (this.channelSub) return;
-    this.imageCachedSubscription = this.state.isImageCached$().subscribe(imageCached => {
+    this.imageCachedSubscription = this.state.isImageCached$().subscribe((imageCached) => {
       this.imageCached = imageCached;
     });
-    this.filenameSubscription = this.state.getFilename$().subscribe(filename => {
+    this.filenameSubscription = this.state.getFilename$().subscribe((filename) => {
       this.fileName = filename;
     });
     // Live recolor from the Channels & Histogram pane: restyle the display window (zmin/zmax for
@@ -244,11 +270,11 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   }
 
   getTrueImageSize(): { width: number; height: number } | null {
-     if (!this.trueImgSize) return null;
-     return {
-       width: this.trueImgSize[1] - this.trueImgSize[0],
-       height: this.trueImgSize[3] - this.trueImgSize[2],
-     };
+    if (!this.trueImgSize) return null;
+    return {
+      width: this.trueImgSize[1] - this.trueImgSize[0],
+      height: this.trueImgSize[3] - this.trueImgSize[2],
+    };
   }
 
   /**
@@ -260,11 +286,17 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     // Re-establish the store subscriptions if a prior component teardown
     // (unsubscribe()) tore them down — see ensureSubscriptions().
     this.ensureSubscriptions();
-    return this.loader.load(imageInfo, zIndex, signal, () => {
-      // [x0, x1, y0, y1]
-      this.trueImgSize = [0, imageInfo.trueImageSize[0], 0, imageInfo.trueImageSize[1]];
-      this.fileName = imageInfo.fileName;
-    }, () => this.fileName === imageInfo.fileName);
+    return this.loader.load(
+      imageInfo,
+      zIndex,
+      signal,
+      () => {
+        // [x0, x1, y0, y1]
+        this.trueImgSize = [0, imageInfo.trueImageSize[0], 0, imageInfo.trueImageSize[1]];
+        this.fileName = imageInfo.fileName;
+      },
+      () => this.fileName === imageInfo.fileName,
+    );
   }
 
   /**
@@ -272,8 +304,14 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
    * existing plot via Plotly.react instead of purge + newPlot — the multi-tier
    * swap (small → large) — so the canvas doesn't briefly blank between phases.
    */
-  public plot(plotDiv: string, imageLoaded: any, imageInfo: IImageInfo, screenHeight: number,
-              plotType: PlotType, inPlace: boolean = false) {
+  public plot(
+    plotDiv: string,
+    imageLoaded: any,
+    imageInfo: IImageInfo,
+    screenHeight: number,
+    plotType: PlotType,
+    inPlace: boolean = false,
+  ) {
     this.ensureSubscriptions();
     // A new image: a stroke or SAM prompt in progress belonged to the old one.
     if (!inPlace) this.canvasTools.resetAll();
@@ -296,8 +334,10 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     // sampling fetch still in flight for the previous one).
     this.intensity.supersede();
     this.intensity.setSamplingElement(plotDiv);
-    this.intensity.setFrames({ frames: imageLoaded.data, ratios: imageLoaded.ratios },
-      { imageInfo, extent: trueImageSize, frameIndex: () => this.activeFrameIndex() });
+    this.intensity.setFrames(
+      { frames: imageLoaded.data, ratios: imageLoaded.ratios },
+      { imageInfo, extent: trueImageSize, frameIndex: () => this.activeFrameIndex() },
+    );
 
     // Pluggable plot types (contour, scatter, scatter3d, isosurface) render
     // through the trace-builder registry. The original HEATMAP/SURFACE/RGB-image
@@ -311,44 +351,110 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
       // loaded reached here and threw on the assignment.
       if (this.imageInfo) this.imageInfo.isGrayscale = !!imageInfo.isGrayscale;
       return this.plotViaRegistry(
-        plotDiv, impl, this.buildTraceInput(imageInfo, imageLoaded, trueImageSize),
-        screenHeight, inPlace);
+        plotDiv,
+        impl,
+        this.buildTraceInput(imageInfo, imageLoaded, trueImageSize),
+        screenHeight,
+        inPlace,
+      );
     }
 
     if (imageInfo.isGrayscale) {
       if (plotType === PlotType.SURFACE) {
-        return this.plotSurface(plotDiv, imageInfo.urls, imageLoaded.data, trueImageSize,
-          imageLoaded.ratios, screenHeight, inPlace);
+        return this.plotSurface(
+          plotDiv,
+          imageInfo.urls,
+          imageLoaded.data,
+          trueImageSize,
+          imageLoaded.ratios,
+          screenHeight,
+          inPlace,
+        );
       }
-      return this.plotHeatmap(plotDiv, imageInfo.urls, imageLoaded.data, trueImageSize,
-        imageLoaded.ratios, screenHeight, inPlace);
+      return this.plotHeatmap(
+        plotDiv,
+        imageInfo.urls,
+        imageLoaded.data,
+        trueImageSize,
+        imageLoaded.ratios,
+        screenHeight,
+        inPlace,
+      );
     }
-    return this.plotRGBHeatmap(plotDiv, imageInfo.urls, imageLoaded.data, trueImageSize,
-      imageLoaded.ratios, imageLoaded.sizes[0], imageLoaded.sizes[1], screenHeight, inPlace);
+    return this.plotRGBHeatmap(
+      plotDiv,
+      imageInfo.urls,
+      imageLoaded.data,
+      trueImageSize,
+      imageLoaded.ratios,
+      imageLoaded.sizes[0],
+      imageLoaded.sizes[1],
+      screenHeight,
+      inPlace,
+    );
   }
 
   /** Grayscale heatmap, one trace per z-plane (`trueImgSize` is [x0, x1, y0, y1]). */
-  private plotHeatmap(plotDiv: string, urls: string[], images: any[], trueImgSize: number[],
-                      ratios: number[], screenHeight: number, inPlace: boolean = false): Promise<boolean> {
-    const traces = buildHeatmapTraces(images, trueImgSize, ratios,
-      this.store.currentColormap().data.value, this.store.currentReverseScale());
+  private plotHeatmap(
+    plotDiv: string,
+    urls: string[],
+    images: any[],
+    trueImgSize: number[],
+    ratios: number[],
+    screenHeight: number,
+    inPlace: boolean = false,
+  ): Promise<boolean> {
+    const traces = buildHeatmapTraces(
+      images,
+      trueImgSize,
+      ratios,
+      this.store.currentColormap().data.value,
+      this.store.currentReverseScale(),
+    );
     const layout = () => this.getHeatmapLayout([trueImgSize[0], trueImgSize[1]], [trueImgSize[3], trueImgSize[2]]);
     return this.renderPlot(plotDiv, urls, images.length, screenHeight, inPlace, traces, layout, CONFIG, true);
   }
 
   /** Grayscale surface. */
-  private plotSurface(plotDiv: string, urls: string[], images: any[], _trueImgSize: number[],
-                      _ratios: number[], screenHeight: number, inPlace: boolean = false): Promise<boolean> {
-    const traces = buildSurfaceTraces(images, this.store.currentColormap().data.value,
-      this.store.currentReverseScale());
-    return this.renderPlot(plotDiv, urls, images.length, screenHeight, inPlace, traces,
-      () => surfaceLayout(0.4), CONFIG_SURFACE, true);
+  private plotSurface(
+    plotDiv: string,
+    urls: string[],
+    images: any[],
+    _trueImgSize: number[],
+    _ratios: number[],
+    screenHeight: number,
+    inPlace: boolean = false,
+  ): Promise<boolean> {
+    const traces = buildSurfaceTraces(
+      images,
+      this.store.currentColormap().data.value,
+      this.store.currentReverseScale(),
+    );
+    return this.renderPlot(
+      plotDiv,
+      urls,
+      images.length,
+      screenHeight,
+      inPlace,
+      traces,
+      () => surfaceLayout(0.4),
+      CONFIG_SURFACE,
+      true,
+    );
   }
 
   /** RGB image, one trace per z-plane. */
-  private plotRGBHeatmap(plotDiv: string, urls: string[], images: any[], trueImgSize: number[],
-                         ratios: number[], width: number, height: number,
-                         screenHeight: number, inPlace: boolean = false): Promise<boolean> {
+  private plotRGBHeatmap(
+    plotDiv: string,
+    urls: string[],
+    images: any[],
+    trueImgSize: number[],
+    ratios: number[],
+    width: number,
+    height: number,
+    screenHeight: number,
+    inPlace: boolean = false,
+  ): Promise<boolean> {
     // As autorange is off and the axis not reversed, the y range is set here.
     const traces = buildRgbImageTraces(images, trueImgSize, ratios, width, height);
     const layout = () => this.getHeatmapLayout([trueImgSize[0], trueImgSize[1]], [trueImgSize[3], trueImgSize[2]]);
@@ -362,9 +468,17 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
    * regression to "loading" before the sharper version appears. The layout is
    * built after the per-plot state (screen height, slice count) is set.
    */
-  private renderPlot(plotDiv: string, urls: string[], sliceCount: number, screenHeight: number,
-                     inPlace: boolean, traces: any[], layout: () => any, config: unknown,
-                     isGrayscale: boolean): Promise<boolean> {
+  private renderPlot(
+    plotDiv: string,
+    urls: string[],
+    sliceCount: number,
+    screenHeight: number,
+    inPlace: boolean,
+    traces: any[],
+    layout: () => any,
+    config: unknown,
+    isGrayscale: boolean,
+  ): Promise<boolean> {
     if (!inPlace) Plotly.purge(plotDiv);
     this.plotDiv = plotDiv;
     this.imageLength = sliceCount;
@@ -382,8 +496,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
    * Assemble the normalised input the pluggable trace builders consume.
    * Pure data only — no Plotly handles — so the builders stay backend-neutral.
    */
-  private buildTraceInput(imageInfo: IImageInfo, imageLoaded: any,
-                          trueImageSize: number[]): TraceBuildInput {
+  private buildTraceInput(imageInfo: IImageInfo, imageLoaded: any, trueImageSize: number[]): TraceBuildInput {
     // Measure the volume's real intensity range so the iso band can be clamped
     // into it (the slider is a fixed 0–255 but a stack may occupy only part of
     // that, which would otherwise leave the surfaces with nothing to cross).
@@ -413,26 +526,46 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   }
 
   /** Plotly renders isosurfaces, so it exposes the isosurface controls (itself). */
-  public getIsosurfaceControls(): IIsosurfaceControls | null { return this.iso; }
+  public getIsosurfaceControls(): IIsosurfaceControls | null {
+    return this.iso;
+  }
 
   /**
    * Render a registry-backed plot type: build its traces from the input, pick
    * the matching layout, render, and wire the usual relayout/click events.
    * Mirrors the structure of the dedicated heatmap/surface renderers.
    */
-  private plotViaRegistry(plotDiv: string, impl: PlotlyPlotTypeImpl, input: TraceBuildInput,
-                          screenHeight: number, inPlace: boolean = false): Promise<boolean> {
+  private plotViaRegistry(
+    plotDiv: string,
+    impl: PlotlyPlotTypeImpl,
+    input: TraceBuildInput,
+    screenHeight: number,
+    inPlace: boolean = false,
+  ): Promise<boolean> {
     const [x0, x1, y0, y1] = input.trueImageSize;
     const layout = (): any => {
       switch (impl.layoutKind) {
-        case '3d-volume': return volumeLayout(this.screenHeight);
-        case '2d-chart': return chartLayout(this.screenHeight);
-        case '2d-overlay': return overlayLayout(this.layoutContext(), [x0, x1], [y1, y0]); // reversed y
-        default: return this.getHeatmapLayout([x0, x1], [y1, y0]); // '2d-image'
+        case '3d-volume':
+          return volumeLayout(this.screenHeight);
+        case '2d-chart':
+          return chartLayout(this.screenHeight);
+        case '2d-overlay':
+          return overlayLayout(this.layoutContext(), [x0, x1], [y1, y0]); // reversed y
+        default:
+          return this.getHeatmapLayout([x0, x1], [y1, y0]); // '2d-image'
       }
     };
-    return this.renderPlot(plotDiv, this.imageInfo?.urls ?? this.urls, input.frames.length, screenHeight,
-      inPlace, impl.buildTraces(input), layout, impl.threeD ? CONFIG_SURFACE : CONFIG, input.isGrayscale);
+    return this.renderPlot(
+      plotDiv,
+      this.imageInfo?.urls ?? this.urls,
+      input.frames.length,
+      screenHeight,
+      inPlace,
+      impl.buildTraces(input),
+      layout,
+      impl.threeD ? CONFIG_SURFACE : CONFIG,
+      input.isGrayscale,
+    );
   }
 
   /** Plot types this backend advertises (drives the UI selector). */
@@ -450,7 +583,9 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   // ── Intensity profile (Region-based line ROIs) ──────────────────────
 
   /** Plotly renders the line ROIs + inset, so it exposes the intensity controls. */
-  public getIntensityControls(): IIntensityControls | null { return this; }
+  public getIntensityControls(): IIntensityControls | null {
+    return this;
+  }
 
   /** Render the floating intensity-profile inset (see plotly-intensity-inset.ts),
    *  so the consumer never touches Plotly directly. */
@@ -569,7 +704,6 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     this.setImageInfo();
   }
 
-
   // ── Tool delegations ────────────────────────────────────────────────
   // The canvas tools (setActiveTool and the per-tool setters) are run by
   // BaseStoreVisualizer over this.canvasTools; Plotly needs no pointer gating.
@@ -649,17 +783,42 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   /** Re-render a high-def zoom crop in the plot type on screen. Without this the
    *  re-fetch always fell back to a heatmap, so zooming in contour (or any
    *  registry type) reverted to heatmap. */
-  private renderZoomCrop(frame: any[], ratios: number[], size: [number, number], imageSize: number[],
-                         fileName?: string): { rendered: Promise<unknown>; reapplyRange: boolean } {
+  private renderZoomCrop(
+    frame: any[],
+    ratios: number[],
+    size: [number, number],
+    imageSize: number[],
+    fileName?: string,
+  ): { rendered: Promise<unknown>; reapplyRange: boolean } {
     const impl = PLOTLY_PLOT_TYPE_IMPLS[this.plotType];
     const rendered = impl
-      ? this.plotViaRegistry(this.plotDiv, impl, this.buildTraceInput(this.imageInfo, {
-          data: [frame], ratios, sizes: size, filename: fileName,
-        }, imageSize), this.screenHeight)
-      : (this.imageInfo?.isGrayscale
-          ? this.plotHeatmap(this.plotDiv, this.urls, [frame], imageSize, ratios, this.screenHeight)
-          : this.plotRGBHeatmap(this.plotDiv, this.urls, [frame], imageSize, ratios,
-              size[0], size[1], this.screenHeight));
+      ? this.plotViaRegistry(
+          this.plotDiv,
+          impl,
+          this.buildTraceInput(
+            this.imageInfo,
+            {
+              data: [frame],
+              ratios,
+              sizes: size,
+              filename: fileName,
+            },
+            imageSize,
+          ),
+          this.screenHeight,
+        )
+      : this.imageInfo?.isGrayscale
+        ? this.plotHeatmap(this.plotDiv, this.urls, [frame], imageSize, ratios, this.screenHeight)
+        : this.plotRGBHeatmap(
+            this.plotDiv,
+            this.urls,
+            [frame],
+            imageSize,
+            ratios,
+            size[0],
+            size[1],
+            this.screenHeight,
+          );
     // plotViaRegistry already applies the type's own layout/range for non-image
     // layouts (chart/overlay); only the image-aligned paths re-apply the range.
     return { rendered, reapplyRange: !impl || impl.layoutKind === '2d-image' };
@@ -765,8 +924,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     this.renderGen++;
     this.intensity.supersede();
     if (this.plotDiv) {
-      Plotly.newPlot(this.plotDiv, [],
-        this.getHeatmapLayout([0, 100], [100, 0]), CONFIG as any);
+      Plotly.newPlot(this.plotDiv, [], this.getHeatmapLayout([0, 100], [100, 0]), CONFIG as any);
     }
   }
 
@@ -843,7 +1001,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   override setReverseScale(reverscale: boolean) {
     super.setReverseScale(reverscale);
     const gd = this.liveGd(); // OSD/napari recolor via their own LUT
-    if (gd) void Plotly.restyle(gd, { 'reversescale': reverscale });
+    if (gd) void Plotly.restyle(gd, { reversescale: reverscale });
   }
 
   setShowStack(showstack: boolean) {
@@ -852,7 +1010,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     }
     if (this.imageInfo) this.imageInfo.showStack = showstack;
     this.loader.stackLoading$.next(showstack);
-    Plotly.relayout(this.plotDiv, { 'showstack': showstack } as any);
+    Plotly.relayout(this.plotDiv, { showstack: showstack } as any);
   }
 
   getAutoscaleEvent() {
@@ -880,8 +1038,16 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   private applyChannelDisplay(channels: any[], rev: boolean, inv: boolean): void {
     const gd = this.liveGd();
     if (!gd) return;
-    void Plotly.restyle(gd, channelDisplayRestyle(channels, rev, inv,
-      this.store.currentColormap()?.data?.value, this.plotType) as Plotly.Data);
+    void Plotly.restyle(
+      gd,
+      channelDisplayRestyle(
+        channels,
+        rev,
+        inv,
+        this.store.currentColormap()?.data?.value,
+        this.plotType,
+      ) as Plotly.Data,
+    );
   }
 
   /** Binned intensity histogram for a channel from the cached source frames
@@ -919,5 +1085,4 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   isStackLoading() {
     return this.isStackLoading$();
   }
-
 }

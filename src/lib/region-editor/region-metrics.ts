@@ -15,9 +15,7 @@ export interface PixelSize {
  * shows µm²/mm² rather than px².
  */
 export function pickMpp(meta: IImageMetadata[] | undefined): PixelSize {
-  const m = Array.isArray(meta)
-    ? (meta.find((e) => e && (e.mppX ?? 0) > 0) ?? meta[0])
-    : undefined;
+  const m = Array.isArray(meta) ? (meta.find((e) => e && (e.mppX ?? 0) > 0) ?? meta[0]) : undefined;
   const mx = m && (m.mppX ?? 0) > 0 ? (m.mppX as number) : undefined;
   const my = m && (m.mppY ?? 0) > 0 ? (m.mppY as number) : undefined;
   return { mppX: mx, mppY: my ?? mx };
@@ -55,7 +53,11 @@ function polygonArea(p: Polygon): number {
   if ((p.xpoints?.length ?? 0) < 3) return 0;
   let a = ringArea(p.xpoints, p.ypoints);
   if (p.holes) {
-    for (const ring of p.holes) a -= ringArea(ring.map((pt) => pt[0]), ring.map((pt) => pt[1]));
+    for (const ring of p.holes)
+      a -= ringArea(
+        ring.map((pt) => pt[0]),
+        ring.map((pt) => pt[1]),
+      );
   }
   return Math.max(0, a);
 }

@@ -35,29 +35,51 @@ export { CellposeSegmenterService } from './lib/toolbar/segmentation/cellpose-se
 // The wire format the bundled example server speaks, plus a ready-made
 // SpatialDataPort adapter for it. Both are OPTIONAL: a host with its own
 // backend implements SpatialDataPort directly and imports neither.
-export { SpatialDataHttpService, SupersededError } from './lib/implementations/spatial-data-http/spatial-data-http.service';
 export {
-  SPATIAL_WIRE_VERSION, isLittleEndian, assertManifestVersion, datasetFromManifest,
-  decodeCoords, decodeRadius, decodeColumn, decodeFeatureVector, decodePolygons,
+  SpatialDataHttpService,
+  SupersededError,
+} from './lib/implementations/spatial-data-http/spatial-data-http.service';
+export {
+  SPATIAL_WIRE_VERSION,
+  isLittleEndian,
+  assertManifestVersion,
+  datasetFromManifest,
+  decodeCoords,
+  decodeRadius,
+  decodeColumn,
+  decodeFeatureVector,
+  decodePolygons,
 } from './lib/implementations/spatial-data-http/spatial-wire';
 export type {
-  SpatialManifest, SpatialDatasetSummary, SpatialRadiusSpec,
+  SpatialManifest,
+  SpatialDatasetSummary,
+  SpatialRadiusSpec,
 } from './lib/implementations/spatial-data-http/spatial-wire';
 // Backend-neutral encodings: columns/genes -> per-point colours and sizes.
 export {
-  encodeCategorical, encodeContinuous, resolveCategoryColors, contrastWindow,
-  markerDiameters, toRgbaTuples, lutFor,
-  DEFAULT_CATEGORICAL_PALETTE, DEFAULT_MUTED_OPACITY, MISSING_COLOR,
+  encodeCategorical,
+  encodeContinuous,
+  resolveCategoryColors,
+  contrastWindow,
+  markerDiameters,
+  toRgbaTuples,
+  lutFor,
+  DEFAULT_CATEGORICAL_PALETTE,
+  DEFAULT_MUTED_OPACITY,
+  MISSING_COLOR,
 } from './lib/spatial/spatial-encoding';
-export type {
-  RGBA, CategoricalEncodingOptions, ContinuousEncodingOptions,
-} from './lib/spatial/spatial-encoding';
+export type { RGBA, CategoricalEncodingOptions, ContinuousEncodingOptions } from './lib/spatial/spatial-encoding';
 // Selection: which observations fall inside the drawn ROIs (as a SpatialSelectionMask,
 // exported with the dataset contract above), and the shared store
 // that holds the answer.
 export {
-  selectInRegions, selectByCategory, mutedFromSelection, pointInRing,
-  emptySelection, countMask, maskToIndices,
+  selectInRegions,
+  selectByCategory,
+  mutedFromSelection,
+  pointInRing,
+  emptySelection,
+  countMask,
+  maskToIndices,
 } from './lib/spatial/spatial-selection';
 export { SpatialSelectionStore } from './lib/store/spatial-selection.service';
 export * from './lib/contracts/instance-segmenter.contract';
@@ -70,8 +92,13 @@ export { ImageConverterService } from './lib/processing/image-converter.service'
 
 // ── SAM model registry (host configures hosted ONNX URLs once available) ──
 export {
-  SAM_MODELS, DEFAULT_SAM_MODEL_ID, getSamModel, isSamModelReady, setSamModelUrls,
-  setDefaultSamModel, getDefaultSamModelId,
+  SAM_MODELS,
+  DEFAULT_SAM_MODEL_ID,
+  getSamModel,
+  isSamModelReady,
+  setSamModelUrls,
+  setDefaultSamModel,
+  getDefaultSamModelId,
 } from './lib/toolbar/segmentation/sam-model-registry';
 
 // ── onnxruntime-web WASM location (host overrides once, at app init) ───────
@@ -108,16 +135,18 @@ export { VisualizerComponent } from './lib/visualizer.component';
 export { RegionEditorComponent } from './lib/region-editor/region-editor.component';
 export { HexColorPickerComponent } from './lib/hex-color-picker/hex-color-picker.component';
 export { ChannelHistogramComponent } from './lib/channel-histogram/channel-histogram.component';
-export {
-  SpatialControlsComponent,
-} from './lib/spatial-controls/spatial-controls.component';
+export { SpatialControlsComponent } from './lib/spatial-controls/spatial-controls.component';
 export type { SpatialLegendEntry } from './lib/spatial-controls/spatial-controls.component';
 export { SpatialChartsComponent } from './lib/spatial-controls/spatial-charts/spatial-charts.component';
 // Pure chart builders, exported so a host can render the same distributions
 // wherever it likes (a report, a different charting surface).
 export {
-  buildOmicsTraces, omicsLayout, benefitsFromGrouping,
+  buildOmicsTraces,
+  omicsLayout,
+  benefitsFromGrouping,
 } from './lib/implementations/plotly/omics-trace-builders';
 export type {
-  OmicsChartKind, OmicsGrouping, OmicsTraceInput,
+  OmicsChartKind,
+  OmicsGrouping,
+  OmicsTraceInput,
 } from './lib/implementations/plotly/omics-trace-builders';

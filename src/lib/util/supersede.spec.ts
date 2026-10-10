@@ -23,7 +23,9 @@ describe('Supersede', () => {
     const load = new Supersede();
     const first = load.next();
     let currentWhenAborted: boolean | undefined;
-    first.signal.addEventListener('abort', () => { currentWhenAborted = first.isCurrent(); });
+    first.signal.addEventListener('abort', () => {
+      currentWhenAborted = first.isCurrent();
+    });
     expect(first.signal.aborted).toBe(false);
     const second = load.next();
     expect(first.signal.aborted).toBe(true);

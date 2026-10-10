@@ -1,6 +1,14 @@
 import {
-  AfterViewInit, ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, Inject, Input, OnDestroy,
-  OnInit, inject,
+  AfterViewInit,
+  ChangeDetectionStrategy,
+  ChangeDetectorRef,
+  Component,
+  DestroyRef,
+  Inject,
+  Input,
+  OnDestroy,
+  OnInit,
+  inject,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
@@ -13,22 +21,30 @@ import { combineLatest } from 'rxjs';
 import { VISUALIZER, IVisualizer, ISpatialControls } from '../../contracts/visualizer.contract';
 import { SpatialEmbeddingMeta } from '../../contracts/spatial-dataset.contract';
 import { SpatialColorBy, SpatialViewState, DEFAULT_SPATIAL_VIEW } from '../../contracts/display-types';
-import {
-  SpatialSelectionMask, emptySelection, maskToIndices,
-} from '../../spatial/spatial-selection';
+import { SpatialSelectionMask, emptySelection, maskToIndices } from '../../spatial/spatial-selection';
 import { HeatmapMatrix, cellsAsGroups } from '../../spatial/spatial-heatmap';
 import { computeHeatmapMatrixAsync } from '../../workers/spatial-math';
 import { Supersede } from '../../util/supersede';
 import {
-  BROWSER_TSNE_MAX_OBSERVATIONS, EmbeddingComputeCoordinator, EmbeddingComputeState,
+  BROWSER_TSNE_MAX_OBSERVATIONS,
+  EmbeddingComputeCoordinator,
+  EmbeddingComputeState,
 } from '../../spatial/embedding-compute-coordinator';
 import { ChartDataModel } from './chart-data-model';
 import { EMBEDDING_CONFIG, PlotlyChartHost } from './plotly-chart-host';
 import { ChartKindOption, chartKindOptions, embeddingNote, heatmapNote, kindHelp } from './chart-help';
 import {
-  OmicsChartKind, benefitsFromGrouping, buildCountTraces, buildHeatmapTraces,
+  OmicsChartKind,
+  benefitsFromGrouping,
+  buildCountTraces,
+  buildHeatmapTraces,
   countByCategory,
-  buildOmicsTraces, buildEmbeddingTraces, countsLayout, heatmapLayout, omicsLayout, embeddingLayout,
+  buildOmicsTraces,
+  buildEmbeddingTraces,
+  countsLayout,
+  heatmapLayout,
+  omicsLayout,
+  embeddingLayout,
 } from '../../implementations/plotly/omics-trace-builders';
 import { SpatialHeatmapControlsComponent } from './spatial-heatmap-controls/spatial-heatmap-controls.component';
 import { SpatialEmbeddingControlsComponent } from './spatial-embedding-controls/spatial-embedding-controls.component';
@@ -50,14 +66,14 @@ function ensureHelpTipStyle(): void {
   if (document.getElementById(HELP_TIP_STYLE_ID)) return;
   const style = document.createElement('style');
   style.id = HELP_TIP_STYLE_ID;
-  style.textContent = '.sx-help-tip .p-tooltip-text { max-width: none; width: 24rem; '
-    + 'line-height: 1.45; }\n.sx-help-tip { max-width: none; }';
+  style.textContent =
+    '.sx-help-tip .p-tooltip-text { max-width: none; width: 24rem; ' +
+    'line-height: 1.45; }\n.sx-help-tip { max-width: none; }';
   document.head.appendChild(style);
 }
 
 /** Per-instance chart-div id source — see {@link SpatialChartsComponent.chartDiv}. */
 let chartInstanceSeq = 0;
-
 
 /**
  * Distribution charts over the spatial-omics values — histogram, violin, box —
@@ -87,8 +103,14 @@ let chartInstanceSeq = 0;
   selector: 'spatial-charts',
   standalone: true,
   imports: [
-    CommonModule, FormsModule, DropdownModule, SelectButtonModule, TooltipModule,
-    SpatialHeatmapControlsComponent, SpatialEmbeddingControlsComponent, SpatialChartWindowComponent,
+    CommonModule,
+    FormsModule,
+    DropdownModule,
+    SelectButtonModule,
+    TooltipModule,
+    SpatialHeatmapControlsComponent,
+    SpatialEmbeddingControlsComponent,
+    SpatialChartWindowComponent,
   ],
   templateUrl: './spatial-charts.component.html',
   styleUrls: ['./spatial-charts.component.scss'],
@@ -200,7 +222,9 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     return options;
   }
   private kindOptionsMemo: {
-    categorical: boolean; embeddings: boolean; options: ChartKindOption[];
+    categorical: boolean;
+    embeddings: boolean;
+    options: ChartKindOption[];
   } | null = null;
 
   protected controls: ISpatialControls | null = null;
@@ -283,44 +307,51 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     // The run's progress, backend and errors, for the embedding controls.
     this.compute.state$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.cdr.markForCheck());
 
-    combineLatest([
-      this.controls.getViewState$(), this.controls.getSelection$(),
-    ]).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(([view, selection]) => {
-      const sourceChanged = view.colorBy?.kind !== this.view.colorBy?.kind
-        || view.colorBy?.name !== this.view.colorBy?.name;
-      this.view = view;
-      this.colorBy = view.colorBy;
-      this.selection = selection;
-      this.selectionCount = selection.count;
-      // A selection or log change only needs a re-render; a new colour source
-      // needs its vector fetched first. The FIRST emission always reloads:
-      // otherwise `null -> null` reads as "unchanged" and the component sits
-      // with no data and no explanation until something else moves.
-      if (!this.primed || sourceChanged) {
-        this.primed = true;
-        void this.reload();
-      } else {
-        // A selection or log-scale change needs only a redraw of the same vector.
-        void this.render();
-      }
-      this.cdr.markForCheck();
-    });
+    combineLatest([this.controls.getViewState$(), this.controls.getSelection$()])
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(([view, selection]) => {
+        const sourceChanged =
+          view.colorBy?.kind !== this.view.colorBy?.kind || view.colorBy?.name !== this.view.colorBy?.name;
+        this.view = view;
+        this.colorBy = view.colorBy;
+        this.selection = selection;
+        this.selectionCount = selection.count;
+        // A selection or log change only needs a re-render; a new colour source
+        // needs its vector fetched first. The FIRST emission always reloads:
+        // otherwise `null -> null` reads as "unchanged" and the component sits
+        // with no data and no explanation until something else moves.
+        if (!this.primed || sourceChanged) {
+          this.primed = true;
+          void this.reload();
+        } else {
+          // A selection or log-scale change needs only a redraw of the same vector.
+          void this.render();
+        }
+        this.cdr.markForCheck();
+      });
 
-    this.controls.getDataset$().pipe(takeUntilDestroyed(this.destroyRef)).subscribe((dataset) => {
-      // Offer to compute a t-SNE only where the dataset has PCA to embed and no t-SNE of
-      // its own; anything computed or computing for the previous dataset is dropped.
-      const embeddings = this.compute.setDataset(dataset?.embeddings ?? [], dataset?.observations.count ?? 0);
-      const switched = this.data.onDatasetChanged(dataset, this.controls?.categoricalColumns() ?? [], embeddings);
-      // Nothing to draw for the kind that was selected; fall back rather than sit blank.
-      if (this.kind === 'embedding' && embeddings.length === 0) this.kind = 'histogram';
-      // Everything loaded was the previous dataset's: fetch afresh, even when the view
-      // does not re-emit (a colour source of the same name).
-      if (switched) {
-        if (this.groupBy) void this.onGroupBy(this.groupBy);
-        void this.reload();
-      }
-      this.cdr.markForCheck();
-    });
+    this.controls
+      .getDataset$()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((dataset) => {
+        // Offer to compute a t-SNE only where the dataset has PCA to embed and no t-SNE of
+        // its own; anything computed or computing for the previous dataset is dropped.
+        const embeddings = this.compute.setDataset(dataset?.embeddings ?? [], dataset?.observations.count ?? 0);
+        const switched = this.data.onDatasetChanged(
+          dataset,
+          this.controls?.categoricalColumns() ?? [],
+          embeddings,
+        );
+        // Nothing to draw for the kind that was selected; fall back rather than sit blank.
+        if (this.kind === 'embedding' && embeddings.length === 0) this.kind = 'histogram';
+        // Everything loaded was the previous dataset's: fetch afresh, even when the view
+        // does not re-emit (a colour source of the same name).
+        if (switched) {
+          if (this.groupBy) void this.onGroupBy(this.groupBy);
+          void this.reload();
+        }
+        this.cdr.markForCheck();
+      });
   }
 
   /** Latest wins among heatmap draws, whose matrix may be computed in a worker. */
@@ -531,7 +562,6 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     });
   }
 
-
   /**
    * Whether the plot on screen fixed its own height.
    *
@@ -654,7 +684,9 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   /** What the embedding view is showing, said plainly. */
   protected get embeddingNote(): string {
     return embeddingNote(
-      this.data.embeddingCoords?.meta ?? this.embedding, this.data.isCategorical, this.selection.count,
+      this.data.embeddingCoords?.meta ?? this.embedding,
+      this.data.isCategorical,
+      this.selection.count,
     );
   }
 
@@ -747,10 +779,10 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
 
     const selected = this.selection.count > 0 ? maskToIndices(this.selection.mask) : null;
     const perCell = !!selected && selected.length <= SpatialChartsComponent.HEATMAP_CELL_COLUMNS;
-    const cells = perCell && selected
-      ? cellsAsGroups(selected, grouping.codes.length,
-        SpatialChartsComponent.HEATMAP_CELL_COLUMNS)
-      : null;
+    const cells =
+      perCell && selected
+        ? cellsAsGroups(selected, grouping.codes.length, SpatialChartsComponent.HEATMAP_CELL_COLUMNS)
+        : null;
 
     // Off the main thread for a big dataset (genes × cells past the worker threshold), and
     // superseded by the next heatmap draw: a slow matrix for an earlier gene list or

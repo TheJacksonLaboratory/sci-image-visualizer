@@ -23,10 +23,13 @@ describe('SpatialKeyModel', () => {
     key = new SpatialKeyModel();
   });
 
-  it('builds a legend from the renderer\'s category colours', async () => {
+  it("builds a legend from the renderer's category colours", async () => {
     await key.refresh(controls, dataset, view({ kind: 'column', name: 'region' }), null, false);
     expect(categoryColors).toHaveBeenCalledWith('region');
-    expect(key.legend).toEqual([{ label: 'Cortex', color: '#f00' }, { label: 'Thalamus', color: '#00f' }]);
+    expect(key.legend).toEqual([
+      { label: 'Cortex', color: '#f00' },
+      { label: 'Thalamus', color: '#00f' },
+    ]);
     expect(key.colorBarCss).toBeNull();
     expect(key.isCategorical).toBe(true);
   });
@@ -54,7 +57,12 @@ describe('SpatialKeyModel', () => {
   it('keeps the legend of the column selected last when an earlier one answers late', async () => {
     let resolveSlow: (v: string[]) => void = () => undefined;
     categoryColors
-      .mockImplementationOnce(() => new Promise((r) => { resolveSlow = r; }))
+      .mockImplementationOnce(
+        () =>
+          new Promise((r) => {
+            resolveSlow = r;
+          }),
+      )
       .mockResolvedValueOnce(['#0f0']);
     const slow = key.refresh(controls, dataset, view({ kind: 'column', name: 'region' }), null, false);
     await key.refresh(controls, dataset, view({ kind: 'column', name: 'zone' }), null, false);
@@ -65,7 +73,12 @@ describe('SpatialKeyModel', () => {
 
   it('drops a legend that lands after the colouring was cleared', async () => {
     let resolveSlow: (v: string[]) => void = () => undefined;
-    categoryColors.mockImplementationOnce(() => new Promise((r) => { resolveSlow = r; }));
+    categoryColors.mockImplementationOnce(
+      () =>
+        new Promise((r) => {
+          resolveSlow = r;
+        }),
+    );
     const slow = key.refresh(controls, dataset, view({ kind: 'column', name: 'region' }), null, false);
     await key.refresh(controls, dataset, view(null), null, false);
     resolveSlow(['#f00', '#00f']);

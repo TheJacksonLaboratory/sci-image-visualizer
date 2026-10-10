@@ -52,8 +52,8 @@ export function planTiledMount(d: TileDescriptor, maxFitTiles = MAX_MULTICHANNEL
       multiChannel = false;
       console.warn(
         '[OSD] multichannel composite too large for per-channel rendering: ' +
-        `${coarseW}x${coarseH} tiles x ${d.channels} channels = ${fitTiles} at the coarsest ` +
-        `real level (> ${maxFitTiles}); rendering server-composited for speed.`,
+          `${coarseW}x${coarseH} tiles x ${d.channels} channels = ${fitTiles} at the coarsest ` +
+          `real level (> ${maxFitTiles}); rendering server-composited for speed.`,
       );
     }
   }
@@ -123,7 +123,13 @@ export function buildOsdTileSource(d: TileDescriptor, spec: TileSourceSpec): Rec
     return new osd.Point(Math.ceil(lvl.width / t), Math.ceil(lvl.height / t));
   };
   ts['getTileUrl'] = (level: number, x: number, y: number) =>
-    buildTileUrl(spec.api, spec.infoB64, { res: resForLevel(level), col: x, row: y, z: spec.z, tileSize: t,
-      channel: spec.channel });
+    buildTileUrl(spec.api, spec.infoB64, {
+      res: resForLevel(level),
+      col: x,
+      row: y,
+      z: spec.z,
+      tileSize: t,
+      channel: spec.channel,
+    });
   return ts;
 }

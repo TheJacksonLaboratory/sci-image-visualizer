@@ -6,14 +6,9 @@ categorical and continuous annotations plus a lazily-fetched feature (gene)
 matrix.
 
 ```ts
-import {
-  SPATIAL_DATA_PORT, SpatialDataHttpService, SpatialDataset,
-} from '@jax-data-science/sci-image-visualizer';
+import { SPATIAL_DATA_PORT, SpatialDataHttpService, SpatialDataset } from '@jax-data-science/sci-image-visualizer';
 
-providers: [
-  SpatialDataHttpService,
-  { provide: SPATIAL_DATA_PORT, useExisting: SpatialDataHttpService },
-]
+providers: [SpatialDataHttpService, { provide: SPATIAL_DATA_PORT, useExisting: SpatialDataHttpService }];
 ```
 
 Like `TILE_ACCESS_PORT`, this is a **port**: the library consumes typed arrays
@@ -24,7 +19,7 @@ its own backend implements `SpatialDataPort` instead and imports neither.
 Two properties the design turns on:
 
 - **Metadata is eager, values are lazy.** A `SpatialDataset` holds coordinates
-  plus column and feature *descriptors*; vectors arrive one at a time, for the
+  plus column and feature _descriptors_; vectors arrive one at a time, for the
   one column or gene being displayed. A Visium table is ~31k genes wide — the
   dense matrix is ~800 MB — so loading a dataset can never mean loading its
   matrix.
@@ -43,7 +38,7 @@ z-stack):
   camera, inside the dataset's reference volume if it has one.
 
 **A dataset whose 3D data is one file gets an image made from it.** A registered
-volume (`SpatialDataset.volume` + `SpatialDataPort.getVolume()`) is published *as*
+volume (`SpatialDataset.volume` + `SpatialDataPort.getVolume()`) is published _as_
 a grayscale z-stack image — one plane per slice, opened mid-volume — so the whole
 image surface applies to it: the toolbar slice slider, the contrast window,
 colormaps, the region tools, the physical scale bar, and Volume / Isosurface
@@ -52,13 +47,13 @@ through the ordinary stack path. In the 2D mode the displayed plane then draws
 grid, and a region drawn there selects that plane's cells rather than the whole
 depth behind them.
 
-**Cluster density volumes** *(3D mode, optional)* — a checkbox that raymarches
+**Cluster density volumes** _(3D mode, optional)_ — a checkbox that raymarches
 each cluster as a smooth density field beside the cloud, tinted with its legend
 colour and blended additively. Serial sections hundreds of microns apart cannot be
 read as an anatomical distribution from points alone: the eye will not integrate a
 stack of discs into a shape, and every gap between sections reads as absence.
 Individual cells are never interpolated — consecutive sections sample different
-cells, so there is nothing to interpolate along — but a density *field* is an
+cells, so there is nothing to interpolate along — but a density _field_ is an
 estimate legitimately defined between the imaged planes, and it renders as a
 translucent cloud so it cannot be mistaken for measurement. The kernel is
 anisotropic (σ along z clears one section gap) and the field is coverage-normalised
@@ -76,7 +71,7 @@ from one slide would smear it through the whole specimen. It is estimated on the
 reference volume's lattice — coarsened in-plane but never along z, so one plane is
 one section — and shares the 2D map's bandwidth, window and colormap.
 
-**Show** *(3D mode)* — the reference volume, the observation cloud and the cluster
+**Show** _(3D mode)_ — the reference volume, the observation cloud and the cluster
 density volumes share one space, so any two of them hide each other; 374k points
 drawn as a stack of discs hide the density volumes almost entirely. Each is
 toggled independently, so every combination is reachable — the estimated fields
@@ -85,7 +80,7 @@ visibility only: the layers stay built, so a toggle never re-fetches the templat
 or re-rasterises a field, and none of them re-frames the orbit camera. (The
 density checkbox is the exception and still gates construction, since building six
 volumes is not free.) **Volume opacity** is the backdrop's own slider, separate
-from the markers': reading the cloud or a density field *through* the anatomy
+from the markers': reading the cloud or a density field _through_ the anatomy
 means turning the anatomy down, not the data over it. **One section at a time** restricts the cloud to a single
 imaged section, which is how you check whether the estimated field follows the
 cells that were actually measured. Sections are the distinct z of the
@@ -102,7 +97,7 @@ napari's click-to-zoom is off in the spatial modes — the wheel, the zoom butto
 and the zoom-box tool still zoom. A gene cannot be clicked to select: no set of
 cells "is" a value.
 
-**Colormap** *(continuous colouring)* — the low→high gradient for a gene or a
+**Colormap** _(continuous colouring)_ — the low→high gradient for a gene or a
 numeric column, chosen from the library's own `COLORMAP_OPTIONS` with the same
 swatch previews the image's colormap picker uses. It defaults to following the
 image's colormap (with a Viridis fallback, since a grey measurement over grey
@@ -110,13 +105,13 @@ anatomy cannot be told apart from it), and clearing the picker returns to that.
 One setting drives the markers, both gene maps and the panel's colour bar, so none
 of them can disagree about what a colour means.
 
-**Gene map** *(2D mode, optional, with a gene selected)* — a checkbox that draws
-the selected gene's expression as a smooth field *beneath* the cells. Coloured
+**Gene map** _(2D mode, optional, with a gene selected)_ — a checkbox that draws
+the selected gene's expression as a smooth field _beneath_ the cells. Coloured
 markers answer "which cells express this gene"; they do not answer "where is it
 expressed", because the eye cannot integrate thousands of small dots into a
 territory. The field is the kernel-weighted **mean per cell, not a sum** — a sum
 would make a crowded region glow whatever its cells were doing — and smoothing the
-numerator and denominator together spreads *where*, not *how much*. That
+numerator and denominator together spreads _where_, not _how much_. That
 denominator is also what lets the layer say nothing: where no cell was measured the
 mean is undefined rather than zero, so those pixels stay fully transparent instead
 of taking the colormap's low end, and alpha ramps with local support so a thinly
@@ -128,9 +123,9 @@ plane from that plane's cells.
 Colour it through `getSpatialControls()`:
 
 ```ts
-const controls = viz.getSpatialControls();   // null unless a port is bound
-controls?.colorByColumn('region');           // categorical -> the column's palette
-controls?.colorByFeature('Ttr');             // gene -> colormap, log, percentile-clipped
+const controls = viz.getSpatialControls(); // null unless a port is bound
+controls?.colorByColumn('region'); // categorical -> the column's palette
+controls?.colorByFeature('Ttr'); // gene -> colormap, log, percentile-clipped
 controls?.setViewState({ pointScale: 2 });
 ```
 
@@ -152,7 +147,7 @@ Its legend swatches and colour bar are built with the same functions the
 renderer uses, so the key cannot drift from the canvas.
 
 **Selection** reuses the region tools you already have: draw a rectangle,
-polygon, freehand shape, wand or brush region, then *Select from ROIs* selects
+polygon, freehand shape, wand or brush region, then _Select from ROIs_ selects
 every observation inside their union and mutes the rest. Legend rows select
 their category on click.
 
@@ -163,7 +158,7 @@ category code would be meaningless, but "how many cells per class" is the questi
 the legend implies and never answers. Violin and box are splittable by a
 categorical column. One dialog on purpose — changing the gene
 and watching the distribution move is a single action. They follow the selection: the histogram
-overlays *Selected* on the full distribution, violin and box narrow to it. The
+overlays _Selected_ on the full distribution, violin and box narrow to it. The
 chart's subject is the map's colour source rather than an independent picker, so
 the two cannot disagree about what is being shown.
 

@@ -7,8 +7,15 @@ import { RegionToolMode } from '../contracts/region-overlay.contract';
 import { IVisualizer } from '../contracts/visualizer.contract';
 
 /** The backend members tool arming drives. */
-export type ToolModesTarget = Pick<IVisualizer, 'getRegionOverlay' | 'setDragMode' | 'setActiveTool' |
-  'setWandOptions' | 'setBrushOptions' | 'setVertexEraserRadius'>;
+export type ToolModesTarget = Pick<
+  IVisualizer,
+  | 'getRegionOverlay'
+  | 'setDragMode'
+  | 'setActiveTool'
+  | 'setWandOptions'
+  | 'setBrushOptions'
+  | 'setVertexEraserRadius'
+>;
 
 /** Where the armed tool is recorded for everyone else (the shared session store). */
 export interface ActiveToolRecord {
@@ -20,7 +27,14 @@ export interface ActiveToolRecord {
  *  tools (drawpolygon/addpoint/deletepoint/move) are handled by the OpenSeadragon overlay;
  *  Plotly's overlay maps them to no-op. */
 const REGION_MODES: ReadonlySet<string> = new Set([
-  'drawrect', 'drawclosedpath', 'drawopenpath', 'select', 'drawpolygon', 'addpoint', 'deletepoint', 'move',
+  'drawrect',
+  'drawclosedpath',
+  'drawopenpath',
+  'select',
+  'drawpolygon',
+  'addpoint',
+  'deletepoint',
+  'move',
 ]);
 
 /**
@@ -51,17 +65,19 @@ export class ToolModes {
     markForCheck: () => void,
   ) {
     this.plotModeTools = {
-      armBrush: (brushClass?: PlotModeBrushClass) => zone.run(() => {
-        this.brushClass = { label: brushClass?.label, color: brushClass?.color };
-        if (this.active === 'brush') this.target.setBrushOptions({ size: this.brushSize, ...this.brushClass });
-        else this.apply('brush');
-        markForCheck();
-      }),
-      disarm: () => zone.run(() => {
-        this.brushClass = null;
-        if (this.active !== null) this.apply(null);
-        markForCheck();
-      }),
+      armBrush: (brushClass?: PlotModeBrushClass) =>
+        zone.run(() => {
+          this.brushClass = { label: brushClass?.label, color: brushClass?.color };
+          if (this.active === 'brush') this.target.setBrushOptions({ size: this.brushSize, ...this.brushClass });
+          else this.apply('brush');
+          markForCheck();
+        }),
+      disarm: () =>
+        zone.run(() => {
+          this.brushClass = null;
+          if (this.active !== null) this.apply(null);
+          markForCheck();
+        }),
       activeTool$: record.getActiveTool$(),
     };
   }
@@ -117,10 +133,14 @@ export class ToolModes {
   /** The options a canvas tool is armed with, from the toolbar's settings. */
   private options(mode: string | null): CanvasToolOptions | undefined {
     switch (mode) {
-      case 'wand': return { sensitivity: this.wandSensitivity };
-      case 'brush': return { size: this.brushSize, ...this.brushClass };
-      case 'eraseVertex': return { radius: this.vertexEraserRadius };
-      default: return undefined;
+      case 'wand':
+        return { sensitivity: this.wandSensitivity };
+      case 'brush':
+        return { size: this.brushSize, ...this.brushClass };
+      case 'eraseVertex':
+        return { radius: this.vertexEraserRadius };
+      default:
+        return undefined;
     }
   }
 }

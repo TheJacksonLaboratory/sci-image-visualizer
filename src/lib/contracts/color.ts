@@ -36,7 +36,11 @@ export function parseCssColor(s: string | null | undefined): Rgb | null {
   }
   const fn = FUNC.exec(text);
   if (fn) {
-    const parts = fn[1].split(/[\s,/]+/).filter((p) => p.length > 0).slice(0, 3).map(Number);
+    const parts = fn[1]
+      .split(/[\s,/]+/)
+      .filter((p) => p.length > 0)
+      .slice(0, 3)
+      .map(Number);
     if (parts.length < 3 || parts.some((v) => !Number.isFinite(v))) return null;
     return [clampByte(parts[0]), clampByte(parts[1]), clampByte(parts[2])];
   }

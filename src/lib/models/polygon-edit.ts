@@ -64,7 +64,10 @@ export function addVertex(p: Polygon, segIndex: number, x: number, y: number): P
   const xpoints = inserted(p.xpoints, at, x);
   const ypoints = inserted(p.ypoints, at, y);
   const patch: Partial<Polygon> = {
-    xpoints, ypoints, coordinates: coordinatesOf(xpoints, ypoints), npoints: xpoints.length,
+    xpoints,
+    ypoints,
+    coordinates: coordinatesOf(xpoints, ypoints),
+    npoints: xpoints.length,
   };
   if (p.bezier && p.handlesIn && p.handlesOut) {
     const n = xpoints.length;
@@ -90,7 +93,10 @@ export function deleteVertex(p: Polygon, index: number): Polygon | null {
   const xpoints = removed(p.xpoints, index);
   const ypoints = removed(p.ypoints, index);
   const patch: Partial<Polygon> = {
-    xpoints, ypoints, coordinates: coordinatesOf(xpoints, ypoints), npoints: xpoints.length,
+    xpoints,
+    ypoints,
+    coordinates: coordinatesOf(xpoints, ypoints),
+    npoints: xpoints.length,
   };
   if (p.bezier && p.handlesIn && p.handlesOut) {
     patch.handlesIn = removed(p.handlesIn, index);
@@ -106,7 +112,12 @@ function hasHole(p: Polygon, holeIndex: number): boolean {
 }
 
 /** Move vertex `index` of hole `holeIndex` to (x, y). Null when either is out of range. */
-export function moveHoleVertex(p: Polygon, holeIndex: number, index: number, x: number, y: number,
+export function moveHoleVertex(
+  p: Polygon,
+  holeIndex: number,
+  index: number,
+  x: number,
+  y: number,
 ): Polygon | null {
   if (!hasHole(p, holeIndex)) return null;
   const ring = p.holes![holeIndex];
@@ -119,7 +130,12 @@ export function moveHoleVertex(p: Polygon, holeIndex: number, index: number, x: 
  * polygon re-seeds its hole handles so they stay parallel to the rings. Null
  * for an out-of-range hole.
  */
-export function addHoleVertex(p: Polygon, holeIndex: number, segIndex: number, x: number, y: number,
+export function addHoleVertex(
+  p: Polygon,
+  holeIndex: number,
+  segIndex: number,
+  x: number,
+  y: number,
 ): Polygon | null {
   if (!hasHole(p, holeIndex)) return null;
   const ring = p.holes![holeIndex];
@@ -136,9 +152,8 @@ export function deleteHoleVertex(p: Polygon, holeIndex: number, index: number): 
   if (!hasHole(p, holeIndex)) return null;
   const ring = p.holes![holeIndex];
   if (index < 0 || index >= ring.length) return null;
-  let holes: number[][][] | undefined = ring.length <= 3
-    ? removed(p.holes!, holeIndex)
-    : replaced(p.holes!, holeIndex, removed(ring, index));
+  let holes: number[][][] | undefined =
+    ring.length <= 3 ? removed(p.holes!, holeIndex) : replaced(p.holes!, holeIndex, removed(ring, index));
   if (holes.length === 0) holes = undefined;
   return withPolygon(p, { holes, ...(p.bezier ? seededHoleHandles(holes) : {}) });
 }
@@ -149,13 +164,18 @@ export function deleteHoleVertex(p: Polygon, holeIndex: number, index: number): 
  * Per-hole bézier handles seeded from the Catmull-Rom default, parallel to
  * `holes` (both undefined without holes).
  */
-export function seededHoleHandles(holes: number[][][] | undefined):
-  Pick<Polygon, 'holeHandlesIn' | 'holeHandlesOut'> {
+export function seededHoleHandles(
+  holes: number[][][] | undefined,
+): Pick<Polygon, 'holeHandlesIn' | 'holeHandlesOut'> {
   if (!holes || !holes.length) return { holeHandlesIn: undefined, holeHandlesOut: undefined };
   const ins: number[][][] = [];
   const outs: number[][][] = [];
   for (const ring of holes) {
-    const off = defaultHandleOffsets(ring.map((q) => q[0]), ring.map((q) => q[1]), true);
+    const off = defaultHandleOffsets(
+      ring.map((q) => q[0]),
+      ring.map((q) => q[1]),
+      true,
+    );
     ins.push(off.in);
     outs.push(off.out);
   }
@@ -171,8 +191,11 @@ export function setBezier(p: Polygon, bezier: boolean): Polygon | null {
   if (p.bezier === bezier) return null;
   if (!bezier) {
     return withPolygon(p, {
-      bezier: false, handlesIn: undefined, handlesOut: undefined,
-      holeHandlesIn: undefined, holeHandlesOut: undefined,
+      bezier: false,
+      handlesIn: undefined,
+      handlesOut: undefined,
+      holeHandlesIn: undefined,
+      holeHandlesOut: undefined,
     });
   }
   const off = defaultHandleOffsets(p.xpoints, p.ypoints, p.closed !== false);
@@ -184,10 +207,16 @@ export function setBezier(p: Polygon, bezier: boolean): Polygon | null {
  * point (x, y). Handles missing from a bézier polygon are seeded from the
  * default first. Null for a non-bézier polygon or an out-of-range index.
  */
-export function moveBezierHandle(p: Polygon, index: number, side: 'in' | 'out', x: number, y: number,
+export function moveBezierHandle(
+  p: Polygon,
+  index: number,
+  side: 'in' | 'out',
+  x: number,
+  y: number,
 ): Polygon | null {
   if (!p.bezier || index < 0 || index >= p.xpoints.length) return null;
-  let handlesIn = p.handlesIn, handlesOut = p.handlesOut;
+  let handlesIn = p.handlesIn,
+    handlesOut = p.handlesOut;
   if (!handlesIn || !handlesOut) {
     const off = defaultHandleOffsets(p.xpoints, p.ypoints, p.closed !== false);
     handlesIn = off.in;
@@ -204,12 +233,19 @@ export function moveBezierHandle(p: Polygon, index: number, side: 'in' | 'out', 
  * absolute point (x, y), seeding the hole handles first when missing. Null for
  * a non-bézier polygon or an out-of-range hole/index.
  */
-export function moveHoleBezierHandle(p: Polygon, holeIndex: number, index: number, side: 'in' | 'out',
-                                     x: number, y: number): Polygon | null {
+export function moveHoleBezierHandle(
+  p: Polygon,
+  holeIndex: number,
+  index: number,
+  side: 'in' | 'out',
+  x: number,
+  y: number,
+): Polygon | null {
   if (!p.bezier || !hasHole(p, holeIndex)) return null;
   const ring = p.holes![holeIndex];
   if (index < 0 || index >= ring.length) return null;
-  let ins = p.holeHandlesIn, outs = p.holeHandlesOut;
+  let ins = p.holeHandlesIn,
+    outs = p.holeHandlesOut;
   if (!ins || !outs) {
     const seeded = seededHoleHandles(p.holes);
     ins = seeded.holeHandlesIn!;
@@ -217,10 +253,14 @@ export function moveHoleBezierHandle(p: Polygon, holeIndex: number, index: numbe
   }
   const offset = [x - ring[index][0], y - ring[index][1]];
   return side === 'in'
-    ? withPolygon(p, { holeHandlesIn: replaced(ins, holeIndex, replaced(ins[holeIndex], index, offset)),
-      holeHandlesOut: outs })
-    : withPolygon(p, { holeHandlesIn: ins,
-      holeHandlesOut: replaced(outs, holeIndex, replaced(outs[holeIndex], index, offset)) });
+    ? withPolygon(p, {
+        holeHandlesIn: replaced(ins, holeIndex, replaced(ins[holeIndex], index, offset)),
+        holeHandlesOut: outs,
+      })
+    : withPolygon(p, {
+        holeHandlesIn: ins,
+        holeHandlesOut: replaced(outs, holeIndex, replaced(outs[holeIndex], index, offset)),
+      });
 }
 
 // ── translation ─────────────────────────────────────────────────────────
@@ -234,14 +274,20 @@ export function translatePolygon(p: Polygon, dx: number, dy: number, round?: (v:
   const xpoints = p.xpoints.map((x) => f(x + dx));
   const ypoints = p.ypoints.map((y) => f(y + dy));
   return withPolygon(p, {
-    xpoints, ypoints, coordinates: coordinatesOf(xpoints, ypoints),
+    xpoints,
+    ypoints,
+    coordinates: coordinatesOf(xpoints, ypoints),
     holes: p.holes?.map((ring) => ring.map(([x, y]) => [f(x + dx), f(y + dy)])),
   });
 }
 
 /** Any region geometry moved by (dx, dy) (see {@link translatePolygon}). */
-export function translateBounds(b: Rectangle | Polygon | MultiPolygon, dx: number, dy: number,
-                                round?: (v: number) => number): Rectangle | Polygon | MultiPolygon {
+export function translateBounds(
+  b: Rectangle | Polygon | MultiPolygon,
+  dx: number,
+  dy: number,
+  round?: (v: number) => number,
+): Rectangle | Polygon | MultiPolygon {
   const f = round ?? ((v: number) => v);
   if (b instanceof Rectangle) {
     return Object.assign(new Rectangle(), b, { x: f(b.x + dx), y: f(b.y + dy) });

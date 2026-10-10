@@ -43,7 +43,7 @@ describe('RegionHistory', () => {
 
   it('a gesture is one step however long it pauses, and never merges with its neighbours', () => {
     h.record('before'); // a timed commit…
-    h.beginGesture();   // …that a gesture starting inside its window does not join
+    h.beginGesture(); // …that a gesture starting inside its window does not join
     h.record('g1');
     jest.advanceTimersByTime(10_000);
     h.record('g2');

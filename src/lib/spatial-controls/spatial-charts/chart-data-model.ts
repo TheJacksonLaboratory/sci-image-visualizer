@@ -1,6 +1,8 @@
 import type { ISpatialControls } from '../../contracts/visualizer.contract';
 import type {
-  SpatialDataset, SpatialEmbedding, SpatialEmbeddingMeta,
+  SpatialDataset,
+  SpatialEmbedding,
+  SpatialEmbeddingMeta,
 } from '../../contracts/spatial-dataset.contract';
 import type { SpatialColorBy } from '../../contracts/display-types';
 import { geneOptionsFor } from '../../spatial/gene-search';
@@ -136,7 +138,9 @@ export class ChartDataModel {
    *   re-emit.
    */
   onDatasetChanged(
-    dataset: SpatialDataset | null, categoricalColumns: readonly string[], embeddings: SpatialEmbeddingMeta[],
+    dataset: SpatialDataset | null,
+    categoricalColumns: readonly string[],
+    embeddings: SpatialEmbeddingMeta[],
   ): boolean {
     const id = dataset?.id ?? null;
     const switched = this.datasetId !== undefined && id !== this.datasetId;
@@ -306,7 +310,8 @@ export class ChartDataModel {
    * @returns whether they are ready to draw ('failed' has set {@link notice}).
    */
   async loadEmbedding(
-    getEmbedding: (name: string) => Promise<SpatialEmbedding>, meta: SpatialEmbeddingMeta,
+    getEmbedding: (name: string) => Promise<SpatialEmbedding>,
+    meta: SpatialEmbeddingMeta,
   ): Promise<'ready' | 'failed' | 'superseded'> {
     const current = this.embeddingLoad.next();
     if (this.embeddingCoords?.meta.name === meta.name) return 'ready';
@@ -335,7 +340,9 @@ export class ChartDataModel {
   }
 
   private refreshGeneOptions(): void {
-    this.geneOptions = geneOptionsFor(this.geneNames, this.geneQuery, this.heatmapGenes)
-      .map((n) => ({ label: n, value: n }));
+    this.geneOptions = geneOptionsFor(this.geneNames, this.geneQuery, this.heatmapGenes).map((n) => ({
+      label: n,
+      value: n,
+    }));
   }
 }

@@ -68,10 +68,7 @@ export interface ExpressionField {
  * Null when nothing lands on the raster — the caller then draws no layer, rather
  * than an empty one the reader has to interpret.
  */
-export function expressionField(
-  obs: SpatialObservations,
-  opts: ExpressionFieldOptions,
-): ExpressionField | null {
+export function expressionField(obs: SpatialObservations, opts: ExpressionFieldOptions): ExpressionField | null {
   const { width: w, height: h, step, sigma, values, indices } = opts;
   if (w <= 0 || h <= 0) return null;
   const [sx, sy] = opts.ref?.scale ?? [1, 1];
@@ -138,7 +135,8 @@ export function expressionField(
  */
 export function fieldContrastWindow(
   field: Pick<ExpressionField | ExpressionVolumeField, 'mean' | 'support'>,
-  lo = 0.01, hi = 0.99,
+  lo = 0.01,
+  hi = 0.99,
 ): [number, number] {
   return percentileWindow(field.mean, lo, hi, { where: field.support });
 }
@@ -273,7 +271,9 @@ export function expressionVolume(
   if (!placed) return null;
 
   const sigmaVox: [number, number, number] = [
-    opts.sigma[0] / voxelSize[0], opts.sigma[1] / voxelSize[1], opts.sigma[2] / voxelSize[2],
+    opts.sigma[0] / voxelSize[0],
+    opts.sigma[1] / voxelSize[1],
+    opts.sigma[2] / voxelSize[2],
   ];
   // In-plane always: a section's own gene map is a 2D field, whichever mode this is.
   for (const axis of [0, 1] as const) {

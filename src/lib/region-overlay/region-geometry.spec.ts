@@ -1,8 +1,19 @@
 import { MultiPolygon, Polygon, Rectangle, Region } from '../models/region';
 import { bezierAnchorHandles } from '../models/bezier';
 import {
-  WORLD, ToScreen, hitHandle, nearestEdge, nearestVertex, regionBBox, regionContains, regionHasHoles,
-  regionPathD, regionsInRect, ringPathD, segmentDistance, topmostRegionAt,
+  WORLD,
+  ToScreen,
+  hitHandle,
+  nearestEdge,
+  nearestVertex,
+  regionBBox,
+  regionContains,
+  regionHasHoles,
+  regionPathD,
+  regionsInRect,
+  ringPathD,
+  segmentDistance,
+  topmostRegionAt,
 } from './region-geometry';
 
 /**
@@ -15,23 +26,39 @@ function region(bounds: unknown): Region {
   return Object.assign(new Region(), { bounds });
 }
 function poly(xs: number[], ys: number[], extra: Partial<Polygon> = {}): Polygon {
-  return Object.assign(new Polygon(), {
-    npoints: xs.length, xpoints: xs, ypoints: ys, coordinates: xs.map((x, i) => [x, ys[i]]), closed: true,
-  }, extra);
+  return Object.assign(
+    new Polygon(),
+    {
+      npoints: xs.length,
+      xpoints: xs,
+      ypoints: ys,
+      coordinates: xs.map((x, i) => [x, ys[i]]),
+      closed: true,
+    },
+    extra,
+  );
 }
 function rect(x: number, y: number, width: number, height: number): Rectangle {
   return Object.assign(new Rectangle(), { x, y, width, height });
 }
 const square = (x0: number, y0: number, x1: number, y1: number, extra: Partial<Polygon> = {}) =>
   poly([x0, x1, x1, x0], [y0, y0, y1, y1], extra);
-const HOLE = [[7, 7], [13, 7], [13, 13], [7, 13]];
+const HOLE = [
+  [7, 7],
+  [13, 7],
+  [13, 13],
+  [7, 13],
+];
 
 const tri = () => region(poly([0, 10, 5], [0, 0, 10]));
 const donut = () => region(square(0, 0, 20, 20, { holes: [HOLE.map((p) => p.slice())] }));
 /** Two parts: a 0–20 square with the 7–13 hole, and a 50–60 square. */
-const multi = () => region(Object.assign(new MultiPolygon(), {
-  polygons: [square(0, 0, 20, 20, { holes: [HOLE.map((p) => p.slice())] }), square(50, 50, 60, 60)],
-}));
+const multi = () =>
+  region(
+    Object.assign(new MultiPolygon(), {
+      polygons: [square(0, 0, 20, 20, { holes: [HOLE.map((p) => p.slice())] }), square(50, 50, 60, 60)],
+    }),
+  );
 /** A U: down the left, across the bottom, up the right. Open. */
 const openU = () => region(poly([0, 0, 40, 40], [0, 40, 40, 0], { closed: false }));
 
@@ -55,10 +82,20 @@ describe('region-geometry', () => {
       ['open polyline: 3 px from the bottom stroke', openU, 20, 37, true],
       ['open polyline: 7 px from any stroke', openU, 7, 20, false],
       ['JSON rectangle (no prototype)', () => region({ x: 0, y: 0, width: 10, height: 10 }), 5, 5, true],
-      ['JSON polygon (no prototype)', () => region({ npoints: 3, xpoints: [0, 10, 5], ypoints: [0, 0, 10] }), 5, 3,
-        true],
-      ['JSON multi-polygon (no prototype)',
-        () => region({ polygons: [{ xpoints: [20, 30, 25], ypoints: [20, 20, 30] }] }), 25, 23, true],
+      [
+        'JSON polygon (no prototype)',
+        () => region({ npoints: 3, xpoints: [0, 10, 5], ypoints: [0, 0, 10] }),
+        5,
+        3,
+        true,
+      ],
+      [
+        'JSON multi-polygon (no prototype)',
+        () => region({ polygons: [{ xpoints: [20, 30, 25], ypoints: [20, 20, 30] }] }),
+        25,
+        23,
+        true,
+      ],
       ['no bounds', () => region(null), 0, 0, false],
     ];
     it.each(cases)('%s', (_name, make, x, y, expected) => {
@@ -124,12 +161,24 @@ describe('region-geometry', () => {
     });
 
     it('ringPathD: a bézier ring curves through its handles, or the default without them', () => {
-      const xs = [0, 10, 5], ys = [0, 0, 10];
+      const xs = [0, 10, 5],
+        ys = [0, 0, 10];
       const d = ringPathD(xs, ys, true, WORLD, {});
       expect(d.match(/ C /g)).toHaveLength(3);
       const [h0, h1] = bezierAnchorHandles(xs, ys, true);
       expect(d.startsWith(`M 0,0 C ${h0.out[0]},${h0.out[1]} ${h1.in[0]},${h1.in[1]} 10,0`)).toBe(true);
-      const offsets = { in: [[0, 0], [0, -1], [0, 0]], out: [[1, 0], [0, 0], [0, 0]] };
+      const offsets = {
+        in: [
+          [0, 0],
+          [0, -1],
+          [0, 0],
+        ],
+        out: [
+          [1, 0],
+          [0, 0],
+          [0, 0],
+        ],
+      };
       const stored = ringPathD(xs, ys, false, WORLD, offsets);
       expect(stored).toBe('M 0,0 C 1,0 10,-1 10,0 C 10,0 5,10 5,10');
     });
@@ -139,8 +188,12 @@ describe('region-geometry', () => {
       ['polygon', tri, 'M 0,0 L 10,0 L 5,10 Z', false],
       ['open polyline', () => region(poly([0, 10], [0, 5], { closed: false })), 'M 0,0 L 10,5', false],
       ['donut', donut, 'M 0,0 L 20,0 L 20,20 L 0,20 Z M 7,7 L 13,7 L 13,13 L 7,13 Z', true],
-      ['multi-polygon (parts and holes)', multi,
-        'M 0,0 L 20,0 L 20,20 L 0,20 Z M 7,7 L 13,7 L 13,13 L 7,13 Z M 50,50 L 60,50 L 60,60 L 50,60 Z', true],
+      [
+        'multi-polygon (parts and holes)',
+        multi,
+        'M 0,0 L 20,0 L 20,20 L 0,20 Z M 7,7 L 13,7 L 13,13 L 7,13 Z M 50,50 L 60,50 L 60,60 L 50,60 Z',
+        true,
+      ],
     ])('regionPathD: %s', (_name, make, d, holes) => {
       expect(regionPathD(make())).toBe(d);
       expect(regionHasHoles(make())).toBe(holes);
@@ -186,8 +239,12 @@ describe('region-geometry', () => {
       const p = r.bounds as Polygon;
       p.bezier = true;
       const [h0] = bezierAnchorHandles(p.xpoints, p.ypoints, true);
-      expect(hitHandle(r, h0.out[0], h0.out[1], WORLD, 1))
-        .toEqual({ kind: 'bezier', ring: -1, index: 0, side: 'out' });
+      expect(hitHandle(r, h0.out[0], h0.out[1], WORLD, 1)).toEqual({
+        kind: 'bezier',
+        ring: -1,
+        index: 0,
+        side: 'out',
+      });
       expect(hitHandle(r, h0.out[0], h0.out[1], WORLD, 1, { bezier: false })).toBeNull();
     });
 
@@ -195,9 +252,17 @@ describe('region-geometry', () => {
       const r = donut();
       const p = r.bounds as Polygon;
       p.bezier = true;
-      const hole = bezierAnchorHandles(HOLE.map((q) => q[0]), HOLE.map((q) => q[1]), true);
-      expect(hitHandle(r, hole[1].in[0], hole[1].in[1], WORLD, 0.5))
-        .toEqual({ kind: 'bezier', ring: 0, index: 1, side: 'in' });
+      const hole = bezierAnchorHandles(
+        HOLE.map((q) => q[0]),
+        HOLE.map((q) => q[1]),
+        true,
+      );
+      expect(hitHandle(r, hole[1].in[0], hole[1].in[1], WORLD, 0.5)).toEqual({
+        kind: 'bezier',
+        ring: 0,
+        index: 1,
+        side: 'in',
+      });
     });
 
     it('measures the radius in screen pixels', () => {

@@ -6,32 +6,44 @@
 <div class="classes-panel">
   <div class="classes-panel-header">
     <span class="classes-panel-title">Classes</span>
-    <button pButton type="button" icon="pi pi-cog" label="Manage"
-            class="p-button-sm p-button-text"
-            pTooltip="Manage classes — add / remove, palette, matching, import/export"
-            tooltipPosition="bottom" (click)="manage.emit()"></button>
+    <button
+      pButton
+      type="button"
+      icon="pi pi-cog"
+      label="Manage"
+      class="p-button-sm p-button-text"
+      pTooltip="Manage classes — add / remove, palette, matching, import/export"
+      tooltipPosition="bottom"
+      (click)="manage.emit()"
+    ></button>
   </div>
   <div class="classes-panel-body">
-    <div *ngFor="let c of rows; trackBy: trackByName"
-         class="class-row" [class.active]="activeClass === c.name"
-         (click)="pick.emit(c.name)"
-         [pTooltip]="c.rowTooltip"
-         tooltipPosition="bottom">
+    <div
+      *ngFor="let c of rows; trackBy: trackByName"
+      class="class-row"
+      [class.active]="activeClass === c.name"
+      (click)="pick.emit(c.name)"
+      [pTooltip]="c.rowTooltip"
+      tooltipPosition="bottom"
+    >
       <span class="row-swatch" (click)="$event.stopPropagation()">
         <hex-color-picker [color]="c.color" (colorChange)="recolor.emit({ name: c.name, color: $event })">
         </hex-color-picker>
       </span>
       <span class="row-name">{{ c.name }}</span>
       <span class="row-count" [class.zero]="c.count === 0">{{ c.count }}</span>
-      <button pButton type="button" icon="pi pi-trash"
-              class="p-button-sm p-button-text p-button-warning row-del"
-              [disabled]="!c.canRemove"
-              [pTooltip]="c.removeTooltip"
-              tooltipPosition="bottom" [attr.aria-label]="'Remove class ' + c.name"
-              (click)="$event.stopPropagation(); remove.emit(c.name)"></button>
+      <button
+        pButton
+        type="button"
+        icon="pi pi-trash"
+        class="p-button-sm p-button-text p-button-warning row-del"
+        [disabled]="!c.canRemove"
+        [pTooltip]="c.removeTooltip"
+        tooltipPosition="bottom"
+        [attr.aria-label]="'Remove class ' + c.name"
+        (click)="$event.stopPropagation(); remove.emit(c.name)"
+      ></button>
     </div>
-    <div *ngIf="!classes.length" class="classes-empty">
-      No classes yet — add one from Manage.
-    </div>
+    <div *ngIf="!classes.length" class="classes-empty">No classes yet — add one from Manage.</div>
   </div>
 </div>

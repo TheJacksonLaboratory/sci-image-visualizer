@@ -23,7 +23,11 @@ import { RegionEditorComponent } from './region-editor/region-editor.component';
 import { HexColorPickerComponent } from './hex-color-picker/hex-color-picker.component';
 
 jest.mock('plotly.js-dist-min', () => ({
-  newPlot: jest.fn(), react: jest.fn(), relayout: jest.fn(), purge: jest.fn(), restyle: jest.fn(),
+  newPlot: jest.fn(),
+  react: jest.fn(),
+  relayout: jest.fn(),
+  purge: jest.fn(),
+  restyle: jest.fn(),
 }));
 
 /**
@@ -127,12 +131,17 @@ describe('VisualizationModule (re-export shim)', () => {
   it('exports the same six components, now standalone', () => {
     const exported = (VisualizationModule as unknown as { ɵmod: { exports: Type<unknown>[] } }).ɵmod.exports;
     expect(exported.map((c) => c.name)).toEqual([
-      'VisualizerComponent', 'RegionEditorComponent', 'HexColorPickerComponent',
-      'ChannelHistogramComponent', 'SpatialControlsComponent', 'SpatialChartsComponent',
+      'VisualizerComponent',
+      'RegionEditorComponent',
+      'HexColorPickerComponent',
+      'ChannelHistogramComponent',
+      'SpatialControlsComponent',
+      'SpatialChartsComponent',
     ]);
     expect(exported.every((c) => isStandalone(c))).toBe(true);
-    expect([VisualizerComponent, RegionEditorComponent, HexColorPickerComponent].every((c) => isStandalone(c)))
-      .toBe(true);
+    expect(
+      [VisualizerComponent, RegionEditorComponent, HexColorPickerComponent].every((c) => isStandalone(c)),
+    ).toBe(true);
   });
 });
 

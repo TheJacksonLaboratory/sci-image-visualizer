@@ -9,7 +9,11 @@ import { IChannelState } from '../../contracts/channel-histogram-api.contract';
 import { SimpleSliceAccessService } from '../simple-slice-access.service';
 
 /** One decoded single-band channel plane (serverless multichannel). */
-export interface SimplePlane { data: Uint8ClampedArray; width: number; height: number; }
+export interface SimplePlane {
+  data: Uint8ClampedArray;
+  width: number;
+  height: number;
+}
 
 /** What `load()` hands to `plot()`. `load()` only computes it: the image on
  *  screen keeps its own state until `plot()` commits this payload. */
@@ -87,7 +91,10 @@ export class OsdSimpleSource {
   channelPlanes: SimplePlane[] = [];
   compositeUrl: string | null = null;
 
-  constructor(private readonly host: SimpleSourceHost, private readonly simpleStack: SimpleSliceAccessService) {}
+  constructor(
+    private readonly host: SimpleSourceHost,
+    private readonly simpleStack: SimpleSliceAccessService,
+  ) {}
 
   /** Forget the simple image's state: mode, slice URLs and the serverless-
    *  multichannel flag, URLs and decoded planes. Called when a tiled image is
@@ -104,7 +111,10 @@ export class OsdSimpleSource {
   revokeUrls(): void {
     for (const u of this.fullResUrls.values()) URL.revokeObjectURL(u);
     this.fullResUrls.clear();
-    if (this.compositeUrl) { URL.revokeObjectURL(this.compositeUrl); this.compositeUrl = null; }
+    if (this.compositeUrl) {
+      URL.revokeObjectURL(this.compositeUrl);
+      this.compositeUrl = null;
+    }
   }
 
   /** Build the `plot()` payload for a simple (tiled:false) image: a single-level
@@ -160,8 +170,8 @@ export class OsdSimpleSource {
     const descriptor: TileDescriptor = {
       width,
       height,
-      tileSize: 0,            // unused: simple mode never calls buildTileSource
-      z: 1,                   // single frame
+      tileSize: 0, // unused: simple mode never calls buildTileSource
+      z: 1, // single frame
       channels: meta?.rgbChannels ?? (imageInfo.isGrayscale ? 1 : 3),
       multichannel: false,
       realLevels: 1,
@@ -262,7 +272,8 @@ export class OsdSimpleSource {
     // the world stays full-res across slices and ROIs keep aligning. Guard
     // against a newer scrub landing first.
     const d = this.host.descriptor();
-    this.simpleStack.fetchAsBlobUrl(rawUrl)
+    this.simpleStack
+      .fetchAsBlobUrl(rawUrl)
       .then((previewUrl) => this.toFullResUrl(previewUrl, d?.width ?? 0, d?.height ?? 0))
       .then((url) => {
         const viewer = this.host.viewer();
@@ -335,15 +346,17 @@ export class OsdSimpleSource {
    *  plane that fails to load is empty (the compositor skips it). */
   async loadChannelPlanes(urls: string[] | undefined): Promise<SimplePlane[]> {
     const empty = (): SimplePlane => ({ data: new Uint8ClampedArray(0), width: 0, height: 0 });
-    return Promise.all((urls ?? []).map(async (u) => {
-      try {
-        const px = await this.decodeUrlToRgba(await this.simpleStack.fetchAsBlobUrl(u));
-        return px ? { data: px.data, width: px.width, height: px.height } : empty();
-      } catch (err) {
-        console.warn('[OSD] channel plane decode failed', err);
-        return empty();
-      }
-    }));
+    return Promise.all(
+      (urls ?? []).map(async (u) => {
+        try {
+          const px = await this.decodeUrlToRgba(await this.simpleStack.fetchAsBlobUrl(u));
+          return px ? { data: px.data, width: px.width, height: px.height } : empty();
+        } catch (err) {
+          console.warn('[OSD] channel plane decode failed', err);
+          return empty();
+        }
+      }),
+    );
   }
 
   /** Composite per-channel planes into ONE RGBA image using the current channel
@@ -353,14 +366,16 @@ export class OsdSimpleSource {
    *  composite PNG, owned by the caller (see {@link openComposite}). */
   async composite(planes: SimplePlane[]): Promise<string | undefined> {
     if (!planes.length) return undefined;
-    const w = planes[0].width, h = planes[0].height;
+    const w = planes[0].width,
+      h = planes[0].height;
     if (!w || !h) return undefined;
     const out = this.host.display().compositeChannels(
       planes.map((p) => (p.width === w && p.height === h ? p.data : null)),
       this.host.channelStates(),
     );
     const canvas = document.createElement('canvas');
-    canvas.width = w; canvas.height = h;
+    canvas.width = w;
+    canvas.height = h;
     const ctx = canvas.getContext('2d');
     if (!ctx) return undefined;
     ctx.putImageData(new ImageData(out, w, h), 0, 0);
@@ -414,7 +429,8 @@ export class OsdSimpleSource {
    *  context). Throws when the URL can't be decoded. */
   async decodeUrlToRgba(url: string): Promise<ImageData | null> {
     const img = await this.loadImageEl(url);
-    const w = img.naturalWidth, h = img.naturalHeight;
+    const w = img.naturalWidth,
+      h = img.naturalHeight;
     return w && h ? readRgba(img, w, h) : null;
   }
 

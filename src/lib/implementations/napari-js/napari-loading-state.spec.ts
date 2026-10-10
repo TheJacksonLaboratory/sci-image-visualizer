@@ -8,7 +8,7 @@ describe('LoadingBadgeState', () => {
     state.attach(document.createElement('div'));
   });
 
-  it('names every source still loading, the service\'s own first', () => {
+  it("names every source still loading, the service's own first", () => {
     const image = state.begin('Image');
     state.setTileLayers(['Transcripts']);
     const obs = state.begin('Observations');
@@ -29,7 +29,7 @@ describe('LoadingBadgeState', () => {
     expect(state.text).toBe('');
   });
 
-  it('a load that settles after a reset leaves the new scene\'s count alone', () => {
+  it("a load that settles after a reset leaves the new scene's count alone", () => {
     // Regression: the observation counter was zeroed by a re-plot and then decremented by the
     // old scene's colouring as it settled, so the new scene's next load counted from -1 and its
     // "Observations reloading…" never showed.

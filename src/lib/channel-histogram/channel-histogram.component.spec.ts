@@ -6,7 +6,10 @@ import { Subject, of } from 'rxjs';
 import * as Plotly from 'plotly.js-dist-min';
 import { ChannelHistogramComponent } from './channel-histogram.component';
 import {
-  CHANNEL_HISTOGRAM_API, IChannelHistogramApi, IChannelState, IHistogram,
+  CHANNEL_HISTOGRAM_API,
+  IChannelHistogramApi,
+  IChannelState,
+  IHistogram,
 } from '../contracts/channel-histogram-api.contract';
 
 jest.mock('plotly.js-dist-min', () => ({ react: jest.fn(), relayout: jest.fn(), purge: jest.fn() }));
@@ -126,8 +129,12 @@ describe('ChannelHistogramComponent', () => {
   });
 
   describe('histogram rendering (with the plot div present)', () => {
-    beforeEach(() => { document.body.innerHTML = `<div id="${component['histogramDiv']}"></div>`; });
-    afterEach(() => { document.body.innerHTML = ''; });
+    beforeEach(() => {
+      document.body.innerHTML = `<div id="${component['histogramDiv']}"></div>`;
+    });
+    afterEach(() => {
+      document.body.innerHTML = '';
+    });
 
     it('selectChannel loads and renders the histogram via Plotly', () => {
       component['selectChannel'](channels[0]);
@@ -171,8 +178,12 @@ describe('ChannelHistogramComponent', () => {
   describe('16-bit native window mapping', () => {
     beforeEach(() => {
       component['hist'] = {
-        bins: [100, 300, 500, 700, 900], counts: [0, 5, 20, 5, 0], max: 20,
-        bitDepth: 16, observedMin: 100, observedMax: 900,
+        bins: [100, 300, 500, 700, 900],
+        counts: [0, 5, 20, 5, 0],
+        max: 20,
+        bitDepth: 16,
+        observedMin: 100,
+        observedMax: 900,
       } as any;
     });
 
@@ -249,7 +260,8 @@ describe('ChannelHistogramComponent', () => {
 
   describe('OnPush (CORE-21)', () => {
     @Component({
-      standalone: true, imports: [ChannelHistogramComponent],
+      standalone: true,
+      imports: [ChannelHistogramComponent],
       template: '<channel-histogram [visible]="true"></channel-histogram>',
     })
     class HostComponent {}

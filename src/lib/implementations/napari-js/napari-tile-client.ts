@@ -20,9 +20,20 @@ import {
   tilesInfoUrl,
 } from '../tile-server';
 import {
-  DESCRIPTOR_POLL_INTERVAL_MS, DESCRIPTOR_TIMEOUT_MS, LumaPlane, MAX_STITCH_TILES, MAX_TEXTURE_DIM,
-  STITCH_BUDGET_COEFF, TILE_FETCH_CONCURRENCY, TILE_SIZE, VOLUME_FETCH_CONCURRENCY, VOLUME_MAX_SLICE,
-  create2dCanvas, mapPool, rgbaToLuminance, stackDepth,
+  DESCRIPTOR_POLL_INTERVAL_MS,
+  DESCRIPTOR_TIMEOUT_MS,
+  LumaPlane,
+  MAX_STITCH_TILES,
+  MAX_TEXTURE_DIM,
+  STITCH_BUDGET_COEFF,
+  TILE_FETCH_CONCURRENCY,
+  TILE_SIZE,
+  VOLUME_FETCH_CONCURRENCY,
+  VOLUME_MAX_SLICE,
+  create2dCanvas,
+  mapPool,
+  rgbaToLuminance,
+  stackDepth,
 } from './napari-helpers';
 
 /** An assembled uint8 (luminance) volume, x-fastest then y then z. */
@@ -215,9 +226,10 @@ export class NapariTileClient {
       // (channelUrls[z][channel]) so each band stays distinct — the client-side
       // analog of the server's per-channel /tile?channel=c. Else the z-anchor URL.
       const chUrls = (info as IImageInfo).channelUrls;
-      const url = channel != null && chUrls?.[z]?.[channel] != null
-        ? chUrls[z][channel]
-        : this.simpleStack.urlFor(info as IImageInfo, z);
+      const url =
+        channel != null && chUrls?.[z]?.[channel] != null
+          ? chUrls[z][channel]
+          : this.simpleStack.urlFor(info as IImageInfo, z);
       if (!url) throw new Error(`[napari-js] no URL for slice ${z}`);
       return this.simpleStack.fetchAsBitmap(url);
     }
@@ -228,14 +240,14 @@ export class NapariTileClient {
     // The requested band; may be dropped to the composite (undefined) below when the channel has no
     // pyramid level small enough to stitch within budget.
     let effectiveChannel = channel;
-    const fetchTile = async (
-      res: number,
-      col: number,
-      row: number,
-      t: number,
-    ): Promise<ImageBitmap> => {
+    const fetchTile = async (res: number, col: number, row: number, t: number): Promise<ImageBitmap> => {
       const url = buildTileUrl(this.api, infoB64, {
-        res, col, row, z, tileSize: t, channel: effectiveChannel,
+        res,
+        col,
+        row,
+        z,
+        tileSize: t,
+        channel: effectiveChannel,
       });
       const resp = await fetchWithAuth(this.tiles, url);
       if (!resp.ok) {
@@ -251,8 +263,7 @@ export class NapariTileClient {
     // Per-channel tiles exist ONLY at REAL Bio-Formats levels (the front of `levels`); the server
     // composite exists at every level, including the small overviews.
     const perChannelLevels = desc.realLevels ?? desc.levels.length;
-    const usable =
-      channel == null ? desc.levels : desc.levels.slice(0, Math.max(1, perChannelLevels));
+    const usable = channel == null ? desc.levels : desc.levels.slice(0, Math.max(1, perChannelLevels));
 
     // Finest level whose stitched grid fits BOTH the tile budget and the GPU texture limit; if none
     // fits, the coarsest available (fits=false).
@@ -354,10 +365,7 @@ export class NapariTileClient {
    *  assembly so both scale their in-plane resolution with the decimate factor. */
   tileBudgetFor(info: IImageInfo | undefined, targetPx: number): number {
     const tileSize = this.currentDescriptor(info)?.tileSize || TILE_SIZE;
-    return Math.min(
-      MAX_STITCH_TILES,
-      Math.max(1, Math.round((targetPx / tileSize) ** 2 * STITCH_BUDGET_COEFF)),
-    );
+    return Math.min(MAX_STITCH_TILES, Math.max(1, Math.round((targetPx / tileSize) ** 2 * STITCH_BUDGET_COEFF)));
   }
 
   /**
@@ -379,9 +387,7 @@ export class NapariTileClient {
     const infoB64 = this.tiles.getSelectedInfoB64() ?? '';
     // Per-channel tiles exist only at REAL Bio-Formats levels; the composite exists at all levels.
     const usable =
-      channel == null
-        ? desc.levels
-        : desc.levels.slice(0, Math.max(1, desc.realLevels ?? desc.levels.length));
+      channel == null ? desc.levels : desc.levels.slice(0, Math.max(1, desc.realLevels ?? desc.levels.length));
     const levelScales = usable.map((l) => desc.width / Math.max(1, l.width)); // level-0 px per level px
     const tileSize = desc.tileSize || TILE_SIZE;
     const api = this.api;
@@ -398,7 +404,12 @@ export class NapariTileClient {
       fetchTile: async (key: TileKey): Promise<PixelChunk> => {
         const res = usable[key.level]?.res ?? key.level;
         const url = buildTileUrl(api, infoB64, {
-          res, col: key.col, row: key.row, z: key.z, tileSize, channel,
+          res,
+          col: key.col,
+          row: key.row,
+          z: key.z,
+          tileSize,
+          channel,
         });
         const end = scene.aborted ? null : onTile();
         try {
@@ -547,7 +558,10 @@ export class NapariTileClient {
    * `(z, channel)`; null for an 8-bit channel, which the caller bins from the client data.
    */
   nativeHistogram$(
-    info: IImageInfo | undefined, z: number, channel: number, bins: number,
+    info: IImageInfo | undefined,
+    z: number,
+    channel: number,
+    bins: number,
   ): Observable<IHistogram | null> | null {
     const bitDepth = this.currentDescriptor(info)?.channelInfo?.[channel]?.bitDepth ?? 8;
     if (bitDepth <= 8) return null;
@@ -560,12 +574,7 @@ export class NapariTileClient {
   /** Fetch + cache one channel's native-bit-depth histogram from `GET /histogram` (>8-bit),
    *  through the shared jit-service client — whose URL carries the per-app-load cache-buster
    *  this backend used to omit, so a reload showed the server's 24 h-cached histogram. */
-  async fetchNativeHistogram(
-    channel: number,
-    bins: number,
-    z: number,
-    key: string,
-  ): Promise<IHistogram | null> {
+  async fetchNativeHistogram(channel: number, bins: number, z: number, key: string): Promise<IHistogram | null> {
     const infoB64 = this.tiles.getSelectedInfoB64();
     if (!infoB64) return null;
     try {

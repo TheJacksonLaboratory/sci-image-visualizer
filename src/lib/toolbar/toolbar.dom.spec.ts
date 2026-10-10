@@ -41,8 +41,14 @@ function signature(fixture: ComponentFixture<unknown>): string[] {
   };
   const visit = (el: Element): void => {
     const tag = el.tagName.toLowerCase();
-    if (el.classList.contains('toolbar-separator')) { out.push('|'); return; }
-    if (el.classList.contains('toolbar-text')) { out.push(`text:${(el.textContent ?? '').replace(/\s+/g, ' ').trim()}`); return; }
+    if (el.classList.contains('toolbar-separator')) {
+      out.push('|');
+      return;
+    }
+    if (el.classList.contains('toolbar-text')) {
+      out.push(`text:${(el.textContent ?? '').replace(/\s+/g, ' ').trim()}`);
+      return;
+    }
     if (tag === 'p-button') {
       const button = el.querySelector('button');
       const on = button && !button.classList.contains('p-button-text') ? ' on' : '';
@@ -52,13 +58,24 @@ function signature(fixture: ComponentFixture<unknown>): string[] {
       return;
     }
     if (tag === 'p-slider') {
-      const handles = Array.from(el.querySelectorAll('.p-slider-handle')).map((h) => h.getAttribute('aria-valuenow'));
+      const handles = Array.from(el.querySelectorAll('.p-slider-handle')).map((h) =>
+        h.getAttribute('aria-valuenow'),
+      );
       out.push(`slider:${handles.join('-')}`);
       return;
     }
-    if (tag === 'p-dropdown') { out.push(`dropdown:${(el.querySelector('.p-dropdown-label')?.textContent ?? '').trim()}`); return; }
-    if (tag === 'p-inputnumber') { out.push('number'); return; }
-    if (tag === 'p-menu') { out.push('menu'); return; }
+    if (tag === 'p-dropdown') {
+      out.push(`dropdown:${(el.querySelector('.p-dropdown-label')?.textContent ?? '').trim()}`);
+      return;
+    }
+    if (tag === 'p-inputnumber') {
+      out.push('number');
+      return;
+    }
+    if (tag === 'p-menu') {
+      out.push('menu');
+      return;
+    }
     for (const child of Array.from(el.children)) visit(child);
   };
   visit(root.querySelector('p-toolbar') as Element);
@@ -66,14 +83,19 @@ function signature(fixture: ComponentFixture<unknown>): string[] {
 }
 
 const tool: ToolbarToolContribution = {
-  id: 'detect', label: 'Detect', icon: { pi: 'pi-search' }, runTooltip: 'Detect things',
-  models: () => [{ id: 'a', label: 'A', info: 'first' }], defaultModelId: () => 'a',
-  params: [{ key: 'k', label: 'K', kind: 'number', min: 0, max: 1, step: 0.1 } as never], defaultParams: () => ({}),
+  id: 'detect',
+  label: 'Detect',
+  icon: { pi: 'pi-search' },
+  runTooltip: 'Detect things',
+  models: () => [{ id: 'a', label: 'A', info: 'first' }],
+  defaultModelId: () => 'a',
+  params: [{ key: 'k', label: 'K', kind: 'number', min: 0, max: 1, step: 0.1 } as never],
+  defaultParams: () => ({}),
   progress: { status$: null as never, busy$: null as never, progress$: null as never },
   run: async () => 0,
 };
 
-const image = (over: Partial<IImageInfo>): IImageInfo => ({ fileName: 'a.tif', ...over } as IImageInfo);
+const image = (over: Partial<IImageInfo>): IImageInfo => ({ fileName: 'a.tif', ...over }) as IImageInfo;
 
 describe('ToolbarComponent (DOM characterization)', () => {
   let fixture: ComponentFixture<ToolbarComponent>;
@@ -83,12 +105,16 @@ describe('ToolbarComponent (DOM characterization)', () => {
     jest.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
       if (!String(args[0]).includes('Could not parse CSS stylesheet')) consoleError(...args);
     });
-    await TestBed.configureTestingModule({ imports: [VisualizationModule, NoopAnimationsModule] })
-      .compileComponents();
+    await TestBed.configureTestingModule({
+      imports: [VisualizationModule, NoopAnimationsModule],
+    }).compileComponents();
     fixture = TestBed.createComponent(ToolbarComponent);
   });
 
-  afterEach(() => { fixture.destroy(); jest.restoreAllMocks(); });
+  afterEach(() => {
+    fixture.destroy();
+    jest.restoreAllMocks();
+  });
 
   async function render(inputs: Record<string, unknown>): Promise<string[]> {
     for (const [k, v] of Object.entries(inputs)) fixture.componentRef.setInput(k, v);
@@ -106,39 +132,74 @@ describe('ToolbarComponent (DOM characterization)', () => {
   ];
 
   it('Image view, z-stack, brush active, SAM models and a contributed tool', async () => {
-    expect(await render({
-      imageInfo: image({ isStack: true }), plotTypeOptions, selectedPlotType: PlotType.IMAGE,
-      maxIndex: 9, zIndex: 3, activeDragMode: 'brush', brushSize: 60, canUndo: true,
-      samModels: [{ id: 'vit_t', label: 'ViT-T' }], samModelId: 'vit_t', contributedTools: [tool],
-    })).toMatchSnapshot();
+    expect(
+      await render({
+        imageInfo: image({ isStack: true }),
+        plotTypeOptions,
+        selectedPlotType: PlotType.IMAGE,
+        maxIndex: 9,
+        zIndex: 3,
+        activeDragMode: 'brush',
+        brushSize: 60,
+        canUndo: true,
+        samModels: [{ id: 'vit_t', label: 'ViT-T' }],
+        samModelId: 'vit_t',
+        contributedTools: [tool],
+      }),
+    ).toMatchSnapshot();
   });
 
   it('Heatmap, stack in single-image mode, wand active, no SAM models', async () => {
-    expect(await render({
-      imageInfo: image({ isStack: true, showStack: false }), plotTypeOptions,
-      selectedPlotType: PlotType.HEATMAP, maxIndex: 4, zIndex: 1, activeDragMode: 'wand',
-      wandSensitivity: 2.5, canRedo: true,
-    })).toMatchSnapshot();
+    expect(
+      await render({
+        imageInfo: image({ isStack: true, showStack: false }),
+        plotTypeOptions,
+        selectedPlotType: PlotType.HEATMAP,
+        maxIndex: 4,
+        zIndex: 1,
+        activeDragMode: 'wand',
+        wandSensitivity: 2.5,
+        canRedo: true,
+      }),
+    ).toMatchSnapshot();
   });
 
   it('napari isosurface 3D: iso band, camera controls, axes, resolution', async () => {
-    expect(await render({
-      imageInfo: image({}), plotTypeOptions, selectedPlotType: PlotType.NAPARI_ISOSURFACE,
-      isHeatmap: false, isoRange: [40, 200], activeSurface3dMode: 'orbit', axesVisible: true,
-    })).toMatchSnapshot();
+    expect(
+      await render({
+        imageInfo: image({}),
+        plotTypeOptions,
+        selectedPlotType: PlotType.NAPARI_ISOSURFACE,
+        isHeatmap: false,
+        isoRange: [40, 200],
+        activeSurface3dMode: 'orbit',
+        axesVisible: true,
+      }),
+    ).toMatchSnapshot();
   });
 
   it('3D spatial cloud with screen-space region tools, eraser active', async () => {
-    expect(await render({
-      imageInfo: image({}), hasSpatialDataset: true, selectedPlotType: PlotType.SPATIAL_OMICS_3D,
-      isHeatmap: false, is3dRegions: true, activeDragMode: 'eraseVertex', vertexEraserRadius: 35,
-    })).toMatchSnapshot();
+    expect(
+      await render({
+        imageInfo: image({}),
+        hasSpatialDataset: true,
+        selectedPlotType: PlotType.SPATIAL_OMICS_3D,
+        isHeatmap: false,
+        is3dRegions: true,
+        activeDragMode: 'eraseVertex',
+        vertexEraserRadius: 35,
+      }),
+    ).toMatchSnapshot();
   });
 
   it('pipeline subset: zoom and region tools only', async () => {
-    expect(await render({
-      imageInfo: image({}), selectedPlotType: PlotType.IMAGE, activeDragMode: 'zoomToBox',
-      tools: { ...ALL_TOOLBAR_TOOLS, specialTools: false, help: false },
-    })).toMatchSnapshot();
+    expect(
+      await render({
+        imageInfo: image({}),
+        selectedPlotType: PlotType.IMAGE,
+        activeDragMode: 'zoomToBox',
+        tools: { ...ALL_TOOLBAR_TOOLS, specialTools: false, help: false },
+      }),
+    ).toMatchSnapshot();
   });
 });

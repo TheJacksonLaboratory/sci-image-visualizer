@@ -1,6 +1,14 @@
 import {
-  buildCountTraces, buildHeatmapTraces, countByCategory, countsLayout, heatmapLayout,
-  OmicsGrouping, OmicsTraceInput, benefitsFromGrouping, buildOmicsTraces, omicsLayout,
+  buildCountTraces,
+  buildHeatmapTraces,
+  countByCategory,
+  countsLayout,
+  heatmapLayout,
+  OmicsGrouping,
+  OmicsTraceInput,
+  benefitsFromGrouping,
+  buildOmicsTraces,
+  omicsLayout,
 } from './omics-trace-builders';
 import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
 
@@ -23,8 +31,7 @@ const asRecords = (traces: unknown[]) => traces as Record<string, any>[];
 describe('omics-trace-builders', () => {
   describe('histogram', () => {
     /** The total a bar trace counts. */
-    const total = (trace: { y?: unknown }) =>
-      (trace.y as number[]).reduce((n, v) => n + v, 0);
+    const total = (trace: { y?: unknown }) => (trace.y as number[]).reduce((n, v) => n + v, 0);
 
     it('charts the full distribution as pre-binned bars', () => {
       const [all] = asRecords(buildOmicsTraces('histogram', input()));
@@ -45,11 +52,16 @@ describe('omics-trace-builders', () => {
     });
 
     it('overlays a Selected trace on the SAME bins, so the two are comparable', () => {
-      const traces = asRecords(buildOmicsTraces('histogram', input({
-        selection: new Uint8Array([0, 1, 1, 0]),
-      })));
+      const traces = asRecords(
+        buildOmicsTraces(
+          'histogram',
+          input({
+            selection: new Uint8Array([0, 1, 1, 0]),
+          }),
+        ),
+      );
       expect(traces).toHaveLength(2);
-      expect(total(traces[0])).toBe(4);   // all, muted
+      expect(total(traces[0])).toBe(4); // all, muted
       expect(traces[0].opacity).toBeLessThan(1);
       expect(traces[1].name).toBe('Selected');
       expect(total(traces[1])).toBe(2);
@@ -57,41 +69,66 @@ describe('omics-trace-builders', () => {
     });
 
     it('ignores an all-zero selection mask (nothing is actually selected)', () => {
-      const traces = buildOmicsTraces('histogram', input({
-        selection: new Uint8Array([0, 0, 0, 0]),
-      }));
+      const traces = buildOmicsTraces(
+        'histogram',
+        input({
+          selection: new Uint8Array([0, 0, 0, 0]),
+        }),
+      );
       expect(traces).toHaveLength(1);
     });
 
     it('drops non-finite values rather than plotting gaps', () => {
-      const [all] = asRecords(buildOmicsTraces('histogram', input({
-        values: new Float32Array([1, NaN, 3]),
-      })));
+      const [all] = asRecords(
+        buildOmicsTraces(
+          'histogram',
+          input({
+            values: new Float32Array([1, NaN, 3]),
+          }),
+        ),
+      );
       expect(total(all)).toBe(2);
       expect(all.customdata[0][0]).toBe(1);
       expect(all.customdata[all.customdata.length - 1][1]).toBeCloseTo(3);
     });
 
     it('log-scales when asked', () => {
-      const [all] = asRecords(buildOmicsTraces('histogram', input({
-        values: new Float32Array([0, 9]), log: true,
-      })));
+      const [all] = asRecords(
+        buildOmicsTraces(
+          'histogram',
+          input({
+            values: new Float32Array([0, 9]),
+            log: true,
+          }),
+        ),
+      );
       expect(all.customdata[0][0]).toBeCloseTo(0);
       expect(all.customdata[all.customdata.length - 1][1]).toBeCloseTo(Math.log1p(9));
     });
 
     it('clamps negatives before log so log1p never returns NaN', () => {
-      const [all] = asRecords(buildOmicsTraces('histogram', input({
-        values: new Float32Array([-5]), log: true,
-      })));
+      const [all] = asRecords(
+        buildOmicsTraces(
+          'histogram',
+          input({
+            values: new Float32Array([-5]),
+            log: true,
+          }),
+        ),
+      );
       expect(all.x).toEqual([0]);
       expect(all.y).toEqual([1]);
     });
 
     it('draws nothing, rather than failing, for no finite values', () => {
-      const [all] = asRecords(buildOmicsTraces('histogram', input({
-        values: new Float32Array([NaN]),
-      })));
+      const [all] = asRecords(
+        buildOmicsTraces(
+          'histogram',
+          input({
+            values: new Float32Array([NaN]),
+          }),
+        ),
+      );
       expect(all.x).toEqual([]);
     });
   });
@@ -119,41 +156,71 @@ describe('omics-trace-builders', () => {
     });
 
     it('narrows TO the selection rather than overlaying it', () => {
-      const traces = asRecords(buildOmicsTraces('violin', input({
-        group: group(), selection: new Uint8Array([1, 0, 0, 1]),
-      })));
+      const traces = asRecords(
+        buildOmicsTraces(
+          'violin',
+          input({
+            group: group(),
+            selection: new Uint8Array([1, 0, 0, 1]),
+          }),
+        ),
+      );
       expect(traces).toHaveLength(2);
       expect(traces[0].y).toEqual([1]);
       expect(traces[1].y).toEqual([4]);
     });
 
     it('labels a single ungrouped trace as Selected when one is active', () => {
-      const [t] = asRecords(buildOmicsTraces('box', input({
-        selection: new Uint8Array([0, 0, 1, 1]),
-      })));
+      const [t] = asRecords(
+        buildOmicsTraces(
+          'box',
+          input({
+            selection: new Uint8Array([0, 0, 1, 1]),
+          }),
+        ),
+      );
       expect(t.name).toBe('Selected');
       expect(t.y).toEqual([3, 4]);
     });
 
     it('drops empty categories — an empty violin reads as data', () => {
-      const traces = asRecords(buildOmicsTraces('violin', input({
-        group: group({ codes: new Uint16Array([0, 0, 0, 0]) }),
-      })));
+      const traces = asRecords(
+        buildOmicsTraces(
+          'violin',
+          input({
+            group: group({ codes: new Uint16Array([0, 0, 0, 0]) }),
+          }),
+        ),
+      );
       expect(traces).toHaveLength(1);
       expect(traces[0].name).toBe('A');
     });
 
     it('skips NO_CATEGORY and out-of-range codes instead of misbucketing them', () => {
-      const traces = asRecords(buildOmicsTraces('violin', input({
-        group: group({ codes: new Uint16Array([0, NO_CATEGORY, 7, 1]) }),
-      })));
-      expect(traces.map((t) => [t.name, t.y])).toEqual([['A', [1]], ['B', [4]]]);
+      const traces = asRecords(
+        buildOmicsTraces(
+          'violin',
+          input({
+            group: group({ codes: new Uint16Array([0, NO_CATEGORY, 7, 1]) }),
+          }),
+        ),
+      );
+      expect(traces.map((t) => [t.name, t.y])).toEqual([
+        ['A', [1]],
+        ['B', [4]],
+      ]);
     });
 
     it('returns no traces when everything is filtered out', () => {
-      expect(buildOmicsTraces('violin', input({
-        values: new Float32Array([NaN, NaN]), selection: null,
-      }))).toEqual([]);
+      expect(
+        buildOmicsTraces(
+          'violin',
+          input({
+            values: new Float32Array([NaN, NaN]),
+            selection: null,
+          }),
+        ),
+      ).toEqual([]);
     });
 
     it('thins a very large sample instead of handing Plotly 84k points', () => {
@@ -170,8 +237,7 @@ describe('omics-trace-builders', () => {
   describe('omicsLayout', () => {
     it('labels the value axis, and marks it as log when scaled', () => {
       expect((omicsLayout('histogram', input()) as any).xaxis.title.text).toBe('total_counts');
-      expect((omicsLayout('histogram', input({ log: true })) as any).xaxis.title.text)
-        .toBe('log1p(total_counts)');
+      expect((omicsLayout('histogram', input({ log: true })) as any).xaxis.title.text).toBe('log1p(total_counts)');
     });
 
     it('puts the value on Y for violin/box and on X for a histogram', () => {
@@ -181,12 +247,26 @@ describe('omics-trace-builders', () => {
 
     it('shows a legend only when the histogram has something to compare', () => {
       expect((omicsLayout('histogram', input()) as any).showlegend).toBe(false);
-      expect((omicsLayout('histogram', input({
-        selection: new Uint8Array([1, 0, 0, 0]),
-      })) as any).showlegend).toBe(true);
-      expect((omicsLayout('violin', input({
-        selection: new Uint8Array([1, 0, 0, 0]),
-      })) as any).showlegend).toBe(false);
+      expect(
+        (
+          omicsLayout(
+            'histogram',
+            input({
+              selection: new Uint8Array([1, 0, 0, 0]),
+            }),
+          ) as any
+        ).showlegend,
+      ).toBe(true);
+      expect(
+        (
+          omicsLayout(
+            'violin',
+            input({
+              selection: new Uint8Array([1, 0, 0, 0]),
+            }),
+          ) as any
+        ).showlegend,
+      ).toBe(false);
     });
 
     it('overlays histogram bars rather than stacking them', () => {
@@ -254,7 +334,11 @@ describe('omics-trace-builders', () => {
     it('grows the plot height with the bar count', () => {
       const few = countsLayout({ group: group([0, 1]), name: 'region' }) as any;
       const many = countsLayout({
-        group: group(Array.from({ length: 40 }, (_, i) => i % 20), 20), name: 'region',
+        group: group(
+          Array.from({ length: 40 }, (_, i) => i % 20),
+          20,
+        ),
+        name: 'region',
       }) as any;
       expect(many.height).toBeGreaterThan(few.height);
     });
@@ -331,5 +415,4 @@ describe('omics-trace-builders', () => {
       expect(short.xaxis.title.text).toBe('class');
     });
   });
-
 });

@@ -3,7 +3,13 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { SpatialGroupsPanelComponent } from './spatial-groups-panel.component';
 import { SpatialDataset } from '../../contracts/spatial-dataset.contract';
 import {
-  SpatialControlsFake, TILED_DATASET, bindInputs, fakeSpatialControls, fire, one, shallowPanel,
+  SpatialControlsFake,
+  TILED_DATASET,
+  bindInputs,
+  fakeSpatialControls,
+  fire,
+  one,
+  shallowPanel,
 } from '../../testing/spatial-panel-testing';
 
 describe('SpatialGroupsPanelComponent', () => {
@@ -14,7 +20,10 @@ describe('SpatialGroupsPanelComponent', () => {
 
   const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   const view = (categories: string[], codes: number[], name = 'graphclust') => ({
-    name, categories, colors: categories.map(() => '#000'), codes: Uint16Array.from(codes),
+    name,
+    categories,
+    colors: categories.map(() => '#000'),
+    codes: Uint16Array.from(codes),
   });
 
   async function build(dataset: SpatialDataset = TILED_DATASET) {
@@ -38,22 +47,37 @@ describe('SpatialGroupsPanelComponent', () => {
     await build({
       ...TILED_DATASET,
       columns: [
-        { kind: 'categorical', name: 'graphclust', description: 'Graph-Based Clustering (GEX)',
-          categories: ['A', 'B'], section: 'Xenium Onboard Analysis groups' },
+        {
+          kind: 'categorical',
+          name: 'graphclust',
+          description: 'Graph-Based Clustering (GEX)',
+          categories: ['A', 'B'],
+          section: 'Xenium Onboard Analysis groups',
+        },
         ...[2, 3].map((k) => ({
-          kind: 'categorical' as const, name: `kmeans_${k}`, categories: ['x'],
+          kind: 'categorical' as const,
+          name: `kmeans_${k}`,
+          categories: ['x'],
           section: 'Xenium Onboard Analysis groups',
           family: { id: 'kmeans', label: 'K-Means Clustering (GEX)', variant: `k = ${k}` },
         })),
-        { kind: 'categorical', name: 'imported:Mine', description: 'Mine', categories: ['T'],
-          section: 'Imported groups' },
+        {
+          kind: 'categorical',
+          name: 'imported:Mine',
+          description: 'Mine',
+          categories: ['T'],
+          section: 'Imported groups',
+        },
       ],
     });
     expect(component['groupOptions']).toEqual([
-      { label: 'Xenium Onboard Analysis groups', items: [
-        { label: 'Graph-Based Clustering (GEX)', value: 'graphclust' },
-        { label: 'K-Means Clustering (GEX)', value: 'family:kmeans' },
-      ] },
+      {
+        label: 'Xenium Onboard Analysis groups',
+        items: [
+          { label: 'Graph-Based Clustering (GEX)', value: 'graphclust' },
+          { label: 'K-Means Clustering (GEX)', value: 'family:kmeans' },
+        ],
+      },
       { label: 'Imported groups', items: [{ label: 'Mine', value: 'imported:Mine' }] },
     ]);
     // A fresh array per read made PrimeNG re-render the options until they were unclickable.
@@ -70,11 +94,16 @@ describe('SpatialGroupsPanelComponent', () => {
 
   it('counts cells per group and hides switched-off groups', async () => {
     categoricalView.mockImplementation(async () => ({
-      name: 'graphclust', categories: ['A', 'B'], colors: ['#f00', '#0f0'],
+      name: 'graphclust',
+      categories: ['A', 'B'],
+      colors: ['#f00', '#0f0'],
       codes: Uint16Array.from([1, 1, 0, 1, 0xffff]),
     }));
     await build();
-    expect(component['groupRows'].map((r) => [r.label, r.count])).toEqual([['B', 3], ['A', 1]]);
+    expect(component['groupRows'].map((r) => [r.label, r.count])).toEqual([
+      ['B', 3],
+      ['A', 1],
+    ]);
     expect(component['groupTotal']).toBe(4);
     const root = fixture.nativeElement as HTMLElement;
     expect(one(root, '.sc-group-all .sc-count').textContent).toContain('4');
@@ -94,7 +123,12 @@ describe('SpatialGroupsPanelComponent', () => {
     // the old dataset's answer from the new one's.
     let resolveOld: (v: ReturnType<typeof view>) => void = () => undefined;
     categoricalView
-      .mockImplementationOnce(() => new Promise((r) => { resolveOld = r; }))
+      .mockImplementationOnce(
+        () =>
+          new Promise((r) => {
+            resolveOld = r;
+          }),
+      )
       .mockResolvedValueOnce(view(['New'], [0, 0]));
     await build();
     fake.dataset$.next({ ...TILED_DATASET, id: 'other' } as SpatialDataset);
@@ -110,8 +144,18 @@ describe('SpatialGroupsPanelComponent', () => {
     let rejectOld: (e: Error) => void = () => undefined;
     let resolveNew: (v: unknown) => void = () => undefined;
     categoricalView
-      .mockImplementationOnce(() => new Promise((_, reject) => { rejectOld = reject; }))
-      .mockImplementationOnce(() => new Promise((r) => { resolveNew = r; }));
+      .mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            rejectOld = reject;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((r) => {
+            resolveNew = r;
+          }),
+      );
     await build();
     component.onCellTypeColumn('curated_cell_type');
     await flush();
@@ -131,13 +175,16 @@ describe('SpatialGroupsPanelComponent', () => {
   });
 
   describe('importing a grouping', () => {
-    const file = (name: string, text: string) => ({
-      files: [{ name, text: async () => text }], value: 'C:\\fakepath\\x',
-    }) as unknown as HTMLInputElement;
+    const file = (name: string, text: string) =>
+      ({
+        files: [{ name, text: async () => text }],
+        value: 'C:\\fakepath\\x',
+      }) as unknown as HTMLInputElement;
 
     it('imports a CSV as a column named after the file, and groups the cells by it', async () => {
       const importGroups = jest.fn(async (label: string) => ({
-        column: { kind: 'categorical' as const, name: `imported:${label}`, categories: ['T'] }, matched: 3,
+        column: { kind: 'categorical' as const, name: `imported:${label}`, categories: ['T'] },
+        matched: 3,
       }));
       (fake.controls as unknown as { importGroups: unknown }).importGroups = importGroups;
       await build();

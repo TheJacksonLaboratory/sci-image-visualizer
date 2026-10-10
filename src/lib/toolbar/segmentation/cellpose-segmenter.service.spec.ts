@@ -1,8 +1,12 @@
 const fromPretrained = jest.fn();
-jest.mock('cellpose-js', () => ({
-  Cellpose: { fromPretrained: (...args: unknown[]) => fromPretrained(...args) },
-  configureOrt: jest.fn(),
-}), { virtual: true }); // the ESM-only package doesn't resolve under jest's CommonJS resolver
+jest.mock(
+  'cellpose-js',
+  () => ({
+    Cellpose: { fromPretrained: (...args: unknown[]) => fromPretrained(...args) },
+    configureOrt: jest.fn(),
+  }),
+  { virtual: true },
+); // the ESM-only package doesn't resolve under jest's CommonJS resolver
 
 import { CellposeSegmenterService } from './cellpose-segmenter.service';
 
@@ -20,10 +24,18 @@ describe('CellposeSegmenterService.getModel', () => {
 
   it('reports download progress to every concurrent caller', async () => {
     let finish!: (m: unknown) => void;
-    fromPretrained.mockImplementation((_url: string, opts: { onProgress: (p: unknown) => void }) =>
-      new Promise((res) => { finish = (m) => { opts.onProgress({ loaded: 5, total: 10 }); res(m); }; }));
+    fromPretrained.mockImplementation(
+      (_url: string, opts: { onProgress: (p: unknown) => void }) =>
+        new Promise((res) => {
+          finish = (m) => {
+            opts.onProgress({ loaded: 5, total: 10 });
+            res(m);
+          };
+        }),
+    );
     const svc = new CellposeSegmenterService();
-    const a: number[] = [], b: number[] = [];
+    const a: number[] = [],
+      b: number[] = [];
     const pa = svc.getModel((l) => a.push(l));
     const pb = svc.getModel((l) => b.push(l));
     await new Promise((r) => setTimeout(r, 0));

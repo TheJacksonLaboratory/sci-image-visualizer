@@ -3,7 +3,8 @@ import { CachedImageData, CanvasToolHost } from '../tool-kit/canvas-tool';
 import { ICellSegmenter, CellSegmentation } from '../../contracts/cell-segmenter.contract';
 import { Region, Rectangle, Polygon } from '../../models/region';
 
-const W = 40, H = 40;
+const W = 40,
+  H = 40;
 
 function rectRegion(x: number, y: number, w: number, h: number): Region {
   const r = new Region();
@@ -29,13 +30,22 @@ function makeHost(regions: Region[]): { host: CanvasToolHost; get: () => Region[
   let regs = regions;
   const frame = Array.from({ length: H }, () => new Array(W).fill(120));
   const cached: CachedImageData = {
-    frames: [frame], width: W, height: H, ratios: [1], isGrayscale: true, originX: 0, originY: 0,
+    frames: [frame],
+    width: W,
+    height: H,
+    ratios: [1],
+    isGrayscale: true,
+    originX: 0,
+    originY: 0,
   };
   const host: CanvasToolHost = {
     getOverlayContainer: () => document.createElement('div'),
     getCachedImageData: () => cached,
-    getCoordinateTransform: () =>
-      ({ isReady: () => true, clientToData: (x, y) => ({ x, y }), dataLengthToScreen: (n) => n }),
+    getCoordinateTransform: () => ({
+      isReady: () => true,
+      clientToData: (x, y) => ({ x, y }),
+      dataLengthToScreen: (n) => n,
+    }),
     getActiveFrameIndex: () => 0,
     getRegions: () => regs,
     setRegions: (r: Region[]) => {
@@ -51,29 +61,33 @@ function makeHost(regions: Region[]): { host: CanvasToolHost; get: () => Region[
 
 describe('CellSegmentToolService', () => {
   let tool: CellSegmentToolService;
-  beforeEach(() => { tool = new CellSegmentToolService(); });
+  beforeEach(() => {
+    tool = new CellSegmentToolService();
+  });
 
   it('crops each rectangle, cellpose-segments it, and adds a region per cell', async () => {
     const { host, get } = makeHost([rectRegion(8, 8, 24, 24)]);
     const added = await tool.segmentBoxes(host, fakeSegmenter());
-    expect(added).toBe(2);                       // two cells in the crop
+    expect(added).toBe(2); // two cells in the crop
     const regs = get();
-    expect(regs).toHaveLength(2);                // prompt rectangle replaced by 2 cell regions
+    expect(regs).toHaveLength(2); // prompt rectangle replaced by 2 cell regions
     expect(regs.every((r) => r.bounds instanceof Polygon)).toBe(true);
     expect(regs.every((r) => r.label === 'cell')).toBe(true);
   });
 
   it('inherits the source box color for every cell region', async () => {
     const rect = rectRegion(8, 8, 24, 24);
-    rect.color = '#00bcd4';                          // distinct, non-default
+    rect.color = '#00bcd4'; // distinct, non-default
     const { host, get } = makeHost([rect]);
     await tool.segmentBoxes(host, fakeSegmenter());
     expect(get().every((r) => r.color === '#00bcd4')).toBe(true);
   });
 
-  it('surfaces the segmenter\'s phase status (so the toast is meaningful)', async () => {
+  it("surfaces the segmenter's phase status (so the toast is meaningful)", async () => {
     const statuses: string[] = [];
-    tool.status$.subscribe((s) => { if (s) statuses.push(s); });
+    tool.status$.subscribe((s) => {
+      if (s) statuses.push(s);
+    });
     const seg: ICellSegmenter = {
       segmentCells: async (img, progress) => {
         progress?.onStatus?.('Running inference (tile 1/2)…');
@@ -97,7 +111,10 @@ describe('CellSegmentToolService', () => {
   it('keeps a rectangle whose crop yields no cells', async () => {
     const empty: ICellSegmenter = {
       segmentCells: async (img) => ({
-        labels: new Uint32Array(img.width * img.height), width: img.width, height: img.height, count: 0,
+        labels: new Uint32Array(img.width * img.height),
+        width: img.width,
+        height: img.height,
+        count: 0,
       }),
     };
     const { host, get } = makeHost([rectRegion(8, 8, 24, 24)]);
@@ -109,15 +126,22 @@ describe('CellSegmentToolService', () => {
 
 describe('CellSegmentToolService — async commit (RT-6, RT-14)', () => {
   let tool: CellSegmentToolService;
-  beforeEach(() => { tool = new CellSegmentToolService(); });
+  beforeEach(() => {
+    tool = new CellSegmentToolService();
+  });
 
   /** A segmenter that waits for `release()` before answering. */
   function gatedSegmenter() {
     let release!: () => void;
-    const gate = new Promise<void>((r) => { release = r; });
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
     const inner = fakeSegmenter();
     const segmenter: ICellSegmenter = {
-      segmentCells: async (img, p) => { await gate; return inner.segmentCells(img, p); },
+      segmentCells: async (img, p) => {
+        await gate;
+        return inner.segmentCells(img, p);
+      },
     };
     return { segmenter, release };
   }

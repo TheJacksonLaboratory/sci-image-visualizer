@@ -3,7 +3,10 @@ import type { Viewer } from 'napari-js';
 
 import { SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import {
-  NO_CATEGORY, SpatialDataset, SpatialObservations, isCategoricalColumn,
+  NO_CATEGORY,
+  SpatialDataset,
+  SpatialObservations,
+  isCategoricalColumn,
 } from '../../contracts/spatial-dataset.contract';
 import { SpatialViewState } from '../../contracts/display-types';
 import { sameSelection, selectByCategory } from '../../spatial/spatial-selection';
@@ -197,9 +200,7 @@ export class SpatialHover {
   async resolveSource(dataset: SpatialDataset | null, view: SpatialViewState): Promise<void> {
     const port = this.host.port;
     const colorBy = view.colorBy;
-    const key = dataset && colorBy
-      ? `${dataset.id}|${colorBy.kind}:${colorBy.name}`
-      : null;
+    const key = dataset && colorBy ? `${dataset.id}|${colorBy.kind}:${colorBy.name}` : null;
     if (key === this.hoverSourceKey) return;
     // The key is committed only where a value is actually stored. Setting it up
     // front would mean a resolution that loses the race leaves the key claiming a
@@ -220,17 +221,17 @@ export class SpatialHover {
         if (!task()) return;
         this.hoverSource = isCategoricalColumn(column)
           ? {
-            kind: 'categorical',
-            name: colorBy.name,
-            categories: column.meta.categories,
-            codes: column.codes,
-          }
+              kind: 'categorical',
+              name: colorBy.name,
+              categories: column.meta.categories,
+              codes: column.codes,
+            }
           : {
-            kind: 'continuous',
-            name: colorBy.name,
-            values: column.values,
-            ...(column.meta.unit ? { unit: column.meta.unit } : {}),
-          };
+              kind: 'continuous',
+              name: colorBy.name,
+              values: column.values,
+              ...(column.meta.unit ? { unit: column.meta.unit } : {}),
+            };
         this.hoverSourceKey = key;
         return;
       }
@@ -267,12 +268,14 @@ export class SpatialHover {
       const world = viewer.canvasToWorld(pointer.clientX, pointer.clientY);
       const zoom = viewer.camera.zoom;
       const radius = HOVER_RADIUS_PX / (zoom > 0 ? zoom : 1);
-      const lines = world ? tiles.hoverAt(world[0], world[1], radius, (details) => {
-        const p = this.pointer;
-        if (!p || !this.tooltip) return;
-        const r = el.getBoundingClientRect();
-        this.tooltip.show(details, p.clientX - r.left, p.clientY - r.top);
-      }) : null;
+      const lines = world
+        ? tiles.hoverAt(world[0], world[1], radius, (details) => {
+            const p = this.pointer;
+            if (!p || !this.tooltip) return;
+            const r = el.getBoundingClientRect();
+            this.tooltip.show(details, p.clientX - r.left, p.clientY - r.top);
+          })
+        : null;
       if (lines) {
         const rect = el.getBoundingClientRect();
         tip.show(lines, pointer.clientX - rect.left, pointer.clientY - rect.top);
@@ -360,18 +363,14 @@ export class SpatialHover {
    */
   private pick(positions: Float32Array, x: number, y: number, radius: number): number {
     if (!this.host.is3d) {
-      return this.grid2d
-        ? this.grid2d.nearest(x, y, radius)
-        : nearestObservation(positions, x, y, radius);
+      return this.grid2d ? this.grid2d.nearest(x, y, radius) : nearestObservation(positions, x, y, radius);
     }
     // The cloud draws a selected marker LARGER, so the pick has to use the same radius the
     // renderer used — otherwise the highlighted cells, the ones a reader is most likely to
     // be pointing at, are the hardest to hover.
     const scale = SPATIAL_SELECTED_SIZE_SCALE;
     const mask = this.host.selection?.current()?.mask;
-    const opts = mask?.length
-      ? { radiusAt: (i: number) => (mask[i] ? radius * scale : radius) }
-      : undefined;
+    const opts = mask?.length ? { radiusAt: (i: number) => (mask[i] ? radius * scale : radius) } : undefined;
     // `radius` still bounds which buckets are visited, so it has to be the LARGEST any
     // point can claim, not the base one.
     const reach = mask?.length ? radius * scale : radius;

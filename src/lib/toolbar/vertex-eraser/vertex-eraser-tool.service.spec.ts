@@ -16,7 +16,12 @@ function squareRegion(): Region {
   p.npoints = 4;
   p.xpoints = [0, 10, 10, 0];
   p.ypoints = [0, 0, 10, 10];
-  p.coordinates = [[0, 0], [10, 0], [10, 10], [0, 10]];
+  p.coordinates = [
+    [0, 0],
+    [10, 0],
+    [10, 10],
+    [0, 10],
+  ];
   p.closed = true;
   r.bounds = p;
   return r;
@@ -44,7 +49,9 @@ describe('VertexEraserTool (neutral Region)', () => {
       getOverlayContainer: () => container,
       getCoordinateTransform: () => identityTransform,
       getRegions: () => regions.slice(),
-      setRegions: (rs: Region[]) => { committed = rs; },
+      setRegions: (rs: Region[]) => {
+        committed = rs;
+      },
       getCachedImageData: () => null,
     } as unknown as CanvasToolHost);
     tool.setRadius(2);
@@ -68,7 +75,14 @@ describe('VertexEraserTool (neutral Region)', () => {
   });
 
   /** A 0–40 square exterior with a hole ring (defaults to a 10–20 square). */
-  function donutRegion(hole: number[][] = [[10, 10], [20, 10], [20, 20], [10, 20]]): Region {
+  function donutRegion(
+    hole: number[][] = [
+      [10, 10],
+      [20, 10],
+      [20, 20],
+      [10, 20],
+    ],
+  ): Region {
     const r = new Region();
     r.id = 2;
     const p = new Polygon();
@@ -88,7 +102,7 @@ describe('VertexEraserTool (neutral Region)', () => {
     canvas.dispatchEvent(new MouseEvent('pointerdown', { clientX: 10, clientY: 10, button: 0 }));
 
     const poly = committed![0].bounds as Polygon;
-    expect(poly.xpoints.length).toBe(4);   // exterior untouched
+    expect(poly.xpoints.length).toBe(4); // exterior untouched
     expect(poly.holes!.length).toBe(1);
     expect(poly.holes![0].length).toBe(3); // one hole vertex removed
   });
@@ -99,18 +113,24 @@ describe('VertexEraserTool (neutral Region)', () => {
     canvas.dispatchEvent(new MouseEvent('pointerdown', { clientX: 0, clientY: 0, button: 0 }));
 
     const poly = committed![0].bounds as Polygon;
-    expect(poly.xpoints.length).toBe(3);   // exterior vertex removed
-    expect(poly.holes!.length).toBe(1);    // hole preserved
+    expect(poly.xpoints.length).toBe(3); // exterior vertex removed
+    expect(poly.holes!.length).toBe(1); // hole preserved
   });
 
   it('drops a hole that erasing reduces below a triangle', () => {
-    regions = [donutRegion([[10, 10], [12, 10], [11, 12]])]; // 3-vertex hole, all near (11,11)
+    regions = [
+      donutRegion([
+        [10, 10],
+        [12, 10],
+        [11, 12],
+      ]),
+    ]; // 3-vertex hole, all near (11,11)
     const canvas = container.querySelector('canvas') as HTMLCanvasElement;
     canvas.dispatchEvent(new MouseEvent('pointerdown', { clientX: 11, clientY: 11, button: 0 }));
 
     const poly = committed![0].bounds as Polygon;
-    expect(poly.xpoints.length).toBe(4);   // exterior intact
-    expect(poly.holes).toBeUndefined();    // collapsed hole removed
+    expect(poly.xpoints.length).toBe(4); // exterior intact
+    expect(poly.holes).toBeUndefined(); // collapsed hole removed
   });
 
   it('does not commit when the click misses every vertex', () => {
@@ -135,8 +155,9 @@ describe('VertexEraserTool (neutral Region)', () => {
 
   it('a bare hover (no button) just redraws the cursor and commits nothing', () => {
     const canvas = container.querySelector('canvas') as HTMLCanvasElement;
-    expect(() => canvas.dispatchEvent(new MouseEvent('pointermove', { clientX: 10, clientY: 0, buttons: 0 })))
-      .not.toThrow();
+    expect(() =>
+      canvas.dispatchEvent(new MouseEvent('pointermove', { clientX: 10, clientY: 0, buttons: 0 })),
+    ).not.toThrow();
     expect(committed).toBeNull();
   });
 
@@ -195,14 +216,18 @@ describe('VertexEraserTool — anisotropic readback (RT-14)', () => {
       getOverlayContainer: () => container,
       getCoordinateTransform: () => identityTransform,
       getRegions: () => regions.slice(),
-      setRegions: (rs: Region[]) => { committed = rs; },
+      setRegions: (rs: Region[]) => {
+        committed = rs;
+      },
       getCachedImageData: () => ({ frames: [[[0]]], width: 1, height: 1, ratios, isGrayscale: true }),
     } as unknown as CanvasToolHost);
     tool.setRadius(2); // matrix px
   }
 
-  const click = (x: number, y: number) => (container.querySelector('canvas') as HTMLCanvasElement)
-    .dispatchEvent(new MouseEvent('pointerdown', { clientX: x, clientY: y, button: 0 }));
+  const click = (x: number, y: number) =>
+    (container.querySelector('canvas') as HTMLCanvasElement).dispatchEvent(
+      new MouseEvent('pointerdown', { clientX: x, clientY: y, button: 0 }),
+    );
 
   it('measures the radius on Y with the Y ratio, not the X ratio', () => {
     // 4 data units per matrix row: the vertex 6 data units down is 1.5 rows away,
@@ -230,7 +255,9 @@ describe('VertexEraserTool — keeps what it does not edit (RT-5)', () => {
       getOverlayContainer: () => container,
       getCoordinateTransform: () => identityTransform,
       getRegions: () => regions.slice(),
-      setRegions: (rs: Region[]) => { committed = rs; },
+      setRegions: (rs: Region[]) => {
+        committed = rs;
+      },
       getCachedImageData: () => null,
     } as unknown as CanvasToolHost);
     tool.setRadius(2);
@@ -248,8 +275,10 @@ describe('VertexEraserTool — keeps what it does not edit (RT-5)', () => {
     container.remove();
   });
 
-  const click = (x: number, y: number) => (container.querySelector('canvas') as HTMLCanvasElement)
-    .dispatchEvent(new MouseEvent('pointerdown', { clientX: x, clientY: y, button: 0 }));
+  const click = (x: number, y: number) =>
+    (container.querySelector('canvas') as HTMLCanvasElement).dispatchEvent(
+      new MouseEvent('pointerdown', { clientX: x, clientY: y, button: 0 }),
+    );
 
   it('never edits an intensity-profile line', () => {
     const line = new Region();
@@ -259,7 +288,11 @@ describe('VertexEraserTool — keeps what it does not edit (RT-5)', () => {
     p.xpoints = [10, 20, 30];
     p.ypoints = [0, 0, 0];
     p.npoints = 3;
-    p.coordinates = [[10, 0], [20, 0], [30, 0]];
+    p.coordinates = [
+      [10, 0],
+      [20, 0],
+      [30, 0],
+    ];
     p.closed = false;
     line.bounds = p;
     bind([line]);
@@ -269,7 +302,7 @@ describe('VertexEraserTool — keeps what it does not edit (RT-5)', () => {
     expect(committed).toBeNull();
   });
 
-  it('keeps the edited region\'s metadata', () => {
+  it("keeps the edited region's metadata", () => {
     const r = squareRegion();
     r.label = 'Tumor';
     r.color = '#123456';

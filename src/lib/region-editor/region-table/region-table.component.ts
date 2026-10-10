@@ -1,6 +1,4 @@
-import {
-  ChangeDetectionStrategy, Component, EventEmitter, Input, OnChanges, Output,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, EventEmitter, Input, OnChanges, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SharedModule } from 'primeng/api';
@@ -34,8 +32,16 @@ export interface RegionPage {
   selector: 'region-table',
   standalone: true,
   imports: [
-    CommonModule, FormsModule, SharedModule, ButtonModule, DropdownModule, InputTextModule, PaginatorModule,
-    RippleModule, TableModule, TooltipModule,
+    CommonModule,
+    FormsModule,
+    SharedModule,
+    ButtonModule,
+    DropdownModule,
+    InputTextModule,
+    PaginatorModule,
+    RippleModule,
+    TableModule,
+    TooltipModule,
   ],
   templateUrl: './region-table.component.html',
   styleUrls: ['./region-table.component.scss'],

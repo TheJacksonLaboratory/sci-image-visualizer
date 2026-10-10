@@ -27,7 +27,8 @@ jest.mock('plotly.js-dist-min', () => ({
 import * as Plotly from 'plotly.js-dist-min';
 
 const dataset: SpatialDataset = {
-  id: 'demo', name: 'Demo',
+  id: 'demo',
+  name: 'Demo',
   observations: { count: 4, x: new Float32Array(4), y: new Float32Array(4) },
   columns: [
     { kind: 'categorical', name: 'region', categories: ['A', 'B'] },
@@ -101,17 +102,23 @@ describe('SpatialChartsComponent', () => {
       getSelection$: jest.fn(() => selection$),
       viewState: jest.fn(() => view$.value),
       setViewState: jest.fn(),
-      colorByColumn: jest.fn(), colorByFeature: jest.fn(), clearColorBy: jest.fn(),
-      searchFeatures: jest.fn(), categoryColors: jest.fn(),
-      selectFromRegions: jest.fn(), selectCategory: jest.fn(), clearSelection: jest.fn(),
+      colorByColumn: jest.fn(),
+      colorByFeature: jest.fn(),
+      clearColorBy: jest.fn(),
+      searchFeatures: jest.fn(),
+      categoryColors: jest.fn(),
+      selectFromRegions: jest.fn(),
+      selectCategory: jest.fn(),
+      clearSelection: jest.fn(),
       continuousValues: jest.fn(async () => new Float32Array([1, 2, 3, 4])),
       categoricalView: jest.fn(async () => ({
-        name: 'region', categories: ['A', 'B'], colors: ['#f00', '#00f'],
+        name: 'region',
+        categories: ['A', 'B'],
+        colors: ['#f00', '#00f'],
         codes: new Uint16Array([0, 0, 1, 1]),
       })),
       categoricalColumns: jest.fn(() => ['region']),
     } as unknown as jest.Mocked<ISpatialControls>;
-
   });
 
   afterEach(() => {
@@ -257,7 +264,12 @@ describe('SpatialChartsComponent', () => {
     it('ignores a superseded vector that resolves late', async () => {
       let release: (v: Float32Array) => void = () => undefined;
       controls.continuousValues
-        .mockImplementationOnce(() => new Promise<Float32Array>((r) => { release = r; }))
+        .mockImplementationOnce(
+          () =>
+            new Promise<Float32Array>((r) => {
+              release = r;
+            }),
+        )
         .mockResolvedValueOnce(new Float32Array([9, 9]));
 
       view$.next({ ...view$.value, colorBy: { kind: 'feature', name: 'slow' } });
@@ -317,8 +329,7 @@ describe('SpatialChartsComponent', () => {
       view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'total_counts' } });
       await flush();
       expect(component['kind']).toBe('histogram');
-      expect(component['kindOptions'].map((k) => k.value))
-        .toEqual(['histogram', 'violin', 'box', 'heatmap']);
+      expect(component['kindOptions'].map((k) => k.value)).toEqual(['histogram', 'violin', 'box', 'heatmap']);
       expect(lastPlot().traces[0].type).toBe('bar');
     });
 
@@ -344,15 +355,25 @@ describe('SpatialChartsComponent', () => {
     type CatView = Awaited<ReturnType<ISpatialControls['categoricalView']>>;
     let resolveSlow: (v: CatView) => void = () => undefined;
     controls.categoricalView
-      .mockImplementationOnce(() => new Promise<CatView>((r) => { resolveSlow = r; }))
+      .mockImplementationOnce(
+        () =>
+          new Promise<CatView>((r) => {
+            resolveSlow = r;
+          }),
+      )
       .mockResolvedValueOnce({
-        name: 'other', categories: ['X'], colors: ['#0f0'], codes: new Uint16Array([0, 0, 0, 0]),
+        name: 'other',
+        categories: ['X'],
+        colors: ['#0f0'],
+        codes: new Uint16Array([0, 0, 0, 0]),
       });
 
     const slow = component['onGroupBy']('region');
     await component['onGroupBy']('other');
     resolveSlow({
-      name: 'region', categories: ['A', 'B'], colors: ['#f00', '#00f'],
+      name: 'region',
+      categories: ['A', 'B'],
+      colors: ['#f00', '#00f'],
       codes: new Uint16Array([0, 0, 1, 1]),
     });
     await slow;
@@ -373,7 +394,7 @@ describe('SpatialChartsComponent', () => {
   });
 
   describe('lifecycle', () => {
-    it('lists the dataset\'s categorical columns to group by', async () => {
+    it("lists the dataset's categorical columns to group by", async () => {
       await build(controls);
       expect(component['groupOptions']).toEqual([
         { label: 'No grouping', value: null },
@@ -455,8 +476,7 @@ describe('SpatialChartsComponent', () => {
       });
       await build(controls);
       await flush();
-      expect(component['embeddings'].filter((e) => /compute/.test(e.label ?? '')))
-        .toHaveLength(0);
+      expect(component['embeddings'].filter((e) => /compute/.test(e.label ?? ''))).toHaveLength(0);
     });
 
     it('does not offer one without a PCA to embed', async () => {
@@ -487,7 +507,9 @@ describe('SpatialChartsComponent', () => {
         const started = new Promise<void>((ready) => {
           spy = jest.spyOn(EmbeddingComputeRun.prototype, 'run').mockImplementation(() => {
             ready();
-            return new Promise((resolve) => { settle = resolve; }) as never;
+            return new Promise((resolve) => {
+              settle = resolve;
+            }) as never;
           });
         });
         return {
@@ -509,7 +531,8 @@ describe('SpatialChartsComponent', () => {
 
       const coords = {
         meta: { name: 'local:tsne', label: 't-SNE', dims: 2 as const },
-        x: new Float32Array([1, 2]), y: new Float32Array([3, 4]),
+        x: new Float32Array([1, 2]),
+        y: new Float32Array([3, 4]),
       };
 
       afterEach(() => jest.restoreAllMocks());
@@ -518,7 +541,9 @@ describe('SpatialChartsComponent', () => {
         dataset$.next(withPca(2688));
         await build(controls);
         controls.getEmbedding = jest.fn(async () => ({
-          meta: pca, x: new Float32Array([0, 1]), y: new Float32Array([2, 3]),
+          meta: pca,
+          x: new Float32Array([0, 1]),
+          y: new Float32Array([2, 3]),
         }));
         await flush();
         component['onEmbedding']('local:tsne');
@@ -531,7 +556,12 @@ describe('SpatialChartsComponent', () => {
         // The scores are still in the air when the dataset changes. `computeRun` does not
         // exist yet at that moment, so terminating it is not what saves this.
         let deliver: (v: unknown) => void = () => undefined;
-        controls.getEmbedding = jest.fn(() => new Promise((r) => { deliver = r; }) as never);
+        controls.getEmbedding = jest.fn(
+          () =>
+            new Promise((r) => {
+              deliver = r;
+            }) as never,
+        );
         const run = jest.spyOn(EmbeddingComputeRun.prototype, 'run');
 
         const computing = component['computeEmbedding']();
@@ -580,34 +610,33 @@ describe('SpatialChartsComponent', () => {
         await computing;
       });
 
-      it('lets the superseded run finish without disowning the one that replaced it',
-        async () => {
-          await armed();
-          const first = pendingRun();
-          const computing = component['computeEmbedding']();
-          await first.started;
+      it('lets the superseded run finish without disowning the one that replaced it', async () => {
+        await armed();
+        const first = pendingRun();
+        const computing = component['computeEmbedding']();
+        await first.started;
 
-          // A switch, then a fresh computation on the new dataset — which the old run's
-          // `finally` must not clear out from under.
-          dataset$.next({ ...withPca(2688), id: 'other' });
-          await flush();
-          component['onEmbedding']('local:tsne');
-          await flush();
-          const second = pendingRun();
-          void component['computeEmbedding']();
-          await second.started;
+        // A switch, then a fresh computation on the new dataset — which the old run's
+        // `finally` must not clear out from under.
+        dataset$.next({ ...withPca(2688), id: 'other' });
+        await flush();
+        component['onEmbedding']('local:tsne');
+        await flush();
+        const second = pendingRun();
+        void component['computeEmbedding']();
+        await second.started;
 
-          const cancel = jest.spyOn(EmbeddingComputeRun.prototype, 'cancel');
-          first.settle(null);
-          await computing;
+        const cancel = jest.spyOn(EmbeddingComputeRun.prototype, 'cancel');
+        first.settle(null);
+        await computing;
 
-          // Cancel must still reach the LIVE run. If the departing one had cleared the
-          // shared slot, this would be a no-op and the button would do nothing.
-          component['cancelCompute']();
-          expect(cancel).toHaveBeenCalledTimes(1);
-          expect(cancel.mock.instances[0]).toBe(second.instance);
-          second.settle(null);
-        });
+        // Cancel must still reach the LIVE run. If the departing one had cleared the
+        // shared slot, this would be a no-op and the button would do nothing.
+        component['cancelCompute']();
+        expect(cancel).toHaveBeenCalledTimes(1);
+        expect(cancel.mock.instances[0]).toBe(second.instance);
+        second.settle(null);
+      });
 
       it('terminates an active run when the panel is destroyed', async () => {
         // Otherwise the worker keeps a GPU busy for minutes with nothing left to receive
@@ -685,9 +714,12 @@ describe('SpatialChartsComponent', () => {
 
     beforeEach(async () => {
       controls.continuousValues = jest.fn(async (source: SpatialColorBy) =>
-        Float32Array.from(geneValues[source.name] ?? new Array(8).fill(0)));
+        Float32Array.from(geneValues[source.name] ?? new Array(8).fill(0)),
+      );
       controls.categoricalView = jest.fn(async (column: string) => ({
-        name: column, categories: ['A', 'B'], colors: ['#f00', '#00f'],
+        name: column,
+        categories: ['A', 'B'],
+        colors: ['#f00', '#00f'],
         codes: Uint16Array.from([0, 0, 0, 0, 1, 1, 1, 1]),
       }));
       await build(controls);
@@ -752,11 +784,14 @@ describe('SpatialChartsComponent', () => {
       const real = spatialMath.computeHeatmapMatrixAsync;
       let releaseFirst!: () => void;
       const signals: AbortSignal[] = [];
-      const spy = jest.spyOn(spatialMath, 'computeHeatmapMatrixAsync')
+      const spy = jest
+        .spyOn(spatialMath, 'computeHeatmapMatrixAsync')
         .mockImplementationOnce((genes, groups, opts, options) => {
           signals.push(options!.signal!);
           // The first matrix (Ttr alone) is slow; the second (both genes) answers at once.
-          return new Promise((resolve) => { releaseFirst = () => resolve(real(genes, groups, opts)); });
+          return new Promise((resolve) => {
+            releaseFirst = () => resolve(real(genes, groups, opts));
+          });
         })
         .mockImplementation((genes, groups, opts, options) => {
           signals.push(options!.signal!);
@@ -858,7 +893,6 @@ describe('SpatialChartsComponent', () => {
     });
   });
 
-
   /**
    * Re-fitting the plot when the host dialog is resized.
    *
@@ -872,9 +906,8 @@ describe('SpatialChartsComponent', () => {
     });
 
     /** jsdom runs no layout, so a width has to be stated outright. */
-    const setWidth = (px: number) => Object.defineProperty(
-      chartHost as HTMLDivElement, 'clientWidth', { value: px, configurable: true },
-    );
+    const setWidth = (px: number) =>
+      Object.defineProperty(chartHost as HTMLDivElement, 'clientWidth', { value: px, configurable: true });
 
     const lastRelayout = () => {
       const calls = (Plotly.relayout as jest.Mock).mock.calls;
@@ -882,10 +915,11 @@ describe('SpatialChartsComponent', () => {
     };
 
     it('sets the WIDTH ONLY where the layout fixed its own height', async () => {
-      controls.continuousValues = jest.fn(async (_source: SpatialColorBy) =>
-        Float32Array.from([1, 2, 3, 4]));
+      controls.continuousValues = jest.fn(async (_source: SpatialColorBy) => Float32Array.from([1, 2, 3, 4]));
       controls.categoricalView = jest.fn(async (column: string) => ({
-        name: column, categories: ['A', 'B'], colors: ['#f00', '#00f'],
+        name: column,
+        categories: ['A', 'B'],
+        colors: ['#f00', '#00f'],
         codes: Uint16Array.from([0, 0, 1, 1]),
       }));
       await build(controls);
@@ -904,8 +938,7 @@ describe('SpatialChartsComponent', () => {
     });
 
     it('autosizes where the layout wants the container’s height', async () => {
-      controls.continuousValues = jest.fn(async (_source: SpatialColorBy) =>
-        Float32Array.from([1, 2, 3, 4]));
+      controls.continuousValues = jest.fn(async (_source: SpatialColorBy) => Float32Array.from([1, 2, 3, 4]));
       await build(controls);
       component['onKind']('histogram');
       await flush();
@@ -932,7 +965,6 @@ describe('SpatialChartsComponent', () => {
       expect(Plotly.relayout).not.toHaveBeenCalled();
     });
   });
-
 
   /**
    * The embedding view, as a kind alongside the distributions.
@@ -1101,9 +1133,12 @@ describe('SpatialChartsComponent', () => {
         // three-cell floor per group to produce a matrix at all, so the four-cell
         // fixture the other tests here use would return no chart and prove nothing.
         controls.continuousValues = jest.fn(async (_source: SpatialColorBy) =>
-          Float32Array.from([1, 1, 1, 1, 9, 9, 9, 9]));
+          Float32Array.from([1, 1, 1, 1, 9, 9, 9, 9]),
+        );
         controls.categoricalView = jest.fn(async (column: string) => ({
-          name: column, categories: ['A', 'B'], colors: ['#f00', '#00f'],
+          name: column,
+          categories: ['A', 'B'],
+          colors: ['#f00', '#00f'],
           codes: Uint16Array.from([0, 0, 0, 0, 1, 1, 1, 1]),
         }));
         await build(controls);
@@ -1176,10 +1211,12 @@ describe('SpatialChartsComponent', () => {
         // `removeAllListeners`, so without these the binding is a silent no-op and the
         // test would pass against a component that never unbinds.
         const bound = new Set<string>();
-        (win as unknown as Record<string, unknown>).on =
-          (name: string) => { bound.add(name); };
-        (win as unknown as Record<string, unknown>).removeAllListeners =
-          (name: string) => { bound.delete(name); };
+        (win as unknown as Record<string, unknown>).on = (name: string) => {
+          bound.add(name);
+        };
+        (win as unknown as Record<string, unknown>).removeAllListeners = (name: string) => {
+          bound.delete(name);
+        };
 
         component['toggleDetached']();
         component['onDetachedWindowShown']();
@@ -1198,9 +1235,12 @@ describe('SpatialChartsComponent', () => {
         // template has removed while the window keeps showing a plot the component
         // believes it has cleared.
         controls.continuousValues = jest.fn(async (_source: SpatialColorBy) =>
-          Float32Array.from([1, 1, 1, 1, 9, 9, 9, 9]));
+          Float32Array.from([1, 1, 1, 1, 9, 9, 9, 9]),
+        );
         controls.categoricalView = jest.fn(async (column: string) => ({
-          name: column, categories: ['A', 'B'], colors: ['#f00', '#00f'],
+          name: column,
+          categories: ['A', 'B'],
+          colors: ['#f00', '#00f'],
           codes: Uint16Array.from([0, 0, 0, 0, 1, 1, 1, 1]),
         }));
         await build(controls);
@@ -1269,7 +1309,10 @@ describe('SpatialChartsComponent', () => {
       // component has to read the LIVE camera and pass it back.
       const meta3d = { name: 'X_umap3d', label: 'UMAP 3D', dims: 3 as const, derived: true };
       controls.getEmbedding = jest.fn(async () => ({
-        meta: meta3d, x: f32(1, 2, 3, 4), y: f32(5, 6, 7, 8), z: f32(9, 10, 11, 12),
+        meta: meta3d,
+        x: f32(1, 2, 3, 4),
+        y: f32(5, 6, 7, 8),
+        z: f32(9, 10, 11, 12),
       }));
       dataset$.next({ ...dataset, embeddings: [meta3d] });
       await build(controls);
@@ -1279,8 +1322,9 @@ describe('SpatialChartsComponent', () => {
 
       // Stand in for the user having rotated it: Plotly keeps the live camera here.
       const camera = { eye: { x: 2.1, y: 0.3, z: -1.2 } };
-      const el = document.getElementById(component['chartDiv']) as unknown as
-        { _fullLayout: { scene: { camera: unknown } } };
+      const el = document.getElementById(component['chartDiv']) as unknown as {
+        _fullLayout: { scene: { camera: unknown } };
+      };
       el._fullLayout = { scene: { camera } };
 
       selection$.next({ mask: Uint8Array.from([1, 0, 0, 0]), count: 1 });
@@ -1299,8 +1343,7 @@ describe('SpatialChartsComponent', () => {
       component['onKind']('embedding');
       await flush();
 
-      const el = document.getElementById(component['chartDiv']) as unknown as
-        { _fullLayout: unknown };
+      const el = document.getElementById(component['chartDiv']) as unknown as { _fullLayout: unknown };
       el._fullLayout = {
         xaxis: { range: [-5, 5], autorange: true },
         yaxis: { range: [-5, 5], autorange: true },
@@ -1320,8 +1363,7 @@ describe('SpatialChartsComponent', () => {
       component['onKind']('embedding');
       await flush();
 
-      const el = document.getElementById(component['chartDiv']) as unknown as
-        { _fullLayout: unknown };
+      const el = document.getElementById(component['chartDiv']) as unknown as { _fullLayout: unknown };
       el._fullLayout = {
         xaxis: { range: [-1, 1], autorange: false },
         yaxis: { range: [-2, 2], autorange: false },
@@ -1339,7 +1381,10 @@ describe('SpatialChartsComponent', () => {
       // — but once, in the caption, since the plot is the scarcer space.
       const meta3d = { name: 'X_umap3d', label: 'UMAP 3D', dims: 3 as const, derived: true };
       controls.getEmbedding = jest.fn(async () => ({
-        meta: meta3d, x: f32(1, 2), y: f32(3, 4), z: f32(5, 6),
+        meta: meta3d,
+        x: f32(1, 2),
+        y: f32(3, 4),
+        z: f32(5, 6),
       }));
       dataset$.next({ ...dataset, embeddings: [meta3d] });
       await build(controls);
@@ -1356,7 +1401,10 @@ describe('SpatialChartsComponent', () => {
       // at perplexity 5 and one at 50 are different pictures of the same cells, and
       // neither is more correct.
       const meta = {
-        name: 'X_tsne', label: 't-SNE', dims: 2 as const, derived: true,
+        name: 'X_tsne',
+        label: 't-SNE',
+        dims: 2 as const,
+        derived: true,
         params: 'PCA(50) then t-SNE, perplexity 30, seed 0',
       };
       controls.getEmbedding = jest.fn(async () => ({ meta, x: f32(1, 2), y: f32(3, 4) }));
@@ -1450,20 +1498,22 @@ describe('SpatialChartsComponent', () => {
     it('does not cache a heatmap gene fetched for the previous dataset', async () => {
       await build(controls);
       let release: (v: Float32Array) => void = () => undefined;
-      controls.continuousValues
-        .mockImplementationOnce(() => new Promise<Float32Array>((r) => { release = r; }));
+      controls.continuousValues.mockImplementationOnce(
+        () =>
+          new Promise<Float32Array>((r) => {
+            release = r;
+          }),
+      );
       const pending = component['onHeatmapGenes'](['Ttr']);
       dataset$.next({ ...dataset, id: 'B' });
       release(new Float32Array([9, 9, 9, 9]));
       await pending;
       await flush();
 
-      const before = controls.continuousValues.mock.calls
-        .filter(([s]) => s.name === 'Ttr').length;
+      const before = controls.continuousValues.mock.calls.filter(([s]) => s.name === 'Ttr').length;
       await component['onHeatmapGenes'](['Ttr']);
       // A's vector was dropped, so B's is fetched rather than A's reused.
-      expect(controls.continuousValues.mock.calls
-        .filter(([s]) => s.name === 'Ttr').length).toBe(before + 1);
+      expect(controls.continuousValues.mock.calls.filter(([s]) => s.name === 'Ttr').length).toBe(before + 1);
     });
 
     it('keeps a colour-source load that a heatmap gene fetch started after', async () => {
@@ -1472,8 +1522,12 @@ describe('SpatialChartsComponent', () => {
       await flush();
 
       let release: (v: Float32Array) => void = () => undefined;
-      controls.continuousValues
-        .mockImplementationOnce(() => new Promise<Float32Array>((r) => { release = r; }));
+      controls.continuousValues.mockImplementationOnce(
+        () =>
+          new Promise<Float32Array>((r) => {
+            release = r;
+          }),
+      );
       view$.next({ ...view$.value, colorBy: { kind: 'feature', name: 'Ttr' } });
       await flush();
       // An unrelated load, started while the colour source is still in flight.
@@ -1513,15 +1567,21 @@ describe('SpatialChartsComponent', () => {
       it('keeps a categorical load that a selection redraw happened during', async () => {
         type CatView = Awaited<ReturnType<ISpatialControls['categoricalView']>>;
         let release: (v: CatView) => void = () => undefined;
-        controls.categoricalView
-          .mockImplementationOnce(() => new Promise<CatView>((r) => { release = r; }));
+        controls.categoricalView.mockImplementationOnce(
+          () =>
+            new Promise<CatView>((r) => {
+              release = r;
+            }),
+        );
         view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
         await flush();
         // A lasso while the column is loading redraws the embedding.
         selection$.next({ mask: Uint8Array.from([1, 0, 0, 0]), count: 1 });
         await flush();
         release({
-          name: 'region', categories: ['A', 'B'], colors: ['#f00', '#00f'],
+          name: 'region',
+          categories: ['A', 'B'],
+          colors: ['#f00', '#00f'],
           codes: new Uint16Array([0, 0, 1, 1]),
         });
         await flush();
@@ -1531,20 +1591,30 @@ describe('SpatialChartsComponent', () => {
       });
     });
   });
-
 });
 
 describe('SpatialChartsComponent — OnPush (SPATIAL-15)', () => {
-  @Component({ standalone: true, imports: [SpatialChartsComponent], template: '<spatial-charts></spatial-charts>' })
+  @Component({
+    standalone: true,
+    imports: [SpatialChartsComponent],
+    template: '<spatial-charts></spatial-charts>',
+  })
   class HostComponent {}
 
-  it('re-renders when the map\'s colouring changes in the store', async () => {
+  it("re-renders when the map's colouring changes in the store", async () => {
     const fake = fakeSpatialControls(TILED_DATASET);
     TestBed.resetTestingModule();
-    for (const child of [SpatialHeatmapControlsComponent, SpatialEmbeddingControlsComponent,
-      SpatialChartWindowComponent]) shallowPanel(child);
-    shallowPanel(SpatialChartsComponent,
-      [SpatialHeatmapControlsComponent, SpatialEmbeddingControlsComponent, SpatialChartWindowComponent]);
+    for (const child of [
+      SpatialHeatmapControlsComponent,
+      SpatialEmbeddingControlsComponent,
+      SpatialChartWindowComponent,
+    ])
+      shallowPanel(child);
+    shallowPanel(SpatialChartsComponent, [
+      SpatialHeatmapControlsComponent,
+      SpatialEmbeddingControlsComponent,
+      SpatialChartWindowComponent,
+    ]);
     await TestBed.configureTestingModule({
       imports: [HostComponent],
       providers: [{ provide: VISUALIZER, useValue: { getSpatialControls: () => fake.controls } }],
@@ -1561,4 +1631,3 @@ describe('SpatialChartsComponent — OnPush (SPATIAL-15)', () => {
     host.destroy();
   });
 });
-

@@ -50,8 +50,16 @@ export interface PresetSet {
  * gets the same colour with no stored state.
  */
 export const DEFAULT_FALLBACK_PALETTE: string[] = [
-  '#6C8EBF', '#82B366', '#B85450', '#9673A6', '#D79B00',
-  '#3C948B', '#A64CA6', '#CC6677', '#4477AA', '#228833',
+  '#6C8EBF',
+  '#82B366',
+  '#B85450',
+  '#9673A6',
+  '#D79B00',
+  '#3C948B',
+  '#A64CA6',
+  '#CC6677',
+  '#4477AA',
+  '#228833',
 ];
 
 /** Seed classes — mirrors the historical hard-coded `classificationColors` map. */

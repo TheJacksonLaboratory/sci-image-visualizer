@@ -501,8 +501,6 @@ export interface SpatialSelectionMask {
 }
 
 /** Look a column's descriptor up by name. */
-export function findColumnMeta(
-  dataset: SpatialDataset, name: string,
-): SpatialColumnMeta | undefined {
+export function findColumnMeta(dataset: SpatialDataset, name: string): SpatialColumnMeta | undefined {
   return dataset.columns.find((c) => c.name === name);
 }

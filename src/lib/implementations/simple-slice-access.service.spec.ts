@@ -56,9 +56,7 @@ describe('SimpleSliceAccessService', () => {
     });
 
     it('passes a data: URL through unchanged, with no HTTP request', async () => {
-      expect(await service.fetchAsBlobUrl('data:image/png;base64,AA==')).toBe(
-        'data:image/png;base64,AA==',
-      );
+      expect(await service.fetchAsBlobUrl('data:image/png;base64,AA==')).toBe('data:image/png;base64,AA==');
     });
 
     it('caches by raw URL — a second fetch of the same slice does not re-request it', async () => {

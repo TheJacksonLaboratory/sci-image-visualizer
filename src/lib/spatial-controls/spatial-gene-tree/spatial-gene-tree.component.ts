@@ -1,5 +1,11 @@
 import {
-  ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, NgZone, OnChanges, SimpleChanges,
+  ChangeDetectionStrategy,
+  ChangeDetectorRef,
+  Component,
+  Input,
+  NgZone,
+  OnChanges,
+  SimpleChanges,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { SharedModule } from 'primeng/api';
@@ -13,11 +19,13 @@ import type { SpatialDataset } from '../../contracts/spatial-dataset.contract';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState, TranscriptGlyphName } from '../../contracts/display-types';
 import { parseCssColor, rgbToHex } from '../../contracts/color';
 import { DEFAULT_CATEGORICAL_PALETTE } from '../../spatial/spatial-encoding';
+import { cellTypeColumnFor, clusterColorMap, clusterOfGene, defaultGlyphFor } from '../../spatial/spatial-tiles';
 import {
-  cellTypeColumnFor, clusterColorMap, clusterOfGene, defaultGlyphFor,
-} from '../../spatial/spatial-tiles';
-import {
-  GLYPH_OPTIONS, GeneTreeNode, buildGeneTree, glyphPoints, toggleHidden,
+  GLYPH_OPTIONS,
+  GeneTreeNode,
+  buildGeneTree,
+  glyphPoints,
+  toggleHidden,
 } from '../../spatial/spatial-panel-model';
 import { Supersede } from '../../util/supersede';
 
@@ -98,15 +106,22 @@ export class SpatialGeneTreeComponent implements OnChanges {
 
   private rebuildRows(): void {
     const genes = this.view.transcriptGenes;
-    this.rows = new Map(genes.map((gene, slot) => [gene, {
-      shown: this.isGeneShown(gene),
-      swatch: this.geneSwatchOf(gene),
-      points: glyphPoints(this.glyphOf(gene, slot)),
-      count: this.geneCountOf(gene),
-    }]));
-    this.groupShown = new Map(this.geneTree
-      .filter((node) => node.name)
-      .map((node) => [node.name as string, this.areGenesShown(node.genes)]));
+    this.rows = new Map(
+      genes.map((gene, slot) => [
+        gene,
+        {
+          shown: this.isGeneShown(gene),
+          swatch: this.geneSwatchOf(gene),
+          points: glyphPoints(this.glyphOf(gene, slot)),
+          count: this.geneCountOf(gene),
+        },
+      ]),
+    );
+    this.groupShown = new Map(
+      this.geneTree
+        .filter((node) => node.name)
+        .map((node) => [node.name as string, this.areGenesShown(node.genes)]),
+    );
     this.rootShown = this.areGenesShown(genes);
   }
 
@@ -194,8 +209,10 @@ export class SpatialGeneTreeComponent implements OnChanges {
   /** The colour gene `slot` is drawn in when transcripts are coloured by gene. */
   geneColor(slot: number): string {
     const gene = this.view?.transcriptGenes[slot];
-    return (gene && this.view.transcriptGeneColors[gene])
-      || DEFAULT_CATEGORICAL_PALETTE[slot % DEFAULT_CATEGORICAL_PALETTE.length];
+    return (
+      (gene && this.view.transcriptGeneColors[gene]) ||
+      DEFAULT_CATEGORICAL_PALETTE[slot % DEFAULT_CATEGORICAL_PALETTE.length]
+    );
   }
 
   protected geneColorOf(gene: string): string {
@@ -205,8 +222,7 @@ export class SpatialGeneTreeComponent implements OnChanges {
   /** In Cluster colouring, a gene's swatch is its cluster's colour, as its markers are. */
   protected geneSwatchOf(gene: string): string {
     if (this.view.transcriptColorBy !== 'cluster') return this.geneColorOf(gene);
-    return this.clusterColors().get(clusterOfGene(gene, this.view.transcriptGeneGroups))
-      ?? this.geneColorOf(gene);
+    return this.clusterColors().get(clusterOfGene(gene, this.view.transcriptGeneGroups)) ?? this.geneColorOf(gene);
   }
 
   protected geneCountOf(gene: string): number | null {
@@ -247,7 +263,9 @@ export class SpatialGeneTreeComponent implements OnChanges {
     if (meta && meta.kind === 'categorical' && this.controls) {
       try {
         const colors = await this.controls.categoryColors(column!);
-        meta.categories.forEach((c, k) => { if (colors[k]) map.set(c, colors[k]); });
+        meta.categories.forEach((c, k) => {
+          if (colors[k]) map.set(c, colors[k]);
+        });
       } catch {
         // No colours: palette colours, as the markers fall back to.
       }

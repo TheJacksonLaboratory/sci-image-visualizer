@@ -1,5 +1,11 @@
 import {
-  ChangeDetectionStrategy, Component, EventEmitter, Input, OnChanges, Output, SimpleChanges,
+  ChangeDetectionStrategy,
+  Component,
+  EventEmitter,
+  Input,
+  OnChanges,
+  Output,
+  SimpleChanges,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -28,8 +34,14 @@ import { SpatialGroupsPanelComponent } from '../spatial-groups-panel/spatial-gro
   selector: 'spatial-cells-panel',
   standalone: true,
   imports: [
-    CommonModule, FormsModule, CheckboxModule, DropdownModule, InputNumberModule, SelectButtonModule,
-    SliderModule, SpatialGroupsPanelComponent,
+    CommonModule,
+    FormsModule,
+    CheckboxModule,
+    DropdownModule,
+    InputNumberModule,
+    SelectButtonModule,
+    SliderModule,
+    SpatialGroupsPanelComponent,
   ],
   templateUrl: './spatial-cells-panel.component.html',
   styleUrls: ['./spatial-cells-panel.component.scss'],
@@ -58,7 +70,9 @@ export class SpatialCellsPanelComponent implements OnChanges {
   protected readonly geneVirtualScrollFrom = 200;
 
   protected readonly cellDrawOptions: PanelOption<SpatialViewState['cellDraw']>[] = [
-    { label: 'Fill', value: 'fill' }, { label: 'Outline', value: 'outline' }, { label: 'Both', value: 'both' },
+    { label: 'Fill', value: 'fill' },
+    { label: 'Outline', value: 'outline' },
+    { label: 'Both', value: 'both' },
   ];
 
   /**

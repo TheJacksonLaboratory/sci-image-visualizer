@@ -45,7 +45,6 @@ import { RegionScopeCache, StackSaveLayout } from './region-scope-cache';
  */
 @Injectable({ providedIn: 'root' })
 export class RegionStore implements IRegionStore, IRegionEditApi {
-
   private static readonly UNDO_LIMIT = 10;
   private static readonly UNDO_COALESCE_MS = 250;
 
@@ -106,8 +105,13 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
    * `isRegionSaveOn` is false the regions are shown transiently (emitted) but
    * not stored — mirrors the previous Plotly behaviour.
    */
-  setRegions(regions: Region[], showRegionLabel?: boolean, isRegionSaveOn?: boolean,
-             fillColor?: string, append: boolean = false): void {
+  setRegions(
+    regions: Region[],
+    showRegionLabel?: boolean,
+    isRegionSaveOn?: boolean,
+    fillColor?: string,
+    append: boolean = false,
+  ): void {
     if (showRegionLabel === undefined) showRegionLabel = this.showShapeLabel;
     if (isRegionSaveOn === undefined) isRegionSaveOn = this.isRegionSavedOn;
     if (fillColor === undefined) fillColor = this.fillColor;
@@ -122,8 +126,9 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
       if (append) {
         // Reject by id collision (already tracked) or geometry equality (same
         // coordinates) — the find button can push the same region repeatedly.
-        const added = regions.filter(r =>
-          !this.regions.some(existing => existing.id === r.id || regionsEqual(existing, r)));
+        const added = regions.filter(
+          (r) => !this.regions.some((existing) => existing.id === r.id || regionsEqual(existing, r)),
+        );
         this.regions = this.regions.concat(added);
       } else {
         this.regions = regions.slice();
@@ -152,15 +157,21 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   // ── Per-slice regions for z-stacks (jit-ui#93) ─────────────────────────
 
   /** True while a z-stack is loaded and the store holds regions per slice. */
-  isStackMode(): boolean { return this.scope.stackMode; }
+  isStackMode(): boolean {
+    return this.scope.stackMode;
+  }
 
   /** The current display slice (zero-based). */
-  getDisplaySlice(): number { return this.scope.displaySlice; }
+  getDisplaySlice(): number {
+    return this.scope.displaySlice;
+  }
 
   /** How the current stack persists to disk (jit-ui#93): `combined` = one
    *  z-indexed geojson (single-file z-stack); `per-slice-file` = one geojson per
    *  slice-file (folder stack). Meaningless outside stack mode. */
-  getStackSaveLayout(): StackSaveLayout { return this.scope.saveLayout; }
+  getStackSaveLayout(): StackSaveLayout {
+    return this.scope.saveLayout;
+  }
 
   /**
    * Enter per-slice stack mode. `slices` maps each zero-based slice index to
@@ -171,8 +182,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
    * every slice for save/export. Ids/names/classification colours are minted
    * exactly as {@link setRegions} does.
    */
-  enterStackMode(slices: Map<number, Region[]>, initialZ = 0,
-                 saveLayout: StackSaveLayout = 'combined'): void {
+  enterStackMode(slices: Map<number, Region[]>, initialZ = 0, saveLayout: StackSaveLayout = 'combined'): void {
     const admitted = new Map<number, Region[]>();
     for (const [z, regs] of slices) admitted.set(z, this.normalizeSlice(regs || [], z));
     this.regions = this.scope.enterStack(admitted, initialZ, saveLayout);
@@ -333,7 +343,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     if (this.selection.ids.length === 0) return;
     this.recordUndoSnapshot();
     const ids = new Set(this.selection.ids);
-    this.regions = this.regions.filter(r => !ids.has(r.id));
+    this.regions = this.regions.filter((r) => !ids.has(r.id));
     this.selection.replace([]);
     this.syncCache();
     this.emitSelection();
@@ -342,16 +352,28 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
 
   // ── IRegionStore: colours / labels ─────────────────────────────────────
 
-  getShowShapeLabel(): boolean { return this.showShapeLabel; }
-  getShapeColor(): string { return this.shapeColor; }
-  getFillColor(): string { return this.fillColor; }
+  getShowShapeLabel(): boolean {
+    return this.showShapeLabel;
+  }
+  getShapeColor(): string {
+    return this.shapeColor;
+  }
+  getFillColor(): string {
+    return this.fillColor;
+  }
 
   /** Show or hide region labels (not on the contract; specs drive it directly).
    *  @deprecated Nothing in the library calls it; will be removed next minor. */
-  setShowShapeLabel(show: boolean): void { this.showShapeLabel = show; }
+  setShowShapeLabel(show: boolean): void {
+    this.showShapeLabel = show;
+  }
 
-  getClassificationColors(): Map<string, string> { return this.store.getClassificationColors(); }
-  setClassificationColor(label: string, color: string): void { this.store.setClassificationColor(label, color); }
+  getClassificationColors(): Map<string, string> {
+    return this.store.getClassificationColors();
+  }
+  setClassificationColor(label: string, color: string): void {
+    this.store.setClassificationColor(label, color);
+  }
 
   // ── IRegionStore: undo / redo (jit-ui#85) ──────────────────────────────
 
@@ -455,7 +477,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.recordUndoSnapshot();
     if (region.id == null) region.id = this.nextId++;
     if (region.name == null) region.name = `shape${region.id}`;
-    region.bounds = hydrateBounds(region.bounds);   // jit-ui#124
+    region.bounds = hydrateBounds(region.bounds); // jit-ui#124
     // A region drawn on a stack belongs to the slice currently displayed, so
     // it saves/reloads on that slice (jit-ui#93). No-op for single-plane images
     // (the display slice stays 0).
@@ -659,7 +681,10 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     // region live. The main regionUpdate$ stays coalesced during a batch (fires
     // once on endBatch) to keep heavier consumers (Regions tab) calm.
     this.regionLiveEdit$.next(this.regions.slice());
-    if (this.batchDepth > 0) { this.pendingEmit = true; return; }
+    if (this.batchDepth > 0) {
+      this.pendingEmit = true;
+      return;
+    }
     this.regionUpdate$.next(this.getRegions());
   }
 
@@ -670,11 +695,10 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   }
 
   private findById(id: number): Region | undefined {
-    return this.regions.find(r => r.id === id);
+    return this.regions.find((r) => r.id === id);
   }
 
   private indexOfId(id: number): number {
-    return this.regions.findIndex(r => r.id === id);
+    return this.regions.findIndex((r) => r.id === id);
   }
 }
-

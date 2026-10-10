@@ -89,8 +89,7 @@ export class SliceCache {
    *  grid is too large (its slices only exist at full resolution). */
   configure(stackDepth: number, coarseFitTiles: number): void {
     this.skipSlicePrefetch = coarseFitTiles > this.MAX_PREFETCH_FIT_TILES;
-    this.maxCachedSlices =
-      stackDepth > 1 ? Math.min(this.MAX_CACHED_SLICES_CAP, stackDepth) : 1;
+    this.maxCachedSlices = stackDepth > 1 ? Math.min(this.MAX_CACHED_SLICES_CAP, stackDepth) : 1;
   }
 
   /** Current LRU cap (the viewer sizes its tile cache from it). */
@@ -257,14 +256,18 @@ export class SliceCache {
       try {
         viewer.addTiledImage({
           tileSource: this.host.buildTileSource(z, c),
-          x: 0, y: 0, width: 1,
+          x: 0,
+          y: 0,
+          width: 1,
           opacity: 0, // revealed by revealChannelSlice once the group is in
           compositeOperation: 'lighter',
           preload: true,
           success: (e) => {
             const item = e?.item;
             if (token !== this.sliceLoadToken) {
-              if (item) { quiet(() => this.host.viewer()?.world?.removeItem(item)); }
+              if (item) {
+                quiet(() => this.host.viewer()?.world?.removeItem(item));
+              }
               return;
             }
             if (item) group[c] = item;
@@ -387,8 +390,11 @@ export class SliceCache {
       const candidates = d === 0 ? [cur] : [cur - d, cur + d];
       for (const z of candidates) {
         if (
-          z >= 0 && z < sliceCount &&
-          !this.sliceCacheHas(z) && !this.slicesLoading.has(z) && !this.bgAttempted.has(z)
+          z >= 0 &&
+          z < sliceCount &&
+          !this.sliceCacheHas(z) &&
+          !this.slicesLoading.has(z) &&
+          !this.bgAttempted.has(z)
         ) {
           return z;
         }
@@ -431,7 +437,11 @@ export class SliceCache {
     for (const [z, group] of [...this.channelSliceItems]) {
       if (z === cur) continue;
       this.channelSliceItems.delete(z);
-      for (const it of group) { if (it) { quiet(() => v.world.removeItem(it)); } }
+      for (const it of group) {
+        if (it) {
+          quiet(() => v.world.removeItem(it));
+        }
+      }
     }
     this.sliceLru = this.sliceCacheHas(cur) ? [cur] : [];
   }
@@ -464,11 +474,18 @@ export class SliceCache {
     if (this.host.isMultiChannel()) {
       const group = this.channelSliceItems.get(z);
       this.channelSliceItems.delete(z);
-      if (group && v) for (const it of group) { if (it) { quiet(() => v.world.removeItem(it)); } }
+      if (group && v)
+        for (const it of group) {
+          if (it) {
+            quiet(() => v.world.removeItem(it));
+          }
+        }
     } else {
       const item = this.sliceItems.get(z);
       this.sliceItems.delete(z);
-      if (item && v) { quiet(() => v.world.removeItem(item)); }
+      if (item && v) {
+        quiet(() => v.world.removeItem(item));
+      }
     }
   }
 

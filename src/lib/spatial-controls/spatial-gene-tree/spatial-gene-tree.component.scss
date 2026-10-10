@@ -4,9 +4,15 @@
   display: contents;
 }
 
-.sc-gene-group { padding-left: 1rem; }
-.sc-gene-leaf { padding-left: 1rem; }
-.sc-gene-leaf.nested { padding-left: 2rem; }
+.sc-gene-group {
+  padding-left: 1rem;
+}
+.sc-gene-leaf {
+  padding-left: 1rem;
+}
+.sc-gene-leaf.nested {
+  padding-left: 2rem;
+}
 
 .sc-eye {
   flex: 0 0 auto;
@@ -15,7 +21,9 @@
   cursor: pointer;
   padding: 0;
   color: var(--text-color-secondary, #6c757d);
-  .pi-eye { color: var(--text-color, #333); }
+  .pi-eye {
+    color: var(--text-color, #333);
+  }
 }
 
 .sc-gene-footer {
@@ -38,10 +46,15 @@
   border-radius: 4px;
   background: transparent;
   cursor: pointer;
-  &:hover, &:focus-visible { border-color: var(--surface-border, rgba(0, 0, 0, 0.2)); }
+  &:hover,
+  &:focus-visible {
+    border-color: var(--surface-border, rgba(0, 0, 0, 0.2));
+  }
 }
 
-::ng-deep .sc-gene-style .p-overlaypanel-content { padding: 0.75rem; }
+::ng-deep .sc-gene-style .p-overlaypanel-content {
+  padding: 0.75rem;
+}
 
 .sc-style-pop {
   display: flex;
@@ -50,10 +63,18 @@
   width: 15rem;
 }
 
-.sc-style-title { font-weight: 600; font-size: 0.9rem; }
-.sc-style-sub { font-size: 0.75rem; text-transform: uppercase; opacity: 0.7; }
+.sc-style-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.sc-style-sub {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
 
-.sc-style-icons, .sc-style-presets {
+.sc-style-icons,
+.sc-style-presets {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 0.35rem;
@@ -69,11 +90,21 @@
   background: transparent;
   color: var(--text-color, inherit);
   cursor: pointer;
-  .sc-glyph-svg { width: 1.1rem; height: 1.1rem; }
-  &.active { border-color: var(--primary-color, #3b82f6); background: var(--highlight-bg, rgba(59, 130, 246, 0.12)); }
+  .sc-glyph-svg {
+    width: 1.1rem;
+    height: 1.1rem;
+  }
+  &.active {
+    border-color: var(--primary-color, #3b82f6);
+    background: var(--highlight-bg, rgba(59, 130, 246, 0.12));
+  }
 }
 
-.sc-style-color { display: flex; gap: 0.5rem; align-items: center; }
+.sc-style-color {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
 
 .sc-style-swatch {
   position: relative;
@@ -82,10 +113,21 @@
   border-radius: 4px;
   border: 1px solid rgba(0, 0, 0, 0.2);
   cursor: pointer;
-  input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+  input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+  }
 }
 
-.sc-style-hex { flex: 1 1 auto; min-width: 0; font-family: monospace; }
+.sc-style-hex {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: monospace;
+}
 
 .sc-style-preset {
   width: 1.4rem;
@@ -94,7 +136,9 @@
   border-radius: 50%;
   border: 2px solid transparent;
   cursor: pointer;
-  &.active { border-color: var(--text-color, #000); }
+  &.active {
+    border-color: var(--text-color, #000);
+  }
 }
 
 // Per-gene transcript count in view, right-aligned on the gene row.

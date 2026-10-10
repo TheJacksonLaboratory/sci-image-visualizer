@@ -3,9 +3,11 @@ import { SpatialDataset, SpatialEmbedding } from '../../contracts/spatial-datase
 import { ChartDataModel } from './chart-data-model';
 
 const ds = (id: string, names = ['Ttr', 'Mbp']): SpatialDataset => ({
-  id, name: id,
+  id,
+  name: id,
   observations: { count: 4, x: new Float32Array(4), y: new Float32Array(4) },
-  columns: [], features: { count: names.length, names },
+  columns: [],
+  features: { count: names.length, names },
 });
 const umap = { name: 'X_umap', label: 'UMAP', dims: 2 as const };
 const pca = { name: 'X_pca', label: 'PCA', dims: 2 as const };
@@ -15,7 +17,9 @@ describe('ChartDataModel', () => {
   let controls: jest.Mocked<ISpatialControls>;
   const deferred = <T>() => {
     let resolve!: (v: T) => void;
-    const promise = new Promise<T>((r) => { resolve = r; });
+    const promise = new Promise<T>((r) => {
+      resolve = r;
+    });
     return { promise, resolve };
   };
 
@@ -24,14 +28,17 @@ describe('ChartDataModel', () => {
     controls = {
       categoricalColumns: jest.fn(() => ['region']),
       categoricalView: jest.fn(async () => ({
-        name: 'region', categories: ['A', 'B'], colors: ['#f00', '#00f'], codes: new Uint16Array([0, 1, 1, 0]),
+        name: 'region',
+        categories: ['A', 'B'],
+        colors: ['#f00', '#00f'],
+        codes: new Uint16Array([0, 1, 1, 0]),
       })),
       continuousValues: jest.fn(async () => new Float32Array([1, 2, 3, 4])),
     } as unknown as jest.Mocked<ISpatialControls>;
     data.onDatasetChanged(ds('A'), ['region'], [umap, pca]);
   });
 
-  it('offers the dataset\'s groupings and embeddings, and says when it switched', () => {
+  it("offers the dataset's groupings and embeddings, and says when it switched", () => {
     expect(data.groupOptions.map((o) => o.value)).toEqual([null, 'region']);
     expect(data.embedding).toBe(umap);
     expect(data.onDatasetChanged(ds('A'), ['region'], [umap])).toBe(false);
@@ -39,7 +46,7 @@ describe('ChartDataModel', () => {
     expect(data.embedding).toBeNull();
   });
 
-  it('loads a continuous source, or a categorical column\'s categories', async () => {
+  it("loads a continuous source, or a categorical column's categories", async () => {
     expect(await data.loadValues(controls, { kind: 'feature', name: 'Ttr' })).toBe('continuous');
     expect(data.snapshot().values).toEqual(new Float32Array([1, 2, 3, 4]));
     expect(await data.loadValues(controls, { kind: 'column', name: 'region' })).toBe('categorical');
@@ -65,9 +72,15 @@ describe('ChartDataModel', () => {
     late.resolve(new Float32Array([9, 9, 9, 9]));
     expect(await loading).toBe('superseded');
     expect(data.busy).toBe(false);
-    expect(data.snapshot()).toEqual(expect.objectContaining({
-      values: null, categorical: null, grouping: null, heatmapRows: [], embeddingCoords: null,
-    }));
+    expect(data.snapshot()).toEqual(
+      expect.objectContaining({
+        values: null,
+        categorical: null,
+        grouping: null,
+        heatmapRows: [],
+        embeddingCoords: null,
+      }),
+    );
     // The same-named grouping is kept as the choice, to be reloaded for the new dataset.
     expect(data.groupBy).toBe('region');
   });
@@ -110,7 +123,9 @@ describe('ChartDataModel', () => {
 
   it('loads an embedding once, and keeps the one chosen last', async () => {
     const coords = (meta: typeof umap): SpatialEmbedding => ({
-      meta, x: new Float32Array(4), y: new Float32Array(4),
+      meta,
+      x: new Float32Array(4),
+      y: new Float32Array(4),
     });
     const get = jest.fn(async (name: string) => coords(name === 'X_pca' ? pca : umap));
     expect(await data.loadEmbedding(get, umap)).toBe('ready');

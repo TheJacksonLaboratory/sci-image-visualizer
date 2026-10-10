@@ -1,7 +1,24 @@
 import {
-  AfterViewInit, ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, ElementRef, EventEmitter,
-  Inject, Injector, Input, NgZone, OnChanges, OnDestroy, OnInit, Optional, Output, SimpleChanges, ViewChild,
-  computed, signal,
+  AfterViewInit,
+  ChangeDetectionStrategy,
+  ChangeDetectorRef,
+  Component,
+  DestroyRef,
+  ElementRef,
+  EventEmitter,
+  Inject,
+  Injector,
+  Input,
+  NgZone,
+  OnChanges,
+  OnDestroy,
+  OnInit,
+  Optional,
+  Output,
+  SimpleChanges,
+  ViewChild,
+  computed,
+  signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
@@ -41,7 +58,9 @@ import {
   NAPARI_DEFAULT_DECIMATE,
 } from './contracts/plot-type';
 import {
-  PLOT_TYPE_CONTRIBUTIONS, PlotTypeContribution, PlotTypeOption,
+  PLOT_TYPE_CONTRIBUTIONS,
+  PlotTypeContribution,
+  PlotTypeOption,
 } from './contracts/plot-type-contribution.contract';
 import { PlotModeController } from './plot-mode/plot-mode-controller';
 import { computePlotTypeMenu, reconcilePlotType } from './plot-mode/plot-type-menu';
@@ -54,16 +73,17 @@ import { SamPointToolService } from './toolbar/segmentation/sam-point-tool.servi
 import { CellSegmentToolService } from './toolbar/segmentation/cell-segment-tool.service';
 import { SegmentationRunner } from './toolbar/segmentation/segmentation-runner';
 import {
-  TOOLBAR_TOOLS, ToolbarContribution, ToolbarDialogToolContribution, ToolbarToolContribution,
+  TOOLBAR_TOOLS,
+  ToolbarContribution,
+  ToolbarDialogToolContribution,
+  ToolbarToolContribution,
   visibleToolContributions,
 } from './contracts/toolbar-tool.contract';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from './contracts/toolbar-config';
 import { VIZ_CONFIG, VizConfig } from './contracts/viz-config';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-data.port';
 import { applyImageRois } from './visualizer/region-load';
-import {
-  ContextMenuActions, ContextMenuState, buildContextMenu,
-} from './visualizer/visualizer-context-menu';
+import { ContextMenuActions, ContextMenuState, buildContextMenu } from './visualizer/visualizer-context-menu';
 import { RegionActions } from './visualizer/region-actions';
 import { ToolModes } from './visualizer/tool-modes';
 import { ShortcutHost, ViewerShortcuts } from './visualizer/viewer-shortcuts';
@@ -96,10 +116,25 @@ let plotInstanceSeq = 0;
   selector: 'visualizer',
   standalone: true,
   imports: [
-    CommonModule, FormsModule, SharedModule, ButtonModule, CheckboxModule, ContextMenuModule, DialogModule,
-    DropdownModule, InputNumberModule, ProgressBarModule, SliderModule, ToastModule, TooltipModule,
-    FloatingDragDirective, ToolbarComponent, IntensityInsetComponent, ChannelHistogramComponent,
-    SpatialControlsComponent, RegionEditorComponent,
+    CommonModule,
+    FormsModule,
+    SharedModule,
+    ButtonModule,
+    CheckboxModule,
+    ContextMenuModule,
+    DialogModule,
+    DropdownModule,
+    InputNumberModule,
+    ProgressBarModule,
+    SliderModule,
+    ToastModule,
+    TooltipModule,
+    FloatingDragDirective,
+    ToolbarComponent,
+    IntensityInsetComponent,
+    ChannelHistogramComponent,
+    SpatialControlsComponent,
+    RegionEditorComponent,
   ],
   templateUrl: './visualizer.component.html',
   styleUrls: ['./visualizer.component.scss'],
@@ -194,10 +229,12 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   });
 
   /** Emits once when this view is destroyed; the collaborators end their subscriptions on it. */
-  private readonly destroyed$ = new Observable<void>((subscriber) => this.destroyRef.onDestroy(() => {
-    subscriber.next();
-    subscriber.complete();
-  }));
+  private readonly destroyed$ = new Observable<void>((subscriber) =>
+    this.destroyRef.onDestroy(() => {
+      subscriber.next();
+      subscriber.complete();
+    }),
+  );
   /** Host image-info objects whose one-shot `initialZIndex` was already applied. */
   private readonly consumedSliceHints = new WeakSet<IImageInfo>();
   protected zIndex = 0;
@@ -207,25 +244,51 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   protected contextMenuItems: MenuItem[] = [];
 
   /** The armed tool mode and the toolbar's tool settings. */
-  protected readonly tools = new ToolModes(this.plotService, this.session, this.ngZone,
-    (mode) => { if (mode !== 'samPoint') this.segmentation.hide(); }, // leaving point mode drops its toast
-    () => this.cdr.markForCheck());
-  protected get activeDragMode(): string | null { return this.tools.active; }
-  protected set activeDragMode(mode: string | null) { this.tools.active = mode; }
-  protected get wandSensitivity(): number { return this.tools.wandSensitivity; }
-  protected set wandSensitivity(v: number) { this.tools.wandSensitivity = v; }
-  protected get brushSize(): number { return this.tools.brushSize; }
-  protected get vertexEraserRadius(): number { return this.tools.vertexEraserRadius; }
-  protected set vertexEraserRadius(v: number) { this.tools.vertexEraserRadius = v; }
+  protected readonly tools = new ToolModes(
+    this.plotService,
+    this.session,
+    this.ngZone,
+    (mode) => {
+      if (mode !== 'samPoint') this.segmentation.hide();
+    }, // leaving point mode drops its toast
+    () => this.cdr.markForCheck(),
+  );
+  protected get activeDragMode(): string | null {
+    return this.tools.active;
+  }
+  protected set activeDragMode(mode: string | null) {
+    this.tools.active = mode;
+  }
+  protected get wandSensitivity(): number {
+    return this.tools.wandSensitivity;
+  }
+  protected set wandSensitivity(v: number) {
+    this.tools.wandSensitivity = v;
+  }
+  protected get brushSize(): number {
+    return this.tools.brushSize;
+  }
+  protected get vertexEraserRadius(): number {
+    return this.tools.vertexEraserRadius;
+  }
+  protected set vertexEraserRadius(v: number) {
+    this.tools.vertexEraserRadius = v;
+  }
 
   /** Region set-operations on the selection, and the store mirrors they read (jit-ui#85). */
   protected readonly regionActions = new RegionActions(
-    this.plotService, this.regionOps, () => this.imageInfo?.trueImageSize,
+    this.plotService,
+    this.regionOps,
+    () => this.imageInfo?.trueImageSize,
     (m) => this.messageService.add({ key: this.resultToastKey, ...m }),
   );
   /** Custom-threshold Simplify dialog visibility (see {@link RegionActions}). */
-  protected get displaySimplifyDialog(): boolean { return this.regionActions.displaySimplifyDialog; }
-  protected set displaySimplifyDialog(v: boolean) { this.regionActions.displaySimplifyDialog = v; }
+  protected get displaySimplifyDialog(): boolean {
+    return this.regionActions.displaySimplifyDialog;
+  }
+  protected set displaySimplifyDialog(v: boolean) {
+    this.regionActions.displaySimplifyDialog = v;
+  }
 
   /** SAM model picker options + current selection (jit-ui#90 P1). Only models
    *  with a hosted ONNX pair (configured via setSamModelUrls at app init) are
@@ -245,11 +308,17 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   /** Contributed plot modes and dialog tools, and their live sessions. */
   readonly contributions: ContributionHost;
   /** Dialog tools registered through {@link TOOLBAR_TOOLS} (`kind: 'dialog'`). */
-  protected get dialogTools(): ToolbarDialogToolContribution[] { return this.contributions.dialogTools; }
+  protected get dialogTools(): ToolbarDialogToolContribution[] {
+    return this.contributions.dialogTools;
+  }
   /** The dialog tool the user has open (its session may be between renders). */
-  protected get openDialogToolId(): string | null { return this.contributions.openDialogToolId; }
+  protected get openDialogToolId(): string | null {
+    return this.contributions.openDialogToolId;
+  }
   /** The open dialog tool's live dialog, as the template renders it. */
-  protected get toolDialog(): ToolDialogView | null { return this.contributions.toolDialog; }
+  protected get toolDialog(): ToolDialogView | null {
+    return this.contributions.toolDialog;
+  }
   protected readonly samToastKey = `sam-${VisualizerComponent.nextToastId++}`;
   /**
    * Outlet for the library's own result/error notices, keyed to this instance so they
@@ -260,7 +329,11 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   protected readonly resultToastKey = `${this.samToastKey}-result`;
   /** Segmentation runs and their sticky progress toast. */
   protected readonly segmentation = new SegmentationRunner(
-    this.messageService, this.samToastKey, this.resultToastKey, () => this.changed());
+    this.messageService,
+    this.samToastKey,
+    this.resultToastKey,
+    () => this.changed(),
+  );
 
   /** Channels & Histogram dialog visibility (opened from the toolbar). */
   protected showChannelHistogram = false;
@@ -335,9 +408,13 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   }
 
   /** Contributed plot modes and their single live session. */
-  get plotModes(): PlotModeController { return this.contributions.plotModes; }
+  get plotModes(): PlotModeController {
+    return this.contributions.plotModes;
+  }
   /** The live contributed mode's side panel; null while no contributed session is live. */
-  protected get plotModePanel(): PlotModePanelView | null { return this.contributions.plotModePanel; }
+  protected get plotModePanel(): PlotModePanelView | null {
+    return this.contributions.plotModePanel;
+  }
 
   /** Where a `mount` panel's host element is attached once the dialog renders. */
   @ViewChild('plotModePanelSlot')
@@ -394,7 +471,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   protected readonly spatial: SpatialDatasetBinder;
   /** Whether a spatial-omics dataset is published on `SPATIAL_DATA_PORT` — gates the
    *  spatial plot types; the toolbar offers the plot modes for an image-less one too. */
-  protected get hasSpatialDataset(): boolean { return this.spatial.hasDataset; }
+  protected get hasSpatialDataset(): boolean {
+    return this.spatial.hasDataset;
+  }
 
   /** Keyboard, wheel and context-menu handling; created once the view exists. */
   private shortcuts?: ViewerShortcuts;
@@ -558,7 +637,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.watchSpatialDataset();
     // OSD and napari-js emit this from their own "fit to view": disarm the tool on
     // the backend too, not only the toolbar's highlight.
-    this.plotService.getAutoscaleEvent().pipe(takeUntilDestroyed(this.destroyRef))
+    this.plotService
+      .getAutoscaleEvent()
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => this.tools.apply(null));
     // Loading/overlay UI mirrors (signals: they re-render the view themselves).
     this.mirror(this.state.isImageLoading$(), (v) => this.imgLoading.set(v));
@@ -567,7 +648,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.mirror(this.state.getImageLoadingMessage$(), (v) => this.loadingMessage.set(v));
     this.mirror(this.state.getCacheProgress$(), (v) => this.cacheProgress.set(v));
     this.mirror(this.state.isZoom$(), (v) => this.zoom.set(v));
-    this.mirror(this.state.getFilename$(), (v) => { if (v) this.fileName = v; });
+    this.mirror(this.state.getFilename$(), (v) => {
+      if (v) this.fileName = v;
+    });
     this.regionActions.bind(this.destroyed$, () => this.changed());
     this.segmentation.bindPointTool(this.samPointTool, this.destroyed$);
     this.mirror(this.state.getPanelWidth$(), () => {
@@ -575,62 +658,65 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       // The intensity inset is a separate chart in a floating panel; reflow it too.
       this.inset?.reflow();
     });
-    this.state.getImageInfo$().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (imgInfo) => {
-        if (!imgInfo) {
-          this.onImageCleared();
-          return;
-        }
-        // The selector, the stack controls and the inset all follow the image.
-        this.changed();
-        if (imgInfo) {
-          this.imageInfo = imgInfo;
-          // Stack-only plot types (isosurface, scatter3d) depend on whether this
-          // file is a stack — recompute the selector options.
-          this.computePlotTypeOptions();
-          // If the active plot type isn't valid for this image (e.g. a scalar
-          // type like Contour carried over to an RGB image), fall back to Image.
-          this.reconcileSelectedPlotType();
-          // Read from `imgInfo`, the value this emission carried, rather than from the
-          // field. Handling the empty emission means the field CAN be nulled part-way
-          // through this branch: `reconcileSelectedPlotType` may call `setPlotType`,
-          // which can make the host publish a new image state, re-entering this very
-          // subscription. Reading the field then threw on `isGrayscale` and aborted the
-          // handler, so the observations were never drawn.
-          this.isGrayscaleEvent.emit(imgInfo.isGrayscale);
-          this.isStackEvent.emit(imgInfo.isStack);
-          // Reset to the default 2D Image view when a different image is
-          // selected while a 3D type is active.
-          if (!this.isHeatmap && imgInfo.fileName !== this.loadedFileName) {
-            this.isHeatmap = true;
-            this.plotType = PlotType.IMAGE;
-            this.selectedPlotTypeId = PlotType.IMAGE;
-            this.plotService.setPlotType(this.plotType);
-            this.activeSurface3dMode = 'turntable';
+    this.state
+      .getImageInfo$()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (imgInfo) => {
+          if (!imgInfo) {
+            this.onImageCleared();
+            return;
           }
-          this.loadedFileName = imgInfo.fileName;
-          this.plotService.setImageMeta(imgInfo.imageMeta, imgInfo.fileName);
-          // A newer image always preempts an in-flight render (see ImageRenderSession).
-          if (imgInfo.urls) this.render.render(imgInfo);
-        }
-      },
-      error: (err: unknown) => {
-        const msg = errorMessage(err);
-        console.error('Error occured when getting image info', err);
-        this.messageService.add({
-          key: this.vizAlertToastKey,
-          sticky: true,
-          severity: 'error',
-          summary: 'An error occured',
-          detail: `The following error occured while getting image info: ${msg}.
+          // The selector, the stack controls and the inset all follow the image.
+          this.changed();
+          if (imgInfo) {
+            this.imageInfo = imgInfo;
+            // Stack-only plot types (isosurface, scatter3d) depend on whether this
+            // file is a stack — recompute the selector options.
+            this.computePlotTypeOptions();
+            // If the active plot type isn't valid for this image (e.g. a scalar
+            // type like Contour carried over to an RGB image), fall back to Image.
+            this.reconcileSelectedPlotType();
+            // Read from `imgInfo`, the value this emission carried, rather than from the
+            // field. Handling the empty emission means the field CAN be nulled part-way
+            // through this branch: `reconcileSelectedPlotType` may call `setPlotType`,
+            // which can make the host publish a new image state, re-entering this very
+            // subscription. Reading the field then threw on `isGrayscale` and aborted the
+            // handler, so the observations were never drawn.
+            this.isGrayscaleEvent.emit(imgInfo.isGrayscale);
+            this.isStackEvent.emit(imgInfo.isStack);
+            // Reset to the default 2D Image view when a different image is
+            // selected while a 3D type is active.
+            if (!this.isHeatmap && imgInfo.fileName !== this.loadedFileName) {
+              this.isHeatmap = true;
+              this.plotType = PlotType.IMAGE;
+              this.selectedPlotTypeId = PlotType.IMAGE;
+              this.plotService.setPlotType(this.plotType);
+              this.activeSurface3dMode = 'turntable';
+            }
+            this.loadedFileName = imgInfo.fileName;
+            this.plotService.setImageMeta(imgInfo.imageMeta, imgInfo.fileName);
+            // A newer image always preempts an in-flight render (see ImageRenderSession).
+            if (imgInfo.urls) this.render.render(imgInfo);
+          }
+        },
+        error: (err: unknown) => {
+          const msg = errorMessage(err);
+          console.error('Error occured when getting image info', err);
+          this.messageService.add({
+            key: this.vizAlertToastKey,
+            sticky: true,
+            severity: 'error',
+            summary: 'An error occured',
+            detail: `The following error occured while getting image info: ${msg}.
                    Please try to open the image again through the file navigator.`,
-        });
-        this.stackLoading.set(false);
-        this.state.setImageLoading(false);
-        this.render.running = false;
-        this.plotService.reset();
-      },
-    });
+          });
+          this.stackLoading.set(false);
+          this.state.setImageLoading(false);
+          this.render.running = false;
+          this.plotService.reset();
+        },
+      });
   }
 
   /** Follow `source` until destroy. */
@@ -686,10 +772,12 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   /** What the keyboard, wheel and context-menu shortcuts act on. Their listeners live
    *  outside this view, so every action that changes what it shows marks it for check. */
   private shortcutHost(): ShortcutHost {
-    const marked = <A extends unknown[]>(act: (...args: A) => void) => (...args: A): void => {
-      act(...args);
-      this.changed();
-    };
+    const marked =
+      <A extends unknown[]>(act: (...args: A) => void) =>
+      (...args: A): void => {
+        act(...args);
+        this.changed();
+      };
     return {
       plotDivName: this.plotDivName,
       hostElement: this.hostRef?.nativeElement ?? null,
@@ -911,9 +999,15 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.plotService.getIsosurfaceControls()?.setIsoRange(values[0], values[1]);
   }
 
-  protected onWandSensitivityChange(value: number | undefined) { this.tools.setWandSensitivity(value); }
-  protected onBrushSizeChange(value: number | undefined) { this.tools.setBrushSize(value); }
-  protected onVertexEraserRadiusChange(value: number | undefined) { this.tools.setVertexEraserRadius(value); }
+  protected onWandSensitivityChange(value: number | undefined) {
+    this.tools.setWandSensitivity(value);
+  }
+  protected onBrushSizeChange(value: number | undefined) {
+    this.tools.setBrushSize(value);
+  }
+  protected onVertexEraserRadiusChange(value: number | undefined) {
+    this.tools.setVertexEraserRadius(value);
+  }
 
   zoomIn() {
     this.plotService.zoomIn();
@@ -938,12 +1032,24 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   }
 
   // ── Region set-operations on the current selection (jit-ui#85) ──────────
-  selectAllRegions(): void { this.regionActions.selectAll(); }
-  mergeRegions(): void { this.regionActions.merge(); }
-  ungroupRegions(): void { this.regionActions.ungroup(); }
-  inverseRegions(): void { this.regionActions.inverse(); }
-  simplifyRegions(thresholdPx: number): void { this.regionActions.simplify(thresholdPx); }
-  openSimplifyDialog(): void { this.regionActions.openSimplifyDialog(); }
+  selectAllRegions(): void {
+    this.regionActions.selectAll();
+  }
+  mergeRegions(): void {
+    this.regionActions.merge();
+  }
+  ungroupRegions(): void {
+    this.regionActions.ungroup();
+  }
+  inverseRegions(): void {
+    this.regionActions.inverse();
+  }
+  simplifyRegions(thresholdPx: number): void {
+    this.regionActions.simplify(thresholdPx);
+  }
+  openSimplifyDialog(): void {
+    this.regionActions.openSimplifyDialog();
+  }
 
   /** Box-prompted SAM segmentation of the drawn rectangles (jit-ui#90). A sticky
    *  `sam` toast shows live status + a download progress bar (first run pulls the
@@ -962,13 +1068,21 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   }
 
   // ── contributed tool parameters (see ToolParamsModel) ─────────────────
-  paramsFor(toolId: string): Record<string, unknown> { return this.toolParams.paramsFor(toolId); }
+  paramsFor(toolId: string): Record<string, unknown> {
+    return this.toolParams.paramsFor(toolId);
+  }
   protected onToolModelChange(e: { toolId: string; modelId: string }): void {
     this.toolParams.setModel(e.toolId, e.modelId);
   }
-  protected openToolParams(toolId: string): void { this.toolParams.open(toolId); }
-  protected closeToolParams(): void { this.toolParams.close(); }
-  protected resetToolParams(toolId: string): void { this.toolParams.reset(toolId); }
+  protected openToolParams(toolId: string): void {
+    this.toolParams.open(toolId);
+  }
+  protected closeToolParams(): void {
+    this.toolParams.close();
+  }
+  protected resetToolParams(toolId: string): void {
+    this.toolParams.reset(toolId);
+  }
 
   /** Run a contributed tool over the current view. No prompt: these sweep the
    *  whole view rather than being pointed at something. Reuses the shared
@@ -1117,10 +1231,14 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   // ── dialog tools (TOOLBAR_TOOLS, kind: 'dialog') ─────────────────────────
 
   /** The toolbar button: open the tool's dialog, or close it if it is open. */
-  protected toggleDialogTool(id: string): void { this.contributions.toggleDialogTool(id); }
+  protected toggleDialogTool(id: string): void {
+    this.contributions.toggleDialogTool(id);
+  }
 
   /** Close the open dialog tool: its body is torn down, then its session ends. */
-  protected closeDialogTool(): void { this.contributions.closeDialogTool(); }
+  protected closeDialogTool(): void {
+    this.contributions.closeDialogTool();
+  }
 
   /** Where the open dialog tool's host element is attached once its dialog renders. */
   @ViewChild('toolDialogSlot')

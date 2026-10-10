@@ -10,8 +10,7 @@ export class ProcessingImage {
 
   /** Create from browser ImageData. */
   static fromImageData(imageData: ImageData): ProcessingImage {
-    return new ProcessingImage(imageData.width, imageData.height, 4,
-      new Uint8ClampedArray(imageData.data));
+    return new ProcessingImage(imageData.width, imageData.height, 4, new Uint8ClampedArray(imageData.data));
   }
 
   constructor(width: number, height: number, channels: number, data: Uint8ClampedArray) {

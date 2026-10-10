@@ -46,8 +46,13 @@ jest.mock('./osd-lib', () => {
     return v;
   });
   Object.assign(factory, {
-    TileSource: function TileSource(this: object, spec: object) { Object.assign(this, spec); },
-    Point: function Point(this: { x: number; y: number }, x: number, y: number) { this.x = x; this.y = y; },
+    TileSource: function TileSource(this: object, spec: object) {
+      Object.assign(this, spec);
+    },
+    Point: function Point(this: { x: number; y: number }, x: number, y: number) {
+      this.x = x;
+      this.y = y;
+    },
   });
   return { OSD: factory, quiet: jest.requireActual('./osd-lib').quiet };
 });
@@ -58,18 +63,27 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
   let store: VisualizerStore;
 
   const descriptor = {
-    width: 64, height: 64, tileSize: 64, z: 1, channels: 1, realLevels: 1,
+    width: 64,
+    height: 64,
+    tileSize: 64,
+    z: 1,
+    channels: 1,
+    realLevels: 1,
     levels: [{ res: 0, width: 64, height: 64 }],
   };
   const simpleInfo = {
-    fileName: 'hyper.tif', tiled: false, isGrayscale: false,
+    fileName: 'hyper.tif',
+    tiled: false,
+    isGrayscale: false,
     urls: ['blob:z0'],
     channelUrls: [['blob:z0c0', 'blob:z0c1']],
     trueImageSize: [8, 8],
     imageMeta: [{ rgbChannels: 1, channelCount: 2, x: 8, y: 8, z: 1 }],
   } as unknown as IImageInfo;
   const tiledInfo = {
-    fileName: 'slide.tif', isGrayscale: true, urls: ['/api/preview?info=INFO64'],
+    fileName: 'slide.tif',
+    isGrayscale: true,
+    urls: ['/api/preview?info=INFO64'],
     trueImageSize: [64, 64],
     imageMeta: [{ rgbChannels: 1, channelCount: 1, x: 64, y: 64, z: 1 }],
   } as unknown as IImageInfo;
@@ -115,8 +129,7 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
     ]);
     jest.spyOn(simple(), 'composite').mockResolvedValue('blob:composite');
     // ...and can't decode a single-image slice either (toFullResUrl then keeps the URL).
-    jest.spyOn(simple(), 'loadImageEl')
-      .mockRejectedValue(new Error('no <img> decode in jsdom'));
+    jest.spyOn(simple(), 'loadImageEl').mockRejectedValue(new Error('no <img> decode in jsdom'));
   });
 
   afterEach(() => {
@@ -147,8 +160,9 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
     tiledViewer.open.mockClear();
 
     const invalidate = jest.spyOn(internals().recolor, 'scheduleInvalidate');
-    store.setChannelStates([{ index: 0, name: 'Intensity', color: '#ffffff', min: 5, max: 200,
-      gamma: 1, visible: true }]);
+    store.setChannelStates([
+      { index: 0, name: 'Intensity', color: '#ffffff', min: 5, max: 200, gamma: 1, visible: true },
+    ]);
     await new Promise((r) => setTimeout(r, 0));
 
     expect(tiledViewer.open).not.toHaveBeenCalled();
@@ -161,8 +175,12 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
     const sampler = (service as unknown as { sampler: { clear(): void; computeImageWindow(): Promise<void> } })
       .sampler;
     const order: string[] = [];
-    jest.spyOn(sampler, 'clear').mockImplementation(() => { order.push('clear'); });
-    jest.spyOn(sampler, 'computeImageWindow').mockImplementation(async () => { order.push('sample'); });
+    jest.spyOn(sampler, 'clear').mockImplementation(() => {
+      order.push('clear');
+    });
+    jest.spyOn(sampler, 'computeImageWindow').mockImplementation(async () => {
+      order.push('sample');
+    });
     const tiledLoaded = await loadTiled();
     void service.plot('plotdiv', tiledLoaded, tiledInfo, 500, PlotType.IMAGE);
     expect(order).toEqual(['clear', 'sample']);
@@ -171,7 +189,7 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
   // /tiles/info can poll for minutes; until plot() mounts the new image, the
   // previous one stays on screen and must keep its own descriptor and state.
 
-  it('a pending tiled load() leaves the mounted image\'s descriptor alone', async () => {
+  it("a pending tiled load() leaves the mounted image's descriptor alone", async () => {
     const first = await loadTiled();
     void service.plot('plotdiv', first, tiledInfo, 500, PlotType.IMAGE);
     expect(service.getTrueImageSize()).toEqual({ width: 64, height: 64 });
@@ -184,7 +202,7 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
     expect(service.getTrueImageSize()).toEqual({ width: 64, height: 64 });
   });
 
-  it('loading another image leaves the mounted serverless multichannel image\'s state alone', async () => {
+  it("loading another image leaves the mounted serverless multichannel image's state alone", async () => {
     const simpleLoaded = await service.load(simpleInfo, 0);
     void service.plot('plotdiv', simpleLoaded, simpleInfo, 500, PlotType.IMAGE);
     expect(simple().multichannel).toBe(true);
@@ -204,7 +222,11 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
   const nextFrame = () => new Promise((r) => setTimeout(r, 40));
   const stackInfo = {
     ...simpleInfo,
-    channelUrls: [['z0c0', 'z0c1'], ['z1c0', 'z1c1'], ['z2c0', 'z2c1']],
+    channelUrls: [
+      ['z0c0', 'z0c1'],
+      ['z1c0', 'z1c1'],
+      ['z2c0', 'z2c1'],
+    ],
   } as unknown as IImageInfo;
 
   async function mountStack() {
@@ -217,10 +239,11 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
     await mountStack();
     const releases: Record<string, () => void> = {};
     (simple().loadChannelPlanes as unknown as jest.Mock).mockImplementation(
-      (urls: string[]) => new Promise((resolve) => {
-        const z = Number(urls[0][1]);
-        releases[urls[0]] = () => resolve([plane(z), plane(z)]);
-      }),
+      (urls: string[]) =>
+        new Promise((resolve) => {
+          const z = Number(urls[0][1]);
+          releases[urls[0]] = () => resolve([plane(z), plane(z)]);
+        }),
     );
     service.setZIndex(1);
     service.setZIndex(2);
@@ -260,7 +283,11 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
     expect(revoke).not.toHaveBeenCalledWith('blob:next');
   });
   it('a slow single-image scrub that resolves after a newer one is not opened', async () => {
-    const info = { ...simpleInfo, channelUrls: undefined, urls: ['blob:a', 'blob:b', 'blob:c'] } as unknown as IImageInfo;
+    const info = {
+      ...simpleInfo,
+      channelUrls: undefined,
+      urls: ['blob:a', 'blob:b', 'blob:c'],
+    } as unknown as IImageInfo;
     const loaded = await service.load(info, 0);
     void service.plot('plotdiv', loaded, info, 500, PlotType.IMAGE);
     const viewer = viewers[viewers.length - 1];
@@ -269,7 +296,10 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
     const simpleStack = (service as unknown as { simpleStack: { fetchAsBlobUrl(u: string): Promise<string> } })
       .simpleStack;
     jest.spyOn(simpleStack, 'fetchAsBlobUrl').mockImplementation(
-      (u: string) => new Promise<string>((resolve) => { fetches[u] = resolve; }),
+      (u: string) =>
+        new Promise<string>((resolve) => {
+          fetches[u] = resolve;
+        }),
     );
     service.setZIndex(1);
     service.setZIndex(2);
@@ -281,13 +311,18 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
   });
 
   it('a simple-mode z-scrub does not pile up open-failed handlers (OSD-PLOTLY-33)', async () => {
-    const info = { ...simpleInfo, channelUrls: undefined, urls: ['blob:a', 'blob:b', 'blob:c'] } as unknown as IImageInfo;
+    const info = {
+      ...simpleInfo,
+      channelUrls: undefined,
+      urls: ['blob:a', 'blob:b', 'blob:c'],
+    } as unknown as IImageInfo;
     const loaded = await service.load(info, 0);
     void service.plot('plotdiv', loaded, info, 500, PlotType.IMAGE);
     const viewer = viewers[viewers.length - 1];
     const failedHandlers = () =>
-      [...viewer.addOnceHandler.mock.calls, ...viewer.addHandler.mock.calls]
-        .filter(([name]) => name === 'open-failed').length;
+      [...viewer.addOnceHandler.mock.calls, ...viewer.addHandler.mock.calls].filter(
+        ([name]) => name === 'open-failed',
+      ).length;
     const before = failedHandlers();
     for (const z of [1, 2, 1, 2]) {
       service.setZIndex(z);

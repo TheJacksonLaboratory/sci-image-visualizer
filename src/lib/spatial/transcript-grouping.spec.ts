@@ -1,8 +1,17 @@
 import { SpatialTranscriptTile } from '../contracts/spatial-dataset.contract';
 import { tilesInRectFrom, visibleArea } from './lod';
 import {
-  TRANSCRIPT_MAX_PX, TRANSCRIPT_MIN_PX, TRANSCRIPT_PHYSICAL_UM, allGenesPlan, clusterColorMap, clusterOfGene,
-  geneBinSize, groupTranscripts, groupedMarkerPx, quantileOf, transcriptMarkerPx,
+  TRANSCRIPT_MAX_PX,
+  TRANSCRIPT_MIN_PX,
+  TRANSCRIPT_PHYSICAL_UM,
+  allGenesPlan,
+  clusterColorMap,
+  clusterOfGene,
+  geneBinSize,
+  groupTranscripts,
+  groupedMarkerPx,
+  quantileOf,
+  transcriptMarkerPx,
 } from './transcript-grouping';
 
 describe('transcriptMarkerPx', () => {
@@ -41,9 +50,16 @@ describe('all-gene grouping', () => {
   const total = 1.04e9;
   const levels = Array.from({ length: 7 }, (_v, m) => ({ binSize: (250 / 128) * 2 ** m }));
   const view = (w: number) => ({ x0: 4000, y0: 4000, x1: 4000 + w, y1: 4000 + w * 0.65 });
-  const plan = (w: number, budget = 100_000) => allGenesPlan({
-    rect: view(w), bounds, total, pxPerUnit: 1260 / w, levels, budget, canIndividual: true,
-  });
+  const plan = (w: number, budget = 100_000) =>
+    allGenesPlan({
+      rect: view(w),
+      bounds,
+      total,
+      pxPerUnit: 1260 / w,
+      levels,
+      budget,
+      canIndividual: true,
+    });
 
   it('draws every transcript once those in view fit the budget', () => {
     // 60 µm wide: ~30k transcripts.
@@ -74,10 +90,17 @@ describe('all-gene grouping', () => {
   });
 
   it('draws nothing for a view outside the tissue', () => {
-    expect(allGenesPlan({
-      rect: { x0: -500, y0: -500, x1: -100, y1: -100 }, bounds, total, pxPerUnit: 1,
-      levels, budget: 1e5, canIndividual: true,
-    })).toEqual({ kind: 'none' });
+    expect(
+      allGenesPlan({
+        rect: { x0: -500, y0: -500, x1: -100, y1: -100 },
+        bounds,
+        total,
+        pxPerUnit: 1,
+        levels,
+        budget: 1e5,
+        canIndividual: true,
+      }),
+    ).toEqual({ kind: 'none' });
     expect(visibleArea({ x0: -10, y0: 0, x1: 10, y1: 10 }, bounds)).toBe(100);
   });
 
@@ -103,7 +126,7 @@ describe('all-gene grouping', () => {
 describe('grouping a gene selection by zoom', () => {
   it('uses the pyramid ladder: the finest bin at least 14 px apart, none when zoomed in', () => {
     const base = 250 / 128;
-    expect(geneBinSize(10, base)).toBeNull();          // 19.5 px per base bin: draw each transcript
+    expect(geneBinSize(10, base)).toBeNull(); // 19.5 px per base bin: draw each transcript
     expect(geneBinSize(1, base)).toBeCloseTo(base * 8); // 15.6 px at 8× the base bin
     expect(geneBinSize(0.001, base, 7)).toBeCloseTo(base * 64); // capped at the coarsest level
     expect(geneBinSize(0, base)).toBeNull();
@@ -111,9 +134,13 @@ describe('grouping a gene selection by zoom', () => {
 
   it('groups each gene on its own by default, at the weighted centroid, in the cell holding most', () => {
     const t: SpatialTranscriptTile = {
-      count: 4, aggregated: false,
-      x: new Float32Array([1, 3, 2, 30]), y: new Float32Array([1, 1, 2, 30]), z: new Float32Array(4),
-      weight: new Uint32Array([1, 3, 1, 1]), observation: new Uint32Array([7, 8, 9, 9]),
+      count: 4,
+      aggregated: false,
+      x: new Float32Array([1, 3, 2, 30]),
+      y: new Float32Array([1, 1, 2, 30]),
+      z: new Float32Array(4),
+      weight: new Uint32Array([1, 3, 1, 1]),
+      observation: new Uint32Array([7, 8, 9, 9]),
       gene: new Uint16Array([0, 0, 1, 0]),
     };
     const { tile: g } = groupTranscripts(t, 10);
@@ -127,9 +154,13 @@ describe('grouping a gene selection by zoom', () => {
 
   it('takes the cell holding most transcripts in total, not the heaviest single one', () => {
     const t: SpatialTranscriptTile = {
-      count: 4, aggregated: false,
-      x: new Float32Array([1, 2, 3, 4]), y: new Float32Array(4), z: new Float32Array(4),
-      weight: new Uint32Array([2, 1, 1, 1]), observation: new Uint32Array([8, 7, 7, 7]),
+      count: 4,
+      aggregated: false,
+      x: new Float32Array([1, 2, 3, 4]),
+      y: new Float32Array(4),
+      z: new Float32Array(4),
+      weight: new Uint32Array([2, 1, 1, 1]),
+      observation: new Uint32Array([8, 7, 7, 7]),
       gene: new Uint16Array(4),
     };
     expect(groupTranscripts(t, 10).tile.observation[0]).toBe(7); // 3 in cell 7, 2 in cell 8
@@ -137,9 +168,13 @@ describe('grouping a gene selection by zoom', () => {
 
   it('merges the genes of one cluster into one marker, showing its dominant gene', () => {
     const t: SpatialTranscriptTile = {
-      count: 4, aggregated: false,
-      x: new Float32Array([1, 2, 3, 4]), y: new Float32Array([1, 2, 3, 4]), z: new Float32Array(4),
-      weight: new Uint32Array([1, 1, 5, 1]), observation: new Uint32Array(4),
+      count: 4,
+      aggregated: false,
+      x: new Float32Array([1, 2, 3, 4]),
+      y: new Float32Array([1, 2, 3, 4]),
+      z: new Float32Array(4),
+      weight: new Uint32Array([1, 1, 5, 1]),
+      observation: new Uint32Array(4),
       gene: new Uint16Array([0, 1, 1, 2]),
     };
     // Genes 0 and 1 are one cluster (key 0); gene 2 is its own (key 9).
@@ -166,21 +201,35 @@ describe('grouping a gene selection by zoom', () => {
         let k = index.get(key);
         const wi = t.weight[i] || 1;
         if (k === undefined) {
-          k = w.length; index.set(key, k);
-          w.push(0); sx.push(0); grp.push(gk); genesW.push(new Map()); obsW.push(new Map());
+          k = w.length;
+          index.set(key, k);
+          w.push(0);
+          sx.push(0);
+          grp.push(gk);
+          genesW.push(new Map());
+          obsW.push(new Map());
         }
-        w[k] += wi; sx[k] += t.x[i] * wi;
+        w[k] += wi;
+        sx[k] += t.x[i] * wi;
         genesW[k].set(t.gene[i], (genesW[k].get(t.gene[i]) ?? 0) + wi);
         obsW[k].set(t.observation[i], (obsW[k].get(t.observation[i]) ?? 0) + wi);
       }
       const dominant = (m: Map<number, number>) => {
-        let best = 0; let top = -1;
-        for (const [key, v] of m) if (v > top) { top = v; best = key; }
+        let best = 0;
+        let top = -1;
+        for (const [key, v] of m)
+          if (v > top) {
+            top = v;
+            best = key;
+          }
         return best;
       };
       return {
-        weight: w, group: grp, x: sx.map((v, k) => v / w[k]),
-        gene: genesW.map(dominant), observation: obsW.map(dominant),
+        weight: w,
+        group: grp,
+        x: sx.map((v, k) => v / w[k]),
+        gene: genesW.map(dominant),
+        observation: obsW.map(dominant),
       };
     };
     let seed = 11;
@@ -190,7 +239,8 @@ describe('grouping a gene selection by zoom', () => {
     };
     const n = 3000;
     const t: SpatialTranscriptTile = {
-      count: n, aggregated: false,
+      count: n,
+      aggregated: false,
       x: Float32Array.from({ length: n }, () => rand(400) - 200),
       y: Float32Array.from({ length: n }, () => rand(300) - 100),
       z: new Float32Array(n),
@@ -208,11 +258,13 @@ describe('grouping a gene selection by zoom', () => {
     expect(Array.from(got.tile.observation)).toEqual(want.observation);
     got.tile.x.forEach((v, k) => expect(v).toBeCloseTo(want.x[k], 3));
   });
-
 });
 
 describe('cluster colours', () => {
-  const groups = [{ name: 'Cluster 27', genes: ['CD55', 'TFF3'] }, { name: 'Cluster 28', genes: ['TNS4', 'SOCS3'] }];
+  const groups = [
+    { name: 'Cluster 27', genes: ['CD55', 'TFF3'] },
+    { name: 'Cluster 28', genes: ['TNS4', 'SOCS3'] },
+  ];
   const genes = ['CD55', 'TFF3', 'TNS4', 'SOCS3', 'LONE'];
 
   it('gives every gene of a cluster one colour, a different one per cluster', () => {

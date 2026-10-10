@@ -29,13 +29,20 @@ export const MAX_RASTER_PIXELS = 4096 * 4096;
  * exceeds `imageWidth`×`imageHeight`; only a bbox larger than
  * {@link MAX_RASTER_PIXELS} is clipped to that window.
  */
-export function rasterizePolygon(xpoints: number[], ypoints: number[],
-                                 imageWidth: number, imageHeight: number,
-                                 holes?: number[][][]): BBoxMask | null {
+export function rasterizePolygon(
+  xpoints: number[],
+  ypoints: number[],
+  imageWidth: number,
+  imageHeight: number,
+  holes?: number[][][],
+): BBoxMask | null {
   const n = xpoints.length;
   if (n < 3) return null;
 
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  let minX = Infinity,
+    maxX = -Infinity,
+    minY = Infinity,
+    maxY = -Infinity;
   for (let i = 0; i < n; i++) {
     if (xpoints[i] < minX) minX = xpoints[i];
     if (xpoints[i] > maxX) maxX = xpoints[i];
@@ -71,7 +78,8 @@ export function rasterizePolygon(xpoints: number[], ypoints: number[],
       const y = by + py + 0.5;
       const xs: number[] = [];
       for (let i = 0, j = m - 1; i < m; j = i++) {
-        const yi = ry[i], yj = ry[j];
+        const yi = ry[i],
+          yj = ry[j];
         if ((yi <= y && yj > y) || (yj <= y && yi > y)) {
           const t = (y - yi) / (yj - yi);
           xs.push(rx[i] + t * (rx[j] - rx[i]));
@@ -88,7 +96,11 @@ export function rasterizePolygon(xpoints: number[], ypoints: number[],
   fillRing(xpoints, ypoints, 1);
   if (holes) {
     for (const ring of holes) {
-      fillRing(ring.map((p) => p[0]), ring.map((p) => p[1]), 0);
+      fillRing(
+        ring.map((p) => p[0]),
+        ring.map((p) => p[1]),
+        0,
+      );
     }
   }
   return { bx, by, bw, bh, mask };

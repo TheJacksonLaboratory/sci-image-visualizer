@@ -14,17 +14,22 @@ import { OSD_ZOOM_PER_SCROLL } from './osd-zoom';
 export function silenceOsdMultiImageAdvisory(): void {
   const osd: any = OSD as any;
   if (osd.__multiImageFilterInstalled) return;
-  const base: any = (osd.console && typeof osd.console.error === 'function')
-    ? osd.console
-    : (typeof console !== 'undefined' ? console : null);
+  const base: any =
+    osd.console && typeof osd.console.error === 'function'
+      ? osd.console
+      : typeof console !== 'undefined'
+        ? console
+        : null;
   if (!base) return;
-  const isAdvisory = (a: unknown) =>
-    typeof a === 'string' && a.indexOf('not accurate with multi-image') !== -1;
+  const isAdvisory = (a: unknown) => typeof a === 'string' && a.indexOf('not accurate with multi-image') !== -1;
   osd.console = new Proxy(base, {
     get(target: any, prop: string) {
       const orig = target[prop];
       if ((prop === 'error' || prop === 'warn') && typeof orig === 'function') {
-        return (...args: any[]) => { if (isAdvisory(args[0])) return; orig.apply(target, args); };
+        return (...args: any[]) => {
+          if (isAdvisory(args[0])) return;
+          orig.apply(target, args);
+        };
       }
       return typeof orig === 'function' ? orig.bind(target) : orig;
     },

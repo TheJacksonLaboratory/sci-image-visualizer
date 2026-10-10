@@ -33,12 +33,15 @@ export class PlotlyShapeProjection {
   private muted = 0;
   private readonly utils = new PlotUtilities();
 
-  constructor(private readonly host: ShapeProjectionHost, private readonly regionStore: RegionStore) {}
+  constructor(
+    private readonly host: ShapeProjectionHost,
+    private readonly regionStore: RegionStore,
+  ) {}
 
   /** The plot div, live Plotly graph or not (null when none is set). */
   private gd(): GraphDiv | null {
     const id = this.host.plotDiv();
-    return id ? document.getElementById(id) as GraphDiv | null : null;
+    return id ? (document.getElementById(id) as GraphDiv | null) : null;
   }
 
   /** The plot div while it hosts a live Plotly graph, else null: the div stays
@@ -69,8 +72,15 @@ export class PlotlyShapeProjection {
   commitToStore(): void {
     const regions = this.shapes.map((s) => Object.assign(new ShapeSelection(), s).getRegion());
     // The canvas already shows these shapes: don't redraw them from the update.
-    this.quietly(() => this.regionStore.setRegions(regions, this.regionStore.getShowShapeLabel(), true,
-      this.regionStore.getFillColor(), false));
+    this.quietly(() =>
+      this.regionStore.setRegions(
+        regions,
+        this.regionStore.getShowShapeLabel(),
+        true,
+        this.regionStore.getFillColor(),
+        false,
+      ),
+    );
     const stored = this.regionStore.getRegions();
     for (let i = 0; i < this.shapes.length && i < stored.length; i++) {
       if (this.shapes[i].id == null) this.shapes[i].id = stored[i].id;
@@ -91,9 +101,8 @@ export class PlotlyShapeProjection {
       const shapeNumber = +key.split('[')[1].split(']')[0];
       const shapeChange = key.split('.')[1];
       if (this.shapes && this.shapes[shapeNumber]) {
-        this.shapes[shapeNumber][shapeChange] = shapeChange === 'path'
-          ? this.utils.roundPathCoordinates(event[key])
-          : Math.round(+event[key]);
+        this.shapes[shapeNumber][shapeChange] =
+          shapeChange === 'path' ? this.utils.roundPathCoordinates(event[key]) : Math.round(+event[key]);
         shapesModified = true;
       }
     }
@@ -134,11 +143,11 @@ export class PlotlyShapeProjection {
       if (JSON.stringify(shape.fileName) === JSON.stringify(this.host.fileName())) {
         shape.label = showLabel
           ? {
-            text: `${shape.legend}`,
-            texttemplate: `${shape.legend}`,
-            textposition: 'top left',
-            font: { color: `${shape.line.color}` },
-          }
+              text: `${shape.legend}`,
+              texttemplate: `${shape.legend}`,
+              textposition: 'top left',
+              font: { color: `${shape.line.color}` },
+            }
           : {};
         shapesToRedraw.push(shape);
       }
@@ -169,7 +178,11 @@ export class PlotlyShapeProjection {
    */
   quietly(write: () => void): void {
     this.muted++;
-    try { write(); } finally { this.muted--; }
+    try {
+      write();
+    } finally {
+      this.muted--;
+    }
   }
 
   /**
@@ -208,7 +221,11 @@ export class PlotlyShapeProjection {
     const active = indices.length > 0 ? indices[indices.length - 1] : -1;
     if ((gd._fullLayout!._activeShapeIndex ?? -1) === active) return;
     gd._fullLayout!._activeShapeIndex = active;
-    try { void Plotly.redraw(gd); } catch { /* noop in tests */ }
+    try {
+      void Plotly.redraw(gd);
+    } catch {
+      /* noop in tests */
+    }
   }
 
   /**
@@ -219,7 +236,7 @@ export class PlotlyShapeProjection {
   syncSelectionFromPlot(): void {
     if (!this.host.plotDiv()) return;
     const raw = this.gd()?._fullLayout?._activeShapeIndex;
-    const idx = (typeof raw === 'number' && raw >= 0 && raw < this.shapes.length) ? raw : -1;
+    const idx = typeof raw === 'number' && raw >= 0 && raw < this.shapes.length ? raw : -1;
     this.regionStore.setSelectedShapeIndices(idx >= 0 ? [idx] : []);
   }
 

@@ -1,7 +1,11 @@
 import { SpatialEmbedding, SpatialEmbeddingMeta } from '../contracts/spatial-dataset.contract';
 import { EmbeddingComputeRun } from './embedding-compute';
 import {
-  BROWSER_TSNE_MAX_OBSERVATIONS, EmbeddingComputeCoordinator, estimateLabel, loadPcaScores, tsneEstimateSeconds,
+  BROWSER_TSNE_MAX_OBSERVATIONS,
+  EmbeddingComputeCoordinator,
+  estimateLabel,
+  loadPcaScores,
+  tsneEstimateSeconds,
 } from './embedding-compute-coordinator';
 
 const pca2: SpatialEmbeddingMeta = { name: 'X_pca', label: 'PCA', dims: 2 };
@@ -29,8 +33,12 @@ describe('EmbeddingComputeCoordinator', () => {
 
   describe('what it offers', () => {
     it('offers a t-SNE where there is a PCA and no t-SNE, small enough to run here', () => {
-      expect(compute.setDataset([umap, pca2], 100).map((e) => e.name))
-        .toEqual(['X_umap', 'X_pca', 'local:tsne', 'local:tsne3d']);
+      expect(compute.setDataset([umap, pca2], 100).map((e) => e.name)).toEqual([
+        'X_umap',
+        'X_pca',
+        'local:tsne',
+        'local:tsne3d',
+      ]);
       expect(compute.tooLarge).toBe(false);
       expect(compute.setDataset([umap], 100).map((e) => e.name)).toEqual(['X_umap']);
       expect(compute.setDataset([pca2, { name: 'X_tsne', dims: 2 }], 100)).toHaveLength(2);
@@ -59,10 +67,15 @@ describe('EmbeddingComputeCoordinator', () => {
     beforeEach(() => {
       compute.setDataset([pca2, pca3], 3);
       run = jest.spyOn(EmbeddingComputeRun.prototype, 'run').mockImplementation(function (
-        this: EmbeddingComputeRun, _req, meta, onProgress,
+        this: EmbeddingComputeRun,
+        _req,
+        meta,
+        onProgress,
       ) {
         onProgress({ fraction: 0.5, backend: 'cpu', message: 'slow path' });
-        return new Promise((r) => { resolveRun = (v) => r(v ? { ...v, meta } : v); });
+        return new Promise((r) => {
+          resolveRun = (v) => r(v ? { ...v, meta } : v);
+        });
       });
     });
 
@@ -74,9 +87,13 @@ describe('EmbeddingComputeCoordinator', () => {
       expect(run.mock.calls[0][0]).toEqual(expect.objectContaining({ nObs: 3, nDims: 3, dims: 2 }));
       // The compute suffix is the menu's, not the result's name.
       expect(run.mock.calls[0][1].label).toBe('t-SNE');
-      expect(compute.state).toEqual(expect.objectContaining({
-        fraction: 0.5, backend: 'cpu', message: 'slow path',
-      }));
+      expect(compute.state).toEqual(
+        expect.objectContaining({
+          fraction: 0.5,
+          backend: 'cpu',
+          message: 'slow path',
+        }),
+      );
       // (`running` asks the run, which is mocked here; the published state says it too.)
       expect(compute.state.running).toBe(true);
       resolveRun(coords(tsne));
@@ -100,7 +117,12 @@ describe('EmbeddingComputeCoordinator', () => {
 
     it('never starts a worker when abandoned during the PCA fetch', async () => {
       let resolvePca!: (e: SpatialEmbedding) => void;
-      getEmbedding.mockImplementationOnce(() => new Promise((r) => { resolvePca = r; }));
+      getEmbedding.mockImplementationOnce(
+        () =>
+          new Promise((r) => {
+            resolvePca = r;
+          }),
+      );
       const started = compute.start(tsne, [pca2], getEmbedding);
       compute.abandon();
       resolvePca(coords(pca2));
@@ -116,7 +138,7 @@ describe('EmbeddingComputeCoordinator', () => {
       expect(compute.state.error).toBe('GPU lost');
     });
 
-    it('passes the user\'s Cancel to the run', async () => {
+    it("passes the user's Cancel to the run", async () => {
       const cancel = jest.spyOn(EmbeddingComputeRun.prototype, 'cancel').mockImplementation(() => undefined);
       void compute.start(tsne, [pca2], getEmbedding);
       await Promise.resolve();

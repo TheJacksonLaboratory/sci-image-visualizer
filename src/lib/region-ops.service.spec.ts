@@ -7,7 +7,10 @@ import { Region, Rectangle, Polygon, MultiPolygon } from './models/region';
 function rect(x: number, y: number, w: number, h: number): Region {
   const r = new Region();
   const b = new Rectangle();
-  b.x = x; b.y = y; b.width = w; b.height = h;
+  b.x = x;
+  b.y = y;
+  b.width = w;
+  b.height = h;
   r.bounds = b;
   return r;
 }
@@ -16,7 +19,9 @@ function rect(x: number, y: number, w: number, h: number): Region {
 function poly(xs: number[], ys: number[], holes?: number[][][]): Region {
   const r = new Region();
   const p = new Polygon();
-  p.xpoints = xs.slice(); p.ypoints = ys.slice(); p.npoints = xs.length;
+  p.xpoints = xs.slice();
+  p.ypoints = ys.slice();
+  p.npoints = xs.length;
   p.coordinates = xs.map((x, i) => [x, ys[i]]);
   p.closed = true;
   if (holes) p.holes = holes;
@@ -34,7 +39,12 @@ function area(region: Region): number {
   };
   const polyArea = (p: Polygon) => {
     let a = ring(p.xpoints, p.ypoints);
-    if (p.holes) for (const h of p.holes) a -= ring(h.map(q => q[0]), h.map(q => q[1]));
+    if (p.holes)
+      for (const h of p.holes)
+        a -= ring(
+          h.map((q) => q[0]),
+          h.map((q) => q[1]),
+        );
     return a;
   };
   const b = region.bounds;
@@ -69,7 +79,9 @@ describe('RegionOpsService', () => {
     });
 
     it('inherits colour/label from the first region', () => {
-      const a = rect(0, 0, 10, 10); a.color = '#abcdef'; a.label = 'Tumor';
+      const a = rect(0, 0, 10, 10);
+      a.color = '#abcdef';
+      a.label = 'Tumor';
       const merged = ops.merge([a, rect(50, 50, 10, 10)], 100, 100)!;
       expect(merged.color).toBe('#abcdef');
       expect(merged.label).toBe('Tumor');
@@ -82,8 +94,7 @@ describe('RegionOpsService', () => {
     it('merges a gigapixel-extent selection at capped resolution — jit-ui#85', () => {
       // Two overlapping ~120k² rectangles: a ~3.24e10-px union bbox. The cap
       // keeps the raster ≤16 MP (MAX_OP_PIXELS); without it this throws/freezes.
-      const merged = ops.merge(
-        [rect(0, 0, 120000, 120000), rect(60000, 60000, 120000, 120000)], 200000, 200000)!;
+      const merged = ops.merge([rect(0, 0, 120000, 120000), rect(60000, 60000, 120000, 120000)], 200000, 200000)!;
       expect(merged).not.toBeNull();
       expect(merged.bounds).toBeInstanceOf(Polygon); // overlapping → one connected part
     });
@@ -97,8 +108,12 @@ describe('RegionOpsService', () => {
       expect(area(inv)).toBeGreaterThan(5500);
       expect(area(inv)).toBeLessThan(6400);
       const b = inv.bounds;
-      const hasHole = b instanceof Polygon ? !!b.holes?.length
-        : b instanceof MultiPolygon ? b.polygons.some(p => !!p.holes?.length) : false;
+      const hasHole =
+        b instanceof Polygon
+          ? !!b.holes?.length
+          : b instanceof MultiPolygon
+            ? b.polygons.some((p) => !!p.holes?.length)
+            : false;
       expect(hasHole).toBe(true);
     });
 
@@ -125,8 +140,19 @@ describe('RegionOpsService', () => {
       expect(b.holes?.length).toBe(1);
     });
 
-    it('turns a donut\'s hole into a solid island in the inverse', () => {
-      const donut = poly([0, 40, 40, 0], [0, 0, 40, 40], [[[10, 10], [30, 10], [30, 30], [10, 30]]]);
+    it("turns a donut's hole into a solid island in the inverse", () => {
+      const donut = poly(
+        [0, 40, 40, 0],
+        [0, 0, 40, 40],
+        [
+          [
+            [10, 10],
+            [30, 10],
+            [30, 30],
+            [10, 30],
+          ],
+        ],
+      );
       const inv = ops.inverse([donut], 100, 100)!;
       // image-rect part (with the donut outer as a hole) + the donut hole as an island.
       expect(inv.bounds).toBeInstanceOf(MultiPolygon);
@@ -139,14 +165,24 @@ describe('RegionOpsService', () => {
       const merged = ops.merge([rect(0, 0, 10, 10), rect(50, 50, 10, 10)], 100, 100)!;
       const parts = ops.ungroup(merged);
       expect(parts.length).toBe(2);
-      expect(parts.every(p => p.bounds instanceof Polygon)).toBe(true);
+      expect(parts.every((p) => p.bounds instanceof Polygon)).toBe(true);
     });
 
-    it('keeps a bézier part\'s hand-edited handles (RT-26)', () => {
+    it("keeps a bézier part's hand-edited handles (RT-26)", () => {
       const part = poly([0, 10, 10, 0], [0, 0, 10, 10]).bounds as Polygon;
       part.bezier = true;
-      part.handlesIn = [[-1, 0], [0, -1], [1, 0], [0, 1]];
-      part.handlesOut = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+      part.handlesIn = [
+        [-1, 0],
+        [0, -1],
+        [1, 0],
+        [0, 1],
+      ];
+      part.handlesOut = [
+        [1, 0],
+        [0, 1],
+        [-1, 0],
+        [0, -1],
+      ];
       const other = poly([50, 60, 60, 50], [50, 50, 60, 60]).bounds as Polygon;
       const r = new Region();
       r.bounds = Object.assign(new MultiPolygon(), { polygons: [part, other] });
@@ -179,13 +215,22 @@ describe('RegionOpsService', () => {
 
     it('simplifies the exterior and each hole of a donut', () => {
       const r = poly(
-        [0, 50, 100, 100, 0], [0, 1, 0, 100, 100],
-        [[[10, 10], [30, 11], [50, 10], [50, 50], [10, 50]]], // (30,11) bump on the hole
+        [0, 50, 100, 100, 0],
+        [0, 1, 0, 100, 100],
+        [
+          [
+            [10, 10],
+            [30, 11],
+            [50, 10],
+            [50, 50],
+            [10, 50],
+          ],
+        ], // (30,11) bump on the hole
       );
       const s = ops.simplify(r, 2);
       const b = s.bounds as Polygon;
-      expect(b.xpoints.length).toBe(4);       // exterior bump removed
-      expect(b.holes![0].length).toBe(4);     // hole bump removed (5 → 4)
+      expect(b.xpoints.length).toBe(4); // exterior bump removed
+      expect(b.holes![0].length).toBe(4); // hole bump removed (5 → 4)
     });
 
     it('simplifies every part of a MultiPolygon', () => {
@@ -197,7 +242,7 @@ describe('RegionOpsService', () => {
       r.bounds = mp;
       const s = ops.simplify(r, 2);
       const parts = (s.bounds as MultiPolygon).polygons;
-      expect(parts.map(p => p.xpoints.length)).toEqual([4, 4]);
+      expect(parts.map((p) => p.xpoints.length)).toEqual([4, 4]);
     });
 
     it('leaves rectangles and non-positive thresholds unchanged', () => {
@@ -210,8 +255,7 @@ describe('RegionOpsService', () => {
 
   describe('round-trip', () => {
     it('merge then ungroup recovers the same number of disjoint parts', () => {
-      const merged = ops.merge(
-        [rect(0, 0, 10, 10), rect(30, 0, 10, 10), rect(60, 0, 10, 10)], 100, 100)!;
+      const merged = ops.merge([rect(0, 0, 10, 10), rect(30, 0, 10, 10), rect(60, 0, 10, 10)], 100, 100)!;
       expect((merged.bounds as MultiPolygon).polygons.length).toBe(3);
       expect(ops.ungroup(merged).length).toBe(3);
     });

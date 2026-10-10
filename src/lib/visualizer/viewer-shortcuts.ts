@@ -27,8 +27,14 @@ export interface ShortcutHost {
 
 /** Bare keys that toggle a tool mode. */
 const TOOL_KEYS: ReadonlyMap<string, string> = new Map([
-  ['p', 'pan'], ['b', 'zoomToBox'], ['r', 'drawrect'], ['f', 'drawclosedpath'], ['w', 'wand'],
-  ['e', 'eraseVertex'], ['s', 'select'], ['l', 'drawopenpath'],
+  ['p', 'pan'],
+  ['b', 'zoomToBox'],
+  ['r', 'drawrect'],
+  ['f', 'drawclosedpath'],
+  ['w', 'wand'],
+  ['e', 'eraseVertex'],
+  ['s', 'select'],
+  ['l', 'drawopenpath'],
 ]);
 
 /** A field the user types into: its keys are never shortcuts. */
@@ -58,7 +64,10 @@ export class ViewerShortcuts {
   private static lastHovered: ViewerShortcuts | null = null;
   private readonly listeners: [string, EventListener, boolean | AddEventListenerOptions][] = [];
 
-  constructor(private readonly host: ShortcutHost, private readonly zone: NgZone) {}
+  constructor(
+    private readonly host: ShortcutHost,
+    private readonly zone: NgZone,
+  ) {}
 
   /** Register the window listeners (outside the zone). */
   attach(): void {
@@ -67,9 +76,13 @@ export class ViewerShortcuts {
       this.listen('keydown', (e) => this.onKeydown(e as KeyboardEvent), false);
       this.listen('wheel', (e) => this.onWheel(e as WheelEvent), { capture: true, passive: false });
       // `pointerover` fires on element transitions only, not on every move.
-      this.listen('pointerover', (e) => {
-        if (this.contains(e.target as Node)) ViewerShortcuts.lastHovered = this;
-      }, true);
+      this.listen(
+        'pointerover',
+        (e) => {
+          if (this.contains(e.target as Node)) ViewerShortcuts.lastHovered = this;
+        },
+        true,
+      );
     });
     ViewerShortcuts.live.add(this);
   }
@@ -97,9 +110,8 @@ export class ViewerShortcuts {
    *  pointer was last over it. */
   private ownsKeys(): boolean {
     const active = document.activeElement;
-    const focused = active && active !== document.body
-      ? [...ViewerShortcuts.live].find((s) => s.contains(active))
-      : undefined;
+    const focused =
+      active && active !== document.body ? [...ViewerShortcuts.live].find((s) => s.contains(active)) : undefined;
     return (focused ?? ViewerShortcuts.lastHovered) === this;
   }
 

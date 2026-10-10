@@ -19,13 +19,19 @@ const IDENTITY_LUT: Rgb[] = Array.from({ length: 256 }, (_, i) => [i, i, i] as R
 function rgba(...pixels: Array<[number, number, number]>): Uint8ClampedArray {
   const d = new Uint8ClampedArray(pixels.length * 4);
   pixels.forEach(([r, g, b], i) => {
-    d[i * 4] = r; d[i * 4 + 1] = g; d[i * 4 + 2] = b; d[i * 4 + 3] = 255;
+    d[i * 4] = r;
+    d[i * 4 + 1] = g;
+    d[i * 4 + 2] = b;
+    d[i * 4 + 3] = 255;
   });
   return d;
 }
 
 function makePipeline(state: {
-  gray?: boolean; lut?: Rgb[] | null; channels?: IChannelState[]; invert?: boolean;
+  gray?: boolean;
+  lut?: Rgb[] | null;
+  channels?: IChannelState[];
+  invert?: boolean;
 }): { pipe: DisplayPipeline; state: any } {
   const st = { gray: true, lut: IDENTITY_LUT, channels: [ch()], invert: false, ...state };
   const host: DisplayPipelineHost = {
@@ -57,10 +63,10 @@ describe('DisplayPipeline', () => {
     const { pipe } = makePipeline({ channels: [ch({ min: 100, max: 200 })] });
     const d = rgba([100, 100, 100], [150, 150, 150], [200, 200, 200], [50, 50, 50], [250, 250, 250]);
     pipe.applyToRgba(d);
-    expect(d[0]).toBe(0);    // window min → black
-    expect(d[4]).toBe(128);  // midpoint → round(0.5 * 255)
-    expect(d[8]).toBe(255);  // window max → white
-    expect(d[12]).toBe(0);   // below window clamps
+    expect(d[0]).toBe(0); // window min → black
+    expect(d[4]).toBe(128); // midpoint → round(0.5 * 255)
+    expect(d[8]).toBe(255); // window max → white
+    expect(d[12]).toBe(0); // below window clamps
     expect(d[16]).toBe(255); // above window clamps
   });
 
@@ -116,7 +122,11 @@ describe('DisplayPipeline', () => {
     // Both channels tinted white → each contributes its intensity to R, G and B.
     const { pipe } = makePipeline({
       gray: false,
-      channels: [ch({ color: '#ffffff' }), ch({ index: 1, color: '#ffffff' }), ch({ index: 2, color: '#0000ff', visible: false })],
+      channels: [
+        ch({ color: '#ffffff' }),
+        ch({ index: 1, color: '#ffffff' }),
+        ch({ index: 2, color: '#0000ff', visible: false }),
+      ],
     });
     const d = rgba([200, 100, 0]);
     pipe.applyToRgba(d);
@@ -170,7 +180,7 @@ describe('DisplayPipeline', () => {
   it('channelRgbLut bakes window + tint into 256-entry tables', () => {
     const { pipe } = makePipeline({});
     const { r, g, b } = pipe.channelRgbLut(ch({ min: 0, max: 255, color: '#00ffff' })); // cyan
-    expect(r[255]).toBe(0);   // no red in cyan
+    expect(r[255]).toBe(0); // no red in cyan
     expect(g[255]).toBe(255);
     expect(b[255]).toBe(255);
     expect(g[128]).toBe(128); // linear mid
@@ -179,10 +189,10 @@ describe('DisplayPipeline', () => {
   it('channelRgbLut applies invert (window → invert → gamma) per channel', () => {
     const { pipe } = makePipeline({ invert: true });
     const { r, g, b } = pipe.channelRgbLut(ch({ min: 0, max: 255, gamma: 2, color: '#00ffff' }));
-    expect(r[0]).toBe(0);     // no red in cyan, inverted or not
-    expect(g[0]).toBe(255);   // inverted: 0 → full tint
-    expect(b[255]).toBe(0);   // inverted: 255 → black
-    expect(g[64]).toBe(221);  // (1 - 64/255)^(1/2) ≈ 0.8655
+    expect(r[0]).toBe(0); // no red in cyan, inverted or not
+    expect(g[0]).toBe(255); // inverted: 0 → full tint
+    expect(b[255]).toBe(0); // inverted: 255 → black
+    expect(g[64]).toBe(221); // (1 - 64/255)^(1/2) ≈ 0.8655
   });
 
   it('compositeChannels inverts each channel before summing', () => {
@@ -200,7 +210,7 @@ describe('DisplayPipeline', () => {
   });
 
   // ── compositeChannels (additive per-channel merge) ────────────────────
-  it('compositeChannels sums each visible channel\'s tinted plane into one opaque RGBA image', () => {
+  it("compositeChannels sums each visible channel's tinted plane into one opaque RGBA image", () => {
     const { pipe } = makePipeline({ gray: false });
     const out = pipe.compositeChannels(
       [rgba([100, 100, 100]), rgba([200, 200, 200]), rgba([50, 50, 50])],

@@ -33,7 +33,10 @@ export class StackControlsComponent {
   /** Stack mode is on (the toggle's state). */
   @Input() showStack = false;
   /** The two stack-mode choices of the toggle. */
-  @Input() stackOptions: StackOption[] = [{ name: 'Single image', val: 'false' }, { name: 'Stack', val: 'true' }];
+  @Input() stackOptions: StackOption[] = [
+    { name: 'Single image', val: 'false' },
+    { name: 'Stack', val: 'true' },
+  ];
   /** The current slice (0-based). */
   @Input() zIndex = 0;
   /** The last slice index. */

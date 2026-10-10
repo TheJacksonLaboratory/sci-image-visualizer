@@ -7,14 +7,25 @@ import type { TranscriptGlyphName } from '../contracts/display-types';
 
 /** Marker shapes for the transcript "icon" mode. All star-convex, so a fan fills them. */
 export const TRANSCRIPT_GLYPHS = [
-  'circle', 'star', 'triangle', 'square', 'diamond', 'cross', 'hexagon', 'triangle-down',
-  'pentagon', 'x',
+  'circle',
+  'star',
+  'triangle',
+  'square',
+  'diamond',
+  'cross',
+  'hexagon',
+  'triangle-down',
+  'pentagon',
+  'x',
 ] as const;
 /** One of the marker shapes in {@link TRANSCRIPT_GLYPHS}. */
-export type TranscriptGlyph = typeof TRANSCRIPT_GLYPHS[number];
+export type TranscriptGlyph = (typeof TRANSCRIPT_GLYPHS)[number];
 // The view state names glyphs without importing this module; keep the two in step.
 const _glyphNamesMatch: TranscriptGlyph extends TranscriptGlyphName
-  ? (TranscriptGlyphName extends TranscriptGlyph ? true : never) : never = true;
+  ? TranscriptGlyphName extends TranscriptGlyph
+    ? true
+    : never
+  : never = true;
 void _glyphNamesMatch;
 
 /** Unit outline of a glyph, radius ≈ 1, centred on the origin, as `[x0, y0, x1, y1, …]`. */
@@ -41,8 +52,18 @@ export function glyphOutline(glyph: TranscriptGlyph): Float32Array {
   // A plus built as a 12-gon: arms of half-width w.
   const plus = (w: number, rotate: boolean) => {
     const pts = [
-      [w, -1], [w, -w], [1, -w], [1, w], [w, w], [w, 1],
-      [-w, 1], [-w, w], [-1, w], [-1, -w], [-w, -w], [-w, -1],
+      [w, -1],
+      [w, -w],
+      [1, -w],
+      [1, w],
+      [w, w],
+      [w, 1],
+      [-w, 1],
+      [-w, w],
+      [-1, w],
+      [-1, -w],
+      [-w, -w],
+      [-w, -1],
     ];
     const out = new Float32Array(pts.length * 2);
     const c = Math.SQRT1_2;
@@ -53,16 +74,26 @@ export function glyphOutline(glyph: TranscriptGlyph): Float32Array {
     return out;
   };
   switch (glyph) {
-    case 'circle': return poly(12);
-    case 'star': return star(5, 0.45);
-    case 'triangle': return poly(3);
-    case 'triangle-down': return poly(3, Math.PI / 2);
-    case 'square': return poly(4, Math.PI / 4, Math.SQRT2 * 0.8);
-    case 'diamond': return poly(4, -Math.PI / 2);
-    case 'hexagon': return poly(6, 0);
-    case 'pentagon': return poly(5);
-    case 'cross': return plus(0.32, false);
-    case 'x': return plus(0.28, true);
+    case 'circle':
+      return poly(12);
+    case 'star':
+      return star(5, 0.45);
+    case 'triangle':
+      return poly(3);
+    case 'triangle-down':
+      return poly(3, Math.PI / 2);
+    case 'square':
+      return poly(4, Math.PI / 4, Math.SQRT2 * 0.8);
+    case 'diamond':
+      return poly(4, -Math.PI / 2);
+    case 'hexagon':
+      return poly(6, 0);
+    case 'pentagon':
+      return poly(5);
+    case 'cross':
+      return plus(0.32, false);
+    case 'x':
+      return plus(0.28, true);
   }
 }
 
@@ -76,7 +107,10 @@ export function defaultGlyphFor(slot: number): TranscriptGlyph {
  * `glyphs[gene[i]]` scaled to `radius[i]` and centred on `(x[i], y[i])`.
  */
 export function glyphRings(
-  x: Float32Array, y: Float32Array, radius: Float32Array, glyphOf: (i: number) => Float32Array,
+  x: Float32Array,
+  y: Float32Array,
+  radius: Float32Array,
+  glyphOf: (i: number) => Float32Array,
 ): { coords: Float32Array; offsets: Uint32Array } {
   const n = x.length;
   const offsets = new Uint32Array(n + 1);

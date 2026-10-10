@@ -70,8 +70,9 @@ export class SimpleSliceAccessService {
     if (rawUrl.startsWith('blob:') || rawUrl.startsWith('data:')) return rawUrl;
     const cached = this.blobUrls.get(rawUrl);
     if (cached) return cached;
-    const pending = firstValueFrom(this.http.get(rawUrl, { responseType: 'blob' }))
-      .then((blob) => URL.createObjectURL(blob));
+    const pending = firstValueFrom(this.http.get(rawUrl, { responseType: 'blob' })).then((blob) =>
+      URL.createObjectURL(blob),
+    );
     this.blobUrls.set(rawUrl, pending);
     // A failed fetch is forgotten so the next call retries it.
     pending.catch(() => {
@@ -91,16 +92,20 @@ export class SimpleSliceAccessService {
    *  via the browser. Only real server URLs go through HttpClient so the auth
    *  interceptor applies. Mirrors {@link fetchAsBlobUrl}'s blob:/data: branch. */
   async fetchAsBitmap(rawUrl: string): Promise<ImageBitmap> {
-    const blob = rawUrl.startsWith('blob:') || rawUrl.startsWith('data:')
-      ? await (await fetch(rawUrl)).blob()
-      : await firstValueFrom(this.http.get(rawUrl, { responseType: 'blob' }));
+    const blob =
+      rawUrl.startsWith('blob:') || rawUrl.startsWith('data:')
+        ? await (await fetch(rawUrl)).blob()
+        : await firstValueFrom(this.http.get(rawUrl, { responseType: 'blob' }));
     return createImageBitmap(blob);
   }
 
   /** Revoke every cached blob: URL — an in-flight one once it resolves. */
   private revokeAll(): void {
     for (const pending of this.blobUrls.values()) {
-      pending.then((url) => URL.revokeObjectURL(url), () => undefined);
+      pending.then(
+        (url) => URL.revokeObjectURL(url),
+        () => undefined,
+      );
     }
     this.blobUrls.clear();
   }

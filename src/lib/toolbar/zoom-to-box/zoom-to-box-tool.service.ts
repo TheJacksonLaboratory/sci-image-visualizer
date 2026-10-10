@@ -72,10 +72,7 @@ export class ZoomToBoxTool implements ICanvasTool<void> {
     if (!host.pixelToData || !host.applyZoomToBox) return;
     const d0 = host.pixelToData(start.x, start.y);
     const d1 = host.pixelToData(end.x, end.y);
-    host.applyZoomToBox([
-      Math.min(d0.x, d1.x), Math.max(d0.x, d1.x),
-      Math.max(d0.y, d1.y), Math.min(d0.y, d1.y),
-    ]);
+    host.applyZoomToBox([Math.min(d0.x, d1.x), Math.max(d0.x, d1.x), Math.max(d0.y, d1.y), Math.min(d0.y, d1.y)]);
   }
 
   // ── Selection rectangle drawing ─────────────────────────────────────

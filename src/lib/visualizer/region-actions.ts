@@ -8,8 +8,15 @@ import { RegionOpsService } from '../region-ops.service';
 import { opEligible, regionsAt } from './visualizer-context-menu';
 
 /** The region-store members the set-operations read and write through. */
-export type RegionActionsTarget = Pick<IRegionStore, 'getRegions' | 'setRegions' | 'setSelectedShapeIndices' |
-  'getSelectedShapeIndices$' | 'getCanUndo$' | 'getCanRedo$'>;
+export type RegionActionsTarget = Pick<
+  IRegionStore,
+  | 'getRegions'
+  | 'setRegions'
+  | 'setSelectedShapeIndices'
+  | 'getSelectedShapeIndices$'
+  | 'getCanUndo$'
+  | 'getCanRedo$'
+>;
 
 /**
  * Region set-operations on the current selection (jit-ui#85) — select all, merge,
@@ -40,10 +47,26 @@ export class RegionActions {
   /** Mirror the store's selection and undo/redo depth until `until$` emits.
    *  `changed` runs after an undo/redo flip (the toolbar binds those). */
   bind(until$: Observable<unknown>, changed: () => void): void {
-    this.target.getCanUndo$().pipe(takeUntil(until$)).subscribe((v) => { this.canUndo = v; changed(); });
-    this.target.getCanRedo$().pipe(takeUntil(until$)).subscribe((v) => { this.canRedo = v; changed(); });
-    this.target.getSelectedShapeIndices$().pipe(takeUntil(until$))
-      .subscribe((indices) => { this.selectedIndices = indices || []; });
+    this.target
+      .getCanUndo$()
+      .pipe(takeUntil(until$))
+      .subscribe((v) => {
+        this.canUndo = v;
+        changed();
+      });
+    this.target
+      .getCanRedo$()
+      .pipe(takeUntil(until$))
+      .subscribe((v) => {
+        this.canRedo = v;
+        changed();
+      });
+    this.target
+      .getSelectedShapeIndices$()
+      .pipe(takeUntil(until$))
+      .subscribe((indices) => {
+        this.selectedIndices = indices || [];
+      });
   }
 
   /** The currently-selected regions (live store instances). */
@@ -54,7 +77,9 @@ export class RegionActions {
   /** Select every region on the image (excludes intensity-profile lines). */
   selectAll(): void {
     const indices: number[] = [];
-    this.target.getRegions().forEach((r, i) => { if (r.kind !== 'profile') indices.push(i); });
+    this.target.getRegions().forEach((r, i) => {
+      if (r.kind !== 'profile') indices.push(i);
+    });
     this.target.setSelectedShapeIndices(indices);
   }
 
@@ -71,7 +96,10 @@ export class RegionActions {
   ungroup(): void {
     const sel = this.selected.filter((r) => this.ops.canUngroup(r));
     if (sel.length === 0) return;
-    this.replace(sel, sel.flatMap((r) => this.ops.ungroup(r)));
+    this.replace(
+      sel,
+      sel.flatMap((r) => this.ops.ungroup(r)),
+    );
   }
 
   /** Replace the selection with its inverse inside the image rectangle. */
@@ -82,7 +110,8 @@ export class RegionActions {
     const inv = this.ops.inverse(sel, w, h);
     if (!inv) {
       this.notify({
-        severity: 'warn', summary: 'Inverse',
+        severity: 'warn',
+        summary: 'Inverse',
         detail: 'Nothing to invert — select one or more closed regions first.',
       });
       return;
@@ -94,7 +123,10 @@ export class RegionActions {
   simplify(thresholdPx: number): void {
     const sel = opEligible(this.selected);
     if (sel.length === 0) return;
-    this.replace(sel, sel.map((r) => this.ops.simplify(r, thresholdPx)));
+    this.replace(
+      sel,
+      sel.map((r) => this.ops.simplify(r, thresholdPx)),
+    );
     this.displaySimplifyDialog = false;
   }
 
@@ -117,7 +149,8 @@ export class RegionActions {
   private frame(regions: Region[]): { w: number; h: number } {
     let [w, h] = this.imageSize() ?? [0, 0];
     if (!(w > 0) || !(h > 0)) {
-      let maxX = 0, maxY = 0;
+      let maxX = 0,
+        maxY = 0;
       const scan = (xs: number[], ys: number[]) => {
         for (const x of xs) maxX = Math.max(maxX, x);
         for (const y of ys) maxY = Math.max(maxY, y);

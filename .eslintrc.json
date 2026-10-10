@@ -1,26 +1,15 @@
 {
   "root": true,
-  "ignorePatterns": [
-    "dist/**",
-    "coverage/**",
-    "node_modules/**",
-    "*.config.ts",
-    "examples/browser-image/**"
-  ],
+  "ignorePatterns": ["dist/**", "coverage/**", "node_modules/**", "*.config.ts", "examples/browser-image/**"],
   "overrides": [
     {
-      "files": [
-        "*.ts"
-      ],
+      "files": ["*.ts"],
       "parser": "@typescript-eslint/parser",
       "parserOptions": {
         "ecmaVersion": 2022,
         "sourceType": "module"
       },
-      "plugins": [
-        "@typescript-eslint",
-        "@angular-eslint"
-      ],
+      "plugins": ["@typescript-eslint", "@angular-eslint"],
       "extends": [
         "eslint:recommended",
         "plugin:@typescript-eslint/recommended",
@@ -53,10 +42,7 @@
             "caughtErrors": "none"
           }
         ],
-        "object-curly-spacing": [
-          "error",
-          "always"
-        ],
+        "object-curly-spacing": ["error", "always"],
         "quotes": [
           "error",
           "single",
@@ -77,22 +63,14 @@
         "no-console": [
           "warn",
           {
-            "allow": [
-              "warn",
-              "error"
-            ]
+            "allow": ["warn", "error"]
           }
         ]
       }
     },
     {
-      "files": [
-        "src/lib/contracts/**/*.ts"
-      ],
-      "excludedFiles": [
-        "*.spec.ts",
-        "src/lib/contracts/cell-segmenter.contract.ts"
-      ],
+      "files": ["src/lib/contracts/**/*.ts"],
+      "excludedFiles": ["*.spec.ts", "src/lib/contracts/cell-segmenter.contract.ts"],
       "rules": {
         "no-restricted-imports": [
           "error",
@@ -119,22 +97,14 @@
       }
     },
     {
-      "files": [
-        "*.html"
-      ],
+      "files": ["*.html"],
       "parser": "@angular-eslint/template-parser",
-      "plugins": [
-        "@angular-eslint/template"
-      ],
-      "extends": [
-        "plugin:@angular-eslint/template/recommended"
-      ],
+      "plugins": ["@angular-eslint/template"],
+      "extends": ["plugin:@angular-eslint/template/recommended"],
       "rules": {}
     },
     {
-      "files": [
-        "examples/tile-server/**/*.mjs"
-      ],
+      "files": ["examples/tile-server/**/*.mjs"],
       "env": {
         "node": true,
         "es2022": true
@@ -143,14 +113,9 @@
         "ecmaVersion": 2022,
         "sourceType": "module"
       },
-      "extends": [
-        "eslint:recommended"
-      ],
+      "extends": ["eslint:recommended"],
       "rules": {
-        "object-curly-spacing": [
-          "error",
-          "always"
-        ],
+        "object-curly-spacing": ["error", "always"],
         "quotes": [
           "error",
           "single",

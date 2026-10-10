@@ -15,7 +15,10 @@ const tileClient = require('./tile-client');
 function tile(n: number, [r, g, b]: [number, number, number]) {
   const data = new Uint8ClampedArray(n * 4);
   for (let i = 0; i < n; i++) {
-    data[i * 4] = r; data[i * 4 + 1] = g; data[i * 4 + 2] = b; data[i * 4 + 3] = 255;
+    data[i * 4] = r;
+    data[i * 4 + 1] = g;
+    data[i * 4 + 2] = b;
+    data[i * 4 + 3] = 255;
   }
   return { data, width: n, height: 1 };
 }
@@ -93,7 +96,8 @@ describe('HistogramSampler', () => {
   // ── computeMultiChannelHistograms ─────────────────────────────────────
   it('bins one histogram per channel from per-channel tiles and nudges the pane', async () => {
     (tileClient.fetchTileRgba as jest.Mock).mockImplementation((_http: any, url: string) =>
-      Promise.resolve(tile(2, url.includes('channel=0') ? [15, 15, 15] : [240, 240, 240])));
+      Promise.resolve(tile(2, url.includes('channel=0') ? [15, 15, 15] : [240, 240, 240])),
+    );
     await sampler.computeMultiChannelHistograms(DESC, 'B64', 3);
 
     expect(sampler.get(3, 0)!.counts[15]).toBe(2);
@@ -113,7 +117,7 @@ describe('HistogramSampler', () => {
     sampler.computeSimpleHistogram(2, tile(5, [42, 42, 42]).data, /*gray*/ true);
     const h = sampler.get(2, 0)!;
     expect(h.counts[42]).toBe(5);
-    expect(sampler.get(2, 1)).toBeNull();            // grayscale → one channel only
+    expect(sampler.get(2, 1)).toBeNull(); // grayscale → one channel only
     expect(onSampled).toHaveBeenCalled();
     expect(tileClient.fetchTileRgba).not.toHaveBeenCalled(); // never hits the server
   });
@@ -127,8 +131,14 @@ describe('HistogramSampler', () => {
 
   it('skips fully-transparent pixels', () => {
     const data = new Uint8ClampedArray(2 * 4);
-    data[0] = 7; data[1] = 7; data[2] = 7; data[3] = 255; // opaque gray 7
-    data[4] = 99; data[5] = 99; data[6] = 99; data[7] = 0; // transparent → ignored
+    data[0] = 7;
+    data[1] = 7;
+    data[2] = 7;
+    data[3] = 255; // opaque gray 7
+    data[4] = 99;
+    data[5] = 99;
+    data[6] = 99;
+    data[7] = 0; // transparent → ignored
     sampler.computeSimpleHistogram(0, data, true);
     expect(sampler.get(0, 0)!.counts[7]).toBe(1);
     expect(sampler.get(0, 0)!.counts[99]).toBe(0);
@@ -147,8 +157,13 @@ describe('HistogramSampler', () => {
 
   // ── native histogram fetch ────────────────────────────────────────────
   const NATIVE = {
-    bitDepth: 16, rangeMin: 96, rangeMax: 150, observedMin: 96, observedMax: 150,
-    binWidth: 0.215, counts: [4, 0, 8],
+    bitDepth: 16,
+    rangeMin: 96,
+    rangeMax: 150,
+    observedMin: 96,
+    observedMax: 150,
+    binWidth: 0.215,
+    counts: [4, 0, 8],
   };
   /** What `http.get(url, { observe: 'response' })` emits for it. */
   const NATIVE_RESP = { status: 200, body: NATIVE };
@@ -213,7 +228,13 @@ describe('HistogramSampler', () => {
 
   it('does not cache a native histogram that lands after clear()', async () => {
     let respond!: (v: unknown) => void;
-    http.get.mockReturnValueOnce(from(new Promise((r) => { respond = r; })));
+    http.get.mockReturnValueOnce(
+      from(
+        new Promise((r) => {
+          respond = r;
+        }),
+      ),
+    );
     const first = firstValueFrom(sampler.native$('A64', 0, 0, 256));
     sampler.clear();
     respond(NATIVE_RESP);
@@ -227,7 +248,7 @@ describe('HistogramSampler', () => {
     http.get.mockReturnValue(of(NATIVE_RESP));
     await firstValueFrom(sampler.native$('A64', 0, 0, 256));
     await firstValueFrom(sampler.native$('B64', 0, 0, 256)); // other image, same z/channel
-    await firstValueFrom(sampler.native$('B64', 0, 0, 64));  // other bin count
+    await firstValueFrom(sampler.native$('B64', 0, 0, 64)); // other bin count
     expect(http.get).toHaveBeenCalledTimes(3);
     expect(http.get.mock.calls[2][0]).toContain('bins=64');
   });
@@ -238,7 +259,7 @@ describe('HistogramSampler', () => {
     const a = sampler.computeMultiChannelHistograms(DESC, 'B64', 1);
     const b = sampler.computeMultiChannelHistograms(DESC, 'B64', 1); // scrub back mid-flight
     await Promise.all([a, b]);
-    await sampler.computeMultiChannelHistograms(DESC, 'B64', 1);     // and once cached
+    await sampler.computeMultiChannelHistograms(DESC, 'B64', 1); // and once cached
     await sampler.computeImageWindow(DESC, 'B64', 1);
     expect(tileClient.fetchTileRgba).toHaveBeenCalledTimes(2); // one run × 2 channels
   });

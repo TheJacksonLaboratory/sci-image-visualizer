@@ -5,28 +5,39 @@
      then the model-picker dropdown (the chevron) which governs BOTH tools.
      Falls back to Segment + point with no model picker when none are set. -->
 <span *ngIf="samModels.length; else segmentPlain" class="p-buttonset segment-split">
-  <p-button size="small" [text]="true" ariaLabel="Segment with SAM (box prompt)"
-            pTooltip="Segment the drawn rectangles with SAM (box prompt)"
-            tooltipPosition="bottom"
-            (onClick)="segmentRegions.emit()">
-    <img src="assets/plotting/sam-box-prompt.svg"
-         class="toolbar-icon-dark" style="width: 1rem"/>
+  <p-button
+    size="small"
+    [text]="true"
+    ariaLabel="Segment with SAM (box prompt)"
+    pTooltip="Segment the drawn rectangles with SAM (box prompt)"
+    tooltipPosition="bottom"
+    (onClick)="segmentRegions.emit()"
+  >
+    <img src="assets/plotting/sam-box-prompt.svg" class="toolbar-icon-dark" style="width: 1rem" />
   </p-button>
   <ng-container [ngTemplateOutlet]="samPointBtn"></ng-container>
-  <p-button icon="pi pi-chevron-down" size="small" [text]="true" ariaLabel="Pick the SAM model"
-            pTooltip="Pick the SAM model (used by both segment tools)"
-            tooltipPosition="bottom"
-            (onClick)="samModelMenu.toggle($event)">
+  <p-button
+    icon="pi pi-chevron-down"
+    size="small"
+    [text]="true"
+    ariaLabel="Pick the SAM model"
+    pTooltip="Pick the SAM model (used by both segment tools)"
+    tooltipPosition="bottom"
+    (onClick)="samModelMenu.toggle($event)"
+  >
   </p-button>
 </span>
 <ng-template #segmentPlain>
   <span class="p-buttonset segment-split">
-    <p-button size="small" [text]="true" ariaLabel="Segment with SAM (box prompt)"
-              pTooltip="Segment the drawn rectangles with SAM (box prompt)"
-              tooltipPosition="bottom"
-              (onClick)="segmentRegions.emit()">
-      <img src="assets/plotting/sam-box-prompt.svg"
-           class="toolbar-icon-dark" style="width: 1rem"/>
+    <p-button
+      size="small"
+      [text]="true"
+      ariaLabel="Segment with SAM (box prompt)"
+      pTooltip="Segment the drawn rectangles with SAM (box prompt)"
+      tooltipPosition="bottom"
+      (onClick)="segmentRegions.emit()"
+    >
+      <img src="assets/plotting/sam-box-prompt.svg" class="toolbar-icon-dark" style="width: 1rem" />
     </p-button>
     <ng-container [ngTemplateOutlet]="samPointBtn"></ng-container>
   </span>
@@ -34,21 +45,29 @@
 <!-- Point-prompt tool — shared between the models / no-models layouts so it
      always sits just left of the model dropdown. -->
 <ng-template #samPointBtn>
-  <p-button size="small" ariaLabel="SAM point prompts"
-            [text]="activeDragMode !== 'samPoint'"
-            pTooltip="SAM point prompts: click a fiber to segment it as a new region;
+  <p-button
+    size="small"
+    ariaLabel="SAM point prompts"
+    [text]="activeDragMode !== 'samPoint'"
+    pTooltip="SAM point prompts: click a fiber to segment it as a new region;
             Shift/Alt-click to refine (exclude) the current one.<br>Esc undoes it."
-            [escape]="false" tooltipPosition="bottom"
-            (onClick)="toggleDragMode.emit('samPoint')">
-    <img src="assets/plotting/sam-point-prompt.svg"
-         [class]="activeDragMode === 'samPoint' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
-         style="width: 1rem"/>
+    [escape]="false"
+    tooltipPosition="bottom"
+    (onClick)="toggleDragMode.emit('samPoint')"
+  >
+    <img
+      src="assets/plotting/sam-point-prompt.svg"
+      [class]="activeDragMode === 'samPoint' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+      style="width: 1rem"
+    />
   </p-button>
 </ng-template>
 <p-menu #samModelMenu styleClass="model-menu" [model]="samMenuItems" [popup]="true" appendTo="body">
   <ng-template pTemplate="item" let-item>
-    <ng-container [ngTemplateOutlet]="modelMenuItem"
-                  [ngTemplateOutletContext]="{ $implicit: item }"></ng-container>
+    <ng-container
+      [ngTemplateOutlet]="modelMenuItem"
+      [ngTemplateOutletContext]="{ $implicit: item }"
+    ></ng-container>
   </ng-template>
 </p-menu>
 
@@ -83,21 +102,31 @@
          announced whether or not the tooltip is showing. It is stripped of
          markup first, since the copy contains `<b>`/`<br>` for the visual
          tooltip and those would otherwise be read out literally. -->
-    <button *ngIf="item.tooltip" type="button"
-            class="pi pi-info-circle model-info-icon"
-            [attr.aria-label]="item.infoLabel"
-            [pTooltip]="item.tooltip" [escape]="false" tooltipPosition="bottom"
-            appendTo="body" tooltipStyleClass="model-info-tooltip"
-            (click)="$event.stopPropagation()"
-            (keydown.enter)="$event.stopPropagation()"
-            (keydown.space)="$event.stopPropagation()"></button>
+    <button
+      *ngIf="item.tooltip"
+      type="button"
+      class="pi pi-info-circle model-info-icon"
+      [attr.aria-label]="item.infoLabel"
+      [pTooltip]="item.tooltip"
+      [escape]="false"
+      tooltipPosition="bottom"
+      appendTo="body"
+      tooltipStyleClass="model-info-tooltip"
+      (click)="$event.stopPropagation()"
+      (keydown.enter)="$event.stopPropagation()"
+      (keydown.space)="$event.stopPropagation()"
+    ></button>
   </a>
 </ng-template>
-<p-button size="small" [text]="true" ariaLabel="Segment cells (cellpose-SAM)"
-          pTooltip="Auto-segment cells inside each drawn rectangle (cellpose-SAM)"
-          tooltipPosition="bottom"
-          (onClick)="segmentCellpose.emit()">
-  <img src="assets/plotting/cells.svg" class="toolbar-icon-dark" style="width: 1rem"/>
+<p-button
+  size="small"
+  [text]="true"
+  ariaLabel="Segment cells (cellpose-SAM)"
+  pTooltip="Auto-segment cells inside each drawn rectangle (cellpose-SAM)"
+  tooltipPosition="bottom"
+  (onClick)="segmentCellpose.emit()"
+>
+  <img src="assets/plotting/cells.svg" class="toolbar-icon-dark" style="width: 1rem" />
 </p-button>
 
 <!-- Contributed no-prompt tools (TOOLBAR_TOOLS). Unlike the SAM and
@@ -111,35 +140,53 @@
      the closed model dependencies. -->
 <ng-container *ngFor="let tool of contributedTools; trackBy: trackToolById">
   <span class="p-buttonset segment-split">
-    <p-button size="small" [text]="true" [ariaLabel]="tool.label"
-              [pTooltip]="tool.runTooltip"
-              tooltipPosition="bottom"
-              (onClick)="runTool.emit(tool.id)">
+    <p-button
+      size="small"
+      [text]="true"
+      [ariaLabel]="tool.label"
+      [pTooltip]="tool.runTooltip"
+      tooltipPosition="bottom"
+      (onClick)="runTool.emit(tool.id)"
+    >
       <!-- `toolbar-icon-dark` is hardcoded rather than bound, unlike the
            toggle tools: these fire a run and have no active state. -->
-      <img *ngIf="tool.icon.src" [src]="tool.icon.src" class="toolbar-icon-dark"
-           style="width: 1rem" [alt]="tool.label" />
+      <img
+        *ngIf="tool.icon.src"
+        [src]="tool.icon.src"
+        class="toolbar-icon-dark"
+        style="width: 1rem"
+        [alt]="tool.label"
+      />
       <i *ngIf="tool.icon.pi" class="pi {{ tool.icon.pi }}"></i>
     </p-button>
-    <p-button icon="pi pi-chevron-down" size="small" [text]="true"
-              [ariaLabel]="'Pick the model for ' + tool.label"
-              [pTooltip]="tool.modelTooltip || 'Pick the model'"
-              tooltipPosition="bottom"
-              (onClick)="toolMenu.toggle($event)">
+    <p-button
+      icon="pi pi-chevron-down"
+      size="small"
+      [text]="true"
+      [ariaLabel]="'Pick the model for ' + tool.label"
+      [pTooltip]="tool.modelTooltip || 'Pick the model'"
+      tooltipPosition="bottom"
+      (onClick)="toolMenu.toggle($event)"
+    >
     </p-button>
-    <p-button *ngIf="tool.params.length"
-              icon="pi pi-sliders-h" size="small" [text]="true"
-              [ariaLabel]="'Parameters for ' + tool.label"
-              [pTooltip]="tool.paramsTooltip || 'Parameters'"
-              tooltipPosition="bottom"
-              (onClick)="openToolParams.emit(tool.id)">
+    <p-button
+      *ngIf="tool.params.length"
+      icon="pi pi-sliders-h"
+      size="small"
+      [text]="true"
+      [ariaLabel]="'Parameters for ' + tool.label"
+      [pTooltip]="tool.paramsTooltip || 'Parameters'"
+      tooltipPosition="bottom"
+      (onClick)="openToolParams.emit(tool.id)"
+    >
     </p-button>
   </span>
-  <p-menu #toolMenu styleClass="model-menu" [model]="toolMenuItems[tool.id] || []"
-          [popup]="true" appendTo="body">
+  <p-menu #toolMenu styleClass="model-menu" [model]="toolMenuItems[tool.id] || []" [popup]="true" appendTo="body">
     <ng-template pTemplate="item" let-item>
-      <ng-container [ngTemplateOutlet]="modelMenuItem"
-                    [ngTemplateOutletContext]="{ $implicit: item }"></ng-container>
+      <ng-container
+        [ngTemplateOutlet]="modelMenuItem"
+        [ngTemplateOutletContext]="{ $implicit: item }"
+      ></ng-container>
     </ng-template>
   </p-menu>
 </ng-container>

@@ -14,7 +14,10 @@
  */
 
 import type {
-  SpatialBounds, SpatialDataset, SpatialImageRef, SpatialTileLevel,
+  SpatialBounds,
+  SpatialDataset,
+  SpatialImageRef,
+  SpatialTileLevel,
 } from '../contracts/spatial-dataset.contract';
 import type { SpatialViewState } from '../contracts/display-types';
 import { quantile } from './stats';
@@ -57,7 +60,8 @@ export function isCuratedColumn(name: string): boolean {
  * any categorical column.
  */
 export function cellTypeColumnFor(
-  dataset: SpatialDataset, view: Pick<SpatialViewState, 'cellTypeColumn'>,
+  dataset: SpatialDataset,
+  view: Pick<SpatialViewState, 'cellTypeColumn'>,
 ): string | null {
   const categorical = dataset.columns.filter((c) => c.kind === 'categorical');
   if (view.cellTypeColumn && categorical.some((c) => c.name === view.cellTypeColumn)) {
@@ -83,8 +87,12 @@ export function pixelsPerDataUnit(zoom: number, ref?: SpatialImageRef | null): n
  * viewport) so tiles just off screen are already there when a pan brings them in.
  */
 export function visibleDataRect(
-  center: readonly [number, number], zoom: number, canvasW: number, canvasH: number,
-  ref?: SpatialImageRef | null, margin = 0.15,
+  center: readonly [number, number],
+  zoom: number,
+  canvasW: number,
+  canvasH: number,
+  ref?: SpatialImageRef | null,
+  margin = 0.15,
 ): DataRect | null {
   if (!(zoom > 0) || !(canvasW > 0) || !(canvasH > 0)) return null;
   const sx = ref?.scale?.[0] ?? 1;
@@ -110,8 +118,11 @@ export function visibleDataRect(
  * rectangle's centre outward, so the middle of the screen fills in first.
  */
 export function tilesInRect(
-  rect: DataRect, level: number, levels: readonly SpatialTileLevel[],
-  bounds?: SpatialBounds | null, limit = Infinity,
+  rect: DataRect,
+  level: number,
+  levels: readonly SpatialTileLevel[],
+  bounds?: SpatialBounds | null,
+  limit = Infinity,
 ): TileKey[] {
   const size = levels[level]?.tileSize;
   if (!(size > 0)) return [];
@@ -133,15 +144,20 @@ export function tilesInRect(
   for (let gy = gy0; gy <= gy1; gy++) {
     for (let gx = gx0; gx <= gx1; gx++) out.push({ level, gx, gy });
   }
-  out.sort((a, b) => ((a.gx + 0.5 - cx) ** 2 + (a.gy + 0.5 - cy) ** 2)
-    - ((b.gx + 0.5 - cx) ** 2 + (b.gy + 0.5 - cy) ** 2));
+  out.sort(
+    (a, b) => (a.gx + 0.5 - cx) ** 2 + (a.gy + 0.5 - cy) ** 2 - ((b.gx + 0.5 - cx) ** 2 + (b.gy + 0.5 - cy) ** 2),
+  );
   return out.length > limit ? out.slice(0, limit) : out;
 }
 
 /** {@link tilesInRect} for a grid whose tile (0, 0) starts at `origin`. */
 export function tilesInRectFrom(
-  origin: readonly [number, number], rect: DataRect, level: number,
-  levels: readonly SpatialTileLevel[], bounds?: SpatialBounds | null, limit = Infinity,
+  origin: readonly [number, number],
+  rect: DataRect,
+  level: number,
+  levels: readonly SpatialTileLevel[],
+  bounds?: SpatialBounds | null,
+  limit = Infinity,
 ): TileKey[] {
   const [ox, oy] = origin;
   const shifted = { x0: rect.x0 - ox, y0: rect.y0 - oy, x1: rect.x1 - ox, y1: rect.y1 - oy };
@@ -189,9 +205,7 @@ export const POLYGON_LEVEL_MIN_CELL_PX = [36, 18, 8, Infinity];
  * Which polygon level suits this zoom, or -1 for "too small to outline".
  * `detail` > 1 prefers finer levels (sharper, slower); < 1 coarser.
  */
-export function polygonLevelFor(
-  pxPerUnit: number, cellDiameter: number, levelCount: number, detail = 1,
-): number {
+export function polygonLevelFor(pxPerUnit: number, cellDiameter: number, levelCount: number, detail = 1): number {
   const cellPx = pxPerUnit * cellDiameter * detail;
   const table = POLYGON_LEVEL_MIN_CELL_PX;
   for (let l = 0; l < levelCount; l++) {
@@ -209,7 +223,9 @@ export function polygonLevelFor(
  * keeps the view fast.
  */
 export function transcriptLevelFor(
-  pxPerUnit: number, levels: readonly SpatialTileLevel[], targetTilePx = 512,
+  pxPerUnit: number,
+  levels: readonly SpatialTileLevel[],
+  targetTilePx = 512,
 ): number {
   if (!levels.length || !(pxPerUnit > 0)) return 0;
   let best = 0;

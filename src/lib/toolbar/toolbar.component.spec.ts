@@ -49,7 +49,7 @@ describe('ToolbarComponent', () => {
     expect(component['isImageView']).toBe(false);
   });
 
-  it('a contributed plot mode gets exactly its base type\'s tools', () => {
+  it("a contributed plot mode gets exactly its base type's tools", () => {
     component.selectedPlotType = 'dianne';
     component.basePlotType = PlotType.IMAGE;
     expect(component['effectivePlotType']).toBe(PlotType.IMAGE);
@@ -77,16 +77,16 @@ describe('ToolbarComponent', () => {
   it('showsLiveSliceScrubber for the live-scrub views incl. the napari surface (stack slider)', () => {
     // The 2D spatial view scrubs too: over a 3D dataset the registered volume IS
     // the image, and the slider picks the section whose observations are drawn.
-    for (const t of [
-      PlotType.IMAGE, PlotType.NAPARI_IMAGE, PlotType.NAPARI_SURFACE, PlotType.SPATIAL_OMICS,
-    ]) {
+    for (const t of [PlotType.IMAGE, PlotType.NAPARI_IMAGE, PlotType.NAPARI_SURFACE, PlotType.SPATIAL_OMICS]) {
       component.selectedPlotType = t;
       expect(component['showsLiveSliceScrubber']).toBe(true);
     }
     // Volume/isosurface render the whole stack at once — no per-slice scrubber —
     // and the 3D cloud has no plane to pick.
     for (const t of [
-      PlotType.NAPARI_VOLUME, PlotType.NAPARI_ISOSURFACE, PlotType.HEATMAP,
+      PlotType.NAPARI_VOLUME,
+      PlotType.NAPARI_ISOSURFACE,
+      PlotType.HEATMAP,
       PlotType.SPATIAL_OMICS_3D,
     ]) {
       component.selectedPlotType = t;
@@ -162,22 +162,30 @@ describe('ToolbarComponent', () => {
 
 describe('ToolbarComponent — dialog tools', () => {
   @Component({
-    template: `
-      <plotting-toolbar [selectedPlotType]="type" [dialogTools]="dialogTools"
-                        [openDialogToolId]="openId" (toggleDialogTool)="toggled.push($event)">
-        <button class="host-pipeline">pipeline</button>
-      </plotting-toolbar>`,
+    template: ` <plotting-toolbar
+      [selectedPlotType]="type"
+      [dialogTools]="dialogTools"
+      [openDialogToolId]="openId"
+      (toggleDialogTool)="toggled.push($event)"
+    >
+      <button class="host-pipeline">pipeline</button>
+    </plotting-toolbar>`,
   })
   class HostComponent {
     type: PlotTypeId = PlotType.IMAGE;
     openId: string | null = null;
     toggled: string[] = [];
-    dialogTools: ToolbarDialogToolContribution[] = [{
-      kind: 'dialog', id: 'dianne', label: 'DIANNE', icon: { pi: 'pi-pencil' },
-      tooltip: 'Digital Pathology - DIANNE',
-      activate: () => ({ deactivate: () => undefined }),
-      mount: () => () => undefined,
-    }];
+    dialogTools: ToolbarDialogToolContribution[] = [
+      {
+        kind: 'dialog',
+        id: 'dianne',
+        label: 'DIANNE',
+        icon: { pi: 'pi-pencil' },
+        tooltip: 'Digital Pathology - DIANNE',
+        activate: () => ({ deactivate: () => undefined }),
+        mount: () => () => undefined,
+      },
+    ];
   }
 
   let fixture: ComponentFixture<HostComponent>;
@@ -198,7 +206,7 @@ describe('ToolbarComponent — dialog tools', () => {
     fixture.detectChanges();
   });
 
-  it('shows the button in the Image view, right after the host\'s own buttons', () => {
+  it("shows the button in the Image view, right after the host's own buttons", () => {
     const b = button();
     expect(b).not.toBeNull();
     const pipeline = fixture.nativeElement.querySelector('.host-pipeline') as HTMLElement;

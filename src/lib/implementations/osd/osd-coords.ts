@@ -18,7 +18,7 @@ import { OsdRectLike, OsdTiledImageLike, OsdViewerLike } from './osd-viewer-like
 /** Reference tiled image for image<->viewport conversions (any slice works since
  *  they share geometry). */
 function refItem(viewer: OsdViewerLike): OsdTiledImageLike | null {
-  return (viewer.world?.getItemCount() ?? 0) > 0 ? viewer.world.getItemAt(0) ?? null : null;
+  return (viewer.world?.getItemCount() ?? 0) > 0 ? (viewer.world.getItemAt(0) ?? null) : null;
 }
 
 /** Viewer-element pixel -> image (data) coordinates. */
@@ -45,7 +45,11 @@ export function imageToElement(viewer: OsdViewerLike, x: number, y: number): { x
 
 /** Image-space rectangle -> viewport rectangle (for fitBounds). */
 export function imageRectToViewport(
-  viewer: OsdViewerLike, x: number, y: number, w: number, h: number,
+  viewer: OsdViewerLike,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
 ): OpenSeadragon.Rect {
   const rect = new OSD.Rect(x, y, w, h);
   const item = refItem(viewer);

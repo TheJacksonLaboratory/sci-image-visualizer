@@ -80,7 +80,9 @@ describe('hoverText', () => {
 
   it('keeps a value readable at either extreme, and needs no unit', () => {
     const big: HoverSource = {
-      kind: 'continuous', name: 'counts', values: Float32Array.from([12345, 0.0001, 3.14159]),
+      kind: 'continuous',
+      name: 'counts',
+      values: Float32Array.from([12345, 0.0001, 3.14159]),
     };
     expect(hoverText(big, 0)).toEqual(['1.23e+4', 'counts']);
     expect(hoverText(big, 1)).toEqual(['1.00e-4', 'counts']);
@@ -115,8 +117,8 @@ describe('PointGridIndex', () => {
     const positions = cloud(5000);
     const index = PointGridIndex.build(positions)!;
     for (let q = 0; q < 500; q++) {
-      const x = (q * 37) % 1100 - 50;
-      const y = (q * 53) % 700 - 50;
+      const x = ((q * 37) % 1100) - 50;
+      const y = ((q * 53) % 700) - 50;
       for (const r of [0.5, 5, 40, 2000]) {
         expect(index.nearest(x, y, r)).toBe(nearestObservation(positions, x, y, r));
       }

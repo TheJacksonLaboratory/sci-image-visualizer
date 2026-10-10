@@ -1,6 +1,16 @@
 import {
-  ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, EventEmitter, Inject, Input, NgZone, OnInit,
-  Output, ViewChild, inject,
+  ChangeDetectionStrategy,
+  ChangeDetectorRef,
+  Component,
+  DestroyRef,
+  EventEmitter,
+  Inject,
+  Input,
+  NgZone,
+  OnInit,
+  Output,
+  ViewChild,
+  inject,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
@@ -54,8 +64,15 @@ let controlsInstanceSeq = 0;
   selector: 'spatial-controls',
   standalone: true,
   imports: [
-    CommonModule, FormsModule, ButtonModule, CheckboxModule, DialogModule, TooltipModule,
-    SpatialCellsPanelComponent, SpatialTranscriptsPanelComponent, SpatialObservationsPanelComponent,
+    CommonModule,
+    FormsModule,
+    ButtonModule,
+    CheckboxModule,
+    DialogModule,
+    TooltipModule,
+    SpatialCellsPanelComponent,
+    SpatialTranscriptsPanelComponent,
+    SpatialObservationsPanelComponent,
     SpatialChartsComponent,
   ],
   templateUrl: './spatial-controls.component.html',
@@ -169,36 +186,60 @@ export class SpatialControlsComponent implements OnInit {
     if (!this.controls) return;
 
     const untilDestroyed = <T>() => takeUntilDestroyed<T>(this.destroyRef);
-    this.controls.getDataset$().pipe(untilDestroyed()).subscribe((dataset) => {
-      this.dataset = dataset;
-      this.genes.setDataset(dataset);
-      // A dataset with no cells to outline leads with its observations.
-      this.open = { ...this.open, cells: !!(dataset?.polygonTiles || dataset?.polygons),
-        observations: !(dataset?.polygonTiles || dataset?.polygons) };
-      void this.refreshKey();
-      this.cdr.markForCheck();
-    });
+    this.controls
+      .getDataset$()
+      .pipe(untilDestroyed())
+      .subscribe((dataset) => {
+        this.dataset = dataset;
+        this.genes.setDataset(dataset);
+        // A dataset with no cells to outline leads with its observations.
+        this.open = {
+          ...this.open,
+          cells: !!(dataset?.polygonTiles || dataset?.polygons),
+          observations: !(dataset?.polygonTiles || dataset?.polygons),
+        };
+        void this.refreshKey();
+        this.cdr.markForCheck();
+      });
 
-    this.controls.getViewState$().pipe(untilDestroyed()).subscribe((view) => {
-      this.view = view;
-      void this.refreshKey();
-      this.cdr.markForCheck();
-    });
+    this.controls
+      .getViewState$()
+      .pipe(untilDestroyed())
+      .subscribe((view) => {
+        this.view = view;
+        void this.refreshKey();
+        this.cdr.markForCheck();
+      });
 
     // The renderer's own streams may emit outside the zone: re-entered here, once, for
     // every panel they feed.
     const estimate$ = this.controls.getTranscriptEstimate$?.();
-    estimate$?.pipe(untilDestroyed()).subscribe((e) => this.runAndMark(() => { this.estimate = e; }));
+    estimate$?.pipe(untilDestroyed()).subscribe((e) =>
+      this.runAndMark(() => {
+        this.estimate = e;
+      }),
+    );
     const counts$ = this.controls.getGeneCountsInView$?.();
-    counts$?.pipe(untilDestroyed()).subscribe((c) => this.runAndMark(() => { this.geneCounts = c; }));
+    counts$?.pipe(untilDestroyed()).subscribe((c) =>
+      this.runAndMark(() => {
+        this.geneCounts = c;
+      }),
+    );
     const density$ = this.controls.getDensityStats$?.();
-    density$?.pipe(untilDestroyed()).subscribe((d) => this.runAndMark(() => { this.densityStats = d; }));
+    density$?.pipe(untilDestroyed()).subscribe((d) =>
+      this.runAndMark(() => {
+        this.densityStats = d;
+      }),
+    );
 
-    this.controls.getSelection$().pipe(untilDestroyed()).subscribe((selection) => {
-      this.selection = selection;
-      if (selection.count === 0) this.selectedCategory = null;
-      this.cdr.markForCheck();
-    });
+    this.controls
+      .getSelection$()
+      .pipe(untilDestroyed())
+      .subscribe((selection) => {
+        this.selection = selection;
+        if (selection.count === 0) this.selectedCategory = null;
+        this.cdr.markForCheck();
+      });
 
     // The colour bar must use the colormap the renderer is using.
     combineLatest([this.viz.getColormap(), this.viz.getReverseScale()])
@@ -276,8 +317,7 @@ export class SpatialControlsComponent implements OnInit {
     this.chartsOpen = !this.chartsOpen;
     if (!this.chartsOpen) return;
     setTimeout(() => {
-      document.getElementById(this.chartsBodyId)
-        ?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+      document.getElementById(this.chartsBodyId)?.scrollIntoView({ block: 'end', behavior: 'smooth' });
     }, 0);
   }
 
@@ -314,7 +354,11 @@ export class SpatialControlsComponent implements OnInit {
 
   /** Which collapsible sections are open. Per dialog instance, not persisted. */
   protected open: Record<'images' | 'cells' | 'transcripts' | 'annotations' | 'observations', boolean> = {
-    images: false, cells: true, transcripts: false, annotations: false, observations: false,
+    images: false,
+    cells: true,
+    transcripts: false,
+    annotations: false,
+    observations: false,
   };
 
   protected toggleSection(name: keyof SpatialControlsComponent['open']): void {

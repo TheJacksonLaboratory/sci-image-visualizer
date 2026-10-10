@@ -1,6 +1,15 @@
 import {
-  ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, EventEmitter, Inject, Input, OnDestroy,
-  OnInit, Output, inject,
+  ChangeDetectionStrategy,
+  ChangeDetectorRef,
+  Component,
+  DestroyRef,
+  EventEmitter,
+  Inject,
+  Input,
+  OnDestroy,
+  OnInit,
+  Output,
+  inject,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
@@ -18,7 +27,11 @@ import { TreeSelectModule } from 'primeng/treeselect';
 import * as Plotly from 'plotly.js-dist-min';
 
 import {
-  CHANNEL_HISTOGRAM_API, IChannelHistogramApi, IChannelState, IHistogram, LUT_COLORS,
+  CHANNEL_HISTOGRAM_API,
+  IChannelHistogramApi,
+  IChannelState,
+  IHistogram,
+  LUT_COLORS,
 } from '../contracts/channel-histogram-api.contract';
 import { autoWindowFromHistogram } from '../contracts/intensity';
 import { HexColorPickerComponent } from '../hex-color-picker/hex-color-picker.component';
@@ -57,8 +70,18 @@ function nativeRange(h: IHistogram | null): { min: number; max: number } {
   selector: 'channel-histogram',
   standalone: true,
   imports: [
-    CommonModule, FormsModule, SharedModule, ButtonModule, CheckboxModule, DialogModule, InputNumberModule,
-    SliderModule, TableModule, TooltipModule, TreeSelectModule, HexColorPickerComponent,
+    CommonModule,
+    FormsModule,
+    SharedModule,
+    ButtonModule,
+    CheckboxModule,
+    DialogModule,
+    InputNumberModule,
+    SliderModule,
+    TableModule,
+    TooltipModule,
+    TreeSelectModule,
+    HexColorPickerComponent,
   ],
   templateUrl: './channel-histogram.component.html',
   styleUrls: ['./channel-histogram.component.scss'],
@@ -84,7 +107,9 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
   /** The selected channel's current histogram. Native bit depth (with
    *  observed/range fields) for >8-bit images, else the 8-bit client histogram.
    *  Drives the plot, the native window labels, and the export-button gate. */
-  protected get hist(): IHistogram | null { return this._hist; }
+  protected get hist(): IHistogram | null {
+    return this._hist;
+  }
   protected set hist(h: IHistogram | null) {
     this._hist = h;
     this.range = nativeRange(h);
@@ -119,26 +144,39 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.colormapOptions = this.api.getColormapOptions();
-    this.api.getColormap().pipe(takeUntilDestroyed(this.destroyRef)).subscribe((cm) => {
-      this.selectedColormap = cm;
-      this.cdr.markForCheck();
-    });
-    this.api.getInvert$().pipe(takeUntilDestroyed(this.destroyRef)).subscribe((i) => {
-      this.invert = !!i;
-      this.cdr.markForCheck();
-    });
-    this.api.getChannels$().pipe(takeUntilDestroyed(this.destroyRef)).subscribe((channels) => {
-      this.channels = channels ?? [];
-      // Keep the selected row (by index) or default to the first channel.
-      const keepIdx = this.selected?.index ?? 0;
-      this.selected = this.channels.find((c) => c.index === keepIdx) ?? this.channels[0] ?? null;
-      if (this.visible) this.updateMarkers();
-      this.cdr.markForCheck();
-    });
+    this.api
+      .getColormap()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((cm) => {
+        this.selectedColormap = cm;
+        this.cdr.markForCheck();
+      });
+    this.api
+      .getInvert$()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((i) => {
+        this.invert = !!i;
+        this.cdr.markForCheck();
+      });
+    this.api
+      .getChannels$()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((channels) => {
+        this.channels = channels ?? [];
+        // Keep the selected row (by index) or default to the first channel.
+        const keepIdx = this.selected?.index ?? 0;
+        this.selected = this.channels.find((c) => c.index === keepIdx) ?? this.channels[0] ?? null;
+        if (this.visible) this.updateMarkers();
+        this.cdr.markForCheck();
+      });
     // The histogram is of the source pixels — it changes with the image/slice,
     // not with window edits — so reload it when the image metadata changes.
-    this.api.getImageMeta().pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(() => { if (this.visible) this.loadHistogram(); });
+    this.api
+      .getImageMeta()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        if (this.visible) this.loadHistogram();
+      });
   }
 
   /** Stops the pending histogram load / retry and activity timer, the resize
@@ -148,7 +186,11 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
     clearTimeout(this.histRetryTimer);
     clearTimeout(this.adjustTimer);
     this.teardownResize();
-    try { Plotly.purge(this.histogramDiv); } catch { /* never rendered */ }
+    try {
+      Plotly.purge(this.histogramDiv);
+    } catch {
+      /* never rendered */
+    }
   }
 
   protected onVisibleChange(v: boolean): void {
@@ -166,7 +208,11 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
       const el = document.getElementById(this.histogramDiv);
       if (el && !this.resizeObserver && typeof ResizeObserver !== 'undefined') {
         this.resizeObserver = new ResizeObserver(() => {
-          try { (Plotly as any).Plots.resize(el); } catch { /* not rendered */ }
+          try {
+            (Plotly as any).Plots.resize(el);
+          } catch {
+            /* not rendered */
+          }
         });
         this.resizeObserver.observe(el);
       }
@@ -289,15 +335,23 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
     if (v == null || isNaN(v)) return 0;
     const o = this.obsRange();
     const span = o.max - o.min || 1;
-    const d = Math.round(255 * (v - o.min) / span);
+    const d = Math.round((255 * (v - o.min)) / span);
     return d < 0 ? 0 : d > 255 ? 255 : d;
   }
   /** Selected channel window endpoints in native units (for the sliders). */
-  protected get minNative(): number { return this.selected ? this.toNative(this.selected.min) : 0; }
-  protected get maxNative(): number { return this.selected ? this.toNative(this.selected.max) : 0; }
+  protected get minNative(): number {
+    return this.selected ? this.toNative(this.selected.min) : 0;
+  }
+  protected get maxNative(): number {
+    return this.selected ? this.toNative(this.selected.max) : 0;
+  }
   /** Native slider bounds + step (256 display steps across the native range). */
-  protected get sliderMin(): number { return this.obsRange().min; }
-  protected get sliderMax(): number { return this.obsRange().max; }
+  protected get sliderMin(): number {
+    return this.obsRange().min;
+  }
+  protected get sliderMax(): number {
+    return this.obsRange().max;
+  }
   protected get sliderStep(): number {
     const r = this.obsRange();
     return this.is16bit ? Math.max(1, Math.round((r.max - r.min) / 255)) : 1;
@@ -356,7 +410,11 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
     if (!el || !this.selected) return;
     const h = this.hist;
     if (!h) {
-      try { Plotly.purge(el); } catch { /* ignore */ }
+      try {
+        Plotly.purge(el);
+      } catch {
+        /* ignore */
+      }
       el.setAttribute('data-empty', 'true');
       return;
     }
@@ -370,7 +428,8 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
       hoverinfo: 'x+y',
     };
     Plotly.react(el, [trace] as any, this.histogramLayout(), {
-      displayModeBar: false, responsive: true,
+      displayModeBar: false,
+      responsive: true,
     } as any);
   }
 
@@ -380,7 +439,9 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
     if (!el || !this.selected || el.getAttribute('data-empty') === 'true') return;
     try {
       Plotly.relayout(el, { shapes: this.markerShapes() } as any);
-    } catch { /* not rendered yet */ }
+    } catch {
+      /* not rendered yet */
+    }
   }
 
   private markerShapes(): any[] {
@@ -388,7 +449,12 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
     if (!c) return [];
     // Markers sit in the same (native) coordinate space as the histogram axis.
     const line = (x: number, color: string) => ({
-      type: 'line', x0: x, x1: x, yref: 'paper', y0: 0, y1: 1,
+      type: 'line',
+      x0: x,
+      x1: x,
+      yref: 'paper',
+      y0: 0,
+      y1: 1,
       line: { color, width: 1, dash: 'dot' },
     });
     return [line(this.toNative(c.min), '#00e0ff'), line(this.toNative(c.max), '#ff7a7a')];
@@ -401,7 +467,9 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
       xaxis: { range: [this.sliderMin, this.sliderMax], zeroline: false, color: '#ccc', fixedrange: true },
       yaxis: {
         title: this.logScale ? 'log₁₀ count' : 'count',
-        zeroline: false, color: '#ccc', fixedrange: true,
+        zeroline: false,
+        color: '#ccc',
+        fixedrange: true,
       },
       paper_bgcolor: 'rgba(30,30,30,0.95)',
       plot_bgcolor: 'rgba(30,30,30,0.95)',

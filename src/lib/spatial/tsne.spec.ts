@@ -1,6 +1,4 @@
-import {
-  NEIGHBOUR_FACTOR, affinities, conditionalAffinities, knnGraph, plainRepulsion, tsneEmbed,
-} from './tsne';
+import { NEIGHBOUR_FACTOR, affinities, conditionalAffinities, knnGraph, plainRepulsion, tsneEmbed } from './tsne';
 import { tileRows } from './tsne-gpu';
 
 /**
@@ -16,9 +14,7 @@ function clustered(perCluster: number, nClusters: number, nDims: number, spread 
   const n = perCluster * nClusters;
   const x = new Float32Array(n * nDims);
   const label = new Int32Array(n);
-  const centres = Array.from({ length: nClusters }, () => (
-    Array.from({ length: nDims }, () => rnd() * 8 - 4)
-  ));
+  const centres = Array.from({ length: nClusters }, () => Array.from({ length: nDims }, () => rnd() * 8 - 4));
   for (let i = 0; i < n; i++) {
     const c = Math.floor(i / perCluster);
     label[i] = c;
@@ -122,7 +118,10 @@ describe('tsneEmbed', () => {
 
   it('separates planted clusters', async () => {
     const { embedding, completed } = await tsneEmbed(x, n, nDims, {
-      dims: 2, perplexity: 12, iterations: 300, seed: 0,
+      dims: 2,
+      perplexity: 12,
+      iterations: 300,
+      seed: 0,
     });
     expect(completed).toBe(true);
 
@@ -148,7 +147,10 @@ describe('tsneEmbed', () => {
     // A collapsed embedding scores perfectly on purity while showing nothing, because
     // every point is everyone's neighbour.
     const { embedding } = await tsneEmbed(x, n, nDims, {
-      dims: 2, perplexity: 12, iterations: 200, seed: 0,
+      dims: 2,
+      perplexity: 12,
+      iterations: 200,
+      seed: 0,
     });
     let min = Infinity;
     let max = -Infinity;
@@ -162,7 +164,10 @@ describe('tsneEmbed', () => {
   it('reports progress and can be stopped part-way', async () => {
     const seen: number[] = [];
     const result = await tsneEmbed(x, n, nDims, {
-      dims: 2, perplexity: 12, iterations: 500, seed: 0,
+      dims: 2,
+      perplexity: 12,
+      iterations: 500,
+      seed: 0,
       onProgress: (done) => seen.push(done),
       // A long run must be abandonable: this is what a Cancel button rides on.
       shouldStop: () => seen.length >= 3,
@@ -178,7 +183,9 @@ describe('tsneEmbed', () => {
     // interrupt, so a Cancel that arrived during GPU start-up must be honoured first.
     const compute = jest.fn();
     const result = await tsneEmbed(x, n, nDims, {
-      dims: 2, perplexity: 12, iterations: 500,
+      dims: 2,
+      perplexity: 12,
+      iterations: 500,
       repulsion: { compute },
       shouldStop: () => true,
     });
@@ -200,7 +207,10 @@ describe('tsneEmbed', () => {
     // must lower the perplexity rather than silently calibrate against nothing.
     const tiny = clustered(4, 2, 3);
     const r = await tsneEmbed(tiny.x, tiny.n, 3, {
-      dims: 2, perplexity: 50, iterations: 20, seed: 0,
+      dims: 2,
+      perplexity: 50,
+      iterations: 20,
+      seed: 0,
     });
     expect(r.neighbours).toBe(tiny.n - 1);
     expect(r.perplexity).toBeLessThanOrEqual(Math.floor((tiny.n - 1) / NEIGHBOUR_FACTOR));
@@ -216,7 +226,11 @@ describe('tsneEmbed', () => {
       },
     };
     await tsneEmbed(x, n, nDims, {
-      dims: 2, perplexity: 8, iterations: 12, seed: 0, repulsion: counting,
+      dims: 2,
+      perplexity: 8,
+      iterations: 12,
+      seed: 0,
+      repulsion: counting,
     });
     expect(calls).toBe(12);
   });

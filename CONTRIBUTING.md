@@ -69,7 +69,7 @@ Branch names follow the change: `fix/…`, `feat/…`, `docs/…`, `chore/…`,
 
 - **Commits** use conventional prefixes scoped to the area:
   `fix(osd): …`, `feat(spatial): …`, `refactor(napari): …`, `docs(readme): …`,
-  `chore(deps): …`. Keep them small and explain *why* in the body.
+  `chore(deps): …`. Keep them small and explain _why_ in the body.
 - **Bug fixes come with a regression spec** that fails before the fix.
 - **Behaviour-preserving refactors** stay separate from behaviour changes.
 - **Public API:** anything exported from `src/index.ts` is public. Give new

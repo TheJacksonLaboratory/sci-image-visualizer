@@ -168,8 +168,11 @@ export function heatmapMatrix(
       return { c, peak };
     });
     // Strongest first, then original order for ties, so the choice is stable.
-    strength.sort((a, b) => (b.peak - a.peak) || (a.c - b.c));
-    const picked = strength.slice(0, opts.maxCols).map((s) => s.c).sort((a, b) => a - b);
+    strength.sort((a, b) => b.peak - a.peak || a.c - b.c);
+    const picked = strength
+      .slice(0, opts.maxCols)
+      .map((s) => s.c)
+      .sort((a, b) => a - b);
     hiddenCols = cols.length - picked.length;
     outCols = picked.map((c) => cols[c]);
     outCounts = Uint32Array.from(picked, (c) => counts[c]);

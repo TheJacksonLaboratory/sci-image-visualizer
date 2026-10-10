@@ -12,7 +12,13 @@ function uniformGray(w: number, h: number, val = 100): number[][] {
 
 function cached(w = 20, h = 20): CachedImageData {
   return {
-    frames: [uniformGray(w, h)], width: w, height: h, ratios: [1], isGrayscale: true, originX: 0, originY: 0,
+    frames: [uniformGray(w, h)],
+    width: w,
+    height: h,
+    ratios: [1],
+    isGrayscale: true,
+    originX: 0,
+    originY: 0,
   };
 }
 
@@ -23,7 +29,9 @@ function makeHost(opts: { regions?: Region[]; cached?: CachedImageData | null } 
   document.body.appendChild(container);
   const state = { regions: opts.regions ?? ([] as Region[]) };
   const img: CachedImageData | null = opts.cached !== undefined ? opts.cached : cached();
-  const setRegions = jest.fn((r: Region[]) => { state.regions = r; });
+  const setRegions = jest.fn((r: Region[]) => {
+    state.regions = r;
+  });
   const host: WandToolHost = {
     getOverlayContainer: () => container,
     getCachedImageData: () => img,
@@ -163,8 +171,11 @@ describe('WandTool', () => {
 
   it('does nothing while the coordinate transform is not ready', () => {
     const { host, container, setRegions } = makeHost();
-    (host.getCoordinateTransform as any) = () =>
-      ({ isReady: () => false, clientToData: () => ({ x: 0, y: 0 }), dataLengthToScreen: () => 1 });
+    (host.getCoordinateTransform as any) = () => ({
+      isReady: () => false,
+      clientToData: () => ({ x: 0, y: 0 }),
+      dataLengthToScreen: () => 1,
+    });
     tool.activate(host, { patchSize: 9, simpleMode: true });
     cv(container).dispatchEvent(mouse('pointerdown', 10, 10));
     expect(setRegions).not.toHaveBeenCalled();
@@ -196,8 +207,8 @@ describe('WandTool', () => {
     cv(container).dispatchEvent(mouse('pointerdown', 10, 10)); // inside the box
 
     expect(setRegions).toHaveBeenCalled();
-    expect(state.regions).toHaveLength(1);   // adopted, not added
-    expect(state.regions[0].id).toBe(42);    // kept the adopted id
+    expect(state.regions).toHaveLength(1); // adopted, not added
+    expect(state.regions[0].id).toBe(42); // kept the adopted id
   });
 });
 
@@ -205,8 +216,10 @@ describe('WandTool', () => {
 function bbox(r: Region): { x0: number; y0: number; x1: number; y1: number } {
   const p = r.bounds as Polygon;
   return {
-    x0: Math.min(...p.xpoints), y0: Math.min(...p.ypoints),
-    x1: Math.max(...p.xpoints), y1: Math.max(...p.ypoints),
+    x0: Math.min(...p.xpoints),
+    y0: Math.min(...p.ypoints),
+    x1: Math.max(...p.xpoints),
+    y1: Math.max(...p.ypoints),
   };
 }
 
@@ -306,7 +319,14 @@ describe('WandTool — a stale stroke never resurrects a region (RT-2)', () => {
 /** A box region with a rectangular hole (image coords). */
 function donutRegion(id: number): Region {
   const r = boxRegion(4, 4, 36, 36, id);
-  (r.bounds as Polygon).holes = [[[15, 15], [25, 15], [25, 25], [15, 25]]];
+  (r.bounds as Polygon).holes = [
+    [
+      [15, 15],
+      [25, 15],
+      [25, 25],
+      [15, 25],
+    ],
+  ];
   return r;
 }
 

@@ -14,7 +14,9 @@
 .sc-meter-fill {
   height: 100%;
   background: var(--primary-color, #2196f3);
-  &.over { background: var(--orange-500, #f59e0b); }
+  &.over {
+    background: var(--orange-500, #f59e0b);
+  }
 }
 .sc-meter-ends,
 .sc-ticks {

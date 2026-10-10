@@ -206,7 +206,7 @@ describe('BrushTool', () => {
 
     expect(setRegions).toHaveBeenCalled();
     expect(state.regions).toHaveLength(1); // adopted, not added
-    expect(state.regions[0].id).toBe(42);  // kept the adopted id
+    expect(state.regions[0].id).toBe(42); // kept the adopted id
   });
 
   it('ignores non-left buttons', () => {
@@ -232,8 +232,11 @@ describe('BrushTool', () => {
 
   it('does nothing while the coordinate transform is not ready', () => {
     const { host, container, setRegions } = makeHost();
-    (host.getCoordinateTransform as any) = () =>
-      ({ isReady: () => false, clientToData: () => ({ x: 0, y: 0 }), dataLengthToScreen: () => 1 });
+    (host.getCoordinateTransform as any) = () => ({
+      isReady: () => false,
+      clientToData: () => ({ x: 0, y: 0 }),
+      dataLengthToScreen: () => 1,
+    });
     tool.activate(host, { size: 12 });
     cv(container).dispatchEvent(mouse('pointerdown', 30, 30));
     expect(setRegions).not.toHaveBeenCalled();
@@ -380,8 +383,10 @@ describe('BrushTool', () => {
 function bbox(r: Region): { x0: number; y0: number; x1: number; y1: number } {
   const p = r.bounds as Polygon;
   return {
-    x0: Math.min(...p.xpoints), y0: Math.min(...p.ypoints),
-    x1: Math.max(...p.xpoints), y1: Math.max(...p.ypoints),
+    x0: Math.min(...p.xpoints),
+    y0: Math.min(...p.ypoints),
+    x1: Math.max(...p.xpoints),
+    y1: Math.max(...p.ypoints),
   };
 }
 
@@ -415,7 +420,7 @@ describe('BrushTool — a stale stroke never resurrects a region (RT-2)', () => 
     expect(bbox(state.regions[0]).x0).toBe(first.x0 + 3); // just the new disc
   });
 
-  it('a dab after the region\'s bounds were replaced (vertex eraser, undo) does not re-commit the old stroke', () => {
+  it("a dab after the region's bounds were replaced (vertex eraser, undo) does not re-commit the old stroke", () => {
     const { host, container, state } = makeHost();
     tool.activate(host, { size: 12 });
     const canvas = cv(container);

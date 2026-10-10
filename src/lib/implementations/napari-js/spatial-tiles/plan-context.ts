@@ -37,7 +37,10 @@ export class PlanContext {
   private failed = false;
 
   /** `isStale` turns true once a newer plan started or the viewer changed. */
-  constructor(private readonly isStale: () => boolean, private readonly loads: LoadTracker) {}
+  constructor(
+    private readonly isStale: () => boolean,
+    private readonly loads: LoadTracker,
+  ) {}
 
   /** True once a newer plan started or the viewer changed. */
   stale(): boolean {

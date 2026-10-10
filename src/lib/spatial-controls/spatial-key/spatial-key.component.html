@@ -9,10 +9,13 @@
        it again clears — so a click is always reversible. -->
   <ul class="sc-legend" *ngIf="isCategorical">
     <li *ngFor="let entry of legend; index as i; trackBy: trackByLabel">
-      <button type="button" class="sc-legend-btn"
-              [class.selected]="selectedCategory === i"
-              (click)="categoryClicked.emit(i)"
-              [title]="'Select ' + entry.label">
+      <button
+        type="button"
+        class="sc-legend-btn"
+        [class.selected]="selectedCategory === i"
+        (click)="categoryClicked.emit(i)"
+        [title]="'Select ' + entry.label"
+      >
         <span class="sc-swatch" [style.background]="entry.color"></span>
         <span class="sc-legend-label">{{ entry.label }}</span>
       </button>
@@ -32,18 +35,22 @@
          names would be the wrong control. Cleared = follow the image's. -->
     <div class="sc-row">
       <span class="sc-lbl">Colormap</span>
-      <p-treeSelect [options]="colormapOptions" [ngModel]="selectedColormapNode"
-                    selectionMode="single" [showClear]="true"
-                    placeholder="Match the image" [scrollHeight]="'260px'"
-                    appendTo="body"
-                    pTooltip="Colour scale for gene and numeric values — the markers, the gene map and this bar. Clear it to follow the image's colormap"
-                    tooltipPosition="top"
-                    (onNodeSelect)="onContinuousColormap($event.node)"
-                    (onClear)="onContinuousColormap(null)">
+      <p-treeSelect
+        [options]="colormapOptions"
+        [ngModel]="selectedColormapNode"
+        selectionMode="single"
+        [showClear]="true"
+        placeholder="Match the image"
+        [scrollHeight]="'260px'"
+        appendTo="body"
+        pTooltip="Colour scale for gene and numeric values — the markers, the gene map and this bar. Clear it to follow the image's colormap"
+        tooltipPosition="top"
+        (onNodeSelect)="onContinuousColormap($event.node)"
+        (onClear)="onContinuousColormap(null)"
+      >
         <ng-template let-node pTemplate="default">
           <span class="sc-cmap-option">
-            <img *ngIf="!node.children && node.data?.src" [src]="node.data.src"
-                 class="sc-cmap-swatch" alt="" />
+            <img *ngIf="!node.children && node.data?.src" [src]="node.data.src" class="sc-cmap-swatch" alt="" />
             <span>{{ node.label }}</span>
           </span>
         </ng-template>

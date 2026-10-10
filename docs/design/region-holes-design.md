@@ -13,7 +13,7 @@ Two root causes, both structural:
 
 1. **The boundary tracer returns only the outer contour.**
    `WandService.maskToPolygons()` labels 4‑connected foreground components and
-   traces each with `mooreBoundary()` — the *outer* ring only. Interior holes
+   traces each with `mooreBoundary()` — the _outer_ ring only. Interior holes
    are never traced.
    `libs/jax-image-visualization/src/lib/toolbar/wand/wand.service.ts:243` (and
    `:288`, `:644`).
@@ -24,8 +24,8 @@ Two root causes, both structural:
    `libs/jax-image-visualization/src/lib/models/region.ts:142`.
 
 Every downstream consumer — both renderers, GeoJSON I/O, hit‑testing, area,
-vertex editing — assumes one ring. Donuts therefore cannot be *represented*,
-not merely cannot be *drawn*.
+vertex editing — assumes one ring. Donuts therefore cannot be _represented_,
+not merely cannot be _drawn_.
 
 ## 2. Goal
 
@@ -35,7 +35,7 @@ even‑odd fill on both backends, round‑trip through GeoJSON (QuPath‑compati
 are excluded from hit‑testing and area, and survive Bézier conversion and the
 per‑image cache / undo snapshots.
 
-Non‑goal for the first cut: hole‑aware *vertex editing* (grab/insert/delete a
+Non‑goal for the first cut: hole‑aware _vertex editing_ (grab/insert/delete a
 vertex on a hole ring). See §7.
 
 ## 3. Data model
@@ -60,6 +60,7 @@ GeoJSON, and equality trivial. Bézier holes are out of scope (§7), so a hole
 never needs handles.
 
 **Touch points that must clone/compare the new field:**
+
 - `RegionStore.cloneBounds()` — deep‑copy `holes`
   (`store/region-store.service.ts:490`). This is also what undo/redo snapshots
   use (`cloneRegion` → `cloneBounds`), so holes ride along for free.
@@ -78,7 +79,7 @@ half‑rendered donuts.
 `WandService.maskToPolygons()` (`wand.service.ts:243`):
 
 1. After labelling foreground components, **find holes**: flood‑fill background
-   (value 0) 4‑connected from the mask‑bbox border. Any background pixel *not*
+   (value 0) 4‑connected from the mask‑bbox border. Any background pixel _not_
    reached is enclosed → belongs to a hole.
 2. Group enclosed background into its own connected components; trace each with
    `mooreBoundary()`.
@@ -110,8 +111,8 @@ tick. Fill the exterior, then zero every pixel inside a hole ring.
 ### Phase 3 — Rendering (both backends, even-odd fill)
 
 **OpenSeadragon overlay** (`implementations/osd/osd-region-overlay.ts:262`): a
-closed polygon currently renders as `<polygon points=…>`. For a polygon *with
-holes*, render a `<path>` with one subpath per ring (`M…L…Z M…L…Z`) and
+closed polygon currently renders as `<polygon points=…>`. For a polygon _with
+holes_, render a `<path>` with one subpath per ring (`M…L…Z M…L…Z`) and
 `fill-rule="evenodd"`. The bezier branch already emits `<path>` via
 `bezierPathD()` (`:362`) — factor a shared `polygonPathD(poly)` that appends
 hole subpaths, used by both. No‑hole polygons keep the existing `<polygon>` path
@@ -146,21 +147,21 @@ update the Regions help dialog (`toolbar.component.html`) and CHANGELOG.
 
 ## 5. Files touched (summary)
 
-| Area | File | Change |
-|------|------|--------|
-| Model | `models/region.ts` | add `Polygon.holes` |
-| Trace | `toolbar/wand/wand.service.ts` | hole detection in `maskToPolygons`, punch holes in `rasterizePolygon`, hole‑aware `pointInPolygon` |
-| Store | `store/region-store.service.ts` | clone/compare holes (`cloneBounds`, `regionsEqual`) |
-| Render | `implementations/osd/osd-region-overlay.ts` | even‑odd `<path>` for holed polygons |
-| Render | `models/region.ts` (`getShape`) + Plotly shape build | hole subpaths + `fillrule` |
-| I/O | `plot.utilities.ts` | export/import hole rings |
-| UI/docs | `toolbar/toolbar.component.html`, `CHANGELOG.md` | help text + release note |
+| Area    | File                                                 | Change                                                                                             |
+| ------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Model   | `models/region.ts`                                   | add `Polygon.holes`                                                                                |
+| Trace   | `toolbar/wand/wand.service.ts`                       | hole detection in `maskToPolygons`, punch holes in `rasterizePolygon`, hole‑aware `pointInPolygon` |
+| Store   | `store/region-store.service.ts`                      | clone/compare holes (`cloneBounds`, `regionsEqual`)                                                |
+| Render  | `implementations/osd/osd-region-overlay.ts`          | even‑odd `<path>` for holed polygons                                                               |
+| Render  | `models/region.ts` (`getShape`) + Plotly shape build | hole subpaths + `fillrule`                                                                         |
+| I/O     | `plot.utilities.ts`                                  | export/import hole rings                                                                           |
+| UI/docs | `toolbar/toolbar.component.html`, `CHANGELOG.md`     | help text + release note                                                                           |
 
 ## 6. Testing
 
 - **wand.service.spec** — `maskToPolygons` on a ring mask yields one polygon
   with one hole; nested/multiple holes; a hole below `minHoleSize` is dropped; a
-  hole touching the bbox border is *not* a hole (it's an inlet).
+  hole touching the bbox border is _not_ a hole (it's an inlet).
   `pointInPolygon` false inside a hole, true in the solid annulus.
   `rasterizePolygon` of a holed polygon leaves the hole empty.
 - **region-store.spec** — `cloneBounds`/undo snapshot preserves holes (no

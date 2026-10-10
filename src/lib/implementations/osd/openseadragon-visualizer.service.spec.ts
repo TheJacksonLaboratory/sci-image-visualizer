@@ -39,8 +39,9 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     // toFullResUrl is a no-op (its catch returns the preview URL unchanged)
     // unless a test overrides it — decoupling the load() tests from the resample
     // (which now resizes to EXACTLY trueImageSize, up or down; jit-ui#93).
-    (service as unknown as { simple: { loadImageEl: (u: string) => Promise<unknown> } }).simple.loadImageEl =
-      jest.fn().mockRejectedValue(new Error('no <img> decode in jsdom'));
+    (service as unknown as { simple: { loadImageEl: (u: string) => Promise<unknown> } }).simple.loadImageEl = jest
+      .fn()
+      .mockRejectedValue(new Error('no <img> decode in jsdom'));
   });
 
   afterEach(() => {
@@ -59,8 +60,15 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     const getImageData = jest.fn(() => ({ data }));
     (service as unknown as { viewer: unknown }).viewer = {
       destroy: () => undefined,
-      drawer: { canvas: { width: w, height: h, clientWidth: w / 2, clientHeight: h / 2,
-        getContext: () => ({ getImageData }) } },
+      drawer: {
+        canvas: {
+          width: w,
+          height: h,
+          clientWidth: w / 2,
+          clientHeight: h / 2,
+          getContext: () => ({ getImageData }),
+        },
+      },
       viewport: {
         viewerElementToImageCoordinates: (p: { x: number; y: number }) => ({ x: 100 + p.x * 4, y: 50 + p.y * 2 }),
       },
@@ -70,7 +78,7 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     expect(isPackedFrame(frame)).toBe(true);
     expect((frame as PackedFrame).data).toBe(data); // the readback itself, not a copy
     expect(cached).toMatchObject({ width: w, height: h, isGrayscale: false, originX: 100, originY: 50 });
-    expect(cached.ratios).toEqual([(w / 2 * 4) / w, (h / 2 * 2) / h]);
+    expect(cached.ratios).toEqual([((w / 2) * 4) / w, ((h / 2) * 2) / h]);
   });
 
   it('setActiveTool: mouse-nav is off while a canvas tool holds the pointer, on otherwise', () => {
@@ -110,22 +118,31 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
   it('load() simple (tiled:false) skips the tile server and returns the URL + a one-level descriptor', async () => {
     const port = TestBed.inject(TILE_ACCESS_PORT);
     const infoSpy = jest.spyOn(port, 'getSelectedInfoB64');
-    const loaded = await service.load({
-      fileName: 'pipe.png',
-      tiled: false,
-      isGrayscale: false,
-      urls: ['blob:abc', 'blob:def'],
-      trueImageSize: [10, 20],
-      imageMeta: [{ rgbChannels: 3, channelCount: 3, x: 10, y: 20, z: 1, mppX: 0.5 }],
-    } as any, 1);
+    const loaded = await service.load(
+      {
+        fileName: 'pipe.png',
+        tiled: false,
+        isGrayscale: false,
+        urls: ['blob:abc', 'blob:def'],
+        trueImageSize: [10, 20],
+        imageMeta: [{ rgbChannels: 3, channelCount: 3, x: 10, y: 20, z: 1, mppX: 0.5 }],
+      } as any,
+      1,
+    );
     // No tile-server consultation at all (the afterEach http.verify() also
     // asserts no /tiles/info request was issued).
     expect(infoSpy).not.toHaveBeenCalled();
     expect(loaded.simple).toBe(true);
-    expect(loaded.url).toBe('blob:def');          // urls[zIndex=1]
+    expect(loaded.url).toBe('blob:def'); // urls[zIndex=1]
     expect(loaded.infoB64).toBe('');
     expect(loaded.descriptor).toMatchObject({
-      width: 10, height: 20, z: 1, realLevels: 1, channels: 3, multichannel: false, mppX: 0.5,
+      width: 10,
+      height: 20,
+      z: 1,
+      realLevels: 1,
+      channels: 3,
+      multichannel: false,
+      mppX: 0.5,
     });
     expect(loaded.descriptor!.levels).toHaveLength(1);
   });
@@ -142,14 +159,17 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
    */
   it('load() simple (tiled:false) fetches a real server URL via HttpClient, not directly', async () => {
     const createObjectURL = jest.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock-1');
-    const loadPromise = service.load({
-      fileName: 'case1_014.dcm',
-      tiled: false,
-      isGrayscale: true,
-      urls: ['/api/preview?info=abc', '/api/preview?info=def'],
-      trueImageSize: [10, 20],
-      imageMeta: [{ rgbChannels: 1, channelCount: 1, x: 10, y: 20, z: 1 }],
-    } as any, 1);
+    const loadPromise = service.load(
+      {
+        fileName: 'case1_014.dcm',
+        tiled: false,
+        isGrayscale: true,
+        urls: ['/api/preview?info=abc', '/api/preview?info=def'],
+        trueImageSize: [10, 20],
+        imageMeta: [{ rgbChannels: 1, channelCount: 1, x: 10, y: 20, z: 1 }],
+      } as any,
+      1,
+    );
 
     const req = http.expectOne('/api/preview?info=def'); // urls[zIndex=1]
     expect(req.request.method).toBe('GET');
@@ -164,14 +184,17 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
   });
 
   it('load() simple infers a single channel for a grayscale image and falls back to urls[0]', async () => {
-    const loaded = await service.load({
-      fileName: 'g.png',
-      tiled: false,
-      isGrayscale: true,
-      urls: ['blob:gray'],
-      trueImageSize: [4, 4],
-      imageMeta: [],                              // no meta → channels from isGrayscale
-    } as any, 0);
+    const loaded = await service.load(
+      {
+        fileName: 'g.png',
+        tiled: false,
+        isGrayscale: true,
+        urls: ['blob:gray'],
+        trueImageSize: [4, 4],
+        imageMeta: [], // no meta → channels from isGrayscale
+      } as any,
+      0,
+    );
     expect(loaded.simple).toBe(true);
     expect(loaded.url).toBe('blob:gray');
     expect(loaded.descriptor!.channels).toBe(1);
@@ -185,14 +208,17 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
    * simple source with an undefined src that throws when mounted.
    */
   it('load() simple returns a null descriptor when no slice URL can be resolved', async () => {
-    const loaded = await service.load({
-      fileName: 'empty.png',
-      tiled: false,
-      isGrayscale: true,
-      urls: [],                     // nothing to load
-      trueImageSize: [4, 4],
-      imageMeta: [{ rgbChannels: 1, channelCount: 1, x: 4, y: 4, z: 1 }],
-    } as any, 0);
+    const loaded = await service.load(
+      {
+        fileName: 'empty.png',
+        tiled: false,
+        isGrayscale: true,
+        urls: [], // nothing to load
+        trueImageSize: [4, 4],
+        imageMeta: [{ rgbChannels: 1, channelCount: 1, x: 4, y: 4, z: 1 }],
+      } as any,
+      0,
+    );
     expect(loaded.descriptor).toBeNull();
     // plot() bails on a null descriptor rather than mounting an undefined src.
     expect(await service.plot('nope', loaded, {} as any, 600, {} as any)).toBe(false);
@@ -203,15 +229,18 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
       (service as unknown as { simple: { loadChannelPlanes(u: string[]): Promise<unknown[]> } }).simple,
       'loadChannelPlanes',
     );
-    const loaded = await service.load({
-      fileName: 'hyper.tif',
-      tiled: false,
-      isGrayscale: false,
-      urls: ['blob:z0'],
-      channelUrls: [['blob:z0c0', 'blob:z0c1', 'blob:z0c2', 'blob:z0c3']],
-      trueImageSize: [8, 8],
-      imageMeta: [{ rgbChannels: 1, channelCount: 4, x: 8, y: 8, z: 1 }],
-    } as any, 0);
+    const loaded = await service.load(
+      {
+        fileName: 'hyper.tif',
+        tiled: false,
+        isGrayscale: false,
+        urls: ['blob:z0'],
+        channelUrls: [['blob:z0c0', 'blob:z0c1', 'blob:z0c2', 'blob:z0c3']],
+        trueImageSize: [8, 8],
+        imageMeta: [{ rgbChannels: 1, channelCount: 4, x: 8, y: 8, z: 1 }],
+      } as any,
+      0,
+    );
     // The MULTICHANNEL branch was taken. jsdom can't decode <img>, so the planes
     // are empty and no composite builds → null descriptor — detection is what we
     // pin here; the real composite is covered by the headless example test.
@@ -226,27 +255,43 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
       (service as unknown as { simple: { loadChannelPlanes(u: string[]): Promise<unknown[]> } }).simple,
       'loadChannelPlanes',
     );
-    const loaded = await service.load({
-      fileName: 'g.png', tiled: false, isGrayscale: true,
-      urls: ['blob:gray'], trueImageSize: [4, 4],
-      imageMeta: [{ rgbChannels: 1, channelCount: 1, x: 4, y: 4, z: 1 }],
-    } as any, 0);
+    const loaded = await service.load(
+      {
+        fileName: 'g.png',
+        tiled: false,
+        isGrayscale: true,
+        urls: ['blob:gray'],
+        trueImageSize: [4, 4],
+        imageMeta: [{ rgbChannels: 1, channelCount: 1, x: 4, y: 4, z: 1 }],
+      } as any,
+      0,
+    );
     expect(loadPlanes).not.toHaveBeenCalled();
     expect(loaded.channelPlanes).toBeUndefined();
   });
 
-  it('fetches a slice\'s channel planes in parallel, keeping channel order (OSD-PLOTLY-31)', async () => {
+  it("fetches a slice's channel planes in parallel, keeping channel order (OSD-PLOTLY-31)", async () => {
     const simpleStack = (service as any).simpleStack;
     const pending: Record<string, (u: string) => void> = {};
     jest.spyOn(simpleStack, 'fetchAsBlobUrl').mockImplementation(
-      (u: unknown) => new Promise<string>((resolve) => { pending[u as string] = resolve; }),
+      (u: unknown) =>
+        new Promise<string>((resolve) => {
+          pending[u as string] = resolve;
+        }),
     );
-    const decode = jest.spyOn((service as any).simple, 'decodeUrlToRgba').mockImplementation(async (u: unknown) =>
-      ({ data: new Uint8ClampedArray([Number((u as string).slice(-1)), 0, 0, 255]), width: 1, height: 1 }));
+    const decode = jest
+      .spyOn((service as any).simple, 'decodeUrlToRgba')
+      .mockImplementation(async (u: unknown) => ({
+        data: new Uint8ClampedArray([Number((u as string).slice(-1)), 0, 0, 255]),
+        width: 1,
+        height: 1,
+      }));
     const run = (service as any).simple.loadChannelPlanes(['c0', 'c1', 'c2']);
     await Promise.resolve();
     expect(Object.keys(pending)).toEqual(['c0', 'c1', 'c2']); // all requested up front
-    pending['c2']('blob:2'); pending['c0']('blob:0'); pending['c1']('blob:1');
+    pending['c2']('blob:2');
+    pending['c0']('blob:0');
+    pending['c1']('blob:1');
     const planes = await run;
     expect(planes.map((p: { data: Uint8ClampedArray }) => p.data[0])).toEqual([0, 1, 2]);
     decode.mockRestore();
@@ -262,9 +307,11 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
    */
   describe('fitWhenContainerSized (initial fit is layout-timing-independent)', () => {
     const call = (el: HTMLElement | null, refit: () => void) =>
-      (service as unknown as {
-        chrome: { fitWhenContainerSized: (e: HTMLElement | null, r: () => void) => void };
-      }).chrome.fitWhenContainerSized(el, refit);
+      (
+        service as unknown as {
+          chrome: { fitWhenContainerSized: (e: HTMLElement | null, r: () => void) => void };
+        }
+      ).chrome.fitWhenContainerSized(el, refit);
 
     let observers: Array<{ cb: () => void; observe: jest.Mock; disconnect: jest.Mock }>;
     let originalRO: unknown;
@@ -280,7 +327,9 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
       (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
         observe = jest.fn();
         disconnect = jest.fn();
-        constructor(public cb: () => void) { observers.push(this as never); }
+        constructor(public cb: () => void) {
+          observers.push(this as never);
+        }
       };
     });
     afterEach(() => {
@@ -329,9 +378,11 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
    */
   describe('toFullResUrl (upscale preview so OSD world = full-res)', () => {
     const call = (u: string, w: number, h: number): Promise<string> =>
-      (service as unknown as {
-        simple: { toFullResUrl: (u: string, w: number, h: number) => Promise<string> };
-      }).simple.toFullResUrl(u, w, h);
+      (
+        service as unknown as {
+          simple: { toFullResUrl: (u: string, w: number, h: number) => Promise<string> };
+        }
+      ).simple.toFullResUrl(u, w, h);
 
     let createObjectURL: jest.SpyInstance;
     let toBlobSpy: jest.SpyInstance;
@@ -425,10 +476,11 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     }).not.toThrow();
   });
 
-  it('only the displayed slice\'s auto-window seeds the Intensity channel (OSD-PLOTLY-13)', () => {
+  it("only the displayed slice's auto-window seeds the Intensity channel (OSD-PLOTLY-13)", () => {
     const store = TestBed.inject(VisualizerStore);
-    store.setChannelStates([{ index: 0, name: 'Intensity', color: '#ffffff', min: 0, max: 255,
-      gamma: 1, visible: true }]);
+    store.setChannelStates([
+      { index: 0, name: 'Intensity', color: '#ffffff', min: 0, max: 255, gamma: 1, visible: true },
+    ]);
     const host = (service as any).sampler.host;
     (service as any).currentZ = 2;
     host.onGrayWindowSampled(10, 90, 5); // a background-preloaded slice
@@ -449,8 +501,12 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     wrapper.append(navEl, wrapperExtra);
     const nav = {
       element: navEl,
-      setWidth: jest.fn((w: number) => { navEl.style.width = `${w}px`; }),
-      setHeight: jest.fn((h: number) => { navEl.style.height = `${h}px`; }),
+      setWidth: jest.fn((w: number) => {
+        navEl.style.width = `${w}px`;
+      }),
+      setHeight: jest.fn((h: number) => {
+        navEl.style.height = `${h}px`;
+      }),
     };
     const svc = service as any;
     svc.viewer = { navigator: nav, element: { clientWidth: 1000, clientHeight: 500 }, destroy: () => undefined };
@@ -479,8 +535,12 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
       svc.isMultiChannel = true;
       svc.currentZ = 3;
       const order: string[] = [];
-      jest.spyOn(svc.cache, 'revealChannelSlice').mockImplementation((z: unknown) => { order.push(`reveal:${z}`); });
-      jest.spyOn(svc.recolor, 'scheduleInvalidate').mockImplementation(() => { order.push('invalidate'); });
+      jest.spyOn(svc.cache, 'revealChannelSlice').mockImplementation((z: unknown) => {
+        order.push(`reveal:${z}`);
+      });
+      jest.spyOn(svc.recolor, 'scheduleInvalidate').mockImplementation(() => {
+        order.push('invalidate');
+      });
       TestBed.inject(VisualizerStore).setChannelStates([channel]);
       expect(order).toEqual(['reveal:3', 'invalidate']);
       expect(svc.recolor.channelStates).toEqual([channel]);
@@ -503,7 +563,9 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
       const navWorld = { requestInvalidate: jest.fn() };
       svc.viewer = { world, navigator: { world: navWorld }, destroy: () => undefined };
       const recomposite = jest.spyOn(svc.simple, 'recompositeAndOpen').mockResolvedValue(undefined);
-      const channelInvalidate = jest.spyOn(svc.cache, 'invalidateChannelDisplay').mockImplementation(() => undefined);
+      const channelInvalidate = jest
+        .spyOn(svc.cache, 'invalidateChannelDisplay')
+        .mockImplementation(() => undefined);
       svc.currentZ = 4;
 
       const before = svc.recolor.displayToken;
@@ -531,7 +593,12 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     svc.plotDiv = 'osdplot';
     const dock = document.querySelector('.toolbar-dock') as HTMLElement;
     let reflows = 0;
-    Object.defineProperty(dock, 'offsetHeight', { get: () => { reflows++; return 0; } });
+    Object.defineProperty(dock, 'offsetHeight', {
+      get: () => {
+        reflows++;
+        return 0;
+      },
+    });
     const lookup = jest.spyOn(document, 'getElementById');
     const now = jest.spyOn(performance, 'now').mockReturnValue(1000);
     svc.chrome.nudgeToolbarRepaint(true);
@@ -607,7 +674,9 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
   it('a superseded recolor round does not write back (would destroy the cache record)', async () => {
     const svc = service as any;
     svc.isMultiChannel = true;
-    svc.recolor.channelStates = [{ index: 0, name: 'c', color: '#ff0000', min: 0, max: 255, gamma: 1, visible: true }];
+    svc.recolor.channelStates = [
+      { index: 0, name: 'c', color: '#ff0000', min: 0, max: 255, gamma: 1, visible: true },
+    ];
 
     const ctx = {
       canvas: { width: 1, height: 1 },
@@ -620,7 +689,10 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
       // A newer display round lands while this one is awaiting its pixels —
       // exactly what the next tick of a slider drag does.
       getData: jest.fn(async (type: string) => {
-        if (type === 'context2d') { svc.recolor.displayToken++; return ctx; }
+        if (type === 'context2d') {
+          svc.recolor.displayToken++;
+          return ctx;
+        }
         return null;
       }),
       setData,
@@ -635,7 +707,9 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
   it('an uncontested recolor round still writes back', async () => {
     const svc = service as any;
     svc.isMultiChannel = true;
-    svc.recolor.channelStates = [{ index: 0, name: 'c', color: '#ff0000', min: 0, max: 255, gamma: 1, visible: true }];
+    svc.recolor.channelStates = [
+      { index: 0, name: 'c', color: '#ff0000', min: 0, max: 255, gamma: 1, visible: true },
+    ];
 
     const ctx = {
       canvas: { width: 1, height: 1 },
@@ -681,16 +755,29 @@ describe('OpenSeadragonVisualizerService — exportComposite', () => {
     let pixel = new Uint8ClampedArray(4);
     put = jest.fn();
     const ctx = {
-      clearRect: () => { pixel = new Uint8ClampedArray(4); },
-      drawImage: (bmp: { v: number }) => { pixel = new Uint8ClampedArray([bmp.v, bmp.v, bmp.v, 255]); },
+      clearRect: () => {
+        pixel = new Uint8ClampedArray(4);
+      },
+      drawImage: (bmp: { v: number }) => {
+        pixel = new Uint8ClampedArray([bmp.v, bmp.v, bmp.v, 255]);
+      },
       getImageData: () => ({ data: new Uint8ClampedArray(pixel), width: 1, height: 1 }),
       putImageData: put,
     };
     getContext = jest.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(ctx as never);
-    jest.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((cb: BlobCallback) => cb(new Blob(['x'])));
+    jest
+      .spyOn(HTMLCanvasElement.prototype, 'toBlob')
+      .mockImplementation((cb: BlobCallback) => cb(new Blob(['x'])));
     const s = service as any;
-    s.descriptor = { width: 1, height: 1, tileSize: 256, z: 1, channels: 3, realLevels: 1,
-      levels: [{ res: 0, width: 1, height: 1 }] };
+    s.descriptor = {
+      width: 1,
+      height: 1,
+      tileSize: 256,
+      z: 1,
+      channels: 3,
+      realLevels: 1,
+      levels: [{ res: 0, width: 1, height: 1 }],
+    };
     s.infoB64 = 'INFO64';
     s.realLevels = 1;
     s.currentFileName = 'multi.tif';
@@ -702,7 +789,7 @@ describe('OpenSeadragonVisualizerService — exportComposite', () => {
     http.match(() => true);
   });
 
-  it('merges each visible channel\'s tiles with its tint for a multichannel image', async () => {
+  it("merges each visible channel's tiles with its tint for a multichannel image", async () => {
     const s = service as any;
     s.isMultiChannel = true;
     s.recolor.channelStates = [
@@ -736,7 +823,12 @@ describe('OpenSeadragonVisualizerService (tiled load via /tiles/info)', () => {
   let http: HttpTestingController;
 
   const descriptor = {
-    width: 1024, height: 768, tileSize: 256, z: 1, channels: 1, realLevels: 1,
+    width: 1024,
+    height: 768,
+    tileSize: 256,
+    z: 1,
+    channels: 1,
+    realLevels: 1,
     levels: [{ res: 0, width: 1024, height: 768 }],
   };
 
@@ -810,8 +902,7 @@ describe('OpenSeadragonVisualizerService (tiled load via /tiles/info)', () => {
   it('rejects an already-aborted load without polling', async () => {
     const ctl = new AbortController();
     ctl.abort();
-    await expect(service.load(BIG_SVS, 0, ctl.signal))
-      .rejects.toMatchObject({ name: 'AbortError' });
+    await expect(service.load(BIG_SVS, 0, ctl.signal)).rejects.toMatchObject({ name: 'AbortError' });
     http.expectNone((r) => r.url.includes('tiles/info'));
   });
 });

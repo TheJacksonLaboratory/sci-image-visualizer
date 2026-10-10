@@ -48,7 +48,10 @@ export interface DensityOptions {
  * align. Without a volume the box comes from the observations' own bounds.
  */
 export function densityGrid(
-  dataset: SpatialDataset, stride = 2, targetLongAxis = 128, zStride = stride,
+  dataset: SpatialDataset,
+  stride = 2,
+  targetLongAxis = 128,
+  zStride = stride,
 ): DensityGrid | null {
   const volume = dataset.volume;
   if (volume) {
@@ -56,9 +59,7 @@ export function densityGrid(
     // z can be coarsened less than x/y — a gene map's sheets need one plane per
     // imaged section, while its in-plane detail is smooth by construction. The
     // physical extent is unchanged either way, so the box still aligns.
-    const [w, h, d] = [
-      cells(volume.width, stride), cells(volume.height, stride), cells(volume.depth, zStride),
-    ];
+    const [w, h, d] = [cells(volume.width, stride), cells(volume.height, stride), cells(volume.depth, zStride)];
     // Voxel size from the SPAN, not stride x original: `ceil` can add a fraction
     // of a voxel, and scaling the original size would push the far edge past the
     // reference volume's.
@@ -122,7 +123,12 @@ export function gaussianKernel(sigma: number): { kernel: Float32Array; radius: n
  * which is the one thing a Nadaraya-Watson field cannot survive.
  */
 export function blurVolumeAxis(
-  field: Float32Array, w: number, h: number, d: number, axis: 0 | 1 | 2, sigmaVox: number,
+  field: Float32Array,
+  w: number,
+  h: number,
+  d: number,
+  axis: 0 | 1 | 2,
+  sigmaVox: number,
 ): void {
   if (!(sigmaVox > 0.01)) return;
   const { kernel, radius } = gaussianKernel(sigmaVox);
@@ -160,7 +166,8 @@ export function blurVolumeAxis(
  * sampling artefact to correct for.
  */
 function sampledPlanes(
-  obs: SpatialObservations, grid: DensityGrid,
+  obs: SpatialObservations,
+  grid: DensityGrid,
 ): { cover: Float32Array; first: number; last: number } {
   const cover = new Float32Array(grid.depth);
   const z = obs.z;
@@ -194,7 +201,9 @@ function blur1d(profile: Float32Array, sigmaVox: number): Float32Array {
  * so the caller draws no layer rather than an empty box.
  */
 export function rasterizeDensity(
-  obs: SpatialObservations, grid: DensityGrid, opts: DensityOptions,
+  obs: SpatialObservations,
+  grid: DensityGrid,
+  opts: DensityOptions,
 ): Uint8Array | null {
   const { width: w, height: h, depth: d, voxelSize } = grid;
   const field = new Float32Array(w * h * d);
@@ -214,7 +223,9 @@ export function rasterizeDensity(
   if (!placed) return null;
 
   const sigmaVox: [number, number, number] = [
-    opts.sigma[0] / voxelSize[0], opts.sigma[1] / voxelSize[1], opts.sigma[2] / voxelSize[2],
+    opts.sigma[0] / voxelSize[0],
+    opts.sigma[1] / voxelSize[1],
+    opts.sigma[2] / voxelSize[2],
   ];
   blurVolumeAxis(field, w, h, d, 0, sigmaVox[0]);
   blurVolumeAxis(field, w, h, d, 1, sigmaVox[1]);

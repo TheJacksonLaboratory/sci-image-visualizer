@@ -19,7 +19,10 @@ export const GROUP_MIN_SPACING_PX = 14;
  * themselves.
  */
 export function geneBinSize(
-  pxPerUnit: number, baseBin: number, levels = 7, spacingPx = GROUP_MIN_SPACING_PX,
+  pxPerUnit: number,
+  baseBin: number,
+  levels = 7,
+  spacingPx = GROUP_MIN_SPACING_PX,
 ): number | null {
   if (!(pxPerUnit > 0) || !(baseBin > 0)) return null;
   if (baseBin * pxPerUnit >= spacingPx) return null;
@@ -39,12 +42,19 @@ export function clipTranscripts(t: SpatialTranscriptTile, rect: DataRect): Spati
   if (keep.length === t.count) return t;
   const pick = <A extends Float32Array | Uint32Array | Uint16Array>(a: A): A => {
     const out = new (a.constructor as new (n: number) => A)(keep.length);
-    keep.forEach((src, i) => { out[i] = a[src]; });
+    keep.forEach((src, i) => {
+      out[i] = a[src];
+    });
     return out;
   };
   return {
-    count: keep.length, aggregated: t.aggregated,
-    x: pick(t.x), y: pick(t.y), z: pick(t.z), weight: pick(t.weight), observation: pick(t.observation),
+    count: keep.length,
+    aggregated: t.aggregated,
+    x: pick(t.x),
+    y: pick(t.y),
+    z: pick(t.z),
+    weight: pick(t.weight),
+    observation: pick(t.observation),
     gene: pick(t.gene),
   };
 }
@@ -59,7 +69,9 @@ export function clipTranscripts(t: SpatialTranscriptTile, rect: DataRect): Spati
  * of them, each summed over all its transcripts in the entry. `group[i]` is entry i's group.
  */
 export function groupTranscripts(
-  t: SpatialTranscriptTile, bin: number, groupOf: (geneSlot: number) => number = (g) => g,
+  t: SpatialTranscriptTile,
+  bin: number,
+  groupOf: (geneSlot: number) => number = (g) => g,
 ): { tile: SpatialTranscriptTile; group: Int32Array } {
   // Hot on every pan and zoom, so nothing is allocated per transcript: the (group, square)
   // key is a number over the tile's own bounded extent rather than a template string, and
@@ -110,7 +122,10 @@ export function groupTranscripts(
     if (k === undefined) {
       k = w.length;
       index.set(key, k);
-      sx.push(0); sy.push(0); sz.push(0); w.push(0);
+      sx.push(0);
+      sy.push(0);
+      sz.push(0);
+      w.push(0);
       grp.push(gk);
     }
     sx[k] += t.x[i] * wi;
@@ -122,9 +137,14 @@ export function groupTranscripts(
   }
   const n = w.length;
   const tile: SpatialTranscriptTile = {
-    count: n, aggregated: true,
-    x: new Float32Array(n), y: new Float32Array(n), z: new Float32Array(n),
-    weight: new Uint32Array(n), observation: new Uint32Array(n), gene: new Uint16Array(n),
+    count: n,
+    aggregated: true,
+    x: new Float32Array(n),
+    y: new Float32Array(n),
+    z: new Float32Array(n),
+    weight: new Uint32Array(n),
+    observation: new Uint32Array(n),
+    gene: new Uint16Array(n),
   };
   const group = new Int32Array(n);
   for (let k = 0; k < n; k++) {
@@ -187,8 +207,10 @@ class DominantTally {
  * cluster gets the same colour — the tree's swatches and the markers use this one map.
  */
 export function clusterColorMap(
-  genes: readonly string[], groups: readonly { name: string; genes: readonly string[] }[],
-  cellColors: ReadonlyMap<string, string>, palette: readonly string[],
+  genes: readonly string[],
+  groups: readonly { name: string; genes: readonly string[] }[],
+  cellColors: ReadonlyMap<string, string>,
+  palette: readonly string[],
 ): Map<string, string> {
   const chosen = new Set(genes);
   const names: string[] = [];
@@ -211,7 +233,8 @@ export function clusterColorMap(
 
 /** The cluster a selected gene is in: its first gene-tree group holding it, else itself. */
 export function clusterOfGene(
-  gene: string, groups: readonly { name: string; genes: readonly string[] }[],
+  gene: string,
+  groups: readonly { name: string; genes: readonly string[] }[],
 ): string {
   return groups.find((g) => g.genes.includes(gene))?.name ?? gene;
 }
@@ -272,8 +295,13 @@ export type AllGenesPlan = { kind: 'individual' } | { kind: 'bins'; level: numbe
  * locally; the renderer still caps what it draws, so an estimate is enough to choose.
  */
 export function allGenesPlan(o: {
-  rect: DataRect; bounds: SpatialBounds; total: number; pxPerUnit: number;
-  levels: readonly { binSize: number }[]; budget: number; canIndividual: boolean;
+  rect: DataRect;
+  bounds: SpatialBounds;
+  total: number;
+  pxPerUnit: number;
+  levels: readonly { binSize: number }[];
+  budget: number;
+  canIndividual: boolean;
   minSpacingPx?: number;
 }): AllGenesPlan {
   const area = visibleArea(o.rect, o.bounds);

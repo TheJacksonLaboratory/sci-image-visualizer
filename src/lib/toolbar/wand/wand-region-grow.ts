@@ -48,14 +48,26 @@ const DEFAULT_SENSITIVITY = 2.0;
  * @param options wand parameters; missing fields fall back to defaults.
  * @returns a Polygon in image-pixel coordinates, or null if no region grew.
  */
-export function computeWandRegion(image: WandImage, cx: number, cy: number,
-                                  options: WandOptions = {}): Polygon | null {
+export function computeWandRegion(
+  image: WandImage,
+  cx: number,
+  cy: number,
+  options: WandOptions = {},
+): Polygon | null {
   const patch = computeWandPatchMask(image, cx, cy, options);
   if (!patch) return null;
   // The largest traced piece (with holes of 4+ px, as the tools trace); single pixels still count.
-  return maskToPolygons(patch.mask, patch.size, patch.size,
-    Math.round(cx) - (patch.size - 1) / 2,
-    Math.round(cy) - (patch.size - 1) / 2, 1, 4)[0] ?? null;
+  return (
+    maskToPolygons(
+      patch.mask,
+      patch.size,
+      patch.size,
+      Math.round(cx) - (patch.size - 1) / 2,
+      Math.round(cy) - (patch.size - 1) / 2,
+      1,
+      4,
+    )[0] ?? null
+  );
 }
 
 /**
@@ -65,8 +77,12 @@ export function computeWandRegion(image: WandImage, cx: number, cy: number,
  *
  * @throws when `options.patchSize` is even.
  */
-export function computeWandPatchMask(image: WandImage, cx: number, cy: number,
-                                     options: WandOptions = {}): WandPatchMask | null {
+export function computeWandPatchMask(
+  image: WandImage,
+  cx: number,
+  cy: number,
+  options: WandOptions = {},
+): WandPatchMask | null {
   const W = options.patchSize ?? DEFAULT_PATCH_SIZE;
   if (W % 2 === 0) {
     throw new Error(`patchSize must be odd, got ${W}`);
@@ -77,7 +93,7 @@ export function computeWandPatchMask(image: WandImage, cx: number, cy: number,
   const type: WandType = options.type ?? (isGrayscale ? 'GRAY' : 'RGB');
   const simple = !!options.simpleMode;
   // extractPatch always interleaves 1 channel for GRAY, 3 for RGB/LAB_DISTANCE.
-  const inputChannels = (type === 'GRAY') ? 1 : 3;
+  const inputChannels = type === 'GRAY' ? 1 : 3;
 
   let buf = extractPatch(image, cx, cy, W, type);
 
@@ -102,10 +118,10 @@ export function computeWandPatchMask(image: WandImage, cx: number, cy: number,
       const distance = labDistanceMap(buf, W);
       const max = distance.max > 0 ? distance.max : 1;
       const scaled = new Float32Array(W * W);
-      for (let i = 0; i < scaled.length; i++) scaled[i] = distance.values[i] * 255.0 / max;
+      for (let i = 0; i < scaled.length; i++) scaled[i] = (distance.values[i] * 255.0) / max;
       buf = scaled;
       floodChannels = 1;
-      threshold = [distance.mean * sensitivity * 255.0 / max];
+      threshold = [(distance.mean * sensitivity * 255.0) / max];
     } else {
       floodChannels = inputChannels;
       threshold = perChannelThreshold(buf, W, inputChannels, sensitivity);
@@ -120,7 +136,7 @@ export function computeWandPatchMask(image: WandImage, cx: number, cy: number,
 // ── Patch extraction ────────────────────────────────────────────────
 
 function extractPatch(image: WandImage, cx: number, cy: number, W: number, type: WandType): Float32Array {
-  const channels = (type === 'GRAY') ? 1 : 3;
+  const channels = type === 'GRAY' ? 1 : 3;
   const half = (W - 1) / 2;
   const x0 = Math.round(cx) - half;
   const y0 = Math.round(cy) - half;
@@ -345,7 +361,10 @@ function dilate(mask: Uint8Array, W: number, r: number): Uint8Array {
         for (let dx = -r; dx <= r; dx++) {
           const xx = x + dx;
           if (xx < 0 || xx >= W) continue;
-          if (mask[yy * W + xx]) { hit = 1; break; }
+          if (mask[yy * W + xx]) {
+            hit = 1;
+            break;
+          }
         }
       }
       out[y * W + x] = hit;
@@ -361,11 +380,20 @@ function erode(mask: Uint8Array, W: number, r: number): Uint8Array {
       let all = 1;
       for (let dy = -r; dy <= r && all; dy++) {
         const yy = y + dy;
-        if (yy < 0 || yy >= W) { all = 0; break; }
+        if (yy < 0 || yy >= W) {
+          all = 0;
+          break;
+        }
         for (let dx = -r; dx <= r; dx++) {
           const xx = x + dx;
-          if (xx < 0 || xx >= W) { all = 0; break; }
-          if (!mask[yy * W + xx]) { all = 0; break; }
+          if (xx < 0 || xx >= W) {
+            all = 0;
+            break;
+          }
+          if (!mask[yy * W + xx]) {
+            all = 0;
+            break;
+          }
         }
       }
       out[y * W + x] = all;
@@ -386,10 +414,12 @@ function srgbToLab(r: number, g: number, b: number): [number, number, number] {
   const B = srgbToLinear(b);
   // sRGB → XYZ (D65)
   const X = R * 0.4124564 + G * 0.3575761 + B * 0.1804375;
-  const Y = R * 0.2126729 + G * 0.7151522 + B * 0.0721750;
-  const Z = R * 0.0193339 + G * 0.1191920 + B * 0.9503041;
+  const Y = R * 0.2126729 + G * 0.7151522 + B * 0.072175;
+  const Z = R * 0.0193339 + G * 0.119192 + B * 0.9503041;
   // Reference white (D65)
-  const Xn = 0.95047, Yn = 1.0, Zn = 1.08883;
+  const Xn = 0.95047,
+    Yn = 1.0,
+    Zn = 1.08883;
   const fx = labF(X / Xn);
   const fy = labF(Y / Yn);
   const fz = labF(Z / Zn);

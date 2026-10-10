@@ -12,7 +12,10 @@ export class CanvasToolManager {
   private readonly tools = new Map<CanvasToolId, ICanvasTool<unknown>>();
   private active: ICanvasTool<unknown> | null = null;
 
-  constructor(private readonly host: CanvasToolHost, tools: ReadonlyArray<ICanvasTool<never>>) {
+  constructor(
+    private readonly host: CanvasToolHost,
+    tools: ReadonlyArray<ICanvasTool<never>>,
+  ) {
     for (const tool of tools) this.tools.set(tool.id, tool as ICanvasTool<unknown>);
   }
 

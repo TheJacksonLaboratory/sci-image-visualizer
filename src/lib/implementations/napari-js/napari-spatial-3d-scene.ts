@@ -3,7 +3,11 @@ import type { Points3DLayer, ProjectedPoints, Viewer, VolumeLayer } from 'napari
 
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
 import {
-  SpatialColumn, SpatialDataset, SpatialObservations, findColumnMeta, isCategoricalColumn,
+  SpatialColumn,
+  SpatialDataset,
+  SpatialObservations,
+  findColumnMeta,
+  isCategoricalColumn,
 } from '../../contracts/spatial-dataset.contract';
 import { SpatialViewState } from '../../contracts/display-types';
 import { DEFAULT_MUTED_OPACITY, resolveCategoryColors } from '../../spatial/spatial-encoding';
@@ -11,16 +15,26 @@ import { SpatialSelectionMask, emptySelection, maskToIndices } from '../../spati
 import { defaultSigma, densityGrid } from '../../spatial/spatial-density';
 import { observationsInSection, sectionsOf } from '../../spatial/spatial-sections';
 import {
-  ExpressionVolumeField, encodeExpressionVolume, fieldContrastWindow,
+  ExpressionVolumeField,
+  encodeExpressionVolume,
+  fieldContrastWindow,
 } from '../../spatial/spatial-expression';
 import { computeExpressionVolumeAsync, rasterizeDensityAsync } from '../../workers/spatial-math';
 import { Supersede } from '../../util/supersede';
 import { isAbortError } from '../tile-server';
 import { NapariScaleBar, ScaleBarCamera } from './napari-scale-bar';
 import {
-  DensityGroup, GENE_MAP_SIGMA, GENE_MAP_VOLUME_STRIDE, SPATIAL_3D_BASE_SIZE, SPATIAL_SELECTED_SIZE_SCALE,
-  Spatial3dEncoding, encodeSpatial3dCategorical, encodeSpatial3dContinuous, rankDensityGroups,
-  spatialFlatColormap, totalDensityGroup,
+  DensityGroup,
+  GENE_MAP_SIGMA,
+  GENE_MAP_VOLUME_STRIDE,
+  SPATIAL_3D_BASE_SIZE,
+  SPATIAL_SELECTED_SIZE_SCALE,
+  Spatial3dEncoding,
+  encodeSpatial3dCategorical,
+  encodeSpatial3dContinuous,
+  rankDensityGroups,
+  spatialFlatColormap,
+  totalDensityGroup,
 } from './napari-spatial-encoding';
 import { SpatialSceneBase, SpatialSession } from './napari-spatial-scene';
 import type { NapariScene, SceneContext } from './napari-scene';
@@ -193,7 +207,8 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
 
   /** (Re)build the 3D point cloud for the current dataset + view state. */
   protected async rebuild(
-    dataset: SpatialDataset | null, view: SpatialViewState,
+    dataset: SpatialDataset | null,
+    view: SpatialViewState,
     selection: SpatialSelectionMask = emptySelection(),
   ): Promise<void> {
     const viewer = this.ctx.viewer;
@@ -386,7 +401,9 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
    * origin.
    */
   private async ensureGeneMap(
-    viewer: Viewer, dataset: SpatialDataset, view: SpatialViewState,
+    viewer: Viewer,
+    dataset: SpatialDataset,
+    view: SpatialViewState,
     selection: SpatialSelectionMask,
   ): Promise<void> {
     const gene = view.geneMap && view.colorBy?.kind === 'feature' ? view.colorBy.name : null;
@@ -406,15 +423,22 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
 
     const fieldKey = gene
       ? [
-        dataset.id, gene, smoothing, section ?? 'all', interpolate ? 'vol' : 'sheets',
-        this.session.selectionRev(selection),
-      ].join('|')
+          dataset.id,
+          gene,
+          smoothing,
+          section ?? 'all',
+          interpolate ? 'vol' : 'sheets',
+          this.session.selectionRev(selection),
+        ].join('|')
       : null;
     const key = fieldKey
       ? [
-        fieldKey, clip.join(','), view.logScale ? 'log' : 'lin', view.geneMapOpacity,
-        this.ctx.display.continuousColormapKey(view),
-      ].join('|')
+          fieldKey,
+          clip.join(','),
+          view.logScale ? 'log' : 'lin',
+          view.geneMapOpacity,
+          this.ctx.display.continuousColormapKey(view),
+        ].join('|')
       : null;
     if (key === this.geneMapKey) return;
 
@@ -457,16 +481,21 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
       const inPlane = dataset.volume?.voxelSize ?? grid.voxelSize;
       let field: ExpressionVolumeField | null;
       try {
-        field = await computeExpressionVolumeAsync(obs, grid, {
-          sigma: [
-            inPlane[0] * GENE_MAP_SIGMA * smoothing,
-            inPlane[1] * GENE_MAP_SIGMA * smoothing,
-            grid.voxelSize[2] * 1.5 * smoothing,
-          ],
-          values,
-          indices: section != null ? observationsInSection(obs, section) : inSelection,
-          interpolate,
-        }, { signal: load.signal });
+        field = await computeExpressionVolumeAsync(
+          obs,
+          grid,
+          {
+            sigma: [
+              inPlane[0] * GENE_MAP_SIGMA * smoothing,
+              inPlane[1] * GENE_MAP_SIGMA * smoothing,
+              grid.voxelSize[2] * 1.5 * smoothing,
+            ],
+            values,
+            indices: section != null ? observationsInSection(obs, section) : inSelection,
+            interpolate,
+          },
+          { signal: load.signal },
+        );
       } catch (err) {
         if (isAbortError(err)) return; // superseded by a newer map, or the scene went away
         throw err;
@@ -485,23 +514,20 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     const lo = 0;
     const data = encodeExpressionVolume(field, [lo, hi], { log: view.logScale });
     const lut = this.ctx.display.spatialLut(view);
-    this.geneMapLayer = viewer.addVolume(
-      data, field.width, field.height, field.depth,
-      {
-        name: `gene map · ${gene}${interpolate ? ' · volume' : ''}`,
-        colormap: colormapFromLut(`gene-map-${gene}`, lut),
-        // The encoding already applied the window, so the layer must not apply a
-        // second one: 0..255 is the whole of what it was given.
-        contrastLimits: [0, 255],
-        rendering: 'translucent',
-        // Additive like the density volumes, and for the same reason: the sheets
-        // have to read THROUGH each other and through the anatomy, which a
-        // translucent blend would occlude one sheet at a time.
-        blending: 'additive',
-        opacity: view.geneMapOpacity,
-        voxelSize: grid.voxelSize,
-      },
-    );
+    this.geneMapLayer = viewer.addVolume(data, field.width, field.height, field.depth, {
+      name: `gene map · ${gene}${interpolate ? ' · volume' : ''}`,
+      colormap: colormapFromLut(`gene-map-${gene}`, lut),
+      // The encoding already applied the window, so the layer must not apply a
+      // second one: 0..255 is the whole of what it was given.
+      contrastLimits: [0, 255],
+      rendering: 'translucent',
+      // Additive like the density volumes, and for the same reason: the sheets
+      // have to read THROUGH each other and through the anatomy, which a
+      // translucent blend would occlude one sheet at a time.
+      blending: 'additive',
+      opacity: view.geneMapOpacity,
+      voxelSize: grid.voxelSize,
+    });
     viewer.requestRender();
   }
 
@@ -527,7 +553,9 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
    * the colour column, the bandwidth, or the selection.
    */
   private async ensureDensityVolumes(
-    viewer: Viewer, dataset: SpatialDataset, view: SpatialViewState,
+    viewer: Viewer,
+    dataset: SpatialDataset,
+    view: SpatialViewState,
     selection: SpatialSelectionMask,
   ): Promise<void> {
     const on = !!view.densityVolume && !!dataset.observations.z;
@@ -585,9 +613,16 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     let fields: (Uint8Array | null)[];
     try {
       // Off the main thread past the worker threshold; the clusters queue on one worker.
-      fields = await Promise.all(groups.map((group) => rasterizeDensityAsync(
-        dataset.observations, grid, { sigma, indices: group.indices }, { signal: load.signal },
-      )));
+      fields = await Promise.all(
+        groups.map((group) =>
+          rasterizeDensityAsync(
+            dataset.observations,
+            grid,
+            { sigma, indices: group.indices },
+            { signal: load.signal },
+          ),
+        ),
+      );
     } catch (err) {
       if (isAbortError(err)) return; // superseded by a newer key, or the scene went away
       throw err;
@@ -623,7 +658,9 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
    * show when the view is not encoding a taxonomy.
    */
   private async densityGroups(
-    dataset: SpatialDataset, column: string | null, selection: SpatialSelectionMask,
+    dataset: SpatialDataset,
+    column: string | null,
+    selection: SpatialSelectionMask,
   ): Promise<DensityGroup[]> {
     const port = this.session.port;
     const meta = column ? findColumnMeta(dataset, column) : undefined;
@@ -645,9 +682,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
    * A failed or absent volume is not fatal: the cloud renders on its own, at its own
    * coordinates, and the camera frames the points instead.
    */
-  private async ensureVolume(
-    viewer: Viewer, dataset: SpatialDataset, view: SpatialViewState,
-  ): Promise<void> {
+  private async ensureVolume(viewer: Viewer, dataset: SpatialDataset, view: SpatialViewState): Promise<void> {
     const meta = dataset.volume;
     const port = this.session.port;
     const key = meta ? `${dataset.id}:${meta.width}x${meta.height}x${meta.depth}` : null;
@@ -685,11 +720,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     });
     // Half the box, negated: the observations' origin is the box's near corner,
     // and the box is centred on the world origin.
-    this.origin = [
-      -(meta.width * vx) / 2,
-      -(meta.height * vy) / 2,
-      -(meta.depth * vz) / 2,
-    ];
+    this.origin = [-(meta.width * vx) / 2, -(meta.height * vy) / 2, -(meta.depth * vz) / 2];
     // Force a geometry rebuild: the offset changed, so cached positions are stale.
     this.layerKey = null;
   }
@@ -744,7 +775,10 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
   /** Continuous values → the active colormap over a percentile-clipped window. */
   encodeContinuous(source: Float32Array, view: SpatialViewState): Spatial3dEncoding {
     return encodeSpatial3dContinuous(
-      source, view, this.ctx.display.spatialLut(view), this.session.contrastWindows,
+      source,
+      view,
+      this.ctx.display.spatialLut(view),
+      this.session.contrastWindows,
     );
   }
 }

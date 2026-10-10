@@ -290,7 +290,7 @@ positive and negative strokes with the brush in blue and red.
 
 - **`TOOLBAR_TOOLS` is typed `readonly ToolbarContribution[]`**, the union of the
   run tools (`ToolbarToolContribution`, unchanged) and the new dialog tools.
-  Providing tools is unaffected. Code that *injects* the token and reads run-tool
+  Providing tools is unaffected. Code that _injects_ the token and reads run-tool
   members directly must narrow first, for example with `visibleToolContributions()`
   or `isDialogToolContribution()`. That is a type-level break, so this is a minor
   bump under 0.x.
@@ -364,7 +364,7 @@ contributions sees no change.
   - **Isolation:** nothing a contribution throws or rejects escapes. Failing to
     start (`activate`, `mount`, a panel component throwing as it is first
     rendered) falls back to the base type with a warning toast. So does failing
-    to clean up (throw *or* async rejection) while the same mode is being
+    to clean up (throw _or_ async rejection) while the same mode is being
     re-activated. An explicit re-selection in the dropdown retries it.
 - **A viewport to draw over, on the OpenSeadragon backend.**
   - `dataToClient` (image px to client px) alongside `clientToData`.

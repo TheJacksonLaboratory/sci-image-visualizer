@@ -28,7 +28,9 @@ export interface QuantileOptions {
  * The `ps` quantiles (each 0..1, clamped) of the values that qualify, or null when none do.
  */
 export function quantiles(
-  values: ArrayLike<number>, ps: readonly number[], opts: QuantileOptions = {},
+  values: ArrayLike<number>,
+  ps: readonly number[],
+  opts: QuantileOptions = {},
 ): number[] | null {
   const positive = opts.filter === 'positive';
   const where = opts.where;
@@ -43,9 +45,7 @@ export function quantiles(
   for (let i = 0; i < n; i++) if (keep(i)) count++;
   if (count === 0) return null;
 
-  const step = opts.sampleSize && count >= 2 * opts.sampleSize
-    ? Math.floor(count / opts.sampleSize)
-    : 1;
+  const step = opts.sampleSize && count >= 2 * opts.sampleSize ? Math.floor(count / opts.sampleSize) : 1;
   const sample = new Float64Array(Math.ceil(count / step));
   let seen = 0;
   let k = 0;
@@ -62,9 +62,7 @@ export function quantiles(
 }
 
 /** One quantile; see {@link quantiles}. */
-export function quantile(
-  values: ArrayLike<number>, p: number, opts: QuantileOptions = {},
-): number | null {
+export function quantile(values: ArrayLike<number>, p: number, opts: QuantileOptions = {}): number | null {
   return quantiles(values, [p], opts)?.[0] ?? null;
 }
 
@@ -77,7 +75,10 @@ export const WINDOW_SAMPLE_SIZE = 65_536;
  * when nothing qualifies, so callers always get a usable window.
  */
 export function percentileWindow(
-  values: ArrayLike<number>, lo: number, hi: number, opts: QuantileOptions = {},
+  values: ArrayLike<number>,
+  lo: number,
+  hi: number,
+  opts: QuantileOptions = {},
 ): [number, number] {
   const q = quantiles(values, [lo, hi], { sampleSize: WINDOW_SAMPLE_SIZE, ...opts });
   if (!q) return [0, 1];

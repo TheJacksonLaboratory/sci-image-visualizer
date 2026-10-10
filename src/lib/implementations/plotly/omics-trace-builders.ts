@@ -14,8 +14,7 @@ import { parseCssColor, rgbToHex } from '../../contracts/color';
  * distribution and already carries both trace types.
  */
 
-export type OmicsChartKind =
-  | 'histogram' | 'violin' | 'box' | 'counts' | 'heatmap' | 'embedding';
+export type OmicsChartKind = 'histogram' | 'violin' | 'box' | 'counts' | 'heatmap' | 'embedding';
 
 /** Per-observation grouping for a violin/box, or an overlaid histogram. */
 export interface OmicsGrouping {
@@ -115,8 +114,7 @@ function histogramBins(input: OmicsTraceInput, selection: Uint8Array | null): Hi
   }
   // One bar, one unit wide, for a flat distribution: there is no spread to bin.
   const flat = !(hi > lo);
-  const bins = flat ? 1 : Math.min(HISTOGRAM_MAX_BINS,
-    Math.max(HISTOGRAM_MIN_BINS, Math.ceil(Math.sqrt(count))));
+  const bins = flat ? 1 : Math.min(HISTOGRAM_MAX_BINS, Math.max(HISTOGRAM_MIN_BINS, Math.ceil(Math.sqrt(count))));
   const start = flat ? lo - 0.5 : lo;
   const width = flat ? 1 : (hi - lo) / bins;
   const all = new Array<number>(bins).fill(0);
@@ -133,9 +131,7 @@ function histogramBins(input: OmicsTraceInput, selection: Uint8Array | null): Hi
 }
 
 /** Values per category, finite and optionally selection-restricted. */
-function byCategory(
-  input: OmicsTraceInput, group: OmicsGrouping, restrict: Uint8Array | null,
-): number[][] {
+function byCategory(input: OmicsTraceInput, group: OmicsGrouping, restrict: Uint8Array | null): number[][] {
   const buckets: number[][] = group.categories.map(() => []);
   const { values, log } = input;
   for (let i = 0; i < values.length; i++) {
@@ -184,11 +180,13 @@ export function buildOmicsTraces(kind: OmicsChartKind, input: OmicsTraceInput): 
       name,
       hovertemplate: `%{y} obs<br>%{customdata[0]:.4g} – %{customdata[1]:.4g}<extra>${name}</extra>`,
     });
-    const traces: unknown[] = [{
-      ...bar(bins.all, 'All'),
-      marker: { color, line: { width: 0 } },
-      opacity: selection ? 0.55 : 1,
-    }];
+    const traces: unknown[] = [
+      {
+        ...bar(bins.all, 'All'),
+        marker: { color, line: { width: 0 } },
+        opacity: selection ? 0.55 : 1,
+      },
+    ];
     if (bins.selected) {
       traces.push({
         ...bar(bins.selected, 'Selected'),
@@ -209,29 +207,33 @@ export function buildOmicsTraces(kind: OmicsChartKind, input: OmicsTraceInput): 
 
   if (input.group) {
     const buckets = byCategory(input, input.group, selection);
-    return buckets
-      // Drop empty categories: an empty violin renders as a stray tick with a
-      // label, which reads as data.
-      .map((values, i) => ({ values, i }))
-      .filter((b) => b.values.length > 0)
-      .map((b) => ({
-        ...shared,
-        y: thin(b.values),
-        name: input.group!.categories[b.i],
-        marker: { color: input.group!.colors[b.i] ?? color },
-        line: { color: input.group!.colors[b.i] ?? color },
-      }));
+    return (
+      buckets
+        // Drop empty categories: an empty violin renders as a stray tick with a
+        // label, which reads as data.
+        .map((values, i) => ({ values, i }))
+        .filter((b) => b.values.length > 0)
+        .map((b) => ({
+          ...shared,
+          y: thin(b.values),
+          name: input.group!.categories[b.i],
+          marker: { color: input.group!.colors[b.i] ?? color },
+          line: { color: input.group!.colors[b.i] ?? color },
+        }))
+    );
   }
 
   const values = thin(prepare(input, selection));
   if (values.length === 0) return [];
-  return [{
-    ...shared,
-    y: values,
-    name: selection ? 'Selected' : 'All',
-    marker: { color },
-    line: { color },
-  }];
+  return [
+    {
+      ...shared,
+      y: values,
+      name: selection ? 'Selected' : 'All',
+      marker: { color },
+      line: { color },
+    },
+  ];
 }
 
 /** Layout for a chart kind — axis titles reflect the log toggle. */
@@ -333,23 +335,26 @@ export function countByCategory(input: OmicsCountInput): CategoryCounts {
  * long, and sorted, because rank is what the chart is read for.
  */
 export function buildCountTraces(
-  input: OmicsCountInput, counts: CategoryCounts = countByCategory(input),
+  input: OmicsCountInput,
+  counts: CategoryCounts = countByCategory(input),
 ): unknown[] {
   const { labels, colors, totals, selected } = counts;
   const selection = activeSelection(input.selection);
   // Plotly draws the first category at the BOTTOM of a horizontal axis, so
   // reverse to put the biggest bar at the top where the eye starts.
   const flip = <T>(a: T[]): T[] => a.slice().reverse();
-  const traces: unknown[] = [{
-    type: 'bar',
-    orientation: 'h',
-    x: flip(totals),
-    y: flip(labels),
-    name: selection ? 'All' : 'Cells',
-    marker: { color: flip(colors) },
-    opacity: selection ? 0.45 : 1,
-    hovertemplate: '%{x} obs<extra>%{y}</extra>',
-  }];
+  const traces: unknown[] = [
+    {
+      type: 'bar',
+      orientation: 'h',
+      x: flip(totals),
+      y: flip(labels),
+      name: selection ? 'All' : 'Cells',
+      marker: { color: flip(colors) },
+      opacity: selection ? 0.45 : 1,
+      hovertemplate: '%{x} obs<extra>%{y}</extra>',
+    },
+  ];
   if (selection) {
     traces.push({
       type: 'bar',
@@ -369,7 +374,8 @@ export function buildCountTraces(
  * each run its own full pass over the codes.
  */
 export function countsLayout(
-  input: OmicsCountInput & { name: string }, counts: CategoryCounts = countByCategory(input),
+  input: OmicsCountInput & { name: string },
+  counts: CategoryCounts = countByCategory(input),
 ): unknown {
   const { labels } = counts;
   return {
@@ -505,10 +511,10 @@ export function buildEmbeddingTraces(input: OmicsEmbeddingInput): unknown[] {
   // own scene, which is why a third dimension cannot just be added to the former. It
   // costs more per point, so it suits this scale and not millions.
   const type = z ? 'scatter3d' : 'scattergl';
-  const markerSize = z ? Math.max(1, (input.size ?? DEFAULT_EMBEDDING_POINT_SIZE) - 2)
+  const markerSize = z
+    ? Math.max(1, (input.size ?? DEFAULT_EMBEDDING_POINT_SIZE) - 2)
     : (input.size ?? DEFAULT_EMBEDDING_POINT_SIZE);
-  const opacityFor = (i: number): number =>
-    !selection || selection[i] ? 1 : EMBEDDING_MUTED_OPACITY;
+  const opacityFor = (i: number): number => (!selection || selection[i] ? 1 : EMBEDDING_MUTED_OPACITY);
   const isSelected = (i: number): boolean => !selection || selection[i] === 1;
   // In 3D the dimming has to be in the COLOUR, since a per-point opacity array is
   // ignored there. Cached per input colour: 19k lookups of the same few categories.
@@ -525,58 +531,61 @@ export function buildEmbeddingTraces(input: OmicsEmbeddingInput): unknown[] {
   const perPointOpacity = !!selection && !z;
   /** Every observation's opacity, built once for the single-trace paths. */
   const allOpacity = (): { opacity?: number[] } =>
-    (perPointOpacity ? { opacity: Array.from({ length: n }, (_, i) => opacityFor(i)) } : {});
+    perPointOpacity ? { opacity: Array.from({ length: n }, (_, i) => opacityFor(i)) } : {};
   /** The single-trace coordinates. `scattergl` takes the typed arrays as they are; the
    *  3D trace is handed plain arrays. */
-  const coords = (): Record<string, unknown> => (z
-    ? {
-      x: Array.from(x.subarray(0, n)),
-      y: Array.from(y.subarray(0, n)),
-      z: Array.from(z.subarray(0, n)),
-    }
-    : { x: x.subarray(0, n), y: y.subarray(0, n) });
+  const coords = (): Record<string, unknown> =>
+    z
+      ? {
+          x: Array.from(x.subarray(0, n)),
+          y: Array.from(y.subarray(0, n)),
+          z: Array.from(z.subarray(0, n)),
+        }
+      : { x: x.subarray(0, n), y: y.subarray(0, n) };
 
   if (!categories || categories.names.length === 0) {
-    return [{
-      type,
-      mode: 'markers',
-      ...coords(),
-      // The OBSERVATION index per point, carried through so a lasso can be turned back
-      // into a selection. Plotly reports a selected point by its position within its
-      // trace, which is not the observation index once the points are split by category.
-      customdata: Array.from({ length: n }, (_, i) => i),
-      marker: {
-        size: markerSize,
-        // A flat colour normally; per point once a selection has to dim some of them in
-        // 3D, where opacity arrays are ignored.
-        color: selection && z
-          ? Array.from({ length: n }, (_, i) => shade('#4c72b0', i))
-          : '#4c72b0',
-        ...allOpacity(),
+    return [
+      {
+        type,
+        mode: 'markers',
+        ...coords(),
+        // The OBSERVATION index per point, carried through so a lasso can be turned back
+        // into a selection. Plotly reports a selected point by its position within its
+        // trace, which is not the observation index once the points are split by category.
+        customdata: Array.from({ length: n }, (_, i) => i),
+        marker: {
+          size: markerSize,
+          // A flat colour normally; per point once a selection has to dim some of them in
+          // 3D, where opacity arrays are ignored.
+          color: selection && z ? Array.from({ length: n }, (_, i) => shade('#4c72b0', i)) : '#4c72b0',
+          ...allOpacity(),
+        },
+        hoverinfo: 'none',
+        showlegend: false,
       },
-      hoverinfo: 'none',
-      showlegend: false,
-    }];
+    ];
   }
 
   const { codes, names, colors } = categories;
   if (names.length > EMBEDDING_MAX_LEGEND_CATEGORIES) {
     // One trace, per-point colour. Hover still names the category, which is the part that
     // matters; the legend is what is lost.
-    return [{
-      type,
-      mode: 'markers',
-      ...coords(),
-      marker: {
-        size: markerSize,
-        color: Array.from({ length: n }, (_, i) => shade(colors[codes[i]] ?? '#999999', i)),
-        ...allOpacity(),
+    return [
+      {
+        type,
+        mode: 'markers',
+        ...coords(),
+        marker: {
+          size: markerSize,
+          color: Array.from({ length: n }, (_, i) => shade(colors[codes[i]] ?? '#999999', i)),
+          ...allOpacity(),
+        },
+        customdata: Array.from({ length: n }, (_, i) => i),
+        text: Array.from({ length: n }, (_, i) => names[codes[i]] ?? 'unassigned'),
+        hovertemplate: '%{text}<extra></extra>',
+        showlegend: false,
       },
-      customdata: Array.from({ length: n }, (_, i) => i),
-      text: Array.from({ length: n }, (_, i) => names[codes[i]] ?? 'unassigned'),
-      hovertemplate: '%{text}<extra></extra>',
-      showlegend: false,
-    }];
+    ];
   }
 
   // One trace per category: the legend entries toggle, so a population can be isolated by
@@ -603,9 +612,7 @@ export function buildEmbeddingTraces(input: OmicsEmbeddingInput): unknown[] {
       customdata: idx,
       marker: {
         size: markerSize,
-        color: selection && z
-          ? idx.map((i) => shade(colors[c] ?? '#999999', i))
-          : (colors[c] ?? '#999999'),
+        color: selection && z ? idx.map((i) => shade(colors[c] ?? '#999999', i)) : (colors[c] ?? '#999999'),
         ...(perPointOpacity ? { opacity: idx.map(opacityFor) } : {}),
       },
       // Split per category regardless, so hover names it and a future isolate control
@@ -668,25 +675,36 @@ export function embeddingLayout(input: OmicsEmbeddingInput): unknown {
       r: 8,
       t: 8,
       // Room for the legend only when one is drawn; otherwise the axis title alone.
-      b: (input.categories?.names.length ?? 0) > 0
-        && (input.categories?.names.length ?? 0) <= EMBEDDING_MAX_LEGEND_SHOWN ? 64 : 40,
+      b:
+        (input.categories?.names.length ?? 0) > 0 &&
+        (input.categories?.names.length ?? 0) <= EMBEDDING_MAX_LEGEND_SHOWN
+          ? 64
+          : 40,
     },
     // Equal aspect: an embedding's axes carry no units, so distances are only comparable if the
     // two are scaled alike. Stretching one axis to fill the panel invents structure.
     xaxis: {
-      title: { text: axisTitle(stem, 1, vr) }, zeroline: false, ticks: 'outside',
+      title: { text: axisTitle(stem, 1, vr) },
+      zeroline: false,
+      ticks: 'outside',
       ...(input.view?.ranges ? { range: input.view.ranges.x, autorange: false } : {}),
     },
     yaxis: {
-      title: { text: axisTitle(stem, 2, vr) }, zeroline: false, ticks: 'outside',
-      scaleanchor: 'x', scaleratio: 1,
+      title: { text: axisTitle(stem, 2, vr) },
+      zeroline: false,
+      ticks: 'outside',
+      scaleanchor: 'x',
+      scaleratio: 1,
       ...(input.view?.ranges ? { range: input.view.ranges.y, autorange: false } : {}),
     },
     legend: {
       orientation: 'h',
       itemsizing: 'constant',
       font: { size: 9 },
-      yanchor: 'top', y: -0.16, xanchor: 'left', x: 0,
+      yanchor: 'top',
+      y: -0.16,
+      xanchor: 'left',
+      x: 0,
     },
     hovermode: 'closest',
   };
@@ -762,23 +780,23 @@ export function buildHeatmapTraces(input: OmicsHeatmapInput): unknown[] {
     zmax = peak > 0 ? peak : 1;
     zmin = -zmax;
   }
-  const hover = counts
-    ? cols.map((label, c) => `${label} · ${counts[c]} cells`)
-    : cols;
-  return [{
-    type: 'heatmap',
-    z,
-    x: cols,
-    y,
-    customdata: z.map(() => hover),
-    colorscale: input.zScored ? HEATMAP_DIVERGING : HEATMAP_SEQUENTIAL,
-    ...(zmin !== undefined ? { zmin, zmax } : {}),
-    // A gap has no colour rather than the scale's bottom: nothing was measured
-    // there, which is not the same as a low mean.
-    hoverongaps: false,
-    colorbar: { title: { text: unit, side: 'right' }, thickness: 10, len: 0.9 },
-    hovertemplate: `%{y}<br>%{customdata}<br>${unit} %{z:.2f}<extra></extra>`,
-  }];
+  const hover = counts ? cols.map((label, c) => `${label} · ${counts[c]} cells`) : cols;
+  return [
+    {
+      type: 'heatmap',
+      z,
+      x: cols,
+      y,
+      customdata: z.map(() => hover),
+      colorscale: input.zScored ? HEATMAP_DIVERGING : HEATMAP_SEQUENTIAL,
+      ...(zmin !== undefined ? { zmin, zmax } : {}),
+      // A gap has no colour rather than the scale's bottom: nothing was measured
+      // there, which is not the same as a low mean.
+      hoverongaps: false,
+      colorbar: { title: { text: unit, side: 'right' }, thickness: 10, len: 0.9 },
+      hovertemplate: `%{y}<br>%{customdata}<br>${unit} %{z:.2f}<extra></extra>`,
+    },
+  ];
 }
 
 export function heatmapLayout(input: OmicsHeatmapInput): unknown {
@@ -787,8 +805,7 @@ export function heatmapLayout(input: OmicsHeatmapInput): unknown {
     margin: { t: 10, r: 10, b: 90, l: 8 },
     autosize: true,
     hovermode: 'closest',
-    xaxis: { automargin: true, tickangle: -45, tickfont: { size: 10 },
-      title: { text: input.groupLabel ?? '' } },
+    xaxis: { automargin: true, tickangle: -45, tickfont: { size: 10 }, title: { text: input.groupLabel ?? '' } },
     yaxis: { automargin: true, tickfont: { size: 10 } },
     // Grows with the gene count so 3 rows are not stretched to 20 rows' height.
     height: Math.max(180, 24 * input.rows.length + 110),

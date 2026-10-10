@@ -59,14 +59,15 @@ export class OsdNavigatorChrome {
     // fits the whole image so OSD selects the coarse synthetic level. Retry
     // across a few frames because the container may not have its final size
     // on the first frame after 'open'.
-    const refit = () => quiet(() => {
-      this.host.viewer()?.viewport.goHome(true);
-      // The navigator was sized in the Viewer constructor — BEFORE the
-      // layout settled — so its element can carry a stale (even
-      // wrong-aspect) size that floats the visible minimap above the
-      // corner. Re-size it from the settled container.
-      this.resizeNavigator();
-    });
+    const refit = () =>
+      quiet(() => {
+        this.host.viewer()?.viewport.goHome(true);
+        // The navigator was sized in the Viewer constructor — BEFORE the
+        // layout settled — so its element can carry a stale (even
+        // wrong-aspect) size that floats the visible minimap above the
+        // corner. Re-size it from the settled container.
+        this.resizeNavigator();
+      });
     requestAnimationFrame(refit);
     setTimeout(refit, 150);
     setTimeout(refit, 400);
@@ -174,7 +175,14 @@ export class OsdNavigatorChrome {
       corner.style.bottom = '12px';
       corner.style.right = '12px';
     }
-    Object.assign(nav.element.style, { position: 'relative', top: '', left: '', bottom: '', right: '', margin: '0' });
+    Object.assign(nav.element.style, {
+      position: 'relative',
+      top: '',
+      left: '',
+      bottom: '',
+      right: '',
+      margin: '0',
+    });
   }
 
   /** Force the docked toolbar to repaint after an OSD zoom. Chrome leaves it

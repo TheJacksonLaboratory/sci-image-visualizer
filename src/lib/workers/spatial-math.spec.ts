@@ -4,14 +4,27 @@ import { expressionField, expressionVolume } from '../spatial/spatial-expression
 import { heatmapMatrix } from '../spatial/spatial-heatmap';
 import { Supersede } from '../util/supersede';
 import {
-  SpatialMathMessage, SpatialMathReply, resultTransferables, runSpatialMath, slimObservations,
+  SpatialMathMessage,
+  SpatialMathReply,
+  resultTransferables,
+  runSpatialMath,
+  slimObservations,
 } from './spatial-math-ops';
 import {
-  SpatialMathClient, computeExpressionFieldAsync, computeExpressionVolumeAsync,
-  computeHeatmapMatrixAsync, rasterizeDensityAsync,
+  SpatialMathClient,
+  computeExpressionFieldAsync,
+  computeExpressionVolumeAsync,
+  computeHeatmapMatrixAsync,
+  rasterizeDensityAsync,
 } from './spatial-math';
 
-const pts: [number, number, number][] = [[1, 1, 0], [1, 2, 0], [5, 5, 1], [6, 5, 1], [2, 6, 2]];
+const pts: [number, number, number][] = [
+  [1, 1, 0],
+  [1, 2, 0],
+  [5, 5, 1],
+  [6, 5, 1],
+  [2, 6, 2],
+];
 const obs: SpatialObservations = {
   count: pts.length,
   x: Float32Array.from(pts, (p) => p[0]),
@@ -68,18 +81,22 @@ class FakeWorker {
 describe('spatial-math', () => {
   describe('runSpatialMath (what the worker runs)', () => {
     it('gives exactly what the synchronous functions give', () => {
-      expect(runSpatialMath({ op: 'expressionField', obs, opts: fieldOpts }))
-        .toEqual(expressionField(obs, fieldOpts));
+      expect(runSpatialMath({ op: 'expressionField', obs, opts: fieldOpts })).toEqual(
+        expressionField(obs, fieldOpts),
+      );
       const volOpts = { sigma: [0.5, 0.5, 0.5] as [number, number, number], values, interpolate: true };
-      expect(runSpatialMath({ op: 'expressionVolume', obs, grid, opts: volOpts }))
-        .toEqual(expressionVolume(obs, grid, volOpts));
+      expect(runSpatialMath({ op: 'expressionVolume', obs, grid, opts: volOpts })).toEqual(
+        expressionVolume(obs, grid, volOpts),
+      );
       const densOpts = { sigma: [0.5, 0.5, 0.5] as [number, number, number] };
-      expect(runSpatialMath({ op: 'rasterizeDensity', obs, grid, opts: densOpts }))
-        .toEqual(rasterizeDensity(obs, grid, densOpts));
+      expect(runSpatialMath({ op: 'rasterizeDensity', obs, grid, opts: densOpts })).toEqual(
+        rasterizeDensity(obs, grid, densOpts),
+      );
       const genes = [{ name: 'A', values }];
       const groups = { codes: Uint16Array.from([0, 0, 1, 1, 1]), categories: ['g0', 'g1'] };
-      expect(runSpatialMath({ op: 'heatmapMatrix', genes, groups, opts: { minCells: 1 } }))
-        .toEqual(heatmapMatrix(genes, groups, { minCells: 1 }));
+      expect(runSpatialMath({ op: 'heatmapMatrix', genes, groups, opts: { minCells: 1 } })).toEqual(
+        heatmapMatrix(genes, groups, { minCells: 1 }),
+      );
     });
 
     it('rejects an unknown op', () => {
@@ -104,24 +121,29 @@ describe('spatial-math', () => {
   describe('without Web Workers (jsdom)', () => {
     it('computes on the main thread with the same answer', async () => {
       expect(typeof Worker).toBe('undefined');
-      expect(await computeExpressionFieldAsync(obs, fieldOpts, { minObservations: 0 }))
-        .toEqual(expressionField(obs, fieldOpts));
+      expect(await computeExpressionFieldAsync(obs, fieldOpts, { minObservations: 0 })).toEqual(
+        expressionField(obs, fieldOpts),
+      );
       const volOpts = { sigma: [0.5, 0.5, 0.5] as [number, number, number], values };
-      expect(await computeExpressionVolumeAsync(obs, grid, volOpts, { minObservations: 0 }))
-        .toEqual(expressionVolume(obs, grid, volOpts));
-      expect(await rasterizeDensityAsync(obs, grid, { sigma: [1, 1, 1] }))
-        .toEqual(rasterizeDensity(obs, grid, { sigma: [1, 1, 1] }));
+      expect(await computeExpressionVolumeAsync(obs, grid, volOpts, { minObservations: 0 })).toEqual(
+        expressionVolume(obs, grid, volOpts),
+      );
+      expect(await rasterizeDensityAsync(obs, grid, { sigma: [1, 1, 1] })).toEqual(
+        rasterizeDensity(obs, grid, { sigma: [1, 1, 1] }),
+      );
       const groups = { codes: Uint16Array.from([0, 0, 1, 1, 1]), categories: ['g0', 'g1'] };
-      expect(await computeHeatmapMatrixAsync([{ name: 'A', values }], groups, { minCells: 1 }))
-        .toEqual(heatmapMatrix([{ name: 'A', values }], groups, { minCells: 1 }));
+      expect(await computeHeatmapMatrixAsync([{ name: 'A', values }], groups, { minCells: 1 })).toEqual(
+        heatmapMatrix([{ name: 'A', values }], groups, { minCells: 1 }),
+      );
     });
 
     it('rejects a call whose signal has already fired', async () => {
       const load = new Supersede();
       const task = load.next();
       load.cancel();
-      await expect(computeExpressionFieldAsync(obs, fieldOpts, { signal: task.signal }))
-        .rejects.toMatchObject({ name: 'AbortError' });
+      await expect(computeExpressionFieldAsync(obs, fieldOpts, { signal: task.signal })).rejects.toMatchObject({
+        name: 'AbortError',
+      });
     });
   });
 
@@ -137,9 +159,9 @@ describe('spatial-math', () => {
     });
 
     it('runs a large call in the worker, sending slim observations', async () => {
-      const result = await client.run(
-        { op: 'expressionField', obs: slimObservations(obs), opts: fieldOpts }, 5, { minObservations: 1 },
-      );
+      const result = await client.run({ op: 'expressionField', obs: slimObservations(obs), opts: fieldOpts }, 5, {
+        minObservations: 1,
+      });
       expect(result).toEqual(expressionField(obs, fieldOpts));
       expect(worker.posted).toHaveLength(1);
       expect(worker.posted[0]).toMatchObject({ op: 'expressionField', id: 1 });
@@ -160,17 +182,21 @@ describe('spatial-math', () => {
     });
 
     it('rejects a failed computation with its message', async () => {
-      await expect(client.run({ op: 'nope' } as never, 5, { minObservations: 0 }))
-        .rejects.toThrow('unknown spatial-math op');
+      await expect(client.run({ op: 'nope' } as never, 5, { minObservations: 0 })).rejects.toThrow(
+        'unknown spatial-math op',
+      );
     });
 
     it('aborts a superseded call and stops the worker it alone was using', async () => {
       worker.hold = true;
       const load = new Supersede();
       const first = load.next();
-      const call = client.run({ op: 'expressionField', obs, opts: fieldOpts }, 5,
-        { minObservations: 0, signal: first.signal });
-      await Promise.resolve(); await Promise.resolve();
+      const call = client.run({ op: 'expressionField', obs, opts: fieldOpts }, 5, {
+        minObservations: 0,
+        signal: first.signal,
+      });
+      await Promise.resolve();
+      await Promise.resolve();
       expect(worker.posted).toHaveLength(1);
 
       load.next(); // a newer request supersedes the first
@@ -180,8 +206,9 @@ describe('spatial-math', () => {
       // The next call starts a fresh worker.
       const next = new FakeWorker();
       factory.mockReturnValueOnce(next as unknown as Worker);
-      await expect(client.run({ op: 'expressionField', obs, opts: fieldOpts }, 5, { minObservations: 0 }))
-        .resolves.toEqual(expressionField(obs, fieldOpts));
+      await expect(
+        client.run({ op: 'expressionField', obs, opts: fieldOpts }, 5, { minObservations: 0 }),
+      ).resolves.toEqual(expressionField(obs, fieldOpts));
       expect(factory).toHaveBeenCalledTimes(2);
     });
 
@@ -191,7 +218,8 @@ describe('spatial-math', () => {
       const req = { op: 'expressionField' as const, obs, opts: fieldOpts };
       const aborted = client.run(req, 5, { minObservations: 0, signal: controller.signal });
       const kept = client.run(req, 5, { minObservations: 0 });
-      await Promise.resolve(); await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
       controller.abort();
       await expect(aborted).rejects.toMatchObject({ name: 'AbortError' });
       expect(worker.terminated).toBe(false);
@@ -204,7 +232,8 @@ describe('spatial-math', () => {
       worker.hold = true;
       const req = { op: 'expressionField' as const, obs, opts: fieldOpts };
       const inFlight = client.run(req, 5, { minObservations: 0 });
-      await Promise.resolve(); await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
       worker.crash();
       await expect(inFlight).resolves.toEqual(expressionField(obs, fieldOpts));
       await expect(client.run(req, 5, { minObservations: 0 })).resolves.toEqual(expressionField(obs, fieldOpts));
@@ -214,15 +243,19 @@ describe('spatial-math', () => {
 
     it('falls back to the main thread when the worker cannot be created', async () => {
       jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-      factory.mockImplementationOnce(() => { throw new Error('no workers here'); });
-      await expect(client.run({ op: 'expressionField', obs, opts: fieldOpts }, 5, { minObservations: 0 }))
-        .resolves.toEqual(expressionField(obs, fieldOpts));
+      factory.mockImplementationOnce(() => {
+        throw new Error('no workers here');
+      });
+      await expect(
+        client.run({ op: 'expressionField', obs, opts: fieldOpts }, 5, { minObservations: 0 }),
+      ).resolves.toEqual(expressionField(obs, fieldOpts));
     });
 
     it('rejects calls in flight on dispose and terminates the worker', async () => {
       worker.hold = true;
       const call = client.run({ op: 'expressionField', obs, opts: fieldOpts }, 5, { minObservations: 0 });
-      await Promise.resolve(); await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
       client.dispose();
       await expect(call).rejects.toMatchObject({ name: 'AbortError' });
       expect(worker.terminated).toBe(true);

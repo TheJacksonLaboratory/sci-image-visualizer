@@ -13,13 +13,11 @@ describe('OsdCoordinateTransform', () => {
     // A viewer without a viewport (not opened yet) is never ready.
     const noViewport = Object.assign(fakeOsdViewer({ world: { getItemCount: () => 1 } }), { viewport: null });
     expect(new OsdCoordinateTransform(noViewport).isReady()).toBe(false);
-    expect(new OsdCoordinateTransform(fakeOsdViewer({ world: { getItemCount: () => 0 } })).isReady())
-      .toBe(false);
+    expect(new OsdCoordinateTransform(fakeOsdViewer({ world: { getItemCount: () => 0 } })).isReady()).toBe(false);
   });
 
   it('isReady is true with a viewport and at least one world item', () => {
-    expect(new OsdCoordinateTransform(fakeOsdViewer({ world: { getItemCount: () => 1 } })).isReady())
-      .toBe(true);
+    expect(new OsdCoordinateTransform(fakeOsdViewer({ world: { getItemCount: () => 1 } })).isReady()).toBe(true);
   });
 
   it('clientToData subtracts the canvas rect, then maps through the viewport', () => {
@@ -50,15 +48,21 @@ describe('OsdCoordinateTransform', () => {
 
   it('dataToClient and clientToData round-trip, on the viewport and the world-item path', () => {
     // A zoomed, panned view: element = (image - pan) * zoom.
-    const zoom = 0.37, panX = 1200, panY = -340;
+    const zoom = 0.37,
+      panX = 1200,
+      panY = -340;
     const viewport = {
       imageToViewerElementCoordinates: (p: OsdXY) => ({ x: (p.x - panX) * zoom, y: (p.y - panY) * zoom }),
       viewerElementToImageCoordinates: (p: OsdXY) => ({ x: p.x / zoom + panX, y: p.y / zoom + panY }),
       // World-item path: viewport coords are image coords / 1000 here.
-      viewportToViewerElementCoordinates: (p: OsdXY) =>
-        ({ x: (p.x * 1000 - panX) * zoom, y: (p.y * 1000 - panY) * zoom }),
-      viewerElementToViewportCoordinates: (p: OsdXY) =>
-        ({ x: (p.x / zoom + panX) / 1000, y: (p.y / zoom + panY) / 1000 }),
+      viewportToViewerElementCoordinates: (p: OsdXY) => ({
+        x: (p.x * 1000 - panX) * zoom,
+        y: (p.y * 1000 - panY) * zoom,
+      }),
+      viewerElementToViewportCoordinates: (p: OsdXY) => ({
+        x: (p.x / zoom + panX) / 1000,
+        y: (p.y / zoom + panY) / 1000,
+      }),
     };
     const item = fakeOsdTiledImage({
       imageToViewportCoordinates: (p) => ({ x: p.x / 1000, y: p.y / 1000 }),
@@ -67,10 +71,16 @@ describe('OsdCoordinateTransform', () => {
     const canvas = fakeCanvasAt(40, 96);
     for (const count of [0, 1]) {
       const viewer = fakeOsdViewer({
-        canvas, viewport, world: { getItemCount: () => count, getItemAt: () => item },
+        canvas,
+        viewport,
+        world: { getItemCount: () => count, getItemAt: () => item },
       });
       const t = new OsdCoordinateTransform(viewer);
-      for (const [x, y] of [[0, 0], [1234.5, 678.25], [40000, 31000]]) {
+      for (const [x, y] of [
+        [0, 0],
+        [1234.5, 678.25],
+        [40000, 31000],
+      ]) {
         const c = t.dataToClient(x, y);
         const back = t.clientToData(c.x, c.y);
         expect(back.x).toBeCloseTo(x, 6);

@@ -35,8 +35,13 @@ export interface PlotlyZoomHost {
   cropSampler(): (frame: any[], ratios: number[], origin: [number, number]) => void;
   /** Re-render the crop in the plot type on screen; `reapplyRange` when the
    *  layout is image-aligned (the heatmap range must be re-applied). */
-  renderCrop(frame: any[], ratios: number[], size: [number, number], imageSize: number[], fileName?: string):
-    { rendered: Promise<unknown>; reapplyRange: boolean };
+  renderCrop(
+    frame: any[],
+    ratios: number[],
+    size: [number, number],
+    imageSize: number[],
+    fileName?: string,
+  ): { rendered: Promise<unknown>; reapplyRange: boolean };
   /** Clear the plot after a failed relayout. */
   reset(): void;
 }
@@ -54,14 +59,16 @@ export class PlotlyZoomController {
   isRealZoom = true;
   private readonly utils = new PlotUtilities();
 
-  constructor(private readonly host: PlotlyZoomHost,
-              private readonly state: ImageStatePort,
-              private readonly tiles: TileAccessPort,
-              private readonly messages: MessageService) {}
+  constructor(
+    private readonly host: PlotlyZoomHost,
+    private readonly state: ImageStatePort,
+    private readonly tiles: TileAccessPort,
+    private readonly messages: MessageService,
+  ) {}
 
   private gd(): GraphDiv | null {
     const id = this.host.plotDiv();
-    return id ? document.getElementById(id) as GraphDiv | null : null;
+    return id ? (document.getElementById(id) as GraphDiv | null) : null;
   }
 
   /** The axis-range part of a `plotly_relayout` event: remember the drag-zoom
@@ -104,17 +111,25 @@ export class PlotlyZoomController {
     if (plotEl?.offsetHeight) this.host.setScreenHeight(plotEl.offsetHeight);
     try {
       const z = this.zoomCoordinates;
-      Plotly.relayout(plotDiv, z.length > 0
-        ? this.host.heatmapLayout([z[0], z[1]], [z[2], z[3]]) // reverse the y range
-        // autorange is off and the axis not reversed, so the y range is set here
-        : this.host.heatmapLayout([imgSize[0], imgSize[1]], [imgSize[3], imgSize[2]]));
+      Plotly.relayout(
+        plotDiv,
+        z.length > 0
+          ? this.host.heatmapLayout([z[0], z[1]], [z[2], z[3]]) // reverse the y range
+          : // autorange is off and the axis not reversed, so the y range is set here
+            this.host.heatmapLayout([imgSize[0], imgSize[1]], [imgSize[3], imgSize[2]]),
+      );
     } catch (err: any) {
       const msg = err?.error?.message || err?.message || err?.statusText || String(err);
       console.error('Error occured', err);
-      this.messages.add({ key: VIZ_ALERT_TOAST_KEY, sticky: true, severity: 'error', summary: 'An error occured',
+      this.messages.add({
+        key: VIZ_ALERT_TOAST_KEY,
+        sticky: true,
+        severity: 'error',
+        summary: 'An error occured',
         detail: `The following
                                   error occured: ${msg}. Please try to open the image again through the
-                                  file navigator.` });
+                                  file navigator.`,
+      });
       // TODO correctly clear the plot
       this.host.reset();
     }
@@ -143,12 +158,16 @@ export class PlotlyZoomController {
     const yc = (yl.range[0] + yl.range[1]) / 2;
     const dx = (xl.range[1] - xl.range[0]) * factor;
     const dy = (yl.range[1] - yl.range[0]) * factor;
-    const x0 = xc - dx / 2, x1 = xc + dx / 2;
-    const y0 = yc - dy / 2, y1 = yc + dy / 2;
+    const x0 = xc - dx / 2,
+      x1 = xc + dx / 2;
+    const y0 = yc - dy / 2,
+      y1 = yc + dy / 2;
     this.zoomCoordinates = [x0, x1, y0, y1];
     Plotly.relayout(plotDiv, {
-      'xaxis.range[0]': x0, 'xaxis.range[1]': x1,
-      'yaxis.range[0]': y0, 'yaxis.range[1]': y1,
+      'xaxis.range[0]': x0,
+      'xaxis.range[1]': x1,
+      'yaxis.range[0]': y0,
+      'yaxis.range[1]': y1,
     } as Plotly.Layout);
   }
 
@@ -221,8 +240,13 @@ export class PlotlyZoomController {
           // Also sample the intensity profiles (and the tools) from the crop, so
           // they reflect the zoom-level resolution (origin = crop top-left).
           sample([frame], ratios, [imageSize[0], imageSize[2]]);
-          const { rendered, reapplyRange } =
-            this.host.renderCrop(frame, ratios, [image.width, image.height], imageSize, reqName);
+          const { rendered, reapplyRange } = this.host.renderCrop(
+            frame,
+            ratios,
+            [image.width, image.height],
+            imageSize,
+            reqName,
+          );
           rendered.then(() => {
             this.state.setImageCached(true);
             this.state.setImageLoading(false);
@@ -234,10 +258,15 @@ export class PlotlyZoomController {
       error: (err) => {
         const msg = err?.error?.message || err?.message || err?.statusText || String(err);
         console.error('Error occured when zooming', err);
-        this.messages.add({ key: VIZ_ALERT_TOAST_KEY, sticky: true, severity: 'error', summary: 'An error occured',
+        this.messages.add({
+          key: VIZ_ALERT_TOAST_KEY,
+          sticky: true,
+          severity: 'error',
+          summary: 'An error occured',
           detail: `The following error occured while zooming: ${msg}.
                           Please try to open the image again through the file navigator and
-                          zoom on the selected area once more.` });
+                          zoom on the selected area once more.`,
+        });
         this.state.setLoadingError(true);
         this.state.setImageLoading(false);
       },

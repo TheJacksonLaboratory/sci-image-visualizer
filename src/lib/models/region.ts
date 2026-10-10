@@ -267,12 +267,7 @@ export type Bounds =
  * hold onto the bounds they created and mutate them in place during a drag.
  */
 export function hydrateBounds(bounds: any): Rectangle | Polygon | MultiPolygon | null | undefined {
-  if (
-    !bounds ||
-    bounds instanceof Rectangle ||
-    bounds instanceof Polygon ||
-    bounds instanceof MultiPolygon
-  ) {
+  if (!bounds || bounds instanceof Rectangle || bounds instanceof Polygon || bounds instanceof MultiPolygon) {
     return bounds;
   }
   if (Array.isArray(bounds.polygons)) {

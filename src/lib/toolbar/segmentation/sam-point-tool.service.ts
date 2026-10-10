@@ -35,7 +35,9 @@ export class SamPointToolService {
   }
 
   /** Test seam: inject a fake/alternate session. */
-  useSession(session: ISamSession): void { this.sessions.useSession(session); }
+  useSession(session: ISamSession): void {
+    this.sessions.useSession(session);
+  }
 
   /** A point tool for one backend, reporting through this service. */
   createTool(): SamPointTool {
@@ -67,9 +69,14 @@ export class SamPointTool implements ICanvasTool<void> {
   /** Id of the in-progress (preview) region being refined, if committed to store. */
   private regionId: number | null = null;
 
-  constructor(private readonly state: AsyncToolStatus, private readonly sessions: SamSessionService) {}
+  constructor(
+    private readonly state: AsyncToolStatus,
+    private readonly sessions: SamSessionService,
+  ) {}
 
-  private get status$() { return this.state.status$; }
+  private get status$() {
+    return this.state.status$;
+  }
 
   // ── ICanvasTool ─────────────────────────────────────────────────────────
 
@@ -122,7 +129,11 @@ export class SamPointTool implements ICanvasTool<void> {
   private createOverlay(): void {
     const container = this.host?.getOverlayContainer();
     if (!container) return;
-    this.overlay.attach(container, { down: (e) => { void this.onPointerDown(e); } });
+    this.overlay.attach(container, {
+      down: (e) => {
+        void this.onPointerDown(e);
+      },
+    });
   }
 
   // ── per-click refinement ────────────────────────────────────────────────
@@ -169,19 +180,20 @@ export class SamPointTool implements ICanvasTool<void> {
       try {
         this.status$.next('Loading SAM model…');
         const session = await this.sessions.ensureSession((f) => this.state.progress$.next(f));
-        const key = [host.getFileName() ?? '', frameIdx, `${cached.width}x${cached.height}`, frame.sig]
-          .join('|');
-        const embedding = await this.sessions.embed(session, cached, frameIdx, key,
-          () => this.status$.next('Encoding image…'));
+        const key = [host.getFileName() ?? '', frameIdx, `${cached.width}x${cached.height}`, frame.sig].join('|');
+        const embedding = await this.sessions.embed(session, cached, frameIdx, key, () =>
+          this.status$.next('Encoding image…'),
+        );
         this.status$.next('Segmenting…');
         const prompt: SamPrompt = { points: this.points.slice() };
         const res = await session.decode(embedding, prompt);
         const poly = maskToPolygons(res.mask, res.width, res.height, 0, 0)[0];
-        if (!poly) { this.status$.next('No mask for these points.'); return; }
+        if (!poly) {
+          this.status$.next('No mask for these points.');
+          return;
+        }
         this.upsertPreview(host, poly, frame);
-        this.status$.next(
-          'Segmented — click another fiber for a new region, Shift-click to refine, Esc to undo.',
-        );
+        this.status$.next('Segmented — click another fiber for a new region, Shift-click to refine, Esc to undo.');
       } catch (err) {
         this.status$.next(err instanceof Error ? err.message : 'SAM model unavailable.');
       }

@@ -10,15 +10,27 @@ export type EditZone = 'move' | 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw
 
 /** The cursor that advertises each zone. */
 export const ZONE_CURSOR: Readonly<Record<EditZone, string>> = {
-  move: 'move', n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize',
-  ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize',
+  move: 'move',
+  n: 'ns-resize',
+  s: 'ns-resize',
+  e: 'ew-resize',
+  w: 'ew-resize',
+  ne: 'nesw-resize',
+  sw: 'nesw-resize',
+  nw: 'nwse-resize',
+  se: 'nwse-resize',
 };
 
 /** Screen-pixel tolerance for grabbing an edge, corner or vertex handle. */
 export const EDIT_TOL_PX = 8;
 
 /** A screen-space box: left, top, right, bottom. */
-export interface ScreenBox { x0: number; y0: number; x1: number; y1: number; }
+export interface ScreenBox {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
 
 /**
  * Classify a screen point against a screen-space rectangle: a corner, an edge
@@ -28,8 +40,10 @@ export function rectZone(px: number, py: number, box: ScreenBox, tolPx = EDIT_TO
   const { x0, y0, x1, y1 } = box;
   const t = tolPx;
   if (px < x0 - t || px > x1 + t || py < y0 - t || py > y1 + t) return null;
-  const left = Math.abs(px - x0) <= t, right = Math.abs(px - x1) <= t;
-  const top = Math.abs(py - y0) <= t, bottom = Math.abs(py - y1) <= t;
+  const left = Math.abs(px - x0) <= t,
+    right = Math.abs(px - x1) <= t;
+  const top = Math.abs(py - y0) <= t,
+    bottom = Math.abs(py - y1) <= t;
   if (top && left) return 'nw';
   if (top && right) return 'ne';
   if (bottom && left) return 'sw';
@@ -43,7 +57,12 @@ export function rectZone(px: number, py: number, box: ScreenBox, tolPx = EDIT_TO
 }
 
 /** An image-space rectangle. */
-export interface RectBox { x: number; y: number; width: number; height: number; }
+export interface RectBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 /**
  * The rectangle `orig` moved or resized through `zone` by the total drag
@@ -52,17 +71,45 @@ export interface RectBox { x: number; y: number; width: number; height: number; 
  * frame is idempotent.
  */
 export function resizeRect(orig: RectBox, zone: EditZone, dx: number, dy: number): RectBox {
-  let x0 = orig.x, y0 = orig.y, x1 = orig.x + orig.width, y1 = orig.y + orig.height;
+  let x0 = orig.x,
+    y0 = orig.y,
+    x1 = orig.x + orig.width,
+    y1 = orig.y + orig.height;
   switch (zone) {
-    case 'move': x0 += dx; x1 += dx; y0 += dy; y1 += dy; break;
-    case 'w': x0 += dx; break;
-    case 'e': x1 += dx; break;
-    case 'n': y0 += dy; break;
-    case 's': y1 += dy; break;
-    case 'nw': x0 += dx; y0 += dy; break;
-    case 'ne': x1 += dx; y0 += dy; break;
-    case 'sw': x0 += dx; y1 += dy; break;
-    case 'se': x1 += dx; y1 += dy; break;
+    case 'move':
+      x0 += dx;
+      x1 += dx;
+      y0 += dy;
+      y1 += dy;
+      break;
+    case 'w':
+      x0 += dx;
+      break;
+    case 'e':
+      x1 += dx;
+      break;
+    case 'n':
+      y0 += dy;
+      break;
+    case 's':
+      y1 += dy;
+      break;
+    case 'nw':
+      x0 += dx;
+      y0 += dy;
+      break;
+    case 'ne':
+      x1 += dx;
+      y0 += dy;
+      break;
+    case 'sw':
+      x0 += dx;
+      y1 += dy;
+      break;
+    case 'se':
+      x1 += dx;
+      y1 += dy;
+      break;
   }
   return {
     x: Math.round(Math.min(x0, x1)),

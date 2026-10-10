@@ -49,8 +49,13 @@ export class PlotlyImageLoader {
    * stack loading is switched off, or `signal` aborts (it then rejects with an
    * `AbortError`). A stopped load keeps the contiguous run of slices from the start.
    */
-  async load(imageInfo: IImageInfo, zIndex: number, signal: AbortSignal | undefined,
-             onProbe: () => void, stillWanted: () => boolean): Promise<PlotlyLoaded> {
+  async load(
+    imageInfo: IImageInfo,
+    zIndex: number,
+    signal: AbortSignal | undefined,
+    onProbe: () => void,
+    stillWanted: () => boolean,
+  ): Promise<PlotlyLoaded> {
     const urls = imageInfo.urls;
     const isGrayscale = imageInfo.isGrayscale;
     const image = await this.loadImage(zIndex ? urls[zIndex] : urls[0], signal);

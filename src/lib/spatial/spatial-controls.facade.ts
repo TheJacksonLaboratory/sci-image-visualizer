@@ -12,7 +12,11 @@ import { resolveCategoryColors } from './spatial-encoding';
 import { sectionsOf } from './spatial-sections';
 import { observationsInSlice, volumeImageRef } from './spatial-volume-image';
 import {
-  emptySelection, selectByCategory, selectByIndices, selectInRegions, selectInRegionsProjected,
+  emptySelection,
+  selectByCategory,
+  selectByIndices,
+  selectInRegions,
+  selectInRegionsProjected,
 } from './spatial-selection';
 
 /** The renderer-side spatial readouts the controls surface (the napari-js backend). */
@@ -54,7 +58,10 @@ export class SpatialControlsFacade {
   private dataset: SpatialDataset | null = null;
   private readonly sub: Subscription;
 
-  constructor(private readonly port: SpatialDataPort, private readonly ctx: SpatialControlsContext) {
+  constructor(
+    private readonly port: SpatialDataPort,
+    private readonly ctx: SpatialControlsContext,
+  ) {
     // Mirror the dataset (and drop a stale selection when it changes — the masks are
     // index-based, so they are meaningless against different observations).
     this.sub = port.getDataset$().subscribe((dataset) => {
@@ -108,15 +115,21 @@ export class SpatialControlsFacade {
         const q = query.toLowerCase();
         return names.filter((n) => n.toLowerCase().includes(q)).slice(0, limit);
       },
-      ...(port.importGroups ? {
-        importGroups: (label: string, table: string) => port.importGroups!(label, table),
-      } : {}),
-      ...(port.getTranscriptCounts ? {
-        transcriptCounts: (genes: string[]) => port.getTranscriptCounts!(genes),
-      } : {}),
-      ...(port.getMarkerGenes ? {
-        markerGenes: (column: string, perGroup?: number) => port.getMarkerGenes!(column, perGroup),
-      } : {}),
+      ...(port.importGroups
+        ? {
+            importGroups: (label: string, table: string) => port.importGroups!(label, table),
+          }
+        : {}),
+      ...(port.getTranscriptCounts
+        ? {
+            transcriptCounts: (genes: string[]) => port.getTranscriptCounts!(genes),
+          }
+        : {}),
+      ...(port.getMarkerGenes
+        ? {
+            markerGenes: (column: string, perGroup?: number) => port.getMarkerGenes!(column, perGroup),
+          }
+        : {}),
       getTranscriptEstimate$: () => this.ctx.napari.transcriptEstimate$.asObservable(),
       getGeneCountsInView$: () => this.ctx.napari.geneCountsInView$.asObservable(),
       getDensityStats$: () => this.ctx.napari.densityStats$.asObservable(),
@@ -134,9 +147,7 @@ export class SpatialControlsFacade {
         if (source.kind === 'feature') return port.getFeatureVector(source.name);
         const column = await port.getColumn(source.name);
         if (isCategoricalColumn(column)) {
-          throw new Error(
-            `[spatial] column "${source.name}" is categorical — it has no values to chart`,
-          );
+          throw new Error(`[spatial] column "${source.name}" is categorical — it has no values to chart`);
         }
         return column.values;
       },
@@ -158,13 +169,10 @@ export class SpatialControlsFacade {
       // and this facade, and a panel checks for its presence to decide whether the view
       // is offered at all. Defining it as a function that rejects would make an
       // embedding-less source look like a broken one.
-      ...(port.getEmbedding
-        ? { getEmbedding: (name: string) => port.getEmbedding!(name) }
-        : {}),
+      ...(port.getEmbedding ? { getEmbedding: (name: string) => port.getEmbedding!(name) } : {}),
 
-      categoricalColumns: () => (this.dataset?.columns ?? [])
-        .filter((c) => c.kind === 'categorical')
-        .map((c) => c.name),
+      categoricalColumns: () =>
+        (this.dataset?.columns ?? []).filter((c) => c.kind === 'categorical').map((c) => c.name),
 
       // Memoized on the observations object, so the renderer's own lookup and
       // this one are the same single scan of up to 3.7M z values.
@@ -199,9 +207,7 @@ export class SpatialControlsFacade {
               dataset.observations,
               volume ? volumeImageRef(volume, dataset.micronsPerUnit) : dataset.imageRef,
               regions,
-              volume
-                ? observationsInSlice(dataset.observations, volume, this.ctx.zIndex())
-                : undefined,
+              volume ? observationsInSlice(dataset.observations, volume, this.ctx.zIndex()) : undefined,
             );
         this.ctx.selectionStore.set(selection);
         return selection.count;

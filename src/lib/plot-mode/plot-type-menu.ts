@@ -2,7 +2,9 @@ import { ViewerCapabilities, ViewerFeature } from '../contracts/capabilities.con
 import { IImageInfo } from '../contracts/image.contract';
 import { PlotType, PlotTypeDescriptor, PlotTypeId, getPlotTypeDescriptor } from '../contracts/plot-type';
 import {
-  ContributedPlotTypeDescriptor, PlotTypeOption, contributedPlotTypeOption,
+  ContributedPlotTypeDescriptor,
+  PlotTypeOption,
+  contributedPlotTypeOption,
 } from '../contracts/plot-type-contribution.contract';
 
 /** What a spatial-omics dataset on offer contributes to the plot-type gates. */
@@ -16,8 +18,10 @@ export interface SpatialGates {
   hasPixels: boolean;
 }
 
-type DataRequirements = Pick<PlotTypeDescriptor,
-  'requiresStack' | 'requiresGrayscale' | 'requiresSpatialData' | 'requiresSpatial3d'>;
+type DataRequirements = Pick<
+  PlotTypeDescriptor,
+  'requiresStack' | 'requiresGrayscale' | 'requiresSpatialData' | 'requiresSpatial3d'
+>;
 
 /** Everything {@link computePlotTypeMenu} gates on. */
 export interface PlotTypeMenuInput {
@@ -95,7 +99,7 @@ export function computePlotTypeMenu(input: PlotTypeMenuInput): PlotTypeMenu {
   // Default selector shows the suffix-free productionLabel; test mode keeps the full
   // backend-suffixed label so same-named modes stay distinguishable.
   const labelled = <T extends { label: string; productionLabel?: string }>(d: T): T =>
-    (testMode ? d : { ...d, label: d.productionLabel! });
+    testMode ? d : { ...d, label: d.productionLabel! };
   const shown = builtIn.map(labelled);
   return { builtIn: shown, menu: [...shown, ...contributed.map(labelled)] };
 }

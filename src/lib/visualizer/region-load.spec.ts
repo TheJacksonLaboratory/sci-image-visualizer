@@ -18,13 +18,23 @@ describe('applyImageRois', () => {
   });
 
   const info = (over: Partial<IImageInfo>): IImageInfo => ({
-    fileName: 'f', urls: ['/0', '/1'], isStack: true, showStack: false, isGrayscale: true,
-    trueImageSize: [1, 1], imageMeta: [], scaleRatio: true, ...over,
+    fileName: 'f',
+    urls: ['/0', '/1'],
+    isStack: true,
+    showStack: false,
+    isGrayscale: true,
+    trueImageSize: [1, 1],
+    imageMeta: [],
+    scaleRatio: true,
+    ...over,
   });
 
   it('a folder stack sizes its slices from the urls, else from roiJsonStrs', () => {
-    applyImageRois(info({ tiled: false, urls: undefined as unknown as string[], roiJsonStrs: ['A', 'A', 'A'] }),
-      target, 2);
+    applyImageRois(
+      info({ tiled: false, urls: undefined as unknown as string[], roiJsonStrs: ['A', 'A', 'A'] }),
+      target,
+      2,
+    );
     const [slices, z, layout] = target.enterStackMode.mock.calls[0];
     expect([...slices.keys()]).toEqual([0, 1, 2]);
     expect(z).toBe(2);

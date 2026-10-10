@@ -8,13 +8,18 @@
 
 import type { SpatialViewState } from '../contracts/display-types';
 import {
-  NO_CATEGORY, NO_OBSERVATION, SpatialDensityRaster, SpatialPolygonTile, SpatialTranscriptTile,
+  NO_CATEGORY,
+  NO_OBSERVATION,
+  SpatialDensityRaster,
+  SpatialPolygonTile,
+  SpatialTranscriptTile,
 } from '../contracts/spatial-dataset.contract';
 import type { DataRect } from './lod';
 
 /** Rings whose owning cell is in a switched-off group removed. */
 export function filterRings(
-  rings: SpatialPolygonTile, hidden: { codes: Uint16Array; hidden: Uint8Array } | null,
+  rings: SpatialPolygonTile,
+  hidden: { codes: Uint16Array; hidden: Uint8Array } | null,
 ): SpatialPolygonTile {
   if (!hidden) return rings;
   const keep: number[] = [];
@@ -51,8 +56,10 @@ export function hiddenGeneSlots(view: SpatialViewState): Uint8Array | null {
 
 /** Entries in a hidden group's cell, or of a hidden gene, removed (with their sizes). */
 export function filterTranscripts(
-  t: SpatialTranscriptTile, px: Float32Array,
-  hidden: { codes: Uint16Array; hidden: Uint8Array } | null, hiddenGenes: Uint8Array | null,
+  t: SpatialTranscriptTile,
+  px: Float32Array,
+  hidden: { codes: Uint16Array; hidden: Uint8Array } | null,
+  hiddenGenes: Uint8Array | null,
 ): { merged: SpatialTranscriptTile; px: Float32Array } {
   if (!hidden && !hiddenGenes) return { merged: t, px };
   const keep: number[] = [];
@@ -67,13 +74,21 @@ export function filterTranscripts(
   }
   const pick = <T extends Float32Array | Uint32Array | Uint16Array>(a: T): T => {
     const out = new (a.constructor as new (n: number) => T)(keep.length);
-    keep.forEach((i, k) => { out[k] = a[i]; });
+    keep.forEach((i, k) => {
+      out[k] = a[i];
+    });
     return out;
   };
   return {
     merged: {
-      count: keep.length, aggregated: t.aggregated, x: pick(t.x), y: pick(t.y), z: pick(t.z),
-      weight: pick(t.weight), observation: pick(t.observation), gene: pick(t.gene),
+      count: keep.length,
+      aggregated: t.aggregated,
+      x: pick(t.x),
+      y: pick(t.y),
+      z: pick(t.z),
+      weight: pick(t.weight),
+      observation: pick(t.observation),
+      gene: pick(t.gene),
     },
     px: pick(px),
   };
@@ -135,8 +150,12 @@ export function mergeTranscriptTiles(tiles: SpatialTranscriptTile[], limit = Inf
   const out: SpatialTranscriptTile = {
     count: n,
     aggregated: tiles.some((t) => t.aggregated),
-    x: new Float32Array(n), y: new Float32Array(n), z: new Float32Array(n),
-    weight: new Uint32Array(n), observation: new Uint32Array(n), gene: new Uint16Array(n),
+    x: new Float32Array(n),
+    y: new Float32Array(n),
+    z: new Float32Array(n),
+    weight: new Uint32Array(n),
+    observation: new Uint32Array(n),
+    gene: new Uint16Array(n),
   };
   let o = 0;
   for (const t of tiles) {
@@ -156,7 +175,10 @@ export function mergeTranscriptTiles(tiles: SpatialTranscriptTile[], limit = Inf
  * slot whose icon cluster c's markers take.
  */
 export function clusterMarkers(
-  rasters: SpatialDensityRaster[], slots: number[], bin: number, area: DataRect,
+  rasters: SpatialDensityRaster[],
+  slots: number[],
+  bin: number,
+  area: DataRect,
 ): { tile: SpatialTranscriptTile; group: Int32Array } {
   const x: number[] = [];
   const y: number[] = [];
@@ -197,9 +219,13 @@ export function clusterMarkers(
   const n = w.length;
   return {
     tile: {
-      count: n, aggregated: true,
-      x: Float32Array.from(x), y: Float32Array.from(y), z: new Float32Array(n),
-      weight: Uint32Array.from(w), observation: new Uint32Array(n).fill(NO_OBSERVATION),
+      count: n,
+      aggregated: true,
+      x: Float32Array.from(x),
+      y: Float32Array.from(y),
+      z: new Float32Array(n),
+      weight: Uint32Array.from(w),
+      observation: new Uint32Array(n).fill(NO_OBSERVATION),
       gene: Uint16Array.from(gene),
     },
     group: Int32Array.from(group),

@@ -45,7 +45,10 @@ export class WandTool implements ICanvasTool<WandOptions> {
   private readonly gesture: UndoGesture;
 
   /** @param gestureTarget the region store, so each drag is one undo step. */
-  constructor(private readonly wandService: WandService, gestureTarget?: UndoGestureTarget | null) {
+  constructor(
+    private readonly wandService: WandService,
+    gestureTarget?: UndoGestureTarget | null,
+  ) {
     this.gesture = new UndoGesture(gestureTarget);
   }
 
@@ -188,8 +191,10 @@ export class WandTool implements ICanvasTool<WandOptions> {
     if (!editor.stroke) {
       // A fresh stroke starts at the patch, clipped to the readback.
       const ok = editor.ensureCovers(
-        Math.max(0, px0), Math.max(0, py0),
-        Math.min(cached.width, px0 + W), Math.min(cached.height, py0 + W),
+        Math.max(0, px0),
+        Math.max(0, py0),
+        Math.min(cached.width, px0 + W),
+        Math.min(cached.height, py0 + W),
       );
       if (!ok) return;
     } else if (!erase) {
