@@ -547,6 +547,76 @@ describe('RegionStore', () => {
     });
   });
 
+  /**
+   * Copy-on-write (review RT-13): an edit replaces the region it changes and never touches an
+   * instance a caller (or an undo snapshot) holds, so history can share every untouched region
+   * instead of deep-cloning the whole set per step.
+   */
+  describe('copy-on-write (RT-13)', () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => { jest.runOnlyPendingTimers(); jest.useRealTimers(); });
+    const settle = () => jest.advanceTimersByTime(500);
+
+    function donut(): Region {
+      const r = polyRegion([0, 20, 20, 0], [0, 0, 20, 20]);
+      (r.bounds as Polygon).holes = [[[7, 7], [13, 7], [13, 13], [7, 13]]];
+      return r;
+    }
+
+    const edits: Array<[string, (s: RegionStore, id: number) => void]> = [
+      ['updateBounds', (s, id) => s.updateBounds(id, rectRegion(1, 1, 1, 1).bounds as Rectangle)],
+      ['moveRegion', (s, id) => s.moveRegion(id, 5, 5)],
+      ['moveVertex', (s, id) => s.moveVertex(id, 0, 1, 1)],
+      ['addVertex', (s, id) => s.addVertex(id, 0, 10, 0)],
+      ['deleteVertex', (s, id) => s.deleteVertex(id, 0)],
+      ['moveHoleVertex', (s, id) => s.moveHoleVertex(id, 0, 0, 8, 8)],
+      ['addHoleVertex', (s, id) => s.addHoleVertex(id, 0, 0, 10, 7)],
+      ['deleteHoleVertex', (s, id) => s.deleteHoleVertex(id, 0, 0)],
+      ['setBezier', (s, id) => s.setBezier(id, true)],
+      ['moveBezierHandle', (s, id) => { s.setBezier(id, true); s.moveBezierHandle(id, 0, 'out', 3, 3); }],
+      ['moveHoleBezierHandle', (s, id) => { s.setBezier(id, true); s.moveHoleBezierHandle(id, 0, 0, 'in', 3, 3); }],
+    ];
+    it.each(edits)('%s replaces the region and leaves the instance a caller holds untouched', (_name, apply) => {
+      const id = store.addRegion(donut());
+      const held = store.getRegions()[0];
+      const before = JSON.stringify(held);
+      apply(store, id);
+      const after = store.getRegions()[0];
+      expect(after).not.toBe(held);
+      expect(after.id).toBe(id);
+      expect(JSON.stringify(held)).toBe(before);
+      expect(JSON.stringify(after)).not.toBe(before);
+    });
+
+    it('an undo step shares the regions the action did not touch', () => {
+      const a = store.addRegion(polyRegion([0, 10, 5], [0, 0, 10]));
+      store.addRegion(rectRegion(50, 50, 5, 5)); settle();
+      const [, untouched] = store.getRegions();
+      store.moveVertex(a, 0, 3, 3); settle();
+      store.undo();
+      const [restored, b] = store.getRegions();
+      expect(b).toBe(untouched); // shared, not a clone
+      expect((restored.bounds as Polygon).xpoints[0]).toBe(0);
+      store.redo();
+      expect(store.getRegions()[1]).toBe(untouched);
+      expect((store.getRegions()[0].bounds as Polygon).xpoints[0]).toBe(3);
+    });
+
+    it('re-colouring a stored region on setRegions copies it rather than changing the snapshot', () => {
+      const r = rectRegion(0, 0, 1, 1);
+      r.label = 'Tumor';
+      store.setRegions([r]); settle();
+      const stored = store.getRegions()[0];
+      const colour = stored.color;
+      TestBed.inject(VisualizerStore).upsertClass({ name: 'Tumor', color: '#123456', source: 'user' });
+      store.setRegions(store.getRegions());
+      expect(store.getRegions()[0].color).toBe('#123456');
+      expect(stored.color).toBe(colour); // the instance the undo snapshot holds is unchanged
+      store.undo();
+      expect(store.getRegions()[0].color).toBe(colour);
+    });
+  });
+
   describe('per-image cache', () => {
     it('snapshots and restores regions across image switches', () => {
       store.setActiveImage(imageInfo('a.tif'));
