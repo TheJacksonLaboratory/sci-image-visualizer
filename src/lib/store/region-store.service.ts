@@ -13,6 +13,7 @@ import * as edit from '../models/polygon-edit';
 import { regionsEqual, withRegionPatch, withRegionZ } from '../models/region-clone';
 import { RegionHistory } from './region-history';
 import { RegionSelection } from './region-selection';
+import { RegionScopeCache, StackSaveLayout } from './region-scope-cache';
 
 /**
  * Backend-neutral region store — the single source of truth for region state.
@@ -48,10 +49,6 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   private static readonly UNDO_LIMIT = 10;
   private static readonly UNDO_COALESCE_MS = 250;
 
-  /** Per-image region cache. `regions` is always a snapshot of the entry for
-   *  `currentImageKey`. */
-  private regionsByImageKey = new Map<string, Region[]>();
-  private currentImageKey: string | undefined;
   /** The current image's regions — the live, edited array. */
   private regions: Region[] = [];
 
@@ -75,27 +72,15 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   private isRegionSavedOn = true;
 
   /**
-   * Per-slice region support for z-stacks (jit-ui#93). While {@link stackMode}
-   * is on (a z-stack is loaded), the live `regions` array always holds ONE
-   * slice — the {@link currentSliceZ} slice — so the on-canvas overlays, the
-   * selection projection, and the Regions table keep working unchanged
-   * (they all read {@link getRegions}). The other slices live in
-   * {@link regionsBySlice}; {@link setDisplaySlice} swaps the live set on scrub
-   * and {@link getSliceRegions} flattens every slice (each tagged with its
-   * zero-based {@link Region.z}) for save/export. Off by default (stackMode
-   * false, z 0), so single-plane images are completely unaffected.
+   * Per-image cache and, for z-stacks, per-slice regions (jit-ui#93). In stack
+   * mode the live `regions` array holds ONE slice — the display slice — so the
+   * overlays, the selection projection and the Regions table work unchanged
+   * (they all read {@link getRegions}); {@link setDisplaySlice} swaps the live
+   * set on scrub and {@link getSliceRegions} flattens every slice (each tagged
+   * with its zero-based {@link Region.z}) for save/export. Off by default, so
+   * single-plane images are unaffected.
    */
-  private regionsBySlice = new Map<number, Region[]>();
-  private stackMode = false;
-  private currentSliceZ = 0;
-  /** How a stack's regions round-trip to disk (jit-ui#93): `combined` writes one
-   *  z-indexed geojson (single-file z-stack, QuPath schema); `per-slice-file`
-   *  writes one geojson per slice-file (a folder of numbered images). */
-  private stackSaveLayout: 'combined' | 'per-slice-file' = 'combined';
-  /** Slices that were loaded with regions (jit-ui#93). A per-slice-file save
-   *  re-writes these even when now empty, so clearing a slice's regions and
-   *  saving removes its previously-saved geojson (writes an empty one). */
-  private stackInitialNonEmpty = new Set<number>();
+  private readonly scope = new RegionScopeCache();
 
   /** Selection by region *id* (stable across edits), projected to array
    *  indices on the IRegionStore boundary. */
@@ -165,15 +150,15 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   // ── Per-slice regions for z-stacks (jit-ui#93) ─────────────────────────
 
   /** True while a z-stack is loaded and the store holds regions per slice. */
-  isStackMode(): boolean { return this.stackMode; }
+  isStackMode(): boolean { return this.scope.stackMode; }
 
   /** The current display slice (zero-based). */
-  getDisplaySlice(): number { return this.currentSliceZ; }
+  getDisplaySlice(): number { return this.scope.displaySlice; }
 
   /** How the current stack persists to disk (jit-ui#93): `combined` = one
    *  z-indexed geojson (single-file z-stack); `per-slice-file` = one geojson per
    *  slice-file (folder stack). Meaningless outside stack mode. */
-  getStackSaveLayout(): 'combined' | 'per-slice-file' { return this.stackSaveLayout; }
+  getStackSaveLayout(): StackSaveLayout { return this.scope.saveLayout; }
 
   /**
    * Enter per-slice stack mode. `slices` maps each zero-based slice index to
@@ -185,18 +170,10 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
    * exactly as {@link setRegions} does.
    */
   enterStackMode(slices: Map<number, Region[]>, initialZ = 0,
-                 saveLayout: 'combined' | 'per-slice-file' = 'combined'): void {
-    this.stackMode = true;
-    this.stackSaveLayout = saveLayout;
-    this.currentSliceZ = initialZ || 0;
-    this.regionsBySlice = new Map<number, Region[]>();
-    this.stackInitialNonEmpty = new Set<number>();
-    for (const [z, regs] of slices) {
-      const normalized = this.normalizeSlice(regs || [], z);
-      this.regionsBySlice.set(z, normalized);
-      if (normalized.length) this.stackInitialNonEmpty.add(z);
-    }
-    this.regions = (this.regionsBySlice.get(this.currentSliceZ) ?? []).slice();
+                 saveLayout: StackSaveLayout = 'combined'): void {
+    const admitted = new Map<number, Region[]>();
+    for (const [z, regs] of slices) admitted.set(z, this.normalizeSlice(regs || [], z));
+    this.regions = this.scope.enterStack(admitted, initialZ, saveLayout);
     this.selection.replace([]);
     this.syncCache();
     this.resetUndoHistory();
@@ -206,11 +183,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
 
   /** Leave stack mode (single-plane image, or the stack was closed). */
   exitStackMode(): void {
-    if (!this.stackMode) return;
-    this.stackMode = false;
-    this.currentSliceZ = 0;
-    this.regionsBySlice = new Map<number, Region[]>();
-    this.stackInitialNonEmpty = new Set<number>();
+    this.scope.exitStack();
   }
 
   /**
@@ -222,12 +195,9 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
    * mode, so the recorded index is unused until a stack is entered). (jit-ui#93)
    */
   setDisplaySlice(z: number): void {
-    const next = z || 0;
-    if (!this.stackMode) { this.currentSliceZ = next; return; }
-    if (this.currentSliceZ === next) return;
-    this.regionsBySlice.set(this.currentSliceZ, this.regions.slice());
-    this.currentSliceZ = next;
-    this.regions = (this.regionsBySlice.get(next) ?? []).slice();
+    const next = this.scope.showSlice(z, this.regions);
+    if (!next) return;
+    this.regions = next;
     this.selection.replace([]);
     this.syncCache();
     this.resetUndoHistory();
@@ -241,14 +211,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
    * first. Returns the flat single-plane set when not in stack mode. (jit-ui#93)
    */
   getSliceRegions(): Region[] {
-    if (!this.stackMode) return this.regions.slice();
-    this.regionsBySlice.set(this.currentSliceZ, this.regions.slice());
-    const out: Region[] = [];
-    const zs = Array.from(this.regionsBySlice.keys()).sort((a, b) => a - b);
-    for (const z of zs) {
-      for (const r of this.regionsBySlice.get(z) as Region[]) out.push(withRegionZ(r, z));
-    }
-    return out;
+    return this.scope.sliceRegions(this.regions);
   }
 
   /**
@@ -259,16 +222,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
    * the current live slice is captured first. Empty outside stack mode.
    */
   getStackSaveSlices(): Map<number, Region[]> {
-    const out = new Map<number, Region[]>();
-    if (!this.stackMode) return out;
-    this.regionsBySlice.set(this.currentSliceZ, this.regions.slice());
-    const zs = new Set<number>(this.stackInitialNonEmpty);
-    for (const [z, regs] of this.regionsBySlice) if (regs.length) zs.add(z);
-    for (const z of Array.from(zs).sort((a, b) => a - b)) {
-      const regs = (this.regionsBySlice.get(z) ?? []).map((r) => withRegionZ(r, z));
-      out.set(z, regs);
-    }
-    return out;
+    return this.scope.stackSaveSlices(this.regions);
   }
 
   /** Mint ids/names + apply classification colours + tag the slice index, as
@@ -481,8 +435,8 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     region.bounds = hydrateBounds(region.bounds);   // jit-ui#124
     // A region drawn on a stack belongs to the slice currently displayed, so
     // it saves/reloads on that slice (jit-ui#93). No-op for single-plane images
-    // (currentSliceZ stays 0).
-    if (this.stackMode) region.z = this.currentSliceZ;
+    // (the display slice stays 0).
+    if (this.scope.stackMode) region.z = this.scope.displaySlice;
     // The caller's instance becomes the stored one (completed in place).
     const [stored] = this.withClassificationColors([region], () => true);
     this.regions = [...this.regions, stored];
@@ -650,18 +604,10 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
    * for the same image (so repeated replots of one image keep its regions).
    */
   setActiveImage(imageInfo: IImageInfo): void {
-    const newKey = this.deriveImageKey(imageInfo);
-    if (this.currentImageKey === newKey) return;
-    // Switching images ends any per-slice stack session (jit-ui#93); the loader
-    // re-enters stack mode afterwards if the new image is itself a z-stack.
-    this.exitStackMode();
-    if (this.currentImageKey) {
-      this.regionsByImageKey.set(this.currentImageKey, this.regions.slice());
-    }
-    this.currentImageKey = newKey;
-    this.regions = (newKey && this.regionsByImageKey.get(newKey))
-      ? (this.regionsByImageKey.get(newKey) as Region[]).slice()
-      : [];
+    // Switching images also ends any per-slice stack session (jit-ui#93).
+    const incoming = this.scope.switchImage(RegionScopeCache.imageKey(imageInfo), this.regions);
+    if (!incoming) return;
+    this.regions = incoming;
     this.selection.replace([]);
     // Undo never crosses an image switch.
     this.resetUndoHistory();
@@ -670,14 +616,6 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   }
 
   // ── internals ──────────────────────────────────────────────────────────
-
-  private deriveImageKey(imageInfo: IImageInfo | undefined): string | undefined {
-    if (!imageInfo) return undefined;
-    if (imageInfo.urls && imageInfo.urls.length > 0 && imageInfo.urls[0]) {
-      return imageInfo.urls[0];
-    }
-    return imageInfo.fileName || undefined;
-  }
 
   /** Apply the preset set's class colours (see {@link applyPresetColors}),
    *  promoting unknown classes into the shared store when the set asks for it. */
@@ -689,9 +627,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   }
 
   private syncCache(): void {
-    if (this.currentImageKey) {
-      this.regionsByImageKey.set(this.currentImageKey, this.regions.slice());
-    }
+    this.scope.sync(this.regions);
   }
 
   private emit(): void {
