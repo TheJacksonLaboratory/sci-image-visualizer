@@ -268,8 +268,8 @@
   color: var(--primary-color, #3399ff);
 }
 
-// Toolbar separator + keyboard-key styling (previously inherited from the
-// diagram component's stylesheet, now removed).
+// Toolbar separator (previously inherited from the diagram component's
+// stylesheet, now removed).
 .toolbar-separator {
   border-left: 1px solid var(--surface-border);
   height: 1.5rem;
@@ -277,14 +277,6 @@
   align-self: center;
 }
 
-kbd {
-  background: #e8e8e8;
-  border: 1px solid #bbb;
-  border-radius: 3px;
-  padding: 1px 5px;
-  font-family: monospace;
-  font-size: 0.85em;
-}
 
 /* =====================================================================
  * Annotation-class presets (jit-ui#70): docked panel, Class dropdown, dialog
