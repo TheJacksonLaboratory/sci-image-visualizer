@@ -36,7 +36,7 @@ import {
 } from './contracts/plot-type-contribution.contract';
 import { ActivePlotMode, PlotModeController } from './plot-mode/plot-mode-controller';
 import { computePlotTypeMenu, reconcilePlotType } from './plot-mode/plot-type-menu';
-import { IntensityProfile, IVisualizer, VISUALIZER, VisualizerHandle } from './contracts/visualizer.contract';
+import { IVisualizer, VISUALIZER, VisualizerHandle } from './contracts/visualizer.contract';
 import { CanvasToolOptions } from './contracts/display-types';
 import { SAM_MODELS, getDefaultSamModelId, isSamModelReady } from './toolbar/segmentation/sam-model-registry';
 import { SamToolService } from './toolbar/segmentation/sam-tool.service';
@@ -66,6 +66,8 @@ import {
 } from './visualizer/visualizer-context-menu';
 import { RegionActions } from './visualizer/region-actions';
 import { ShortcutHost, ViewerShortcuts } from './visualizer/viewer-shortcuts';
+import { FloatingPos } from './visualizer/floating-drag.directive';
+import { IntensityInsetComponent } from './intensity-inset/intensity-inset.component';
 
 /** Per-instance plot-div id source. The mount element's id must be unique so two
  *  live viewers (e.g. the main diagram + a modal preview) don't collide on the
@@ -370,24 +372,22 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    *  {@link plotDivName}: the backend resolves it by id, so a fixed id made two live
    *  viewers draw both insets into whichever div came first in the document. */
   readonly intensityInsetDiv = `${this.plotDivName}-inset`;
-  profilePanelPos = { x: 20, y: 70 };
-  private profilePanelDragging = false;
-  private profilePanelStart = { mx: 0, my: 0, x: 0, y: 0 };
 
   /** Toolbar docking: docked across the top by default; dragging its handle
    *  detaches it into a floating, movable window (frees the top row for the
    *  visualization). */
   toolbarFloating = false;
   toolbarPos = { x: 8, y: 8 };
-  private toolbarDragging = false;
-  private toolbarStart = { mx: 0, my: 0, x: 0, y: 0 };
-  private latestProfiles: IntensityProfile[] = [];
-  /** Drives the intensity inset panel's visibility — true whenever any
-   *  intensity-profile line exists (independent of the current plot type). */
-  hasProfiles = false;
-  private profileDragMoveListener?: (e: MouseEvent) => void;
-  private profileDragUpListener?: () => void;
-  private profileResizeListener?: () => void;
+  /** Where a toolbar-handle drag starts from: grabbing the docked toolbar floats it. */
+  readonly toolbarDragOrigin = (): FloatingPos => {
+    if (!this.toolbarFloating) {
+      this.toolbarFloating = true;
+      this.toolbarPos = { x: 8, y: 8 };
+    }
+    return this.toolbarPos;
+  };
+  /** The floating intensity-profile inset (always mounted; shows itself while lines exist). */
+  @ViewChild(IntensityInsetComponent, { static: true }) inset?: IntensityInsetComponent;
 
   /** True while the 3D spatial cloud is the active mode. The controls drop the ROI
    *  selection there: region tools are screen-space, and against an orbiting
@@ -763,12 +763,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     });
     this.state.getPanelWidth$().pipe(takeUntil(this.unsub)).subscribe(() => {
       this.plotService.relayout();
-      // The intensity inset is a separate Plotly chart in a floating panel; reflow
-      // it to its current size when the canvas resizes, else it keeps the stale
-      // size and blanks out. Defer a tick so the panel layout has settled.
-      if (this.hasProfiles) {
-        setTimeout(() => this.renderIntensityInset(), 0);
-      }
+      // The intensity inset is a separate chart in a floating panel; reflow it too.
+      this.inset?.reflow();
     });
     this.state.getImageLoadingMessage$().pipe(takeUntil(this.unsub)).subscribe((message) => {
       this.loadingMessage = message;
@@ -785,26 +781,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.state.getFilename$().pipe(takeUntil(this.unsub)).subscribe((filename) => {
       if (filename) {
         this.fileName = filename;
-      }
-    });
-    this.plotService.getIntensityProfile$().pipe(takeUntil(this.unsub)).subscribe((profiles) => {
-      this.latestProfiles = profiles;
-      this.hasProfiles = profiles.length > 0;
-      // The panel div is behind *ngIf="hasProfiles". detectChanges() materializes
-      // it synchronously (the subscription may fire outside Angular's zone — e.g.
-      // from an OSD drag — so CD wouldn't run on its own). Then render on the next
-      // animation frame, AFTER the browser lays the panel out: a synchronous draw
-      // hits a zero-size container on first create and Plotly keeps that size, so
-      // the inset stays blank and live updates redraw into the same zero box.
-      this.cdr.detectChanges();
-      requestAnimationFrame(() => this.renderIntensityInset());
-    });
-    // When the OSD view settles at a new zoom/pan, re-sample the intensity lines
-    // from a crop of the visible region so the inset reflects the zoom-level
-    // resolution (Plotly's own high-def zoom updates the sampling cache inline).
-    this.plotService.getViewportChange$().pipe(takeUntil(this.unsub)).subscribe((roi) => {
-      if (this.hasProfiles && this.isImageView) {
-        this.plotService.refreshIntensitySamplingForRoi(roi.x, roi.y, roi.width, roi.height, this.zIndex);
       }
     });
     this.state.getImageInfo$().pipe(takeUntil(this.unsub)).subscribe({
@@ -1028,44 +1004,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // re-enters the zone (ngZone.run) only when it actually changes view state.
     this.shortcuts = new ViewerShortcuts(this.shortcutHost(), this.ngZone);
     this.shortcuts.attach();
-    this.ngZone.runOutsideAngular(() => this.addWindowListeners());
     this.onViewReady();
-  }
-
-  private addWindowListeners(): void {
-    // Drag handling for the floating intensity-profile panel.
-    this.profileDragMoveListener = (e: MouseEvent) => {
-      if (this.profilePanelDragging) {
-        this.ngZone.run(() => {
-          this.profilePanelPos = {
-            x: this.profilePanelStart.x + (e.clientX - this.profilePanelStart.mx),
-            y: this.profilePanelStart.y + (e.clientY - this.profilePanelStart.my),
-          };
-        });
-      } else if (this.toolbarDragging) {
-        this.ngZone.run(() => {
-          this.toolbarPos = {
-            x: this.toolbarStart.x + (e.clientX - this.toolbarStart.mx),
-            y: this.toolbarStart.y + (e.clientY - this.toolbarStart.my),
-          };
-        });
-      }
-    };
-    this.profileDragUpListener = () => {
-      this.profilePanelDragging = false;
-      this.toolbarDragging = false;
-    };
-    window.addEventListener('mousemove', this.profileDragMoveListener);
-    window.addEventListener('mouseup', this.profileDragUpListener);
-
-    // On any window resize, reflow the intensity inset to its (fixed) panel size
-    // on the next frame, once layout has settled. Without this the inset can be
-    // left at a stale/zero size by a mid-reflow resize and stop showing.
-    this.profileResizeListener = () => {
-      if (!this.hasProfiles) return;
-      requestAnimationFrame(() => this.renderIntensityInset());
-    };
-    window.addEventListener('resize', this.profileResizeListener);
   }
 
   /** The plot div exists now: run an image-less draw that arrived before it did. */
@@ -1110,74 +1049,18 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     };
   }
 
-  onProfilePanelDragStart(e: MouseEvent) {
-    this.profilePanelDragging = true;
-    this.profilePanelStart = {
-      mx: e.clientX,
-      my: e.clientY,
-      x: this.profilePanelPos.x,
-      y: this.profilePanelPos.y,
-    };
-    e.preventDefault();
-  }
-
-  /** Grab the toolbar handle: detach it into a floating window (if still docked)
-   *  and start dragging. */
-  onToolbarDragStart(e: MouseEvent) {
-    if (!this.toolbarFloating) {
-      this.toolbarFloating = true;
-      this.toolbarPos = { x: 8, y: 8 };
-    }
-    this.toolbarDragging = true;
-    this.toolbarStart = {
-      mx: e.clientX,
-      my: e.clientY,
-      x: this.toolbarPos.x,
-      y: this.toolbarPos.y,
-    };
-    e.preventDefault();
-  }
-
   /** Snap the floating toolbar back to its docked position across the top. */
   dockToolbar() {
     this.toolbarFloating = false;
   }
 
-  /** Render the intensity inset chart from the latest profile data. The actual
-   *  charting is owned by the visualizer service — the component just decides
-   *  when (profile mode + a fresh profile). */
-  private renderIntensityInset(): void {
-    if (!this.hasProfiles) return;
-    this.plotService.renderIntensityInset(this.intensityInsetDiv, this.latestProfiles);
-  }
-
   /** Toolbar "Intensity" group: add another line ROI (next bright colour). */
   async addProfileLine(): Promise<void> {
-    // Park the floating inset near the plot's top-right when the first line is
-    // added (it's position:fixed, so use viewport coords from the plot rect).
-    if (!this.hasProfiles) {
-      const rect = document.getElementById(this.plotDivName)?.getBoundingClientRect();
-      this.profilePanelPos = rect
-        ? { x: Math.max(10, rect.right - 300), y: rect.top + 10 }
-        : { x: 20, y: 70 };
-    }
-    // Image (OSD) mode: Plotly never rendered, so it has no pixel cache / extent.
-    // Load the current slice's frames for sampling + line placement first.
-    if (this.isImageView && this.imageInfo) {
-      await this.plotService.ensureIntensitySampling(this.imageInfo, this.zIndex);
-    }
-    const region = this.plotService.getIntensityControls()?.addProfileLine();
-    // Auto-select the new line on the active backend (Plotly handles / OSD
-    // highlight) so it's ready to move or delete immediately.
-    if (region) {
-      this.plotService.selectRegion(region);
-      // OSD only draws a selected region's handles in an edit mode, so a line in
-      // 'none' mode looks unselected. Switch to 'select' so the new line shows
-      // its endpoint handles and can be dragged/deleted right away.
-      if (this.isImageView && this.activeDragMode !== 'select') {
-        this.toggleDragMode('select');
-      }
-    }
+    const region = await this.inset?.addProfileLine();
+    // OSD only draws a selected region's handles in an edit mode, so a line in
+    // 'none' mode looks unselected. Switch to 'select' so the new line shows its
+    // endpoint handles and can be dragged/deleted right away.
+    if (region && this.isImageView && this.activeDragMode !== 'select') this.toggleDragMode('select');
   }
 
   ngOnDestroy() {
@@ -1195,15 +1078,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.unsub.next();
     this.unsub.complete();
     this.shortcuts?.detach();
-    if (this.profileDragMoveListener) {
-      window.removeEventListener('mousemove', this.profileDragMoveListener);
-    }
-    if (this.profileDragUpListener) {
-      window.removeEventListener('mouseup', this.profileDragUpListener);
-    }
-    if (this.profileResizeListener) {
-      window.removeEventListener('resize', this.profileResizeListener);
-    }
     this.plotService.unsubscribe();
   }
 
@@ -1287,11 +1161,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     if (z === undefined) return;
     this.zIndex = z;
     this.scrubber.commit(z);
-    // Keep the intensity inset in sync with the displayed slice (Image/OSD mode,
-    // where the profile sampler is fed from the loaded preview frames).
-    if (this.hasProfiles && this.isImageView && this.imageInfo) {
-      this.plotService.ensureIntensitySampling(this.imageInfo, z);
-    }
+    // Keep the intensity inset sampling the displayed slice (Image view).
+    this.inset?.sliceCommitted(z);
   }
 
   /**

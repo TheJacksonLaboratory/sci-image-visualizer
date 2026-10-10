@@ -1411,7 +1411,9 @@ describe('VisualizerComponent — global listeners run outside Angular (CORE-4)'
 
   it('registers every window listener outside the zone, so a mousemove does not run change detection', () => {
     const types = added.map((a) => a.type).sort();
-    expect(types).toEqual(['contextmenu', 'keydown', 'mousemove', 'mouseup', 'pointerover', 'resize', 'wheel']);
+    // The drag (mousemove/mouseup) listeners exist only during a drag now, and the
+    // inset's resize listener lives in <viz-intensity-inset> (both pinned in their specs).
+    expect(types).toEqual(['contextmenu', 'keydown', 'pointerover', 'wheel']);
     expect(added.every((a) => a.outside)).toBe(true);
   });
 

@@ -34,6 +34,8 @@ import { ChannelHistogramComponent } from './channel-histogram/channel-histogram
 import { SpatialControlsComponent } from './spatial-controls/spatial-controls.component';
 import { SpatialChartsComponent } from './spatial-controls/spatial-charts/spatial-charts.component';
 import { VISUALIZER_TOKEN_BINDINGS } from './provide-visualization';
+import { IntensityInsetComponent } from './intensity-inset/intensity-inset.component';
+import { FloatingDragDirective } from './visualizer/floating-drag.directive';
 
 /**
  * Self-contained plotting UI: the {@link VisualizerComponent} (plot surface
@@ -55,6 +57,8 @@ import { VISUALIZER_TOKEN_BINDINGS } from './provide-visualization';
     ChannelHistogramComponent,
     SpatialControlsComponent,
     SpatialChartsComponent,
+    IntensityInsetComponent,
+    FloatingDragDirective,
   ],
   imports: [
     CommonModule,

@@ -30,7 +30,7 @@
 <div class="toolbar-dock" [class.floating]="toolbarFloating"
      [style.left.px]="toolbarFloating ? toolbarPos.x : null"
      [style.top.px]="toolbarFloating ? toolbarPos.y : null">
-  <div class="toolbar-drag-handle" (mousedown)="onToolbarDragStart($event)"
+  <div class="toolbar-drag-handle" [vizFloatingDrag]="toolbarDragOrigin" (vizFloatingDragMove)="toolbarPos = $event"
        pTooltip="Drag to float the toolbar" tooltipPosition="bottom">
     <i class="pi pi-bars"></i>
   </div>
@@ -156,17 +156,10 @@
 </div>
 
 <!-- Floating, draggable intensity-profile inset, shown while any intensity line
-     exists; the chart updates live as a line ROI is moved. Kept OUTSIDE the plot div and
-     positioned fixed so it floats over the whole page (not clipped to the
-     diagram/canvas area). -->
-<div *ngIf="hasProfiles" class="intensity-panel"
-     [style.left.px]="profilePanelPos.x" [style.top.px]="profilePanelPos.y">
-  <div class="intensity-panel-header" (mousedown)="onProfilePanelDragStart($event)">
-    <span>Intensity profile</span>
-    <i class="pi pi-arrows-alt"></i>
-  </div>
-  <div [id]="intensityInsetDiv" class="intensity-panel-plot"></div>
-</div>
+     exists. Kept OUTSIDE the plot div and fixed to the viewport, so it floats over
+     the whole page rather than being clipped to the canvas. -->
+<viz-intensity-inset [divId]="intensityInsetDiv" [plotDivName]="plotDivName" [zIndex]="zIndex"
+                     [imageView]="isImageView" [imageInfo]="imageInfo"></viz-intensity-inset>
 
 <!-- Channels & Histogram: non-modal floating dialog opened from the toolbar. -->
 <channel-histogram [(visible)]="showChannelHistogram"></channel-histogram>

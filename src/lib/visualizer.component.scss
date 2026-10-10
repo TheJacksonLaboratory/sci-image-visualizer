@@ -213,46 +213,6 @@ kbd {
   @include viz-icons-rules.rules('./assets');
 }
 
-/* Floating, draggable intensity-profile inset (LINE plot type). Fixed to the
-   viewport so it floats over the whole page (above the toolbar, z-index 1000),
-   not clipped to the #plot/canvas area. */
-.intensity-panel {
-  position: fixed;
-  z-index: 1100;
-  width: 280px;
-  height: 180px;
-  background: rgba(25, 25, 25, 0.9);
-  border: 1px solid var(--primary-color, #3399ff);
-  border-radius: 6px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.intensity-panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.25rem 0.5rem;
-  cursor: move;
-  user-select: none;
-  background: rgba(255, 255, 255, 0.08);
-  color: #eee;
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
-.intensity-panel-header i {
-  opacity: 0.6;
-  font-size: 0.7rem;
-}
-
-.intensity-panel-plot {
-  flex: 1 1 auto;
-  width: 100%;
-}
-
 /* SAM/cellpose model-download bar: kill PrimeNG's default `width 1s ease`
  * transition on the fill so it tracks the real download percentage instantly.
  * Otherwise the numeric label jumps to 100% while the animated fill lags behind
