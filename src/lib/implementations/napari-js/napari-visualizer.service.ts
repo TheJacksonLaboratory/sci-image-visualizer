@@ -39,6 +39,7 @@ import { NapariSpatialTooltip } from './napari-spatial-tooltip';
 import { NapariSpatialTileLayers, TranscriptEstimate } from './napari-spatial-tiles';
 import { NapariNavigator } from './napari-navigator';
 import { LoadingBadgeState } from './napari-loading-state';
+import { NapariToolBridge } from './napari-tool-bridge';
 import { NapariDisplayState } from './napari-display-state';
 import { AssembledVolume, NapariTileClient } from './napari-tile-client';
 import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
@@ -51,10 +52,10 @@ import {
 
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
 import {
-  LumaPlane, READBACK_DEBOUNCE_MS, SCATTER3D_MAX_POINTS, SCATTER3D_MAX_XY, SURFACE_MAX_GRID,
-  SURFACE_Z_ASPECT, SceneKind, VOLUME_FETCH_CONCURRENCY, VOLUME_WORLD_INPLANE_REF,
-  isServerlessMultichannel, mapPool, sceneKindOf, stackDepth, surfaceResolutionFor, tintFor,
-  tintedComposite, toIHistogram, toNapariGamma, typedPlane, volumeResolutionFor,
+  LumaPlane, SCATTER3D_MAX_POINTS, SCATTER3D_MAX_XY, SURFACE_MAX_GRID, SURFACE_Z_ASPECT, SceneKind,
+  VOLUME_FETCH_CONCURRENCY, VOLUME_WORLD_INPLANE_REF, isServerlessMultichannel, mapPool,
+  sceneKindOf, stackDepth, surfaceResolutionFor, tintFor, tintedComposite, toIHistogram,
+  toNapariGamma, typedPlane, volumeResolutionFor,
 } from './napari-helpers';
 import {
   ContrastWindowCache, DensityGroup, GENE_MAP_MAX_SIDE, GENE_MAP_SIGMA,
@@ -102,43 +103,19 @@ import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
 import { NapariScaleBar, ScaleBarCamera } from './napari-scale-bar';
 import { formatUm } from '../../overlays/scale-bar-core';
-import { NapariRegionOverlay, OverlayViewer } from './napari-region-overlay';
+
 import { NapariAxesLabels, AxisLabelSpec } from './napari-axes-labels';
 import { NapariVolumeZHandle } from './napari-volume-z-handle';
-import {
-  ICoordinateTransform,
-} from '../../contracts/coordinate-transform.contract';
-import { CachedImageData, CanvasToolHost } from '../../toolbar/tool-kit/canvas-tool';
+
+import { CanvasToolHost } from '../../toolbar/tool-kit/canvas-tool';
 import { CanvasToolManager } from '../../toolbar/tool-kit/canvas-tool-manager';
-import { createCanvasToolManager } from '../../toolbar/canvas-tools';
-import { packedFrame } from '../../toolbar/tool-kit/frame-pixels';
+
 import { WandService } from '../../toolbar/wand/wand.service';
 import { CanvasToolId } from '../../contracts/display-types';
 import { SamToolService } from '../../toolbar/segmentation/sam-tool.service';
 import { SamPointToolService } from '../../toolbar/segmentation/sam-point-tool.service';
 import { CellSegmentToolService } from '../../toolbar/segmentation/cell-segment-tool.service';
 import { ICellSegmenter, CELL_SEGMENTER } from '../../contracts/cell-segmenter.contract';
-
-/** ICoordinateTransform over the napari camera: pointer client coords ↔ image/world coords. */
-class NapariCoordinateTransform implements ICoordinateTransform {
-  constructor(
-    private readonly viewer: {
-      canvasToWorld(clientX: number, clientY: number): [number, number];
-      readonly camera: { zoom: number };
-    },
-    private readonly ready: () => boolean,
-  ) {}
-  clientToData(clientX: number, clientY: number): { x: number; y: number } {
-    const [x, y] = this.viewer.canvasToWorld(clientX, clientY);
-    return { x, y };
-  }
-  dataLengthToScreen(dataLength: number): number {
-    return dataLength * this.viewer.camera.zoom; // CSS px per world unit
-  }
-  isReady(): boolean {
-    return this.ready();
-  }
-}
 
 /** Opaque handle from {@link NapariVisualizerService.load}, passed back to plot(). */
 interface NapariLoaded {
@@ -192,7 +169,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private canvas: HTMLCanvasElement | null = null;
   private host: HTMLElement | null = null;
   private loaded: NapariLoaded | null = null;
-  private lastPixels: PixelData | null = null;
   private currentPlotType: PlotType = PlotType.NAPARI_IMAGE;
   /** The kind of scene {@link plot} mounted — fixed per plot, unlike {@link currentPlotType},
    *  which {@link setPlotType} can change under it. Drives {@link setZIndex}. */
@@ -400,35 +376,16 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private navigatorChannels: ImageBitmap[] | null = null;
   /** The tints/visibility the thumbnail was last composited with — see {@link recolorNavigator}. */
   private navigatorTintKey = '';
-  /** SVG region-drawing overlay for the 2D image (null until a 2D image is plotted). */
-  private regionOverlay: NapariRegionOverlay | null = null;
-  /** Pixel-tool plumbing: the plot div id, coord transform, and bound tool hosts. */
-  private plotDivId = '';
-  private coordTransform: ICoordinateTransform | null = null;
+  /** The region overlay, the pixel tools and the displayed-pixel readback they read. */
+  private readonly tools: NapariToolBridge;
   /** What this backend's canvas tools read and write (one host for every tool). */
   private readonly toolHost: CanvasToolHost;
   /** This backend's own wand, brush, eraser, zoom-to-box and SAM point tools. */
   protected readonly canvasTools: CanvasToolManager;
-  /** Cached CachedImageData built from the last readback (rebuilt when lastPixels changes). */
-  private cachedImage: CachedImageData | null = null;
-  private cachedImageSource: PixelData | null = null;
-  /** Visible world rect captured AT the last readback — must pair with `lastPixels` so the pixel
-   *  tools' ratios/origin match the matrix's camera (using the live rect after a pan/zoom would
-   *  mis-scale the region). */
-  private lastPixelsRect: { x: number; y: number; width: number; height: number } | null = null;
   /** Image smoothing (bilinear) vs nearest-neighbour (crisp pixels, the default). */
   private imageSmoothing = false;
   /** True when the 2D image is rendered via pyramidal TiledSources (descriptor available). */
   private tiled = false;
-  /** Debounced readback timer + camera-change unsubscribe (keep lastPixels current for tools). */
-  private readbackTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Debounced viewport emission for a camera change that needs no pixels. */
-  private viewportTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Active tools that read the displayed pixels; a pan/zoom re-reads them only while non-empty. */
-  private readonly pixelTools = new Set<CanvasToolId>();
-  /** The camera moved since {@link lastPixels} was read. */
-  private pixelsStale = false;
-  private cameraReadbackOff: (() => void) | null = null;
   /** Coarse per-channel luminance sample (keyed by channel index) for the histogram in tiled mode,
    *  where the layers have no full in-memory pixels. Refreshed on plot + slice change. */
   private readonly histSamples = new Map<number, Uint8Array>();
@@ -469,29 +426,20 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.tileClient = new NapariTileClient(tiles, simpleStack, this.api);
     this.tileClient.startScene(this.scene.signal);
     this.display = new NapariDisplayState(store);
-    // The pixel tools read displayed pixels synchronously from the last readback and convert
-    // pointer coords via the napari camera, mirroring the OSD host. This backend owns its own tool
-    // instances (RT-21); the host reads live state, so it is built once.
-    this.toolHost = {
-      getRegions: () => regionStore.getRegions(),
-      setRegions: (r) => regionStore.setRegions(r),
-      getCachedImageData: () => this.cachedImageData(),
-      getActiveFrameIndex: () => this.loaded?.z ?? 0,
-      getOverlayContainer: () => this.host,
-      getCoordinateTransform: () => this.coordTransform as ICoordinateTransform,
-      getFileName: () => this.loaded?.filename,
-      getShapeColor: () => regionStore.getShapeColor(),
-      pixelToData: (px, py) => {
-        const rect = this.host?.getBoundingClientRect();
-        if (!this.viewer || !rect) return { x: 0, y: 0 };
-        const [x, y] = this.viewer.canvasToWorld(rect.left + px, rect.top + py);
-        return { x, y };
-      },
-      applyZoomToBox: (coords) => this.applyZoomToBox(coords),
-    };
-    this.canvasTools = createCanvasToolManager(this.toolHost, {
-      wandService, regionStore, samPoint: samPointTool,
-    });
+    this.tools = new NapariToolBridge({
+      viewer: () => this.viewer,
+      host: () => this.host,
+      canvas: () => this.canvas,
+      imageSize: () => this.getTrueImageSize(),
+      frameIndex: () => this.loaded?.z ?? 0,
+      fileName: () => this.loaded?.filename,
+      // Reached from timers armed outside the zone; subscribers are UI.
+      viewportChanged: (rect) => this.inZone(() => this.viewportChange$.next(rect)),
+      outsideZone: (fn) => this.zone.runOutsideAngular(fn),
+      inZone: (fn) => this.inZone(fn),
+    }, { regionStore, wandService, samTool, samPointTool, cellSegmentTool, cellSegmenter });
+    this.toolHost = this.tools.toolHost;
+    this.canvasTools = this.tools.canvasTools;
   }
 
   /** Run `fn` inside the Angular zone: for output (subjects the UI renders, store writes)
@@ -548,7 +496,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     const scene = this.scene.signal;
     this.host = host;
     this.badge.attach(host);
-    this.plotDivId = plotDiv;
     this.currentPlotType = plotType;
     this.mounted = sceneKindOf(plotType);
 
@@ -617,9 +564,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
         this.subscribeDisplayState();
         this.installScaleBar();
         this.installNavigator(z);
-        this.install2dInteraction(viewer, host);
+        this.tools.install2dInteraction(viewer, host);
       }
-      this.scheduleReadback();
+      this.tools.scheduleReadback();
       return true;
     } catch (err) {
       console.error('[napari-js] plot failed:', err);
@@ -1256,12 +1203,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.installNavigator(z);
     // This mode plots REGION centroids, so without the region tools there is no
     // way to produce a point — drawing a region now adds one immediately.
-    this.install2dInteraction(viewer, host);
+    this.tools.install2dInteraction(viewer, host);
     this.rebuildScatterPoints();
     this.scatterRegionSub = this.regionStore
       .getRegionUpdateEvent()
       .subscribe(() => this.rebuildScatterPoints());
-    this.scheduleReadback();
+    this.tools.scheduleReadback();
   }
 
   /** (Re)build the 2D scatter's point layer at the current region centroids. */
@@ -1280,22 +1227,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       borderColor: [0, 0, 0, 1],
       borderWidth: 2,
     });
-  }
-
-  /**
-   * The interaction stack every 2D mode needs: the region overlay (draw/select/edit), the pixel
-   * tools that read back displayed pixels (wand, brush, vertex eraser, zoom-to-box, SAM/cellpose),
-   * and a camera hook that keeps that readback current as the view pans/zooms and tiled levels
-   * load.
-   *
-   * Extracted because forgetting it is invisible: the toolbar gates its region buttons on 2D-vs-3D
-   * rather than on plot type, so a 2D mode that skips this shows every tool and silently does
-   * nothing. That is exactly what happened to the spatial and region-centroid scatter modes.
-   */
-  private install2dInteraction(viewer: Viewer, host: HTMLElement): void {
-    this.regionOverlay = new NapariRegionOverlay(host, viewer, this.regionStore);
-    this.buildToolHosts();
-    this.cameraReadbackOff = viewer.camera.changed.connect(() => this.onViewChanged());
   }
 
   // ── Spatial omics ────────────────────────────────────────────────────────────────────────
@@ -1326,11 +1257,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       this.installScaleBar();
       this.installNavigator(z);
     }
-    this.install2dInteraction(viewer, host);
+    this.tools.install2dInteraction(viewer, host);
     this.installSpatialHover(host);
     this.spatialTiles()?.attach(viewer);
     this.subscribeSpatial();
-    this.scheduleReadback();
+    this.tools.scheduleReadback();
   }
 
   /**
@@ -1369,58 +1300,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       },
     });
     return this.spatialTilesMgr;
-  }
-
-  /**
-   * Region drawing for the 3D cloud.
-   *
-   * Reuses {@link NapariRegionOverlay} verbatim by handing it a SCREEN-SPACE viewer: the drawn
-   * shape is a lasso in canvas pixels, so "world" is the canvas and both transforms are identity
-   * (bar the client→canvas offset). Every existing tool — rectangle, polygon, freehand — therefore
-   * works in 3D with no new drawing code.
-   *
-   * A screen-space shape stops meaning anything the moment the camera moves, so an orbit clears
-   * the regions drawn in this view (and only those). The SELECTION they produced is kept: that is
-   * the durable artefact, and the highlighted points stay highlighted from every angle.
-   */
-  private install3dInteraction(viewer: Viewer, host: HTMLElement): void {
-    this.regionOverlay = new NapariRegionOverlay(host, this.screenSpaceViewer(viewer), this.regionStore);
-    this.buildToolHosts();
-    // Regions already in the shared store when the 3D view mounted (the image's own, say) are
-    // not screen-space shapes and must survive an orbit; only those drawn here are cleared.
-    // (No mid-gesture case to guard: the overlay disables the camera controls while drawing.)
-    const foreign = new Set(this.regionStore.getRegions().map((r) => r.id));
-    this.cameraReadbackOff = viewer.camera3d.changed.connect(() => {
-      const drawn = this.regionStore.getRegions().filter((r) => !foreign.has(r.id)).map((r) => r.id);
-      // Not an edit of the user's: no undo step (NAPARI-SVC-11).
-      if (drawn.length) this.inZone(() => this.regionStore.removeRegions(drawn, { recordUndo: false }));
-    });
-  }
-
-  /**
-   * The {@link OverlayViewer} the 3D region overlay draws through: "world" is the canvas, in
-   * canvas-local CSS pixels. The overlay's contract is CLIENT pixels on both sides (it subtracts
-   * its own rect, as for napari-js's `Viewer.worldToCanvas`), so both directions apply the
-   * canvas's client offset — returning canvas-local pixels from `worldToCanvas` drew the lasso
-   * offset from the cursor whenever the canvas was not at the page origin.
-   */
-  private screenSpaceViewer(viewer: Viewer): OverlayViewer {
-    const offset = (): [number, number] => {
-      const r = this.canvas?.getBoundingClientRect();
-      return r ? [r.left, r.top] : [0, 0];
-    };
-    return {
-      canvasToWorld: (clientX: number, clientY: number) => {
-        const [left, top] = offset();
-        return [clientX - left, clientY - top];
-      },
-      worldToCanvas: (x: number, y: number) => {
-        const [left, top] = offset();
-        return [x + left, y + top];
-      },
-      setControlsEnabled: (enabled: boolean) => viewer.setControlsEnabled(enabled),
-      camera: viewer.camera3d,
-    };
   }
 
   /** Movement, in screen pixels, under which a press-release is a CLICK and not a
@@ -1484,7 +1363,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       if (Date.now() - start.t > NapariVisualizerService.CLICK_MAX_MS) return;
       // A region tool owns the pointer while it is active, and placing a polygon
       // vertex is also a click that does not move.
-      if (this.regionOverlay?.toolActive) return;
+      if (this.tools.regionOverlay?.toolActive) return;
       this.inZone(() => this.selectClassAt(e.clientX, e.clientY));
     };
 
@@ -1948,7 +1827,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       this.spatialPoints.visible = this.spatialPointsVisible();
       this.spatialPoints.faceColor = gatherColors(faceColor, slab?.indices);
       this.hideForeignImage(viewer, (!!ref || !!dataset.volume) && view.showImage !== false);
-    this.regionOverlay?.setRegionsVisible(view.showAnnotations !== false);
+    this.tools.regionOverlay?.setRegionsVisible(view.showAnnotations !== false);
       viewer.requestRender();
       return;
     }
@@ -1987,7 +1866,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.spatialTilesMgr?.afterObservations();
     this.frameSpatialPointsOnce(viewer, dataset.id, positions, !!ref);
     this.hideForeignImage(viewer, (!!ref || !!dataset.volume) && view.showImage !== false);
-    this.regionOverlay?.setRegionsVisible(view.showAnnotations !== false);
+    this.tools.regionOverlay?.setRegionsVisible(view.showAnnotations !== false);
     this.setRegionGridFor(dataset, positions);
   }
 
@@ -2006,7 +1885,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
    * depending only on what the units are, and only the dataset knows.
    */
   private setRegionGridFor(dataset: SpatialDataset, positions: Float32Array): void {
-    const overlay = this.regionOverlay;
+    const overlay = this.tools.regionOverlay;
     if (!overlay?.setWorldQuantum) return;
     if (dataset.imageRef || dataset.volume) {
       overlay.setWorldQuantum(PIXEL_WORLD_QUANTUM);
@@ -2269,7 +2148,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
    * (`fit3d: 'once'`).
    */
   private async mountSpatialOmics3d(viewer: Viewer, host: HTMLElement): Promise<void> {
-    this.install3dInteraction(viewer, host);
+    this.tools.install3dInteraction(viewer, host);
     this.installSpatialHover(host);
     this.subscribeSpatial();
   }
@@ -2986,7 +2865,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.volumeChannelData.clear();
     this.volumeChannelData.set(0, data);
     this.subscribeScatter3dDisplayState();
-    this.scheduleReadback();
+    this.tools.scheduleReadback();
   }
 
   /** Store colormap / reverse / invert / channel window → the 3D scatter's colormap + contrast. */
@@ -3192,7 +3071,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     // Reuse the volume intensity-histogram path: the slice's scalar plane is the histogram source.
     this.volumeChannelData.clear();
     this.volumeChannelData.set(0, plane.data);
-    this.scheduleReadback();
+    this.tools.scheduleReadback();
   }
 
   /** Subscribe the store colormap / reverse / invert / channel window → the surface, so histogram
@@ -3270,38 +3149,22 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.navigator = null;
     this.setNavigatorChannels(null);
     this.badge.reset();
-    this.regionOverlay?.destroy();
-    this.regionOverlay = null;
+    this.tools.teardown();
     this.axesLabels?.destroy();
     this.axesLabels = null;
     this.zHandle?.destroy();
     this.zHandle = null;
     this.volumeWorldBase = null;
-    this.cachedImage = null;
-    this.cachedImageSource = null;
-    this.lastPixelsRect = null;
     this.tileClient.startScene(this.scene.signal);
     this.tiled = false;
     this.histGen++;
     this.histSamples.clear();
-    if (this.readbackTimer != null) {
-      clearTimeout(this.readbackTimer);
-      this.readbackTimer = null;
-    }
-    if (this.viewportTimer != null) {
-      clearTimeout(this.viewportTimer);
-      this.viewportTimer = null;
-    }
-    this.pixelsStale = false;
-    this.cameraReadbackOff?.();
-    this.cameraReadbackOff = null;
     this.channelView = null;
     this.spatialTilesMgr?.detach();
     this.viewer?.dispose();
     this.viewer = null;
     if (this.canvas && this.host?.contains(this.canvas)) this.host.removeChild(this.canvas);
     this.canvas = null;
-    this.lastPixels = null;
     this.volumeView = null;
     this.volumeMultichannel = false;
     this.surfaceLayer = null;
@@ -3416,7 +3279,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       case 'volume':
         // Volume / isosurface: step the volume's z plane in place.
         v.dims.z = zIndex;
-        this.scheduleReadback();
+        this.tools.scheduleReadback();
         return;
       case 'scatter3d':
       case 'spatial3d':
@@ -3433,7 +3296,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       const desc = this.currentDescriptor();
       if (desc) void this.refreshHistogramSamples(zIndex, desc);
       this.redrawSpatialMarkers();
-      this.scheduleReadback();
+      this.tools.scheduleReadback();
       return;
     }
     // 2D image (stitch fallback): re-render the slice (re-fetches per-channel / composite).
@@ -3449,7 +3312,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
         this.redrawSpatialMarkers();
         // The region-centroid scatter went with the same clear.
         if (this.scatter2dPoints) this.rebuildScatterPoints();
-        this.scheduleReadback();
+        this.tools.scheduleReadback();
       })
       .catch((err) => console.error('[napari-js] setZIndex slice failed:', err));
   }
@@ -3484,7 +3347,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   }
 
   getDisplayedPixelData(): PixelData | null {
-    return this.lastPixels;
+    return this.tools.lastPixels;
   }
 
   getDisplayedSourceRect(): { x: number; y: number; width: number; height: number } | null {
@@ -3569,167 +3432,22 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     /* Plotly owns the intensity inset */
   }
 
-  /** Read the displayed composite into `lastPixels` (the pixel-tools' source) + emit the clamped
-   *  visible region. A fresh PixelData object means cachedImageData() rebuilds automatically. */
-  private async runReadback(): Promise<void> {
-    const v = this.viewer;
-    if (!v) return;
-    try {
-      const px = await v.readDisplayedPixels();
-      if (this.viewer !== v) return;
-      const rect = v.visibleWorldRect(); // capture WITH the pixels (same camera)
-      this.lastPixels = px;
-      this.lastPixelsRect = rect;
-      this.pixelsStale = false;
-      this.emitViewport(rect);
-    } catch {
-      /* readback unavailable (no device yet, or it was lost): the tools keep the last pixels */
-    }
-  }
-
-  /** Emit the visible region, clamped to the image, on {@link viewportChange$}. */
-  private emitViewport(rect: { x: number; y: number; width: number; height: number }): void {
-    const size = this.getTrueImageSize();
-    if (!size || !rect) return;
-    const x = Math.max(0, Math.min(size.width, rect.x));
-    const y = Math.max(0, Math.min(size.height, rect.y));
-    const width = Math.max(1, Math.min(size.width - x, rect.width));
-    const height = Math.max(1, Math.min(size.height - y, rect.height));
-    // Reached from timers armed outside the zone; subscribers are UI.
-    this.inZone(() => this.viewportChange$.next({ x, y, width, height }));
-  }
-
-  /**
-   * A 2D pan/zoom. The full-canvas GPU readback is paid for only while a pixel tool reads it
-   * ({@link pixelTools}); otherwise only the viewport rect is emitted (debounced), and the pixels
-   * are marked stale for whoever next needs them ({@link rgbHistogram} refreshes lazily, and a
-   * tool arms a fresh readback as it activates).
-   */
-  private onViewChanged(): void {
-    this.pixelsStale = true;
-    if (this.pixelTools.size > 0) {
-      this.armReadback(); // emits the viewport with the pixels
-      return;
-    }
-    if (this.viewportTimer != null) clearTimeout(this.viewportTimer);
-    this.viewportTimer = this.zone.runOutsideAngular(() => setTimeout(() => {
-      this.viewportTimer = null;
-      if (this.viewer) this.emitViewport(this.viewer.visibleWorldRect());
-    }, READBACK_DEBOUNCE_MS));
-  }
-
-  private scheduleReadback(): void {
-    if (!this.viewer) return;
-    this.zone.runOutsideAngular(() => {
-      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => void this.runReadback());
-      else setTimeout(() => void this.runReadback(), 0);
-    });
-  }
-
-  /** Debounced readback — armed on camera changes while a pixel tool is active, so `lastPixels`
-   *  tracks the current view after a pan/zoom settles, which the on-canvas pixel tools
-   *  (wand/brush/SAM) read synchronously. Coalesces rapid changes. */
-  private armReadback(delayMs = READBACK_DEBOUNCE_MS): void {
-    if (this.readbackTimer != null) clearTimeout(this.readbackTimer);
-    this.readbackTimer = this.zone.runOutsideAngular(() => setTimeout(() => {
-      this.readbackTimer = null;
-      void this.runReadback();
-    }, delayMs));
-  }
-
   // ── IRegionStore + classification colours ──────────────────────────────────
   // Inherited from BaseStoreVisualizer — pure delegations to the shared
   // RegionStore / VisualizerStore (identical to the OSD backend).
 
-  // ── Pixel tools: this backend's CanvasToolManager over a napari host ──────────────────────
-
-  /** Build the pixel tools' coordinate transform for the current viewer (called from plot()). */
-  private buildToolHosts(): void {
-    if (!this.viewer) return;
-    this.coordTransform = new NapariCoordinateTransform(
-      this.viewer,
-      () => !!this.viewer && this.imageW > 0,
-    );
-  }
-
-  /** Zoom/pan the camera to fit a data-space rectangle `[xMin, xMax, yMax, yMin]`. */
-  private applyZoomToBox(coordinates: number[]): void {
-    const v = this.viewer;
-    if (!v || !this.canvas || coordinates.length < 4) return;
-    const [xMin, xMax, yA, yB] = coordinates;
-    const x0 = Math.min(xMin, xMax);
-    const x1 = Math.max(xMin, xMax);
-    const y0 = Math.min(yA, yB);
-    const y1 = Math.max(yA, yB);
-    const w = Math.max(1, x1 - x0);
-    const h = Math.max(1, y1 - y0);
-    const vw = this.canvas.clientWidth || w;
-    const vh = this.canvas.clientHeight || h;
-    v.camera.center = [(x0 + x1) / 2, (y0 + y1) / 2];
-    v.camera.zoom = Math.min(vw / w, vh / h);
-    v.requestRender();
-  }
-
-  /** Build CachedImageData from the most recent readback — its RGBA device pixels are the frame
-   *  as-is (packed, no per-pixel arrays: NAPARI-SVC-23) — with ratios/origin mapping image coords
-   *  ↔ readback pixels. Cached until the readback changes. */
-  private cachedImageData(): CachedImageData | null {
-    const px = this.lastPixels;
-    if (!px || !this.viewer) return null;
-    if (this.cachedImage && this.cachedImageSource === px) return this.cachedImage;
-    const w = px.width;
-    const h = px.height;
-    // Use the rect captured WITH this readback (not the live one) so ratios/origin match the
-    // matrix's camera — otherwise a pan/zoom since the readback mis-scales the traced region.
-    const rect = this.lastPixelsRect ?? this.viewer.visibleWorldRect();
-    this.cachedImage = {
-      frames: [packedFrame(px.data, w, h)],
-      width: w,
-      height: h,
-      ratios: [rect.width / w, rect.height / h],
-      isGrayscale: false,
-      originX: rect.x,
-      originY: rect.y,
-    };
-    this.cachedImageSource = px;
-    return this.cachedImage;
-  }
-
   // ── IToolController ────────────────────────────────────────────────────────
-  // setActiveTool and the per-tool setters run in BaseStoreVisualizer over this.canvasTools.
-  // Control gating: a tool that ACTIVATES disables the camera controls; deactivation is a no-op
-  // because the host always calls the region overlay's setMode FIRST in each toggle (which sets
-  // the baseline enabled/disabled), so re-enabling here would fight a freshly-activated draw mode.
+  // setActiveTool and the per-tool setters run in BaseStoreVisualizer over this.canvasTools; the
+  // pointer and readback gating, and the SAM / cellpose runs, are the tool bridge's.
 
-  /** Track the pixel-reading tool (see {@link onViewChanged}), gate the camera, and arm a fresh
-   *  readback for a pixel tool. Nothing is armed without a viewer, nor a pixel tool before a 2D
-   *  plot built its coordinate transform. */
   protected override beforeToolChange(next: CanvasToolId | null): boolean {
-    this.pixelTools.clear();
-    if (next !== null && next !== 'zoomToBox') this.pixelTools.add(next);
-    if (!this.viewer) return false; // no plot yet → nothing to drive
-    if (next === null) return true;
-    if (next !== 'zoomToBox' && !this.coordTransform) return false;
-    this.viewer.setControlsEnabled(false);
-    if (next === 'zoomToBox') return true;
-    this.cachedImageSource = null;
-    // The eraser only converts coordinates with the readback, so a current one will do.
-    if (next !== 'eraseVertex' || this.pixelsStale) this.armReadback(0);
-    return true;
+    return this.tools.beforeToolChange(next);
   }
-  // SAM / cellpose — server round-trips that read the drawn rectangles + displayed pixels through
-  // the tool host (rectangles from the RegionStore, image from the readback).
-  async segmentRectangles(): Promise<number> {
-    if (!this.viewer || !this.coordTransform) return 0;
-    await this.runReadback(); // the SAM embedding samples the currently-displayed image
-    this.cachedImageSource = null;
-    return this.samTool.segmentBoxes(this.toolHost);
+  segmentRectangles(): Promise<number> {
+    return this.tools.segmentRectangles();
   }
-  async segmentRectanglesCellpose(): Promise<number> {
-    if (!this.viewer || !this.coordTransform || !this.cellSegmenter) return 0;
-    await this.runReadback();
-    this.cachedImageSource = null;
-    return this.cellSegmentTool.segmentBoxes(this.toolHost, this.cellSegmenter);
+  segmentRectanglesCellpose(): Promise<number> {
+    return this.tools.segmentRectanglesCellpose();
   }
   setSamModel(id: string): void {
     this.samTool.setModel(id);
@@ -3759,7 +3477,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
 
   // ── IVisualizer composite members ─────────────────────────────────────────
   getRegionOverlay(): IRegionOverlay | null {
-    return this.regionOverlay;
+    return this.tools.regionOverlay;
   }
   getIsosurfaceControls(): IIsosurfaceControls | null {
     if (!this.volumeView) return null;
@@ -3814,7 +3532,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     }
     // Tiled mode has no full in-memory pixels → use the coarse per-channel sample (RGB: readback).
     if (this.tiled) {
-      if (this.imageMode === 'rgb') return this.rgbHistogram(channelIndex, bins);
+      if (this.imageMode === 'rgb') return this.tools.rgbHistogram(channelIndex, bins);
       const sample = this.histSamples.get(this.imageMode === 'grayscale' ? 0 : channelIndex);
       return sample ? toIHistogram(histogramScalar(sample, bins, 0, 255)) : null;
     }
@@ -3825,7 +3543,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       const h = v.layerHistogram(layer, bins);
       if (h) return toIHistogram(h);
     }
-    if (this.imageMode === 'rgb') return this.rgbHistogram(channelIndex, bins);
+    if (this.imageMode === 'rgb') return this.tools.rgbHistogram(channelIndex, bins);
     return null;
   }
   getHistogram$(channelIndex: number, bins: number): Observable<IHistogram | null> {
@@ -3835,24 +3553,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       ?? of(this.getHistogram(channelIndex, bins));
   }
 
-  /** Per-channel histogram of the displayed RGB composite (R/G/B byte), from the last readback. */
-  private rgbHistogram(channelIndex: number, bins: number): IHistogram | null {
-    // Pans no longer read the canvas back (no pixel tool needs it), so refresh lazily here: this
-    // answer may describe the previous view, and the pane's next request gets the current one.
-    if (this.pixelsStale) this.armReadback(0);
-    const px = this.lastPixels;
-    if (!px) return null;
-    const band = Math.max(0, Math.min(2, channelIndex));
-    const n = Math.max(1, Math.min(256, Math.floor(bins) || 256));
-    const counts = new Array(n).fill(0);
-    const data = px.data;
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i + 3] === 0) continue; // skip transparent padding
-      counts[Math.min(n - 1, (data[i + band] * n) >> 8)]++;
-    }
-    const binsArr = Array.from({ length: n }, (_, i) => (i * 256) / n);
-    return { bins: binsArr, counts, max: counts.reduce((m, c) => (c > m ? c : m), 0) };
-  }
   /** Save the displayed composite as a PNG. Through file-saver, which (unlike revoking an object
    *  URL straight after `a.click()`) does not race the browser's download. */
   exportComposite(): void {

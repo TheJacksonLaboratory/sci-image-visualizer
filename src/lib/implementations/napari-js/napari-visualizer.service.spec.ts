@@ -215,25 +215,27 @@ describe('NapariVisualizerService', () => {
   describe('setActiveTool', () => {
     type Internals = {
       viewer: unknown;
-      coordTransform: unknown;
-      pixelsStale: boolean;
-      pixelTools: Set<string>;
       canvasTools: { activeId: string | null };
-      armReadback(delay?: number): void;
+      tools: {
+        coordTransform: unknown;
+        pixelsStale: boolean;
+        pixelTools: Set<string>;
+        armReadback(delay?: number): void;
+      };
     };
     const internals = () => service as unknown as Internals;
 
     it('arms nothing before a plot, but still records the pixel tool', () => {
       service.setActiveTool('wand', { sensitivity: 2 });
       expect(internals().canvasTools.activeId).toBeNull();
-      expect([...internals().pixelTools]).toEqual(['wand']);
+      expect([...internals().tools.pixelTools]).toEqual(['wand']);
     });
 
     it('disables the camera, refreshes the readback and arms the tool', () => {
       const setControlsEnabled = jest.fn();
       internals().viewer = { setControlsEnabled };
-      internals().coordTransform = {};
-      const arm = jest.spyOn(internals(), 'armReadback').mockImplementation(() => undefined);
+      internals().tools.coordTransform = {};
+      const arm = jest.spyOn(internals().tools, 'armReadback').mockImplementation(() => undefined);
 
       service.setActiveTool('brush', { size: 8 });
       expect(setControlsEnabled).toHaveBeenLastCalledWith(false);
@@ -242,11 +244,11 @@ describe('NapariVisualizerService', () => {
 
       // The eraser re-reads only a stale readback; zoom-to-box never reads pixels.
       arm.mockClear();
-      internals().pixelsStale = false;
+      internals().tools.pixelsStale = false;
       service.setActiveTool('eraseVertex', { radius: 4 });
       service.setActiveTool('zoomToBox');
       expect(arm).not.toHaveBeenCalled();
-      expect(internals().pixelTools.size).toBe(0);
+      expect(internals().tools.pixelTools.size).toBe(0);
 
       service.setActiveTool('drawrect'); // a region mode: disarm only
       expect(internals().canvasTools.activeId).toBeNull();
@@ -500,19 +502,17 @@ describe('NapariVisualizerService', () => {
     const px = { width: 2560, height: 1440, channels: 4, data: new Uint8ClampedArray(2560 * 1440 * 4) };
     type Internals = {
       viewer: unknown;
-      lastPixels: unknown;
-      lastPixelsRect: unknown;
-      cachedImageData(): CachedImageData | null;
+      tools: { lastPixels: unknown; lastPixelsRect: unknown; cachedImageData(): CachedImageData | null };
     };
     const internals = service as unknown as Internals;
     internals.viewer = {};
-    internals.lastPixels = px;
-    internals.lastPixelsRect = { x: 10, y: 20, width: 1280, height: 2880 };
-    const cached = internals.cachedImageData()!;
+    internals.tools.lastPixels = px;
+    internals.tools.lastPixelsRect = { x: 10, y: 20, width: 1280, height: 2880 };
+    const cached = internals.tools.cachedImageData()!;
     expect(isPackedFrame(cached.frames[0])).toBe(true);
     expect((cached.frames[0] as PackedFrame).data).toBe(px.data); // the readback itself, not a copy
     expect(cached).toMatchObject({ width: 2560, height: 1440, ratios: [0.5, 2], originX: 10, originY: 20 });
-    expect(internals.cachedImageData()).toBe(cached); // cached until the readback changes
+    expect(internals.tools.cachedImageData()).toBe(cached); // cached until the readback changes
   });
 
   it('reads the canvas back after a pan only while a pixel tool needs it', async () => {
@@ -525,7 +525,7 @@ describe('NapariVisualizerService', () => {
     await service.plot('lazy-readback-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE);
     type Internals = {
       viewer: { camera: { changed: { connect(l: () => void): () => void } } };
-      install2dInteraction(v: unknown, h: HTMLElement): void;
+      tools: { install2dInteraction(v: unknown, h: HTMLElement): void };
     };
     const internals = service as unknown as Internals;
     // The stub camera never emits: capture the listeners the 2D interaction installs.
@@ -534,7 +534,7 @@ describe('NapariVisualizerService', () => {
       listeners.push(l);
       return () => undefined;
     };
-    internals.install2dInteraction(internals.viewer, div);
+    internals.tools.install2dInteraction(internals.viewer, div);
     const pan = () => listeners.forEach((l) => l());
     const settle = () => new Promise((r) => setTimeout(r, 300));
     await settle();
@@ -603,13 +603,13 @@ describe('NapariVisualizerService', () => {
     const listeners: Array<() => void> = [];
     const internals = service as unknown as {
       viewer: { camera: { changed: { connect(l: () => void): () => void } } };
-      install2dInteraction(v: unknown, h: HTMLElement): void;
+      tools: { install2dInteraction(v: unknown, h: HTMLElement): void };
     };
     internals.viewer.camera.changed.connect = (l) => {
       listeners.push(l);
       return () => undefined;
     };
-    internals.install2dInteraction(internals.viewer, div);
+    internals.tools.install2dInteraction(internals.viewer, div);
     const emittedInZone: boolean[] = [];
     const sub = service.getViewportChange$().subscribe(() => emittedInZone.push(NgZone.isInAngularZone()));
     listeners.forEach((l) => l());
@@ -2622,14 +2622,16 @@ describe('NapariVisualizerService', () => {
       const internals = service as unknown as {
         canvas: HTMLCanvasElement;
         viewer: unknown;
-        screenSpaceViewer(v: unknown): {
-          canvasToWorld(x: number, y: number): [number, number];
-          worldToCanvas(x: number, y: number): [number, number];
+        tools: {
+          screenSpaceViewer(v: unknown): {
+            canvasToWorld(x: number, y: number): [number, number];
+            worldToCanvas(x: number, y: number): [number, number];
+          };
         };
       };
       jest.spyOn(internals.canvas, 'getBoundingClientRect')
         .mockReturnValue({ left: 100, top: 50, width: 300, height: 150 } as DOMRect);
-      const screen = internals.screenSpaceViewer(internals.viewer);
+      const screen = internals.tools.screenSpaceViewer(internals.viewer);
       expect(screen.canvasToWorld(130, 70)).toEqual([30, 20]);
       expect(screen.worldToCanvas(30, 20)).toEqual([130, 70]);
     });
@@ -2648,8 +2650,8 @@ describe('NapariVisualizerService', () => {
         camera3d: { changed: { connect: (l: () => void) => { orbit = l; return () => undefined; } } },
         setControlsEnabled: () => undefined,
       };
-      (service as unknown as { install3dInteraction(v: unknown, h: HTMLElement): void })
-        .install3dInteraction(viewer, document.getElementById('spatial3d-host')!);
+      (service as unknown as { tools: { install3dInteraction(v: unknown, h: HTMLElement): void } })
+        .tools.install3dInteraction(viewer, document.getElementById('spatial3d-host')!);
       regionStore.addRegion({ bounds: { x: 10, y: 10, width: 5, height: 5 } } as never);
       expect(regionStore.getRegions()).toHaveLength(2);
 
