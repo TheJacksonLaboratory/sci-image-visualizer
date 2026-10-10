@@ -176,19 +176,34 @@ describe('OsdRegionOverlay — vertex tools', () => {
     o.destroy();
   });
 
-  it('skips the rebuild on update-viewport frames where the projection did not move', () => {
+  it('follows a camera move by rewriting one transform, not rebuilding the regions (OSD-PLOTLY-11)', () => {
     const viewer: any = fakeViewer();
     const handlersByName: Record<string, () => void> = {};
     viewer.addHandler = (name: string, h: () => void) => { handlersByName[name] = h; };
     let scale = 1;
     viewer.viewport.imageToViewerElementCoordinates = (p: any) => ({ x: p.x * scale, y: p.y * scale });
     const o = new OsdRegionOverlay(viewer, store);
+    store.addRegion(rectRegion()); // drawn, and selected: its corner handles show
+    const svg = (viewer.canvas as HTMLElement).querySelector('svg')!;
+    const shape = svg.querySelector('polygon')!;
     const redraw = jest.spyOn(o, 'redraw');
-    handlersByName['update-viewport'](); // tile-only frame
-    expect(redraw).not.toHaveBeenCalled();
+    const observer = new MutationObserver(() => undefined);
+    observer.observe(svg, { subtree: true, childList: true, attributes: true });
+
+    handlersByName['update-viewport'](); // a tile-only frame: the projection did not move
+    expect(observer.takeRecords()).toEqual([]);
+
     scale = 2; // zoomed
     handlersByName['update-viewport']();
-    expect(redraw).toHaveBeenCalledTimes(1);
+    const records = observer.takeRecords();
+    observer.disconnect();
+    expect(redraw).not.toHaveBeenCalled();
+    expect(records.filter((r) => r.type === 'childList')).toEqual([]); // nothing created or removed
+    expect(svg.querySelector('polygon')).toBe(shape); // the same region node…
+    expect(shape.getAttribute('points')).toBe('0,0 10,0 10,10 0,10'); // …still in image coordinates
+    expect(shape.parentElement!.getAttribute('transform')).toBe('matrix(2 0 0 2 0 0)');
+    // The screen-sized corner handles were re-positioned in place.
+    expect(Array.from(svg.querySelectorAll('circle')).map((c) => c.getAttribute('cx'))).toEqual(['0', '20', '20', '0']);
     o.destroy();
   });
 

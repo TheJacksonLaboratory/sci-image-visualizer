@@ -2,13 +2,14 @@ import { Subscription } from 'rxjs';
 
 import { IRegionOverlay, RegionToolMode } from '../../contracts/region-overlay.contract';
 import { Region, Rectangle, Polygon } from '../../models/region';
-import { AnchorHandle } from '../../models/bezier';
 import { RegionStore } from '../../store/region-store.service';
 import { PIXEL_WORLD_QUANTUM, snapToWorldGrid } from '../../spatial/world-grid';
 import {
-  ToScreen, hitHandle, nearestEdge, nearestVertex, regionBBox, regionContains, regionPathD, regionsInRect,
-  ringHandles,
+  ToScreen, hitHandle, nearestEdge, nearestVertex, regionBBox, regionContains, regionsInRect, ringHandles, ringOf,
 } from '../../region-overlay/region-geometry';
+import {
+  Affine, ScreenLayer, SvgRegionRenderer, affineFromProjection, svgEl,
+} from '../../region-overlay/svg-region-renderer';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 /**
@@ -76,9 +77,11 @@ export interface OverlayViewer {
  * {@link OsdRegionOverlay} but driven by napari's `canvasToWorld`/`worldToCanvas` transforms
  * (see {@link OverlayViewer} for their coordinate spaces).
  * Vector shapes are drawn in an absolutely-positioned `<svg>` over the canvas (no need to push
- * them through WebGPU). It writes completed shapes to the shared {@link RegionStore} (so save /
- * undo / export work identically to OSD) and re-renders from the store on every camera move,
- * region change, and selection change.
+ * them through WebGPU) by the shared {@link SvgRegionRenderer}: in world coordinates inside one
+ * transformed group, rebuilt on a region or selection change, while a camera move only rewrites
+ * the transform (derived from `worldToCanvas`, i.e. napari-js's camera centre/zoom) and the few
+ * screen-space handles and labels. It writes completed shapes to the shared {@link RegionStore}
+ * (so save / undo / export work identically to OSD).
  *
  * Supports (jit-ui#102): rectangle / polygon / freehand path drawing, click-select and rubber-band
  * marquee select, pan/zoom gating via `setControlsEnabled`, body move, vertex move/add/delete,
@@ -88,6 +91,7 @@ export interface OverlayViewer {
  */
 export class NapariRegionOverlay implements IRegionOverlay {
   private readonly svg: SVGSVGElement;
+  private readonly renderer: SvgRegionRenderer;
   private readonly subs = new Subscription();
   private readonly disconnectCamera: () => void;
 
@@ -133,6 +137,12 @@ export class NapariRegionOverlay implements IRegionOverlay {
       touchAction: 'none',
     } as Partial<CSSStyleDeclaration>);
     this.host.appendChild(this.svg);
+    this.renderer = new SvgRegionRenderer(this.svg, {
+      rectElement: 'rect',
+      styleShape: (el, region, selected) => this.style(el, this.strokeOf(region), selected),
+      decorate: (region, _i, _selected, layer) => this.drawLabel(region, layer),
+      skip: (region) => !!region.isProfile?.(),
+    });
 
     this.svg.addEventListener('pointerdown', this.onPointerDown);
     this.svg.addEventListener('pointermove', this.onPointerMove);
@@ -148,7 +158,9 @@ export class NapariRegionOverlay implements IRegionOverlay {
         this.redraw();
       }),
     );
-    this.disconnectCamera = this.viewer.camera.changed.connect(() => this.redraw());
+    // A camera move rewrites the renderer's transform and its few screen-space elements;
+    // the regions are drawn in world coordinates and are not rebuilt (NAPARI-BOUNDARY-10).
+    this.disconnectCamera = this.viewer.camera.changed.connect(() => this.updateCamera());
     this.redraw();
   }
 
@@ -176,7 +188,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
     this.viewer.setControlsEnabled(!active);
     this.svg.style.pointerEvents = active ? 'auto' : 'none';
     this.svg.style.cursor = active ? 'crosshair' : 'default';
-    this.redraw();
+    this.renderOverlay();
   }
 
   setSelectedBezier(bezier: boolean): void {
@@ -331,7 +343,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
         this.draftPath.push([ix, iy]);
       }
     }
-    this.redraw();
+    this.renderOverlay();
   };
 
   private readonly onPointerUp = (e: PointerEvent): void => {
@@ -667,57 +679,54 @@ export class NapariRegionOverlay implements IRegionOverlay {
     this.redraw();
   }
 
+  /** The renderer's world → svg-local affine for the current camera (one svg rect read). */
+  private currentAffine(): Affine {
+    return this.withOrigin(() => affineFromProjection(this.toScreen));
+  }
+
+  /** Follow a camera move: one transform attribute plus the screen-space elements. */
+  private updateCamera(): void {
+    this.renderer.setCamera(this.currentAffine());
+  }
+
   /**
-   * Rebuild every element from the store. Built into a fragment and swapped in once, with the
-   * svg's origin read once: the viewer's `worldToCanvas` reads the canvas rect on every call,
-   * and appending between those reads forced a layout per vertex.
+   * Rebuild every element from the store: the regions in world coordinates (one transformed
+   * group), their labels, and the overlay. The svg's origin is read once.
    */
   redraw(): void {
-    const out = document.createDocumentFragment();
     this.withOrigin(() => {
-      const regions = this.regionsVisible ? this.store.getRegions() : [];
-      regions.forEach((region, i) => {
-        if (region.isProfile?.()) return;
-        const isSel = this.selected.includes(i);
-        const el = this.buildRegionEl(region, isSel);
-        if (el) out.appendChild(el);
-        this.drawLabel(region, out);
-        if (isSel) this.drawHandles(region, out);
-      });
-      this.drawDraft(out);
+      this.renderer.setCamera(this.currentAffine());
+      this.renderer.render(this.regionsVisible ? this.store.getRegions() : [], this.selected);
+      this.renderOverlay();
     });
-    while (this.svg.firstChild) this.svg.removeChild(this.svg.firstChild);
-    this.svg.appendChild(out);
+  }
+
+  /** Rebuild the screen-space overlay only: the selected regions' handles and the draft. */
+  private renderOverlay(): void {
+    this.renderer.renderOverlay((layer) => {
+      if (this.regionsVisible) {
+        const regions = this.store.getRegions();
+        for (const i of this.selected) {
+          const region = regions[i];
+          if (region && !region.isProfile?.()) this.drawHandles(region, layer);
+        }
+      }
+      this.drawDraft(layer);
+    });
+  }
+
+  /** A region's outline colour. */
+  private strokeOf(region: Region): string {
+    return region.color || this.store.getShapeColor() || '#00ffff';
   }
 
   /** Draw a region's classification label at its top-left, when labels are enabled (matches OSD). */
-  private drawLabel(region: Region, out: Node): void {
+  private drawLabel(region: Region, layer: ScreenLayer): void {
     if (!this.store.getShowShapeLabel() || region.isProfile?.()) return;
     const label = region.label;
-    const b = region.bounds;
-    if (!label || !b) return;
-    let ix: number;
-    let iy: number;
-    if ('width' in b && 'x' in b) {
-      ix = (b as Rectangle).x;
-      iy = (b as Rectangle).y;
-    } else if ('npoints' in b) {
-      const p = b as Polygon;
-      ix = p.xpoints.reduce((m, x) => Math.min(m, x), Infinity);
-      iy = p.ypoints.reduce((m, y) => Math.min(m, y), Infinity);
-    } else if ('polygons' in b) {
-      // Multi-part region: top-left of all parts together.
-      const bb = regionBBox(region);
-      if (!bb) return;
-      ix = bb.x0;
-      iy = bb.y0;
-    } else {
-      return;
-    }
-    const [lx, ly] = this.toLocal(ix, iy);
-    const text = document.createElementNS(SVG_NS, 'text');
-    text.setAttribute('x', `${lx}`);
-    text.setAttribute('y', `${ly - 4}`);
+    const bb = label ? regionBBox(region) : null;
+    if (!label || !bb) return;
+    const text = svgEl('text');
     text.setAttribute('fill', '#fff');
     text.setAttribute('stroke', '#000');
     text.setAttribute('stroke-width', '3');
@@ -725,51 +734,42 @@ export class NapariRegionOverlay implements IRegionOverlay {
     text.setAttribute('font', '12px sans-serif');
     text.setAttribute('pointer-events', 'none');
     text.textContent = label;
-    out.appendChild(text);
+    layer.at(text, bb.x0, bb.y0, { dy: -4 });
   }
 
-  /** Draw grab handles for the selected region: rectangle corners or polygon vertices. */
-  private drawHandles(region: Region, out: Node): void {
+  /** Draw grab handles for a selected region: rectangle corners or polygon vertices. */
+  private drawHandles(region: Region, layer: ScreenLayer): void {
     const b = region.bounds;
     if (!b) return;
-    const stroke = region.color || this.store.getShapeColor() || '#00ffff';
+    const stroke = this.strokeOf(region);
     const handle = (imgX: number, imgY: number): void => {
-      const [lx, ly] = this.toLocal(imgX, imgY);
-      const el = document.createElementNS(SVG_NS, 'rect');
-      el.setAttribute('x', `${lx - HANDLE_SIZE / 2}`);
-      el.setAttribute('y', `${ly - HANDLE_SIZE / 2}`);
+      const el = svgEl('rect');
       el.setAttribute('width', `${HANDLE_SIZE}`);
       el.setAttribute('height', `${HANDLE_SIZE}`);
       el.setAttribute('fill', '#fff');
       el.setAttribute('stroke', stroke);
       el.setAttribute('stroke-width', '1.5');
-      out.appendChild(el);
+      layer.at(el, imgX, imgY, { dx: -HANDLE_SIZE / 2, dy: -HANDLE_SIZE / 2 });
     };
-    if ('width' in b && 'x' in b) {
-      const r = b as Rectangle;
-      handle(r.x, r.y);
-      handle(r.x + r.width, r.y);
-      handle(r.x, r.y + r.height);
-      handle(r.x + r.width, r.y + r.height);
-    } else if ('npoints' in b) {
-      const p = b as Polygon;
-      for (let i = 0; i < p.npoints; i++) handle(p.xpoints[i], p.ypoints[i]);
-      for (const ring of p.holes ?? []) for (const [hx, hy] of ring) handle(hx, hy);
+    if (b instanceof Rectangle) {
+      handle(b.x, b.y);
+      handle(b.x + b.width, b.y);
+      handle(b.x, b.y + b.height);
+      handle(b.x + b.width, b.y + b.height);
+    } else if (b instanceof Polygon) {
+      for (let i = 0; i < b.npoints; i++) handle(b.xpoints[i], b.ypoints[i]);
+      for (const ring of b.holes ?? []) for (const [hx, hy] of ring) handle(hx, hy);
       // Bezier regions also expose their tangent control points (circles) joined to the anchor
       // by a thin line, matching the OSD overlay's editable bezier handles. Stored handles when
       // present, else the Catmull-Rom default the curve is drawn with.
-      if (p.bezier) {
-        const drawRing = (xs: number[], ys: number[], handles: AnchorHandle[]): void => {
-          handles.forEach((h, i) => {
-            if (h.hasOut) this.drawBezierHandle(xs[i], ys[i], h.out, stroke, out);
-            if (h.hasIn) this.drawBezierHandle(xs[i], ys[i], h.in, stroke, out);
+      if (b.bezier) {
+        for (let ring = -1; ring < (b.holes?.length ?? 0); ring++) {
+          const { xs, ys } = ringOf(b, ring);
+          ringHandles(b, ring).forEach((h, i) => {
+            if (h.hasOut) this.drawBezierHandle(xs[i], ys[i], h.out, stroke, layer);
+            if (h.hasIn) this.drawBezierHandle(xs[i], ys[i], h.in, stroke, layer);
           });
-        };
-        drawRing(p.xpoints, p.ypoints, ringHandles(p, -1));
-        // Donut hole bezier control handles.
-        (p.holes ?? []).forEach((ring, hi) => {
-          drawRing(ring.map((pt) => pt[0]), ring.map((pt) => pt[1]), ringHandles(p, hi));
-        });
+        }
       }
     }
   }
@@ -777,78 +777,19 @@ export class NapariRegionOverlay implements IRegionOverlay {
   /** Draw one bezier control point as a small circle connected to its anchor by a tangent line.
    *  `handle` is the control point's absolute position in image space. */
   private drawBezierHandle(
-    ax: number, ay: number, handle: [number, number], stroke: string, out: Node,
+    ax: number, ay: number, handle: [number, number], stroke: string, layer: ScreenLayer,
   ): void {
     if (handle[0] === ax && handle[1] === ay) return;
-    const [alx, aly] = this.toLocal(ax, ay);
-    const [hlx, hly] = this.toLocal(handle[0], handle[1]);
-    const line = document.createElementNS(SVG_NS, 'line');
-    line.setAttribute('x1', `${alx}`);
-    line.setAttribute('y1', `${aly}`);
-    line.setAttribute('x2', `${hlx}`);
-    line.setAttribute('y2', `${hly}`);
+    const line = layer.line(ax, ay, handle[0], handle[1]);
     line.setAttribute('stroke', stroke);
     line.setAttribute('stroke-width', '1');
     line.setAttribute('stroke-opacity', '0.7');
-    out.appendChild(line);
-    const dot = document.createElementNS(SVG_NS, 'circle');
-    dot.setAttribute('cx', `${hlx}`);
-    dot.setAttribute('cy', `${hly}`);
+    const dot = svgEl('circle');
     dot.setAttribute('r', `${HANDLE_SIZE / 2}`);
     dot.setAttribute('fill', stroke);
     dot.setAttribute('stroke', '#fff');
     dot.setAttribute('stroke-width', '1');
-    out.appendChild(dot);
-  }
-
-  private buildRegionEl(region: Region, isSelected: boolean): SVGElement | null {
-    const b = region.bounds;
-    if (!b) return null;
-    const stroke = region.color || this.store.getShapeColor() || '#00ffff';
-    if ('width' in b && 'x' in b) {
-      const r = b as Rectangle;
-      const [lx, ly] = this.toLocal(r.x, r.y);
-      const [rx, ry] = this.toLocal(r.x + r.width, r.y + r.height);
-      const el = document.createElementNS(SVG_NS, 'rect');
-      el.setAttribute('x', `${Math.min(lx, rx)}`);
-      el.setAttribute('y', `${Math.min(ly, ry)}`);
-      el.setAttribute('width', `${Math.abs(rx - lx)}`);
-      el.setAttribute('height', `${Math.abs(ry - ly)}`);
-      this.style(el, stroke, isSelected);
-      return el;
-    }
-    if ('npoints' in b) {
-      const p = b as Polygon;
-      const isBezier = !!p.bezier && p.npoints >= 2;
-      const hasHoles = !!(p.holes && p.holes.length);
-      // Bezier or donut (holes) → a single <path>; holes use even-odd fill so they punch through.
-      if (isBezier || hasHoles) {
-        const el = document.createElementNS(SVG_NS, 'path');
-        el.setAttribute('d', regionPathD(region, this.toScreen));
-        if (hasHoles) el.setAttribute('fill-rule', 'evenodd');
-        this.style(el, stroke, isSelected);
-        return el;
-      }
-      const pts = p.xpoints
-        .map((_, i) => this.toLocal(p.xpoints[i], p.ypoints[i]).join(','))
-        .join(' ');
-      const el = document.createElementNS(SVG_NS, p.closed === false ? 'polyline' : 'polygon');
-      el.setAttribute('points', pts);
-      this.style(el, stroke, isSelected);
-      return el;
-    }
-    if ('polygons' in b) {
-      // Multi-part region (merge/union output): one even-odd <path> with every part's exterior
-      // plus its holes, as the OSD overlay draws it.
-      const d = regionPathD(region, this.toScreen);
-      if (!d) return null;
-      const el = document.createElementNS(SVG_NS, 'path');
-      el.setAttribute('d', d);
-      el.setAttribute('fill-rule', 'evenodd');
-      this.style(el, stroke, isSelected);
-      return el;
-    }
-    return null;
+    layer.at(dot, handle[0], handle[1], { x: 'cx', y: 'cy' });
   }
 
   private style(el: SVGElement, stroke: string, isSelected: boolean): void {
@@ -856,29 +797,25 @@ export class NapariRegionOverlay implements IRegionOverlay {
     el.setAttribute('stroke-width', isSelected ? '4' : '2');
     el.setAttribute('fill', isSelected ? stroke : 'none');
     el.setAttribute('fill-opacity', isSelected ? '0.35' : '0');
-    el.setAttribute('vector-effect', 'non-scaling-stroke');
   }
 
   /** Draw the in-progress rectangle / path preview. */
-  private drawDraft(out: Node): void {
+  private drawDraft(layer: ScreenLayer): void {
     if (this.draftRect) {
       const { x0, y0, x1, y1 } = this.draftRect;
-      const [lx, ly] = this.toLocal(Math.min(x0, x1), Math.min(y0, y1));
-      const [rx, ry] = this.toLocal(Math.max(x0, x1), Math.max(y0, y1));
-      const el = document.createElementNS(SVG_NS, 'rect');
-      el.setAttribute('x', `${lx}`);
-      el.setAttribute('y', `${ly}`);
-      el.setAttribute('width', `${Math.abs(rx - lx)}`);
-      el.setAttribute('height', `${Math.abs(ry - ly)}`);
+      const el = svgEl('rect');
+      layer.place(el, (e, project) => {
+        const [lx, ly] = project(Math.min(x0, x1), Math.min(y0, y1));
+        const [rx, ry] = project(Math.max(x0, x1), Math.max(y0, y1));
+        e.setAttribute('x', `${lx}`);
+        e.setAttribute('y', `${ly}`);
+        e.setAttribute('width', `${Math.abs(rx - lx)}`);
+        e.setAttribute('height', `${Math.abs(ry - ly)}`);
+      });
       this.styleDraft(el);
-      out.appendChild(el);
     }
     if (this.draftPath && this.draftPath.length) {
-      const pts = this.draftPath.map(([x, y]) => this.toLocal(x, y).join(',')).join(' ');
-      const el = document.createElementNS(SVG_NS, 'polyline');
-      el.setAttribute('points', pts);
-      this.styleDraft(el);
-      out.appendChild(el);
+      this.styleDraft(layer.poly('polyline', this.draftPath.map(([x, y]) => ({ x, y }))));
     }
   }
 

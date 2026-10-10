@@ -65,6 +65,9 @@ function fakeViewer(): FakeViewer {
   };
 }
 
+/** Half the rendered handle size (handles are centred on their vertex). */
+const HANDLE_HALF = 3.5;
+
 function svgOf(overlay: NapariRegionOverlay): SVGSVGElement {
   return (overlay as any).svg as SVGSVGElement;
 }
@@ -222,6 +225,41 @@ describe('NapariRegionOverlay', () => {
     viewer.cameraListeners[0]();
     expect(read).toHaveBeenCalledTimes(1);
     expect(svgOf(overlay).querySelectorAll('polygon')).toHaveLength(5);
+  });
+
+  it('a camera move rewrites one transform and does not rebuild the regions (NAPARI-BOUNDARY-10)', () => {
+    let zoom = 1;
+    viewer.worldToCanvas = (x: number, y: number) => [x * zoom + 5, y * zoom];
+    store.addRegion(triRegion());
+    store.setSelectedShapeIndices([]); // no handles: only the regions are on screen
+    overlay.redraw();
+    const svg = svgOf(overlay);
+    const shape = svg.querySelector('polygon')!;
+    expect(shape.getAttribute('points')).toBe('0,0 10,0 5,10'); // world coordinates
+    const observer = new MutationObserver(() => undefined);
+    observer.observe(svg, { subtree: true, childList: true, attributes: true, characterData: true });
+
+    zoom = 3;
+    viewer.cameraListeners[0]();
+    const records = observer.takeRecords();
+    observer.disconnect();
+    expect(records.map((r) => [r.type, r.attributeName, (r.target as Element).getAttribute?.('data-layer')]))
+      .toEqual([['attributes', 'transform', 'regions']]);
+    expect(svg.querySelector('polygon')).toBe(shape);
+    expect(shape.parentElement!.getAttribute('transform')).toBe('matrix(3 0 0 3 5 0)');
+  });
+
+  it('a camera move re-positions the selected region\'s handles in place', () => {
+    let zoom = 1;
+    viewer.worldToCanvas = (x: number, y: number) => [x * zoom, y * zoom];
+    store.addRegion(rectRegionAt(0, 0, 10, 10)); // selected → four corner handles
+    const handles = () => Array.from(svgOf(overlay).querySelectorAll('rect'))
+      .filter((el) => el.getAttribute('fill') === '#fff');
+    const before = handles();
+    zoom = 2;
+    viewer.cameraListeners[0]();
+    expect(handles()).toEqual(before); // the same nodes
+    expect(before.map((el) => Number(el.getAttribute('x')) + HANDLE_HALF)).toEqual([0, 20, 0, 20]);
   });
 
   it('camera change triggers a redraw without throwing', () => {

@@ -9,9 +9,12 @@ import { elementToImage, imageToElement } from './osd-coords';
 import { OSD_ZOOM_PER_SCROLL } from './osd-zoom';
 import { parseCssColor } from '../../contracts/color';
 import {
-  OPEN_PATH_TOL_PX, ToScreen, hitHandle, nearestEdge, regionContains, regionPathD, regionsInRect, ringHandles,
+  OPEN_PATH_TOL_PX, ToScreen, hitHandle, nearestEdge, regionBBox, regionContains, regionsInRect, ringHandles,
   ringOf, topmostRegionAt,
 } from '../../region-overlay/region-geometry';
+import {
+  ScreenLayer, SvgRegionRenderer, affineFromProjection, svgEl,
+} from '../../region-overlay/svg-region-renderer';
 
 /**
  * The shared region store as the overlay needs it: the cross-backend
@@ -106,15 +109,13 @@ export class OsdRegionOverlay implements IRegionOverlay {
   private bandDragged = false;
 
   private readonly redrawHandler = () => this.redraw();
-  /** The image→element projection the SVG was last built for (see
-   *  {@link viewportHandler}). */
-  private drawnProjection = '';
-  /** 'update-viewport' also fires on frames where only tiles changed (loading,
-   *  recolor). The SVG is drawn in element pixels, so it only needs rebuilding
-   *  when the image→element projection moved. */
-  private readonly viewportHandler = () => {
-    if (this.projectionKey() !== this.drawnProjection) this.redraw();
-  };
+  /** A camera move ('update-viewport', raised on every redrawn frame, animated ones
+   *  included; 'resize'; 'rotate'). The regions are drawn in image coordinates, so
+   *  only the renderer's transform and its few screen-space elements follow; nothing
+   *  is rebuilt (OSD-PLOTLY-11). A tile-only frame (loading, recolor) leaves the
+   *  projection, and so the DOM, untouched. */
+  private readonly cameraHandler = () => this.updateCamera();
+  private readonly renderer: SvgRegionRenderer;
   /** OSD's MouseTracker drops a cancelled pointer (touch interrupted, pointer
    *  capture lost to the browser) without calling releaseHandler, so the
    *  gesture is ended here instead. */
@@ -130,13 +131,18 @@ export class OsdRegionOverlay implements IRegionOverlay {
       pointerEvents: 'none', // OSD handles navigation unless we're drawing
     });
     this.viewer.canvas.appendChild(this.svg);
+    this.renderer = new SvgRegionRenderer(this.svg, {
+      rectElement: 'polygon',
+      styleShape: (el, region, selected) => this.styleRegion(el, region, selected),
+      decorate: (region, _i, _selected, layer) => this.drawLabel(region, layer),
+    });
     (this.viewer.canvas as HTMLElement).addEventListener('pointercancel', this.pointerCancelHandler);
 
     // 'update-viewport' fires on every redrawn frame, animated ones included —
     // also listening to 'animation' rebuilt the whole SVG twice per frame.
-    this.viewer.addHandler('update-viewport', this.viewportHandler);
-    this.viewer.addHandler('resize', this.redrawHandler);
-    this.viewer.addHandler('rotate', this.redrawHandler);
+    this.viewer.addHandler('update-viewport', this.cameraHandler);
+    this.viewer.addHandler('resize', this.cameraHandler);
+    this.viewer.addHandler('rotate', this.cameraHandler);
     // Keep wheel-zoom alive while a tool has mouse-nav disabled (see handler).
     (this.viewer.element as HTMLElement | undefined)
       ?.addEventListener('wheel', this.wheelZoomHandler, { passive: false });
@@ -170,7 +176,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
     this.viewer.setMouseNavEnabled(mode === 'none');
     this.tracker.setTracking(mode !== 'none');
     this.updateCursor(false);
-    this.redraw();
+    this.renderOverlay();
   }
 
   /** Drive OSD zoom from the wheel while any tool owns the pointer.
@@ -228,9 +234,9 @@ export class OsdRegionOverlay implements IRegionOverlay {
     this.subs.unsubscribe();
     (this.viewer.element as HTMLElement | undefined)
       ?.removeEventListener('wheel', this.wheelZoomHandler);
-    this.viewer.removeHandler('update-viewport', this.viewportHandler);
-    this.viewer.removeHandler('resize', this.redrawHandler);
-    this.viewer.removeHandler('rotate', this.redrawHandler);
+    this.viewer.removeHandler('update-viewport', this.cameraHandler);
+    this.viewer.removeHandler('resize', this.cameraHandler);
+    this.viewer.removeHandler('rotate', this.cameraHandler);
     if (this.tracker) this.tracker.destroy();
     if (this.svg.parentNode) this.svg.parentNode.removeChild(this.svg);
   }
@@ -257,225 +263,149 @@ export class OsdRegionOverlay implements IRegionOverlay {
   };
 
   // ── rendering ────────────────────────────────────────────────────────
-  /** The current image→element projection (origin + unit step), as a key. */
-  private projectionKey(): string {
-    const o = this.toPx(0, 0);
-    const u = this.toPx(1, 1);
-    return `${o.x},${o.y},${u.x},${u.y}`;
+  /** Follow the current image→element projection: the renderer rewrites one transform
+   *  and re-positions its screen-space elements, or does nothing when it did not move. */
+  private updateCamera(): void {
+    this.renderer.setCamera(affineFromProjection(this.toScreen));
   }
 
+  /** Rebuild everything: the regions (in image coordinates), their labels and the overlay. */
   redraw(): void {
-    this.drawnProjection = this.projectionKey();
-    while (this.svg.firstChild) this.svg.removeChild(this.svg.firstChild);
+    this.updateCamera();
+    this.renderer.render(this.store.getRegions(), this.selected);
+    this.renderOverlay();
+  }
 
-    const regions = this.store.getRegions();
-    regions.forEach((r, i) => {
-      const el = this.buildRegionEl(r, this.selected.includes(i));
-      if (el) this.svg.appendChild(el);
-    });
-
-    // Handles on the selected polygon, so the user can grab/insert/delete
-    // vertices. Bezier regions also get their cubic
-    // control handles (tangent lines + control points), mirroring paper.js's
-    // fullySelected rendering.
-    if (this.showsSelectedVertices) {
-      const sel = this.selectedRegionInfo();
-      const b = sel?.region.bounds;
-      // Handles/vertices take the region's own colour (not the global shape
-      // colour) so they match the shape they belong to.
-      const color = sel ? sel.region.color || this.store.getShapeColor() : '';
-      if (b instanceof Polygon) {
-        if (b.bezier) {
-          this.drawBezierHandles(b, color);
-        } else {
-          for (let i = 0; i < b.xpoints.length; i++) {
-            const q = this.toPx(b.xpoints[i], b.ypoints[i]);
-            this.svg.appendChild(this.vertexMarker(q.x, q.y, false, color));
-          }
-          // Interior-ring (hole) vertices too, so a donut's inner outline shows
-          // its vertices when selected (jit-ui#85).
-          if (b.holes) {
-            for (const ring of b.holes) {
-              for (const [hx, hy] of ring) {
-                const q = this.toPx(hx, hy);
-                this.svg.appendChild(this.vertexMarker(q.x, q.y, false, color));
-              }
+  /**
+   * Rebuild the screen-space overlay only: the selected region's handles, the rubber band
+   * and any in-progress drawing. Drawing and marquee drags call this rather than
+   * {@link redraw}, so the regions are not rebuilt per pointer move.
+   */
+  private renderOverlay(): void {
+    this.renderer.renderOverlay((layer) => {
+      // Handles on the selected polygon, so the user can grab/insert/delete
+      // vertices. Bezier regions also get their cubic control handles (tangent
+      // lines + control points), mirroring paper.js's fullySelected rendering.
+      if (this.showsSelectedVertices) {
+        const sel = this.selectedRegionInfo();
+        const b = sel?.region.bounds;
+        // Handles/vertices take the region's own colour (not the global shape
+        // colour) so they match the shape they belong to.
+        const color = sel ? sel.region.color || this.store.getShapeColor() : '';
+        if (b instanceof Polygon) {
+          if (b.bezier) {
+            this.drawBezierHandles(layer, b, color);
+          } else {
+            // The exterior, then each interior ring (hole), so a donut's inner outline
+            // shows its vertices when selected (jit-ui#85).
+            for (let ring = -1; ring < (b.holes?.length ?? 0); ring++) {
+              const { xs, ys } = ringOf(b, ring);
+              for (let i = 0; i < xs.length; i++) this.vertexMarker(layer, xs[i], ys[i], false, color);
             }
           }
-        }
-      } else if (b instanceof Rectangle) {
-        // The four corners as grab/resize handles.
-        const corners: [number, number][] = [
-          [b.x, b.y], [b.x + b.width, b.y],
-          [b.x + b.width, b.y + b.height], [b.x, b.y + b.height],
-        ];
-        for (const [cx, cy] of corners) {
-          const q = this.toPx(cx, cy);
-          this.svg.appendChild(this.vertexMarker(q.x, q.y, false, color));
+        } else if (b instanceof Rectangle) {
+          // The four corners as grab/resize handles.
+          const corners: [number, number][] = [
+            [b.x, b.y], [b.x + b.width, b.y],
+            [b.x + b.width, b.y + b.height], [b.x, b.y + b.height],
+          ];
+          for (const [cx, cy] of corners) this.vertexMarker(layer, cx, cy, false, color);
         }
       }
-    }
 
-    // Rubber-band (marquee) selection preview.
-    if (this.mode === 'select' && this.bandStart && this.bandCurrent) {
-      this.svg.appendChild(this.selectionBand(this.bandStart, this.bandCurrent));
-    }
+      // Rubber-band (marquee) selection preview.
+      if (this.mode === 'select' && this.bandStart && this.bandCurrent) {
+        this.selectionBand(layer, this.bandStart, this.bandCurrent);
+      }
 
-    // In-progress drawing preview.
-    if (this.mode === 'drawrect' && this.rectStart && this.rectCurrent) {
-      this.svg.appendChild(this.rectPreview(this.rectStart, this.rectCurrent));
-    }
-    if ((this.mode === 'drawclosedpath' || this.mode === 'drawopenpath') && this.polyPoints.length) {
-      this.svg.appendChild(this.polyPreview(this.polyPoints));
-    }
-    // Click-to-place polygon preview: the polyline so far + a marker on the
-    // first vertex (click it to close).
-    if (this.mode === 'drawpolygon' && this.polyPoints.length) {
-      this.svg.appendChild(this.polyPreview(this.polyPoints));
-      const f = this.toPx(this.polyPoints[0].x, this.polyPoints[0].y);
-      this.svg.appendChild(this.vertexMarker(f.x, f.y, true));
-    }
+      // In-progress drawing preview.
+      if (this.mode === 'drawrect' && this.rectStart && this.rectCurrent) {
+        this.rectPreview(layer, this.rectStart, this.rectCurrent);
+      }
+      if ((this.mode === 'drawclosedpath' || this.mode === 'drawopenpath') && this.polyPoints.length) {
+        this.polyPreview(layer, this.polyPoints);
+      }
+      // Click-to-place polygon preview: the polyline so far + a marker on the
+      // first vertex (click it to close).
+      if (this.mode === 'drawpolygon' && this.polyPoints.length) {
+        this.polyPreview(layer, this.polyPoints);
+        this.vertexMarker(layer, this.polyPoints[0].x, this.polyPoints[0].y, true);
+      }
+    });
   }
 
-  /** A small vertex handle (filled for an emphasised marker, hollow otherwise).
-   *  Colour defaults to the global shape colour (used by the in-progress draw
-   *  preview); selected-region handles pass the region's own colour. */
-  private vertexMarker(x: number, y: number, emphasised: boolean,
-                       color: string = this.store.getShapeColor()): SVGElement {
-    const c = document.createElementNS(SVGNS, 'circle');
-    c.setAttribute('cx', `${x}`);
-    c.setAttribute('cy', `${y}`);
+  /** A small vertex handle (filled for an emphasised marker, hollow otherwise) at an
+   *  image point. Colour defaults to the global shape colour (used by the in-progress
+   *  draw preview); selected-region handles pass the region's own colour. */
+  private vertexMarker(layer: ScreenLayer, x: number, y: number, emphasised: boolean,
+                       color: string = this.store.getShapeColor()): void {
+    const c = svgEl('circle');
     c.setAttribute('r', emphasised ? '5' : '4');
     c.setAttribute('fill', emphasised ? color : '#ffffff');
     c.setAttribute('stroke', color);
     c.setAttribute('stroke-width', '2');
-    return c;
+    layer.at(c, x, y, { x: 'cx', y: 'cy' });
   }
 
-  private buildRegionEl(region: Region, selected: boolean): SVGElement | null {
+  /** Stroke/fill for a region shape (drawn in image coordinates by the renderer). */
+  private styleRegion(el: SVGElement, region: Region, selected: boolean): void {
     const color = region.color || this.store.getShapeColor();
-    const bounds = region.bounds;
-    let pts: { x: number; y: number }[] | null = null;
-    let closed = true;
-    let el: SVGElement | null = null;
-
-    if (bounds instanceof MultiPolygon) {
-      // Multi-part region (jit-ui#85): one even-odd <path> with every part's
-      // exterior plus its holes. All parts' vertices drive the label bbox.
-      const parts = bounds.polygons.filter((p) => (p.xpoints?.length ?? 0) >= 3);
-      if (parts.length === 0) return null;
-      pts = [];
-      for (const part of parts) {
-        for (let i = 0; i < part.xpoints.length; i++) pts.push({ x: part.xpoints[i], y: part.ypoints[i] });
-      }
-      el = document.createElementNS(SVGNS, 'path');
-      el.setAttribute('d', regionPathD(region, this.toScreen));
-      el.setAttribute('fill-rule', 'evenodd');
-    } else if (bounds instanceof Rectangle) {
-      pts = [
-        { x: bounds.x, y: bounds.y },
-        { x: bounds.x + bounds.width, y: bounds.y },
-        { x: bounds.x + bounds.width, y: bounds.y + bounds.height },
-        { x: bounds.x, y: bounds.y + bounds.height },
-      ];
-    } else if (bounds instanceof Polygon) {
-      closed = bounds.closed !== false;
-      // The anchors drive the label bbox and (for non-bezier) the rendered shape.
-      pts = bounds.xpoints.map((x, i) => ({ x, y: bounds.ypoints[i] }));
-    }
-    if (!pts || pts.length === 0) return null;
-
-    if (!el) {
-      // Bezier regions render as a true cubic-bezier path through the anchors
-      // (paper.js-equivalent smooth curve); everything else as a straight
-      // polygon/polyline.
-      const isBezier = bounds instanceof Polygon && bounds.bezier && pts.length >= 2;
-      // Interior rings (holes) — punch through with even-odd fill (jit-ui#85).
-      const holes = (closed && bounds instanceof Polygon && bounds.holes?.length)
-        ? bounds.holes : null;
-      if (isBezier || holes) {
-        // Exterior subpath (smooth for bezier, straight otherwise) followed by a
-        // subpath per hole (smooth too for a bezier donut, jit-ui#102).
-        el = document.createElementNS(SVGNS, 'path');
-        if (holes) el.setAttribute('fill-rule', 'evenodd');
-        el.setAttribute('d', regionPathD(region, this.toScreen));
-      } else {
-        el = document.createElementNS(SVGNS, closed ? 'polygon' : 'polyline');
-        el.setAttribute('points', pts.map(p => { const q = this.toPx(p.x, p.y); return `${q.x},${q.y}`; }).join(' '));
-      }
-    }
     el.setAttribute('fill', selected ? this.rgba(color, 0.35) : 'none');
     el.setAttribute('stroke', color);
     el.setAttribute('stroke-width', selected ? '4' : '2');
+  }
 
-    // The class label (legend), shown when the Region Editor's "show labels" is
-    // on — mirrors Plotly's per-shape label (top-left, drawn in the region's
-    // colour). Without this OSD showed regions with no label even though Plotly
-    // did. region.label is restored from the shape's legend in getRegion().
+  /**
+   * The class label (legend), shown when the Region Editor's "show labels" is on —
+   * mirrors Plotly's per-shape label (top-left, drawn in the region's colour).
+   * region.label is restored from the shape's legend in getRegion().
+   */
+  private drawLabel(region: Region, layer: ScreenLayer): void {
     const label = region.label;
-    if (this.store.getShowShapeLabel() && label != null && `${label}`.length > 0) {
-      const g = document.createElementNS(SVGNS, 'g');
-      g.appendChild(el);
-      // A loop, not Math.min(...spread): spreading a large imported annotation's
-      // vertices as arguments throws RangeError.
-      let minX = Infinity, minY = Infinity;
-      for (const p of pts) {
-        if (p.x < minX) minX = p.x;
-        if (p.y < minY) minY = p.y;
-      }
-      const q = this.toPx(minX, minY);
-      const text = document.createElementNS(SVGNS, 'text');
-      text.setAttribute('x', `${q.x}`);
-      text.setAttribute('y', `${q.y - 4}`); // just above the top-left corner
-      text.setAttribute('fill', color);
-      text.setAttribute('font-size', '13');
-      text.setAttribute('font-family', 'sans-serif');
-      // Dark halo so the label stays legible over both bright and dark tiles.
-      text.setAttribute('paint-order', 'stroke');
-      text.setAttribute('stroke', 'rgba(0,0,0,0.65)');
-      text.setAttribute('stroke-width', '2');
-      text.textContent = `${label}`;
-      g.appendChild(text);
-      return g;
-    }
-    return el;
+    if (!this.store.getShowShapeLabel() || label == null || `${label}`.length === 0) return;
+    // The loop-based bbox, not Math.min(...spread): spreading a large imported
+    // annotation's vertices as arguments throws RangeError (OSD-PLOTLY-34).
+    const bb = regionBBox(region);
+    if (!bb) return;
+    const text = svgEl('text');
+    text.setAttribute('fill', region.color || this.store.getShapeColor());
+    text.setAttribute('font-size', '13');
+    text.setAttribute('font-family', 'sans-serif');
+    // Dark halo so the label stays legible over both bright and dark tiles.
+    text.setAttribute('paint-order', 'stroke');
+    text.setAttribute('stroke', 'rgba(0,0,0,0.65)');
+    text.setAttribute('stroke-width', '2');
+    text.textContent = `${label}`;
+    layer.at(text, bb.x0, bb.y0, { dy: -4 }); // just above the top-left corner
   }
 
   /** Marquee rectangle for rubber-band multi-select (dashed outline + faint fill). */
-  private selectionBand(a: { x: number; y: number }, b: { x: number; y: number }): SVGElement {
-    const corners = [
+  private selectionBand(layer: ScreenLayer, a: { x: number; y: number }, b: { x: number; y: number }): void {
+    const el = layer.poly('polygon', [
       { x: a.x, y: a.y }, { x: b.x, y: a.y }, { x: b.x, y: b.y }, { x: a.x, y: b.y },
-    ];
-    const el = document.createElementNS(SVGNS, 'polygon');
-    el.setAttribute('points', corners.map(p => { const q = this.toPx(p.x, p.y); return `${q.x},${q.y}`; }).join(' '));
+    ]);
     el.setAttribute('fill', 'rgba(120,170,255,0.15)');
     el.setAttribute('stroke', '#4a90e2');
     el.setAttribute('stroke-dasharray', '4 3');
     el.setAttribute('stroke-width', '1');
-    return el;
   }
 
-  private rectPreview(a: { x: number; y: number }, b: { x: number; y: number }): SVGElement {
-    const corners = [
+  private rectPreview(layer: ScreenLayer, a: { x: number; y: number }, b: { x: number; y: number }): void {
+    const el = layer.poly('polygon', [
       { x: a.x, y: a.y }, { x: b.x, y: a.y }, { x: b.x, y: b.y }, { x: a.x, y: b.y },
-    ];
-    const el = document.createElementNS(SVGNS, 'polygon');
-    el.setAttribute('points', corners.map(p => { const q = this.toPx(p.x, p.y); return `${q.x},${q.y}`; }).join(' '));
-    el.setAttribute('fill', 'none');
-    el.setAttribute('stroke', this.store.getShapeColor());
-    el.setAttribute('stroke-dasharray', '4 3');
-    el.setAttribute('stroke-width', '2');
-    return el;
+    ]);
+    this.styleDraft(el);
   }
 
-  private polyPreview(pts: { x: number; y: number }[]): SVGElement {
-    const el = document.createElementNS(SVGNS, 'polyline');
-    el.setAttribute('points', pts.map(p => { const q = this.toPx(p.x, p.y); return `${q.x},${q.y}`; }).join(' '));
+  private polyPreview(layer: ScreenLayer, pts: { x: number; y: number }[]): void {
+    this.styleDraft(layer.poly('polyline', pts.slice()));
+  }
+
+  private styleDraft(el: SVGElement): void {
     el.setAttribute('fill', 'none');
     el.setAttribute('stroke', this.store.getShapeColor());
     el.setAttribute('stroke-dasharray', '4 3');
     el.setAttribute('stroke-width', '2');
-    return el;
   }
 
   /**
@@ -483,46 +413,40 @@ export class OsdRegionOverlay implements IRegionOverlay {
    * each anchor as a small square, with tangent lines out to its two control
    * points (drawn as small circles).
    */
-  private drawBezierHandles(poly: Polygon, color: string): void {
+  private drawBezierHandles(layer: ScreenLayer, poly: Polygon, color: string): void {
     // The exterior, then each donut hole ring (jit-ui#102): stored handles, or the
     // Catmull-Rom default the curve is drawn with — the ones hitHandle grabs.
     for (let ring = -1; ring < (poly.holes?.length ?? 0); ring++) {
       const { xs, ys } = ringOf(poly, ring);
       const h = ringHandles(poly, ring);
       for (let i = 0; i < xs.length; i++) {
-        const a = this.toPx(xs[i], ys[i]);
-        if (h[i].hasIn) this.drawHandle(a, this.toPx(h[i].in[0], h[i].in[1]), color);
-        if (h[i].hasOut) this.drawHandle(a, this.toPx(h[i].out[0], h[i].out[1]), color);
-        this.svg.appendChild(this.anchorSquare(a.x, a.y, color));
+        if (h[i].hasIn) this.drawHandle(layer, xs[i], ys[i], h[i].in, color);
+        if (h[i].hasOut) this.drawHandle(layer, xs[i], ys[i], h[i].out, color);
+        this.anchorSquare(layer, xs[i], ys[i], color);
       }
     }
   }
 
   /** A tangent line from an anchor to a control point, with a circle at the end. */
-  private drawHandle(anchor: { x: number; y: number }, ctrl: { x: number; y: number }, color: string): void {
-    const line = document.createElementNS(SVGNS, 'line');
-    line.setAttribute('x1', `${anchor.x}`); line.setAttribute('y1', `${anchor.y}`);
-    line.setAttribute('x2', `${ctrl.x}`); line.setAttribute('y2', `${ctrl.y}`);
+  private drawHandle(layer: ScreenLayer, ax: number, ay: number, ctrl: [number, number], color: string): void {
+    const line = layer.line(ax, ay, ctrl[0], ctrl[1]);
     line.setAttribute('stroke', color);
     line.setAttribute('stroke-width', '1');
-    this.svg.appendChild(line);
-    const c = document.createElementNS(SVGNS, 'circle');
-    c.setAttribute('cx', `${ctrl.x}`); c.setAttribute('cy', `${ctrl.y}`);
+    const c = svgEl('circle');
     c.setAttribute('r', '3');
     c.setAttribute('fill', color);
-    this.svg.appendChild(c);
+    layer.at(c, ctrl[0], ctrl[1], { x: 'cx', y: 'cy' });
   }
 
   /** A filled-white anchor square (the editable vertex). */
-  private anchorSquare(x: number, y: number, color: string): SVGElement {
+  private anchorSquare(layer: ScreenLayer, x: number, y: number, color: string): void {
     const r = 3.5;
-    const rect = document.createElementNS(SVGNS, 'rect');
-    rect.setAttribute('x', `${x - r}`); rect.setAttribute('y', `${y - r}`);
+    const rect = svgEl('rect');
     rect.setAttribute('width', `${2 * r}`); rect.setAttribute('height', `${2 * r}`);
     rect.setAttribute('fill', '#ffffff');
     rect.setAttribute('stroke', color);
     rect.setAttribute('stroke-width', '2');
-    return rect;
+    layer.at(rect, x, y, { dx: -r, dy: -r });
   }
 
   private rgba(color: string, alpha: number): string {
@@ -604,7 +528,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
   private onDrag(e: any): void {
     if (this.mode === 'drawrect' && this.rectStart) {
       this.rectCurrent = this.toImage(e.position);
-      this.redraw();
+      this.renderOverlay();
       return;
     }
     if (this.freehandDragging && this.isFreehand) {
@@ -613,7 +537,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
       if (!last || Math.hypot(e.position.x - last.x, e.position.y - last.y) >= 4) {
         this.polyPoints.push(this.toImage(e.position));
         this.lastFreehandPx = { x: e.position.x, y: e.position.y };
-        this.redraw();
+        this.renderOverlay();
       }
       return;
     }
@@ -625,7 +549,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
     if (this.bandStart) {
       this.bandCurrent = this.toImage(e.position);
       this.bandDragged = true;
-      this.redraw();
+      this.renderOverlay();
     }
   }
 
@@ -665,7 +589,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
       if (this.bandDragged && (x1 - x0 > 2 || y1 - y0 > 2)) {
         this.store.setSelectedShapeIndices(regionsInRect(this.store.getRegions(), x0, y0, x1, y1));
       }
-      this.redraw();
+      this.renderOverlay();
     }
   }
 
@@ -718,7 +642,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
     if (!this.drawingPolygon) {
       this.polyPoints = [pt];
       this.drawingPolygon = true;
-      this.redraw();
+      this.renderOverlay();
       return;
     }
     const first = this.toPx(this.polyPoints[0].x, this.polyPoints[0].y);
@@ -728,7 +652,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
       return;
     }
     this.polyPoints.push(pt);
-    this.redraw();
+    this.renderOverlay();
   }
 
   /**
