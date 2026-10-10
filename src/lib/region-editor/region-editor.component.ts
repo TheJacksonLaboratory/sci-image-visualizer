@@ -161,9 +161,8 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       this.recomputeClassCounts();
     });
 
-    this._saveAsCheckSub = this.persistence.fileExists$.subscribe({
-      next: exists => { this.saveAsFileExists = exists; },
-      error: () => { this.saveAsFileExists = false; },
+    this._saveAsCheckSub = this.persistence.fileExists$.subscribe((exists) => {
+      this.saveAsFileExists = exists;
     });
 
     // Physical pixel size of the active image (for region areas in µm²/mm²).

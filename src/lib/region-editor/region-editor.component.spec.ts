@@ -787,6 +787,18 @@ describe('RegionEditorComponent persist / save-as', () => {
     expect(component.saveAsFileExists).toBe(false);
   }));
 
+  it('keeps checking after a failed existence check', fakeAsync(() => {
+    (mockRegionIo.roiFileExists as jest.Mock).mockReturnValueOnce(throwError(() => new Error('network')));
+    component.saveAsFilename = 'a.geojson';
+    component.checkSaveAsFileExists();
+    tick(500);
+    (mockRegionIo.roiFileExists as jest.Mock).mockReturnValue(of(true));
+    component.saveAsFilename = 'b.geojson';
+    component.checkSaveAsFileExists();
+    tick(500);
+    expect(component.saveAsFileExists).toBe(true);
+  }));
+
   // --- confirmSaveAs (save action) ---
 
   it('should save directly when file does not exist', fakeAsync(() => {

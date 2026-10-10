@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@angular/core';
 import { saveAs } from 'file-saver';
-import { Observable, Subject, Subscription } from 'rxjs';
-import { debounceTime, switchMap } from 'rxjs/operators';
+import { Observable, Subject, Subscription, of } from 'rxjs';
+import { catchError, debounceTime, switchMap } from 'rxjs/operators';
 
 import { Region } from '../models/region';
 import { withRegionZ } from '../models/region-clone';
@@ -73,11 +73,12 @@ export class RegionPersistenceService {
 
   /**
    * Result of the latest {@link checkExists} name, debounced 400 ms; a newer
-   * name supersedes an in-flight check. Checks only run while subscribed.
+   * name supersedes an in-flight check. A failed check reads as "does not
+   * exist" and later checks keep working. Checks only run while subscribed.
    */
   readonly fileExists$: Observable<boolean> = this.existsCheck$.pipe(
     debounceTime(400),
-    switchMap((name) => this.io.roiFileExists(name)),
+    switchMap((name) => this.io.roiFileExists(name).pipe(catchError(() => of(false)))),
   );
 
   /** Queue an existence check for `name` (see {@link fileExists$}). */
