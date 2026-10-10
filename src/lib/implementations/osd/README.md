@@ -11,7 +11,15 @@ a z-stack slice cache, and a serverless "simple" mode.
 
 | File | Role |
 |------|------|
-| `openseadragon-visualizer.service.ts` | The coordinator: `load()` / `plot()` / `setZIndex()` / teardown, the store subscription that drives recoloring, tool activation, exports, and the `IVisualizer` stubs. |
+| `openseadragon-visualizer.service.ts` | The coordinator: `load()` / `plot()` / `setZIndex()` / teardown, the open wiring, tool gating and the `IVisualizer` stubs. Everything below is built by it and reads its live state through host closures. |
+| `openseadragon-viewer-options.ts` | `buildViewerOptions`, the pure OpenSeadragon options object (and the tuning notes on its values), plus the multi-image advisory silencer. |
+| `osd-viewer-mount.ts` | Viewer creation and the always-settling open handshake. |
+| `osd-tile-source.ts` | Pure: the `GET /tile` TileSource from the descriptor's real per-level sizes, and `planTiledMount` (per-channel vs server-composited). |
+| `tile-recolor.ts` | `OsdTileRecolorer`: the store subscription, the coalesced invalidation with its display token, and the tile/channel recolor (see "Recolor invariant"). Owns the `DisplayPipeline`. |
+| `simple-source.ts` | `OsdSimpleSource`: the `tiled: false` path — load, full-res resample, serverless multichannel composite, simple z-scrub — and every simple-mode field. |
+| `osd-viewport.ts` | `OsdViewportAdapter`: visible-rect streams, the `PlotModeViewport`, zoom/fit/resize. |
+| `osd-navigator-chrome.ts` | `OsdNavigatorChrome`: navigator sizing/visibility, smoothing, fit-as-layout-settles, the toolbar repaint nudge. |
+| `osd-pixel-readback.ts`, `osd-export.ts` | Pure: the drawer-canvas reads (the tools' packed frame, the PNG snapshot); the composite PNG and TIFF exports. |
 | `slice-cache.ts` | Stack slices as separate TiledImages (opacity toggle on z-scrub), per-channel image groups, LRU sizing and the background preloader. |
 | `display-pipeline.ts` | Pure pixel math: window/gamma/invert/colormap for grayscale and RGB, per-channel tint LUTs and the additive channel merge. Shared by tile recoloring, the serverless compositor and the composite export. |
 | `histogram-sampler.ts` | Per-slice 8-bit histograms and the grayscale auto-window from sampled tiles, plus native-bit-depth histograms from `/histogram`. Generation-guarded against image switches. |

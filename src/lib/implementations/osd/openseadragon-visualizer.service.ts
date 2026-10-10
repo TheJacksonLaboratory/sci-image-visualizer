@@ -44,7 +44,6 @@ import { SamToolService } from '../../toolbar/segmentation/sam-tool.service';
 import { SamPointToolService } from '../../toolbar/segmentation/sam-point-tool.service';
 import { CellSegmentToolService } from '../../toolbar/segmentation/cell-segment-tool.service';
 import { ICellSegmenter, CELL_SEGMENTER } from '../../contracts/cell-segmenter.contract';
-
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { saveAs } from 'file-saver';
 
@@ -101,9 +100,8 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   private currentFileName: string | undefined;
   /** Only grayscale images get a colormap (RGB tiles pass through untouched). */
   private isGrayscaleImage = false;
-  /** True for multichannel fluorescence (channelCount > 1, not RGB): tiles are
-   *  composited client-side from per-channel single-band fetches (see
-   *  recolorMultiChannelTile) rather than recolored in place. */
+  /** True for multichannel fluorescence drawn per channel: one single-band
+   *  TiledImage per channel, tinted by the recolorer (see planTiledMount). */
   private isMultiChannel = false;
   /** Count of real Bio-Formats resolution levels (per-channel tiles exist only
    *  here). For multichannel images the tile source is built from these alone so
@@ -121,12 +119,9 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
 
   /** Overall deadline for the /tiles/info poll loop. An uncached whole-slide
    *  image (e.g. .ndpi) is cached server-side first (GCS->PVC), which can take
-   *  several minutes — we poll (short requests; the cache-progress overlay
-   *  shows the wait) until it's ready. Generous because each poll is cheap; on
-   *  expiry the render pipeline gives up and the router falls back to Plotly.
-   *  (napari-js waits less — it falls back to a single tile, not a backend.) */
+   *  several minutes. Generous because each poll is cheap; on expiry the router
+   *  falls back to Plotly. (napari-js waits less — it falls back to a single tile.) */
   private readonly tilesInfoTimeoutMs = 600000; // 10 min
-
 
   /** Window/gamma/colormap/invert and per-channel tints, applied to the tiles
    *  through OSD's pixel pipeline (see OsdTileRecolorer and the README's recolor
@@ -164,10 +159,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    *  the ctor body because it captures the resolved API base URL. */
   private sampler!: HistogramSampler;
 
-  /** Stack-slice cache + background preloader (see SliceCache — refactoring
-   *  plan Step 3). The host accessors are live closures, so the cache always
-   *  reads the service's current viewer/descriptor/z — exactly the fields the
-   *  moved code used to read directly. */
+  /** Stack-slice cache + background preloader (see SliceCache). */
   private readonly cache: SliceCache = new SliceCache({
     viewer: () => this.viewer,
     hasImage: () => !!(this.viewer && this.descriptor && this.infoB64),
