@@ -10,9 +10,9 @@ import { colorForLabel, presetKey } from '../store/class-color.util';
 import { ConfirmationService, MessageService } from 'primeng/api';
 import { IRegionEditorApi, REGION_EDITOR_API } from '../contracts/region-editor-api.contract';
 import { RegionIoPort, REGION_IO_PORT } from '../contracts/ports/region-io.port';
-import { regionToParts, scaleParts, maskScaleFor } from './mask-raster';
 import { VIZ_TOAST_KEY } from '../toast-outlets';
 import { fileStem } from './file-stem';
+import { MaskExportService, MaskMode } from './mask-export.service';
 import { PixelSize, formatArea, pickMpp, regionAreaPx } from './region-metrics';
 
 @Component({
@@ -87,15 +87,15 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   saveMaskFilename = '';
   /** Mask type chosen in the Save-mask dialog: a binary foreground/background
    *  mask, or a multi-class mask with a distinct id per region. */
-  maskMode: 'binary' | 'multiclass' = 'binary';
+  maskMode: MaskMode = 'binary';
   /** True while the mask worker is rasterizing/encoding — drives the progress
    *  bar and the Cancel button in the dialog. */
   maskBusy = false;
   /** 0–100 rasterization progress; switches to indeterminate during encoding. */
   maskProgress = 0;
   maskEncoding = false;
-  private maskWorker?: Worker;
-  private pendingMaskFilename = '';
+  /** The running mask export; unsubscribing cancels it (terminates its worker). */
+  private maskJob?: Subscription;
 
   /**
    * PrimeNG p-table multi-selection mode toggle. When true, single-click
@@ -121,6 +121,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     public messageService: MessageService,
     private confirmationService: ConfirmationService,
     @Inject(REGION_IO_PORT) private regionIo: RegionIoPort,
+    private maskExport: MaskExportService,
   ) {}
 
   ngOnInit() {
@@ -206,7 +207,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this._saveAsCheckSub.unsubscribe();
     if (this._saveAsTimer !== undefined) clearTimeout(this._saveAsTimer);
     this._saveAsSub?.unsubscribe();
-    this.teardownMaskWorker();
+    this.maskJob?.unsubscribe();
   }
 
   /**
@@ -815,9 +816,9 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   /**
    * Rasterize the regions to the chosen mask type and download as a PNG. The
-   * heavy work (full-res rasterize + PNG encode) runs in a Web Worker so the UI
-   * never freezes on large/whole-slide images and the job can be cancelled
-   * (jit-ui#95). The dialog stays open showing a progress bar until done.
+   * heavy work runs in a Web Worker ({@link MaskExportService}) so the UI never
+   * freezes on whole-slide images and the job can be cancelled (jit-ui#95);
+   * the dialog stays open with a progress bar until done.
    */
   confirmSaveMask() {
     const filename = this.saveMaskFilename.trim();
@@ -828,87 +829,53 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       this.maskError('No image size is available, so the mask cannot be sized.');
       return;
     }
-
-    // Whole-slide images exceed the browser's typed-array/memory limits, so cap
-    // the mask to a safe pixel budget and scale the geometry to match.
-    const scale = maskScaleFor(size.width, size.height);
-    const width = Math.max(1, Math.round(size.width * scale));
-    const height = Math.max(1, Math.round(size.height * scale));
-    if (scale < 1) {
-      this.messageService.add({
-        key: VIZ_TOAST_KEY,
-        severity: 'info',
-        summary: 'Mask downscaled',
-        detail: `Image too large for a full-resolution mask; saving at ${width}×${height}.`,
-      });
-    }
-    const regions = this.regions.map((r) => scaleParts(regionToParts(r), scale));
-
-    this.pendingMaskFilename = filename;
     this.maskBusy = true;
     this.maskEncoding = false;
     this.maskProgress = 0;
-
-    const payload = {
-      width, height,
-      originalWidth: size.width, originalHeight: size.height, scale,
-      mode: this.maskMode,
+    this.maskJob = this.maskExport.export({
+      regions: this.regions, imageSize: size, mode: this.maskMode,
       sourceName: this.regionIo.getSelectedFileName(),
-      regions,
-    };
-    // createMaskWorker() is async (the worker module is imported dynamically so
-    // its import.meta never reaches the CommonJS test compile). Wire up once it
-    // resolves — unless the user cancelled while it was loading.
-    this.createMaskWorker().then((worker) => {
-      if (!this.maskBusy) { worker.terminate(); return; }
-      this.maskWorker = worker;
-      worker.onmessage = ({ data }: MessageEvent) => {
-        switch (data?.type) {
-          case 'progress':
-            this.maskProgress = data.total ? Math.round((data.done / data.total) * 100) : 0;
+    }).subscribe({
+      next: (e) => {
+        switch (e.type) {
+          case 'planned':
+            if (e.scale < 1) {
+              this.messageService.add({
+                key: VIZ_TOAST_KEY,
+                severity: 'info',
+                summary: 'Mask downscaled',
+                detail: `Image too large for a full-resolution mask; saving at ${e.width}×${e.height}.`,
+              });
+            }
             break;
-          case 'encoding':
-            this.maskEncoding = true;
-            break;
-          case 'done':
-            this.finishMask(new Blob([data.png], { type: 'image/png' }));
-            break;
-          case 'error':
-            this.maskError(data.error || 'The mask could not be generated.');
-            break;
+          case 'progress': this.maskProgress = e.percent; break;
+          case 'encoding': this.maskEncoding = true; break;
+          case 'done': this.finishMask(e.blob, filename); break;
         }
-      };
-      worker.onerror = () => this.maskError('The mask worker failed.');
-      worker.postMessage(payload);
-    }).catch(() => this.maskError('The mask worker failed to start.'));
+      },
+      error: (err: Error) => this.maskError(err.message),
+    });
   }
 
-  /** Cancel an in-progress mask export: terminate the worker and reset state. */
+  /** Cancel an in-progress mask export (terminates its worker) and reset state. */
   cancelSaveMask() {
-    this.teardownMaskWorker();
+    this.maskJob?.unsubscribe();
+    this.maskJob = undefined;
     this.maskBusy = false;
     this.maskEncoding = false;
     this.maskProgress = 0;
   }
 
-  /** Worker factory — async so the worker module (and its `import.meta.url`,
-   *  which the CommonJS test compile rejects) is loaded via a dynamic import,
-   *  exactly like the segmentation worker. Overridable in tests. */
-  protected async createMaskWorker(): Promise<Worker> {
-    const { createMaskWorker } = await import('./mask-worker');
-    return createMaskWorker();
-  }
-
-  private finishMask(blob: Blob) {
-    this.teardownMaskWorker();
+  private finishMask(blob: Blob, filename: string) {
+    this.maskJob = undefined;
     this.maskBusy = false;
     this.maskEncoding = false;
     this.showSaveMaskDialog = false;
-    saveAs(blob, this.pendingMaskFilename);
+    saveAs(blob, filename);
   }
 
   private maskError(detail: string) {
-    this.teardownMaskWorker();
+    this.maskJob = undefined;
     this.maskBusy = false;
     this.maskEncoding = false;
     this.messageService.add({
@@ -917,11 +884,6 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       summary: 'Could not create mask',
       detail,
     });
-  }
-
-  private teardownMaskWorker() {
-    this.maskWorker?.terminate();
-    this.maskWorker = undefined;
   }
 
   persistRegions() {

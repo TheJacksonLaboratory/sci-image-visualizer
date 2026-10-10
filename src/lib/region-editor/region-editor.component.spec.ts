@@ -661,7 +661,7 @@ describe('RegionEditorComponent persist / save-as', () => {
   it('confirmSaveMask runs the worker off-thread with the chosen mode, then downloads on completion', async () => {
     (saveAs as unknown as jest.Mock).mockClear();
     const worker = new FakeMaskWorker();
-    (component as any).createMaskWorker = () => Promise.resolve(worker);
+    (component as any).maskExport.createWorker = () => Promise.resolve(worker);
 
     component.openSaveMaskDialog();
     component.maskMode = 'multiclass';
@@ -690,7 +690,7 @@ describe('RegionEditorComponent persist / save-as', () => {
 
   it('cancelSaveMask before the worker resolves terminates it and clears the busy state', async () => {
     const worker = new FakeMaskWorker();
-    (component as any).createMaskWorker = () => Promise.resolve(worker);
+    (component as any).maskExport.createWorker = () => Promise.resolve(worker);
     component.openSaveMaskDialog();
     component.confirmSaveMask();
     expect(component.maskBusy).toBe(true);
@@ -707,7 +707,7 @@ describe('RegionEditorComponent persist / save-as', () => {
     (saveAs as unknown as jest.Mock).mockClear();
     (mockVisualizer.getMaskImageSize as jest.Mock).mockReturnValueOnce(null);
     const worker = new FakeMaskWorker();
-    (component as any).createMaskWorker = () => Promise.resolve(worker);
+    (component as any).maskExport.createWorker = () => Promise.resolve(worker);
     component.openSaveMaskDialog();
 
     component.confirmSaveMask();
@@ -722,7 +722,7 @@ describe('RegionEditorComponent persist / save-as', () => {
 
   it('confirmSaveMask surfaces a worker error as a toast', async () => {
     const worker = new FakeMaskWorker();
-    (component as any).createMaskWorker = () => Promise.resolve(worker);
+    (component as any).maskExport.createWorker = () => Promise.resolve(worker);
     component.openSaveMaskDialog();
     component.confirmSaveMask();
     await flush();

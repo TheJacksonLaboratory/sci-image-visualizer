@@ -29,6 +29,7 @@ import { AutoCompleteModule } from 'primeng/autocomplete';
 import { VisualizerComponent } from './visualizer.component';
 import { ToolbarComponent } from './toolbar/toolbar.component';
 import { RegionEditorComponent } from './region-editor/region-editor.component';
+import { SaveMaskDialogComponent } from './region-editor/save-mask-dialog/save-mask-dialog.component';
 import { HexColorPickerComponent } from './hex-color-picker/hex-color-picker.component';
 import { ChannelHistogramComponent } from './channel-histogram/channel-histogram.component';
 import { SpatialControlsComponent } from './spatial-controls/spatial-controls.component';
@@ -53,6 +54,7 @@ import { FloatingDragDirective } from './visualizer/floating-drag.directive';
     VisualizerComponent,
     ToolbarComponent,
     RegionEditorComponent,
+    SaveMaskDialogComponent,
     HexColorPickerComponent,
     ChannelHistogramComponent,
     SpatialControlsComponent,
