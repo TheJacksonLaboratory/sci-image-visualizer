@@ -3866,4 +3866,212 @@ describe('NapariVisualizerService', () => {
       expect(dataset$.observed).toBe(false);
     });
   });
+
+  // ── Characterization specs for the NapariVisualizerService split (review Appendix B, 0 (a)–(g)) ──
+  // Pinned against the public surface (plus the few internals the cases name), before any code
+  // moves, so every extraction step has to keep them green as-is.
+  describe('characterization (god-class split)', () => {
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+    let hostIds = 0;
+
+    /** Plot `type` into a fresh host; returns the host's remover. */
+    async function plotInto(type: PlotType, info: IImageInfo = imageInfo(), z = 0) {
+      const div = document.createElement('div');
+      div.id = `characterize-${hostIds++}`;
+      document.body.appendChild(div);
+      const loaded = await service.load(info, z);
+      expect(await service.plot(div.id, loaded, info, 600, type)).toBe(true);
+      await flush();
+      return () => {
+        service.unsubscribe();
+        div.remove();
+      };
+    }
+    const viewer = () => (service as unknown as {
+      viewer: { dims: { z: number }; layers: { items: readonly object[] } };
+    }).viewer;
+    const fetchedUrls = () => (globalThis.fetch as jest.Mock).mock.calls.map((c) => String(c[0]));
+
+    describe('(b) setZIndex per scene', () => {
+      it('steps the volume\'s z plane in place', async () => {
+        const done = await plotInto(PlotType.NAPARI_VOLUME);
+        const render = jest.spyOn(MultiChannelImageView.prototype, 'render');
+        service.setZIndex(1);
+        await flush();
+        expect(viewer().dims.z).toBe(1);
+        expect(render).not.toHaveBeenCalled();
+        done();
+      });
+
+      it('moves a tiled image\'s dims plane and refreshes the histogram sample, without a re-render',
+        async () => {
+          const done = await plotInto(PlotType.NAPARI_IMAGE);
+          const render = jest.spyOn(MultiChannelImageView.prototype, 'render');
+          (globalThis.fetch as jest.Mock).mockClear();
+          service.setZIndex(1);
+          await flush();
+          expect(viewer().dims.z).toBe(1);
+          expect(render).not.toHaveBeenCalled();
+          // The coarse sample of the NEW slice (budget 1 → one tile at z=1).
+          expect(fetchedUrls().some((u) => u.includes('/tile?') && u.includes('&z=1&'))).toBe(true);
+          done();
+        });
+
+      it('re-renders a stitched image for the new slice', async () => {
+        (globalThis.fetch as jest.Mock).mockImplementation((url: string) => Promise.resolve(
+          url.includes('tiles/info')
+            ? { ok: false, status: 404 }
+            : { ok: true, status: 200, blob: () => Promise.resolve(new Blob()) },
+        ));
+        const done = await plotInto(PlotType.NAPARI_IMAGE);
+        const render = jest.spyOn(MultiChannelImageView.prototype, 'render');
+        (globalThis.fetch as jest.Mock).mockClear();
+        service.setZIndex(1);
+        await flush();
+        expect(render).toHaveBeenCalledTimes(1);
+        expect(fetchedUrls().some((u) => u.includes('&z=1&'))).toBe(true);
+        done();
+      });
+    });
+
+    describe('(d) the descriptor poll', () => {
+      type Internals = { ensureDescriptor(): Promise<unknown> };
+      const ensure = () => (service as unknown as Internals).ensureDescriptor();
+      const infoCalls = () => fetchedUrls().filter((u) => u.includes('tiles/info'));
+      const answer = (status: number, body?: unknown) =>
+        Promise.resolve({ ok: status === 200, status, json: () => Promise.resolve(body) });
+      const desc = { width: 8, height: 8, tileSize: 512, levels: [{ res: 0, width: 8, height: 8 }] };
+
+      afterEach(() => jest.useRealTimers());
+
+      it('re-polls a 202 until the 200 arrives', async () => {
+        jest.useFakeTimers();
+        let calls = 0;
+        (globalThis.fetch as jest.Mock)
+          .mockImplementation(() => (calls++ === 0 ? answer(202) : answer(200, desc)));
+        const poll = ensure();
+        await jest.advanceTimersByTimeAsync(1300);
+        expect(await poll).toEqual(desc);
+        expect(infoCalls()).toHaveLength(2);
+      });
+
+      it('gives up (null) once a 202 outlasts the deadline', async () => {
+        jest.useFakeTimers();
+        jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        (globalThis.fetch as jest.Mock).mockImplementation(() => answer(202));
+        const poll = ensure();
+        await jest.advanceTimersByTimeAsync(125_000);
+        expect(await poll).toBeNull();
+      });
+
+      it('serves a described source from its cache', async () => {
+        (globalThis.fetch as jest.Mock).mockImplementation(() => answer(200, desc));
+        expect(await ensure()).toEqual(desc);
+        expect(await ensure()).toEqual(desc);
+        expect(infoCalls()).toHaveLength(1);
+      });
+    });
+
+    describe('(e) the >8-bit histogram', () => {
+      it('fetches the native histogram once per (z, channel) — the bin count is not in the key', async () => {
+        (globalThis.fetch as jest.Mock).mockImplementation((url: string) => {
+          if (url.includes('tiles/info')) {
+            return answerJson({
+              width: 64, height: 48, tileSize: 512, z: 2, channels: 1, realLevels: 1,
+              channelInfo: [{ bitDepth: 16 }], levels: [{ res: 0, width: 64, height: 48 }],
+            });
+          }
+          if (url.includes('histogram?')) {
+            return answerJson({
+              bitDepth: 16, rangeMin: 0, rangeMax: 2, observedMin: 0, observedMax: 2, binWidth: 1,
+              counts: [1, 2, 3],
+            });
+          }
+          return Promise.resolve({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) });
+        });
+        const done = await plotInto(PlotType.NAPARI_IMAGE);
+        const histogramCalls = () => fetchedUrls().filter((u) => u.includes('histogram?'));
+
+        const first = await firstValueFrom(service.getHistogram$(0, 3));
+        expect(first).toMatchObject({ bitDepth: 16, counts: [1, 2, 3] });
+        expect(histogramCalls()).toHaveLength(1);
+        expect(histogramCalls()[0]).toContain('channel=0&z=0&bins=3');
+        // Same (z, channel), other bin count: the cached answer.
+        expect(await firstValueFrom(service.getHistogram$(0, 64))).toBe(first);
+        expect(histogramCalls()).toHaveLength(1);
+        // Another slice is another key.
+        service.setZIndex(1);
+        await firstValueFrom(service.getHistogram$(0, 3));
+        expect(histogramCalls()).toHaveLength(2);
+        expect(histogramCalls()[1]).toContain('z=1');
+        done();
+      });
+
+      function answerJson(body: unknown) {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) });
+      }
+    });
+
+    describe('(f) the TIFF export', () => {
+      const exportCalls = () => fetchedUrls().filter((u) => u.includes('export/tiff'));
+
+      it('asks for the visible channels only when some are hidden', async () => {
+        await service.load({ ...imageInfo(), fileName: 'scan.ndpi' } as IImageInfo, 3);
+        store.setChannelStates([
+          { index: 0, name: 'a', color: '#f00', min: 0, max: 255, gamma: 1, visible: true },
+          { index: 1, name: 'b', color: '#0f0', min: 0, max: 255, gamma: 1, visible: false },
+          { index: 2, name: 'c', color: '#00f', min: 0, max: 255, gamma: 1, visible: true },
+        ] as IChannelState[]);
+        (saveAs as unknown as jest.Mock).mockClear();
+        await service.exportData();
+        expect(exportCalls()).toEqual(['http://srv/export/tiff?info=INFO&z=3&channels=0,2']);
+        expect(saveAs).toHaveBeenCalledWith(expect.any(Blob), 'scan_16bit.ome.tif');
+
+        store.setChannelStates([
+          { index: 0, name: 'a', color: '#f00', min: 0, max: 255, gamma: 1, visible: true },
+          { index: 1, name: 'b', color: '#0f0', min: 0, max: 255, gamma: 1, visible: true },
+        ] as IChannelState[]);
+        await service.exportData();
+        expect(exportCalls()[1]).toBe('http://srv/export/tiff?info=INFO&z=3');
+      });
+    });
+
+    describe('(g) the layers each plot type mounts', () => {
+      /** Each added layer, tagged with the Viewer method that made it. */
+      function tagLayers(): WeakMap<object, string> {
+        const kinds = new WeakMap<object, string>();
+        const proto = Viewer.prototype as unknown as Record<string, (...a: unknown[]) => unknown>;
+        for (const method of ['addImage', 'addVolume', 'addAxes', 'addSurface', 'addPoints', 'addPoints3D']) {
+          const original = proto[method];
+          jest.spyOn(proto, method).mockImplementation(function (this: unknown, ...args: unknown[]) {
+            const layer = original.apply(this, args) as object;
+            kinds.set(layer, method);
+            return layer;
+          });
+        }
+        return kinds;
+      }
+      const shape = (kinds: WeakMap<object, string>) =>
+        viewer().layers.items.map((l) => [kinds.get(l), (l as { name?: string }).name ?? null]);
+
+      it.each([
+        [PlotType.NAPARI_IMAGE, [['addImage', null]]],
+        [PlotType.NAPARI_SCATTER, [['addImage', null], ['addPoints', null]]],
+        [PlotType.NAPARI_SURFACE, [['addSurface', null], ['addAxes', null]]],
+        [PlotType.NAPARI_SCATTER3D, [['addPoints3D', null]]],
+        [PlotType.NAPARI_VOLUME, [['addVolume', null], ['addAxes', null]]],
+        [PlotType.NAPARI_ISOSURFACE, [['addVolume', null], ['addAxes', null]]],
+        [PlotType.SPATIAL_OMICS, [['addImage', null], ['addPoints', 'observations']]],
+        [PlotType.SPATIAL_OMICS_3D, [['addPoints3D', 'observations']]],
+      ])('%s', async (type, expected) => {
+        jest.spyOn(regionStore, 'getRegions')
+          .mockReturnValue([{ bounds: { x: 10, y: 20, width: 4, height: 6 } }] as never);
+        dataset$.next(type === PlotType.SPATIAL_OMICS_3D ? spatialDataset3d() : spatialDataset());
+        const kinds = tagLayers();
+        const done = await plotInto(type);
+        expect(shape(kinds)).toEqual(expected);
+        done();
+      });
+    });
+  });
 });
