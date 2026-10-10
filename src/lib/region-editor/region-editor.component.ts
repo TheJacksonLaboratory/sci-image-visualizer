@@ -511,9 +511,6 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     });
   }
 
-  /** trackBy for the class rows so re-sorting doesn't re-create the pickers. */
-  trackByClassName = (_: number, c: ClassPreset): string => c.name;
-
   /** Number of regions currently using a class (keyed by the active match mode). */
   classCount(name: string): number {
     return this.classCounts.get(presetKey(this.presetSet, name)) ?? 0;
@@ -524,13 +521,6 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     if (!color) return;
     this.regionApi.setClassificationColor(name, color);
     this.commit();
-  }
-
-  /** Tooltip for a class's delete button in the panel. */
-  deleteClassTooltip(name: string): string {
-    const inUse = this.classCount(name) > 0;
-    if (name === this.defaultClassName && inUse) return 'The default class cannot be removed while in use';
-    return inUse ? 'Remove class — its regions revert to Region' : 'Remove class';
   }
 
   /** Remove a class. Any regions still using it fall back to the default

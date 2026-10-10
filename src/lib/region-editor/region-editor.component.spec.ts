@@ -1513,15 +1513,7 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
     expect(component.regions[0].colorOverridden).toBe(false);
   });
 
-  it('deleting the in-use default "Region" class is disabled (helper reports it)', () => {
-    component.presetSet = {
-      classes: [{ name: 'Region', color: '#00FFFF' }],
-      fallbackPalette: ['#111111'], autoPromote: false, matchMode: 'exact',
-    };
-    component.regions = [Object.assign(new Region(), { id: 1, label: 'Region' })];
-    (component as any).recomputeClassCounts();
-    expect(component.deleteClassTooltip('Region')).toContain('cannot be removed');
-  });
+  // The delete-class tooltip / disabled state is covered in classes-panel.component.spec.ts.
 
   it('auto-adds classes found on loaded regions (not already presets), ignoring legend/empty', () => {
     const loaded = [

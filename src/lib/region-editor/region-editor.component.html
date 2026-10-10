@@ -99,44 +99,12 @@
   </div>
 </p-toolbar>
 
-<!-- Docked "Classes" panel (jit-ui#70): the always-visible list of annotation
-     classes above the regions table. Click a row to make it the active class
-     (new regions inherit it; with rows selected it re-classifies them); recolour
-     via the swatch; the badge shows how many regions use the class. "Manage"
-     opens the full editor (fallback palette, auto-add, matching, import/export). -->
-<div class="classes-panel">
-  <div class="classes-panel-header">
-    <span class="classes-panel-title">Classes</span>
-    <button pButton type="button" icon="pi pi-cog" label="Manage"
-            class="p-button-sm p-button-text"
-            pTooltip="Manage classes — add / remove, palette, matching, import/export"
-            tooltipPosition="bottom" (click)="openManageDialog()"></button>
-  </div>
-  <div class="classes-panel-body">
-    <div *ngFor="let c of displayClasses; trackBy: trackByClassName"
-         class="class-row" [class.active]="activeClass === c.name"
-         (click)="selectActiveClass(c.name)"
-         [pTooltip]="selectedRegions?.length
-           ? 'Apply “' + c.name + '” to the selected region(s)'
-           : 'Set “' + c.name + '” active — new regions use it'"
-         tooltipPosition="bottom">
-      <span class="row-swatch" (click)="$event.stopPropagation()">
-        <hex-color-picker [color]="c.color" (colorChange)="setClassColor(c.name, $event)"></hex-color-picker>
-      </span>
-      <span class="row-name">{{ c.name }}</span>
-      <span class="row-count" [class.zero]="classCount(c.name) === 0">{{ classCount(c.name) }}</span>
-      <button pButton type="button" icon="pi pi-trash"
-              class="p-button-sm p-button-text p-button-warning row-del"
-              [disabled]="c.name === defaultClassName && classCount(c.name) > 0"
-              [pTooltip]="deleteClassTooltip(c.name)"
-              tooltipPosition="bottom"
-              (click)="$event.stopPropagation(); deleteClass(c.name)"></button>
-    </div>
-    <div *ngIf="!displayClasses.length" class="classes-empty">
-      No classes yet — add one from Manage.
-    </div>
-  </div>
-</div>
+<region-classes-panel [classes]="displayClasses" [counts]="classCounts" [matchMode]="presetSet.matchMode"
+                      [activeClass]="activeClass" [selectedCount]="selectedRegions?.length || 0"
+                      [defaultClassName]="defaultClassName"
+                      (pick)="selectActiveClass($event)" (recolor)="setClassColor($event.name, $event.color)"
+                      (remove)="deleteClass($event)" (manage)="openManageDialog()">
+</region-classes-panel>
 
 <div class="region-editor-content">
     <p-table #dt [value]="pagedRegions"

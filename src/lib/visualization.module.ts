@@ -36,6 +36,7 @@ import { RegionColorDialogComponent } from './region-editor/region-color-dialog/
 import {
   ManageClassesDialogComponent,
 } from './region-editor/manage-classes-dialog/manage-classes-dialog.component';
+import { ClassesPanelComponent } from './region-editor/classes-panel/classes-panel.component';
 import { HexColorPickerComponent } from './hex-color-picker/hex-color-picker.component';
 import { ChannelHistogramComponent } from './channel-histogram/channel-histogram.component';
 import { SpatialControlsComponent } from './spatial-controls/spatial-controls.component';
@@ -65,6 +66,7 @@ import { FloatingDragDirective } from './visualizer/floating-drag.directive';
     RegionEditorHelpComponent,
     RegionColorDialogComponent,
     ManageClassesDialogComponent,
+    ClassesPanelComponent,
     HexColorPickerComponent,
     ChannelHistogramComponent,
     SpatialControlsComponent,
