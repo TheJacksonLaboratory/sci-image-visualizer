@@ -1,0 +1,222 @@
+<ng-container *ngIf="dataset as ds">
+<!-- Observations: one marker per observation (cell centroid, Visium spot), and what
+     colours them. The lead section for datasets without cell outlines. -->
+<div class="sc-panel" [class.open]="open">
+  <div class="sc-panel-head" (click)="openChange.emit(!open)">
+    <p-checkbox [binary]="true" [ngModel]="view.showPoints" (click)="$event.stopPropagation()"
+                (onChange)="onShowPoints($event.checked)"></p-checkbox>
+    <span class="sc-panel-title">Observations</span>
+    <i class="pi" [class.pi-chevron-down]="open" [class.pi-chevron-right]="!open"></i>
+  </div>
+  <div class="sc-panel-body" *ngIf="open">
+    <small class="sc-hint" *ngIf="hasCells && !is3d">
+      One circle per cell. With cell outlines on, circles are only drawn where cells
+      are too small on screen to outline.
+    </small>
+<!-- Colour source. Column and gene are mutually exclusive: picking one
+     clears the other, so what drives the colours is never ambiguous. -->
+<div class="sc-section">
+  <label class="sc-lbl" for="sc-column">Colour by column</label>
+  <p-dropdown inputId="sc-column" [options]="columnOptions"
+              optionLabel="label" optionValue="value"
+              [ngModel]="selectedColumn" (ngModelChange)="onColumn($event)"
+              placeholder="None (flat colour)" appendTo="body"
+              styleClass="sc-full"></p-dropdown>
+</div>
+
+<ng-container *ngIf="genes?.state$ | async as gene">
+<div class="sc-section" *ngIf="ds.features">
+  <label class="sc-lbl" for="sc-gene">Colour by gene</label>
+  <!-- A filterable dropdown, not a free-text box: the genes are visible before
+       anything is typed, and each keystroke narrows a list the user can see.
+       Virtual-scrolled because a targeted panel runs to a few thousand names. -->
+  <p-dropdown inputId="sc-gene" [options]="gene.options"
+              optionLabel="label" optionValue="value"
+              [ngModel]="selectedGene" (ngModelChange)="onGene($event)"
+              [filter]="true" filterBy="label" [resetFilterOnHide]="true"
+              (onFilter)="genes?.onFilter($event.filter)" (onShow)="genes?.ensureList()"
+              [showClear]="true"
+              [virtualScroll]="gene.options.length > geneVirtualScrollFrom"
+              [virtualScrollItemSize]="30"
+              [emptyFilterMessage]="gene.remote ? 'No match — keep typing' : 'No match'"
+              [emptyMessage]="gene.remote ? 'Type to search genes' : 'No genes'"
+              appendTo="body"
+              placeholder="Search {{ ds.features.count | number }} genes…"
+              styleClass="sc-full"></p-dropdown>
+  <small class="sc-hint" *ngIf="gene.failed">Gene lookup failed.</small>
+</div>
+</ng-container>
+
+<spatial-key [controls]="controls" [dataset]="ds" [view]="view"
+             [legend]="legend" [colorBarCss]="colorBarCss"
+             [selectedCategory]="selectedCategory" [colormapOptions]="colormapOptions"
+             (categoryClicked)="categoryClicked.emit($event)"></spatial-key>
+
+<!-- Display -->
+<div class="sc-section">
+  <div class="sc-row">
+    <span class="sc-lbl">Point size</span>
+    <p-slider [ngModel]="view.pointScale" [min]="0.25" [max]="5" [step]="0.25"
+              (onChange)="onPointScale($event.value)"></p-slider>
+    <span class="sc-val">{{ view.pointScale }}×</span>
+  </div>
+  <div class="sc-row">
+    <span class="sc-lbl">Opacity</span>
+    <p-slider [ngModel]="view.opacity" [min]="0.1" [max]="1" [step]="0.05"
+              (onChange)="onOpacity($event.value)"></p-slider>
+    <span class="sc-val">{{ view.opacity }}</span>
+  </div>
+</div>
+
+  </div>
+</div>
+
+<!-- Only for a gene: the map draws that gene's expression as a field. In 2D
+     it goes under the cells of the displayed plane; in 3D it is one sheet per
+     imaged section, optionally smoothed along z into a volume. -->
+<div class="sc-section" *ngIf="canMapGene">
+  <div class="sc-row">
+    <p-checkbox [binary]="true" [ngModel]="view.geneMap"
+                (onChange)="onGeneMap($event.checked)"
+                label="Gene map (expression field)"
+                [pTooltip]="is3d
+                  ? 'Draw this gene\'s expression as one field per imaged section — an estimate between the cells, empty where nothing was measured'
+                  : 'Draw this gene\'s expression as a smooth field UNDER the cells — an estimate between them, transparent where nothing was measured'"
+                tooltipPosition="top"></p-checkbox>
+  </div>
+  <!-- 3D only: interpolating along z turns the measured sheets into an
+       estimate, so it is its own decision and its own label. -->
+  <div class="sc-row" *ngIf="view.geneMap && is3d">
+    <p-checkbox [binary]="true" [ngModel]="view.geneMapVolume"
+                (onChange)="onGeneMapVolume($event.checked)"
+                label="Volume rendering (interpolate along z)"
+                pTooltip="Smooth the per-section fields into a continuous volume — an ESTIMATE between the imaged sections, not measured tissue"
+                tooltipPosition="top"></p-checkbox>
+  </div>
+  <!-- Meaningless while interpolating: a volume built from one section would
+       smear that slide through the specimen's whole depth. -->
+  <div class="sc-row" *ngIf="view.geneMap && is3d && isSectioned && !view.geneMapVolume">
+    <p-checkbox [binary]="true" [ngModel]="geneMapOneSection"
+                (onChange)="onGeneMapOneSection($event.checked)"
+                label="One map section at a time"
+                pTooltip="Draw a single imaged section's field instead of the whole stack of sheets"
+                tooltipPosition="top"></p-checkbox>
+  </div>
+  <div class="sc-row"
+       *ngIf="view.geneMap && is3d && isSectioned && !view.geneMapVolume && geneMapOneSection">
+    <span class="sc-lbl">Map section</span>
+    <p-slider [ngModel]="view.geneMapSection" [min]="0" [max]="lastSection" [step]="1"
+              (onChange)="onGeneMapSection($event.value)"></p-slider>
+    <span class="sc-val">{{ geneMapSectionLabel }}</span>
+  </div>
+  <div class="sc-row" *ngIf="view.geneMap">
+    <span class="sc-lbl">Smoothing</span>
+    <p-slider [ngModel]="view.geneMapSmoothing" [min]="0.5" [max]="4" [step]="0.5"
+              (onChange)="onGeneMapSmoothing($event.value)"></p-slider>
+    <span class="sc-val">{{ view.geneMapSmoothing }}×</span>
+  </div>
+  <div class="sc-row" *ngIf="view.geneMap">
+    <span class="sc-lbl">Map opacity</span>
+    <p-slider [ngModel]="view.geneMapOpacity" [min]="0.1" [max]="1" [step]="0.05"
+              (onChange)="onGeneMapOpacity($event.value)"></p-slider>
+    <span class="sc-val">{{ view.geneMapOpacity }}</span>
+  </div>
+  <div class="sc-hint" *ngIf="view.geneMap && !is3d">
+    Kernel-weighted mean per cell, not a sum — so a crowded region does not glow
+    for being crowded. Transparent where no cell was measured. Turn the cells'
+    own Opacity down to read the field under them.
+  </div>
+  <div class="sc-hint" *ngIf="view.geneMap && is3d">
+    {{ geneMapVolumeNote }}
+  </div>
+</div>
+
+<!-- 3D only: the volume, the cloud and the density volumes occupy the same
+     space, so each hides the others. Independent toggles, because the useful
+     views are the combinations — the field alone, one section's cells over it,
+     the anatomy alone. -->
+<div class="sc-section" *ngIf="is3d">
+  <span class="sc-lbl">Show</span>
+  <div class="sc-row" *ngIf="ds.volume">
+    <p-checkbox [binary]="true" [ngModel]="view.showVolume"
+                (onChange)="onShowVolume($event.checked)"
+                label="Reference volume"
+                pTooltip="The registered anatomy the observations sit in"
+                tooltipPosition="top"></p-checkbox>
+  </div>
+  <!-- The backdrop's own opacity: reading the cloud or a density field
+       through the anatomy means turning the anatomy down, not the data. -->
+  <div class="sc-row" *ngIf="ds.volume && view.showVolume">
+    <span class="sc-lbl">Volume opacity</span>
+    <p-slider [ngModel]="view.volumeOpacity" [min]="0.05" [max]="1" [step]="0.05"
+              (onChange)="onVolumeOpacity($event.value)"></p-slider>
+    <span class="sc-val">{{ view.volumeOpacity }}</span>
+  </div>
+  <div class="sc-row">
+    <p-checkbox [binary]="true" [ngModel]="view.showPoints"
+                (onChange)="onShowPoints($event.checked)"
+                label="Observations"
+                pTooltip="The measured cells. Hide them to read the density volumes underneath"
+                tooltipPosition="top"></p-checkbox>
+  </div>
+  <!-- Only for data that really is sectioned; a continuous z has no sections
+       to step through. -->
+  <div class="sc-row" *ngIf="view.showPoints && isSectioned">
+    <p-checkbox [binary]="true" [ngModel]="oneSection"
+                (onChange)="onOneSection($event.checked)"
+                label="One section at a time"
+                pTooltip="Draw a single imaged section's cells, so the density volumes between the sections stay visible"
+                tooltipPosition="top"></p-checkbox>
+  </div>
+  <div class="sc-row" *ngIf="view.showPoints && isSectioned && oneSection">
+    <span class="sc-lbl">Section</span>
+    <p-slider [ngModel]="view.pointSection" [min]="0" [max]="lastSection" [step]="1"
+              (onChange)="onPointSection($event.value)"></p-slider>
+    <span class="sc-val">{{ sectionLabel }}</span>
+  </div>
+</div>
+
+<div class="sc-section" *ngIf="is3d">
+  <div class="sc-hint" *ngIf="exceedsCloudPalette">
+    {{ legend?.length }} categories is past the {{ cloudPaletteLimit }} the 3D cloud's
+    colour LUT can keep apart, so the points draw flat for this column. The density
+    volumes below render it, and so does the 2D Spatial omics view.
+  </div>
+  <div class="sc-row">
+    <p-checkbox [binary]="true" [ngModel]="view.densityVolume"
+                (onChange)="onDensityVolume($event.checked)"
+                label="Cluster density volumes"
+                pTooltip="Raymarch each cluster as a smooth density field — an ESTIMATE between the imaged sections, not measured cells"
+                tooltipPosition="top"></p-checkbox>
+  </div>
+  <div class="sc-row" *ngIf="view.densityVolume">
+    <span class="sc-lbl">Smoothing</span>
+    <p-slider [ngModel]="view.densitySmoothing" [min]="0.5" [max]="4" [step]="0.5"
+              (onChange)="onDensitySmoothing($event.value)"></p-slider>
+    <span class="sc-val">{{ view.densitySmoothing }}×</span>
+  </div>
+  <div class="sc-hint" *ngIf="view.densityVolume">{{ densityNote }}</div>
+</div>
+
+<!-- Continuous-only knobs: meaningless for a categorical palette. -->
+<div class="sc-section" *ngIf="isContinuous">
+  <div class="sc-row">
+    <p-checkbox [binary]="true" [ngModel]="view.logScale"
+                (onChange)="onLogScale($event.checked)"
+                label="Log scale"
+                pTooltip="Counts collapse against their outliers on a linear ramp"
+                tooltipPosition="top"></p-checkbox>
+  </div>
+  <div class="sc-row">
+    <span class="sc-lbl">Clip outliers</span>
+    <p-dropdown [options]="clipOptions" optionLabel="label" optionValue="value"
+                [ngModel]="view.percentileClip" (ngModelChange)="onClip($event)"
+                appendTo="body"
+                pTooltip="Percentile the contrast window is taken at"
+                tooltipPosition="top"></p-dropdown>
+    <!-- Reserves the readout column this row has no readout for, so the
+         control's right edge lines up with every slider's. -->
+    <span class="sc-val"></span>
+  </div>
+</div>
+</ng-container>

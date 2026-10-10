@@ -7,10 +7,7 @@ import { VISUALIZER, IVisualizer, ISpatialControls } from '../contracts/visualiz
 import { SpatialChartsComponent } from './spatial-charts/spatial-charts.component';
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
 import { ColormapNode, SpatialViewState, DEFAULT_SPATIAL_VIEW } from '../contracts/display-types';
-import { SPATIAL_3D_MAX_CATEGORIES } from '../spatial/spatial-encoding';
-import {
-  CLIP_OPTIONS, PanelOption, columnOptions, middleSection, parseGeneGroups, sectionLabel,
-} from '../spatial/spatial-panel-model';
+import { PanelOption, parseGeneGroups } from '../spatial/spatial-panel-model';
 import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selection';
 import { GenePickerModel } from './spatial-gene-picker';
 import { SpatialKeyModel, SpatialLegendEntry } from './spatial-key/spatial-key.model';
@@ -69,21 +66,11 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   @Input() is3d = false;
   @Output() visibleChange = new EventEmitter<boolean>();
 
-  readonly clipOptions = CLIP_OPTIONS;
-
   /** Null when the host bound no `SPATIAL_DATA_PORT`. */
   controls: ISpatialControls | null = null;
   dataset: SpatialDataset | null = null;
   view: SpatialViewState = { ...DEFAULT_SPATIAL_VIEW };
 
-  /** Colour-by column choices — "None" plus every column the dataset declares. */
-  columnOptions: { label: string; value: string | null }[] = [];
-  selectedColumn: string | null = null;
-
-  /** Virtual-scrolled only past this many options: the scroller earns its
-   *  complexity for a few thousand names, and for eight it adds only overhead —
-   *  a virtual viewport that short swallows the clicks it is meant to forward. */
-  readonly geneVirtualScrollFrom = 200;
   /**
    * Gene picker: a filterable dropdown rather than a free-text typeahead, so the
    * options are visible before anything is typed and each keystroke narrows a list
@@ -108,7 +95,6 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   get geneSearchFailed(): boolean {
     return this.genes.failed;
   }
-  selectedGene: string | null = null;
 
   /** The key — legend or colour bar — for the active colouring. Kept here, not in
    *  `<spatial-key>`: whether the colouring is categorical decides which knobs the rest of
@@ -141,13 +127,6 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
    *  element and expanding the second panel cannot scroll the first one's chart. */
   readonly chartsBodyId = `sc-charts-body-${++controlsInstanceSeq}`;
 
-  /**
-   * The dataset's imaged section positions, or null when its z is continuous
-   * rather than sectioned. Read once per dataset — the scan walks the z of every
-   * observation, so it must not sit in a template getter.
-   */
-  sections: Float32Array | null = null;
-
   /** Colormap tree for the continuous colour scale and the density map: the library's
    *  own `COLORMAP_OPTIONS`. */
   colormapOptions: ColormapNode[] = [];
@@ -168,11 +147,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
 
     this.subs.add(this.controls.getDataset$().subscribe((dataset) => {
       this.dataset = dataset;
-      this.columnOptions = columnOptions(dataset);
-      // A new dataset almost certainly has different columns; drop stale UI state.
-      this.selectedGene = null;
       this.genes.setDataset(dataset);
-      this.sections = this.controls?.sampledSections() ?? null;
       // A dataset with no cells to outline leads with its observations.
       this.open = { ...this.open, cells: !!(dataset?.polygonTiles || dataset?.polygons),
         observations: !(dataset?.polygonTiles || dataset?.polygons) };
@@ -181,8 +156,6 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
 
     this.subs.add(this.controls.getViewState$().subscribe((view) => {
       this.view = view;
-      this.selectedColumn = view.colorBy?.kind === 'column' ? view.colorBy.name : null;
-      this.selectedGene = view.colorBy?.kind === 'feature' ? view.colorBy.name : null;
       void this.refreshKey();
     }));
 
@@ -222,19 +195,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     this.visibleChange.emit(value);
   }
 
-  // ── colour source ───────────────────────────────────────────────────────
-
-  /** Column dropdown. Choosing a column supersedes any gene selection. */
-  onColumn(name: string | null): void {
-    this.selectedColumn = name;
-    if (!name) {
-      this.controls?.clearColorBy();
-      this.selectedGene = null;
-      return;
-    }
-    this.selectedGene = null;
-    this.controls?.colorByColumn(name);
-  }
+  // ── the shared gene list ────────────────────────────────────────────────
 
   /** A keystroke in a gene dropdown's filter box — see {@link GenePickerModel.onFilter}. */
   onGeneFilter(query: string): Promise<void> {
@@ -244,17 +205,6 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   /** A gene dropdown opened — see {@link GenePickerModel.ensureList}. */
   ensureGeneList(): Promise<void> {
     return this.genes.ensureList();
-  }
-
-  /** A gene was picked; it supersedes any column selection. */
-  onGene(name: string | null): void {
-    this.selectedGene = name;
-    if (!name) {
-      this.controls?.clearColorBy();
-      return;
-    }
-    this.selectedColumn = null;
-    this.controls?.colorByFeature(name);
   }
 
   // ── selection ───────────────────────────────────────────────────────────
@@ -313,163 +263,6 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     return this.selection.count > 0;
   }
 
-  // ── display ─────────────────────────────────────────────────────────────
-
-  // PrimeNG's slider reports `number | undefined`; ignore the empty case rather
-  // than writing `undefined` into the store and rendering NaN-sized markers.
-  onPointScale(value: number | undefined): void {
-    if (value === undefined) return;
-    this.controls?.setViewState({ pointScale: value });
-  }
-  onOpacity(value: number | undefined): void {
-    if (value === undefined) return;
-    this.controls?.setViewState({ opacity: value });
-  }
-  onLogScale(on: boolean): void {
-    this.controls?.setViewState({ logScale: on });
-  }
-  /**
-   * Set when the active categorical colouring has more categories than the 3D
-   * cloud can keep apart, so the points are drawing FLAT.
-   *
-   * Said in the panel rather than left to a console warning: `subclass` (338) is
-   * served precisely because the density volumes and the 2D view can render it, and
-   * a user who picks it in the cloud and sees one colour deserves to know both why
-   * and what to do instead.
-   */
-  get exceedsCloudPalette(): boolean {
-    return this.is3d && (this.legend?.length ?? 0) > SPATIAL_3D_MAX_CATEGORIES;
-  }
-  /** The ceiling itself, for the message. */
-  readonly cloudPaletteLimit = SPATIAL_3D_MAX_CATEGORIES;
-
-  onGeneMap(on: boolean): void {
-    this.controls?.setViewState({ geneMap: on });
-  }
-  /** 3D: smooth the per-section sheets along z into a continuous volume. */
-  onGeneMapVolume(on: boolean): void {
-    this.controls?.setViewState({ geneMapVolume: on });
-  }
-  /** 3D: restrict the sheets to one imaged section. */
-  onGeneMapOneSection(on: boolean): void {
-    if (!on) {
-      this.controls?.setViewState({ geneMapSection: null });
-      return;
-    }
-    this.controls?.setViewState({ geneMapSection: middleSection(this.sections) });
-  }
-  onGeneMapSection(value: number | undefined): void {
-    if (value === undefined) return;
-    this.controls?.setViewState({ geneMapSection: value });
-  }
-  get geneMapOneSection(): boolean {
-    return this.view.geneMapSection != null;
-  }
-  /** "12 of 53" for the gene map's own section, 1-based like the cloud's. */
-  get geneMapSectionLabel(): string {
-    return sectionLabel(this.sections, this.view.geneMapSection);
-  }
-  onGeneMapSmoothing(value: number | undefined): void {
-    if (value === undefined) return;
-    this.controls?.setViewState({ geneMapSmoothing: value });
-  }
-  onGeneMapOpacity(value: number | undefined): void {
-    if (value === undefined) return;
-    this.controls?.setViewState({ geneMapOpacity: value });
-  }
-  /**
-   * What the 3D gene map is currently showing, said plainly — the sheets are a
-   * measurement and the volume is an estimate, and the panel has to be the place
-   * that says which one is on screen.
-   */
-  get geneMapVolumeNote(): string {
-    const total = this.sections?.length ?? 0;
-    if (this.view.geneMapVolume) {
-      return 'Interpolated along z: the planes between the imaged sections carry an '
-        + 'ESTIMATE, smoothed from their neighbours\' mean. Nothing is drawn beyond the '
-        + 'outermost section.';
-    }
-    if (this.geneMapOneSection) {
-      return 'One imaged section\'s field — measured, not interpolated. Hide the '
-        + 'observations to read it, or leave them on to check the field against them.';
-    }
-    return `One field per imaged section${total ? ` (${total})` : ''}, at its own depth, `
-      + 'with the gaps between sections empty. Kernel-weighted mean per cell, not a sum.';
-  }
-
-  /** True while a gene is the colour source — the only thing a gene map can map. */
-  get canMapGene(): boolean {
-    return this.view.colorBy?.kind === 'feature';
-  }
-
-  // ── what the 3D scene draws ─────────────────────────────────────────────
-  // The volume, the cloud and the density volumes share one space, so each one
-  // hides the others to some degree. Independent toggles because the useful views
-  // are the combinations, not a single "3D mode".
-
-  onShowVolume(on: boolean): void {
-    this.controls?.setViewState({ showVolume: on });
-  }
-  onVolumeOpacity(value: number | undefined): void {
-    if (value === undefined) return;
-    this.controls?.setViewState({ volumeOpacity: value });
-  }
-  onShowPoints(on: boolean): void {
-    this.controls?.setViewState({ showPoints: on });
-  }
-  /** The "one section at a time" switch: null restores the whole stack. */
-  onOneSection(on: boolean): void {
-    if (!on) {
-      this.controls?.setViewState({ pointSection: null });
-      return;
-    }
-    // Open in the middle of the stack rather than on the first section, which for
-    // a brain is a nearly empty olfactory-bulb slide.
-    this.controls?.setViewState({ pointSection: middleSection(this.sections) });
-  }
-  onPointSection(value: number | undefined): void {
-    if (value === undefined) return;
-    this.controls?.setViewState({ pointSection: value });
-  }
-  /** True while the cloud is restricted to a single section. */
-  get oneSection(): boolean {
-    return this.view.pointSection != null;
-  }
-  /** Highest section index the slider can reach. */
-  get lastSection(): number {
-    return Math.max(0, (this.sections?.length ?? 1) - 1);
-  }
-  /** "12 of 53" — 1-based, because the sections are slides, not array slots. */
-  get sectionLabel(): string {
-    return sectionLabel(this.sections, this.view.pointSection);
-  }
-  /** Whether this dataset has sections to pick from at all. */
-  get isSectioned(): boolean {
-    return (this.sections?.length ?? 0) > 1;
-  }
-
-  onDensityVolume(on: boolean): void {
-    this.controls?.setViewState({ densityVolume: on });
-  }
-  onDensitySmoothing(value: number | undefined): void {
-    if (value === undefined) return;
-    this.controls?.setViewState({ densitySmoothing: value });
-  }
-
-  /** What the density volumes are actually showing, said plainly — an estimate is
-   *  only honest if the reader knows it is one, and which clusters are in view. */
-  get densityNote(): string {
-    const capped = `the ${SpatialControlsComponent.DENSITY_MAX_CLUSTERS} largest clusters`;
-    const what = this.legend ? capped : this.hasSelection ? 'the selected cells' : 'all cells';
-    return `Density estimate over ${what} — smoothed between the imaged sections, `
-      + 'not measured cells. Lower Opacity to read the fields under the cloud.';
-  }
-
-  /** Mirrors the renderer's cap, for the note only. */
-  private static readonly DENSITY_MAX_CLUSTERS = 6;
-  onClip(value: [number, number]): void {
-    this.controls?.setViewState({ percentileClip: value });
-  }
   // ── sections ────────────────────────────────────────────────────────────
 
   /** Boundaries on offer: tiled (level-of-detail) or whole-dataset rings. */
@@ -516,8 +309,6 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   reset(): void {
     this.controls?.setViewState({ ...DEFAULT_SPATIAL_VIEW });
     this.clearSelection();
-    this.selectedColumn = null;
-    this.selectedGene = null;
   }
 
   /** Label for the current colouring, for the Distribution heading. */

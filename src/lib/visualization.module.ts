@@ -55,6 +55,9 @@ import { SpatialGroupsPanelComponent } from './spatial-controls/spatial-groups-p
 import {
   SpatialTranscriptsPanelComponent,
 } from './spatial-controls/spatial-transcripts-panel/spatial-transcripts-panel.component';
+import {
+  SpatialObservationsPanelComponent,
+} from './spatial-controls/spatial-observations-panel/spatial-observations-panel.component';
 import { SpatialGeneTreeComponent } from './spatial-controls/spatial-gene-tree/spatial-gene-tree.component';
 import {
   SpatialMarkerGenesFormComponent,
@@ -105,6 +108,7 @@ import { FloatingDragDirective } from './visualizer/floating-drag.directive';
     SpatialTranscriptsPanelComponent,
     SpatialGeneTreeComponent,
     SpatialMarkerGenesFormComponent,
+    SpatialObservationsPanelComponent,
   ],
   imports: [
     CommonModule,

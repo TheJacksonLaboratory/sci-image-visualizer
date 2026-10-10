@@ -9,6 +9,7 @@ import { SpatialCellsPanelComponent } from './spatial-cells-panel/spatial-cells-
 import { SpatialGroupsPanelComponent } from './spatial-groups-panel/spatial-groups-panel.component';
 import { SpatialTranscriptsPanelComponent } from './spatial-transcripts-panel/spatial-transcripts-panel.component';
 import { SpatialGeneTreeComponent } from './spatial-gene-tree/spatial-gene-tree.component';
+import { SpatialObservationsPanelComponent } from './spatial-observations-panel/spatial-observations-panel.component';
 import { SpatialMarkerGenesFormComponent } from './spatial-marker-genes-form/spatial-marker-genes-form.component';
 import { VISUALIZER, ISpatialControls } from '../contracts/visualizer.contract';
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
@@ -112,7 +113,7 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       declarations: [
         SpatialControlsComponent, SpatialKeyComponent, SpatialCellsPanelComponent, SpatialGroupsPanelComponent,
         SpatialTranscriptsPanelComponent, SpatialGeneTreeComponent, SpatialMarkerGenesFormComponent,
-        StubValueAccessorDirective,
+        SpatialObservationsPanelComponent, StubValueAccessorDirective,
       ],
       imports: [FormsModule],
       schemas: [NO_ERRORS_SCHEMA],
