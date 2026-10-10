@@ -19,9 +19,9 @@ export interface ContextMenuState {
   canUngroup(region: Region): boolean;
 }
 
-/** What the menu's items do. */
+/** What the menu's items do (the viewer's own toolbar handlers). */
 export interface ContextMenuActions {
-  autoscale(): void;
+  autoscaleImage(): void;
   zoomIn(): void;
   zoomOut(): void;
   toggleDragMode(mode: string): void;
@@ -70,7 +70,7 @@ export function buildContextMenu(state: ContextMenuState, actions: ContextMenuAc
   const items: MenuItem[] = [];
   const regionActions = buildRegionActionItems(state, actions);
   if (regionActions.length) items.push(...regionActions, { separator: true });
-  items.push({ label: 'Autoscale', icon: 'pi pi-window-maximize', command: () => actions.autoscale() },
+  items.push({ label: 'Autoscale', icon: 'pi pi-window-maximize', command: () => actions.autoscaleImage() },
     { separator: true });
   // 'Zoom selection' is Plotly's rubber-band zoom; it doesn't apply to the
   // OpenSeadragon-backed Image view (use 'Zoom to box' there instead).

@@ -70,7 +70,7 @@ let plotInstanceSeq = 0;
   templateUrl: './visualizer.component.html',
   styleUrls: ['./visualizer.component.scss'],
 })
-export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, OnDestroy {
+export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, OnDestroy, ContextMenuActions {
   /** Per-instance toast key. MessageService is a global singleton, so two live
    *  `<visualizer>` instances (main viewer + pipeline-dialog preview) sharing
    *  one key would each render the same message — a duplicate toast. A unique
@@ -957,11 +957,11 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
 
   /** The right-click menu for the current view, armed mode and selection. */
   private buildContextMenuItems(): MenuItem[] {
-    return buildContextMenu(this.contextMenuState(), this.contextMenuActions);
+    return buildContextMenu(this.contextMenuState(), this);
   }
 
   private buildRegionActionItems(): MenuItem[] {
-    return buildRegionActionItems(this.contextMenuState(), this.contextMenuActions);
+    return buildRegionActionItems(this.contextMenuState(), this);
   }
 
   private contextMenuState(): ContextMenuState {
@@ -975,24 +975,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       canUngroup: (r) => this.regionOps.canUngroup(r),
     };
   }
-
-  private readonly contextMenuActions: ContextMenuActions = {
-    autoscale: () => this.autoscaleImage(),
-    zoomIn: () => this.zoomIn(),
-    zoomOut: () => this.zoomOut(),
-    toggleDragMode: (mode) => this.toggleDragMode(mode),
-    toggleSurface3dMode: (mode) => this.toggleSurface3dMode(mode),
-    resetSurfaceCamera: () => this.resetSurfaceCamera(),
-    selectAllRegions: () => this.selectAllRegions(),
-    mergeRegions: () => this.mergeRegions(),
-    ungroupRegions: () => this.ungroupRegions(),
-    inverseRegions: () => this.inverseRegions(),
-    simplifyRegions: (px) => this.simplifyRegions(px),
-    openSimplifyDialog: () => this.openSimplifyDialog(),
-    toBezierRegion: () => this.toBezierRegion(),
-    toPolygonRegion: () => this.toPolygonRegion(),
-    deleteRegion: () => this.deleteRegion(),
-  };
 
   toggleSurface3dMode(mode: string) {
     this.activeSurface3dMode = mode;
