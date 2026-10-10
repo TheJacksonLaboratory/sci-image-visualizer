@@ -11,7 +11,6 @@ import {
   tintColormap,
   reverseColormap,
   heightField,
-  LUT_SIZE,
   MultiChannelImageView,
   MultiChannelVolumeView,
 } from 'napari-js';
@@ -35,16 +34,14 @@ import { nearestProjectedIndex, ScreenIndex, SCREEN_INDEX_MIN_POINTS } from 'nap
 import { IImageInfo } from '../../contracts/image.contract';
 import { IChannelState } from '../../contracts/channel-histogram-api.contract';
 import { buildColormapLut, Rgb } from '../../contracts/colormap-lut';
-import { bt601Luminance } from '../../contracts/intensity';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import {
   SpatialColumn, SpatialDataset, SpatialImageRef, findColumnMeta, isCategoricalColumn,
 } from '../../contracts/spatial-dataset.contract';
 import { SpatialViewState } from '../../contracts/display-types';
 import {
-  contrastWindow, encodeCategorical, encodeContinuous, markerDiameters,
-  resolveCategoryColors, toRgbaTuples, parseHex, MISSING_COLOR, DEFAULT_MUTED_OPACITY,
-  SPATIAL_3D_MAX_CATEGORIES, spatialContinuousLut, type RGBA,
+  encodeCategorical, markerDiameters, resolveCategoryColors, toRgbaTuples, DEFAULT_MUTED_OPACITY,
+  spatialContinuousLut, type RGBA,
 } from '../../spatial/spatial-encoding';
 import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
 import { SpatialObservations } from '../../contracts/spatial-dataset.contract';
@@ -70,37 +67,22 @@ import {
   encodeExpressionVolume, expressionField, expressionVolume, fieldContrastWindow,
 } from '../../spatial/spatial-expression';
 
-/**
- * A short, stable id for a colormap value, for cache keys.
- *
- * Half the library's colormaps are NAMES and half are inline `[stop, colour]`
- * arrays of 256 entries. Stringifying the array kind would put 6 KB in a key that
- * is rebuilt and compared on every view change; hashing it keeps the key small,
- * and it only has to distinguish one colormap from another.
- */
-function colormapId(value: unknown): string {
-  if (value == null) return '';
-  if (typeof value === 'string') return value;
-  if (!Array.isArray(value)) return '?';
-  // FNV-1a over the stops. A collision would leave a stale colouring on screen,
-  // not corrupt anything, and 32 bits over a few hundred colormaps will not.
-  let hash = 0x811c9dc5;
-  const text = value.map((stop) => String(stop)).join(',');
-  for (let i = 0; i < text.length; i++) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return `#${(hash >>> 0).toString(36)}`;
-}
-
-/**
- * In-plane coarsening of the 3D gene map's lattice, relative to the reference
- * volume. The field is smooth, so its detail is set by the kernel rather than the
- * raster — and the estimate is a pair of separable blurs on the main thread, which
- * at the template's full resolution means seconds of frozen UI per toggle.
- */
-const GENE_MAP_VOLUME_STRIDE = 2;
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
+import {
+  DESCRIPTOR_POLL_INTERVAL_MS, DESCRIPTOR_TIMEOUT_MS, MAX_STITCH_TILES, MAX_TEXTURE_DIM,
+  READBACK_DEBOUNCE_MS, SCATTER3D_MAX_POINTS, SCATTER3D_MAX_XY, STITCH_BUDGET_COEFF,
+  SURFACE_MAX_GRID, SURFACE_Z_ASPECT, SceneKind, TILE_FETCH_CONCURRENCY, TILE_SIZE,
+  VOLUME_FETCH_CONCURRENCY, VOLUME_MAX_SLICE, VOLUME_WORLD_INPLANE_REF, colormapId, create2dCanvas,
+  isServerlessMultichannel, mapPool, rgbaToLuminance, sceneKindOf, stackDepth, surfaceResolutionFor,
+  tintFor, tintedComposite, toIHistogram, toNapariGamma, typedPlane, volumeResolutionFor,
+} from './napari-helpers';
+import {
+  ContrastWindowCache, DensityGroup, GENE_MAP_MAX_SIDE, GENE_MAP_SIGMA,
+  GENE_MAP_VOLUME_STRIDE, SPATIAL_3D_BASE_SIZE, SPATIAL_FALLBACK_RADIUS, SPATIAL_NEUTRAL_COLOR,
+  SPATIAL_NEUTRAL_HEX, SPATIAL_SELECTED_SIZE_SCALE, SPATIAL_SLICE_MIN_DIAMETER_PX, Spatial3dEncoding,
+  encodeSpatial3dCategorical, encodeSpatial3dContinuous, encodeSpatialContinuous, gatherColors,
+  rankDensityGroups, spatialFlatColormap, totalDensityGroup,
+} from './napari-spatial-encoding';
 import {
   PlotType,
   PlotTypeDescriptor,
@@ -191,19 +173,6 @@ class NapariCoordinateTransform implements ICoordinateTransform {
   }
 }
 
-/** What a plot mounts, as far as a slice change is concerned. */
-type SceneKind = 'image2d' | 'volume' | 'surface' | 'scatter3d' | 'spatial3d';
-
-/** The scene kind {@link NapariVisualizerService.plot} mounts for a plot type (same dispatch). */
-function sceneKindOf(plotType: PlotType): SceneKind {
-  if (isSpatialOmics3d(plotType)) return 'spatial3d';
-  if (isSpatialOmics(plotType) || isNapariScatter(plotType)) return 'image2d';
-  if (isNapariScatter3d(plotType)) return 'scatter3d';
-  if (isNapariSurface(plotType)) return 'surface';
-  if (isNapari3d(plotType)) return 'volume';
-  return 'image2d';
-}
-
 /** Opaque handle from {@link NapariVisualizerService.load}, passed back to plot(). */
 interface NapariLoaded {
   imageInfo: IImageInfo;
@@ -211,209 +180,6 @@ interface NapariLoaded {
   /** Must match `IImageInfo.fileName` — the render orchestrator drops the result if the
    *  handle's `filename` doesn't match the requested image (guards against stale clicks). */
   filename: string;
-}
-
-const VOLUME_MAX_SLICE = 1024; // "Full" in-plane cap; the default ¼ load uses 256
-/** Reference in-plane world size (long side) for the volume/axes box, in arbitrary world units.
- *  The box is anchored to this reference regardless of the chosen decimate factor, so changing the
- *  resolution changes DETAIL, not the volume's proportions (Z no longer appears to shrink when the
- *  in-plane sampling grows). Set to the DEFAULT decimate's in-plane cap so the default view is
- *  unchanged; higher/lower resolutions keep that same shape. See {@link mountVolume}. */
-const VOLUME_WORLD_INPLANE_REF = VOLUME_MAX_SLICE / NAPARI_DEFAULT_DECIMATE;
-/** Max concurrent slice fetches when assembling a volume — keeps the connection pool busy
- *  without flooding it (browsers cap ~6/host) on a deep stack. */
-const VOLUME_FETCH_CONCURRENCY = 8;
-
-/** Volume/isosurface sampling for a decimate factor `scale` (1 = Full 1024, 2 = ½ 512, 4 = ¼ 256
- *  default, 8 = ⅛ 128): the in-plane cap halves each step; slices stay un-subsampled until ⅛, then
- *  subsample. */
-function volumeResolutionFor(scale: number): { maxSlice: number; sliceStep: number } {
-  const s = Math.max(1, Math.round(scale));
-  return {
-    maxSlice: Math.max(8, Math.round(VOLUME_MAX_SLICE / s)),
-    sliceStep: Math.max(1, Math.floor(s / 4)),
-  };
-}
-/** Fully-normalized intensity height as a fraction of the in-plane extent — matches the Plotly
- *  SURFACE z-aspect (~0.4) so the relief isn't exaggerated. */
-const SURFACE_Z_ASPECT = 0.4;
-/** "Full" mesh grid cap; the decimate factor divides it (default ¼ → 220, ½ → 440, Full → 880). */
-const SURFACE_MAX_GRID = 880;
-/** Coefficient scaling the pyramid tile budget with the target resolution — a higher target pulls a
- *  finer pyramid level (more real detail). Shared by the surface plane fetch + volume assembly. */
-const STITCH_BUDGET_COEFF = 16;
-/** Surface mesh target grid for a decimate factor `scale`: the grid cap shrinks by `scale` (every
- *  slice is kept — the z-slider needs them all). The source is fetched at a matching resolution. */
-function surfaceResolutionFor(scale: number): { maxGrid: number } {
-  const s = Math.max(1, Math.round(scale));
-  return { maxGrid: Math.max(16, Math.round(SURFACE_MAX_GRID / s)) };
-}
-
-/** 3D scatter: in-plane cap for the assembled voxel grid, and the max number of points emitted
- *  (the grid is flat-strided down to this) — keeps the billboard count interactive. */
-const SCATTER3D_MAX_XY = 64;
-const SCATTER3D_MAX_POINTS = 150000;
-
-/** How long a pan/zoom must settle before the viewport (and, for pixel tools, the canvas
- *  readback) is refreshed — coalesces the camera's per-frame changes. */
-const READBACK_DEBOUNCE_MS = 250;
-
-const TILE_SIZE = 512; // server tile edge (matches the OSD backend)
-/** Max tiles stitched for one displayed slice (512px tiles → up to ~6144² at full res). Beyond
- *  this we step to a coarser pyramid level so a large image stays tractable. */
-const MAX_STITCH_TILES = 144;
-/** WebGPU default `maxTextureDimension2D` — a stitched slice's longest side must fit a texture. */
-const MAX_TEXTURE_DIM = 8192;
-/** Concurrent tile requests per stitched slice. Firing a whole grid at once (hundreds of requests
- *  for a large level) overwhelmed the tile server (504s); a small pool keeps the pipe full without
- *  flooding it — and slice-level workers already run several stitches in parallel on top of this. */
-const TILE_FETCH_CONCURRENCY = 6;
-/** How long to poll `/tiles/info` (202 while the server caches the source) before falling back to
- *  a single tile. Generous like the OSD backend — a cold whole-slide can take minutes to cache. */
-const DESCRIPTOR_TIMEOUT_MS = 120000;
-/** Wait between two `/tiles/info` polls while the server answers 202. */
-const DESCRIPTOR_POLL_INTERVAL_MS = 1200;
-
-/**
- * RGBA bytes → one BT.601 luminance byte per pixel, written into `out` from `offset`. Rounded,
- * so a grey pixel (R=G=B — every single-band server tile) decodes to itself exactly, while a
- * colour source (an RGB composite) becomes its luminance rather than its red channel.
- */
-function rgbaToLuminance(rgba: ArrayLike<number>, out: Uint8Array, offset = 0): void {
-  const n = rgba.length >> 2;
-  for (let i = 0; i < n; i++) {
-    const o = i * 4;
-    out[offset + i] = Math.round(bt601Luminance(rgba[o], rgba[o + 1], rgba[o + 2]));
-  }
-}
-
-/**
- * `IChannelState.gamma` → the `gamma` a napari-js layer or view takes.
- *
- * The shared channel state follows the ImageJ/Fiji convention the OSD backend draws
- * (`osd/display-pipeline.ts`: output = t^(1/γ), so γ > 1 BRIGHTENS the midtones), while
- * napari-js's shaders apply `pow(t, gamma)` (napari's convention: γ > 1 darkens). Every gamma
- * handed to napari-js goes through here, so one slider in the Channels & Histogram dialog moves
- * both backends the same way. (Invert is still applied in a different order — napari-js does
- * window → invert → gamma, OSD window → gamma → invert — which only matters with γ ≠ 1 and
- * invert on; aligning that is the OSD pipeline's change, NAPARI-BOUNDARY-2.)
- */
-function toNapariGamma(gamma: number | undefined): number {
-  return gamma != null && gamma > 0 ? 1 / gamma : 1;
-}
-
-/** A 2D canvas (an `OffscreenCanvas` where available) and its context; throws, naming `what`,
- *  when no 2D context can be had. */
-function create2dCanvas(
-  width: number,
-  height: number,
-  what: string,
-): {
-  canvas: HTMLCanvasElement | OffscreenCanvas;
-  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
-} {
-  let canvas: HTMLCanvasElement | OffscreenCanvas;
-  if (typeof OffscreenCanvas !== 'undefined') {
-    canvas = new OffscreenCanvas(width, height);
-  } else {
-    canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-  }
-  const ctx = canvas.getContext('2d') as
-    | CanvasRenderingContext2D
-    | OffscreenCanvasRenderingContext2D
-    | null;
-  if (!ctx) throw new Error(`[napari-js] ${what}: 2D context unavailable`);
-  return { canvas, ctx };
-}
-
-/**
- * Run `fn` over `items` with at most `concurrency` in flight — keeps the connection pool busy
- * without flooding the server — starting no further item once `stop()` says so.
- */
-async function mapPool<T>(
-  items: readonly T[],
-  concurrency: number,
-  fn: (item: T) => Promise<void>,
-  stop: () => boolean = () => false,
-): Promise<void> {
-  let next = 0;
-  const worker = async (): Promise<void> => {
-    while (next < items.length && !stop()) await fn(items[next++]);
-  };
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
-}
-
-/** A serverless multichannel stack (`tiled:false` + `channelUrls`): no tile descriptor, so its
- *  channel count comes from `imageMeta`, and each band is fetched from its own plane URLs. */
-function isServerlessMultichannel(simple: boolean, info: IImageInfo | undefined): boolean {
-  return simple && !!info?.channelUrls?.length && (info?.imageMeta?.[0]?.channelCount ?? 1) > 1;
-}
-
-/** The stack's declared slice count (`imageMeta.z`, else one URL per slice); 0 when unknown. */
-function stackDepth(info: IImageInfo | undefined): number {
-  return info?.imageMeta?.[0]?.z || info?.urls?.length || 0;
-}
-
-/** A decoded single-channel uint8 plane as a napari-js typed image source. */
-function typedPlane(d: { data: Uint8Array; width: number; height: number }): ChannelView['source'] {
-  return { kind: 'typed', width: d.width, height: d.height, channels: 1, dtype: 'uint8', data: d.data };
-}
-
-/** Whether a colour input is one RGBA per point rather than one broadcast RGBA. */
-function isPerPoint(colors: RGBA[] | RGBA): colors is RGBA[] {
-  return Array.isArray(colors[0]);
-}
-
-/** Default per-channel tints (Fiji-style) when the store/descriptor offers no colour. */
-const DEFAULT_TINTS = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ffffff'];
-
-/** Default tint for a channel index, cycling the Fiji palette. */
-function tintFor(channel: number): string {
-  return DEFAULT_TINTS[channel % DEFAULT_TINTS.length];
-}
-
-/**
- * Contrast windows memoised per (values array, lo, hi, log). `contrastWindow` sorts every value,
- * and the spatial colouring re-runs it on each opacity, selection or colormap change while the
- * coloured vector itself is unchanged (review SPATIAL-12). Keyed by the vector's identity, so a
- * new column or gene vector is a miss and an old one is collected with its windows.
- */
-class ContrastWindowCache {
-  private readonly byVector = new WeakMap<Float32Array, Map<string, [number, number]>>();
-
-  get(
-    values: Float32Array,
-    lo: number,
-    hi: number,
-    log: boolean,
-    compute: () => [number, number],
-  ): [number, number] {
-    let windows = this.byVector.get(values);
-    if (!windows) {
-      windows = new Map();
-      this.byVector.set(values, windows);
-    }
-    const key = `${lo}|${hi}|${log ? 1 : 0}`;
-    let w = windows.get(key);
-    if (!w) {
-      w = compute();
-      windows.set(key, w);
-    }
-    return w;
-  }
-}
-
-/**
- * What the 3D points layer needs to colour a cloud: one scalar per point, a colormap, and the
- * window that maps scalars onto it. Categorical and continuous colourings both reduce to this,
- * because the layer offers no per-point colour channel.
- */
-interface Spatial3dEncoding {
-  values: Float32Array;
-  colormap: Colormap;
-  contrastLimits: [number, number];
 }
 
 /**
@@ -1662,14 +1428,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.navigator?.setVisible(visible);
   }
 
-  /** Convert a napari-js `Histogram` (bin count + min/max) to the pane's `IHistogram` (bin edges). */
-  private toIHistogram(h: { counts: Uint32Array; bins: number; min: number; max: number }): IHistogram {
-    const span = h.max - h.min || 1;
-    const bins = Array.from({ length: h.bins }, (_, i) => h.min + (i * span) / h.bins);
-    const counts = Array.from(h.counts);
-    return { bins, counts, max: counts.reduce((m, c) => (c > m ? c : m), 0) };
-  }
-
   /**
    * Mount the 3D volume/isosurface. A multichannel image becomes one additive, tinted
    * {@link VolumeLayer} per channel (so each channel's colour composites into the render); a
@@ -2031,38 +1789,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
 
   // ── Spatial omics ────────────────────────────────────────────────────────────────────────
 
-  /** Marker radius (image px) for a dataset that declares none — segmented cells often don't. */
-  private static readonly SPATIAL_FALLBACK_RADIUS = 4;
-  /** Smallest marker DIAMETER, in slice pixels, over a volume-backed dataset. A cell's real
-   *  size is honoured wherever it survives the grid: the ABC atlas serves 5 µm radii on a
-   *  40 µm/px template, so drawing them to scale would put every cell a fifth of a pixel wide
-   *  and the section would come up empty. The point-size control scales up from this floor. */
-  private static readonly SPATIAL_SLICE_MIN_DIAMETER_PX = 1.5;
-  /** Longest side of the gene-map raster, in field pixels. A gene map is a smooth
-   *  field read as territory, so it gains nothing from matching a 2 Gpx slide's
-   *  resolution — and the estimate costs one pass over this many pixels. */
-  private static readonly GENE_MAP_MAX_SIDE = 512;
-  /** Kernel σ in field pixels at smoothing 1: wide enough to read between cells,
-   *  tight enough to keep a nucleus-scale structure distinct. */
-  private static readonly GENE_MAP_SIGMA = 2.5;
-  /** Clusters drawn as density volumes at once. Past a handful, additive translucent
-   *  clouds stop being separable by eye — and each one is a full rasterisation. */
-  private static readonly DENSITY_MAX_CLUSTERS = 6;
-  /** How much larger a selected marker is drawn, so a small selection is findable inside a
-   *  3.7M-point cloud rather than merely brighter. */
-  private static readonly SPATIAL_SELECTED_SIZE_SCALE = 1.6;
-
-  /** Colour for observations when nothing is selected to colour by: visible, neutral, and
-   *  obviously not encoding anything. */
-  private static readonly SPATIAL_NEUTRAL_COLOR: [number, number, number, number] =
-    [0.35, 0.72, 0.95, 0.9];
-  /** {@link SPATIAL_NEUTRAL_COLOR} as a hex colour (alpha dropped), for the encoders and the
-   *  density-volume tint. */
-  private static readonly SPATIAL_NEUTRAL_HEX = `#${NapariVisualizerService.SPATIAL_NEUTRAL_COLOR
-    .slice(0, 3)
-    .map((c) => Math.round(c * 255).toString(16).padStart(2, '0'))
-    .join('')}`;
-
   /**
    * Mount the SPATIAL_OMICS view: the tissue image with one marker per observation, coloured by
    * an annotation column or a gene. The markers rebuild whenever the dataset or the view state
@@ -2409,7 +2135,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     // The cloud draws a selected marker LARGER, so the pick has to use the same radius the
     // renderer used — otherwise the highlighted cells, the ones a reader is most likely to
     // be pointing at, are the hardest to hover.
-    const scale = NapariVisualizerService.SPATIAL_SELECTED_SIZE_SCALE;
+    const scale = SPATIAL_SELECTED_SIZE_SCALE;
     const mask = this.selectionStore?.current()?.mask;
     const opts = mask?.length
       ? { radiusAt: (i: number) => (mask[i] ? radius * scale : radius) }
@@ -2458,7 +2184,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
           // found — its centre is off screen while part of it is not.
           {
             maxReach: NapariVisualizerService.HOVER_RADIUS_PX
-              * NapariVisualizerService.SPATIAL_SELECTED_SIZE_SCALE,
+              * SPATIAL_SELECTED_SIZE_SCALE,
           },
         );
       }
@@ -2647,10 +2373,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     try {
       faceColor = dataset
         ? await this.spatialFaceColors(dataset, view, selection)
-        : NapariVisualizerService.SPATIAL_NEUTRAL_COLOR;
+        : SPATIAL_NEUTRAL_COLOR;
     } catch (err) {
       console.warn('[napari-js] spatial colouring failed — falling back to a flat colour', err);
-      faceColor = NapariVisualizerService.SPATIAL_NEUTRAL_COLOR;
+      faceColor = SPATIAL_NEUTRAL_COLOR;
     } finally {
       this.observationsLoading--;
       this.showLoading();
@@ -2683,7 +2409,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     await this.ensureGeneMap(viewer, dataset, view, selection, slab);
     if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
     const ref = slab?.ref ?? dataset.imageRef;
-    const base = markerDiameters(obs, NapariVisualizerService.SPATIAL_FALLBACK_RADIUS);
+    const base = markerDiameters(obs, SPATIAL_FALLBACK_RADIUS);
     const scale = view.pointScale > 0 ? view.pointScale : 1;
     const floor = slab?.minDiameter ?? 0;
     const sizeOf = (i: number) =>
@@ -2713,7 +2439,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     if (this.spatialPoints && key === this.spatialLayerKey) {
       this.spatialPoints.size = size;
       this.spatialPoints.visible = this.spatialPointsVisible();
-      this.spatialPoints.faceColor = this.gatherColors(faceColor, slab?.indices);
+      this.spatialPoints.faceColor = gatherColors(faceColor, slab?.indices);
       this.hideForeignImage(viewer, (!!ref || !!dataset.volume) && view.showImage !== false);
     this.regionOverlay?.setRegionsVisible(view.showAnnotations !== false);
       viewer.requestRender();
@@ -2737,7 +2463,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.spatialPoints = viewer.addPoints(positions, {
       name: 'observations',
       size,
-      faceColor: this.gatherColors(faceColor, drawn),
+      faceColor: gatherColors(faceColor, drawn),
       // No border: at Visium spot density an outline per marker reads as noise,
       // and it costs a second colour array.
       borderWidth: 0,
@@ -2933,7 +2659,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     if (!imageW || !imageH) return;
     const step = Math.max(
       1,
-      Math.ceil(Math.max(imageW, imageH) / NapariVisualizerService.GENE_MAP_MAX_SIDE),
+      Math.ceil(Math.max(imageW, imageH) / GENE_MAP_MAX_SIDE),
     );
 
     if (fieldKey !== this.geneMapFieldKey) {
@@ -2952,7 +2678,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
         width: Math.ceil(imageW / step),
         height: Math.ceil(imageH / step),
         step,
-        sigma: NapariVisualizerService.GENE_MAP_SIGMA * smoothing,
+        sigma: GENE_MAP_SIGMA * smoothing,
         values,
         // A plane wins over a selection: the 2D view is showing one section, so a
         // field spanning the specimen's depth would not be the thing on screen.
@@ -3002,18 +2728,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       ref: volumeImageRef(volume, dataset.micronsPerUnit),
       indices: observationsInSlice(dataset.observations, volume, slice),
       slice,
-      minDiameter: NapariVisualizerService.SPATIAL_SLICE_MIN_DIAMETER_PX * volume.voxelSize[0],
+      minDiameter: SPATIAL_SLICE_MIN_DIAMETER_PX * volume.voxelSize[0],
     };
-  }
-
-  /** Per-point colours for the drawn subset. A broadcast tuple stays broadcast —
-   *  it is one colour for every point either way. (A tuple is an array too, so it is told
-   *  apart from a per-point list by its elements, not by `Array.isArray`.) */
-  private gatherColors(colors: RGBA[] | RGBA, indices?: Uint32Array): RGBA[] | RGBA {
-    if (!indices || !isPerPoint(colors)) return colors;
-    const out: RGBA[] = new Array(indices.length);
-    for (let i = 0; i < indices.length; i++) out[i] = colors[indices[i]];
-    return out;
   }
 
   /**
@@ -3086,9 +2802,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.scaleBar = new NapariScaleBar(this.host, shim, micronsPerUnit);
   }
 
-  /** Base marker diameter for the 3D cloud, in SCREEN pixels (the layer's unit). */
-  private static readonly SPATIAL_3D_BASE_SIZE = 3;
-
   /** (Re)build the 3D point cloud for the current dataset + view state. */
   private async rebuildSpatialPoints3d(
     dataset: SpatialDataset | null, view: SpatialViewState,
@@ -3154,9 +2867,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     }
 
     const scale = view.pointScale > 0 ? view.pointScale : 1;
-    const size = NapariVisualizerService.SPATIAL_3D_BASE_SIZE * scale;
+    const size = SPATIAL_3D_BASE_SIZE * scale;
     const scalars = enc?.values ?? new Float32Array(obs.count);
-    const colormap = enc?.colormap ?? this.spatialFlatColormap();
+    const colormap = enc?.colormap ?? spatialFlatColormap();
     const contrastLimits: [number, number] = enc?.contrastLimits ?? [0, 1];
 
     // One imaged section, or the whole stack. The subset IS the geometry, so it
@@ -3251,7 +2964,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
           const i = shown ? shown[k] : k;
           const picked = !!selection.mask[i];
           alphas[k] = picked ? 1 : DEFAULT_MUTED_OPACITY;
-          sizes[k] = picked ? NapariVisualizerService.SPATIAL_SELECTED_SIZE_SCALE : 1;
+          sizes[k] = picked ? SPATIAL_SELECTED_SIZE_SCALE : 1;
         }
         cloud.alphas = alphas;
         cloud.sizes = sizes;
@@ -3356,8 +3069,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       const inPlane = dataset.volume?.voxelSize ?? grid.voxelSize;
       this.geneMapVolumeField = expressionVolume(obs, grid, {
         sigma: [
-          inPlane[0] * NapariVisualizerService.GENE_MAP_SIGMA * smoothing,
-          inPlane[1] * NapariVisualizerService.GENE_MAP_SIGMA * smoothing,
+          inPlane[0] * GENE_MAP_SIGMA * smoothing,
+          inPlane[1] * GENE_MAP_SIGMA * smoothing,
           grid.voxelSize[2] * 1.5 * smoothing,
         ],
         values,
@@ -3541,52 +3254,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
    */
   private async densityGroups(
     dataset: SpatialDataset, column: string | null, selection: SpatialSelectionMask,
-  ): Promise<{ name: string; color: string; indices?: Uint32Array }[]> {
-    const n = dataset.observations.count;
-    const inSelection = selection.count > 0 ? selection.mask : null;
+  ): Promise<DensityGroup[]> {
     const port = this.spatialData;
     const meta = column ? findColumnMeta(dataset, column) : undefined;
-    if (!port || !column || !meta || meta.kind !== 'categorical') {
-      const indices = inSelection ? maskToIndices(inSelection) : undefined;
-      return [{
-        name: inSelection ? 'selected cells' : 'all cells',
-        color: NapariVisualizerService.SPATIAL_NEUTRAL_HEX,
-        indices,
-      }];
-    }
-
+    if (!port || !column || !meta || meta.kind !== 'categorical') return [totalDensityGroup(selection)];
     const loaded = await port.getColumn(column);
     if (!isCategoricalColumn(loaded)) return [];
-    const colors = resolveCategoryColors(loaded.meta);
-    const counts = new Uint32Array(loaded.meta.categories.length);
-    for (let i = 0; i < n; i++) {
-      if (inSelection && !inSelection[i]) continue;
-      const code = loaded.codes[i];
-      if (code !== NO_CATEGORY && code < counts.length) counts[code]++;
-    }
-    const ranked = Array.from(counts, (count, code) => ({ code, count }))
-      .filter((c) => c.count > 0)
-      .sort((a, b) => b.count - a.count)
-      .slice(0, NapariVisualizerService.DENSITY_MAX_CLUSTERS);
-    if (counts.filter((c) => c > 0).length > ranked.length) {
-      console.warn(
-        `[napari-js] ${column}: drawing the ${ranked.length} largest clusters as density ` +
-          'volumes; more than that stop being separable by eye',
-      );
-    }
-    return ranked.map(({ code }) => {
-      const indices = new Uint32Array(counts[code]);
-      let k = 0;
-      for (let i = 0; i < n; i++) {
-        if (inSelection && !inSelection[i]) continue;
-        if (loaded.codes[i] === code) indices[k++] = i;
-      }
-      return {
-        name: loaded.meta.categories[code],
-        color: colors[code] ?? '#888888',
-        indices: indices.subarray(0, k),
-      };
-    });
+    return rankDensityGroups(column, loaded, dataset.observations.count, selection);
   }
 
   /**
@@ -3679,15 +3353,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.spatialDrawn3d = null;
   }
 
-  /** A one-colour colormap, for the "nothing to colour by" state. */
-  private spatialFlatColormap(): Colormap {
-    const [r, g, b] = NapariVisualizerService.SPATIAL_NEUTRAL_COLOR;
-    const rgb: Rgb = [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
-    // Two identical stops: colormapFromLut needs at least two, and equal ends
-    // make every value resolve to the same colour.
-    return colormapFromLut('spatial-flat', [rgb, rgb]);
-  }
-
   /**
    * The per-point scalar + colormap + window that colour the 3D cloud.
    *
@@ -3705,64 +3370,16 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     if (colorBy.kind === 'column') {
       const column: SpatialColumn = await port.getColumn(colorBy.name);
       if (isCategoricalColumn(column)) {
-        return this.encodeSpatial3dCategorical(column.codes, resolveCategoryColors(column.meta));
+        return encodeSpatial3dCategorical(column.codes, resolveCategoryColors(column.meta));
       }
       return this.encodeSpatial3dContinuous(column.values, view);
     }
     return this.encodeSpatial3dContinuous(await port.getFeatureVector(colorBy.name), view);
   }
 
-  /** Category codes → a stepped LUT, exact for up to {@link SPATIAL_3D_MAX_CATEGORIES}. */
-  private encodeSpatial3dCategorical(codes: Uint16Array, colors: string[]): Spatial3dEncoding | null {
-    // Slot 0 is reserved for "no category", so the palette occupies 1..K and the
-    // block count is one more than the category count — which is why the published
-    // ceiling is 95 categories rather than the LUT's 96 distinguishable blocks.
-    if (colors.length > SPATIAL_3D_MAX_CATEGORIES) {
-      console.warn(
-        `[napari-js] ${colors.length} categories exceeds the ${SPATIAL_3D_MAX_CATEGORIES} the 3D `
-        + "layer's 256-entry LUT can hold distinctly; drawing flat instead of with wrong colours",
-      );
-      return null;
-    }
-    const k = colors.length + 1;
-    const palette: Rgb[] = [
-      MISSING_COLOR,
-      ...colors.map(parseHex),
-    ];
-    const lut: Rgb[] = new Array(LUT_SIZE);
-    for (let j = 0; j < LUT_SIZE; j++) {
-      lut[j] = palette[Math.min(k - 1, Math.floor((j * k) / LUT_SIZE))];
-    }
-    const values = new Float32Array(codes.length);
-    for (let i = 0; i < codes.length; i++) {
-      values[i] = codes[i] === NO_CATEGORY ? 0 : codes[i] + 1;
-    }
-    return {
-      values,
-      colormap: colormapFromLut('spatial-categories', lut),
-      contrastLimits: [-0.5, k - 0.5],
-    };
-  }
-
-  /** Continuous values → the active colormap over a percentile-clipped window (log1p first when
-   *  the view's log scale is on). */
+  /** Continuous values → the active colormap over a percentile-clipped window (3D cloud). */
   private encodeSpatial3dContinuous(source: Float32Array, view: SpatialViewState): Spatial3dEncoding {
-    const lut = this.spatialLut(view);
-    const [lo, hi] = view.percentileClip ?? [0.01, 0.99];
-    const log = !!view.logScale;
-    let values = source;
-    if (log) {
-      values = new Float32Array(source.length);
-      for (let i = 0; i < source.length; i++) values[i] = Math.log1p(Math.max(0, source[i]));
-    }
-    // Keyed by the SOURCE vector: the log copy above is new on every call.
-    const [min, max] = this.contrastWindows.get(source, lo, hi, log, () => contrastWindow(values, lo, hi));
-    return {
-      values,
-      colormap: colormapFromLut('spatial-continuous', lut),
-      // A degenerate window would divide by zero in the shader's normalisation.
-      contrastLimits: max > min ? [min, max] : [min, min + 1],
-    };
+    return encodeSpatial3dContinuous(source, view, this.spatialLut(view), this.contrastWindows);
   }
 
   /**
@@ -3782,13 +3399,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     if (!port || !colorBy) {
       // Genuinely uniform: one broadcast tuple, so a flat 84k-observation view
       // does not allocate 84k of them.
-      if (!muted && view.opacity >= 1) return NapariVisualizerService.SPATIAL_NEUTRAL_COLOR;
+      if (!muted && view.opacity >= 1) return SPATIAL_NEUTRAL_COLOR;
       // Not uniform — the opacity control or a selection varies the alpha, so it
       // has to be per-point. Returning the constant tuple here is what made the
       // Opacity slider do nothing in the default state, which is the state anyone
       // lands in before picking a colour source.
       return toRgbaTuples(encodeCategorical(new Uint16Array(dataset.observations.count), {
-        colors: [NapariVisualizerService.SPATIAL_NEUTRAL_HEX],
+        colors: [SPATIAL_NEUTRAL_HEX],
         opacity: view.opacity,
         muted,
       }));
@@ -3824,18 +3441,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     return toRgbaTuples(this.encodeSpatialContinuous(values, view, muted));
   }
 
-  /** Continuous values → RGBA through the active colormap and a clipped window (log scale per
-   *  the view). */
+  /** Continuous values → RGBA through the active colormap and a clipped window (2D markers). */
   private encodeSpatialContinuous(
     values: Float32Array, view: SpatialViewState, muted: Uint8Array | null = null,
   ): Float32Array {
-    const lut = this.spatialLut(view);
-    const [lo, hi] = view.percentileClip ?? [0.01, 0.99];
-    // The window is taken on the raw values (encodeContinuous applies the log itself).
-    const [min, max] = this.contrastWindows.get(values, lo, hi, false, () => contrastWindow(values, lo, hi));
-    return encodeContinuous(values, {
-      lut, min, max, log: view.logScale, opacity: view.opacity, muted,
-    });
+    return encodeSpatialContinuous(values, view, this.spatialLut(view), this.contrastWindows, muted);
   }
 
   /**
@@ -4780,20 +4390,20 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     // requested channel (multichannel) or the single grayscale volume (key 0).
     if (this.volumeChannelData.size) {
       const data = this.volumeChannelData.get(channelIndex) ?? this.volumeChannelData.get(0);
-      return data ? this.toIHistogram(histogramScalar(data, bins, 0, 255)) : null;
+      return data ? toIHistogram(histogramScalar(data, bins, 0, 255)) : null;
     }
     // Tiled mode has no full in-memory pixels → use the coarse per-channel sample (RGB: readback).
     if (this.tiled) {
       if (this.imageMode === 'rgb') return this.rgbHistogram(channelIndex, bins);
       const sample = this.histSamples.get(this.imageMode === 'grayscale' ? 0 : channelIndex);
-      return sample ? this.toIHistogram(histogramScalar(sample, bins, 0, 255)) : null;
+      return sample ? toIHistogram(histogramScalar(sample, bins, 0, 255)) : null;
     }
     // Grayscale/multichannel (stitch): native per-channel histogram straight from the in-memory
     // scalar layer (no GPU readback). RGB: bin the displayed pixels' R/G/B byte (8-bit client path).
     const layer = this.channelView?.layers[this.imageMode === 'grayscale' ? 0 : channelIndex];
     if (layer) {
       const h = v.layerHistogram(layer, bins);
-      if (h) return this.toIHistogram(h);
+      if (h) return toIHistogram(h);
     }
     if (this.imageMode === 'rgb') return this.rgbHistogram(channelIndex, bins);
     return null;
@@ -4894,31 +4504,3 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   }
 }
 
-/**
- * Additively composite grayscale channel images, each tinted with its display colour —
- * the navigator's picture of a multichannel image.
- */
-function tintedComposite(images: ImageBitmap[], colors: string[]): HTMLCanvasElement {
-  const w = images[0]?.width ?? 1;
-  const h = images[0]?.height ?? 1;
-  const out = document.createElement('canvas');
-  out.width = w;
-  out.height = h;
-  const ctx = out.getContext('2d')!;
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, w, h);
-  const tmp = document.createElement('canvas');
-  tmp.width = w;
-  tmp.height = h;
-  const t = tmp.getContext('2d')!;
-  images.forEach((img, i) => {
-    t.globalCompositeOperation = 'source-over';
-    t.drawImage(img, 0, 0, w, h);
-    t.globalCompositeOperation = 'multiply';
-    t.fillStyle = colors[i];
-    t.fillRect(0, 0, w, h);
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.drawImage(tmp, 0, 0);
-  });
-  return out;
-}
