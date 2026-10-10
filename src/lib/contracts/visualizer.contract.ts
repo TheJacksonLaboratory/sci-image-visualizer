@@ -8,7 +8,9 @@ import { PlotType, PlotTypeDescriptor } from './plot-type';
 import { ViewerCapabilities } from './capabilities.contract';
 import { IRegionOverlay } from './region-overlay.contract';
 import { IHistogram } from './channel-histogram-api.contract';
-import { ColormapNode, IWandOptions, IBrushOptions, SpatialViewState, SpatialColorBy } from './display-types';
+import {
+  CanvasToolOptions, ColormapNode, IWandOptions, IBrushOptions, SpatialViewState, SpatialColorBy,
+} from './display-types';
 import {
   CategoricalColumnMeta,
   SpatialDataset,
@@ -232,16 +234,29 @@ export interface IRegionStore {
   getStackSaveSlices(): Map<number, Region[]>;
 }
 
-/** On-canvas tool modes (wand, brush, vertex eraser, zoom-to-box). */
+/** On-canvas tool modes (wand, brush, vertex eraser, zoom-to-box, SAM point). */
 export interface IToolController {
+  /**
+   * Arm one on-canvas tool (`CanvasToolId`) with its options — the wand's
+   * {@link IWandOptions}, the brush's {@link IBrushOptions} (`size` is the
+   * matrix-pixel diameter of the painted disc), the eraser's `{ radius }` —
+   * and disarm the one that was armed. `null`, or any id that is not a canvas
+   * tool (a region draw mode such as `'drawrect'`, `'pan'`), disarms only.
+   * Arming the armed tool again applies the options and keeps its work in
+   * progress.
+   */
+  setActiveTool(id: string | null, options?: CanvasToolOptions): void;
+  /** @deprecated Use `setActiveTool('wand', options)` / `setActiveTool(null)`. */
   setWandMode(active: boolean, options?: IWandOptions): void;
   setWandOptions(options: IWandOptions): void;
   clearActiveWandRegion(): void;
-  /** Brush region tool. `size` (matrix-pixel diameter) sizes the painted disc. */
+  /** @deprecated Use `setActiveTool('brush', options)` / `setActiveTool(null)`. */
   setBrushMode(active: boolean, options?: IBrushOptions): void;
   setBrushOptions(options: IBrushOptions): void;
+  /** @deprecated Use `setActiveTool('eraseVertex', { radius })` / `setActiveTool(null)`. */
   setVertexEraserMode(active: boolean): void;
   setVertexEraserRadius(radius: number): void;
+  /** @deprecated Use `setActiveTool('zoomToBox')` / `setActiveTool(null)`. */
   setZoomToBoxMode(active: boolean): void;
   /** Box-prompted SAM segmentation: segment every rectangle region into masks.
    *  Returns the number of mask regions added. (jit-ui#90) */
@@ -251,7 +266,8 @@ export interface IToolController {
   segmentRectanglesCellpose(): Promise<number>;
   /** Choose the registered SAM model the segment tools use (jit-ui#90 P1). */
   setSamModel(id: string): void;
-  /** Toggle the interactive SAM point-prompt tool (click = +point, Shift = -). */
+  /** Toggle the interactive SAM point-prompt tool (click = +point, Shift = -).
+   *  @deprecated Use `setActiveTool('samPoint')` / `setActiveTool(null)`. */
   setSamPointMode(active: boolean): void;
   /** Finalise / discard the in-progress SAM point object. */
   commitSamPoints(): void;

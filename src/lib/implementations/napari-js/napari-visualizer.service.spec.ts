@@ -211,6 +211,48 @@ describe('NapariVisualizerService', () => {
     expect(await firstValueFrom(service.getReverseScale())).toBe(true);
   });
 
+  describe('setActiveTool', () => {
+    type Internals = {
+      viewer: unknown;
+      coordTransform: unknown;
+      pixelsStale: boolean;
+      pixelTools: Set<string>;
+      canvasTools: { activeId: string | null };
+      armReadback(delay?: number): void;
+    };
+    const internals = () => service as unknown as Internals;
+
+    it('arms nothing before a plot, but still records the pixel tool', () => {
+      service.setActiveTool('wand', { sensitivity: 2 });
+      expect(internals().canvasTools.activeId).toBeNull();
+      expect([...internals().pixelTools]).toEqual(['wand']);
+    });
+
+    it('disables the camera, refreshes the readback and arms the tool', () => {
+      const setControlsEnabled = jest.fn();
+      internals().viewer = { setControlsEnabled };
+      internals().coordTransform = {};
+      const arm = jest.spyOn(internals(), 'armReadback').mockImplementation(() => undefined);
+
+      service.setActiveTool('brush', { size: 8 });
+      expect(setControlsEnabled).toHaveBeenLastCalledWith(false);
+      expect(arm).toHaveBeenCalledWith(0);
+      expect(internals().canvasTools.activeId).toBe('brush');
+
+      // The eraser re-reads only a stale readback; zoom-to-box never reads pixels.
+      arm.mockClear();
+      internals().pixelsStale = false;
+      service.setActiveTool('eraseVertex', { radius: 4 });
+      service.setActiveTool('zoomToBox');
+      expect(arm).not.toHaveBeenCalled();
+      expect(internals().pixelTools.size).toBe(0);
+
+      service.setActiveTool('drawrect'); // a region mode: disarm only
+      expect(internals().canvasTools.activeId).toBeNull();
+      internals().viewer = null;
+    });
+  });
+
   it('tool controls are safe no-ops before a plot is mounted', async () => {
     expect(() => {
       service.setWandMode(true);

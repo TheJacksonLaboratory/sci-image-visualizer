@@ -112,7 +112,7 @@ describe('PlotlyService relayout handler', () => {
     service = TestBed.inject(PlotlyService);
 
     // Set up internal state needed by the relayout handler
-    (service as any).plotDiv = 'plot';
+    (service as unknown as { plotDiv: string }).plotDiv = 'plot';
     (service as any).shapes = [];
     (service as any).imageInfo = { showStack: false, isGrayscale: true } as IImageInfo;
     (service as any).trueImgSize = [0, 1344, 0, 1024];
@@ -288,7 +288,7 @@ describe('PlotlyService region glue (Plotly-specific)', () => {
     });
     service = TestBed.inject(PlotlyService);
 
-    (service as any).plotDiv = 'plot';
+    (service as unknown as { plotDiv: string }).plotDiv = 'plot';
     (service as any).shapes = [];
     (service as any).imageInfo = { showStack: false, isGrayscale: true } as IImageInfo;
     (service as any).fileName = '';
@@ -371,7 +371,7 @@ describe('PlotlyService viewport + stack-state methods', () => {
       providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
     });
     service = TestBed.inject(PlotlyService);
-    (service as any).plotDiv = 'plot';
+    (service as unknown as { plotDiv: string }).plotDiv = 'plot';
     (service as any).imageInfo = { showStack: true, isGrayscale: true } as IImageInfo;
     document.body.innerHTML = '<div id="plot"></div>';
     relayout = jest.spyOn(Plotly, 'relayout').mockResolvedValue({} as any);
@@ -678,3 +678,37 @@ describe('PlotlyService async supersession (review OSD-PLOTLY-8)', () => {
   });
 });
 
+describe('PlotlyService canvas tools (setActiveTool)', () => {
+  let service: PlotlyService;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule],
+      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+    });
+    service = TestBed.inject(PlotlyService);
+    document.body.innerHTML = '<div id="plot"></div>';
+    (service as unknown as { plotDiv: string }).plotDiv = 'plot';
+  });
+
+  afterEach(() => service.setActiveTool(null));
+
+  const overlays = () => document.querySelectorAll('#plot > canvas').length;
+
+  it('arms one tool at a time over the plot div', () => {
+    service.setActiveTool('wand', { sensitivity: 2 });
+    expect(overlays()).toBe(1);
+    service.setActiveTool('brush', { size: 8 });
+    expect(overlays()).toBe(1);
+    service.setActiveTool('drawrect'); // a region mode arms no canvas tool
+    expect(overlays()).toBe(0);
+  });
+
+  it('a deprecated setter disarms only its own tool', () => {
+    service.setBrushMode(true, { size: 8 });
+    service.setWandMode(false);
+    expect(overlays()).toBe(1);
+    service.setBrushMode(false);
+    expect(overlays()).toBe(0);
+  });
+});

@@ -38,6 +38,7 @@ import {
 import { ActivePlotMode, PlotModeController } from './plot-mode/plot-mode-controller';
 import { ViewerFeature } from './contracts/capabilities.contract';
 import { IntensityProfile, IVisualizer, VISUALIZER, VisualizerHandle } from './contracts/visualizer.contract';
+import { CanvasToolOptions } from './contracts/display-types';
 import { SAM_MODELS, getDefaultSamModelId, isSamModelReady } from './toolbar/segmentation/sam-model-registry';
 import { SamToolService } from './toolbar/segmentation/sam-tool.service';
 import { SamPointToolService } from './toolbar/segmentation/sam-point-tool.service';
@@ -1674,16 +1675,20 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       this.plotService.setDragMode(viewportDrag ? active : false);
     }
 
-    // On-canvas tool overlays.
-    this.plotService.setZoomToBoxMode(active === 'zoomToBox');
-    this.plotService.setWandMode(active === 'wand', { sensitivity: this.wandSensitivity });
-    this.plotService.setBrushMode(active === 'brush', { size: this.brushSize, ...this.brushClass });
-    this.plotService.setSamPointMode(active === 'samPoint');
+    // On-canvas tool overlays: arm the one this mode names (none for a region or
+    // viewport mode), disarming whichever was armed.
+    this.plotService.setActiveTool(active, this.canvasToolOptions(active));
     // Leaving point mode dismisses any lingering status toast.
     if (active !== 'samPoint') this.hideSamToast();
-    this.plotService.setVertexEraserMode(active === 'eraseVertex');
-    if (active === 'eraseVertex') {
-      this.plotService.setVertexEraserRadius(this.vertexEraserRadius);
+  }
+
+  /** The options a canvas tool is armed with, from the toolbar's settings. */
+  private canvasToolOptions(mode: string | null): CanvasToolOptions | undefined {
+    switch (mode) {
+      case 'wand': return { sensitivity: this.wandSensitivity };
+      case 'brush': return { size: this.brushSize, ...this.brushClass };
+      case 'eraseVertex': return { radius: this.vertexEraserRadius };
+      default: return undefined;
     }
   }
 
@@ -2628,11 +2633,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.session.setActiveTool(null);
     this.plotService.getRegionOverlay()?.setMode('none');
     this.plotService.setDragMode(false);
-    this.plotService.setZoomToBoxMode(false);
-    this.plotService.setWandMode(false);
-    this.plotService.setBrushMode(false);
-    this.plotService.setSamPointMode(false);
-    this.plotService.setVertexEraserMode(false);
+    this.plotService.setActiveTool(null);
   }
 }
 

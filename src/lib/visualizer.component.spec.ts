@@ -69,6 +69,7 @@ function mockPlotService(): any {
     zoomOut: jest.fn(),
     setImageSmoothingEnabled: jest.fn(),
     setDragMode: jest.fn(),
+    setActiveTool: jest.fn(),
     setZoomToBoxMode: jest.fn(),
     setWandMode: jest.fn(),
     setWandOptions: jest.fn(),
@@ -1092,14 +1093,25 @@ describe('VisualizerComponent (UI shell)', () => {
     it('toggleDragMode wand arms the wand with the current sensitivity', () => {
       component.wandSensitivity = 2.5;
       component.toggleDragMode('wand');
-      expect(plotService.setWandMode).toHaveBeenCalledWith(true, { sensitivity: 2.5 });
+      expect(plotService.setActiveTool).toHaveBeenCalledWith('wand', { sensitivity: 2.5 });
     });
 
-    it('toggleDragMode eraseVertex also pushes the eraser radius', () => {
+    it('toggleDragMode eraseVertex arms the eraser with its radius', () => {
       component.vertexEraserRadius = 12;
       component.toggleDragMode('eraseVertex');
-      expect(plotService.setVertexEraserMode).toHaveBeenLastCalledWith(true);
-      expect(plotService.setVertexEraserRadius).toHaveBeenCalledWith(12);
+      expect(plotService.setActiveTool).toHaveBeenLastCalledWith('eraseVertex', { radius: 12 });
+    });
+
+    it('arms canvas tools with one setActiveTool call, not a per-tool fan-out', () => {
+      component.toggleDragMode('samPoint');
+      expect(plotService.setActiveTool).toHaveBeenCalledTimes(1);
+      expect(plotService.setActiveTool).toHaveBeenLastCalledWith('samPoint', undefined);
+      component.toggleDragMode('drawrect'); // a region mode arms no canvas tool
+      expect(plotService.setActiveTool).toHaveBeenLastCalledWith('drawrect', undefined);
+      for (const setter of ['setWandMode', 'setBrushMode', 'setVertexEraserMode', 'setZoomToBoxMode',
+        'setSamPointMode', 'setVertexEraserRadius'] as const) {
+        expect(plotService[setter]).not.toHaveBeenCalled();
+      }
     });
 
     it('toBezierRegion / toPolygonRegion drive the overlay bezier toggle', () => {
@@ -1464,11 +1476,11 @@ describe('VisualizerComponent — autoscale from the backend (CORE-5)', () => {
     const autoscale$ = new BehaviorSubject<void>(undefined);
     const { component, plot, store } = harness({ getAutoscaleEvent: () => autoscale$ });
     component.toggleDragMode('wand');
-    expect(plot.setWandMode).toHaveBeenLastCalledWith(true, expect.anything());
+    expect(plot.setActiveTool).toHaveBeenLastCalledWith('wand', expect.anything());
 
     autoscale$.next(); // the context-menu "Autoscale" on OSD / napari
     expect(component.activeDragMode).toBeNull();
-    expect(plot.setWandMode).toHaveBeenLastCalledWith(false, expect.anything());
+    expect(plot.setActiveTool).toHaveBeenLastCalledWith(null, undefined);
     let tool: string | null = 'unset';
     store.getActiveTool$().subscribe((t) => (tool = t)).unsubscribe();
     expect(tool).toBeNull();

@@ -11,7 +11,7 @@ import { OpenSeadragonVisualizerService } from './implementations/osd/openseadra
 import { PlotType, PlotTypeDescriptor, isNapari3d, isNapariScatter, isSpatialOmics, isSpatialOmics3d } from './contracts/plot-type';
 import { IVisualizer, LoadedImage, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls, ISpatialControls } from './contracts/visualizer.contract';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-data.port';
-import { ColormapNode, IBrushOptions, IWandOptions, SpatialColorBy } from './contracts/display-types';
+import { CanvasToolOptions, ColormapNode, IBrushOptions, IWandOptions, SpatialColorBy } from './contracts/display-types';
 import { SpatialDataset, isCategoricalColumn } from './contracts/spatial-dataset.contract';
 import { resolveCategoryColors } from './spatial/spatial-encoding';
 import { sectionsOf } from './spatial/spatial-sections';
@@ -456,17 +456,25 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   // The wand, vertex eraser and zoom-to-box are implemented on both backends
   // via ICoordinateTransform (+ a viewport pixel readback for the wand), so they
   // follow the active renderer.
+  setActiveTool(id: string | null, options?: CanvasToolOptions): void {
+    this.renderer().setActiveTool(id, options);
+  }
+  /** @deprecated Use {@link setActiveTool}. */
   setWandMode(active: boolean, options?: IWandOptions): void { this.renderer().setWandMode(active, options); }
   setWandOptions(options: IWandOptions): void { this.renderer().setWandOptions(options); }
   clearActiveWandRegion(): void { this.renderer().clearActiveWandRegion(); }
+  /** @deprecated Use {@link setActiveTool}. */
   setBrushMode(active: boolean, options?: IBrushOptions): void { this.renderer().setBrushMode(active, options); }
   setBrushOptions(options: IBrushOptions): void { this.renderer().setBrushOptions(options); }
+  /** @deprecated Use {@link setActiveTool}. */
   setVertexEraserMode(active: boolean): void { this.renderer().setVertexEraserMode(active); }
   setVertexEraserRadius(radius: number): void { this.renderer().setVertexEraserRadius(radius); }
+  /** @deprecated Use {@link setActiveTool}. */
   setZoomToBoxMode(active: boolean): void { this.renderer().setZoomToBoxMode(active); }
   segmentRectangles(): Promise<number> { return this.renderer().segmentRectangles(); }
   segmentRectanglesCellpose(): Promise<number> { return this.renderer().segmentRectanglesCellpose(); }
   setSamModel(id: string): void { this.renderer().setSamModel(id); }
+  /** @deprecated Use {@link setActiveTool}. */
   setSamPointMode(active: boolean): void { this.renderer().setSamPointMode(active); }
   commitSamPoints(): void { this.renderer().commitSamPoints(); }
   clearSamPoints(): void { this.renderer().clearSamPoints(); }

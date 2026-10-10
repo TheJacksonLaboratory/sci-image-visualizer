@@ -656,7 +656,7 @@ describe('contributed plot types — toolbar tools (ctx.tools)', () => {
     tools.armBrush({ label: 'dianne:positive', color: '#1E88E5' });
 
     expect(component.activeDragMode).toBe('brush');
-    expect(plot.setBrushMode).toHaveBeenLastCalledWith(true, {
+    expect(plot.setActiveTool).toHaveBeenLastCalledWith('brush', {
       size: component.brushSize, label: 'dianne:positive', color: '#1E88E5',
     });
     expect(armed[armed.length - 1]).toBe('brush');
@@ -665,11 +665,11 @@ describe('contributed plot types — toolbar tools (ctx.tools)', () => {
   it('arming again while the brush is armed switches class without re-arming', () => {
     const { component, plot, tools } = activeCtx();
     tools.armBrush({ label: 'pos', color: '#00f' });
-    const armCalls = plot.setBrushMode.mock.calls.length;
+    const armCalls = plot.setActiveTool.mock.calls.length;
 
     tools.armBrush({ label: 'neg', color: '#f00' });
 
-    expect(plot.setBrushMode.mock.calls.length).toBe(armCalls);
+    expect(plot.setActiveTool.mock.calls.length).toBe(armCalls);
     expect(plot.setBrushOptions).toHaveBeenLastCalledWith({ size: component.brushSize, label: 'neg', color: '#f00' });
     expect(component.activeDragMode).toBe('brush');
   });
@@ -691,7 +691,7 @@ describe('contributed plot types — toolbar tools (ctx.tools)', () => {
     expect(armed[armed.length - 1]).toBe('pan');
     component.toggleDragMode('brush');
 
-    expect(plot.setBrushMode).toHaveBeenLastCalledWith(true, { size: component.brushSize });
+    expect(plot.setActiveTool).toHaveBeenLastCalledWith('brush', { size: component.brushSize });
   });
 
   it('disarm clears the armed tool', () => {
@@ -701,7 +701,7 @@ describe('contributed plot types — toolbar tools (ctx.tools)', () => {
     tools.disarm();
 
     expect(component.activeDragMode).toBeNull();
-    expect(plot.setBrushMode).toHaveBeenLastCalledWith(false, { size: component.brushSize });
+    expect(plot.setActiveTool).toHaveBeenLastCalledWith(null, undefined);
     expect(armed[armed.length - 1]).toBeNull();
   });
 });

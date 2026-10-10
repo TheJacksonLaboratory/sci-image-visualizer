@@ -91,6 +91,7 @@ function mockBackend(): any {
     importRegions: jest.fn().mockReturnValue([]),
     exportRegions: jest.fn(),
     getGeoJsonString: jest.fn().mockReturnValue('{}'),
+    setActiveTool: jest.fn(),
     setWandMode: jest.fn(),
     setWandOptions: jest.fn(),
     clearActiveWandRegion: jest.fn(),
@@ -413,6 +414,8 @@ describe('RoutingVisualizerService (characterization)', () => {
     ['importRegions', ['{}']],
     ['exportRegions', [[]]],
     ['getGeoJsonString', [[]]],
+    ['setActiveTool', ['wand', { sensitivity: 2 }]],
+    ['setActiveTool', [null, undefined]],
     ['setWandMode', [true, { sensitivity: 2 }]],
     ['setWandOptions', [{ sensitivity: 2 }]],
     ['clearActiveWandRegion', []],
@@ -441,7 +444,10 @@ describe('RoutingVisualizerService (characterization)', () => {
     router.zoomIn();
     router.setDragMode('pan');
     router.setZIndex(2);
+    router.setActiveTool('brush', { size: 8 });
     expect(osd.zoomIn).toHaveBeenCalled();
+    expect(osd.setActiveTool).toHaveBeenCalledWith('brush', { size: 8 });
+    expect(plotly.setActiveTool).not.toHaveBeenCalled();
     expect(osd.setDragMode).toHaveBeenCalledWith('pan');
     expect(osd.setZIndex).toHaveBeenCalledWith(2);
   });

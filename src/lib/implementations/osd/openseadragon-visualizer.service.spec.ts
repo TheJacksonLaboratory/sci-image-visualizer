@@ -73,6 +73,29 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     expect(cached.ratios).toEqual([(w / 2 * 4) / w, (h / 2 * 2) / h]);
   });
 
+  it('setActiveTool: mouse-nav is off while a canvas tool holds the pointer, on otherwise', () => {
+    const setMouseNavEnabled = jest.fn();
+    type Internals = { viewer: unknown; viewportPixels: unknown; canvasTools: { activeId: string | null } };
+    const internals = service as unknown as Internals;
+    internals.viewer = { setMouseNavEnabled, destroy: () => undefined };
+
+    internals.viewportPixels = {};
+    service.setActiveTool('wand', { sensitivity: 2 });
+    expect(setMouseNavEnabled).toHaveBeenLastCalledWith(false);
+    expect(internals.viewportPixels).toBeNull(); // re-read the viewport on first use
+    expect(internals.canvasTools.activeId).toBe('wand');
+
+    internals.viewportPixels = {};
+    service.setActiveTool('zoomToBox');
+    expect(setMouseNavEnabled).toHaveBeenLastCalledWith(false);
+    expect(internals.viewportPixels).not.toBeNull(); // the box reads no pixels
+
+    // A region draw mode (armed on the overlay) or nothing: no canvas tool, nav back on.
+    service.setActiveTool('drawrect');
+    expect(setMouseNavEnabled).toHaveBeenLastCalledWith(true);
+    expect(internals.canvasTools.activeId).toBeNull();
+  });
+
   it('constructs against the port stubs (no viewer, no DOM)', () => {
     expect(service).toBeTruthy();
     expect(service.capabilities).toBeDefined();
