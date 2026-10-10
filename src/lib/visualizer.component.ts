@@ -1,6 +1,6 @@
 import { ChangeDetectorRef, Component, AfterViewInit, ElementRef, EventEmitter, Inject, Injector, Input, NgZone, OnChanges, OnDestroy, OnInit, Optional, Output, SimpleChanges, Type, ViewChild } from '@angular/core';
 
-import { Observable, Subject } from 'rxjs';
+import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 
 import { MenuItem, MessageService } from 'primeng/api';
@@ -42,6 +42,7 @@ import { SAM_MODELS, getDefaultSamModelId, isSamModelReady } from './toolbar/seg
 import { SamToolService } from './toolbar/segmentation/sam-tool.service';
 import { SamPointToolService } from './toolbar/segmentation/sam-point-tool.service';
 import { CellSegmentToolService } from './toolbar/segmentation/cell-segment-tool.service';
+import { SegmentationRunner } from './toolbar/segmentation/segmentation-runner';
 import {
   TOOLBAR_TOOLS,
   NumberParamSpec,
@@ -259,15 +260,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     values: Record<string, unknown>;
     fields: { spec: ToolParamSpec; number: NumberParamSpec | null; select: SelectParamSpec | null }[];
   } | null = null;
-  /** SAM download/segment toast state (bound by the `sam` p-toast template). */
-  samStatus = '';
-  samProgress = 0; // 0..100, encoder download
-  samDownloading = false;
-  samBusy = false; // any SAM work in flight (drives the indeterminate spinner)
-  /** Whether the shared `sam` toast is currently shown (avoids stacking it on
-   *  every point click, which re-runs inference). */
-  private samToastShown = false;
-
   readonly samToastKey = `sam-${VisualizerComponent.nextToastId++}`;
   /**
    * Outlet for the library's own result/error notices.
@@ -278,16 +270,19 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * mount a bare `<p-toast>` (jit-ui does, in its file-tree component). Every
    * other host — including this repo's own browser example — dropped them
    * silently, which made a failed or no-op segmentation look like a dead button:
-   * the sticky progress toast is cleared in the same tick by hideSamToast, and
+   * the sticky progress toast is cleared in the same tick by its teardown, and
    * the message explaining why never appeared anywhere.
    *
    * Keyed to this component instance so the library renders its own outlet and
    * is not dependent on host markup. Deliberately NOT the sticky toast's key:
-   * {@link hideSamToast} clears that key in the `finally`, which would wipe the
+   * `SegmentationRunner.hide` clears that key in the `finally`, which would wipe the
    * result the moment it was posted, and the sticky toast's custom template is
    * built for the live status + progress bar.
    */
   readonly resultToastKey = `${this.samToastKey}-result`;
+  /** Segmentation runs and their sticky progress toast. */
+  readonly segmentation = new SegmentationRunner(
+    this.messageService, this.samToastKey, this.resultToastKey, () => this.cdr.detectChanges());
   /** Vertex eraser radius in image-pixel coordinates. */
   vertexEraserRadius = 20;
 
@@ -738,23 +733,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       this.imgLoading = isImageLoading;
     });
     this.regionActions.bind(this.unsub, () => this.cdr.detectChanges());
-    // Interactive point-prompt segmentation runs inside the renderer on each
-    // click; surface its live status + download progress in the shared `sam`
-    // toast so the user sees it working (the first click pulls the encoder).
-    this.samPointTool.progress$.pipe(takeUntil(this.unsub)).subscribe((f) => {
-      this.samDownloading = f >= 0 && f < 1;
-      if (f >= 0) this.samProgress = Math.min(100, Math.round(f * 100));
-      this.cdr.detectChanges();
-    });
-    this.samPointTool.status$.pipe(takeUntil(this.unsub)).subscribe((m) => {
-      this.samStatus = m;
-      this.cdr.detectChanges();
-    });
-    this.samPointTool.busy$.pipe(takeUntil(this.unsub)).subscribe((busy) => {
-      this.samBusy = busy;
-      if (busy) this.showSamToast('SAM point segmentation');
-      this.cdr.detectChanges();
-    });
+    this.segmentation.bindPointTool(this.samPointTool, this.unsub);
     this.plotService.getStackLoadingProgress().pipe(takeUntil(this.unsub)).subscribe((loadingProgress) => {
       this.loadingPercentage = loadingProgress;
     });
@@ -1033,7 +1012,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       resolveSamPrompt: (commit) => {
         if (commit) this.plotService.commitSamPoints();
         else this.plotService.clearSamPoints();
-        this.hideSamToast(); // prompt resolved → dismiss the status toast
+        this.segmentation.hide(); // prompt resolved → dismiss the status toast
       },
       undo: () => this.undoRegion(),
       redo: () => this.redoRegion(),
@@ -1319,7 +1298,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // viewport mode), disarming whichever was armed.
     this.plotService.setActiveTool(active, this.canvasToolOptions(active));
     // Leaving point mode dismisses any lingering status toast.
-    if (active !== 'samPoint') this.hideSamToast();
+    if (active !== 'samPoint') this.segmentation.hide();
   }
 
   /** The options a canvas tool is armed with, from the toolbar's settings. */
@@ -1408,14 +1387,14 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    *  `sam` toast shows live status + a download progress bar (first run pulls the
    *  encoder, ~170 MB); it stays open until the run finishes (bar hits 100%). */
   async segmentRegions() {
-    await this.runSegmentWithToast('SAM', this.samTool, () => this.plotService.segmentRectangles());
+    await this.segmentation.run('SAM', this.samTool, () => this.plotService.segmentRectangles());
   }
 
   /** Auto-segment cells inside each drawn rectangle with cellpose-SAM, client-side
    *  (jit-ui#90). Each box is cropped (browser slide-crop) then run through the
    *  cellpose-js model; the same sticky `sam` toast + progress bar is reused. */
   async segmentCellpose() {
-    await this.runSegmentWithToast('Cellpose', this.cellSegmentTool, () =>
+    await this.segmentation.run('Cellpose', this.cellSegmentTool, () =>
       this.plotService.segmentRectanglesCellpose(),
     );
   }
@@ -1505,79 +1484,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     const tool = this.contributedTools.find((t) => t.id === toolId);
     if (!tool) return;
     const params = { ...this.paramsFor(toolId), modelId: this.modelIdFor(tool) };
-    await this.runSegmentWithToast(tool.label, tool.progress, () =>
+    await this.segmentation.run(tool.label, tool.progress, () =>
       tool.run(this.plotService, params),
     );
-  }
-
-  /** Shared driver for the box-prompt segment tools: wires the tool's status +
-   *  download progress into the sticky `sam` toast, runs `op`, and reports the
-   *  region count. Keeps the toast open until the run settles (bar hits 100%). */
-  private async runSegmentWithToast(
-    label: string,
-    // Observables rather than BehaviorSubjects: a contributed tool implements
-    // ToolProgress, and requiring a concrete subject would force every plugin
-    // to expose its internals just to drive this toast.
-    tool: { status$: Observable<string>; progress$: Observable<number> },
-    op: () => Promise<number>,
-  ) {
-    this.samStatus = 'Starting…';
-    this.samProgress = 0;
-    this.samDownloading = false;
-    this.samBusy = true;
-    const psub = tool.progress$.subscribe((f) => {
-      this.samDownloading = f >= 0 && f < 1;
-      if (f >= 0) this.samProgress = Math.min(100, Math.round(f * 100));
-      this.cdr.detectChanges();
-    });
-    // Tracked here rather than read off the subject at the end: `tool` is only
-    // an Observable pair now, so there is no `.value` to sample once the run
-    // settles. The last non-empty status is what the result toast reports.
-    let lastStatus = '';
-    const ssub = tool.status$.subscribe((m) => {
-      if (m) {
-        lastStatus = m;
-        this.samStatus = m;
-        this.cdr.detectChanges();
-      }
-    });
-    this.showSamToast(label);
-    try {
-      const n = await op();
-      this.messageService.add({
-        key: this.resultToastKey,
-        severity: n > 0 ? 'success' : 'warn',
-        summary: label,
-        detail: lastStatus || (n > 0 ? `Added ${n} region(s).` : 'No regions added.'),
-      });
-    } catch (e) {
-      this.messageService.add({
-        key: this.resultToastKey,
-        severity: 'error', summary: `${label} failed`, detail: String(e),
-      });
-    } finally {
-      psub.unsubscribe();
-      ssub.unsubscribe();
-      this.hideSamToast();
-    }
-  }
-
-  /** Show the shared sticky `sam` toast once (idempotent — re-adding would stack
-   *  a new toast on every point click). */
-  private showSamToast(summary: string): void {
-    if (this.samToastShown) return;
-    this.samToastShown = true;
-    this.messageService.add({ key: this.samToastKey, sticky: true, severity: 'info', summary });
-  }
-
-  /** Dismiss the shared `sam` toast and reset its progress/spinner state. */
-  private hideSamToast(): void {
-    this.samToastShown = false;
-    this.samBusy = false;
-    this.samDownloading = false;
-    this.samProgress = 0;
-    this.messageService.clear(this.samToastKey);
-    this.cdr.detectChanges();
   }
 
   /** Pick the SAM model the segment tools use (jit-ui#90 P1). */
