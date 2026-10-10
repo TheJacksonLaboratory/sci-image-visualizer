@@ -5,52 +5,17 @@ import {
   SpatialDataset, SpatialPolygonTile, SpatialTranscriptTile,
 } from '../../contracts/spatial-dataset.contract';
 import { emptySelection } from '../../spatial/spatial-selection';
-import { NapariSpatialTileLayers, SpatialTileHost, pickNearest } from './napari-spatial-tiles';
+import { NapariSpatialTileLayers, SpatialTileHost } from './napari-spatial-tiles';
 
 /** A minimal valid continuous LUT: napari-js's colormapFromLut rejects fewer than two rows. */
 const LUT: [number, number, number][] = [[0, 0, 0], [255, 255, 255]];
 
-const tile = (xs: number[], ys: number[], weight = 1): SpatialTranscriptTile => ({
-  count: xs.length,
-  aggregated: weight > 1,
-  x: Float32Array.from(xs),
-  y: Float32Array.from(ys),
-  z: new Float32Array(xs.length),
-  weight: new Uint32Array(xs.length).fill(weight),
-  observation: Uint32Array.from(xs.map((_v, i) => i)),
-  gene: new Uint16Array(xs.length),
-});
-
-describe('pickNearest (transcript hover)', () => {
-  const drawn = (t: SpatialTranscriptTile, r: number) => ({
-    merged: t, radius: new Float32Array(t.count).fill(r), grid: null,
-  });
-
-  it('finds the marker under the cursor, within its radius', () => {
-    const d = drawn(tile([0, 10, 20], [0, 0, 0]), 2);
-    expect(pickNearest(d, 10.5, 0.5, 0.1)).toBe(1);
-    expect(pickNearest(d, 15, 0, 0.1)).toBe(-1); // between markers
-  });
-
-  it('uses the pointer tolerance for markers smaller than it', () => {
-    const d = drawn(tile([0, 10], [0, 0]), 0.1);
-    expect(pickNearest(d, 1, 0, 1.5)).toBe(0);
-  });
-
-  it('prefers the closest of overlapping markers', () => {
-    const d = drawn(tile([0, 1.5], [0, 0]), 2);
-    expect(pickNearest(d, 1.2, 0, 0.1)).toBe(1);
-  });
-
-  it('builds its grid once and reuses it', () => {
-    const d = drawn(tile([0, 100, -100], [0, 50, -50]), 1);
-    expect(pickNearest(d, 100, 50, 0.1)).toBe(1);
-    const grid = d.grid;
-    expect(grid).not.toBeNull();
-    expect(pickNearest(d, -100, -50, 0.1)).toBe(2);
-    expect(d.grid).toBe(grid);
-  });
-});
+/** What the transcript layer last drew, as the hover holds it (private; read by the specs). */
+function drawnOf<T = { kind: string; bin?: { size: number }; merged: SpatialTranscriptTile }>(
+  tiles: NapariSpatialTileLayers,
+): T {
+  return (tiles as unknown as { hover: { drawn: T } }).hover.drawn;
+}
 
 describe('NapariSpatialTileLayers: a tile that fails to load', () => {
   const ring = (): SpatialPolygonTile => ({
@@ -196,7 +161,7 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
     const { tiles, getTranscriptBins } = setup(100, 'cellType');
     await (tiles as unknown as { plan(): Promise<void> }).plan();
     expect(getTranscriptBins).not.toHaveBeenCalled();
-    expect((tiles as unknown as { drawn: { kind: string } }).drawn.kind).toBe('individual');
+    expect(drawnOf(tiles).kind).toBe('individual');
     tiles.detach();
   });
 
@@ -204,7 +169,7 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
     const { tiles, getTranscriptBins } = setup(5000, 'cellType'); // over 1.5 × the budget
     await (tiles as unknown as { plan(): Promise<void> }).plan();
     expect(getTranscriptBins).toHaveBeenCalled();
-    expect((tiles as unknown as { drawn: { kind: string } }).drawn.kind).toBe('bins');
+    expect(drawnOf(tiles).kind).toBe('bins');
     tiles.detach();
   });
 
@@ -286,8 +251,7 @@ describe('NapariSpatialTileLayers: a gene selection follows the zoom', () => {
     tiles.attach(viewer);
     return tiles;
   }
-  const drawn = (t: NapariSpatialTileLayers) =>
-    (t as unknown as { drawn: { kind: string; bin?: { size: number }; merged: SpatialTranscriptTile } }).drawn;
+  const drawn = (t: NapariSpatialTileLayers) => drawnOf(t);
 
   it('groups each gene into the pyramid bin the zoom calls for', async () => {
     const tiles = setup(2); // 2 px per unit: the 8-unit bin is the first 14 px apart
@@ -386,7 +350,7 @@ describe('NapariSpatialTileLayers: a gene selection from the per-gene pyramid le
     return { tiles, getTranscriptGeneBins, getTranscriptTile };
   }
   type Drawn = { bin?: { size: number }; merged: SpatialTranscriptTile; entryGroup: Int32Array };
-  const drawn = (t: NapariSpatialTileLayers) => (t as unknown as { drawn: Drawn }).drawn;
+  const drawn = (t: NapariSpatialTileLayers) => drawnOf<Drawn>(t);
 
   it('reads the level the zoom calls for, one marker per cluster per bin, cells kept', async () => {
     const { tiles, getTranscriptGeneBins } = setup(4, 100_000); // 4 px per unit: 4-unit bins

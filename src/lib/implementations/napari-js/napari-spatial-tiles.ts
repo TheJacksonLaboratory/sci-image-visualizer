@@ -5,9 +5,9 @@ import type { Rgb } from '../../contracts/colormap-lut';
 import { ALL_GENES, type SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import type { SpatialViewState } from '../../contracts/display-types';
 import {
-  NO_CATEGORY, NO_OBSERVATION, SpatialBounds, SpatialColumn, SpatialDataset, SpatialDensityRaster, SpatialImageRef,
+  NO_CATEGORY, NO_OBSERVATION, SpatialBounds, SpatialColumn, SpatialDataset, SpatialDensityRaster,
   SpatialPolygonTile,
-  SpatialPolygons, SpatialTranscriptCounts, SpatialTranscriptSummary, SpatialTranscriptTile,
+  SpatialPolygons, SpatialTranscriptCounts, SpatialTranscriptTile,
   isCategoricalColumn,
 } from '../../contracts/spatial-dataset.contract';
 import {
@@ -30,6 +30,7 @@ import {
   clusterMarkers, filterRings, filterTranscripts, hiddenGeneSlots, median, mergePolygonTiles, mergeTranscriptTiles,
 } from '../../spatial/spatial-tile-merge';
 import { CategoricalLookup } from './spatial-tiles/categorical-lookup';
+import { TranscriptHover } from './spatial-tiles/transcript-hover';
 
 /** The all-gene pyramid's finest bin (250 µm source tiles / 128) and default level count, used
  *  to group a gene selection on the same ladder when a dataset has no pyramid. */
@@ -177,24 +178,11 @@ export class NapariSpatialTileLayers {
   private lastSelection: SpatialSelectionMask | null = null;
   private selectionRevision = 0;
 
-  // transcripts
-  /** µm per observation unit of the drawn dataset, for describing a grouped marker's area. */
-  private micronsPerUnit: number | null = null;
-
   /** Loads in flight, per layer label, for the loading badge. */
   private readonly loading = new Map<string, number>();
 
   /** The loaded per-gene transcripts the in-view counts are taken from. */
   private countSource: { merged: SpatialTranscriptTile; genes: string[] } | null = null;
-
-  // hover
-  /** What the transcript layer currently shows (written by drawing, read by hover). */
-  private drawn: DrawnTranscripts | null = null;
-  private hoverTypes: { codes: Uint16Array; meta: SpatialColumn['meta'] } | null = null;
-  /** Details already fetched, by hovered entry. */
-  private readonly hoverCache = new Map<string, string[]>();
-  private hoverKey: string | null = null;
-  private hoverTimer: ReturnType<typeof setTimeout> | null = null;
 
   // density + estimate
   /** Summed per-cluster density grids (see densityFor). */
@@ -207,9 +195,14 @@ export class NapariSpatialTileLayers {
   densityStats: { lo: number; hi: number; max: number } | null = null;
 
   private readonly lookup: CategoricalLookup;
+  private readonly hover: TranscriptHover;
 
   constructor(private readonly port: SpatialDataPort, private readonly host: SpatialTileHost) {
     this.lookup = new CategoricalLookup(port);
+    this.hover = new TranscriptHover(port, () => {
+      const layer = this.layers.get('transcripts');
+      return !!layer && !!this.viewer?.layers.items.includes(layer);
+    });
   }
 
   // ── lifecycle ─────────────────────────────────────────────────────────────────────
@@ -289,6 +282,14 @@ export class NapariSpatialTileLayers {
     return out;
   }
 
+  /**
+   * Tooltip lines for the transcript marker under world point `(wx, wy)`, or null; the
+   * server's details arrive through `onDetails` once the pointer rests (see TranscriptHover).
+   */
+  hoverAt(wx: number, wy: number, radiusWorld: number, onDetails: (lines: string[]) => void): string[] | null {
+    return this.hover.hoverAt(wx, wy, radiusWorld, onDetails);
+  }
+
   /** Whether `layer` is one of the overlays drawn here (density, cells, transcripts). */
   owns(layer: Layer): boolean {
     for (const l of this.layers.values()) if (l === layer) return true;
@@ -296,9 +297,7 @@ export class NapariSpatialTileLayers {
   }
 
   detach(): void {
-    if (this.hoverTimer) clearTimeout(this.hoverTimer);
-    this.hoverTimer = null;
-    this.drawn = null;
+    this.hover.dispose();
     this.cameraOff?.();
     this.cameraOff = null;
     if (this.timer) clearTimeout(this.timer);
@@ -609,7 +608,7 @@ export class NapariSpatialTileLayers {
     if (!job) {
       this.drop('transcripts');
       this.drop('transcriptOutline');
-      this.drawn = null;
+      this.hover.clear();
       this.countSource = null;
       return;
     }
@@ -666,7 +665,7 @@ export class NapariSpatialTileLayers {
     if (ctx.incomplete) this.keys.delete('transcripts');
     else this.keys.set('transcripts', planKey);
     const diam = px.map((d) => d / pxPerUnit);
-    this.drawn = {
+    this.hover.setDrawn({
       kind: loaded.kind ?? job.kind,
       bin: selectionBin ? { size: selectionBin, origin: loaded.clustered?.origin ?? [0, 0] }
         : (loaded.kind ? loaded.bin : job.bin),
@@ -674,11 +673,9 @@ export class NapariSpatialTileLayers {
       genes: [...view.transcriptGenes], ref: dataset.imageRef ?? null, grid: null,
       ...(entryGroup && groupNames ? { entryGroup, groupNames } : {}),
       ...(loaded.clustered ? { groupGenes: loaded.clustered.genes } : {}),
-    };
-    this.hoverCache.clear();
-    this.micronsPerUnit = dataset.micronsPerUnit ?? null;
+    }, dataset.micronsPerUnit ?? null);
     const typeColumn = cellTypeColumnFor(dataset, view);
-    this.hoverTypes = typeColumn ? await this.lookup.codes(typeColumn).catch(() => null) : null;
+    this.hover.setTypes(typeColumn ? await this.lookup.codes(typeColumn).catch(() => null) : null);
     if (ctx.stale()) return;
     const ref = dataset.imageRef;
     const place: Placement = { scale: ref?.scale ?? [1, 1], translate: ref?.translate ?? [0, 0] };
@@ -760,133 +757,6 @@ export class NapariSpatialTileLayers {
       translate,
     });
     this.replace('transcriptOutline', edge);
-  }
-
-  // ── hover ─────────────────────────────────────────────────────────────────────────
-
-  /**
-   * Tooltip lines for the transcript marker under world point `(wx, wy)`, or null.
-   *
-   * Returns what is known at once (gene, count, cell type); anything that needs the
-   * server — distinct genes in a group, its top genes and cells, the cell's display id —
-   * arrives through `onDetails` once the pointer has rested on the marker briefly.
-   */
-  hoverAt(
-    wx: number, wy: number, radiusWorld: number, onDetails: (lines: string[]) => void,
-  ): string[] | null {
-    const d = this.drawn;
-    const layer = this.layers.get('transcripts');
-    if (!d || !layer || !this.viewer?.layers.items.includes(layer) || !d.merged.count) {
-      this.hoverKey = null;
-      return null;
-    }
-    const sx = d.ref?.scale?.[0] ?? 1;
-    const sy = d.ref?.scale?.[1] ?? 1;
-    const x = (wx - (d.ref?.translate?.[0] ?? 0)) / sx;
-    const y = (wy - (d.ref?.translate?.[1] ?? 0)) / sy;
-    const i = pickNearest(d, x, y, radiusWorld / Math.abs(sx));
-    if (i < 0) {
-      this.hoverKey = null;
-      return null;
-    }
-    const key = `${d.kind}|${d.merged.x[i]}|${d.merged.y[i]}|${d.merged.gene[i]}`;
-    const cached = this.hoverCache.get(key);
-    if (cached) return cached;
-    if (key !== this.hoverKey) {
-      this.hoverKey = key;
-      if (this.hoverTimer) clearTimeout(this.hoverTimer);
-      this.hoverTimer = setTimeout(() => void this.fetchDetails(d, i, key, onDetails), 150);
-    }
-    return this.describe(d, i, null);
-  }
-
-  private async fetchDetails(
-    d: DrawnTranscripts, i: number, key: string, onDetails: (lines: string[]) => void,
-  ): Promise<void> {
-    if (!this.port.getTranscriptSummary || this.hoverKey !== key) return;
-    const obs = d.merged.observation[i];
-    const cells = obs === NO_OBSERVATION ? [] : [obs];
-    let box: [number, number, number, number] | undefined;
-    if ((d.kind === 'bins' || d.kind === 'genes') && d.bin) {
-      const { size, origin } = d.bin;
-      const bx = Math.floor((d.merged.x[i] - origin[0]) / size);
-      const by = Math.floor((d.merged.y[i] - origin[1]) / size);
-      const x0 = origin[0] + bx * size;
-      const y0 = origin[1] + by * size;
-      box = [x0, y0, x0 + size, y0 + size];
-    } else if (d.kind === 'individual') {
-      const e = 0.02;
-      box = [d.merged.x[i] - e, d.merged.y[i] - e, d.merged.x[i] + e, d.merged.y[i] + e];
-    }
-    const genes = d.groupGenes && d.entryGroup ? d.groupGenes[d.entryGroup[i]] : undefined;
-    try {
-      const summary = await this.port.getTranscriptSummary({ box, cells, ...(genes ? { genes } : {}) });
-      const lines = this.describe(d, i, summary);
-      this.hoverCache.set(key, lines);
-      if (this.hoverKey === key) onDetails(lines);
-    } catch (err) {
-      console.warn('[napari-js] transcript details unavailable', err);
-    }
-  }
-
-  /** The tooltip text for entry `i`, with the server's details when they have arrived. */
-  private describe(d: DrawnTranscripts, i: number, s: SpatialTranscriptSummary | null): string[] {
-    const t = d.merged;
-    const n = t.weight[i];
-    const obs = t.observation[i];
-    const fmt = (v: number) => v.toLocaleString();
-    const typeOf = (o: number) => {
-      const types = this.hoverTypes;
-      if (!types || o === NO_OBSERVATION || types.meta.kind !== 'categorical') return null;
-      const c = types.codes[o];
-      return c === NO_CATEGORY ? null : types.meta.categories[c] ?? null;
-    };
-    const cellLine = (o: number, prefix: string) => {
-      if (o === NO_OBSERVATION) return 'outside any cell';
-      const id = s?.cellIds?.[o] ?? `#${o}`;
-      const type = typeOf(o);
-      return `${prefix} ${id}${type ? ` · ${type}` : ''}`;
-    };
-
-    if (d.kind === 'bins') {
-      const lines = [`${fmt(n)} transcripts · all genes`];
-      if (d.bin) lines.push(`${d.bin.size.toFixed(1)} × ${d.bin.size.toFixed(1)} µm area`);
-      if (s?.transcripts !== undefined) {
-        lines.push(`${fmt(s.genes ?? 0)} distinct genes · ${fmt(s.cells ?? 0)} cell${s.cells === 1 ? '' : 's'}`
-          + (s.unassigned ? ` · ${fmt(s.unassigned)} outside cells` : ''));
-        if (s.topGenes?.length) {
-          lines.push(`top genes: ${s.topGenes.slice(0, 5).map((g) => `${g.name} ${fmt(g.count)}`).join(', ')}`);
-        }
-      }
-      lines.push(cellLine(obs, 'mostly cell'));
-      if (!s && this.port.getTranscriptSummary) lines.push('loading details…');
-      return lines;
-    }
-    if (d.kind === 'individual') {
-      const gene = s?.topGenes?.[0]?.name;
-      return [
-        gene ? `${gene} transcript` : 'Transcript',
-        cellLine(obs, 'in cell'),
-        ...(!s && this.port.getTranscriptSummary ? ['loading details…'] : []),
-      ];
-    }
-    const gene = d.genes[t.gene[i]] ?? 'transcript';
-    if (d.bin) {
-      const um = d.bin.size * (this.micronsPerUnit ?? 1);
-      const group = d.entryGroup && d.groupNames ? d.groupNames[d.entryGroup[i]] : gene;
-      const top = s?.topGenes?.length
-        ? [s.topGenes.slice(0, 6).map((g) => `${g.name} ${fmt(g.count)}`).join(', ')] : [];
-      return [
-        `${group} · ${fmt(n)} transcript${n === 1 ? '' : 's'}`,
-        ...(d.groupGenes ? top : group !== gene ? [`mostly ${gene}`] : []),
-        `${um.toFixed(1)} × ${um.toFixed(1)} µm area · zoom in to split`,
-        ...(obs === NO_OBSERVATION && d.groupGenes ? [] : [cellLine(obs, 'mostly cell')]),
-        ...(!s && d.groupGenes && this.port.getTranscriptSummary ? ['loading details…'] : []),
-      ];
-    }
-    return n > 1
-      ? [`${gene} · ${fmt(n)} transcripts`, 'grouped: zoom in to split', cellLine(obs, 'near cell')]
-      : [`${gene} transcript`, cellLine(obs, 'in cell')];
   }
 
   /**
@@ -1444,63 +1314,4 @@ function clipKey(rect: DataRect, mx: number, my: number): string {
 /** Physical marker size needs µm; undefined when the dataset's unit is unknown. */
 function pxPerMicronOf(dataset: SpatialDataset, pxPerUnit: number): number | undefined {
   return dataset.micronsPerUnit ? pxPerUnit / dataset.micronsPerUnit : undefined;
-}
-
-/** What the transcript layer currently shows — what hovering needs to name a marker. */
-interface DrawnTranscripts {
-  kind: TranscriptJob['kind'];
-  bin?: TranscriptJob['bin'];
-  merged: SpatialTranscriptTile;
-  /** Marker radius per entry, in observation units. */
-  radius: Float32Array;
-  genes: string[];
-  ref: SpatialImageRef | null;
-  /** For a grouped gene selection: each entry's group, and the groups' names. */
-  entryGroup?: Int32Array;
-  groupNames?: string[];
-  /** Each group's genes, when the markers came from the density grids (for the hover). */
-  groupGenes?: string[][];
-  /** Lazily built spatial index: bucket → entry indices. */
-  grid: { size: number; buckets: Map<number, number[]> } | null;
-}
-
-/** Index of the entry under `(x, y)` — within its own radius or `tolerance` — or -1. */
-export function pickNearest(
-  d: Pick<DrawnTranscripts, 'merged' | 'radius' | 'grid'>, x: number, y: number, tolerance: number,
-): number {
-  const t = d.merged;
-  if (!d.grid) {
-    let maxR = 0;
-    for (let i = 0; i < t.count; i++) if (d.radius[i] > maxR) maxR = d.radius[i];
-    const size = Math.max(maxR * 2, tolerance * 2, 1e-6);
-    const buckets = new Map<number, number[]>();
-    for (let i = 0; i < t.count; i++) {
-      const k = bucketKey(Math.floor(t.x[i] / size), Math.floor(t.y[i] / size));
-      let b = buckets.get(k);
-      if (!b) buckets.set(k, (b = []));
-      b.push(i);
-    }
-    d.grid = { size, buckets };
-  }
-  const { size, buckets } = d.grid;
-  const gx = Math.floor(x / size);
-  const gy = Math.floor(y / size);
-  let best = -1;
-  let bestD = Infinity;
-  for (let dy = -1; dy <= 1; dy++) {
-    for (let dx = -1; dx <= 1; dx++) {
-      for (const i of buckets.get(bucketKey(gx + dx, gy + dy)) ?? []) {
-        const dist = Math.hypot(t.x[i] - x, t.y[i] - y);
-        if (dist <= Math.max(d.radius[i], tolerance) && dist < bestD) {
-          bestD = dist;
-          best = i;
-        }
-      }
-    }
-  }
-  return best;
-}
-
-function bucketKey(gx: number, gy: number): number {
-  return (gx + 32768) * 65536 + (gy + 32768);
 }
