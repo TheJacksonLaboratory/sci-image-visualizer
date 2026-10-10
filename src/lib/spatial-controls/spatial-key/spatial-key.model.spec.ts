@@ -62,4 +62,14 @@ describe('SpatialKeyModel', () => {
     await slow;
     expect(key.legend).toEqual([{ label: 'Z', color: '#0f0' }]);
   });
+
+  it('drops a legend that lands after the colouring was cleared', async () => {
+    let resolveSlow: (v: string[]) => void = () => undefined;
+    categoryColors.mockImplementationOnce(() => new Promise((r) => { resolveSlow = r; }));
+    const slow = key.refresh(controls, dataset, view({ kind: 'column', name: 'region' }), null, false);
+    await key.refresh(controls, dataset, view(null), null, false);
+    resolveSlow(['#f00', '#00f']);
+    await slow;
+    expect(key.legend).toBeNull();
+  });
 });

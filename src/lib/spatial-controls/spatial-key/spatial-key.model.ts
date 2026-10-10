@@ -47,6 +47,8 @@ export class SpatialKeyModel {
   ): Promise<void> {
     const by = view.colorBy;
     if (!by || !controls) {
+      // A legend still loading for the colouring just cleared must not land after it.
+      this.load.cancel();
       this.legend = null;
       this.colorBarCss = null;
       return;
