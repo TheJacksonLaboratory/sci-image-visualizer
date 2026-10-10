@@ -2136,9 +2136,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     // (No mid-gesture case to guard: the overlay disables the camera controls while drawing.)
     const foreign = new Set(this.regionStore.getRegions().map((r) => r.id));
     this.cameraReadbackOff = viewer.camera3d.changed.connect(() => {
-      const regions = this.regionStore.getRegions();
-      const kept = regions.filter((r) => foreign.has(r.id));
-      if (kept.length < regions.length) this.inZone(() => this.regionStore.setRegions(kept));
+      const drawn = this.regionStore.getRegions().filter((r) => !foreign.has(r.id)).map((r) => r.id);
+      // Not an edit of the user's: no undo step (NAPARI-SVC-11).
+      if (drawn.length) this.inZone(() => this.regionStore.removeRegions(drawn, { recordUndo: false }));
     });
   }
 

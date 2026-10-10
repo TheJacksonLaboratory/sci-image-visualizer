@@ -615,6 +615,35 @@ describe('RegionStore', () => {
       store.undo();
       expect(store.getRegions()[0].color).toBe(colour);
     });
+
+    it('removeRegions drops several regions in one undo step', () => {
+      const a = store.addRegion(rectRegion(0, 0, 1, 1));
+      const b = store.addRegion(rectRegion(5, 5, 1, 1));
+      store.addRegion(rectRegion(9, 9, 1, 1)); settle();
+      store.removeRegions([a, b]);
+      expect(store.getRegions()).toHaveLength(1);
+      store.undo();
+      expect(store.getRegions()).toHaveLength(3);
+    });
+
+    it('removeRegions with recordUndo: false takes no undo step (NAPARI-SVC-11)', () => {
+      const keep = store.addRegion(rectRegion(0, 0, 1, 1)); settle();
+      const lasso = store.addRegion(rectRegion(5, 5, 1, 1)); settle();
+      const emitted: number[] = [];
+      store.getRegionUpdateEvent().subscribe((rs) => emitted.push(rs.length));
+      store.removeRegions([lasso], { recordUndo: false });
+      expect(store.getRegions().map((r) => r.id)).toEqual([keep]);
+      expect(emitted).toEqual([1]);
+      // The newest step is still "add the lasso": undo goes back past it to [keep]; had the
+      // removal been recorded, undo would have brought the lasso back instead.
+      store.undo();
+      expect(store.getRegions().map((r) => r.id)).toEqual([keep]);
+      store.undo();
+      expect(store.getRegions()).toEqual([]);
+      emitted.length = 0;
+      store.removeRegions([12345], { recordUndo: false }); // nothing to remove: no emit
+      expect(emitted).toEqual([]);
+    });
   });
 
   describe('per-image cache', () => {

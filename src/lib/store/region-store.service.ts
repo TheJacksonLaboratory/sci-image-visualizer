@@ -521,11 +521,20 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   }
 
   removeRegion(id: number): void {
-    const idx = this.indexOfId(id);
-    if (idx < 0) return;
-    this.recordUndoSnapshot();
-    this.regions = this.regions.filter((r) => r.id !== id);
-    this.selectedIds = this.selectedIds.filter(s => s !== id);
+    this.removeRegions([id]);
+  }
+
+  /**
+   * Remove the regions with these ids, if present. With `{ recordUndo: false }`
+   * no undo step is taken — for clearing transient shapes that were never the
+   * user's work (the 3D view's screen-space lassos on an orbit, NAPARI-SVC-11).
+   */
+  removeRegions(ids: Iterable<number>, opts: { recordUndo?: boolean } = {}): void {
+    const drop = new Set(ids);
+    if (!this.regions.some((r) => drop.has(r.id))) return;
+    if (opts.recordUndo !== false) this.recordUndoSnapshot();
+    this.regions = this.regions.filter((r) => !drop.has(r.id));
+    this.selectedIds = this.selectedIds.filter((s) => !drop.has(s));
     this.syncCache();
     this.emitSelection();
     this.emit();
