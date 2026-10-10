@@ -15,6 +15,7 @@ import { RegionStore } from './store/region-store.service';
 import { SpatialSelectionStore } from './store/spatial-selection.service';
 import { Rectangle, Region } from './models/region';
 import { BehaviorSubject } from 'rxjs';
+import { IntensityProfileService } from './intensity/intensity-profile.service';
 
 /**
  * CHARACTERIZATION TESTS (refactoring plan, Step 0).
@@ -127,8 +128,16 @@ describe('RoutingVisualizerService (characterization)', () => {
   let napari: any;
   let store: VisualizerStore;
   let regionStore: RegionStore;
+  let intensity: Record<string, jest.Mock>;
 
   function setup(): void {
+    intensity = {
+      getIntensityProfile$: jest.fn().mockReturnValue(of([])),
+      setSamplingElement: jest.fn(),
+      ensureIntensitySampling: jest.fn().mockResolvedValue(undefined),
+      refreshIntensitySamplingForRoi: jest.fn(),
+      addProfileLine: jest.fn().mockReturnValue(null),
+    };
     plotly = mockBackend();
     osd = mockBackend();
     napari = mockBackend();
@@ -141,6 +150,7 @@ describe('RoutingVisualizerService (characterization)', () => {
         { provide: OpenSeadragonVisualizerService, useValue: osd },
         { provide: NapariVisualizerService, useValue: napari },
         { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
+        { provide: IntensityProfileService, useValue: intensity },
       ],
     });
     router = TestBed.inject(RoutingVisualizerService);
@@ -498,15 +508,11 @@ describe('RoutingVisualizerService (characterization)', () => {
     ['isStackLoading', []],
     ['getStackLoadingProgress', []],
     ['getAutoscaleEvent', []],
-    ['getIntensityProfile$', []],
     ['renderIntensityInset', ['div', []]],
     ['setColormap', ['Reds']],
     ['setReverseScale', [true]],
     ['getIsosurfaceControls', []],
     ['getSurface3dControls', []],
-    ['getIntensityControls', []],
-    ['ensureIntensitySampling', [IMAGE_INFO, 0]],
-    ['refreshIntensitySamplingForRoi', [0, 0, 10, 10, 0]],
   ])('routes %s to Plotly (the full-featured backend)', (method, args) => {
     (router as any)[method](...args);
     expect(plotly[method]).toHaveBeenCalledWith(...args);
@@ -589,11 +595,39 @@ describe('RoutingVisualizerService (characterization)', () => {
     expect(napari.zoomIn).not.toHaveBeenCalled();
   });
 
-  it('getIsosurfaceControls / getIntensityControls are Plotly-owned', () => {
+  it('getIsosurfaceControls is Plotly-owned before any plot', () => {
     router.getIsosurfaceControls();
-    router.getIntensityControls();
     expect(plotly.getIsosurfaceControls).toHaveBeenCalled();
-    expect(plotly.getIntensityControls).toHaveBeenCalled();
+  });
+
+  // ── intensity profiles: the backend-neutral IntensityProfileService, not Plotly ──
+  it('serves the profiles and the line controls from the IntensityProfileService on any backend', async () => {
+    await router.plot('div', {}, IMAGE_INFO, 600, PlotType.IMAGE); // OSD on screen
+    router.getIntensityProfile$();
+    expect(intensity['getIntensityProfile$']).toHaveBeenCalled();
+    expect(router.getIntensityControls()).toBe(intensity);
+    for (const b of [plotly, osd, napari]) {
+      expect(b.getIntensityProfile$).not.toHaveBeenCalled();
+      expect(b.getIntensityControls).not.toHaveBeenCalled();
+    }
+  });
+
+  it('samples through the IntensityProfileService, sizing crops from the plotted div', async () => {
+    await router.plot('viz-plot-1', {}, IMAGE_INFO, 600, PlotType.IMAGE);
+    await router.ensureIntensitySampling(IMAGE_INFO, 2);
+    router.refreshIntensitySamplingForRoi(1, 2, 3, 4, 2);
+    expect(intensity['ensureIntensitySampling']).toHaveBeenCalledWith(IMAGE_INFO, 2);
+    expect(intensity['refreshIntensitySamplingForRoi']).toHaveBeenCalledWith(1, 2, 3, 4, 2);
+    // Each call points the service at the plot div first.
+    expect(intensity['setSamplingElement'].mock.calls).toEqual([['viz-plot-1'], ['viz-plot-1']]);
+    expect(intensity['setSamplingElement'].mock.invocationCallOrder[1])
+      .toBeLessThan(intensity['refreshIntensitySamplingForRoi'].mock.invocationCallOrder[0]);
+    for (const b of [plotly, osd, napari]) expect(b.refreshIntensitySamplingForRoi).not.toHaveBeenCalled();
+  });
+
+  it('keeps rendering the inset through Plotly', () => {
+    router.renderIntensityInset('inset', []);
+    expect(plotly.renderIntensityInset).toHaveBeenCalledWith('inset', []);
   });
 
   // ── display + channel state read/write the shared store ───────────────
@@ -658,6 +692,7 @@ describe('RoutingVisualizerService — spatial controls', () => {
         { provide: OpenSeadragonVisualizerService, useValue: mockBackend() },
         { provide: NapariVisualizerService, useValue: mockBackend() },
         { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
+        { provide: IntensityProfileService, useValue: {} },
         ...(port ? [{ provide: SPATIAL_DATA_PORT, useValue: port }] : []),
       ],
     });

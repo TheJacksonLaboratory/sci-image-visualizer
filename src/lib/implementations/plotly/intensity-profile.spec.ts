@@ -139,7 +139,7 @@ describe('PlotlyService intensity profile lines (characterization)', () => {
 
   it('places the line inside the last visible region when it overlaps the image', () => {
     image([0, 1000, 0, 800]);
-    service.refreshIntensitySamplingForRoi(100, 100, 200, 100, 0);
+    intensity.refreshIntensitySamplingForRoi(100, 100, 200, 100, 0);
     const line = ends(service.addProfileLine());
     expect(line.xs[0]).toBeCloseTo(200 - 200 / 3);
     expect(line.xs[1]).toBeCloseTo(200 + 200 / 3);
@@ -171,7 +171,7 @@ describe('PlotlyService intensity profile lines (characterization)', () => {
     image([0, 3, 0, 2]);
     service.setSamplingFrames([[[10, 20, 30], [40, 50, 60]]], [1, 1]);
     const seen: IntensityProfile[][] = [];
-    service.getIntensityProfile$().subscribe((p) => seen.push(p));
+    intensity.getIntensityProfile$().subscribe((p) => seen.push(p));
     const line = service.addProfileLine()!;
     const last = seen[seen.length - 1];
     expect(last).toHaveLength(1);

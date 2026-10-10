@@ -450,16 +450,6 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
 
   // ── Intensity profile (Region-based line ROIs) ──────────────────────
 
-  /** Emits the full set of intensity profiles (one per profile-line region)
-   *  whenever a profile line is added, moved, or removed. */
-  public getIntensityProfile$(): Observable<IntensityProfile[]> {
-    // A recreated VisualizerComponent subscribes here on init, before any Plotly
-    // load/plot — and with OSD/napari active none may follow. Re-arm the region
-    // subscriptions that drive the profiles (see ensureSubscriptions()).
-    this.ensureSubscriptions();
-    return this.intensity.getIntensityProfile$();
-  }
-
   /** Plotly renders the line ROIs + inset, so it exposes the intensity controls. */
   public getIntensityControls(): IIntensityControls | null { return this; }
 
@@ -502,11 +492,6 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     this.intensity.setFrames({ frames, ratios: this.cachedImageRatios, origin });
   }
 
-  /** IIntensitySampling → IntensityProfileService (its own sampling frames). */
-  public ensureIntensitySampling(imageInfo: IImageInfo, zIndex: number): Promise<void> {
-    return this.intensity.ensureIntensitySampling(imageInfo, zIndex);
-  }
-
   /**
    * {@link IIntensitySampling} stub — the viewport-change signal is OpenSeadragon's
    * (it re-samples on OSD zoom/pan). Plotly's own high-def zoom updates the
@@ -515,14 +500,6 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
    */
   public getViewportChange$(): Observable<{ x: number; y: number; width: number; height: number }> {
     return EMPTY;
-  }
-
-  /** IIntensitySampling → IntensityProfileService: re-sample from a display-resolution
-   *  crop of the visible region, sized from this viewer's plot div. */
-  public refreshIntensitySamplingForRoi(x: number, y: number, width: number, height: number,
-                                        zIndex: number): void {
-    if (this.plotDiv) this.intensity.setSamplingElement(this.plotDiv);
-    this.intensity.refreshIntensitySamplingForRoi(x, y, width, height, zIndex);
   }
 
   /** Autoscale the plot (see PlotlyZoomController). */

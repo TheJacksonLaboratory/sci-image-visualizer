@@ -608,20 +608,6 @@ describe('PlotlyService service-lifetime subscriptions (review CORE-1)', () => {
     expect(emitProfiles).toHaveBeenCalled();
   });
 
-  it('re-arms the profile subscriptions when a recreated component subscribes, with no Plotly plot', () => {
-    const regionStore = TestBed.inject(RegionStore);
-    // OSD/napari owns the view: after the teardown, the next component only
-    // subscribes to the profiles — Plotly never loads or plots.
-    service.unsubscribe();
-    service.getIntensityProfile$().subscribe();
-
-    const emitProfiles = jest.spyOn(TestBed.inject(IntensityProfileService), 'emitProfiles');
-    const r = new Region();
-    r.bounds = Object.assign(new Rectangle(), { x: 1, y: 1, width: 5, height: 5 });
-    regionStore.setRegions([r]);
-    expect(emitProfiles).toHaveBeenCalled();
-  });
-
   it('does not double-subscribe when plot runs without a prior unsubscribe()', async () => {
     const store = TestBed.inject(VisualizerStore);
     const loaded = await service.load(imageInfo, 0);
@@ -672,8 +658,9 @@ describe('PlotlyService async supersession (review OSD-PLOTLY-8)', () => {
       new Promise((resolve) => releases.push(() => resolve({ frame: [[info.fileName!]], ratios: [1, 1] }))));
     const info = (name: string) =>
       ({ fileName: name, urls: [name], trueImageSize: [1, 1] }) as unknown as IImageInfo;
-    const a = service.ensureIntensitySampling(info('A'), 0);
-    const b = service.ensureIntensitySampling(info('B'), 0);
+    // The router samples through the IntensityProfileService (IVisualizer split, intensity routing).
+    const a = intensity.ensureIntensitySampling(info('A'), 0);
+    const b = intensity.ensureIntensitySampling(info('B'), 0);
     releases[1](); // B first
     await b;
     releases[0](); // then the slow A
@@ -709,8 +696,9 @@ describe('PlotlyService async supersession (review OSD-PLOTLY-8)', () => {
     s.imageInfo = { isGrayscale: true, fileName: 'f.tif' } as IImageInfo;
     const measure = jest.spyOn(PlotUtilities.prototype, 'getDomRectangle');
     s.zoom.triggerZoom([100, 200, 300, 400]);
-    service.refreshIntensitySamplingForRoi(0, 0, 10, 10, 0);
-    expect(measure.mock.calls).toEqual([['plot'], ['plot']]);
+    // (The profiles' crop is sized from the same div: the router points the
+    // IntensityProfileService at it — routing-visualizer.service.spec.ts.)
+    expect(measure.mock.calls).toEqual([['plot']]);
   });
 
   it('loads a stack\'s slices in parallel, keeping slice order (OSD-PLOTLY-31)', async () => {

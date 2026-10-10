@@ -24,6 +24,7 @@ import { VisualizerStore } from './store/visualizer-store.service';
 import { NapariVisualizerService } from './implementations/napari-js/napari-visualizer.service';
 import { VIZ_CONFIG, VizConfig } from './contracts/viz-config';
 import { PlotModeViewport } from './contracts/plot-type-contribution.contract';
+import { IntensityProfileService } from './intensity/intensity-profile.service';
 
 /** Intensity-profile line ROIs are owned by the intensity tool, not the editor.
  *  Package-internal predicate (property-based so it also matches plain objects
@@ -69,6 +70,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   private napariFellBack = false;
   /** The file name of the image last plotted (names a GeoJSON export). */
   private plottedFileName: string | undefined;
+  /** The div the backends render into (every backend shares it); '' before the first plot. */
+  private plotDiv = '';
 
   constructor(private plotly: PlotlyService,
               private osd: OpenSeadragonVisualizerService,
@@ -79,6 +82,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
               // and `getSpatialControls()` then returns null.
               private regionStore: RegionStore,
               private selectionStore: SpatialSelectionStore,
+              private intensity: IntensityProfileService,
               @Optional() @Inject(SPATIAL_DATA_PORT)
               private spatialData: SpatialDataPort | null = null) {}
 
@@ -185,6 +189,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
        plotType: PlotType, inPlace?: boolean): Promise<boolean> {
     this.currentPlotType = plotType;
     this.plottedFileName = imageInfo?.fileName;
+    this.plotDiv = plotDiv;
     // Apply the per-image region cache (snapshot old regions, restore the new
     // image's, clear selection) for whichever backend renders — Plotly does
     // this inside its own plot(), but OSD doesn't, so drive it here. Idempotent
@@ -310,9 +315,10 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       this.napari.getAutoscaleEvent(),
     ).pipe(map(() => undefined));
   }
-  getIntensityProfile$(): Observable<IntensityProfile[]> { return this.plotly.getIntensityProfile$(); }
-  // The intensity inset is a Plotly LINE chart — render it through Plotly, which
-  // owns the profile stream regardless of which backend draws the main image.
+  /** The line-ROI profiles: sampled by the backend-neutral IntensityProfileService. */
+  getIntensityProfile$(): Observable<IntensityProfile[]> { return this.intensity.getIntensityProfile$(); }
+  // The intensity inset is a Plotly LINE chart — render it through Plotly whichever
+  // backend draws the main image.
   renderIntensityInset(divId: string, profiles: IntensityProfile[]): void {
     this.plotly.renderIntensityInset(divId, profiles); }
 
@@ -545,9 +551,10 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
    *  2D-only one. */
   getSurface3dControls(): ISurface3dControls | null { return this.renderer().getSurface3dControls(); }
 
-  /** Intensity (line-ROI) controls — always Plotly's, since the line profiles
-   *  render their inset on Plotly regardless of which backend draws the image. */
-  getIntensityControls(): IIntensityControls | null { return this.plotly.getIntensityControls(); }
+  /** Intensity (line-ROI) controls, whichever backend draws the image: the
+   *  IntensityProfileService adds the line to the store, and every backend
+   *  (Plotly included) draws it from the store's update event. */
+  getIntensityControls(): IIntensityControls | null { return this.intensity; }
 
   /**
    * Spatial-omics controls, or null when no `SPATIAL_DATA_PORT` is bound. Served by a
@@ -581,10 +588,17 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.spatialFacade = null;
   }
 
-  /** Load pixel frames for intensity sampling when OpenSeadragon owns the image
-   *  (it doesn't feed Plotly's frame cache). No-op needed when Plotly renders. */
+  /** Load the displayed slice's pixels for intensity sampling, for a backend that
+   *  has no frames of its own (OpenSeadragon, napari-js; Plotly feeds its frames
+   *  to the IntensityProfileService when it plots). */
   ensureIntensitySampling(imageInfo: IImageInfo, zIndex: number): Promise<void> {
-    return this.plotly.ensureIntensitySampling(imageInfo, zIndex);
+    this.pointSamplingAtPlot();
+    return this.intensity.ensureIntensitySampling(imageInfo, zIndex);
+  }
+
+  /** Crops for sampling are sized from the plot div (whichever backend renders into it). */
+  private pointSamplingAtPlot(): void {
+    if (this.plotDiv) this.intensity.setSamplingElement(this.plotDiv);
   }
 
   /** Visible-region changes from the OpenSeadragon viewer (image-pixel coords),
@@ -595,9 +609,10 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   }
 
   /** Re-sample the intensity profiles from a fresh crop of the given image-pixel
-   *  ROI at display resolution (sampling always lives in Plotly). */
+   *  ROI at display resolution (IntensityProfileService). */
   refreshIntensitySamplingForRoi(x: number, y: number, width: number, height: number, zIndex: number): void {
-    this.plotly.refreshIntensitySamplingForRoi(x, y, width, height, zIndex);
+    this.pointSamplingAtPlot();
+    this.intensity.refreshIntensitySamplingForRoi(x, y, width, height, zIndex);
   }
 
   /** The visualizer view is going away: detach every backend — dropping their view-bound
