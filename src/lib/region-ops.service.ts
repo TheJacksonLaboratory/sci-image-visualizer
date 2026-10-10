@@ -1,7 +1,8 @@
 import { Injectable } from '@angular/core';
 
 import { Region, Rectangle, Polygon, MultiPolygon } from './models/region';
-import { BBoxMask, unionMasks } from './geometry/raster';
+import { BBoxMask, rasterizePolygon, unionMasks } from './geometry/raster';
+import { maskToPolygons } from './geometry/contour';
 import { simplifyRing } from './geometry/ring';
 import { clonePolygon, makePolygon, rectToRing } from './models/polygon-factory';
 import { WandService } from './toolbar/wand/wand.service';
@@ -10,7 +11,7 @@ import { WandService } from './toolbar/wand/wand.service';
  * Pure (DOM-free) region set-operations — merge / inverse / ungroup (jit-ui#85).
  *
  * Raster-based, reusing the wand/brush mask pipeline
- * ({@link WandService.rasterizePolygon} → {@link WandService.maskToPolygons}),
+ * ({@link rasterizePolygon} → {@link maskToPolygons}, the pure `geometry/` modules),
  * so "select + merge" yields the same geometry as brushing regions together:
  * one engine, one set of behaviours, holes + multi-part results for free.
  *
@@ -31,7 +32,15 @@ export class RegionOpsService {
    */
   private static readonly MAX_OP_PIXELS = 16_000_000;
 
-  constructor(private wand: WandService) {}
+  /**
+   * Uses no collaborators: the raster pipeline is the pure `geometry/` modules.
+   * The (unused) parameter only keeps `new RegionOpsService(new WandService())`
+   * in the visualizer specs compiling; DI still resolves it, so it goes once
+   * those specs construct the service without it.
+   */
+  constructor(_legacyWand?: WandService) {
+    // Nothing to keep: see above.
+  }
 
   /**
    * Geometric union of `regions` into a single region: a {@link Polygon} when
@@ -47,7 +56,7 @@ export class RegionOpsService {
     const scale = this.opRasterScale(regions, imageWidth, imageHeight);
     const mask = this.unionMask(regions, imageWidth, imageHeight, scale);
     if (!mask) return null;
-    let polys = this.wand.maskToPolygons(mask.mask, mask.bw, mask.bh, mask.bx, mask.by, 1, 1);
+    let polys = maskToPolygons(mask.mask, mask.bw, mask.bh, mask.bx, mask.by, 1, 1);
     if (scale !== 1) polys = polys.map((p) => this.scalePolygon(p, 1 / scale));
     return this.regionFromParts(polys, regions[0]);
   }
@@ -206,17 +215,17 @@ export class RegionOpsService {
     const b = region?.bounds;
     if (b instanceof Rectangle) {
       const ring = rectToRing(b);
-      return this.wand.rasterizePolygon(sc(ring.xs), sc(ring.ys), sw, sh);
+      return rasterizePolygon(sc(ring.xs), sc(ring.ys), sw, sh);
     }
     if (b instanceof Polygon) {
       if (b.closed === false || b.xpoints.length < 3) return null;
-      return this.wand.rasterizePolygon(sc(b.xpoints), sc(b.ypoints), sw, sh, scHoles(b.holes));
+      return rasterizePolygon(sc(b.xpoints), sc(b.ypoints), sw, sh, scHoles(b.holes));
     }
     if (b instanceof MultiPolygon) {
       let acc: BBoxMask | null = null;
       for (const part of b.polygons) {
         if (part.xpoints.length < 3) continue;
-        const m = this.wand.rasterizePolygon(sc(part.xpoints), sc(part.ypoints), sw, sh, scHoles(part.holes));
+        const m = rasterizePolygon(sc(part.xpoints), sc(part.ypoints), sw, sh, scHoles(part.holes));
         if (m) acc = acc ? unionMasks(acc, m) : m;
       }
       return acc;

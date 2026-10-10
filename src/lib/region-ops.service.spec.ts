@@ -1,7 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 
 import { RegionOpsService } from './region-ops.service';
-import { WandService } from './toolbar/wand/wand.service';
 import { Region, Rectangle, Polygon, MultiPolygon } from './models/region';
 
 /** A rectangle region in image-pixel coords. */
@@ -49,7 +48,7 @@ describe('RegionOpsService', () => {
   let ops: RegionOpsService;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [RegionOpsService, WandService] });
+    TestBed.configureTestingModule({ providers: [RegionOpsService] });
     ops = TestBed.inject(RegionOpsService);
   });
 
