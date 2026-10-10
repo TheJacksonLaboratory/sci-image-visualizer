@@ -1,3 +1,4 @@
+import type * as OpenSeadragon from 'openseadragon';
 import { OSD } from './osd-lib';
 import { Subscription } from 'rxjs';
 
@@ -6,6 +7,7 @@ import { IRegionStore } from '../../contracts/visualizer.contract';
 import { IRegionEditApi } from '../../contracts/region-store.contract';
 import { IRegionOverlay, RegionToolMode } from '../../contracts/region-overlay.contract';
 import { elementToImage, imageToElement } from './osd-coords';
+import { OsdViewerLike } from './osd-viewer-like';
 import { OSD_ZOOM_PER_SCROLL } from './osd-zoom';
 import { translateBounds } from '../../models/polygon-edit';
 import { makePolygon } from '../../models/polygon-factory';
@@ -56,12 +58,10 @@ export class OsdRegionOverlay implements IRegionOverlay {
 
   private readonly svg: SVGSVGElement;
   private readonly subs = new Subscription();
-  private readonly osd: any = OSD;
-
   private selected: number[] = [];
   private mode: RegionToolMode = 'none';
 
-  private tracker: any;
+  private tracker: OpenSeadragon.MouseTracker;
   private rectStart: { x: number; y: number } | null = null; // image coords
   private rectCurrent: { x: number; y: number } | null = null;
   private polyPoints: { x: number; y: number }[] = [];        // image coords
@@ -112,7 +112,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
     this.redraw();
   };
 
-  constructor(private viewer: any, private store: RegionEditStore) {
+  constructor(private viewer: OsdViewerLike, private store: RegionEditStore) {
     this.svg = document.createElementNS(SVGNS, 'svg') as SVGSVGElement;
     Object.assign(this.svg.style, {
       position: 'absolute', left: '0', top: '0', width: '100%', height: '100%',
@@ -127,7 +127,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
         if (this.store.getShowShapeLabel()) drawRegionLabel(layer, region, this.store.getShapeColor());
       },
     });
-    (this.viewer.canvas as HTMLElement).addEventListener('pointercancel', this.pointerCancelHandler);
+    this.viewer.canvas.addEventListener('pointercancel', this.pointerCancelHandler);
 
     // 'update-viewport' fires on every redrawn frame, animated ones included —
     // also listening to 'animation' rebuilt the whole SVG twice per frame.
@@ -135,10 +135,10 @@ export class OsdRegionOverlay implements IRegionOverlay {
     this.viewer.addHandler('resize', this.cameraHandler);
     this.viewer.addHandler('rotate', this.cameraHandler);
     // Keep wheel-zoom alive while a tool has mouse-nav disabled (see handler).
-    (this.viewer.element as HTMLElement | undefined)
+    this.viewer.element
       ?.addEventListener('wheel', this.wheelZoomHandler, { passive: false });
 
-    this.tracker = new this.osd.MouseTracker({
+    this.tracker = new OSD.MouseTracker({
       element: this.viewer.canvas,
       pressHandler: (e: any) => this.onPress(e),
       dragHandler: (e: any) => this.onDrag(e),
@@ -181,12 +181,12 @@ export class OsdRegionOverlay implements IRegionOverlay {
    * tool active) it does nothing and OSD zooms natively. (jit-ui#94) */
   private readonly wheelZoomHandler = (e: WheelEvent) => {
     const vp = this.viewer?.viewport;
-    const el = this.viewer?.element as HTMLElement | undefined;
+    const el = this.viewer?.element;
     // Nav on → no tool active → let OSD handle scroll-zoom natively.
     if (!vp || !el || e.deltaY === 0 || this.viewer.isMouseNavEnabled()) return;
     e.preventDefault();
     const rect = el.getBoundingClientRect();
-    const refPoint = vp.pointFromPixel(new this.osd.Point(e.clientX - rect.left, e.clientY - rect.top));
+    const refPoint = vp.pointFromPixel(new OSD.Point(e.clientX - rect.left, e.clientY - rect.top));
     vp.zoomBy(e.deltaY < 0 ? OSD_ZOOM_PER_SCROLL : 1 / OSD_ZOOM_PER_SCROLL, refPoint);
     vp.applyConstraints();
   };
@@ -194,7 +194,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
   /** Cursor feedback per mode (crosshair while drawing; pointer over a region
    *  in select mode). */
   private updateCursor(overRegion: boolean): void {
-    const canvas = this.viewer.canvas as HTMLElement;
+    const canvas = this.viewer.canvas;
     if (this.mode === 'drawrect' || this.mode === 'drawclosedpath' || this.mode === 'drawopenpath'
         || this.mode === 'drawpolygon' || this.mode === 'addpoint' || this.mode === 'deletepoint') {
       canvas.style.cursor = 'crosshair';
@@ -221,9 +221,9 @@ export class OsdRegionOverlay implements IRegionOverlay {
     // Close a gesture in flight first: a drag's open store batch would
     // otherwise suppress every later region-update emission app-wide.
     this.endGesture();
-    (this.viewer.canvas as HTMLElement).removeEventListener('pointercancel', this.pointerCancelHandler);
+    this.viewer.canvas.removeEventListener('pointercancel', this.pointerCancelHandler);
     this.subs.unsubscribe();
-    (this.viewer.element as HTMLElement | undefined)
+    this.viewer.element
       ?.removeEventListener('wheel', this.wheelZoomHandler);
     this.viewer.removeHandler('update-viewport', this.cameraHandler);
     this.viewer.removeHandler('resize', this.cameraHandler);
@@ -508,12 +508,12 @@ export class OsdRegionOverlay implements IRegionOverlay {
     // A grabbable bezier control handle or vertex of the selected polygon takes
     // priority.
     if (this.hitPolygonHandle(e.position)) {
-      (this.viewer.canvas as HTMLElement).style.cursor = 'pointer';
+      this.viewer.canvas.style.cursor = 'pointer';
       return;
     }
     const ez = this.editZoneAt(e.position);
     if (ez) {
-      (this.viewer.canvas as HTMLElement).style.cursor = ZONE_CURSOR[ez.zone];
+      this.viewer.canvas.style.cursor = ZONE_CURSOR[ez.zone];
       return;
     }
     this.updateCursor(this.regionIndexAt(this.toWorld(e.position)) >= 0);

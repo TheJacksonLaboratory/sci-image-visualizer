@@ -1,4 +1,5 @@
 import { OSD, quiet } from './osd-lib';
+import { OsdTiledImageLike, OsdViewerLike } from './osd-viewer-like';
 
 /**
  * Stack-slice cache for the OpenSeadragon backend (refactoring plan, Step 3 —
@@ -20,7 +21,7 @@ import { OSD, quiet } from './osd-lib';
  *  viewer/descriptor/z — matching the field reads it replaced. */
 export interface SliceCacheHost {
   /** The mounted viewer, or null. */
-  viewer(): any | null;
+  viewer(): OsdViewerLike | null;
   /** True when a viewer, descriptor and infoB64 are all present. */
   hasImage(): boolean;
   /** Stack depth (descriptor.z, 1 for single images). */
@@ -34,18 +35,18 @@ export interface SliceCacheHost {
   /** Channel visibility (drives group reveal opacity). */
   channelVisible(c: number): boolean;
   /** Tile source for slice z (optionally one channel). */
-  buildTileSource(z: number, channel?: number): any;
+  buildTileSource(z: number, channel?: number): string | object;
   /** A composite slice landed in the world — the service samples its window. */
   onCompositeSliceAdded(z: number): void;
 }
 
 export class SliceCache {
   /** z-slice → its TiledImage in the viewer world (composite path). */
-  private sliceItems = new Map<number, any>();
+  private sliceItems = new Map<number, OsdTiledImageLike>();
   /** Multichannel per-slice cache: z → the N channel TiledImages for that slice
    *  (additively composited by OSD; index = channel). Only the active slice's
    *  visible channels have opacity > 0. */
-  private channelSliceItems = new Map<number, any[]>();
+  private channelSliceItems = new Map<number, Array<OsdTiledImageLike | undefined>>();
   /** Cached multichannel slices whose tiles were tinted before the latest
    *  display change; re-tinted lazily when next revealed by z-scrub. */
   private staleSlices = new Set<number>();
@@ -76,7 +77,7 @@ export class SliceCache {
   private readonly MAX_PREFETCH_FIT_TILES = 256;
   /** True only for stacks too large to background-preload. */
   private skipSlicePrefetch = false;
-  private prefetchTimer: any = null;
+  private prefetchTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private host: SliceCacheHost) {}
 
@@ -114,7 +115,7 @@ export class SliceCache {
     if (this.host.isMultiChannel()) {
       quiet(() => {
         const it0 = viewer?.world?.getItemAt?.(0);
-        if (it0) viewer.world.removeItem(it0);
+        if (viewer && it0) viewer.world.removeItem(it0);
       });
       this.addChannelSlice(z);
       return;
@@ -125,7 +126,7 @@ export class SliceCache {
 
   /** Seed the cache with the just-opened composite slice (world item 0), so
    *  scrubbing back to it later is an instant opacity toggle, not a re-open. */
-  seedComposite(z: number, item: any): void {
+  seedComposite(z: number, item: OsdTiledImageLike): void {
     this.sliceItems.set(z, item);
     this.touchSliceLru(z);
   }
@@ -171,6 +172,8 @@ export class SliceCache {
       this.addChannelSlice(z);
       return;
     }
+    const viewer = this.host.viewer();
+    if (!viewer) return;
     this.slicesLoading.add(z);
     // Tag this add to the current image; if the user switches images before it
     // resolves, the stale callback is dropped (the add belongs to the old stack).
@@ -178,7 +181,7 @@ export class SliceCache {
     const ts = this.host.buildTileSource(z);
     try {
       // addTiledImage lives on the Viewer (it queues the add into the world).
-      this.host.viewer().addTiledImage({
+      viewer.addTiledImage({
         tileSource: ts,
         x: 0,
         y: 0,
@@ -187,7 +190,7 @@ export class SliceCache {
         // Load tiles even though it's hidden — this is what lets the background
         // loader fill every slice's cache so scrubbing gets progressively smoother.
         preload: true,
-        success: (e: any) => {
+        success: (e) => {
           const item = e?.item;
           if (token !== this.sliceLoadToken) {
             // Image switched while this was adding — drop the orphan so it stops
@@ -230,10 +233,12 @@ export class SliceCache {
   addChannelSlice(z: number): void {
     if (!this.host.hasImage()) return;
     if (this.channelSliceItems.has(z) || this.slicesLoading.has(z)) return;
+    const viewer = this.host.viewer();
+    if (!viewer) return;
     this.slicesLoading.add(z);
     const token = this.sliceLoadToken;
     const n = this.host.channelCount();
-    const group: any[] = new Array(n);
+    const group: Array<OsdTiledImageLike | undefined> = new Array(n);
     let settled = 0;
     const onSettled = () => {
       if (++settled < n) return;
@@ -250,13 +255,13 @@ export class SliceCache {
     };
     for (let c = 0; c < n; c++) {
       try {
-        this.host.viewer().addTiledImage({
+        viewer.addTiledImage({
           tileSource: this.host.buildTileSource(z, c),
           x: 0, y: 0, width: 1,
           opacity: 0, // revealed by revealChannelSlice once the group is in
           compositeOperation: 'lighter',
           preload: true,
-          success: (e: any) => {
+          success: (e) => {
             const item = e?.item;
             if (token !== this.sliceLoadToken) {
               if (item) { quiet(() => this.host.viewer()?.world?.removeItem(item)); }
@@ -315,11 +320,11 @@ export class SliceCache {
   private invalidateSlice(z: number): void {
     const group = this.channelSliceItems.get(z) ?? [];
     if (!group.length) return;
-    const osd: any = OSD;
-    const tStamp = typeof osd.now === 'function' ? osd.now() : Date.now();
+    // Feature-tested: a mocked OSD module (specs) may not provide it.
+    const tStamp = typeof OSD.now === 'function' ? OSD.now() : Date.now();
     for (const it of group) {
       if (it && typeof it.requestInvalidate === 'function') {
-        quiet(() => it.requestInvalidate(true, false, tStamp));
+        quiet(() => it.requestInvalidate?.(true, false, tStamp));
       }
     }
   }
@@ -440,7 +445,7 @@ export class SliceCache {
   }
 
   /** The cached TiledImage(s) for slice z (0–1 for composite, N for multichannel). */
-  private sliceGroup(z: number): any[] {
+  private sliceGroup(z: number): Array<OsdTiledImageLike | undefined> {
     if (this.host.isMultiChannel()) return this.channelSliceItems.get(z) ?? [];
     const it = this.sliceItems.get(z);
     return it ? [it] : [];
@@ -468,9 +473,9 @@ export class SliceCache {
   }
 
   /** Is the tiled image still in the world (not evicted)? */
-  private sliceInWorld(item: any): boolean {
+  private sliceInWorld(item: OsdTiledImageLike): boolean {
     try {
-      return this.host.viewer().world.getIndexOfItem(item) >= 0;
+      return (this.host.viewer()?.world.getIndexOfItem(item) ?? -1) >= 0;
     } catch {
       return false;
     }

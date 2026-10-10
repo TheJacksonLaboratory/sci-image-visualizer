@@ -1,4 +1,6 @@
 import { OsdScaleBar } from './osd-scale-bar';
+import { OsdViewerLike } from './osd-viewer-like';
+import { fakeOsdTiledImage, fakeOsdViewer } from '../../testing/fake-osd-viewer';
 
 /**
  * Fake OSD viewer whose image→element mapping is a fixed linear scale, so the
@@ -7,23 +9,22 @@ import { OsdScaleBar } from './osd-scale-bar';
  */
 function fakeViewer(pxPerImagePx: number, itemCount = 1) {
   const handlers: Record<string, Array<() => void>> = {};
-  return {
-    canvas: document.createElement('div'),
+  const viewer = fakeOsdViewer({
     // The bar converts through world item 0 (osd-coords): image → viewport is the
     // identity here, and viewport → element the fixed scale.
-    world: { getItemCount: () => itemCount, getItemAt: () => ({ imageToViewportCoordinates: <P>(pt: P) => pt }) },
+    world: { getItemCount: () => itemCount, getItemAt: () => fakeOsdTiledImage() },
     viewport: {
-      viewportToViewerElementCoordinates: (pt: any) => ({ x: pt.x * pxPerImagePx, y: 0 }),
+      viewportToViewerElementCoordinates: (pt) => ({ x: pt.x * pxPerImagePx, y: 0 }),
     },
-    addHandler: (ev: string, fn: () => void) => { (handlers[ev] ||= []).push(fn); },
-    removeHandler: (ev: string, fn: () => void) => { handlers[ev] = (handlers[ev] || []).filter(f => f !== fn); },
-    handlers,
-  };
+    addHandler: (ev, fn) => { (handlers[ev] ||= []).push(fn); },
+    removeHandler: (ev, fn) => { handlers[ev] = (handlers[ev] || []).filter(f => f !== fn); },
+  });
+  return Object.assign(viewer, { handlers });
 }
 
-function barEl(viewer: any): HTMLDivElement { return viewer.canvas.firstChild as HTMLDivElement; }
-function label(viewer: any): string { return barEl(viewer).querySelector('span')!.textContent ?? ''; }
-function visible(viewer: any): boolean { return barEl(viewer).style.display !== 'none'; }
+function barEl(viewer: OsdViewerLike): HTMLDivElement { return viewer.canvas.firstChild as HTMLDivElement; }
+function label(viewer: OsdViewerLike): string { return barEl(viewer).querySelector('span')!.textContent ?? ''; }
+function visible(viewer: OsdViewerLike): boolean { return barEl(viewer).style.display !== 'none'; }
 
 describe('OsdScaleBar', () => {
   it('renders a bar and a label when the image has a physical pixel size', () => {

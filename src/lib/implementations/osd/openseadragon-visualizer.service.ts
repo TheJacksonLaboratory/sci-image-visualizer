@@ -203,7 +203,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       getFileName: () => this.currentFileName,
       getShapeColor: () => this.regionStore.getShapeColor(),
       // Zoom-to-box: overlay pixels -> image coords, and fit the viewport to the box.
-      pixelToData: (px, py) => elementToImage(this.viewer, px, py),
+      pixelToData: (px, py) => elementToImage(this.viewer!, px, py),
       applyZoomToBox: (coords) => this.viewport.applyZoomToBox(coords),
     };
     this.canvasTools = createCanvasToolManager(this.toolHost, {

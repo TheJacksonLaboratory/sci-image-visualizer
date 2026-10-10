@@ -1,4 +1,6 @@
+import type * as OpenSeadragon from 'openseadragon';
 import { OSD } from './osd-lib';
+import { OsdRectLike, OsdTiledImageLike, OsdViewerLike } from './osd-viewer-like';
 
 /**
  * Coordinate conversions between screen (viewer-element) pixels, the OSD viewport,
@@ -12,18 +14,17 @@ import { OSD } from './osd-lib';
  * step on the viewport (which is unambiguous). Falls back to the viewport methods
  * when the world is empty.
  */
-const osd: any = OSD;
 
 /** Reference tiled image for image<->viewport conversions (any slice works since
  *  they share geometry). */
-function refItem(viewer: any): any | null {
-  return viewer?.world?.getItemCount?.() > 0 ? viewer.world.getItemAt(0) : null;
+function refItem(viewer: OsdViewerLike): OsdTiledImageLike | null {
+  return (viewer.world?.getItemCount() ?? 0) > 0 ? viewer.world.getItemAt(0) ?? null : null;
 }
 
 /** Viewer-element pixel -> image (data) coordinates. */
-export function elementToImage(viewer: any, x: number, y: number): { x: number; y: number } {
+export function elementToImage(viewer: OsdViewerLike, x: number, y: number): { x: number; y: number } {
   const vp = viewer.viewport;
-  const pt = new osd.Point(x, y);
+  const pt = new OSD.Point(x, y);
   const item = refItem(viewer);
   const img = item
     ? item.viewportToImageCoordinates(vp.viewerElementToViewportCoordinates(pt))
@@ -32,9 +33,9 @@ export function elementToImage(viewer: any, x: number, y: number): { x: number; 
 }
 
 /** Image (data) coordinates -> viewer-element pixel point. */
-export function imageToElement(viewer: any, x: number, y: number): { x: number; y: number } {
+export function imageToElement(viewer: OsdViewerLike, x: number, y: number): { x: number; y: number } {
   const vp = viewer.viewport;
-  const pt = new osd.Point(x, y);
+  const pt = new OSD.Point(x, y);
   const item = refItem(viewer);
   const p = item
     ? vp.viewportToViewerElementCoordinates(item.imageToViewportCoordinates(pt))
@@ -43,8 +44,10 @@ export function imageToElement(viewer: any, x: number, y: number): { x: number; 
 }
 
 /** Image-space rectangle -> viewport rectangle (for fitBounds). */
-export function imageRectToViewport(viewer: any, x: number, y: number, w: number, h: number): any {
-  const rect = new osd.Rect(x, y, w, h);
+export function imageRectToViewport(
+  viewer: OsdViewerLike, x: number, y: number, w: number, h: number,
+): OpenSeadragon.Rect {
+  const rect = new OSD.Rect(x, y, w, h);
   const item = refItem(viewer);
   return item ? item.imageToViewportRectangle(rect) : viewer.viewport.imageToViewportRectangle(rect);
 }
@@ -52,7 +55,7 @@ export function imageRectToViewport(viewer: any, x: number, y: number, w: number
 /** Viewport rectangle -> image (data) rectangle. Routes through world item 0 so
  *  it stays accurate when the world holds multiple images (stack slices /
  *  per-channel layers); falls back to the viewport when the world is empty. */
-export function viewportRectToImage(viewer: any, vpRect: any): any {
+export function viewportRectToImage(viewer: OsdViewerLike, vpRect: OsdRectLike): OsdRectLike {
   const item = refItem(viewer);
   return item ? item.viewportToImageRectangle(vpRect) : viewer.viewport.viewportToImageRectangle(vpRect);
 }

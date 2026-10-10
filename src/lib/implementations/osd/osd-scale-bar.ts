@@ -1,5 +1,6 @@
 import { ScaleBarElement, createScaleBarElement, scaleBarFor } from '../../overlays/scale-bar-core';
 import { imageToElement } from './osd-coords';
+import { OsdViewerLike } from './osd-viewer-like';
 
 /**
  * A physical scale bar drawn over an OpenSeadragon viewer: an adapter over the shared
@@ -11,7 +12,7 @@ export class OsdScaleBar {
   private readonly el: ScaleBarElement;
   private readonly redrawHandler = () => this.update();
 
-  constructor(private viewer: any, private mppX: number) {
+  constructor(private viewer: OsdViewerLike, private mppX: number) {
     this.el = createScaleBarElement(this.viewer.canvas);
     this.viewer.addHandler('update-viewport', this.redrawHandler);
     this.viewer.addHandler('animation', this.redrawHandler);

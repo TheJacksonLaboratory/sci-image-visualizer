@@ -2,6 +2,7 @@ import { OsdRegionOverlay } from './osd-region-overlay';
 import { RegionStore } from '../../store/region-store.service';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { Region, Rectangle, Polygon, MultiPolygon } from '../../models/region';
+import { fakeOsdViewer } from '../../testing/fake-osd-viewer';
 
 /**
  * Mock OpenSeadragon with an *identity* viewport (image coords == element
@@ -18,20 +19,6 @@ jest.mock('openseadragon', () => ({
   },
   Point: class { constructor(public x: number, public y: number) {} },
 }));
-
-function fakeViewer() {
-  const canvas = document.createElement('div');
-  return {
-    canvas,
-    viewport: {
-      imageToViewerElementCoordinates: (p: any) => ({ x: p.x, y: p.y }),
-      viewerElementToImageCoordinates: (pos: any) => ({ x: pos.x, y: pos.y }),
-    },
-    setMouseNavEnabled: () => { /* noop */ },
-    addHandler: () => { /* noop */ },
-    removeHandler: () => { /* noop */ },
-  };
-}
 
 /** The captured MouseTracker handlers (press/drag/release/click/move). */
 function handlers(): any {
@@ -72,7 +59,7 @@ describe('OsdRegionOverlay — vertex tools', () => {
 
   beforeEach(() => {
     store = new RegionStore(new VisualizerStore());
-    overlay = new OsdRegionOverlay(fakeViewer(), store);
+    overlay = new OsdRegionOverlay(fakeOsdViewer(), store);
   });
 
   afterEach(() => overlay.destroy());
@@ -167,9 +154,9 @@ describe('OsdRegionOverlay — vertex tools', () => {
   it('rebuilds the SVG once per animated frame, on update-viewport only (OSD-PLOTLY-11)', () => {
     // OSD raises both 'animation' and 'update-viewport' on every animated frame;
     // redrawing on both rebuilt every region twice per frame.
-    const viewer: any = fakeViewer();
+    const viewer = fakeOsdViewer();
     const events: string[] = [];
-    viewer.addHandler = (name: string) => events.push(name);
+    viewer.addHandler = (name) => events.push(name);
     const o = new OsdRegionOverlay(viewer, store);
     expect(events).toContain('update-viewport');
     expect(events).not.toContain('animation');
@@ -177,14 +164,14 @@ describe('OsdRegionOverlay — vertex tools', () => {
   });
 
   it('follows a camera move by rewriting one transform, not rebuilding the regions (OSD-PLOTLY-11)', () => {
-    const viewer: any = fakeViewer();
+    const viewer = fakeOsdViewer();
     const handlersByName: Record<string, () => void> = {};
-    viewer.addHandler = (name: string, h: () => void) => { handlersByName[name] = h; };
+    viewer.addHandler = (name, h) => { handlersByName[name] = h; };
     let scale = 1;
-    viewer.viewport.imageToViewerElementCoordinates = (p: any) => ({ x: p.x * scale, y: p.y * scale });
+    viewer.viewport.imageToViewerElementCoordinates = (p) => ({ x: p.x * scale, y: p.y * scale });
     const o = new OsdRegionOverlay(viewer, store);
     store.addRegion(rectRegion()); // drawn, and selected: its corner handles show
-    const svg = (viewer.canvas as HTMLElement).querySelector('svg')!;
+    const svg = viewer.canvas.querySelector('svg')!;
     const shape = svg.querySelector('polygon')!;
     const redraw = jest.spyOn(o, 'redraw');
     const observer = new MutationObserver(() => undefined);
@@ -407,11 +394,11 @@ describe('OsdRegionOverlay — vertex tools', () => {
   }
 
   it('renders a multi-part region as one even-odd path with a subpath per part', () => {
-    const viewer = fakeViewer();
+    const viewer = fakeOsdViewer();
     const o = new OsdRegionOverlay(viewer, store);
     try {
       store.addRegion(multiRegion());
-      const paths = (viewer.canvas as HTMLElement).querySelectorAll('path');
+      const paths = viewer.canvas.querySelectorAll('path');
       expect(paths.length).toBe(1);
       expect(paths[0].getAttribute('fill-rule')).toBe('evenodd');
       expect((paths[0].getAttribute('d')!.match(/M/g) || []).length).toBe(2); // one per part
@@ -435,13 +422,13 @@ describe('OsdRegionOverlay — vertex tools', () => {
   });
 
   it('shows the hole vertices (not just the exterior) when a donut is selected', () => {
-    const viewer = fakeViewer();
+    const viewer = fakeOsdViewer();
     const o = new OsdRegionOverlay(viewer, store);
     try {
       o.setMode('select');
       store.addRegion(donutRegion()); // addRegion selects it
       // 4 exterior vertices + 4 hole vertices = 8 markers.
-      const circles = (viewer.canvas as HTMLElement).querySelectorAll('circle');
+      const circles = viewer.canvas.querySelectorAll('circle');
       expect(circles.length).toBe(8);
     } finally {
       o.destroy();
@@ -530,7 +517,7 @@ describe('OsdRegionOverlay — regions arriving as JSON (jit-ui#124)', () => {
 
   beforeEach(() => {
     store = new RegionStore(new VisualizerStore());
-    overlay = new OsdRegionOverlay(fakeViewer(), store);
+    overlay = new OsdRegionOverlay(fakeOsdViewer(), store);
     svg = (overlay as any).svg as SVGSVGElement;
   });
 
