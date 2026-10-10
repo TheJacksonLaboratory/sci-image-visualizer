@@ -9,13 +9,15 @@ import { CachedImageData } from '../../toolbar/wand/wand-tool.service';
 import { RegionStore } from '../../store/region-store.service';
 import { Polygon, Region } from '../../models/region';
 import { IntensityProfile } from '../../contracts/visualizer.contract';
+import { IImageInfo } from '../../contracts/image.contract';
+import { IntensityProfileService } from '../../intensity/intensity-profile.service';
 
 /**
  * Locks the intensity-profile sampling used by the LINE plot type's draggable
  * line ROI → floating inset.
  */
-describe('PlotlyService intensity profile sampling', () => {
-  let service: PlotlyService;
+describe('IntensityProfileService sampling', () => {
+  let service: IntensityProfileService;
 
   beforeEach(() => {
     TestBed.configureTestingModule({
@@ -25,32 +27,30 @@ describe('PlotlyService intensity profile sampling', () => {
         MessageService,
       ],
     });
-    service = TestBed.inject(PlotlyService);
+    service = TestBed.inject(IntensityProfileService);
   });
 
   it('samples grayscale intensity along a horizontal line ROI', () => {
     // 1 frame, 2 rows x 3 cols.
-    (service as any).cachedImageFrames = [[[10, 20, 30], [40, 50, 60]]];
-    (service as any).cachedImageRatios = [1, 1];
+    service.setFrames({ frames: [[[10, 20, 30], [40, 50, 60]]], ratios: [1, 1] });
 
-    const profile = (service as any).computeIntensityProfile({ x0: 0, y0: 0, x1: 2, y1: 0 });
+    const profile = service.computeIntensityProfile({ x0: 0, y0: 0, x1: 2, y1: 0 });
     expect(profile.values).toEqual([10, 30]);
     expect(profile.positions).toEqual([0, 2]);
   });
 
   it('uses RGB luminance for colour frames', () => {
     // single RGB pixel row: red, then white.
-    (service as any).cachedImageFrames = [[[[255, 0, 0], [255, 255, 255]]]];
-    (service as any).cachedImageRatios = [1, 1];
+    service.setFrames({ frames: [[[[255, 0, 0], [255, 255, 255]]]], ratios: [1, 1] });
 
-    const profile = (service as any).computeIntensityProfile({ x0: 0, y0: 0, x1: 1, y1: 0 });
+    const profile = service.computeIntensityProfile({ x0: 0, y0: 0, x1: 1, y1: 0 });
     expect(profile.values[0]).toBeCloseTo(0.299 * 255, 2); // red luminance
     expect(profile.values[1]).toBeCloseTo(255, 2);         // white luminance
   });
 
   it('returns empty when no image is cached', () => {
-    (service as any).cachedImageFrames = [];
-    expect((service as any).computeIntensityProfile({ x0: 0, y0: 0, x1: 1, y1: 0 }))
+    service.setFrames({ frames: [], ratios: [1, 1] });
+    expect(service.computeIntensityProfile({ x0: 0, y0: 0, x1: 1, y1: 0 }))
       .toEqual({ positions: [], values: [] });
   });
 });
@@ -100,7 +100,11 @@ describe('PlotlyService sampling cache after setSamplingFrames (OSD-PLOTLY-2)', 
  */
 describe('PlotlyService intensity profile lines (characterization)', () => {
   let service: PlotlyService;
+  let intensity: IntensityProfileService;
   let regionStore: RegionStore;
+  /** The image the profile lines are placed over ([x0, x1, y0, y1]). */
+  const image = (extent: number[], imageInfo = {} as IImageInfo) =>
+    intensity.setFrames({ frames: [], ratios: [1, 1] }, { imageInfo, extent });
 
   beforeEach(() => {
     TestBed.configureTestingModule({
@@ -109,6 +113,7 @@ describe('PlotlyService intensity profile lines (characterization)', () => {
     });
     service = TestBed.inject(PlotlyService);
     regionStore = TestBed.inject(RegionStore);
+    intensity = TestBed.inject(IntensityProfileService);
   });
 
   const ends = (r: Region | null) => {
@@ -121,7 +126,7 @@ describe('PlotlyService intensity profile lines (characterization)', () => {
   });
 
   it('spans 2/3 of the image width, centred, staggering each new line down the image', () => {
-    (service as any).trueImgSize = [0, 1000, 0, 800];
+    image([0, 1000, 0, 800]);
     const first = ends(service.addProfileLine());
     expect(first.xs[0]).toBeCloseTo(1000 / 6);
     expect(first.xs[1]).toBeCloseTo(5000 / 6);
@@ -133,7 +138,7 @@ describe('PlotlyService intensity profile lines (characterization)', () => {
   });
 
   it('places the line inside the last visible region when it overlaps the image', () => {
-    (service as any).trueImgSize = [0, 1000, 0, 800];
+    image([0, 1000, 0, 800]);
     service.refreshIntensitySamplingForRoi(100, 100, 200, 100, 0);
     const line = ends(service.addProfileLine());
     expect(line.xs[0]).toBeCloseTo(200 - 200 / 3);
@@ -142,29 +147,28 @@ describe('PlotlyService intensity profile lines (characterization)', () => {
   });
 
   it('cycles a bright palette, one colour per line', () => {
-    (service as any).trueImgSize = [0, 100, 0, 100];
+    image([0, 100, 0, 100]);
     const colors = Array.from({ length: 9 }, () => service.addProfileLine()!.color);
     expect(new Set(colors.slice(0, 8)).size).toBe(8);
     expect(colors[8]).toBe(colors[0]);
   });
 
   it('measures along the line in microns when the image carries a pixel size', () => {
-    (service as any).cachedImageFrames = [[[10, 20, 30], [40, 50, 60]]];
-    (service as any).cachedImageRatios = [1, 1];
-    (service as any).imageInfo = { imageMeta: [{ mppX: 0.5, mppY: 0.25 }] };
-    const profile = (service as any).computeIntensityProfile({ x0: 0, y0: 0, x1: 2, y1: 0 });
+    image([0, 3, 0, 2], { imageMeta: [{ mppX: 0.5, mppY: 0.25 }] } as IImageInfo);
+    intensity.setFrames({ frames: [[[10, 20, 30], [40, 50, 60]]], ratios: [1, 1] });
+    const profile = intensity.computeIntensityProfile({ x0: 0, y0: 0, x1: 2, y1: 0 });
     expect(profile).toEqual({ positions: [0, 1], values: [10, 30], unit: 'µm' });
   });
 
   it('samples a zoom crop at its origin', () => {
     service.setSamplingFrames([[[1, 2, 3], [4, 5, 6]]], [1, 1], [100, 50]);
-    const profile = (service as any).computeIntensityProfile({ x0: 100, y0: 51, x1: 102, y1: 51 });
+    const profile = intensity.computeIntensityProfile({ x0: 100, y0: 51, x1: 102, y1: 51 });
     expect(profile.values).toEqual([4, 6]);
     expect(profile.unit).toBe('px');
   });
 
   it('re-emits every line\'s profile, tagged with its id and colour, when a region changes', () => {
-    (service as any).trueImgSize = [0, 3, 0, 2];
+    image([0, 3, 0, 2]);
     service.setSamplingFrames([[[10, 20, 30], [40, 50, 60]]], [1, 1]);
     const seen: IntensityProfile[][] = [];
     service.getIntensityProfile$().subscribe((p) => seen.push(p));

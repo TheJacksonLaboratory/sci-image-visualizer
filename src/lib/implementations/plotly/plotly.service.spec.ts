@@ -15,6 +15,8 @@ import { RegionStore } from '../../store/region-store.service';
 import { IChannelState } from '../../contracts/channel-histogram-api.contract';
 import { TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
 import { Subject } from 'rxjs';
+import { IntensityProfileService } from '../../intensity/intensity-profile.service';
+import { PlotUtilities } from '../../plot.utilities';
 import { ImageLayoutContext, chartLayout, overlayLayout, surfaceLayout, volumeLayout } from './plotly-layouts';
 
 describe('PlotlyService', () => {
@@ -495,7 +497,7 @@ describe('PlotlyService service-lifetime subscriptions (review CORE-1)', () => {
     await service.plot('plot', loaded, imageInfo, 811, PlotType.HEATMAP);
 
     const restyle = jest.spyOn(Plotly, 'restyle').mockResolvedValue(document.createElement('div') as never);
-    const emitProfiles = jest.spyOn(service as unknown as { emitProfiles(): void }, 'emitProfiles');
+    const emitProfiles = jest.spyOn(TestBed.inject(IntensityProfileService), 'emitProfiles');
     store.setChannelStates([channel(10, 20)]);
     expect(restyle).toHaveBeenCalledWith(document.getElementById('plot'), expect.objectContaining({ zmin: 10, zmax: 20 }));
 
@@ -512,7 +514,7 @@ describe('PlotlyService service-lifetime subscriptions (review CORE-1)', () => {
     service.unsubscribe();
     service.getIntensityProfile$().subscribe();
 
-    const emitProfiles = jest.spyOn(service as unknown as { emitProfiles(): void }, 'emitProfiles');
+    const emitProfiles = jest.spyOn(TestBed.inject(IntensityProfileService), 'emitProfiles');
     const r = new Region();
     r.bounds = Object.assign(new Rectangle(), { x: 1, y: 1, width: 5, height: 5 });
     regionStore.setRegions([r]);
@@ -562,17 +564,22 @@ describe('PlotlyService async supersession (review OSD-PLOTLY-8)', () => {
   afterEach(() => jest.restoreAllMocks());
 
   it('drops an intensity-sampling load that a newer one superseded', async () => {
-    const frames = (name: string) => ({ data: [[[name]]], ratios: [1, 1], sizes: [1, 1] });
+    const intensity = TestBed.inject(IntensityProfileService);
     const releases: Array<() => void> = [];
-    jest.spyOn(service, 'load').mockImplementation((info: IImageInfo) =>
-      new Promise((resolve) => releases.push(() => resolve(frames(info.fileName!) as never))));
-    const a = service.ensureIntensitySampling({ fileName: 'A', urls: ['a'] } as IImageInfo, 0);
-    const b = service.ensureIntensitySampling({ fileName: 'B', urls: ['b'] } as IImageInfo, 0);
+    type Loader = { loadSlice(info: IImageInfo): Promise<{ frame: unknown[]; ratios: number[] }> };
+    jest.spyOn(intensity as unknown as Loader, 'loadSlice').mockImplementation((info: IImageInfo) =>
+      new Promise((resolve) => releases.push(() => resolve({ frame: [[info.fileName!]], ratios: [1, 1] }))));
+    const info = (name: string) =>
+      ({ fileName: name, urls: [name], trueImageSize: [1, 1] }) as unknown as IImageInfo;
+    const a = service.ensureIntensitySampling(info('A'), 0);
+    const b = service.ensureIntensitySampling(info('B'), 0);
     releases[1](); // B first
     await b;
     releases[0](); // then the slow A
     await a;
-    expect((service as any).cachedImageFrames).toEqual([[['B']]]);
+    expect((intensity as unknown as { frames: { frames: unknown } }).frames.frames).toEqual([[['B']]]);
+    // ...and the Plotly pixel tools' frames are not the profiles' (OSD-PLOTLY-2).
+    expect((service as any).cachedImageFrames).toBeUndefined();
   });
 
   it('drops a high-def zoom crop that arrives after the plot was purged for another backend', async () => {
@@ -599,7 +606,7 @@ describe('PlotlyService async supersession (review OSD-PLOTLY-8)', () => {
     s.plotDiv = 'plot';
     s.trueImgSize = [0, 1000, 0, 800];
     s.imageInfo = { isGrayscale: true, fileName: 'f.tif' } as IImageInfo;
-    const measure = jest.spyOn(s.plotUtilities, 'getDomRectangle');
+    const measure = jest.spyOn(PlotUtilities.prototype, 'getDomRectangle');
     s.triggerZoom([100, 200, 300, 400]);
     service.refreshIntensitySamplingForRoi(0, 0, 10, 10, 0);
     expect(measure.mock.calls).toEqual([['plot'], ['plot']]);

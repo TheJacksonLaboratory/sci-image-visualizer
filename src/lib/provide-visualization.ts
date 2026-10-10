@@ -10,6 +10,7 @@ import { SamToolService } from './toolbar/segmentation/sam-tool.service';
 import { SamPointToolService } from './toolbar/segmentation/sam-point-tool.service';
 import { CellSegmentToolService } from './toolbar/segmentation/cell-segment-tool.service';
 import { SpatialSelectionStore } from './store/spatial-selection.service';
+import { IntensityProfileService } from './intensity/intensity-profile.service';
 import { VISUALIZER } from './contracts/visualizer.contract';
 import { REGION_EDITOR_API } from './contracts/region-editor-api.contract';
 import { CHANNEL_HISTOGRAM_API } from './contracts/channel-histogram-api.contract';
@@ -73,6 +74,7 @@ export function provideVisualization(): Provider[] {
     VisualizerStore,
     RegionStore,
     SpatialSelectionStore,
+    IntensityProfileService,
     // The canvas tools (wand, brush, eraser, zoom-to-box, SAM point) are not here:
     // each backend above builds its own instances in its CanvasToolManager. The
     // SAM point tools report through the chain's SamPointToolService.

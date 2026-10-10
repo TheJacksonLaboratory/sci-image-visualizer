@@ -4,7 +4,7 @@ import * as Plotly from 'plotly.js-dist-min';
 import { Image } from 'image-js';
 import { HttpClient } from '@angular/common/http';
 
-import { Polygon, Rectangle, Region } from '../../models/region';
+import { Region } from '../../models/region';
 import { Buffer } from 'buffer';
 import { IImageInfo } from '../../contracts/image.contract';
 import { TileAccessPort, TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
@@ -40,6 +40,8 @@ import { ViewerCapabilities, ViewerFeature, capabilitiesOf } from '../../contrac
 import { IRegionOverlay } from '../../contracts/region-overlay.contract';
 import { PlotlyRegionOverlay } from './plotly-region-overlay';
 import { PlotlyIsosurfaceControls } from './plotly-isosurface-controls';
+import { renderIntensityInset as renderPlotlyIntensityInset } from './plotly-intensity-inset';
+import { IntensityProfileService } from '../../intensity/intensity-profile.service';
 import { ICoordinateTransform } from '../../contracts/coordinate-transform.contract';
 import { PlotlyCoordinateTransform } from './plotly-coordinate-transform';
 import { VisualizerStore } from '../../store/visualizer-store.service';
@@ -127,26 +129,15 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   private cachedImageRatios: number[] = [1, 1];
   private cachedIsGrayscale = false;
   /** Data-space coordinate of the cached frame's pixel (0,0). [0,0] for the full
-   *  image; a crop's top-left when zoomed (so the intensity profile samples the
+   *  image; a crop's top-left after a high-def zoom (so the tools sample the
    *  zoom-level pixels at the right offset/resolution). */
   private cachedFrameOrigin: [number, number] = [0, 0];
-  /** Last visible image-pixel rectangle from the active backend's viewport (set by
-   *  the OSD viewport-change hook via refreshIntensitySamplingForRoi). New profile lines are
-   *  placed within it so they land on-screen when zoomed in; null → use full image. */
-  private lastVisibleRoi: { x: number; y: number; width: number; height: number } | null = null;
-
   /** events */
   private onRelayoutEvent: any;
   /** Bumped by every render of the plot div (plot, a high-def zoom re-render,
    *  purge, reset). A high-def zoom drops its crop if another render (or the
    *  hand-over of the div to another backend) happened while it was fetching. */
   private renderGen = 0;
-  /** Bumped by every write request to the intensity-sampling cache (plot,
-   *  ensureIntensitySampling, refreshIntensitySamplingForRoi, reset): an async
-   *  sampling fetch lands only if no newer one was requested meanwhile, so a
-   *  slow fetch for the previous image can't overwrite the current one. */
-  private samplingGen = 0;
-
   private stackLoading$ = new BehaviorSubject<boolean>(false);
   private stackLoadingProgress$ = new BehaviorSubject<number>(0);
   // current index of image in stack (if stack), 0 if single image
@@ -155,22 +146,6 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   // The region update event and selection stream are owned by the shared
   // RegionStore; getRegionUpdateEvent()/getSelectedShapeIndices$() delegate to
   // it so every consumer (and the OSD backend) sees one stream.
-  /** Bright, well-separated colours cycled as the user adds profile-line ROIs.
-   *  The matching inset trace is drawn in the same colour. */
-  private readonly PROFILE_PALETTE = [
-    '#FFD400', // yellow
-    '#00E5FF', // cyan
-    '#FF2D95', // magenta
-    '#39FF14', // green
-    '#FF9500', // orange
-    '#7C4DFF', // violet
-    '#FF3B30', // red
-    '#18FFFF', // aqua
-  ];
-  /** Palette cursor for profile lines (never reset on delete, so colours keep
-   *  cycling across the session). */
-  private profileColorSeq = 0;
-  private intensityProfile$ = new Subject<IntensityProfile[]>();
   /** The ISOSURFACE band, mapped onto the measured volume (see PlotlyIsosurfaceControls). */
   private readonly iso = new PlotlyIsosurfaceControls(
     () => this.plotType === PlotType.ISOSURFACE && !!this.plotDiv && !!this.liveGd(),
@@ -182,11 +157,6 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   private imageCached = false;
   private imageCachedSubscription?: Subscription;
   private filenameSubscription?: Subscription;
-  /** Drives the intensity inset off region adds/drags/deletes (both backends). */
-  private regionUpdateSubscription?: Subscription;
-  /** Live (per-frame, non-coalesced) region edits — so the inset tracks an OSD
-   *  line ROI live during a drag (OSD batches regionUpdate$ until release). */
-  private regionLiveEditSubscription?: Subscription;
   private channelSub?: Subscription;
 
   /** What this backend's canvas tools read and write (one host for every tool). */
@@ -209,7 +179,8 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
               private cellSegmentTool: CellSegmentToolService,
               @Optional() @Inject(CELL_SEGMENTER) private cellSegmenter: ICellSegmenter | null,
               store: VisualizerStore,
-              regionStore: RegionStore) {
+              regionStore: RegionStore,
+              private intensity: IntensityProfileService) {
     super(regionStore, store);
     // relayout event router
     this.onRelayoutEvent = (event: any) => { this.relayoutEventHandler(event); };
@@ -261,16 +232,6 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
       this.store.getInvert(),
       this.store.getColormap(),
     ]).subscribe(([channels, rev, inv]) => this.applyChannelDisplay(channels, rev, inv));
-    // Profile lines are store regions; any region change (add/drag/delete, on
-    // either backend) should refresh the inset traces. The live-edit stream
-    // fires per frame during a drag (OSD coalesces regionUpdate$ until release),
-    // so the inset tracks an OSD line ROI live as it's moved.
-    this.regionUpdateSubscription = this.regionStore.getRegionUpdateEvent().subscribe(() => {
-      this.emitProfiles();
-    });
-    this.regionLiveEditSubscription = this.regionStore.getRegionLiveEdit$().subscribe(() => {
-      this.emitProfiles();
-    });
   }
 
   getTrueImageSize(): { width: number; height: number } | null {
@@ -388,7 +349,6 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     // A new image: a stroke or SAM prompt in progress belonged to the old one.
     if (!inPlace) this.canvasTools.resetAll();
     this.renderGen++;
-    this.samplingGen++;
     const trueImageSize: number[] = [];
     this.zoomCoordinates = [];
     // [x0, x1, y0, y1]
@@ -408,6 +368,12 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     this.cachedImageRatios = imageLoaded.ratios;
     this.cachedFrameOrigin = [0, 0]; // full image — reset any prior zoom-crop origin
     this.cachedIsGrayscale = !!imageInfo.isGrayscale;
+    // The profiles sample the image on screen from now on (superseding any
+    // sampling fetch still in flight for the previous one).
+    this.intensity.supersede();
+    this.intensity.setSamplingElement(plotDiv);
+    this.intensity.setFrames({ frames: imageLoaded.data, ratios: imageLoaded.ratios },
+      { imageInfo, extent: trueImageSize, frameIndex: () => this.activeFrameIndex() });
 
     // Pluggable plot types (contour, scatter, scatter3d, isosurface) render
     // through the trace-builder registry. The original HEATMAP/SURFACE/RGB-image
@@ -566,42 +532,16 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     // load/plot — and with OSD/napari active none may follow. Re-arm the region
     // subscriptions that drive the profiles (see ensureSubscriptions()).
     this.ensureSubscriptions();
-    return this.intensityProfile$.asObservable();
+    return this.intensity.getIntensityProfile$();
   }
 
   /** Plotly renders the line ROIs + inset, so it exposes the intensity controls. */
   public getIntensityControls(): IIntensityControls | null { return this; }
 
-  /**
-   * Render the floating intensity-profile inset chart into `divId` — one line
-   * trace per ROI, each drawn in its ROI's colour. Kept here (not in the diagram
-   * component) so the consumer never touches Plotly directly.
-   */
+  /** Render the floating intensity-profile inset (see plotly-intensity-inset.ts),
+   *  so the consumer never touches Plotly directly. */
   public renderIntensityInset(divId: string, profiles: IntensityProfile[]): void {
-    const el = document.getElementById(divId);
-    if (!el) return;
-    const traces = (profiles ?? []).map((p, i) => ({
-      x: p.positions,
-      y: p.values,
-      type: 'scatter',
-      mode: 'lines',
-      line: { color: p.color ?? '#FFD400', width: 2 },
-      name: `Line ${i + 1}`,
-      hoverinfo: 'x+y',
-    }));
-    // X axis is in microns when the image carries a physical pixel size (mpp),
-    // otherwise in pixels — driven by the unit the sampler tagged on the profile.
-    const unit = (profiles ?? []).find(p => p.unit)?.unit ?? 'px';
-    const xTitle = unit === 'µm' ? 'Position (µm)' : 'Position (px)';
-    Plotly.react(el, traces as any, {
-      margin: { t: 6, r: 8, b: 38, l: 40 },
-      xaxis: { title: xTitle, zeroline: false, color: '#ddd' },
-      yaxis: { title: 'Intensity', zeroline: false, color: '#ddd' },
-      showlegend: false,
-      paper_bgcolor: 'rgba(25,25,25,0.9)',
-      plot_bgcolor: 'rgba(25,25,25,0.9)',
-      font: { color: '#eee', size: 10 },
-    } as any, { displayModeBar: false, responsive: true } as any);
+    renderPlotlyIntensityInset(divId, profiles);
   }
 
   /**
@@ -614,60 +554,13 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   }
 
   /**
-   * IIntensityControls: add another intensity-profile line as a neutral Region
-   * (tagged `kind: 'profile'`). It is a horizontal open 2-point polyline spanning
-   * the image width, staggered vertically so successive lines stay distinct, in
-   * the next bright palette colour. Added to the shared store so both backends
-   * (Plotly + OpenSeadragon) render and drag it; excluded from the Regions tab
-   * and exports by its kind.
+   * IIntensityControls: add another profile line (see IntensityProfileService),
+   * and draw it at once when a Plotly plot is on screen (the OSD/napari overlays
+   * render it from the store's region-update event).
    */
   public addProfileLine(): Region | null {
-    if (!this.trueImgSize) return null;
-    const count = this.getProfileRegions().length;
-    const imgX0 = this.trueImgSize[0], imgX1 = this.trueImgSize[1];
-    const imgTop = this.trueImgSize[2], imgBottom = this.trueImgSize[3];
-
-    // Place the line within the currently VISIBLE image area, so when zoomed in it
-    // lands on-screen instead of spanning the whole (mostly off-screen) image, at
-    // 2/3 of the visible width and horizontally centred. Falls back to the full
-    // image when no viewport ROI is known (Plotly heatmap) or a stale ROI no longer
-    // overlaps the image.
-    const roi = this.lastVisibleRoi;
-    const overlaps = !!roi && roi.width > 0 && roi.height > 0
-      && roi.x < imgX1 && roi.x + roi.width > imgX0
-      && roi.y < imgBottom && roi.y + roi.height > imgTop;
-    const x0v = overlaps ? Math.max(imgX0, roi!.x) : imgX0;
-    const x1v = overlaps ? Math.min(imgX1, roi!.x + roi!.width) : imgX1;
-    const topV = overlaps ? Math.max(imgTop, roi!.y) : imgTop;
-    const bottomV = overlaps ? Math.min(imgBottom, roi!.y + roi!.height) : imgBottom;
-
-    const cx = (x0v + x1v) / 2;
-    const half = ((x1v - x0v) * (2 / 3)) / 2; // line spans 2/3 of the visible width
-    const x0 = cx - half, x1 = cx + half;
-
-    const bandH = bottomV - topV;
-    const midY = (topV + bottomV) / 2;
-    // Stagger successive lines across the visible band so they stay distinct.
-    const y = Math.min(bottomV, Math.max(topV, midY + count * bandH * 0.12));
-
-    const poly = new Polygon();
-    poly.npoints = 2;
-    poly.xpoints = [x0, x1];
-    poly.ypoints = [y, y];
-    poly.coordinates = [[x0, y], [x1, y]];
-    poly.closed = false;
-
-    const region = new Region();
-    region.bounds = poly;
-    region.kind = 'profile';
-    region.color = this.PROFILE_PALETTE[this.profileColorSeq++ % this.PROFILE_PALETTE.length];
-    // Leave region.label undefined so applyClassificationColors won't recolor it.
-
-    this.regionStore.addRegion(region);
-
-    // If a Plotly plot is on screen, re-render shapes so the new line appears.
-    // (The OSD overlay renders automatically via its region-update subscription.)
-    if (this.plotDiv) {
+    const region = this.intensity.addProfileLine();
+    if (region && this.plotDiv) {
       this.syncShapesFromStore();
       const gd = this.liveGd();
       if (gd) void Plotly.relayout(gd, { shapes: this.currentRenderShapes() } as any);
@@ -675,42 +568,9 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     return region;
   }
 
-  /** The profile-line ROIs currently in the store (kind === 'profile'). */
-  private getProfileRegions(): Region[] {
-    return this.regionStore.getRegions().filter(r => (r as any).kind === 'profile');
-  }
-
-  /** Recompute and broadcast a profile for every profile-line region (id + colour
-   *  tagged so the inset trace matches its line). */
-  private emitProfiles(): void {
-    this.intensityProfile$.next(this.getProfileRegions().map(r => ({
-      ...this.computeIntensityProfileForRegion(r),
-      id: r.id,
-      color: r.color,
-    })));
-  }
-
   /**
-   * Sample the intensity profile for a profile-line region: extract its two
-   * polygon endpoints and reuse the shared `computeIntensityProfile` sampling.
-   */
-  private computeIntensityProfileForRegion(region: Region): IntensityProfile {
-    // Duck-typed (not `instanceof Polygon`): after a drag round-trips through the
-    // store the bounds can be a plain object, so match on the point arrays.
-    const poly: any = region.bounds;
-    if (!poly || !Array.isArray(poly.xpoints) || !Array.isArray(poly.ypoints) ||
-        poly.xpoints.length < 2 || poly.ypoints.length < 2) {
-      return { positions: [], values: [] };
-    }
-    return this.computeIntensityProfile({
-      x0: poly.xpoints[0], y0: poly.ypoints[0],
-      x1: poly.xpoints[1], y1: poly.ypoints[1],
-    });
-  }
-
-  /**
-   * Supply pixel frames for intensity sampling (used by the OSD/image backend,
-   * whose cached frames may be empty). Optionally also sets the data/pixel ratios.
+   * Point the pixel tools at these frames (e.g. a high-def zoom crop whose pixel
+   * (0,0) sits at image `origin`), and sample the intensity profiles from them.
    */
   public setSamplingFrames(frames: any[], ratios: number[], origin: [number, number] = [0, 0]): void {
     this.cachedImageFrames = frames;
@@ -723,137 +583,30 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
       this.cachedImageHeight = frame.length;
       this.cachedImageWidth = frame[0]?.length ?? 0;
     }
+    this.intensity.setFrames({ frames, ratios: this.cachedImageRatios, origin });
   }
 
-  /**
-   * Populate the sampling cache for the intensity profiles when OpenSeadragon is
-   * the active backend (the Image plot type). In OSD mode Plotly never rendered,
-   * so `cachedImageFrames`/`trueImgSize` are unset — fetch the current slice's
-   * preview (the same pixels the heatmap would sample) so the line ROIs have
-   * pixel data and a placement extent. Re-emits the profiles once loaded.
-   */
-  public async ensureIntensitySampling(imageInfo: IImageInfo, zIndex: number): Promise<void> {
-    if (!imageInfo?.urls?.length) return;
-    // Sample just the displayed slice (showStack off → single frame); `load`
-    // also sets `this.trueImgSize`, which addProfileLine needs for placement.
-    const single = { ...imageInfo, showStack: false } as IImageInfo;
-    const gen = ++this.samplingGen;
-    const loaded = await this.load(single, zIndex || 0);
-    if (gen !== this.samplingGen) return; // superseded (another image / a crop)
-    this.cachedImageFrames = loaded.data;
-    this.cachedImageRatios = loaded.ratios;
-    this.cachedImageWidth = loaded.sizes?.[0] ?? this.cachedImageWidth;
-    this.cachedImageHeight = loaded.sizes?.[1] ?? this.cachedImageHeight;
-    this.cachedFrameOrigin = [0, 0]; // full preview
-    this.cachedIsGrayscale = !!imageInfo.isGrayscale;
-    this.emitProfiles();
+  /** IIntensitySampling → IntensityProfileService (its own sampling frames). */
+  public ensureIntensitySampling(imageInfo: IImageInfo, zIndex: number): Promise<void> {
+    return this.intensity.ensureIntensitySampling(imageInfo, zIndex);
   }
 
   /**
    * {@link IIntensitySampling} stub — the viewport-change signal is OpenSeadragon's
    * (it re-samples on OSD zoom/pan). Plotly's own high-def zoom updates the
-   * sampling cache inline, so it never emits here; returns EMPTY so a uniform
+   * sampling frames inline, so it never emits here; returns EMPTY so a uniform
    * `IVisualizer` consumer can subscribe regardless of the active backend.
    */
   public getViewportChange$(): Observable<{ x: number; y: number; width: number; height: number }> {
     return EMPTY;
   }
 
-  /**
-   * Re-fetch the given image-pixel ROI at the display resolution and use it as
-   * the intensity-sampling source, so the profile reflects the data at the
-   * current zoom level. Shared by both backends: the OSD viewport-change hook
-   * calls it on zoom/pan; Plotly's own high-def zoom (triggerZoom) updates the
-   * same cache inline. `roi` is in full-image pixel coordinates.
-   */
+  /** IIntensitySampling → IntensityProfileService: re-sample from a display-resolution
+   *  crop of the visible region, sized from this viewer's plot div. */
   public refreshIntensitySamplingForRoi(x: number, y: number, width: number, height: number,
                                         zIndex: number): void {
-    if (width <= 0 || height <= 0) return;
-    // Remember the visible region so a new profile line is placed inside it.
-    this.lastVisibleRoi = { x, y, width, height };
-    const roi = new Rectangle();
-    roi.x = Math.round(x); roi.y = Math.round(y);
-    roi.width = Math.round(width); roi.height = Math.round(height);
-    // Sized from this viewer's own plot div, not jit-ui's `#diagram` wrapper,
-    // which other hosts (and the pipeline preview) don't have.
-    const screen = this.plotUtilities.getDomRectangle(this.plotDiv);
-    // Snapshot the filename so a response that arrives after the user switched
-    // files is dropped (the request carried the file selected at call time).
-    const reqName = this.fileName;
-    const gen = ++this.samplingGen;
-    this.tiles.zoomOnRegion(roi, screen, zIndex || 0).subscribe({
-      next: (zoomData) => {
-        Image.load(Buffer.from(new Uint8Array(zoomData))).then((image: any) => {
-          if (this.fileName !== reqName || gen !== this.samplingGen) return;
-          const isGray = !!this.imageInfo?.isGrayscale;
-          const frame = isGray
-            ? this.plotUtilities.arrayToMatrix(image.grey().data, image.width)
-            : this.plotUtilities.arrayToMatrix(image.getPixelsArray(), image.width);
-          this.setSamplingFrames([frame], [roi.width / image.width, roi.height / image.height],
-            [roi.x, roi.y]);
-          this.emitProfiles();
-        });
-      },
-      error: () => { /* keep the previous sampling frame on a failed crop fetch */ },
-    });
-  }
-
-  /**
-   * Sample the active frame's intensity (grayscale value or RGB luminance)
-   * along the line ROI. Returns distance-along-line positions and values.
-   */
-  private computeIntensityProfile(line: any): IntensityProfile {
-    const empty: IntensityProfile = { positions: [], values: [] };
-    if (!this.cachedImageFrames?.length || !line) return empty;
-    const frame = this.cachedImageFrames[this.activeFrameIndex()] ?? this.cachedImageFrames[0];
-    if (!frame?.length) return empty;
-    const rx = this.cachedImageRatios[0] || 1;
-    const ry = this.cachedImageRatios[1] || rx;
-    const [ox, oy] = this.cachedFrameOrigin;
-    const x0 = +line.x0, y0 = +line.y0, x1 = +line.x1, y1 = +line.y1;
-    const dxData = x1 - x0, dyData = y1 - y0;
-    // Scale the along-line distance by the physical pixel size (microns/pixel)
-    // when the image carries one — anisotropic mppX/mppY are applied per axis so
-    // diagonal lines measure the true physical length. Falls back to pixels.
-    const { mppX, mppY } = this.currentMpp();
-    const useMicrons = mppX != null;
-    const lenData = useMicrons
-      ? Math.hypot(dxData * mppX, dyData * (mppY ?? mppX))
-      : Math.hypot(dxData, dyData);
-    const lenPx = Math.hypot(dxData / rx, dyData / ry);
-    const n = Math.max(2, Math.round(lenPx));
-    const h = frame.length;
-    const w = frame[0].length;
-    const positions: number[] = [];
-    const values: number[] = [];
-    for (let i = 0; i < n; i++) {
-      const t = i / (n - 1);
-      // Map data coords to the cached frame's pixel grid, offset by the frame's
-      // origin (non-zero when the frame is a zoomed crop).
-      const px = Math.round((x0 + t * dxData - ox) / rx);
-      const py = Math.round((y0 + t * dyData - oy) / ry);
-      let v = 0;
-      if (px >= 0 && px < w && py >= 0 && py < h) {
-        const cell = frame[py][px];
-        v = Array.isArray(cell) ? bt601Luminance(cell[0], cell[1], cell[2]) : cell;
-      }
-      positions.push(t * lenData);
-      values.push(v);
-    }
-    return { positions, values, unit: useMicrons ? 'µm' : 'px' };
-  }
-
-  /** Physical pixel size (microns/pixel) for the current image, if known.
-   *  mpp is constant across frames/channels, so the first metadata entry that
-   *  carries a positive mppX wins. Returns nulls when the image is unscaled. */
-  private currentMpp(): { mppX: number | null; mppY: number | null } {
-    const meta = this.imageInfo?.imageMeta;
-    const m = Array.isArray(meta)
-      ? (meta.find(e => e && (e.mppX ?? 0) > 0) ?? meta[0])
-      : undefined;
-    const mppX = m && (m.mppX ?? 0) > 0 ? (m.mppX as number) : null;
-    const mppY = m && (m.mppY ?? 0) > 0 ? (m.mppY as number) : null;
-    return { mppX, mppY };
+    if (this.plotDiv) this.intensity.setSamplingElement(this.plotDiv);
+    this.intensity.refreshIntensitySamplingForRoi(x, y, width, height, zIndex);
   }
 
   /**
@@ -1186,7 +939,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     // A newer render (another zoom, a new plot, or the div handed to another
     // backend — even for the same file) supersedes this crop.
     const gen = ++this.renderGen;
-    const samplingGen = ++this.samplingGen;
+    const samplingGen = this.intensity.supersede();
     this.state.setImageLoading(true);
     this.state.setZoom(true);
     this.tiles.zoomOnRegion(rect, screen, this.zIndex.value).subscribe({ next: zoomData => {
@@ -1203,9 +956,9 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
             : this.plotUtilities.arrayToMatrix(image.getPixelsArray(), image.width);
           // Also sample the intensity profiles from this high-def crop so the
           // inset reflects the zoom-level resolution (origin = crop top-left).
-          if (samplingGen === this.samplingGen) {
+          if (this.intensity.isCurrent(samplingGen)) {
             this.setSamplingFrames([frame], [xRatio, yRatio], [imageSize[0], imageSize[2]]);
-            this.emitProfiles();
+            this.intensity.emitProfiles();
           }
           // Re-render the high-def crop in the SAME plot type the user is
           // viewing. Without this the zoom re-fetch always fell back to a
@@ -1481,7 +1234,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
 
   public reset() {
     this.renderGen++;
-    this.samplingGen++;
+    this.intensity.supersede();
     if (this.plotDiv) {
       Plotly.newPlot(this.plotDiv, [],
         this.getHeatmapLayout([0, 100], [100, 0]), CONFIG as any);
@@ -1730,10 +1483,6 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     this.imageCachedSubscription = undefined;
     this.filenameSubscription?.unsubscribe();
     this.filenameSubscription = undefined;
-    this.regionUpdateSubscription?.unsubscribe();
-    this.regionUpdateSubscription = undefined;
-    this.regionLiveEditSubscription?.unsubscribe();
-    this.regionLiveEditSubscription = undefined;
     this.channelSub?.unsubscribe();
     this.channelSub = undefined;
   }
