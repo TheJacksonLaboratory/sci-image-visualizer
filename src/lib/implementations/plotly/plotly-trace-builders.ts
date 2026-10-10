@@ -1,5 +1,6 @@
 import { PlotType } from '../../contracts/plot-type';
 import { bt601Luminance } from '../../contracts/intensity';
+import { polygonCentroid } from '../region-centroids';
 
 /**
  * Pluggable Plotly trace builders for the plot types added on top of the
@@ -136,12 +137,10 @@ function buildScatterTraces(input: TraceBuildInput): any[] {
   const ys: number[] = [];
   const text: string[] = [];
   input.regions.forEach((poly, i) => {
-    const n = poly.xpoints.length;
-    if (n === 0) return;
-    const cx = poly.xpoints.reduce((a, b) => a + b, 0) / n;
-    const cy = poly.ypoints.reduce((a, b) => a + b, 0) / n;
-    xs.push(cx);
-    ys.push(cy);
+    const c = polygonCentroid(poly.xpoints, poly.ypoints);
+    if (!c) return;
+    xs.push(c[0]);
+    ys.push(c[1]);
     text.push(`R${i + 1}`);
   });
   return [{

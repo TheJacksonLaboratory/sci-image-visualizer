@@ -133,6 +133,7 @@ import { ColormapNode, IWandOptions, IBrushOptions } from '../../contracts/displ
 import { VIZ_CONFIG, VizConfig } from '../../contracts/viz-config';
 import { TILE_ACCESS_PORT, TileAccessPort } from '../../contracts/ports/tile-access.port';
 import { BaseStoreVisualizer } from '../base-store-visualizer';
+import { regionCentroids } from '../region-centroids';
 import {
   TileDescriptor,
   TileLevel,
@@ -1950,7 +1951,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       v.layers.remove(this.scatter2dPoints);
       this.scatter2dPoints = null;
     }
-    const centroids = this.regionCentroids();
+    const centroids = regionCentroids(this.regionStore.getRegions());
     if (centroids.length === 0) return;
     this.scatter2dPoints = v.addPoints(centroids, {
       size: 12,
@@ -1958,39 +1959,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       borderColor: [0, 0, 0, 1],
       borderWidth: 2,
     });
-  }
-
-  /** Region centroids as flat `[x, y, …]` data coords (rectangle / polygon / multipolygon). */
-  private regionCentroids(): Float32Array {
-    const out: number[] = [];
-    const polyCentroid = (xs: number[], ys: number[]): void => {
-      const n = xs.length;
-      if (n === 0) return;
-      let cx = 0;
-      let cy = 0;
-      for (let i = 0; i < n; i++) {
-        cx += xs[i];
-        cy += ys[i];
-      }
-      out.push(cx / n, cy / n);
-    };
-    for (const r of this.regionStore.getRegions()) {
-      const b = r.bounds as
-        | { x: number; y: number; width: number; height: number }
-        | { xpoints: number[]; ypoints: number[] }
-        | { polygons: { xpoints: number[]; ypoints: number[] }[] }
-        | null
-        | undefined;
-      if (!b) continue;
-      if ('width' in b && 'x' in b) {
-        out.push(b.x + b.width / 2, b.y + b.height / 2);
-      } else if ('xpoints' in b) {
-        polyCentroid(b.xpoints, b.ypoints);
-      } else if ('polygons' in b) {
-        for (const p of b.polygons) polyCentroid(p.xpoints, p.ypoints);
-      }
-    }
-    return new Float32Array(out);
   }
 
   /**
