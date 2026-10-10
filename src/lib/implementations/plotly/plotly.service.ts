@@ -11,7 +11,6 @@ import { TileAccessPort, TILE_ACCESS_PORT } from '../../contracts/ports/tile-acc
 import { ImageStatePort, IMAGE_STATE_PORT } from '../../contracts/ports/image-state.port';
 import { BehaviorSubject, EMPTY, Observable, Subject, Subscription, combineLatest, of } from 'rxjs';
 import { MessageService } from 'primeng/api';
-import { ShapeSelection } from '../../models/shape';
 import { CONFIG, CONFIG_SURFACE, PlotUtilities } from '../../plot.utilities';
 import { WandService } from '../../toolbar/wand/wand.service';
 import { CachedImageData, CanvasToolHost } from '../../toolbar/tool-kit/canvas-tool';
@@ -40,6 +39,7 @@ import { ViewerCapabilities, ViewerFeature, capabilitiesOf } from '../../contrac
 import { IRegionOverlay } from '../../contracts/region-overlay.contract';
 import { PlotlyRegionOverlay } from './plotly-region-overlay';
 import { PlotlyIsosurfaceControls } from './plotly-isosurface-controls';
+import { PlotlyShapeProjection } from './plotly-shape-projection';
 import { renderIntensityInset as renderPlotlyIntensityInset } from './plotly-intensity-inset';
 import { IntensityProfileService } from '../../intensity/intensity-profile.service';
 import { ICoordinateTransform } from '../../contracts/coordinate-transform.contract';
@@ -82,8 +82,10 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     ViewerFeature.Isosurface,
   ]);
 
-  private shapes: any[] = [];
-  private isRegionSavedOn = true;
+  /** Plotly's render projection of the shared RegionStore (the shape dicts) and
+   *  the selection ↔ active-shape mapping (see PlotlyShapeProjection). */
+  private readonly shapeProjection = new PlotlyShapeProjection(
+    { plotDiv: () => this.plotDiv, fileName: () => this.fileName }, this.regionStore);
   private imageLength!: number;
   private screenHeight!: number;
   private plotDiv!: string;
@@ -94,14 +96,9 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   private fileName!: string | undefined;
 
   private dragMode!: string;
-  // Region data (the list + per-image cache), selection, id minting, the region
-  // update event and the shape colour/label prefs now live in the shared
-  // RegionStore (injected as `this.regionStore`) — the single source of truth
-  // both backends delegate to. `this.shapes` below is kept as Plotly's *render
-  // projection* of those regions (the dict array Plotly.relayout consumes) and
-  // is mirrored into the store on every write. Colormap, reverse-scale, image
-  // metadata and classification colours live in the shared VisualizerStore
-  // (injected as `this.store`).
+  // Region data lives in the shared RegionStore (`this.regionStore`), Plotly's
+  // shape dicts in `shapeProjection`; colormap, image metadata and
+  // classification colours in the shared VisualizerStore (`this.store`).
   private urls!: string[];
   /**
    * The image currently plotted.
@@ -117,10 +114,6 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   private plotType!: PlotType;
 
   private onPlotMouseDown: (() => void) | null = null;
-
-  // The per-image region cache (regionsByImageKey/currentImageKey) now lives in
-  // the shared RegionStore; setActiveImage() delegates to it and re-projects
-  // `this.shapes` from the store afterwards.
 
   /** Pixel data cached for wand sampling. data[zIndex] is a 2-D matrix. */
   private cachedImageFrames?: any[];
@@ -357,7 +350,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     trueImageSize[2] = 0;
     trueImageSize[3] = imageInfo.trueImageSize[1];
     // Save the current image's regions and pull in any cached regions for the
-    // image we're about to display, before Plotly.newPlot reads `this.shapes`.
+    // image we're about to display, before Plotly.newPlot reads the shape projection.
     this.setActiveImage(imageInfo);
     this.imageInfo = imageInfo;
     this.plotType = plotType;
@@ -544,13 +537,10 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     renderPlotlyIntensityInset(divId, profiles);
   }
 
-  /**
-   * Region shapes (filtered/redrawn for the current file). The profile-line ROIs
-   * are ordinary store regions (tagged `kind: 'profile'`), so they are already
-   * part of `this.shapes` — no separate append is needed.
-   */
+  /** Region shapes for the image on screen (profile lines included: they are
+   *  ordinary store regions). */
   private currentRenderShapes(showLabel = this.regionStore.getShowShapeLabel()): any[] {
-    return this.shapesToRedraw(showLabel);
+    return this.shapeProjection.shapesToRedraw(showLabel);
   }
 
   /**
@@ -561,7 +551,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   public addProfileLine(): Region | null {
     const region = this.intensity.addProfileLine();
     if (region && this.plotDiv) {
-      this.syncShapesFromStore();
+      this.shapeProjection.syncFromStore();
       const gd = this.liveGd();
       if (gd) void Plotly.relayout(gd, { shapes: this.currentRenderShapes() } as any);
     }
@@ -676,7 +666,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
       // event — sample _activeShapeIndex on the next microtask so subscribers
       // (Region Editor) can mirror the selection.
       plot.removeEventListener('mousedown', this.onPlotMouseDown);
-      this.onPlotMouseDown = () => setTimeout(() => this.maybeEmitActiveShapeIndex(), 0);
+      this.onPlotMouseDown = () => setTimeout(() => this.shapeProjection.syncSelectionFromPlot(), 0);
       plot.addEventListener('mousedown', this.onPlotMouseDown);
     }
   }
@@ -685,28 +675,9 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     if (Object.keys(event).includes('dragmode')) {
       this.dragMode = event.dragmode;
     }
-    // when relayout event occurs
-    // update the region selection udpdates
     const keys = Object.keys(event);
-    let shapesModified = false;
-    keys.forEach((key: any) => {
-      if (typeof key === 'string' && key.startsWith('shapes[')) {
-        const shapeNumber = +key.split('[')[1].split(']')[0];
-        const shapeChange = key.split('.')[1];
-        if (this.shapes && this.shapes[shapeNumber]) {
-          if (shapeChange === 'path') {
-            this.shapes[shapeNumber][shapeChange] = this.plotUtilities.roundPathCoordinates(event[key]);
-          } else {
-            this.shapes[shapeNumber][shapeChange] = Math.round(+event[key]);
-          }
-          shapesModified = true;
-        }
-      }
-    });
-    if (shapesModified) {
-      // Mirror the in-place edit into the shared store (syncs its cache + emits).
-      this.commitShapesToStore();
-    }
+    // In-place shape edits and natively drawn shapes, mirrored into the store.
+    this.shapeProjection.applyRelayout(event);
     // manage high def zoom (not if we are showing a stack)
     if (keys.length === 4 && this.isRealZoom) {
       const coordinates: any[] = [];
@@ -722,26 +693,6 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
       if (!this.imageInfo?.showStack) {
         this.triggerZoom(coordinates);
       }
-    }
-    // when shape is created
-    if (keys.length === 1 && 'shapes' in event) {
-      this.shapes = event.shapes as any[];
-      for (let i = 0; i < this.shapes.length; i++) {
-        // A freshly Plotly-drawn shape has no id yet — give it a label object
-        // (when labels are on) before the store mints id + default name.
-        const isNew = this.shapes[i].id == null;
-        this.shapes[i].fileName = this.fileName;
-        this.shapes[i] = this.plotUtilities.snapRegion(this.shapes[i]);
-        if (isNew && this.regionStore.getShowShapeLabel()) {
-          this.shapes[i].label = { text: this.shapes[i].label,
-            texttemplate: this.shapes[i].label,
-            font: { color: this.regionStore.getShapeColor() },
-            textposition: 'top left'
-          };
-        }
-      }
-      // Mint ids/names in the store, write them back onto the dicts, and emit.
-      this.commitShapesToStore();
     }
     // if autoscale
     if (keys.includes('xaxis.autorange') && keys.includes('yaxis.autorange')) {
@@ -759,7 +710,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     // Plotly may have updated the active shape index as part of the relayout
     // (e.g. clicking a shape's edit handle, or finishing a draw) — surface
     // that change to the Region Editor.
-    this.maybeEmitActiveShapeIndex();
+    this.shapeProjection.syncSelectionFromPlot();
   }
 
   public reloadAndPlot() {
@@ -840,49 +791,6 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
       originX: this.cachedFrameOrigin[0],
       originY: this.cachedFrameOrigin[1],
     };
-  }
-
-  // ── shared-store sync helpers ──────────────────────────────────────────
-  //
-  // `this.shapes` is Plotly's own representation (the dict array Plotly.relayout
-  // consumes). The shared RegionStore is the single source of truth, holding the
-  // neutral Region model. These helpers bridge the two: writes mirror
-  // `this.shapes` INTO the store; image switches/external changes project the
-  // store back OUT to `this.shapes`.
-
-  /** Build Plotly shape dicts from the store's regions (the render projection). */
-  private regionsToShapeDicts(): any[] {
-    const showLabel = this.regionStore.getShowShapeLabel();
-    return this.regionStore.getRegions().map(r => {
-      r.filename = this.fileName;
-      return { ...r.getShape(showLabel) };
-    });
-  }
-
-  /** Rebuild the dict working-set from the store (after an image switch, or when
-   *  regions changed while another backend was rendering). */
-  private syncShapesFromStore(): void {
-    this.shapes = this.regionsToShapeDicts();
-  }
-
-  /**
-   * Make the shared store authoritative for the current dict working-set: convert
-   * `this.shapes` to neutral regions and replace the store's list (the store
-   * mints ids, applies class colours, syncs its per-image cache and emits the
-   * region-update event). Store-minted ids are written back onto the dicts so the
-   * two representations stay aligned. Profile-line ROIs are ordinary regions
-   * (tagged `kind: 'profile'`) and round-trip through here too.
-   */
-  private commitShapesToStore(): void {
-    const regions = this.shapes
-      .map(s => Object.assign(new ShapeSelection(), s).getRegion());
-    this.regionStore.setRegions(regions, this.regionStore.getShowShapeLabel(), true,
-      this.regionStore.getFillColor(), false);
-    const stored = this.regionStore.getRegions();
-    for (let i = 0; i < this.shapes.length && i < stored.length; i++) {
-      if (this.shapes[i].id == null) this.shapes[i].id = stored[i].id;
-      if (this.shapes[i].name == null) this.shapes[i].name = stored[i].name;
-    }
   }
 
   /** Active frame index in the cached image stack. */
@@ -1035,7 +943,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
    */
   public setActiveImage(imageInfo: IImageInfo) {
     this.regionStore.setActiveImage(imageInfo);
-    this.syncShapesFromStore();
+    this.shapeProjection.syncFromStore();
   }
 
   /**
@@ -1050,41 +958,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   public override setRegions(regions: Region[], showRegionLabel?: boolean,
                              isRegionSaveOn?: boolean, fillColor?: string,
                              append: boolean = false) {
-    const showLabel = showRegionLabel === undefined ? this.regionStore.getShowShapeLabel() : showRegionLabel;
-    const save = isRegionSaveOn === undefined ? this.isRegionSavedOn : isRegionSaveOn;
-
-    this.regionStore.setRegions(regions, showRegionLabel, isRegionSaveOn, fillColor, append);
-    this.isRegionSavedOn = save;
-
-    if (save) {
-      // Re-project the authoritative regions into Plotly's working-set and render.
-      this.syncShapesFromStore();
-      this.renderShapes();
-    } else {
-      // Transient display only — render the passed regions, don't touch the
-      // working-set (and the store didn't store them either).
-      const dicts = regions.map(r => { r.filename = this.fileName; return { ...r.getShape(showLabel) }; });
-      const gd = this.liveGd();
-      if (gd) void Plotly.relayout(gd, this.shapesRelayout(dicts) as any);
-    }
-  }
-
-  /** The shapes-relayout payload: region shapes (profile-line ROIs included, as
-   *  they are ordinary regions) plus the active-shape fill colour. */
-  private shapesRelayout(shapeDicts: any[]): any {
-    return {
-      shapes: shapeDicts,
-      activeshape: { fillcolor: this.regionStore.getFillColor() },
-    };
-  }
-
-  /** Push the current dict working-set to Plotly (no-op when another backend
-   *  owns the div). */
-  private renderShapes(): void {
-    const gd = this.liveGd();
-    if (!gd) return; // another backend's overlay renders the regions
-    const dictArray = this.shapes.map(s => ({ ...s }));
-    void Plotly.relayout(gd, this.shapesRelayout(dictArray) as any);
+    this.shapeProjection.setRegions(regions, showRegionLabel, isRegionSaveOn, fillColor, append);
   }
 
   /** The plot div while it hosts a live Plotly graph, else null. `plotDiv`
@@ -1111,27 +985,6 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     return heatmapLayout(this.layoutContext(), xRange, yRange, this.imageLength);
   }
 
-  private shapesToRedraw(showLabel: boolean) {
-    const shapesToRedraw: ShapeSelection[] = [];
-    for (const shape of this.shapes) {
-      if (JSON.stringify(shape.fileName) === JSON.stringify(this.fileName)) {
-        // Set label
-        if (showLabel) {
-          shape.label = {
-            text: `${shape.legend}`,
-            texttemplate: `${shape.legend}`,
-            textposition: 'top left',
-            font: { color: `${shape.line.color}` }
-          };
-        } else {
-          shape.label = {};
-        }
-        shapesToRedraw.push(shape);
-      }
-    }
-    // convert to dict so that plotly recognises the shapes
-    return shapesToRedraw.map(s => ({ ...s }));
-  }
   /**
    * Fetch an image via Angular HttpClient so that auth interceptors (Bearer token)
    * are applied, then decode it with image-js. This avoids raw browser fetch()
@@ -1325,35 +1178,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
    * where Plotly clicked a shape without going through the table).
    */
   public override deleteActiveShape() {
-    // Note: no `plotDiv` guard — when OpenSeadragon is the renderer, Plotly
-    // never plotted (plotDiv is unset), but deletion only needs the shape list
-    // + the current selection; the Plotly relayout below is guarded.
-    const gd: any = this.plotDiv ? document.getElementById(this.plotDiv) : null;
-
-    // Resolve what to delete: the store's selection, else the shape Plotly
-    // tracks as clicked (when the user clicked a shape without going through the
-    // Region Editor table).
-    if (this.regionStore.getSelectedShapeIndices().length === 0) {
-      const activeIndex: number = gd?._fullLayout?._activeShapeIndex;
-      if (activeIndex === undefined || activeIndex < 0) return;
-      this.regionStore.setSelectedShapeIndices([activeIndex]);
-    }
-    // The store removes the selected regions, clears the selection, syncs its
-    // cache and emits the region-update event.
-    this.regionStore.deleteActiveShape();
-
-    // Re-project the remaining regions and render on the Plotly plot (a no-op
-    // when another backend owns the div — its overlay re-renders via the
-    // store's update event).
-    this.syncShapesFromStore();
-    const live = this.liveGd();
-    if (!live) return;
-    live._fullLayout._activeShapeIndex = -1;
-    const dictArray = this.shapes.map(s => ({ ...s }));
-    Plotly.relayout(live, { shapes: dictArray } as any).then(
-      () => { if (live._fullLayout) void Plotly.redraw(live); },
-      (err: unknown) => console.warn('[viz:plotly] shape relayout after delete failed', err),
-    );
+    this.shapeProjection.deleteActiveShape();
   }
 
   public zoomOut() {
@@ -1424,53 +1249,14 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
    * rendering is the only highlight.
    */
   public override setSelectedShapeIndices(indices: number[]) {
-    const valid = (indices || [])
-      .filter(i => Number.isFinite(i) && i >= 0 && i < this.shapes.length);
-    const seen = new Set<number>();
-    const cleaned: number[] = [];
-    for (const i of valid) {
-      if (!seen.has(i)) { seen.add(i); cleaned.push(i); }
-    }
-    if (this.plotDiv) {
-      const gd: any = document.getElementById(this.plotDiv);
-      if (gd?._fullLayout) {
-        gd._fullLayout._activeShapeIndex = cleaned.length > 0 ? cleaned[cleaned.length - 1] : -1;
-        try { void Plotly.redraw(gd); } catch { /* noop in tests */ }
-      }
-    }
-    this.regionStore.setSelectedShapeIndices(cleaned);
+    this.shapeProjection.setSelectedShapeIndices(indices);
   }
 
-  /**
-   * Select a specific region (IRegionStore.selectRegion). Sets the shared store
-   * selection by identity and points Plotly's active-shape at the matching
-   * rendered shape so its edit handles appear.
-   */
+  /** Select a region (IRegionStore.selectRegion), giving its shape the edit handles. */
   public override selectRegion(region: Region): void {
-    this.regionStore.selectRegion(region);
-    if (this.plotDiv) {
-      const idx = this.shapes.findIndex(s => s.id === region?.id);
-      const gd: any = document.getElementById(this.plotDiv);
-      if (gd?._fullLayout && idx >= 0) {
-        gd._fullLayout._activeShapeIndex = idx;
-        try { void Plotly.redraw(gd); } catch { /* noop in tests */ }
-      }
-    }
+    this.shapeProjection.selectRegion(region);
   }
 
-  /**
-   * Read Plotly's `_activeShapeIndex` and push it as the selection. Called from
-   * the relayout handler and the post-click tick — Plotly doesn't fire a
-   * dedicated active-shape event for clicks, so we sample. The store no-ops if
-   * the selection is unchanged.
-   */
-  private maybeEmitActiveShapeIndex() {
-    if (!this.plotDiv) return;
-    const gd: any = document.getElementById(this.plotDiv);
-    const raw = gd?._fullLayout?._activeShapeIndex;
-    const idx = (typeof raw === 'number' && raw >= 0 && raw < this.shapes.length) ? raw : -1;
-    this.regionStore.setSelectedShapeIndices(idx >= 0 ? [idx] : []);
-  }
   setZIndex(zIndex: number) {
     this.zIndex.next(zIndex);
   }

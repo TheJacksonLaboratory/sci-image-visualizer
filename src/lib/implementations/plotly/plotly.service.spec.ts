@@ -116,7 +116,7 @@ describe('PlotlyService relayout handler', () => {
 
     // Set up internal state needed by the relayout handler
     (service as unknown as { plotDiv: string }).plotDiv = 'plot';
-    (service as any).shapes = [];
+    (service as any).shapeProjection.shapes = [];
     (service as any).imageInfo = { showStack: false, isGrayscale: true } as IImageInfo;
     (service as any).trueImgSize = [0, 1344, 0, 1024];
     (service as any).isRealZoom = true;
@@ -170,7 +170,7 @@ describe('PlotlyService relayout handler', () => {
     relayoutSpy.mockClear();
 
     // Existing shape plus a new one — simulates drawing a region
-    (service as any).shapes = [{ x0: 0, x1: 50, y0: 0, y1: 50, name: 'shape0', type: 'rect' }];
+    (service as any).shapeProjection.shapes = [{ x0: 0, x1: 50, y0: 0, y1: 50, name: 'shape0', type: 'rect' }];
     const event = {
       shapes: [
         { x0: 0, x1: 50, y0: 0, y1: 50, name: 'shape0', type: 'rect' },
@@ -184,7 +184,7 @@ describe('PlotlyService relayout handler', () => {
     // Should NOT call triggerZoom — shape is treated as a region, not a zoom box
     expect(triggerZoomSpy).not.toHaveBeenCalled();
     // Shapes should be updated with the new shape
-    expect((service as any).shapes.length).toBe(2);
+    expect((service as any).shapeProjection.shapes.length).toBe(2);
   });
 
   it('should update zoomCoordinates on drag zoom in stack mode without triggering real zoom', () => {
@@ -292,7 +292,7 @@ describe('PlotlyService region glue (Plotly-specific)', () => {
     service = TestBed.inject(PlotlyService);
 
     (service as unknown as { plotDiv: string }).plotDiv = 'plot';
-    (service as any).shapes = [];
+    (service as any).shapeProjection.shapes = [];
     (service as any).imageInfo = { showStack: false, isGrayscale: true } as IImageInfo;
     (service as any).fileName = '';
 
