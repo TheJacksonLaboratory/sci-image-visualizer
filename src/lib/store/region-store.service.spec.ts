@@ -293,6 +293,41 @@ describe('RegionStore', () => {
       expect(store.getRegions().map(r => r.name)).toEqual(['s1', 's3']);
       expect(store.getSelectedShapeIndices()).toEqual([]);
     });
+
+    it('drops out-of-range and duplicate indices, keeping the given order', () => {
+      store.addRegion(rectRegion(0, 0, 1, 1));
+      store.addRegion(rectRegion(2, 2, 1, 1));
+      store.addRegion(rectRegion(4, 4, 1, 1));
+      store.setSelectedShapeIndices([2, -1, 0, 2, 9, NaN]);
+      expect(store.getSelectedShapeIndices()).toEqual([2, 0]);
+    });
+
+    it('emits only when the projected index set changes', () => {
+      store.addRegion(rectRegion(0, 0, 1, 1));
+      store.addRegion(rectRegion(2, 2, 1, 1));
+      const seen: number[][] = [];
+      store.getSelectedShapeIndices$().subscribe((s) => seen.push(s));
+      store.setSelectedShapeIndices([0]);
+      store.setSelectedShapeIndices([0]);
+      store.moveRegion(store.getRegions()[0].id, 1, 1); // an edit keeps the same projection
+      store.setSelectedShapeIndices([1, 0]);
+      expect(seen).toEqual([[1], [0], [1, 0]]);
+    });
+
+    it('selectRegion ignores a region the store does not hold', () => {
+      store.addRegion(rectRegion(0, 0, 1, 1));
+      const stranger = rectRegion(9, 9, 1, 1);
+      stranger.id = 999;
+      store.selectRegion(stranger);
+      expect(store.getSelectedShapeIndices()).toEqual([0]);
+    });
+
+    it('undo drops selected ids the restored set no longer contains', () => {
+      store.addRegion(rectRegion(0, 0, 1, 1));
+      store.addRegion(rectRegion(2, 2, 1, 1)); // selected (index 1)
+      store.undo();
+      expect(store.getSelectedShapeIndices()).toEqual([]);
+    });
   });
 
   describe('batching', () => {
@@ -1099,6 +1134,63 @@ describe('RegionStore', () => {
       // Live set is whatever slice was current (slice 0); getSliceRegions no
       // longer flattens other slices.
       expect(store.getSliceRegions().length).toBe(store.getRegions().length);
+    });
+
+    // Characterization (§6 RegionStore split): pins the scope cache's coupling
+    // to history, selection and the per-image cache before it moves.
+    it('setDisplaySlice resets the undo history and clears the selection', () => {
+      store.enterStackMode(new Map<number, Region[]>([[0, [rectRegion(0, 0, 5, 5)]]]), 0);
+      store.addRegion(rectRegion(1, 1, 5, 5));
+      expect(store.canUndo()).toBe(true);
+      expect(store.getSelectedShapeIndices()).toEqual([1]);
+      store.setDisplaySlice(1);
+      expect(store.canUndo()).toBe(false);
+      expect(store.canRedo()).toBe(false);
+      expect(store.getSelectedShapeIndices()).toEqual([]);
+    });
+
+    it('enterStackMode resets the undo history and clears the selection', () => {
+      store.addRegion(rectRegion(1, 1, 5, 5));
+      expect(store.canUndo()).toBe(true);
+      store.enterStackMode(new Map<number, Region[]>([[0, [rectRegion(0, 0, 5, 5)]]]), 0);
+      expect(store.canUndo()).toBe(false);
+      expect(store.getSelectedShapeIndices()).toEqual([]);
+    });
+
+    it('setDisplaySlice to the current slice keeps history and selection', () => {
+      store.enterStackMode(new Map<number, Region[]>([[0, []]]), 0);
+      store.addRegion(rectRegion(1, 1, 5, 5));
+      store.setDisplaySlice(0);
+      expect(store.canUndo()).toBe(true);
+      expect(store.getSelectedShapeIndices()).toEqual([0]);
+    });
+
+    it('enterStackMode tags imported regions with their slice and mints ids', () => {
+      const a = rectRegion(0, 0, 5, 5);
+      store.enterStackMode(new Map<number, Region[]>([[3, [a]]]), 3);
+      const [live] = store.getRegions();
+      expect(live.z).toBe(3);
+      expect(live.id).toEqual(expect.any(Number));
+      expect(live.name).toBe(`shape${live.id}`);
+    });
+
+    it('an image switch ends stack mode; the outgoing live slice is cached under the old image', () => {
+      store.setActiveImage(imageInfo('a.tif'));
+      store.enterStackMode(new Map<number, Region[]>([[0, [rectRegion(0, 0, 5, 5)]], [1, []]]), 0);
+      store.setActiveImage(imageInfo('b.tif'));
+      expect(store.isStackMode()).toBe(false);
+      expect(store.getRegions()).toEqual([]);
+      store.setActiveImage(imageInfo('a.tif'));
+      // Only the live slice was cached for the image (the loader re-enters stack mode).
+      expect(store.getRegions().length).toBe(1);
+    });
+
+    it('getSliceRegions does not change the stored instances it tags', () => {
+      store.enterStackMode(new Map<number, Region[]>([[0, [rectRegion(0, 0, 5, 5)]]]), 0);
+      const live = store.getRegions()[0];
+      const before = live.z;
+      store.getSliceRegions();
+      expect(live.z).toBe(before);
     });
   });
 });
