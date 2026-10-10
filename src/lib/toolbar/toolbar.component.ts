@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
 
 import { IImageInfo } from '../contracts/image.contract';
-import { PlotType, PlotTypeId, isBuiltinPlotType, isNapari3d, isNapariIsosurface, isNapariSurface, isNapariScatter, NAPARI_DECIMATE_OPTIONS, NAPARI_DEFAULT_DECIMATE, isSpatialOmics, isSpatialOmics3d } from '../contracts/plot-type';
+import { PlotType, PlotTypeId, isBuiltinPlotType, isNapari3d, isNapariIsosurface, isNapariSurface, isNapariScatter, NAPARI_DEFAULT_DECIMATE, isSpatialOmics, isSpatialOmics3d } from '../contracts/plot-type';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from '../contracts/toolbar-config';
 import { ToolbarDialogToolContribution, ToolbarToolContribution } from '../contracts/toolbar-tool.contract';
 import { PlotTypeOption } from '../contracts/plot-type-contribution.contract';
@@ -71,8 +71,6 @@ export class ToolbarComponent {
   @Input() wireframeActive = false;
   /** Active napari 3D decimate factor (1 = Full … 8 = ⅛; default ½). */
   @Input() resolutionScale = NAPARI_DEFAULT_DECIMATE;
-  /** Decimate-factor options for the Resolution dropdown. */
-  readonly decimateOptions = NAPARI_DECIMATE_OPTIONS;
   @Input() wandSensitivity = 2.0;
   @Input() brushSize = 40;
   @Input() vertexEraserRadius = 20;
