@@ -62,7 +62,7 @@ import { VIZ_CONFIG, VizConfig } from './contracts/viz-config';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-data.port';
 import { applyImageRois } from './visualizer/region-load';
 import {
-  ContextMenuActions, ContextMenuState, buildContextMenu, buildRegionActionItems,
+  ContextMenuActions, ContextMenuState, buildContextMenu,
 } from './visualizer/visualizer-context-menu';
 import { RegionActions } from './visualizer/region-actions';
 import { ToolModes } from './visualizer/tool-modes';
@@ -999,10 +999,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   /** The right-click menu for the current view, armed mode and selection. */
   private buildContextMenuItems(): MenuItem[] {
     return buildContextMenu(this.contextMenuState(), this);
-  }
-
-  private buildRegionActionItems(): MenuItem[] {
-    return buildRegionActionItems(this.contextMenuState(), this);
   }
 
   private contextMenuState(): ContextMenuState {

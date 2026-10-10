@@ -10,7 +10,7 @@ import { TileAccessPort, TILE_ACCESS_PORT } from '../../contracts/ports/tile-acc
 import { ImageStatePort, IMAGE_STATE_PORT } from '../../contracts/ports/image-state.port';
 import { BehaviorSubject, Observable, Subject, Subscription, combineLatest, of } from 'rxjs';
 import { MessageService } from 'primeng/api';
-import { CONFIG, CONFIG_SURFACE, PlotUtilities } from '../../plot.utilities';
+import { CONFIG, CONFIG_SURFACE } from '../../plot.utilities';
 import { WandService } from '../../toolbar/wand/wand.service';
 import { CachedImageData, CanvasToolHost } from '../../toolbar/tool-kit/canvas-tool';
 import { CanvasToolManager } from '../../toolbar/tool-kit/canvas-tool-manager';
@@ -106,7 +106,6 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
    * "can't access property isGrayscale" and aborted the load.
    */
   imageInfo!: IImageInfo;
-  private plotUtilities = new PlotUtilities();
   private plotType!: PlotType;
 
   private onPlotMouseDown: (() => void) | null = null;
@@ -155,8 +154,8 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
 
   constructor(@Inject(TILE_ACCESS_PORT) private tiles: TileAccessPort,
               @Inject(IMAGE_STATE_PORT) private state: ImageStatePort,
-              public messageService: MessageService, private http: HttpClient,
-              private wandService: WandService,
+              public messageService: MessageService, http: HttpClient,
+              wandService: WandService,
               private samTool: SamToolService,
               private samPointTool: SamPointToolService,
               private cellSegmentTool: CellSegmentToolService,

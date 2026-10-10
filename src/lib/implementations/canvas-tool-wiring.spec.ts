@@ -14,7 +14,10 @@ import { Rectangle, Region } from '../models/region';
 
 type Backend = PlotlyService | OpenSeadragonVisualizerService | NapariVisualizerService;
 const tools = (b: Backend) => (b as unknown as { canvasTools: CanvasToolManager }).canvasTools;
-const host = (b: Backend) => (b as unknown as { toolHost: CanvasToolHost }).toolHost;
+// napari's host lives on its tool bridge; Plotly and OSD keep it on the service.
+const host = (b: Backend): CanvasToolHost =>
+  (b as unknown as { toolHost?: CanvasToolHost }).toolHost
+  ?? (b as unknown as { tools: { toolHost: CanvasToolHost } }).tools.toolHost;
 
 /**
  * The canvas tools were root singletons that every backend re-bound to its own

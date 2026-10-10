@@ -24,6 +24,7 @@ import { VisualizerStore } from './store/visualizer-store.service';
 import { RegionOpsService } from './region-ops.service';
 import { Region, Rectangle, Polygon, MultiPolygon } from './models/region';
 import { IImageInfo } from './contracts/image.contract';
+import { buildRegionActionItems } from './visualizer/visualizer-context-menu';
 
 function rectRegion(x: number, y: number, w: number, h: number): Region {
   const r = new Region();
@@ -901,7 +902,8 @@ describe('VisualizerComponent (UI shell)', () => {
 
     it('offers Merge / Ungroup / Inverse in the context menu according to the selection', () => {
       statefulRegions([rectRegion(0, 0, 10, 10), rectRegion(50, 50, 10, 10)]);
-      const labels = () => ((component as any).buildRegionActionItems() as { label?: string }[])
+      const c = component as any;
+      const labels = () => (buildRegionActionItems(c.contextMenuState(), c) as { label?: string }[])
         .map((i) => i.label);
       (component as any).regionActions.selectedIndices = [0, 1];
       expect(labels()).toContain('Merge / group');

@@ -25,7 +25,6 @@ import {
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
-import { CanvasToolHost } from '../../toolbar/tool-kit/canvas-tool';
 import { CanvasToolManager } from '../../toolbar/tool-kit/canvas-tool-manager';
 import { WandService } from '../../toolbar/wand/wand.service';
 import { SamToolService } from '../../toolbar/segmentation/sam-tool.service';
@@ -142,8 +141,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private imageH = 0;
   /** The region overlay, the pixel tools and the displayed-pixel readback they read. */
   private readonly tools: NapariToolBridge;
-  /** What this backend's canvas tools read and write (one host for every tool). */
-  private readonly toolHost: CanvasToolHost;
   /** This backend's own wand, brush, eraser, zoom-to-box and SAM point tools. */
   protected readonly canvasTools: CanvasToolManager;
   private readonly stackLoading$ = new BehaviorSubject<boolean>(false);
@@ -196,7 +193,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       outsideZone: (fn) => this.zone.runOutsideAngular(fn),
       inZone: (fn) => this.inZone(fn),
     }, { regionStore, wandService, samTool, samPointTool, cellSegmentTool, cellSegmenter });
-    this.toolHost = this.tools.toolHost;
     this.canvasTools = this.tools.canvasTools;
   }
 

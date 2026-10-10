@@ -26,7 +26,6 @@ import { PendingCalls, WorkerReply } from './pending-calls';
 export class OnnxSamSession implements ISamSession {
   private mode: 'inproc' | 'worker' | null = null;
   private loaded = false;
-  private model: SamModelDef | null = null;
   private inputSize = 1024;
 
   // ── worker mode ──
@@ -43,7 +42,6 @@ export class OnnxSamSession implements ISamSession {
     if (!model.encoderUrl || !model.decoderUrl) {
       throw new Error(`SAM model "${model.id}" has no ONNX URLs configured.`);
     }
-    this.model = model;
     this.inputSize = model.inputSize;
     const hasGpu = typeof navigator !== 'undefined' && 'gpu' in navigator;
     const eps: string[] = model.encoderProviders ?? (hasGpu ? ['webgpu', 'wasm'] : ['wasm']);

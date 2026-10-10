@@ -12,7 +12,7 @@ export class NapariLoadingBadge {
   private names: string[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(private readonly host: HTMLElement) {
+  constructor(host: HTMLElement) {
     if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
     this.el = document.createElement('div');
     this.el.className = 'napari-loading-badge';
