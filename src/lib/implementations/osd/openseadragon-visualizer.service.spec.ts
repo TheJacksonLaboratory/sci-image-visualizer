@@ -437,6 +437,93 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     expect(store.currentChannelStates()[0]).toMatchObject({ min: 10, max: 90 });
   });
 
+  // ── characterization ahead of the god-class split (review §6, proposal A) ──
+
+  it('resizeNavigator sizes the minimap from the settled container and pins it to the corner', () => {
+    const corner = document.createElement('div');
+    const wrapper = document.createElement('div');
+    const stray = document.createElement('div'); // anything else OSD left in the corner
+    const navEl = document.createElement('div');
+    const wrapperExtra = document.createElement('span');
+    corner.append(wrapper, stray);
+    wrapper.append(navEl, wrapperExtra);
+    const nav = {
+      element: navEl,
+      setWidth: jest.fn((w: number) => { navEl.style.width = `${w}px`; }),
+      setHeight: jest.fn((h: number) => { navEl.style.height = `${h}px`; }),
+    };
+    const svc = service as any;
+    svc.viewer = { navigator: nav, element: { clientWidth: 1000, clientHeight: 500 }, destroy: () => undefined };
+    svc.resizeNavigator();
+    expect(nav.setWidth).toHaveBeenCalledWith(160);
+    expect(nav.setHeight).toHaveBeenCalledWith(80);
+    expect(wrapper.style).toMatchObject({ display: 'block', height: 'auto', width: 'auto' });
+    expect(stray.style.display).toBe('none');
+    expect(wrapperExtra.style.display).toBe('none');
+    expect(corner.style).toMatchObject({ bottom: '12px', right: '12px' });
+    expect(navEl.style).toMatchObject({ position: 'relative', margin: '0px' });
+    // Already that size: not resized again.
+    svc.resizeNavigator();
+    expect(nav.setWidth).toHaveBeenCalledTimes(1);
+    // A container without a size yet: left alone.
+    svc.viewer.element = { clientWidth: 0, clientHeight: 0 };
+    svc.resizeNavigator();
+    expect(nav.setWidth).toHaveBeenCalledTimes(1);
+  });
+
+  describe('display-state subscription → invalidation', () => {
+    const channel = { index: 0, name: 'c', color: '#ff0000', min: 5, max: 200, gamma: 1, visible: true };
+
+    it('a channel change on a multichannel image reveals the slice, then schedules one invalidation', () => {
+      const svc = service as any;
+      svc.isMultiChannel = true;
+      svc.currentZ = 3;
+      const order: string[] = [];
+      jest.spyOn(svc.cache, 'revealChannelSlice').mockImplementation((z: unknown) => { order.push(`reveal:${z}`); });
+      jest.spyOn(svc, 'scheduleInvalidate').mockImplementation(() => { order.push('invalidate'); });
+      TestBed.inject(VisualizerStore).setChannelStates([channel]);
+      expect(order).toEqual(['reveal:3', 'invalidate']);
+      expect(svc.channelStates).toEqual([channel]);
+    });
+
+    it('any other image only schedules the invalidation, with the LUT and invert picked up', () => {
+      const svc = service as any;
+      const reveal = jest.spyOn(svc.cache, 'revealChannelSlice');
+      const schedule = jest.spyOn(svc, 'scheduleInvalidate').mockImplementation(() => undefined);
+      TestBed.inject(VisualizerStore).setInvert(true);
+      expect(reveal).not.toHaveBeenCalled();
+      expect(schedule).toHaveBeenCalledTimes(1);
+      expect(svc.invertBg).toBe(true);
+      expect(Array.isArray(svc.colorLut)).toBe(true);
+    });
+
+    it('invalidateDisplay picks the round by image kind and supersedes the previous one', () => {
+      const svc = service as any;
+      const world = { requestInvalidate: jest.fn() };
+      const navWorld = { requestInvalidate: jest.fn() };
+      svc.viewer = { world, navigator: { world: navWorld }, destroy: () => undefined };
+      const recomposite = jest.spyOn(svc, 'recompositeAndOpen').mockResolvedValue(undefined);
+      const channelInvalidate = jest.spyOn(svc.cache, 'invalidateChannelDisplay').mockImplementation(() => undefined);
+      svc.currentZ = 4;
+
+      const before = svc.displayToken;
+      svc.invalidateDisplay(); // composite / grayscale: the whole world + navigator
+      expect(svc.displayToken).toBe(before + 1);
+      expect(world.requestInvalidate).toHaveBeenCalledWith(true);
+      expect(navWorld.requestInvalidate).toHaveBeenCalledWith(true);
+
+      svc.isMultiChannel = true; // per-channel: only the visible slice's images
+      svc.invalidateDisplay();
+      expect(channelInvalidate).toHaveBeenCalledWith(4);
+      expect(world.requestInvalidate).toHaveBeenCalledTimes(1);
+
+      svc.simpleMultichannel = true; // serverless: re-composite the cached planes
+      svc.invalidateDisplay();
+      expect(recomposite).toHaveBeenCalledWith(svc.displayToken);
+      expect(channelInvalidate).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('nudges the toolbar at most every 100 ms during an animation, looking it up once (OSD-PLOTLY-30)', () => {
     document.body.innerHTML =
       '<visualization><div class="toolbar-dock"></div><div id="osdplot"></div></visualization>';

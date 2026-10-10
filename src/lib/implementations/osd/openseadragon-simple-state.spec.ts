@@ -257,6 +257,27 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
     expect(revoke).toHaveBeenCalledWith('blob:mounted');
     expect(revoke).not.toHaveBeenCalledWith('blob:next');
   });
+  it('a slow single-image scrub that resolves after a newer one is not opened', async () => {
+    const info = { ...simpleInfo, channelUrls: undefined, urls: ['blob:a', 'blob:b', 'blob:c'] } as unknown as IImageInfo;
+    const loaded = await service.load(info, 0);
+    void service.plot('plotdiv', loaded, info, 500, PlotType.IMAGE);
+    const viewer = viewers[viewers.length - 1];
+    viewer.open.mockClear();
+    const fetches: Record<string, (u: string) => void> = {};
+    const simpleStack = (service as unknown as { simpleStack: { fetchAsBlobUrl(u: string): Promise<string> } })
+      .simpleStack;
+    jest.spyOn(simpleStack, 'fetchAsBlobUrl').mockImplementation(
+      (u: string) => new Promise<string>((resolve) => { fetches[u] = resolve; }),
+    );
+    service.setZIndex(1);
+    service.setZIndex(2);
+    fetches['blob:c']('blob:c');
+    await nextFrame();
+    fetches['blob:b']('blob:b'); // z=1 lands last
+    await nextFrame();
+    expect(viewer.open.mock.calls.map(([src]) => src.url)).toEqual(['blob:c']);
+  });
+
   it('a simple-mode z-scrub does not pile up open-failed handlers (OSD-PLOTLY-33)', async () => {
     const info = { ...simpleInfo, channelUrls: undefined, urls: ['blob:a', 'blob:b', 'blob:c'] } as unknown as IImageInfo;
     const loaded = await service.load(info, 0);
