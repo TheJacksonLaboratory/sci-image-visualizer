@@ -263,8 +263,8 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
   describe('fitWhenContainerSized (initial fit is layout-timing-independent)', () => {
     const call = (el: HTMLElement | null, refit: () => void) =>
       (service as unknown as {
-        fitWhenContainerSized: (e: HTMLElement | null, r: () => void) => void;
-      }).fitWhenContainerSized(el, refit);
+        chrome: { fitWhenContainerSized: (e: HTMLElement | null, r: () => void) => void };
+      }).chrome.fitWhenContainerSized(el, refit);
 
     let observers: Array<{ cb: () => void; observe: jest.Mock; disconnect: jest.Mock }>;
     let originalRO: unknown;
@@ -454,7 +454,7 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     };
     const svc = service as any;
     svc.viewer = { navigator: nav, element: { clientWidth: 1000, clientHeight: 500 }, destroy: () => undefined };
-    svc.resizeNavigator();
+    svc.chrome.resizeNavigator();
     expect(nav.setWidth).toHaveBeenCalledWith(160);
     expect(nav.setHeight).toHaveBeenCalledWith(80);
     expect(wrapper.style).toMatchObject({ display: 'block', height: 'auto', width: 'auto' });
@@ -463,11 +463,11 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     expect(corner.style).toMatchObject({ bottom: '12px', right: '12px' });
     expect(navEl.style).toMatchObject({ position: 'relative', margin: '0px' });
     // Already that size: not resized again.
-    svc.resizeNavigator();
+    svc.chrome.resizeNavigator();
     expect(nav.setWidth).toHaveBeenCalledTimes(1);
     // A container without a size yet: left alone.
     svc.viewer.element = { clientWidth: 0, clientHeight: 0 };
-    svc.resizeNavigator();
+    svc.chrome.resizeNavigator();
     expect(nav.setWidth).toHaveBeenCalledTimes(1);
   });
 
@@ -534,14 +534,14 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     Object.defineProperty(dock, 'offsetHeight', { get: () => { reflows++; return 0; } });
     const lookup = jest.spyOn(document, 'getElementById');
     const now = jest.spyOn(performance, 'now').mockReturnValue(1000);
-    svc.nudgeToolbarRepaint(true);
-    svc.nudgeToolbarRepaint(true); // same frame burst
+    svc.chrome.nudgeToolbarRepaint(true);
+    svc.chrome.nudgeToolbarRepaint(true); // same frame burst
     now.mockReturnValue(1050);
-    svc.nudgeToolbarRepaint(true);
+    svc.chrome.nudgeToolbarRepaint(true);
     expect(reflows).toBe(1);
     now.mockReturnValue(1200);
-    svc.nudgeToolbarRepaint(true);
-    svc.nudgeToolbarRepaint(); // animation-finish: always
+    svc.chrome.nudgeToolbarRepaint(true);
+    svc.chrome.nudgeToolbarRepaint(); // animation-finish: always
     expect(reflows).toBe(3);
     expect(lookup).toHaveBeenCalledTimes(1);
     now.mockRestore();
