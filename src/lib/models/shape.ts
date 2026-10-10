@@ -2,6 +2,14 @@ import { Region, Polygon, Rectangle } from './region';
 import { parseSvgPath } from './geometry';
 import { Datum, Font, Shape, ShapeLabel, ShapeLine, XAxisName, YAxisName } from 'plotly.js-dist-min';
 
+/**
+ * A {@link Region} projected to a Plotly layout shape (`rect` or SVG `path`),
+ * carrying the region's identity, class label and file name along so it
+ * round-trips through Plotly's relayout. Coordinates are the plot's data
+ * coordinates, which are the region's image pixels. Built by
+ * {@link Region.getShape}; {@link getRegion} converts back (only `rect` and
+ * `path` shapes — anything else throws).
+ */
 export class ShapeSelection implements Shape {
 
   /** Stable, unique identity carried alongside the shape so it round-trips

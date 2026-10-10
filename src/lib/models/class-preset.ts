@@ -6,8 +6,13 @@
  * see `class-color.util.ts` for the deterministic colour-resolution engine.
  */
 
+/** Where a preset class came from: added by the user, one of the built-in
+ *  defaults, or auto-promoted from an unknown region label. */
 export type PresetSource = 'user' | 'default' | 'auto';
 
+/** One annotation class and its colour: regions whose `label` matches
+ *  `name` (per the set's {@link MatchMode}) draw in `color` unless their colour
+ *  was overridden by hand. */
 export interface ClassPreset {
   /** The class name — matched against `Region.label`. */
   name: string;
@@ -19,8 +24,15 @@ export interface ClassPreset {
   source?: PresetSource;
 }
 
+/** How a region label is matched to a preset name: `'exact'` compares the
+ *  strings as is; `'normalized'` trims and lower-cases both first. */
 export type MatchMode = 'exact' | 'normalized';
 
+/**
+ * The per-user class-colour configuration (server-persisted through the
+ * preferences port): the preset classes, the palette for labels outside them,
+ * and the matching rules. Resolved into region colours by `class-color.util.ts`.
+ */
 export interface PresetSet {
   /** Ordered list of preset classes. */
   classes: ClassPreset[];

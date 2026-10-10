@@ -25,6 +25,12 @@ export interface OmicsGrouping {
   colors: string[];
 }
 
+/**
+ * What {@link buildOmicsTraces} / {@link omicsLayout} chart: one value per
+ * observation (cell/spot), with the optional grouping and selection
+ * index-aligned to it. Non-finite values (NaN for a missing measurement) are
+ * left out of every chart.
+ */
 export interface OmicsTraceInput {
   /** The values being charted (an annotation column or a gene vector). */
   values: Float32Array;

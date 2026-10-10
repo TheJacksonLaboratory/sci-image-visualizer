@@ -1,6 +1,17 @@
 import { ShapeSelection } from './shape';
 import { verticesToSvgPath } from './geometry';
 
+/**
+ * One annotation region — the backend-neutral model every renderer (Plotly,
+ * OpenSeadragon, napari-js), the RegionStore, the Region Editor and the
+ * GeoJSON/QuPath import/export share.
+ *
+ * Geometry lives in {@link bounds}, in full-resolution image-pixel
+ * coordinates (x right, y down) of slice {@link z}. A region with no bounds
+ * (`null`/absent) is kept but draws nowhere. Regions that arrive as JSON are
+ * rebuilt into class instances by {@link hydrateBounds} on their way into the
+ * store, so `bounds instanceof Rectangle` etc. can be relied on downstream.
+ */
 export class Region {
   /** Stable, unique identity for selection and equality. Minted by the
    *  RegionStore when a region first enters it. Never derived from array
@@ -135,6 +146,8 @@ export class Region {
   }
 }
 
+/** An axis-aligned box in image-pixel coordinates: (`x`, `y`) is the top-left
+ *  (minimum) corner, `width`/`height` extend right/down. */
 export class Rectangle {
   x = 0;
   y = 0;
@@ -142,6 +155,15 @@ export class Rectangle {
   height = 0;
 }
 
+/**
+ * A polygon or open polyline in image-pixel coordinates, optionally with holes
+ * and smoothed into a bézier curve.
+ *
+ * The vertices are stored twice and must agree: as the parallel `xpoints` /
+ * `ypoints` arrays (length `npoints`; the Java/JIT wire shape) and as
+ * `coordinates` `[x, y]` pairs (what GeoJSON export reads). The ring is
+ * implicitly closed — the first vertex is not repeated at the end.
+ */
 export class Polygon {
   npoints = 0;
   xpoints: number[] = [];
@@ -205,6 +227,13 @@ export class MultiPolygon {
   polygons: Polygon[] = [];
 }
 
+/**
+ * A region's geometry as a host may supply it: a {@link Rectangle} or
+ * {@link Polygon} instance, or a plain object with the same fields (e.g. parsed
+ * JSON, possibly with only some of them). Image-pixel coordinates. Plain objects
+ * become class instances via {@link hydrateBounds} when they enter the store;
+ * {@link Region.bounds} itself is always an instance (or a {@link MultiPolygon}).
+ */
 export type Bounds =
   | Rectangle
   | Polygon
