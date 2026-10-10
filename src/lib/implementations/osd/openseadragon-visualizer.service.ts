@@ -3,8 +3,8 @@ import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, EMPTY, Observable, of } from 'rxjs';
 import { Image } from 'image-js';
 import * as OpenSeadragon from 'openseadragon';
-import { OSD, quiet } from './osd-lib';
-import { buildViewerOptions, silenceOsdMultiImageAdvisory } from './openseadragon-viewer-options';
+import { buildViewerOptions } from './openseadragon-viewer-options';
+import { createViewer, openViewer } from './osd-viewer-mount';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
 import { IImageInfo } from '../../contracts/image.contract';
@@ -393,90 +393,59 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     const tileSource = simple
       ? { type: 'image', url: loaded.url }
       : this.buildTileSource(d, loaded.infoB64, loaded.z, this.isMultiChannel ? 0 : undefined);
-    silenceOsdMultiImageAdvisory();
-    this.viewer = (OSD as any)(buildViewerOptions({
+    const options = buildViewerOptions({
       id: plotDiv,
       navigatorVisible: this.chrome.navigatorVisible,
       smoothing: this.chrome.smoothingEnabled,
       authHeaders: this.authHeaders,
       sliceCount: d.z ?? 1,
       maxSlices: this.cache.maxSlices(),
-    }));
-
-    return new Promise<boolean>((resolve) => {
-      // Always settle: if OSD never emits open/open-failed (a bad tile source,
-      // a viewer torn down mid-open), the render pipeline must not hang — a hang
-      // leaves imageLoading=true, sticking the spinner and the 500ms
-      // cache-progress poll forever (NS_BINDING_ABORTED storm).
-      let settled = false;
-      const done = (ok: boolean) => {
-        if (!settled) {
-          settled = true;
-          resolve(ok);
-        }
-      };
-      this.viewer!.addOnceHandler('open', () => {
-        // Region overlay reads/writes the shared RegionStore, so regions stay
-        // in sync with Plotly and the Region Editor. Recreate it per open() so
-        // it binds to the freshly-opened viewer's canvas/MouseTracker.
-        this.overlay?.destroy();
-        this.overlay = new OsdRegionOverlay(this.viewer, this.regionStore);
-        this.coordTransform = new OsdCoordinateTransform(this.viewer);
-        this.scaleBar = new OsdScaleBar(this.viewer, d.mppX ?? 0);
-        // Simple mode is a single, self-contained image — no slice cache to seed.
-        // Its z-scrub and recomposite re-open the viewer; one persistent handler
-        // reports a failed re-open (a once-handler per scrub would pile up).
-        if (simple) {
-          this.viewer!.addHandler('open-failed', (e: any) => {
-            console.warn('[OSD] slice re-open failed', this.currentZ, e?.message ?? e);
-          });
-        } else if (this.isMultiChannel) {
-          // Drop the single opened (channel-0) image and add this slice's channel
-          // group to the per-slice cache. The shared background loader / LRU then
-          // pre-fills the other slices' channel groups so z-scrub is flicker-free.
-          quiet(() => {
-            const it0 = this.viewer!.world?.getItemAt?.(0);
-            if (it0) this.viewer!.world.removeItem(it0);
-          });
-          this.cache.addChannelSlice(this.currentZ);
-        } else {
-          // Seed the slice cache with the just-opened slice (world item 0), so
-          // scrubbing back to it later is an instant opacity toggle, not a re-open.
-          const firstItem = this.viewer!.world?.getItemAt?.(0);
-          if (firstItem) this.cache.seedComposite(this.currentZ, firstItem);
-        }
-        // The wand samples the *rendered viewport*, so its pixel matrix is only
-        // valid for the current view — drop it whenever the viewport changes.
-        this.viewer!.addHandler('viewport-change', () => {
-          this.viewportPixels = null;
-        });
-        // Recolor every tile (main viewer and navigator) through the display pipeline.
-        this.recolor.attach(this.viewer!);
-        // Prefetch adjacent z-slices once the view settles (and on each settle,
-        // so it tracks the current viewport as the user pans/zooms). Simple mode
-        // has a single frame, so there's nothing to prefetch.
-        if (!simple) this.viewer!.addHandler('animation-finish', () => this.cache.schedulePrefetch());
-        // Tell listeners (the intensity inset) the visible image region whenever
-        // the view settles, so they can re-sample at the current zoom resolution.
-        this.viewer!.addHandler('animation-finish', () => this.viewport.emitViewportChange());
-        // Every redraw (pan/zoom animation frames, resize) — for a contributed
-        // plot mode's overlay, which has to move with the image, not after it.
-        this.viewer!.addHandler('update-viewport', () => this.viewport.scheduleFrame());
-        if (!simple) this.cache.schedulePrefetch();
-        // Toolbar nudges, fit-to-view as the layout settles, navigator sizing.
-        this.chrome.attach(this.viewer!, plotDiv);
-        done(true);
-      });
-      this.viewer!.addOnceHandler('open-failed', (e: any) => {
-        console.warn('[OSD] open-failed', e?.message ?? e);
-        done(false);
-      });
-      setTimeout(() => {
-        if (!settled) console.warn('[OSD] viewer open timed out');
-        done(false);
-      }, 8000);
-      this.viewer!.open(tileSource as any);
     });
+    this.viewer = createViewer(options);
+    return openViewer(this.viewer, tileSource, (v) => this.onViewerOpened(v, d, simple, plotDiv));
+  }
+
+  /** Wire a freshly opened viewer: the region overlay, coordinate transform and
+   *  scale bar, the slice cache, the recolor pipeline, the viewport streams and
+   *  the chrome. */
+  private onViewerOpened(viewer: OpenSeadragon.Viewer, d: TileDescriptor, simple: boolean, plotDiv: string): void {
+    // Region overlay reads/writes the shared RegionStore, so regions stay
+    // in sync with Plotly and the Region Editor. Recreate it per open() so
+    // it binds to the freshly-opened viewer's canvas/MouseTracker.
+    this.overlay?.destroy();
+    this.overlay = new OsdRegionOverlay(viewer, this.regionStore);
+    this.coordTransform = new OsdCoordinateTransform(viewer);
+    this.scaleBar = new OsdScaleBar(viewer, d.mppX ?? 0);
+    if (simple) {
+      // A single, self-contained image — no slice cache to seed. Its z-scrub and
+      // recomposite re-open the viewer; one persistent handler reports a failed
+      // re-open (a once-handler per scrub would pile up).
+      viewer.addHandler('open-failed', (e) => {
+        console.warn('[OSD] slice re-open failed', this.currentZ, (e as { message?: string })?.message ?? e);
+      });
+    } else {
+      this.cache.adoptOpenedSlice(this.currentZ);
+    }
+    // The wand samples the *rendered viewport*, so its pixel matrix is only
+    // valid for the current view — drop it whenever the viewport changes.
+    viewer.addHandler('viewport-change', () => {
+      this.viewportPixels = null;
+    });
+    // Recolor every tile (main viewer and navigator) through the display pipeline.
+    this.recolor.attach(viewer);
+    // Prefetch adjacent z-slices once the view settles (and on each settle,
+    // so it tracks the current viewport as the user pans/zooms). Simple mode
+    // has a single frame, so there's nothing to prefetch.
+    if (!simple) viewer.addHandler('animation-finish', () => this.cache.schedulePrefetch());
+    // Tell listeners (the intensity inset) the visible image region whenever
+    // the view settles, so they can re-sample at the current zoom resolution.
+    viewer.addHandler('animation-finish', () => this.viewport.emitViewportChange());
+    // Every redraw (pan/zoom animation frames, resize) — for a contributed
+    // plot mode's overlay, which has to move with the image, not after it.
+    viewer.addHandler('update-viewport', () => this.viewport.scheduleFrame());
+    if (!simple) this.cache.schedulePrefetch();
+    // Toolbar nudges, fit-to-view as the layout settles, navigator sizing.
+    this.chrome.attach(viewer, plotDiv);
   }
 
   /** The `GET /tile` source for slice `z` (one channel's, when given) — see

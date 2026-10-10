@@ -102,6 +102,27 @@ export class SliceCache {
     this.channelSliceItems.clear();
   }
 
+  /**
+   * Take over the slice the viewer just opened (world item 0). Composite: seed
+   * the cache with it, so scrubbing back to it later is an instant opacity
+   * toggle, not a re-open. Multichannel: drop that single (channel-0) image and
+   * add the slice's channel group instead; the background loader / LRU then
+   * pre-fills the other slices' groups so z-scrub is flicker-free.
+   */
+  adoptOpenedSlice(z: number): void {
+    const viewer = this.host.viewer();
+    if (this.host.isMultiChannel()) {
+      quiet(() => {
+        const it0 = viewer?.world?.getItemAt?.(0);
+        if (it0) viewer.world.removeItem(it0);
+      });
+      this.addChannelSlice(z);
+      return;
+    }
+    const firstItem = viewer?.world?.getItemAt?.(0);
+    if (firstItem) this.seedComposite(z, firstItem);
+  }
+
   /** Seed the cache with the just-opened composite slice (world item 0), so
    *  scrubbing back to it later is an instant opacity toggle, not a re-open. */
   seedComposite(z: number, item: any): void {
