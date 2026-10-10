@@ -1,5 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { NoopAnimationsModule } from '@angular/platform-browser/animations';
+import { Tooltip } from 'primeng/tooltip';
 
 import { VisualizationModule } from '../visualization.module';
 import { ToolbarComponent } from './toolbar.component';
@@ -19,11 +20,20 @@ import { ToolbarToolContribution } from '../contracts/toolbar-tool.contract';
  * its icon or image, its static tooltip, whether it is shown "on" (not text-
  * styled) and disabled, a slider's value, a text label.
  */
-function signature(root: HTMLElement): string[] {
+function signature(fixture: ComponentFixture<unknown>): string[] {
+  const root = fixture.nativeElement as HTMLElement;
   const out: string[] = [];
+  // Read the tooltip off the directive, so a bound [pTooltip] reads like a static one.
+  const tooltipOf = (el: Element): string => {
+    const de = fixture.debugElement.query((d) => d.nativeElement === el);
+    const content = de?.injector.get(Tooltip, null)?.content;
+    return typeof content === 'string' ? content : '';
+  };
   const iconOf = (el: Element): string => {
-    const icon = el.getAttribute('icon');
-    if (icon) return icon;
+    // The rendered icon span, so a bound [icon] reads like a static one.
+    const span = el.querySelector('.p-button-icon');
+    const pi = span ? Array.from(span.classList).filter((c) => c === 'pi' || c.startsWith('pi-')) : [];
+    if (pi.length) return pi.join(' ');
     const img = el.querySelector('img');
     if (img) return (img.getAttribute('src') ?? '').replace('assets/plotting/', '');
     const i = el.querySelector('i');
@@ -37,7 +47,7 @@ function signature(root: HTMLElement): string[] {
       const button = el.querySelector('button');
       const on = button && !button.classList.contains('p-button-text') ? ' on' : '';
       const disabled = button?.disabled ? ' disabled' : '';
-      const tip = (el.getAttribute('ptooltip') ?? '').replace(/\s+/g, ' ').trim();
+      const tip = tooltipOf(el).replace(/\s+/g, ' ').trim();
       out.push(`button:${iconOf(el)}${on}${disabled}${tip ? ` "${tip}"` : ''}`);
       return;
     }
@@ -85,7 +95,7 @@ describe('ToolbarComponent (DOM characterization)', () => {
     fixture.detectChanges();
     await fixture.whenStable(); // ngModel writes slider / dropdown values a tick later
     fixture.detectChanges();
-    return signature(fixture.nativeElement);
+    return signature(fixture);
   }
 
   const plotTypeOptions = [
