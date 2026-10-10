@@ -37,7 +37,6 @@ import { TOOLBAR_TOOLS, ToolbarDialogToolContribution } from './contracts/toolba
 import { VISUALIZER } from './contracts/visualizer.contract';
 import { VisualizerStore } from './store/visualizer-store.service';
 import { RegionOpsService } from './region-ops.service';
-import { WandService } from './toolbar/wand/wand.service';
 import { SamToolService } from './toolbar/segmentation/sam-tool.service';
 import { SamPointToolService } from './toolbar/segmentation/sam-point-tool.service';
 import { CellSegmentToolService } from './toolbar/segmentation/cell-segment-tool.service';
@@ -171,7 +170,7 @@ function harness(contributions: unknown[] | undefined, viewport: PlotModeViewpor
     { detectChanges: jest.fn(), markForCheck: jest.fn() } as any,
     new VisualizerStore(),
     toolFeeds(), toolFeeds(), toolFeeds(),
-    new RegionOpsService(new WandService()),
+    new RegionOpsService(),
     undefined, // VIZ_CONFIG
     toolContributions as any, // TOOLBAR_TOOLS
     undefined, // SPATIAL_DATA_PORT

@@ -5,7 +5,6 @@ import { BBoxMask, rasterizePolygon, unionMasks } from './geometry/raster';
 import { maskToPolygons } from './geometry/contour';
 import { simplifyRing } from './geometry/ring';
 import { clonePolygon, makePolygon, rectToRing } from './models/polygon-factory';
-import { WandService } from './toolbar/wand/wand.service';
 
 /**
  * Pure (DOM-free) region set-operations — merge / inverse / ungroup (jit-ui#85).
@@ -31,16 +30,6 @@ export class RegionOpsService {
    * large-extent selections (small selections keep full resolution).
    */
   private static readonly MAX_OP_PIXELS = 16_000_000;
-
-  /**
-   * Uses no collaborators: the raster pipeline is the pure `geometry/` modules.
-   * The (unused) parameter only keeps `new RegionOpsService(new WandService())`
-   * in the visualizer specs compiling; DI still resolves it, so it goes once
-   * those specs construct the service without it.
-   */
-  constructor(_legacyWand?: WandService) {
-    // Nothing to keep: see above.
-  }
 
   /**
    * Geometric union of `regions` into a single region: a {@link Polygon} when

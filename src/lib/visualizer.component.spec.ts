@@ -21,7 +21,6 @@ import { VisualizerComponent } from './visualizer.component';
 import { PlotType, PLOT_TYPE_DESCRIPTORS } from './contracts/plot-type';
 import { VisualizerStore } from './store/visualizer-store.service';
 import { RegionOpsService } from './region-ops.service';
-import { WandService } from './toolbar/wand/wand.service';
 import { Region, Rectangle, Polygon, MultiPolygon } from './models/region';
 import { IImageInfo } from './contracts/image.contract';
 
@@ -120,7 +119,7 @@ function makeComponent(plot: any, spatialData?: any): VisualizerComponent {
         busy$: new BehaviorSubject(false),
         progress$: new BehaviorSubject(-1),
       } as any,
-      new RegionOpsService(new WandService()), // RegionOpsService
+      new RegionOpsService(), // RegionOpsService
       undefined, // VIZ_CONFIG
       undefined, // TOOLBAR_TOOLS
       spatialData, // SPATIAL_DATA_PORT (optional — absent for image-only hosts)
@@ -225,7 +224,7 @@ function harness(overrides: Record<string, unknown> = {}) {
     toolFeeds(),
     toolFeeds(),
     toolFeeds(),
-    new RegionOpsService(new WandService()),
+    new RegionOpsService(),
   );
   component.ngOnInit();
   return { component, plot, state, imageInfo$, subjects, messages, store };
