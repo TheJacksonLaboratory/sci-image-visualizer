@@ -32,15 +32,15 @@ import {
 import {
   ImageLayoutContext, chartLayout, heatmapLayout, overlayLayout, surfaceLayout, volumeLayout,
 } from './plotly-layouts';
-import { IViewerBackend, IntensityProfile, IIsosurfaceControls, IIntensityControls } from '../../contracts/visualizer.contract';
+import { IViewerBackend, IntensityProfile, IIsosurfaceControls, IIntensityControls, PixelData } from '../../contracts/visualizer.contract';
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
-import { bt601Luminance, histogram256 } from '../../contracts/intensity';
 import { ViewerCapabilities, ViewerFeature, capabilitiesOf } from '../../contracts/capabilities.contract';
 import { IRegionOverlay } from '../../contracts/region-overlay.contract';
 import { PlotlyRegionOverlay } from './plotly-region-overlay';
 import { PlotlyIsosurfaceControls } from './plotly-isosurface-controls';
 import { PlotlyShapeProjection } from './plotly-shape-projection';
 import { PlotlyZoomController } from './plotly-zoom-controller';
+import { axesSourceRect, channelDisplayRestyle, frameHistogram, tracePixels } from './plotly-readback';
 import { renderIntensityInset as renderPlotlyIntensityInset } from './plotly-intensity-inset';
 import { IntensityProfileService } from '../../intensity/intensity-profile.service';
 import { ICoordinateTransform } from '../../contracts/coordinate-transform.contract';
@@ -887,74 +887,18 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
    * This captures whatever is actually rendered — including zoomed regions.
    * Returns { width, height, channels, data } or null if no plot is displayed.
    */
-  public getDisplayedPixelData(): { width: number; height: number; channels: number;
-    data: Uint8ClampedArray } | null {
-    if (!this.plotDiv) return null;
-    const gd: any = document.getElementById(this.plotDiv);
+  public getDisplayedPixelData(): PixelData | null {
+    const gd: any = this.plotDiv ? document.getElementById(this.plotDiv) : null;
     if (!gd?.data || gd.data.length === 0) return null;
-
-    // Find the visible trace
-    const frameIdx = this.activeFrameIndex();
-    const trace = gd.data[frameIdx] || gd.data[0];
-    if (!trace || !trace.z) return null;
-
-    const zData: any[][] = trace.z;
-    const height = zData.length;
-    if (height === 0) return null;
-    const width = zData[0].length;
-
-    if (trace.type === 'image') {
-      // RGB image: z[row][col] = [r, g, b] or [r, g, b, a]
-      const sample = zData[0][0];
-      const channels = Array.isArray(sample) ? sample.length : 3;
-      const data = new Uint8ClampedArray(width * height * channels);
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          const pixel = zData[y][x];
-          const offset = (y * width + x) * channels;
-          for (let c = 0; c < channels; c++) {
-            data[offset + c] = pixel[c];
-          }
-        }
-      }
-      return { width, height, channels, data };
-    } else {
-      // Heatmap (grayscale): z[row][col] = scalar value
-      const data = new Uint8ClampedArray(width * height);
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          data[y * width + x] = Math.round(zData[y][x]);
-        }
-      }
-      return { width, height, channels: 1, data };
-    }
+    return tracePixels(gd.data[this.activeFrameIndex()] || gd.data[0]);
   }
 
-  /**
-   * Region of the original image that the displayed `z` grid covers, in
-   * full-image pixel coords. On a server zoom (`triggerZoom`) the trace `z` is
-   * replaced with the high-def crop and the axes are relaid out to the crop's
-   * original-image bounds (`imageSize`), so the live axis ranges ARE that
-   * rectangle; when the whole image is in view the ranges span `trueImgSize`.
-   * Reading the ranges therefore yields the crop origin + extent without
-   * tracking zoom state separately. Falls back to the full image, then `null`.
-   */
+  /** The image rect the displayed `z` grid covers, in full-image pixel coords —
+   *  read off the live axis ranges (a high-def zoom relays them out to the crop),
+   *  else the whole image (see axesSourceRect). */
   public getDisplayedSourceRect(): { x: number; y: number; width: number; height: number } | null {
     const gd: any = this.plotDiv ? document.getElementById(this.plotDiv) : null;
-    const xr: number[] | undefined = gd?._fullLayout?.xaxis?.range;
-    const yr: number[] | undefined = gd?._fullLayout?.yaxis?.range;
-    if (xr && yr) {
-      const x0 = Math.min(xr[0], xr[1]);
-      const y0 = Math.min(yr[0], yr[1]); // y axis is reversed for image layouts
-      return { x: x0, y: y0, width: Math.abs(xr[1] - xr[0]), height: Math.abs(yr[1] - yr[0]) };
-    }
-    if (!this.trueImgSize) return null;
-    return {
-      x: this.trueImgSize[0],
-      y: this.trueImgSize[2],
-      width: this.trueImgSize[1] - this.trueImgSize[0],
-      height: this.trueImgSize[3] - this.trueImgSize[2],
-    };
+    return axesSourceRect(gd?._fullLayout?.xaxis?.range, gd?._fullLayout?.yaxis?.range, this.trueImgSize);
   }
 
   public reset() {
@@ -1113,29 +1057,8 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   private applyChannelDisplay(channels: any[], rev: boolean, inv: boolean): void {
     const gd = this.liveGd();
     if (!gd) return;
-    const ch = channels?.[0];
-    const colorscale = this.store.currentColormap()?.data?.value;
-    // reverse-scale and invert each flip the ramp; both together cancel.
-    const update: any = { reversescale: rev !== inv };
-    if (colorscale != null) update.colorscale = colorscale; // live colormap recolor
-    if (ch) {
-      // Surface/isosurface/scatter3d colour-map via cmin/cmax; heatmap/contour via zmin/zmax.
-      const threeD =
-        this.plotType === PlotType.ISOSURFACE ||
-        this.plotType === PlotType.SURFACE ||
-        this.plotType === PlotType.SCATTER3D;
-      if (threeD) {
-        update.cmin = ch.min;
-        update.cmax = ch.max;
-        update.cauto = false;
-      } else {
-        update.zmin = ch.min;
-        update.zmax = ch.max;
-        update.zauto = false;
-      }
-    }
-    // A trace without a colour scale just ignores these attributes.
-    void Plotly.restyle(gd, update);
+    void Plotly.restyle(gd, channelDisplayRestyle(channels, rev, inv,
+      this.store.currentColormap()?.data?.value, this.plotType) as Plotly.Data);
   }
 
   /** Binned intensity histogram for a channel from the cached source frames
@@ -1145,24 +1068,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     if (!frames?.length) return null;
     const frame = frames[this.activeFrameIndex()] ?? frames[0];
     if (!frame?.length) return null;
-    const counts = new Array(256).fill(0);
-    for (const row of frame) {
-      if (!row) continue;
-      for (const cell of row) {
-        let v: number;
-        if (Array.isArray(cell)) {
-          v = channelIndex >= 0 && channelIndex < cell.length
-            ? cell[channelIndex]
-            : Math.round(bt601Luminance(cell[0], cell[1], cell[2]));
-        } else {
-          v = cell;
-        }
-        v = v | 0;
-        if (v < 0) v = 0; else if (v > 255) v = 255;
-        counts[v]++;
-      }
-    }
-    return histogram256(counts);
+    return frameHistogram(frame, channelIndex);
   }
 
   /** Async histogram stream — Plotly renders heatmap frame data (already in
