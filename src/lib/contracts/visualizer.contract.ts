@@ -532,25 +532,16 @@ export interface IVisualizer extends IDataRenderer, IRegionStore, IToolControlle
 }
 
 /**
- * Region writes that still carry backend render glue: Plotly re-projects its shape
- * working-set on them, and undo/redo/slice switches reset the backend's canvas tools.
- * Transitional — they move off the backend contract once each backend redraws from the
- * shared `RegionStore`'s update event instead of being on the write path.
- */
-export type IRegionRenderGlue = Pick<IRegionStore, 'setRegions' | 'setSelectedShapeIndices' | 'selectRegion' |
-  'deleteActiveShape' | 'exportRegions' | 'undo' | 'redo' | 'setDisplaySlice'>;
-
-/**
  * What a rendering backend implements (Plotly, OpenSeadragon, napari-js): rendering,
  * the viewport, pixel readback, export, loading state and its on-canvas tools, plus
  * capability-gated getters for what only some backends have.
  *
  * It is the backend-facing half of {@link IVisualizer}. Region and display state are
  * not here: they live in the shared `RegionStore` / `VisualizerStore`, which the router
- * serves to hosts directly (apart from the {@link IRegionRenderGlue} writes). Hosts
- * keep depending on `IVisualizer` (the router's composite), never on a backend.
+ * serves to hosts directly; a backend draws them by subscribing to the stores' events.
+ * Hosts keep depending on `IVisualizer` (the router's composite), never on a backend.
  */
-export interface IViewerBackend extends IToolController, IRegionRenderGlue {
+export interface IViewerBackend extends IToolController {
   readonly capabilities: ViewerCapabilities;
 
   // ── render lifecycle ──────────────────────────────────────────────────

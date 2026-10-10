@@ -363,6 +363,19 @@ describe('RegionStore', () => {
       expect(store.canUndo()).toBe(false);
     });
 
+    it('signals a replaced region set on every undo, redo and slice switch, not on an edit', () => {
+      let replaced = 0;
+      store.getRegionSetReplaced$().subscribe(() => replaced++);
+      store.addRegion(rectRegion(0, 0, 10, 10));
+      expect(replaced).toBe(0);
+      store.undo();
+      store.redo();
+      store.undo();
+      store.undo(); // nothing left to undo: still signalled (tool work is dropped either way)
+      store.setDisplaySlice(3); // outside stack mode too
+      expect(replaced).toBe(5);
+    });
+
     it('undoes a single add, restoring the prior (empty) state', () => {
       store.addRegion(rectRegion(0, 0, 10, 10));
       expect(store.getRegions().length).toBe(1);

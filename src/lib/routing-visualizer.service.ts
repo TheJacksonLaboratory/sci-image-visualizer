@@ -67,6 +67,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   /** napari-js failed for the current render cycle → fall back to OSD (then Plotly).
    *  Reset by reset() at the start of every cycle, like {@link osdFellBack}. */
   private napariFellBack = false;
+  /** The file name of the image last plotted (names a GeoJSON export). */
+  private plottedFileName: string | undefined;
 
   constructor(private plotly: PlotlyService,
               private osd: OpenSeadragonVisualizerService,
@@ -182,6 +184,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   plot(plotDiv: string, imageLoaded: unknown, imageInfo: IImageInfo, screenHeight: number,
        plotType: PlotType, inPlace?: boolean): Promise<boolean> {
     this.currentPlotType = plotType;
+    this.plottedFileName = imageInfo?.fileName;
     // Apply the per-image region cache (snapshot old regions, restore the new
     // image's, clear selection) for whichever backend renders — Plotly does
     // this inside its own plot(), but OSD doesn't, so drive it here. Idempotent
@@ -314,22 +317,22 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.plotly.renderIntensityInset(divId, profiles); }
 
   // ── regions ──────────────────────────────────────────────────────────
-  // Region state lives in the shared RegionStore, so reads and plain writes go
-  // straight to it. The writes in IRegionRenderGlue still route through the backend
-  // on screen, which adds render glue to them (Plotly re-projects its shapes; undo,
-  // redo and a slice switch reset the canvas tools); the others redraw from the
-  // store's update event.
+  // Region state lives in the shared RegionStore, so every read and write goes
+  // straight to it. Every backend draws from the store's events: the OSD and
+  // napari-js overlays and Plotly's shape projection redraw on its region-update
+  // and selection streams, and the canvas tools reset on getRegionSetReplaced$
+  // (undo, redo, a slice switch).
   setRegions(regions: Region[], showRegionLabel?: boolean, isRegionSaveOn?: boolean,
              fillColor?: string, append?: boolean): void {
-    this.renderer().setRegions(regions, showRegionLabel, isRegionSaveOn, fillColor, append);
+    this.regionStore.setRegions(regions, showRegionLabel, isRegionSaveOn, fillColor, append);
   }
   getRegions(): Region[] { return this.regionStore.getRegions(); }
   getRegionPolygons(): Polygon[] { return this.regionStore.getRegionPolygons(); }
   getRegionUpdateEvent(): Observable<Region[]> { return this.regionStore.getRegionUpdateEvent(); }
-  setSelectedShapeIndices(indices: number[]): void { this.renderer().setSelectedShapeIndices(indices); }
-  selectRegion(region: Region): void { this.renderer().selectRegion(region); }
+  setSelectedShapeIndices(indices: number[]): void { this.regionStore.setSelectedShapeIndices(indices); }
+  selectRegion(region: Region): void { this.regionStore.selectRegion(region); }
   getSelectedShapeIndices$(): Observable<number[]> { return this.regionStore.getSelectedShapeIndices$(); }
-  deleteActiveShape(): void { this.renderer().deleteActiveShape(); }
+  deleteActiveShape(): void { this.regionStore.deleteActiveShape(); }
   getShowShapeLabel(): boolean { return this.regionStore.getShowShapeLabel(); }
   getShapeColor(): string { return this.regionStore.getShapeColor(); }
   getFillColor(): string { return this.regionStore.getFillColor(); }
@@ -344,16 +347,16 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   upsertClass(preset: ClassPreset): void { this.store.upsertClass(preset); }
   removeClass(name: string): void { this.store.removeClass(name); }
   resetPresets(): void { this.store.resetPresets(); }
-  // Undo/redo go through the backend (they reset its canvas tools); their state is the store's.
-  undo(): void { this.renderer().undo(); }
-  redo(): void { this.renderer().redo(); }
+  undo(): void { this.regionStore.undo(); }
+  redo(): void { this.regionStore.redo(); }
   canUndo(): boolean { return this.regionStore.canUndo(); }
   canRedo(): boolean { return this.regionStore.canRedo(); }
   getCanUndo$(): Observable<boolean> { return this.regionStore.getCanUndo$(); }
   getCanRedo$(): Observable<boolean> { return this.regionStore.getCanRedo$(); }
   resetUndoHistory(): void { this.regionStore.resetUndoHistory(); }
   importRegions(geoJsonStr: string): Region[] { return this.regionStore.importRegions(geoJsonStr); }
-  exportRegions(regions: Region[]): void { this.renderer().exportRegions(regions); }
+  /** Download `regions` as GeoJSON, named after the image last plotted. */
+  exportRegions(regions: Region[]): void { this.regionStore.exportRegions(regions, this.plottedFileName); }
   getGeoJsonString(regions: Region[]): string { return this.regionStore.getGeoJsonString(regions); }
 
   // ── Per-slice z-stack regions (jit-ui#93), from the shared RegionStore. ──
@@ -364,7 +367,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   exitStackMode(): void { this.regionStore.exitStackMode(); }
   isStackMode(): boolean { return this.regionStore.isStackMode(); }
   getStackSaveLayout(): 'combined' | 'per-slice-file' { return this.regionStore.getStackSaveLayout(); }
-  setDisplaySlice(z: number): void { this.renderer().setDisplaySlice(z); }
+  setDisplaySlice(z: number): void { this.regionStore.setDisplaySlice(z); }
   getSliceRegions(): Region[] { return this.regionStore.getSliceRegions(); }
   getStackSaveSlices(): Map<number, Region[]> { return this.regionStore.getStackSaveSlices(); }
   /** All slices' ANNOTATION regions for a z-stack save (jit-ui#93), each tagged
@@ -408,17 +411,15 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   // ── IRegionEditorApi: annotation-only surface for the Region Editor ───
   // Intensity-profile lines (kind='profile') belong to the intensity tool, not
   // the editor. These methods give external consumers an annotation-only view
-  // and guarantee profile lines are preserved. Routing (not the store) owns this
-  // so writes/selection go through renderer() and the active backend re-renders
-  // (Plotly relayouts its shapes in setRegions; it doesn't on regionUpdate$).
+  // and guarantee profile lines are preserved. The writes land in the store like
+  // any other, and every backend redraws from its events.
 
   getAnnotationRegions(): Region[] {
     return this.regionStore.getRegions().filter((r) => !isProfileRegion(r));
   }
   setAnnotationRegions(regions: Region[], showRegionLabel?: boolean,
                        isRegionSaveOn?: boolean, fillColor?: string): void {
-    // Re-append the store's profile lines so an editor save/delete can't drop
-    // them, then route through setRegions so the active backend re-renders.
+    // Re-append the store's profile lines so an editor save/delete can't drop them.
     const profiles = this.regionStore.getRegions().filter((r) => isProfileRegion(r));
     const annotations = (regions || []).filter((r) => !isProfileRegion(r));
     this.setRegions([...annotations, ...profiles], showRegionLabel, isRegionSaveOn, fillColor, false);

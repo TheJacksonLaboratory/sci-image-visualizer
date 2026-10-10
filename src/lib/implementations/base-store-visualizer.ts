@@ -40,7 +40,12 @@ export abstract class BaseStoreVisualizer implements IRegionStore, IDisplayOptio
   protected constructor(
     protected readonly regionStore: RegionStore,
     protected readonly store: VisualizerStore,
-  ) {}
+  ) {
+    // Undo, redo and a slice switch replace the regions an in-progress stroke or
+    // SAM prompt was building on — whoever called them (the router writes the
+    // store directly). Service-lifetime, like the store.
+    regionStore.getRegionSetReplaced$().subscribe(() => this.canvasTools.resetAll());
+  }
 
   // ── IRegionStore → shared RegionStore ────────────────────────────────────
   setRegions(regions: Region[], showRegionLabel?: boolean, isRegionSaveOn?: boolean,
@@ -57,9 +62,9 @@ export abstract class BaseStoreVisualizer implements IRegionStore, IDisplayOptio
   getShowShapeLabel(): boolean { return this.regionStore.getShowShapeLabel(); }
   getShapeColor(): string { return this.regionStore.getShapeColor(); }
   getFillColor(): string { return this.regionStore.getFillColor(); }
-  // Undo/redo replace the regions a stroke or SAM prompt was building on.
-  undo(): void { this.regionStore.undo(); this.canvasTools.resetAll(); }
-  redo(): void { this.regionStore.redo(); this.canvasTools.resetAll(); }
+  // Undo/redo reset the canvas tools through the store's getRegionSetReplaced$ (see the constructor).
+  undo(): void { this.regionStore.undo(); }
+  redo(): void { this.regionStore.redo(); }
   canUndo(): boolean { return this.regionStore.canUndo(); }
   canRedo(): boolean { return this.regionStore.canRedo(); }
   getCanUndo$(): Observable<boolean> { return this.regionStore.getCanUndo$(); }
@@ -77,10 +82,7 @@ export abstract class BaseStoreVisualizer implements IRegionStore, IDisplayOptio
   exitStackMode(): void { this.regionStore.exitStackMode(); }
   isStackMode(): boolean { return this.regionStore.isStackMode(); }
   getStackSaveLayout(): 'combined' | 'per-slice-file' { return this.regionStore.getStackSaveLayout(); }
-  setDisplaySlice(z: number): void {
-    this.regionStore.setDisplaySlice(z);
-    this.canvasTools.resetAll(); // another slice's regions
-  }
+  setDisplaySlice(z: number): void { this.regionStore.setDisplaySlice(z); }
   getSliceRegions(): Region[] { return this.regionStore.getSliceRegions(); }
   getStackSaveSlices(): Map<number, Region[]> { return this.regionStore.getStackSaveSlices(); }
 

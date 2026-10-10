@@ -9,6 +9,8 @@ import { VIZ_PORT_STUBS } from '../testing/viz-port-stubs';
 import { CanvasToolManager } from '../toolbar/tool-kit/canvas-tool-manager';
 import { CanvasToolHost } from '../toolbar/tool-kit/canvas-tool';
 import { CANVAS_TOOL_IDS } from '../contracts/display-types';
+import { RegionStore } from '../store/region-store.service';
+import { Rectangle, Region } from '../models/region';
 
 type Backend = PlotlyService | OpenSeadragonVisualizerService | NapariVisualizerService;
 const tools = (b: Backend) => (b as unknown as { canvasTools: CanvasToolManager }).canvasTools;
@@ -69,6 +71,22 @@ describe('canvas tools per backend (RT-21)', () => {
       b.undo();
       b.redo();
       expect(resetAll).toHaveBeenCalledTimes(2);
+      resetAll.mockRestore();
     }
+  });
+
+  // The router writes undo/redo/slice switches straight to the store (IVisualizer split (d)),
+  // so the resets must come from the store's event, not from the backend's own members.
+  it('resets every backend\'s tools on a store undo, redo or slice switch — not on an ordinary edit', () => {
+    const regionStore = TestBed.inject(RegionStore);
+    const spies = backends.map((b) => jest.spyOn(tools(b), 'resetAll'));
+    regionStore.setRegions([Object.assign(new Region(), {
+      bounds: Object.assign(new Rectangle(), { x: 0, y: 0, width: 4, height: 4 }),
+    })]);
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    regionStore.undo();
+    regionStore.redo();
+    regionStore.setDisplaySlice(1);
+    for (const spy of spies) expect(spy).toHaveBeenCalledTimes(3);
   });
 });

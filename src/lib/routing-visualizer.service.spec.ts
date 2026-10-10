@@ -326,9 +326,10 @@ describe('RoutingVisualizerService (characterization)', () => {
   it('setAnnotationRegions preserves existing profile lines and never appends', () => {
     const profile = { id: 1, kind: 'profile' };
     jest.spyOn(regionStore, 'getRegions').mockReturnValue([profile, { id: 2 }] as unknown as Region[]);
+    const write = jest.spyOn(regionStore, 'setRegions').mockImplementation(() => undefined);
     const next: any = [{ id: 3 }];
     router.setAnnotationRegions(next, true, false, '#fff');
-    expect(plotly.setRegions).toHaveBeenCalledWith([{ id: 3 }, profile], true, false, '#fff', false);
+    expect(write).toHaveBeenCalledWith([{ id: 3 }, profile], true, false, '#fff', false);
   });
 
   // ── auto-contrast windowing math ──────────────────────────────────────
@@ -403,10 +404,6 @@ describe('RoutingVisualizerService (characterization)', () => {
     ['downloadImage', []],
     ['exportComposite', []],
     ['exportData', []],
-    ['setSelectedShapeIndices', [[0, 1]]],
-    ['selectRegion', [{ id: 1 }]],
-    ['deleteActiveShape', []],
-    ['exportRegions', [[]]],
     ['setActiveTool', ['wand', { sensitivity: 2 }]],
     ['setActiveTool', [null, undefined]],
     ['setWandMode', [true, { sensitivity: 2 }]],
@@ -425,7 +422,6 @@ describe('RoutingVisualizerService (characterization)', () => {
     ['setZoomToBoxMode', [true]],
     ['getHistogram', [0, 256]],
     ['getHistogram$', [0, 256]],
-    ['setRegions', [[], true, false, '#fff', false]],
   ])('routes %s to the active renderer (Plotly before any plot)', (method, args) => {
     (router as any)[method](...args);
     expect(plotly[method]).toHaveBeenCalledWith(...args);
@@ -453,6 +449,14 @@ describe('RoutingVisualizerService (characterization)', () => {
     ['getStackSaveLayout', [], 'region'],
     ['getSliceRegions', [], 'region'],
     ['getStackSaveSlices', [], 'region'],
+    // the writes too (step (d)): every backend redraws from the store's events
+    ['setRegions', [[], true, false, '#fff', false], 'region'],
+    ['setSelectedShapeIndices', [[0, 1]], 'region'],
+    ['selectRegion', [{ id: 1 }], 'region'],
+    ['deleteActiveShape', [], 'region'],
+    ['undo', [], 'region'],
+    ['redo', [], 'region'],
+    ['setDisplaySlice', [2], 'region'],
     ['getClassificationColors', [], 'display'],
     ['setClassificationColor', ['tumour', '#ffffff'], 'display'],
   ])('serves %s from the shared store, not a backend', async (method, args, owner) => {
@@ -464,6 +468,14 @@ describe('RoutingVisualizerService (characterization)', () => {
     for (const backend of [plotly, osd, napari]) {
       if (backend[method]) expect(backend[method]).not.toHaveBeenCalled();
     }
+  });
+
+  it('exports regions through the store, named after the image last plotted', async () => {
+    await router.plot('div', {}, IMAGE_INFO, 600, PlotType.IMAGE);
+    const spy = jest.spyOn(regionStore, 'exportRegions').mockImplementation(() => undefined);
+    router.exportRegions([]);
+    expect(spy).toHaveBeenCalledWith([], 'test.tif');
+    for (const backend of [plotly, osd, napari]) expect(backend.exportRegions).not.toHaveBeenCalled();
   });
 
   it('switches delegation to OSD once an IMAGE plot makes it the active renderer', async () => {

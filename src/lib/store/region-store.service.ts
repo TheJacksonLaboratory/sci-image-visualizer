@@ -89,6 +89,8 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   /** Non-coalesced sibling of regionUpdate$: fires on every change even during a
    *  batched drag, so live consumers (intensity inset) update per frame. */
   private readonly regionLiveEdit$ = new Subject<Region[]>();
+  /** See {@link getRegionSetReplaced$}. */
+  private readonly regionSetReplaced$ = new Subject<void>();
 
   /** Emit coalescing for live drags (see IRegionEditApi.beginBatch). */
   private batchDepth = 0;
@@ -186,15 +188,8 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.scope.exitStack();
   }
 
-  /**
-   * Show a different slice: capture the current slice's (possibly edited)
-   * regions back into the per-slice store, then load the target slice's regions
-   * as the live set and emit. Undo never crosses a slice. Outside stack mode
-   * this only records the requested slice index (a no-op otherwise: single-plane
-   * regions stay on the default plane — addRegion tags Region.z only in stack
-   * mode, so the recorded index is unused until a stack is entered). (jit-ui#93)
-   */
-  setDisplaySlice(z: number): void {
+  /** The live-set swap of {@link setDisplaySlice}. */
+  private showSlice(z: number): void {
     const next = this.scope.showSlice(z, this.regions);
     if (!next) return;
     this.regions = next;
@@ -203,6 +198,21 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.resetUndoHistory();
     this.emitSelection();
     this.emit();
+  }
+
+  /**
+   * Show a different slice: capture the current slice's (possibly edited)
+   * regions back into the per-slice store, then load the target slice's regions
+   * as the live set and emit. Undo never crosses a slice. Outside stack mode
+   * this only records the requested slice index (a no-op otherwise: single-plane
+   * regions stay on the default plane — addRegion tags Region.z only in stack
+   * mode, so the recorded index is unused until a stack is entered). (jit-ui#93)
+   * Either way {@link getRegionSetReplaced$} emits: the slice on screen changed
+   * under any in-progress tool work.
+   */
+  setDisplaySlice(z: number): void {
+    this.showSlice(z);
+    this.regionSetReplaced$.next();
   }
 
   /**
@@ -278,6 +288,17 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
    *  Used by the intensity-profile inset so it tracks line ROIs live. */
   getRegionLiveEdit$(): Observable<Region[]> {
     return this.regionLiveEdit$.asObservable();
+  }
+
+  /**
+   * Emits after every {@link undo}, {@link redo} and {@link setDisplaySlice} call
+   * (even one that changed nothing): the region set was replaced under whatever
+   * a canvas tool was building on (a brush stroke, a SAM point prompt), so the
+   * backends reset their canvas tools on it. Not emitted for ordinary edits —
+   * a tool's own commit must not reset it.
+   */
+  getRegionSetReplaced$(): Observable<void> {
+    return this.regionSetReplaced$.asObservable();
   }
 
   // ── IRegionStore: selection ────────────────────────────────────────────
@@ -368,6 +389,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   undo(): void {
     const snapshot = this.history.undo(this.regions);
     if (snapshot) this.restoreSnapshot(snapshot);
+    this.regionSetReplaced$.next();
   }
 
   /**
@@ -379,6 +401,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   redo(): void {
     const snapshot = this.history.redo(this.regions);
     if (snapshot) this.restoreSnapshot(snapshot);
+    this.regionSetReplaced$.next();
   }
 
   /** Discard the undo/redo history (e.g. on image load/switch — history never
