@@ -2,55 +2,25 @@
 import type { Layer, Viewer } from 'napari-js';
 
 import type { Rgb } from '../../contracts/colormap-lut';
-import { type SpatialDataPort } from '../../contracts/ports/spatial-data.port';
+import type { SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import type { SpatialViewState } from '../../contracts/display-types';
-import { SpatialDataset } from '../../contracts/spatial-dataset.contract';
-
-import { SpatialSelectionMask } from '../../spatial/spatial-selection';
+import type { SpatialDataset } from '../../contracts/spatial-dataset.contract';
+import type { SpatialSelectionMask } from '../../spatial/spatial-selection';
 import { DataRect, pixelsPerDataUnit, visibleDataRect } from '../../spatial/lod';
-
 import { CategoricalLookup } from './spatial-tiles/categorical-lookup';
-import { LoadTracker, PlanContext } from './spatial-tiles/plan-context';
-import { OrderedLayerGroups, TILE_LAYER_ORDER, TileGroup } from './spatial-tiles/layer-groups';
-import { TranscriptHover } from './spatial-tiles/transcript-hover';
 import { CellLayers } from './spatial-tiles/cell-layers';
-import { TranscriptLayers } from './spatial-tiles/transcript-layers';
-import { TranscriptJobPlanner } from './spatial-tiles/transcript-jobs';
 import {
   DensityLayer, DensityStats, TranscriptEstimate, TranscriptEstimator,
 } from './spatial-tiles/density-layer';
+import { OrderedLayerGroups, TILE_LAYER_ORDER, TileGroup } from './spatial-tiles/layer-groups';
+import { LoadTracker, PlanContext } from './spatial-tiles/plan-context';
+import { TranscriptHover } from './spatial-tiles/transcript-hover';
+import { TranscriptJobPlanner } from './spatial-tiles/transcript-jobs';
+import { TranscriptLayers } from './spatial-tiles/transcript-layers';
 
 export type { TranscriptEstimate } from './spatial-tiles/density-layer';
 
-/**
- * Level-of-detail cell outlines, transcripts and transcript density for the 2D spatial view.
- *
- * WHY A SEPARATE CLASS
- * --------------------
- * Everything else the spatial view draws is built once per (dataset, view) and only
- * restyled afterwards. These layers also depend on the CAMERA: which tiles are on screen
- * and which level of detail the zoom calls for. Keeping that loop — plan on camera idle,
- * fetch tiles, merge, draw — out of the visualizer service keeps both readable.
- *
- * LAYER ORDER
- * -----------
- * napari-js's layer list is append-only (add / remove / clear), so order is kept by
- * re-adding: cell fill, cell outline, the transcript density, then transcripts on top. Each
- * removal disposes the layer's GPU visual (re-uploaded on the next frame), so a plan restores
- * the order once, after all its groups are in place, and moves only the layers that are out
- * of place ({@link restoreOrder}). `LayerList.move` in napari-js would remove the re-upload.
- * The service's observation markers sit under all of them; while outlines are drawn the
- * markers are hidden (a cell is its outline then, not a dot), so the cells never have to
- * be ordered against them. The density goes OVER the markers on purpose: under 10^5
- * dots it would only show in the gaps between cells. {@link afterObservations} restores
- * the order after the service re-adds its markers.
- *
- * ONE LAYER PER GROUP
- * -------------------
- * Each group is one merged layer over every visible tile, rebuilt when the tile set or
- * level changes. Recolouring (a new cell-type column, a selection) only rewrites the
- * per-shape values — the geometry is not re-expanded.
- */
+/** What the tile layers read from, and report to, the visualizer service. */
 export interface SpatialTileHost {
   /** Latest dataset/view/selection, as the spatial subscription saw them. */
   latest(): [SpatialDataset | null, SpatialViewState, SpatialSelectionMask] | null;
@@ -70,11 +40,46 @@ export interface SpatialTileHost {
   loadingChanged?(layers: string[]): void;
 }
 
+/** Camera idle time before a plan runs. */
 const CAMERA_IDLE_MS = 120;
 /** First retry of a view with a failed tile; doubles each time, up to MAX_TILE_RETRIES. */
 const TILE_RETRY_MS = 1000;
 const MAX_TILE_RETRIES = 3;
 
+/**
+ * Level-of-detail cell outlines, transcripts and transcript density for the 2D spatial view.
+ *
+ * WHY A SEPARATE CLASS
+ * --------------------
+ * Everything else the spatial view draws is built once per (dataset, view) and only
+ * restyled afterwards. These layers also depend on the CAMERA: which tiles are on screen
+ * and which level of detail the zoom calls for. Keeping that loop — plan on camera idle,
+ * fetch tiles, merge, draw — out of the visualizer service keeps both readable.
+ *
+ * COLLABORATORS (spatial-tiles/)
+ * ------------------------------
+ * This class is the coordinator: it debounces camera moves, runs one plan per idle camera
+ * (a {@link PlanContext}) and retries an incomplete one. The work is done by
+ * {@link CellLayers}, {@link TranscriptLayers} (with {@link TranscriptJobPlanner} deciding what
+ * to fetch), {@link DensityLayer} and {@link TranscriptEstimator}; {@link TranscriptHover}
+ * names the drawn markers, and {@link OrderedLayerGroups} keeps their layers in order.
+ *
+ * LAYER ORDER
+ * -----------
+ * Cell fill, cell outline, nucleus outline, the transcript density, then transcripts on top
+ * ({@link TILE_LAYER_ORDER}); a plan restores the order once, after all its groups are in
+ * place. The service's observation markers sit under all of them; while outlines are drawn the
+ * markers are hidden (a cell is its outline then, not a dot), so the cells never have to
+ * be ordered against them. The density goes OVER the markers on purpose: under 10^5
+ * dots it would only show in the gaps between cells. {@link afterObservations} restores
+ * the order after the service re-adds its markers.
+ *
+ * ONE LAYER PER GROUP
+ * -------------------
+ * Each group is one merged layer over every visible tile, rebuilt when the tile set or
+ * level changes. Recolouring (a new cell-type column, a selection) only rewrites the
+ * per-shape values — the geometry is not re-expanded.
+ */
 export class NapariSpatialTileLayers {
   private viewer: Viewer | null = null;
   private cameraOff: (() => void) | null = null;
@@ -116,6 +121,22 @@ export class NapariSpatialTileLayers {
     this.cameraOff = viewer.camera.changed.connect(() => this.schedule());
   }
 
+  /** Stop following the camera and remove every overlay layer from the viewer. */
+  detach(): void {
+    this.hover.dispose();
+    this.cameraOff?.();
+    this.cameraOff = null;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.token++;
+    this.tileRetries = 0;
+    this.transcripts.detached();
+    this.loads.clear();
+    this.groups.detach();
+    this.cells.detached();
+    this.viewer = null;
+  }
+
   /**
    * Transcripts of each selected gene inside `rect`: each entry counts for the transcripts it
    * stands for (an aggregate at a coarse level holds several). Null without per-gene data.
@@ -135,21 +156,6 @@ export class NapariSpatialTileLayers {
   /** Whether `layer` is one of the overlays drawn here (density, cells, transcripts). */
   owns(layer: Layer): boolean {
     return this.groups.owns(layer);
-  }
-
-  detach(): void {
-    this.hover.dispose();
-    this.cameraOff?.();
-    this.cameraOff = null;
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = null;
-    this.token++;
-    this.tileRetries = 0;
-    this.transcripts.detached();
-    this.loads.clear();
-    this.groups.detach();
-    this.cells.detached();
-    this.viewer = null;
   }
 
   /** True while outlines are on screen — the service hides its dots then. */
@@ -225,5 +231,4 @@ export class NapariSpatialTileLayers {
       this.schedule(TILE_RETRY_MS * 2 ** this.tileRetries++);
     }
   }
-
 }
