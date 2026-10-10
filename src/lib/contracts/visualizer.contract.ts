@@ -479,7 +479,10 @@ export interface IIntensitySampling {
   getViewportChange$(): Observable<{ x: number; y: number; width: number; height: number }>;
 }
 
-/** Composite contract a visualization backend implements. */
+/**
+ * The host-facing composite contract, implemented by the router (`VISUALIZER`). A
+ * rendering backend implements {@link IViewerBackend} instead.
+ */
 export interface IVisualizer extends IDataRenderer, IRegionStore, IToolController, IDisplayOptions,
   IIntensitySampling {
   readonly capabilities: ViewerCapabilities;
@@ -526,6 +529,76 @@ export interface IVisualizer extends IDataRenderer, IRegionStore, IToolControlle
   detach(): void;
   /** @deprecated Use {@link detach}, which this delegates to. */
   unsubscribe(): void;
+}
+
+/**
+ * Region writes that still carry backend render glue: Plotly re-projects its shape
+ * working-set on them, and undo/redo/slice switches reset the backend's canvas tools.
+ * Transitional — they move off the backend contract once each backend redraws from the
+ * shared `RegionStore`'s update event instead of being on the write path.
+ */
+export type IRegionRenderGlue = Pick<IRegionStore, 'setRegions' | 'setSelectedShapeIndices' | 'selectRegion' |
+  'deleteActiveShape' | 'exportRegions' | 'undo' | 'redo' | 'setDisplaySlice'>;
+
+/**
+ * What a rendering backend implements (Plotly, OpenSeadragon, napari-js): rendering,
+ * the viewport, pixel readback, export, loading state and its on-canvas tools, plus
+ * capability-gated getters for what only some backends have.
+ *
+ * It is the backend-facing half of {@link IVisualizer}. Region and display state are
+ * not here: they live in the shared `RegionStore` / `VisualizerStore`, which the router
+ * serves to hosts directly (apart from the {@link IRegionRenderGlue} writes). Hosts
+ * keep depending on `IVisualizer` (the router's composite), never on a backend.
+ */
+export interface IViewerBackend extends IToolController, IRegionRenderGlue {
+  readonly capabilities: ViewerCapabilities;
+
+  // ── render lifecycle ──────────────────────────────────────────────────
+  load(imageInfo: IImageInfo, zIndex: number, signal?: AbortSignal): Promise<LoadedImage>;
+  plot(plotDiv: string, imageLoaded: unknown, imageInfo: IImageInfo, screenHeight: number,
+       plotType: PlotType, inPlace?: boolean): Promise<boolean>;
+  reset(): void;
+  relayout(trueImageSize?: number[]): void;
+  /** The view is going away: release what is bound to it. */
+  detach(): void;
+  /** Stop streaming frames (volume assembly / surface preload). Optional: only
+   *  backends that stream a z-stack do work here. */
+  cancelLoading?(): void;
+
+  // ── viewport ─────────────────────────────────────────────────────────
+  zoomIn(): void;
+  zoomOut(): void;
+  setDragMode(mode: string | false): void;
+  fitToView(): void;
+  /** @see IDataRenderer.resetAxes */
+  resetAxes(): void;
+  setZIndex(zIndex: number): void;
+  setShowStack(showstack: boolean): void;
+  /** Emits whenever the backend fits the view. */
+  getAutoscaleEvent(): Observable<unknown>;
+  isStackLoading(): Observable<boolean>;
+  getStackLoadingProgress(): Observable<number>;
+
+  // ── pixels, histogram, export ─────────────────────────────────────────
+  getTrueImageSize(): { width: number; height: number } | null;
+  getCurrentImage(): Promise<Image | null>;
+  getDisplayedPixelData(): PixelData | null;
+  getDisplayedSourceRect(): { x: number; y: number; width: number; height: number } | null;
+  getHistogram(channelIndex: number, bins: number): IHistogram | null;
+  getHistogram$(channelIndex: number, bins: number): Observable<IHistogram | null>;
+  downloadImage(): void;
+  exportComposite(): void;
+  exportData(): void;
+
+  // ── capability-gated surfaces (null / absent where the backend lacks the feature) ──
+  getRegionOverlay(): IRegionOverlay | null;
+  getIsosurfaceControls(): IIsosurfaceControls | null;
+  getSurface3dControls(): ISurface3dControls | null;
+  getIntensityControls(): IIntensityControls | null;
+  getPlotModeViewport?(): PlotModeViewport | null;
+  /** napari-js 3D decimate factor. */
+  setResolutionScale?(scale: number): void;
+  getResolutionScale?(): number;
 }
 
 /**

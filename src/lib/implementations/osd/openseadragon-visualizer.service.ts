@@ -14,7 +14,7 @@ import { IImageInfo } from '../../contracts/image.contract';
 import { TileAccessPort, TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
 import { VizConfig, VIZ_CONFIG } from '../../contracts/viz-config';
 import { PlotType, PLOT_TYPE_DESCRIPTORS, PlotTypeDescriptor } from '../../contracts/plot-type';
-import { IVisualizer, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls } from '../../contracts/visualizer.contract';
+import { IViewerBackend, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls } from '../../contracts/visualizer.contract';
 import { ViewerCapabilities, ViewerFeature, capabilitiesOf } from '../../contracts/capabilities.contract';
 import { OsdRegionOverlay } from './osd-region-overlay';
 import { OsdScaleBar } from './osd-scale-bar';
@@ -127,7 +127,7 @@ interface OsdLoaded {
  * recolor invariant are described in this folder's README.
  */
 @Injectable({ providedIn: 'root' })
-export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implements IVisualizer {
+export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implements IViewerBackend {
   /** OSD's strength is displaying a large zoomable image — nothing else here. */
   readonly capabilities: ViewerCapabilities = capabilitiesOf([ViewerFeature.ImageDisplay]);
 

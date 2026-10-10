@@ -126,6 +126,7 @@ describe('RoutingVisualizerService (characterization)', () => {
   let osd: any;
   let napari: any;
   let store: VisualizerStore;
+  let regionStore: RegionStore;
 
   function setup(): void {
     plotly = mockBackend();
@@ -144,6 +145,7 @@ describe('RoutingVisualizerService (characterization)', () => {
     });
     router = TestBed.inject(RoutingVisualizerService);
     store = TestBed.inject(VisualizerStore);
+    regionStore = TestBed.inject(RegionStore);
   }
 
   beforeEach(() => setup());
@@ -317,13 +319,13 @@ describe('RoutingVisualizerService (characterization)', () => {
   it('getAnnotationRegions excludes intensity-profile lines', () => {
     const profile = { id: 1, kind: 'profile' };
     const annotation = { id: 2 };
-    plotly.getRegions.mockReturnValue([profile, annotation]);
+    jest.spyOn(regionStore, 'getRegions').mockReturnValue([profile, annotation] as unknown as Region[]);
     expect(router.getAnnotationRegions()).toEqual([annotation]);
   });
 
   it('setAnnotationRegions preserves existing profile lines and never appends', () => {
     const profile = { id: 1, kind: 'profile' };
-    plotly.getRegions.mockReturnValue([profile, { id: 2 }]);
+    jest.spyOn(regionStore, 'getRegions').mockReturnValue([profile, { id: 2 }] as unknown as Region[]);
     const next: any = [{ id: 3 }];
     router.setAnnotationRegions(next, true, false, '#fff');
     expect(plotly.setRegions).toHaveBeenCalledWith([{ id: 3 }, profile], true, false, '#fff', false);
@@ -401,21 +403,10 @@ describe('RoutingVisualizerService (characterization)', () => {
     ['downloadImage', []],
     ['exportComposite', []],
     ['exportData', []],
-    ['getRegions', []],
-    ['getRegionPolygons', []],
-    ['getRegionUpdateEvent', []],
     ['setSelectedShapeIndices', [[0, 1]]],
     ['selectRegion', [{ id: 1 }]],
-    ['getSelectedShapeIndices$', []],
     ['deleteActiveShape', []],
-    ['getShowShapeLabel', []],
-    ['getShapeColor', []],
-    ['getFillColor', []],
-    ['getClassificationColors', []],
-    ['setClassificationColor', ['tumour', '#fff']],
-    ['importRegions', ['{}']],
     ['exportRegions', [[]]],
-    ['getGeoJsonString', [[]]],
     ['setActiveTool', ['wand', { sensitivity: 2 }]],
     ['setActiveTool', [null, undefined]],
     ['setWandMode', [true, { sensitivity: 2 }]],
@@ -439,6 +430,40 @@ describe('RoutingVisualizerService (characterization)', () => {
     (router as any)[method](...args);
     expect(plotly[method]).toHaveBeenCalledWith(...args);
     expect(osd[method]).not.toHaveBeenCalled();
+  });
+
+  // ── region reads and plain writes come straight from the shared stores (IVisualizer split (d)) ──
+  it.each<[string, unknown[], 'region' | 'display']>([
+    ['getRegions', [], 'region'],
+    ['getRegionPolygons', [], 'region'],
+    ['getRegionUpdateEvent', [], 'region'],
+    ['getSelectedShapeIndices$', [], 'region'],
+    ['getShowShapeLabel', [], 'region'],
+    ['getShapeColor', [], 'region'],
+    ['getFillColor', [], 'region'],
+    ['canUndo', [], 'region'],
+    ['canRedo', [], 'region'],
+    ['getCanUndo$', [], 'region'],
+    ['getCanRedo$', [], 'region'],
+    ['resetUndoHistory', [], 'region'],
+    ['importRegions', ['{"type":"FeatureCollection","features":[]}'], 'region'],
+    ['getGeoJsonString', [[]], 'region'],
+    ['isStackMode', [], 'region'],
+    ['exitStackMode', [], 'region'],
+    ['getStackSaveLayout', [], 'region'],
+    ['getSliceRegions', [], 'region'],
+    ['getStackSaveSlices', [], 'region'],
+    ['getClassificationColors', [], 'display'],
+    ['setClassificationColor', ['tumour', '#ffffff'], 'display'],
+  ])('serves %s from the shared store, not a backend', async (method, args, owner) => {
+    await router.plot('div', {}, IMAGE_INFO, 600, PlotType.IMAGE); // OSD on screen
+    const target = (owner === 'region' ? regionStore : store) as unknown as Record<string, () => unknown>;
+    const spy = jest.spyOn(target, method);
+    (router as unknown as Record<string, (...a: unknown[]) => unknown>)[method](...args);
+    expect(spy).toHaveBeenCalledWith(...args);
+    for (const backend of [plotly, osd, napari]) {
+      if (backend[method]) expect(backend[method]).not.toHaveBeenCalled();
+    }
   });
 
   it('switches delegation to OSD once an IMAGE plot makes it the active renderer', async () => {

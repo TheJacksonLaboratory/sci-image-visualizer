@@ -9,7 +9,7 @@ import { ClassPreset, PresetSet } from './models/class-preset';
 import { PlotlyService } from './implementations/plotly/plotly.service';
 import { OpenSeadragonVisualizerService } from './implementations/osd/openseadragon-visualizer.service';
 import { PlotType, PlotTypeDescriptor, isNapari3d, isNapariScatter, isSpatialOmics, isSpatialOmics3d } from './contracts/plot-type';
-import { IVisualizer, LoadedImage, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls, ISpatialControls } from './contracts/visualizer.contract';
+import { IViewerBackend, IVisualizer, LoadedImage, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls, ISpatialControls } from './contracts/visualizer.contract';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-data.port';
 import { CanvasToolOptions, ColormapNode, IBrushOptions, IWandOptions } from './contracts/display-types';
 import { SpatialControlsFacade } from './spatial/spatial-controls.facade';
@@ -57,7 +57,7 @@ function isProfileRegion(r: { kind?: string } | null | undefined): boolean {
 export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, IChannelHistogramApi, OnDestroy {
 
   private currentPlotType: PlotType = PlotType.IMAGE;
-  private lastRendered: IVisualizer | null = null;
+  private lastRendered: IViewerBackend | null = null;
   /** OSD failed for the *current* render cycle (e.g. a fresh file still caching
    *  past the deadline) → fall back to Plotly for this image only. Reset by
    *  reset() at the start of every render cycle, so the next file — or a
@@ -109,7 +109,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
    *  - plain `IMAGE` (no opt-in): OSD → Plotly.
    *  - 3D napari (`NAPARI_VOLUME`/`NAPARI_ISOSURFACE`): napari-js → Plotly (OSD can't render 3D).
    */
-  private imageBackend(): IVisualizer {
+  private imageBackend(): IViewerBackend {
     const t = this.currentPlotType;
     // 2D image with a napari-js attempt (explicit napari image, or opt-in on the Image type).
     if (this.isNapariImageType(t) || (this.isImageType(t) && this.config.useNapariRenderer)) {
@@ -129,7 +129,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   }
 
   /** Backend currently on screen — what ongoing zoom/tool/region ops act on. */
-  private renderer(): IVisualizer {
+  private renderer(): IViewerBackend {
     return this.lastRendered ?? this.plotly;
   }
 
@@ -145,7 +145,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     const backend = this.imageBackend();
     if (backend === this.napari) {
       try {
-        return await (this.napari as IVisualizer).load(imageInfo, zIndex, signal);
+        return await this.napari.load(imageInfo, zIndex, signal);
       } catch (err) {
         // Aborted: nobody wants this image any more, so don't go on to load it elsewhere.
         if (signal?.aborted) throw err;
@@ -155,7 +155,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
         //  - 2D image → OSD, then Plotly.
         if (this.isNapari3dType(this.currentPlotType)) {
           console.warn('[visualizer] napari-js load failed — falling back to Plotly.', err);
-          return (this.plotly as IVisualizer).load(imageInfo, zIndex, signal);
+          return this.plotly.load(imageInfo, zIndex, signal);
         }
         console.warn('[visualizer] napari-js load failed — falling back to OpenSeadragon.', err);
         return this.loadViaOsdThenPlotly(imageInfo, zIndex, signal);
@@ -164,19 +164,19 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     if (backend === this.osd) {
       return this.loadViaOsdThenPlotly(imageInfo, zIndex, signal);
     }
-    return (this.plotly as IVisualizer).load(imageInfo, zIndex, signal);
+    return this.plotly.load(imageInfo, zIndex, signal);
   }
 
   /** Try OSD; on failure fall back to Plotly for this image (not permanent — see reset()). */
   private async loadViaOsdThenPlotly(imageInfo: IImageInfo, zIndex: number,
                                      signal?: AbortSignal): Promise<LoadedImage> {
     try {
-      return await (this.osd as IVisualizer).load(imageInfo, zIndex, signal);
+      return await this.osd.load(imageInfo, zIndex, signal);
     } catch (err) {
       if (signal?.aborted) throw err;
       console.warn('[visualizer] OpenSeadragon load failed — falling back to Plotly for this image.', err);
       this.osdFellBack = true;
-      return (this.plotly as IVisualizer).load(imageInfo, zIndex, signal);
+      return this.plotly.load(imageInfo, zIndex, signal);
     }
   }
   plot(plotDiv: string, imageLoaded: unknown, imageInfo: IImageInfo, screenHeight: number,
@@ -267,9 +267,9 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   setStackLoading(b: boolean): void { this.plotly.setStackLoading(b); }
   // Cancel in-flight loading on every backend — the user's Cancel shouldn't depend on which one is
   // active. Only backends that stream frames (napari-js) do real work; the rest no-op. The concrete
-  // backend classes don't all declare the optional contract method, so call it via IVisualizer.
+  // backend classes don't all declare the optional contract method, so call it via IViewerBackend.
   cancelLoading(): void {
-    for (const backend of [this.plotly, this.osd, this.napari] as IVisualizer[]) {
+    for (const backend of [this.plotly, this.osd, this.napari] as IViewerBackend[]) {
       backend.cancelLoading?.();
     }
   }
@@ -288,7 +288,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     // merge let an idle backend's stale value win the stream on a re-load — leaving the bar below the
     // active backend's real progress (e.g. stuck ~⅓ while the % read 100). Gating by the loading flag
     // ignores idle backends, so the bar tracks the one doing the work and reaches 100%.
-    const track = (v: IVisualizer): Observable<[number, boolean]> =>
+    const track = (v: IViewerBackend): Observable<[number, boolean]> =>
       combineLatest([v.getStackLoadingProgress(), v.isStackLoading()]);
     return combineLatest([track(this.plotly), track(this.osd), track(this.napari)]).pipe(
       map((pairs) => {
@@ -313,29 +313,29 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   renderIntensityInset(divId: string, profiles: IntensityProfile[]): void {
     this.plotly.renderIntensityInset(divId, profiles); }
 
-  // ── regions → active renderer ────────────────────────────────────────
-  // Region *state* lives in the shared RegionStore; both backends implement
-  // IRegionStore by delegating to it. We route through the active renderer
-  // (not hardcoded Plotly) so the backend on screen also *renders* the change:
-  // Plotly relayouts its shapes, OpenSeadragon's overlay redraws from the store
-  // update event. Either way the same store is the single source of truth.
+  // ── regions ──────────────────────────────────────────────────────────
+  // Region state lives in the shared RegionStore, so reads and plain writes go
+  // straight to it. The writes in IRegionRenderGlue still route through the backend
+  // on screen, which adds render glue to them (Plotly re-projects its shapes; undo,
+  // redo and a slice switch reset the canvas tools); the others redraw from the
+  // store's update event.
   setRegions(regions: Region[], showRegionLabel?: boolean, isRegionSaveOn?: boolean,
              fillColor?: string, append?: boolean): void {
     this.renderer().setRegions(regions, showRegionLabel, isRegionSaveOn, fillColor, append);
   }
-  getRegions(): Region[] { return this.renderer().getRegions(); }
-  getRegionPolygons(): Polygon[] { return this.renderer().getRegionPolygons(); }
-  getRegionUpdateEvent(): Observable<Region[]> { return this.renderer().getRegionUpdateEvent(); }
+  getRegions(): Region[] { return this.regionStore.getRegions(); }
+  getRegionPolygons(): Polygon[] { return this.regionStore.getRegionPolygons(); }
+  getRegionUpdateEvent(): Observable<Region[]> { return this.regionStore.getRegionUpdateEvent(); }
   setSelectedShapeIndices(indices: number[]): void { this.renderer().setSelectedShapeIndices(indices); }
   selectRegion(region: Region): void { this.renderer().selectRegion(region); }
-  getSelectedShapeIndices$(): Observable<number[]> { return this.renderer().getSelectedShapeIndices$(); }
+  getSelectedShapeIndices$(): Observable<number[]> { return this.regionStore.getSelectedShapeIndices$(); }
   deleteActiveShape(): void { this.renderer().deleteActiveShape(); }
-  getShowShapeLabel(): boolean { return this.renderer().getShowShapeLabel(); }
-  getShapeColor(): string { return this.renderer().getShapeColor(); }
-  getFillColor(): string { return this.renderer().getFillColor(); }
-  getClassificationColors(): Map<string, string> { return this.renderer().getClassificationColors(); }
+  getShowShapeLabel(): boolean { return this.regionStore.getShowShapeLabel(); }
+  getShapeColor(): string { return this.regionStore.getShapeColor(); }
+  getFillColor(): string { return this.regionStore.getFillColor(); }
+  getClassificationColors(): Map<string, string> { return this.store.getClassificationColors(); }
   setClassificationColor(label: string, color: string): void {
-    this.renderer().setClassificationColor(label, color); }
+    this.store.setClassificationColor(label, color); }
   // Annotation-class presets live in the shared VisualizerStore (backend-neutral
   // session state), so route straight to it rather than through renderer(). (jit-ui#70)
   getPresetSet(): PresetSet { return this.store.getPresetSet(); }
@@ -344,43 +344,41 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   upsertClass(preset: ClassPreset): void { this.store.upsertClass(preset); }
   removeClass(name: string): void { this.store.removeClass(name); }
   resetPresets(): void { this.store.resetPresets(); }
-  // Undo state is owned by the shared RegionStore (same instance for both
-  // backends), so routing through the active renderer is safe and stable.
+  // Undo/redo go through the backend (they reset its canvas tools); their state is the store's.
   undo(): void { this.renderer().undo(); }
   redo(): void { this.renderer().redo(); }
-  canUndo(): boolean { return this.renderer().canUndo(); }
-  canRedo(): boolean { return this.renderer().canRedo(); }
-  getCanUndo$(): Observable<boolean> { return this.renderer().getCanUndo$(); }
-  getCanRedo$(): Observable<boolean> { return this.renderer().getCanRedo$(); }
-  resetUndoHistory(): void { this.renderer().resetUndoHistory(); }
-  importRegions(geoJsonStr: string): Region[] { return this.renderer().importRegions(geoJsonStr); }
+  canUndo(): boolean { return this.regionStore.canUndo(); }
+  canRedo(): boolean { return this.regionStore.canRedo(); }
+  getCanUndo$(): Observable<boolean> { return this.regionStore.getCanUndo$(); }
+  getCanRedo$(): Observable<boolean> { return this.regionStore.getCanRedo$(); }
+  resetUndoHistory(): void { this.regionStore.resetUndoHistory(); }
+  importRegions(geoJsonStr: string): Region[] { return this.regionStore.importRegions(geoJsonStr); }
   exportRegions(regions: Region[]): void { this.renderer().exportRegions(regions); }
-  getGeoJsonString(regions: Region[]): string { return this.renderer().getGeoJsonString(regions); }
+  getGeoJsonString(regions: Region[]): string { return this.regionStore.getGeoJsonString(regions); }
 
-  // ── Per-slice z-stack regions (jit-ui#93) — the RegionStore is shared across
-  //    backends, so routing to the active renderer hits the same store. ──────
+  // ── Per-slice z-stack regions (jit-ui#93), from the shared RegionStore. ──
   enterStackMode(slices: Map<number, Region[]>, initialZ?: number,
                  saveLayout?: 'combined' | 'per-slice-file'): void {
-    this.renderer().enterStackMode(slices, initialZ, saveLayout);
+    this.regionStore.enterStackMode(slices, initialZ, saveLayout);
   }
-  exitStackMode(): void { this.renderer().exitStackMode(); }
-  isStackMode(): boolean { return this.renderer().isStackMode(); }
-  getStackSaveLayout(): 'combined' | 'per-slice-file' { return this.renderer().getStackSaveLayout(); }
+  exitStackMode(): void { this.regionStore.exitStackMode(); }
+  isStackMode(): boolean { return this.regionStore.isStackMode(); }
+  getStackSaveLayout(): 'combined' | 'per-slice-file' { return this.regionStore.getStackSaveLayout(); }
   setDisplaySlice(z: number): void { this.renderer().setDisplaySlice(z); }
-  getSliceRegions(): Region[] { return this.renderer().getSliceRegions(); }
-  getStackSaveSlices(): Map<number, Region[]> { return this.renderer().getStackSaveSlices(); }
+  getSliceRegions(): Region[] { return this.regionStore.getSliceRegions(); }
+  getStackSaveSlices(): Map<number, Region[]> { return this.regionStore.getStackSaveSlices(); }
   /** All slices' ANNOTATION regions for a z-stack save (jit-ui#93), each tagged
    *  with its zero-based Region.z; profile lines excluded. Flat annotation set
    *  outside stack mode. */
   getSliceAnnotationRegions(): Region[] {
-    return this.renderer().getSliceRegions().filter((r) => !isProfileRegion(r));
+    return this.regionStore.getSliceRegions().filter((r) => !isProfileRegion(r));
   }
   /** Per-slice annotation regions to write on a folder-stack save (jit-ui#93):
    *  slice index → that slice's annotation regions (profile lines excluded),
    *  including now-empty slices that were loaded non-empty (so they overwrite). */
   getStackSaveAnnotationSlices(): Map<number, Region[]> {
     const out = new Map<number, Region[]>();
-    for (const [z, regs] of this.renderer().getStackSaveSlices()) {
+    for (const [z, regs] of this.regionStore.getStackSaveSlices()) {
       out.set(z, regs.filter((r) => !isProfileRegion(r)));
     }
     return out;
@@ -415,13 +413,13 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   // (Plotly relayouts its shapes in setRegions; it doesn't on regionUpdate$).
 
   getAnnotationRegions(): Region[] {
-    return this.renderer().getRegions().filter((r) => !isProfileRegion(r));
+    return this.regionStore.getRegions().filter((r) => !isProfileRegion(r));
   }
   setAnnotationRegions(regions: Region[], showRegionLabel?: boolean,
                        isRegionSaveOn?: boolean, fillColor?: string): void {
     // Re-append the store's profile lines so an editor save/delete can't drop
     // them, then route through setRegions so the active backend re-renders.
-    const profiles = this.renderer().getRegions().filter((r) => isProfileRegion(r));
+    const profiles = this.regionStore.getRegions().filter((r) => isProfileRegion(r));
     const annotations = (regions || []).filter((r) => !isProfileRegion(r));
     this.setRegions([...annotations, ...profiles], showRegionLabel, isRegionSaveOn, fillColor, false);
   }
@@ -429,7 +427,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     // Map the internal index-based selection to the selected annotation regions.
     return this.getSelectedShapeIndices$().pipe(
       map((idxs) => {
-        const regs = this.renderer().getRegions();
+        const regs = this.regionStore.getRegions();
         return idxs
           .map((i) => regs[i])
           .filter((r): r is Region => !!r && !isProfileRegion(r));
@@ -437,7 +435,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     );
   }
   setSelectedRegions(regions: Region[]): void {
-    const regs = this.renderer().getRegions();
+    const regs = this.regionStore.getRegions();
     const indices = (regions || [])
       .map((r) => regs.findIndex((x) => x.id === r.id))
       .filter((i) => i >= 0);

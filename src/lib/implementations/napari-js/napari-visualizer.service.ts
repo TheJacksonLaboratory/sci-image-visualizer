@@ -115,7 +115,7 @@ import {
   NAPARI_DEFAULT_DECIMATE,
 } from '../../contracts/plot-type';
 import {
-  IVisualizer,
+  IViewerBackend,
   PixelData,
   IntensityProfile,
   IIsosurfaceControls,
@@ -439,7 +439,7 @@ interface Spatial3dEncoding {
  * Angular zone.
  */
 @Injectable({ providedIn: 'root' })
-export class NapariVisualizerService extends BaseStoreVisualizer implements IVisualizer {
+export class NapariVisualizerService extends BaseStoreVisualizer implements IViewerBackend {
   readonly capabilities: ViewerCapabilities = capabilitiesOf([
     ViewerFeature.ImageDisplay,
     ViewerFeature.StackSlider,

@@ -27,7 +27,7 @@ import {
   PlotlyPlotTypeImpl,
   TraceBuildInput,
 } from './plotly-trace-builders';
-import { IVisualizer, IntensityProfile, IIsosurfaceControls, IIntensityControls } from '../../contracts/visualizer.contract';
+import { IViewerBackend, IntensityProfile, IIsosurfaceControls, IIntensityControls } from '../../contracts/visualizer.contract';
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { bt601Luminance, histogram256 } from '../../contracts/intensity';
 import { ViewerCapabilities, ViewerFeature, capabilitiesOf } from '../../contracts/capabilities.contract';
@@ -55,7 +55,7 @@ const PLOTLY_STACK_FETCH_CONCURRENCY = 4;
 @Injectable({
   providedIn: 'root'
 })
-export class PlotlyService extends BaseStoreVisualizer implements IVisualizer {
+export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend {
 
   /**
    * Plotly is the full-featured data backend: it supports every feature,
