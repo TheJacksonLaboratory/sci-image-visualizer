@@ -26,6 +26,11 @@ function jobsOf(tiles: NapariSpatialTileLayers) {
   }).jobs;
 }
 
+/** The transcript layers (private; their colouring and count source are read by the specs). */
+function transcriptsOf<T>(tiles: NapariSpatialTileLayers): T {
+  return (tiles as unknown as { transcripts: T }).transcripts;
+}
+
 describe('NapariSpatialTileLayers: a tile that fails to load', () => {
   const ring = (): SpatialPolygonTile => ({
     count: 1, coords: new Float32Array([0, 0, 10, 0, 10, 10, 0, 10]),
@@ -162,7 +167,7 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
     const tiles = new NapariSpatialTileLayers(port, host);
     tiles.attach(viewer);
     type WithColors = { transcriptColors: (...a: unknown[]) => unknown };
-    const colors = jest.spyOn(tiles as unknown as WithColors, 'transcriptColors');
+    const colors = jest.spyOn(transcriptsOf<WithColors>(tiles), 'transcriptColors');
     return { tiles, getTranscriptTile, getTranscriptBins, colors };
   }
 
@@ -204,7 +209,7 @@ describe('NapariSpatialTileLayers: per-gene counts in view', () => {
       polygonsShownChanged: () => undefined,
     });
     expect(tiles.geneCountsIn({ x0: 0, y0: 0, x1: 10, y1: 10 })).toBeNull();
-    (tiles as unknown as { countSource: unknown }).countSource = {
+    transcriptsOf<{ countSource: unknown }>(tiles).countSource = {
       genes: ['CD163', 'MRC1', 'CHIT1'],
       merged: {
         count: 4, aggregated: true,
@@ -450,7 +455,8 @@ describe('NapariSpatialTileLayers: colouring transcripts by cluster', () => {
     const dataset = { id: 'd', columns: [meta] } as unknown as SpatialDataset;
     const view = { ...DEFAULT_SPATIAL_VIEW, transcriptColorBy: 'cluster' as const, cellTypeColumn: 'graphclust' };
     const clusters = ['Cluster 2', 'Cluster 2', 'Cluster 1', 'Mine'];
-    const colors = (tiles as unknown as { transcriptColors: Colors }).transcriptColors.bind(tiles);
+    const transcripts = transcriptsOf<{ transcriptColors: Colors }>(tiles);
+    const colors = transcripts.transcriptColors.bind(transcripts);
     const { rgba } = await colors(dataset, view, tile([0, 1, 2, 3]), (i) => clusters[i]);
     expect(rgba[0]).toEqual(rgba[1]);           // genes 0 and 1: one cluster, one colour
     expect(rgba[0]).toEqual([0, 1, 0, 1]);      // Cluster 2's cells are green
