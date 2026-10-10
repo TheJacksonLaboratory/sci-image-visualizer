@@ -1,7 +1,5 @@
 import { Inject, Injectable, NgZone, Optional, inject } from '@angular/core';
-import {
-  Observable, BehaviorSubject, Subject, Subscription, combineLatest, from, of,
-} from 'rxjs';
+import { Observable, BehaviorSubject, Subject, Subscription, combineLatest, of } from 'rxjs';
 import { Image } from 'image-js';
 import { saveAs } from 'file-saver';
 import {
@@ -15,19 +13,8 @@ import {
   MultiChannelVolumeView,
 } from 'napari-js';
 import type {
-  AxesLayer,
-  ImageLayer,
-  SurfaceLayer,
-  VolumeLayer,
-  PointsLayer,
-  Points3DLayer,
-  TiledSource,
-  TileKey,
-  PixelChunk,
-  ChannelView,
-  VolumeChannel,
-  Colormap,
-  ProjectedPoints,
+  AxesLayer, ImageLayer, SurfaceLayer, VolumeLayer, PointsLayer, Points3DLayer, TiledSource,
+  ChannelView, VolumeChannel, Colormap, ProjectedPoints,
 } from 'napari-js';
 import { nearestProjectedIndex, ScreenIndex, SCREEN_INDEX_MIN_POINTS } from 'napari-js';
 
@@ -59,6 +46,7 @@ import { NapariSpatialTooltip } from './napari-spatial-tooltip';
 import { NapariSpatialTileLayers, TranscriptEstimate } from './napari-spatial-tiles';
 import { NapariNavigator } from './napari-navigator';
 import { LoadingBadgeState } from './napari-loading-state';
+import { AssembledVolume, NapariTileClient } from './napari-tile-client';
 import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
 import { NAPARI_WHEEL_ZOOM_SPEED } from './napari-zoom';
 import { ZOOM_BUTTON_STEP } from '../osd/osd-zoom';
@@ -69,12 +57,10 @@ import {
 
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
 import {
-  DESCRIPTOR_POLL_INTERVAL_MS, DESCRIPTOR_TIMEOUT_MS, MAX_STITCH_TILES, MAX_TEXTURE_DIM,
-  READBACK_DEBOUNCE_MS, SCATTER3D_MAX_POINTS, SCATTER3D_MAX_XY, STITCH_BUDGET_COEFF,
-  SURFACE_MAX_GRID, SURFACE_Z_ASPECT, SceneKind, TILE_FETCH_CONCURRENCY, TILE_SIZE,
-  VOLUME_FETCH_CONCURRENCY, VOLUME_MAX_SLICE, VOLUME_WORLD_INPLANE_REF, colormapId, create2dCanvas,
-  isServerlessMultichannel, mapPool, rgbaToLuminance, sceneKindOf, stackDepth, surfaceResolutionFor,
-  tintFor, tintedComposite, toIHistogram, toNapariGamma, typedPlane, volumeResolutionFor,
+  LumaPlane, READBACK_DEBOUNCE_MS, SCATTER3D_MAX_POINTS, SCATTER3D_MAX_XY, SURFACE_MAX_GRID,
+  SURFACE_Z_ASPECT, SceneKind, VOLUME_FETCH_CONCURRENCY, VOLUME_WORLD_INPLANE_REF, colormapId,
+  isServerlessMultichannel, mapPool, sceneKindOf, stackDepth, surfaceResolutionFor, tintFor,
+  tintedComposite, toIHistogram, toNapariGamma, typedPlane, volumeResolutionFor,
 } from './napari-helpers';
 import {
   ContrastWindowCache, DensityGroup, GENE_MAP_MAX_SIDE, GENE_MAP_SIGMA,
@@ -116,20 +102,7 @@ import { VIZ_CONFIG, VizConfig } from '../../contracts/viz-config';
 import { TILE_ACCESS_PORT, TileAccessPort } from '../../contracts/ports/tile-access.port';
 import { BaseStoreVisualizer } from '../base-store-visualizer';
 import { regionCentroids } from '../region-centroids';
-import {
-  TileDescriptor,
-  TileLevel,
-  buildTileUrl,
-  exportTiffFilename,
-  exportTiffUrl,
-  fetchJsonWithAuth,
-  fetchWithAuth,
-  isAbortError,
-  nativeHistogram,
-  pollDescriptor,
-  throwIfAborted,
-  tilesInfoUrl,
-} from '../tile-server';
+import { TileDescriptor, throwIfAborted } from '../tile-server';
 import { SimpleSliceAccessService } from '../simple-slice-access.service';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
@@ -215,6 +188,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   ]);
 
   private readonly api: string;
+  /** The jit-service tile server: descriptor, slices, tiled sources, histograms, export. */
+  private readonly tileClient: NapariTileClient;
   /** napari-js's render loop and the hot pointer/timer paths run outside the Angular zone
    *  (NAPARI-SVC-25); what they produce for the UI re-enters it through {@link inZone}. */
   private readonly zone = inject(NgZone);
@@ -408,14 +383,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private imageH = 0;
   /** Monotonic slice-request id so a slow out-of-order slice fetch can't clobber a newer one. */
   private sliceReq = 0;
-  /** Cached `/tiles/info` pyramid descriptor + the infoB64 it was fetched for. */
-  private descriptor: TileDescriptor | null = null;
-  private descriptorKey: string | null = null;
-  /** The poll in flight, shared by every caller asking for the same `infoB64`. */
-  private descriptorPoll: { key: string; promise: Promise<TileDescriptor | null> } | null = null;
-  /** `infoB64`s this scene's poll got no descriptor for (non-202 status, empty body, timeout).
-   *  Scene-scoped — cleared by {@link reset} — so a re-plot retries a slow or flaky server once. */
-  private readonly descriptorMisses = new Set<string>();
 
   /** How the current 2D image is composited (drives histogram + state application). */
   private imageMode: 'grayscale' | 'multichannel' | 'rgb' = 'rgb';
@@ -478,8 +445,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private histGen = 0;
   /** Spatial colouring's percentile windows, memoised per coloured vector (SPATIAL-12). */
   private readonly contrastWindows = new ContrastWindowCache();
-  /** Native-bit-depth histograms from `/histogram`, keyed `${z}|${channel}` (>8-bit images). */
-  private readonly nativeHistograms = new Map<string, IHistogram>();
 
   private readonly stackLoading$ = new BehaviorSubject<boolean>(false);
   private readonly stackLoadingProgress$ = new BehaviorSubject<number>(0);
@@ -510,6 +475,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   ) {
     super(regionStore, store);
     this.api = config.slideCropServer;
+    this.tileClient = new NapariTileClient(tiles, simpleStack, this.api);
+    this.tileClient.startScene(this.scene.signal);
     // The pixel tools read displayed pixels synchronously from the last readback and convert
     // pointer coords via the napari camera, mirroring the OSD host. This backend owns its own tool
     // instances (RT-21); the host reads live state, so it is built once.
@@ -535,247 +502,20 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     });
   }
 
-  /**
-   * Fetch + cache the server pyramid descriptor (`GET /tiles/info`): the REAL per-level tile grid,
-   * tile size, channel metadata and physical pixel size. The backend returns 202 while the source
-   * is still caching, so we poll ({@link pollDescriptor}). Cached per `infoB64`; returns null if it
-   * never becomes ready, or the server will not describe the source (callers fall back to a
-   * single-tile fetch). Read it back through {@link currentDescriptor}. This is the authoritative grid — guessing
-   * level dims from `trueImageSize` overshoots the real grid and the server 400s out-of-range tiles.
-   */
-  private ensureDescriptor(): Promise<TileDescriptor | null> {
-    // Self-contained multi-slice stack (no tile server — e.g. a numbered image
-    // series assembled client-side, each slice a different file): there is no
-    // single server-tiled pyramid to describe. Returning null routes every
-    // caller (2D image, volume, surface) to their stitched/single-fetch
-    // fallback, which — via fetchSlice's own SimpleSliceAccessService branch —
-    // correctly fetches each slice's own URL instead of one fixed file's tile
-    // pyramid.
-    if (this.simpleStack.isSimple(this.loaded?.imageInfo)) return Promise.resolve(null);
-    const infoB64 = this.tiles.getSelectedInfoB64();
-    if (!infoB64) return Promise.resolve(null);
-    if (this.descriptor && this.descriptorKey === infoB64) return Promise.resolve(this.descriptor);
-    // A source that answered "no" (or never answered) this scene is not asked again: the render,
-    // the stitch fallback and every slice would otherwise each wait out their own poll.
-    if (this.descriptorMisses.has(infoB64)) return Promise.resolve(null);
-    // Concurrent callers (render, navigator, histogram) share one poll.
-    if (this.descriptorPoll?.key === infoB64) return this.descriptorPoll.promise;
-    const scene = this.scene.signal;
-    const promise = this.pollDescriptor(infoB64, scene).then((desc) => {
-      if (this.descriptorPoll?.promise === promise) this.descriptorPoll = null;
-      if (desc) {
-        this.descriptor = desc;
-        this.descriptorKey = infoB64;
-      } else if (!scene.aborted) {
-        this.descriptorMisses.add(infoB64);
-      }
-      return desc;
-    });
-    this.descriptorPoll = { key: infoB64, promise };
-    return promise;
-  }
-
-  /**
-   * The `/tiles/info` loop behind {@link ensureDescriptor}: the shared jit-service poll
-   * (`tile-server/pollDescriptor`). Re-polls only on 202 (the server is still caching the source);
-   * any other status means this server will not describe it, so the answer is null at once. Each
-   * request gives up after its own timeout — a hung request would otherwise never reach the
-   * deadline check — and the whole poll ends (null) as soon as `scene` is aborted.
-   */
-  private async pollDescriptor(infoB64: string, scene: AbortSignal): Promise<TileDescriptor | null> {
-    try {
-      return await pollDescriptor(fetchJsonWithAuth(this.tiles), tilesInfoUrl(this.api, infoB64), {
-        deadlineMs: DESCRIPTOR_TIMEOUT_MS,
-        intervalMs: DESCRIPTOR_POLL_INTERVAL_MS,
-        signal: scene,
-        tag: '[napari-js]',
-      });
-    } catch (err) {
-      if (isAbortError(err)) return null; // the scene was reset
-      throw err;
-    }
-  }
-
   /** Run `fn` inside the Angular zone: for output (subjects the UI renders, store writes)
    *  produced by work that runs outside it. */
   private inZone<T>(fn: () => T): T {
     return NgZone.isInAngularZone() ? fn() : this.zone.run(fn);
   }
 
-  /** µm per pixel along x for the image on screen: the descriptor's, else the image metadata's;
-   *  0 when neither declares it. */
-  private mppX(): number {
-    return this.currentDescriptor()?.mppX || this.loaded?.imageInfo.imageMeta?.[0]?.mppX || 0;
+  /** The image on screen, as {@link load} recorded it. */
+  private info(): IImageInfo | undefined {
+    return this.loaded?.imageInfo;
   }
 
-  /**
-   * The pyramid descriptor of the image on screen, or null when it has none.
-   *
-   * {@link descriptor} is a cache keyed by `infoB64` that survives image switches and failed polls,
-   * so reading it directly hands a `tiled:false` stack (or an image whose poll never answered) the
-   * PREVIOUS image's size, µm/pixel, tile size and bit depth. Every read site goes through here.
-   */
+  /** The pyramid descriptor of the image on screen, or null when it has none. */
   private currentDescriptor(): TileDescriptor | null {
-    if (!this.descriptor || this.simpleStack.isSimple(this.loaded?.imageInfo)) return null;
-    return this.descriptorKey === this.tiles.getSelectedInfoB64() ? this.descriptor : null;
-  }
-
-  /**
-   * Fetch a COMPLETE rendered slice as an `ImageBitmap` by stitching the server's REAL tile grid
-   * (from `/tiles/info`) — not just the top-left tile, which only ever showed a large image's
-   * corner. Picks the finest pyramid level whose grid fits `budgetTiles` and whose longest side is
-   * within the GPU texture limit, fetches that grid concurrently, and stitches it into one canvas.
-   *
-   * `channel` selects a single band as grayscale (real levels only); omit for the server composite.
-   * `budgetTiles` caps the grid: the 2D view uses the full budget for detail; volume assembly and
-   * the surface pass {@link tileBudgetFor} their target resolution, and the histogram samples and
-   * navigator 1 for a cheap overview tile. Falls back
-   * to a single `col=0,row=0` tile when no descriptor is available (small/simple images, volumes).
-   */
-  private async fetchSlice(
-    z: number,
-    channel?: number,
-    budgetTiles: number = MAX_STITCH_TILES,
-    /** When a specific channel has no pyramid level within `budgetTiles`, drop to the server
-     *  COMPOSITE overview instead of stitching the huge per-channel level. Only safe when the caller
-     *  wants a single decimated plane (the surface height): for a multichannel VOLUME every channel
-     *  would then fetch the same composite and the channels would collapse into one, so volume
-     *  assembly leaves this `false` to keep each band distinct. */
-    allowCompositeFallback = false,
-  ): Promise<ImageBitmap> {
-    // Self-contained multi-slice stack (tiled:false): `z` indexes a completely
-    // different file's own preview URL, not an internal slice of one server-
-    // tiled file — resolved and fetched via SimpleSliceAccessService (shared
-    // with OSD; see its docs for why this can't be a bare fetch()) instead of
-    // building a /tile?info=...&z= request against whichever single file
-    // getSelectedInfoB64() points at (which would 400/mismatch for any z
-    // beyond that one file's own extent).
-    const info = this.loaded?.imageInfo;
-    if (this.simpleStack.isSimple(info)) {
-      // Serverless multichannel volume: fetch the requested channel's OWN plane
-      // (channelUrls[z][channel]) so each band stays distinct — the client-side
-      // analog of the server's per-channel /tile?channel=c. Else the z-anchor URL.
-      const chUrls = (info as IImageInfo).channelUrls;
-      const url = channel != null && chUrls?.[z]?.[channel] != null
-        ? chUrls[z][channel]
-        : this.simpleStack.urlFor(info as IImageInfo, z);
-      if (!url) throw new Error(`[napari-js] no URL for slice ${z}`);
-      return this.simpleStack.fetchAsBitmap(url);
-    }
-    const infoB64 = this.tiles.getSelectedInfoB64();
-    if (!infoB64) throw new Error('[napari-js] no selected image info (getSelectedInfoB64 null)');
-    const desc = await this.ensureDescriptor();
-
-    // The requested band; may be dropped to the composite (undefined) below when the channel has no
-    // pyramid level small enough to stitch within budget.
-    let effectiveChannel = channel;
-    const fetchTile = async (
-      res: number,
-      col: number,
-      row: number,
-      t: number,
-    ): Promise<ImageBitmap> => {
-      const url = buildTileUrl(this.api, infoB64, {
-        res, col, row, z, tileSize: t, channel: effectiveChannel,
-      });
-      const resp = await fetchWithAuth(this.tiles, url);
-      if (!resp.ok) {
-        throw new Error(`[napari-js] slice fetch failed: ${resp.status} (${col}/${row} res ${res})`);
-      }
-      return createImageBitmap(await resp.blob());
-    };
-
-    // No descriptor → single top-left tile (legacy fallback; correct for small/simple images).
-    if (!desc || !desc.levels?.length) return fetchTile(0, 0, 0, TILE_SIZE);
-
-    const t = desc.tileSize || TILE_SIZE;
-    // Per-channel tiles exist ONLY at REAL Bio-Formats levels (the front of `levels`); the server
-    // composite exists at every level, including the small overviews.
-    const perChannelLevels = desc.realLevels ?? desc.levels.length;
-    const usable =
-      channel == null ? desc.levels : desc.levels.slice(0, Math.max(1, perChannelLevels));
-
-    // Finest level whose stitched grid fits BOTH the tile budget and the GPU texture limit; if none
-    // fits, the coarsest available (fits=false).
-    const tilesFor = (lvl: TileLevel): number =>
-      Math.max(1, Math.ceil(lvl.width / t)) * Math.max(1, Math.ceil(lvl.height / t));
-    const pick = (levels: TileLevel[]): { lvl: TileLevel; fits: boolean } => {
-      let c = levels[0];
-      for (const lvl of levels) {
-        c = lvl;
-        if (tilesFor(lvl) <= budgetTiles && Math.max(lvl.width, lvl.height) <= MAX_TEXTURE_DIM) {
-          return { lvl, fits: true };
-        }
-      }
-      return { lvl: c, fits: false };
-    };
-
-    let sel = pick(usable);
-    // A specific channel only has tiles at the (few, large) real levels. When none of them fit the
-    // budget — e.g. the coarsest real level is still 14982×18670 → ~1100 full-res tiles — stitching
-    // it per slice floods the server (504s) and stalls the load. The composite pyramid has small
-    // overview levels, so fetch the composite instead and derive luminance from it. Every caller here
-    // (surface height, volume assembly, readback) downscales the plane anyway, so a composite-derived
-    // plane is the right trade for one that actually loads. Only kicks in when the channel can't fit.
-    if (allowCompositeFallback && !sel.fits && channel != null && desc.levels.length > perChannelLevels) {
-      const composite = pick(desc.levels);
-      if (composite.fits || tilesFor(composite.lvl) < tilesFor(sel.lvl)) {
-        effectiveChannel = undefined;
-        sel = composite;
-        console.warn(
-          `[napari-js] channel ${channel} has no pyramid level within the ${budgetTiles}-tile ` +
-            `budget; using the composite overview (res ${sel.lvl.res}, ${sel.lvl.width}×` +
-            `${sel.lvl.height}) for this plane.`,
-        );
-      }
-    }
-    const chosen = sel.lvl;
-    const cols = Math.max(1, Math.ceil(chosen.width / t));
-    const rows = Math.max(1, Math.ceil(chosen.height / t));
-    if (!sel.fits && budgetTiles === MAX_STITCH_TILES) {
-      console.warn(
-        `[napari-js] full resolution exceeds the ${budgetTiles}-tile/${MAX_TEXTURE_DIM}px budget; ` +
-          `displaying overview level res ${chosen.res} (${chosen.width}×${chosen.height}).`,
-      );
-    }
-
-    if (cols === 1 && rows === 1) return fetchTile(chosen.res, 0, 0, t);
-
-    // Stitch into one level-sized canvas. Fetch the grid with BOUNDED concurrency: firing every tile
-    // at once (a big grid = hundreds of requests) overwhelmed the tile server (504s). Edge tiles are
-    // narrower/shorter; drawImage places each at its grid offset so partial tiles line up.
-    const coords: Array<{ col: number; row: number }> = [];
-    for (let row = 0; row < rows; row++) {
-      for (let col = 0; col < cols; col++) coords.push({ col, row });
-    }
-    const tiles: Array<{ col: number; row: number; bmp: ImageBitmap }> = [];
-    await mapPool(coords, TILE_FETCH_CONCURRENCY, async ({ col, row }) => {
-      tiles.push({ col, row, bmp: await fetchTile(chosen.res, col, row, t) });
-    });
-
-    const { canvas, ctx } = create2dCanvas(chosen.width, chosen.height, 'slice stitch');
-    for (const { col, row, bmp } of tiles) {
-      ctx.drawImage(bmp, col * t, row * t);
-      bmp.close?.();
-    }
-
-    // Safety net: if the chosen level still exceeds the GPU texture limit (e.g. a multichannel
-    // image whose coarsest REAL level is huge — overview levels are composite-only), downscale the
-    // stitched canvas to fit so the WebGPU texture upload can't fail.
-    const longest = Math.max(chosen.width, chosen.height);
-    if (longest > MAX_TEXTURE_DIM) {
-      const scale = MAX_TEXTURE_DIM / longest;
-      const outW = Math.max(1, Math.floor(chosen.width * scale));
-      const outH = Math.max(1, Math.floor(chosen.height * scale));
-      console.warn(
-        `[napari-js] stitched level ${chosen.width}×${chosen.height} exceeds the ` +
-          `${MAX_TEXTURE_DIM}px texture limit; downscaling to ${outW}×${outH}.`,
-      );
-      const { canvas: out, ctx: octx } = create2dCanvas(outW, outH, 'slice downscale');
-      octx.drawImage(canvas as unknown as CanvasImageSource, 0, 0, outW, outH);
-      return createImageBitmap(out as unknown as ImageBitmapSource);
-    }
-    return createImageBitmap(canvas as unknown as ImageBitmapSource);
+    return this.tileClient.currentDescriptor(this.info());
   }
 
   // ── IDataRenderer: load / render / viewport ───────────────────────────────
@@ -910,40 +650,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       : 'gray';
   }
 
-  /** Fetch a stitched slice and read it back as a single-channel uint8 plane. `channel` selects a
-   *  band (multichannel); omit it for the grayscale composite (all overview levels available, so a
-   *  large image picks a fitting downscaled level rather than only the full-res real level). */
-  private async fetchChannelData(
-    z: number,
-    channel?: number,
-    budgetTiles?: number,
-  ): Promise<{ data: Uint8Array; width: number; height: number }> {
-    const bmp = await this.fetchSlice(z, channel, budgetTiles);
-    return this.bitmapToLuminance(bmp);
-  }
-
-  /** Decode an `ImageBitmap` to a single-channel uint8 luminance plane (server bands are grey,
-   *  R=G=B, and decode exactly; a colour composite becomes its BT.601 luminance). `maxSide` caps
-   *  the longest side (downscaling on the canvas draw) — used to keep pre-loaded surface slice
-   *  planes small. */
-  private bitmapToLuminance(
-    bmp: ImageBitmap,
-    maxSide?: number,
-  ): { data: Uint8Array; width: number; height: number } {
-    const scale = maxSide ? Math.min(1, maxSide / Math.max(bmp.width, bmp.height, 1)) : 1;
-    const w = Math.max(1, Math.round(bmp.width * scale));
-    const h = Math.max(1, Math.round(bmp.height * scale));
-    const { ctx } = create2dCanvas(w, h, 'channel readback');
-    // Scale the WHOLE bitmap into the (possibly smaller) target canvas — drawing at natural size
-    // would crop to the top-left w×h corner when downscaling a large slice (maxSide < bmp size).
-    ctx.drawImage(bmp, 0, 0, w, h);
-    bmp.close?.();
-    const rgba = ctx.getImageData(0, 0, w, h).data;
-    const data = new Uint8Array(w * h);
-    rgbaToLuminance(rgba, data);
-    return { data, width: w, height: h };
-  }
-
   /**
    * Render the 2D image for slice `z`. With a server pyramid descriptor we use a pyramidal
    * {@link TiledSource} per layer so the view refines to higher resolution on zoom (like OSD) and
@@ -954,7 +660,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     const v = this.viewer;
     if (!v) return;
     const scene = this.scene.signal;
-    const desc = await this.ensureDescriptor();
+    const desc = await this.tileClient.ensureDescriptor(this.info());
     // Reset into a newer scene while the descriptor was in flight: this render is superseded.
     if (scene.aborted) return;
     if (desc && desc.levels?.length) {
@@ -969,7 +675,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private async renderImageStitched(z: number, token?: number): Promise<void> {
     const v = this.viewer;
     if (!v) return;
-    const desc = await this.ensureDescriptor();
+    const desc = await this.tileClient.ensureDescriptor(this.info());
     const states = this.store.currentChannelStates();
     const channelCount = desc?.channels ?? (states.length || 1);
     const multichannel = !!desc?.multichannel && channelCount > 1;
@@ -982,16 +688,16 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     if (multichannel) {
       mode = 'multichannel';
       planes = await Promise.all(
-        Array.from({ length: channelCount }, (_, c) => this.fetchChannelData(z, c)),
+        Array.from({ length: channelCount }, (_, c) => this.tileClient.fetchChannelData(this.info(), z, c)),
       );
     } else if (channelCount === 1) {
       mode = 'grayscale';
       // Composite fetch (no channel) → all overview levels usable, so a large grayscale image
       // selects a fitting downscaled level instead of the full-res real level (texture limit).
-      planes = [await this.fetchChannelData(z)];
+      planes = [await this.tileClient.fetchChannelData(this.info(), z)];
     } else {
       mode = 'rgb';
-      bitmap = await this.fetchSlice(z);
+      bitmap = await this.tileClient.fetchSlice(this.info(), z);
     }
 
     // 2) Commit — unless a newer scrub superseded us or the viewer was torn down.
@@ -1046,15 +752,15 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     if (multichannel) {
       this.imageMode = 'multichannel';
       const views = Array.from({ length: channelCount }, (_, c) =>
-        this.tintedChannelView(c, states, desc, this.buildTiledSource(desc, c, 1, scene)));
+        this.tintedChannelView(c, states, desc, this.tiledSource(desc, c, 1, scene)));
       this.channelView.render('multichannel', views, { interpolation });
     } else if (channelCount === 1) {
       this.imageMode = 'grayscale';
-      const view = this.grayscaleChannelView(states[0], this.buildTiledSource(desc, undefined, 1, scene));
+      const view = this.grayscaleChannelView(states[0], this.tiledSource(desc, undefined, 1, scene));
       this.channelView.render('grayscale', [view], { interpolation });
     } else {
       this.imageMode = 'rgb';
-      this.channelView.render('rgb', [{ source: this.buildTiledSource(desc, undefined, 4, scene) }], {
+      this.channelView.render('rgb', [{ source: this.tiledSource(desc, undefined, 4, scene) }], {
         interpolation,
       });
     }
@@ -1103,56 +809,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     };
   }
 
-  /** Build a pyramidal TiledSource backed by the server `/tile` endpoint. `channel` selects a band
-   *  (grayscale luminance, real levels only); omit it for the composite (RGBA, all levels).
-   *  `scene` is the signal of the render that asked for it, taken before that render's awaits. */
-  private buildTiledSource(
-    desc: TileDescriptor,
-    channel: number | undefined,
-    channels: 1 | 4,
-    scene: AbortSignal,
+  /** A pyramidal TiledSource for the image on screen, whose tiles count on the loading badge
+   *  while `scene` (the render that asked for it) is current. */
+  private tiledSource(
+    desc: TileDescriptor, channel: number | undefined, channels: 1 | 4, scene: AbortSignal,
   ): TiledSource {
-    const infoB64 = this.tiles.getSelectedInfoB64() ?? '';
-    // Per-channel tiles exist only at REAL Bio-Formats levels; the composite exists at all levels.
-    const usable =
-      channel == null
-        ? desc.levels
-        : desc.levels.slice(0, Math.max(1, desc.realLevels ?? desc.levels.length));
-    const levelScales = usable.map((l) => desc.width / Math.max(1, l.width)); // level-0 px per level px
-    const tileSize = desc.tileSize || TILE_SIZE;
-    const api = this.api;
-    // The scene this source draws: its tiles count on the badge only while that scene is current,
-    // so a request the disposed source still issues after a reset never shows on the new one.
-    return {
-      kind: 'tiled',
-      width: desc.width,
-      height: desc.height,
-      tileSize,
-      levels: usable.length,
-      levelScales,
-      depth: Math.max(1, desc.z || 1),
-      channels,
-      dtype: 'uint8',
-      fetchTile: async (key: TileKey): Promise<PixelChunk> => {
-        const res = usable[key.level]?.res ?? key.level;
-        const url = buildTileUrl(api, infoB64, {
-          res, col: key.col, row: key.row, z: key.z, tileSize, channel,
-        });
-        // "Image reloading…" on the loading badge while any tile of the image is in flight.
-        const end = scene.aborted ? null : this.badge.begin('Image');
-        try {
-          const resp = await fetchWithAuth(this.tiles, url);
-          if (!resp.ok) {
-            throw new Error(`[napari-js] tile ${key.level}/${key.col}/${key.row} → ${resp.status}`);
-          }
-          const bmp = await createImageBitmap(await resp.blob());
-          if (channels === 4) return { width: bmp.width, height: bmp.height, data: bmp };
-          return this.bitmapToLuminance(bmp);
-        } finally {
-          if (!scene.aborted) end?.();
-        }
-      },
-    };
+    return this.tileClient.tiledSource(desc, channel, channels, scene, () => this.badge.begin('Image'));
   }
 
   /** (Re)fetch a coarse per-channel luminance sample for the histogram (tiled mode has no full
@@ -1168,7 +830,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     const samples = await Promise.all(
       Array.from({ length: channelCount }, (_, c) =>
         // budget 1 → coarsest single tile; a failed channel leaves its sample unset.
-        this.fetchChannelData(z, multichannel ? c : undefined, 1).then(
+        this.tileClient.fetchChannelData(this.info(), z, multichannel ? c : undefined, 1).then(
           (d) => d.data,
           () => null,
         ),
@@ -1319,7 +981,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private installScaleBar(): void {
     this.scaleBar?.destroy();
     this.scaleBar = null;
-    const mppX = this.mppX();
+    const mppX = this.tileClient.mppX(this.info());
     if (this.viewer && this.host && mppX > 0) {
       this.scaleBar = new NapariScaleBar(this.host, this.viewer.camera, mppX);
     }
@@ -1350,17 +1012,19 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     if (!nav) return;
     const token = ++this.navigatorToken;
     try {
-      const desc = await this.ensureDescriptor();
+      const desc = await this.tileClient.ensureDescriptor(this.info());
       // Superseded (a newer slice, or the scene was torn down): fetch nothing.
       if (token !== this.navigatorToken || this.navigator !== nav) return;
       const channels = desc?.multichannel ? desc.channelInfo ?? [] : [];
       if (channels.length > 1) {
-        const bitmaps = await Promise.all(channels.map((_c, c) => this.fetchSlice(z, c, 1)));
+        const bitmaps = await Promise.all(
+          channels.map((_c, c) => this.tileClient.fetchSlice(this.info(), z, c, 1)),
+        );
         if (token !== this.navigatorToken || this.navigator !== nav) return;
         this.setNavigatorChannels(bitmaps);
         this.recolorNavigator();
       } else {
-        const image = await this.fetchSlice(z, undefined, 1);
+        const image = await this.tileClient.fetchSlice(this.info(), z, undefined, 1);
         if (token !== this.navigatorToken || this.navigator !== nav) return;
         this.setNavigatorChannels(null);
         nav.setImage(image);
@@ -1419,7 +1083,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     plotType: PlotType,
   ): Promise<void> {
     const loading = this.loading.signal; // bail before rendering on a Cancel / new plot
-    const desc = await this.ensureDescriptor();
+    const desc = await this.tileClient.ensureDescriptor(this.info());
     // Serverless multichannel (tiled:false + channelUrls): no tile descriptor, so
     // derive the channel count from imageMeta and assemble each band from its own
     // channelUrls[z][c] plane (fetchSlice does the per-channel routing).
@@ -1641,74 +1305,17 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     };
   }
 
-  /**
-   * Assemble a downsampled uint8 volume (luminance) from the per-slice tile endpoint. Slices are
-   * fetched with bounded concurrency (keeps the connection pool full without flooding it on a deep
-   * stack) and read into the volume as each arrives, driving {@link stackLoadingProgress$} so the
-   * host shows a determinate progress bar instead of a bare spinner.
-   */
-  private async assembleVolume(
+  /** Assemble the stack into a uint8 volume, driving {@link stackLoadingProgress$}; null on a
+   *  Cancel or a new plot. */
+  private assembleVolume(
     info: IImageInfo | undefined,
     opts: { maxSlice?: number; sliceStep?: number } = {},
     channel?: number,
-  ): Promise<{ data: Uint8Array; width: number; height: number; depth: number } | null> {
-    const loading = this.loading.signal; // bail on a Cancel / new plot while we fetch
-    const fullDepth = stackDepth(info) || 1;
-    if (fullDepth < 1) {
-      console.warn('[napari-js] no slices to assemble a volume');
-      return null;
-    }
-    const step = Math.max(1, Math.floor(opts.sliceStep ?? 1));
-    const maxSlice = opts.maxSlice ?? VOLUME_MAX_SLICE;
-    // Source-slice indices sampled into the volume (every `step`th plane → low-res is faster).
-    const zIndices: number[] = [];
-    for (let z = 0; z < fullDepth; z += step) zIndices.push(z);
-    const depth = zIndices.length;
-
-    this.stackLoadingProgress$.next(0);
-    try {
-      // Fetch each slice at a pyramid level matching `maxSlice` (budget scales with the decimate
-      // factor), so a higher factor pulls a finer level → more real in-plane detail; then downsample
-      // to `maxSlice`. `channel` selects a band (multichannel volume); omit for the grayscale
-      // composite. The caller owns the stackLoading flag (multichannel assembles channels in turn).
-      const budget = this.tileBudgetFor(maxSlice);
-      const first = await this.fetchSlice(zIndices[0], channel, budget);
-      const scale = Math.min(1, maxSlice / Math.max(first.width, first.height, 1));
-      const width = Math.max(1, Math.round(first.width * scale));
-      const height = Math.max(1, Math.round(first.height * scale));
-      const data = new Uint8Array(width * height * depth);
-
-      const { ctx } = create2dCanvas(width, height, 'volume assembly');
-
-      // Read one fetched slice bitmap into the volume plane `z` (luminance). Synchronous between
-      // awaits, so the shared 2D context is safe to reuse across the concurrent fetch workers.
-      let done = 0;
-      const readSlice = (z: number, bmp: ImageBitmap): void => {
-        ctx.clearRect(0, 0, width, height);
-        ctx.drawImage(bmp, 0, 0, width, height);
-        rgbaToLuminance(ctx.getImageData(0, 0, width, height).data, data, z * width * height);
-        bmp.close?.();
-        done++;
-        this.stackLoadingProgress$.next(Math.round((done / depth) * 100));
-      };
-
-      readSlice(0, first);
-
-      // Remaining planes through a small fetch pool. Each plane `p` maps to source slice
-      // `zIndices[p]` (subsampled for low-res).
-      const planes = Array.from({ length: depth - 1 }, (_, i) => i + 1);
-      await mapPool(
-        planes,
-        VOLUME_FETCH_CONCURRENCY,
-        async (p) => readSlice(p, await this.fetchSlice(zIndices[p], channel, budget)),
-        () => loading.aborted,
-      );
-
-      if (loading.aborted) return null; // cancelled → don't render a partial volume
-      return { data, width, height, depth };
-    } finally {
-      this.stackLoadingProgress$.next(0);
-    }
+  ): Promise<AssembledVolume | null> {
+    return this.tileClient.assembleVolume(info, opts, channel, {
+      signal: this.loading.signal, // bail on a Cancel / new plot while we fetch
+      progress: (p) => this.stackLoadingProgress$.next(p),
+    });
   }
 
   /**
@@ -3496,7 +3103,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
    * lives in napari-js (`heightField` + `Viewer.addSurface`); this backend supplies scalar slices.
    */
   private async mountSurface(viewer: Viewer): Promise<void> {
-    const desc = await this.ensureDescriptor();
+    const desc = await this.tileClient.ensureDescriptor(this.info());
     const info = this.loaded?.imageInfo;
     // Serverless multichannel (tiled:false + channelUrls) has no descriptor — detect
     // it from imageMeta so the Surface still follows one band.
@@ -3526,7 +3133,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     const boxH = Math.max(1, b.max[1] - b.min[1]);
     const boxD = Math.max(1, b.max[2] - b.min[2]);
     const desc = this.currentDescriptor();
-    const mppX = this.mppX();
+    const mppX = this.tileClient.mppX(this.info());
     const voxel = mppX > 0 ? (mppX * (desc?.width ?? this.imageW)) / Math.max(1, this.imageW) : 1;
     this.axesLayer = viewer.addAxes(boxW, boxH, boxD, {
       voxelSize: [voxel, voxel, 1],
@@ -3613,70 +3220,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     }
   }
 
-  /** Tile budget to stitch a whole slice at ~`targetPx` resolution from the pyramid: a higher target
-   *  pulls a FINER pyramid level (more real detail). Shared by the surface plane fetch and the volume
-   *  assembly so both scale their in-plane resolution with the decimate factor. */
-  private tileBudgetFor(targetPx: number): number {
-    const tileSize = this.currentDescriptor()?.tileSize || TILE_SIZE;
-    return Math.min(
-      MAX_STITCH_TILES,
-      Math.max(1, Math.round((targetPx / tileSize) ** 2 * STITCH_BUDGET_COEFF)),
-    );
-  }
-
-  /**
-   * Fetch slice `z` as a single WHOLE-image luminance plane (decimated to `maxGrid`). Prefers the
-   * server pyramid, stitched at a resolution set by the decimate factor; without a descriptor,
-   * the app's complete per-slice image (`urls`/`smallUrls`, as the Plotly surface) — never a lone
-   * top-left tile, which would be a corner of the slice — and only as a last resort the
-   * single-tile fetch.
-   */
-  private async fetchSurfacePlane(
-    z: number,
-    maxGrid: number,
-  ): Promise<{ data: Uint8Array; width: number; height: number }> {
-    const info = this.loaded?.imageInfo;
-    const desc = await this.ensureDescriptor();
-    let plane: { data: Uint8Array; width: number; height: number } | null = null;
-
-    // Preferred: stitch the WHOLE slice from the server pyramid at a resolution driven by the
-    // decimate factor — a higher target grid pulls a FINER pyramid level (more real detail). With a
-    // descriptor, fetchSlice stitches the whole chosen level (never a corner), then we downscale to
-    // the grid. This is what makes "Full" actually higher-res than "½", not just a fixed preview.
-    if (desc?.levels?.length) {
-      const budget = this.tileBudgetFor(maxGrid);
-      // The surface is a single decimated plane, so the composite fallback is acceptable when the
-      // channel has no small pyramid level (keeps it fast); a multichannel VOLUME must not do this.
-      plane = this.bitmapToLuminance(
-        await this.fetchSlice(z, this.surfaceChannel, budget, true),
-        maxGrid,
-      );
-    }
-
-    // Fallback (no pyramid): the app's COMPLETE per-slice image (urls[z], not the small blurry
-    // thumbnail) — whole slice, avoids a corner tile. Capped at the image's own resolution.
-    if (!plane) {
-      const url = info?.urls?.[z] ?? info?.smallUrls?.[z];
-      if (url) {
-        try {
-          const resp = await fetchWithAuth(this.tiles, url);
-          if (resp.ok) {
-            plane = this.bitmapToLuminance(await createImageBitmap(await resp.blob()), maxGrid);
-          }
-        } catch (err) {
-          console.warn(`[napari-js] surface url fetch failed for z=${z}`, err);
-        }
-      }
-    }
-
-    // Last resort (no pyramid and no complete image): a single tile.
-    if (!plane) {
-      plane = this.bitmapToLuminance(
-        await this.fetchSlice(z, this.surfaceChannel, this.tileBudgetFor(maxGrid), true),
-        maxGrid,
-      );
-    }
-    return plane;
+  /** Slice `z` as a whole-image luminance plane of the surface's band, decimated to `maxGrid`. */
+  private fetchSurfacePlane(z: number, maxGrid: number): Promise<LumaPlane> {
+    return this.tileClient.fetchPlane(this.info(), z, this.surfaceChannel, maxGrid);
   }
 
   /** The channel state driving the surface: the chosen band for multichannel (matched by index),
@@ -3827,9 +3373,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.cachedImage = null;
     this.cachedImageSource = null;
     this.lastPixelsRect = null;
-    this.nativeHistograms.clear();
-    this.descriptorPoll = null;
-    this.descriptorMisses.clear();
+    this.tileClient.startScene(this.scene.signal);
     this.tiled = false;
     this.histGen++;
     this.histSamples.clear();
@@ -4167,7 +3711,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     }, READBACK_DEBOUNCE_MS));
   }
 
-
   private scheduleReadback(): void {
     if (!this.viewer) return;
     this.zone.runOutsideAngular(() => {
@@ -4379,43 +3922,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     return null;
   }
   getHistogram$(channelIndex: number, bins: number): Observable<IHistogram | null> {
-    // >8-bit channels: fetch the true native distribution from the server (the displayed pixels
-    // are 8-bit, so the client histogram would be clipped). 8-bit channels use the client path.
-    const bitDepth = this.currentDescriptor()?.channelInfo?.[channelIndex]?.bitDepth ?? 8;
-    if (bitDepth > 8) {
-      const z = this.loaded?.z ?? 0;
-      const key = `${z}|${channelIndex}`;
-      const cached = this.nativeHistograms.get(key);
-      if (cached) return of(cached);
-      return from(this.fetchNativeHistogram(channelIndex, bins, z, key));
-    }
-    return of(this.getHistogram(channelIndex, bins));
-  }
-
-  /** Fetch + cache one channel's native-bit-depth histogram from `GET /histogram` (>8-bit),
-   *  through the shared jit-service client — whose URL carries the per-app-load cache-buster
-   *  this backend used to omit, so a reload showed the server's 24 h-cached histogram. */
-  private async fetchNativeHistogram(
-    channel: number,
-    bins: number,
-    z: number,
-    key: string,
-  ): Promise<IHistogram | null> {
-    const infoB64 = this.tiles.getSelectedInfoB64();
-    if (!infoB64) return null;
-    try {
-      const out = await nativeHistogram(fetchJsonWithAuth(this.tiles), this.api, infoB64, {
-        z,
-        channel,
-        bins,
-      });
-      if (!out) return null; // 202 (still caching) or transient → null; the pane retries
-      this.nativeHistograms.set(key, out);
-      return out;
-    } catch (err) {
-      console.warn('[napari-js] native histogram fetch failed', err);
-      return null;
-    }
+    // >8-bit channels: the true native distribution from the server (the displayed pixels are
+    // 8-bit, so the client histogram would be clipped). 8-bit channels use the client path.
+    return this.tileClient.nativeHistogram$(this.info(), this.loaded?.z ?? 0, channelIndex, bins)
+      ?? of(this.getHistogram(channelIndex, bins));
   }
 
   /** Per-channel histogram of the displayed RGB composite (R/G/B byte), from the last readback. */
@@ -4450,24 +3960,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
    *  the displayed PNG is an 8-bit figure, this preserves the true pixel values. Visible channels
    *  only (omitted when all are visible → server default). Mirrors the OSD backend. */
   async exportData(): Promise<void> {
-    const infoB64 = this.tiles.getSelectedInfoB64();
-    if (!infoB64) return;
-    const states = this.store.currentChannelStates();
-    const visible = states.filter((c) => c.visible).map((c) => c.index);
-    const z = this.loaded?.z ?? 0;
-    const url = exportTiffUrl(this.api, infoB64, z, visible, states.length);
-    const saveName = exportTiffFilename(this.loaded?.filename);
-    try {
-      const resp = await fetchWithAuth(this.tiles, url);
-      if (resp.status === 202) {
-        console.warn('[napari-js] 16-bit export: file still caching — try again shortly.');
-        return;
-      }
-      if (!resp.ok) throw new Error(`status ${resp.status}`);
-      saveAs(await resp.blob(), saveName);
-    } catch (err) {
-      console.warn('[napari-js] 16-bit TIFF export failed', err);
-    }
+    await this.tileClient.exportTiff(
+      this.loaded?.z ?? 0, this.store.currentChannelStates(), this.loaded?.filename,
+    );
   }
   unsubscribe(): void {
     this.reset();

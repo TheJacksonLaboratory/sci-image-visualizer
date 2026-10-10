@@ -8,6 +8,7 @@ import { MultiChannelImageView, Viewer } from 'napari-js';
 import { saveAs } from 'file-saver';
 
 import { NapariVisualizerService } from './napari-visualizer.service';
+import { bitmapToLuminance } from './napari-tile-client';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
 import { VIZ_CONFIG } from '../../contracts/viz-config';
@@ -383,15 +384,13 @@ describe('NapariVisualizerService', () => {
         data: new Uint8ClampedArray([255, 0, 0, 255, 0, 0, 255, 255, 100, 100, 100, 255, 255, 255, 255, 255]),
       }),
     }) as unknown as CanvasRenderingContext2D);
-    const decode = (service as unknown as {
-      bitmapToLuminance(b: unknown): { data: Uint8Array; width: number; height: number };
-    }).bitmapToLuminance({ width: 4, height: 1, close: () => undefined });
+    const decode = bitmapToLuminance({ width: 4, height: 1, close: () => undefined } as unknown as ImageBitmap);
     expect(Array.from(decode.data)).toEqual([76, 29, 100, 255]);
   });
 
   describe('the /tiles/info poll', () => {
-    type Internals = { ensureDescriptor(): Promise<unknown> };
-    const ensure = () => (service as unknown as Internals).ensureDescriptor();
+    type Internals = { tileClient: { ensureDescriptor(info?: unknown): Promise<unknown> } };
+    const ensure = () => (service as unknown as Internals).tileClient.ensureDescriptor();
     const PENDING = Symbol('pending');
     /** The poll's result if it settles within a few ticks, else PENDING. */
     const settled = (p: Promise<unknown>) =>
@@ -487,9 +486,9 @@ describe('NapariVisualizerService', () => {
       }),
     );
     type Internals = {
-      fetchNativeHistogram(ch: number, bins: number, z: number, key: string): Promise<unknown>;
+      tileClient: { fetchNativeHistogram(ch: number, bins: number, z: number, key: string): Promise<unknown> };
     };
-    const h = await (service as unknown as Internals).fetchNativeHistogram(1, 3, 0, 'k');
+    const h = await (service as unknown as Internals).tileClient.fetchNativeHistogram(1, 3, 0, 'k');
     expect(h).toMatchObject({ bins: [0, 1, 2], max: 3, bitDepth: 16 });
     const url = String((globalThis.fetch as jest.Mock).mock.calls.at(-1)[0]);
     expect(url).toContain('histogram?info=INFO&channel=1&z=0&bins=3');
@@ -667,7 +666,7 @@ describe('NapariVisualizerService', () => {
     type Internals = {
       badge: { attach(host: HTMLElement): void; readonly text: string };
       scene: AbortController;
-      buildTiledSource(desc: unknown, channel: number | undefined, channels: 1 | 4, scene: AbortSignal): {
+      tiledSource(desc: unknown, channel: number | undefined, channels: 1 | 4, scene: AbortSignal): {
         fetchTile(key: { level: number; col: number; row: number; z: number }): Promise<unknown>;
       };
     };
@@ -688,7 +687,7 @@ describe('NapariVisualizerService', () => {
     });
 
     it('says the image is reloading while a tile is in flight, and stops once it lands', async () => {
-      const tile = internals.buildTiledSource(desc, undefined, 4, internals.scene.signal).fetchTile(key);
+      const tile = internals.tiledSource(desc, undefined, 4, internals.scene.signal).fetchTile(key);
       await Promise.resolve();
       expect(internals.badge.text).toBe('Image reloading…');
       release();
@@ -697,12 +696,12 @@ describe('NapariVisualizerService', () => {
     });
 
     it('a tile that lands after a reset leaves the new scene\'s count alone', async () => {
-      const stale = internals.buildTiledSource(desc, undefined, 4, internals.scene.signal).fetchTile(key);
+      const stale = internals.tiledSource(desc, undefined, 4, internals.scene.signal).fetchTile(key);
       await Promise.resolve();
       const releaseStale = release;
       service.reset();
       internals.badge.attach(document.createElement('div'));
-      const fresh = internals.buildTiledSource(desc, undefined, 4, internals.scene.signal).fetchTile(key);
+      const fresh = internals.tiledSource(desc, undefined, 4, internals.scene.signal).fetchTile(key);
       await Promise.resolve();
       releaseStale();
       await stale;
@@ -713,7 +712,7 @@ describe('NapariVisualizerService', () => {
     });
 
     it('a disposed source\'s request after a reset never counts toward the new scene', async () => {
-      const disposed = internals.buildTiledSource(desc, undefined, 4, internals.scene.signal);
+      const disposed = internals.tiledSource(desc, undefined, 4, internals.scene.signal);
       service.reset();
       internals.badge.attach(document.createElement('div'));
       const late = disposed.fetchTile(key);
@@ -721,7 +720,7 @@ describe('NapariVisualizerService', () => {
       expect(internals.badge.text).toBe('');
       release();
       await late;
-      const fresh = internals.buildTiledSource(desc, undefined, 4, internals.scene.signal).fetchTile(key);
+      const fresh = internals.tiledSource(desc, undefined, 4, internals.scene.signal).fetchTile(key);
       await Promise.resolve();
       expect(internals.badge.text).toBe('Image reloading…');
       release();
@@ -745,7 +744,7 @@ describe('NapariVisualizerService', () => {
         }
         return Promise.resolve({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) });
       });
-      const built = jest.spyOn(internals, 'buildTiledSource');
+      const built = jest.spyOn(internals, 'tiledSource');
 
       const loaded = await service.load(imageInfo(), 0);
       const old = service.plot('superseded-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE);
@@ -1205,13 +1204,13 @@ describe('NapariVisualizerService', () => {
       imageMode: string;
       histSamples: Map<number, Uint8Array>;
       refreshHistogramSamples(z: number, desc: unknown): Promise<void>;
-      fetchChannelData(z: number, ch?: number, budget?: number): Promise<Plane>;
+      tileClient: { fetchChannelData(info: unknown, z: number, ch?: number, budget?: number): Promise<Plane> };
     };
     const internals = service as unknown as Internals;
     internals.imageMode = 'multichannel';
     const held = new Map<number, Array<(p: Plane) => void>>();
-    jest.spyOn(internals, 'fetchChannelData').mockImplementation(
-      (z) => new Promise<Plane>((resolve) => {
+    jest.spyOn(internals.tileClient, 'fetchChannelData').mockImplementation(
+      (_info, z) => new Promise<Plane>((resolve) => {
         held.set(z, [...(held.get(z) ?? []), resolve]);
       }),
     );
@@ -1347,8 +1346,10 @@ describe('NapariVisualizerService', () => {
 
     // channel 1 at a small (surface ¼) tile budget, WITH composite fallback allowed.
     await (service as unknown as {
-      fetchSlice: (z: number, c: number, b: number, allowCompositeFallback: boolean) => Promise<unknown>;
-    }).fetchSlice(0, 1, 3, true);
+      tileClient: {
+        fetchSlice: (info: unknown, z: number, c: number, b: number, fallback: boolean) => Promise<unknown>;
+      };
+    }).tileClient.fetchSlice(undefined, 0, 1, 3, true);
 
     expect(tileUrls.length).toBeGreaterThan(0);
     // Dropped to the composite (no &channel=) rather than stitching the huge per-channel level…
@@ -1390,8 +1391,8 @@ describe('NapariVisualizerService', () => {
 
     // Default call (allowCompositeFallback omitted → false): the volume path.
     await (service as unknown as {
-      fetchSlice: (z: number, c: number, b: number) => Promise<unknown>;
-    }).fetchSlice(0, 1, 3);
+      tileClient: { fetchSlice: (info: unknown, z: number, c: number, b: number) => Promise<unknown> };
+    }).tileClient.fetchSlice(undefined, 0, 1, 3);
 
     // Stayed on the requested channel (never dropped to the composite), so channels stay distinct.
     expect(tileUrls.length).toBeGreaterThan(0);
@@ -1418,8 +1419,8 @@ describe('NapariVisualizerService', () => {
     });
 
     await (service as unknown as {
-      fetchSlice: (z: number, c: number, b: number) => Promise<unknown>;
-    }).fetchSlice(0, 1, 3);
+      tileClient: { fetchSlice: (info: unknown, z: number, c: number, b: number) => Promise<unknown> };
+    }).tileClient.fetchSlice(undefined, 0, 1, 3);
 
     expect(tileUrls.some((u) => u.includes('channel=1'))).toBe(true);
   });
@@ -3934,8 +3935,8 @@ describe('NapariVisualizerService', () => {
     });
 
     describe('(d) the descriptor poll', () => {
-      type Internals = { ensureDescriptor(): Promise<unknown> };
-      const ensure = () => (service as unknown as Internals).ensureDescriptor();
+      type Internals = { tileClient: { ensureDescriptor(info?: unknown): Promise<unknown> } };
+      const ensure = () => (service as unknown as Internals).tileClient.ensureDescriptor();
       const infoCalls = () => fetchedUrls().filter((u) => u.includes('tiles/info'));
       const answer = (status: number, body?: unknown) =>
         Promise.resolve({ ok: status === 200, status, json: () => Promise.resolve(body) });
