@@ -3,24 +3,22 @@ import { Observable, BehaviorSubject, Subject, Subscription, combineLatest, of }
 import { Image } from 'image-js';
 import { saveAs } from 'file-saver';
 import {
-  Viewer, histogramScalar, colormapFromLut, heightField, MultiChannelImageView,
-  MultiChannelVolumeView,
+  Viewer, histogramScalar, heightField, MultiChannelImageView, MultiChannelVolumeView,
 } from 'napari-js';
 import type {
-  AxesLayer, ImageLayer, SurfaceLayer, VolumeLayer, PointsLayer, Points3DLayer, TiledSource,
-  ChannelView, VolumeChannel, ProjectedPoints,
+  AxesLayer, ImageLayer, SurfaceLayer, PointsLayer, Points3DLayer, TiledSource, ChannelView,
+  VolumeChannel,
 } from 'napari-js';
 
 import { IImageInfo } from '../../contracts/image.contract';
 import { IChannelState } from '../../contracts/channel-histogram-api.contract';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import {
-  SpatialColumn, SpatialDataset, SpatialImageRef, findColumnMeta, isCategoricalColumn,
+  SpatialColumn, SpatialDataset, SpatialImageRef, isCategoricalColumn,
 } from '../../contracts/spatial-dataset.contract';
 import { SpatialViewState } from '../../contracts/display-types';
 import {
-  encodeCategorical, markerDiameters, resolveCategoryColors, toRgbaTuples, DEFAULT_MUTED_OPACITY,
-  type RGBA,
+  encodeCategorical, markerDiameters, resolveCategoryColors, toRgbaTuples, type RGBA,
 } from '../../spatial/spatial-encoding';
 import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
 import { SpatialObservations } from '../../contracts/spatial-dataset.contract';
@@ -30,23 +28,21 @@ import {
 import { framePositions } from '../../spatial/spatial-framing';
 import { PIXEL_WORLD_QUANTUM, worldQuantumForExtent } from '../../spatial/world-grid';
 import { observationsInSlice, volumeImageRef } from '../../spatial/spatial-volume-image';
-import { defaultSigma, densityGrid, rasterizeDensity } from '../../spatial/spatial-density';
-import { observationsInSection, sectionsOf } from '../../spatial/spatial-sections';
 
 import { NapariSpatialTileLayers, TranscriptEstimate } from './napari-spatial-tiles';
 import { NapariNavigator } from './napari-navigator';
 import { LoadingBadgeState } from './napari-loading-state';
 import { NapariToolBridge } from './napari-tool-bridge';
 import { SpatialHover } from './napari-spatial-hover';
+import { NapariScene, NapariSettings, SceneContext } from './napari-scene';
+import { SpatialSession } from './napari-spatial-scene';
+import { Spatial3dScene } from './napari-spatial-3d-scene';
 import { NapariDisplayState } from './napari-display-state';
 import { AssembledVolume, NapariTileClient } from './napari-tile-client';
 import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
 import { NAPARI_WHEEL_ZOOM_SPEED } from './napari-zoom';
 import { ZOOM_BUTTON_STEP } from '../osd/osd-zoom';
-import {
-  type ExpressionField, type ExpressionVolumeField, colorExpressionField,
-  encodeExpressionVolume, expressionField, expressionVolume, fieldContrastWindow,
-} from '../../spatial/spatial-expression';
+import { colorExpressionField, expressionField, fieldContrastWindow } from '../../spatial/spatial-expression';
 
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
 import {
@@ -56,11 +52,8 @@ import {
   toNapariGamma, typedPlane, volumeResolutionFor,
 } from './napari-helpers';
 import {
-  ContrastWindowCache, DensityGroup, GENE_MAP_MAX_SIDE, GENE_MAP_SIGMA,
-  GENE_MAP_VOLUME_STRIDE, SPATIAL_3D_BASE_SIZE, SPATIAL_FALLBACK_RADIUS, SPATIAL_NEUTRAL_COLOR,
-  SPATIAL_NEUTRAL_HEX, SPATIAL_SELECTED_SIZE_SCALE, SPATIAL_SLICE_MIN_DIAMETER_PX, Spatial3dEncoding,
-  encodeSpatial3dCategorical, encodeSpatial3dContinuous, encodeSpatialContinuous, gatherColors,
-  rankDensityGroups, spatialFlatColormap, totalDensityGroup,
+  GENE_MAP_MAX_SIDE, GENE_MAP_SIGMA, SPATIAL_FALLBACK_RADIUS, SPATIAL_NEUTRAL_COLOR,
+  SPATIAL_NEUTRAL_HEX, SPATIAL_SLICE_MIN_DIAMETER_PX, encodeSpatialContinuous, gatherColors,
 } from './napari-spatial-encoding';
 import {
   PlotType,
@@ -99,7 +92,7 @@ import { TileDescriptor, throwIfAborted } from '../tile-server';
 import { SimpleSliceAccessService } from '../simple-slice-access.service';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
-import { NapariScaleBar, ScaleBarCamera } from './napari-scale-bar';
+import { NapariScaleBar } from './napari-scale-bar';
 import { formatUm } from '../../overlays/scale-bar-core';
 
 import { NapariAxesLabels, AxisLabelSpec } from './napari-axes-labels';
@@ -196,8 +189,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   /** Contrast window [min,max] the current surface mesh was built with. A change reshapes the
    *  mesh (pixel height = intensity within [min,max]), so it triggers a geometry rebuild. */
   private surfaceWindow: [number, number] | null = null;
-  /** Persisted wireframe choice for the surface (re-applied when a new surface mounts). */
-  private surfaceWireframe = false;
   /** napari-js 2D scatter points (region centroids) + its region-change subscription. */
   private scatter2dPoints: PointsLayer | null = null;
   private scatterRegionSub: Subscription | null = null;
@@ -205,55 +196,14 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private scatter3dLayer: Points3DLayer | null = null;
   /** Spatial-omics observation markers + the dataset/view subscription driving them. */
   private spatialPoints: PointsLayer | null = null;
-  /** The 3D point cloud. One layer: selection is a per-point alpha on it, not a second. */
-  private spatialPoints3d: Points3DLayer | null = null;
-  private spatialLayerKey3d: string | null = null;
-  /** Interleaved x,y,z, cached so a colour change does not re-walk 3.7M observations. */
-  private spatialPositions3d: Float32Array | null = null;
-  /** Identity of the scalars currently uploaded — see {@link rebuildSpatialPoints3d}. */
-  private spatialScalarKey3d: string | null = null;
-  /** The anatomical volume the cloud sits inside, when the dataset has one. */
-  private spatialVolume: VolumeLayer | null = null;
-  private spatialVolumeKey: string | null = null;
-  /** Per-cluster density volumes drawn alongside the cloud, and what they were
-   *  built from — rasterising is seconds of work, so it must not repeat for a
-   *  change that cannot affect the field. */
-  private densityLayers: VolumeLayer[] = [];
-  private densityKey: string | null = null;
-  /** Selection identity, as a number the density key can carry. */
-  private lastSelectionSeen: SpatialSelectionMask | null = null;
-  private selectionRevision = 0;
   /** The gene map: its layer, the field it was estimated from, and the inputs each
    *  was built for — the field is the expensive half and survives a recolour. */
   private geneMapLayer: ImageLayer | null = null;
   private geneMapKey: string | null = null;
-  private geneMapField: ExpressionField | null = null;
-  private geneMapFieldKey: string | null = null;
-  /** The 3D gene map: its volume layer, the field behind it, and the inputs each
-   *  was built for — same two clocks as the 2D map. */
-  private geneMapVolumeLayer: VolumeLayer | null = null;
-  private geneMapVolumeKey: string | null = null;
-  private geneMapVolumeField: ExpressionVolumeField | null = null;
-  private geneMapVolumeFieldKey: string | null = null;
-  /** Offset applied to observation coordinates to sit them in the volume's box. */
-  private spatialOrigin3d: [number, number, number] = [0, 0, 0];
   /** Cursor tooltip and click-to-select for the spatial views. */
   private hover: SpatialHover | null = null;
-  /** Observation indices the cached 3D positions belong to, in the same order;
-   *  null when every observation is drawn. Without it a projection built from the
-   *  positions is indexed by DRAWN order and silently attributes each point to
-   *  the wrong observation as soon as a section is isolated. */
-  private spatialDrawn3d: Uint32Array | null = null;
-
-  /** Reused projection buffers — see {@link getSpatialScreenProjection}. */
-  private spatialProjection3d: ProjectedPoints | undefined = undefined;
-
-  /** Per-observation depth from the last projection, for the depth-aware hover pick. */
-  private spatialDepths3d: Float32Array | null = null;
   /** Whose 2D observations the camera has been framed on — see {@link frameSpatialPointsOnce}. */
   private spatial2dFramed: { viewer: Viewer; datasetId: string } | null = null;
-  /** Dataset the 3D scale bar was built for. */
-  private spatialScaleBarKey: string | null = null;
   private spatialSub: Subscription | null = null;
   /** Level-of-detail cell outlines, transcripts and density over the 2D view — created on
    *  first use, and only when a spatial port is bound. */
@@ -263,10 +213,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   /** Transcripts of each selected gene in view (see NapariSpatialTileLayers.geneCountsIn). */
   readonly geneCountsInView$ = new BehaviorSubject<Record<string, number> | null>(null);
   readonly densityStats$ = new BehaviorSubject<{ lo: number; hi: number; max: number } | null>(null);
-  /** Latest (dataset, view, selection) the spatial subscription saw, so a slice
-   *  change can rebuild the markers for the new plane. */
-  private spatialLatest: [SpatialDataset | null, SpatialViewState, SpatialSelectionMask] | null =
-    null;
   /** Which dataset the current marker layer was built for, so a display-only
    *  change (size, colour, opacity, selection) can update it in place. */
   private spatialLayerKey: string | null = null;
@@ -284,7 +230,20 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
    * has replaced it. A tile that settles after a reset belongs to the aborted scene and leaves the
    * new scene's count alone.
    */
-  private scene = new AbortController();
+  private lifetime = new AbortController();
+  /** What {@link plot} mounted, while it is mounted. */
+  private scene: NapariScene | null = null;
+  /** Spatial state that outlives a scene (latest data, windows, estimated gene-map fields). */
+  private readonly spatial: SpatialSession;
+  /** Viewer settings that outlive a scene. */
+  private readonly settings: NapariSettings = {
+    resolutionScale: NAPARI_DEFAULT_DECIMATE,
+    navigatorVisible: true,
+    imageSmoothing: false,
+    axesVisible: true,
+    surfaceWireframe: false,
+    volumeZScale: 1,
+  };
   /**
    * Frame loading (volume assembly, surface preload): aborted by {@link reset} AND by
    * {@link cancelLoading}, so a Cancel actually stops fetching frames instead of running to
@@ -294,24 +253,16 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
    * {@link spatialRebuildToken}, {@link hoverSourceToken}) are "latest wins WITHIN a scene".
    */
   private loading = new AbortController();
-  /** Decimate factor for the napari 3D types (1 = Full, 2 = ½, 4 = ¼ default, 8 = ⅛). Applied when a
-   *  volume/isosurface/surface (re)loads; changing it needs a re-plot (it changes fetched data). */
-  private resolutionScale = NAPARI_DEFAULT_DECIMATE;
   /** 3D coordinate-axes / scale gizmo for the volume/isosurface view (null in 2D). */
   private axesLayer: AxesLayer | null = null;
   /** DOM X/Y/Z + scale labels tracking the 3D axes gizmo (null in 2D). */
   private axesLabels: NapariAxesLabels | null = null;
   /** Draggable Z-height grip over the volume (null unless a volume/isosurface is mounted). */
   private zHandle: NapariVolumeZHandle | null = null;
-  /** User Z-height factor for the volume (1 = the volume's natural proportions); driven by the
-   *  in-view drag handle. Reset per mount. */
-  private volumeZScale = 1;
   /** Volume world box at `volumeZScale = 1` (base) + the sampled voxel depth — enough to recompute
    *  the Z-axis voxel scale, axes depth, and overlay anchors as the handle stretches Z. */
   private volumeWorldBase: { width: number; height: number; depth: number } | null = null;
   private volumeSampledDepth = 1;
-  /** Persisted axes on/off choice, re-applied when a new volume mounts. Defaults on. */
-  private axesVisible = true;
   private volumeDims: { width: number; height: number; depth: number } | null = null;
   /** Assembled uint8 volume data per channel (key = channel index), kept for the volume intensity
    *  histogram. Key 0 holds the grayscale/composite volume in the single-channel case. */
@@ -332,8 +283,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private scaleBar: NapariScaleBar | null = null;
   /** Overview minimap (bottom-right), as OSD's navigator. */
   private navigator: NapariNavigator | null = null;
-  /** Whether the navigator is shown — the same host setting OSD's navigator honours. */
-  private navigatorVisible = true;
   /** Bumped per thumbnail request, so a slow one cannot overwrite a newer slice's. */
   private navigatorToken = 0;
   /** The current slice's per-channel thumbnail bitmaps (multichannel only), kept so a tint or
@@ -347,8 +296,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private readonly toolHost: CanvasToolHost;
   /** This backend's own wand, brush, eraser, zoom-to-box and SAM point tools. */
   protected readonly canvasTools: CanvasToolManager;
-  /** Image smoothing (bilinear) vs nearest-neighbour (crisp pixels, the default). */
-  private imageSmoothing = false;
   /** True when the 2D image is rendered via pyramidal TiledSources (descriptor available). */
   private tiled = false;
   /** Coarse per-channel luminance sample (keyed by channel index) for the histogram in tiled mode,
@@ -356,8 +303,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private readonly histSamples = new Map<number, Uint8Array>();
   /** Latest-wins token for {@link refreshHistogramSamples}. */
   private histGen = 0;
-  /** Spatial colouring's percentile windows, memoised per coloured vector (SPATIAL-12). */
-  private readonly contrastWindows = new ContrastWindowCache();
 
   private readonly stackLoading$ = new BehaviorSubject<boolean>(false);
   private readonly stackLoadingProgress$ = new BehaviorSubject<number>(0);
@@ -389,8 +334,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     super(regionStore, store);
     this.api = config.slideCropServer;
     this.tileClient = new NapariTileClient(tiles, simpleStack, this.api);
-    this.tileClient.startScene(this.scene.signal);
+    this.tileClient.startScene(this.lifetime.signal);
     this.display = new NapariDisplayState(store);
+    this.spatial = new SpatialSession(spatialData, selectionStore);
     this.tools = new NapariToolBridge({
       viewer: () => this.viewer,
       host: () => this.host,
@@ -411,6 +357,38 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
    *  produced by work that runs outside it. */
   private inZone<T>(fn: () => T): T {
     return NgZone.isInAngularZone() ? fn() : this.zone.run(fn);
+  }
+
+  /** What a scene is built from (see {@link SceneContext}). */
+  private sceneContext(viewer: Viewer, host: HTMLElement, canvas: HTMLCanvasElement): SceneContext {
+    return {
+      viewer,
+      host,
+      canvas,
+      signal: this.lifetime.signal,
+      loading: () => this.loading.signal,
+      info: () => this.loaded?.imageInfo,
+      z: () => this.loaded?.z ?? 0,
+      tiles: this.tileClient,
+      display: this.display,
+      badge: this.badge,
+      tools: this.tools,
+      store: this.store,
+      regionStore: this.regionStore,
+      settings: this.settings,
+      stack: {
+        loading: (on) => this.stackLoading$.next(on),
+        progress: (percent) => this.stackLoadingProgress$.next(percent),
+      },
+      imageSize: () => ({ width: this.imageW, height: this.imageH }),
+      setImageSize: (width, height) => {
+        this.imageW = width;
+        this.imageH = height;
+      },
+      fitCameraSoon: () => this.fitCameraSoon(),
+      outsideZone: (fn) => this.zone.runOutsideAngular(fn),
+      inZone: (fn) => this.inZone(fn),
+    };
   }
 
   /** The image on screen, as {@link load} recorded it. */
@@ -458,7 +436,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     if (!inPlace) this.canvasTools.resetAll();
     // This plot's scene. A newer plot resets into the next one while this one still awaits, and
     // a superseded plot must not go on to draw (or count image tiles) into the newer scene.
-    const scene = this.scene.signal;
+    const scene = this.lifetime.signal;
     this.host = host;
     this.badge.attach(host);
     this.currentPlotType = plotType;
@@ -510,7 +488,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       if (scene.aborted) return false;
 
       if (isSpatialOmics3d(plotType)) {
-        await this.mountSpatialOmics3d(viewer, host);
+        this.scene = new Spatial3dScene(this.sceneContext(viewer, host, canvas), this.spatial);
+        await this.scene.mount();
       } else if (isSpatialOmics(plotType)) {
         // No loaded image: an image-less dataset opened before any image (the visualizer's
         // plotSpatialWithoutImage) — the observations alone.
@@ -550,7 +529,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private async renderImage(z: number, token?: number): Promise<void> {
     const v = this.viewer;
     if (!v) return;
-    const scene = this.scene.signal;
+    const scene = this.lifetime.signal;
     const desc = await this.tileClient.ensureDescriptor(this.info());
     // Reset into a newer scene while the descriptor was in flight: this render is superseded.
     if (scene.aborted) return;
@@ -608,7 +587,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     const scale: [number, number] = [texW ? fullW / texW : 1, texH ? fullH / texH : 1];
 
     this.imageMode = mode;
-    const interpolation: 'linear' | 'nearest' = this.imageSmoothing ? 'linear' : 'nearest';
+    const interpolation: 'linear' | 'nearest' = this.settings.imageSmoothing ? 'linear' : 'nearest';
     this.channelView = new MultiChannelImageView(v);
     if (mode === 'multichannel') {
       const views = planes.map((d, c) => this.tintedChannelView(c, states, desc, typedPlane(d), scale));
@@ -635,7 +614,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     const states = this.store.currentChannelStates();
     const channelCount = desc.channels ?? (states.length || 1);
     const multichannel = !!desc.multichannel && channelCount > 1;
-    const interpolation: 'linear' | 'nearest' = this.imageSmoothing ? 'linear' : 'nearest';
+    const interpolation: 'linear' | 'nearest' = this.settings.imageSmoothing ? 'linear' : 'nearest';
 
     this.tiled = true;
     this.channelView = new MultiChannelImageView(v);
@@ -835,7 +814,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.navigator = new NapariNavigator(
       this.host, this.viewer, this.imageW, this.imageH, () => this.hover?.hide(),
     );
-    this.navigator.setVisible(this.navigatorVisible);
+    this.navigator.setVisible(this.settings.navigatorVisible);
     void this.refreshNavigatorImage(z);
   }
 
@@ -904,7 +883,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
 
   /** Show/hide the overview navigator (same setting as OSD's). */
   setNavigatorVisible(visible: boolean): void {
-    this.navigatorVisible = visible;
+    this.settings.navigatorVisible = visible;
     this.navigator?.setVisible(visible);
   }
 
@@ -927,7 +906,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     const simpleMc = isServerlessMultichannel(this.simpleStack.isSimple(info), info);
     const channelCount = simpleMc ? info!.imageMeta![0].channelCount : (desc?.channels ?? 1);
     const multichannel = simpleMc || (!!desc?.multichannel && channelCount > 1);
-    const res = volumeResolutionFor(this.resolutionScale);
+    const res = volumeResolutionFor(this.settings.resolutionScale);
     const rendering: 'iso' | 'mip' = isNapariIsosurface(plotType) ? 'iso' : 'mip';
     const states = this.store.currentChannelStates();
 
@@ -1031,7 +1010,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     // `volumeZScale` (user drag) applies on top so changing resolution keeps the chosen height.
     this.volumeWorldBase = world;
     this.volumeSampledDepth = Math.max(1, dims.depth);
-    const worldZ = world.depth * this.volumeZScale;
+    const worldZ = world.depth * this.settings.volumeZScale;
     const voxelSize: [number, number, number] = [
       world.width / dims.width,
       world.height / dims.height,
@@ -1046,14 +1025,14 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
 
     // 3D coordinate-axes / scale gizmo + labels, sharing the volume's world box so the gizmo tracks
     // the rendered proportions. Physical scale text still comes from the FULL image extent.
-    this.axesLayer = viewer.addAxes(world.width, world.height, worldZ, { visible: this.axesVisible });
+    this.axesLayer = viewer.addAxes(world.width, world.height, worldZ, { visible: this.settings.axesVisible });
     if (this.host) {
       this.axesLabels = new NapariAxesLabels(
         this.host,
         viewer.camera3d,
         this.buildAxesLabels({ width: world.width, height: world.height, depth: worldZ }),
       );
-      this.axesLabels.setVisible(this.axesVisible);
+      this.axesLabels.setVisible(this.settings.axesVisible);
       // In-view drag handle at the TOP END OF THE Z AXIS (the box's min-XY corner, where the blue
       // "Z" axis + label live), so it reads as the Z-height control. Floated a little past the axis
       // tip (×1.12) so the grip clears the "Z · …" label. Drag ↕ to restretch Z live.
@@ -1061,9 +1040,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
         topAnchor: () => [
           -this.volumeWorldBase!.width / 2,
           -this.volumeWorldBase!.height / 2,
-          ((this.volumeWorldBase!.depth * this.volumeZScale) / 2) * 1.12,
+          ((this.volumeWorldBase!.depth * this.settings.volumeZScale) / 2) * 1.12,
         ],
-        getScale: () => this.volumeZScale,
+        getScale: () => this.settings.volumeZScale,
         setScale: (s) => this.setVolumeZScale(s),
       });
     }
@@ -1077,10 +1056,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
    * (resolution changes) so the chosen height sticks.
    */
   private setVolumeZScale(factor: number): void {
-    this.volumeZScale = Math.min(10, Math.max(0.1, factor));
+    this.settings.volumeZScale = Math.min(10, Math.max(0.1, factor));
     const base = this.volumeWorldBase;
     if (!base || !this.volumeView) return;
-    const worldZ = base.depth * this.volumeZScale;
+    const worldZ = base.depth * this.settings.volumeZScale;
     const vsZ = worldZ / this.volumeSampledDepth;
     for (const layer of this.volumeView.layers) {
       const [sx, sy] = layer.voxelSize;
@@ -1214,7 +1193,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     // this fits to those — and because it defers to a frame, it lands AFTER the points
     // are added and overwrites the framing they set. That is what left an image-less
     // dataset as a ten-pixel speck off to one side.
-    if (this.spatialLatest?.[0]?.imageRef) this.fitCameraSoon();
+    if (this.spatial.latest?.[0]?.imageRef) this.fitCameraSoon();
     this.subscribeDisplayState();
     // The scale bar and navigator describe an image; with none loaded, whatever they would
     // read is left over from the last one.
@@ -1235,7 +1214,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
    * noise. Zoomed out past the outline threshold, the circles stand in for the cells.
    */
   private spatialPointsVisible(): boolean {
-    const view = this.spatialLatest?.[1];
+    const view = this.spatial.latest?.[1];
     return (view?.showPoints ?? true) && !this.spatialTilesMgr?.outlinesShown;
   }
 
@@ -1247,7 +1226,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     const port = this.spatialData;
     if (!port) return null;
     this.spatialTilesMgr ??= new NapariSpatialTileLayers(port, {
-      latest: () => this.spatialLatest,
+      latest: () => this.spatial.latest,
       canvasSize: () => [this.canvas?.clientWidth ?? 0, this.canvas?.clientHeight ?? 0],
       continuousLut: (view) => {
         return this.display.spatialLut(view);
@@ -1270,16 +1249,15 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   /** The spatial views' tooltip and click-to-select, over the scene just mounted. */
   private installSpatialHover(host: HTMLElement): void {
     this.hover?.dispose();
-    const is3d = isSpatialOmics3d(this.currentPlotType);
     this.hover = new SpatialHover({
-      is3d,
+      is3d: false,
       viewer: this.viewer!,
       canvas: this.canvas!,
       port: this.spatialData,
       selection: this.selectionStore,
-      dataset: () => this.spatialLatest?.[0] ?? null,
-      positions: (obs) => (is3d ? this.getSpatialScreenProjection(obs) : this.hoverWorldPositions(obs)),
-      depths: () => this.spatialDepths3d,
+      dataset: () => this.spatial.latest?.[0] ?? null,
+      positions: (obs) => this.hoverWorldPositions(obs),
+      depths: () => null,
       tiles: () => this.spatialTilesMgr,
       toolActive: () => !!this.tools.regionOverlay?.toolActive,
       outsideZone: (fn) => this.zone.runOutsideAngular(fn),
@@ -1294,7 +1272,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
    * built from, so the tooltip cannot point at a cell that is not drawn.
    */
   private hoverWorldPositions(obs: SpatialObservations): Float32Array | null {
-    const dataset = this.spatialLatest?.[0];
+    const dataset = this.spatial.latest?.[0];
     if (!dataset || obs.count === 0) return null;
     const slab = this.spatialSlab(dataset);
     const ref = slab?.ref ?? dataset.imageRef;
@@ -1311,48 +1289,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     return out;
   }
 
-  /**
-   * Project every observation to canvas pixels under the current 3D camera.
-   *
-   * The projection itself is the renderer's: `viewer.projectPoints` owns the camera, the
-   * viewport in CSS pixels, the perspective divide and the y-flip. This used to be fifteen
-   * lines of column-major matrix arithmetic here, duplicating a second copy in
-   * `napari-axes-labels` — and the two had drifted on what to do with a NaN w.
-   *
-   * What is left is the part that is genuinely this adapter's: SCATTERING the drawn subset
-   * back into observation order. The cloud holds only the points of the displayed section,
-   * in its own packing; every consumer indexes by observation. NaN stands for "not on
-   * screen", which is also the right answer for an observation whose section is hidden.
-   *
-   * Null when the 3D cloud is not mounted, so the caller falls back to the 2D affine path.
-   */
+  /** Observations projected to canvas pixels under the 3D camera (the spatial 3D cloud), indexed
+   *  by observation with NaN for any not drawn; null when no cloud is mounted. */
   getSpatialScreenProjection(obs: SpatialObservations): Float32Array | null {
-    const viewer = this.viewer;
-    if (!viewer || !this.spatialPositions3d) return null;
-
-    const projected = viewer.projectPoints(this.spatialPositions3d, this.spatialProjection3d);
-    if (!projected) return null;
-    // Reused across camera changes: at 3.7M observations this is a 30 MB allocation that
-    // would otherwise happen on every orbit.
-    this.spatialProjection3d = projected;
-
-    const drawn = this.spatialDrawn3d;
-    const { screen, depth } = projected;
-    const count = screen.length >> 1;
-    const out = new Float32Array(obs.count * 2).fill(NaN);
-    const depths = new Float32Array(obs.count).fill(NaN);
-    for (let k = 0; k < count; k++) {
-      const i = drawn ? drawn[k] : k;
-      if (i >= obs.count) continue;
-      out[i * 2] = screen[k * 2];
-      out[i * 2 + 1] = screen[k * 2 + 1];
-      depths[i] = depth[k];
-    }
-    // Kept beside the screen positions so the hover pick can prefer the FRONT-most point
-    // under the cursor rather than the one nearest its centre — which in a dense cloud is
-    // regularly something the renderer drew another point over.
-    this.spatialDepths3d = depths;
-    return out;
+    return this.scene?.screenProjection?.(obs) ?? null;
   }
 
   /** Rebuild the markers on any dataset or view-state change. */
@@ -1371,15 +1311,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       this.display.record((colormap as ColormapNode) ?? null, !!reverse);
       // Kept so a slice change can redraw the markers for the new plane, which
       // arrives through setZIndex rather than through any of these streams.
-      this.spatialLatest = [dataset, view, selection];
+      this.spatial.latest = [dataset, view, selection];
       // The markers are about to move or change meaning, so both halves of the
       // tooltip — where the points are, and what they are — are stale.
       this.hover?.invalidate();
       void this.hover?.resolveSource(dataset, view);
-      void (isSpatialOmics3d(this.currentPlotType)
-        ? this.rebuildSpatialPoints3d(dataset, view, selection)
-        : this.rebuildSpatialPoints(dataset, view, selection));
-      if (!isSpatialOmics3d(this.currentPlotType)) this.spatialTilesMgr?.refresh();
+      void this.rebuildSpatialPoints(dataset, view, selection);
+      this.spatialTilesMgr?.refresh();
     });
   }
 
@@ -1562,7 +1500,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
    */
   private hideForeignImage(viewer: Viewer, datasetHasPixels: boolean): void {
     // No image of its own → nothing for an overview to show either.
-    this.navigator?.setVisible(datasetHasPixels && this.navigatorVisible);
+    this.navigator?.setVisible(datasetHasPixels && this.settings.navigatorVisible);
     for (const layer of viewer.layers.items) {
       if (layer.kind !== 'image') continue;
       // The transcript-density raster and the gene map are image layers too, but they are
@@ -1644,7 +1582,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     // the colours depend on the window, the log flag and the opacity. Recolouring a
     // cached field is a fraction of estimating one.
     const fieldKey = gene
-      ? [dataset.id, gene, slab?.slice ?? '', smoothing, this.selectionRev(selection)].join('|')
+      ? [dataset.id, gene, slab?.slice ?? '', smoothing, this.spatial.selectionRev(selection)].join('|')
       : null;
     const key = fieldKey
       ? [
@@ -1669,8 +1607,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     }
     this.geneMapKey = key;
     if (!key || !gene || !port) {
-      this.geneMapField = null;
-      this.geneMapFieldKey = null;
+      this.spatial.geneMap.field = null;
+      this.spatial.geneMap.key = null;
       return;
     }
 
@@ -1687,7 +1625,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       Math.ceil(Math.max(imageW, imageH) / GENE_MAP_MAX_SIDE),
     );
 
-    if (fieldKey !== this.geneMapFieldKey) {
+    if (fieldKey !== this.spatial.geneMap.key) {
       let values: Float32Array;
       try {
         values = await port.getFeatureVector(gene);
@@ -1698,7 +1636,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       }
       if (this.viewer !== viewer || this.geneMapKey !== key) return;
       const inSelection = selection.count > 0 ? maskToIndices(selection.mask) : undefined;
-      this.geneMapField = expressionField(dataset.observations, {
+      this.spatial.geneMap.field = expressionField(dataset.observations, {
         ref: slab?.ref ?? dataset.imageRef,
         width: Math.ceil(imageW / step),
         height: Math.ceil(imageH / step),
@@ -1709,9 +1647,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
         // field spanning the specimen's depth would not be the thing on screen.
         indices: slab?.indices ?? inSelection,
       });
-      this.geneMapFieldKey = fieldKey;
+      this.spatial.geneMap.key = fieldKey;
     }
-    const field = this.geneMapField;
+    const field = this.spatial.geneMap.field;
     if (!field) return;
 
     const lut = this.display.spatialLut(view);
@@ -1771,621 +1709,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
    * any, in the 3D cloud (no image, no plane), and with no dataset to draw.
    */
   private redrawSpatialMarkers(): void {
-    const latest = this.spatialLatest;
+    const latest = this.spatial.latest;
     if (!latest?.[0] || isSpatialOmics3d(this.currentPlotType)) return;
     void this.rebuildSpatialPoints(...latest);
-  }
-
-  /**
-   * Mount the SPATIAL_OMICS_3D view: observations as a 3D point cloud under the orbit camera.
-   *
-   * Thinner than the 2D mount: there is no tissue image to render (a registered volume like the
-   * Allen CCF has no single reference plane), so no readback and no navigator; the 3D scale bar
-   * follows the dataset (see {@link installSpatial3dScaleBar}). The region tools work in SCREEN
-   * space through {@link install3dInteraction} — a lasso selects the cells under it, and an orbit
-   * clears the shape while keeping the selection. The first 3D layer added frames the camera
-   * (`fit3d: 'once'`).
-   */
-  private async mountSpatialOmics3d(viewer: Viewer, host: HTMLElement): Promise<void> {
-    this.tools.install3dInteraction(viewer, host);
-    this.installSpatialHover(host);
-    this.subscribeSpatial();
-  }
-
-  /**
-   * Scale bar for the 3D cloud, measured at the ORBIT PIVOT.
-   *
-   * A perspective camera has no single scale — things farther away are smaller — so a bar can
-   * only be true at one depth. The pivot is the honest choice: it is what the camera is framing,
-   * what a zoom moves towards, and where the eye is anyway. napari's own 3D scale bar works the
-   * same way.
-   *
-   * `NapariScaleBar` needs CSS px per world unit, which an orbit camera does not expose, but at
-   * the pivot it is exactly `viewportHeight / (2 * distance * tan(fov / 2))` — the same
-   * relationship `Camera3D.pan` uses to track the cursor. The bar then converts through
-   * `micronsPerUnit`, and draws nothing at all when the dataset does not declare one, because a
-   * bar labelled in microns over unknown units would read as a measurement.
-   */
-  private installSpatial3dScaleBar(viewer: Viewer, dataset: SpatialDataset | null): void {
-    this.scaleBar?.destroy();
-    this.scaleBar = null;
-    this.navigator?.destroy();
-    this.navigator = null;
-    const micronsPerUnit = dataset?.micronsPerUnit;
-    if (!this.host || !micronsPerUnit || micronsPerUnit <= 0) return;
-
-    const canvas = this.canvas;
-    const cam = viewer.camera3d;
-    const shim: ScaleBarCamera = {
-      get zoom(): number {
-        const h = canvas?.clientHeight || canvas?.height || 0;
-        const worldPerPx = (2 * cam.distance * Math.tan(cam.fov / 2)) / (h || 1);
-        return worldPerPx > 0 ? 1 / worldPerPx : 0;
-      },
-      changed: cam.changed,
-    };
-    this.scaleBar = new NapariScaleBar(this.host, shim, micronsPerUnit);
-  }
-
-  /** (Re)build the 3D point cloud for the current dataset + view state. */
-  private async rebuildSpatialPoints3d(
-    dataset: SpatialDataset | null, view: SpatialViewState,
-    selection: SpatialSelectionMask = emptySelection(),
-  ): Promise<void> {
-    const viewer = this.viewer;
-    if (!viewer) return;
-    const token = ++this.spatialRebuildToken;
-
-    // Resolve the scalar encoding BEFORE touching the scene, for the same reason
-    // the 2D path does: a gene fetch can fail or be superseded, and dropping the
-    // layer first would blank the view.
-    let enc: Spatial3dEncoding | null = null;
-    if (dataset) {
-      const endLoading = this.badge.begin('Observations');
-      try {
-        enc = await this.spatialScalar3d(view);
-      } catch (err) {
-        console.warn('[napari-js] spatial 3D colouring failed — falling back to a flat colour', err);
-        enc = null;
-      } finally {
-        endLoading();
-      }
-    }
-    if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
-
-    const obs = dataset?.observations;
-    // No z means nothing to draw in 3D. The plot type is gated on `requiresSpatial3d`
-    // so this should be unreachable from the UI, but a host can set the type directly.
-    if (!dataset || !obs || obs.count === 0 || !obs.z) {
-      this.removeSpatial3dLayers(viewer);
-      return;
-    }
-
-    // Anatomy first: on a scene's FIRST layer napari frames the orbit camera, and
-    // the reference volume is the framing we want — the brain, not the outermost
-    // stray segmentation. Every later add keeps the pose instead (napari-js `fit3d: 'once'`).
-    await this.ensureSpatialVolume(viewer, dataset, view);
-    if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
-    // Then the cluster density volumes, which can set the centring offset when
-    // there is no reference volume — so before any position is computed from it.
-    await this.ensureDensityVolumes(viewer, dataset, view, selection);
-    if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
-    // Then the gene map, which shares the reference volume's lattice — so it goes
-    // after anything that can still move the centring offset.
-    await this.ensureGeneMapVolume(viewer, dataset, view, selection);
-    if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
-    // Scale depends on the dataset's declared unit, so it waits for the dataset
-    // rather than being set up at mount time.
-    if (dataset.id !== this.spatialScaleBarKey) {
-      this.spatialScaleBarKey = dataset.id;
-      this.installSpatial3dScaleBar(viewer, dataset);
-    }
-
-    // The reference volume is hidden, not removed: it also fixes the centring
-    // offset every position is computed from, and re-fetching a 100 MB template
-    // to un-hide it would make a checkbox feel like a load.
-    if (this.spatialVolume) {
-      this.spatialVolume.visible = view.showVolume;
-      this.spatialVolume.opacity = view.volumeOpacity;
-    }
-
-    const scale = view.pointScale > 0 ? view.pointScale : 1;
-    const size = SPATIAL_3D_BASE_SIZE * scale;
-    const scalars = enc?.values ?? new Float32Array(obs.count);
-    const colormap = enc?.colormap ?? spatialFlatColormap();
-    const contrastLimits: [number, number] = enc?.contrastLimits ?? [0, 1];
-
-    // One imaged section, or the whole stack. The subset IS the geometry, so it
-    // belongs in the geometry key rather than being re-derived per frame — and an
-    // out-of-range index is clamped rather than dropping the cloud, because the
-    // section count changes with the dataset while the view state persists.
-    const sections = sectionsOf(obs);
-    const section =
-      view.pointSection != null && sections && sections.length > 0
-        ? sections[Math.max(0, Math.min(sections.length - 1, view.pointSection))]
-        : null;
-    const shown = section != null ? observationsInSection(obs, section) : null;
-    const shownCount = shown ? shown.length : obs.count;
-
-    const key = `${dataset.id}:${obs.count}:${section ?? 'all'}`;
-    // Track the scalars' identity separately from the geometry's (`colorBy` plus the
-    // transforms feeding the encoding): a new colour source swaps `values` in place
-    // (napari-js ≥ 0.14), while a new geometry needs a new layer.
-    const clip = view.percentileClip ?? [0.01, 0.99];
-    const scalarKey = [
-      key,
-      view.colorBy ? `${view.colorBy.kind}:${view.colorBy.name}` : 'flat',
-      view.logScale ? 'log' : 'lin',
-      clip.join(','),
-    ].join('|');
-
-    if (key !== this.spatialLayerKey3d) {
-      // New geometry: interleave x,y,z (the layer's documented layout, x-fastest)
-      // and cache it, so later colour changes rebuild the layer without walking
-      // the observations again.
-      const [ox, oy, oz] = this.spatialOrigin3d;
-      const positions = new Float32Array(shownCount * 3);
-      for (let k = 0; k < shownCount; k++) {
-        const i = shown ? shown[k] : k;
-        positions[k * 3] = obs.x[i] + ox;
-        positions[k * 3 + 1] = obs.y[i] + oy;
-        positions[k * 3 + 2] = obs.z[i] + oz;
-      }
-      this.spatialPositions3d = positions;
-      this.spatialDrawn3d = shown;
-    }
-
-    // The scalars have to follow the geometry: a per-observation vector against one
-    // section's positions would colour each cell by a stranger's value.
-    const valuesFor = () => (shown ? Float32Array.from(shown, (i) => scalars[i]) : scalars);
-
-    if (!this.spatialPoints3d || key !== this.spatialLayerKey3d) {
-      // New GEOMETRY — a different dataset, or a different section — so a new layer.
-      if (this.spatialPoints3d) viewer.layers.remove(this.spatialPoints3d);
-      this.spatialLayerKey3d = key;
-      this.spatialScalarKey3d = scalarKey;
-      this.spatialPoints3d = viewer.addPoints3D(this.spatialPositions3d!, valuesFor(), {
-        name: 'observations',
-        colormap,
-        contrastLimits,
-        size,
-      });
-    } else {
-      if (scalarKey !== this.spatialScalarKey3d) {
-        // A change of colour SOURCE, which used to mean discarding the layer and building
-        // another — and, because adding a 3D layer reframes, a camera jump to undo as well.
-        // napari-js ≥ 0.14 lets the scalars be replaced in place — the setter bumps the
-        // layer's dataVersion so the visual re-uploads — and the positions have not moved,
-        // so there is nothing for the camera to reframe.
-        this.spatialScalarKey3d = scalarKey;
-        this.spatialPoints3d.values = valuesFor();
-      }
-      this.spatialPoints3d.colormap = colormap;
-      this.spatialPoints3d.contrastLimits = contrastLimits;
-      this.spatialPoints3d.size = size;
-    }
-
-    // Selection is a PER-POINT alpha, in the one layer.
-    //
-    // It used to be a second layer: with a single opacity for the whole cloud, the only way
-    // to highlight a subset was to draw it again on top at full opacity while the parent
-    // dropped to the muted level. That second layer had to be kept in step through every
-    // colormap, window and size change, and the two then depth-sorted against each other as
-    // separate draws. Per-point alphas and sizes give the same reading — muted cloud, bright
-    // selection, slightly larger so a small one is findable inside 3.7M points — in one.
-    const hasSelection = selection.count > 0 && selection.mask.length === obs.count;
-    const cloud = this.spatialPoints3d;
-    if (cloud) {
-      cloud.opacity = view.opacity;
-      if (!hasSelection) {
-        cloud.alphas = null;
-        cloud.sizes = null;
-      } else {
-        const alphas = new Float32Array(shownCount);
-        const sizes = new Float32Array(shownCount);
-        for (let k = 0; k < shownCount; k++) {
-          const i = shown ? shown[k] : k;
-          const picked = !!selection.mask[i];
-          alphas[k] = picked ? 1 : DEFAULT_MUTED_OPACITY;
-          sizes[k] = picked ? SPATIAL_SELECTED_SIZE_SCALE : 1;
-        }
-        cloud.alphas = alphas;
-        cloud.sizes = sizes;
-      }
-    }
-    // Last, so it also covers a layer this pass just created.
-    if (this.spatialPoints3d) this.spatialPoints3d.visible = view.showPoints;
-    viewer.requestRender();
-  }
-
-  /**
-   * The **3D gene map**: the active gene's expression over the whole sectioned
-   * specimen, as one raymarched volume.
-   *
-   * Two things it can be, and the panel's `Volume rendering` toggle picks which:
-   *
-   *  - **sheets** — exactly the planes that were imaged, each carrying that
-   *    slide's own 2D gene map, with the gaps between sections empty. A stack of
-   *    measured fields, at their true z.
-   *  - **volume** — the same fields smoothed along z, so the planes between the
-   *    sections carry an interpolated value. An estimate, and drawn as a
-   *    translucent cloud for the same reason the density volumes are.
-   *
-   * One `VolumeLayer` rather than a textured quad per section: an `ImageLayer`
-   * renders only at `ndisplay === 2`, so 53 sheets in the orbit view would need a
-   * new layer type upstream — while a scalar volume whose z sampling already IS
-   * the section spacing expresses the sheets exactly, and the same lattice then
-   * gives the interpolated version for free.
-   *
-   * Estimated on the reference volume's own lattice (`densityGrid` at stride 1),
-   * so the field lands voxel-for-voxel on the anatomy and needs no offset — a
-   * `VolumeLayer` has no translate, and napari centres both boxes on the world
-   * origin.
-   */
-  private async ensureGeneMapVolume(
-    viewer: Viewer, dataset: SpatialDataset, view: SpatialViewState,
-    selection: SpatialSelectionMask,
-  ): Promise<void> {
-    const gene = view.geneMap && view.colorBy?.kind === 'feature' ? view.colorBy.name : null;
-    const port = this.spatialData;
-    const smoothing = view.geneMapSmoothing > 0 ? view.geneMapSmoothing : 1;
-    const clip = view.percentileClip ?? [0.01, 0.99];
-    const obs = dataset.observations;
-    // A volume built from ONE section would smear that slide through the whole
-    // depth, so the section restriction only applies to the sheets.
-    const interpolate = !!view.geneMapVolume;
-    const sections = sectionsOf(obs);
-    const section =
-      !interpolate && view.geneMapSection != null && sections && sections.length > 0
-        ? sections[Math.max(0, Math.min(sections.length - 1, view.geneMapSection))]
-        : null;
-
-    const fieldKey = gene
-      ? [
-        dataset.id, gene, smoothing, section ?? 'all', interpolate ? 'vol' : 'sheets',
-        this.selectionRev(selection),
-      ].join('|')
-      : null;
-    const key = fieldKey
-      ? [
-        fieldKey, clip.join(','), view.logScale ? 'log' : 'lin', view.geneMapOpacity,
-        this.display.continuousColormapKey(view),
-      ].join('|')
-      : null;
-    if (key === this.geneMapVolumeKey) return;
-
-    if (this.geneMapVolumeLayer) {
-      viewer.layers.remove(this.geneMapVolumeLayer);
-      this.geneMapVolumeLayer = null;
-    }
-    this.geneMapVolumeKey = key;
-    if (!key || !gene || !port) {
-      this.geneMapVolumeField = null;
-      this.geneMapVolumeFieldKey = null;
-      return;
-    }
-
-    // Coarsened in-plane but NOT along z: the sheets need one plane per imaged
-    // section, while the field they carry is smooth by construction and gains
-    // nothing from the template's 40 µm detail. At full resolution the estimate is
-    // a 5.7M-voxel pair of blurs on the main thread — seconds of frozen UI for a
-    // checkbox; an eighth of the voxels is an eighth of the work.
-    const grid = densityGrid(dataset, GENE_MAP_VOLUME_STRIDE, 128, 1);
-    if (!grid) return;
-
-    if (fieldKey !== this.geneMapVolumeFieldKey) {
-      let values: Float32Array;
-      try {
-        values = await port.getFeatureVector(gene);
-      } catch (err) {
-        console.warn(`[napari-js] 3D gene map: "${gene}" unavailable`, err);
-        this.geneMapVolumeKey = null;
-        return;
-      }
-      if (this.viewer !== viewer || this.geneMapVolumeKey !== key) return;
-      const inSelection = selection.count > 0 ? maskToIndices(selection.mask) : undefined;
-      // In-plane σ is a PHYSICAL bandwidth, anchored to the reference volume's own
-      // voxel — the resolution the 2D map estimates at — so a sheet and the 2D
-      // view of the same section are the same field whatever lattice this is
-      // rasterised on. Along z it is the density path's 1.5 voxels: the smallest σ
-      // that bridges one section gap.
-      const inPlane = dataset.volume?.voxelSize ?? grid.voxelSize;
-      this.geneMapVolumeField = expressionVolume(obs, grid, {
-        sigma: [
-          inPlane[0] * GENE_MAP_SIGMA * smoothing,
-          inPlane[1] * GENE_MAP_SIGMA * smoothing,
-          grid.voxelSize[2] * 1.5 * smoothing,
-        ],
-        values,
-        indices: section != null ? observationsInSection(obs, section) : inSelection,
-        interpolate,
-      });
-      this.geneMapVolumeFieldKey = fieldKey;
-    }
-    const field = this.geneMapVolumeField;
-    if (!field) return;
-
-    // The high end over the MEASURED voxels only (the unmeasured zeros would pull it down and
-    // saturate the map), but the low end stays 0: in a volume the value is also the opacity and
-    // 0 reads as "nothing here", so starting at the lowest measured value would erase it.
-    const [, hi] = fieldContrastWindow(field, clip[0], clip[1]);
-    const lo = 0;
-    const data = encodeExpressionVolume(field, [lo, hi], { log: view.logScale });
-    const lut = this.display.spatialLut(view);
-    this.geneMapVolumeLayer = viewer.addVolume(
-      data, field.width, field.height, field.depth,
-      {
-        name: `gene map · ${gene}${interpolate ? ' · volume' : ''}`,
-        colormap: colormapFromLut(`gene-map-${gene}`, lut),
-        // The encoding already applied the window, so the layer must not apply a
-        // second one: 0..255 is the whole of what it was given.
-        contrastLimits: [0, 255],
-        rendering: 'translucent',
-        // Additive like the density volumes, and for the same reason: the sheets
-        // have to read THROUGH each other and through the anatomy, which a
-        // translucent blend would occlude one sheet at a time.
-        blending: 'additive',
-        opacity: view.geneMapOpacity,
-        voxelSize: grid.voxelSize,
-      },
-    );
-    viewer.requestRender();
-  }
-
-  /**
-   * Cluster density volumes: each cluster rasterised into a smooth scalar field and
-   * raymarched alongside the cloud, tinted with the cluster's own legend colour.
-   *
-   * This is what makes a serially sectioned dataset readable as an anatomical
-   * distribution. The cloud shows measured cells and nothing else — but at 200 µm
-   * section spacing the eye cannot integrate a stack of discs into a shape, and
-   * every gap reads as absence. A density field is a different object from a cell:
-   * an estimate, defined between the imaged planes, drawn as a translucent cloud so
-   * it cannot be mistaken for measurement. Individual cells are never interpolated —
-   * consecutive sections sample different cells, so there is nothing to interpolate
-   * along.
-   *
-   * One volume per cluster rather than one for everything: additive blending is what
-   * makes two clusters' territories comparable, and a single blended field would
-   * answer no question anyone asks of a taxonomy. Capped at
-   * {@link DENSITY_MAX_CLUSTERS} by cell count.
-   *
-   * Keyed so it rebuilds only when the field would actually differ — the dataset,
-   * the colour column, the bandwidth, or the selection.
-   */
-  private async ensureDensityVolumes(
-    viewer: Viewer, dataset: SpatialDataset, view: SpatialViewState,
-    selection: SpatialSelectionMask,
-  ): Promise<void> {
-    const on = !!view.densityVolume && !!dataset.observations.z;
-    const smoothing = view.densitySmoothing > 0 ? view.densitySmoothing : 1;
-    const column = view.colorBy?.kind === 'column' ? view.colorBy.name : null;
-    // The selection enters the key by IDENTITY, not by count: two different ROIs
-    // holding the same number of cells would otherwise look like the same key and
-    // leave the previous ROI's fields on screen.
-    const key = on
-      ? [dataset.id, column ?? 'all', smoothing, this.selectionRev(selection)].join('|')
-      : null;
-    if (key === this.densityKey) return;
-
-    for (const layer of this.densityLayers) viewer.layers.remove(layer);
-    this.densityLayers = [];
-    this.densityKey = key;
-    if (!key) return;
-
-    const grid = densityGrid(dataset);
-    if (!grid) return;
-    // With no reference volume there is no offset yet, and a VolumeLayer has no
-    // translate — napari centres its box on the world origin. So the POINTS move by
-    // half the density box, exactly as they do for a reference volume, and the
-    // cached geometry is invalidated because that offset just changed.
-    if (!this.spatialVolume) {
-      this.spatialOrigin3d = [
-        -(grid.width * grid.voxelSize[0]) / 2,
-        -(grid.height * grid.voxelSize[1]) / 2,
-        -(grid.depth * grid.voxelSize[2]) / 2,
-      ];
-      this.spatialLayerKey3d = null;
-    }
-
-    let groups: { name: string; color: string; indices?: Uint32Array }[];
-    try {
-      groups = await this.densityGroups(dataset, column, selection);
-    } catch (err) {
-      console.warn('[napari-js] density volumes: column unavailable', err);
-      this.densityKey = null;
-      return;
-    }
-    if (this.viewer !== viewer || this.densityKey !== key) return;
-
-    const sigma = defaultSigma(grid, smoothing);
-    // Additive blending SUMS, so a fixed per-layer opacity blows out to white as
-    // soon as several broad clusters overlap — six subclasses at 0.55 each turned
-    // the brain into one cyan mass. Splitting the budget keeps n fully overlapping
-    // peaks inside the display's range, so overlap reads as overlap; a single
-    // cluster still gets the full 0.55. It only mitigates: a translucent raymarch
-    // integrates along the ray, so clusters that are ubiquitous rather than
-    // regional (the largest subclasses are glia, which are everywhere) still pile
-    // up, and one cluster at a time is the readable way to look at those.
-    const opacity = Math.min(0.55, 0.9 / Math.max(1, groups.length));
-    for (const group of groups) {
-      const data = rasterizeDensity(dataset.observations, grid, { sigma, indices: group.indices });
-      // A cluster with nothing on the grid draws no layer, rather than an empty box.
-      if (!data) continue;
-      if (this.viewer !== viewer || this.densityKey !== key) return;
-      this.densityLayers.push(
-        (
-          viewer.addVolume(data, grid.width, grid.height, grid.depth, {
-            name: `density · ${group.name}`,
-            colormap: this.display.channelTintColormap(group.color),
-            // Translucent, not MIP: a cluster's interior is the readable part, and MIP
-            // would flatten every cloud to its brightest shell.
-            rendering: 'translucent',
-            opacity,
-            // Additive, so two clusters overlapping read as both being there instead
-            // of the nearer one hiding the other.
-            blending: 'additive',
-            voxelSize: grid.voxelSize,
-          })),
-      );
-    }
-    viewer.requestRender();
-  }
-
-  /**
-   * A revision number for a selection object.
-   *
-   * The store hands out a NEW mask object per change, so object identity is the
-   * cheap and exact way to tell two selections apart — a fingerprint over 3.7M
-   * mask bytes would be neither. Counting revisions keeps the cache key a short
-   * string.
-   */
-  private selectionRev(selection: SpatialSelectionMask): number {
-    if (selection !== this.lastSelectionSeen) {
-      this.lastSelectionSeen = selection;
-      this.selectionRevision++;
-    }
-    return this.selectionRevision;
-  }
-
-  /**
-   * The clusters to rasterise: the categories of the active categorical colouring,
-   * biggest first and capped, each with its legend colour.
-   *
-   * Restricted to the current selection when there is one, so "select a region,
-   * check the box" answers which clusters live there. With no categorical colouring
-   * there is one group — total cell density, which is a real question on its own
-   * ("where is the tissue dense?") and the honest thing to show when the view is
-   * not encoding a taxonomy.
-   */
-  private async densityGroups(
-    dataset: SpatialDataset, column: string | null, selection: SpatialSelectionMask,
-  ): Promise<DensityGroup[]> {
-    const port = this.spatialData;
-    const meta = column ? findColumnMeta(dataset, column) : undefined;
-    if (!port || !column || !meta || meta.kind !== 'categorical') return [totalDensityGroup(selection)];
-    const loaded = await port.getColumn(column);
-    if (!isCategoricalColumn(loaded)) return [];
-    return rankDensityGroups(column, loaded, dataset.observations.count, selection);
-  }
-
-  /**
-   * Add (or keep) the dataset's reference volume, and derive the offset that sits the
-   * observations inside it.
-   *
-   * `VolumeLayer` has no translate: napari-js maps the volume's unit cube to a world box
-   * **centred on the origin**, sized `dims x voxelSize`. The observations, by contract, are in
-   * the volume's own frame with its near corner at the coordinate origin. So the two only line
-   * up if the POINTS move — by half the box — which is what {@link spatialOrigin3d} is.
-   *
-   * A failed or absent volume is not fatal: the cloud renders on its own, at its own
-   * coordinates, and the camera frames the points instead.
-   */
-  private async ensureSpatialVolume(
-    viewer: Viewer, dataset: SpatialDataset, view: SpatialViewState,
-  ): Promise<void> {
-    const meta = dataset.volume;
-    const port = this.spatialData;
-    const key = meta ? `${dataset.id}:${meta.width}x${meta.height}x${meta.depth}` : null;
-    if (key && key === this.spatialVolumeKey) return;
-
-    if (this.spatialVolume) {
-      viewer.layers.remove(this.spatialVolume);
-      this.spatialVolume = null;
-      this.spatialVolumeKey = null;
-    }
-    this.spatialOrigin3d = [0, 0, 0];
-    if (!meta || !port?.getVolume) return;
-
-    let voxels: Uint8Array;
-    try {
-      voxels = await port.getVolume();
-    } catch (err) {
-      console.warn('[napari-js] reference volume unavailable — drawing the cloud alone', err);
-      return;
-    }
-    if (this.viewer !== viewer) return;
-
-    const [vx, vy, vz] = meta.voxelSize;
-    this.spatialVolumeKey = key;
-    this.spatialVolume = (
-      viewer.addVolume(voxels, meta.width, meta.height, meta.depth, {
-      name: 'reference volume',
-      colormap: 'gray',
-      // MIP would draw the brightest voxel along each ray, which for an averaged
-      // template means a flat white shell that hides the cloud. Translucent lets
-      // the points read through the tissue, which is the entire point of drawing
-      // them together.
-      rendering: 'translucent',
-      opacity: view.volumeOpacity,
-        voxelSize: [vx, vy, vz],
-      }));
-    // Half the box, negated: the observations' origin is the box's near corner,
-    // and the box is centred on the world origin.
-    this.spatialOrigin3d = [
-      -(meta.width * vx) / 2,
-      -(meta.height * vy) / 2,
-      -(meta.depth * vz) / 2,
-    ];
-    // Force a geometry rebuild: the offset changed, so cached positions are stale.
-    this.spatialLayerKey3d = null;
-  }
-
-  private removeSpatial3dLayers(viewer: Viewer): void {
-    for (const layer of [
-      this.spatialPoints3d, this.spatialVolume,
-      this.geneMapVolumeLayer, ...this.densityLayers,
-    ]) {
-      if (layer) viewer.layers.remove(layer);
-    }
-    this.geneMapVolumeLayer = null;
-    this.geneMapVolumeKey = null;
-    this.geneMapVolumeField = null;
-    this.geneMapVolumeFieldKey = null;
-    this.densityLayers = [];
-    this.densityKey = null;
-    // The scene is gone, so the next 3D layer should frame itself again. That used to be
-    // `spatialFramed = null` next to a hand-rolled save/restore; the renderer owns the
-    // policy now, and this is the same statement addressed to it.
-    viewer.resetFit3D();
-    this.spatial2dFramed = null;
-    this.spatialVolume = null;
-    this.spatialVolumeKey = null;
-    this.spatialOrigin3d = [0, 0, 0];
-    this.spatialPoints3d = null;
-    this.spatialLayerKey3d = null;
-    this.spatialScalarKey3d = null;
-    this.spatialPositions3d = null;
-    this.spatialDrawn3d = null;
-  }
-
-  /**
-   * The per-point scalar + colormap + window that colour the 3D cloud.
-   *
-   * Continuous data is the natural fit: values go straight through the active colormap with the
-   * same percentile window the 2D path uses. Categorical data has to be smuggled through the same
-   * scalar channel — see {@link SPATIAL_3D_MAX_CATEGORIES}. Codes map to LUT blocks, and
-   * `contrastLimits` of `[-0.5, K - 0.5]` puts code `i` at the centre of block `i`, which is what
-   * makes the round-trip exact instead of approximately right.
-   */
-  private async spatialScalar3d(view: SpatialViewState): Promise<Spatial3dEncoding | null> {
-    const port = this.spatialData;
-    const colorBy = view.colorBy;
-    if (!port || !colorBy) return null;
-
-    if (colorBy.kind === 'column') {
-      const column: SpatialColumn = await port.getColumn(colorBy.name);
-      if (isCategoricalColumn(column)) {
-        return encodeSpatial3dCategorical(column.codes, resolveCategoryColors(column.meta));
-      }
-      return this.encodeSpatial3dContinuous(column.values, view);
-    }
-    return this.encodeSpatial3dContinuous(await port.getFeatureVector(colorBy.name), view);
-  }
-
-  /** Continuous values → the active colormap over a percentile-clipped window (3D cloud). */
-  private encodeSpatial3dContinuous(source: Float32Array, view: SpatialViewState): Spatial3dEncoding {
-    return encodeSpatial3dContinuous(source, view, this.display.spatialLut(view), this.contrastWindows);
   }
 
   /**
@@ -2451,7 +1777,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private encodeSpatialContinuous(
     values: Float32Array, view: SpatialViewState, muted: Uint8Array | null = null,
   ): Float32Array {
-    return encodeSpatialContinuous(values, view, this.display.spatialLut(view), this.contrastWindows, muted);
+    const lut = this.display.spatialLut(view);
+    return encodeSpatialContinuous(values, view, lut, this.spatial.contrastWindows, muted);
   }
 
   /**
@@ -2462,7 +1789,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private async mountScatter3d(viewer: Viewer, info: IImageInfo | undefined): Promise<void> {
     this.imageMode = 'grayscale';
     this.volumeMultichannel = false;
-    const res = volumeResolutionFor(this.resolutionScale);
+    const res = volumeResolutionFor(this.settings.resolutionScale);
     this.stackLoading$.next(true);
     this.stackLoadingProgress$.next(0);
     let vol: { data: Uint8Array; width: number; height: number; depth: number } | null = null;
@@ -2537,7 +1864,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.surfaceMultichannel = multichannel;
     // A height field is single-scalar → follow the pane-SELECTED channel.
     this.surfaceChannel = multichannel ? this.store.currentSelectedChannel() : undefined;
-    this.surfaceMaxGrid = surfaceResolutionFor(this.resolutionScale).maxGrid;
+    this.surfaceMaxGrid = surfaceResolutionFor(this.settings.resolutionScale).maxGrid;
     this.imageMode = 'grayscale';
     this.volumeMultichannel = false;
     await this.preloadSurfacePlanes(viewer);
@@ -2562,7 +1889,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     const voxel = mppX > 0 ? (mppX * (desc?.width ?? this.imageW)) / Math.max(1, this.imageW) : 1;
     this.axesLayer = viewer.addAxes(boxW, boxH, boxD, {
       voxelSize: [voxel, voxel, 1],
-      visible: this.axesVisible,
+      visible: this.settings.axesVisible,
     });
     if (this.host) {
       this.axesLabels = new NapariAxesLabels(
@@ -2570,7 +1897,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
         viewer.camera3d,
         this.buildSurfaceAxesLabels(boxW, boxH, boxD, mppX),
       );
-      this.axesLabels.setVisible(this.axesVisible);
+      this.axesLabels.setVisible(this.settings.axesVisible);
     }
   }
 
@@ -2613,7 +1940,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       preload.signal.aborted || loading.aborted || this.viewer !== viewer;
     const info = this.loaded?.imageInfo;
     const depth = stackDepth(info) || 1;
-    const { maxGrid } = surfaceResolutionFor(this.resolutionScale);
+    const { maxGrid } = surfaceResolutionFor(this.settings.resolutionScale);
     this.surfacePlanes.clear();
     this.stackLoading$.next(true);
     this.stackLoadingProgress$.next(0);
@@ -2701,7 +2028,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       colormap: this.display.volumeColormap(st),
       contrastLimits: win,
       gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
-      wireframe: this.surfaceWireframe,
+      wireframe: this.settings.surfaceWireframe,
     });
 
     this.imageW = plane.width;
@@ -2775,11 +2102,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
 
   reset(): void {
     this.mounted = null;
+    this.scene?.dispose();
+    this.scene = null;
     // End the previous scene: its frame loading, descriptor poll, tile counts and awaits.
     this.loading.abort();
     this.loading = new AbortController();
-    this.scene.abort();
-    this.scene = new AbortController();
+    this.lifetime.abort();
+    this.lifetime = new AbortController();
     this.displaySub?.unsubscribe();
     this.displaySub = null;
     this.scaleBar?.destroy();
@@ -2794,7 +2123,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.zHandle?.destroy();
     this.zHandle = null;
     this.volumeWorldBase = null;
-    this.tileClient.startScene(this.scene.signal);
+    this.tileClient.startScene(this.lifetime.signal);
     this.tiled = false;
     this.histGen++;
     this.histSamples.clear();
@@ -2819,26 +2148,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.hover = null;
     this.spatialPoints = null;
     this.spatialLayerKey = null;
-    this.spatialPoints3d = null;
-    this.spatialLayerKey3d = null;
-    this.spatialScalarKey3d = null;
-    this.spatialVolume = null;
-    this.spatialVolumeKey = null;
     // The gene maps' and density volumes' layers belonged to the disposed viewer, so their keys
     // must go with it: kept, the next viewer would see "already built" and never add them back.
     // The estimated FIELDS (geneMapField*, geneMapVolumeField*) are viewer-independent and stay
     // cached, so a re-plot recolours instead of re-estimating.
     this.geneMapLayer = null;
     this.geneMapKey = null;
-    this.geneMapVolumeLayer = null;
-    this.geneMapVolumeKey = null;
-    this.densityLayers = [];
-    this.densityKey = null;
-    this.spatialOrigin3d = [0, 0, 0];
-    this.spatialScaleBarKey = null;
-    // Drop the cached interleaved coordinates too: holding 3.7M x 3 floats after
-    // a teardown is ~45MB of retained heap for a scene that no longer exists.
-    this.spatialPositions3d = null;
     // Invalidate any colour fetch still in flight so it can't attach to the next scene.
     this.spatialRebuildToken++;
     this.scatter2dPoints = null;
@@ -2887,7 +2202,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   }
 
   setImageSmoothingEnabled(enabled: boolean): void {
-    this.imageSmoothing = enabled;
+    this.settings.imageSmoothing = enabled;
     // Apply live to the rendered image layers; baked into the next render too.
     this.channelView?.setInterpolation(enabled ? 'linear' : 'nearest');
   }
@@ -3053,13 +2368,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
 
   /** The napari 3D decimate factor (1 = full … 8 = ⅛). Read by the toolbar to init the control. */
   getResolutionScale(): number {
-    return this.resolutionScale;
+    return this.settings.resolutionScale;
   }
 
   /** Set the decimate factor for the napari 3D types. Takes effect on the next (re)load — the host
    *  re-plots after calling this, since decimation changes the fetched/assembled data. */
   setResolutionScale(scale: number): void {
-    this.resolutionScale = Math.max(1, Math.round(scale));
+    this.settings.resolutionScale = Math.max(1, Math.round(scale));
   }
 
   getIntensityProfile$(): Observable<IntensityProfile[]> {
@@ -3140,23 +2455,23 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       setSurfaceDragMode: (mode: string): void => this.setSurfaceDragMode(mode),
       resetSurfaceCamera: (): void => this.resetSurfaceCamera(),
       setAxesVisible: (visible: boolean): void => {
-        this.axesVisible = visible;
+        this.settings.axesVisible = visible;
         this.axesLabels?.setVisible(visible);
         if (this.axesLayer) {
           this.axesLayer.visible = visible;
           this.viewer?.requestRender();
         }
       },
-      axesVisible: (): boolean => this.axesVisible,
+      axesVisible: (): boolean => this.settings.axesVisible,
       // Surface wireframe (napari-js surface only) — a live layer property, no rebuild needed.
       setWireframe: (on: boolean): void => {
-        this.surfaceWireframe = on;
+        this.settings.surfaceWireframe = on;
         if (this.surfaceLayer) {
           this.surfaceLayer.wireframe = on;
           this.viewer?.requestRender();
         }
       },
-      wireframe: (): boolean => this.surfaceWireframe,
+      wireframe: (): boolean => this.settings.surfaceWireframe,
     };
   }
   getHistogram(channelIndex: number, bins: number): IHistogram | null {

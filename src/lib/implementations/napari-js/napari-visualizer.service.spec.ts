@@ -9,6 +9,7 @@ import { saveAs } from 'file-saver';
 
 import { NapariVisualizerService } from './napari-visualizer.service';
 import { bitmapToLuminance } from './napari-tile-client';
+import { ContrastWindowCache, encodeSpatial3dContinuous } from './napari-spatial-encoding';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
 import { VIZ_CONFIG } from '../../contracts/viz-config';
@@ -446,9 +447,12 @@ describe('NapariVisualizerService', () => {
     const sort = jest.spyOn(spatialEncoding, 'contrastWindow');
     type Internals = {
       encodeSpatialContinuous(v: Float32Array, view: SpatialViewState): Float32Array;
-      encodeSpatial3dContinuous(v: Float32Array, view: SpatialViewState): unknown;
+      spatial: { contrastWindows: ContrastWindowCache };
     };
     const s = service as unknown as Internals;
+    // The 3D cloud's encoder shares the session's window cache with the 2D markers'.
+    const encode3d = (v: Float32Array, view: SpatialViewState) =>
+      encodeSpatial3dContinuous(v, view, [[0, 0, 0], [255, 255, 255]], s.spatial.contrastWindows);
     const vector = new Float32Array([1, 5, 2, 8, 3]);
     const view = { opacity: 1 } as SpatialViewState;
     s.encodeSpatialContinuous(vector, view);
@@ -457,8 +461,8 @@ describe('NapariVisualizerService', () => {
     s.encodeSpatialContinuous(vector, { ...view, percentileClip: [0.05, 0.95] }); // a new clip
     s.encodeSpatialContinuous(new Float32Array(vector), view); // a new vector
     expect(sort).toHaveBeenCalledTimes(3);
-    s.encodeSpatial3dContinuous(vector, { ...view, logScale: true }); // log: a window of its own
-    s.encodeSpatial3dContinuous(vector, { ...view, logScale: true });
+    encode3d(vector, { ...view, logScale: true }); // log: a window of its own
+    encode3d(vector, { ...view, logScale: true });
     expect(sort).toHaveBeenCalledTimes(4);
     sort.mockRestore();
   });
@@ -665,7 +669,7 @@ describe('NapariVisualizerService', () => {
   describe('image tiles on the loading badge', () => {
     type Internals = {
       badge: { attach(host: HTMLElement): void; readonly text: string };
-      scene: AbortController;
+      lifetime: AbortController;
       tiledSource(desc: unknown, channel: number | undefined, channels: 1 | 4, scene: AbortSignal): {
         fetchTile(key: { level: number; col: number; row: number; z: number }): Promise<unknown>;
       };
@@ -687,7 +691,7 @@ describe('NapariVisualizerService', () => {
     });
 
     it('says the image is reloading while a tile is in flight, and stops once it lands', async () => {
-      const tile = internals.tiledSource(desc, undefined, 4, internals.scene.signal).fetchTile(key);
+      const tile = internals.tiledSource(desc, undefined, 4, internals.lifetime.signal).fetchTile(key);
       await Promise.resolve();
       expect(internals.badge.text).toBe('Image reloading…');
       release();
@@ -696,12 +700,12 @@ describe('NapariVisualizerService', () => {
     });
 
     it('a tile that lands after a reset leaves the new scene\'s count alone', async () => {
-      const stale = internals.tiledSource(desc, undefined, 4, internals.scene.signal).fetchTile(key);
+      const stale = internals.tiledSource(desc, undefined, 4, internals.lifetime.signal).fetchTile(key);
       await Promise.resolve();
       const releaseStale = release;
       service.reset();
       internals.badge.attach(document.createElement('div'));
-      const fresh = internals.tiledSource(desc, undefined, 4, internals.scene.signal).fetchTile(key);
+      const fresh = internals.tiledSource(desc, undefined, 4, internals.lifetime.signal).fetchTile(key);
       await Promise.resolve();
       releaseStale();
       await stale;
@@ -712,7 +716,7 @@ describe('NapariVisualizerService', () => {
     });
 
     it('a disposed source\'s request after a reset never counts toward the new scene', async () => {
-      const disposed = internals.tiledSource(desc, undefined, 4, internals.scene.signal);
+      const disposed = internals.tiledSource(desc, undefined, 4, internals.lifetime.signal);
       service.reset();
       internals.badge.attach(document.createElement('div'));
       const late = disposed.fetchTile(key);
@@ -720,7 +724,7 @@ describe('NapariVisualizerService', () => {
       expect(internals.badge.text).toBe('');
       release();
       await late;
-      const fresh = internals.tiledSource(desc, undefined, 4, internals.scene.signal).fetchTile(key);
+      const fresh = internals.tiledSource(desc, undefined, 4, internals.lifetime.signal).fetchTile(key);
       await Promise.resolve();
       expect(internals.badge.text).toBe('Image reloading…');
       release();
@@ -750,7 +754,7 @@ describe('NapariVisualizerService', () => {
       const old = service.plot('superseded-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE);
       while (infoCalls === 0) await new Promise((r) => setTimeout(r, 0));
       expect(await service.plot('superseded-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE)).toBe(true);
-      const scene = internals.scene.signal;
+      const scene = internals.lifetime.signal;
       const builtByNew = built.mock.calls.length;
       expect(builtByNew).toBeGreaterThan(0);
       expect(built.mock.calls.every((c) => c[3] === scene)).toBe(true);
