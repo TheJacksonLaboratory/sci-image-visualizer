@@ -51,6 +51,11 @@ function makeHost(): { host: CanvasToolHost; get: () => Region[]; container: HTM
   return { host, get: () => regs, container };
 }
 
+/** The tool's in-progress point prompts (private state). */
+function pointsOf(t: SamPointTool): unknown[] {
+  return (t as unknown as { points: unknown[] }).points;
+}
+
 function cv(c: HTMLElement): HTMLCanvasElement {
   return c.querySelector('canvas') as HTMLCanvasElement;
 }
@@ -130,7 +135,7 @@ describe('SamPointTool', () => {
     cv(container).dispatchEvent(click(24, 24));       // adjacent fiber 2 (positive)
     await flush();
     expect(get()).toHaveLength(2);                    // a new region, not a grown one
-    expect((tool as any).points).toHaveLength(1);     // prompt reset to the latest click only
+    expect(pointsOf(tool)).toHaveLength(1);     // prompt reset to the latest click only
   });
 
   it('clicking after the region is deleted starts fresh (no stale merged prompt)', async () => {
@@ -142,7 +147,7 @@ describe('SamPointTool', () => {
     cv(container).dispatchEvent(click(24, 24));       // click another fiber
     await flush();
     expect(get()).toHaveLength(1);                    // one fresh region…
-    expect((tool as any).points).toHaveLength(1);     // …from a single fresh point
+    expect(pointsOf(tool)).toHaveLength(1);     // …from a single fresh point
   });
 
   it('a Shift/Alt click refines the current object (not a new region)', async () => {
@@ -182,7 +187,7 @@ describe('SamPointTool', () => {
     cv(container).dispatchEvent(click(18, 18));
     await flush();
     tool.reset();
-    expect((tool as any).points).toHaveLength(0);
+    expect(pointsOf(tool)).toHaveLength(0);
     tool.clear(); // nothing in progress any more: the region stays
     expect(get()).toHaveLength(1);
   });
@@ -201,7 +206,7 @@ describe('SamPointTool', () => {
 
     expect(a.get()).toHaveLength(1);
     expect(b.get()).toHaveLength(0);
-    expect((other as any).points).toHaveLength(0);
+    expect(pointsOf(other)).toHaveLength(0);
     expect(statuses.length).toBeGreaterThan(0);
     other.deactivate();
   });
