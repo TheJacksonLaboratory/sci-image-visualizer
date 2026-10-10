@@ -1,0 +1,64 @@
+<div class="sc-panel" [class.open]="open">
+  <div class="sc-panel-head" (click)="openChange.emit(!open)">
+    <p-checkbox [binary]="true" [ngModel]="cellsOn" (click)="$event.stopPropagation()"
+                (onChange)="onShowCells($event.checked)"></p-checkbox>
+    <span class="sc-panel-title">Cells</span>
+    <i class="pi" [class.pi-chevron-down]="open" [class.pi-chevron-right]="!open"></i>
+  </div>
+  <div class="sc-panel-body" *ngIf="open">
+    <ng-container *ngIf="cellSetOptions.length > 1">
+      <div class="sc-subhead">Boundaries</div>
+      <p-selectButton [options]="cellSetOptions" optionLabel="label" optionValue="value"
+                      [ngModel]="activeCellSet" (ngModelChange)="onCellSet($event)"
+                      [allowEmpty]="false" styleClass="sc-buttons"></p-selectButton>
+    </ng-container>
+
+    <div class="sc-subhead">Coloring</div>
+    <div class="sc-row">
+      <span class="sc-lbl">Cell Color</span>
+      <p-dropdown [options]="cellColorOptions" optionLabel="label" optionValue="value"
+                  [ngModel]="view.cellColorMode" (ngModelChange)="onCellColorMode($event)"
+                  appendTo="body"></p-dropdown>
+    </div>
+    <small class="sc-hint" *ngIf="view.cellColorMode === 'group'">
+      Adjust cell color in the groups section below.
+    </small>
+    <ng-container *ngIf="genes?.state$ | async as gene">
+      <div class="sc-row" *ngIf="view.cellColorMode === 'gene' && dataset?.features">
+        <span class="sc-lbl">Gene</span>
+        <p-dropdown [options]="gene.options" optionLabel="label" optionValue="value"
+                    [ngModel]="view.cellColorGene" (ngModelChange)="onCellColorGene($event)"
+                    [filter]="true" filterBy="label" [resetFilterOnHide]="true"
+                    (onFilter)="genes?.onFilter($event.filter)" (onShow)="genes?.ensureList()"
+                    [virtualScroll]="gene.options.length > geneVirtualScrollFrom"
+                    [virtualScrollItemSize]="30" appendTo="body"
+                    placeholder="Search genes…"></p-dropdown>
+      </div>
+    </ng-container>
+    <div class="sc-row" *ngIf="view.cellColorMode === 'single'">
+      <span class="sc-lbl">Color</span>
+      <input type="color" class="sc-color-input" [value]="view.cellSingleColor"
+             (change)="onCellSingleColor($any($event.target).value)" />
+    </div>
+    <div *ngIf="view.cellColorMode === 'gene' || view.cellColorMode === 'transcriptDensity'">
+      <div class="sc-colorbar" [style.background]="colorBarCss || densityColorBarCss"></div>
+    </div>
+
+    <spatial-groups-panel [controls]="controls" [dataset]="dataset" [view]="view"></spatial-groups-panel>
+
+    <div class="sc-subhead">Visibility</div>
+    <span class="sc-lbl">View cells as</span>
+    <p-selectButton [options]="cellDrawOptions" optionLabel="label" optionValue="value"
+                    [ngModel]="view.cellDraw" (ngModelChange)="onCellDraw($event)"
+                    [allowEmpty]="false" styleClass="sc-buttons"></p-selectButton>
+    <ng-container *ngIf="view.cellDraw !== 'outline'">
+      <span class="sc-lbl">Cell fill opacity</span>
+      <div class="sc-row sc-row-number">
+        <p-slider [ngModel]="view.cellOpacity" [min]="0.05" [max]="1" [step]="0.05"
+                  (onChange)="onCellOpacity($event.value)"></p-slider>
+        <p-inputNumber [ngModel]="cellOpacityPercent" (ngModelChange)="onCellOpacityPercent($event)"
+                       [min]="5" [max]="100" [showButtons]="false" inputStyleClass="sc-num"></p-inputNumber>
+      </div>
+    </ng-container>
+  </div>
+</div>

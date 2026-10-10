@@ -11,14 +11,12 @@ import {
 } from '../contracts/display-types';
 import { DEFAULT_CATEGORICAL_PALETTE, SPATIAL_3D_MAX_CATEGORIES } from '../spatial/spatial-encoding';
 import {
-  cellTypeColumnFor, cellsShown, clusterColorMap, clusterOfGene, defaultGlyphFor,
+  cellTypeColumnFor, clusterColorMap, clusterOfGene, defaultGlyphFor,
 } from '../spatial/spatial-tiles';
 import {
-  CLIP_OPTIONS, FAMILY_PREFIX, GLYPH_OPTIONS, allGenesPreparingNote, buildGeneTree, columnOptions,
-  PanelOption, countGroupRows, densityColorBarCss, familyMembers, glyphPoints,
-  groupEntryFor, groupOptions, groupVariantOptions, importGeneGroupsPatch, markerColumnOptions,
-  markerGeneGroups, markerGenesPatch, middleSection, parseGeneGroups, sectionLabel, tileOptions,
-  toggleHidden,
+  CLIP_OPTIONS, GLYPH_OPTIONS, PanelOption, allGenesPreparingNote, buildGeneTree, columnOptions,
+  densityColorBarCss, glyphPoints, importGeneGroupsPatch, markerColumnOptions, markerGeneGroups,
+  markerGenesPatch, middleSection, parseGeneGroups, sectionLabel, tileOptions, toggleHidden,
 } from '../spatial/spatial-panel-model';
 import {
   SpatialSelectionMask, emptySelection,
@@ -186,15 +184,13 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       this.selectedGene = null;
       this.genes.setDataset(dataset);
       this.sections = this.controls?.sampledSections() ?? null;
-      this.buildTileOptions(dataset);
-      this.groupRowsFor = null;
+      this.transcriptModeOptions = tileOptions(dataset).transcriptModeOptions;
       // Same for the group colours: a same-named grouping of the new dataset is not the old one.
       this.cellGroupColorsFor = null;
       // A dataset with no cells to outline leads with its observations.
       this.open = { ...this.open, cells: !!(dataset?.polygonTiles || dataset?.polygons),
         observations: !(dataset?.polygonTiles || dataset?.polygons) };
       void this.refreshKey();
-      void this.refreshGroups();
       void this.refreshCellGroupColors();
     }));
 
@@ -207,7 +203,6 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       this.geneMenu = this.buildGeneMenu();
       this.refreshDensityWindow();
       void this.refreshKey();
-      void this.refreshGroups();
       void this.refreshCellGroupColors();
     }));
 
@@ -498,9 +493,6 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   }
   // ── cells & transcripts ────────────────────────────────────────────────
 
-  readonly cellDrawOptions = [
-    { label: 'Fill', value: 'fill' }, { label: 'Outline', value: 'outline' }, { label: 'Both', value: 'both' },
-  ];
   readonly transcriptColorOptions = [
     { label: 'Cluster', value: 'cluster' }, { label: 'Cell type', value: 'cellType' }, { label: 'Gene', value: 'gene' },
   ];
@@ -517,199 +509,17 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     return !!this.dataset?.transcriptTiles || !!this.dataset?.density;
   }
 
-
-  /** Whether outlines are on — the explicit choice, or automatically for data that has them. */
-  get cellsOn(): boolean {
-    return cellsShown(this.dataset, this.view);
-  }
-
-  get activeCellSet(): string | null {
-    const tiles = this.dataset?.polygonTiles;
-    return this.view.cellSet ?? tiles?.defaultSet ?? tiles?.sets[0]?.name ?? null;
-  }
-
   /**
-   * Option lists for the cell/transcript controls. Built once per dataset rather than in
-   * getters: a getter returns a fresh array on every change-detection pass, and PrimeNG
-   * re-renders its buttons whenever the array identity changes — which made them
-   * impossible to click.
+   * Transcript modes on offer. Built once per dataset rather than in a getter: a getter
+   * returns a fresh array on every change-detection pass, and PrimeNG re-renders its
+   * buttons whenever the array identity changes — which made them impossible to click.
    */
-  cellSetOptions: { label: string; value: string }[] = [];
   transcriptModeOptions: { label: string; value: SpatialViewState['transcriptMode'] }[] = [];
-
-  private buildTileOptions(ds: SpatialDataset | null): void {
-    ({
-      cellSetOptions: this.cellSetOptions,
-      transcriptModeOptions: this.transcriptModeOptions,
-      cellColorOptions: this.cellColorOptions,
-    } = tileOptions(ds));
-    this.groupOptions = groupOptions(ds);
-    this.refreshVariants();
-  }
-
-  /** Cell colour modes on offer (Xenium Explorer's "Cell Color"). */
-  cellColorOptions: { label: string; value: SpatialViewState['cellColorMode'] }[] = [];
 
   // ── groups ──────────────────────────────────────────────────────────────
 
-  /**
-   * The group picker: categorical columns under their section heading, a family of
-   * variants (k-means at k = 2…10) listed once. Values are a column name, or
-   * `family:<id>` for a family.
-   */
-  groupOptions: { label: string; items: { label: string; value: string }[] }[] = [];
-  /** Variants of the active family (k = 2…10), when a family is active. */
-  groupVariantOptions: { label: string; value: string }[] = [];
-  /** The last variant chosen per family, so switching away and back keeps k. */
-  private familyChoice = new Map<string, string>();
-
-  /** The picker's value for the active group column. */
-  get activeGroupEntry(): string | null {
-    return groupEntryFor(this.dataset, this.activeCellTypeColumn);
-  }
-
-  private refreshVariants(): void {
-    const next = groupVariantOptions(this.dataset, this.activeCellTypeColumn);
-    if (JSON.stringify(next) !== JSON.stringify(this.groupVariantOptions)) this.groupVariantOptions = next;
-  }
-
-  onGroupEntry(value: string): void {
-    if (value.startsWith(FAMILY_PREFIX)) {
-      const id = value.slice(FAMILY_PREFIX.length);
-      const members = familyMembers(this.dataset, id);
-      const name = this.familyChoice.get(id) ?? members[0]?.name;
-      if (name) this.onCellTypeColumn(name);
-      return;
-    }
-    this.onCellTypeColumn(value);
-  }
-
-  onGroupVariant(name: string): void {
-    const meta = this.dataset?.columns.find((c) => c.name === name);
-    if (meta?.kind === 'categorical' && meta.family) this.familyChoice.set(meta.family.id, name);
-    this.onCellTypeColumn(name);
-  }
-
-  /** The active grouping's categories with colours and cell counts, largest first. */
-  groupRows: { label: string; color: string; count: number }[] = [];
-  groupTotal = 0;
-  groupsExpanded = true;
-  /** The grouping {@link groupRows} shows or is loading — a repeat request for it is a no-op. */
-  private groupRowsFor: string | null = null;
-  /** Latest wins among group-row loads, so a slow one for an earlier grouping (or the
-   *  previous dataset's column of the same name) cannot land over the current one. */
-  private readonly groupRowsLoad = new Supersede();
-  groupImportError: string | null = null;
-  groupImporting = false;
-
-  private async refreshGroups(): Promise<void> {
-    this.refreshVariants();
-    const name = this.activeCellTypeColumn;
-    if (!name || !this.controls) {
-      this.groupRowsLoad.cancel();
-      this.groupRows = [];
-      this.groupTotal = 0;
-      this.groupRowsFor = null;
-      return;
-    }
-    if (name === this.groupRowsFor) return;
-    this.groupRowsFor = name;
-    const task = this.groupRowsLoad.next();
-    try {
-      const v = await this.controls.categoricalView(name);
-      if (!task.isCurrent()) return;
-      const { rows, total } = countGroupRows(v);
-      this.zone.run(() => {
-        this.groupRows = rows;
-        this.groupTotal = total;
-      });
-    } catch {
-      // Only the current load's failure re-opens the key: a superseded one clearing it
-      // would make the newer load's result look stale and be dropped.
-      if (task.isCurrent()) this.groupRowsFor = null;
-    }
-  }
-
-  isGroupShown(label: string): boolean {
-    return !this.view.hiddenGroups.includes(label);
-  }
-
-  get allGroupsShown(): boolean {
-    return this.view.hiddenGroups.length === 0;
-  }
-
-  onGroupShown(label: string, on: boolean): void {
-    this.controls?.setViewState({ hiddenGroups: toggleHidden(this.view.hiddenGroups, [label], on) });
-  }
-
-  onAllGroupsShown(on: boolean): void {
-    this.controls?.setViewState({ hiddenGroups: on ? [] : this.groupRows.map((r) => r.label) });
-  }
-
-  get canImportGroups(): boolean {
-    return !!this.controls?.importGroups;
-  }
-
-  /** '+': a CSV/TSV of `cell_id` and group, named after the file. */
-  async onImportGroupsFile(input: HTMLInputElement): Promise<void> {
-    const file = input.files?.[0];
-    input.value = '';
-    if (!file || !this.controls?.importGroups) return;
-    this.groupImportError = null;
-    this.groupImporting = true;
-    try {
-      const label = file.name.replace(/\.(csv|tsv|txt)$/i, '');
-      const { column } = await this.controls.importGroups(label, await file.text());
-      this.zone.run(() => this.onCellTypeColumn(column.name));
-    } catch (err) {
-      this.zone.run(() => { this.groupImportError = String((err as Error)?.message ?? err); });
-    } finally {
-      this.zone.run(() => { this.groupImporting = false; });
-    }
-  }
-
   get activeCellTypeColumn(): string | null {
     return this.dataset ? cellTypeColumnFor(this.dataset, this.view) : null;
-  }
-
-  onShowCells(on: boolean): void {
-    this.controls?.setViewState({ showCells: on });
-  }
-
-  onCellSet(set: string): void {
-    this.controls?.setViewState({ cellSet: set });
-  }
-
-  onCellDraw(draw: SpatialViewState['cellDraw']): void {
-    this.controls?.setViewState({ cellDraw: draw });
-  }
-
-  onCellOpacity(value: number | undefined): void {
-    if (value === undefined) return;
-    this.controls?.setViewState({ cellOpacity: value });
-  }
-
-  onCellTypeColumn(name: string | null): void {
-    // Switched-off groups belong to the grouping they were switched off in.
-    this.controls?.setViewState({ cellTypeColumn: name, hiddenGroups: [] });
-  }
-
-  onCellColorMode(mode: SpatialViewState['cellColorMode']): void {
-    this.controls?.setViewState({ cellColorMode: mode });
-  }
-
-  onCellColorGene(gene: string | null): void {
-    this.controls?.setViewState({ cellColorGene: gene });
-  }
-
-  onCellSingleColor(hex: string): void {
-    this.controls?.setViewState({ cellSingleColor: hex });
-  }
-
-  /** Fill opacity as a 0–100 number, for the box beside the slider. */
-  onCellOpacityPercent(v: number | null): void {
-    if (v === null || !Number.isFinite(v)) return;
-    this.controls?.setViewState({ cellOpacity: Math.min(1, Math.max(0.05, v / 100)) });
   }
 
   onShowImage(on: boolean): void {
@@ -728,7 +538,12 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   };
 
   toggleSection(name: keyof SpatialControlsComponent['open']): void {
-    this.open = { ...this.open, [name]: !this.open[name] };
+    this.setOpen(name, !this.open[name]);
+  }
+
+  /** Expand or collapse a section — what a panel's header asks for. */
+  setOpen(name: keyof SpatialControlsComponent['open'], on: boolean): void {
+    this.open = { ...this.open, [name]: on };
   }
 
   // ── transcripts (Xenium Explorer layout) ─────────────────────────────────
@@ -765,7 +580,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
 
   /**
    * The selected genes as Explorer's tree: named groups, then the ungrouped ones.
-   * Rebuilt when the view changes — never per change-detection pass (see buildTileOptions).
+   * Rebuilt when the view changes — never per change-detection pass (see transcriptModeOptions).
    */
   geneTree: { name: string | null; genes: string[] }[] = [];
   geneMenu: { label: string; icon: string; command: () => void; disabled?: boolean }[] = [];
@@ -888,10 +703,6 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   trackByNode = (_i: number, node: { name: string | null }) => node.name ?? '';
   trackByLabelString = (_i: number, s: string) => s;
 
-  get cellOpacityPercent(): number {
-    return Math.round(this.view.cellOpacity * 100);
-  }
-
   get densityOpacityPercent(): number {
     return Math.round(this.view.densityOpacity * 100);
   }
@@ -926,7 +737,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
    *
    * Bound to a `p-dropdown`, so the same array comes back until the columns change: a
    * fresh array per change-detection pass makes PrimeNG re-render the options (see
-   * `cellSetOptions` for what that does to a click).
+   * `transcriptModeOptions` for what that does to a click).
    */
   get markerColumnOptions(): { label: string; value: string }[] {
     const columns = this.dataset?.columns;

@@ -161,3 +161,35 @@ export function fakeSpatialControls(dataset: SpatialDataset | null): SpatialCont
   } as unknown as jest.Mocked<ISpatialControls>;
   return { controls, dataset$, view$, selection$ };
 }
+
+/**
+ * A Xenium-style dataset with everything the panels can show: cell boundaries in two
+ * sets, transcript tiles, a density map, the all-genes pyramid and a 27k-gene panel whose
+ * names are not inlined.
+ */
+export const TILED_DATASET: SpatialDataset = {
+  id: 'tiled',
+  name: 'Xenium demo',
+  observations: { count: 1983, x: new Float32Array(0), y: new Float32Array(0) },
+  columns: [
+    { kind: 'categorical', name: 'graphclust', categories: ['A', 'B'] },
+    { kind: 'categorical', name: 'curated_cell_type', categories: ['T cell', 'Tumour'] },
+    { kind: 'continuous', name: 'cell_area' },
+  ],
+  features: { count: 27000 },
+  polygonTiles: {
+    bounds: [0, 0, 100, 100],
+    sets: [{ name: 'nucleus', label: 'Nuclei' }, { name: 'cell', label: 'Cells' }],
+    defaultSet: 'cell',
+    levels: [{ tileSize: 250 }],
+  },
+  transcriptTiles: {
+    bounds: [0, 0, 100, 100], geneCount: 27000, hasZ: true,
+    levels: [{ tileSize: 250, aggregated: false }],
+  },
+  density: { gridSize: [10, 10], origin: [0, 0], rows: 10, cols: 10 },
+  transcriptBins: {
+    bounds: [0, 0, 100, 100], origin: [0, 0], count: 1000,
+    levels: [{ binSize: 2, tileSize: 128 }],
+  },
+};

@@ -731,13 +731,6 @@ describe('SpatialControlsComponent', () => {
       dataset$.next(tiled);
       expect(component.hasCells).toBe(true);
       expect(component.hasTranscripts).toBe(true);
-      // Outlines are on by default for data that has them, until the user says otherwise.
-      expect(component.cellsOn).toBe(true);
-      component.onShowCells(false);
-      expect(component.cellsOn).toBe(false);
-      // Explorer's order: cell first, and Both when there are two sets.
-      expect(component.cellSetOptions.map((o) => o.value)).toEqual(['cell', 'nucleus', 'both']);
-      expect(component.activeCellSet).toBe('cell');
       expect(component.transcriptModeOptions.map((o) => o.label))
         .toEqual(['Points', 'Icons', 'Density Map']);
     });
@@ -747,63 +740,8 @@ describe('SpatialControlsComponent', () => {
       await build(controls);
       // A fresh array per read made PrimeNG re-render the buttons until they were unclickable.
       expect(component.transcriptModeOptions).toBe(component.transcriptModeOptions);
-      expect(component.groupOptions).toBe(component.groupOptions);
       expect(component.geneTree).toBe(component.geneTree);
       expect(component.geneMenu).toBe(component.geneMenu);
-    });
-
-    it('lists groups under their section, with a k-means family listed once', async () => {
-      dataset$.next({
-        ...tiled,
-        columns: [
-          { kind: 'categorical', name: 'graphclust', description: 'Graph-Based Clustering (GEX)',
-            categories: ['A', 'B'], section: 'Xenium Onboard Analysis groups' },
-          ...[2, 3].map((k) => ({
-            kind: 'categorical' as const, name: `kmeans_${k}`, categories: ['x'],
-            section: 'Xenium Onboard Analysis groups',
-            family: { id: 'kmeans', label: 'K-Means Clustering (GEX)', variant: `k = ${k}` },
-          })),
-          { kind: 'categorical', name: 'imported:Mine', description: 'Mine', categories: ['T'],
-            section: 'Imported groups' },
-        ],
-      });
-      await build(controls);
-      expect(component.groupOptions).toEqual([
-        { label: 'Xenium Onboard Analysis groups', items: [
-          { label: 'Graph-Based Clustering (GEX)', value: 'graphclust' },
-          { label: 'K-Means Clustering (GEX)', value: 'family:kmeans' },
-        ] },
-        { label: 'Imported groups', items: [{ label: 'Mine', value: 'imported:Mine' }] },
-      ]);
-      component.onGroupEntry('family:kmeans');
-      expect(view$.value.cellTypeColumn).toBe('kmeans_2');
-      expect(component.activeGroupEntry).toBe('family:kmeans');
-      expect(component.groupVariantOptions.map((o) => o.label)).toEqual(['k = 2', 'k = 3']);
-      component.onGroupVariant('kmeans_3');
-      component.onGroupEntry('graphclust');
-      component.onGroupEntry('family:kmeans');
-      expect(view$.value.cellTypeColumn).toBe('kmeans_3'); // remembers the k chosen
-    });
-
-    it('counts cells per group and hides switched-off groups', async () => {
-      dataset$.next(tiled);
-      (controls as any).categoricalView = jest.fn(async () => ({
-        name: 'graphclust', categories: ['A', 'B'], colors: ['#f00', '#0f0'],
-        codes: Uint16Array.from([1, 1, 0, 1, 0xffff]),
-      }));
-      await build(controls);
-      await flush();
-      expect(component.groupRows.map((r) => [r.label, r.count])).toEqual([['B', 3], ['A', 1]]);
-      expect(component.groupTotal).toBe(4);
-      component.onGroupShown('B', false);
-      expect(view$.value.hiddenGroups).toEqual(['B']);
-      expect(component.allGroupsShown).toBe(false);
-      component.onAllGroupsShown(true);
-      expect(view$.value.hiddenGroups).toEqual([]);
-      // Changing grouping clears the switched-off groups of the old one.
-      component.onGroupShown('A', false);
-      component.onCellTypeColumn('curated_cell_type');
-      expect(view$.value.hiddenGroups).toEqual([]);
     });
 
     /** Install a `categoricalView` mock on the controls (an optional member of the port). */
@@ -813,48 +751,6 @@ describe('SpatialControlsComponent', () => {
     };
     /** The colours of the cells' groups, by name (private component state). */
     const groupColors = () => (component as unknown as { cellGroupColors: Map<string, string> }).cellGroupColors;
-
-    it("drops group rows the previous dataset's same-named grouping answers late", async () => {
-      // Both datasets group by `graphclust`: only the load sequence, not the name, can
-      // tell the old dataset's answer from the new one's.
-      dataset$.next(tiled);
-      const view = (categories: string[], codes: number[]) => ({
-        name: 'graphclust', categories, colors: categories.map(() => '#000'),
-        codes: Uint16Array.from(codes),
-      });
-      let resolveOld: (v: ReturnType<typeof view>) => void = () => undefined;
-      categoricalView(jest.fn())
-        .mockImplementationOnce(() => new Promise((r) => { resolveOld = r; }))
-        .mockResolvedValueOnce(view(['New'], [0, 0]));
-      await build(controls);
-      dataset$.next({ ...tiled, id: 'other' } as SpatialDataset);
-      await flush();
-      expect(component.groupRows.map((r) => r.label)).toEqual(['New']);
-
-      resolveOld(view(['Old'], [0, 0, 0]));
-      await flush();
-      expect(component.groupRows.map((r) => r.label)).toEqual(['New']);
-    });
-
-    it("keeps the newer grouping's rows when a superseded load fails", async () => {
-      dataset$.next(tiled);
-      let rejectOld: (e: Error) => void = () => undefined;
-      let resolveNew: (v: unknown) => void = () => undefined;
-      categoricalView(jest.fn())
-        .mockImplementationOnce(() => new Promise((_, reject) => { rejectOld = reject; }))
-        .mockImplementationOnce(() => new Promise((r) => { resolveNew = r; }));
-      await build(controls);
-      component.onCellTypeColumn('curated_cell_type');
-      await flush();
-      rejectOld(new Error('gone'));
-      await flush();
-      resolveNew({
-        name: 'curated_cell_type', categories: ['T cell'], colors: ['#000'], codes: Uint16Array.from([0]),
-      });
-      await flush();
-      expect(component.groupRows.map((r) => r.label)).toEqual(['T cell']);
-      expect(controls.categoricalView).toHaveBeenCalledTimes(2);
-    });
 
     it("reloads the group colours for a new dataset's same-named grouping", async () => {
       dataset$.next(tiled);
@@ -938,17 +834,6 @@ describe('SpatialControlsComponent', () => {
       component.onTranscriptGenes(['EPCAM']);
       await component.ensureGeneList();
       expect(component.geneOptions.map((o) => o.value)).toContain('EPCAM');
-    });
-
-    it('labels the boundary sets briefly, to fit one row', async () => {
-      dataset$.next({
-        ...tiled,
-        polygonTiles: { ...tiled.polygonTiles!, sets: [
-          { name: 'nucleus', label: 'Nucleus boundaries' }, { name: 'cell', label: 'Cell boundaries' },
-        ] },
-      });
-      await build(controls);
-      expect(component.cellSetOptions.map((o) => o.label)).toEqual(['Cell', 'Nucleus', 'Both']);
     });
 
     it('gives each gene a glyph by position until one is chosen', async () => {
@@ -1109,14 +994,9 @@ describe('SpatialControlsComponent', () => {
     it('patches the display settings', async () => {
       dataset$.next(tiled);
       await build(controls);
-      component.onShowCells(true);
-      component.onCellSet('nucleus');
-      component.onCellDraw('both');
-      component.onCellOpacity(0.3);
       component.onTranscriptQuality(true);
       component.onTranscriptColorBy('gene');
       expect(view$.value).toEqual(expect.objectContaining({
-        showCells: true, cellSet: 'nucleus', cellDraw: 'both', cellOpacity: 0.3,
         transcriptQuality: 'all', transcriptColorBy: 'gene',
       }));
     });
