@@ -1429,9 +1429,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   };
 
   public hasRegions(): boolean {
-    // Use the contract's framework-neutral region accessor, not the raw
-    // Plotly-shaped getShapes() — the component only needs to know whether any
-    // region exists, and must not depend on a backend's wire format.
+    // The contract's framework-neutral region accessor: the component only needs to
+    // know whether any region exists, never a backend's wire format.
     return this.plotService.getRegions().length > 0;
   }
 
