@@ -3,24 +3,17 @@ import { Observable, BehaviorSubject, Subject, Subscription, combineLatest, of }
 import { Image } from 'image-js';
 import { saveAs } from 'file-saver';
 import {
-  Viewer,
-  histogramScalar,
-  colormapFromLut,
-  tintColormap,
-  reverseColormap,
-  heightField,
-  MultiChannelImageView,
+  Viewer, histogramScalar, colormapFromLut, heightField, MultiChannelImageView,
   MultiChannelVolumeView,
 } from 'napari-js';
 import type {
   AxesLayer, ImageLayer, SurfaceLayer, VolumeLayer, PointsLayer, Points3DLayer, TiledSource,
-  ChannelView, VolumeChannel, Colormap, ProjectedPoints,
+  ChannelView, VolumeChannel, ProjectedPoints,
 } from 'napari-js';
 import { nearestProjectedIndex, ScreenIndex, SCREEN_INDEX_MIN_POINTS } from 'napari-js';
 
 import { IImageInfo } from '../../contracts/image.contract';
 import { IChannelState } from '../../contracts/channel-histogram-api.contract';
-import { buildColormapLut, Rgb } from '../../contracts/colormap-lut';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import {
   SpatialColumn, SpatialDataset, SpatialImageRef, findColumnMeta, isCategoricalColumn,
@@ -28,7 +21,7 @@ import {
 import { SpatialViewState } from '../../contracts/display-types';
 import {
   encodeCategorical, markerDiameters, resolveCategoryColors, toRgbaTuples, DEFAULT_MUTED_OPACITY,
-  spatialContinuousLut, type RGBA,
+  type RGBA,
 } from '../../spatial/spatial-encoding';
 import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
 import { SpatialObservations } from '../../contracts/spatial-dataset.contract';
@@ -46,6 +39,7 @@ import { NapariSpatialTooltip } from './napari-spatial-tooltip';
 import { NapariSpatialTileLayers, TranscriptEstimate } from './napari-spatial-tiles';
 import { NapariNavigator } from './napari-navigator';
 import { LoadingBadgeState } from './napari-loading-state';
+import { NapariDisplayState } from './napari-display-state';
 import { AssembledVolume, NapariTileClient } from './napari-tile-client';
 import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
 import { NAPARI_WHEEL_ZOOM_SPEED } from './napari-zoom';
@@ -58,7 +52,7 @@ import {
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
 import {
   LumaPlane, READBACK_DEBOUNCE_MS, SCATTER3D_MAX_POINTS, SCATTER3D_MAX_XY, SURFACE_MAX_GRID,
-  SURFACE_Z_ASPECT, SceneKind, VOLUME_FETCH_CONCURRENCY, VOLUME_WORLD_INPLANE_REF, colormapId,
+  SURFACE_Z_ASPECT, SceneKind, VOLUME_FETCH_CONCURRENCY, VOLUME_WORLD_INPLANE_REF,
   isServerlessMultichannel, mapPool, sceneKindOf, stackDepth, surfaceResolutionFor, tintFor,
   tintedComposite, toIHistogram, toNapariGamma, typedPlane, volumeResolutionFor,
 } from './napari-helpers';
@@ -341,6 +335,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private spatialRebuildToken = 0;
   /** "x reloading…" at the bottom of the canvas: the tile layers' loads and the observations'. */
   private readonly badge = new LoadingBadgeState();
+  /** The store's display state (colormap, reverse, invert) and the colormaps derived from it. */
+  private readonly display: NapariDisplayState;
   /**
    * The mounted scene's lifetime: aborted by {@link reset}, so everything a plot starts — its
    * descriptor poll, its tile fetches, its badge counts, its awaits — can tell that a newer plot
@@ -391,11 +387,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private channelView: MultiChannelImageView | null = null;
   /** Live subscription applying channel-state / colormap changes to the layers. */
   private displaySub: Subscription | null = null;
-  /** Latest grayscale colormap selection from the store (applied to the single gray layer). */
-  private currentColormap: ColormapNode | null = null;
-  private currentReverse = false;
-  /** Latest invert toggle from the store (flips intensity before the colormap, like OSD). */
-  private invertEnabled = false;
   /** Physical scale bar overlay for the 2D image (null when 3D or the image has no µm/pixel). */
   private scaleBar: NapariScaleBar | null = null;
   /** Overview minimap (bottom-right), as OSD's navigator. */
@@ -477,6 +468,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.api = config.slideCropServer;
     this.tileClient = new NapariTileClient(tiles, simpleStack, this.api);
     this.tileClient.startScene(this.scene.signal);
+    this.display = new NapariDisplayState(store);
     // The pixel tools read displayed pixels synchronously from the last readback and convert
     // pointer coords via the napari camera, mirroring the OSD host. This backend owns its own tool
     // instances (RT-21); the host reads live state, so it is built once.
@@ -637,19 +629,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
 
   // ── Channels: per-channel composite, LUT, native histograms (jit-ui#102) ──────────────────
 
-  /** The grayscale display colormap from the store selection (+reverse), defaulting to gray.
-   *  Maps the jit-ui store colormap node to a napari `Colormap` via the library's LUT factory;
-   *  the multichannel tint ramps are built inside {@link MultiChannelImageView} from each
-   *  channel's hex colour. */
-  private grayscaleColormap(): Colormap | string {
-    const value = this.colormapValue();
-    const lut = value != null ? buildColormapLut(value, this.currentReverse) : null;
-    if (lut) return colormapFromLut('gray-cmap', lut);
-    return this.currentReverse
-      ? colormapFromLut('gray-rev', [[255, 255, 255], [0, 0, 0]] as Rgb[])
-      : 'gray';
-  }
-
   /**
    * Render the 2D image for slice `z`. With a server pyramid descriptor we use a pyramidal
    * {@link TiledSource} per layer so the view refines to higher resolution on zoom (like OSD) and
@@ -788,7 +767,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       contrastLimits: [st?.min ?? 0, st?.max ?? 255],
       gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
       visible: st?.visible ?? true,
-      invert: this.invertEnabled,
+      invert: this.display.invert,
       ...(scale ? { scale } : {}),
     };
   }
@@ -801,10 +780,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   ): ChannelView {
     return {
       source,
-      colormap: this.grayscaleColormap(),
+      colormap: this.display.grayscaleColormap(),
       contrastLimits: [st?.min ?? 0, st?.max ?? 255],
       gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
-      invert: this.invertEnabled,
+      invert: this.display.invert,
       ...(scale ? { scale } : {}),
     };
   }
@@ -850,29 +829,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
    */
   private watchDisplayState(apply: (channels: IChannelState[], selected: number) => void): void {
     this.displaySub?.unsubscribe();
-    this.displaySub = combineLatest([
-      this.store.getChannelStates(),
-      this.store.getColormap(),
-      this.store.getReverseScale(),
-      this.store.getInvert(),
-      this.store.getSelectedChannel(),
-    ]).subscribe(([channels, colormap, reverse, invert, selected]) => {
-      this.currentColormap = (colormap as ColormapNode) ?? null;
-      this.currentReverse = reverse;
-      this.invertEnabled = invert;
-      apply(channels, selected);
-    });
-  }
-
-  /** The selected display colormap's value (a name or inline stops), if any. */
-  private colormapValue(): unknown {
-    return this.currentColormap?.data?.value;
-  }
-
-  /** The LUT a continuous spatial layer draws with: the view's own choice, else the display
-   *  colormap and its reverse flag — one rule for the markers, the cloud and both gene maps. */
-  private spatialLut(view: SpatialViewState): Rgb[] {
-    return spatialContinuousLut(this.colormapValue(), this.currentReverse, view.continuousColormap);
+    this.displaySub = this.display.watch(apply);
   }
 
   /** Subscribe channel states + grayscale colormap → live-apply to the rendered layers (no
@@ -897,7 +854,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
         view.layers.forEach((_, c) => {
           const st = channels.find((s) => s.index === c);
           view.updateChannel(c, {
-            colormap: this.channelTintColormap(st?.color ?? '#ffffff'),
+            colormap: this.display.channelTintColormap(st?.color ?? '#ffffff'),
             ...(st
               ? {
                   contrastLimits: [st.min, st.max] as [number, number],
@@ -910,43 +867,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       } else {
         const st = channels[0];
         view.updateChannel(0, {
-          colormap: this.volumeColormap(st),
+          colormap: this.display.volumeColormap(st),
           ...(st ? { contrastLimits: [st.min, st.max] as [number, number], gamma: toNapariGamma(st.gamma) } : {}),
         });
       }
     });
-  }
-
-  /** A channel's tint colormap (black→colour) with reverse-scale / invert applied by flipping. */
-  private channelTintColormap(color: string): Colormap | string {
-    let cmap: Colormap | string = tintColormap(color);
-    if (this.currentReverse) cmap = reverseColormap(cmap);
-    if (this.invertEnabled) cmap = reverseColormap(cmap);
-    return cmap;
-  }
-
-  /**
-   * Colour map for the volume/isosurface. A real colormap selection (viridis/magma/…) wins;
-   * otherwise the channel's colour tints it (so the channel-dialog colour swatch recolors the 3D
-   * render). Reverse-scale and invert each flip the ramp — the `VolumeLayer` has no per-layer
-   * invert, so both are emulated by reversing the colormap.
-   */
-  private volumeColormap(st: IChannelState | undefined): Colormap | string {
-    const node = this.currentColormap;
-    // A colored colormap (viridis/magma/…) drives the volume; the default grayscale family
-    // (gray / Greys / Greys Inv) yields to the channel's colour so the dialog colour swatch
-    // recolors the 3D render.
-    const label = (node?.label ?? '').toLowerCase();
-    const grayFamily = label === '' || label.includes('grey') || label.includes('gray');
-    const value = node?.data?.value;
-    const lut = !grayFamily && value != null ? buildColormapLut(value, false) : null;
-    let cmap: Colormap | string = lut
-      ? colormapFromLut('vol-cmap', lut)
-      : tintColormap(st?.color ?? '#ffffff');
-    // Reverse-scale and invert each flip the ramp (the VolumeLayer has no per-layer invert).
-    if (this.currentReverse) cmap = reverseColormap(cmap);
-    if (this.invertEnabled) cmap = reverseColormap(cmap);
-    return cmap;
   }
 
   /** Apply the current channel states / colormap to the live layers (no re-fetch), delegating the
@@ -963,14 +888,14 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
           contrastLimits: [st.min, st.max],
           gamma: toNapariGamma(st.gamma), // ImageJ γ → napari-js γ
           visible: st.visible,
-          invert: this.invertEnabled,
+          invert: this.display.invert,
         });
       });
     } else if (this.imageMode === 'grayscale') {
       const st = channels[0];
       view.updateChannel(0, {
-        colormap: this.grayscaleColormap(),
-        invert: this.invertEnabled,
+        colormap: this.display.grayscaleColormap(),
+        invert: this.display.invert,
         ...(st ? { contrastLimits: [st.min, st.max] as [number, number], gamma: toNapariGamma(st.gamma) } : {}),
       });
     }
@@ -1121,7 +1046,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
             width: vol.width,
             height: vol.height,
             depth: vol.depth,
-            colormap: this.channelTintColormap(color),
+            colormap: this.display.channelTintColormap(color),
             contrastLimits: [st?.min ?? 0, st?.max ?? 255],
             gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
             visible: st?.visible ?? true,
@@ -1138,7 +1063,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
             width: vol.width,
             height: vol.height,
             depth: vol.depth,
-            colormap: this.volumeColormap(st),
+            colormap: this.display.volumeColormap(st),
             contrastLimits: [st?.min ?? 0, st?.max ?? 255],
             gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
           });
@@ -1429,7 +1354,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       latest: () => this.spatialLatest,
       canvasSize: () => [this.canvas?.clientWidth ?? 0, this.canvas?.clientHeight ?? 0],
       continuousLut: (view) => {
-        return this.spatialLut(view);
+        return this.display.spatialLut(view);
       },
       // These follow the camera, which moves outside the zone; the panel reads them.
       estimateChanged: (e) => this.inZone(() => this.transcriptEstimate$.next(e)),
@@ -1925,8 +1850,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       port.getDataset$(), this.store.getSpatialView$(), selection$,
       this.store.getColormap(), this.store.getReverseScale(),
     ]).subscribe(([dataset, view, selection, colormap, reverse]) => {
-      this.currentColormap = (colormap as ColormapNode) ?? null;
-      this.currentReverse = !!reverse;
+      this.display.record((colormap as ColormapNode) ?? null, !!reverse);
       // Kept so a slice change can redraw the markers for the new plane, which
       // arrives through setZIndex rather than through any of these streams.
       this.spatialLatest = [dataset, view, selection];
@@ -2207,7 +2131,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     const key = fieldKey
       ? [
         fieldKey, clip.join(','), view.logScale ? 'log' : 'lin', view.geneMapOpacity,
-        this.continuousColormapKey(view),
+        this.display.continuousColormapKey(view),
       ].join('|')
       : null;
     if (key === this.geneMapKey) return;
@@ -2272,7 +2196,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     const field = this.geneMapField;
     if (!field) return;
 
-    const lut = this.spatialLut(view);
+    const lut = this.display.spatialLut(view);
     // Over the measured pixels only: unmeasured ones are 0 and would drag the low end down.
     const [lo, hi] = fieldContrastWindow(field, clip[0], clip[1]);
     const rgba = colorExpressionField(field, lut, [lo, hi], {
@@ -2607,7 +2531,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     const key = fieldKey
       ? [
         fieldKey, clip.join(','), view.logScale ? 'log' : 'lin', view.geneMapOpacity,
-        this.continuousColormapKey(view),
+        this.display.continuousColormapKey(view),
       ].join('|')
       : null;
     if (key === this.geneMapVolumeKey) return;
@@ -2669,7 +2593,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     const [, hi] = fieldContrastWindow(field, clip[0], clip[1]);
     const lo = 0;
     const data = encodeExpressionVolume(field, [lo, hi], { log: view.logScale });
-    const lut = this.spatialLut(view);
+    const lut = this.display.spatialLut(view);
     this.geneMapVolumeLayer = viewer.addVolume(
       data, field.width, field.height, field.depth,
       {
@@ -2775,7 +2699,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
         (
           viewer.addVolume(data, grid.width, grid.height, grid.depth, {
             name: `density · ${group.name}`,
-            colormap: this.channelTintColormap(group.color),
+            colormap: this.display.channelTintColormap(group.color),
             // Translucent, not MIP: a cluster's interior is the readable part, and MIP
             // would flatten every cloud to its brightest shell.
             rendering: 'translucent',
@@ -2788,23 +2712,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       );
     }
     viewer.requestRender();
-  }
-
-  /**
-   * Identity of the colour scale a continuous spatial layer will draw with, for a
-   * cache key: the explicit choice, or else the display colormap and its reverse
-   * flag, since that is what {@link spatialContinuousLut} falls back to.
-   *
-   * The gene maps cache their coloured output, so without this in the key a change
-   * of colour scale left the field on screen in the previous colours — the markers
-   * recoloured and the map under them did not.
-   */
-  private continuousColormapKey(view: SpatialViewState): string {
-    return [
-      colormapId(view.continuousColormap),
-      colormapId(this.colormapValue()),
-      this.currentReverse ? 'rev' : '',
-    ].join(':');
   }
 
   /**
@@ -2960,7 +2867,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
 
   /** Continuous values → the active colormap over a percentile-clipped window (3D cloud). */
   private encodeSpatial3dContinuous(source: Float32Array, view: SpatialViewState): Spatial3dEncoding {
-    return encodeSpatial3dContinuous(source, view, this.spatialLut(view), this.contrastWindows);
+    return encodeSpatial3dContinuous(source, view, this.display.spatialLut(view), this.contrastWindows);
   }
 
   /**
@@ -3026,7 +2933,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private encodeSpatialContinuous(
     values: Float32Array, view: SpatialViewState, muted: Uint8Array | null = null,
   ): Float32Array {
-    return encodeSpatialContinuous(values, view, this.spatialLut(view), this.contrastWindows, muted);
+    return encodeSpatialContinuous(values, view, this.display.spatialLut(view), this.contrastWindows, muted);
   }
 
   /**
@@ -3068,7 +2975,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
 
     const st = this.store.currentChannelStates()[0];
     this.scatter3dLayer = viewer.addPoints3D(new Float32Array(pos), new Float32Array(val), {
-      colormap: this.volumeColormap(st),
+      colormap: this.display.volumeColormap(st),
       contrastLimits: [st?.min ?? 0, st?.max ?? 255],
       size: 3,
     });
@@ -3088,7 +2995,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       const layer = this.scatter3dLayer;
       if (!layer) return;
       const st = channels[0];
-      layer.colormap = this.volumeColormap(st);
+      layer.colormap = this.display.volumeColormap(st);
       if (st) layer.contrastLimits = [st.min, st.max];
       this.viewer?.requestRender();
     });
@@ -3273,7 +3180,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       this.surfaceLayer = null;
     }
     this.surfaceLayer = viewer.addSurface(vertices, faces, values, {
-      colormap: this.volumeColormap(st),
+      colormap: this.display.volumeColormap(st),
       contrastLimits: win,
       gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
       wireframe: this.surfaceWireframe,
@@ -3319,7 +3226,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
         return;
       }
       // Colour-only change: update uniforms in place, no geometry rebuild.
-      layer.colormap = this.volumeColormap(st);
+      layer.colormap = this.display.volumeColormap(st);
       if (st) {
         layer.contrastLimits = win;
         layer.gamma = toNapariGamma(st.gamma); // ImageJ γ → napari-js γ
