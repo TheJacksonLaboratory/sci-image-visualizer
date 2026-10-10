@@ -28,13 +28,6 @@ import { AutoCompleteModule } from 'primeng/autocomplete';
 
 import { VisualizerComponent } from './visualizer.component';
 import { ToolbarComponent } from './toolbar/toolbar.component';
-import { ToolbarHelpDialogComponent } from './toolbar/toolbar-help-dialog/toolbar-help-dialog.component';
-import { SegmentationToolsComponent } from './toolbar/segmentation-tools/segmentation-tools.component';
-import { RegionToolsComponent } from './toolbar/region-tools/region-tools.component';
-import { ToolSliderComponent } from './toolbar/tool-slider/tool-slider.component';
-import { ViewControlsComponent } from './toolbar/view-controls/view-controls.component';
-import { StackControlsComponent } from './toolbar/stack-controls/stack-controls.component';
-import { PlotTypeSelectorComponent } from './toolbar/plot-type-selector/plot-type-selector.component';
 import { RegionEditorComponent } from './region-editor/region-editor.component';
 import { SaveMaskDialogComponent } from './region-editor/save-mask-dialog/save-mask-dialog.component';
 import { SaveRegionsDialogComponent } from './region-editor/save-regions-dialog/save-regions-dialog.component';
@@ -89,14 +82,6 @@ import { FloatingDragDirective } from './visualizer/floating-drag.directive';
 @NgModule({
   declarations: [
     VisualizerComponent,
-    ToolbarComponent,
-    ToolbarHelpDialogComponent,
-    SegmentationToolsComponent,
-    RegionToolsComponent,
-    ToolSliderComponent,
-    ViewControlsComponent,
-    StackControlsComponent,
-    PlotTypeSelectorComponent,
     RegionEditorComponent,
     SaveMaskDialogComponent,
     SaveRegionsDialogComponent,
@@ -123,6 +108,8 @@ import { FloatingDragDirective } from './visualizer/floating-drag.directive';
     SpatialChartWindowComponent,
   ],
   imports: [
+    // Standalone components used by the declared ones.
+    ToolbarComponent,
     CommonModule,
     FormsModule,
     ToolbarModule,

@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Component, NO_ERRORS_SCHEMA } from '@angular/core';
 import { EventEmitter } from '@angular/core';
@@ -12,11 +13,12 @@ describe('ToolbarComponent', () => {
   let fixture: ComponentFixture<ToolbarComponent>;
 
   beforeEach(async () => {
-    await TestBed.configureTestingModule({
-      declarations: [ToolbarComponent],
-      imports: [FormsModule],
-      schemas: [NO_ERRORS_SCHEMA],
-    }).compileComponents();
+    // Shallow: the toolbar's own template only, its children and PrimeNG unrendered.
+    await TestBed.configureTestingModule({ imports: [ToolbarComponent] })
+      .overrideComponent(ToolbarComponent, {
+        set: { imports: [CommonModule, FormsModule], schemas: [NO_ERRORS_SCHEMA] },
+      })
+      .compileComponents();
 
     fixture = TestBed.createComponent(ToolbarComponent);
     component = fixture.componentInstance;
@@ -35,41 +37,41 @@ describe('ToolbarComponent', () => {
     // jit-ui opening a Xenium zip: no image loaded, but Spatial omics is still a choice.
     component.imageInfo = undefined;
     component.hasSpatialDataset = false;
-    expect(component.showPlotTypes).toBe(false);
+    expect(component['showPlotTypes']).toBe(false);
     component.hasSpatialDataset = true;
-    expect(component.showPlotTypes).toBe(true);
+    expect(component['showPlotTypes']).toBe(true);
   });
 
   it('isImageView is true only for the Image plot type', () => {
     component.selectedPlotType = PlotType.IMAGE;
-    expect(component.isImageView).toBe(true);
+    expect(component['isImageView']).toBe(true);
     component.selectedPlotType = PlotType.HEATMAP;
-    expect(component.isImageView).toBe(false);
+    expect(component['isImageView']).toBe(false);
   });
 
   it('a contributed plot mode gets exactly its base type\'s tools', () => {
     component.selectedPlotType = 'dianne';
     component.basePlotType = PlotType.IMAGE;
-    expect(component.effectivePlotType).toBe(PlotType.IMAGE);
-    expect(component.isImageView).toBe(true);
-    expect(component.supportsRegionVertexTools).toBe(true);
-    expect(component.showsLiveSliceScrubber).toBe(true);
-    expect(component.isIntensityCapable).toBe(true);
-    expect(component.isNapariMode).toBe(false);
+    expect(component['effectivePlotType']).toBe(PlotType.IMAGE);
+    expect(component['isImageView']).toBe(true);
+    expect(component['supportsRegionVertexTools']).toBe(true);
+    expect(component['showsLiveSliceScrubber']).toBe(true);
+    expect(component['isIntensityCapable']).toBe(true);
+    expect(component['isNapariMode']).toBe(false);
     // Unbound base: a non-built-in selection is treated as the default Image view.
     component.basePlotType = null;
-    expect(component.effectivePlotType).toBe(PlotType.IMAGE);
+    expect(component['effectivePlotType']).toBe(PlotType.IMAGE);
     component.selectedPlotType = PlotType.HEATMAP;
-    expect(component.effectivePlotType).toBe(PlotType.HEATMAP);
+    expect(component['effectivePlotType']).toBe(PlotType.HEATMAP);
   });
 
   // isPiIcon is covered in plot-type-selector.component.spec.ts.
 
   it('isIsosurfaceMode is true only for the Isosurface plot type', () => {
     component.selectedPlotType = PlotType.ISOSURFACE;
-    expect(component.isIsosurfaceMode).toBe(true);
+    expect(component['isIsosurfaceMode']).toBe(true);
     component.selectedPlotType = PlotType.HEATMAP;
-    expect(component.isIsosurfaceMode).toBe(false);
+    expect(component['isIsosurfaceMode']).toBe(false);
   });
 
   it('showsLiveSliceScrubber for the live-scrub views incl. the napari surface (stack slider)', () => {
@@ -79,7 +81,7 @@ describe('ToolbarComponent', () => {
       PlotType.IMAGE, PlotType.NAPARI_IMAGE, PlotType.NAPARI_SURFACE, PlotType.SPATIAL_OMICS,
     ]) {
       component.selectedPlotType = t;
-      expect(component.showsLiveSliceScrubber).toBe(true);
+      expect(component['showsLiveSliceScrubber']).toBe(true);
     }
     // Volume/isosurface render the whole stack at once — no per-slice scrubber —
     // and the 3D cloud has no plane to pick.
@@ -88,30 +90,30 @@ describe('ToolbarComponent', () => {
       PlotType.SPATIAL_OMICS_3D,
     ]) {
       component.selectedPlotType = t;
-      expect(component.showsLiveSliceScrubber).toBe(false);
+      expect(component['showsLiveSliceScrubber']).toBe(false);
     }
   });
 
   it('isNapariSurfaceMode is true only for the napari surface, isNapari3dMode for all napari 3D', () => {
     component.selectedPlotType = PlotType.NAPARI_SURFACE;
-    expect(component.isNapariSurfaceMode).toBe(true);
+    expect(component['isNapariSurfaceMode']).toBe(true);
     for (const t of [PlotType.NAPARI_VOLUME, PlotType.SURFACE, PlotType.NAPARI_IMAGE]) {
       component.selectedPlotType = t;
-      expect(component.isNapariSurfaceMode).toBe(false);
+      expect(component['isNapariSurfaceMode']).toBe(false);
     }
     // The Resolution control shows for every napari 3D type.
     for (const t of [PlotType.NAPARI_VOLUME, PlotType.NAPARI_ISOSURFACE, PlotType.NAPARI_SURFACE]) {
       component.selectedPlotType = t;
-      expect(component.isNapari3dMode).toBe(true);
+      expect(component['isNapari3dMode']).toBe(true);
     }
     component.selectedPlotType = PlotType.NAPARI_IMAGE;
-    expect(component.isNapari3dMode).toBe(false);
+    expect(component['isNapari3dMode']).toBe(false);
   });
 
   it('showHelp opens the help dialog', () => {
-    expect(component.displayHelpDialog).toBe(false);
-    component.showHelp();
-    expect(component.displayHelpDialog).toBe(true);
+    expect(component['displayHelpDialog']).toBe(false);
+    component['showHelp']();
+    expect(component['displayHelpDialog']).toBe(true);
   });
 
   it('exposes the toolbar actions as outputs', () => {
@@ -143,16 +145,16 @@ describe('ToolbarComponent', () => {
       // the 2D view does, not less: a million overlapping points are unreadable
       // without a colour source.
       component.selectedPlotType = PlotType.SPATIAL_OMICS;
-      expect(component.isSpatialMode).toBe(true);
+      expect(component['isSpatialMode']).toBe(true);
 
       component.selectedPlotType = PlotType.SPATIAL_OMICS_3D;
-      expect(component.isSpatialMode).toBe(true);
+      expect(component['isSpatialMode']).toBe(true);
     });
 
     it('hides it for every non-spatial mode', () => {
       for (const t of [PlotType.IMAGE, PlotType.NAPARI_VOLUME, PlotType.SCATTER]) {
         component.selectedPlotType = t;
-        expect(component.isSpatialMode).toBe(false);
+        expect(component['isSpatialMode']).toBe(false);
       }
     });
   });
@@ -184,10 +186,14 @@ describe('ToolbarComponent — dialog tools', () => {
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      declarations: [ToolbarComponent, HostComponent],
-      imports: [FormsModule],
+      declarations: [HostComponent],
+      imports: [ToolbarComponent],
       schemas: [NO_ERRORS_SCHEMA],
-    }).compileComponents();
+    })
+      .overrideComponent(ToolbarComponent, {
+        set: { imports: [CommonModule, FormsModule], schemas: [NO_ERRORS_SCHEMA] },
+      })
+      .compileComponents();
     fixture = TestBed.createComponent(HostComponent);
     fixture.detectChanges();
   });

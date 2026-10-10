@@ -5,9 +5,9 @@ describe('ToolSliderComponent', () => {
     const s = new ToolSliderComponent();
     const out: unknown[] = [];
     s.valueChange.subscribe((v) => out.push(v));
-    s.onChange({ value: 5 });
+    s['onChange']({ value: 5 });
     s.range = true;
-    s.onChange({ values: [10, 20] });
+    s['onChange']({ values: [10, 20] });
     expect(out).toEqual([5, [10, 20]]);
   });
 });

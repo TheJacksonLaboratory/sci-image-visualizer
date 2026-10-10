@@ -85,7 +85,7 @@
          tooltip and those would otherwise be read out literally. -->
     <button *ngIf="item.tooltip" type="button"
             class="pi pi-info-circle model-info-icon"
-            [attr.aria-label]="'About ' + item.label + ': ' + plainText(item.tooltip)"
+            [attr.aria-label]="item.infoLabel"
             [pTooltip]="item.tooltip" [escape]="false" tooltipPosition="bottom"
             appendTo="body" tooltipStyleClass="model-info-tooltip"
             (click)="$event.stopPropagation()"

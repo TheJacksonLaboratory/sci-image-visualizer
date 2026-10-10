@@ -25,7 +25,7 @@ describe('ToolbarHelpDialogComponent', () => {
     fixture.componentRef.setInput('contributedTools', [tool]);
     fixture.componentRef.setInput('visible', true);
     fixture.detectChanges();
-    expect(fixture.componentInstance.contributedToolNames).toBe('Detect');
+    expect(fixture.componentInstance['contributedToolNames']).toBe('Detect');
     const text = document.querySelector('.p-dialog-content')?.textContent ?? '';
     expect(text).toContain('no-prompt ones (Detect)');
     expect(text).toContain('Detect finds things.');

@@ -49,9 +49,9 @@ describe('StackControlsComponent', () => {
     const typed: number[] = [];
     stack.zIndexInput.subscribe((z) => typed.push(z));
     stack.zIndex = 4;
-    stack.onSliceInput('');
-    stack.onSliceInput(null);
-    stack.onSliceInput('6');
+    stack['onSliceInput']('');
+    stack['onSliceInput'](null);
+    stack['onSliceInput']('6');
     expect(typed).toEqual([4, 4, 6]);
   });
 });

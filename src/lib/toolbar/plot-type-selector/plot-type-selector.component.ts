@@ -1,7 +1,14 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { SharedModule } from 'primeng/api';
+import { ButtonModule } from 'primeng/button';
+import { DropdownModule } from 'primeng/dropdown';
+import { TooltipModule } from 'primeng/tooltip';
 
 import { PlotType, PlotTypeId } from '../../contracts/plot-type';
 import { PlotTypeOption } from '../../contracts/plot-type-contribution.contract';
+import { ToolSliderComponent } from '../tool-slider/tool-slider.component';
 
 /**
  * The toolbar's plot-type group: the plot-type dropdown, the isosurface band
@@ -10,6 +17,10 @@ import { PlotTypeOption } from '../../contracts/plot-type-contribution.contract'
  */
 @Component({
   selector: 'toolbar-plot-type-selector',
+  standalone: true,
+  imports: [
+    CommonModule, FormsModule, SharedModule, ButtonModule, DropdownModule, TooltipModule, ToolSliderComponent,
+  ],
   templateUrl: './plot-type-selector.component.html',
   styleUrls: ['./plot-type-selector.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -26,24 +37,26 @@ export class PlotTypeSelectorComponent {
   /** The view draws intensity profile lines: show the add-line button. */
   @Input() intensityLines = false;
 
+  /** A plot type or contributed mode was picked from the dropdown. */
   @Output() selectPlotType = new EventEmitter<PlotTypeId>();
+  /** The iso band slider moved: the new `[low, high]` pair (or nothing). */
   @Output() isoRangeChange = new EventEmitter<number[] | undefined>();
   /** Add another coloured intensity line ROI + inset trace. */
   @Output() addProfileLine = new EventEmitter<void>();
 
   /** Iso slider bounds — UI constants (the band is host-owned). */
-  readonly isoValueMin = 0;
-  readonly isoValueMax = 255;
-  readonly isoValueStep = 1;
+  protected readonly isoValueMin = 0;
+  protected readonly isoValueMax = 255;
+  protected readonly isoValueStep = 1;
 
   /** A plot-type icon is a PrimeNG font glyph (e.g. `pi pi-image`) rather than an
    *  SVG asset path — drives which element the item template renders. */
-  isPiIcon(icon: string | undefined): boolean {
+  protected isPiIcon(icon: string | undefined): boolean {
     return !!icon && icon.startsWith('pi ');
   }
 
   /** The iso band slider reports its `[low, high]` pair (or nothing). */
-  onIsoRange(value: number | number[] | undefined): void {
+  protected onIsoRange(value: number | number[] | undefined): void {
     this.isoRangeChange.emit(Array.isArray(value) ? value : undefined);
   }
 }

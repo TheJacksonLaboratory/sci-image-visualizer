@@ -59,7 +59,7 @@ describe('RegionToolsComponent', () => {
     expect(el().textContent).toContain('3.3');
     const changes: (number | undefined)[] = [];
     tools.wandSensitivityChange.subscribe((v) => changes.push(v));
-    (slider.componentInstance as ToolSliderComponent).onChange({ value: 4 });
+    (slider.componentInstance as ToolSliderComponent)['onChange']({ value: 4 });
     expect(changes).toEqual([4]);
   });
 

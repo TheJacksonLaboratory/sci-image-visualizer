@@ -31,9 +31,9 @@ describe('SegmentationToolsComponent — model menus', () => {
 
     // The item template turns `tooltip` into the hover info icon, so an empty
     // one would silently drop the icon rather than fail.
-    expect(tools.samMenuItems[0].tooltip).toContain('TinyViT');
+    expect(tools['samMenuItems'][0].tooltip).toContain('TinyViT');
     // Active model still marked, and selecting still emits.
-    expect(tools.samMenuItems[0].icon).toBe('pi pi-check');
+    expect(tools['samMenuItems'][0].icon).toBe('pi pi-check');
   });
 
   it('builds a contributed tool\'s menu from the tool\'s own model info', () => {
@@ -44,7 +44,7 @@ describe('SegmentationToolsComponent — model menus', () => {
     tools.toolModelIds = { detect: 'model-b' };
     tools.ngOnChanges({ contributedTools: {} as never });
 
-    const items = tools.toolMenuItems['detect']!;
+    const items = tools['toolMenuItems']['detect']!;
     expect(items[0].tooltip).toContain('the first one');
     expect(items[1].icon).toBe('pi pi-check');
     expect(items[0].icon).toBe('pi pi-fw');
@@ -57,7 +57,7 @@ describe('SegmentationToolsComponent — model menus', () => {
     const picked: { toolId: string; modelId: string }[] = [];
     tools.toolModelChange.subscribe((e) => picked.push(e));
 
-    tools.toolMenuItems['detect']![1].command!({} as never);
+    tools['toolMenuItems']['detect']![1].command!({} as never);
 
     expect(picked).toEqual([{ toolId: 'detect', modelId: 'model-b' }]);
   });
@@ -65,7 +65,7 @@ describe('SegmentationToolsComponent — model menus', () => {
   it('leaves `tooltip` undefined for a model with no description', () => {
     tools.samModels = [{ id: 'some-unregistered-model', label: 'Unknown' }];
     tools.ngOnChanges({ samModels: {} as never });
-    expect(tools.samMenuItems[0].tooltip).toBeUndefined();
+    expect(tools['samMenuItems'][0].tooltip).toBeUndefined();
   });
 });
 
@@ -76,15 +76,25 @@ describe('SegmentationToolsComponent — model info accessibility', () => {
     // out literally.
     const c = new SegmentationToolsComponent();
 
-    const out = c.plainText('<b>VNet 2D</b><br>~590&nbsp;MB download &amp; 6&times; slower.');
+    const out = c['plainText']('<b>VNet 2D</b><br>~590&nbsp;MB download &amp; 6&times; slower.');
 
     expect(out).toBe('VNet 2D. ~590 MB download & 6x slower.');
     expect(out).not.toMatch(/[<>]/);
   });
 
+  it('builds each info button\'s accessible name with the menu, stripped of markup', () => {
+    const c = new SegmentationToolsComponent();
+    c.contributedTools = [contributedTool()];
+    c.samModels = [{ id: 'some-unregistered-model', label: 'Unknown' }];
+    c.ngOnChanges({ contributedTools: {} as never, samModels: {} as never });
+    expect(c['toolMenuItems']['detect']![0]['infoLabel']).toBe('About A: the first one');
+    // No description, no info button, no label.
+    expect(c['samMenuItems'][0]['infoLabel']).toBeUndefined();
+  });
+
   it('survives an empty or missing description', () => {
     const c = new SegmentationToolsComponent();
-    expect(c.plainText('')).toBe('');
-    expect(c.plainText(undefined as never)).toBe('');
+    expect(c['plainText']('')).toBe('');
+    expect(c['plainText'](undefined as never)).toBe('');
   });
 });
