@@ -33,10 +33,9 @@ import {
   PlotModeTools,
   PlotTypeContribution,
   PlotTypeOption,
-  contributedPlotTypeOption,
 } from './contracts/plot-type-contribution.contract';
 import { ActivePlotMode, PlotModeController } from './plot-mode/plot-mode-controller';
-import { ViewerFeature } from './contracts/capabilities.contract';
+import { computePlotTypeMenu, reconcilePlotType } from './plot-mode/plot-type-menu';
 import { IntensityProfile, IVisualizer, VISUALIZER, VisualizerHandle } from './contracts/visualizer.contract';
 import { CanvasToolOptions } from './contracts/display-types';
 import { SAM_MODELS, getDefaultSamModelId, isSamModelReady } from './toolbar/segmentation/sam-model-registry';
@@ -647,79 +646,23 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.volumeImageUrls = [];
   }
 
-  /**
-   * Plot types offered in the selector for the current image:
-   *  - Outside **test mode**, only the curated default set (descriptors with a
-   *    `productionLabel`) is offered, shown under suffix-free names — Image,
-   *    Heatmap, Contour and the napari Surface / Volume / Isosurface. Test mode
-   *    exposes every backend's type under its full (backend-suffixed) label.
-   *  - 3D types hidden when the backend can't render a 3D scene.
-   *  - stack-only types (volume, isosurface) hidden unless the file is a stack —
-   *    a volume needs multiple z-slices.
-   *  - scalar-intensity types (contour, surface, isosurface) hidden for RGB
-   *    images — they map a single intensity per pixel. Image and Heatmap render
-   *    any image.
-   *  - spatial-omics types hidden until a `SpatialDataset` is published on
-   *    `SPATIAL_DATA_PORT` — the mode has nothing to draw without observations,
-   *    exactly as a volume has nothing to draw without a stack.
-   */
+  /** Recompute the selector's entries for the current image, dataset and test mode
+   *  (see {@link computePlotTypeMenu}). */
   private computePlotTypeOptions() {
-    const caps = this.plotService.capabilities;
-    const isStack = !!this.imageInfo?.isStack;
-    const isGrayscale = !!this.imageInfo?.isGrayscale;
-    // A multichannel image's bands are each single-band (scalar), so the scalar
-    // plot modes (Heatmap / Surface / Volume / Isosurface) apply per channel even
-    // though the RGB composite isn't grayscale — don't gate them out.
-    const m0 = this.imageInfo?.imageMeta?.[0];
-    const isMultichannel = (m0?.channelCount ?? 1) > 1 && (m0?.rgbChannels ?? 1) < 3;
-    const passesGates = (d: PlotTypeDescriptor): boolean => {
-      if (d.dimensions === '3d' && !caps.has(ViewerFeature.Surface3D)) return false;
-      // Volume and Isosurface raymarch the IMAGE STACK, and nothing else: these
-      // two gates are about the loaded image, full stop. A 3D omics dataset
-      // reaches them because its registered volume is published AS a grayscale
-      // z-stack image (`buildVolumeStackImage`), not through a second voxel
-      // source hiding behind the same modes.
-      if (d.requiresStack && !isStack) return false;
-      if (d.requiresGrayscale && !isGrayscale && !isMultichannel) return false;
-      if (d.requiresSpatialData && !this.hasSpatialDataset) return false;
-      if (d.requiresSpatial3d && !this.hasSpatial3dDataset) return false;
-      // An image-sourced mode reads PIXELS. A spatial dataset that brings no tissue
-      // image (seqFISH records unitless coordinates, not a section) leaves nothing for
-      // one to draw, so offering Image / Heatmap / Surface there offers modes that can
-      // only come up blank — or worse, showing whatever slide was loaded before.
-      //
-      // Narrowed to "a dataset is up AND there is no image": with no dataset at all,
-      // Image stays on offer, because a host that has not loaded anything yet needs a
-      // default and an empty selector would be worse than a blank view.
-      if (d.source === 'image' && this.hasSpatialDataset
-        && !this.spatialDatasetHasPixels) return false;
-      return true;
-    };
-    // Outside test mode, only the curated set (those with a productionLabel)
-    // is offered; test mode exposes every backend's type.
-    const curated = (d: { productionLabel?: string }): boolean => this.testMode || !!d.productionLabel;
-    const builtIn = this.plotService.getPlotTypeDescriptors()
-      .filter((d) => curated(d) && passesGates(d));
-    // Contributed modes come after every built-in one, under the same label rule
-    // and their own stack/grayscale/spatial gates. A mode also needs whatever its base
-    // view needs (pixels, a 3D-capable backend), so the base type's gates apply
-    // too — a contributed Image-based mode goes wherever Image goes.
-    const contributed: PlotTypeOption[] = [];
-    for (const d of this.plotModes.descriptors()) {
-      if (!curated(d)) continue;
-      if (d.requiresStack && !isStack) continue;
-      if (d.requiresGrayscale && !isGrayscale && !isMultichannel) continue;
-      if (d.requiresSpatialData && !this.hasSpatialDataset) continue;
-      if (d.requiresSpatial3d && !this.hasSpatial3dDataset) continue;
-      const base = getPlotTypeDescriptor(d.baseType);
-      if (base && passesGates(base)) contributed.push(contributedPlotTypeOption(d, base));
-    }
-    // Default selector shows the suffix-free productionLabel; test mode keeps
-    // the full backend-suffixed label so same-named modes stay distinguishable.
-    const labelled = <T extends { label: string; productionLabel?: string }>(d: T): T =>
-      (this.testMode ? d : { ...d, label: d.productionLabel! });
-    this.plotTypeOptions = builtIn.map(labelled);
-    this.plotTypeMenu = [...this.plotTypeOptions, ...contributed.map(labelled)];
+    const { builtIn, menu } = computePlotTypeMenu({
+      descriptors: this.plotService.getPlotTypeDescriptors(),
+      contributions: this.plotModes.descriptors(),
+      caps: this.plotService.capabilities,
+      imageInfo: this.imageInfo,
+      spatial: {
+        hasDataset: this.hasSpatialDataset,
+        has3d: this.hasSpatial3dDataset,
+        hasPixels: this.spatialDatasetHasPixels,
+      },
+      testMode: this.testMode,
+    });
+    this.plotTypeOptions = builtIn;
+    this.plotTypeMenu = menu;
   }
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -769,13 +712,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    *  turned off while a test-only type was active, or a scalar type carried onto
    *  an RGB image), fall back to the default 2D Image view. */
   private reconcileSelectedPlotType(): void {
-    if (this.plotTypeMenu.some((d) => d.type === this.selectedPlotTypeId)) return;
-    // Image is the usual fallback, but it is not always ON OFFER: with no image loaded
-    // the pixel modes are gone, and falling back to one would select a mode the selector
-    // does not list and nothing can draw. Take the first type still offered instead.
-    const fallback = this.plotTypeMenu.some((d) => d.type === PlotType.IMAGE)
-      ? PlotType.IMAGE
-      : this.plotTypeMenu[0]?.type;
+    const fallback = reconcilePlotType(this.plotTypeMenu, this.selectedPlotTypeId);
     if (!fallback) return;
     // Leaving a contributed mode (its gates stopped passing, or its provider is
     // gone): its session ends before anything else draws.
