@@ -258,11 +258,6 @@ export class ToolbarComponent {
     this.isoRangeChange.emit(Array.isArray(value) ? value : undefined);
   }
 
-  /** The slice field reports what was typed; the host owns `zIndex`. */
-  onSliceInput(value: string | number | null): void {
-    this.zIndexInput.emit(value == null || value === '' ? this.zIndex : Number(value));
-  }
-
   showHelp(): void {
     this.displayHelpDialog = true;
   }

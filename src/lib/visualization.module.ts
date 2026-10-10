@@ -33,6 +33,7 @@ import { SegmentationToolsComponent } from './toolbar/segmentation-tools/segment
 import { RegionToolsComponent } from './toolbar/region-tools/region-tools.component';
 import { ToolSliderComponent } from './toolbar/tool-slider/tool-slider.component';
 import { ViewControlsComponent } from './toolbar/view-controls/view-controls.component';
+import { StackControlsComponent } from './toolbar/stack-controls/stack-controls.component';
 import { RegionEditorComponent } from './region-editor/region-editor.component';
 import { SaveMaskDialogComponent } from './region-editor/save-mask-dialog/save-mask-dialog.component';
 import { SaveRegionsDialogComponent } from './region-editor/save-regions-dialog/save-regions-dialog.component';
@@ -71,6 +72,7 @@ import { FloatingDragDirective } from './visualizer/floating-drag.directive';
     RegionToolsComponent,
     ToolSliderComponent,
     ViewControlsComponent,
+    StackControlsComponent,
     RegionEditorComponent,
     SaveMaskDialogComponent,
     SaveRegionsDialogComponent,
