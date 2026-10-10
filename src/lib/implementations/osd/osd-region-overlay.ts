@@ -16,6 +16,7 @@ import {
 import {
   ScreenLayer, SvgRegionRenderer, affineFromProjection, svgEl,
 } from '../../region-overlay/svg-region-renderer';
+import { EDIT_TOL_PX, EditZone, ZONE_CURSOR, rectZone, resizeRect } from '../../region-overlay/region-hit-test';
 
 /**
  * The shared region store as the overlay needs it: the cross-backend
@@ -29,22 +30,12 @@ export type RegionEditStore = IRegionStore & IRegionEditApi;
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 
-/** Move/resize zones on the selected rectangle. */
-type EditZone = 'move' | 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
-const ZONE_CURSOR: Record<EditZone, string> = {
-  move: 'move', n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize',
-  ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize',
-};
 /** A region's geometry at the start of a move/resize (see `snapshot`): a rectangle's
  *  box for a resize, or the polygon/multi-polygon bounds themselves for a move — the
  *  store is copy-on-write, so the gesture-start instance never changes under the drag. */
 type EditSnapshot =
   | { kind: 'rect'; x: number; y: number; w: number; h: number }
   | { kind: 'shape'; bounds: Polygon | MultiPolygon };
-
-/** Screen-pixel tolerance for grabbing an edge/corner handle. */
-const EDIT_TOL = 8;
-
 
 /**
  * OpenSeadragon implementation of {@link IRegionOverlay}.
@@ -642,7 +633,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
       return;
     }
     const first = this.toPx(this.polyPoints[0].x, this.polyPoints[0].y);
-    const onFirst = Math.hypot(e.position.x - first.x, e.position.y - first.y) <= EDIT_TOL;
+    const onFirst = Math.hypot(e.position.x - first.x, e.position.y - first.y) <= EDIT_TOL_PX;
     if (onFirst && this.polyPoints.length >= 3) {
       this.commitPolygon(true); // closes + resets in-progress (incl. drawingPolygon)
       return;
@@ -685,8 +676,8 @@ export class OsdRegionOverlay implements IRegionOverlay {
     if (b instanceof Rectangle) {
       const a = this.toPx(b.x, b.y);
       const c = this.toPx(b.x + b.width, b.y + b.height);
-      const zone = this.rectZone(position.x, position.y,
-        Math.min(a.x, c.x), Math.min(a.y, c.y), Math.max(a.x, c.x), Math.max(a.y, c.y));
+      const zone = rectZone(position.x, position.y,
+        { x0: Math.min(a.x, c.x), y0: Math.min(a.y, c.y), x1: Math.max(a.x, c.x), y1: Math.max(a.y, c.y) });
       return zone ? { zone, index } : null;
     }
     if (b instanceof Polygon || b instanceof MultiPolygon) {
@@ -711,7 +702,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
     { kind: 'vertex' | 'bezier'; ring: number; index: number; side: 'in' | 'out' } | null {
     const sel = this.selectedRegionInfo();
     if (!sel || !(sel.region.bounds instanceof Polygon)) return null;
-    const hit = hitHandle(sel.region, position.x, position.y, this.toScreen, EDIT_TOL, { bezier });
+    const hit = hitHandle(sel.region, position.x, position.y, this.toScreen, EDIT_TOL_PX, { bezier });
     if (!hit || hit.kind === 'corner') return null;
     return { kind: hit.kind, ring: hit.ring, index: hit.index, side: hit.kind === 'bezier' ? hit.side : 'out' };
   }
@@ -721,27 +712,9 @@ export class OsdRegionOverlay implements IRegionOverlay {
   private hitEdge(position: { x: number; y: number }, region: Region):
     { ring: number; segIndex: number; x: number; y: number } | null {
     const edge = nearestEdge(region, position.x, position.y, this.toScreen);
-    if (!edge || edge.dist > EDIT_TOL) return null;
+    if (!edge || edge.dist > EDIT_TOL_PX) return null;
     const img = this.toImage(position);
     return { ring: edge.ring, segIndex: edge.segIndex, x: img.x, y: img.y };
-  }
-
-  /** Classify a screen point against a screen-space rectangle into a zone. */
-  private rectZone(px: number, py: number, x0: number, y0: number, x1: number, y1: number): EditZone | null {
-    const t = EDIT_TOL;
-    if (px < x0 - t || px > x1 + t || py < y0 - t || py > y1 + t) return null;
-    const left = Math.abs(px - x0) <= t, right = Math.abs(px - x1) <= t;
-    const top = Math.abs(py - y0) <= t, bottom = Math.abs(py - y1) <= t;
-    if (top && left) return 'nw';
-    if (top && right) return 'ne';
-    if (bottom && left) return 'sw';
-    if (bottom && right) return 'se';
-    if (left) return 'w';
-    if (right) return 'e';
-    if (top) return 'n';
-    if (bottom) return 's';
-    if (px > x0 && px < x1 && py > y0 && py < y1) return 'move';
-    return null;
   }
 
   /** Snapshot the selected region's geometry at the start of an edit. */
@@ -791,24 +764,8 @@ export class OsdRegionOverlay implements IRegionOverlay {
     const o = this.edit.orig;
     if (!o) return;
     if (o.kind === 'rect') {
-      let x0 = o.x, y0 = o.y, x1 = o.x + o.w, y1 = o.y + o.h;
-      switch (this.edit.zone) {
-        case 'move': x0 += dx; x1 += dx; y0 += dy; y1 += dy; break;
-        case 'w': x0 += dx; break;
-        case 'e': x1 += dx; break;
-        case 'n': y0 += dy; break;
-        case 's': y1 += dy; break;
-        case 'nw': x0 += dx; y0 += dy; break;
-        case 'ne': x1 += dx; y0 += dy; break;
-        case 'sw': x0 += dx; y1 += dy; break;
-        case 'se': x1 += dx; y1 += dy; break;
-      }
-      const rect = new Rectangle();
-      rect.x = Math.round(Math.min(x0, x1));
-      rect.y = Math.round(Math.min(y0, y1));
-      rect.width = Math.round(Math.abs(x1 - x0));
-      rect.height = Math.round(Math.abs(y1 - y0));
-      this.store.updateBounds(this.edit.id, rect);
+      const box = resizeRect({ x: o.x, y: o.y, width: o.w, height: o.h }, this.edit.zone, dx, dy);
+      this.store.updateBounds(this.edit.id, Object.assign(new Rectangle(), box));
     } else {
       // Polygon / multi-part region: translate every vertex, hole and part, rounded to
       // whole pixels. Bezier handle offsets are relative, so they carry over unchanged.
