@@ -4625,7 +4625,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       invalidateWandRegion: () => this.wandTool.clearActiveRegion(),
       getOverlayContainer: () => this.host,
       getCoordinateTransform: () => this.coordTransform as ICoordinateTransform,
-      getCachedImageRatio: () => this.cachedImageData()?.ratios[0] ?? 1,
+      getCachedImageData: () => this.cachedImageData(),
     };
   }
 

@@ -236,7 +236,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IVisualizer {
       invalidateWandRegion: () => this.wandTool.clearActiveRegion(),
       getOverlayContainer: () => this.getOverlayContainer(),
       getCoordinateTransform: () => this.getCoordinateTransform(),
-      getCachedImageRatio: () => this.cachedImageRatios[0] || 1,
+      getCachedImageData: () => this.getCachedImageData(),
     };
     this.wandTool.bindHost(this.wandHost);
     // The brush reuses the wand host (same coordinate frame + region access).

@@ -24,18 +24,12 @@ export interface VertexEraserToolHost extends IViewportHost, IRegionDataHost {
    */
   invalidateWandRegion(): void;
   /**
-   * Data-coords-per-image-pixel ratio (== cachedImageRatios[0] || 1). Used to
-   * convert between matrix coordinates (the eraser's native space) and the
-   * backend's data coordinates when {@link getCachedImageData} isn't provided.
+   * The readback the wand samples: its per-axis ratios convert between matrix
+   * coordinates (the eraser's native space) and data coordinates, so the eraser
+   * radius stays round in image pixels on an anisotropic readback (RT-14).
+   * null (no image yet) means one data unit per matrix pixel.
    */
-  getCachedImageRatio(): number;
-  /**
-   * The readback the wand samples, if the host exposes it to the eraser. Its
-   * per-axis ratios keep the eraser circle round in image pixels on an
-   * anisotropic readback; without it `getCachedImageRatio()` is used for both
-   * axes.
-   */
-  getCachedImageData?(): CachedImageData | null;
+  getCachedImageData(): CachedImageData | null;
 }
 
 /**
@@ -164,10 +158,9 @@ export class VertexEraserToolService {
 
   // ── Per-tick erase logic ────────────────────────────────────────────
 
-  /** The data↔matrix frame: the host's readback when exposed, else its single ratio. */
+  /** The data↔matrix frame of the host's readback (identity without one). */
   private frame(): MatrixFrame {
-    const cached = this.host.getCachedImageData?.();
-    return MatrixFrame.from(cached ?? { ratios: [this.host.getCachedImageRatio()] });
+    return MatrixFrame.from(this.host.getCachedImageData() ?? { ratios: [1] });
   }
 
   /**

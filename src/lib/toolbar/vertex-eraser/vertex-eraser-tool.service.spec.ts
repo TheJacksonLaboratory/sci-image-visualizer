@@ -47,7 +47,7 @@ describe('VertexEraserToolService (neutral Region)', () => {
       getRegions: () => regions.slice(),
       setRegions: (rs) => { committed = rs; },
       invalidateWandRegion: () => { invalidated++; },
-      getCachedImageRatio: () => 1,
+      getCachedImageData: () => null,
     });
     tool.setMode(true);
     tool.setRadius(2);
@@ -163,6 +163,69 @@ describe('VertexEraserToolService (neutral Region)', () => {
   });
 });
 
+describe('VertexEraserToolService — anisotropic readback (RT-14)', () => {
+  let tool: VertexEraserToolService;
+  let committed: Region[] | null;
+  let container: HTMLDivElement;
+
+  /** A quad with a vertex 6 data units below the click at (0, 0). */
+  function tallRegion(): Region {
+    const r = new Region();
+    r.id = 3;
+    const p = new Polygon();
+    p.xpoints = [0, 20, 20, 0];
+    p.ypoints = [6, 6, 30, 30];
+    p.npoints = 4;
+    p.coordinates = p.xpoints.map((x, i) => [x, p.ypoints[i]]);
+    p.closed = true;
+    r.bounds = p;
+    return r;
+  }
+
+  beforeEach(() => {
+    tool = new VertexEraserToolService();
+    committed = null;
+    container = document.createElement('div');
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    tool.setMode(false);
+    container.remove();
+  });
+
+  function bind(regions: Region[], ratios: number[]) {
+    tool.bindHost({
+      getOverlayContainer: () => container,
+      getCoordinateTransform: () => identityTransform,
+      getRegions: () => regions.slice(),
+      setRegions: (rs) => { committed = rs; },
+      invalidateWandRegion: () => undefined,
+      getCachedImageData: () => ({ frames: [[[0]]], width: 1, height: 1, ratios, isGrayscale: true }),
+    });
+    tool.setMode(true);
+    tool.setRadius(2); // matrix px
+  }
+
+  const click = (x: number, y: number) => (container.querySelector('canvas') as HTMLCanvasElement)
+    .dispatchEvent(new MouseEvent('pointerdown', { clientX: x, clientY: y, button: 0 }));
+
+  it('measures the radius on Y with the Y ratio, not the X ratio', () => {
+    // 4 data units per matrix row: the vertex 6 data units down is 1.5 rows away,
+    // inside the radius. Using the X ratio (1) for Y it would be 6 rows away.
+    bind([tallRegion()], [1, 4]);
+    click(0, 0);
+    expect(committed).not.toBeNull();
+    expect((committed![0].bounds as Polygon).ypoints).toEqual([6, 30, 30]);
+  });
+
+  it('keeps a vertex outside the radius on a square readback', () => {
+    bind([tallRegion()], [1, 1]);
+    click(0, 0);
+    expect(committed).toBeNull();
+  });
+});
+
 describe('VertexEraserToolService — keeps what it does not edit (RT-5)', () => {
   let tool: VertexEraserToolService;
   let committed: Region[] | null;
@@ -175,7 +238,7 @@ describe('VertexEraserToolService — keeps what it does not edit (RT-5)', () =>
       getRegions: () => regions.slice(),
       setRegions: (rs) => { committed = rs; },
       invalidateWandRegion: () => undefined,
-      getCachedImageRatio: () => 1,
+      getCachedImageData: () => null,
     });
     tool.setMode(true);
     tool.setRadius(2);

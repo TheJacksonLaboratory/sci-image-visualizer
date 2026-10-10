@@ -1650,7 +1650,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       invalidateWandRegion: () => this.wandTool.clearActiveRegion(),
       getOverlayContainer: () => this.getOverlayContainer(),
       getCoordinateTransform: () => this.coordTransform as ICoordinateTransform,
-      getCachedImageRatio: () => this.readbackViewport()?.ratios[0] ?? 1,
+      getCachedImageData: () => this.readbackViewport(),
     };
   }
 

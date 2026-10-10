@@ -8,9 +8,9 @@ import { Region } from '../models/region';
  *
  * "Data coordinates" are the backend's shape coordinate space: Plotly data
  * coords for Plotly, image-pixel coords for OpenSeadragon. The tools convert
- * data -> image-matrix using the per-image ratio they already get from the host
- * (`getCachedImageData().ratios` / `getCachedImageRatio()`), so that division
- * stays in the tool and the transform stays purely screen<->data.
+ * data -> image-matrix using the per-axis ratios they already get from the host
+ * (`getCachedImageData().ratios`, see `MatrixFrame`), so that division stays in
+ * the tool and the transform stays purely screen<->data.
  */
 export interface ICoordinateTransform {
   /** Client (mouse event) pixel -> data coordinates. */
