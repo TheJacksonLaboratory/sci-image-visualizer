@@ -1,5 +1,6 @@
 import type { CachedImageData } from '../wand/wand-tool.service';
 import { MatrixFrame } from '../tool-kit/matrix-frame';
+import { framePixels } from '../tool-kit/frame-pixels';
 
 /** A client-side crop of the loaded image — the browser equivalent of the JIT
  *  server slide-crop, taken from the pixels already in the viewer. */
@@ -44,30 +45,16 @@ export function cropImageRegion(
 }
 
 /**
- * RGBA pixels of the `w`×`h` matrix window at (x0, y0) of a cached frame.
- * Grayscale frames are replicated across R/G/B; RGB tuples are copied through.
- * Missing pixels become opaque black.
+ * RGBA pixels of the `w`×`h` matrix window at (x0, y0) of a cached frame,
+ * nested or packed (see `tool-kit/frame-pixels`). Grayscale frames are
+ * replicated across R/G/B; RGB tuples are copied through. Missing pixels become
+ * opaque black.
  */
 export function frameRegionToRgba(
   cached: CachedImageData, frameIndex: number, x0: number, y0: number, w: number, h: number,
 ): Uint8ClampedArray {
-  const frame = cached.frames[frameIndex] ?? cached.frames[0];
+  const pixels = framePixels(cached.frames[frameIndex] ?? cached.frames[0], cached.isGrayscale);
   const data = new Uint8ClampedArray(w * h * 4);
-  for (let y = 0; y < h; y++) {
-    const row = frame?.[y0 + y];
-    for (let x = 0; x < w; x++) {
-      const o = (y * w + x) * 4;
-      const px = row?.[x0 + x];
-      if (px == null) { data[o + 3] = 255; continue; }
-      if (cached.isGrayscale) {
-        const v = px as number;
-        data[o] = v; data[o + 1] = v; data[o + 2] = v;
-      } else {
-        const t = px as number[];
-        data[o] = t[0]; data[o + 1] = t[1]; data[o + 2] = t[2];
-      }
-      data[o + 3] = 255;
-    }
-  }
+  for (let y = 0; y < h; y++) pixels.rgbaRow(y0 + y, x0, w, data, y * w * 4);
   return data;
 }

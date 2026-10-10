@@ -7,6 +7,7 @@ import { MaskStrokeEditor } from '../tool-kit/mask-stroke-editor';
 import { UndoGesture } from '../tool-kit/undo-gesture';
 import { ToolOverlayCanvas } from '../tool-kit/tool-overlay';
 import { RegionStore } from '../../store/region-store.service';
+import type { CachedFrame } from '../tool-kit/frame-pixels';
 import { IViewportHost, IRegionDataHost } from '../../contracts/coordinate-transform.contract';
 import { Region } from '../../models/region';
 
@@ -15,8 +16,12 @@ import { Region } from '../../models/region';
  * canvas tools for sampling. Returned by `WandToolHost.getCachedImageData()`.
  */
 export interface CachedImageData {
-  /** 2-D matrices, one per stack frame (length 1 for non-stack images). */
-  frames: any[];
+  /**
+   * One frame per stack slice (length 1 for non-stack images): a nested `[y][x]`
+   * matrix (Plotly) or a packed RGBA readback (OpenSeadragon, napari-js). Read
+   * them through `framePixels()` (`tool-kit/frame-pixels`).
+   */
+  frames: CachedFrame[];
   /** Image-pixel width of each frame matrix. */
   width: number;
   /** Image-pixel height of each frame matrix. */
@@ -27,7 +32,8 @@ export interface CachedImageData {
    * (see {@link MatrixFrame}).
    */
   ratios: number[];
-  /** Whether each frame is a 2-D scalar matrix (true) or 3-channel RGB (false). */
+  /** Whether each nested frame is a 2-D scalar matrix (true) or 3-channel RGB
+   *  (false). Packed frames always read as RGB. */
   isGrayscale: boolean;
   /**
    * Data-coords of matrix pixel (0,0). Lets the matrix be a *crop* of the data

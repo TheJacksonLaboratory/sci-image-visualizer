@@ -5,6 +5,7 @@ import { dropVerticesWithinRadius, pointInPolygonWithHoles, pointInRing } from '
 import { labelsToPolygons, maskToPolygons } from '../../geometry/contour';
 
 import { IWandOptions, WandType } from '../../contracts/display-types';
+import { CachedFrame, framePixels, isPackedFrame } from '../tool-kit/frame-pixels';
 
 // Canonical wand option/type shapes moved to contracts/display-types (public
 // API surface); re-exported here so existing internal imports keep working.
@@ -15,8 +16,9 @@ export interface WandImage {
   /**
    * Grayscale: number[][] where data[y][x] is intensity.
    * RGB: [r,g,b][][] where data[y][x] is a 3-tuple.
+   * Or a packed RGBA readback, read as RGB (see `tool-kit/frame-pixels`).
    */
-  data: number[][] | number[][][];
+  data: CachedFrame;
   width: number;
   height: number;
   isGrayscale: boolean;
@@ -162,18 +164,21 @@ export class WandService {
     const x0 = Math.round(cx) - half;
     const y0 = Math.round(cy) - half;
     const buf = new Float32Array(W * W * channels);
+    const pixels = framePixels(image.data, image.isGrayscale);
+    // A grayscale nested frame reads as (v, v, v): its value is rgb[0].
+    const gray = image.isGrayscale && !isPackedFrame(image.data);
+    const rgb = [0, 0, 0];
 
     for (let py = 0; py < W; py++) {
       const iy = y0 + py;
       if (iy < 0 || iy >= image.height) continue;
-      const row = image.data[iy];
-      if (!row) continue;
       for (let px = 0; px < W; px++) {
         const ix = x0 + px;
         if (ix < 0 || ix >= image.width) continue;
+        if (!pixels.rgb(ix, iy, rgb)) continue;
         const dst = (py * W + px) * channels;
-        if (image.isGrayscale) {
-          const v = row[ix] as number;
+        if (gray) {
+          const v = rgb[0];
           if (channels === 1) {
             buf[dst] = v;
           } else {
@@ -181,16 +186,13 @@ export class WandService {
             buf[dst + 1] = v;
             buf[dst + 2] = v;
           }
+        } else if (channels === 1) {
+          // GRAY type forced on RGB image: convert with luminance.
+          buf[dst] = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
         } else {
-          const tuple = row[ix] as number[];
-          if (channels === 1) {
-            // GRAY type forced on RGB image: convert with luminance.
-            buf[dst] = 0.299 * tuple[0] + 0.587 * tuple[1] + 0.114 * tuple[2];
-          } else {
-            buf[dst] = tuple[0];
-            buf[dst + 1] = tuple[1];
-            buf[dst + 2] = tuple[2];
-          }
+          buf[dst] = rgb[0];
+          buf[dst + 1] = rgb[1];
+          buf[dst + 2] = rgb[2];
         }
       }
     }
