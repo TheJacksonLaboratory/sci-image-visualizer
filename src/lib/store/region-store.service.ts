@@ -7,7 +7,7 @@ import { downloadGeoJson, regionsFromGeoJson, regionsToGeoJson } from '../models
 import { VisualizerStore } from './visualizer-store.service';
 import { IRegionStore } from '../contracts/visualizer.contract';
 import { IRegionEditApi } from '../contracts/region-store.contract';
-import { colorForLabel, presetKey } from './class-color.util';
+import { applyPresetColors } from './class-color.util';
 import { cloneBounds, makePolygon, rectToRing, regionPolygons, replaceBounds } from '../models/polygon-factory';
 import * as edit from '../models/polygon-edit';
 import { regionsEqual, withRegionPatch, withRegionZ } from '../models/region-clone';
@@ -688,33 +688,12 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     return imageInfo.fileName || undefined;
   }
 
-  /**
-   * Resolve each region's colour from the annotation-class preset set (jit-ui#70).
-   * The presets are the source of truth for colour — this **overrides any colour
-   * embedded in the GeoJSON** (which the YOLO worker writes today). A matching
-   * preset gives the class colour; an unknown class gets a deterministic fallback
-   * colour (and, only when `autoPromote` is on, is added to the editable list).
-   * Regions the user explicitly recoloured (`colorOverridden`) are left untouched.
-   * A region whose colour changes is copied, unless `inPlace` says it is the
-   * caller's fresh instance (not yet stored, so not in any undo snapshot).
-   */
+  /** Apply the preset set's class colours (see {@link applyPresetColors}),
+   *  promoting unknown classes into the shared store when the set asks for it. */
   private withClassificationColors(regions: Region[], inPlace: (r: Region) => boolean): Region[] {
-    const set = this.store.getPresetSet();
-    const known = new Set(set.classes.map((c) => presetKey(set, c.name)));
-    return regions.map((region) => {
-      if (!region.label || region.colorOverridden) return region;
-      const color = colorForLabel(region.label, set);
-      if (set.autoPromote && !known.has(presetKey(set, region.label))) {
-        known.add(presetKey(set, region.label));
-        // In normalized mode, trim the promoted name so leading/trailing
-        // whitespace doesn't create invisible duplicates or odd display names.
-        const name = set.matchMode === 'normalized' ? region.label.trim() : region.label;
-        this.store.upsertClass({ name, color, source: 'auto' });
-      }
-      if (region.color === color) return region;
-      if (!inPlace(region)) return withRegionPatch(region, { color });
-      region.color = color;
-      return region;
+    return applyPresetColors(regions, this.store.getPresetSet(), {
+      inPlace,
+      onPromote: (preset) => this.store.upsertClass(preset),
     });
   }
 
