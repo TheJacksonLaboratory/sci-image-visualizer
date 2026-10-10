@@ -16,7 +16,7 @@ export interface FloatingPos {
  * Angular zone, re-entering it per emitted position: a permanent window mousemove
  * listener made every pointer move anywhere in the host app run change detection.
  */
-@Directive({ selector: '[vizFloatingDrag]' })
+@Directive({ selector: '[vizFloatingDrag]', standalone: true })
 export class FloatingDragDirective implements OnDestroy {
   /** Called on mousedown: the panel's position the drag starts from. */
   @Input('vizFloatingDrag') origin!: () => FloatingPos;

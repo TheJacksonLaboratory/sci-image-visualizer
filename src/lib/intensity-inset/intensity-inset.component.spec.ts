@@ -11,6 +11,7 @@ describe('IntensityInsetComponent', () => {
   let viz: Record<string, jest.Mock>;
   let inset: IntensityInsetComponent;
   let outside: boolean;
+  let destroy: () => void;
   const LINE: IntensityProfile = { positions: [0, 1], values: [5, 6] };
 
   beforeEach(() => {
@@ -35,22 +36,27 @@ describe('IntensityInsetComponent', () => {
         try { return fn(); } finally { outside = false; }
       },
     };
-    inset = new IntensityInsetComponent(viz as never, { detectChanges: jest.fn() } as never, zone as never);
+    // A DestroyRef whose callbacks run in destroy(), as Angular runs them after ngOnDestroy.
+    const onDestroy: (() => void)[] = [];
+    const destroyRef = { onDestroy: (cb: () => void) => { onDestroy.push(cb); return () => undefined; } };
+    destroy = () => { inset.ngOnDestroy(); onDestroy.splice(0).forEach((cb) => cb()); };
+    inset = new IntensityInsetComponent(
+      viz as never, { detectChanges: jest.fn() } as never, zone as never, destroyRef as never);
     inset.divId = 'viz-plot-9-inset';
     inset.plotDivName = 'viz-plot-9';
   });
 
   afterEach(() => {
-    inset.ngOnDestroy();
+    destroy();
     jest.useRealTimers();
     jest.restoreAllMocks();
   });
 
   it('shows itself while any line exists and charts the profiles into its own div', () => {
     inset.ngOnInit();
-    expect(inset.hasProfiles).toBe(false);
+    expect(inset['hasProfiles']()).toBe(false);
     profiles$.next([LINE]);
-    expect(inset.hasProfiles).toBe(true);
+    expect(inset['hasProfiles']()).toBe(true);
     expect(viz['renderIntensityInset']).toHaveBeenCalledWith('viz-plot-9-inset', [LINE]);
   });
 
@@ -79,7 +85,7 @@ describe('IntensityInsetComponent', () => {
     viz['renderIntensityInset'].mockClear();
     window.dispatchEvent(new Event('resize'));
     expect(viz['renderIntensityInset']).toHaveBeenCalledTimes(1);
-    inset.ngOnDestroy();
+    destroy();
     window.dispatchEvent(new Event('resize'));
     expect(viz['renderIntensityInset']).toHaveBeenCalledTimes(1);
     expect(profiles$.observed).toBe(false);
@@ -123,7 +129,7 @@ describe('IntensityInsetComponent', () => {
     await expect(inset.addProfileLine()).resolves.toBe(line);
     expect(viz['ensureIntensitySampling']).toHaveBeenCalled();
     expect(viz['selectRegion']).toHaveBeenCalledWith(line);
-    expect(inset.pos).toEqual({ x: 500, y: 60 });
+    expect(inset['pos']()).toEqual({ x: 500, y: 60 });
     plot.remove();
   });
 });

@@ -1,5 +1,5 @@
-<div *ngIf="hasProfiles" class="intensity-panel" [style.left.px]="pos.x" [style.top.px]="pos.y">
-  <div class="intensity-panel-header" [vizFloatingDrag]="dragOrigin" (vizFloatingDragMove)="pos = $event">
+<div *ngIf="hasProfiles()" class="intensity-panel" [style.left.px]="pos().x" [style.top.px]="pos().y">
+  <div class="intensity-panel-header" [vizFloatingDrag]="dragOrigin" (vizFloatingDragMove)="pos.set($event)">
     <span>Intensity profile</span>
     <i class="pi pi-arrows-alt"></i>
   </div>

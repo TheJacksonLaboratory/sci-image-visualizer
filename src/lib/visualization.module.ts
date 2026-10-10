@@ -82,12 +82,12 @@ import { FloatingDragDirective } from './visualizer/floating-drag.directive';
 @NgModule({
   declarations: [
     VisualizerComponent,
-    IntensityInsetComponent,
-    FloatingDragDirective,
   ],
   imports: [
     // Standalone components used by the declared ones.
     ToolbarComponent,
+    IntensityInsetComponent,
+    FloatingDragDirective,
     HexColorPickerComponent,
     RegionEditorComponent,
     ChannelHistogramComponent,

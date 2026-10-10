@@ -1,13 +1,14 @@
 import {
-  ChangeDetectorRef, Component, Inject, Input, NgZone, OnDestroy, OnInit,
+  ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, Inject, Input, NgZone, OnDestroy, OnInit,
+  signal,
 } from '@angular/core';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { CommonModule } from '@angular/common';
 
 import { IImageInfo } from '../contracts/image.contract';
 import { IntensityProfile, IVisualizer, VISUALIZER } from '../contracts/visualizer.contract';
 import { Region } from '../models/region';
-import { FloatingPos } from '../visualizer/floating-drag.directive';
+import { FloatingDragDirective, FloatingPos } from '../visualizer/floating-drag.directive';
 
 /**
  * The floating, draggable intensity-profile inset: shown while any intensity line
@@ -18,9 +19,14 @@ import { FloatingPos } from '../visualizer/floating-drag.directive';
  * backend (`IVisualizer.renderIntensityInset`) so this never reaches a charting
  * library. Fixed to the viewport, outside the plot div, so it is not clipped to the
  * canvas.
+ *
+ * OnPush, with its view state in signals: the profile stream may fire outside the zone.
  */
 @Component({
   selector: 'viz-intensity-inset',
+  standalone: true,
+  imports: [CommonModule, FloatingDragDirective],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './intensity-inset.component.html',
   styleUrls: ['./intensity-inset.component.scss'],
 })
@@ -33,32 +39,33 @@ export class IntensityInsetComponent implements OnInit, OnDestroy {
   @Input() zIndex = 0;
   /** The Image view (OSD), whose line sampling is fed from preview frames. */
   @Input() imageView = false;
+  /** The image shown (the Image view samples its lines from it). */
   @Input() imageInfo: IImageInfo | undefined;
 
   /** True whenever any intensity-profile line exists (whatever the plot type). */
-  hasProfiles = false;
-  pos: FloatingPos = { x: 20, y: 70 };
+  protected readonly hasProfiles = signal(false);
+  protected readonly pos = signal<FloatingPos>({ x: 20, y: 70 });
   /** Where a header drag starts from. */
-  readonly dragOrigin = (): FloatingPos => this.pos;
+  protected readonly dragOrigin = (): FloatingPos => this.pos();
 
   private profiles: IntensityProfile[] = [];
-  private readonly destroy$ = new Subject<void>();
   private readonly onResize = () => {
     // Reflow to the (fixed) panel size once layout has settled: a mid-reflow resize
     // can leave the chart at a stale or zero size.
-    if (this.hasProfiles) requestAnimationFrame(() => this.render());
+    if (this.hasProfiles()) requestAnimationFrame(() => this.render());
   };
 
   constructor(
     @Inject(VISUALIZER) private readonly visualizer: IVisualizer,
     private readonly cdr: ChangeDetectorRef,
     private readonly zone: NgZone,
+    private readonly destroyRef: DestroyRef,
   ) {}
 
   ngOnInit(): void {
-    this.visualizer.getIntensityProfile$().pipe(takeUntil(this.destroy$)).subscribe((profiles) => {
+    this.visualizer.getIntensityProfile$().pipe(takeUntilDestroyed(this.destroyRef)).subscribe((profiles) => {
       this.profiles = profiles;
-      this.hasProfiles = profiles.length > 0;
+      this.hasProfiles.set(profiles.length > 0);
       // The panel is behind *ngIf. detectChanges() materializes it synchronously (the
       // stream may fire outside the zone, e.g. from an OSD drag). Render on the next
       // frame, AFTER layout: drawn synchronously, Plotly sizes a fresh chart to a zero
@@ -69,28 +76,27 @@ export class IntensityInsetComponent implements OnInit, OnDestroy {
     // When the OSD view settles at a new zoom/pan, re-sample from a crop of the
     // visible region so the inset reflects the zoom-level resolution (Plotly's own
     // high-def zoom updates the sampling cache inline).
-    this.visualizer.getViewportChange$().pipe(takeUntil(this.destroy$)).subscribe((roi) => {
-      if (this.hasProfiles && this.imageView) {
+    this.visualizer.getViewportChange$().pipe(takeUntilDestroyed(this.destroyRef)).subscribe((roi) => {
+      if (this.hasProfiles() && this.imageView) {
         this.visualizer.refreshIntensitySamplingForRoi(roi.x, roi.y, roi.width, roi.height, this.zIndex);
       }
     });
     this.zone.runOutsideAngular(() => window.addEventListener('resize', this.onResize));
   }
 
+  /** Removes the window resize listener; the streams end through `takeUntilDestroyed`. */
   ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
     window.removeEventListener('resize', this.onResize);
   }
 
   /** The canvas was resized: reflow the chart a tick later, once the panel has settled. */
   reflow(): void {
-    if (this.hasProfiles) setTimeout(() => this.render(), 0);
+    if (this.hasProfiles()) setTimeout(() => this.render(), 0);
   }
 
   /** A slice was committed: keep the lines sampled from it (Image view). */
   sliceCommitted(z: number): void {
-    if (this.hasProfiles && this.imageView && this.imageInfo) {
+    if (this.hasProfiles() && this.imageView && this.imageInfo) {
       void this.visualizer.ensureIntensitySampling(this.imageInfo, z);
     }
   }
@@ -101,9 +107,9 @@ export class IntensityInsetComponent implements OnInit, OnDestroy {
    * top-right. Resolves the new line, or null when no image extent is known yet.
    */
   async addProfileLine(): Promise<Region | null> {
-    if (!this.hasProfiles) {
+    if (!this.hasProfiles()) {
       const rect = document.getElementById(this.plotDivName)?.getBoundingClientRect();
-      this.pos = rect ? { x: Math.max(10, rect.right - 300), y: rect.top + 10 } : { x: 20, y: 70 };
+      this.pos.set(rect ? { x: Math.max(10, rect.right - 300), y: rect.top + 10 } : { x: 20, y: 70 });
     }
     // Image (OSD) view: Plotly never rendered, so it has no pixel cache / extent. Load
     // the current slice's frames for sampling + line placement first.
@@ -116,6 +122,6 @@ export class IntensityInsetComponent implements OnInit, OnDestroy {
   }
 
   private render(): void {
-    if (this.hasProfiles) this.visualizer.renderIntensityInset(this.divId, this.profiles);
+    if (this.hasProfiles()) this.visualizer.renderIntensityInset(this.divId, this.profiles);
   }
 }
