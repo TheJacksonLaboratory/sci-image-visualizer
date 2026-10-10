@@ -25,7 +25,7 @@ export class DisplayPipeline {
   /**
    * Apply the current display pipeline to an RGBA buffer in place; returns
    * whether any opaque pixel was written.
-   *  - Grayscale: intensity → window + gamma + invert → colormap LUT.
+   *  - Grayscale: intensity → window → invert → gamma → colormap LUT.
    *  - RGB/multichannel: additive pseudo-colour merge — each visible channel's
    *    windowed intensity is tinted by its assigned colour and summed (Fiji
    *    "Merge Channels"). Defaults (R=red, G=green, B=blue) are the identity.
@@ -41,19 +41,22 @@ export class DisplayPipeline {
       const wMin = ch ? ch.min : 0;
       const wSpan = ch && ch.max > ch.min ? ch.max - ch.min : 255;
       const invGamma = ch && ch.gamma > 0 ? 1 / ch.gamma : 1;
-      // Precompute raw(0..255) -> final RGB once (256 window+gamma+invert+colormap
+      // Precompute raw(0..255) -> final RGB once (256 window+invert+gamma+colormap
       // evaluations) and map each pixel by table lookup — a Math.pow per pixel
       // (~262k/tile) made the window/gamma sliders crawl on large stacks.
+      // The order is napari-js's `windowGamma` (window → invert → gamma), so the
+      // same channel state draws the same image under both backends; only the
+      // exponent differs by convention (ImageJ t^(1/γ) here, converted to
+      // napari's t^γ at the napari boundary).
       const rL = new Uint8ClampedArray(256);
       const gL = new Uint8ClampedArray(256);
       const bL = new Uint8ClampedArray(256);
       for (let raw = 0; raw < 256; raw++) {
         let t = (raw - wMin) / wSpan;
         t = t < 0 ? 0 : t > 1 ? 1 : t;
+        if (invertBg) t = 1 - t;
         if (invGamma !== 1) t = Math.pow(t, invGamma);
-        let v = Math.round(t * 255);
-        if (invertBg) v = 255 - v;
-        const c = lut[v];
+        const c = lut[Math.round(t * 255)];
         rL[raw] = c[0];
         gL[raw] = c[1];
         bL[raw] = c[2];
