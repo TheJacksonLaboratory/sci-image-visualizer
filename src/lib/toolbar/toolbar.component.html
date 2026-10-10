@@ -34,7 +34,7 @@
     <!-- Channels & Histogram: brightness/contrast, gamma, per-channel display,
          colormap/reverse/invert — opens the floating dialog. -->
     <p-button *ngIf="tools.specialTools" pRipple size="small" [text]="true"
-              pTooltip="Channels &amp; Histogram (brightness/contrast, colormap)"
+              ariaLabel="Channels &amp; Histogram" pTooltip="Channels &amp; Histogram (brightness/contrast, colormap)"
               tooltipPosition="bottom"
               (onClick)="openChannelHistogram.emit()">
       <img src="assets/plotting/invert.svg" class="toolbar-icon-dark" style="width: 1rem"/>
@@ -44,7 +44,7 @@
          itself only offered while a dataset is loaded — so this button appears
          exactly when there is something for it to control. -->
     <p-button *ngIf="tools.specialTools && isSpatialMode" pRipple size="small" [text]="true"
-              pTooltip="Spatial omics (colour by column or gene, legend, selection, distributions)"
+              ariaLabel="Spatial omics controls" pTooltip="Spatial omics (colour by column or gene, legend, selection, distributions)"
               tooltipPosition="bottom"
               (onClick)="openSpatialControls.emit()">
       <img src="assets/plotting/spatial-omics.svg" class="toolbar-icon-dark" style="width: 1rem"/>
@@ -54,7 +54,7 @@
          view only — it's an OpenSeadragon drawer setting). Highlighted when smoothing on. -->
     <p-button *ngIf="tools.specialTools && isImageView" size="small"
               [text]="!imageSmoothingEnabled"
-              pTooltip="Smoothen (turn on image smoothing)" tooltipPosition="bottom"
+              ariaLabel="Smoothen" pTooltip="Smoothen (turn on image smoothing)" tooltipPosition="bottom"
               (onClick)="toggleImageSmoothing.emit()">
       <img src="assets/plotting/smooth.svg" style="width: 1rem"
            [class]="imageSmoothingEnabled ? 'toolbar-icon-active' : 'toolbar-icon-dark'"/>
@@ -75,11 +75,11 @@
     <ng-container *ngIf="tools.specialTools">
       <span class="toolbar-separator"></span>
       <p-button icon="pi pi-download" size="small" [text]="true"
-                pTooltip="Download image as PNG" tooltipPosition="bottom"
+                ariaLabel="Download image as PNG" pTooltip="Download image as PNG" tooltipPosition="bottom"
                 (onClick)="downloadImage.emit()">
       </p-button>
       <p-button *ngIf="isHeatmap" icon="pi pi-window-maximize" size="small" [text]="true"
-                pTooltip="Fit to view" tooltipPosition="bottom"
+                ariaLabel="Fit to view" pTooltip="Fit to view" tooltipPosition="bottom"
                 (onClick)="autoscaleImage.emit()">
       </p-button>
     </ng-container>
@@ -129,7 +129,7 @@
 
       <!-- Help -->
       <p-button icon="pi pi-question-circle" size="small" [text]="true"
-                pTooltip="Help" tooltipPosition="bottom"
+                ariaLabel="Help" pTooltip="Help" tooltipPosition="bottom"
                 (onClick)="showHelp()">
       </p-button>
     </ng-container>
