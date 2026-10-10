@@ -1,86 +1,34 @@
-import { Injectable, Optional } from '@angular/core';
-
 import { WandImage, WandOptions, WandService } from './wand.service';
 import { BBoxMask } from '../../geometry/raster';
 import { MatrixFrame } from '../tool-kit/matrix-frame';
 import { MaskStrokeEditor } from '../tool-kit/mask-stroke-editor';
-import { UndoGesture } from '../tool-kit/undo-gesture';
+import { UndoGesture, UndoGestureTarget } from '../tool-kit/undo-gesture';
 import { ToolOverlayCanvas } from '../tool-kit/tool-overlay';
-import { RegionStore } from '../../store/region-store.service';
-import type { CachedFrame } from '../tool-kit/frame-pixels';
-import { IViewportHost, IRegionDataHost } from '../../contracts/coordinate-transform.contract';
+import { CanvasToolHost, ICanvasTool } from '../tool-kit/canvas-tool';
 import { Region } from '../../models/region';
 
-/**
- * The pixel readback a backend (Plotly, OpenSeadragon or napari-js) hands the
- * canvas tools for sampling. Returned by `WandToolHost.getCachedImageData()`.
- */
-export interface CachedImageData {
-  /**
-   * One frame per stack slice (length 1 for non-stack images): a nested `[y][x]`
-   * matrix (Plotly) or a packed RGBA readback (OpenSeadragon, napari-js). Read
-   * them through `framePixels()` (`tool-kit/frame-pixels`).
-   */
-  frames: CachedFrame[];
-  /** Image-pixel width of each frame matrix. */
-  width: number;
-  /** Image-pixel height of each frame matrix. */
-  height: number;
-  /**
-   * Data coords per matrix pixel: `[x, y]`. OSD and napari report distinct
-   * ratios for a non-square viewport; a single entry applies to both axes
-   * (see {@link MatrixFrame}).
-   */
-  ratios: number[];
-  /** Whether each nested frame is a 2-D scalar matrix (true) or 3-channel RGB
-   *  (false). Packed frames always read as RGB. */
-  isGrayscale: boolean;
-  /**
-   * Data-coords of matrix pixel (0,0). Lets the matrix be a *crop* of the data
-   * space rather than starting at the origin — e.g. the OSD backend samples the
-   * currently rendered viewport, so when zoomed in the matrix covers only the
-   * visible sub-region at screen resolution. Defaults to 0 (full-frame matrix,
-   * as Plotly provides). matrixIndex = (data - origin) / ratio.
-   */
-  originX?: number;
-  originY?: number;
-}
+// The readback type lives with the tool contract now; re-exported for the
+// modules that import it from here.
+export type { CachedImageData } from '../tool-kit/canvas-tool';
 
-/**
- * The collaboration interface the wand (and brush, SAM and Cellpose tools)
- * need from a backend. Keeping it explicit makes the dependency one-way: the
- * tools never import a backend. Each backend (Plotly, OpenSeadragon, napari-js)
- * builds a host object and binds it with `bindHost(host)` before activating a
- * tool.
- */
-export interface WandToolHost extends IViewportHost, IRegionDataHost {
-  /** Pixel data for sampling. null when no image is loaded yet. */
-  getCachedImageData(): CachedImageData | null;
-  /** Index of the currently visible frame in a stack (0 for non-stack). */
-  getActiveFrameIndex(): number;
-
-  /** Current image's filename — stamped onto new shapes for filtering. */
-  getFileName(): string | undefined;
-  /** Default stroke colour for new shapes. */
-  getShapeColor(): string;
-}
+/** @deprecated One host serves every canvas tool: use {@link CanvasToolHost}. */
+export type WandToolHost = CanvasToolHost;
 
 /**
  * The wand drawing tool. Owns its pointer overlay and stroke accumulator
  * (shared with the brush, see {@link MaskStrokeEditor}). Reads/writes regions
- * via the {@link WandToolHost} interface so it stays decoupled from the
- * backends.
+ * via its {@link CanvasToolHost} so it stays decoupled from the backends.
  *
- * Lifecycle: the active backend binds its host with `bindHost(host)`, then
- * calls `setMode(true | false, options)` to activate/deactivate the tool.
+ * A plain class: each backend's `CanvasToolManager` owns one instance and arms
+ * it with `activate(host, options)` / `deactivate()`.
  */
-@Injectable({ providedIn: 'root' })
-export class WandToolService {
+export class WandTool implements ICanvasTool<WandOptions> {
+  readonly id = 'wand';
+
   // ── Tool state ──────────────────────────────────────────────────────
 
-  private host!: WandToolHost;
+  private host!: CanvasToolHost;
   private readonly overlay = new ToolOverlayCanvas();
-  private active = false;
   /**
    * Accumulated wand region. Every per-tick patch mask is OR'd into the stroke
    * over a bbox that grows with the stroke, so the region keeps expanding as
@@ -96,26 +44,24 @@ export class WandToolService {
   /** Makes each drag one undo step, however long the user pauses (RT-12). */
   private readonly gesture: UndoGesture;
 
-  constructor(private wandService: WandService, @Optional() regionStore?: RegionStore) {
-    this.gesture = new UndoGesture(regionStore);
+  /** @param gestureTarget the region store, so each drag is one undo step. */
+  constructor(private readonly wandService: WandService, gestureTarget?: UndoGestureTarget | null) {
+    this.gesture = new UndoGesture(gestureTarget);
   }
 
-  /** Wire the tool to its host. Must be called once before `setMode(true)`. */
-  bindHost(host: WandToolHost) {
+  // ── ICanvasTool ─────────────────────────────────────────────────────
+
+  /** Arm the wand on `host` with `options` (replacing the previous options). */
+  activate(host: CanvasToolHost, options: WandOptions = {}) {
     this.host = host;
+    this.options = options;
+    this.createOverlay();
   }
 
-  // ── Public API ──────────────────────────────────────────────────────
-
-  /** Toggle the wand on/off. */
-  setMode(active: boolean, options: WandOptions = {}) {
-    this.active = active;
-    this.options = options;
-    if (active) {
-      this.createOverlay();
-    } else {
-      this.destroyOverlay();
-    }
+  /** Disarm: remove the overlay and drop the active region. */
+  deactivate() {
+    this.overlay.detach();
+    this.resetStroke();
   }
 
   /** Merge new options (e.g. live sensitivity slider updates). */
@@ -124,7 +70,7 @@ export class WandToolService {
   }
 
   /** Drop the active wand region so the next click starts a new one. */
-  clearActiveRegion() {
+  reset() {
     this.resetStroke();
   }
 
@@ -138,12 +84,6 @@ export class WandToolService {
       move: (e) => this.onPointerMove(e),
       up: () => this.onPointerUp(),
     });
-  }
-
-  private destroyOverlay() {
-    if (!this.overlay.attached) return;
-    this.overlay.detach();
-    this.resetStroke();
   }
 
   private onPointerDown(e: PointerEvent) {

@@ -1,4 +1,4 @@
-import { WandToolService, WandToolHost, CachedImageData } from './wand-tool.service';
+import { WandTool, WandToolHost, CachedImageData } from './wand-tool.service';
 import { WandService } from './wand.service';
 import { Region, Polygon } from '../../models/region';
 import { RegionStore } from '../../store/region-store.service';
@@ -64,33 +64,30 @@ function mouse(type: string, clientX: number, clientY: number, extra: MouseEvent
   return new MouseEvent(type, { button: 0, buttons: 1, clientX, clientY, ...extra });
 }
 
-describe('WandToolService', () => {
-  let tool: WandToolService;
+describe('WandTool', () => {
+  let tool: WandTool;
 
   beforeEach(() => {
-    tool = new WandToolService(new WandService());
+    tool = new WandTool(new WandService());
   });
 
   afterEach(() => {
-    tool.setMode(false);
+    tool.deactivate();
     document.body.innerHTML = '';
   });
 
   it('creates an overlay canvas on activation and removes it on deactivation', () => {
     const { host, container } = makeHost();
-    tool.bindHost(host);
-
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
+    tool.activate(host, { patchSize: 9, simpleMode: true });
     expect(container.querySelector('canvas')).not.toBeNull();
 
-    tool.setMode(false);
+    tool.deactivate();
     expect(container.querySelector('canvas')).toBeNull();
   });
 
   it('a left click grows a region from the clicked pixel and commits it', () => {
     const { host, container, state, setRegions } = makeHost();
-    tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
+    tool.activate(host, { patchSize: 9, simpleMode: true });
 
     cv(container).dispatchEvent(mouse('pointerdown', 10, 10));
 
@@ -103,8 +100,7 @@ describe('WandToolService', () => {
 
   it('a drag (mousedown → mousemove) keeps extending the same region', () => {
     const { host, container, state } = makeHost();
-    tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
+    tool.activate(host, { patchSize: 9, simpleMode: true });
     const canvas = cv(container);
 
     canvas.dispatchEvent(mouse('pointerdown', 6, 6));
@@ -117,8 +113,7 @@ describe('WandToolService', () => {
 
   it('mousemove without a held button ends the drag (no further growth)', () => {
     const { host, container, setRegions } = makeHost();
-    tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
+    tool.activate(host, { patchSize: 9, simpleMode: true });
     const canvas = cv(container);
 
     canvas.dispatchEvent(mouse('pointerdown', 10, 10));
@@ -129,8 +124,7 @@ describe('WandToolService', () => {
 
   it('a second click well outside the first stroke starts a new region', () => {
     const { host, container, state } = makeHost({ cached: cached(60, 60) });
-    tool.bindHost(host);
-    tool.setMode(true, { patchSize: 5, simpleMode: true });
+    tool.activate(host, { patchSize: 5, simpleMode: true });
     const canvas = cv(container);
 
     canvas.dispatchEvent(mouse('pointerdown', 8, 8));
@@ -141,32 +135,28 @@ describe('WandToolService', () => {
 
   it('ignores non-left buttons', () => {
     const { host, container, setRegions } = makeHost();
-    tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
+    tool.activate(host, { patchSize: 9, simpleMode: true });
     cv(container).dispatchEvent(mouse('pointerdown', 10, 10, { button: 2 }));
     expect(setRegions).not.toHaveBeenCalled();
   });
 
   it('shift-clicking empty space is a no-op (no region created just to erase)', () => {
     const { host, container, setRegions } = makeHost();
-    tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
+    tool.activate(host, { patchSize: 9, simpleMode: true });
     cv(container).dispatchEvent(mouse('pointerdown', 10, 10, { shiftKey: true }));
     expect(setRegions).not.toHaveBeenCalled();
   });
 
   it('does nothing when there is no cached image data', () => {
     const { host, container, setRegions } = makeHost({ cached: null });
-    tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
+    tool.activate(host, { patchSize: 9, simpleMode: true });
     cv(container).dispatchEvent(mouse('pointerdown', 10, 10));
     expect(setRegions).not.toHaveBeenCalled();
   });
 
   it('does nothing when the click is outside the image bounds', () => {
     const { host, container, setRegions } = makeHost();
-    tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
+    tool.activate(host, { patchSize: 9, simpleMode: true });
     cv(container).dispatchEvent(mouse('pointerdown', 999, 999)); // outside 20×20
     expect(setRegions).not.toHaveBeenCalled();
   });
@@ -175,37 +165,33 @@ describe('WandToolService', () => {
     const { host, container, setRegions } = makeHost();
     (host.getCoordinateTransform as any) = () =>
       ({ isReady: () => false, clientToData: () => ({ x: 0, y: 0 }), dataLengthToScreen: () => 1 });
-    tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
+    tool.activate(host, { patchSize: 9, simpleMode: true });
     cv(container).dispatchEvent(mouse('pointerdown', 10, 10));
     expect(setRegions).not.toHaveBeenCalled();
   });
 
   it('clearActiveRegion resets the in-progress stroke', () => {
     const { host, container, state } = makeHost({ cached: cached(60, 60) });
-    tool.bindHost(host);
-    tool.setMode(true, { patchSize: 5, simpleMode: true });
+    tool.activate(host, { patchSize: 5, simpleMode: true });
     const canvas = cv(container);
 
     canvas.dispatchEvent(mouse('pointerdown', 8, 8));
     expect(state.regions).toHaveLength(1);
-    tool.clearActiveRegion();
+    tool.reset();
     canvas.dispatchEvent(mouse('pointerdown', 50, 50)); // empty space → a fresh region
     expect(state.regions).toHaveLength(2);
   });
 
   it('setOptions merges live option updates without throwing', () => {
     const { host } = makeHost();
-    tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
+    tool.activate(host, { patchSize: 9, simpleMode: true });
     expect(() => tool.setOptions({ sensitivity: 3 })).not.toThrow();
   });
 
   it('a click inside an existing closed polygon adopts and replaces it (same id)', () => {
     const existing = boxRegion(4, 4, 16, 16, 42);
     const { host, container, state, setRegions } = makeHost({ regions: [existing] });
-    tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
+    tool.activate(host, { patchSize: 9, simpleMode: true });
 
     cv(container).dispatchEvent(mouse('pointerdown', 10, 10)); // inside the box
 
@@ -230,22 +216,21 @@ function bbox(r: Region): { x0: number; y0: number; x1: number; y1: number } {
  * replace, vertex eraser) — otherwise the next click re-commits the whole old
  * stroke and brings the undone/deleted region back (review RT-2).
  */
-describe('WandToolService — a stale stroke never resurrects a region (RT-2)', () => {
-  let tool: WandToolService;
+describe('WandTool — a stale stroke never resurrects a region (RT-2)', () => {
+  let tool: WandTool;
 
   beforeEach(() => {
-    tool = new WandToolService(new WandService());
+    tool = new WandTool(new WandService());
   });
 
   afterEach(() => {
-    tool.setMode(false);
+    tool.deactivate();
     document.body.innerHTML = '';
   });
 
   it('a click after the region was removed outside the tool starts a fresh region', () => {
     const { host, container, state } = makeHost({ cached: cached(40, 40) });
-    tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
+    tool.activate(host, { patchSize: 9, simpleMode: true });
     const canvas = cv(container);
     canvas.dispatchEvent(mouse('pointerdown', 10, 10));
     canvas.dispatchEvent(mouse('pointerup', 10, 10));
@@ -263,8 +248,7 @@ describe('WandToolService — a stale stroke never resurrects a region (RT-2)', 
 
   it('a click after undo restored an earlier, smaller region does not re-commit the undone growth', () => {
     const { host, container, state } = makeHost({ cached: cached(40, 40) });
-    tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
+    tool.activate(host, { patchSize: 9, simpleMode: true });
     const canvas = cv(container);
     canvas.dispatchEvent(mouse('pointerdown', 10, 10));
     canvas.dispatchEvent(mouse('pointerup', 10, 10));
@@ -289,8 +273,7 @@ describe('WandToolService — a stale stroke never resurrects a region (RT-2)', 
     const { host, container } = makeHost({ cached: cached(40, 40) });
     host.getRegions = () => store.getRegions();
     host.setRegions = (r: Region[]) => store.setRegions(r);
-    tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
+    tool.activate(host, { patchSize: 9, simpleMode: true });
     const canvas = cv(container);
     canvas.dispatchEvent(mouse('pointerdown', 10, 10));
     canvas.dispatchEvent(mouse('pointerup', 10, 10));
@@ -307,8 +290,7 @@ describe('WandToolService — a stale stroke never resurrects a region (RT-2)', 
 
   it('keeps extending the same stroke while nothing changed underneath it', () => {
     const { host, container, state } = makeHost({ cached: cached(40, 40) });
-    tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
+    tool.activate(host, { patchSize: 9, simpleMode: true });
     const canvas = cv(container);
     canvas.dispatchEvent(mouse('pointerdown', 10, 10));
     canvas.dispatchEvent(mouse('pointerup', 10, 10));
@@ -339,22 +321,21 @@ function mintingHost(regions: Region[]) {
   return h;
 }
 
-describe('WandToolService — commits every traced piece with its holes (RT-3, RT-5)', () => {
-  let tool: WandToolService;
+describe('WandTool — commits every traced piece with its holes (RT-3, RT-5)', () => {
+  let tool: WandTool;
 
   beforeEach(() => {
-    tool = new WandToolService(new WandService());
+    tool = new WandTool(new WandService());
   });
 
   afterEach(() => {
-    tool.setMode(false);
+    tool.deactivate();
     document.body.innerHTML = '';
   });
 
   it('extending a donut keeps its hole', () => {
     const { host, container, state } = mintingHost([donutRegion(5)]);
-    tool.bindHost(host);
-    tool.setMode(true, { patchSize: 5, simpleMode: true });
+    tool.activate(host, { patchSize: 5, simpleMode: true });
 
     cv(container).dispatchEvent(mouse('pointerdown', 8, 8)); // in the solid ring
 
@@ -365,8 +346,7 @@ describe('WandToolService — commits every traced piece with its holes (RT-3, R
 
   it('a Shift-erase that cuts a region in two keeps both pieces', () => {
     const { host, container, state } = mintingHost([boxRegion(4, 4, 36, 12, 5)]);
-    tool.bindHost(host);
-    tool.setMode(true, { patchSize: 9, simpleMode: true });
+    tool.activate(host, { patchSize: 9, simpleMode: true });
 
     cv(container).dispatchEvent(mouse('pointerdown', 20, 8, { shiftKey: true }));
 
@@ -385,8 +365,7 @@ describe('WandToolService — commits every traced piece with its holes (RT-3, R
     existing.filename = 'a.tif';
     existing.label = 'Tumor';
     const { host, container, state } = mintingHost([existing]);
-    tool.bindHost(host);
-    tool.setMode(true, { patchSize: 5, simpleMode: true });
+    tool.activate(host, { patchSize: 5, simpleMode: true });
 
     cv(container).dispatchEvent(mouse('pointerdown', 8, 8));
 
@@ -400,7 +379,7 @@ describe('WandToolService — commits every traced piece with its holes (RT-3, R
   });
 });
 
-describe('WandToolService — one drag is one undo step (RT-12)', () => {
+describe('WandTool — one drag is one undo step (RT-12)', () => {
   afterEach(() => {
     jest.useRealTimers();
     document.body.innerHTML = '';
@@ -409,12 +388,11 @@ describe('WandToolService — one drag is one undo step (RT-12)', () => {
   it('a drag with a long pause undoes in one step, and the next click is its own step', () => {
     jest.useFakeTimers();
     const store = new RegionStore(new VisualizerStore());
-    const tool = new WandToolService(new WandService(), store);
+    const tool = new WandTool(new WandService(), store);
     const { host, container } = makeHost({ cached: cached(40, 40) });
     host.getRegions = () => store.getRegions();
     host.setRegions = (r: Region[]) => store.setRegions(r);
-    tool.bindHost(host);
-    tool.setMode(true, { patchSize: 5, simpleMode: true });
+    tool.activate(host, { patchSize: 5, simpleMode: true });
     const canvas = cv(container);
 
     canvas.dispatchEvent(mouse('pointerdown', 10, 10));
@@ -429,7 +407,7 @@ describe('WandToolService — one drag is one undo step (RT-12)', () => {
     expect(store.getRegions()).toHaveLength(1);
     store.undo();
     expect(store.getRegions()).toHaveLength(0);
-    tool.setMode(false);
+    tool.deactivate();
     store.resetUndoHistory();
   });
 });

@@ -61,7 +61,9 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
       destroy: () => undefined,
       drawer: { canvas: { width: w, height: h, clientWidth: w / 2, clientHeight: h / 2,
         getContext: () => ({ getImageData }) } },
-      viewport: { viewerElementToImageCoordinates: (p: { x: number; y: number }) => ({ x: 100 + p.x * 4, y: 50 + p.y * 2 }) },
+      viewport: {
+        viewerElementToImageCoordinates: (p: { x: number; y: number }) => ({ x: 100 + p.x * 4, y: 50 + p.y * 2 }),
+      },
     };
     const cached = (service as unknown as { readbackViewport(): CachedImageData | null }).readbackViewport()!;
     const frame = cached.frames[0];

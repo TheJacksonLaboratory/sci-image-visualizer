@@ -2,7 +2,11 @@ import { Observable } from 'rxjs';
 
 import { IDisplayOptions, IRegionStore } from '../contracts/visualizer.contract';
 import { Region } from '../models/region';
-import { ColormapNode } from '../contracts/display-types';
+import {
+  CanvasToolId, CanvasToolOptions, ColormapNode, IBrushOptions, IWandOptions,
+} from '../contracts/display-types';
+import type { CanvasToolManager } from '../toolbar/tool-kit/canvas-tool-manager';
+import type { SamPointTool } from '../toolbar/segmentation/sam-point-tool.service';
 import { IImageMetadata } from '../contracts/image.contract';
 import { RegionStore } from '../store/region-store.service';
 import { VisualizerStore } from '../store/visualizer-store.service';
@@ -17,9 +21,13 @@ import { VisualizerStore } from '../store/visualizer-store.service';
  * abstraction" convention from CLAUDE.md; see
  * docs/history/2026-07-shared-backend-refactor.md.)
  *
+ * The on-canvas tool controls (`setActiveTool` and the per-tool setters) live
+ * here too: each subclass creates its own {@link CanvasToolManager} over its own
+ * tool host and gates pointer/readback in {@link beforeToolChange}.
+ *
  * Backend-specific members — `load`/`plot`/`reset`/zoom/`setZIndex`/readback,
- * the region OVERLAY, tool wiring, histograms, scale bar, tiling, colormap LUT
- * application — deliberately stay in each subclass. Plotly keeps a Plotly-shape
+ * the region OVERLAY, the tool host, SAM/Cellpose runs, histograms, scale bar,
+ * tiling, colormap LUT application — deliberately stay in each subclass. Plotly keeps a Plotly-shape
  * working-set beside the store, so it overrides the handful of members that
  * must also redraw it (`setRegions`, selection, delete, colormap, reverse
  * scale, and `exportRegions` for the file name).
@@ -49,8 +57,9 @@ export abstract class BaseStoreVisualizer implements IRegionStore, IDisplayOptio
   getShowShapeLabel(): boolean { return this.regionStore.getShowShapeLabel(); }
   getShapeColor(): string { return this.regionStore.getShapeColor(); }
   getFillColor(): string { return this.regionStore.getFillColor(); }
-  undo(): void { this.regionStore.undo(); }
-  redo(): void { this.regionStore.redo(); }
+  // Undo/redo replace the regions a stroke or SAM prompt was building on.
+  undo(): void { this.regionStore.undo(); this.canvasTools.resetAll(); }
+  redo(): void { this.regionStore.redo(); this.canvasTools.resetAll(); }
   canUndo(): boolean { return this.regionStore.canUndo(); }
   canRedo(): boolean { return this.regionStore.canRedo(); }
   getCanUndo$(): Observable<boolean> { return this.regionStore.getCanUndo$(); }
@@ -68,9 +77,63 @@ export abstract class BaseStoreVisualizer implements IRegionStore, IDisplayOptio
   exitStackMode(): void { this.regionStore.exitStackMode(); }
   isStackMode(): boolean { return this.regionStore.isStackMode(); }
   getStackSaveLayout(): 'combined' | 'per-slice-file' { return this.regionStore.getStackSaveLayout(); }
-  setDisplaySlice(z: number): void { this.regionStore.setDisplaySlice(z); }
+  setDisplaySlice(z: number): void {
+    this.regionStore.setDisplaySlice(z);
+    this.canvasTools.resetAll(); // another slice's regions
+  }
   getSliceRegions(): Region[] { return this.regionStore.getSliceRegions(); }
   getStackSaveSlices(): Map<number, Region[]> { return this.regionStore.getStackSaveSlices(); }
+
+  // ── IToolController: on-canvas tools → this backend's CanvasToolManager ──
+
+  /** This backend's canvas tools, created by the subclass over its own host. */
+  protected abstract readonly canvasTools: CanvasToolManager;
+
+  /**
+   * Runs before every tool change, for the backend's pointer and readback
+   * gating (pan/zoom off while a tool holds the pointer, a fresh pixel
+   * readback). Return false to arm nothing; the armed tool is disarmed anyway.
+   */
+  protected beforeToolChange(_next: CanvasToolId | null): boolean {
+    return true;
+  }
+
+  /**
+   * Arm one on-canvas tool, disarming the armed one; null — or any id that is
+   * not a canvas tool (a region draw mode, pan) — disarms only. Re-arming the
+   * armed tool applies `options` and keeps its work in progress.
+   */
+  setActiveTool(id: string | null, options?: CanvasToolOptions): void {
+    const next = this.canvasTools.has(id) ? id : null;
+    if (!this.beforeToolChange(next)) {
+      this.canvasTools.deactivate();
+      return;
+    }
+    this.canvasTools.activate(next, options);
+  }
+
+  /** @deprecated Use {@link setActiveTool}(`'wand'`, options) / (null). */
+  setWandMode(active: boolean, options?: IWandOptions): void { this.setToolMode('wand', active, options); }
+  setWandOptions(options: IWandOptions): void { this.canvasTools.setOptions('wand', options); }
+  clearActiveWandRegion(): void { this.canvasTools.reset('wand'); }
+  /** @deprecated Use {@link setActiveTool}(`'brush'`, options) / (null). */
+  setBrushMode(active: boolean, options?: IBrushOptions): void { this.setToolMode('brush', active, options); }
+  setBrushOptions(options: IBrushOptions): void { this.canvasTools.setOptions('brush', options ?? {}); }
+  /** @deprecated Use {@link setActiveTool}(`'eraseVertex'`, { radius }) / (null). */
+  setVertexEraserMode(active: boolean): void { this.setToolMode('eraseVertex', active); }
+  setVertexEraserRadius(radius: number): void { this.canvasTools.setOptions('eraseVertex', { radius }); }
+  /** @deprecated Use {@link setActiveTool}(`'zoomToBox'`) / (null). */
+  setZoomToBoxMode(active: boolean): void { this.setToolMode('zoomToBox', active); }
+  /** @deprecated Use {@link setActiveTool}(`'samPoint'`) / (null). */
+  setSamPointMode(active: boolean): void { this.setToolMode('samPoint', active); }
+  commitSamPoints(): void { this.canvasTools.get<SamPointTool>('samPoint')?.commit(); }
+  clearSamPoints(): void { this.canvasTools.get<SamPointTool>('samPoint')?.clear(); }
+
+  /** A per-tool setter: arm `id`, or disarm it if it is the armed tool. */
+  private setToolMode(id: CanvasToolId, active: boolean, options?: CanvasToolOptions): void {
+    if (active) this.setActiveTool(id, options);
+    else if (this.canvasTools.activeId === id) this.setActiveTool(null);
+  }
 
   // ── Classification colours → shared VisualizerStore ──────────────────────
   getClassificationColors(): Map<string, string> { return this.store.getClassificationColors(); }

@@ -1,30 +1,16 @@
-import { Injectable } from '@angular/core';
-
 import { ToolOverlayCanvas } from '../tool-kit/tool-overlay';
+import { CanvasToolHost, ICanvasTool } from '../tool-kit/canvas-tool';
 
 /** A drag shorter than this (CSS px) on either axis is an accidental click. */
 const MIN_DRAG_PX = 5;
 
 /**
- * Collaboration interface the zoom-to-box tool needs from its host backend
- * (Plotly, OpenSeadragon or napari-js).
+ * @deprecated One host serves every canvas tool: use {@link CanvasToolHost}.
+ * The overlay now attaches to `getOverlayContainer()` (formerly the element
+ * with id `getPlotDiv()`), and `pixelToData` / `applyZoomToBox` are its
+ * optional zoom-to-box members.
  */
-export interface ZoomToBoxToolHost {
-  /** DOM id of the plot element the overlay canvas attaches to. */
-  getPlotDiv(): string;
-  /**
-   * Convert an overlay-pixel point (relative to the plot element's top-left)
-   * into the backend's data coordinates — Plotly axis data for Plotly,
-   * image-pixel coords for OpenSeadragon. Keeps the tool backend-agnostic.
-   */
-  pixelToData(px: number, py: number): { x: number; y: number };
-  /**
-   * Apply the user-selected zoom rectangle, ordered `[xMin, xMax, yMax, yMin]`.
-   * The host decides what that means: Plotly does a high-def re-fetch / axis
-   * relayout, OpenSeadragon fits the viewport to the image rectangle.
-   */
-  applyZoomToBox(coordinates: number[]): void;
-}
+export type ZoomToBoxToolHost = CanvasToolHost;
 
 /**
  * Custom canvas overlay for click-and-drag rectangular zoom. Plotly's
@@ -32,29 +18,18 @@ export interface ZoomToBoxToolHost {
  * doesn't drive the high-def zoom pipeline — this overlay does, by handing
  * the selected coordinates back to the host.
  */
-@Injectable({ providedIn: 'root' })
-export class ZoomToBoxToolService {
-
-  private host!: ZoomToBoxToolHost;
+export class ZoomToBoxTool implements ICanvasTool<void> {
+  readonly id = 'zoomToBox';
+  private host!: CanvasToolHost;
   private readonly overlay = new ToolOverlayCanvas();
   private startPx: { x: number; y: number } | null = null;
 
-  bindHost(host: ZoomToBoxToolHost) {
+  // ── ICanvasTool ─────────────────────────────────────────────────────
+
+  /** Lay the selection overlay over `host`'s plot. */
+  activate(host: CanvasToolHost) {
     this.host = host;
-  }
-
-  setMode(active: boolean) {
-    if (active) {
-      this.createOverlay();
-    } else {
-      this.destroyOverlay();
-    }
-  }
-
-  // ── Overlay lifecycle ───────────────────────────────────────────────
-
-  private createOverlay() {
-    const plotEl = document.getElementById(this.host.getPlotDiv());
+    const plotEl = host.getOverlayContainer();
     if (!plotEl) return;
     this.overlay.attach(plotEl, {
       down: (e) => this.onPointerDown(e),
@@ -63,7 +38,8 @@ export class ZoomToBoxToolService {
     });
   }
 
-  private destroyOverlay() {
+  /** Remove the overlay and any half-drawn box. */
+  deactivate() {
     this.overlay.detach();
     this.startPx = null;
   }
@@ -92,9 +68,11 @@ export class ZoomToBoxToolService {
     if (Math.abs(end.x - start.x) < MIN_DRAG_PX || Math.abs(end.y - start.y) < MIN_DRAG_PX) return;
 
     // Convert overlay-pixel → data coordinates via the active backend's host.
-    const d0 = this.host.pixelToData(start.x, start.y);
-    const d1 = this.host.pixelToData(end.x, end.y);
-    this.host.applyZoomToBox([
+    const host = this.host;
+    if (!host.pixelToData || !host.applyZoomToBox) return;
+    const d0 = host.pixelToData(start.x, start.y);
+    const d1 = host.pixelToData(end.x, end.y);
+    host.applyZoomToBox([
       Math.min(d0.x, d1.x), Math.max(d0.x, d1.x),
       Math.max(d0.y, d1.y), Math.min(d0.y, d1.y),
     ]);

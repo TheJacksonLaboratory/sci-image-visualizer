@@ -1,6 +1,6 @@
 import { SamToolService } from './sam-tool.service';
 import { SamSessionService } from './sam-session.service';
-import { CachedImageData, WandToolHost } from '../wand/wand-tool.service';
+import { CachedImageData, CanvasToolHost } from '../tool-kit/canvas-tool';
 import { ISamSession, SamEmbedding, SamPrompt } from '../../contracts/sam.contract';
 import { Region, Rectangle, Polygon } from '../../models/region';
 import { setSamModelUrls, getSamModel, DEFAULT_SAM_MODEL_ID } from './sam-model-registry';
@@ -34,13 +34,13 @@ function fakeSession(): ISamSession {
   };
 }
 
-function makeHost(regions: Region[]): { host: WandToolHost; get: () => Region[] } {
+function makeHost(regions: Region[]): { host: CanvasToolHost; get: () => Region[] } {
   let regs = regions;
   const frame = Array.from({ length: H }, () => new Array(W).fill(0));
   const cached: CachedImageData = {
     frames: [frame], width: W, height: H, ratios: [1], isGrayscale: true, originX: 0, originY: 0,
   };
-  const host: WandToolHost = {
+  const host: CanvasToolHost = {
     getOverlayContainer: () => document.createElement('div'),
     getCachedImageData: () => cached,
     getCoordinateTransform: () =>
@@ -64,9 +64,8 @@ describe('SamToolService', () => {
 
   it('segments each rectangle into a labelled polygon region', async () => {
     const { host, get } = makeHost([rectRegion(10, 10, 20, 20)]);
-    tool.bindHost(host);
 
-    const added = await tool.segmentBoxes();
+    const added = await tool.segmentBoxes(host);
 
     expect(added).toBe(1);
     const regs = get();
@@ -81,17 +80,15 @@ describe('SamToolService', () => {
     const rect = rectRegion(10, 10, 20, 20);
     rect.color = '#ff8800';                         // a distinct, non-default color
     const { host, get } = makeHost([rect]);
-    tool.bindHost(host);
 
-    await tool.segmentBoxes();
+    await tool.segmentBoxes(host);
 
     expect(get()[0].color).toBe('#ff8800');         // mask kept its source rect's color
   });
 
   it('segments multiple rectangles in one pass', async () => {
     const { host, get } = makeHost([rectRegion(2, 2, 12, 12), rectRegion(22, 22, 14, 14)]);
-    tool.bindHost(host);
-    const added = await tool.segmentBoxes();
+    const added = await tool.segmentBoxes(host);
     expect(added).toBe(2);
     expect(get()).toHaveLength(2);                // 2 rects replaced by 2 masks
     expect(get().every((r) => r.bounds instanceof Polygon)).toBe(true);
@@ -99,8 +96,7 @@ describe('SamToolService', () => {
 
   it('is a no-op with a clear status when no rectangles are drawn', async () => {
     const { host } = makeHost([]);
-    tool.bindHost(host);
-    const added = await tool.segmentBoxes();
+    const added = await tool.segmentBoxes(host);
     expect(added).toBe(0);
     expect(tool.status$.value).toMatch(/rectangle/i);
   });
@@ -110,8 +106,7 @@ describe('SamToolService', () => {
     const embedSpy = jest.spyOn(session, 'embed');
     tool.useSession(session);
     const { host } = makeHost([rectRegion(2, 2, 10, 10), rectRegion(20, 20, 10, 10)]);
-    tool.bindHost(host);
-    await tool.segmentBoxes();
+    await tool.segmentBoxes(host);
     expect(embedSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -119,8 +114,7 @@ describe('SamToolService', () => {
     setSamModelUrls(DEFAULT_SAM_MODEL_ID, '', ''); // ensure unconfigured
     const fresh = new SamToolService(); // no session injected
     const { host, get } = makeHost([rectRegion(10, 10, 20, 20)]);
-    fresh.bindHost(host);
-    const added = await fresh.segmentBoxes();
+    const added = await fresh.segmentBoxes(host);
     expect(added).toBe(0);
     expect(getSamModel(DEFAULT_SAM_MODEL_ID).encoderUrl).toBe('');
     expect(fresh.status$.value).toMatch(/not configured/i);
@@ -154,9 +148,8 @@ describe('SamToolService — async commit (RT-6)', () => {
     session.embed = async (img) => { await gate; return embed(img); };
     tool.useSession(session);
     const { host, get } = makeHost([rectRegion(10, 10, 20, 20)]);
-    tool.bindHost(host);
 
-    const run = tool.segmentBoxes();
+    const run = tool.segmentBoxes(host);
     await Promise.resolve();
     const drawn = rectRegion(0, 0, 2, 2);
     host.setRegions([...get(), drawn]); // the user draws another prompt meanwhile
@@ -180,11 +173,10 @@ describe('SamToolService — guard covers the model download (RT-7)', () => {
     sessions.useSessionFactory(factory);
     const tool = new SamToolService(sessions);
     const { host } = makeHost([rectRegion(10, 10, 20, 20)]);
-    tool.bindHost(host);
 
-    const first = tool.segmentBoxes();
+    const first = tool.segmentBoxes(host);
     expect(tool.busy$.value).toBe(true);       // busy before the download finishes
-    expect(await tool.segmentBoxes()).toBe(0); // second press ignored
+    expect(await tool.segmentBoxes(host)).toBe(0); // second press ignored
     finishLoad();
     expect(await first).toBe(1);
     expect(factory).toHaveBeenCalledTimes(1);

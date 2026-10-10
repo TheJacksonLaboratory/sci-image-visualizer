@@ -10,7 +10,8 @@ import { provideVisualization } from './provide-visualization';
  * sharing the root one. A service that holds per-viewer state — a Subject, or a
  * host bound with `bindHost` — and is missing from the list silently couples two
  * live viewers (review CORE-6: both showed the sticky SAM toast, and a spatial
- * selection in one muted the other).
+ * selection in one muted the other). The canvas tools are no longer injectables:
+ * each backend builds its own in its CanvasToolManager (RT-21), so none binds a host.
  *
  * This scans the library for such `@Injectable`s, so a new one fails here until it
  * is either provided or consciously allow-listed as shared.
@@ -35,7 +36,8 @@ function statefulInjectables(): { name: string; file: string }[] {
   for (const file of sources(__dirname)) {
     const text = readFileSync(file, 'utf8');
     if (!text.includes('@Injectable')) continue;
-    if (!/new (Behavior|Replay)?Subject\b|bindHost\(/.test(text)) continue;
+    // A Subject, a bound host, or the async tools' status feeds (AsyncToolStatus).
+    if (!/new (Behavior|Replay)?Subject\b|bindHost\(|new AsyncToolStatus\(/.test(text)) continue;
     const cls = /@Injectable\([^)]*\)\s*export class (\w+)/.exec(text);
     if (cls) found.push({ name: cls[1], file: relative(__dirname, file) });
   }
@@ -53,7 +55,7 @@ function providedClassNames(providers: Provider[]): Set<string> {
 describe('provideVisualization()', () => {
   it('finds the stateful services it is meant to check (sanity)', () => {
     const names = statefulInjectables().map((s) => s.name);
-    expect(names).toEqual(expect.arrayContaining(['PlotlyService', 'RegionStore', 'WandToolService']));
+    expect(names).toEqual(expect.arrayContaining(['PlotlyService', 'RegionStore', 'SamPointToolService']));
   });
 
   it('lists every stateful @Injectable of the chain, or it is allow-listed as shared', () => {

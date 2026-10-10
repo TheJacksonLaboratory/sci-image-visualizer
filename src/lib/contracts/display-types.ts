@@ -52,6 +52,30 @@ export interface IBrushOptions {
   color?: string;
 }
 
+/** Options for the vertex eraser. */
+export interface IVertexEraserOptions {
+  /** Eraser radius in matrix (image) pixels. */
+  radius?: number;
+}
+
+/**
+ * The on-canvas tools `IToolController.setActiveTool` arms: magic wand, brush,
+ * vertex eraser, box zoom and SAM point prompts. Any other id (a region draw
+ * mode such as `'drawrect'`, `'pan'`) arms none of them.
+ */
+export type CanvasToolId = 'wand' | 'brush' | 'eraseVertex' | 'zoomToBox' | 'samPoint';
+
+/** Every {@link CanvasToolId}. */
+export const CANVAS_TOOL_IDS: readonly CanvasToolId[] = ['wand', 'brush', 'eraseVertex', 'zoomToBox', 'samPoint'];
+
+/** Whether `id` names an on-canvas tool. */
+export function isCanvasToolId(id: string | null | undefined): id is CanvasToolId {
+  return (CANVAS_TOOL_IDS as readonly string[]).includes(id as string);
+}
+
+/** Options for {@link CanvasToolId} tools: the wand's, the brush's or the eraser's. */
+export type CanvasToolOptions = IWandOptions | IBrushOptions | IVertexEraserOptions;
+
 /** What drives point colour in the spatial-omics mode: an annotation column
  *  from the dataset, or one feature (gene) vector fetched on demand. */
 export interface SpatialColorBy {

@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 
-import { WandToolHost } from '../wand/wand-tool.service';
+import { CanvasToolHost } from '../tool-kit/canvas-tool';
 import { cropImageRegion } from '../crop/slide-crop';
 import { ICellSegmenter } from '../../contracts/cell-segmenter.contract';
 import { Region, Rectangle } from '../../models/region';
@@ -26,33 +26,31 @@ const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
  */
 @Injectable({ providedIn: 'root' })
 export class CellSegmentToolService {
-  private host!: WandToolHost;
   private readonly state = new AsyncToolStatus();
 
   readonly status$ = this.state.status$;
   readonly busy$ = this.state.busy$;
   readonly progress$ = this.state.progress$;
 
-  bindHost(host: WandToolHost): void { this.host = host; }
-
   /**
-   * Crop + cellpose-segment every rectangle; append the cell regions and drop
-   * the prompt rectangles that produced cells. Returns the number of regions
-   * added; 0 (ignored) while a previous run is still going.
+   * Crop + cellpose-segment every rectangle of the backend behind `host`; append
+   * the cell regions and drop the prompt rectangles that produced cells. Returns
+   * the number of regions added; 0 (ignored) while a previous run is still going.
+   * The host is passed per run, so no backend's host outlives its call.
    */
-  async segmentBoxes(segmenter: ICellSegmenter): Promise<number> {
-    if (!this.host || this.state.busy) return 0;
-    const cached = this.host.getCachedImageData();
+  async segmentBoxes(host: CanvasToolHost, segmenter: ICellSegmenter): Promise<number> {
+    if (this.state.busy) return 0;
+    const cached = host.getCachedImageData();
     if (!cached || cached.frames.length === 0) { this.status$.next('No image loaded.'); return 0; }
 
-    const rects = this.host.getRegions().filter((r) => r.bounds instanceof Rectangle);
+    const rects = host.getRegions().filter((r) => r.bounds instanceof Rectangle);
     if (rects.length === 0) {
       this.status$.next('Draw one or more rectangles, then run Cellpose.');
       return 0;
     }
 
     const frame = MatrixFrame.from(cached);
-    const frameIdx = this.host.getActiveFrameIndex();
+    const frameIdx = host.getActiveFrameIndex();
 
     const added = await this.state.run(async () => {
       try {
@@ -79,13 +77,14 @@ export class CellSegmentToolService {
           if (polys.length === 0) continue;
           for (const poly of polys) {
             const ring = frame.ringToData(poly.xpoints, poly.ypoints);
-            cells.push(this.makeRegion(ring.xs, ring.ys, frame.holesToData(poly.holes), rects[i].color));
+            const color = rects[i].color || host.getShapeColor();
+            cells.push(makeCellRegion(ring.xs, ring.ys, frame.holesToData(poly.holes), color));
           }
           consumed.push(rects[i]);
         }
         // Commit against the regions as they are NOW (the run takes a while and
         // the user may have edited meanwhile): drop the consumed prompts by id.
-        this.host.setRegions(withoutRegions(this.host.getRegions(), consumed).concat(cells));
+        host.setRegions(withoutRegions(host.getRegions(), consumed).concat(cells));
         this.status$.next(cells.length > 0 ? `Added ${cells.length} cell region(s).` : 'No cells found.');
         return cells.length;
       } catch (err) {
@@ -96,13 +95,14 @@ export class CellSegmentToolService {
     return added ?? 0;
   }
 
-  private makeRegion(xData: number[], yData: number[], holes: number[][][] | undefined,
-                     color?: string): Region {
-    const region = new Region();
-    region.bounds = makePolygon(xData, yData, { holes });
-    // Inherit the source box's color; fall back to the host default.
-    region.color = color || this.host.getShapeColor();
-    region.label = 'cell';
-    return region;
-  }
+}
+
+function makeCellRegion(xData: number[], yData: number[], holes: number[][][] | undefined,
+                        color: string): Region {
+  const region = new Region();
+  region.bounds = makePolygon(xData, yData, { holes });
+  // The source box's color, else the host default.
+  region.color = color;
+  region.label = 'cell';
+  return region;
 }

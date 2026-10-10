@@ -1,36 +1,18 @@
-import { Injectable, Optional } from '@angular/core';
-
-import { IViewportHost, IRegionDataHost } from '../../contracts/coordinate-transform.contract';
+import { IVertexEraserOptions } from '../../contracts/display-types';
 import { Polygon } from '../../models/region';
 import { makePolygon, replaceBounds } from '../../models/polygon-factory';
 import { dropVerticesWithinRadius } from '../../geometry/ring';
-import type { CachedImageData } from '../wand/wand-tool.service';
 import { MatrixFrame } from '../tool-kit/matrix-frame';
-import { UndoGesture } from '../tool-kit/undo-gesture';
+import { UndoGesture, UndoGestureTarget } from '../tool-kit/undo-gesture';
 import { ToolOverlayCanvas } from '../tool-kit/tool-overlay';
-import { RegionStore } from '../../store/region-store.service';
+import { CanvasToolHost, ICanvasTool } from '../tool-kit/canvas-tool';
 
 /**
- * Collaboration interface the vertex eraser needs from its host backend.
- *
- * Extends {@link IViewportHost} for coordinate conversion + overlay attachment,
- * so the eraser is backend-agnostic (Plotly, OpenSeadragon and napari-js all
- * bind one).
+ * @deprecated One host serves every canvas tool: use {@link CanvasToolHost}.
+ * The eraser converts with its readback's per-axis ratios
+ * (`getCachedImageData().ratios`, RT-14); `getCachedImageRatio()` is gone.
  */
-export interface VertexEraserToolHost extends IViewportHost, IRegionDataHost {
-  /**
-   * Drop the wand's in-progress stroke. Called after the eraser modifies
-   * regions — the wand's accumulator may now reference stale vertices.
-   */
-  invalidateWandRegion(): void;
-  /**
-   * The readback the wand samples: its per-axis ratios convert between matrix
-   * coordinates (the eraser's native space) and data coordinates, so the eraser
-   * radius stays round in image pixels on an anisotropic readback (RT-14).
-   * null (no image yet) means one data unit per matrix pixel.
-   */
-  getCachedImageData(): CachedImageData | null;
-}
+export type VertexEraserToolHost = CanvasToolHost;
 
 /**
  * Vertex eraser. A custom canvas overlay that, on click/drag, removes any
@@ -41,10 +23,9 @@ export interface VertexEraserToolHost extends IViewportHost, IRegionDataHost {
  * The cursor is rendered as a dashed-red circle on the overlay so the user
  * can see the active radius while moving.
  */
-@Injectable({ providedIn: 'root' })
-export class VertexEraserToolService {
-
-  private host!: VertexEraserToolHost;
+export class VertexEraserTool implements ICanvasTool<IVertexEraserOptions> {
+  readonly id = 'eraseVertex';
+  private host!: CanvasToolHost;
   private readonly overlay = new ToolOverlayCanvas();
   private dragging = false;
   /** Eraser radius in image-pixel (matrix) coordinates. */
@@ -54,22 +35,30 @@ export class VertexEraserToolService {
   /** Makes each drag one undo step, however long the user pauses (RT-12). */
   private readonly gesture: UndoGesture;
 
-  constructor(@Optional() regionStore?: RegionStore) {
-    this.gesture = new UndoGesture(regionStore);
+  /** @param gestureTarget the region store, so each drag is one undo step. */
+  constructor(gestureTarget?: UndoGestureTarget | null) {
+    this.gesture = new UndoGesture(gestureTarget);
   }
 
-  bindHost(host: VertexEraserToolHost) {
+  // ── ICanvasTool ─────────────────────────────────────────────────────
+
+  /** Arm the eraser on `host`, optionally with a new radius. */
+  activate(host: CanvasToolHost, options: IVertexEraserOptions = {}) {
     this.host = host;
+    if (options.radius != null) this.setRadius(options.radius);
+    this.createOverlay();
   }
 
-  // ── Public API ──────────────────────────────────────────────────────
+  /** Disarm: remove the overlay and its cursor. */
+  deactivate() {
+    this.overlay.detach();
+    this.dragging = false;
+    this.gesture.end();
+    this.cursor = null;
+  }
 
-  setMode(active: boolean) {
-    if (active) {
-      this.createOverlay();
-    } else {
-      this.destroyOverlay();
-    }
+  setOptions(options: IVertexEraserOptions) {
+    if (options.radius != null) this.setRadius(options.radius);
   }
 
   /** Set eraser radius in matrix-pixel (image pixel) coordinates. */
@@ -90,14 +79,6 @@ export class VertexEraserToolService {
       up: () => this.onPointerUp(),
       resize: () => this.drawCursor(), // a resize clears the canvas
     });
-  }
-
-  private destroyOverlay() {
-    if (!this.overlay.attached) return;
-    this.overlay.detach();
-    this.dragging = false;
-    this.gesture.end();
-    this.cursor = null;
   }
 
   // ── Pointer handlers ────────────────────────────────────────────────
@@ -233,9 +214,9 @@ export class VertexEraserToolService {
     }
 
     if (!anyChange) return;
-    // The wand's stroke mask becomes stale once we trim vertices off any
-    // region — drop it so the next wand interaction re-adopts or restarts.
-    this.host.invalidateWandRegion();
+    // A wand/brush stroke over a region edited here is dropped when that tool
+    // next runs: it was disarmed (and reset) when the eraser was armed, and its
+    // stroke editor discards a stroke whose regions changed (RT-2).
     this.host.setRegions(regions);
   }
 }

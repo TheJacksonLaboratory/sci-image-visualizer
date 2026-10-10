@@ -6,10 +6,6 @@ import { OpenSeadragonVisualizerService } from './implementations/osd/openseadra
 import { NapariVisualizerService } from './implementations/napari-js/napari-visualizer.service';
 import { VisualizerStore } from './store/visualizer-store.service';
 import { RegionStore } from './store/region-store.service';
-import { WandToolService } from './toolbar/wand/wand-tool.service';
-import { VertexEraserToolService } from './toolbar/vertex-eraser/vertex-eraser-tool.service';
-import { ZoomToBoxToolService } from './toolbar/zoom-to-box/zoom-to-box-tool.service';
-import { BrushToolService } from './toolbar/brush/brush-tool.service';
 import { SamToolService } from './toolbar/segmentation/sam-tool.service';
 import { SamPointToolService } from './toolbar/segmentation/sam-point-tool.service';
 import { CellSegmentToolService } from './toolbar/segmentation/cell-segment-tool.service';
@@ -73,10 +69,9 @@ export function provideVisualization(): Provider[] {
     VisualizerStore,
     RegionStore,
     SpatialSelectionStore,
-    WandToolService,
-    BrushToolService,
-    VertexEraserToolService,
-    ZoomToBoxToolService,
+    // The canvas tools (wand, brush, eraser, zoom-to-box, SAM point) are not here:
+    // each backend above builds its own instances in its CanvasToolManager. The
+    // SAM point tools report through the chain's SamPointToolService.
     SamToolService,
     SamPointToolService,
     CellSegmentToolService,

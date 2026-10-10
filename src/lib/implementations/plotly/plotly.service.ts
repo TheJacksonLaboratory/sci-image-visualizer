@@ -13,15 +13,14 @@ import { BehaviorSubject, EMPTY, Observable, Subject, Subscription, combineLates
 import { MessageService } from 'primeng/api';
 import { ShapeSelection } from '../../models/shape';
 import { CONFIG, CONFIG_SURFACE, PlotUtilities } from '../../plot.utilities';
-import { WandService, WandOptions } from '../../toolbar/wand/wand.service';
-import { CachedImageData, WandToolService, WandToolHost } from '../../toolbar/wand/wand-tool.service';
-import { BrushToolService, BrushOptions } from '../../toolbar/brush/brush-tool.service';
+import { WandService } from '../../toolbar/wand/wand.service';
+import { CachedImageData, CanvasToolHost } from '../../toolbar/tool-kit/canvas-tool';
+import { CanvasToolManager } from '../../toolbar/tool-kit/canvas-tool-manager';
+import { createCanvasToolManager } from '../../toolbar/canvas-tools';
 import { SamToolService } from '../../toolbar/segmentation/sam-tool.service';
 import { SamPointToolService } from '../../toolbar/segmentation/sam-point-tool.service';
 import { CellSegmentToolService } from '../../toolbar/segmentation/cell-segment-tool.service';
 import { ICellSegmenter, CELL_SEGMENTER } from '../../contracts/cell-segmenter.contract';
-import { VertexEraserToolService, VertexEraserToolHost } from '../../toolbar/vertex-eraser/vertex-eraser-tool.service';
-import { ZoomToBoxToolService } from '../../toolbar/zoom-to-box/zoom-to-box-tool.service';
 import { PlotType, PLOT_TYPE_DESCRIPTORS, PlotTypeDescriptor } from '../../contracts/plot-type';
 import {
   PLOTLY_PLOT_TYPE_IMPLS,
@@ -190,8 +189,10 @@ export class PlotlyService extends BaseStoreVisualizer implements IVisualizer {
   private regionLiveEditSubscription?: Subscription;
   private channelSub?: Subscription;
 
-  private wandHost!: WandToolHost;
-  private eraserHost!: VertexEraserToolHost;
+  /** What this backend's canvas tools read and write (one host for every tool). */
+  private readonly toolHost: CanvasToolHost;
+  /** This backend's own wand, brush, eraser, zoom-to-box and SAM point tools. */
+  protected readonly canvasTools: CanvasToolManager;
   /** This backend's region renderer (lazily created in getRegionOverlay). */
   private regionOverlay?: IRegionOverlay;
   private readonly coordinateTransform: ICoordinateTransform =
@@ -203,24 +204,19 @@ export class PlotlyService extends BaseStoreVisualizer implements IVisualizer {
               @Inject(IMAGE_STATE_PORT) private state: ImageStatePort,
               public messageService: MessageService, private http: HttpClient,
               private wandService: WandService,
-              private wandTool: WandToolService,
-              private brushTool: BrushToolService,
               private samTool: SamToolService,
               private samPointTool: SamPointToolService,
               private cellSegmentTool: CellSegmentToolService,
               @Optional() @Inject(CELL_SEGMENTER) private cellSegmenter: ICellSegmenter | null,
-              private vertexEraserTool: VertexEraserToolService,
-              private zoomToBoxTool: ZoomToBoxToolService,
               store: VisualizerStore,
               regionStore: RegionStore) {
     super(regionStore, store);
     // relayout event router
     this.onRelayoutEvent = (event: any) => { this.relayoutEventHandler(event); };
 
-    // Tool services read/mutate our state via small *Host interfaces. Stored
-    // so we can re-bind them to ourselves whenever a Plotly tool is activated
-    // (the OpenSeadragon backend re-binds the same singleton tools to itself).
-    this.wandHost = {
+    // The canvas tools read/mutate our state through one host, and this backend
+    // owns its own tool instances (RT-21) — nothing to re-bind on activation.
+    this.toolHost = {
       getRegions: () => this.regionStore.getRegions(),
       setRegions: (regions) => this.setRegions(regions),
       getCachedImageData: () => this.getCachedImageData(),
@@ -229,20 +225,12 @@ export class PlotlyService extends BaseStoreVisualizer implements IVisualizer {
       getCoordinateTransform: () => this.getCoordinateTransform(),
       getFileName: () => this.fileName,
       getShapeColor: () => this.regionStore.getShapeColor(),
+      pixelToData: (px, py) => this.zoomBoxPixelToData(px, py),
+      applyZoomToBox: (coords) => this.applyZoomToBox(coords),
     };
-    this.eraserHost = {
-      getRegions: () => this.regionStore.getRegions(),
-      setRegions: (regions) => this.setRegions(regions),
-      invalidateWandRegion: () => this.wandTool.clearActiveRegion(),
-      getOverlayContainer: () => this.getOverlayContainer(),
-      getCoordinateTransform: () => this.getCoordinateTransform(),
-      getCachedImageData: () => this.getCachedImageData(),
-    };
-    this.wandTool.bindHost(this.wandHost);
-    // The brush reuses the wand host (same coordinate frame + region access).
-    this.brushTool.bindHost(this.wandHost);
-    this.vertexEraserTool.bindHost(this.eraserHost);
-    this.bindZoomToBoxHost();
+    this.canvasTools = createCanvasToolManager(this.toolHost, {
+      wandService, regionStore, samPoint: samPointTool,
+    });
 
     this.ensureSubscriptions();
   }
@@ -397,6 +385,8 @@ export class PlotlyService extends BaseStoreVisualizer implements IVisualizer {
   public plot(plotDiv: string, imageLoaded: any, imageInfo: IImageInfo, screenHeight: number,
               plotType: PlotType, inPlace: boolean = false) {
     this.ensureSubscriptions();
+    // A new image: a stroke or SAM prompt in progress belonged to the old one.
+    if (!inPlace) this.canvasTools.resetAll();
     this.renderGen++;
     this.samplingGen++;
     const trueImageSize: number[] = [];
@@ -1225,79 +1215,22 @@ export class PlotlyService extends BaseStoreVisualizer implements IVisualizer {
 
 
   // ── Tool delegations ────────────────────────────────────────────────
+  // The canvas tools (setActiveTool and the per-tool setters) are run by
+  // BaseStoreVisualizer over this.canvasTools; Plotly needs no pointer gating.
 
-  public setWandMode(active: boolean, options: WandOptions = {}) {
-    // Re-bind to ourselves in case the OSD backend last used these singletons.
-    if (active) this.wandTool.bindHost(this.wandHost);
-    this.wandTool.setMode(active, options);
-  }
-
-  public setWandOptions(options: WandOptions) {
-    this.wandTool.setOptions(options);
-  }
-
-  public clearActiveWandRegion() {
-    this.wandTool.clearActiveRegion();
-  }
-
-  public setBrushMode(active: boolean, options: BrushOptions = {}) {
-    // Re-bind to ourselves in case the OSD backend last used this singleton.
-    if (active) this.brushTool.bindHost(this.wandHost);
-    this.brushTool.setMode(active, options);
-  }
-
-  public setBrushOptions(options: BrushOptions) {
-    this.brushTool.setOptions(options);
-  }
-
-  public setVertexEraserMode(active: boolean) {
-    if (active) this.vertexEraserTool.bindHost(this.eraserHost);
-    this.vertexEraserTool.setMode(active);
-  }
-
-  public setVertexEraserRadius(radius: number) {
-    this.vertexEraserTool.setRadius(radius);
-  }
-
-  public setZoomToBoxMode(active: boolean) {
-    // The zoom-to-box tool is a root singleton shared with the OSD backend,
-    // which rebinds it to its own host on activation. Rebind to ours when we
-    // activate so a prior OSD zoom-to-box doesn't leave the singleton pointing
-    // at OSD's coordinate/zoom handlers (which would break box-zoom on heatmaps).
-    if (active) this.bindZoomToBoxHost();
-    this.zoomToBoxTool.setMode(active);
-  }
-
-  /** Bind the shared zoom-to-box tool to this (Plotly) backend's host. */
-  private bindZoomToBoxHost() {
-    this.zoomToBoxTool.bindHost({
-      getPlotDiv: () => this.plotDiv,
-      pixelToData: (px, py) => this.zoomBoxPixelToData(px, py),
-      applyZoomToBox: (coords) => this.applyZoomToBox(coords),
-    });
-  }
-
-  /** Box-prompted SAM: segment the drawn rectangles. The SAM tool reuses the
-   *  wand host (cached frame + coordinate transform + region store). */
+  /** Box-prompted SAM: segment the drawn rectangles against our tool host
+   *  (cached frame + coordinate transform + region store). */
   public segmentRectangles(): Promise<number> {
-    this.samTool.bindHost(this.wandHost);
-    return this.samTool.segmentBoxes();
+    return this.samTool.segmentBoxes(this.toolHost);
   }
   public segmentRectanglesCellpose(): Promise<number> {
     if (!this.cellSegmenter) return Promise.resolve(0);
-    this.cellSegmentTool.bindHost(this.wandHost);
-    return this.cellSegmentTool.segmentBoxes(this.cellSegmenter);
+    return this.cellSegmentTool.segmentBoxes(this.toolHost, this.cellSegmenter);
   }
   public setSamModel(id: string): void {
     this.samTool.setModel(id);
     this.samPointTool.setModel(id);
   }
-  public setSamPointMode(active: boolean): void {
-    if (active) this.samPointTool.bindHost(this.wandHost);
-    this.samPointTool.setMode(active);
-  }
-  public commitSamPoints(): void { this.samPointTool.commit(); }
-  public clearSamPoints(): void { this.samPointTool.clear(); }
 
   /** Overlay-pixel -> Plotly data coords via the axis objects (subtracting the
    *  plot margin offset). The zoom-to-box tool calls this through its host. */
@@ -1339,7 +1272,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IVisualizer {
     return this.coordinateTransform;
   }
 
-  // ── WandToolHost implementation ─────────────────────────────────────
+  // ── Canvas tool host ────────────────────────────────────────────────
 
   /** Pixel data the wand needs for sampling. null = no image loaded. */
   private getCachedImageData(): CachedImageData | null {

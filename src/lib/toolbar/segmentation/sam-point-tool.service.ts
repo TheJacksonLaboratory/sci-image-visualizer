@@ -1,6 +1,5 @@
 import { Injectable } from '@angular/core';
 
-import { WandToolHost } from '../wand/wand-tool.service';
 import { isSamModelReady } from './sam-model-registry';
 import { SamSessionService } from './sam-session.service';
 import { ISamSession, SamPrompt } from '../../contracts/sam.contract';
@@ -10,6 +9,39 @@ import { maskToPolygons } from '../../geometry/contour';
 import { MatrixFrame } from '../tool-kit/matrix-frame';
 import { AsyncToolStatus } from '../tool-kit/async-tool-status';
 import { ToolOverlayCanvas } from '../tool-kit/tool-overlay';
+import { CanvasToolHost, ICanvasTool } from '../tool-kit/canvas-tool';
+
+/**
+ * The SAM point prompts of one viewer chain: the status feeds the toolbar shows
+ * and the model session. Every backend's `CanvasToolManager` gets its own
+ * {@link SamPointTool} from {@link createTool}, so in-progress points never
+ * cross backends, while all of them report through these feeds and share one
+ * busy guard and one {@link SamSessionService}.
+ */
+@Injectable({ providedIn: 'root' })
+export class SamPointToolService {
+  private readonly state = new AsyncToolStatus();
+
+  readonly status$ = this.state.status$;
+  readonly busy$ = this.state.busy$;
+  /** Encoder-download progress (0..1) on the first click; -1 when not downloading. */
+  readonly progress$ = this.state.progress$;
+
+  constructor(private readonly sessions: SamSessionService = new SamSessionService()) {}
+
+  /** Choose the registered model to use (shared with the box tool). */
+  setModel(id: string): void {
+    this.sessions.setModel(id);
+  }
+
+  /** Test seam: inject a fake/alternate session. */
+  useSession(session: ISamSession): void { this.sessions.useSession(session); }
+
+  /** A point tool for one backend, reporting through this service. */
+  createTool(): SamPointTool {
+    return new SamPointTool(this.state, this.sessions);
+  }
+}
 
 /** Interactive SAM point-prompt tool (jit-ui#90, P1).
  *
@@ -23,45 +55,41 @@ import { ToolOverlayCanvas } from '../tool-kit/tool-overlay';
  *
  * Inference goes through the shared {@link SamSessionService} (one session and
  * embedding for both SAM tools; lazy onnxruntime-web in production, a fake in
- * tests).
+ * tests). Created by {@link SamPointToolService.createTool}.
  */
-@Injectable({ providedIn: 'root' })
-export class SamPointToolService {
-  private host!: WandToolHost;
+export class SamPointTool implements ICanvasTool<void> {
+  readonly id = 'samPoint';
+  private host: CanvasToolHost | null = null;
   private readonly overlay = new ToolOverlayCanvas();
-  private readonly state = new AsyncToolStatus();
 
   /** Accumulated point prompts, in image (matrix) coords. */
   private points: { x: number; y: number; label: 0 | 1 }[] = [];
   /** Id of the in-progress (preview) region being refined, if committed to store. */
   private regionId: number | null = null;
 
-  readonly status$ = this.state.status$;
-  readonly busy$ = this.state.busy$;
-  /** Encoder-download progress (0..1) on the first click; -1 when not downloading. */
-  readonly progress$ = this.state.progress$;
+  constructor(private readonly state: AsyncToolStatus, private readonly sessions: SamSessionService) {}
 
-  constructor(private readonly sessions: SamSessionService = new SamSessionService()) {}
+  private get status$() { return this.state.status$; }
 
-  bindHost(host: WandToolHost): void { this.host = host; }
+  // ── ICanvasTool ─────────────────────────────────────────────────────────
 
-  /** Choose the registered model to use (shared with the box tool). */
-  setModel(id: string): void {
-    this.sessions.setModel(id);
+  activate(host: CanvasToolHost): void {
+    this.host = host;
+    this.createOverlay();
+    // Warm up the model in the background as soon as the tool is armed, so the
+    // first click doesn't pay the (download +) session-build cost on its path.
+    this.preload();
   }
 
-  /** Test seam: inject a fake/alternate session. */
-  useSession(session: ISamSession): void { this.sessions.useSession(session); }
+  deactivate(): void {
+    this.overlay.detach();
+    this.reset();
+  }
 
-  setMode(active: boolean): void {
-    if (active) {
-      this.createOverlay();
-      // Warm up the model in the background as soon as the tool is armed, so the
-      // first click doesn't pay the (download +) session-build cost on its path.
-      this.preload();
-    } else {
-      this.destroyOverlay();
-    }
+  /** Forget the current prompt (its preview region stays). */
+  reset(): void {
+    this.points = [];
+    this.regionId = null;
   }
 
   /** Eagerly load the model in the background (fire-and-forget). Safe to call
@@ -80,7 +108,7 @@ export class SamPointToolService {
 
   /** Discard the in-progress prompt + its preview region. */
   clear(): void {
-    if (this.regionId != null) {
+    if (this.regionId != null && this.host) {
       const regions = this.host.getRegions().filter((r) => r.id !== this.regionId);
       this.host.setRegions(regions);
     }
@@ -97,13 +125,6 @@ export class SamPointToolService {
     this.overlay.attach(container, { down: (e) => { void this.onPointerDown(e); } });
   }
 
-  private destroyOverlay(): void {
-    if (!this.overlay.attached) return;
-    this.overlay.detach();
-    this.points = [];
-    this.regionId = null;
-  }
-
   // ── per-click refinement ────────────────────────────────────────────────
 
   /** Primary button only (the overlay filters the others). */
@@ -116,15 +137,17 @@ export class SamPointToolService {
     // the tab. Each click is fast once the embedding is cached, so this only
     // drops clicks made while genuinely busy.
     if (this.state.busy) return;
-    const cached = this.host.getCachedImageData();
+    const host = this.host;
+    if (!host) return;
+    const cached = host.getCachedImageData();
     if (!cached || cached.frames.length === 0) return;
-    const transform = this.host.getCoordinateTransform();
+    const transform = host.getCoordinateTransform();
     if (!transform.isReady()) return;
     const { x: dataX, y: dataY } = transform.clientToData(e.clientX, e.clientY);
     if (!Number.isFinite(dataX) || !Number.isFinite(dataY)) return;
 
     const frame = MatrixFrame.from(cached);
-    const frameIdx = this.host.getActiveFrameIndex();
+    const frameIdx = host.getActiveFrameIndex();
     // Shift or Alt = negative (exclude) point.
     const label: 0 | 1 = e.shiftKey || e.altKey ? 0 : 1;
     // A plain positive click starts a NEW object: clicking another fiber must
@@ -145,8 +168,8 @@ export class SamPointToolService {
     await this.state.run(async () => {
       try {
         this.status$.next('Loading SAM model…');
-        const session = await this.sessions.ensureSession((f) => this.progress$.next(f));
-        const key = [this.host.getFileName() ?? '', frameIdx, `${cached.width}x${cached.height}`, frame.sig]
+        const session = await this.sessions.ensureSession((f) => this.state.progress$.next(f));
+        const key = [host.getFileName() ?? '', frameIdx, `${cached.width}x${cached.height}`, frame.sig]
           .join('|');
         const embedding = await this.sessions.embed(session, cached, frameIdx, key,
           () => this.status$.next('Encoding image…'));
@@ -155,7 +178,7 @@ export class SamPointToolService {
         const res = await session.decode(embedding, prompt);
         const poly = maskToPolygons(res.mask, res.width, res.height, 0, 0)[0];
         if (!poly) { this.status$.next('No mask for these points.'); return; }
-        this.upsertPreview(poly, frame);
+        this.upsertPreview(host, poly, frame);
         this.status$.next(
           'Segmented — click another fiber for a new region, Shift-click to refine, Esc to undo.',
         );
@@ -167,10 +190,10 @@ export class SamPointToolService {
 
   /** Replace (or insert) the in-progress preview region in the shared store,
    *  against the regions as they are now (the run may have taken a while). */
-  private upsertPreview(poly: Polygon, frame: MatrixFrame): void {
+  private upsertPreview(host: CanvasToolHost, poly: Polygon, frame: MatrixFrame): void {
     if (poly.xpoints.length < 3) return;
     const ring = frame.ringToData(poly.xpoints, poly.ypoints);
-    const regions = this.host.getRegions();
+    const regions = host.getRegions();
     const bounds = makePolygon(ring.xs, ring.ys, { holes: frame.holesToData(poly.holes) });
     const idx = this.regionId != null ? regions.findIndex((r) => r.id === this.regionId) : -1;
     let region: Region;
@@ -181,11 +204,11 @@ export class SamPointToolService {
     } else {
       region = new Region();
       region.bounds = bounds;
-      region.color = this.host.getShapeColor();
+      region.color = host.getShapeColor();
       region.label = 'sam';
       regions.push(region);
     }
-    this.host.setRegions(regions);
+    host.setRegions(regions);
     this.regionId = region.id ?? this.regionId;
   }
 }

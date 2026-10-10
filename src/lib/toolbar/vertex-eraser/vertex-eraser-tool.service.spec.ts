@@ -1,6 +1,7 @@
-import { VertexEraserToolService } from './vertex-eraser-tool.service';
+import { VertexEraserTool } from './vertex-eraser-tool.service';
 import { Region, Polygon } from '../../models/region';
 import { ICoordinateTransform } from '../../contracts/coordinate-transform.contract';
+import { CanvasToolHost } from '../tool-kit/canvas-tool';
 
 /**
  * The eraser is decoupled from any backend's shape format: it reads/writes the
@@ -27,34 +28,30 @@ const identityTransform: ICoordinateTransform = {
   isReady: () => true,
 };
 
-describe('VertexEraserToolService (neutral Region)', () => {
-  let tool: VertexEraserToolService;
+describe('VertexEraserTool (neutral Region)', () => {
+  let tool: VertexEraserTool;
   let regions: Region[];
   let committed: Region[] | null;
   let container: HTMLDivElement;
-  let invalidated: number;
 
   beforeEach(() => {
-    tool = new VertexEraserToolService();
+    tool = new VertexEraserTool();
     regions = [squareRegion()];
     committed = null;
-    invalidated = 0;
     container = document.createElement('div');
     document.body.appendChild(container);
-    tool.bindHost({
+    tool.activate({
       getOverlayContainer: () => container,
       getCoordinateTransform: () => identityTransform,
       getRegions: () => regions.slice(),
-      setRegions: (rs) => { committed = rs; },
-      invalidateWandRegion: () => { invalidated++; },
+      setRegions: (rs: Region[]) => { committed = rs; },
       getCachedImageData: () => null,
-    });
-    tool.setMode(true);
+    } as unknown as CanvasToolHost);
     tool.setRadius(2);
   });
 
   afterEach(() => {
-    tool.setMode(false);
+    tool.deactivate();
     container.remove();
   });
 
@@ -68,7 +65,6 @@ describe('VertexEraserToolService (neutral Region)', () => {
     expect(bounds).toBeInstanceOf(Polygon); // neutral model, not a Plotly dict
     expect((bounds as Polygon).xpoints.length).toBe(3); // the (10,0) vertex was dropped
     expect(committed![0].id).toBe(1); // identity preserved
-    expect(invalidated).toBe(1); // wand stroke invalidated after the edit
   });
 
   /** A 0–40 square exterior with a hole ring (defaults to a 10–20 square). */
@@ -163,8 +159,8 @@ describe('VertexEraserToolService (neutral Region)', () => {
   });
 });
 
-describe('VertexEraserToolService — anisotropic readback (RT-14)', () => {
-  let tool: VertexEraserToolService;
+describe('VertexEraserTool — anisotropic readback (RT-14)', () => {
+  let tool: VertexEraserTool;
   let committed: Region[] | null;
   let container: HTMLDivElement;
 
@@ -183,27 +179,25 @@ describe('VertexEraserToolService — anisotropic readback (RT-14)', () => {
   }
 
   beforeEach(() => {
-    tool = new VertexEraserToolService();
+    tool = new VertexEraserTool();
     committed = null;
     container = document.createElement('div');
     document.body.appendChild(container);
   });
 
   afterEach(() => {
-    tool.setMode(false);
+    tool.deactivate();
     container.remove();
   });
 
   function bind(regions: Region[], ratios: number[]) {
-    tool.bindHost({
+    tool.activate({
       getOverlayContainer: () => container,
       getCoordinateTransform: () => identityTransform,
       getRegions: () => regions.slice(),
-      setRegions: (rs) => { committed = rs; },
-      invalidateWandRegion: () => undefined,
+      setRegions: (rs: Region[]) => { committed = rs; },
       getCachedImageData: () => ({ frames: [[[0]]], width: 1, height: 1, ratios, isGrayscale: true }),
-    });
-    tool.setMode(true);
+    } as unknown as CanvasToolHost);
     tool.setRadius(2); // matrix px
   }
 
@@ -226,33 +220,31 @@ describe('VertexEraserToolService — anisotropic readback (RT-14)', () => {
   });
 });
 
-describe('VertexEraserToolService — keeps what it does not edit (RT-5)', () => {
-  let tool: VertexEraserToolService;
+describe('VertexEraserTool — keeps what it does not edit (RT-5)', () => {
+  let tool: VertexEraserTool;
   let committed: Region[] | null;
   let container: HTMLDivElement;
 
   function bind(regions: Region[]) {
-    tool.bindHost({
+    tool.activate({
       getOverlayContainer: () => container,
       getCoordinateTransform: () => identityTransform,
       getRegions: () => regions.slice(),
-      setRegions: (rs) => { committed = rs; },
-      invalidateWandRegion: () => undefined,
+      setRegions: (rs: Region[]) => { committed = rs; },
       getCachedImageData: () => null,
-    });
-    tool.setMode(true);
+    } as unknown as CanvasToolHost);
     tool.setRadius(2);
   }
 
   beforeEach(() => {
-    tool = new VertexEraserToolService();
+    tool = new VertexEraserTool();
     committed = null;
     container = document.createElement('div');
     document.body.appendChild(container);
   });
 
   afterEach(() => {
-    tool.setMode(false);
+    tool.deactivate();
     container.remove();
   });
 

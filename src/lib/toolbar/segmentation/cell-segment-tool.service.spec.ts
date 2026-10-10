@@ -1,5 +1,5 @@
 import { CellSegmentToolService } from './cell-segment-tool.service';
-import { CachedImageData, WandToolHost } from '../wand/wand-tool.service';
+import { CachedImageData, CanvasToolHost } from '../tool-kit/canvas-tool';
 import { ICellSegmenter, CellSegmentation } from '../../contracts/cell-segmenter.contract';
 import { Region, Rectangle, Polygon } from '../../models/region';
 
@@ -25,13 +25,13 @@ function fakeSegmenter(): ICellSegmenter {
   };
 }
 
-function makeHost(regions: Region[]): { host: WandToolHost; get: () => Region[] } {
+function makeHost(regions: Region[]): { host: CanvasToolHost; get: () => Region[] } {
   let regs = regions;
   const frame = Array.from({ length: H }, () => new Array(W).fill(120));
   const cached: CachedImageData = {
     frames: [frame], width: W, height: H, ratios: [1], isGrayscale: true, originX: 0, originY: 0,
   };
-  const host: WandToolHost = {
+  const host: CanvasToolHost = {
     getOverlayContainer: () => document.createElement('div'),
     getCachedImageData: () => cached,
     getCoordinateTransform: () =>
@@ -55,8 +55,7 @@ describe('CellSegmentToolService', () => {
 
   it('crops each rectangle, cellpose-segments it, and adds a region per cell', async () => {
     const { host, get } = makeHost([rectRegion(8, 8, 24, 24)]);
-    tool.bindHost(host);
-    const added = await tool.segmentBoxes(fakeSegmenter());
+    const added = await tool.segmentBoxes(host, fakeSegmenter());
     expect(added).toBe(2);                       // two cells in the crop
     const regs = get();
     expect(regs).toHaveLength(2);                // prompt rectangle replaced by 2 cell regions
@@ -68,8 +67,7 @@ describe('CellSegmentToolService', () => {
     const rect = rectRegion(8, 8, 24, 24);
     rect.color = '#00bcd4';                          // distinct, non-default
     const { host, get } = makeHost([rect]);
-    tool.bindHost(host);
-    await tool.segmentBoxes(fakeSegmenter());
+    await tool.segmentBoxes(host, fakeSegmenter());
     expect(get().every((r) => r.color === '#00bcd4')).toBe(true);
   });
 
@@ -84,8 +82,7 @@ describe('CellSegmentToolService', () => {
       },
     };
     const { host } = makeHost([rectRegion(8, 8, 24, 24)]);
-    tool.bindHost(host);
-    await tool.segmentBoxes(seg);
+    await tool.segmentBoxes(host, seg);
     expect(statuses).toContain('Running inference (tile 1/2)…');
     expect(statuses).toContain('Computing flow dynamics…');
     expect(statuses.some((s) => /tracing/i.test(s))).toBe(true); // our own phase
@@ -93,8 +90,7 @@ describe('CellSegmentToolService', () => {
 
   it('no-ops with a status when no rectangles are drawn', async () => {
     const { host } = makeHost([]);
-    tool.bindHost(host);
-    expect(await tool.segmentBoxes(fakeSegmenter())).toBe(0);
+    expect(await tool.segmentBoxes(host, fakeSegmenter())).toBe(0);
     expect(tool.status$.value).toMatch(/rectangle/i);
   });
 
@@ -105,8 +101,7 @@ describe('CellSegmentToolService', () => {
       }),
     };
     const { host, get } = makeHost([rectRegion(8, 8, 24, 24)]);
-    tool.bindHost(host);
-    expect(await tool.segmentBoxes(empty)).toBe(0);
+    expect(await tool.segmentBoxes(host, empty)).toBe(0);
     expect(get()).toHaveLength(1);
     expect(get()[0].bounds).toBeInstanceOf(Rectangle); // untouched
   });
@@ -129,9 +124,8 @@ describe('CellSegmentToolService — async commit (RT-6, RT-14)', () => {
 
   it('keeps a region drawn while the segmenter was running', async () => {
     const { host, get } = makeHost([rectRegion(8, 8, 24, 24)]);
-    tool.bindHost(host);
     const { segmenter, release } = gatedSegmenter();
-    const run = tool.segmentBoxes(segmenter);
+    const run = tool.segmentBoxes(host, segmenter);
     await new Promise((r) => setTimeout(r, 5));
     host.setRegions([...get(), rectRegion(0, 0, 2, 2)].map((r) => r)); // the user draws meanwhile
     const drawn = get()[get().length - 1];
@@ -143,10 +137,9 @@ describe('CellSegmentToolService — async commit (RT-6, RT-14)', () => {
 
   it('ignores a second run while one is in flight', async () => {
     const { host, get } = makeHost([rectRegion(8, 8, 24, 24)]);
-    tool.bindHost(host);
     const { segmenter, release } = gatedSegmenter();
-    const first = tool.segmentBoxes(segmenter);
-    const second = tool.segmentBoxes(segmenter);
+    const first = tool.segmentBoxes(host, segmenter);
+    const second = tool.segmentBoxes(host, segmenter);
     release();
     expect(await second).toBe(0);
     expect(await first).toBe(2);
@@ -157,8 +150,7 @@ describe('CellSegmentToolService — async commit (RT-6, RT-14)', () => {
     const { host, get } = makeHost([rectRegion(8, 16, 24, 48)]);
     const cached = host.getCachedImageData()!;
     cached.ratios = [1, 2]; // rows are 2 data units tall
-    tool.bindHost(host);
-    await tool.segmentBoxes(fakeSegmenter());
+    await tool.segmentBoxes(host, fakeSegmenter());
     const ys = get().flatMap((r) => (r.bounds as Polygon).ypoints);
     // The cells stay inside the prompt box's data extent (16..64), not 8..32 or 32..128.
     expect(Math.min(...ys)).toBeGreaterThanOrEqual(16);

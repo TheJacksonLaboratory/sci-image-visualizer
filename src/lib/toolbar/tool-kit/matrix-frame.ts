@@ -1,4 +1,4 @@
-import type { CachedImageData } from '../wand/wand-tool.service';
+import type { CachedImageData } from './canvas-tool';
 
 /**
  * The mapping between a backend's data coordinates and the pixel matrix of a

@@ -32,17 +32,17 @@ import {
   tilesInfoUrl,
 } from '../tile-server';
 import { BaseStoreVisualizer } from '../base-store-visualizer';
+import { CanvasToolId } from '../../contracts/display-types';
 import { SimpleSliceAccessService } from '../simple-slice-access.service';
-import { CachedImageData, WandToolService, WandToolHost } from '../../toolbar/wand/wand-tool.service';
+import { CachedImageData, CanvasToolHost } from '../../toolbar/tool-kit/canvas-tool';
+import { CanvasToolManager } from '../../toolbar/tool-kit/canvas-tool-manager';
+import { createCanvasToolManager } from '../../toolbar/canvas-tools';
+import { WandService } from '../../toolbar/wand/wand.service';
 import { packedFrame } from '../../toolbar/tool-kit/frame-pixels';
-import { BrushToolService, BrushOptions } from '../../toolbar/brush/brush-tool.service';
 import { SamToolService } from '../../toolbar/segmentation/sam-tool.service';
 import { SamPointToolService } from '../../toolbar/segmentation/sam-point-tool.service';
 import { CellSegmentToolService } from '../../toolbar/segmentation/cell-segment-tool.service';
 import { ICellSegmenter, CELL_SEGMENTER } from '../../contracts/cell-segmenter.contract';
-import { VertexEraserToolService, VertexEraserToolHost } from '../../toolbar/vertex-eraser/vertex-eraser-tool.service';
-import { ZoomToBoxToolService, ZoomToBoxToolHost } from '../../toolbar/zoom-to-box/zoom-to-box-tool.service';
-import { WandOptions } from '../../toolbar/wand/wand.service';
 import { buildColormapLut, Rgb } from '../../contracts/colormap-lut';
 import { IChannelState, IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { saveAs } from 'file-saver';
@@ -165,8 +165,10 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    *  accidental enormous canvas allocation. */
   private readonly SIMPLE_UPSCALE_MAX_DIM = 8192;
   private coordTransform: OsdCoordinateTransform | null = null;
-  private wandHost!: WandToolHost;
-  private eraserHost!: VertexEraserToolHost;
+  /** What this backend's canvas tools read and write (one host for every tool). */
+  private readonly toolHost: CanvasToolHost;
+  /** This backend's own wand, brush, eraser, zoom-to-box and SAM point tools. */
+  protected readonly canvasTools: CanvasToolManager;
   /** Wand sampling matrix read back from the rendered viewport; cached until
    *  the viewport changes (see readbackViewport). */
   private viewportPixels: CachedImageData | null = null;
@@ -274,20 +276,36 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   constructor(
     private http: HttpClient,
     @Inject(TILE_ACCESS_PORT) private tiles: TileAccessPort,
-    private wandTool: WandToolService,
-    private brushTool: BrushToolService,
+    wandService: WandService,
     private samTool: SamToolService,
     private samPointTool: SamPointToolService,
     private cellSegmentTool: CellSegmentToolService,
     @Optional() @Inject(CELL_SEGMENTER) private cellSegmenter: ICellSegmenter | null,
-    private eraserTool: VertexEraserToolService,
-    private zoomToBoxTool: ZoomToBoxToolService,
     store: VisualizerStore,
     regionStore: RegionStore,
     private simpleStack: SimpleSliceAccessService,
     @Inject(VIZ_CONFIG) config: VizConfig,
   ) {
     super(regionStore, store);
+    // The canvas tools run over OSD through the shared coordinate transform and a
+    // viewport readback, and read/write the shared RegionStore. This backend owns
+    // its own tool instances (RT-21); the host reads live state, so it is built once.
+    this.toolHost = {
+      getRegions: () => this.regionStore.getRegions(),
+      setRegions: (regions) => this.regionStore.setRegions(regions),
+      getCachedImageData: () => this.readbackViewport(),
+      getActiveFrameIndex: () => this.currentZ,
+      getOverlayContainer: () => this.getOverlayContainer(),
+      getCoordinateTransform: () => this.coordTransform as ICoordinateTransform,
+      getFileName: () => this.currentFileName,
+      getShapeColor: () => this.regionStore.getShapeColor(),
+      // Zoom-to-box: overlay pixels -> image coords, and fit the viewport to the box.
+      pixelToData: (px, py) => elementToImage(this.viewer, px, py),
+      applyZoomToBox: (coords) => this.applyZoomToBox(coords),
+    };
+    this.canvasTools = createCanvasToolManager(this.toolHost, {
+      wandService, regionStore, samPoint: samPointTool,
+    });
     this.api = config.slideCropServer;
     this.sampler = new HistogramSampler(this.http, this.api, {
       realLevels: () => this.realLevels,
@@ -701,6 +719,8 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     // (unsubscribe()) tore it down — this service is a root singleton, so the
     // constructor won't run again to recreate it.
     this.ensureColormapSubscription();
+    // A new image: a stroke or SAM prompt in progress belonged to the old one.
+    if (!inPlace) this.canvasTools.resetAll();
     // OSD tiles natively, so the in-place (large) pass is normally a no-op
     // once mounted — the tile pyramid IS the full resolution regardless of
     // which ImageInfo tier requested it. Simple mode has no pyramid to fall
@@ -928,7 +948,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
         this.overlay = new OsdRegionOverlay(this.viewer, this.regionStore);
         this.coordTransform = new OsdCoordinateTransform(this.viewer);
         this.scaleBar = new OsdScaleBar(this.viewer, d.mppX ?? 0);
-        this.buildToolHosts();
         // Simple mode is a single, self-contained image — no slice cache to seed.
         // Its z-scrub and recomposite re-open the viewer; one persistent handler
         // reports a failed re-open (a once-handler per scrub would pile up).
@@ -1161,11 +1180,8 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       cancelAnimationFrame(this.frameRaf);
       this.frameRaf = null;
     }
-    // Tear down any active tool overlays (shared singletons).
-    this.wandTool.setMode(false);
-    this.brushTool.setMode(false);
-    this.samPointTool.setMode(false);
-    this.eraserTool.setMode(false);
+    // Tear down an armed pixel tool's overlay (zoom-to-box stays armed, as before).
+    if (this.canvasTools.activeId !== 'zoomToBox') this.canvasTools.deactivate();
     if (this.overlay) {
       this.overlay.destroy();
       this.overlay = null;
@@ -1547,112 +1563,35 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   // overlay rather than carrying Plotly shape dicts.
 
   // ── IToolController ──────────────────────────────────────────────────
-  // Wand + vertex eraser run over OSD via ICoordinateTransform. They share the
-  // singleton tool services with Plotly, so we re-bind to our hosts on activate.
-  setWandMode(active: boolean, options?: any): void {
-    if (!active) {
-      this.wandTool.setMode(false);
-      return;
-    }
-    // Take the pointer from OSD so the drag draws instead of panning. (Nav is
-    // re-enabled when the region overlay returns to 'none' on tool switch.)
-    this.viewer?.setMouseNavEnabled(false);
-    // The wand samples the rendered viewport — read back lazily on first use.
-    this.viewportPixels = null;
-    this.wandTool.bindHost(this.wandHost);
-    this.wandTool.setMode(true, (options ?? {}) as WandOptions);
+  // setActiveTool and the per-tool setters run in BaseStoreVisualizer over
+  // this.canvasTools; OSD gates mouse-nav and its readback here.
+
+  /**
+   * Mouse-nav is off while a canvas tool holds the pointer (its drag must draw,
+   * not pan) and on otherwise — also when a region draw mode is armed on the
+   * overlay, as the old per-tool fan-out left it (its setZoomToBoxMode(false)
+   * re-enabled nav after the overlay's setMode). A pixel tool samples the
+   * rendered viewport, read back lazily on first use.
+   */
+  protected override beforeToolChange(next: CanvasToolId | null): boolean {
+    this.viewer?.setMouseNavEnabled(next === null);
+    if (next !== null && next !== 'zoomToBox') this.viewportPixels = null;
+    return true;
   }
-  setWandOptions(options: any): void {
-    this.wandTool.setOptions(options as WandOptions);
-  }
-  clearActiveWandRegion(): void {
-    this.wandTool.clearActiveRegion();
-  }
-  setBrushMode(active: boolean, options?: any): void {
-    if (!active) {
-      this.brushTool.setMode(false);
-      return;
-    }
-    // Take the pointer from OSD so the drag paints instead of panning.
-    this.viewer?.setMouseNavEnabled(false);
-    // The brush works in the rendered-viewport coordinate frame — read it back
-    // lazily on first use, like the wand. It shares the wand's host.
-    this.viewportPixels = null;
-    this.brushTool.bindHost(this.wandHost);
-    this.brushTool.setMode(true, (options ?? {}) as BrushOptions);
-  }
-  setBrushOptions(options: any): void {
-    this.brushTool.setOptions((options ?? {}) as BrushOptions);
-  }
-  setVertexEraserMode(active: boolean): void {
-    if (active) {
-      this.viewer?.setMouseNavEnabled(false); // tool takes the pointer
-      this.viewportPixels = null;
-      this.eraserTool.bindHost(this.eraserHost);
-    }
-    this.eraserTool.setMode(active);
-  }
-  setVertexEraserRadius(radius: number): void {
-    this.eraserTool.setRadius(radius);
-  }
-  setZoomToBoxMode(active: boolean): void {
-    if (active) {
-      this.viewer?.setMouseNavEnabled(false); // the box drag must not pan
-      this.zoomToBoxTool.bindHost(this.zoomBoxHost());
-    }
-    this.zoomToBoxTool.setMode(active);
-    if (!active) this.viewer?.setMouseNavEnabled(true);
-  }
-  /** Box-prompted SAM: segment the drawn rectangles. The SAM tool reuses the
-   *  wand host (viewport readback + coordinate transform + region store). */
+  /** Box-prompted SAM: segment the drawn rectangles against our tool host
+   *  (viewport readback + coordinate transform + region store). */
   segmentRectangles(): Promise<number> {
     this.viewportPixels = null; // segment against the current viewport readback
-    this.samTool.bindHost(this.wandHost);
-    return this.samTool.segmentBoxes();
+    return this.samTool.segmentBoxes(this.toolHost);
   }
   segmentRectanglesCellpose(): Promise<number> {
     if (!this.cellSegmenter) return Promise.resolve(0);
     this.viewportPixels = null; // crop against the current viewport readback
-    this.cellSegmentTool.bindHost(this.wandHost);
-    return this.cellSegmentTool.segmentBoxes(this.cellSegmenter);
+    return this.cellSegmentTool.segmentBoxes(this.toolHost, this.cellSegmenter);
   }
   setSamModel(id: string): void {
     this.samTool.setModel(id);
     this.samPointTool.setModel(id);
-  }
-  setSamPointMode(active: boolean): void {
-    if (active) {
-      this.viewer?.setMouseNavEnabled(false); // clicks add points, don't pan
-      this.viewportPixels = null;
-      this.samPointTool.bindHost(this.wandHost);
-    }
-    this.samPointTool.setMode(active);
-  }
-  commitSamPoints(): void { this.samPointTool.commit(); }
-  clearSamPoints(): void { this.samPointTool.clear(); }
-
-  /** Build the wand/eraser host objects bound to this backend. Both tools run
-   *  over OSD via the shared coordinate transform + a viewport pixel readback,
-   *  and read/write regions directly on the shared RegionStore (neutral model). */
-  private buildToolHosts(): void {
-    this.wandHost = {
-      getRegions: () => this.regionStore.getRegions(),
-      setRegions: (regions) => this.regionStore.setRegions(regions),
-      getCachedImageData: () => this.readbackViewport(),
-      getActiveFrameIndex: () => this.currentZ,
-      getOverlayContainer: () => this.getOverlayContainer(),
-      getCoordinateTransform: () => this.coordTransform as ICoordinateTransform,
-      getFileName: () => this.currentFileName,
-      getShapeColor: () => this.regionStore.getShapeColor(),
-    };
-    this.eraserHost = {
-      getRegions: () => this.regionStore.getRegions(),
-      setRegions: (regions) => this.regionStore.setRegions(regions),
-      invalidateWandRegion: () => this.wandTool.clearActiveRegion(),
-      getOverlayContainer: () => this.getOverlayContainer(),
-      getCoordinateTransform: () => this.coordTransform as ICoordinateTransform,
-      getCachedImageData: () => this.readbackViewport(),
-    };
   }
 
   /** The element the on-canvas tool overlays attach to (OSD is mounted here). */
@@ -1733,16 +1672,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     dock.style.display = 'none';
     void dock.offsetHeight; // reflow so the toggle re-rasters on the next paint
     dock.style.display = prev;
-  }
-
-  /** Host for the (shared) zoom-to-box tool: convert overlay pixels to image
-   *  coords via the viewport, and fit the viewport to the chosen rectangle. */
-  private zoomBoxHost(): ZoomToBoxToolHost {
-    return {
-      getPlotDiv: () => this.plotDiv,
-      pixelToData: (px: number, py: number) => elementToImage(this.viewer, px, py),
-      applyZoomToBox: (coords: number[]) => this.applyZoomToBox(coords),
-    };
   }
 
   /** Fit the OSD viewport to an image-space rectangle (coords ordered

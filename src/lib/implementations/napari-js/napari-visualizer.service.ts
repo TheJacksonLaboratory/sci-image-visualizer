@@ -129,7 +129,7 @@ import {
 } from '../../contracts/capabilities.contract';
 import { IRegionOverlay } from '../../contracts/region-overlay.contract';
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
-import { ColormapNode, IWandOptions, IBrushOptions } from '../../contracts/display-types';
+import { ColormapNode } from '../../contracts/display-types';
 import { VIZ_CONFIG, VizConfig } from '../../contracts/viz-config';
 import { TILE_ACCESS_PORT, TileAccessPort } from '../../contracts/ports/tile-access.port';
 import { BaseStoreVisualizer } from '../base-store-visualizer';
@@ -159,18 +159,12 @@ import { NapariVolumeZHandle } from './napari-volume-z-handle';
 import {
   ICoordinateTransform,
 } from '../../contracts/coordinate-transform.contract';
-import { WandToolService, WandToolHost, CachedImageData } from '../../toolbar/wand/wand-tool.service';
+import { CachedImageData, CanvasToolHost } from '../../toolbar/tool-kit/canvas-tool';
+import { CanvasToolManager } from '../../toolbar/tool-kit/canvas-tool-manager';
+import { createCanvasToolManager } from '../../toolbar/canvas-tools';
 import { packedFrame } from '../../toolbar/tool-kit/frame-pixels';
-import { WandOptions } from '../../toolbar/wand/wand.service';
-import { BrushToolService, BrushOptions } from '../../toolbar/brush/brush-tool.service';
-import {
-  VertexEraserToolService,
-  VertexEraserToolHost,
-} from '../../toolbar/vertex-eraser/vertex-eraser-tool.service';
-import {
-  ZoomToBoxToolService,
-  ZoomToBoxToolHost,
-} from '../../toolbar/zoom-to-box/zoom-to-box-tool.service';
+import { WandService } from '../../toolbar/wand/wand.service';
+import { CanvasToolId } from '../../contracts/display-types';
 import { SamToolService } from '../../toolbar/segmentation/sam-tool.service';
 import { SamPointToolService } from '../../toolbar/segmentation/sam-point-tool.service';
 import { CellSegmentToolService } from '../../toolbar/segmentation/cell-segment-tool.service';
@@ -691,8 +685,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   /** Pixel-tool plumbing: the plot div id, coord transform, and bound tool hosts. */
   private plotDivId = '';
   private coordTransform: ICoordinateTransform | null = null;
-  private wandHost: WandToolHost | null = null;
-  private eraserHost: VertexEraserToolHost | null = null;
+  /** What this backend's canvas tools read and write (one host for every tool). */
+  private readonly toolHost: CanvasToolHost;
+  /** This backend's own wand, brush, eraser, zoom-to-box and SAM point tools. */
+  protected readonly canvasTools: CanvasToolManager;
   /** Cached CachedImageData built from the last readback (rebuilt when lastPixels changes). */
   private cachedImage: CachedImageData | null = null;
   private cachedImageSource: PixelData | null = null;
@@ -709,7 +705,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   /** Debounced viewport emission for a camera change that needs no pixels. */
   private viewportTimer: ReturnType<typeof setTimeout> | null = null;
   /** Active tools that read the displayed pixels; a pan/zoom re-reads them only while non-empty. */
-  private readonly pixelTools = new Set<'wand' | 'brush' | 'eraser' | 'samPoint'>();
+  private readonly pixelTools = new Set<CanvasToolId>();
   /** The camera moved since {@link lastPixels} was read. */
   private pixelsStale = false;
   private cameraReadbackOff: (() => void) | null = null;
@@ -738,10 +734,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     @Inject(TILE_ACCESS_PORT) private readonly tiles: TileAccessPort,
     store: VisualizerStore,
     regionStore: RegionStore,
-    private readonly wandTool: WandToolService,
-    private readonly brushTool: BrushToolService,
-    private readonly eraserTool: VertexEraserToolService,
-    private readonly zoomToBoxTool: ZoomToBoxToolService,
+    wandService: WandService,
     private readonly samTool: SamToolService,
     private readonly samPointTool: SamPointToolService,
     private readonly cellSegmentTool: CellSegmentToolService,
@@ -755,6 +748,29 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   ) {
     super(regionStore, store);
     this.api = config.slideCropServer;
+    // The pixel tools read displayed pixels synchronously from the last readback and convert
+    // pointer coords via the napari camera, mirroring the OSD host. This backend owns its own tool
+    // instances (RT-21); the host reads live state, so it is built once.
+    this.toolHost = {
+      getRegions: () => regionStore.getRegions(),
+      setRegions: (r) => regionStore.setRegions(r),
+      getCachedImageData: () => this.cachedImageData(),
+      getActiveFrameIndex: () => this.loaded?.z ?? 0,
+      getOverlayContainer: () => this.host,
+      getCoordinateTransform: () => this.coordTransform as ICoordinateTransform,
+      getFileName: () => this.loaded?.filename,
+      getShapeColor: () => regionStore.getShapeColor(),
+      pixelToData: (px, py) => {
+        const rect = this.host?.getBoundingClientRect();
+        if (!this.viewer || !rect) return { x: 0, y: 0 };
+        const [x, y] = this.viewer.canvasToWorld(rect.left + px, rect.top + py);
+        return { x, y };
+      },
+      applyZoomToBox: (coords) => this.applyZoomToBox(coords),
+    };
+    this.canvasTools = createCanvasToolManager(this.toolHost, {
+      wandService, regionStore, samPoint: samPointTool,
+    });
   }
 
   /**
@@ -1023,7 +1039,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     imageInfo: IImageInfo,
     screenHeight: number,
     plotType: PlotType,
-    _inPlace?: boolean,
+    inPlace?: boolean,
   ): Promise<boolean> {
     const host = document.getElementById(plotDiv);
     if (!host) {
@@ -1031,6 +1047,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
       return false;
     }
     this.reset();
+    // A new image: a stroke or SAM prompt in progress belonged to the old one.
+    if (!inPlace) this.canvasTools.resetAll();
     // This plot's scene. A newer plot resets into the next one while this one still awaits, and
     // a superseded plot must not go on to draw (or count image tiles) into the newer scene.
     const scene = this.scene.signal;
@@ -4569,11 +4587,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     }, READBACK_DEBOUNCE_MS));
   }
 
-  /** Record whether a tool that reads the displayed pixels is active (see {@link onViewChanged}). */
-  private setPixelTool(tool: 'wand' | 'brush' | 'eraser' | 'samPoint', active: boolean): void {
-    if (active) this.pixelTools.add(tool);
-    else this.pixelTools.delete(tool);
-  }
 
   private scheduleReadback(): void {
     if (!this.viewer) return;
@@ -4598,49 +4611,15 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   // Inherited from BaseStoreVisualizer — pure delegations to the shared
   // RegionStore / VisualizerStore (identical to the OSD backend).
 
-  // ── Pixel tools: reuse the shared, backend-agnostic tool services with a napari host ───────
+  // ── Pixel tools: this backend's CanvasToolManager over a napari host ──────────────────────
 
-  /** Build the coordinate transform + tool hosts for the current viewer (called from plot()). The
-   *  pixel tools read displayed pixels synchronously from the last readback and convert pointer
-   *  coords via the napari camera, exactly mirroring the OSD host. */
+  /** Build the pixel tools' coordinate transform for the current viewer (called from plot()). */
   private buildToolHosts(): void {
     if (!this.viewer) return;
     this.coordTransform = new NapariCoordinateTransform(
       this.viewer,
       () => !!this.viewer && this.imageW > 0,
     );
-    const regions = this.regionStore;
-    this.wandHost = {
-      getRegions: () => regions.getRegions(),
-      setRegions: (r) => regions.setRegions(r),
-      getCachedImageData: () => this.cachedImageData(),
-      getActiveFrameIndex: () => this.loaded?.z ?? 0,
-      getOverlayContainer: () => this.host,
-      getCoordinateTransform: () => this.coordTransform as ICoordinateTransform,
-      getFileName: () => this.loaded?.filename,
-      getShapeColor: () => regions.getShapeColor(),
-    };
-    this.eraserHost = {
-      getRegions: () => regions.getRegions(),
-      setRegions: (r) => regions.setRegions(r),
-      invalidateWandRegion: () => this.wandTool.clearActiveRegion(),
-      getOverlayContainer: () => this.host,
-      getCoordinateTransform: () => this.coordTransform as ICoordinateTransform,
-      getCachedImageData: () => this.cachedImageData(),
-    };
-  }
-
-  private zoomBoxHost(): ZoomToBoxToolHost {
-    return {
-      getPlotDiv: () => this.plotDivId,
-      pixelToData: (px, py) => {
-        const rect = this.host?.getBoundingClientRect();
-        if (!this.viewer || !rect) return { x: 0, y: 0 };
-        const [x, y] = this.viewer.canvasToWorld(rect.left + px, rect.top + py);
-        return { x, y };
-      },
-      applyZoomToBox: (coords) => this.applyZoomToBox(coords),
-    };
   }
 
   /** Zoom/pan the camera to fit a data-space rectangle `[xMin, xMax, yMax, yMin]`. */
@@ -4687,103 +4666,44 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   }
 
   // ── IToolController ────────────────────────────────────────────────────────
+  // setActiveTool and the per-tool setters run in BaseStoreVisualizer over this.canvasTools.
   // Control gating: a tool that ACTIVATES disables the camera controls; deactivation is a no-op
   // because the host always calls the region overlay's setMode FIRST in each toggle (which sets
   // the baseline enabled/disabled), so re-enabling here would fight a freshly-activated draw mode.
-  setWandMode(active: boolean, options?: IWandOptions): void {
-    this.setPixelTool('wand', active);
-    if (!this.viewer) return; // no plot yet → nothing to drive
-    if (!active) {
-      this.wandTool.setMode(false);
-      return;
-    }
-    this.viewer?.setControlsEnabled(false);
+
+  /** Track the pixel-reading tool (see {@link onViewChanged}), gate the camera, and arm a fresh
+   *  readback for a pixel tool. Nothing is armed without a viewer, nor a pixel tool before a 2D
+   *  plot built its coordinate transform. */
+  protected override beforeToolChange(next: CanvasToolId | null): boolean {
+    this.pixelTools.clear();
+    if (next !== null && next !== 'zoomToBox') this.pixelTools.add(next);
+    if (!this.viewer) return false; // no plot yet → nothing to drive
+    if (next === null) return true;
+    if (next !== 'zoomToBox' && !this.coordTransform) return false;
+    this.viewer.setControlsEnabled(false);
+    if (next === 'zoomToBox') return true;
     this.cachedImageSource = null;
-    this.armReadback(0);
-    if (this.wandHost) this.wandTool.bindHost(this.wandHost);
-    this.wandTool.setMode(true, (options ?? {}) as unknown as WandOptions);
-  }
-  setWandOptions(options: IWandOptions): void {
-    this.wandTool.setOptions((options ?? {}) as unknown as WandOptions);
-  }
-  clearActiveWandRegion(): void {
-    this.wandTool.clearActiveRegion();
-  }
-  setBrushMode(active: boolean, options?: IBrushOptions): void {
-    this.setPixelTool('brush', active);
-    if (!this.viewer) return;
-    if (!active) {
-      this.brushTool.setMode(false);
-      return;
-    }
-    this.viewer?.setControlsEnabled(false);
-    this.cachedImageSource = null;
-    this.armReadback(0);
-    if (this.wandHost) this.brushTool.bindHost(this.wandHost);
-    this.brushTool.setMode(true, (options ?? {}) as unknown as BrushOptions);
-  }
-  setBrushOptions(options: IBrushOptions): void {
-    this.brushTool.setOptions(options ?? {});
-  }
-  setVertexEraserMode(active: boolean): void {
-    // The eraser sizes its radius from the readback's ratio, so it reads the pixels too.
-    this.setPixelTool('eraser', active);
-    if (!this.viewer) return;
-    if (active) {
-      this.viewer?.setControlsEnabled(false);
-      this.cachedImageSource = null;
-      if (this.pixelsStale) this.armReadback(0);
-      if (this.eraserHost) this.eraserTool.bindHost(this.eraserHost);
-    }
-    this.eraserTool.setMode(active);
-  }
-  setVertexEraserRadius(radius: number): void {
-    this.eraserTool.setRadius(radius);
-  }
-  setZoomToBoxMode(active: boolean): void {
-    if (!this.viewer) return;
-    if (active) {
-      this.viewer?.setControlsEnabled(false);
-      this.zoomToBoxTool.bindHost(this.zoomBoxHost());
-    }
-    this.zoomToBoxTool.setMode(active);
+    // The eraser only converts coordinates with the readback, so a current one will do.
+    if (next !== 'eraseVertex' || this.pixelsStale) this.armReadback(0);
+    return true;
   }
   // SAM / cellpose — server round-trips that read the drawn rectangles + displayed pixels through
-  // the same wand host (rectangles from the RegionStore, image from the readback).
+  // the tool host (rectangles from the RegionStore, image from the readback).
   async segmentRectangles(): Promise<number> {
-    if (!this.viewer || !this.wandHost) return 0;
+    if (!this.viewer || !this.coordTransform) return 0;
     await this.runReadback(); // the SAM embedding samples the currently-displayed image
     this.cachedImageSource = null;
-    this.samTool.bindHost(this.wandHost);
-    return this.samTool.segmentBoxes();
+    return this.samTool.segmentBoxes(this.toolHost);
   }
   async segmentRectanglesCellpose(): Promise<number> {
-    if (!this.viewer || !this.wandHost || !this.cellSegmenter) return 0;
+    if (!this.viewer || !this.coordTransform || !this.cellSegmenter) return 0;
     await this.runReadback();
     this.cachedImageSource = null;
-    this.cellSegmentTool.bindHost(this.wandHost);
-    return this.cellSegmentTool.segmentBoxes(this.cellSegmenter);
+    return this.cellSegmentTool.segmentBoxes(this.toolHost, this.cellSegmenter);
   }
   setSamModel(id: string): void {
     this.samTool.setModel(id);
     this.samPointTool.setModel(id);
-  }
-  setSamPointMode(active: boolean): void {
-    this.setPixelTool('samPoint', active);
-    if (!this.viewer) return;
-    if (active) {
-      this.viewer?.setControlsEnabled(false);
-      this.cachedImageSource = null;
-      this.armReadback(0); // refresh the readback the click's embedding will sample
-      if (this.wandHost) this.samPointTool.bindHost(this.wandHost);
-    }
-    this.samPointTool.setMode(active);
-  }
-  commitSamPoints(): void {
-    this.samPointTool.commit();
-  }
-  clearSamPoints(): void {
-    this.samPointTool.clear();
   }
 
   // ── IDisplayOptions ───────────────────────────────────────────────────────

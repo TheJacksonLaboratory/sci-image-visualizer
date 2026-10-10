@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 
-import { WandToolHost } from '../wand/wand-tool.service';
+import { CanvasToolHost } from '../tool-kit/canvas-tool';
 import { SamSessionService } from './sam-session.service';
 import { ISamSession } from '../../contracts/sam.contract';
 import { Region, Polygon, Rectangle } from '../../models/region';
@@ -10,9 +10,9 @@ import { MatrixFrame } from '../tool-kit/matrix-frame';
 import { AsyncToolStatus } from '../tool-kit/async-tool-status';
 import { withoutRegions } from './segmentation-commit';
 
-/** The SAM tool binds to the same host the wand/brush use, so each backend
- *  reuses its existing pixel readback + coordinate transform + region store. */
-export type SamToolHost = WandToolHost;
+/** @deprecated The SAM tool runs against the backend's canvas-tool host:
+ *  use {@link CanvasToolHost}. */
+export type SamToolHost = CanvasToolHost;
 
 /**
  * Box-prompted SAM segmentation tool (jit-ui#90, P0). On `segmentBoxes()` it
@@ -26,7 +26,6 @@ export type SamToolHost = WandToolHost;
  */
 @Injectable({ providedIn: 'root' })
 export class SamToolService {
-  private host!: SamToolHost;
   private readonly state = new AsyncToolStatus();
 
   /** Status text + busy flag for a spinner / toast in the host. */
@@ -36,11 +35,6 @@ export class SamToolService {
   readonly progress$ = this.state.progress$;
 
   constructor(private readonly sessions: SamSessionService = new SamSessionService()) {}
-
-  /** Bind to the active backend's host (called by the backend, like the wand). */
-  bindHost(host: SamToolHost): void {
-    this.host = host;
-  }
 
   /** Choose the registered model to use (shared with the point tool). */
   setModel(id: string): void {
@@ -58,24 +52,26 @@ export class SamToolService {
   }
 
   /**
-   * Segment every rectangle region with a box prompt and replace each prompt
-   * that produced a mask with the mask's polygon region. Returns how many
-   * regions were added; 0 (ignored) while a previous run is still going.
+   * Segment every rectangle region of the backend behind `host` with a box
+   * prompt and replace each prompt that produced a mask with the mask's polygon
+   * region. Returns how many regions were added; 0 (ignored) while a previous
+   * run is still going. The host is passed per run, so no backend's host
+   * outlives its call.
    */
-  async segmentBoxes(): Promise<number> {
-    if (!this.host || this.state.busy) return 0;
-    const cached = this.host.getCachedImageData();
+  async segmentBoxes(host: CanvasToolHost): Promise<number> {
+    if (this.state.busy) return 0;
+    const cached = host.getCachedImageData();
     if (!cached || cached.frames.length === 0) {
       this.status$.next('No image loaded.');
       return 0;
     }
-    const rects = this.host.getRegions().filter((r) => r.bounds instanceof Rectangle);
+    const rects = host.getRegions().filter((r) => r.bounds instanceof Rectangle);
     if (rects.length === 0) {
       this.status$.next('Draw one or more rectangles, then press Segment.');
       return 0;
     }
     const frame = MatrixFrame.from(cached);
-    const frameIdx = this.host.getActiveFrameIndex();
+    const frameIdx = host.getActiveFrameIndex();
 
     // Busy from here on — including the model download, so a second press
     // can't start a second download/encode (which can freeze the tab on a heavy
@@ -90,7 +86,7 @@ export class SamToolService {
       }
       try {
         // Encode once per image; reuse the embedding across all boxes.
-        const key = [this.host.getFileName() ?? '', frameIdx, `${cached.width}x${cached.height}`, frame.sig]
+        const key = [host.getFileName() ?? '', frameIdx, `${cached.width}x${cached.height}`, frame.sig]
           .join('|');
         const embedding = await this.sessions.embed(session, cached, frameIdx, key,
           () => this.status$.next('Encoding image…'));
@@ -112,14 +108,14 @@ export class SamToolService {
           const poly = maskToPolygons(res.mask, res.width, res.height, 0, 0)[0];
           if (!poly) continue;
           // Inherit the prompt rectangle's colour.
-          masks.push(this.makeRegion(poly, frame, rects[i].color));
+          masks.push(makeSamRegion(poly, frame, rects[i].color || host.getShapeColor()));
           consumed.push(rects[i]);
         }
 
         // Commit against the regions as they are NOW: the user may have drawn,
         // edited or deleted regions during the (possibly minutes-long) run.
         // Prompts that produced a mask are replaced; the rest stay for a retry.
-        this.host.setRegions(withoutRegions(this.host.getRegions(), consumed).concat(masks));
+        host.setRegions(withoutRegions(host.getRegions(), consumed).concat(masks));
         this.status$.next(masks.length > 0 ? `Added ${masks.length} region(s).` : 'No masks found.');
         return masks.length;
       } catch (err) {
@@ -130,14 +126,15 @@ export class SamToolService {
     return added ?? 0;
   }
 
-  private makeRegion(poly: Polygon, frame: MatrixFrame, color?: string): Region {
-    const ring = frame.ringToData(poly.xpoints, poly.ypoints);
-    const region = new Region();
-    region.bounds = makePolygon(ring.xs, ring.ys, { holes: frame.holesToData(poly.holes) });
-    // Inherit the source prompt rectangle's color; fall back to the host default.
-    region.color = color || this.host.getShapeColor();
-    // Default class/annotation name, matching the wand/brush + overlay-drawn regions.
-    region.label = 'sam';
-    return region;
-  }
+}
+
+function makeSamRegion(poly: Polygon, frame: MatrixFrame, color: string): Region {
+  const ring = frame.ringToData(poly.xpoints, poly.ypoints);
+  const region = new Region();
+  region.bounds = makePolygon(ring.xs, ring.ys, { holes: frame.holesToData(poly.holes) });
+  // The source prompt rectangle's color, else the host default.
+  region.color = color;
+  // Default class/annotation name, matching the wand/brush + overlay-drawn regions.
+  region.label = 'sam';
+  return region;
 }

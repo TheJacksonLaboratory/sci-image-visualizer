@@ -1,11 +1,8 @@
-import { Injectable, Optional } from '@angular/core';
-
-import { CachedImageData, WandToolHost } from '../wand/wand-tool.service';
 import { MatrixFrame } from '../tool-kit/matrix-frame';
 import { MaskStrokeEditor } from '../tool-kit/mask-stroke-editor';
-import { UndoGesture } from '../tool-kit/undo-gesture';
+import { UndoGesture, UndoGestureTarget } from '../tool-kit/undo-gesture';
 import { ToolOverlayCanvas } from '../tool-kit/tool-overlay';
-import { RegionStore } from '../../store/region-store.service';
+import { CachedImageData, CanvasToolHost, ICanvasTool } from '../tool-kit/canvas-tool';
 import { Region } from '../../models/region';
 
 /** Brush parameters. `size` is the brush *diameter* in matrix (image) pixels. */
@@ -25,14 +22,9 @@ export interface BrushOptions {
 /** Default brush diameter (matrix pixels) if none is supplied. */
 const DEFAULT_BRUSH_SIZE = 40;
 
-/**
- * The brush host is identical to the wand's — both need the cached-image
- * coordinate frame, the overlay container, the coordinate transform, and
- * read/write access to the shared region list. The brush ignores the wand's
- * pixel values (it paints a geometric disc rather than flood-filling by colour),
- * so reusing {@link WandToolHost} lets each backend bind the same host object.
- */
-export type BrushToolHost = WandToolHost;
+/** @deprecated One host serves every canvas tool: use {@link CanvasToolHost}. The
+ *  brush reads only the readback's coordinate frame, not its pixel values. */
+export type BrushToolHost = CanvasToolHost;
 
 /**
  * QuPath-style brush tool. Painting a stroke unions a disc of the configured
@@ -45,8 +37,8 @@ export type BrushToolHost = WandToolHost;
  * No pixel sampling and no cursor indicator: the painted stroke itself shows the
  * brush size. The overlay canvas only captures the pointer.
  *
- * Lifecycle mirrors the wand: a backend binds its host once, then toggles the
- * tool with `setMode(true | false, options)`.
+ * Lifecycle mirrors the wand: a plain class, one instance per backend's
+ * `CanvasToolManager`, armed with `activate(host, options)` / `deactivate()`.
  *
  * Holes / donuts (jit-ui#85): brushing a ring that encloses an unpainted area
  * keeps the enclosed hole — the contour tracer (`geometry/contour`) traces interior
@@ -55,11 +47,10 @@ export type BrushToolHost = WandToolHost;
  * even-odd fill and GeoJSON round-trips them as extra Polygon rings. The Plotly
  * (Heatmap) backend currently renders the filled exterior only.
  */
-@Injectable({ providedIn: 'root' })
-export class BrushToolService {
-  private host!: BrushToolHost;
+export class BrushTool implements ICanvasTool<BrushOptions> {
+  readonly id = 'brush';
+  private host!: CanvasToolHost;
   private readonly overlay = new ToolOverlayCanvas();
-  private active = false;
 
   /**
    * Accumulated brush region (bbox-relative mask), shared logic with the wand.
@@ -78,31 +69,31 @@ export class BrushToolService {
   /** Makes each drag one undo step, however long the user pauses (RT-12). */
   private readonly gesture: UndoGesture;
 
-  constructor(@Optional() regionStore?: RegionStore) {
-    this.gesture = new UndoGesture(regionStore);
+  /** @param gestureTarget the region store, so each drag is one undo step. */
+  constructor(gestureTarget?: UndoGestureTarget | null) {
+    this.gesture = new UndoGesture(gestureTarget);
   }
 
-  /** Wire the tool to its host. Must be called once before `setMode(true)`. */
-  bindHost(host: BrushToolHost) {
+  // ── ICanvasTool ─────────────────────────────────────────────────────
+
+  /** Arm the brush on `host`. Arming sets the class in full: no label/color
+   *  means the plain brush; a missing size keeps the previous one. */
+  activate(host: CanvasToolHost, options: BrushOptions = {}) {
     this.host = host;
+    this.setOptions({ label: undefined, color: undefined, ...options });
+    this.createOverlay();
   }
 
-  // ── Public API ──────────────────────────────────────────────────────
+  /** Disarm: remove the overlay, drop the active region and the class. */
+  deactivate() {
+    this.overlay.detach();
+    this.resetStroke();
+    this.paintClass = null;
+  }
 
-  /** Toggle the brush on/off. */
-  setMode(active: boolean, options: BrushOptions = {}) {
-    this.active = active;
-    // Size applies whether arming or not, as before brush classes: a host may set it
-    // while the brush is off, and the next arm without options keeps it.
-    if (options.size != null) this.setSize(options.size);
-    if (active) {
-      // Arming sets the class in full: no label/color means the plain brush.
-      this.setOptions({ label: undefined, color: undefined, ...options });
-      this.createOverlay();
-    } else {
-      this.destroyOverlay();
-      this.paintClass = null;
-    }
+  /** Drop the active brush region so the next stroke starts a new one. */
+  reset() {
+    this.resetStroke();
   }
 
   /**
@@ -129,11 +120,6 @@ export class BrushToolService {
     this.size = size;
   }
 
-  /** Drop the active brush region so the next stroke starts a new one. */
-  clearActiveRegion() {
-    this.resetStroke();
-  }
-
   // ── Overlay lifecycle ───────────────────────────────────────────────
 
   private createOverlay() {
@@ -144,12 +130,6 @@ export class BrushToolService {
       move: (e) => this.onPointerMove(e),
       up: () => this.onPointerUp(),
     });
-  }
-
-  private destroyOverlay() {
-    if (!this.overlay.attached) return;
-    this.overlay.detach();
-    this.resetStroke();
   }
 
   private onPointerDown(e: PointerEvent) {

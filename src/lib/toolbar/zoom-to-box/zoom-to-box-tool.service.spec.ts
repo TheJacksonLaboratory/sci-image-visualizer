@@ -1,27 +1,26 @@
-import { TestBed } from '@angular/core/testing';
+import { ZoomToBoxTool } from './zoom-to-box-tool.service';
+import { CanvasToolHost } from '../tool-kit/canvas-tool';
 
-import { ZoomToBoxToolService } from './zoom-to-box-tool.service';
-
-describe('ZoomToBoxToolService overlay lifecycle', () => {
-  let service: ZoomToBoxToolService;
+describe('ZoomToBoxTool overlay lifecycle', () => {
+  let service: ZoomToBoxTool;
   let applyZoomToBox: jest.Mock;
+  let host: CanvasToolHost;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [ZoomToBoxToolService] });
-    service = TestBed.inject(ZoomToBoxToolService);
+    service = new ZoomToBoxTool();
 
     applyZoomToBox = jest.fn();
-    service.bindHost({
-      getPlotDiv: () => 'plot',
-      pixelToData: (px, py) => ({ x: px, y: py }),
+    host = {
+      getOverlayContainer: () => document.getElementById('plot'),
+      pixelToData: (px: number, py: number) => ({ x: px, y: py }),
       applyZoomToBox,
-    });
+    } as unknown as CanvasToolHost;
 
     document.body.innerHTML = '<div id="plot"></div>';
   });
 
   it('creates a canvas overlay when the tool is activated', () => {
-    service.setMode(true);
+    service.activate(host);
 
     const plotEl = document.getElementById('plot');
     const canvas = plotEl?.querySelector('canvas');
@@ -29,13 +28,13 @@ describe('ZoomToBoxToolService overlay lifecycle', () => {
     expect(canvas?.style.cursor).toBe('crosshair');
 
     // Clean up.
-    service.setMode(false);
+    service.deactivate();
     expect(plotEl?.querySelector('canvas')).toBeNull();
   });
 
   it('removes the canvas overlay when the tool is deactivated', () => {
-    service.setMode(true);
-    service.setMode(false);
+    service.activate(host);
+    service.deactivate();
 
     const plotEl = document.getElementById('plot');
     expect(plotEl?.querySelector('canvas')).toBeNull();
@@ -46,7 +45,7 @@ describe('ZoomToBoxToolService overlay lifecycle', () => {
   }
 
   it('a drag selection applies the ordered [xMin, xMax, yMax, yMin] data coords', () => {
-    service.setMode(true);
+    service.activate(host);
     const c = canvas();
     // jsdom getBoundingClientRect is all-zeros and pixelToData is identity, so
     // data coords equal the client coords.
@@ -57,7 +56,7 @@ describe('ZoomToBoxToolService overlay lifecycle', () => {
   });
 
   it('ignores a tiny drag (accidental click) without zooming', () => {
-    service.setMode(true);
+    service.activate(host);
     const c = canvas();
     c.dispatchEvent(new MouseEvent('pointerdown', { clientX: 10, clientY: 10 }));
     c.dispatchEvent(new MouseEvent('pointerup', { clientX: 12, clientY: 11 })); // < 5px each axis
@@ -65,7 +64,7 @@ describe('ZoomToBoxToolService overlay lifecycle', () => {
   });
 
   it('mousemove and mouseup without a prior mousedown are no-ops', () => {
-    service.setMode(true);
+    service.activate(host);
     const c = canvas();
     expect(() => {
       c.dispatchEvent(new MouseEvent('pointermove', { clientX: 5, clientY: 5 }));
@@ -75,18 +74,18 @@ describe('ZoomToBoxToolService overlay lifecycle', () => {
   });
 
   it('draws the selection rectangle on drag-move without throwing', () => {
-    service.setMode(true);
+    service.activate(host);
     const c = canvas();
     c.dispatchEvent(new MouseEvent('pointerdown', { clientX: 10, clientY: 10 }));
     expect(() => c.dispatchEvent(new MouseEvent('pointermove', { clientX: 40, clientY: 50 }))).not.toThrow();
   });
 
   it('only the primary button starts a zoom box (RT-31)', () => {
-    service.setMode(true);
+    service.activate(host);
     const c = canvas();
     c.dispatchEvent(new MouseEvent('pointerdown', { button: 2, clientX: 10, clientY: 10 }));
     c.dispatchEvent(new MouseEvent('pointerup', { button: 2, clientX: 60, clientY: 60 }));
     expect(applyZoomToBox).not.toHaveBeenCalled();
-    service.setMode(false);
+    service.deactivate();
   });
 });

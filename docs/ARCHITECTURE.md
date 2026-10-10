@@ -186,12 +186,21 @@ worker imports too.
 
 ## Toolbar tools and contributions
 
-Built-in tools are root services under `toolbar/`: wand, brush, vertex eraser,
-zoom-to-box, SAM box prompt, SAM point prompt and the cellpose tool. They reach
-the canvas through `ICoordinateTransform` / `IViewportHost`, and share the
-`toolbar/tool-kit/` pieces: one pointer overlay for the canvas tools, one stroke
-accumulator for wand and brush, one data ↔ matrix frame, and `UndoGesture`, which
-wraps a drag in `RegionStore.beginGesture()`/`endGesture()` so it is one undo step.
+Built-in tools live under `toolbar/`. The on-canvas tools (wand, brush, vertex
+eraser, zoom-to-box, SAM point prompt) are plain classes implementing
+`ICanvasTool`: each backend builds its own set in a `CanvasToolManager`
+(`toolbar/canvas-tools.ts`) over one `CanvasToolHost` of its own, and
+`IToolController.setActiveTool(id, options)` arms one of them (the per-tool
+`setXMode` setters are deprecated wrappers). `BaseStoreVisualizer` implements
+those controls once; a backend only gates pan/zoom and its pixel readback in
+`beforeToolChange`. The SAM box prompt and the cellpose tool are chain-scoped
+services that take the backend's host per run, and the SAM point tools report
+through the chain's `SamPointToolService`. The tools reach the canvas through
+`ICoordinateTransform` / `IViewportHost`, and share the `toolbar/tool-kit/`
+pieces: one pointer overlay for the canvas tools, one stroke accumulator for wand
+and brush, one data ↔ matrix frame, one pixel accessor for nested or packed RGBA
+frames (`frame-pixels.ts`), and `UndoGesture`, which wraps a drag in
+`RegionStore.beginGesture()`/`endGesture()` so it is one undo step.
 The two SAM tools share one model session (`SamSessionService`). The intensity line
 profile is part of `PlotlyService` (`kind: 'profile'` regions).
 
