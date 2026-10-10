@@ -82,7 +82,6 @@ import { FloatingDragDirective } from './visualizer/floating-drag.directive';
 @NgModule({
   declarations: [
     VisualizerComponent,
-    ChannelHistogramComponent,
     SpatialControlsComponent,
     SpatialChartsComponent,
     IntensityInsetComponent,
@@ -103,6 +102,7 @@ import { FloatingDragDirective } from './visualizer/floating-drag.directive';
     ToolbarComponent,
     HexColorPickerComponent,
     RegionEditorComponent,
+    ChannelHistogramComponent,
     SaveMaskDialogComponent,
     SaveRegionsDialogComponent,
     RegionEditorHelpComponent,

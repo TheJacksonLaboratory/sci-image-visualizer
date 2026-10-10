@@ -1,12 +1,12 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { FormsModule } from '@angular/forms';
-import { NO_ERRORS_SCHEMA } from '@angular/core';
-import { of } from 'rxjs';
+import { CommonModule } from '@angular/common';
+import { Component, NO_ERRORS_SCHEMA } from '@angular/core';
+import { Subject, of } from 'rxjs';
 
 import * as Plotly from 'plotly.js-dist-min';
 import { ChannelHistogramComponent } from './channel-histogram.component';
 import {
-  CHANNEL_HISTOGRAM_API, IChannelHistogramApi, IChannelState,
+  CHANNEL_HISTOGRAM_API, IChannelHistogramApi, IChannelState, IHistogram,
 } from '../contracts/channel-histogram-api.contract';
 
 jest.mock('plotly.js-dist-min', () => ({ react: jest.fn(), relayout: jest.fn(), purge: jest.fn() }));
@@ -44,11 +44,15 @@ describe('ChannelHistogramComponent', () => {
     } as unknown as jest.Mocked<IChannelHistogramApi>;
 
     await TestBed.configureTestingModule({
-      declarations: [ChannelHistogramComponent],
-      imports: [FormsModule],
+      imports: [ChannelHistogramComponent],
       providers: [{ provide: CHANNEL_HISTOGRAM_API, useValue: api }],
-      schemas: [NO_ERRORS_SCHEMA],
-    }).compileComponents();
+    })
+      // Shallow: the pane's own template only; PrimeNG, its form controls and the colour
+      // picker stay unknown elements.
+      .overrideComponent(ChannelHistogramComponent, {
+        set: { imports: [CommonModule], schemas: [NO_ERRORS_SCHEMA] },
+      })
+      .compileComponents();
 
     fixture = TestBed.createComponent(ChannelHistogramComponent);
     component = fixture.componentInstance;
@@ -57,141 +61,141 @@ describe('ChannelHistogramComponent', () => {
 
   it('should create and seed channels from the API', () => {
     expect(component).toBeTruthy();
-    expect(component.channels.length).toBe(1);
-    expect(component.selected?.name).toBe('Intensity');
+    expect(component['channels'].length).toBe(1);
+    expect(component['selected']?.name).toBe('Intensity');
   });
 
   it('should route a min/max edit through the API (clamped, ordered)', () => {
-    component.onMinChange(300); // clamps to 255, then max stays ≥ min
+    component['onMinChange'](300); // clamps to 255, then max stays ≥ min
     expect(api.setChannelState).toHaveBeenCalledWith(0, { min: 255, max: 255 });
   });
 
   it('should route gamma + auto + reset through the API', () => {
-    component.onGammaChange(2.2);
+    component['onGammaChange'](2.2);
     expect(api.setChannelState).toHaveBeenCalledWith(0, { gamma: 2.2 });
-    component.auto();
+    component['auto']();
     expect(api.autoContrast).toHaveBeenCalledWith([0], 0.001);
-    component.reset();
+    component['reset']();
     expect(api.resetContrast).toHaveBeenCalledWith([0]);
   });
 
   it('should toggle invert through the API', () => {
-    component.onInvert(true);
+    component['onInvert'](true);
     expect(api.setInvert).toHaveBeenCalledWith(true);
   });
 
   it('should assign a preset LUT colour and export through the API', () => {
-    component.setPreset(channels[0], '#00ffff');
+    component['setPreset'](channels[0], '#00ffff');
     expect(api.setChannelState).toHaveBeenCalledWith(0, { color: '#00ffff' });
-    component.exportComposite();
+    component['exportComposite']();
     expect(api.exportComposite).toHaveBeenCalled();
   });
 
   it('should route a 16-bit data export through the API', () => {
-    component.exportData();
+    component['exportData']();
     expect(api.exportData).toHaveBeenCalled();
   });
 
   it('maps an 8-bit window edit identically (native==display for 8-bit)', () => {
     // No native histogram → obsRange is 0..255, so native units == display units.
-    component.onMaxChange(128);
+    component['onMaxChange'](128);
     expect(api.setChannelState).toHaveBeenCalledWith(0, { min: 0, max: 128 });
   });
 
   it('onColormap applies a leaf node but ignores a parent', () => {
-    component.onColormap({ label: 'Viridis' } as any);
+    component['onColormap']({ label: 'Viridis' } as any);
     expect(api.setColormap).toHaveBeenCalledTimes(1);
-    component.onColormap({ label: 'group', children: [] } as any);
+    component['onColormap']({ label: 'group', children: [] } as any);
     expect(api.setColormap).toHaveBeenCalledTimes(1);
   });
 
   it('onVisibleToggle writes channel visibility', () => {
-    component.onVisibleToggle(channels[0], false);
+    component['onVisibleToggle'](channels[0], false);
     expect(api.setChannelState).toHaveBeenCalledWith(0, { visible: false });
   });
 
   it('onVisibleChange(false) emits and is reflected in state', () => {
     const emit = jest.spyOn(component.visibleChange, 'emit');
-    component.onVisibleChange(false);
+    component['onVisibleChange'](false);
     expect(component.visible).toBe(false);
     expect(emit).toHaveBeenCalledWith(false);
   });
 
   it('multichannel is false for a single channel', () => {
-    expect(component.multichannel).toBe(false);
+    expect(component['multichannel']).toBe(false);
   });
 
   describe('histogram rendering (with the plot div present)', () => {
-    beforeEach(() => { document.body.innerHTML = `<div id="${component.histogramDiv}"></div>`; });
+    beforeEach(() => { document.body.innerHTML = `<div id="${component['histogramDiv']}"></div>`; });
     afterEach(() => { document.body.innerHTML = ''; });
 
     it('selectChannel loads and renders the histogram via Plotly', () => {
-      component.selectChannel(channels[0]);
+      component['selectChannel'](channels[0]);
       expect(api.getHistogram$).toHaveBeenCalledWith(0, 256);
-      expect(component.hist).toEqual({ bins: [0, 1], counts: [3, 7], max: 7 });
+      expect(component['hist']).toEqual({ bins: [0, 1], counts: [3, 7], max: 7 });
       expect(Plotly.react).toHaveBeenCalled();
     });
 
     it('purges the plot when no histogram is available (and not retrying)', () => {
       (api.getHistogram$ as jest.Mock).mockReturnValue(of(null));
-      component.selectChannel(channels[0]); // visible=false → no retry loop → purge
-      expect(component.hist).toBeNull();
+      component['selectChannel'](channels[0]); // visible=false → no retry loop → purge
+      expect(component['hist']).toBeNull();
       expect(Plotly.purge).toHaveBeenCalled();
     });
 
     it('toggleLog re-renders the histogram', () => {
-      component.selectChannel(channels[0]);
+      component['selectChannel'](channels[0]);
       (Plotly.react as jest.Mock).mockClear();
-      component.toggleLog(true);
-      expect(component.logScale).toBe(true);
+      component['toggleLog'](true);
+      expect(component['logScale']).toBe(true);
       expect(Plotly.react).toHaveBeenCalled();
     });
 
     it('onColorChange on the selected channel updates the colour and re-renders', () => {
-      component.selectChannel(channels[0]);
+      component['selectChannel'](channels[0]);
       (Plotly.react as jest.Mock).mockClear();
-      component.onColorChange(channels[0], '#ff0000');
+      component['onColorChange'](channels[0], '#ff0000');
       expect(api.setChannelState).toHaveBeenCalledWith(0, { color: '#ff0000' });
-      expect(component.selected!.color).toBe('#ff0000');
+      expect(component['selected']!.color).toBe('#ff0000');
       expect(Plotly.react).toHaveBeenCalled();
     });
 
     it('a min edit moves the marker lines (relayout) once a histogram is drawn', () => {
-      component.selectChannel(channels[0]);
+      component['selectChannel'](channels[0]);
       (Plotly.relayout as jest.Mock).mockClear();
-      component.onMinChange(50);
+      component['onMinChange'](50);
       expect(Plotly.relayout).toHaveBeenCalled();
     });
   });
 
   describe('16-bit native window mapping', () => {
     beforeEach(() => {
-      component.hist = {
+      component['hist'] = {
         bins: [100, 300, 500, 700, 900], counts: [0, 5, 20, 5, 0], max: 20,
         bitDepth: 16, observedMin: 100, observedMax: 900,
       } as any;
     });
 
     it('reports 16-bit and an observed slider range', () => {
-      expect(component.is16bit).toBe(true);
-      expect(component.sliderMin).toBe(100);
-      expect(component.sliderMax).toBe(900);
-      expect(component.sliderStep).toBeGreaterThanOrEqual(1);
+      expect(component['is16bit']).toBe(true);
+      expect(component['sliderMin']).toBe(100);
+      expect(component['sliderMax']).toBe(900);
+      expect(component['sliderStep']).toBeGreaterThanOrEqual(1);
     });
 
     it('maps the 0..255 display window onto native units for the sliders', () => {
-      expect(component.minNative).toBe(100); // toNative(0)
-      expect(component.maxNative).toBe(900); // toNative(255)
+      expect(component['minNative']).toBe(100); // toNative(0)
+      expect(component['maxNative']).toBe(900); // toNative(255)
     });
 
     it('auto() saturates the native distribution and writes a display window (not autoContrast)', () => {
-      component.auto();
+      component['auto']();
       expect(api.setChannelState).toHaveBeenCalled();
       expect(api.autoContrast).not.toHaveBeenCalled();
     });
 
     it('a min edit maps native→display via the observed range', () => {
-      component.onMinChange(500); // mid of 100..900 → ~128/255
+      component['onMinChange'](500); // mid of 100..900 → ~128/255
       const lastCall = (api.setChannelState as jest.Mock).mock.calls.pop();
       expect(lastCall[1].min).toBeGreaterThan(120);
       expect(lastCall[1].min).toBeLessThan(135);
@@ -201,7 +205,7 @@ describe('ChannelHistogramComponent', () => {
   describe('lifecycle (RT-33)', () => {
     it('gives each instance its own plot element id', () => {
       const other = TestBed.createComponent(ChannelHistogramComponent).componentInstance;
-      expect(other.histogramDiv).not.toBe(component.histogramDiv);
+      expect(other['histogramDiv']).not.toBe(component['histogramDiv']);
     });
 
     it('cancels a pending histogram retry on destroy', () => {
@@ -209,7 +213,7 @@ describe('ChannelHistogramComponent', () => {
       try {
         api.getHistogram$.mockReturnValue(of(null));
         component.visible = true;
-        component.selectChannel(component.channels[0]); // not ready → schedules a retry
+        component['selectChannel'](component['channels'][0]); // not ready → schedules a retry
         const calls = api.getHistogram$.mock.calls.length;
         component.ngOnDestroy();
         jest.advanceTimersByTime(5000);
@@ -224,8 +228,8 @@ describe('ChannelHistogramComponent', () => {
       try {
         api.getHistogram$.mockReturnValue(of(null));
         component.visible = true;
-        component.selectChannel(component.channels[0]);
-        component.selectChannel(component.channels[0]);
+        component['selectChannel'](component['channels'][0]);
+        component['selectChannel'](component['channels'][0]);
         const calls = api.getHistogram$.mock.calls.length;
         jest.advanceTimersByTime(400);
         expect(api.getHistogram$.mock.calls.length).toBe(calls + 1);
@@ -236,10 +240,38 @@ describe('ChannelHistogramComponent', () => {
     });
 
     it('a colour edit does not mutate the channel state the store emitted', () => {
-      const emitted = component.selected!;
-      component.onColorChange(emitted, '#ff0000');
+      const emitted = component['selected']!;
+      component['onColorChange'](emitted, '#ff0000');
       expect(emitted.color).toBe('#ffffff');
-      expect(component.selected?.color).toBe('#ff0000');
+      expect(component['selected']?.color).toBe('#ff0000');
+    });
+  });
+
+  describe('OnPush (CORE-21)', () => {
+    @Component({
+      standalone: true, imports: [ChannelHistogramComponent],
+      template: '<channel-histogram [visible]="true"></channel-histogram>',
+    })
+    class HostComponent {}
+
+    it('re-renders when a histogram arrives asynchronously', () => {
+      const meta = new Subject<[]>();
+      const hist = new Subject<IHistogram | null>();
+      api.getImageMeta.mockReturnValue(meta);
+      api.getHistogram$.mockReturnValue(hist);
+      // Two channels: no colormap picker (its scrollHeight binding can't land on a bare element).
+      api.getChannels$.mockReturnValue(of([...channels, { ...channels[0], index: 1, name: 'B' }]));
+      const host = TestBed.createComponent(HostComponent);
+      host.detectChanges();
+      const tiffButton = () => host.nativeElement.querySelector('p-button[label="Export 16-bit TIFF"]');
+      expect((ChannelHistogramComponent as unknown as { ɵcmp: { onPush: boolean } }).ɵcmp.onPush).toBe(true);
+      expect(tiffButton()).toBeNull();
+
+      meta.next([]); // a new image: reload the histogram
+      hist.next({ bins: [0, 1], counts: [1, 1], max: 1, bitDepth: 16, observedMin: 0, observedMax: 4095 });
+      host.detectChanges();
+      expect(tiffButton()).not.toBeNull();
+      host.destroy();
     });
   });
 });
