@@ -34,9 +34,6 @@ Tracked in the code review (`sci-image-visualizer-review.md`, #45):
   order (NAPARI-BOUNDARY-2).
 - **3D lasso offset.** The 3D screen-space adapter returns canvas-local px from
   `worldToCanvas`, while `OverlayViewer` expects client px (NAPARI-BOUNDARY-6).
-- **Region geometry is a copy of OSD's.** The overlays follow the same rules but do not share
-  code yet (NAPARI-BOUNDARY-13); the overlay still rebuilds its SVG per camera frame instead of
-  using a world-space transform (NAPARI-BOUNDARY-10).
 - **Needs napari-js APIs:** `LayerList.move` (layer reorders re-upload GPU buffers,
   NAPARI-BOUNDARY-11), flat `Float32Array` point colours (NAPARI-BOUNDARY-12), per-point
   symbols (NAPARI-BOUNDARY-25), per-shape colours (NAPARI-BOUNDARY-27), GPU density windowing
