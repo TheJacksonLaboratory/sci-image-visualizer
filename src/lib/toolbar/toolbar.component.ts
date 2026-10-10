@@ -251,13 +251,6 @@ export class ToolbarComponent implements OnChanges {
       .trim();
   }
 
-  /** Contributed tool names for the help dialog's prompted/no-prompt contrast,
-   *  e.g. "YOLO, Retinal layers". Empty when nothing is registered, which is
-   *  why the sentence that uses it is itself conditional. */
-  get contributedToolNames(): string {
-    return this.contributedTools.map((t) => t.label).join(', ');
-  }
-
   /** Keeps each contributed tool's `p-menu` overlay alive across CD ticks —
    *  re-creating it mid-interaction swallows the click on a menu item. */
   trackToolById(_index: number, tool: { id: string }): string {

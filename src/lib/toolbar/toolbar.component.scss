@@ -154,26 +154,3 @@ img.colormap {
   background-size: 100%;
   vertical-align: middle;
 }
-
-// Help dialog
-kbd {
-  background: #e8e8e8;
-  border: 1px solid #bbb;
-  border-radius: 3px;
-  padding: 1px 5px;
-  font-family: monospace;
-  font-size: 0.85em;
-}
-
-.shortcuts-table {
-  border-collapse: collapse;
-
-  td {
-    padding: 0.25rem 0.75rem 0.25rem 0;
-    vertical-align: middle;
-
-    &:first-child {
-      white-space: nowrap;
-    }
-  }
-}
