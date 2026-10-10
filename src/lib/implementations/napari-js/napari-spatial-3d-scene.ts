@@ -8,9 +8,14 @@ import {
 import { SpatialViewState } from '../../contracts/display-types';
 import { DEFAULT_MUTED_OPACITY, resolveCategoryColors } from '../../spatial/spatial-encoding';
 import { SpatialSelectionMask, emptySelection, maskToIndices } from '../../spatial/spatial-selection';
-import { defaultSigma, densityGrid, rasterizeDensity } from '../../spatial/spatial-density';
+import { defaultSigma, densityGrid } from '../../spatial/spatial-density';
 import { observationsInSection, sectionsOf } from '../../spatial/spatial-sections';
-import { encodeExpressionVolume, expressionVolume, fieldContrastWindow } from '../../spatial/spatial-expression';
+import {
+  ExpressionVolumeField, encodeExpressionVolume, fieldContrastWindow,
+} from '../../spatial/spatial-expression';
+import { computeExpressionVolumeAsync, rasterizeDensityAsync } from '../../workers/spatial-math';
+import { Supersede } from '../../util/supersede';
+import { isAbortError } from '../tile-server';
 import { NapariScaleBar, ScaleBarCamera } from './napari-scale-bar';
 import {
   DensityGroup, GENE_MAP_SIGMA, GENE_MAP_VOLUME_STRIDE, SPATIAL_3D_BASE_SIZE, SPATIAL_SELECTED_SIZE_SCALE,
@@ -65,6 +70,11 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
   private scaleBar: NapariScaleBar | null = null;
   /** Dataset the scale bar was built for. */
   private scaleBarKey: string | null = null;
+  /** The density rasterisation and the 3D gene-map estimate in flight (off the main thread
+   *  past the worker threshold, SPATIAL-19): a new key supersedes — and aborts — the previous
+   *  one; a rebuild that leaves the key alone lets it finish. */
+  private readonly densityLoads = new Supersede();
+  private readonly geneMapLoads = new Supersede();
 
   constructor(ctx: SceneContext, session: SpatialSession) {
     super(ctx, session, true);
@@ -92,6 +102,8 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
 
   dispose(): void {
     this.disposeSpatial();
+    this.densityLoads.cancel();
+    this.geneMapLoads.cancel();
     this.scaleBar?.destroy();
     this.scaleBar = null;
     // Drop the cached interleaved coordinates too: holding 3.7M x 3 floats after
@@ -426,6 +438,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     if (!grid) return;
 
     if (fieldKey !== cache.key) {
+      const load = this.geneMapLoads.next();
       let values: Float32Array;
       try {
         values = await port.getFeatureVector(gene);
@@ -434,7 +447,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
         this.geneMapKey = null;
         return;
       }
-      if (this.ctx.signal.aborted || this.geneMapKey !== key) return;
+      if (!load() || this.geneMapKey !== key) return;
       const inSelection = selection.count > 0 ? maskToIndices(selection.mask) : undefined;
       // In-plane σ is a PHYSICAL bandwidth, anchored to the reference volume's own
       // voxel — the resolution the 2D map estimates at — so a sheet and the 2D
@@ -442,16 +455,24 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
       // rasterised on. Along z it is the density path's 1.5 voxels: the smallest σ
       // that bridges one section gap.
       const inPlane = dataset.volume?.voxelSize ?? grid.voxelSize;
-      cache.field = expressionVolume(obs, grid, {
-        sigma: [
-          inPlane[0] * GENE_MAP_SIGMA * smoothing,
-          inPlane[1] * GENE_MAP_SIGMA * smoothing,
-          grid.voxelSize[2] * 1.5 * smoothing,
-        ],
-        values,
-        indices: section != null ? observationsInSection(obs, section) : inSelection,
-        interpolate,
-      });
+      let field: ExpressionVolumeField | null;
+      try {
+        field = await computeExpressionVolumeAsync(obs, grid, {
+          sigma: [
+            inPlane[0] * GENE_MAP_SIGMA * smoothing,
+            inPlane[1] * GENE_MAP_SIGMA * smoothing,
+            grid.voxelSize[2] * 1.5 * smoothing,
+          ],
+          values,
+          indices: section != null ? observationsInSection(obs, section) : inSelection,
+          interpolate,
+        }, { signal: load.signal });
+      } catch (err) {
+        if (isAbortError(err)) return; // superseded by a newer map, or the scene went away
+        throw err;
+      }
+      if (!load() || this.geneMapKey !== key) return;
+      cache.field = field;
       cache.key = fieldKey;
     }
     const field = cache.field;
@@ -523,6 +544,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     for (const layer of this.densityLayers) viewer.layers.remove(layer);
     this.densityLayers = [];
     this.densityKey = key;
+    const load = this.densityLoads.next();
     if (!key) return;
 
     const grid = densityGrid(dataset);
@@ -548,7 +570,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
       this.densityKey = null;
       return;
     }
-    if (this.ctx.signal.aborted || this.densityKey !== key) return;
+    if (!load() || this.densityKey !== key) return;
 
     const sigma = defaultSigma(grid, smoothing);
     // Additive blending SUMS, so a fixed per-layer opacity blows out to white as
@@ -560,11 +582,21 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     // regional (the largest subclasses are glia, which are everywhere) still pile
     // up, and one cluster at a time is the readable way to look at those.
     const opacity = Math.min(0.55, 0.9 / Math.max(1, groups.length));
-    for (const group of groups) {
-      const data = rasterizeDensity(dataset.observations, grid, { sigma, indices: group.indices });
+    let fields: (Uint8Array | null)[];
+    try {
+      // Off the main thread past the worker threshold; the clusters queue on one worker.
+      fields = await Promise.all(groups.map((group) => rasterizeDensityAsync(
+        dataset.observations, grid, { sigma, indices: group.indices }, { signal: load.signal },
+      )));
+    } catch (err) {
+      if (isAbortError(err)) return; // superseded by a newer key, or the scene went away
+      throw err;
+    }
+    if (!load() || this.densityKey !== key) return;
+    groups.forEach((group, i) => {
+      const data = fields[i];
       // A cluster with nothing on the grid draws no layer, rather than an empty box.
-      if (!data) continue;
-      if (this.ctx.signal.aborted || this.densityKey !== key) return;
+      if (!data) return;
       this.densityLayers.push(
         viewer.addVolume(data, grid.width, grid.height, grid.depth, {
           name: `density · ${group.name}`,
@@ -579,7 +611,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
           voxelSize: grid.voxelSize,
         }),
       );
-    }
+    });
     viewer.requestRender();
   }
 

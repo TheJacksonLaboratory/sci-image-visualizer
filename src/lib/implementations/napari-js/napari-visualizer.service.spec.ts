@@ -2438,6 +2438,27 @@ describe('NapariVisualizerService', () => {
         expect(inScene).toHaveLength(1);
       });
 
+      it('rasterises off the main thread\'s critical path, latest key wins (SPATIAL-19)', async () => {
+        // The rasterisation is async now (a worker past the threshold). Two changes in one
+        // tick: the superseded field must not land on screen beside the newer one…
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        await mount3d(clustered());
+        const inScene = () =>
+          ((service as unknown as { viewer: { layers: { items: readonly { name?: string }[] } } })
+            .viewer.layers.items).filter((l) => l.name?.startsWith('density · ')).length;
+        store.setSpatialView({ densityVolume: true });
+        store.setSpatialView({ densitySmoothing: 3 });
+        await flush();
+        expect(inScene()).toBe(1);
+
+        // …and a rebuild that leaves the field's key alone while it is computing must not
+        // strand it (the key is already taken, so nothing would ever draw it again).
+        store.setSpatialView({ densitySmoothing: 2 });
+        store.setSpatialView({ pointScale: 2 });
+        await flush();
+        expect(inScene()).toBe(1);
+      });
+
       it('re-rasterises for a different selection of the same size', async () => {
         const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
