@@ -1,3 +1,4 @@
+import { By } from '@angular/platform-browser';
 jest.mock('plotly.js-dist-min', () => ({
   react: jest.fn().mockResolvedValue(undefined),
   relayout: jest.fn(),
@@ -5,8 +6,6 @@ jest.mock('plotly.js-dist-min', () => ({
 }));
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { FormsModule } from '@angular/forms';
-import { NO_ERRORS_SCHEMA } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
 
 import { SpatialChartsComponent } from './spatial-charts.component';
@@ -17,7 +16,7 @@ import { VISUALIZER, ISpatialControls } from '../../contracts/visualizer.contrac
 import { SpatialDataset } from '../../contracts/spatial-dataset.contract';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../../contracts/display-types';
 import { SpatialSelectionMask, emptySelection } from '../../spatial/spatial-selection';
-import { StubValueAccessorDirective, accessorOf, fire, one } from '../../testing/spatial-panel-testing';
+import { accessorOf, fire, one, shallowPanel } from '../../testing/spatial-panel-testing';
 
 /**
  * The charts panel rendered with its control rows and window: what each rendered control
@@ -59,13 +58,12 @@ describe('SpatialChartsComponent (rendered)', () => {
       })),
       selectIndices: jest.fn(), clearSelection: jest.fn(),
     } as unknown as jest.Mocked<ISpatialControls>;
+    for (const child of [SpatialHeatmapControlsComponent, SpatialEmbeddingControlsComponent,
+      SpatialChartWindowComponent]) shallowPanel(child);
+    shallowPanel(SpatialChartsComponent,
+      [SpatialHeatmapControlsComponent, SpatialEmbeddingControlsComponent, SpatialChartWindowComponent]);
     await TestBed.configureTestingModule({
-      declarations: [
-        SpatialChartsComponent, SpatialHeatmapControlsComponent, SpatialEmbeddingControlsComponent,
-        SpatialChartWindowComponent, StubValueAccessorDirective,
-      ],
-      imports: [FormsModule],
-      schemas: [NO_ERRORS_SCHEMA],
+      imports: [SpatialChartsComponent],
       providers: [{ provide: VISUALIZER, useValue: { getSpatialControls: () => controls } }],
     }).compileComponents();
     fixture = TestBed.createComponent(SpatialChartsComponent);
@@ -86,12 +84,12 @@ describe('SpatialChartsComponent (rendered)', () => {
     expect((genes as unknown as { options: { value: string }[] }).options.map((o) => o.value)).toEqual(['Ttr', 'Mbp']);
     accessorOf(fixture, genes).pick(['Mbp']);
     await settle();
-    expect(component.heatmapGenes).toEqual(['Mbp']);
+    expect(component['heatmapGenes']).toEqual(['Mbp']);
     fire(genes, 'onFilter', { filter: 'tt' });
     fixture.detectChanges();
-    expect(component.geneOptions.map((o) => o.value)).toEqual(['Mbp', 'Ttr']);
+    expect(component['geneOptions'].map((o) => o.value)).toEqual(['Mbp', 'Ttr']);
     fire(one(row, 'p-checkbox'), 'onChange', { checked: false });
-    expect(component.heatmapZScore).toBe(false);
+    expect(component['heatmapZScore']).toBe(false);
   });
 
   it('offers the embedding picker on the embedding tab, and Detach on every tab', async () => {
@@ -102,19 +100,20 @@ describe('SpatialChartsComponent (rendered)', () => {
     const picker = one(row, 'p-dropdown');
     accessorOf(fixture, picker).pick('X_pca');
     await settle();
-    expect(component.embedding?.name).toBe('X_pca');
+    expect(component['embedding']?.name).toBe('X_pca');
     // PCA, no t-SNE, four cells: a t-SNE is offered, with its estimate.
-    expect(component.embeddings.map((e) => e.name)).toContain('local:tsne');
+    expect(component['embeddings'].map((e) => e.name)).toContain('local:tsne');
 
     const detach = Array.from(row.querySelectorAll('p-button')).pop()!;
     expect((detach as unknown as { label: string }).label).toBe('Detach');
     fire(detach, 'onClick');
     fixture.detectChanges();
-    expect(component.detached).toBe(true);
+    expect(component['detached']).toBe(true);
   });
 
   it('shows the Compute button for a t-SNE to compute, and starts it', async () => {
-    const spy = jest.spyOn(component, 'computeEmbedding').mockResolvedValue();
+    const spy = jest.spyOn(component as unknown as { computeEmbedding(): Promise<void> }, 'computeEmbedding')
+      .mockResolvedValue();
     accessorOf(fixture, one(root, 'p-selectButton')).pick('embedding');
     await settle();
     accessorOf(fixture, one(root, 'spatial-embedding-controls p-dropdown')).pick('local:tsne');
@@ -127,18 +126,21 @@ describe('SpatialChartsComponent (rendered)', () => {
   });
 
   it('opens the detached window with the plot div and the hints, and puts the chart back on close', async () => {
-    component.toggleDetached();
+    // Through the embedding controls' Detach output, as a click would: the OnPush panel
+    // re-renders on its child's event.
+    fixture.debugElement.query(By.directive(SpatialEmbeddingControlsComponent))
+      .componentInstance.detachedToggle.emit();
     fixture.detectChanges();
     const window = one(document.body, 'spatial-chart-window');
-    expect(window.querySelector(`#${component.detachedDiv}`)).toBeTruthy();
-    expect(root.querySelector(`#${component.chartDiv}`)).toBeNull();
+    expect(window.querySelector(`#${component['detachedDiv']}`)).toBeTruthy();
+    expect(root.querySelector(`#${component['chartDiv']}`)).toBeNull();
     expect(window.querySelector('.sx-hint')).toBeTruthy();
     const draw = jest.spyOn(component as unknown as { render: () => Promise<void> }, 'render');
     fire(one(window, 'p-dialog'), 'onShow');
     expect(draw).toHaveBeenCalled();
     fire(one(window, 'p-dialog'), 'visibleChange');
     fixture.detectChanges();
-    expect(component.detached).toBe(false);
+    expect(component['detached']).toBe(false);
     expect(root.querySelector('spatial-chart-window')).toBeNull();
   });
 });

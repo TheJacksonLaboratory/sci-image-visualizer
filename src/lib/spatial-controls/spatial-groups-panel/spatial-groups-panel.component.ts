@@ -1,6 +1,11 @@
 import {
   ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, NgZone, OnChanges, SimpleChanges,
 } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { SharedModule } from 'primeng/api';
+import { CheckboxModule } from 'primeng/checkbox';
+import { DropdownModule } from 'primeng/dropdown';
 
 import type { ISpatialControls } from '../../contracts/visualizer.contract';
 import type { SpatialDataset } from '../../contracts/spatial-dataset.contract';
@@ -22,6 +27,8 @@ import { Supersede } from '../../util/supersede';
  */
 @Component({
   selector: 'spatial-groups-panel',
+  standalone: true,
+  imports: [CommonModule, FormsModule, SharedModule, CheckboxModule, DropdownModule],
   templateUrl: './spatial-groups-panel.component.html',
   styleUrls: ['./spatial-groups-panel.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -36,23 +43,23 @@ export class SpatialGroupsPanelComponent implements OnChanges {
    * variants (k-means at k = 2…10) listed once. Values are a column name, or
    * `family:<id>` for a family.
    */
-  groupOptions: GroupOptionSection[] = [];
+  protected groupOptions: GroupOptionSection[] = [];
   /** Variants of the active family (k = 2…10), when a family is active. */
-  groupVariantOptions: PanelOption<string>[] = [];
+  protected groupVariantOptions: PanelOption<string>[] = [];
   /** The last variant chosen per family, so switching away and back keeps k. */
   private readonly familyChoice = new Map<string, string>();
 
   /** The active grouping's categories with colours and cell counts, largest first. */
-  groupRows: GroupRow[] = [];
-  groupTotal = 0;
-  groupsExpanded = true;
+  protected groupRows: GroupRow[] = [];
+  protected groupTotal = 0;
+  protected groupsExpanded = true;
   /** The grouping {@link groupRows} shows or is loading — a repeat request for it is a no-op. */
   private groupRowsFor: string | null = null;
   /** Latest wins among group-row loads, so a slow one for an earlier grouping (or the
    *  previous dataset's column of the same name) cannot land over the current one. */
   private readonly groupRowsLoad = new Supersede();
-  groupImportError: string | null = null;
-  groupImporting = false;
+  protected groupImportError: string | null = null;
+  protected groupImporting = false;
 
   constructor(
     private readonly zone: NgZone,
@@ -69,16 +76,16 @@ export class SpatialGroupsPanelComponent implements OnChanges {
   }
 
   /** The categorical column the cells are grouped by. */
-  get activeCellTypeColumn(): string | null {
+  protected get activeCellTypeColumn(): string | null {
     return this.dataset ? cellTypeColumnFor(this.dataset, this.view) : null;
   }
 
   /** The picker's value for the active group column. */
-  get activeGroupEntry(): string | null {
+  protected get activeGroupEntry(): string | null {
     return groupEntryFor(this.dataset, this.activeCellTypeColumn);
   }
 
-  onGroupEntry(value: string): void {
+  protected onGroupEntry(value: string): void {
     if (value.startsWith(FAMILY_PREFIX)) {
       const id = value.slice(FAMILY_PREFIX.length);
       const name = this.familyChoice.get(id) ?? familyMembers(this.dataset, id)[0]?.name;
@@ -88,7 +95,7 @@ export class SpatialGroupsPanelComponent implements OnChanges {
     this.onCellTypeColumn(value);
   }
 
-  onGroupVariant(name: string): void {
+  protected onGroupVariant(name: string): void {
     const meta = this.dataset?.columns.find((c) => c.name === name);
     if (meta?.kind === 'categorical' && meta.family) this.familyChoice.set(meta.family.id, name);
     this.onCellTypeColumn(name);
@@ -99,28 +106,28 @@ export class SpatialGroupsPanelComponent implements OnChanges {
     this.controls?.setViewState({ cellTypeColumn: name, hiddenGroups: [] });
   }
 
-  isGroupShown(label: string): boolean {
+  protected isGroupShown(label: string): boolean {
     return !this.view.hiddenGroups.includes(label);
   }
 
-  get allGroupsShown(): boolean {
+  protected get allGroupsShown(): boolean {
     return this.view.hiddenGroups.length === 0;
   }
 
-  onGroupShown(label: string, on: boolean): void {
+  protected onGroupShown(label: string, on: boolean): void {
     this.controls?.setViewState({ hiddenGroups: toggleHidden(this.view.hiddenGroups, [label], on) });
   }
 
-  onAllGroupsShown(on: boolean): void {
+  protected onAllGroupsShown(on: boolean): void {
     this.controls?.setViewState({ hiddenGroups: on ? [] : this.groupRows.map((r) => r.label) });
   }
 
-  get canImportGroups(): boolean {
+  protected get canImportGroups(): boolean {
     return !!this.controls?.importGroups;
   }
 
   /** '+': a CSV/TSV of `cell_id` and group, named after the file. */
-  async onImportGroupsFile(input: HTMLInputElement): Promise<void> {
+  protected async onImportGroupsFile(input: HTMLInputElement): Promise<void> {
     const file = input.files?.[0];
     input.value = '';
     if (!file || !this.controls?.importGroups) return;
@@ -137,7 +144,7 @@ export class SpatialGroupsPanelComponent implements OnChanges {
     }
   }
 
-  trackByLabel = (_i: number, row: { label: string }) => row.label;
+  protected trackByLabel = (_i: number, row: { label: string }) => row.label;
 
   private refreshVariants(): void {
     const next = groupVariantOptions(this.dataset, this.activeCellTypeColumn);

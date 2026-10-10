@@ -1,3 +1,9 @@
+import { Component } from '@angular/core';
+import { TILED_DATASET, fakeSpatialControls, shallowPanel } from '../../testing/spatial-panel-testing';
+import { SpatialHeatmapControlsComponent } from './spatial-heatmap-controls/spatial-heatmap-controls.component';
+import { SpatialEmbeddingControlsComponent } from './spatial-embedding-controls/spatial-embedding-controls.component';
+import { SpatialChartWindowComponent } from './spatial-chart-window/spatial-chart-window.component';
+import { CommonModule } from '@angular/common';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { FormsModule } from '@angular/forms';
 import { NO_ERRORS_SCHEMA } from '@angular/core';
@@ -59,10 +65,11 @@ describe('SpatialChartsComponent', () => {
    *  under NO_ERRORS_SCHEMA gives the ngModel inputs no value accessor. */
   async function build(spatial: ISpatialControls | null, render = false) {
     TestBed.resetTestingModule();
+    TestBed.overrideComponent(SpatialChartsComponent, {
+      set: { imports: [CommonModule, FormsModule], schemas: [NO_ERRORS_SCHEMA] },
+    });
     await TestBed.configureTestingModule({
-      declarations: [SpatialChartsComponent],
-      imports: [FormsModule],
-      schemas: [NO_ERRORS_SCHEMA],
+      imports: [SpatialChartsComponent],
       providers: [{ provide: VISUALIZER, useValue: { getSpatialControls: () => spatial } }],
     }).compileComponents();
     fixture = TestBed.createComponent(SpatialChartsComponent);
@@ -70,7 +77,7 @@ describe('SpatialChartsComponent', () => {
     // The component draws into a div it looks up by its OWN per-instance id, so
     // the host element can only be made once that id exists.
     chartHost = document.createElement('div');
-    chartHost.id = component.chartDiv;
+    chartHost.id = component['chartDiv'];
     document.body.appendChild(chartHost);
     if (render) {
       fixture.detectChanges();
@@ -116,7 +123,7 @@ describe('SpatialChartsComponent', () => {
     // The empty state lives in the enclosing <spatial-controls> dialog now, so
     // this component simply does nothing rather than repeating the message.
     await build(null, true);
-    expect(component.controls).toBeNull();
+    expect(component['controls']).toBeNull();
     expect(Plotly.react).not.toHaveBeenCalled();
   });
 
@@ -161,7 +168,7 @@ describe('SpatialChartsComponent', () => {
 
   it('says what to do when nothing is coloured by', async () => {
     await build(controls);
-    expect(component.notice).toMatch(/Colour the map by a column or a gene/);
+    expect(component['notice']).toMatch(/Colour the map by a column or a gene/);
     expect(Plotly.react).not.toHaveBeenCalled();
   });
 
@@ -178,14 +185,14 @@ describe('SpatialChartsComponent', () => {
       expect(traces[0].type).toBe('bar');
       expect(binned(traces[0])).toEqual({ range: [1, 4], total: 4 });
       expect(layout.xaxis.title.text).toBe('total_counts');
-      expect(component.subject).toBe('total_counts');
-      expect(component.notice).toBeNull();
+      expect(component['subject']).toBe('total_counts');
+      expect(component['notice']).toBeNull();
     });
 
     it('labels a gene source as a gene', async () => {
       view$.next({ ...view$.value, colorBy: { kind: 'feature', name: 'Ttr' } });
       await flush();
-      expect(component.subject).toBe('gene Ttr');
+      expect(component['subject']).toBe('gene Ttr');
     });
 
     it('overlays the selection on the histogram', async () => {
@@ -195,7 +202,7 @@ describe('SpatialChartsComponent', () => {
       expect(traces).toHaveLength(2);
       expect(traces[1].name).toBe('Selected');
       expect(binned(traces[1]).total).toBe(2);
-      expect(component.selectionCount).toBe(2);
+      expect(component['selectionCount']).toBe(2);
     });
 
     it('re-renders on a log-scale change without refetching the vector', async () => {
@@ -208,15 +215,15 @@ describe('SpatialChartsComponent', () => {
 
     it('switches chart kind without refetching', async () => {
       const before = controls.continuousValues.mock.calls.length;
-      component.onKind('violin');
+      component['onKind']('violin');
       await flush();
       expect(controls.continuousValues.mock.calls.length).toBe(before);
       expect(lastPlot().traces[0].type).toBe('violin');
     });
 
     it('groups a violin by a categorical column, in the map colours', async () => {
-      component.onKind('violin');
-      await component.onGroupBy('region');
+      component['onKind']('violin');
+      await component['onGroupBy']('region');
       await flush();
       expect(controls.categoricalView).toHaveBeenCalledWith('region');
       const { traces } = lastPlot();
@@ -226,24 +233,24 @@ describe('SpatialChartsComponent', () => {
     });
 
     it('ignores the grouping for a histogram', async () => {
-      await component.onGroupBy('region');
-      component.onKind('histogram');
+      await component['onGroupBy']('region');
+      component['onKind']('histogram');
       await flush();
       expect(lastPlot().traces[0].type).toBe('bar');
     });
 
     it('suggests a grouping for a violin that has none', () => {
-      component.onKind('violin');
-      expect(component.suggestsGrouping).toBe(true);
-      component.onKind('histogram');
-      expect(component.suggestsGrouping).toBe(false);
+      component['onKind']('violin');
+      expect(component['suggestsGrouping']).toBe(true);
+      component['onKind']('histogram');
+      expect(component['suggestsGrouping']).toBe(false);
     });
 
     it('recovers from a failed grouping fetch instead of half-applying it', async () => {
       controls.categoricalView.mockRejectedValueOnce(new Error('not loaded'));
-      component.onKind('violin');
-      await component.onGroupBy('region');
-      expect(component.groupBy).toBeNull();
+      component['onKind']('violin');
+      await component['onGroupBy']('region');
+      expect(component['groupBy']).toBeNull();
       expect(lastPlot().traces[0].name).toBe('All');
     });
 
@@ -277,8 +284,8 @@ describe('SpatialChartsComponent', () => {
       // implies and never answers.
       expect(controls.categoricalView).toHaveBeenCalledWith('region');
       expect(controls.continuousValues).not.toHaveBeenCalled();
-      expect(component.notice).toBeNull();
-      expect(component.kind).toBe('counts');
+      expect(component['notice']).toBeNull();
+      expect(component['kind']).toBe('counts');
 
       const { traces, layout } = lastPlot();
       expect(traces[0].type).toBe('bar');
@@ -292,25 +299,25 @@ describe('SpatialChartsComponent', () => {
 
     it('hands the kind picker the same options array until they change', async () => {
       // A fresh array per change-detection pass makes PrimeNG re-render the buttons.
-      const first = component.kindOptions;
-      expect(component.kindOptions).toBe(first);
+      const first = component['kindOptions'];
+      expect(component['kindOptions']).toBe(first);
       view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'total_counts' } });
       await flush();
-      expect(component.kindOptions).not.toBe(first);
+      expect(component['kindOptions']).not.toBe(first);
     });
 
     it('offers only the kinds a categorical subject can be drawn as', () => {
       // A category code is a label, not a magnitude, so no histogram/violin/box.
       // The heatmap is always offered: its subject is a gene LIST crossed with a
       // grouping, not whatever the map happens to be coloured by.
-      expect(component.kindOptions.map((k) => k.value)).toEqual(['counts', 'heatmap']);
+      expect(component['kindOptions'].map((k) => k.value)).toEqual(['counts', 'heatmap']);
     });
 
     it('returns to a histogram when the source goes back to continuous', async () => {
       view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'total_counts' } });
       await flush();
-      expect(component.kind).toBe('histogram');
-      expect(component.kindOptions.map((k) => k.value))
+      expect(component['kind']).toBe('histogram');
+      expect(component['kindOptions'].map((k) => k.value))
         .toEqual(['histogram', 'violin', 'box', 'heatmap']);
       expect(lastPlot().traces[0].type).toBe('bar');
     });
@@ -321,7 +328,7 @@ describe('SpatialChartsComponent', () => {
       await flush();
       view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
       await flush();
-      expect(component.notice).toMatch(/could not be charted/);
+      expect(component['notice']).toMatch(/could not be charted/);
       expect(Plotly.purge).toHaveBeenCalled();
     });
   });
@@ -330,7 +337,7 @@ describe('SpatialChartsComponent', () => {
     await build(controls);
     view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'total_counts' } });
     await flush();
-    component.onKind('violin');
+    component['onKind']('violin');
 
     // A slow 'region' and a fast 'other': without sequencing the slow one lands
     // last and charts region's categories under a dropdown that says other.
@@ -342,8 +349,8 @@ describe('SpatialChartsComponent', () => {
         name: 'other', categories: ['X'], colors: ['#0f0'], codes: new Uint16Array([0, 0, 0, 0]),
       });
 
-    const slow = component.onGroupBy('region');
-    await component.onGroupBy('other');
+    const slow = component['onGroupBy']('region');
+    await component['onGroupBy']('other');
     resolveSlow({
       name: 'region', categories: ['A', 'B'], colors: ['#f00', '#00f'],
       codes: new Uint16Array([0, 0, 1, 1]),
@@ -351,7 +358,7 @@ describe('SpatialChartsComponent', () => {
     await slow;
     await flush();
 
-    expect(component.groupBy).toBe('other');
+    expect(component['groupBy']).toBe('other');
     expect(lastPlot().traces.map((t: Record<string, unknown>) => t.name)).toEqual(['X']);
   });
 
@@ -359,16 +366,16 @@ describe('SpatialChartsComponent', () => {
     // Two exported visualizers on a page (the main diagram + a modal preview) mean
     // two charts; a shared DOM id hands both the first element.
     await build(controls);
-    const first = component.chartDiv;
+    const first = component['chartDiv'];
     await build(controls);
-    expect(component.chartDiv).not.toBe(first);
-    expect(document.getElementById(component.chartDiv)).not.toBeNull();
+    expect(component['chartDiv']).not.toBe(first);
+    expect(document.getElementById(component['chartDiv'])).not.toBeNull();
   });
 
   describe('lifecycle', () => {
     it('lists the dataset\'s categorical columns to group by', async () => {
       await build(controls);
-      expect(component.groupOptions).toEqual([
+      expect(component['groupOptions']).toEqual([
         { label: 'No grouping', value: null },
         { label: 'region', value: 'region' },
       ]);
@@ -376,10 +383,10 @@ describe('SpatialChartsComponent', () => {
 
     it('drops a grouping that the new dataset does not have', async () => {
       await build(controls);
-      await component.onGroupBy('region');
+      await component['onGroupBy']('region');
       controls.categoricalColumns.mockReturnValue([]);
       dataset$.next({ ...dataset, id: 'other', columns: [] });
-      expect(component.groupBy).toBeNull();
+      expect(component['groupBy']).toBeNull();
     });
 
     it('tears down its subscriptions and the plot', async () => {
@@ -388,7 +395,7 @@ describe('SpatialChartsComponent', () => {
       fixture.destroy();
       expect(view$.observed).toBe(false);
       expect(selection$.observed).toBe(false);
-      expect(Plotly.purge).toHaveBeenCalledWith(component.chartDiv);
+      expect(Plotly.purge).toHaveBeenCalledWith(component['chartDiv']);
     });
   });
 
@@ -408,10 +415,10 @@ describe('SpatialChartsComponent', () => {
       dataset$.next(withPca(2688));
       await build(controls);
       await flush();
-      const labels = component.embeddings.map((e) => e.label);
+      const labels = component['embeddings'].map((e) => e.label);
       expect(labels).toContain('t-SNE (compute)');
       expect(labels).toContain('t-SNE 3D (compute)');
-      expect(component.tsneTooLarge).toBe(false);
+      expect(component['tsneTooLarge']).toBe(false);
     });
 
     it('withholds the option past the size threshold, and says why', async () => {
@@ -420,10 +427,10 @@ describe('SpatialChartsComponent', () => {
       dataset$.next(withPca(19416));
       await build(controls);
       await flush();
-      expect(component.embeddings.map((e) => e.label)).not.toContain('t-SNE (compute)');
-      expect(component.tsneTooLarge).toBe(true);
-      expect(component.tsneTooLargeNote).toContain('19,416');
-      expect(component.tsneTooLargeNote).toContain('offline');
+      expect(component['embeddings'].map((e) => e.label)).not.toContain('t-SNE (compute)');
+      expect(component['tsneTooLarge']).toBe(true);
+      expect(component['tsneTooLargeNote']).toContain('19,416');
+      expect(component['tsneTooLargeNote']).toContain('offline');
     });
 
     it('estimates the cost quadratically, from the measured anchor', async () => {
@@ -438,7 +445,7 @@ describe('SpatialChartsComponent', () => {
       await flush();
       // Four times the work for twice the points.
       expect(component.computeEstimateSeconds).toBe(95 * 4);
-      expect(component.computeEstimateLabel).toBe('~6 min');
+      expect(component['computeEstimateLabel']).toBe('~6 min');
     });
 
     it('does not offer one when the dataset already has a t-SNE', async () => {
@@ -448,7 +455,7 @@ describe('SpatialChartsComponent', () => {
       });
       await build(controls);
       await flush();
-      expect(component.embeddings.filter((e) => /compute/.test(e.label ?? '')))
+      expect(component['embeddings'].filter((e) => /compute/.test(e.label ?? '')))
         .toHaveLength(0);
     });
 
@@ -461,8 +468,8 @@ describe('SpatialChartsComponent', () => {
       });
       await build(controls);
       await flush();
-      expect(component.embeddings.map((e) => e.label)).toEqual(['UMAP']);
-      expect(component.tsneTooLarge).toBe(false);
+      expect(component['embeddings'].map((e) => e.label)).toEqual(['UMAP']);
+      expect(component['tsneTooLarge']).toBe(false);
     });
 
     /**
@@ -514,7 +521,7 @@ describe('SpatialChartsComponent', () => {
           meta: pca, x: new Float32Array([0, 1]), y: new Float32Array([2, 3]),
         }));
         await flush();
-        component.onEmbedding('local:tsne');
+        component['onEmbedding']('local:tsne');
         await flush();
         return component;
       }
@@ -527,7 +534,7 @@ describe('SpatialChartsComponent', () => {
         controls.getEmbedding = jest.fn(() => new Promise((r) => { deliver = r; }) as never);
         const run = jest.spyOn(EmbeddingComputeRun.prototype, 'run');
 
-        const computing = component.computeEmbedding();
+        const computing = component['computeEmbedding']();
         await flush();
         dataset$.next({ ...withPca(2688), id: 'other' });
         deliver({ meta: pca, x: new Float32Array([0, 1]), y: new Float32Array([2, 3]) });
@@ -539,14 +546,14 @@ describe('SpatialChartsComponent', () => {
       it('discards a result that arrives after the switch', async () => {
         await armed();
         const { started, settle } = pendingRun();
-        const computing = component.computeEmbedding();
+        const computing = component['computeEmbedding']();
         await started;
 
         // The new dataset also offers a t-SNE to compute, so the panel comes back to the
         // same selection — which is what makes the stale result look adoptable.
         dataset$.next({ ...withPca(2688), id: 'other' });
         await flush();
-        component.onEmbedding('local:tsne');
+        component['onEmbedding']('local:tsne');
         await flush();
         const drawn = (Plotly.react as jest.Mock).mock.calls.length;
 
@@ -556,7 +563,7 @@ describe('SpatialChartsComponent', () => {
 
         // Keeping it would mark the NEW dataset's t-SNE as computed, and plot 2,688 of
         // the old one's points over the new one's observations.
-        expect(component.isComputed).toBe(false);
+        expect(component['isComputed']).toBe(false);
         expect((Plotly.react as jest.Mock).mock.calls.length).toBe(drawn);
       });
 
@@ -564,7 +571,7 @@ describe('SpatialChartsComponent', () => {
         await armed();
         const terminate = jest.spyOn(EmbeddingComputeRun.prototype, 'terminate');
         const { started, settle } = pendingRun();
-        const computing = component.computeEmbedding();
+        const computing = component['computeEmbedding']();
         await started;
 
         dataset$.next({ ...withPca(2688), id: 'other' });
@@ -577,17 +584,17 @@ describe('SpatialChartsComponent', () => {
         async () => {
           await armed();
           const first = pendingRun();
-          const computing = component.computeEmbedding();
+          const computing = component['computeEmbedding']();
           await first.started;
 
           // A switch, then a fresh computation on the new dataset — which the old run's
           // `finally` must not clear out from under.
           dataset$.next({ ...withPca(2688), id: 'other' });
           await flush();
-          component.onEmbedding('local:tsne');
+          component['onEmbedding']('local:tsne');
           await flush();
           const second = pendingRun();
-          void component.computeEmbedding();
+          void component['computeEmbedding']();
           await second.started;
 
           const cancel = jest.spyOn(EmbeddingComputeRun.prototype, 'cancel');
@@ -596,7 +603,7 @@ describe('SpatialChartsComponent', () => {
 
           // Cancel must still reach the LIVE run. If the departing one had cleared the
           // shared slot, this would be a no-op and the button would do nothing.
-          component.cancelCompute();
+          component['cancelCompute']();
           expect(cancel).toHaveBeenCalledTimes(1);
           expect(cancel.mock.instances[0]).toBe(second.instance);
           second.settle(null);
@@ -608,7 +615,7 @@ describe('SpatialChartsComponent', () => {
         await armed();
         const terminate = jest.spyOn(EmbeddingComputeRun.prototype, 'terminate');
         const { started, settle } = pendingRun();
-        const computing = component.computeEmbedding();
+        const computing = component['computeEmbedding']();
         await started;
 
         fixture.destroy();
@@ -624,15 +631,15 @@ describe('SpatialChartsComponent', () => {
       await build(controls);
       view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
       await flush();
-      expect(component.kind).toBe('counts');
-      expect(component.kindHelp).toContain('Counts');
+      expect(component['kind']).toBe('counts');
+      expect(component['kindHelp']).toContain('Counts');
 
-      component.onKind('heatmap');
+      component['onKind']('heatmap');
       await flush();
-      expect(component.kindHelp).toContain('Heatmap');
+      expect(component['kindHelp']).toContain('Heatmap');
       // The caveat is the point of the help, not a footnote: a z-scored colour says
       // "above this gene's own average", which is routinely read as "highly expressed".
-      expect(component.kindHelp).toContain('z-scored');
+      expect(component['kindHelp']).toContain('z-scored');
     });
 
     it('names the embedding METHOD, because they cannot be read the same way', async () => {
@@ -647,21 +654,21 @@ describe('SpatialChartsComponent', () => {
       dataset$.next({ ...dataset, embeddings: metas });
       await build(controls);
       await flush();
-      component.onKind('embedding');
+      component['onKind']('embedding');
       await flush();
-      expect(component.kindHelp).toContain('UMAP');
-      expect(component.kindHelp).toContain('arbitrary');
+      expect(component['kindHelp']).toContain('UMAP');
+      expect(component['kindHelp']).toContain('arbitrary');
 
-      component.onEmbedding('X_pca2d');
+      component['onEmbedding']('X_pca2d');
       await flush();
-      expect(component.kindHelp).toContain('PCA');
-      expect(component.kindHelp).toContain('variance');
+      expect(component['kindHelp']).toContain('PCA');
+      expect(component['kindHelp']).toContain('variance');
       // Only PCA may promise measurable distance.
-      expect(component.kindHelp).not.toContain('arbitrary');
+      expect(component['kindHelp']).not.toContain('arbitrary');
 
-      component.onEmbedding('X_tsne');
+      component['onEmbedding']('X_tsne');
       await flush();
-      expect(component.kindHelp).toContain('t-SNE');
+      expect(component['kindHelp']).toContain('t-SNE');
     });
   });
 
@@ -688,7 +695,7 @@ describe('SpatialChartsComponent', () => {
     });
 
     it('offers the dataset’s gene names as the rows to pick from', () => {
-      expect(component.geneOptions.map((o) => o.value)).toEqual(['Ttr', 'Mbp', 'Snap25']);
+      expect(component['geneOptions'].map((o) => o.value)).toEqual(['Ttr', 'Mbp', 'Snap25']);
     });
 
     it('caps the options for a whole-transcriptome list, and keeps what is picked', async () => {
@@ -697,18 +704,18 @@ describe('SpatialChartsComponent', () => {
       const names = Array.from({ length: 18078 }, (_, i) => `Gene${i}`);
       dataset$.next({ ...dataset, features: { count: names.length, names } });
       await flush();
-      expect(component.geneOptions.length).toBe(GENE_OPTIONS_MAX);
+      expect(component['geneOptions'].length).toBe(GENE_OPTIONS_MAX);
 
       // Typing reaches past the cap, because the search runs over the whole list.
-      component.onGeneFilter('Gene9001');
-      expect(component.geneOptions.map((o) => o.value)).toEqual(['Gene9001']);
+      component['onGeneFilter']('Gene9001');
+      expect(component['geneOptions'].map((o) => o.value)).toEqual(['Gene9001']);
 
       // A picked gene must survive a query that excludes it: a multi-select that loses
       // its own selection from the options cannot label the chip, and drops the value on
       // the next change.
-      await component.onHeatmapGenes(['Gene9001']);
-      component.onGeneFilter('Gene5');
-      const shown = component.geneOptions.map((o) => o.value);
+      await component['onHeatmapGenes'](['Gene9001']);
+      component['onGeneFilter']('Gene5');
+      const shown = component['geneOptions'].map((o) => o.value);
       expect(shown[0]).toBe('Gene9001');
       expect(shown).toContain('Gene5');
     });
@@ -719,24 +726,24 @@ describe('SpatialChartsComponent', () => {
       const names = Array.from({ length: 18078 }, (_, i) => `Gene${i}`);
       dataset$.next({ ...dataset, features: { count: names.length, names } });
       await flush();
-      await component.onHeatmapGenes(['Gene17000']);
-      expect(component.heatmapGenes).toEqual(['Gene17000']);
+      await component['onHeatmapGenes'](['Gene17000']);
+      expect(component['heatmapGenes']).toEqual(['Gene17000']);
 
       // Same wide dataset again: the gene is real and must be kept.
       dataset$.next({ ...dataset, features: { count: names.length, names } });
       await flush();
-      expect(component.heatmapGenes).toEqual(['Gene17000']);
+      expect(component['heatmapGenes']).toEqual(['Gene17000']);
     });
 
     it('seeds with the gene already on screen, rather than opening empty', async () => {
       view$.next({ ...view$.value, colorBy: { kind: 'feature', name: 'Ttr' } });
       await flush();
-      component.onKind('heatmap');
+      component['onKind']('heatmap');
       await flush();
-      expect(component.heatmapGenes).toEqual(['Ttr']);
+      expect(component['heatmapGenes']).toEqual(['Ttr']);
       // …and it picked a grouping on its own: a heatmap with no columns is not
       // a chart, so "No grouping" is not a usable default here.
-      expect(component.groupBy).toBe('region');
+      expect(component['groupBy']).toBe('region');
       await flush();
       expect(lastPlot().traces[0].type).toBe('heatmap');
     });
@@ -755,10 +762,10 @@ describe('SpatialChartsComponent', () => {
           signals.push(options!.signal!);
           return real(genes, groups, opts);
         });
-      component.onKind('heatmap');
+      component['onKind']('heatmap');
       await flush();
-      await component.onHeatmapGenes(['Ttr']);
-      await component.onHeatmapGenes(['Ttr', 'Mbp']);
+      await component['onHeatmapGenes'](['Ttr']);
+      await component['onHeatmapGenes'](['Ttr', 'Mbp']);
       await flush();
       expect(lastPlot().traces[0].y).toEqual(['Mbp', 'Ttr']);
       // The overtaken computation was told to stop…
@@ -772,9 +779,9 @@ describe('SpatialChartsComponent', () => {
     });
 
     it('draws one row per gene and one column per category', async () => {
-      component.onKind('heatmap');
+      component['onKind']('heatmap');
       await flush();
-      await component.onHeatmapGenes(['Ttr', 'Mbp']);
+      await component['onHeatmapGenes'](['Ttr', 'Mbp']);
       await flush();
       const { traces, layout } = lastPlot();
       expect(traces[0].type).toBe('heatmap');
@@ -789,9 +796,9 @@ describe('SpatialChartsComponent', () => {
     });
 
     it('narrows to the selection, and switches to per-cell columns for a small one', async () => {
-      component.onKind('heatmap');
+      component['onKind']('heatmap');
       await flush();
-      await component.onHeatmapGenes(['Ttr']);
+      await component['onHeatmapGenes'](['Ttr']);
       selection$.next({ mask: Uint8Array.from([1, 0, 1, 0, 0, 0, 0, 0]), count: 2 });
       await flush();
       const { traces } = lastPlot();
@@ -800,54 +807,54 @@ describe('SpatialChartsComponent', () => {
       // the cells themselves — "what is in this region", not a 2-column class
       // matrix.
       expect(traces[0].x).toEqual(['#0', '#2']);
-      expect(component.heatmapNote).toContain('per selected cell');
+      expect(component['heatmapNote']).toContain('per selected cell');
     });
 
     it('z-scores by default and says so, and can be turned off', async () => {
-      component.onKind('heatmap');
+      component['onKind']('heatmap');
       await flush();
-      await component.onHeatmapGenes(['Ttr']);
+      await component['onHeatmapGenes'](['Ttr']);
       await flush();
-      expect(component.heatmapZScore).toBe(true);
+      expect(component['heatmapZScore']).toBe(true);
       expect(lastPlot().traces[0].zmin).toBeLessThan(0); // symmetric about zero
-      expect(component.heatmapNote).toContain('z-scored');
+      expect(component['heatmapNote']).toContain('z-scored');
 
-      component.onHeatmapZScore(false);
+      component['onHeatmapZScore'](false);
       await flush();
       expect(lastPlot().traces[0].zmin).toBeUndefined();
-      expect(component.heatmapNote).toContain('Raw means');
+      expect(component['heatmapNote']).toContain('Raw means');
     });
 
     it('asks for genes when it has none, instead of drawing an empty grid', async () => {
       view$.next({ ...view$.value, colorBy: null });
       await flush();
-      component.onKind('heatmap');
+      component['onKind']('heatmap');
       await flush();
-      expect(component.heatmapGenes).toEqual([]);
-      expect(component.heatmapNote).toContain('Pick one or more genes');
+      expect(component['heatmapGenes']).toEqual([]);
+      expect(component['heatmapNote']).toContain('Pick one or more genes');
     });
 
     it('fetches each gene once, however often it redraws', async () => {
-      component.onKind('heatmap');
+      component['onKind']('heatmap');
       await flush();
-      await component.onHeatmapGenes(['Ttr', 'Mbp']);
+      await component['onHeatmapGenes'](['Ttr', 'Mbp']);
       await flush();
       const after = (controls.continuousValues as jest.Mock).mock.calls.length;
       // Adding a third gene must not refetch the first two — each is a full
       // per-observation vector.
-      await component.onHeatmapGenes(['Ttr', 'Mbp', 'Snap25']);
+      await component['onHeatmapGenes'](['Ttr', 'Mbp', 'Snap25']);
       await flush();
       expect((controls.continuousValues as jest.Mock).mock.calls.length).toBe(after + 1);
     });
 
     it('drops genes the new dataset does not have', async () => {
-      component.onKind('heatmap');
+      component['onKind']('heatmap');
       await flush();
-      await component.onHeatmapGenes(['Ttr', 'Mbp']);
+      await component['onHeatmapGenes'](['Ttr', 'Mbp']);
       dataset$.next({ ...dataset, id: 'other', features: { count: 1, names: ['Actb'] } });
       await flush();
-      expect(component.heatmapGenes).toEqual([]);
-      expect(component.geneOptions.map((o) => o.value)).toEqual(['Actb']);
+      expect(component['heatmapGenes']).toEqual([]);
+      expect(component['geneOptions'].map((o) => o.value)).toEqual(['Actb']);
     });
   });
 
@@ -885,7 +892,7 @@ describe('SpatialChartsComponent', () => {
       // A categorical subject selects the counts chart on its own.
       view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
       await flush();
-      expect(component.kind).toBe('counts');
+      expect(component['kind']).toBe('counts');
       // Guard: this test only means something if counts really does fix a height.
       expect(typeof lastPlot().layout?.height).toBe('number');
 
@@ -900,7 +907,7 @@ describe('SpatialChartsComponent', () => {
       controls.continuousValues = jest.fn(async (_source: SpatialColorBy) =>
         Float32Array.from([1, 2, 3, 4]));
       await build(controls);
-      component.onKind('histogram');
+      component['onKind']('histogram');
       await flush();
       // Guard: the distribution kinds must NOT be fixing a height.
       expect(lastPlot().layout?.height).toBeUndefined();
@@ -948,21 +955,21 @@ describe('SpatialChartsComponent', () => {
 
     it('is not offered for a dataset that publishes no embedding', async () => {
       await build(controls);
-      expect(component.kindOptions.map((k) => k.value)).not.toContain('embedding');
+      expect(component['kindOptions'].map((k) => k.value)).not.toContain('embedding');
     });
 
     it('is offered once the dataset publishes one', async () => {
       dataset$.next({ ...dataset, embeddings: [umapMeta] });
       await build(controls);
       await flush();
-      expect(component.kindOptions.map((k) => k.value)).toContain('embedding');
+      expect(component['kindOptions'].map((k) => k.value)).toContain('embedding');
     });
 
     it('draws the served coordinates', async () => {
       dataset$.next({ ...dataset, embeddings: [umapMeta] });
       await build(controls);
       await flush();
-      component.onKind('embedding');
+      component['onKind']('embedding');
       await flush();
 
       expect(controls.getEmbedding).toHaveBeenCalledWith('X_umap');
@@ -985,7 +992,7 @@ describe('SpatialChartsComponent', () => {
       dataset$.next({ ...dataset, embeddings: [meta3d] });
       await build(controls);
       await flush();
-      component.onKind('embedding');
+      component['onKind']('embedding');
       await flush();
 
       const { traces, layout } = lastPlot();
@@ -1001,9 +1008,9 @@ describe('SpatialChartsComponent', () => {
       dataset$.next({ ...dataset, embeddings: [umapMeta] });
       await build(controls);
       await flush();
-      component.onKind('embedding');
+      component['onKind']('embedding');
       await flush();
-      expect((Plotly.react as jest.Mock).mock.calls.at(-1)?.[0]).toBe(component.chartDiv);
+      expect((Plotly.react as jest.Mock).mock.calls.at(-1)?.[0]).toBe(component['chartDiv']);
 
       // The window's div only exists once it is rendered; this suite drives the
       // component directly, so stand it in — and REMOVE the inline div, because the
@@ -1011,18 +1018,18 @@ describe('SpatialChartsComponent', () => {
       // earlier version of this test pass against a component that could not draw
       // detached at all.
       const win = document.createElement('div');
-      win.id = component.detachedDiv;
+      win.id = component['detachedDiv'];
       document.body.appendChild(win);
       chartHost?.remove();
-      component.toggleDetached();
+      component['toggleDetached']();
       // Detaching does NOT draw on a timer: the window's div does not exist until
       // PrimeNG has mounted the dialog, so its `onShow` drives that draw. The template
       // wires it; here it is called directly.
-      component.onDetachedWindowShown();
+      component['onDetachedWindowShown']();
       await flush();
 
-      expect(component.detached).toBe(true);
-      expect((Plotly.react as jest.Mock).mock.calls.at(-1)?.[0]).toBe(component.detachedDiv);
+      expect(component['detached']).toBe(true);
+      expect((Plotly.react as jest.Mock).mock.calls.at(-1)?.[0]).toBe(component['detachedDiv']);
       win.remove();
     });
 
@@ -1030,24 +1037,24 @@ describe('SpatialChartsComponent', () => {
       dataset$.next({ ...dataset, embeddings: [umapMeta] });
       await build(controls);
       await flush();
-      component.onKind('embedding');
+      component['onKind']('embedding');
       await flush();
       (Plotly.purge as jest.Mock).mockClear();
 
-      component.toggleDetached();
+      component['toggleDetached']();
       // Plotly keeps per-div state; a graph left in a div Angular then removes leaks its
       // WebGL context.
-      expect(Plotly.purge).toHaveBeenCalledWith(component.chartDiv);
+      expect(Plotly.purge).toHaveBeenCalledWith(component['chartDiv']);
     });
 
     it('gives the inline and detached divs different ids per instance', async () => {
       // They must not collide, and two mounted charts must not share either — the same
       // reason `chartDiv` is per-instance at all.
       await build(controls);
-      expect(component.chartDiv).not.toBe(component.detachedDiv);
-      const first = component.chartDiv;
+      expect(component['chartDiv']).not.toBe(component['detachedDiv']);
+      const first = component['chartDiv'];
       await build(controls);
-      expect(component.chartDiv).not.toBe(first);
+      expect(component['chartDiv']).not.toBe(first);
     });
 
     /**
@@ -1063,7 +1070,7 @@ describe('SpatialChartsComponent', () => {
       /** Stand in the window's div and take away the panel's, as the template does. */
       function enterWindow(): HTMLDivElement {
         const win = document.createElement('div');
-        win.id = component.detachedDiv;
+        win.id = component['detachedDiv'];
         document.body.appendChild(win);
         chartHost?.remove();
         return win;
@@ -1073,17 +1080,17 @@ describe('SpatialChartsComponent', () => {
         await build(controls);
         view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
         await flush();
-        expect(component.kind).toBe('counts');
-        expect((Plotly.react as jest.Mock).mock.calls.at(-1)?.[0]).toBe(component.chartDiv);
+        expect(component['kind']).toBe('counts');
+        expect((Plotly.react as jest.Mock).mock.calls.at(-1)?.[0]).toBe(component['chartDiv']);
 
         const win = enterWindow();
-        component.toggleDetached();
-        component.onDetachedWindowShown();
+        component['toggleDetached']();
+        component['onDetachedWindowShown']();
         await flush();
 
-        expect(component.detached).toBe(true);
+        expect(component['detached']).toBe(true);
         const call = (Plotly.react as jest.Mock).mock.calls.at(-1);
-        expect(call?.[0]).toBe(component.detachedDiv);
+        expect(call?.[0]).toBe(component['detachedDiv']);
         // Still a counts plot, not whatever was last drawn elsewhere.
         expect((call?.[1] as Record<string, unknown>[])[0].type).toBe('bar');
         win.remove();
@@ -1102,18 +1109,18 @@ describe('SpatialChartsComponent', () => {
         await build(controls);
         view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
         await flush();
-        component.onKind('heatmap');
+        component['onKind']('heatmap');
         await flush();
-        await component.onHeatmapGenes(['Ttr', 'Mbp']);
+        await component['onHeatmapGenes'](['Ttr', 'Mbp']);
         await flush();
 
         const win = enterWindow();
-        component.toggleDetached();
-        component.onDetachedWindowShown();
+        component['toggleDetached']();
+        component['onDetachedWindowShown']();
         await flush();
 
         const call = (Plotly.react as jest.Mock).mock.calls.at(-1);
-        expect(call?.[0]).toBe(component.detachedDiv);
+        expect(call?.[0]).toBe(component['detachedDiv']);
         expect((call?.[1] as Record<string, unknown>[])[0].type).toBe('heatmap');
         win.remove();
       });
@@ -1126,30 +1133,30 @@ describe('SpatialChartsComponent', () => {
         await build(controls);
         view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
         await flush();
-        component.onKind('embedding');
+        component['onKind']('embedding');
         await flush();
 
         const win = enterWindow();
-        component.toggleDetached();
-        component.onDetachedWindowShown();
+        component['toggleDetached']();
+        component['onDetachedWindowShown']();
         await flush();
-        expect(component.detached).toBe(true);
-        expect((Plotly.react as jest.Mock).mock.calls.at(-1)?.[0]).toBe(component.detachedDiv);
+        expect(component['detached']).toBe(true);
+        expect((Plotly.react as jest.Mock).mock.calls.at(-1)?.[0]).toBe(component['detachedDiv']);
 
         // Switching tabs swaps what the window shows; it does not close it. The inline
         // div stays absent, as the template leaves it while detached.
-        component.onKind('counts');
+        component['onKind']('counts');
         await flush();
-        expect(component.detached).toBe(true);
+        expect(component['detached']).toBe(true);
         const call = (Plotly.react as jest.Mock).mock.calls.at(-1);
-        expect(call?.[0]).toBe(component.detachedDiv);
+        expect(call?.[0]).toBe(component['detachedDiv']);
         expect((call?.[1] as Record<string, unknown>[])[0].type).toBe('bar');
 
         // And back, still detached.
-        component.onKind('embedding');
+        component['onKind']('embedding');
         await flush();
-        expect(component.detached).toBe(true);
-        expect((Plotly.react as jest.Mock).mock.calls.at(-1)?.[0]).toBe(component.detachedDiv);
+        expect(component['detached']).toBe(true);
+        expect((Plotly.react as jest.Mock).mock.calls.at(-1)?.[0]).toBe(component['detachedDiv']);
         win.remove();
       });
 
@@ -1161,7 +1168,7 @@ describe('SpatialChartsComponent', () => {
         await build(controls);
         view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
         await flush();
-        component.onKind('embedding');
+        component['onKind']('embedding');
         await flush();
 
         const win = enterWindow();
@@ -1174,12 +1181,12 @@ describe('SpatialChartsComponent', () => {
         (win as unknown as Record<string, unknown>).removeAllListeners =
           (name: string) => { bound.delete(name); };
 
-        component.toggleDetached();
-        component.onDetachedWindowShown();
+        component['toggleDetached']();
+        component['onDetachedWindowShown']();
         await flush();
         expect(bound.has('plotly_selected')).toBe(true);
 
-        component.onKind('counts');
+        component['onKind']('counts');
         await flush();
         expect(bound.has('plotly_selected')).toBe(false);
         expect(bound.has('plotly_deselect')).toBe(false);
@@ -1199,22 +1206,22 @@ describe('SpatialChartsComponent', () => {
         await build(controls);
         view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
         await flush();
-        component.onKind('heatmap');
+        component['onKind']('heatmap');
         await flush();
-        await component.onHeatmapGenes(['Ttr']);
+        await component['onHeatmapGenes'](['Ttr']);
         await flush();
 
         const win = enterWindow();
-        component.toggleDetached();
-        component.onDetachedWindowShown();
+        component['toggleDetached']();
+        component['onDetachedWindowShown']();
         await flush();
         (Plotly.purge as jest.Mock).mockClear();
 
         // No genes: nothing to draw, so whatever is plotted must be cleared.
-        await component.onHeatmapGenes([]);
+        await component['onHeatmapGenes']([]);
         await flush();
-        expect(Plotly.purge).toHaveBeenCalledWith(component.detachedDiv);
-        expect(Plotly.purge).not.toHaveBeenCalledWith(component.chartDiv);
+        expect(Plotly.purge).toHaveBeenCalledWith(component['detachedDiv']);
+        expect(Plotly.purge).not.toHaveBeenCalledWith(component['chartDiv']);
         win.remove();
       });
 
@@ -1228,13 +1235,13 @@ describe('SpatialChartsComponent', () => {
 
         const win = enterWindow();
         Object.defineProperty(win, 'clientWidth', { value: 640, configurable: true });
-        component.toggleDetached();
-        component.onDetachedWindowShown();
+        component['toggleDetached']();
+        component['onDetachedWindowShown']();
         await flush();
 
-        expect(component.hasFixedHeight).toBe(true);
+        expect(component['hasFixedHeight']).toBe(true);
         (Plotly.relayout as jest.Mock).mockClear();
-        component.onDetachedResizeEnd();
+        component['onDetachedResizeEnd']();
         expect(Plotly.relayout).toHaveBeenCalledWith(win, { width: 640 });
         win.remove();
       });
@@ -1246,13 +1253,13 @@ describe('SpatialChartsComponent', () => {
         await flush();
         // A tab label alone would leave two windows both headed "Embedding"; the
         // embedding names the embedding.
-        component.onKind('embedding');
+        component['onKind']('embedding');
         await flush();
-        expect(component.detachedTitle).toBe('UMAP');
+        expect(component['detachedTitle']).toBe('UMAP');
 
-        component.onKind('counts');
+        component['onKind']('counts');
         await flush();
-        expect(component.detachedTitle).toContain('Counts');
+        expect(component['detachedTitle']).toContain('Counts');
       });
     });
 
@@ -1267,12 +1274,12 @@ describe('SpatialChartsComponent', () => {
       dataset$.next({ ...dataset, embeddings: [meta3d] });
       await build(controls);
       await flush();
-      component.onKind('embedding');
+      component['onKind']('embedding');
       await flush();
 
       // Stand in for the user having rotated it: Plotly keeps the live camera here.
       const camera = { eye: { x: 2.1, y: 0.3, z: -1.2 } };
-      const el = document.getElementById(component.chartDiv) as unknown as
+      const el = document.getElementById(component['chartDiv']) as unknown as
         { _fullLayout: { scene: { camera: unknown } } };
       el._fullLayout = { scene: { camera } };
 
@@ -1289,10 +1296,10 @@ describe('SpatialChartsComponent', () => {
       dataset$.next({ ...dataset, embeddings: [umapMeta] });
       await build(controls);
       await flush();
-      component.onKind('embedding');
+      component['onKind']('embedding');
       await flush();
 
-      const el = document.getElementById(component.chartDiv) as unknown as
+      const el = document.getElementById(component['chartDiv']) as unknown as
         { _fullLayout: unknown };
       el._fullLayout = {
         xaxis: { range: [-5, 5], autorange: true },
@@ -1310,10 +1317,10 @@ describe('SpatialChartsComponent', () => {
       dataset$.next({ ...dataset, embeddings: [umapMeta] });
       await build(controls);
       await flush();
-      component.onKind('embedding');
+      component['onKind']('embedding');
       await flush();
 
-      const el = document.getElementById(component.chartDiv) as unknown as
+      const el = document.getElementById(component['chartDiv']) as unknown as
         { _fullLayout: unknown };
       el._fullLayout = {
         xaxis: { range: [-1, 1], autorange: false },
@@ -1337,10 +1344,10 @@ describe('SpatialChartsComponent', () => {
       dataset$.next({ ...dataset, embeddings: [meta3d] });
       await build(controls);
       await flush();
-      component.onKind('embedding');
+      component['onKind']('embedding');
       await flush();
 
-      expect(component.embeddingNote).toMatch(/[Cc]omputed here/);
+      expect(component['embeddingNote']).toMatch(/[Cc]omputed here/);
       expect(lastPlot().layout.annotations).toBeUndefined();
     });
 
@@ -1356,11 +1363,11 @@ describe('SpatialChartsComponent', () => {
       dataset$.next({ ...dataset, embeddings: [meta] });
       await build(controls);
       await flush();
-      component.onKind('embedding');
+      component['onKind']('embedding');
       await flush();
 
-      expect(component.embeddingNote).toContain('perplexity 30');
-      expect(component.embeddingNote).toMatch(/[Cc]omputed here/);
+      expect(component['embeddingNote']).toContain('perplexity 30');
+      expect(component['embeddingNote']).toMatch(/[Cc]omputed here/);
     });
 
     it('does not invent parameters for a published embedding', async () => {
@@ -1369,11 +1376,11 @@ describe('SpatialChartsComponent', () => {
       dataset$.next({ ...dataset, embeddings: [umapMeta] });
       await build(controls);
       await flush();
-      component.onKind('embedding');
+      component['onKind']('embedding');
       await flush();
 
-      expect(component.embeddingNote).not.toMatch(/[Cc]omputed here/);
-      expect(component.embeddingNote).not.toContain('(');
+      expect(component['embeddingNote']).not.toMatch(/[Cc]omputed here/);
+      expect(component['embeddingNote']).not.toContain('(');
     });
 
     it('fetches the coordinates once, not per redraw', async () => {
@@ -1382,7 +1389,7 @@ describe('SpatialChartsComponent', () => {
       dataset$.next({ ...dataset, embeddings: [umapMeta] });
       await build(controls);
       await flush();
-      component.onKind('embedding');
+      component['onKind']('embedding');
       await flush();
       const calls = (controls.getEmbedding as jest.Mock).mock.calls.length;
 
@@ -1397,13 +1404,13 @@ describe('SpatialChartsComponent', () => {
       dataset$.next({ ...dataset, embeddings: [umapMeta] });
       await build(controls);
       await flush();
-      component.onKind('embedding');
+      component['onKind']('embedding');
       await flush();
-      expect(component.kind).toBe('embedding');
+      expect(component['kind']).toBe('embedding');
 
       dataset$.next({ ...dataset, id: 'other', embeddings: undefined });
       await flush();
-      expect(component.kind).not.toBe('embedding');
+      expect(component['kind']).not.toBe('embedding');
     });
 
     it('says when the source serves no embeddings at all', async () => {
@@ -1412,9 +1419,9 @@ describe('SpatialChartsComponent', () => {
       await flush();
       // A host may advertise an embedding without implementing the accessor.
       (controls as { getEmbedding?: unknown }).getEmbedding = undefined;
-      component.onKind('embedding');
+      component['onKind']('embedding');
       await flush();
-      expect(component.notice).toMatch(/does not serve embeddings/);
+      expect(component['notice']).toMatch(/does not serve embeddings/);
     });
   });
 
@@ -1445,7 +1452,7 @@ describe('SpatialChartsComponent', () => {
       let release: (v: Float32Array) => void = () => undefined;
       controls.continuousValues
         .mockImplementationOnce(() => new Promise<Float32Array>((r) => { release = r; }));
-      const pending = component.onHeatmapGenes(['Ttr']);
+      const pending = component['onHeatmapGenes'](['Ttr']);
       dataset$.next({ ...dataset, id: 'B' });
       release(new Float32Array([9, 9, 9, 9]));
       await pending;
@@ -1453,7 +1460,7 @@ describe('SpatialChartsComponent', () => {
 
       const before = controls.continuousValues.mock.calls
         .filter(([s]) => s.name === 'Ttr').length;
-      await component.onHeatmapGenes(['Ttr']);
+      await component['onHeatmapGenes'](['Ttr']);
       // A's vector was dropped, so B's is fetched rather than A's reused.
       expect(controls.continuousValues.mock.calls
         .filter(([s]) => s.name === 'Ttr').length).toBe(before + 1);
@@ -1470,14 +1477,14 @@ describe('SpatialChartsComponent', () => {
       view$.next({ ...view$.value, colorBy: { kind: 'feature', name: 'Ttr' } });
       await flush();
       // An unrelated load, started while the colour source is still in flight.
-      await component.onHeatmapGenes(['Mbp']);
+      await component['onHeatmapGenes'](['Mbp']);
       release(new Float32Array([5, 6, 7, 8]));
       await flush();
 
-      component.onKind('histogram');
+      component['onKind']('histogram');
       await flush();
       expect(binned(lastPlot().traces[0]).range).toEqual([5, 8]);
-      expect(component.busy).toBe(false);
+      expect(component['busy']).toBe(false);
     });
 
     describe('with an embedding on screen', () => {
@@ -1491,7 +1498,7 @@ describe('SpatialChartsComponent', () => {
         }));
         dataset$.next({ ...dataset, embeddings: [umapMeta] });
         await build(controls);
-        component.onKind('embedding');
+        component['onKind']('embedding');
         await flush();
       });
 
@@ -1499,7 +1506,7 @@ describe('SpatialChartsComponent', () => {
         // The embedding's own caption tells the reader to do exactly this.
         view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
         await flush();
-        expect(component.kind).toBe('embedding');
+        expect(component['kind']).toBe('embedding');
         expect(lastPlot().traces.map((t) => t.name)).toEqual(['A', 'B']);
       });
 
@@ -1518,11 +1525,40 @@ describe('SpatialChartsComponent', () => {
           codes: new Uint16Array([0, 0, 1, 1]),
         });
         await flush();
-        expect(component.embeddingNote).toContain('Coloured to match the map');
+        expect(component['embeddingNote']).toContain('Coloured to match the map');
         expect(lastPlot().traces.map((t) => t.name)).toEqual(['A', 'B']);
-        expect(component.busy).toBe(false);
+        expect(component['busy']).toBe(false);
       });
     });
   });
 
 });
+
+describe('SpatialChartsComponent — OnPush (SPATIAL-15)', () => {
+  @Component({ standalone: true, imports: [SpatialChartsComponent], template: '<spatial-charts></spatial-charts>' })
+  class HostComponent {}
+
+  it('re-renders when the map\'s colouring changes in the store', async () => {
+    const fake = fakeSpatialControls(TILED_DATASET);
+    TestBed.resetTestingModule();
+    for (const child of [SpatialHeatmapControlsComponent, SpatialEmbeddingControlsComponent,
+      SpatialChartWindowComponent]) shallowPanel(child);
+    shallowPanel(SpatialChartsComponent,
+      [SpatialHeatmapControlsComponent, SpatialEmbeddingControlsComponent, SpatialChartWindowComponent]);
+    await TestBed.configureTestingModule({
+      imports: [HostComponent],
+      providers: [{ provide: VISUALIZER, useValue: { getSpatialControls: () => fake.controls } }],
+    }).compileComponents();
+    const host = TestBed.createComponent(HostComponent);
+    host.detectChanges();
+    const subject = () => (host.nativeElement as HTMLElement).querySelector('.sx-subject')?.textContent?.trim();
+    expect((SpatialChartsComponent as unknown as { ɵcmp: { onPush: boolean } }).ɵcmp.onPush).toBe(true);
+    expect(subject()).toBe('nothing selected to chart');
+
+    fake.controls.setViewState({ colorBy: { kind: 'feature', name: 'KRT5' } });
+    host.detectChanges();
+    expect(subject()).toBe('gene KRT5');
+    host.destroy();
+  });
+});
+

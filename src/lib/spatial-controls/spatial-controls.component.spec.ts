@@ -1,6 +1,7 @@
+import { CommonModule } from '@angular/common';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { FormsModule } from '@angular/forms';
-import { NO_ERRORS_SCHEMA } from '@angular/core';
+import { Component, NO_ERRORS_SCHEMA } from '@angular/core';
 import { BehaviorSubject, of } from 'rxjs';
 
 import { SpatialControlsComponent, parseGeneGroups } from './spatial-controls.component';
@@ -9,7 +10,14 @@ import { VISUALIZER, ISpatialControls } from '../contracts/visualizer.contract';
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../contracts/display-types';
 import { COLORMAP_OPTIONS } from '../plot.utilities';
-import { TILED_DATASET } from '../testing/spatial-panel-testing';
+import { TILED_DATASET, fakeSpatialControls, panelNamed, shallowPanel } from '../testing/spatial-panel-testing';
+import { SpatialKeyComponent } from './spatial-key/spatial-key.component';
+import { SpatialCellsPanelComponent } from './spatial-cells-panel/spatial-cells-panel.component';
+import { SpatialGroupsPanelComponent } from './spatial-groups-panel/spatial-groups-panel.component';
+import { SpatialTranscriptsPanelComponent } from './spatial-transcripts-panel/spatial-transcripts-panel.component';
+import { SpatialGeneTreeComponent } from './spatial-gene-tree/spatial-gene-tree.component';
+import { SpatialObservationsPanelComponent } from './spatial-observations-panel/spatial-observations-panel.component';
+import { SpatialMarkerGenesFormComponent } from './spatial-marker-genes-form/spatial-marker-genes-form.component';
 import {
   SpatialSelectionMask, emptySelection,
 } from '../spatial/spatial-selection';
@@ -47,10 +55,12 @@ describe('SpatialControlsComponent', () => {
    */
   async function build(spatial: ISpatialControls | null, render = false) {
     TestBed.resetTestingModule();
+    // Shallow: PrimeNG elements and the panels are not under test here.
+    TestBed.overrideComponent(SpatialControlsComponent, {
+      set: { imports: [CommonModule, FormsModule], schemas: [NO_ERRORS_SCHEMA] },
+    });
     await TestBed.configureTestingModule({
-      declarations: [SpatialControlsComponent],
-      imports: [FormsModule],
-      schemas: [NO_ERRORS_SCHEMA], // PrimeNG elements are not under test here
+      imports: [SpatialControlsComponent],
       providers: [{
         provide: VISUALIZER,
         useValue: {
@@ -106,9 +116,9 @@ describe('SpatialControlsComponent', () => {
   describe('without a SPATIAL_DATA_PORT', () => {
     it('renders an empty state instead of dead controls', async () => {
       await build(null, true);
-      expect(component.controls).toBeNull();
-      expect(component.dataset).toBeNull();
-      expect(component.legend).toBeNull();
+      expect(component['controls']).toBeNull();
+      expect(component['dataset']).toBeNull();
+      expect(component['legend']).toBeNull();
       const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
       expect(text).toContain('SPATIAL_DATA_PORT');
     });
@@ -116,9 +126,9 @@ describe('SpatialControlsComponent', () => {
     it('setters are safe no-ops', async () => {
       await build(null);
       expect(() => {
-        component.selectFromRegions();
-        component.selectCategory(0);
-        component.reset();
+        component['selectFromRegions']();
+        component['selectCategory'](0);
+        component['reset']();
       }).not.toThrow();
     });
   });
@@ -197,42 +207,42 @@ describe('SpatialControlsComponent', () => {
       controls.colorByColumn('region');
       await flush();
       expect(controls.categoryColors).toHaveBeenCalledWith('region');
-      expect(component.legend).toEqual([
+      expect(component['legend']).toEqual([
         { label: 'Cortex', color: '#ff0000' },
         { label: 'Thalamus', color: '#0000ff' },
       ]);
       expect(component.isCategorical).toBe(true);
-      expect(component.colorBarCss).toBeNull();
+      expect(component['colorBarCss']).toBeNull();
     });
 
     it('builds a colour bar for a continuous column', async () => {
       controls.colorByColumn('total_counts');
       await flush();
-      expect(component.legend).toBeNull();
+      expect(component['legend']).toBeNull();
       expect(component.isContinuous).toBe(true);
-      expect(component.colorBarCss).toContain('linear-gradient');
+      expect(component['colorBarCss']).toContain('linear-gradient');
     });
 
     it('builds a colour bar for a gene', async () => {
       controls.colorByFeature('Ttr');
       await flush();
       expect(component.isContinuous).toBe(true);
-      expect(component.colorByLabel).toBe('Gene · Ttr');
+      expect(component['colorByLabel']).toBe('Gene · Ttr');
     });
 
     it('shows no key at all when nothing is coloured by', async () => {
       controls.clearColorBy();
       await flush();
-      expect(component.legend).toBeNull();
-      expect(component.colorBarCss).toBeNull();
-      expect(component.colorByLabel).toBe('Flat colour');
+      expect(component['legend']).toBeNull();
+      expect(component['colorBarCss']).toBeNull();
+      expect(component['colorByLabel']).toBe('Flat colour');
     });
 
     it('leaves the key empty rather than wrong when the column cannot be read', async () => {
       controls.categoryColors.mockRejectedValueOnce(new Error('not loaded'));
       controls.colorByColumn('region');
       await flush();
-      expect(component.legend).toBeNull();
+      expect(component['legend']).toBeNull();
     });
   });
 
@@ -240,11 +250,11 @@ describe('SpatialControlsComponent', () => {
     beforeEach(async () => build(controls));
 
     it('switches the drawn annotation regions off and on, like the other layer sections', () => {
-      component.onShowAnnotations(false);
+      component['onShowAnnotations'](false);
       expect(controls.setViewState).toHaveBeenCalledWith({ showAnnotations: false });
-      expect(component.view.showAnnotations).toBe(false);
-      component.onShowAnnotations(true);
-      expect(component.view.showAnnotations).toBe(true);
+      expect(component['view'].showAnnotations).toBe(false);
+      component['onShowAnnotations'](true);
+      expect(component['view'].showAnnotations).toBe(true);
     });
 
     it('builds the colour bar from the colormap the renderer would use', async () => {
@@ -254,7 +264,7 @@ describe('SpatialControlsComponent', () => {
         continuousColormap: 'Reds',
       });
       await flush();
-      const reds = component.colorBarCss!;
+      const reds = component['colorBarCss']!;
       expect(reds).toContain('linear-gradient');
 
       view$.next({ ...view$.value, continuousColormap: 'Viridis' });
@@ -262,24 +272,24 @@ describe('SpatialControlsComponent', () => {
       // A different colormap has to produce a different bar; built from `lutFor`
       // on the IMAGE's colormap alone, the bar showed grey while the canvas drew
       // Viridis, which makes the key worse than no key at all.
-      expect(component.colorBarCss).not.toBe(reds);
+      expect(component['colorBarCss']).not.toBe(reds);
     });
 
     it('reset restores the defaults, which clears the colour source', () => {
       controls.colorByColumn('region');
-      component.reset();
+      component['reset']();
       expect(controls.setViewState).toHaveBeenCalledWith({ ...DEFAULT_SPATIAL_VIEW });
-      expect(component.view.colorBy).toBeNull();
+      expect(component['view'].colorBy).toBeNull();
     });
   });
 
   it('gives each instance its own charts-body id for aria-controls and the scroll', async () => {
     await build(controls);
-    const first = component.chartsBodyId;
+    const first = component['chartsBodyId'];
     await build(controls);
     // Otherwise `aria-controls` names a non-unique target and expanding the
     // second panel scrolls the first panel's chart into view.
-    expect(component.chartsBodyId).not.toBe(first);
+    expect(component['chartsBodyId']).not.toBe(first);
   });
 
   describe('out-of-order responses', () => {
@@ -356,7 +366,7 @@ describe('SpatialControlsComponent', () => {
       await flush();
 
       // region's two-colour answer arriving late must not repaint zone's key.
-      expect(component.legend?.map((e) => e.color)).toEqual(['#0f0']);
+      expect(component['legend']?.map((e) => e.color)).toEqual(['#0f0']);
     });
   });
 
@@ -364,61 +374,61 @@ describe('SpatialControlsComponent', () => {
     beforeEach(async () => build(controls));
 
     it('selects from the drawn ROIs and reports the count', () => {
-      component.selectFromRegions();
+      component['selectFromRegions']();
       expect(controls.selectFromRegions).toHaveBeenCalled();
-      expect(component.hasSelection).toBe(true);
-      expect(component.selection.count).toBe(2);
-      expect(component.selectionMissed).toBe(false);
+      expect(component['hasSelection']).toBe(true);
+      expect(component['selection'].count).toBe(2);
+      expect(component['selectionMissed']).toBe(false);
     });
 
     it('says so when the ROIs matched nothing, rather than looking inert', () => {
       controls.selectFromRegions.mockReturnValueOnce(0);
-      component.selectFromRegions();
-      expect(component.selectionMissed).toBe(true);
-      expect(component.hasSelection).toBe(false);
+      component['selectFromRegions']();
+      expect(component['selectionMissed']).toBe(true);
+      expect(component['hasSelection']).toBe(false);
     });
 
     it('selects a category from the legend', async () => {
       controls.colorByColumn('region');
       await flush();
-      await component.selectCategory(1);
+      await component['selectCategory'](1);
       expect(controls.selectCategory).toHaveBeenCalledWith('region', 1);
-      expect(component.selectedCategory).toBe(1);
-      expect(component.hasSelection).toBe(true);
+      expect(component['selectedCategory']).toBe(1);
+      expect(component['hasSelection']).toBe(true);
     });
 
     it('clicking the active legend row again clears — a click is reversible', async () => {
       controls.colorByColumn('region');
       await flush();
-      await component.selectCategory(0);
-      expect(component.selectedCategory).toBe(0);
+      await component['selectCategory'](0);
+      expect(component['selectedCategory']).toBe(0);
 
-      await component.selectCategory(0);
+      await component['selectCategory'](0);
       expect(controls.clearSelection).toHaveBeenCalled();
-      expect(component.selectedCategory).toBeNull();
-      expect(component.hasSelection).toBe(false);
+      expect(component['selectedCategory']).toBeNull();
+      expect(component['hasSelection']).toBe(false);
     });
 
     it('ignores a legend click while colouring by a gene (no categories to select)', async () => {
       controls.colorByFeature('Ttr');
       await flush();
-      await component.selectCategory(0);
+      await component['selectCategory'](0);
       expect(controls.selectCategory).not.toHaveBeenCalled();
     });
 
     it('drops the highlighted row when the selection is cleared elsewhere', async () => {
       controls.colorByColumn('region');
       await flush();
-      await component.selectCategory(1);
+      await component['selectCategory'](1);
       selection$.next(emptySelection());
-      expect(component.selectedCategory).toBeNull();
+      expect(component['selectedCategory']).toBeNull();
     });
 
     it('reset clears the selection as well as the view state', () => {
-      component.selectFromRegions();
-      component.reset();
+      component['selectFromRegions']();
+      component['reset']();
       expect(controls.clearSelection).toHaveBeenCalled();
-      expect(component.hasSelection).toBe(false);
+      expect(component['hasSelection']).toBe(false);
     });
   });
 
@@ -426,14 +436,14 @@ describe('SpatialControlsComponent', () => {
     beforeEach(async () => build(controls));
 
     it('starts collapsed, so the panel stays the height of its controls', () => {
-      expect(component.chartsOpen).toBe(false);
+      expect(component['chartsOpen']).toBe(false);
     });
 
     it('toggles open and shut', () => {
-      component.toggleCharts();
-      expect(component.chartsOpen).toBe(true);
-      component.toggleCharts();
-      expect(component.chartsOpen).toBe(false);
+      component['toggleCharts']();
+      expect(component['chartsOpen']).toBe(true);
+      component['toggleCharts']();
+      expect(component['chartsOpen']).toBe(false);
     });
   });
 
@@ -450,7 +460,7 @@ describe('SpatialControlsComponent', () => {
       await build(controls);
       const seen: boolean[] = [];
       component.visibleChange.subscribe((v) => seen.push(v));
-      component.onVisibleChange(false);
+      component['onVisibleChange'](false);
       expect(seen).toEqual([false]);
       expect(component.visible).toBe(false);
     });
@@ -470,14 +480,14 @@ describe('SpatialControlsComponent', () => {
       const resize = jest.fn();
       // The chart is a ViewChild, which the behavioural tests do not render.
       (component as unknown as { charts?: { resize: () => void } }).charts = { resize };
-      component.onResizeEnd();
+      component['onResizeEnd']();
       expect(resize).toHaveBeenCalledTimes(1);
     });
 
     it('does not blow up before the chart exists', async () => {
       await build(controls);
       // The charts section is collapsed until opened, so the ViewChild is unset.
-      expect(() => component.onResizeEnd()).not.toThrow();
+      expect(() => component['onResizeEnd']()).not.toThrow();
     });
 
     it('is actually wired to the dialog in the template', async () => {
@@ -486,7 +496,7 @@ describe('SpatialControlsComponent', () => {
       // p-dialog is an unknown element, so the output binding registers as a plain
       // DOM listener and dispatching the event exercises the real wiring.
       await build(null, true);
-      const spy = jest.spyOn(component, 'onResizeEnd');
+      const spy = jest.spyOn(component as unknown as { onResizeEnd(): void }, 'onResizeEnd');
       const dialog = fixture.nativeElement.querySelector('p-dialog');
       expect(dialog).toBeTruthy();
       dialog.dispatchEvent(new Event('onResizeEnd'));
@@ -499,11 +509,11 @@ describe('SpatialControlsComponent', () => {
 
     it('offers the controls only for a dataset that has the geometry', async () => {
       await build(controls);
-      expect(component.hasCells).toBe(false);
-      expect(component.hasTranscripts).toBe(false);
+      expect(component['hasCells']).toBe(false);
+      expect(component['hasTranscripts']).toBe(false);
       dataset$.next(TILED_DATASET);
-      expect(component.hasCells).toBe(true);
-      expect(component.hasTranscripts).toBe(true);
+      expect(component['hasCells']).toBe(true);
+      expect(component['hasTranscripts']).toBe(true);
     });
 
     it('parses gene groups from a group,gene table', () => {
@@ -539,3 +549,53 @@ describe('SpatialControlsComponent', () => {
     });
   });
 });
+
+describe('SpatialControlsComponent — OnPush (SPATIAL-15)', () => {
+  @Component({
+    standalone: true, imports: [SpatialControlsComponent],
+    template: '<spatial-controls [visible]="true"></spatial-controls>',
+  })
+  class HostComponent {}
+
+  it('re-renders when the selection changes in the store (not through its own template)', async () => {
+    const fake = fakeSpatialControls(TILED_DATASET);
+    TestBed.resetTestingModule();
+    // Every panel shallow (PrimeNG unrendered), as in the DOM spec.
+    for (const leaf of [SpatialKeyComponent, SpatialGroupsPanelComponent, SpatialGeneTreeComponent,
+      SpatialMarkerGenesFormComponent]) shallowPanel(leaf);
+    shallowPanel(SpatialCellsPanelComponent, [SpatialGroupsPanelComponent]);
+    shallowPanel(SpatialObservationsPanelComponent, [SpatialKeyComponent]);
+    shallowPanel(SpatialTranscriptsPanelComponent, [SpatialGeneTreeComponent, SpatialMarkerGenesFormComponent]);
+    shallowPanel(SpatialControlsComponent,
+      [SpatialCellsPanelComponent, SpatialTranscriptsPanelComponent, SpatialObservationsPanelComponent]);
+    await TestBed.configureTestingModule({
+      imports: [HostComponent],
+      providers: [{
+        provide: VISUALIZER,
+        useValue: {
+          getSpatialControls: () => fake.controls,
+          getColormap: () => of(null),
+          getReverseScale: () => of(false),
+          getColormapOptions: () => COLORMAP_OPTIONS,
+        },
+      }],
+    }).compileComponents();
+    const host = TestBed.createComponent(HostComponent);
+    host.detectChanges();
+    const text = () => (host.nativeElement as HTMLElement).textContent ?? '';
+    expect((SpatialControlsComponent as unknown as { ɵcmp: { onPush: boolean } }).ɵcmp.onPush).toBe(true);
+    // Open the Annotations section, where the selection count is shown.
+    (panelNamed(host.nativeElement, 'Annotations').querySelector('.sc-panel-head') as HTMLElement).click();
+    host.detectChanges();
+    expect(host.nativeElement.querySelector('p-button[icon="pi pi-object-group"]')).not.toBeNull();
+    expect(text()).not.toContain('selected —');
+
+    const mask = new Uint8Array(TILED_DATASET.observations.count);
+    mask[0] = mask[1] = 1;
+    fake.selection$.next({ mask, count: 2 });
+    host.detectChanges();
+    expect(text()).toContain('2 of');
+    host.destroy();
+  });
+});
+

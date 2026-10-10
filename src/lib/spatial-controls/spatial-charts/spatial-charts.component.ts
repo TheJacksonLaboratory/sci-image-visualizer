@@ -1,7 +1,14 @@
 import {
-  AfterViewInit, Component, Inject, Input, OnDestroy, OnInit,
+  AfterViewInit, ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, Inject, Input, OnDestroy,
+  OnInit, inject,
 } from '@angular/core';
-import { Subscription, combineLatest } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { DropdownModule } from 'primeng/dropdown';
+import { SelectButtonModule } from 'primeng/selectbutton';
+import { TooltipModule } from 'primeng/tooltip';
+import { combineLatest } from 'rxjs';
 
 import { VISUALIZER, IVisualizer, ISpatialControls } from '../../contracts/visualizer.contract';
 import { SpatialEmbeddingMeta } from '../../contracts/spatial-dataset.contract';
@@ -23,6 +30,9 @@ import {
   countByCategory,
   buildOmicsTraces, buildEmbeddingTraces, countsLayout, heatmapLayout, omicsLayout, embeddingLayout,
 } from '../../implementations/plotly/omics-trace-builders';
+import { SpatialHeatmapControlsComponent } from './spatial-heatmap-controls/spatial-heatmap-controls.component';
+import { SpatialEmbeddingControlsComponent } from './spatial-embedding-controls/spatial-embedding-controls.component';
+import { SpatialChartWindowComponent } from './spatial-chart-window/spatial-chart-window.component';
 
 /**
  * Widen the help tooltip, once per document.
@@ -68,11 +78,21 @@ let chartInstanceSeq = 0;
  * Depends only on {@link ISpatialControls} through the `VISUALIZER` contract
  * token, like `SpatialControlsComponent`. Trace building lives in the pure
  * `omics-trace-builders`; this component only moves data and owns the div.
+ *
+ * OnPush: its state lives in collaborators that change asynchronously (the data loads,
+ * the t-SNE run, the plot host), so the controls' streams, the run's state, every
+ * finished draw and every load start mark it for check.
  */
 @Component({
   selector: 'spatial-charts',
+  standalone: true,
+  imports: [
+    CommonModule, FormsModule, DropdownModule, SelectButtonModule, TooltipModule,
+    SpatialHeatmapControlsComponent, SpatialEmbeddingControlsComponent, SpatialChartWindowComponent,
+  ],
   templateUrl: './spatial-charts.component.html',
   styleUrls: ['./spatial-charts.component.scss'],
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy {
   /**
@@ -103,7 +123,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    *  (`visualizer.component.ts`): two mounted charts sharing one DOM id means
    *  `getElementById` hands both of them the first element, so one instance draws
    *  into — or purges — the other's canvas. */
-  readonly chartDiv = `spatial-charts-plot-${this.seq}`;
+  protected readonly chartDiv = `spatial-charts-plot-${this.seq}`;
   /**
    * The div inside the detached window.
    *
@@ -114,7 +134,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    * ONE is enough for every kind, because only the active kind is ever plotted. Detaching
    * is remembered per kind, but at most one window is open at a time.
    */
-  readonly detachedDiv = `spatial-charts-detached-${this.seq}`;
+  protected readonly detachedDiv = `spatial-charts-detached-${this.seq}`;
 
   /**
    * Whether the chart is shown in its own window rather than inline.
@@ -128,7 +148,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    * charts beside the map, switching from the heatmap to the counts should swap what the
    * window shows, not yank it back into the dialog and make them detach it again.
    */
-  detached = false;
+  protected detached = false;
   /**
    * Largest dataset this will offer to embed in the browser — see
    * {@link BROWSER_TSNE_MAX_OBSERVATIONS}.
@@ -153,11 +173,11 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     return this.compute.state.error;
   }
   /** Where a computation stands, for the embedding controls. */
-  get computeState(): EmbeddingComputeState {
+  protected get computeState(): EmbeddingComputeState {
     return this.compute.state;
   }
   /** True when a t-SNE is missing but the dataset is too big to embed here. */
-  get tsneTooLarge(): boolean {
+  protected get tsneTooLarge(): boolean {
     return this.compute.tooLarge;
   }
 
@@ -168,7 +188,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    *  Bound to a `p-selectButton`, so the SAME array is returned until what it is built
    *  from changes: a fresh array per change-detection pass makes PrimeNG re-render the
    *  buttons, and a button re-rendered under the pointer swallows the click. */
-  get kindOptions(): ChartKindOption[] {
+  protected get kindOptions(): ChartKindOption[] {
     const categorical = this.data.isCategorical;
     const embeddings = this.embeddings.length > 0;
     const hit = this.kindOptionsMemo;
@@ -183,47 +203,47 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     categorical: boolean; embeddings: boolean; options: ChartKindOption[];
   } | null = null;
 
-  controls: ISpatialControls | null = null;
-  kind: OmicsChartKind = 'histogram';
+  protected controls: ISpatialControls | null = null;
+  protected kind: OmicsChartKind = 'histogram';
   /** The data charted, and its loading — see {@link ChartDataModel}. */
   private readonly data = new ChartDataModel();
 
   /** Embeddings the dataset offers, and which of them is drawn. */
-  get embeddings(): SpatialEmbeddingMeta[] {
+  protected get embeddings(): SpatialEmbeddingMeta[] {
     return this.data.embeddings;
   }
-  get embedding(): SpatialEmbeddingMeta | null {
+  protected get embedding(): SpatialEmbeddingMeta | null {
     return this.data.embedding;
   }
   /** Genes the heatmap's rows are. */
-  get heatmapGenes(): string[] {
+  protected get heatmapGenes(): string[] {
     return this.data.heatmapGenes;
   }
   /** The heatmap gene picker's options. */
-  get geneOptions(): { label: string; value: string }[] {
+  protected get geneOptions(): { label: string; value: string }[] {
     return this.data.geneOptions;
   }
   /** Categorical column the violin/box splits by; null = one trace for all. */
-  get groupBy(): string | null {
+  protected get groupBy(): string | null {
     return this.data.groupBy;
   }
-  get groupOptions(): { label: string; value: string | null }[] {
+  protected get groupOptions(): { label: string; value: string | null }[] {
     return this.data.groupOptions;
   }
   /** Set when the active colour source cannot be charted, for an inline hint. */
-  get notice(): string | null {
+  protected get notice(): string | null {
     return this.data.notice;
   }
-  set notice(text: string | null) {
+  protected set notice(text: string | null) {
     this.data.notice = text;
   }
   /** A load is in flight. */
-  get busy(): boolean {
+  protected get busy(): boolean {
     return this.data.busy;
   }
   /** Z-score each gene across the groups. On by default: without it one loud
    *  gene saturates the scale and the rest of the panel reads as blank. */
-  heatmapZScore = true;
+  protected heatmapZScore = true;
   /** Past this many selected cells the per-cell view is a texture, not a
    *  readable panel, so the columns go back to being classes. */
   private static readonly HEATMAP_CELL_COLUMNS = 200;
@@ -242,13 +262,14 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
 
   /** What the map is coloured by — the chart's subject. */
   colorBy: SpatialColorBy | null = null;
-  selectionCount = 0;
+  protected selectionCount = 0;
 
   private view: SpatialViewState = { ...DEFAULT_SPATIAL_VIEW };
   private selection: SpatialSelectionMask = emptySelection();
   /** Whether the first view emission has been handled. */
   private primed = false;
-  private readonly subs = new Subscription();
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly cdr = inject(ChangeDetectorRef);
 
   constructor(@Inject(VISUALIZER) private readonly viz: IVisualizer) {}
 
@@ -259,9 +280,12 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     this.controls = this.viz.getSpatialControls?.() ?? null;
     if (!this.controls) return;
 
-    this.subs.add(combineLatest([
+    // The run's progress, backend and errors, for the embedding controls.
+    this.compute.state$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.cdr.markForCheck());
+
+    combineLatest([
       this.controls.getViewState$(), this.controls.getSelection$(),
-    ]).subscribe(([view, selection]) => {
+    ]).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(([view, selection]) => {
       const sourceChanged = view.colorBy?.kind !== this.view.colorBy?.kind
         || view.colorBy?.name !== this.view.colorBy?.name;
       this.view = view;
@@ -279,9 +303,10 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
         // A selection or log-scale change needs only a redraw of the same vector.
         void this.render();
       }
-    }));
+      this.cdr.markForCheck();
+    });
 
-    this.subs.add(this.controls.getDataset$().subscribe((dataset) => {
+    this.controls.getDataset$().pipe(takeUntilDestroyed(this.destroyRef)).subscribe((dataset) => {
       // Offer to compute a t-SNE only where the dataset has PCA to embed and no t-SNE of
       // its own; anything computed or computing for the previous dataset is dropped.
       const embeddings = this.compute.setDataset(dataset?.embeddings ?? [], dataset?.observations.count ?? 0);
@@ -294,7 +319,8 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
         if (this.groupBy) void this.onGroupBy(this.groupBy);
         void this.reload();
       }
-    }));
+      this.cdr.markForCheck();
+    });
   }
 
   /** Latest wins among heatmap draws, whose matrix may be computed in a worker. */
@@ -314,8 +340,9 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     this.plot.refit(this.chartDiv);
   }
 
+  /** Stops the t-SNE run and heatmap worker and frees both plots; the streams end
+   *  through `takeUntilDestroyed`. */
   ngOnDestroy(): void {
-    this.subs.unsubscribe();
     // A worker outlives the component that started it: closing the panel mid-run would
     // otherwise leave a t-SNE saturating a GPU for minutes with nothing left to receive
     // the answer.
@@ -331,7 +358,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     void this.reload();
   }
 
-  onKind(kind: OmicsChartKind): void {
+  protected onKind(kind: OmicsChartKind): void {
     this.kind = kind;
     if (kind === 'heatmap') {
       // Seed with the gene already on screen, so the chart says something the
@@ -361,13 +388,13 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     await this.onGroupBy(first);
   }
 
-  onHeatmapZScore(on: boolean): void {
+  protected onHeatmapZScore(on: boolean): void {
     this.heatmapZScore = on;
     void this.render();
   }
 
   /** What the heatmap is currently showing, said plainly. */
-  get heatmapNote(): string {
+  protected get heatmapNote(): string {
     return heatmapNote({
       geneCount: this.heatmapGenes.length,
       selectionCount: this.selectionCount,
@@ -380,7 +407,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   }
 
   /** Gene rows for the heatmap. */
-  async onHeatmapGenes(names: string[]): Promise<void> {
+  protected async onHeatmapGenes(names: string[]): Promise<void> {
     this.data.setHeatmapGenes(names);
     await this.loadHeatmapGenes();
     void this.render();
@@ -391,16 +418,19 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     return this.data.loadHeatmapGenes(this.controls);
   }
 
-  async onGroupBy(name: string | null): Promise<void> {
-    if (await this.data.loadGrouping(this.controls, name)) void this.render();
+  protected async onGroupBy(name: string | null): Promise<void> {
+    const loading = this.data.loadGrouping(this.controls, name);
+    this.cdr.markForCheck(); // the busy spinner
+    if (await loading) void this.render();
+    else this.cdr.markForCheck();
   }
 
   /** True when the current kind would read better with a grouping chosen. */
-  get suggestsGrouping(): boolean {
+  protected get suggestsGrouping(): boolean {
     return benefitsFromGrouping(this.kind) && !this.groupBy && this.groupOptions.length > 1;
   }
 
-  get subject(): string {
+  protected get subject(): string {
     if (!this.colorBy) return '';
     return this.colorBy.kind === 'feature' ? `gene ${this.colorBy.name}` : this.colorBy.name;
   }
@@ -409,7 +439,9 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
 
   /** Fetch the active colour source's vector, then draw. */
   private async reload(): Promise<void> {
-    const loaded = await this.data.loadValues(this.controls, this.view.colorBy);
+    const loading = this.data.loadValues(this.controls, this.view.colorBy);
+    this.cdr.markForCheck(); // the busy spinner
+    const loaded = await loading;
     if (loaded === 'superseded') return;
     // Only off the distribution tabs. The heatmap does not chart the colour source, and the
     // embedding is coloured BY it — its own caption asks for exactly this.
@@ -508,7 +540,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    * embedding fixes no height and fills the window instead. The template needs to know
    * which, because the two want opposite `flex` and `overflow`.
    */
-  get hasFixedHeight(): boolean {
+  protected get hasFixedHeight(): boolean {
     return this.plot.hasFixedHeight;
   }
 
@@ -523,7 +555,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    * The embedding names the embedding rather than the tab, because "Embedding" beside a
    * window drawing a t-SNE says less than "t-SNE" does.
    */
-  get detachedTitle(): string {
+  protected get detachedTitle(): string {
     if (this.kind === 'embedding') {
       return this.embedding?.label ?? this.embedding?.name ?? 'Embedding';
     }
@@ -538,7 +570,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    * behind in a div that Angular then removes leaks its WebGL context — and if the div
    * comes back, react would resize a plot whose data belongs to the other place.
    */
-  toggleDetached(): void {
+  protected toggleDetached(): void {
     const leaving = this.plotTarget;
     this.detached = !this.detached;
     this.plot.purge(leaving);
@@ -550,17 +582,17 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   }
 
   /** The detached window is up and its div exists — now the plot can be drawn into it. */
-  onDetachedWindowShown(): void {
+  protected onDetachedWindowShown(): void {
     void this.render();
   }
 
   /** Re-fit the detached window's plot after it is resized. */
-  onDetachedResizeEnd(): void {
+  protected onDetachedResizeEnd(): void {
     this.plot.refit(this.detachedDiv);
   }
 
   /** The gene picker's filter box changed: search the resident names, show the best. */
-  onGeneFilter(query: string): void {
+  protected onGeneFilter(query: string): void {
     this.data.filterGenes(query);
   }
 
@@ -570,31 +602,31 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   }
 
   /** That estimate as something to put on a button. */
-  get computeEstimateLabel(): string {
+  protected get computeEstimateLabel(): string {
     return this.compute.estimateLabel;
   }
 
   /** Why the option is absent, when a dataset is past the threshold. */
-  get tsneTooLargeNote(): string {
+  protected get tsneTooLargeNote(): string {
     return this.compute.tooLargeNote;
   }
 
   /** Whether the selected embedding is one this browser would have to compute. */
-  get isComputable(): boolean {
+  protected get isComputable(): boolean {
     return this.compute.isComputable(this.embedding);
   }
 
   /** Whether it has already been computed in this session. */
-  get isComputed(): boolean {
+  protected get isComputed(): boolean {
     return this.compute.isComputed(this.embedding);
   }
 
-  get isComputing(): boolean {
+  protected get isComputing(): boolean {
     return this.compute.running;
   }
 
   /** Compute the selected embedding here, in a worker, then draw it. */
-  async computeEmbedding(): Promise<void> {
+  protected async computeEmbedding(): Promise<void> {
     const meta = this.embedding;
     const controls = this.controls;
     if (!meta || !controls?.getEmbedding || this.isComputing) return;
@@ -605,22 +637,22 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   }
 
   /** Stop a run. It settles shortly after, leaving no embedding. */
-  cancelCompute(): void {
+  protected cancelCompute(): void {
     this.compute.cancel();
   }
 
   /** Which embedding to draw, when the dataset publishes more than one. */
-  onEmbedding(name: string): void {
+  protected onEmbedding(name: string): void {
     if (this.data.selectEmbedding(name)) void this.render();
   }
 
   /** What the chart on screen shows, and what it cannot be read for — see {@link kindHelp}. */
-  get kindHelp(): string {
+  protected get kindHelp(): string {
     return kindHelp(this.kind, this.embedding);
   }
 
   /** What the embedding view is showing, said plainly. */
-  get embeddingNote(): string {
+  protected get embeddingNote(): string {
     return embeddingNote(
       this.data.embeddingCoords?.meta ?? this.embedding, this.data.isCategorical, this.selection.count,
     );
@@ -637,7 +669,16 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     return this.plot.draw(this.plotTarget, traces, layout);
   }
 
+  /** Draw the active kind, then re-render the panel around it (notices, height, notes). */
   private async render(): Promise<void> {
+    try {
+      await this.renderChart();
+    } finally {
+      this.cdr.markForCheck();
+    }
+  }
+
+  private async renderChart(): Promise<void> {
     if (!this.isActive) return;
     // Guard on the div the ACTIVE kind will draw into, not always the shared one. While a
     // kind is detached the inline div is removed by its `*ngIf`, so checking that one

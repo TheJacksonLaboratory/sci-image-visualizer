@@ -1,6 +1,13 @@
 import {
   ChangeDetectionStrategy, Component, EventEmitter, Input, OnChanges, Output, SimpleChanges,
 } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { CheckboxModule } from 'primeng/checkbox';
+import { DropdownModule } from 'primeng/dropdown';
+import { InputNumberModule } from 'primeng/inputnumber';
+import { SelectButtonModule } from 'primeng/selectbutton';
+import { SliderModule } from 'primeng/slider';
 
 import type { ISpatialControls } from '../../contracts/visualizer.contract';
 import type { SpatialDataset } from '../../contracts/spatial-dataset.contract';
@@ -8,6 +15,7 @@ import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../../contracts/display-
 import { cellsShown } from '../../spatial/spatial-tiles';
 import { PanelOption, densityColorBarCss, tileOptions } from '../../spatial/spatial-panel-model';
 import type { GenePickerModel } from '../spatial-gene-picker';
+import { SpatialGroupsPanelComponent } from '../spatial-groups-panel/spatial-groups-panel.component';
 
 /**
  * The Cells section, as Xenium Explorer's: the outlines' on/off switch, which boundary set
@@ -18,6 +26,11 @@ import type { GenePickerModel } from '../spatial-gene-picker';
  */
 @Component({
   selector: 'spatial-cells-panel',
+  standalone: true,
+  imports: [
+    CommonModule, FormsModule, CheckboxModule, DropdownModule, InputNumberModule, SelectButtonModule,
+    SliderModule, SpatialGroupsPanelComponent,
+  ],
   templateUrl: './spatial-cells-panel.component.html',
   styleUrls: ['./spatial-cells-panel.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -38,9 +51,9 @@ export class SpatialCellsPanelComponent implements OnChanges {
   /** Virtual-scrolled only past this many options: the scroller earns its complexity for
    *  a few thousand names, and for eight it adds only overhead — a virtual viewport that
    *  short swallows the clicks it is meant to forward. */
-  readonly geneVirtualScrollFrom = 200;
+  protected readonly geneVirtualScrollFrom = 200;
 
-  readonly cellDrawOptions: PanelOption<SpatialViewState['cellDraw']>[] = [
+  protected readonly cellDrawOptions: PanelOption<SpatialViewState['cellDraw']>[] = [
     { label: 'Fill', value: 'fill' }, { label: 'Outline', value: 'outline' }, { label: 'Both', value: 'both' },
   ];
 
@@ -49,11 +62,11 @@ export class SpatialCellsPanelComponent implements OnChanges {
    * getter returns a fresh array on every change-detection pass, and PrimeNG re-renders
    * its buttons whenever the array identity changes — which made them impossible to click.
    */
-  cellSetOptions: PanelOption<string>[] = [];
+  protected cellSetOptions: PanelOption<string>[] = [];
   /** Cell colour modes on offer (Xenium Explorer's "Cell Color"). */
-  cellColorOptions: PanelOption<SpatialViewState['cellColorMode']>[] = [];
+  protected cellColorOptions: PanelOption<SpatialViewState['cellColorMode']>[] = [];
   /** The density colour bar, rebuilt only when its colormap changes (a 256-entry LUT). */
-  densityColorBarCss = '';
+  protected densityColorBarCss = '';
   private densityBarFor: SpatialViewState['densityColormap'] | undefined = undefined;
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -69,54 +82,54 @@ export class SpatialCellsPanelComponent implements OnChanges {
   }
 
   /** Whether outlines are on — the explicit choice, or automatically for data that has them. */
-  get cellsOn(): boolean {
+  protected get cellsOn(): boolean {
     return cellsShown(this.dataset, this.view);
   }
 
   /** The boundary set drawn: the view's choice, else the dataset's default, else its first. */
-  get activeCellSet(): string | null {
+  protected get activeCellSet(): string | null {
     const tiles = this.dataset?.polygonTiles;
     return this.view.cellSet ?? tiles?.defaultSet ?? tiles?.sets[0]?.name ?? null;
   }
 
   /** Fill opacity as a 0–100 number, for the box beside the slider. */
-  get cellOpacityPercent(): number {
+  protected get cellOpacityPercent(): number {
     return Math.round(this.view.cellOpacity * 100);
   }
 
-  onShowCells(on: boolean): void {
+  protected onShowCells(on: boolean): void {
     this.controls?.setViewState({ showCells: on });
   }
 
-  onCellSet(set: string): void {
+  protected onCellSet(set: string): void {
     this.controls?.setViewState({ cellSet: set });
   }
 
-  onCellDraw(draw: SpatialViewState['cellDraw']): void {
+  protected onCellDraw(draw: SpatialViewState['cellDraw']): void {
     this.controls?.setViewState({ cellDraw: draw });
   }
 
   // PrimeNG's slider reports `number | undefined`; ignore the empty case rather than
   // writing `undefined` into the store.
-  onCellOpacity(value: number | undefined): void {
+  protected onCellOpacity(value: number | undefined): void {
     if (value === undefined) return;
     this.controls?.setViewState({ cellOpacity: value });
   }
 
-  onCellOpacityPercent(v: number | null): void {
+  protected onCellOpacityPercent(v: number | null): void {
     if (v === null || !Number.isFinite(v)) return;
     this.controls?.setViewState({ cellOpacity: Math.min(1, Math.max(0.05, v / 100)) });
   }
 
-  onCellColorMode(mode: SpatialViewState['cellColorMode']): void {
+  protected onCellColorMode(mode: SpatialViewState['cellColorMode']): void {
     this.controls?.setViewState({ cellColorMode: mode });
   }
 
-  onCellColorGene(gene: string | null): void {
+  protected onCellColorGene(gene: string | null): void {
     this.controls?.setViewState({ cellColorGene: gene });
   }
 
-  onCellSingleColor(hex: string): void {
+  protected onCellSingleColor(hex: string): void {
     this.controls?.setViewState({ cellSingleColor: hex });
   }
 }

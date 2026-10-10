@@ -1,7 +1,15 @@
 import {
-  Component, EventEmitter, Inject, Input, NgZone, OnDestroy, OnInit, Output, ViewChild,
+  ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, EventEmitter, Inject, Input, NgZone, OnInit,
+  Output, ViewChild, inject,
 } from '@angular/core';
-import { Subscription, combineLatest } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { ButtonModule } from 'primeng/button';
+import { CheckboxModule } from 'primeng/checkbox';
+import { DialogModule } from 'primeng/dialog';
+import { TooltipModule } from 'primeng/tooltip';
+import { combineLatest } from 'rxjs';
 
 import { VISUALIZER, IVisualizer, ISpatialControls } from '../contracts/visualizer.contract';
 import { SpatialChartsComponent } from './spatial-charts/spatial-charts.component';
@@ -12,6 +20,9 @@ import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selecti
 import { GenePickerModel } from './spatial-gene-picker';
 import { SpatialKeyModel, SpatialLegendEntry } from './spatial-key/spatial-key.model';
 import { colorByLabel } from './spatial-key/spatial-key.component';
+import { SpatialCellsPanelComponent } from './spatial-cells-panel/spatial-cells-panel.component';
+import { SpatialTranscriptsPanelComponent } from './spatial-transcripts-panel/spatial-transcripts-panel.component';
+import { SpatialObservationsPanelComponent } from './spatial-observations-panel/spatial-observations-panel.component';
 
 /** @deprecated Moved to `spatial-key/spatial-key.model`; re-exported for one release. */
 export type { SpatialLegendEntry };
@@ -35,13 +46,23 @@ let controlsInstanceSeq = 0;
  * The legend swatches and the continuous colour bar are built with the SAME
  * functions the renderer uses (`categoryColors` → `resolveCategoryColors`,
  * `spatialContinuousLut`), so the key cannot drift from what is on screen.
+ *
+ * OnPush: the controls' streams, the key and gene-list models (which re-enter the zone
+ * when their async work lands) and an awaited category selection mark it for check.
  */
 @Component({
   selector: 'spatial-controls',
+  standalone: true,
+  imports: [
+    CommonModule, FormsModule, ButtonModule, CheckboxModule, DialogModule, TooltipModule,
+    SpatialCellsPanelComponent, SpatialTranscriptsPanelComponent, SpatialObservationsPanelComponent,
+    SpatialChartsComponent,
+  ],
   templateUrl: './spatial-controls.component.html',
   styleUrls: ['./spatial-controls.component.scss'],
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class SpatialControlsComponent implements OnInit, OnDestroy {
+export class SpatialControlsComponent implements OnInit {
   /** The embedded chart, so a dialog resize can re-fit it. */
   @ViewChild(SpatialChartsComponent) private charts?: SpatialChartsComponent;
 
@@ -54,7 +75,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
    * far more direct signal than watching boxes, and firing once on release means
    * no relayout churn during the drag.
    */
-  onResizeEnd(): void {
+  protected onResizeEnd(): void {
     this.charts?.resize();
   }
 
@@ -64,25 +85,26 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
    *  MEANS — a screen-space lasso cutting through the cloud's full depth rather
    *  than a shape in tissue coordinates — so the hint below it says so. */
   @Input() is3d = false;
+  /** The dialog was opened or closed; two-way with {@link visible}. */
   @Output() visibleChange = new EventEmitter<boolean>();
 
   /** Null when the host bound no `SPATIAL_DATA_PORT`. */
-  controls: ISpatialControls | null = null;
-  dataset: SpatialDataset | null = null;
-  view: SpatialViewState = { ...DEFAULT_SPATIAL_VIEW };
+  protected controls: ISpatialControls | null = null;
+  protected dataset: SpatialDataset | null = null;
+  protected view: SpatialViewState = { ...DEFAULT_SPATIAL_VIEW };
 
   /**
    * Gene picker: a filterable dropdown rather than a free-text typeahead, so the
    * options are visible before anything is typed and each keystroke narrows a list
    * the user can see. One model feeds every gene dropdown of the panel.
    */
-  readonly genes = new GenePickerModel(
+  protected readonly genes = new GenePickerModel(
     () => this.controls,
     () => [
       ...(this.view?.transcriptGenes ?? []),
       ...(this.view?.colorBy?.kind === 'feature' ? [this.view.colorBy.name] : []),
     ],
-    (fn) => this.zone.run(fn),
+    (fn) => this.runAndMark(fn),
   );
   /** The gene dropdowns' options. */
   get geneOptions(): PanelOption<string>[] {
@@ -99,41 +121,42 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   /** The key — legend or colour bar — for the active colouring. Kept here, not in
    *  `<spatial-key>`: whether the colouring is categorical decides which knobs the rest of
    *  the panel offers, whether or not the key is on screen. */
-  readonly key = new SpatialKeyModel((fn) => this.zone.run(fn));
+  readonly key = new SpatialKeyModel((fn) => this.runAndMark(fn));
   /** Categorical key, or null when the active colouring is continuous. */
-  get legend(): SpatialLegendEntry[] | null {
+  protected get legend(): SpatialLegendEntry[] | null {
     return this.key.legend;
   }
   /** CSS gradient for a continuous colouring, or null when categorical. */
-  get colorBarCss(): string | null {
+  protected get colorBarCss(): string | null {
     return this.key.colorBarCss;
   }
 
   /** Current selection — drives the count, the Clear button and the muting. */
-  selection: SpatialSelectionMask = emptySelection();
+  protected selection: SpatialSelectionMask = emptySelection();
   /** The legend row whose category is currently selected, for highlighting. */
-  selectedCategory: number | null = null;
+  protected selectedCategory: number | null = null;
   /** An ROI selection that matched nothing, so the UI can say so rather than
    *  looking like the button did nothing. */
-  selectionMissed = false;
+  protected selectionMissed = false;
 
   /**
    * Whether the Distribution section is expanded. Collapsed by default: the
    * panel's primary job is the colour controls, and the chart roughly doubles
    * its height.
    */
-  chartsOpen = false;
+  protected chartsOpen = false;
   /** Per-instance id for the collapsible body, so `aria-controls` points at one
    *  element and expanding the second panel cannot scroll the first one's chart. */
-  readonly chartsBodyId = `sc-charts-body-${++controlsInstanceSeq}`;
+  protected readonly chartsBodyId = `sc-charts-body-${++controlsInstanceSeq}`;
 
   /** Colormap tree for the continuous colour scale and the density map: the library's
    *  own `COLORMAP_OPTIONS`. */
-  colormapOptions: ColormapNode[] = [];
+  protected colormapOptions: ColormapNode[] = [];
 
   private colormap: ColormapNode | null = null;
   private reverse = false;
-  private readonly subs = new Subscription();
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly cdr = inject(ChangeDetectorRef);
 
   constructor(
     @Inject(VISUALIZER) private readonly viz: IVisualizer,
@@ -145,52 +168,57 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     this.colormapOptions = this.viz.getColormapOptions?.() ?? [];
     if (!this.controls) return;
 
-    this.subs.add(this.controls.getDataset$().subscribe((dataset) => {
+    const untilDestroyed = <T>() => takeUntilDestroyed<T>(this.destroyRef);
+    this.controls.getDataset$().pipe(untilDestroyed()).subscribe((dataset) => {
       this.dataset = dataset;
       this.genes.setDataset(dataset);
       // A dataset with no cells to outline leads with its observations.
       this.open = { ...this.open, cells: !!(dataset?.polygonTiles || dataset?.polygons),
         observations: !(dataset?.polygonTiles || dataset?.polygons) };
       void this.refreshKey();
-    }));
+      this.cdr.markForCheck();
+    });
 
-    this.subs.add(this.controls.getViewState$().subscribe((view) => {
+    this.controls.getViewState$().pipe(untilDestroyed()).subscribe((view) => {
       this.view = view;
       void this.refreshKey();
-    }));
+      this.cdr.markForCheck();
+    });
 
     // The renderer's own streams may emit outside the zone: re-entered here, once, for
     // every panel they feed.
     const estimate$ = this.controls.getTranscriptEstimate$?.();
-    if (estimate$) this.subs.add(estimate$.subscribe((e) => this.zone.run(() => { this.estimate = e; })));
+    estimate$?.pipe(untilDestroyed()).subscribe((e) => this.runAndMark(() => { this.estimate = e; }));
     const counts$ = this.controls.getGeneCountsInView$?.();
-    if (counts$) this.subs.add(counts$.subscribe((c) => this.zone.run(() => { this.geneCounts = c; })));
+    counts$?.pipe(untilDestroyed()).subscribe((c) => this.runAndMark(() => { this.geneCounts = c; }));
     const density$ = this.controls.getDensityStats$?.();
-    if (density$) {
-      this.subs.add(density$.subscribe((d) => this.zone.run(() => { this.densityStats = d; })));
-    }
+    density$?.pipe(untilDestroyed()).subscribe((d) => this.runAndMark(() => { this.densityStats = d; }));
 
-    this.subs.add(this.controls.getSelection$().subscribe((selection) => {
+    this.controls.getSelection$().pipe(untilDestroyed()).subscribe((selection) => {
       this.selection = selection;
       if (selection.count === 0) this.selectedCategory = null;
-    }));
+      this.cdr.markForCheck();
+    });
 
     // The colour bar must use the colormap the renderer is using.
-    this.subs.add(
-      combineLatest([this.viz.getColormap(), this.viz.getReverseScale()])
-        .subscribe(([colormap, reverse]) => {
-          this.colormap = (colormap as ColormapNode) ?? null;
-          this.reverse = !!reverse;
-          void this.refreshKey();
-        }),
-    );
+    combineLatest([this.viz.getColormap(), this.viz.getReverseScale()])
+      .pipe(untilDestroyed())
+      .subscribe(([colormap, reverse]) => {
+        this.colormap = (colormap as ColormapNode) ?? null;
+        this.reverse = !!reverse;
+        void this.refreshKey();
+      });
   }
 
-  ngOnDestroy(): void {
-    this.subs.unsubscribe();
+  /** Apply an async result inside the zone and re-render this OnPush dialog. */
+  private runAndMark(fn: () => void): void {
+    this.zone.run(() => {
+      fn();
+      this.cdr.markForCheck();
+    });
   }
 
-  onVisibleChange(value: boolean): void {
+  protected onVisibleChange(value: boolean): void {
     this.visible = value;
     this.visibleChange.emit(value);
   }
@@ -210,7 +238,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   // ── selection ───────────────────────────────────────────────────────────
 
   /** Select every observation inside the drawn regions (their union). */
-  selectFromRegions(): void {
+  protected selectFromRegions(): void {
     const count = this.controls?.selectFromRegions() ?? 0;
     this.selectedCategory = null;
     this.selectionMissed = count === 0;
@@ -218,7 +246,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
 
   /** Legend click: select one category. Clicking the active row clears it, so a
    *  second click is an undo rather than a no-op. */
-  async selectCategory(index: number): Promise<void> {
+  protected async selectCategory(index: number): Promise<void> {
     const by = this.view.colorBy;
     if (!this.controls || by?.kind !== 'column') return;
     if (this.selectedCategory === index) {
@@ -232,6 +260,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     } catch {
       this.selectedCategory = null;
     }
+    this.cdr.markForCheck();
   }
 
   /**
@@ -243,7 +272,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
    * scroll is deferred a task so the chart's own deferred first draw has given the
    * body its height.
    */
-  toggleCharts(): void {
+  protected toggleCharts(): void {
     this.chartsOpen = !this.chartsOpen;
     if (!this.chartsOpen) return;
     setTimeout(() => {
@@ -252,67 +281,67 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     }, 0);
   }
 
-  clearSelection(): void {
+  protected clearSelection(): void {
     this.controls?.clearSelection();
     this.selectedCategory = null;
     this.selectionMissed = false;
   }
 
   /** True while a selection is active — everything else renders muted. */
-  get hasSelection(): boolean {
+  protected get hasSelection(): boolean {
     return this.selection.count > 0;
   }
 
   // ── sections ────────────────────────────────────────────────────────────
 
   /** Boundaries on offer: tiled (level-of-detail) or whole-dataset rings. */
-  get hasCells(): boolean {
+  protected get hasCells(): boolean {
     return !!(this.dataset?.polygonTiles || this.dataset?.polygons);
   }
 
   /** Transcripts on offer: tiles to draw, or a density map. */
-  get hasTranscripts(): boolean {
+  protected get hasTranscripts(): boolean {
     return !!this.dataset?.transcriptTiles || !!this.dataset?.density;
   }
 
-  onShowImage(on: boolean): void {
+  protected onShowImage(on: boolean): void {
     this.controls?.setViewState({ showImage: on });
   }
 
-  onShowAnnotations(on: boolean): void {
+  protected onShowAnnotations(on: boolean): void {
     this.controls?.setViewState({ showAnnotations: on });
   }
 
   /** Which collapsible sections are open. Per dialog instance, not persisted. */
-  open: Record<'images' | 'cells' | 'transcripts' | 'annotations' | 'observations', boolean> = {
+  protected open: Record<'images' | 'cells' | 'transcripts' | 'annotations' | 'observations', boolean> = {
     images: false, cells: true, transcripts: false, annotations: false, observations: false,
   };
 
-  toggleSection(name: keyof SpatialControlsComponent['open']): void {
+  protected toggleSection(name: keyof SpatialControlsComponent['open']): void {
     this.setOpen(name, !this.open[name]);
   }
 
   /** Expand or collapse a section — what a panel's header asks for. */
-  setOpen(name: keyof SpatialControlsComponent['open'], on: boolean): void {
+  protected setOpen(name: keyof SpatialControlsComponent['open'], on: boolean): void {
     this.open = { ...this.open, [name]: on };
   }
 
   // ── renderer readouts, for the Transcripts section ────────────────────
 
   /** Estimated transcripts in view, against the budget — Explorer's points bar. */
-  estimate: { points: number; max: number } | null = null;
+  protected estimate: { points: number; max: number } | null = null;
   /** The density window in use and its densest bin, for the threshold control. */
-  densityStats: { lo: number; hi: number; max: number } | null = null;
+  protected densityStats: { lo: number; hi: number; max: number } | null = null;
   /** Transcripts of each selected gene in the current view, from the renderer. */
-  geneCounts: Record<string, number> | null = null;
+  protected geneCounts: Record<string, number> | null = null;
 
-  reset(): void {
+  protected reset(): void {
     this.controls?.setViewState({ ...DEFAULT_SPATIAL_VIEW });
     this.clearSelection();
   }
 
   /** Label for the current colouring, for the Distribution heading. */
-  get colorByLabel(): string {
+  protected get colorByLabel(): string {
     return colorByLabel(this.view);
   }
 

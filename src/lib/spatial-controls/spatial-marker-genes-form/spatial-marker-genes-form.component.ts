@@ -2,6 +2,11 @@ import {
   ChangeDetectionStrategy, ChangeDetectorRef, Component, EventEmitter, Input, NgZone, OnChanges, Output,
   SimpleChanges,
 } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { ButtonModule } from 'primeng/button';
+import { DropdownModule } from 'primeng/dropdown';
+import { MultiSelectModule } from 'primeng/multiselect';
 
 import type { ISpatialControls } from '../../contracts/visualizer.contract';
 import type { SpatialDataset } from '../../contracts/spatial-dataset.contract';
@@ -21,6 +26,8 @@ import {
  */
 @Component({
   selector: 'spatial-marker-genes-form',
+  standalone: true,
+  imports: [CommonModule, FormsModule, ButtonModule, DropdownModule, MultiSelectModule],
   templateUrl: './spatial-marker-genes-form.component.html',
   styleUrls: ['./spatial-marker-genes-form.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -33,20 +40,20 @@ export class SpatialMarkerGenesFormComponent implements OnChanges {
   @Input() open = false;
   @Output() readonly openChange = new EventEmitter<boolean>();
 
-  markerColumn: string | null = null;
-  markerPerGroup = 5;
-  readonly markerPerGroupOptions = [3, 5, 10, 20].map((n) => ({ label: `${n} genes`, value: n }));
-  markerClusters: string[] = [];
-  markerClusterOptions: PanelOption<string>[] = [];
-  markerLoading = false;
-  markerError: string | null = null;
+  protected markerColumn: string | null = null;
+  protected markerPerGroup = 5;
+  protected readonly markerPerGroupOptions = [3, 5, 10, 20].map((n) => ({ label: `${n} genes`, value: n }));
+  protected markerClusters: string[] = [];
+  protected markerClusterOptions: PanelOption<string>[] = [];
+  protected markerLoading = false;
+  protected markerError: string | null = null;
   /**
    * Every categorical column but the segmentation method, which says nothing about genes.
    * Rebuilt with the dataset, never per change-detection pass: a fresh array per pass makes
    * PrimeNG re-render the options, and an option re-rendered under the pointer swallows
    * the click.
    */
-  markerColumnOptions: PanelOption<string>[] = [];
+  protected markerColumnOptions: PanelOption<string>[] = [];
 
   constructor(
     private readonly zone: NgZone,
@@ -58,12 +65,12 @@ export class SpatialMarkerGenesFormComponent implements OnChanges {
     if (changes['open'] && this.open) this.prepare();
   }
 
-  onMarkerColumn(column: string): void {
+  protected onMarkerColumn(column: string): void {
     this.markerColumn = column;
     this.refreshMarkerClusters();
   }
 
-  close(): void {
+  protected close(): void {
     this.open = false;
     this.openChange.emit(false);
   }
@@ -73,7 +80,7 @@ export class SpatialMarkerGenesFormComponent implements OnChanges {
    * them. A gene that marks several clusters goes to the one it is most specific to, so the
    * tree lists it once.
    */
-  async addMarkerGenes(): Promise<void> {
+  protected async addMarkerGenes(): Promise<void> {
     const column = this.markerColumn;
     const markerGenes = this.controls?.markerGenes;
     if (!column || !markerGenes || !this.markerClusters.length) return;

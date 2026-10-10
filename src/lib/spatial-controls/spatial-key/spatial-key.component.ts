@@ -1,6 +1,11 @@
 import {
   ChangeDetectionStrategy, Component, EventEmitter, Input, OnChanges, Output,
 } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { SharedModule } from 'primeng/api';
+import { TooltipModule } from 'primeng/tooltip';
+import { TreeSelectModule } from 'primeng/treeselect';
 
 import type { ISpatialControls } from '../../contracts/visualizer.contract';
 import type { SpatialDataset } from '../../contracts/spatial-dataset.contract';
@@ -21,6 +26,8 @@ import type { SpatialLegendEntry } from './spatial-key.model';
  */
 @Component({
   selector: 'spatial-key',
+  standalone: true,
+  imports: [CommonModule, FormsModule, SharedModule, TooltipModule, TreeSelectModule],
   templateUrl: './spatial-key.component.html',
   styleUrls: ['./spatial-key.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -45,15 +52,15 @@ export class SpatialKeyComponent implements OnChanges {
   @Output() readonly categoryClicked = new EventEmitter<number>();
 
   /** The node currently picked from {@link colormapOptions}. */
-  selectedColormapNode: ColormapNode | null = null;
+  protected selectedColormapNode: ColormapNode | null = null;
   /** Label for the current colouring, for the key's heading. */
-  colorByLabel = 'Flat colour';
+  protected colorByLabel = 'Flat colour';
   /**
    * Description of the active column, when it has one. Surfaced because a DERIVED column
    * (k-means clusters, QC totals computed at conversion) must not read as though it came
    * with the data.
    */
-  activeDescription: string | null = null;
+  protected activeDescription: string | null = null;
 
   ngOnChanges(): void {
     const by = this.view.colorBy;
@@ -65,12 +72,12 @@ export class SpatialKeyComponent implements OnChanges {
   }
 
   /** True when the active colouring is a categorical column. */
-  get isCategorical(): boolean {
+  protected get isCategorical(): boolean {
     return this.legend !== null;
   }
 
   /** Whether the colour bar applies: there is a colouring, and it is not categorical. */
-  get isContinuous(): boolean {
+  protected get isContinuous(): boolean {
     return !!this.view.colorBy && this.legend === null;
   }
 
@@ -78,7 +85,7 @@ export class SpatialKeyComponent implements OnChanges {
    * The continuous colour scale's colormap. Clearing it goes back to following the
    * image's, which is the default.
    */
-  onContinuousColormap(node: ColormapNode | null): void {
+  protected onContinuousColormap(node: ColormapNode | null): void {
     this.selectedColormapNode = node;
     // The value is a ColormapValue, which is a NAME for the built-in scales and an
     // inline `[stop, colour]` array for the rest — half the library's colormaps

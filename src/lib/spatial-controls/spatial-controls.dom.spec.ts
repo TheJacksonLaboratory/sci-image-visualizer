@@ -1,6 +1,4 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { FormsModule } from '@angular/forms';
-import { NO_ERRORS_SCHEMA } from '@angular/core';
 import { BehaviorSubject, of } from 'rxjs';
 
 import { SpatialControlsComponent } from './spatial-controls.component';
@@ -17,7 +15,7 @@ import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../contracts/display-typ
 import { COLORMAP_OPTIONS } from '../plot.utilities';
 import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selection';
 import {
-  StubValueAccessorDirective, accessorOf, afterLabel, click, fire, one, panelNamed, rowLabelled,
+  accessorOf, afterLabel, click, fire, one, panelNamed, rowLabelled, shallowPanel,
 } from '../testing/spatial-panel-testing';
 
 /**
@@ -108,15 +106,16 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
 
   async function build(opts: { is3d?: boolean } = {}) {
     TestBed.resetTestingModule();
+    // The dialog and every panel it is made of, each shallow (PrimeNG unrendered).
+    for (const leaf of [SpatialKeyComponent, SpatialGroupsPanelComponent, SpatialGeneTreeComponent,
+      SpatialMarkerGenesFormComponent]) shallowPanel(leaf);
+    shallowPanel(SpatialCellsPanelComponent, [SpatialGroupsPanelComponent]);
+    shallowPanel(SpatialObservationsPanelComponent, [SpatialKeyComponent]);
+    shallowPanel(SpatialTranscriptsPanelComponent, [SpatialGeneTreeComponent, SpatialMarkerGenesFormComponent]);
+    shallowPanel(SpatialControlsComponent,
+      [SpatialCellsPanelComponent, SpatialTranscriptsPanelComponent, SpatialObservationsPanelComponent]);
     await TestBed.configureTestingModule({
-      // The dialog and every panel it is made of.
-      declarations: [
-        SpatialControlsComponent, SpatialKeyComponent, SpatialCellsPanelComponent, SpatialGroupsPanelComponent,
-        SpatialTranscriptsPanelComponent, SpatialGeneTreeComponent, SpatialMarkerGenesFormComponent,
-        SpatialObservationsPanelComponent, StubValueAccessorDirective,
-      ],
-      imports: [FormsModule],
-      schemas: [NO_ERRORS_SCHEMA],
+      imports: [SpatialControlsComponent],
       providers: [{
         provide: VISUALIZER,
         useValue: {
@@ -587,7 +586,7 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       click(one(root, '.sc-disclosure'));
       fixture.detectChanges();
       expect(charts.active).toBe(true);
-      expect(one(root, `#${component.chartsBodyId}`).hidden).toBe(false);
+      expect(one(root, `#${component['chartsBodyId']}`).hidden).toBe(false);
     });
 
     it('resets the view to the defaults and clears the selection', async () => {

@@ -1,11 +1,9 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { FormsModule } from '@angular/forms';
-import { NO_ERRORS_SCHEMA } from '@angular/core';
 
 import { SpatialGroupsPanelComponent } from './spatial-groups-panel.component';
 import { SpatialDataset } from '../../contracts/spatial-dataset.contract';
 import {
-  SpatialControlsFake, StubValueAccessorDirective, TILED_DATASET, bindInputs, fakeSpatialControls, fire, one,
+  SpatialControlsFake, TILED_DATASET, bindInputs, fakeSpatialControls, fire, one, shallowPanel,
 } from '../../testing/spatial-panel-testing';
 
 describe('SpatialGroupsPanelComponent', () => {
@@ -21,11 +19,8 @@ describe('SpatialGroupsPanelComponent', () => {
 
   async function build(dataset: SpatialDataset = TILED_DATASET) {
     fake.dataset$.next(dataset);
-    await TestBed.configureTestingModule({
-      declarations: [SpatialGroupsPanelComponent, StubValueAccessorDirective],
-      imports: [FormsModule],
-      schemas: [NO_ERRORS_SCHEMA],
-    }).compileComponents();
+    shallowPanel(SpatialGroupsPanelComponent);
+    await TestBed.configureTestingModule({ imports: [SpatialGroupsPanelComponent] }).compileComponents();
     fixture = TestBed.createComponent(SpatialGroupsPanelComponent);
     component = fixture.componentInstance;
     bindInputs(fixture, { controls: fake.controls, dataset: fake.dataset$, view: fake.view$ });
@@ -54,7 +49,7 @@ describe('SpatialGroupsPanelComponent', () => {
           section: 'Imported groups' },
       ],
     });
-    expect(component.groupOptions).toEqual([
+    expect(component['groupOptions']).toEqual([
       { label: 'Xenium Onboard Analysis groups', items: [
         { label: 'Graph-Based Clustering (GEX)', value: 'graphclust' },
         { label: 'K-Means Clustering (GEX)', value: 'family:kmeans' },
@@ -62,14 +57,14 @@ describe('SpatialGroupsPanelComponent', () => {
       { label: 'Imported groups', items: [{ label: 'Mine', value: 'imported:Mine' }] },
     ]);
     // A fresh array per read made PrimeNG re-render the options until they were unclickable.
-    expect(component.groupOptions).toBe(component.groupOptions);
-    component.onGroupEntry('family:kmeans');
+    expect(component['groupOptions']).toBe(component['groupOptions']);
+    component['onGroupEntry']('family:kmeans');
     expect(fake.view$.value.cellTypeColumn).toBe('kmeans_2');
-    expect(component.activeGroupEntry).toBe('family:kmeans');
-    expect(component.groupVariantOptions.map((o) => o.label)).toEqual(['k = 2', 'k = 3']);
-    component.onGroupVariant('kmeans_3');
-    component.onGroupEntry('graphclust');
-    component.onGroupEntry('family:kmeans');
+    expect(component['activeGroupEntry']).toBe('family:kmeans');
+    expect(component['groupVariantOptions'].map((o) => o.label)).toEqual(['k = 2', 'k = 3']);
+    component['onGroupVariant']('kmeans_3');
+    component['onGroupEntry']('graphclust');
+    component['onGroupEntry']('family:kmeans');
     expect(fake.view$.value.cellTypeColumn).toBe('kmeans_3'); // remembers the k chosen
   });
 
@@ -79,17 +74,17 @@ describe('SpatialGroupsPanelComponent', () => {
       codes: Uint16Array.from([1, 1, 0, 1, 0xffff]),
     }));
     await build();
-    expect(component.groupRows.map((r) => [r.label, r.count])).toEqual([['B', 3], ['A', 1]]);
-    expect(component.groupTotal).toBe(4);
+    expect(component['groupRows'].map((r) => [r.label, r.count])).toEqual([['B', 3], ['A', 1]]);
+    expect(component['groupTotal']).toBe(4);
     const root = fixture.nativeElement as HTMLElement;
     expect(one(root, '.sc-group-all .sc-count').textContent).toContain('4');
-    component.onGroupShown('B', false);
+    component['onGroupShown']('B', false);
     expect(fake.view$.value.hiddenGroups).toEqual(['B']);
-    expect(component.allGroupsShown).toBe(false);
-    component.onAllGroupsShown(true);
+    expect(component['allGroupsShown']).toBe(false);
+    component['onAllGroupsShown'](true);
     expect(fake.view$.value.hiddenGroups).toEqual([]);
     // Changing grouping clears the switched-off groups of the old one.
-    component.onGroupShown('A', false);
+    component['onGroupShown']('A', false);
     component.onCellTypeColumn('curated_cell_type');
     expect(fake.view$.value.hiddenGroups).toEqual([]);
   });
@@ -104,11 +99,11 @@ describe('SpatialGroupsPanelComponent', () => {
     await build();
     fake.dataset$.next({ ...TILED_DATASET, id: 'other' } as SpatialDataset);
     await flush();
-    expect(component.groupRows.map((r) => r.label)).toEqual(['New']);
+    expect(component['groupRows'].map((r) => r.label)).toEqual(['New']);
 
     resolveOld(view(['Old'], [0, 0, 0]));
     await flush();
-    expect(component.groupRows.map((r) => r.label)).toEqual(['New']);
+    expect(component['groupRows'].map((r) => r.label)).toEqual(['New']);
   });
 
   it("keeps the newer grouping's rows when a superseded load fails", async () => {
@@ -124,14 +119,14 @@ describe('SpatialGroupsPanelComponent', () => {
     await flush();
     resolveNew(view(['T cell'], [0], 'curated_cell_type'));
     await flush();
-    expect(component.groupRows.map((r) => r.label)).toEqual(['T cell']);
+    expect(component['groupRows'].map((r) => r.label)).toEqual(['T cell']);
     expect(categoricalView).toHaveBeenCalledTimes(2);
   });
 
   it('shows no rows without a grouping', async () => {
     await build({ ...TILED_DATASET, columns: [{ kind: 'continuous', name: 'cell_area' }] });
-    expect(component.groupRows).toEqual([]);
-    expect(component.groupOptions).toEqual([]);
+    expect(component['groupRows']).toEqual([]);
+    expect(component['groupOptions']).toEqual([]);
     expect((fixture.nativeElement as HTMLElement).querySelector('.sc-subhead')).toBeNull();
   });
 
@@ -146,13 +141,13 @@ describe('SpatialGroupsPanelComponent', () => {
       }));
       (fake.controls as unknown as { importGroups: unknown }).importGroups = importGroups;
       await build();
-      expect(component.canImportGroups).toBe(true);
+      expect(component['canImportGroups']).toBe(true);
       const input = file('Mine.csv', 'cell_id,group\n1,T');
-      await component.onImportGroupsFile(input);
+      await component['onImportGroupsFile'](input);
       expect(importGroups).toHaveBeenCalledWith('Mine', 'cell_id,group\n1,T');
       expect(input.value).toBe('');
       expect(fake.view$.value.cellTypeColumn).toBe('imported:Mine');
-      expect(component.groupImporting).toBe(false);
+      expect(component['groupImporting']).toBe(false);
     });
 
     it('says why an import failed', async () => {
@@ -160,15 +155,15 @@ describe('SpatialGroupsPanelComponent', () => {
         throw new Error('no cell_id column');
       });
       await build();
-      await component.onImportGroupsFile(file('Bad.csv', 'x'));
-      expect(component.groupImportError).toBe('no cell_id column');
+      await component['onImportGroupsFile'](file('Bad.csv', 'x'));
+      expect(component['groupImportError']).toBe('no cell_id column');
       fixture.detectChanges();
       expect((fixture.nativeElement as HTMLElement).textContent).toContain('no cell_id column');
     });
 
     it('is not offered when the port cannot import', async () => {
       await build();
-      expect(component.canImportGroups).toBe(false);
+      expect(component['canImportGroups']).toBe(false);
     });
   });
 

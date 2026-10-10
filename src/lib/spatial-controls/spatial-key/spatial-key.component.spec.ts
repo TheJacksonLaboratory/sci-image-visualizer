@@ -1,12 +1,10 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { FormsModule } from '@angular/forms';
-import { NO_ERRORS_SCHEMA } from '@angular/core';
 
 import { SpatialKeyComponent, colorByLabel, colormapNodeFor } from './spatial-key.component';
 import { SpatialDataset } from '../../contracts/spatial-dataset.contract';
 import { COLORMAP_OPTIONS } from '../../plot.utilities';
 import {
-  SpatialControlsFake, StubValueAccessorDirective, accessorOf, bindInputs, fakeSpatialControls, fire, one,
+  SpatialControlsFake, accessorOf, bindInputs, fakeSpatialControls, fire, one, shallowPanel,
 } from '../../testing/spatial-panel-testing';
 
 const dataset: SpatialDataset = {
@@ -30,11 +28,8 @@ describe('SpatialKeyComponent', () => {
   let root: HTMLElement;
 
   async function build(inputs: Record<string, unknown> = {}) {
-    await TestBed.configureTestingModule({
-      declarations: [SpatialKeyComponent, StubValueAccessorDirective],
-      imports: [FormsModule],
-      schemas: [NO_ERRORS_SCHEMA],
-    }).compileComponents();
+    shallowPanel(SpatialKeyComponent);
+    await TestBed.configureTestingModule({ imports: [SpatialKeyComponent] }).compileComponents();
     fixture = TestBed.createComponent(SpatialKeyComponent);
     key = fixture.componentInstance;
     root = fixture.nativeElement as HTMLElement;
@@ -51,7 +46,7 @@ describe('SpatialKeyComponent', () => {
   it('shows nothing while nothing is coloured by', async () => {
     await build();
     expect(root.querySelector('.sc-key')).toBeNull();
-    expect(key.colorByLabel).toBe('Flat colour');
+    expect(key['colorByLabel']).toBe('Flat colour');
   });
 
   describe('heading', () => {
@@ -64,16 +59,16 @@ describe('SpatialKeyComponent', () => {
     it('surfaces a column description, so a DERIVED column does not read as measured', async () => {
       await build();
       fake.view$.next({ ...fake.view$.value, colorBy: { kind: 'column', name: 'cluster' } });
-      expect(key.activeDescription).toMatch(/k-means/);
+      expect(key['activeDescription']).toMatch(/k-means/);
       expect(one(root, '.sc-key').textContent).toContain('k-means');
     });
 
     it('has no description for a gene or an undescribed column', async () => {
       await build();
       fake.view$.next({ ...fake.view$.value, colorBy: { kind: 'feature', name: 'Ttr' } });
-      expect(key.activeDescription).toBeNull();
+      expect(key['activeDescription']).toBeNull();
       fake.view$.next({ ...fake.view$.value, colorBy: { kind: 'column', name: 'region' } });
-      expect(key.activeDescription).toBeNull();
+      expect(key['activeDescription']).toBeNull();
     });
   });
 
@@ -92,8 +87,8 @@ describe('SpatialKeyComponent', () => {
       expect(clicked).toEqual([0]);
       // No colour bar and no colormap picker for categories.
       expect(root.querySelector('.sc-colorbar')).toBeNull();
-      expect(key.isCategorical).toBe(true);
-      expect(key.isContinuous).toBe(false);
+      expect(key['isCategorical']).toBe(true);
+      expect(key['isContinuous']).toBe(false);
     });
   });
 
@@ -104,7 +99,7 @@ describe('SpatialKeyComponent', () => {
     });
 
     it('shows the colour bar with its colormap picker', () => {
-      expect(key.isContinuous).toBe(true);
+      expect(key['isContinuous']).toBe(true);
       expect(one(root, '.sc-colorbar')).toBeTruthy();
       expect(root.querySelector('.sc-legend')).toBeNull();
       expect(one(root, 'p-treeSelect')).toBeTruthy();
@@ -117,7 +112,7 @@ describe('SpatialKeyComponent', () => {
       fire(picker, 'onClear');
       expect(fake.controls.setViewState).toHaveBeenCalledWith({ continuousColormap: null });
       // A group row carries no value, so picking one must not set a bogus colormap.
-      key.onContinuousColormap({ label: 'Sequential', data: null } as never);
+      key['onContinuousColormap']({ label: 'Sequential', data: null } as never);
       expect(fake.controls.setViewState).toHaveBeenLastCalledWith({ continuousColormap: null });
     });
 
@@ -132,13 +127,13 @@ describe('SpatialKeyComponent', () => {
         label: 'Plasma',
         data: { value: [[0, 'rgb(12,7,134)'], [1, 'rgb(239,248,33)']] as [number, string][] },
       };
-      key.onContinuousColormap(resolved);
+      key['onContinuousColormap'](resolved);
       expect(fake.controls.setViewState).toHaveBeenCalledWith({ continuousColormap: resolved.data.value });
 
       // And an unresolved key is still a name, which must pass through too.
       const plasma = COLORMAP_OPTIONS.flatMap((g) => g.children ?? []).find((n) => n.label === 'Plasma')!;
       expect(plasma.data!.value).toBe('PLASMA_LUT');
-      key.onContinuousColormap(plasma);
+      key['onContinuousColormap'](plasma);
       expect(fake.controls.setViewState).toHaveBeenCalledWith({ continuousColormap: 'PLASMA_LUT' });
     });
 
@@ -146,16 +141,16 @@ describe('SpatialKeyComponent', () => {
       // The picker has to reflect state set from anywhere — a host calling
       // setViewState, or a restored session — not just its own clicks.
       fake.view$.next({ ...fake.view$.value, continuousColormap: 'MAGMA_LUT' });
-      expect(key.selectedColormapNode?.label).toBe('Magma');
+      expect(key['selectedColormapNode']?.label).toBe('Magma');
       await fixture.whenStable();
       expect((accessorOf(fixture, one(root, 'p-treeSelect')).value as { label: string }).label).toBe('Magma');
 
       fake.view$.next({ ...fake.view$.value, continuousColormap: null });
-      expect(key.selectedColormapNode).toBeNull();
+      expect(key['selectedColormapNode']).toBeNull();
 
       // An unknown value selects nothing rather than throwing.
       fake.view$.next({ ...fake.view$.value, continuousColormap: 'NOT_A_LUT' });
-      expect(key.selectedColormapNode).toBeNull();
+      expect(key['selectedColormapNode']).toBeNull();
     });
   });
 

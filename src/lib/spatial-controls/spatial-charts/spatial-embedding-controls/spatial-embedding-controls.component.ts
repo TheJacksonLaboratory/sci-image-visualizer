@@ -1,4 +1,10 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { ButtonModule } from 'primeng/button';
+import { DropdownModule } from 'primeng/dropdown';
+import { ProgressBarModule } from 'primeng/progressbar';
+import { TooltipModule } from 'primeng/tooltip';
 
 import type { SpatialEmbeddingMeta } from '../../../contracts/spatial-dataset.contract';
 import type { EmbeddingComputeState } from '../../../spatial/embedding-compute-coordinator';
@@ -14,6 +20,8 @@ const IDLE: EmbeddingComputeState = { running: false, fraction: null, backend: n
  */
 @Component({
   selector: 'spatial-embedding-controls',
+  standalone: true,
+  imports: [CommonModule, FormsModule, ButtonModule, DropdownModule, ProgressBarModule, TooltipModule],
   templateUrl: './spatial-embedding-controls.component.html',
   styleUrls: ['./spatial-embedding-controls.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

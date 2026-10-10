@@ -1,6 +1,7 @@
-import { Directive, Input, forwardRef } from '@angular/core';
-import { ComponentFixture } from '@angular/core/testing';
-import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
+import { Directive, Input, NO_ERRORS_SCHEMA, Type, forwardRef } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { ControlValueAccessor, FormsModule, NG_VALUE_ACCESSOR } from '@angular/forms';
 import { By } from '@angular/platform-browser';
 import { BehaviorSubject, Subscription, isObservable } from 'rxjs';
 
@@ -21,6 +22,7 @@ import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selecti
  * the schema, which {@link fire} dispatches.
  */
 @Directive({
+  standalone: true,
   // eslint-disable-next-line @angular-eslint/directive-selector
   selector: 'p-checkbox[ngModel],p-dropdown[ngModel],p-selectButton[ngModel],p-slider[ngModel],'
     + 'p-inputNumber[ngModel],p-multiSelect[ngModel],p-treeSelect[ngModel]',
@@ -53,6 +55,22 @@ export class StubValueAccessorDirective implements ControlValueAccessor {
     this.value = value;
     this.onChange(value);
   }
+}
+
+/**
+ * Render a standalone panel shallowly, as the panel specs always have: its own template
+ * with the common directives, `ngModel` and {@link StubValueAccessorDirective}, every
+ * PrimeNG control and child component an unknown element (`NO_ERRORS_SCHEMA`). `children`
+ * are rendered for real (themselves shallow only if passed through this too). Call before
+ * the testing module compiles.
+ */
+export function shallowPanel(component: Type<unknown>, children: Type<unknown>[] = []): void {
+  TestBed.overrideComponent(component, {
+    set: {
+      imports: [CommonModule, FormsModule, StubValueAccessorDirective, ...children],
+      schemas: [NO_ERRORS_SCHEMA],
+    },
+  });
 }
 
 /** The one element matching `selector` under `root`; throws (naming it) when there is none. */

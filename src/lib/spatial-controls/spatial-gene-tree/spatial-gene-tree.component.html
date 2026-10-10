@@ -2,9 +2,9 @@
 <div class="sc-gene-tree">
   <div class="sc-gene-row sc-gene-root">
     <button type="button" class="sc-eye"
-            (click)="view.transcriptAllGenes ? onToggleAllGenes() : onGenesShown(view.transcriptGenes, !areGenesShown(view.transcriptGenes))">
-      <i class="pi" [class.pi-eye]="view.transcriptAllGenes || areGenesShown(view.transcriptGenes)"
-         [class.pi-eye-slash]="!view.transcriptAllGenes && !areGenesShown(view.transcriptGenes)"></i>
+            (click)="view.transcriptAllGenes ? onToggleAllGenes() : onGenesShown(view.transcriptGenes, !rootShown)">
+      <i class="pi" [class.pi-eye]="view.transcriptAllGenes || rootShown"
+         [class.pi-eye-slash]="!view.transcriptAllGenes && !rootShown"></i>
     </button>
     <span class="sc-group-label">Genes</span>
     <span class="sc-count">({{ (view.transcriptAllGenes ? geneTotal : view.transcriptGenes.length) | number }}/{{ geneTotal | number }})</span>
@@ -16,8 +16,8 @@
   <ng-container *ngIf="geneTreeOpen && !view.transcriptAllGenes">
     <ng-container *ngFor="let node of geneTree; trackBy: trackByNode">
       <div class="sc-gene-row sc-gene-group" *ngIf="node.name">
-        <button type="button" class="sc-eye" (click)="onGenesShown(node.genes, !areGenesShown(node.genes))">
-          <i class="pi" [class.pi-eye]="areGenesShown(node.genes)" [class.pi-eye-slash]="!areGenesShown(node.genes)"></i>
+        <button type="button" class="sc-eye" (click)="onGenesShown(node.genes, !groupShown.get(node.name))">
+          <i class="pi" [class.pi-eye]="groupShown.get(node.name)" [class.pi-eye-slash]="!groupShown.get(node.name)"></i>
         </button>
         <span class="sc-group-label" [title]="node.name">{{ node.name }}</span>
         <span class="sc-count">({{ node.genes.length }})</span>
@@ -29,22 +29,22 @@
       <ng-container *ngIf="!node.name || !collapsedGeneGroups.has(node.name)">
         <div class="sc-gene-row sc-gene-leaf" [class.nested]="!!node.name"
              *ngFor="let gene of node.genes; trackBy: trackByLabelString">
-          <button type="button" class="sc-eye" (click)="onGenesShown([gene], !isGeneShown(gene))">
-            <i class="pi" [class.pi-eye]="isGeneShown(gene)" [class.pi-eye-slash]="!isGeneShown(gene)"></i>
+          <button type="button" class="sc-eye" (click)="onGenesShown([gene], !rows.get(gene)?.shown)">
+            <i class="pi" [class.pi-eye]="rows.get(gene)?.shown" [class.pi-eye-slash]="!rows.get(gene)?.shown"></i>
           </button>
           <!-- The gene's marker, in its colour: its icon in Icons mode, a dot for circles.
                Clicking it opens the icon and colour picker (as Xenium Explorer does). -->
-          <button type="button" class="sc-gene-icon" [style.color]="geneSwatchOf(gene)"
+          <button type="button" class="sc-gene-icon" [style.color]="rows.get(gene)?.swatch"
                   [attr.aria-label]="'Icon and colour for ' + gene" pTooltip="Icon and colour"
                   tooltipPosition="top" (click)="openGeneStyle($event, gene, genePop)">
             <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg">
               <polygon *ngIf="view.transcriptMode === 'glyphs'; else dotIcon"
-                       [attr.points]="glyphPoints(glyphOf(gene, view.transcriptGenes.indexOf(gene)))"></polygon>
+                       [attr.points]="rows.get(gene)?.points"></polygon>
               <ng-template #dotIcon><circle r="0.75"></circle></ng-template>
             </svg>
           </button>
           <span class="sc-group-label">{{ gene }}</span>
-          <span class="sc-gene-count" *ngIf="geneCountOf(gene) as n; else zeroCount"
+          <span class="sc-gene-count" *ngIf="rows.get(gene)?.count as n; else zeroCount"
                 title="Transcripts in view">{{ n | number }}</span>
           <ng-template #zeroCount>
             <span class="sc-gene-count" *ngIf="geneCounts" title="Transcripts in view">0</span>

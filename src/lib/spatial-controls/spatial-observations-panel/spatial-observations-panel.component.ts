@@ -1,6 +1,12 @@
 import {
   ChangeDetectionStrategy, Component, EventEmitter, Input, OnChanges, Output, SimpleChanges,
 } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { CheckboxModule } from 'primeng/checkbox';
+import { DropdownModule } from 'primeng/dropdown';
+import { SliderModule } from 'primeng/slider';
+import { TooltipModule } from 'primeng/tooltip';
 
 import type { ISpatialControls } from '../../contracts/visualizer.contract';
 import type { SpatialDataset } from '../../contracts/spatial-dataset.contract';
@@ -12,6 +18,7 @@ import {
 } from '../../spatial/spatial-panel-model';
 import type { GenePickerModel } from '../spatial-gene-picker';
 import type { SpatialLegendEntry } from '../spatial-key/spatial-key.model';
+import { SpatialKeyComponent } from '../spatial-key/spatial-key.component';
 
 /**
  * The Observations section — one marker per observation (cell centroid, Visium spot) — and
@@ -25,6 +32,11 @@ import type { SpatialLegendEntry } from '../spatial-key/spatial-key.model';
  */
 @Component({
   selector: 'spatial-observations-panel',
+  standalone: true,
+  imports: [
+    CommonModule, FormsModule, CheckboxModule, DropdownModule, SliderModule, TooltipModule,
+    SpatialKeyComponent,
+  ],
   templateUrl: './spatial-observations-panel.component.html',
   styleUrls: ['./spatial-observations-panel.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -49,20 +61,20 @@ export class SpatialObservationsPanelComponent implements OnChanges {
   /** A legend row was clicked (see the key). */
   @Output() readonly categoryClicked = new EventEmitter<number>();
 
-  readonly clipOptions = CLIP_OPTIONS;
+  protected readonly clipOptions = CLIP_OPTIONS;
   /** Virtual-scrolled only past this many options (see the cells panel's gene dropdown). */
-  readonly geneVirtualScrollFrom = 200;
+  protected readonly geneVirtualScrollFrom = 200;
 
   /** Colour-by column choices — "None" plus every column the dataset declares. */
-  columnOptions: PanelOption<string | null>[] = [];
-  selectedColumn: string | null = null;
-  selectedGene: string | null = null;
+  protected columnOptions: PanelOption<string | null>[] = [];
+  protected selectedColumn: string | null = null;
+  protected selectedGene: string | null = null;
   /**
    * The dataset's imaged section positions, or null when its z is continuous rather than
    * sectioned. Read once per dataset — the scan walks the z of every observation, so it
    * must not sit in a template getter.
    */
-  sections: Float32Array | null = null;
+  protected sections: Float32Array | null = null;
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['dataset'] || changes['controls']) {
@@ -80,7 +92,7 @@ export class SpatialObservationsPanelComponent implements OnChanges {
   // ── colour source ───────────────────────────────────────────────────────
 
   /** Column dropdown. Choosing a column supersedes any gene selection. */
-  onColumn(name: string | null): void {
+  protected onColumn(name: string | null): void {
     this.selectedColumn = name;
     this.selectedGene = null;
     if (!name) {
@@ -91,7 +103,7 @@ export class SpatialObservationsPanelComponent implements OnChanges {
   }
 
   /** A gene was picked; it supersedes any column selection. */
-  onGene(name: string | null): void {
+  protected onGene(name: string | null): void {
     this.selectedGene = name;
     if (!name) {
       this.controls?.clearColorBy();
@@ -102,7 +114,7 @@ export class SpatialObservationsPanelComponent implements OnChanges {
   }
 
   /** Cell outlines on offer, which changes what the circles mean. */
-  get hasCells(): boolean {
+  protected get hasCells(): boolean {
     return !!(this.dataset?.polygonTiles || this.dataset?.polygons);
   }
 
@@ -112,7 +124,7 @@ export class SpatialObservationsPanelComponent implements OnChanges {
   }
 
   /** Whether log/clip apply — they are continuous-only knobs. */
-  get isContinuous(): boolean {
+  protected get isContinuous(): boolean {
     return !!this.view.colorBy && this.legend === null;
   }
 
@@ -120,15 +132,15 @@ export class SpatialObservationsPanelComponent implements OnChanges {
 
   // PrimeNG's slider reports `number | undefined`; ignore the empty case rather
   // than writing `undefined` into the store and rendering NaN-sized markers.
-  onPointScale(value: number | undefined): void {
+  protected onPointScale(value: number | undefined): void {
     if (value === undefined) return;
     this.controls?.setViewState({ pointScale: value });
   }
-  onOpacity(value: number | undefined): void {
+  protected onOpacity(value: number | undefined): void {
     if (value === undefined) return;
     this.controls?.setViewState({ opacity: value });
   }
-  onLogScale(on: boolean): void {
+  protected onLogScale(on: boolean): void {
     this.controls?.setViewState({ logScale: on });
   }
   /**
@@ -140,43 +152,43 @@ export class SpatialObservationsPanelComponent implements OnChanges {
    * a user who picks it in the cloud and sees one colour deserves to know both why
    * and what to do instead.
    */
-  get exceedsCloudPalette(): boolean {
+  protected get exceedsCloudPalette(): boolean {
     return this.is3d && (this.legend?.length ?? 0) > SPATIAL_3D_MAX_CATEGORIES;
   }
   /** The ceiling itself, for the message. */
-  readonly cloudPaletteLimit = SPATIAL_3D_MAX_CATEGORIES;
+  protected readonly cloudPaletteLimit = SPATIAL_3D_MAX_CATEGORIES;
 
-  onGeneMap(on: boolean): void {
+  protected onGeneMap(on: boolean): void {
     this.controls?.setViewState({ geneMap: on });
   }
   /** 3D: smooth the per-section sheets along z into a continuous volume. */
-  onGeneMapVolume(on: boolean): void {
+  protected onGeneMapVolume(on: boolean): void {
     this.controls?.setViewState({ geneMapVolume: on });
   }
   /** 3D: restrict the sheets to one imaged section. */
-  onGeneMapOneSection(on: boolean): void {
+  protected onGeneMapOneSection(on: boolean): void {
     if (!on) {
       this.controls?.setViewState({ geneMapSection: null });
       return;
     }
     this.controls?.setViewState({ geneMapSection: middleSection(this.sections) });
   }
-  onGeneMapSection(value: number | undefined): void {
+  protected onGeneMapSection(value: number | undefined): void {
     if (value === undefined) return;
     this.controls?.setViewState({ geneMapSection: value });
   }
-  get geneMapOneSection(): boolean {
+  protected get geneMapOneSection(): boolean {
     return this.view.geneMapSection != null;
   }
   /** "12 of 53" for the gene map's own section, 1-based like the cloud's. */
-  get geneMapSectionLabel(): string {
+  protected get geneMapSectionLabel(): string {
     return sectionLabel(this.sections, this.view.geneMapSection);
   }
-  onGeneMapSmoothing(value: number | undefined): void {
+  protected onGeneMapSmoothing(value: number | undefined): void {
     if (value === undefined) return;
     this.controls?.setViewState({ geneMapSmoothing: value });
   }
-  onGeneMapOpacity(value: number | undefined): void {
+  protected onGeneMapOpacity(value: number | undefined): void {
     if (value === undefined) return;
     this.controls?.setViewState({ geneMapOpacity: value });
   }
@@ -185,7 +197,7 @@ export class SpatialObservationsPanelComponent implements OnChanges {
    * measurement and the volume is an estimate, and the panel has to be the place
    * that says which one is on screen.
    */
-  get geneMapVolumeNote(): string {
+  protected get geneMapVolumeNote(): string {
     const total = this.sections?.length ?? 0;
     if (this.view.geneMapVolume) {
       return 'Interpolated along z: the planes between the imaged sections carry an '
@@ -201,7 +213,7 @@ export class SpatialObservationsPanelComponent implements OnChanges {
   }
 
   /** True while a gene is the colour source — the only thing a gene map can map. */
-  get canMapGene(): boolean {
+  protected get canMapGene(): boolean {
     return this.view.colorBy?.kind === 'feature';
   }
 
@@ -210,18 +222,18 @@ export class SpatialObservationsPanelComponent implements OnChanges {
   // hides the others to some degree. Independent toggles because the useful views
   // are the combinations, not a single "3D mode".
 
-  onShowVolume(on: boolean): void {
+  protected onShowVolume(on: boolean): void {
     this.controls?.setViewState({ showVolume: on });
   }
-  onVolumeOpacity(value: number | undefined): void {
+  protected onVolumeOpacity(value: number | undefined): void {
     if (value === undefined) return;
     this.controls?.setViewState({ volumeOpacity: value });
   }
-  onShowPoints(on: boolean): void {
+  protected onShowPoints(on: boolean): void {
     this.controls?.setViewState({ showPoints: on });
   }
   /** The "one section at a time" switch: null restores the whole stack. */
-  onOneSection(on: boolean): void {
+  protected onOneSection(on: boolean): void {
     if (!on) {
       this.controls?.setViewState({ pointSection: null });
       return;
@@ -230,38 +242,38 @@ export class SpatialObservationsPanelComponent implements OnChanges {
     // a brain is a nearly empty olfactory-bulb slide.
     this.controls?.setViewState({ pointSection: middleSection(this.sections) });
   }
-  onPointSection(value: number | undefined): void {
+  protected onPointSection(value: number | undefined): void {
     if (value === undefined) return;
     this.controls?.setViewState({ pointSection: value });
   }
   /** True while the cloud is restricted to a single section. */
-  get oneSection(): boolean {
+  protected get oneSection(): boolean {
     return this.view.pointSection != null;
   }
   /** Highest section index the slider can reach. */
-  get lastSection(): number {
+  protected get lastSection(): number {
     return Math.max(0, (this.sections?.length ?? 1) - 1);
   }
   /** "12 of 53" — 1-based, because the sections are slides, not array slots. */
-  get sectionLabel(): string {
+  protected get sectionLabel(): string {
     return sectionLabel(this.sections, this.view.pointSection);
   }
   /** Whether this dataset has sections to pick from at all. */
-  get isSectioned(): boolean {
+  protected get isSectioned(): boolean {
     return (this.sections?.length ?? 0) > 1;
   }
 
-  onDensityVolume(on: boolean): void {
+  protected onDensityVolume(on: boolean): void {
     this.controls?.setViewState({ densityVolume: on });
   }
-  onDensitySmoothing(value: number | undefined): void {
+  protected onDensitySmoothing(value: number | undefined): void {
     if (value === undefined) return;
     this.controls?.setViewState({ densitySmoothing: value });
   }
 
   /** What the density volumes are actually showing, said plainly — an estimate is
    *  only honest if the reader knows it is one, and which clusters are in view. */
-  get densityNote(): string {
+  protected get densityNote(): string {
     const capped = `the ${SpatialObservationsPanelComponent.DENSITY_MAX_CLUSTERS} largest clusters`;
     const what = this.legend ? capped : this.hasSelection ? 'the selected cells' : 'all cells';
     return `Density estimate over ${what} — smoothed between the imaged sections, `
@@ -270,7 +282,7 @@ export class SpatialObservationsPanelComponent implements OnChanges {
 
   /** Mirrors the renderer's cap, for the note only. */
   private static readonly DENSITY_MAX_CLUSTERS = 6;
-  onClip(value: [number, number]): void {
+  protected onClip(value: [number, number]): void {
     this.controls?.setViewState({ percentileClip: value });
   }
 }

@@ -1,4 +1,9 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { CheckboxModule } from 'primeng/checkbox';
+import { MultiSelectModule } from 'primeng/multiselect';
+import { TooltipModule } from 'primeng/tooltip';
 
 /**
  * The heatmap's own controls: the genes its rows are (a filterable multi-select over the
@@ -8,6 +13,8 @@ import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from 
  */
 @Component({
   selector: 'spatial-heatmap-controls',
+  standalone: true,
+  imports: [CommonModule, FormsModule, CheckboxModule, MultiSelectModule, TooltipModule],
   templateUrl: './spatial-heatmap-controls.component.html',
   styleUrls: ['./spatial-heatmap-controls.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

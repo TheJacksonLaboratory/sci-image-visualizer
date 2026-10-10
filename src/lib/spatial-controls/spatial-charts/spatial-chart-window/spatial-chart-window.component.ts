@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
+import { DialogModule } from 'primeng/dialog';
 
 /**
  * The detached chart window: a non-modal, draggable, resizable dialog beside the
@@ -10,6 +11,8 @@ import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from 
  */
 @Component({
   selector: 'spatial-chart-window',
+  standalone: true,
+  imports: [DialogModule],
   templateUrl: './spatial-chart-window.component.html',
   styleUrls: ['./spatial-chart-window.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
