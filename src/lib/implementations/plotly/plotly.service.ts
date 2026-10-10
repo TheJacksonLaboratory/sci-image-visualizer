@@ -39,6 +39,7 @@ import { bt601Luminance, histogram256 } from '../../contracts/intensity';
 import { ViewerCapabilities, ViewerFeature, capabilitiesOf } from '../../contracts/capabilities.contract';
 import { IRegionOverlay } from '../../contracts/region-overlay.contract';
 import { PlotlyRegionOverlay } from './plotly-region-overlay';
+import { PlotlyIsosurfaceControls } from './plotly-isosurface-controls';
 import { ICoordinateTransform } from '../../contracts/coordinate-transform.contract';
 import { PlotlyCoordinateTransform } from './plotly-coordinate-transform';
 import { VisualizerStore } from '../../store/visualizer-store.service';
@@ -170,18 +171,11 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
    *  cycling across the session). */
   private profileColorSeq = 0;
   private intensityProfile$ = new Subject<IntensityProfile[]>();
-  /** ISOSURFACE band as a 0–255 slider position, mapped onto the volume's real
-   *  intensity range at render time (see mapIsoBand). Defaults to the full range
-   *  so the first render shows the whole structure regardless of how bright or
-   *  dark the volume is; the user then narrows the band to isolate intensities. */
-  private isoMin = 0;
-  private isoMax = 255;
-  /** Actual intensity range of the volume on screen ([min,max] over the loaded
-   *  frames). The slider spans 0–255, but a given stack often occupies only a
-   *  sub-range, so we clamp the iso band into this range (with a small margin)
-   *  to guarantee non-degenerate surfaces — both on first render and on live
-   *  slider moves. Null until an isosurface volume has been measured. */
-  private isoDataRange: [number, number] | null = null;
+  /** The ISOSURFACE band, mapped onto the measured volume (see PlotlyIsosurfaceControls). */
+  private readonly iso = new PlotlyIsosurfaceControls(
+    () => this.plotType === PlotType.ISOSURFACE && !!this.plotDiv && !!this.liveGd(),
+    (update) => void Plotly.restyle(this.liveGd(), update as Plotly.Data),
+  );
   // Id minting and the selection index stream are owned by the shared
   // RegionStore. Selection still drives Plotly's `_activeShapeIndex` (so a
   // single shape gets the edit handles) — see setSelectedShapeIndices().
@@ -504,9 +498,9 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     // into it (the slider is a fixed 0–255 but a stack may occupy only part of
     // that, which would otherwise leave the surfaces with nothing to cross).
     if (this.plotType === PlotType.ISOSURFACE) {
-      this.isoDataRange = this.measureIntensityRange(imageLoaded.data, !!imageInfo.isGrayscale);
+      this.iso.measure(imageLoaded.data, !!imageInfo.isGrayscale);
     }
-    const [isoMin, isoMax] = this.mapIsoBand(this.isoMin, this.isoMax);
+    const [isoMin, isoMax] = this.iso.band();
     return {
       frames: imageLoaded.data,
       width: imageLoaded.sizes[0],
@@ -523,64 +517,13 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     };
   }
 
-  /** Min/max intensity over every voxel of the loaded frames (RGB → luminance),
-   *  used to keep the iso band inside the data. Returns null for empty input. */
-  private measureIntensityRange(frames: any[], isGrayscale: boolean): [number, number] | null {
-    let min = Infinity, max = -Infinity;
-    for (const frame of frames || []) {
-      for (const row of frame || []) {
-        for (const cell of row || []) {
-          const v = isGrayscale ? cell
-            : bt601Luminance(cell[0], cell[1], cell[2]);
-          if (!Number.isFinite(v)) continue;
-          if (v < min) min = v;
-          if (v > max) max = v;
-        }
-      }
-    }
-    return (Number.isFinite(min) && Number.isFinite(max) && max > min) ? [min, max] : null;
-  }
-
-  /** Map the 0–255 slider band onto the volume's actual intensity range. The
-   *  slider is fixed 0–255, but a stack often occupies only a narrow sub-range
-   *  (e.g. this EDOF volume is ~2–50 with structure near 6–10). Mapping spreads
-   *  the data across the whole slider so every intensity is easy to reach and
-   *  the band always lands inside the data — a small inset keeps the extreme
-   *  surfaces off the exact data edges, which are degenerate and draw nothing. */
-  private mapIsoBand(isoMin: number, isoMax: number): [number, number] {
-    let lo = Math.min(isoMin, isoMax);
-    let hi = Math.max(isoMin, isoMax);
-    if (this.isoDataRange) {
-      const [vMin, vMax] = this.isoDataRange;
-      const span = vMax - vMin;
-      const pad = 0.03 * span;
-      const usable = span - 2 * pad;
-      const SLIDER_MAX = 255; // toolbar slider domain (isoValueMax)
-      lo = vMin + pad + (lo / SLIDER_MAX) * usable;
-      hi = vMin + pad + (hi / SLIDER_MAX) * usable;
-      if (lo > hi) { const t = lo; lo = hi; hi = t; }
-    }
-    return [lo, hi];
-  }
-
-  /**
-   * Update the isosurface intensity bounds. When isosurface is on screen this
-   * restyles `isomin`/`isomax` in place for a live update (no volume rebuild).
-   * Slider values are mapped onto the volume's real range so the surfaces always
-   * have data to cross (matching the initial render).
-   */
+  /** Update the isosurface intensity band (see PlotlyIsosurfaceControls). */
   public setIsoRange(isoMin: number, isoMax: number): void {
-    this.isoMin = isoMin;
-    this.isoMax = isoMax;
-    if (this.plotType === PlotType.ISOSURFACE && this.plotDiv) {
-      const [lo, hi] = this.mapIsoBand(isoMin, isoMax);
-      const gd = this.liveGd();
-      if (gd) void Plotly.restyle(gd, { isomin: [lo], isomax: [hi] } as any);
-    }
+    this.iso.setIsoRange(isoMin, isoMax);
   }
 
   /** Plotly renders isosurfaces, so it exposes the isosurface controls (itself). */
-  public getIsosurfaceControls(): IIsosurfaceControls | null { return this; }
+  public getIsosurfaceControls(): IIsosurfaceControls | null { return this.iso; }
 
   /**
    * Render a registry-backed plot type: build its traces from the input, pick
