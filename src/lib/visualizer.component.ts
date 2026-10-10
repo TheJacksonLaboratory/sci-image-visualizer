@@ -50,7 +50,6 @@ import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from './contracts/toolbar-co
 import { VIZ_CONFIG, VizConfig } from './contracts/viz-config';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-data.port';
 import { SpatialDataset } from './contracts/spatial-dataset.contract';
-import { buildVolumeStackImage } from './spatial/spatial-volume-image';
 import { applyImageRois } from './visualizer/region-load';
 import {
   ContextMenuActions, ContextMenuState, buildContextMenu, buildRegionActionItems,
@@ -59,6 +58,7 @@ import { RegionActions } from './visualizer/region-actions';
 import { ShortcutHost, ViewerShortcuts } from './visualizer/viewer-shortcuts';
 import { FloatingPos } from './visualizer/floating-drag.directive';
 import { IntensityInsetComponent } from './intensity-inset/intensity-inset.component';
+import { SpatialDatasetBinder } from './visualizer/spatial-dataset-binder';
 
 /** Per-instance plot-div id source. The mount element's id must be unique so two
  *  live viewers (e.g. the main diagram + a modal preview) don't collide on the
@@ -361,26 +361,11 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    *  intensity range by the renderer. Defaults to the full range. */
   isoRange: number[] = [0, 255];
 
-  /** Whether a spatial-omics dataset is currently published on
-   *  `SPATIAL_DATA_PORT` — gates the spatial plot types in the selector. Also bound
-   *  by the toolbar, which offers the plot modes for a dataset with no image too. */
-  hasSpatialDataset = false;
-  /** The spatial dataset on offer, for drawing one that brings no image (see reloadAndPlot). */
-  private spatialDataset: SpatialDataset | null = null;
-  /** Whether that dataset's observations carry a z, gating the 3D spatial mode. */
-  private hasSpatial3dDataset = false;
-  /** Whether it carries a registered volume. Change detection only: a volume
-   *  appearing is what publishes it as the image, and the plot-type gates then
-   *  see an ordinary grayscale stack. */
-  private hasSpatialVolume = false;
-  /** Dataset identity + capability shape the last emission was handled at, so a
-   *  switch between two datasets of the same shape is not mistaken for a repeat. */
-  private spatialDatasetKey: string | null = null;
-  /** Dataset + geometry the currently published volume image was built from, so a
-   *  re-emitted dataset doesn't re-fetch megabytes or reset the user's scrub. */
-  private volumeImageKey: string | null = null;
-  /** Blob URLs backing that image — ours to revoke. */
-  private volumeImageUrls: string[] = [];
+  /** The spatial-omics dataset on offer and the gates it puts on the selector. */
+  readonly spatial: SpatialDatasetBinder;
+  /** Whether a spatial-omics dataset is published on `SPATIAL_DATA_PORT` — gates the
+   *  spatial plot types; the toolbar offers the plot modes for an image-less one too. */
+  get hasSpatialDataset(): boolean { return this.spatial.hasDataset; }
 
   /** Keyboard, wheel and context-menu handling; created once the view exists. */
   private shortcuts?: ViewerShortcuts;
@@ -439,158 +424,28 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       notify: (m) => this.messageService.add({ key: this.resultToastKey, ...m }),
       detectChanges: () => this.cdr.detectChanges(),
     });
+    this.spatial = new SpatialDatasetBinder(this.spatialData, {
+      gatesChanged: () => this.computePlotTypeOptions(),
+      selectedId: () => this.selectedPlotTypeId,
+      basePlotType: () => this.basePlotType,
+      hasImage: () => !!this.imageInfo,
+      selectPlotType: (type) => this.onSelectPlotType(type),
+      replot: () => this.reloadAndPlot(),
+      publishImage: (info) => this.state.setImageInfo(info),
+      setImageLoading: (loading) => this.state.setImageLoading(loading),
+      settled: () => {
+        this.reconcileSelectedPlotType();
+        this.cdr.detectChanges();
+      },
+      detectChanges: () => this.cdr.detectChanges(),
+    });
     this.computePlotTypeOptions();
   }
 
-  /**
-   * Track whether a spatial-omics dataset is available. A dataset appearing (or
-   * being cleared) changes which plot types make sense, so it drives the same
-   * recompute + reconcile that the image stream and the test-mode toggle do.
-   *
-   * No-op when the host provides no `SPATIAL_DATA_PORT` — the spatial types then
-   * stay hidden for the life of the component.
-   */
+  /** Follow the spatial-omics dataset: a dataset appearing, switching or being cleared
+   *  re-gates the selector exactly as the image stream and the test-mode toggle do. */
   private watchSpatialDataset(): void {
-    this.spatialData?.getDataset$().pipe(takeUntil(this.unsub)).subscribe((dataset) => {
-      this.spatialDataset = dataset ?? null;
-      const has = !!dataset;
-      // Only a dataset whose observations carry a z can be drawn as a cloud, so
-      // the 3D mode is gated on the coordinates, not merely on a dataset being
-      // present. Most spatial assays are one plane.
-      const has3d = !!dataset?.observations.z;
-      const hasVolume = !!dataset?.volume;
-      // The port publishes its current value on subscribe, so the initial `null`
-      // would otherwise recompute the selector for no change. Keyed by dataset
-      // IDENTITY as well as capability shape: two 3D datasets that both carry a
-      // volume have the same shape, and comparing only that skipped the switch —
-      // leaving the previous dataset's volume image on screen underneath the new
-      // one's observations.
-      const key = dataset
-        ? `${dataset.id}|${has3d}|${hasVolume}|${dataset.volume
-          ? `${dataset.volume.width}x${dataset.volume.height}x${dataset.volume.depth}` : ''}`
-        : null;
-      if (key === this.spatialDatasetKey) return;
-      this.spatialDatasetKey = key;
-      this.hasSpatialDataset = has;
-      this.hasSpatial3dDataset = has3d;
-      // Whether the dataset says it registers onto a tissue image. Distinct from an
-      // image being LOADED: a registered dataset's image may still be on its way, and
-      // the pixel modes must not flicker out of the selector while it arrives.
-      // A registered dataset draws over a tissue image; a volume-backed one publishes its
-      // volume AS a grayscale z-stack image (`buildVolumeStackImage`). Either way pixels
-      // exist, so the pixel modes stay on offer — Volume and Isosurface are exactly how
-      // a 3D omics dataset is read.
-      this.spatialDatasetHasPixels = !!dataset?.imageRef || hasVolume;
-      this.hasSpatialVolume = hasVolume;
-      this.computePlotTypeOptions();
-      // A dataset with no reference image has nothing to draw observations OVER:
-      // a cloud registered into a common frame (the Allen CCF) has coordinates
-      // but no one section. What it does have is its registered VOLUME, which is
-      // a 3D image in one file — so make that the image and open on it, slice bar
-      // and all, rather than leaving the host on an Image view showing whatever
-      // slide was loaded before. Ordered after computePlotTypeOptions so the type
-      // is on offer before it is selected.
-      if (dataset && !dataset.imageRef && hasVolume) {
-        void this.showVolumeAsImage(dataset);
-      } else {
-        // Anything else — a dataset with its own section image, a volume-less
-        // cloud, or none at all — means a published volume image is no longer what
-        // is on screen. Forget it, or coming BACK to the volume dataset would
-        // short-circuit on a matching key and leave the other dataset's slide up.
-        this.dropVolumeImage();
-        if (dataset && !dataset.imageRef) {
-          // No reference image and no volume to slice: the observations are the only
-          // thing there is to draw, so open on whichever spatial mode their
-          // coordinates support. Leaving the type alone strands the host on an Image
-          // view showing whatever slide was loaded BEFORE — the observations never
-          // appear, and the previous dataset's tissue does, which reads as this
-          // dataset failing to load.
-          //
-          // Gated on the coordinates, not on the dataset merely existing: a
-          // one-plane assay has no z and cannot be a cloud. That case only turned up
-          // with an image-less 2D dataset, which is why it went unhandled — before
-          // it, image-less meant 3D.
-          const target = has3d ? PlotType.SPATIAL_OMICS_3D : PlotType.SPATIAL_OMICS;
-          if (this.selectedPlotTypeId !== target) this.onSelectPlotType(target);
-          // Same mode, another image-less dataset, nothing loaded: re-plot so its placeholder
-          // image info (and with it the regions' key) is this dataset's, not the last one's.
-          else if (!this.imageInfo) this.reloadAndPlot();
-        }
-      }
-      // Clearing the dataset while a spatial mode is active leaves a type that is
-      // no longer offered — fall back to Image, as turning test mode off does.
-      this.reconcileSelectedPlotType();
-      this.cdr.detectChanges();
-    });
-  }
-
-  /**
-   * Publish a dataset's reference volume AS the image, and open the 2D Image view
-   * on it.
-   *
-   * The volume is a 3D image delivered in one file, so for a dataset that has no
-   * section image it is the honest thing to put on screen: the slice bar scrubs z,
-   * and the contrast window, colormaps and region tools all work because the
-   * volume genuinely is the image now. The 3D cloud stays one menu pick away.
-   *
-   * Keyed by dataset + geometry: the dataset stream re-emits on things like a
-   * colour-column change, and rebuilding then would re-fetch the voxels and throw
-   * the user back to the middle slice.
-   */
-  private async showVolumeAsImage(dataset: SpatialDataset): Promise<void> {
-    const meta = dataset.volume;
-    if (!meta || !this.spatialData?.getVolume) return;
-    const key = `${dataset.id}:${meta.width}x${meta.height}x${meta.depth}`;
-    if (key === this.volumeImageKey) return;
-    // Claim the key BEFORE awaiting: the stream can emit again while the voxels
-    // are in flight, and two builds of the same volume would race to publish.
-    this.volumeImageKey = key;
-    this.state.setImageLoading(true);
-    try {
-      const built = await buildVolumeStackImage(dataset, await this.spatialData.getVolume());
-      // A different dataset was selected while this one encoded — its image is the
-      // one that belongs on screen, so drop what we just built.
-      if (this.volumeImageKey !== key) {
-        built?.urls.forEach((u) => URL.revokeObjectURL(u));
-        return;
-      }
-      if (!built) {
-        this.volumeImageKey = null;
-        return;
-      }
-      // Pick the mode first so the image lands in the view that will show it,
-      // instead of rendering once into whatever mode the last dataset left active.
-      if (this.selectedPlotTypeId !== PlotType.IMAGE) this.onSelectPlotType(PlotType.IMAGE);
-      this.revokeVolumeImageUrls();
-      this.volumeImageUrls = built.urls;
-      this.state.setImageInfo(built.info);
-    } catch (err) {
-      // No volume served after all: the cloud is still renderable, so fall back to
-      // it rather than leaving the host on an Image view with nothing in it.
-      console.warn('[visualizer] reference volume unavailable — falling back to the 3D cloud', err);
-      this.volumeImageKey = null;
-      if (this.hasSpatial3dDataset && !isSpatialOmics3d(this.basePlotType)) {
-        this.onSelectPlotType(PlotType.SPATIAL_OMICS_3D);
-      }
-    } finally {
-      // Only the build still on screen (or one that failed and released its key) may
-      // drop the overlay: a newer volume build that superseded this one is still encoding.
-      if (this.volumeImageKey === key || this.volumeImageKey === null) this.state.setImageLoading(false);
-      this.cdr.detectChanges();
-    }
-  }
-
-  /** Forget the published volume image so re-selecting the dataset rebuilds it.
-   *  The URLs deliberately stay alive: the host may still be displaying that image
-   *  at this instant, and revoking under it would break every later tile read. They
-   *  are freed when the next volume replaces them, or on destroy. */
-  private dropVolumeImage(): void {
-    this.volumeImageKey = null;
-  }
-
-  private revokeVolumeImageUrls(): void {
-    this.volumeImageUrls.forEach((u) => URL.revokeObjectURL(u));
-    this.volumeImageUrls = [];
+    this.spatial.bind(this.unsub);
   }
 
   /** Recompute the selector's entries for the current image, dataset and test mode
@@ -601,11 +456,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       contributions: this.plotModes.descriptors(),
       caps: this.plotService.capabilities,
       imageInfo: this.imageInfo,
-      spatial: {
-        hasDataset: this.hasSpatialDataset,
-        has3d: this.hasSpatial3dDataset,
-        hasPixels: this.spatialDatasetHasPixels,
-      },
+      spatial: this.spatial,
       testMode: this.testMode,
     });
     this.plotTypeOptions = builtIn;
@@ -623,10 +474,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       this.reconcileSelectedPlotType();
     }
   }
-
-  /** Whether the live spatial dataset brings pixels of its own — a tissue image it
-   *  registers onto, or a volume that is published as a z-stack image. */
-  private spatialDatasetHasPixels = false;
 
   /**
    * The host published NO image — a spatial dataset that brings none does this.
@@ -943,7 +790,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // Only if it is still the dataset on offer and no image has arrived meanwhile. By id, not by
     // object: the port may re-emit the same dataset as a new object (a colour-column change does),
     // and then the current object is the one to draw.
-    const current = this.spatialDataset;
+    const current = this.spatial.dataset;
     if (pending && current && current.id === pending.id && !this.imageInfo) {
       void this.plotSpatialWithoutImage(current);
     }
@@ -999,7 +846,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     VisualizerComponent.liveInstances.delete(this);
     this.state.setDiagram(null);
     this.renderAbort?.abort();
-    this.revokeVolumeImageUrls();
+    this.spatial.dispose();
     this.scrubber.cancel();
     this.unsub.next();
     this.unsub.complete();
@@ -1118,10 +965,10 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // empty/old urls, failing to hand the div over to the new renderer.
     if (this.imageInfo) {
       this.state.setImageInfo(this.imageInfo);
-    } else if (this.spatialDataset && (isSpatialOmics(this.plotType) || isSpatialOmics3d(this.plotType))) {
+    } else if (this.spatial.dataset && (isSpatialOmics(this.plotType) || isSpatialOmics3d(this.plotType))) {
       // A spatial dataset that brings no image, opened with no image loaded (a host's
       // first view): there is no image info to re-drive, so draw the spatial mode itself.
-      void this.plotSpatialWithoutImage(this.spatialDataset);
+      void this.plotSpatialWithoutImage(this.spatial.dataset);
     } else {
       this.plotService.reloadAndPlot();
     }

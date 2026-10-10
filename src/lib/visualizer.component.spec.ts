@@ -779,7 +779,7 @@ describe('VisualizerComponent (UI shell)', () => {
         (c as any).onViewReady();
         await flush();
         expect(plotService.plot).toHaveBeenCalledTimes(1);
-        expect((c as any).spatialDataset).toBe(again);
+        expect((c as any).spatial.dataset).toBe(again);
         expect((plotService.plot as jest.Mock).mock.calls[0][2].fileName).toBe('spatial:csc');
       });
 

@@ -279,21 +279,21 @@ describe('contributed plot types — the selector', () => {
     expect(types(component)).not.toContain('spatial');
     expect(types(component)).not.toContain('spatial3d');
 
-    c.hasSpatialDataset = true;
-    c.spatialDatasetHasPixels = true; // a tissue image under the observations
+    component.spatial.hasDataset = true;
+    component.spatial.hasPixels = true; // a tissue image under the observations
     c.computePlotTypeOptions();
     expect(types(component)).toContain('spatial');
     expect(types(component)).not.toContain('spatial3d');
 
-    c.hasSpatial3dDataset = true;
+    component.spatial.has3d = true;
     c.computePlotTypeOptions();
     expect(types(component)).toContain('spatial3d');
   });
 
   it('hides an Image-based mode wherever Image itself is hidden (a spatial dataset without pixels)', () => {
     const { component } = harness([dianne()]);
-    (component as any).hasSpatialDataset = true;
-    (component as any).spatialDatasetHasPixels = false;
+    component.spatial.hasDataset = true;
+    component.spatial.hasPixels = false;
     (component as any).computePlotTypeOptions();
     expect(types(component)).not.toContain(PlotType.IMAGE);
     expect(types(component)).not.toContain('dianne');
