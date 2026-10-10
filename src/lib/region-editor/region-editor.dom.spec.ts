@@ -1,3 +1,4 @@
+import { NgZone } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { NoopAnimationsModule } from '@angular/platform-browser/animations';
 import { EMPTY, of } from 'rxjs';
@@ -165,6 +166,17 @@ describe('RegionEditorComponent (DOM)', () => {
     render();
     expect(store.getRegions().length).toBe(11);
     expect(texts('.region-editor-paginator .p-paginator-current')).toEqual(['1 to 10 of 11']);
+  });
+
+  it('a region drawn outside the Angular zone (an overlay pointer handler) shows without a manual refresh', async () => {
+    // The napari and OSD overlays commit from pointer handlers that run outside the zone; the
+    // OnPush editor must still re-render, not wait for an unrelated event.
+    fixture.autoDetectChanges(true);
+    await fixture.whenStable();
+    expect(texts('.region-editor-paginator .p-paginator-current')).toEqual(['1 to 10 of 12']);
+    TestBed.inject(NgZone).runOutsideAngular(() => store.addRegion(square(20, 'Region')));
+    await fixture.whenStable();
+    expect(texts('.region-editor-paginator .p-paginator-current')).toEqual(['1 to 10 of 13']);
   });
 
   it('clicking a class row with rows selected re-classifies them', () => {

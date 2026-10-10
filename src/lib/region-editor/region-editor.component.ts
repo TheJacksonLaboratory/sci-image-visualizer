@@ -8,7 +8,9 @@ import {
   OnInit,
   ViewChild,
   inject,
+  NgZone,
 } from '@angular/core';
+import { markForCheckInZone } from '../util/mark-for-check';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -160,6 +162,12 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   private _suppressSelectionSyncToPlot = false;
   private readonly destroyRef = inject(DestroyRef);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly zone = inject(NgZone);
+
+  /** Re-render this OnPush view, re-entering the zone when the change came from outside it. */
+  private changed(): void {
+    markForCheckInZone(this.cdr, this.zone);
+  }
 
   /** Physical pixel size (µm/pixel) of the active image, for region areas in
    *  µm²; empty when the format reports no physical size. */
@@ -188,7 +196,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       presets$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((set) => {
         if (set) this.presetSet = set;
         this.updateDisplayClasses();
-        this.cdr.markForCheck();
+        this.changed();
       });
     }
     // Seed from the visualizer's current regions — already scoped to the
@@ -216,7 +224,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
         this.clampPaginatorFirst();
         this.syncClassesFromRegions(updated);
         this.recomputeClassCounts();
-        this.cdr.markForCheck();
+        this.changed();
       });
 
     this.persistence
@@ -224,7 +232,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((exists) => {
         this.saveAsFileExists = exists;
-        this.cdr.markForCheck();
+        this.changed();
       });
 
     // Physical pixel size of the active image (for region areas in µm²/mm²).
@@ -233,7 +241,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((meta) => {
         this.mpp = pickMpp(meta);
-        this.cdr.markForCheck();
+        this.changed();
       });
 
     this.regionApi
@@ -255,7 +263,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
             if (pageStart !== this.paginatorFirst) this.paginatorFirst = pageStart;
           }
         }
-        this.cdr.markForCheck();
+        this.changed();
       });
   }
 
@@ -315,7 +323,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     }
     this.syncClassesFromRegions(next);
     this.recomputeClassCounts();
-    this.cdr.markForCheck();
+    this.changed();
   }
 
   /**
@@ -747,7 +755,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
         detail: `${(err as Error)?.message ?? err}`,
       });
     }
-    this.cdr.markForCheck();
+    this.changed();
   }
 
   protected importRois(event: Event) {
@@ -825,7 +833,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       })
       .subscribe({
         next: (e) => {
-          this.cdr.markForCheck();
+          this.changed();
           switch (e.type) {
             case 'planned':
               if (e.scale < 1) {
@@ -850,7 +858,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
         },
         error: (err: Error) => {
           this.maskError(err.message);
-          this.cdr.markForCheck();
+          this.changed();
         },
       });
   }
@@ -908,7 +916,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this._saveAsSub = this.persistence.saveSlices(slices).subscribe({
       next: () => {
         this.saveAsBusy = false;
-        this.cdr.markForCheck();
+        this.changed();
         this.toast(
           'success',
           'Regions saved',
@@ -917,7 +925,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       },
       error: (err) => {
         this.saveAsBusy = false;
-        this.cdr.markForCheck();
+        this.changed();
         this.toast('error', 'Error saving regions', `${(err as Error)?.message ?? err}`);
       },
     });
@@ -938,19 +946,19 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     const doSave = () => {
       this.saveAsBusy = true;
       // Also run from the overwrite confirmation, which the host's dialog may answer.
-      this.cdr.markForCheck();
+      this.changed();
       this._saveAsSub = this.persistence
         .save(() => this.regionsForSave(), filename)
         .subscribe({
           next: () => {
             this.saveAsBusy = false;
             this.showSaveAsDialog = false;
-            this.cdr.markForCheck();
+            this.changed();
             this.toast('success', 'Regions saved', `Saved as ${filename}`);
           },
           error: (err) => {
             this.saveAsBusy = false;
-            this.cdr.markForCheck();
+            this.changed();
             this.toast('error', 'Error saving regions', `${(err as Error)?.message || err}`);
           },
         });

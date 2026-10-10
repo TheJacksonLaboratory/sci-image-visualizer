@@ -9,7 +9,9 @@ import {
   OnDestroy,
   OnInit,
   inject,
+  NgZone,
 } from '@angular/core';
+import { markForCheckInZone } from '../../util/mark-for-check';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -294,6 +296,12 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   private primed = false;
   private readonly destroyRef = inject(DestroyRef);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly zone = inject(NgZone);
+
+  /** Re-render this OnPush view, re-entering the zone when the change came from outside it. */
+  private changed(): void {
+    markForCheckInZone(this.cdr, this.zone);
+  }
 
   constructor(@Inject(VISUALIZER) private readonly viz: IVisualizer) {}
 
@@ -305,7 +313,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     if (!this.controls) return;
 
     // The run's progress, backend and errors, for the embedding controls.
-    this.compute.state$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.cdr.markForCheck());
+    this.compute.state$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.changed());
 
     combineLatest([this.controls.getViewState$(), this.controls.getSelection$()])
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -327,7 +335,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
           // A selection or log-scale change needs only a redraw of the same vector.
           void this.render();
         }
-        this.cdr.markForCheck();
+        this.changed();
       });
 
     this.controls
@@ -350,7 +358,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
           if (this.groupBy) void this.onGroupBy(this.groupBy);
           void this.reload();
         }
-        this.cdr.markForCheck();
+        this.changed();
       });
   }
 
@@ -451,9 +459,9 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
 
   protected async onGroupBy(name: string | null): Promise<void> {
     const loading = this.data.loadGrouping(this.controls, name);
-    this.cdr.markForCheck(); // the busy spinner
+    this.changed(); // the busy spinner
     if (await loading) void this.render();
-    else this.cdr.markForCheck();
+    else this.changed();
   }
 
   /** True when the current kind would read better with a grouping chosen. */
@@ -471,7 +479,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   /** Fetch the active colour source's vector, then draw. */
   private async reload(): Promise<void> {
     const loading = this.data.loadValues(this.controls, this.view.colorBy);
-    this.cdr.markForCheck(); // the busy spinner
+    this.changed(); // the busy spinner
     const loaded = await loading;
     if (loaded === 'superseded') return;
     // Only off the distribution tabs. The heatmap does not chart the colour source, and the
@@ -706,7 +714,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     try {
       await this.renderChart();
     } finally {
-      this.cdr.markForCheck();
+      this.changed();
     }
   }
 

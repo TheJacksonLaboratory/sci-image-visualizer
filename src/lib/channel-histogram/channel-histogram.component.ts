@@ -10,7 +10,9 @@ import {
   OnInit,
   Output,
   inject,
+  NgZone,
 } from '@angular/core';
+import { markForCheckInZone } from '../util/mark-for-check';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -131,6 +133,12 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
 
   private readonly destroyRef = inject(DestroyRef);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly zone = inject(NgZone);
+
+  /** Re-render this OnPush view, re-entering the zone when the change came from outside it. */
+  private changed(): void {
+    markForCheckInZone(this.cdr, this.zone);
+  }
   /** Keeps the Plotly histogram sized to the (resizable) dialog body. */
   private resizeObserver?: ResizeObserver;
 
@@ -149,14 +157,14 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((cm) => {
         this.selectedColormap = cm;
-        this.cdr.markForCheck();
+        this.changed();
       });
     this.api
       .getInvert$()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((i) => {
         this.invert = !!i;
-        this.cdr.markForCheck();
+        this.changed();
       });
     this.api
       .getChannels$()
@@ -167,7 +175,7 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
         const keepIdx = this.selected?.index ?? 0;
         this.selected = this.channels.find((c) => c.index === keepIdx) ?? this.channels[0] ?? null;
         if (this.visible) this.updateMarkers();
-        this.cdr.markForCheck();
+        this.changed();
       });
     // The histogram is of the source pixels — it changes with the image/slice,
     // not with window edits — so reload it when the image metadata changes.
@@ -269,7 +277,7 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
     clearTimeout(this.adjustTimer);
     this.adjustTimer = setTimeout(() => {
       this.activeAdjust = null;
-      this.cdr.markForCheck();
+      this.changed();
     }, 500);
   }
   protected onVisibleToggle(ch: IChannelState, value: boolean): void {
@@ -394,14 +402,14 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
         } else {
           this.hist = null;
           this.renderHistogram();
-          this.cdr.markForCheck();
+          this.changed();
         }
         return;
       }
       this.histRetries = 0;
       this.hist = h;
       this.renderHistogram();
-      this.cdr.markForCheck();
+      this.changed();
     });
   }
 

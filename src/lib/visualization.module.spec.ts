@@ -1,4 +1,4 @@
-import { Component, NgModule, Type, isStandalone, ɵComponentDef } from '@angular/core';
+import { Component, NgModule, NgZone, Type, isStandalone, ɵComponentDef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { HttpClientTestingModule } from '@angular/common/http/testing';
 import { NoopAnimationsModule } from '@angular/platform-browser/animations';
@@ -118,6 +118,25 @@ describe('VisualizationModule (re-export shim)', () => {
     viewer.onSelectPlotType(PlotType.HEATMAP);
     fixture.detectChanges();
     expect(toolbar.selectedPlotType).toBe(PlotType.HEATMAP);
+    fixture.destroy();
+  });
+
+  it('drops the loading overlay when the host clears its loading flag outside the Angular zone', async () => {
+    // A serverless host clears isImageLoading$ from an image decode or an OpenSeadragon open
+    // callback, outside the zone. The OnPush viewer must still re-render: the overlay used to
+    // stay over the drawn image until an unrelated event (the Cancel button) ran change detection.
+    const loading$ = new BehaviorSubject(true);
+    const stub = VIZ_PORT_STUBS.find((p) => p.provide === IMAGE_STATE_PORT)!.useValue;
+    TestBed.overrideProvider(IMAGE_STATE_PORT, { useValue: { ...stub, isImageLoading$: () => loading$ } });
+    const fixture = TestBed.createComponent(LegacyHostComponent);
+    fixture.autoDetectChanges(true);
+    await fixture.whenStable();
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('visualizer .loading-overlay')).not.toBeNull();
+
+    TestBed.inject(NgZone).runOutsideAngular(() => loading$.next(false));
+    await fixture.whenStable();
+    expect(el.querySelector('visualizer .loading-overlay')).toBeNull();
     fixture.destroy();
   });
 

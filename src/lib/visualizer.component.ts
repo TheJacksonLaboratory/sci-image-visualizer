@@ -251,7 +251,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     (mode) => {
       if (mode !== 'samPoint') this.segmentation.hide();
     }, // leaving point mode drops its toast
-    () => this.cdr.markForCheck(),
+    () => this.changed(),
   );
   protected get activeDragMode(): string | null {
     return this.tools.active;
@@ -719,9 +719,17 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       });
   }
 
-  /** Follow `source` until destroy. */
+  /**
+   * Follow `source` until destroy. Host streams can emit outside the Angular zone (a
+   * serverless host clears its loading flag from an image decode or an OpenSeadragon
+   * callback); setting a signal there marks this OnPush view but schedules no change
+   * detection, so the update is applied inside the zone, as {@link changed} does.
+   */
   private mirror<T>(source: Observable<T>, apply: (value: T) => void): void {
-    source.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(apply);
+    source.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((value) => {
+      if (NgZone.isInAngularZone()) apply(value);
+      else this.ngZone.run(() => apply(value));
+    });
   }
 
   /**
@@ -825,7 +833,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // Leave the live set so the next-oldest visualizer picks up the outlets — on its
     // next check, which an OnPush sibling needs asking for.
     VisualizerComponent.liveInstances.delete(this);
-    for (const other of VisualizerComponent.liveInstances) other.cdr.markForCheck();
+    for (const other of VisualizerComponent.liveInstances) other.changed();
     this.state.setDiagram(null);
     this.render.cancel();
     this.spatial.dispose();
