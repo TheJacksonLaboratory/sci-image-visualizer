@@ -160,16 +160,7 @@ export class ToolbarComponent {
   @Output() brushSizeChange = new EventEmitter<number | undefined>();
   @Output() vertexEraserRadiusChange = new EventEmitter<number | undefined>();
 
-  /** Sliders' bounds — toolbar UI constants (the values are host-owned). */
-  readonly wandSensitivityMin = 0.5;
-  readonly wandSensitivityMax = 10.0;
-  readonly wandSensitivityStep = 0.1;
-  readonly brushSizeMin = 5;
-  readonly brushSizeMax = 300;
-  readonly brushSizeStep = 5;
-  readonly vertexEraserRadiusMin = 5;
-  readonly vertexEraserRadiusMax = 300;
-  readonly vertexEraserRadiusStep = 5;
+  /** Iso slider bounds — toolbar UI constants (the values are host-owned). */
   readonly isoValueMin = 0;
   readonly isoValueMax = 255;
   readonly isoValueStep = 1;
@@ -262,6 +253,11 @@ export class ToolbarComponent {
    *  Image plot types, which show the Intensity tool group. */
   get isIntensityCapable(): boolean {
     return this.effectivePlotType === PlotType.HEATMAP || this.effectivePlotType === PlotType.IMAGE;
+  }
+
+  /** The iso band slider reports its `[low, high]` pair (or nothing). */
+  onIsoRange(value: number | number[] | undefined): void {
+    this.isoRangeChange.emit(Array.isArray(value) ? value : undefined);
   }
 
   /** The slice field reports what was typed; the host owns `zIndex`. */

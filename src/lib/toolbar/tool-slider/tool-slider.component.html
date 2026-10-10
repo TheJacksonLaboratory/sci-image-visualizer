@@ -1,0 +1,8 @@
+<span class="flex align-items-center mx-1 toolbar-text">{{ label }}</span>
+<p-slider [ngModel]="value" [range]="range"
+          [min]="min" [max]="max" [step]="step" [ariaLabel]="label"
+          (onChange)="onChange($event)"
+          [pTooltip]="tooltip" [escape]="false" tooltipPosition="bottom"
+          styleClass="wand-sensitivity-slider"></p-slider>
+<span class="flex align-items-center mx-1 toolbar-text wand-sensitivity-value">
+  {{ valueText }}</span>

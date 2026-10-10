@@ -47,18 +47,15 @@
         </ng-template>
       </p-dropdown>
       <ng-container *ngIf="isIsosurfaceMode">
-        <span class="flex align-items-center mx-1 toolbar-text">Iso</span>
-        <p-slider [ngModel]="isoRange" [range]="true"
-                  [min]="isoValueMin" [max]="isoValueMax" [step]="isoValueStep"
-                  (onChange)="isoRangeChange.emit($event.values)"
-                  pTooltip="Isosurface band (0–255), mapped onto the volume's
-                  actual intensity range. Surfaces are drawn for voxels whose
-                  intensity falls in the selected band — narrow it to isolate
-                  features, widen it to see the whole structure."
-                  [escape]="false" tooltipPosition="bottom"
-                  styleClass="wand-sensitivity-slider"></p-slider>
-        <span class="flex align-items-center mx-1 toolbar-text wand-sensitivity-value">
-          {{ isoRange[0] }}–{{ isoRange[1] }}</span>
+        <toolbar-tool-slider label="Iso" [value]="isoRange" [range]="true"
+                             [min]="isoValueMin" [max]="isoValueMax" [step]="isoValueStep"
+                             tooltip="Isosurface band (0–255), mapped onto the volume's
+                             actual intensity range. Surfaces are drawn for voxels whose
+                             intensity falls in the selected band — narrow it to isolate
+                             features, widen it to see the whole structure."
+                             [valueText]="isoRange[0] + '–' + isoRange[1]"
+                             (valueChange)="onIsoRange($event)">
+        </toolbar-tool-slider>
       </ng-container>
       <!-- Intensity tools (Heatmap / Image mode): add another colored line ROI.
            Each added line gets the next bright palette colour and its own inset
@@ -250,162 +247,19 @@
     </ng-container>
 
     <ng-container *ngIf="(isHeatmap || is3dRegions) && tools.regionTools">
-      <span class="toolbar-separator"></span>
-      <!-- Region Editor: opens the editor as a floating dialog (formerly the
-           right-panel Regions tab). Sits with the region drawing tools. -->
-      <p-button size="small" [text]="true"
-                pTooltip="Open the Region Editor" tooltipPosition="bottom"
-                (onClick)="openRegionEditor.emit()">
-        <img src="assets/plotting/region-editor.svg" class="toolbar-icon-dark" style="width: 1rem"/>
-      </p-button>
-      <!-- Region drawing tools -->
-      <p-button icon="pi pi-arrow-up-right" size="small"
-                [text]="activeDragMode !== 'select'"
-                pTooltip="Selection mode (<kbd>s</kbd>)"
-                [escape]="false" tooltipPosition="bottom"
-                (onClick)="toggleDragMode.emit('select')">
-      </p-button>
-      <p-button icon="pi pi-stop" size="small"
-                [text]="activeDragMode !== 'drawrect'"
-                pTooltip="Draw a rectangular region (<kbd>r</kbd>)" [escape]="false"
-                tooltipPosition="bottom"
-                (onClick)="toggleDragMode.emit('drawrect')">
-      </p-button>
-      <p-button *ngIf="!is3dRegions" size="small"
-                [text]="activeDragMode !== 'drawopenpath'"
-                pTooltip="Draw a polyline (<kbd>l</kbd>)" [escape]="false"
-                tooltipPosition="bottom"
-                (onClick)="toggleDragMode.emit('drawopenpath')">
-        <img src="assets/plotting/polyline.svg"
-             [class]="activeDragMode === 'drawopenpath' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
-             style="width: 1rem"/>
-      </p-button>
-      <p-button icon="pi pi-pencil" size="small"
-                [text]="activeDragMode !== 'drawclosedpath'"
-                pTooltip="Draw a freeform region (<kbd>f</kbd>)" [escape]="false"
-                tooltipPosition="bottom"
-                (onClick)="toggleDragMode.emit('drawclosedpath')">
-      </p-button>
-      <!-- Brush: paint a region by dragging a disc of the given size; the Size
-           slider appears while it's active. Hold Shift to erase (subtract). -->
-      <!-- Brush and polyline are absent from a 3D cloud: the brush paints in IMAGE
-                 pixels and there is no raster to sample, and an open polyline is a
-                 profile tool, not a closed region a selection can test against. -->
-            <p-button *ngIf="!is3dRegions" size="small"
-                [text]="activeDragMode !== 'brush'"
-                pTooltip="Brush: click and drag to paint a region.
-                <br>Hold <kbd>Shift</kbd> while painting to erase from a region."
-                [escape]="false" tooltipPosition="bottom"
-                (onClick)="toggleDragMode.emit('brush')">
-        <img src="assets/plotting/paintbrush.svg"
-             [class]="activeDragMode === 'brush' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
-             style="width: 1rem"/>
-      </p-button>
-      <ng-container *ngIf="activeDragMode === 'brush'">
-        <span class="flex align-items-center mx-1 toolbar-text">Size</span>
-        <p-slider [ngModel]="brushSize"
-                  [min]="brushSizeMin" [max]="brushSizeMax" [step]="brushSizeStep"
-                  (onChange)="brushSizeChange.emit($event.value)"
-                  pTooltip="Brush diameter in image pixels."
-                  [escape]="false" tooltipPosition="bottom"
-                  styleClass="wand-sensitivity-slider"></p-slider>
-        <span class="flex align-items-center mx-1 toolbar-text wand-sensitivity-value">
-          {{ brushSize }}</span>
-      </ng-container>
-
-      <!-- Vertex editing — backends with a vertex-editing overlay (OSD + napari-js image). -->
-      <ng-container *ngIf="supportsRegionVertexTools">
-        <p-button size="small"
-                  [text]="activeDragMode !== 'drawpolygon'"
-                  pTooltip="Polygon: click to place each vertex; click the first point to close"
-                  [escape]="false" tooltipPosition="bottom"
-                  (onClick)="toggleDragMode.emit('drawpolygon')">
-          <img src="assets/plotting/polygon-vertices.svg"
-               [class]="activeDragMode === 'drawpolygon' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
-               style="width: 1rem"/>
-        </p-button>
-        <p-button size="small"
-                  [text]="activeDragMode !== 'addpoint'"
-                  pTooltip="Add a vertex: click an edge of the selected polygon"
-                  [escape]="false" tooltipPosition="bottom"
-                  (onClick)="toggleDragMode.emit('addpoint')">
-          <img src="assets/plotting/vertex-add.svg"
-               [class]="activeDragMode === 'addpoint' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
-               style="width: 1rem"/>
-        </p-button>
-        <p-button size="small"
-                  [text]="activeDragMode !== 'deletepoint'"
-                  pTooltip="Delete a vertex: click a vertex of the selected polygon"
-                  [escape]="false" tooltipPosition="bottom"
-                  (onClick)="toggleDragMode.emit('deletepoint')">
-          <img src="assets/plotting/vertex-delete.svg"
-               [class]="activeDragMode === 'deletepoint' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
-               style="width: 1rem"/>
-        </p-button>
-      </ng-container>
-
-      <p-button size="small"
-                [text]="activeDragMode !== 'wand'"
-                pTooltip="Wand: click and drag to grow a region by similar pixel values (<kbd>w</kbd>).
-                <br>Hold <kbd>Shift</kbd> while clicking or dragging on a region to erase pixels from it."
-                [escape]="false" tooltipPosition="bottom"
-                (onClick)="toggleDragMode.emit('wand')">
-        <img src="assets/plotting/wand.svg"
-             [class]="activeDragMode === 'wand' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
-             style="width: 1rem"/>
-      </p-button>
-      <ng-container *ngIf="activeDragMode === 'wand'">
-        <span class="flex align-items-center mx-1 toolbar-text">Sens.</span>
-        <p-slider [ngModel]="wandSensitivity"
-                  [min]="wandSensitivityMin" [max]="wandSensitivityMax" [step]="wandSensitivityStep"
-                  (onChange)="wandSensitivityChange.emit($event.value)"
-                  pTooltip="Higher = stricter (smaller selection); lower = looser.
-                  Takes effect from the next click/drag tick."
-                  [escape]="false" tooltipPosition="bottom"
-                  styleClass="wand-sensitivity-slider"></p-slider>
-        <span class="flex align-items-center mx-1 toolbar-text wand-sensitivity-value">
-          {{ wandSensitivity.toFixed(1) }}</span>
-      </ng-container>
-      <p-button icon="pi pi-eraser" size="small"
-                [text]="activeDragMode !== 'eraseVertex'"
-                pTooltip="Vertex eraser (<kbd>e</kbd>): click or drag to remove polygon vertices inside
-                the cursor circle from any region."
-                [escape]="false" tooltipPosition="bottom"
-                (onClick)="toggleDragMode.emit('eraseVertex')">
-      </p-button>
-      <ng-container *ngIf="activeDragMode === 'eraseVertex'">
-        <span class="flex align-items-center mx-1 toolbar-text">Radius</span>
-        <p-slider [ngModel]="vertexEraserRadius"
-                  [min]="vertexEraserRadiusMin" [max]="vertexEraserRadiusMax" [step]="vertexEraserRadiusStep"
-                  (onChange)="vertexEraserRadiusChange.emit($event.value)"
-                  pTooltip="Eraser radius in image pixels.
-                  Vertices within this distance of the cursor are removed."
-                  [escape]="false" tooltipPosition="bottom"
-                  styleClass="wand-sensitivity-slider"></p-slider>
-        <span class="flex align-items-center mx-1 toolbar-text wand-sensitivity-value">
-          {{ vertexEraserRadius }}</span>
-      </ng-container>
-      <p-button size="small" [text]="true"
-                [disabled]="!canUndo"
-                pTooltip="Undo the last region action (<kbd>Ctrl</kbd>+<kbd>Z</kbd>).
-                Up to 10 actions can be undone."
-                [escape]="false" tooltipPosition="bottom"
-                (onClick)="undoRegion.emit()">
-        <img src="assets/plotting/undo.svg" class="toolbar-icon-dark" style="width: 1rem"/>
-      </p-button>
-      <p-button size="small" [text]="true"
-                [disabled]="!canRedo"
-                pTooltip="Redo the last undone region action
-                (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd>)."
-                [escape]="false" tooltipPosition="bottom"
-                (onClick)="redoRegion.emit()">
-        <img src="assets/plotting/redo.svg" class="toolbar-icon-dark" style="width: 1rem"/>
-      </p-button>
-      <p-button icon="pi pi-trash" size="small" [text]="true"
-                pTooltip="Delete selected region (<kbd>Del</kbd>)"
-                [escape]="false" tooltipPosition="bottom"
-                (onClick)="deleteRegion.emit()">
-      </p-button>
+      <toolbar-region-tools [activeDragMode]="activeDragMode" [is3dRegions]="is3dRegions"
+                            [vertexTools]="supportsRegionVertexTools"
+                            [wandSensitivity]="wandSensitivity" [brushSize]="brushSize"
+                            [vertexEraserRadius]="vertexEraserRadius"
+                            [canUndo]="canUndo" [canRedo]="canRedo"
+                            (openRegionEditor)="openRegionEditor.emit()"
+                            (toggleDragMode)="toggleDragMode.emit($event)"
+                            (undoRegion)="undoRegion.emit()" (redoRegion)="redoRegion.emit()"
+                            (deleteRegion)="deleteRegion.emit()"
+                            (wandSensitivityChange)="wandSensitivityChange.emit($event)"
+                            (brushSizeChange)="brushSizeChange.emit($event)"
+                            (vertexEraserRadiusChange)="vertexEraserRadiusChange.emit($event)">
+      </toolbar-region-tools>
       <toolbar-segmentation-tools [activeDragMode]="activeDragMode"
                                   [samModels]="samModels" [samModelId]="samModelId"
                                   [contributedTools]="contributedTools" [toolModelIds]="toolModelIds"
