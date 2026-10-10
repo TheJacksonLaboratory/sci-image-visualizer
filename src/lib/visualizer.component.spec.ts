@@ -1,4 +1,5 @@
 import { BehaviorSubject } from 'rxjs';
+import { MenuItem } from 'primeng/api';
 
 // Capture the RenderOrchestrator host config so the preemption tests can invoke a
 // superseded render's callbacks directly and assert they are inert. SliceScrubber
@@ -1571,5 +1572,303 @@ describe('VisualizerComponent — contributed tool parameters', () => {
 
     c.closeToolParams();
     expect(c.openParams).toBeNull();
+  });
+});
+
+/**
+ * CHARACTERIZATION (review Appendix A, god-class step 1): how an image's saved ROIs
+ * are applied once its render lands. Pins the three layouts — folder stack
+ * (per-slice-file), single-file z-stack (combined) and single plane / legacy global —
+ * before the logic moves out of the component.
+ */
+describe('VisualizerComponent — ROI import on load (characterization)', () => {
+  const r = (z?: number): Region => {
+    const reg = rectRegion(0, 0, 1, 1);
+    if (z !== undefined) reg.z = z;
+    return reg;
+  };
+  const A = [r()];
+  const C = [r()];
+  const Z = [r(0), r(2), r(2)];
+  const FLAT = [r(), r(0)];
+  const FIXTURES: Record<string, Region[]> = { A, C, Z, FLAT };
+
+  const stack = (over: Partial<IImageInfo>): IImageInfo => ({
+    fileName: 'f.tif', urls: ['/0', '/1', '/2'], isStack: true, showStack: false, isGrayscale: true,
+    trueImageSize: [4, 4], imageMeta: [], scaleRatio: true, ...over,
+  });
+
+  function landed(info: IImageInfo) {
+    orchestratorHosts.length = 0;
+    const h = harness({ importRegions: jest.fn((json: string) => FIXTURES[json] ?? []) });
+    h.imageInfo$.next(info);
+    orchestratorHosts[orchestratorHosts.length - 1].finished(false);
+    return h;
+  }
+  const asObject = (m: Map<number, Region[]>) => Object.fromEntries([...m].map(([z, rs]) => [z, rs]));
+
+  it('folder stack (tiled=false): one slice per url, each from its own geojson, per-slice-file layout', () => {
+    const { component, plot } = landed(stack({
+      tiled: false, roiJsonStrs: ['A', null as unknown as string, 'C'], initialZIndex: 1,
+    }));
+    expect(plot.enterStackMode).toHaveBeenCalledTimes(1);
+    const [slices, z, layout] = plot.enterStackMode.mock.calls[0];
+    expect(asObject(slices)).toEqual({ 0: A, 1: [], 2: C });
+    expect(z).toBe(1);
+    expect(layout).toBe('per-slice-file');
+    expect(plot.setRegions).not.toHaveBeenCalled();
+    expect(plot.resetUndoHistory).not.toHaveBeenCalled();
+    component.ngOnDestroy();
+  });
+
+  it('folder stack with no geojson yet still enters the per-slice-file layout (empty slices)', () => {
+    const { component, plot } = landed(stack({ tiled: false, urls: ['/0', '/1'] }));
+    const [slices, z, layout] = plot.enterStackMode.mock.calls[0];
+    expect(asObject(slices)).toEqual({ 0: [], 1: [] });
+    expect(z).toBe(0);
+    expect(layout).toBe('per-slice-file');
+    component.ngOnDestroy();
+  });
+
+  it('single-file stack with z-indexed geojson: buckets by Region.z, combined layout', () => {
+    const { component, plot } = landed(stack({ roiJsonStr: 'Z' }));
+    const [slices, , layout] = plot.enterStackMode.mock.calls[0];
+    expect(asObject(slices)).toEqual({ 0: [Z[0]], 2: [Z[1], Z[2]] });
+    expect(layout).toBe('combined');
+    expect(plot.setRegions).not.toHaveBeenCalled();
+    component.ngOnDestroy();
+  });
+
+  it('single-file stack with no geojson: an empty combined session to author against', () => {
+    const { component, plot } = landed(stack({}));
+    const [slices, , layout] = plot.enterStackMode.mock.calls[0];
+    expect(slices.size).toBe(0);
+    expect(layout).toBe('combined');
+    component.ngOnDestroy();
+  });
+
+  it('single-file stack whose regions are all on plane 0 stays global (legacy), undo history reset', () => {
+    const { component, plot } = landed(stack({ roiJsonStr: 'FLAT' }));
+    expect(plot.enterStackMode).not.toHaveBeenCalled();
+    expect(plot.setRegions).toHaveBeenCalledWith(FLAT);
+    expect(plot.resetUndoHistory).toHaveBeenCalledTimes(1);
+    component.ngOnDestroy();
+  });
+
+  it('single plane with and without a geojson', () => {
+    const withRoi = landed(stack({ isStack: false, urls: ['/0'], roiJsonStr: 'A' }));
+    expect(withRoi.plot.setRegions).toHaveBeenCalledWith(A);
+    expect(withRoi.plot.resetUndoHistory).toHaveBeenCalledTimes(1);
+    expect(withRoi.plot.enterStackMode).not.toHaveBeenCalled();
+    withRoi.component.ngOnDestroy();
+
+    const without = landed(stack({ isStack: false, urls: ['/0'] }));
+    expect(without.plot.setRegions).not.toHaveBeenCalled();
+    expect(without.plot.resetUndoHistory).toHaveBeenCalledTimes(1);
+    without.component.ngOnDestroy();
+  });
+});
+
+/**
+ * CHARACTERIZATION (review Appendix A, god-class step 1): the right-click menu, per
+ * view and selection. Each item is written `label` (`*` = highlighted as the armed
+ * mode, `[a,b]` = submenu), separators as `---`.
+ */
+describe('VisualizerComponent — context menu (characterization)', () => {
+  let plot: ReturnType<typeof mockPlotService>;
+  let component: VisualizerComponent;
+
+  const describeMenu = (items: MenuItem[]): string[] => items.map((i) => {
+    if (i.separator) return '---';
+    const sub = i.items ? `[${i.items.map((s) => (s.separator ? '---' : s.label)).join(',')}]` : '';
+    return `${i.label}${i.styleClass === 'context-menu-active' ? '*' : ''}${sub}`;
+  });
+  const items = (): MenuItem[] =>
+    (component as unknown as { buildContextMenuItems(): MenuItem[] }).buildContextMenuItems();
+  const menu = () => describeMenu(items());
+
+  function view(type: PlotType, is3d = false) {
+    component.selectedPlotTypeId = type;
+    component.plotType = type;
+    component.isHeatmap = !is3d;
+  }
+  function select(regions: Region[], indices: number[]) {
+    plot.getRegions.mockReturnValue(regions);
+    (component as unknown as { selectedIndices: number[] }).selectedIndices = indices;
+  }
+
+  beforeEach(() => {
+    plot = mockPlotService();
+    plot.resetSurfaceCamera = jest.fn();
+    plot.setSurfaceDragMode = jest.fn();
+    component = makeComponent(plot);
+  });
+
+  const TOOLS_2D = ['Zoom in', 'Zoom out', '---', 'Select', 'Freeform', 'Brush', 'Polyline', 'Rectangle', 'Wand',
+    'Vertex eraser'];
+  const VERTEX_TOOLS = ['Polygon (click vertices)', 'Add vertex', 'Delete vertex'];
+
+  it('Image view, no regions, Select armed', () => {
+    view(PlotType.IMAGE);
+    component.activeDragMode = 'select';
+    expect(menu()).toEqual([
+      'Autoscale', '---', 'Zoom to box', 'Pan',
+      ...TOOLS_2D.map((l) => (l === 'Select' ? 'Select*' : l)), ...VERTEX_TOOLS,
+    ]);
+  });
+
+  it('Image view, regions present but nothing selected: only "Select all" leads', () => {
+    view(PlotType.IMAGE);
+    select([rectRegion(0, 0, 5, 5)], []);
+    expect(menu().slice(0, 3)).toEqual(['Select all regions', '---', 'Autoscale']);
+  });
+
+  it('Image view, a straight and a Bézier polygon selected (profile lines never count)', () => {
+    view(PlotType.IMAGE);
+    const bez = new Region(); const p = new Polygon();
+    p.xpoints = [0, 5, 5]; p.ypoints = [0, 0, 5]; p.npoints = 3; p.closed = true; p.bezier = true; bez.bounds = p;
+    const profile = new Region(); profile.kind = 'profile'; profile.bounds = new Rectangle();
+    select([rectRegion(0, 0, 5, 5), bez, profile], [0, 1]);
+    expect(menu().slice(0, 8)).toEqual([
+      'Select all regions', 'Merge / group', 'Inverse',
+      'Simplify[Light (1 px),Medium (3 px),Strong (8 px),---,Custom…]',
+      'Convert to Bézier', 'Convert to polygon', 'Delete region', '---',
+    ]);
+  });
+
+  it('Heatmap (Plotly 2D), a merged region selected, Zoom selection armed: no vertex or Bézier items', () => {
+    view(PlotType.HEATMAP);
+    component.activeDragMode = 'zoom';
+    const multi = new Region(); const mp = new MultiPolygon();
+    const part = () => {
+      const q = new Polygon();
+      q.xpoints = [0, 1, 1]; q.ypoints = [0, 0, 1]; q.npoints = 3;
+      return q;
+    };
+    mp.polygons = [part(), part()]; multi.bounds = mp;
+    select([multi], [0]);
+    expect(menu()).toEqual([
+      'Select all regions', 'Ungroup', 'Inverse', 'Simplify[Light (1 px),Medium (3 px),Strong (8 px),---,Custom…]',
+      'Delete region', '---',
+      'Autoscale', '---', 'Zoom selection*', 'Zoom to box', 'Pan', ...TOOLS_2D,
+    ]);
+  });
+
+  it('3D scene: camera modes only, the active one highlighted', () => {
+    view(PlotType.SURFACE, true);
+    component.activeSurface3dMode = 'orbit';
+    select([rectRegion(0, 0, 5, 5)], [0]); // region actions are 2D-only
+    expect(menu()).toEqual(['Zoom', 'Pan', 'Orbital rotation*', 'Turntable rotation', '---', 'Reset camera']);
+  });
+
+  it('items run their actions', () => {
+    view(PlotType.IMAGE);
+    const run = (label: string) => items().find((i) => i.label === label)?.command?.({});
+    run('Zoom in');
+    expect(plot.zoomIn).toHaveBeenCalled();
+    run('Autoscale');
+    expect(plot.autoscale).toHaveBeenCalled();
+    run('Rectangle');
+    expect(component.activeDragMode).toBe('drawrect');
+    view(PlotType.SURFACE, true);
+    run('Pan');
+    expect(component.activeSurface3dMode).toBe('pan');
+    run('Reset camera');
+    expect(plot.resetSurfaceCamera).toHaveBeenCalled();
+  });
+});
+
+/**
+ * CHARACTERIZATION (review Appendix A, god-class step 3): the bare-key map of the
+ * window keydown listener, plus the wheel and context-menu listeners, before they
+ * move into ViewerShortcuts.
+ */
+describe('VisualizerComponent — shortcut map (characterization)', () => {
+  let component: VisualizerComponent;
+  let plot: ReturnType<typeof mockPlotService>;
+  let plotEl: HTMLElement;
+  let toggle: jest.SpyInstance;
+  const menuShow = jest.fn();
+
+  beforeEach(() => {
+    plot = mockPlotService();
+    component = makeComponent(plot);
+    plotEl = document.createElement('div');
+    plotEl.id = component.plotDivName;
+    document.body.appendChild(plotEl);
+    menuShow.mockClear();
+    component.contextMenu = { show: menuShow } as unknown as VisualizerComponent['contextMenu'];
+    component.ngAfterViewInit();
+    toggle = jest.spyOn(component, 'toggleDragMode');
+  });
+
+  afterEach(() => {
+    component.ngOnDestroy();
+    plotEl.remove();
+  });
+
+  const press = (init: KeyboardEventInit, target: EventTarget = document.body) =>
+    target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, ...init }));
+
+  it.each([
+    ['p', 'pan'], ['b', 'zoomToBox'], ['r', 'drawrect'], ['f', 'drawclosedpath'], ['w', 'wand'],
+    ['e', 'eraseVertex'], ['s', 'select'], ['l', 'drawopenpath'],
+  ])('%s toggles %s', (key, mode) => {
+    press({ key });
+    expect(toggle).toHaveBeenCalledWith(mode);
+  });
+
+  it.each(['Delete', 'Backspace', 'd', 'D'])('%s deletes the selected region', (key) => {
+    press({ key });
+    expect(plot.deleteActiveShape).toHaveBeenCalledTimes(1);
+  });
+
+  it('+ / = zoom in, - / _ zoom out', () => {
+    press({ key: '+' }); press({ key: '=' });
+    press({ key: '-' }); press({ key: '_' });
+    expect(plot.zoomIn).toHaveBeenCalledTimes(2);
+    expect(plot.zoomOut).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores keys typed into a form field', () => {
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    press({ key: 'd' }, input);
+    press({ key: 'p' }, input);
+    input.remove();
+    expect(plot.deleteActiveShape).not.toHaveBeenCalled();
+    expect(toggle).not.toHaveBeenCalled();
+  });
+
+  it('in SAM point mode Enter commits and Escape clears the prompt', () => {
+    component.activeDragMode = 'samPoint';
+    press({ key: 'Enter' });
+    expect(plot.commitSamPoints).toHaveBeenCalledTimes(1);
+    press({ key: 'Escape' });
+    expect(plot.clearSamPoints).toHaveBeenCalledTimes(1);
+  });
+
+  it('the wheel steps the zoom over a 2D plot, and is left alone elsewhere', () => {
+    component.selectedPlotTypeId = PlotType.HEATMAP;
+    const wheel = (deltaY: number, target: EventTarget) =>
+      target.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY }));
+    wheel(-1, plotEl);
+    wheel(1, plotEl);
+    expect(plot.zoomIn).toHaveBeenCalledTimes(1);
+    expect(plot.zoomOut).toHaveBeenCalledTimes(1);
+    wheel(-1, document.body); // outside the plot
+    component.isHeatmap = false; // a 3D scene orbits on its own
+    wheel(-1, plotEl);
+    expect(plot.zoomIn).toHaveBeenCalledTimes(1);
+  });
+
+  it('a right-click on the plot opens the built menu; elsewhere it is the browser\'s', () => {
+    const ctx = (target: EventTarget) =>
+      target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    ctx(document.body);
+    expect(menuShow).not.toHaveBeenCalled();
+    ctx(plotEl);
+    expect(menuShow).toHaveBeenCalledTimes(1);
+    expect(component.contextMenuItems.length).toBeGreaterThan(0);
   });
 });
