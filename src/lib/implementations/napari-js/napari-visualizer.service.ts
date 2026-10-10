@@ -2,13 +2,8 @@ import { Inject, Injectable, NgZone, Optional, inject } from '@angular/core';
 import { Observable, BehaviorSubject, Subject, Subscription, combineLatest, of } from 'rxjs';
 import { Image } from 'image-js';
 import { saveAs } from 'file-saver';
-import {
-  Viewer, histogramScalar, heightField, MultiChannelImageView, MultiChannelVolumeView,
-} from 'napari-js';
-import type {
-  AxesLayer, ImageLayer, SurfaceLayer, PointsLayer, Points3DLayer, TiledSource, ChannelView,
-  VolumeChannel,
-} from 'napari-js';
+import { Viewer, histogramScalar, MultiChannelImageView } from 'napari-js';
+import type { ImageLayer, PointsLayer, TiledSource, ChannelView } from 'napari-js';
 
 import { IImageInfo } from '../../contracts/image.contract';
 import { IChannelState } from '../../contracts/channel-histogram-api.contract';
@@ -37,8 +32,11 @@ import { SpatialHover } from './napari-spatial-hover';
 import { NapariScene, NapariSettings, SceneContext } from './napari-scene';
 import { SpatialSession } from './napari-spatial-scene';
 import { Spatial3dScene } from './napari-spatial-3d-scene';
+import { Scatter3dScene, VolumeScene } from './napari-volume-scene';
+import { SurfaceScene } from './napari-surface-scene';
+import { cameraDragMode } from './napari-axes-gizmo';
 import { NapariDisplayState } from './napari-display-state';
-import { AssembledVolume, NapariTileClient } from './napari-tile-client';
+import { NapariTileClient } from './napari-tile-client';
 import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
 import { NAPARI_WHEEL_ZOOM_SPEED } from './napari-zoom';
 import { ZOOM_BUTTON_STEP } from '../osd/osd-zoom';
@@ -46,10 +44,7 @@ import { colorExpressionField, expressionField, fieldContrastWindow } from '../.
 
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
 import {
-  LumaPlane, SCATTER3D_MAX_POINTS, SCATTER3D_MAX_XY, SURFACE_MAX_GRID, SURFACE_Z_ASPECT, SceneKind,
-  VOLUME_FETCH_CONCURRENCY, VOLUME_WORLD_INPLANE_REF, isServerlessMultichannel, mapPool,
-  sceneKindOf, stackDepth, surfaceResolutionFor, tintFor, tintedComposite, toIHistogram,
-  toNapariGamma, typedPlane, volumeResolutionFor,
+  SceneKind, sceneKindOf, tintFor, tintedComposite, toIHistogram, toNapariGamma, typedPlane,
 } from './napari-helpers';
 import {
   GENE_MAP_MAX_SIDE, GENE_MAP_SIGMA, SPATIAL_FALLBACK_RADIUS, SPATIAL_NEUTRAL_COLOR,
@@ -93,10 +88,6 @@ import { SimpleSliceAccessService } from '../simple-slice-access.service';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
 import { NapariScaleBar } from './napari-scale-bar';
-import { formatUm } from '../../overlays/scale-bar-core';
-
-import { NapariAxesLabels, AxisLabelSpec } from './napari-axes-labels';
-import { NapariVolumeZHandle } from './napari-volume-z-handle';
 
 import { CanvasToolHost } from '../../toolbar/tool-kit/canvas-tool';
 import { CanvasToolManager } from '../../toolbar/tool-kit/canvas-tool-manager';
@@ -164,36 +155,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   /** The kind of scene {@link plot} mounted — fixed per plot, unlike {@link currentPlotType},
    *  which {@link setPlotType} can change under it. Drives {@link setZIndex}. */
   private mounted: SceneKind | null = null;
-  /** napari-js high-level view owning the 3D volume layers (one additive tinted layer per channel
-   *  for multichannel, or a single grayscale volume). Null in 2D. */
-  private volumeView: MultiChannelVolumeView | null = null;
-  /** True when the volume is composited from per-channel layers (vs a single grayscale volume). */
-  private volumeMultichannel = false;
-  /** napari-js height-field surface mesh (NAPARI_SURFACE plot type; null otherwise). Built from a
-   *  single grayscale slice by {@link buildSurface} via napari-js's `heightField` + `addSurface`. */
-  private surfaceLayer: SurfaceLayer | null = null;
-  /** Which band the surface samples (a channel index for multichannel, else the composite). */
-  private surfaceChannel: number | undefined = undefined;
-  /** True when the mounted Surface follows one band of a multichannel image. */
-  private surfaceMultichannel = false;
-  /** Pre-loaded per-slice luminance planes (already decimated to the surface grid), keyed by z,
-   *  so the stack slider rebuilds the surface instantly. Filled by {@link preloadSurfacePlanes}. */
-  private readonly surfacePlanes = new Map<
-    number,
-    { data: Uint8Array; width: number; height: number }
-  >();
-  /** The surface preload in flight; a newer one (a channel switch) aborts it. */
-  private surfacePreload: AbortController | null = null;
-  /** In-plane grid cap for the active surface load (full grid ÷ the decimate factor). */
-  private surfaceMaxGrid = SURFACE_MAX_GRID;
-  /** Contrast window [min,max] the current surface mesh was built with. A change reshapes the
-   *  mesh (pixel height = intensity within [min,max]), so it triggers a geometry rebuild. */
-  private surfaceWindow: [number, number] | null = null;
   /** napari-js 2D scatter points (region centroids) + its region-change subscription. */
   private scatter2dPoints: PointsLayer | null = null;
   private scatterRegionSub: Subscription | null = null;
-  /** napari-js 3D scatter (voxel point cloud). */
-  private scatter3dLayer: Points3DLayer | null = null;
   /** Spatial-omics observation markers + the dataset/view subscription driving them. */
   private spatialPoints: PointsLayer | null = null;
   /** The gene map: its layer, the field it was estimated from, and the inputs each
@@ -253,20 +217,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
    * {@link spatialRebuildToken}, {@link hoverSourceToken}) are "latest wins WITHIN a scene".
    */
   private loading = new AbortController();
-  /** 3D coordinate-axes / scale gizmo for the volume/isosurface view (null in 2D). */
-  private axesLayer: AxesLayer | null = null;
-  /** DOM X/Y/Z + scale labels tracking the 3D axes gizmo (null in 2D). */
-  private axesLabels: NapariAxesLabels | null = null;
-  /** Draggable Z-height grip over the volume (null unless a volume/isosurface is mounted). */
-  private zHandle: NapariVolumeZHandle | null = null;
-  /** Volume world box at `volumeZScale = 1` (base) + the sampled voxel depth — enough to recompute
-   *  the Z-axis voxel scale, axes depth, and overlay anchors as the handle stretches Z. */
-  private volumeWorldBase: { width: number; height: number; depth: number } | null = null;
-  private volumeSampledDepth = 1;
-  private volumeDims: { width: number; height: number; depth: number } | null = null;
-  /** Assembled uint8 volume data per channel (key = channel index), kept for the volume intensity
-   *  histogram. Key 0 holds the grayscale/composite volume in the single-channel case. */
-  private readonly volumeChannelData = new Map<number, Uint8Array>();
   private imageW = 0;
   private imageH = 0;
   /** Monotonic slice-request id so a slow out-of-order slice fetch can't clobber a newer one. */
@@ -497,11 +447,15 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       } else if (isNapariScatter(plotType)) {
         await this.mountScatter(viewer, host, z);
       } else if (isNapariScatter3d(plotType)) {
-        await this.mountScatter3d(viewer, info);
+        this.scene = new Scatter3dScene(this.sceneContext(viewer, host, canvas), info);
+        await this.scene.mount();
       } else if (isNapariSurface(plotType)) {
-        await this.mountSurface(viewer);
+        this.scene = new SurfaceScene(this.sceneContext(viewer, host, canvas));
+        await this.scene.mount();
       } else if (isNapari3d(plotType)) {
-        await this.mountVolume(viewer, info, plotType);
+        const rendering = isNapariIsosurface(plotType) ? 'iso' : 'mip';
+        this.scene = new VolumeScene(this.sceneContext(viewer, host, canvas), info, rendering);
+        await this.scene.mount();
       } else {
         await this.renderImage(z);
         this.fitCameraSoon();
@@ -732,39 +686,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     });
   }
 
-  /** Subscribe the store colormap (+reverse), invert, and channel state → the volume/isosurface
-   *  transfer function: colour (channel tint or selected colormap), the intensity **window
-   *  (min/max → contrastLimits)** and **gamma**, mirroring the grayscale image's display controls
-   *  so the histogram pane drives the 3D render. Replaces any prior subscription. */
-  private subscribeVolumeDisplayState(): void {
-    this.watchDisplayState((channels) => {
-      const view = this.volumeView;
-      if (!view) return;
-      if (this.volumeMultichannel) {
-        // Each channel's layer is tinted by its colour and gets its own window/gamma/visibility.
-        view.layers.forEach((_, c) => {
-          const st = channels.find((s) => s.index === c);
-          view.updateChannel(c, {
-            colormap: this.display.channelTintColormap(st?.color ?? '#ffffff'),
-            ...(st
-              ? {
-                  contrastLimits: [st.min, st.max] as [number, number],
-                  gamma: toNapariGamma(st.gamma), // ImageJ γ → napari-js γ
-                  visible: st.visible,
-                }
-              : {}),
-          });
-        });
-      } else {
-        const st = channels[0];
-        view.updateChannel(0, {
-          colormap: this.display.volumeColormap(st),
-          ...(st ? { contrastLimits: [st.min, st.max] as [number, number], gamma: toNapariGamma(st.gamma) } : {}),
-        });
-      }
-    });
-  }
-
   /** Apply the current channel states / colormap to the live layers (no re-fetch), delegating the
    *  per-channel layer mutations to the {@link MultiChannelImageView}. */
   private applyDisplayState(channels: IChannelState[]): void {
@@ -885,253 +806,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   setNavigatorVisible(visible: boolean): void {
     this.settings.navigatorVisible = visible;
     this.navigator?.setVisible(visible);
-  }
-
-  /**
-   * Mount the 3D volume/isosurface. A multichannel image becomes one additive, tinted
-   * {@link VolumeLayer} per channel (so each channel's colour composites into the render); a
-   * grayscale/composite image uses a single volume. Adds the axes gizmo + labels and wires the
-   * display-state subscription. The caller owns `viewer.ready`.
-   */
-  private async mountVolume(
-    viewer: Viewer,
-    info: IImageInfo | undefined,
-    plotType: PlotType,
-  ): Promise<void> {
-    const loading = this.loading.signal; // bail before rendering on a Cancel / new plot
-    const desc = await this.tileClient.ensureDescriptor(this.info());
-    // Serverless multichannel (tiled:false + channelUrls): no tile descriptor, so
-    // derive the channel count from imageMeta and assemble each band from its own
-    // channelUrls[z][c] plane (fetchSlice does the per-channel routing).
-    const simpleMc = isServerlessMultichannel(this.simpleStack.isSimple(info), info);
-    const channelCount = simpleMc ? info!.imageMeta![0].channelCount : (desc?.channels ?? 1);
-    const multichannel = simpleMc || (!!desc?.multichannel && channelCount > 1);
-    const res = volumeResolutionFor(this.settings.resolutionScale);
-    const rendering: 'iso' | 'mip' = isNapariIsosurface(plotType) ? 'iso' : 'mip';
-    const states = this.store.currentChannelStates();
-
-    this.volumeChannelData.clear();
-    this.volumeMultichannel = multichannel;
-    this.imageMode = this.volumeMultichannel ? 'multichannel' : 'grayscale';
-    const view = new MultiChannelVolumeView(viewer);
-    this.volumeView = view;
-
-    // Assemble per-channel scalar volumes from the server tiles (jit-specific); the napari-js view
-    // owns the layer orchestration (one additive tinted volume per channel, or a single grayscale
-    // volume). The adapter computes each channel's colormap (incl. invert/reverse flips).
-    let dims: { width: number; height: number; depth: number } | null = null;
-    const channels: VolumeChannel[] = [];
-    this.stackLoading$.next(true);
-    this.stackLoadingProgress$.next(0);
-    try {
-      if (multichannel) {
-        for (let c = 0; c < channelCount; c++) {
-          const vol = await this.assembleVolume(info, res, c);
-          if (!vol) continue;
-          dims = vol;
-          this.volumeChannelData.set(c, vol.data);
-          const st = states.find((s) => s.index === c);
-          const color = st?.color ?? desc?.channelInfo?.[c]?.color ?? tintFor(c);
-          channels.push({
-            data: vol.data,
-            width: vol.width,
-            height: vol.height,
-            depth: vol.depth,
-            colormap: this.display.channelTintColormap(color),
-            contrastLimits: [st?.min ?? 0, st?.max ?? 255],
-            gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
-            visible: st?.visible ?? true,
-          });
-        }
-      } else {
-        const vol = await this.assembleVolume(info, res);
-        if (vol) {
-          dims = vol;
-          this.volumeChannelData.set(0, vol.data);
-          const st = states[0];
-          channels.push({
-            data: vol.data,
-            width: vol.width,
-            height: vol.height,
-            depth: vol.depth,
-            colormap: this.display.volumeColormap(st),
-            contrastLimits: [st?.min ?? 0, st?.max ?? 255],
-            gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
-          });
-        }
-      }
-    } finally {
-      this.stackLoading$.next(false);
-      this.stackLoadingProgress$.next(0);
-    }
-
-    if (!dims || !channels.length || loading.aborted) return; // cancelled → don't render
-
-    // Resolution-invariant world box; the per-axis `voxelSize` (napari `scale`) maps the sampled
-    // grid onto it.
-    //
-    // A stack that declares its physical spacing on ALL THREE axes gets its true
-    // extent as the world box — the only way anisotropy survives, and what makes a
-    // resampled 40 x 40 x 200 µm volume read as a brain instead of a cube-aspect
-    // brick. It needs none of the reference-box arithmetic: a physical box is
-    // already independent of the decimate factor.
-    //
-    // Everything else keeps that arithmetic. Sizing the box by the sampled voxel
-    // counts made higher in-plane resolution grow X/Y while the depth stayed the
-    // (constant) slice count — so Z appeared to shrink at higher resolution.
-    // Anchoring the in-plane long side to a fixed reference and letting Z span the
-    // full slice count makes the box shape identical at every decimate factor.
-    const meta = this.loaded?.imageInfo.imageMeta?.[0];
-    const mppXYZ: [number, number, number] | null =
-      meta?.mppX && meta?.mppY && meta?.mppZ ? [meta.mppX, meta.mppY, meta.mppZ] : null;
-    // The image's DECLARED pixel dimensions, which is what mpp is per: the sampled
-    // dims are decimated, so sizing a physical box by them would make the world
-    // box depend on the resolution the user happens to be viewing at.
-    const imageDesc = this.currentDescriptor();
-    const fullW = imageDesc?.width ?? meta?.x ?? dims.width;
-    const fullH = imageDesc?.height ?? meta?.y ?? dims.height;
-    const fullD = stackDepth(this.loaded?.imageInfo) || dims.depth;
-    let world: { width: number; height: number; depth: number };
-    if (mppXYZ) {
-      world = {
-        width: fullW * mppXYZ[0],
-        height: fullH * mppXYZ[1],
-        depth: fullD * mppXYZ[2],
-      };
-    } else {
-      const fullLong = Math.max(1, fullW, fullH);
-      world = {
-        width: (fullW * VOLUME_WORLD_INPLANE_REF) / fullLong,
-        height: (fullH * VOLUME_WORLD_INPLANE_REF) / fullLong,
-        depth: fullD,
-      };
-    }
-    // Base box (Z-scale = 1) + the sampled depth drive the live Z-height handle below; the persisted
-    // `volumeZScale` (user drag) applies on top so changing resolution keeps the chosen height.
-    this.volumeWorldBase = world;
-    this.volumeSampledDepth = Math.max(1, dims.depth);
-    const worldZ = world.depth * this.settings.volumeZScale;
-    const voxelSize: [number, number, number] = [
-      world.width / dims.width,
-      world.height / dims.height,
-      worldZ / this.volumeSampledDepth,
-    ];
-    for (const ch of channels) ch.voxelSize = voxelSize;
-
-    view.render(this.volumeMultichannel ? 'multichannel' : 'grayscale', channels, { rendering });
-    this.imageW = dims.width;
-    this.imageH = dims.height;
-    this.volumeDims = dims;
-
-    // 3D coordinate-axes / scale gizmo + labels, sharing the volume's world box so the gizmo tracks
-    // the rendered proportions. Physical scale text still comes from the FULL image extent.
-    this.axesLayer = viewer.addAxes(world.width, world.height, worldZ, { visible: this.settings.axesVisible });
-    if (this.host) {
-      this.axesLabels = new NapariAxesLabels(
-        this.host,
-        viewer.camera3d,
-        this.buildAxesLabels({ width: world.width, height: world.height, depth: worldZ }),
-      );
-      this.axesLabels.setVisible(this.settings.axesVisible);
-      // In-view drag handle at the TOP END OF THE Z AXIS (the box's min-XY corner, where the blue
-      // "Z" axis + label live), so it reads as the Z-height control. Floated a little past the axis
-      // tip (×1.12) so the grip clears the "Z · …" label. Drag ↕ to restretch Z live.
-      this.zHandle = new NapariVolumeZHandle(this.host, viewer.camera3d, {
-        topAnchor: () => [
-          -this.volumeWorldBase!.width / 2,
-          -this.volumeWorldBase!.height / 2,
-          ((this.volumeWorldBase!.depth * this.settings.volumeZScale) / 2) * 1.12,
-        ],
-        getScale: () => this.settings.volumeZScale,
-        setScale: (s) => this.setVolumeZScale(s),
-      });
-    }
-    this.subscribeVolumeDisplayState();
-  }
-
-  /**
-   * Restretch the volume's Z height live (driven by the in-view {@link NapariVolumeZHandle}). Only
-   * the per-axis `voxelSize` / axes depth change — the voxel textures are untouched — so dragging is
-   * smooth. `factor` is relative to the volume's natural proportions (1). Persists across re-mounts
-   * (resolution changes) so the chosen height sticks.
-   */
-  private setVolumeZScale(factor: number): void {
-    this.settings.volumeZScale = Math.min(10, Math.max(0.1, factor));
-    const base = this.volumeWorldBase;
-    if (!base || !this.volumeView) return;
-    const worldZ = base.depth * this.settings.volumeZScale;
-    const vsZ = worldZ / this.volumeSampledDepth;
-    for (const layer of this.volumeView.layers) {
-      const [sx, sy] = layer.voxelSize;
-      layer.voxelSize = [sx, sy, vsZ];
-    }
-    if (this.axesLayer) this.axesLayer.depth = worldZ;
-    this.axesLabels?.updateAnchors(
-      this.buildAxesLabels({ width: base.width, height: base.height, depth: worldZ }),
-    );
-    this.zHandle?.reposition();
-    this.viewer?.requestRender();
-  }
-
-  /** Build the X/Y/Z axis-end label specs for the 3D gizmo. Anchors are in the volume's centred
-   *  world box (matching the AxesLayer geometry); the scale text reflects the FULL image extent —
-   *  physical µm when µm/pixel is known, else pixel (X/Y) / slice (Z) counts. */
-  private buildAxesLabels(
-    vol: { width: number; height: number; depth: number },
-  ): AxisLabelSpec[] {
-    const hx = vol.width / 2;
-    const hy = vol.height / 2;
-    const hz = vol.depth / 2;
-    // Measured from the IMAGE's own extent, never from the world box: the box is a
-    // shape (and for a physically sized volume it is already in µm, so reading a
-    // pixel count off it and multiplying by mpp would scale the label twice).
-    const { px, mpp } = this.imageExtent();
-    const len = (n: number, um: number): string => (um > 0 ? formatUm(n * um) : `${n} px`);
-    return [
-      { anchor: [hx, -hy, -hz], text: `X · ${len(px[0], mpp[0])}`, color: '#ed4545' },
-      { anchor: [-hx, hy, -hz], text: `Y · ${len(px[1], mpp[1])}`, color: '#4dd959' },
-      // Physical when the stack declares its slice spacing (`mppZ`) — a resampled
-      // volume knows how thick it is; a plain z-stack can only say how many slices.
-      { anchor: [-hx, -hy, hz], text: `Z · ${len(px[2], mpp[2])}`, color: '#668cff' },
-    ];
-  }
-
-  /**
-   * The image's declared extent in pixels/slices, and its physical spacing per
-   * axis in µm (0 = undeclared, and then that axis reads in pixels).
-   *
-   * One place, because the volume world box and the axis labels have to agree
-   * about what the image's real dimensions are — the sampled grid is decimated and
-   * says nothing about either.
-   */
-  private imageExtent(): { px: [number, number, number]; mpp: [number, number, number] } {
-    const meta = this.loaded?.imageInfo.imageMeta?.[0];
-    const dims = this.volumeDims;
-    const desc = this.currentDescriptor();
-    const mppX = desc?.mppX || meta?.mppX || 0;
-    return {
-      px: [
-        desc?.width ?? meta?.x ?? dims?.width ?? 1,
-        desc?.height ?? meta?.y ?? dims?.height ?? 1,
-        stackDepth(this.loaded?.imageInfo) || dims?.depth || 1,
-      ],
-      // A descriptor that reports only mppX is square-pixel by convention, which is
-      // what the 2D scale bar already assumes of it.
-      mpp: [mppX, desc?.mppY || meta?.mppY || mppX, meta?.mppZ || 0],
-    };
-  }
-
-  /** Assemble the stack into a uint8 volume, driving {@link stackLoadingProgress$}; null on a
-   *  Cancel or a new plot. */
-  private assembleVolume(
-    info: IImageInfo | undefined,
-    opts: { maxSlice?: number; sliceStep?: number } = {},
-    channel?: number,
-  ): Promise<AssembledVolume | null> {
-    return this.tileClient.assembleVolume(info, opts, channel, {
-      signal: this.loading.signal, // bail on a Cancel / new plot while we fetch
-      progress: (p) => this.stackLoadingProgress$.next(p),
-    });
   }
 
   /**
@@ -1781,305 +1455,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     return encodeSpatialContinuous(values, view, lut, this.spatial.contrastWindows, muted);
   }
 
-  /**
-   * Mount the NAPARI_SCATTER3D 3D scatter: the downsampled voxel grid as a 3D point cloud colored
-   * by intensity (napari-js analog of Plotly's voxel scatter3d). Assembles a coarse volume, then
-   * emits a flat-strided sample of voxels (capped at {@link SCATTER3D_MAX_POINTS}) via `addPoints3D`.
-   */
-  private async mountScatter3d(viewer: Viewer, info: IImageInfo | undefined): Promise<void> {
-    this.imageMode = 'grayscale';
-    this.volumeMultichannel = false;
-    const res = volumeResolutionFor(this.settings.resolutionScale);
-    this.stackLoading$.next(true);
-    this.stackLoadingProgress$.next(0);
-    let vol: { data: Uint8Array; width: number; height: number; depth: number } | null = null;
-    try {
-      vol = await this.assembleVolume(info, {
-        maxSlice: Math.min(res.maxSlice, SCATTER3D_MAX_XY),
-        sliceStep: res.sliceStep,
-      });
-    } finally {
-      this.stackLoading$.next(false);
-      this.stackLoadingProgress$.next(0);
-    }
-    if (!vol || this.viewer !== viewer) return;
-
-    const { data, width, height, depth } = vol;
-    const zScale = Math.max(width, height) / Math.max(1, depth); // ≈ cubic aspect
-    const total = width * height * depth;
-    const stride = Math.max(1, Math.ceil(total / SCATTER3D_MAX_POINTS));
-    const pos: number[] = [];
-    const val: number[] = [];
-    for (let i = 0; i < total; i += stride) {
-      const x = i % width;
-      const y = Math.floor(i / width) % height;
-      const zi = Math.floor(i / (width * height));
-      pos.push(x, y, zi * zScale);
-      val.push(data[i]);
-    }
-
-    const st = this.store.currentChannelStates()[0];
-    this.scatter3dLayer = viewer.addPoints3D(new Float32Array(pos), new Float32Array(val), {
-      colormap: this.display.volumeColormap(st),
-      contrastLimits: [st?.min ?? 0, st?.max ?? 255],
-      size: 3,
-    });
-    this.imageW = width;
-    this.imageH = height;
-    this.volumeDims = { width, height, depth };
-    // Feed the intensity histogram from the assembled volume (key 0).
-    this.volumeChannelData.clear();
-    this.volumeChannelData.set(0, data);
-    this.subscribeScatter3dDisplayState();
-    this.tools.scheduleReadback();
-  }
-
-  /** Store colormap / reverse / invert / channel window → the 3D scatter's colormap + contrast. */
-  private subscribeScatter3dDisplayState(): void {
-    this.watchDisplayState((channels) => {
-      const layer = this.scatter3dLayer;
-      if (!layer) return;
-      const st = channels[0];
-      layer.colormap = this.display.volumeColormap(st);
-      if (st) layer.contrastLimits = [st.min, st.max];
-      this.viewer?.requestRender();
-    });
-  }
-
-  /**
-   * Mount the NAPARI_SURFACE height-field surface. A height field is single-scalar, so for a
-   * multichannel image the surface follows ONE band — the first visible channel (fallback 0) —
-   * coloured by that channel's window/colormap (like the Plotly SURFACE, which is grayscale-only).
-   * Pre-loads every slice's height data with a progress bar (as the volume does) so the stack
-   * slider re-slices instantly, then builds the mesh for the current slice. All mesh + GPU work
-   * lives in napari-js (`heightField` + `Viewer.addSurface`); this backend supplies scalar slices.
-   */
-  private async mountSurface(viewer: Viewer): Promise<void> {
-    const desc = await this.tileClient.ensureDescriptor(this.info());
-    const info = this.loaded?.imageInfo;
-    // Serverless multichannel (tiled:false + channelUrls) has no descriptor — detect
-    // it from imageMeta so the Surface still follows one band.
-    const simpleMc = isServerlessMultichannel(this.simpleStack.isSimple(info), info);
-    const multichannel = simpleMc || (!!desc?.multichannel && (desc?.channels ?? 1) > 1);
-    this.surfaceMultichannel = multichannel;
-    // A height field is single-scalar → follow the pane-SELECTED channel.
-    this.surfaceChannel = multichannel ? this.store.currentSelectedChannel() : undefined;
-    this.surfaceMaxGrid = surfaceResolutionFor(this.settings.resolutionScale).maxGrid;
-    this.imageMode = 'grayscale';
-    this.volumeMultichannel = false;
-    await this.preloadSurfacePlanes(viewer);
-    if (this.viewer !== viewer) return;
-    await this.buildSurface(viewer, this.loaded?.z ?? 0);
-    this.installSurfaceAxes(viewer);
-    // Subscribe after the first build so display-state edits target a live layer.
-    this.subscribeSurfaceDisplayState();
-  }
-
-  /** Add the 3D axes gizmo + DOM labels around the (origin-centered) surface mesh, matching the
-   *  volume/isosurface. Installed once per mount; the box tracks the mesh bounds, X/Y show the
-   *  physical (or pixel) extent, and Z is the intensity/height axis. */
-  private installSurfaceAxes(viewer: Viewer): void {
-    if (!this.surfaceLayer) return;
-    const b = this.surfaceLayer.bounds();
-    const boxW = Math.max(1, b.max[0] - b.min[0]);
-    const boxH = Math.max(1, b.max[1] - b.min[1]);
-    const boxD = Math.max(1, b.max[2] - b.min[2]);
-    const desc = this.currentDescriptor();
-    const mppX = this.tileClient.mppX(this.info());
-    const voxel = mppX > 0 ? (mppX * (desc?.width ?? this.imageW)) / Math.max(1, this.imageW) : 1;
-    this.axesLayer = viewer.addAxes(boxW, boxH, boxD, {
-      voxelSize: [voxel, voxel, 1],
-      visible: this.settings.axesVisible,
-    });
-    if (this.host) {
-      this.axesLabels = new NapariAxesLabels(
-        this.host,
-        viewer.camera3d,
-        this.buildSurfaceAxesLabels(boxW, boxH, boxD, mppX),
-      );
-      this.axesLabels.setVisible(this.settings.axesVisible);
-    }
-  }
-
-  /** X/Y/Z end-labels for the surface gizmo: X/Y are the physical (µm) or pixel extent of the FULL
-   *  image; Z is the intensity/height axis. Anchors are in the centered box (matching AxesLayer). */
-  private buildSurfaceAxesLabels(
-    boxW: number,
-    boxH: number,
-    boxD: number,
-    mppX: number,
-  ): AxisLabelSpec[] {
-    const hx = boxW / 2;
-    const hy = boxH / 2;
-    const hz = boxD / 2;
-    const desc = this.currentDescriptor();
-    const descW = desc?.width ?? this.imageW;
-    const descH = desc?.height ?? this.imageH;
-    const len = (px: number): string => (mppX > 0 ? formatUm(px * mppX) : `${px} px`);
-    return [
-      { anchor: [hx, -hy, -hz], text: `X · ${len(descW)}`, color: '#ed4545' },
-      { anchor: [-hx, hy, -hz], text: `Y · ${len(descH)}`, color: '#4dd959' },
-      { anchor: [-hx, -hy, hz], text: 'Z · intensity', color: '#668cff' },
-    ];
-  }
-
-  /**
-   * Pre-fetch every stack slice's luminance plane (decimated to the surface grid) into
-   * {@link surfacePlanes}, driving {@link stackLoadingProgress$} — the same load-with-progress UX
-   * as the volume, but keeping one 2D plane per slice rather than packing a 3D volume. Bounded
-   * concurrency keeps the connection pool busy without flooding it on a deep stack.
-   */
-  private async preloadSurfacePlanes(viewer: Viewer): Promise<void> {
-    // A channel switch starts a new preload while this one may still be in flight: the newer
-    // one owns the plane cache and the progress bar from here on.
-    this.surfacePreload?.abort();
-    const preload = new AbortController();
-    this.surfacePreload = preload;
-    const loading = this.loading.signal; // bail on a Cancel / new plot while we fetch
-    const stale = (): boolean =>
-      preload.signal.aborted || loading.aborted || this.viewer !== viewer;
-    const info = this.loaded?.imageInfo;
-    const depth = stackDepth(info) || 1;
-    const { maxGrid } = surfaceResolutionFor(this.settings.resolutionScale);
-    this.surfacePlanes.clear();
-    this.stackLoading$.next(true);
-    this.stackLoadingProgress$.next(0);
-    try {
-      let done = 0;
-      const slices = Array.from({ length: depth }, (_, z) => z);
-      await mapPool(slices, VOLUME_FETCH_CONCURRENCY, async (z) => {
-        try {
-          const plane = await this.fetchSurfacePlane(z, maxGrid);
-          // Superseded while in flight: this plane may be the OLD band, and the cache is not
-          // this preload's any more.
-          if (stale()) return;
-          this.surfacePlanes.set(z, plane);
-        } catch (err) {
-          if (stale()) return;
-          console.warn(`[napari-js] surface slice ${z} preload failed`, err);
-        }
-        done++;
-        this.stackLoadingProgress$.next(Math.round((done / depth) * 100));
-      }, stale);
-    } finally {
-      // Only the newest preload ends the progress bar; a superseded one would hide it while
-      // its successor is still loading.
-      if (this.surfacePreload === preload) {
-        this.surfacePreload = null;
-        this.stackLoading$.next(false);
-        this.stackLoadingProgress$.next(0);
-      }
-    }
-  }
-
-  /** Slice `z` as a whole-image luminance plane of the surface's band, decimated to `maxGrid`. */
-  private fetchSurfacePlane(z: number, maxGrid: number): Promise<LumaPlane> {
-    return this.tileClient.fetchPlane(this.info(), z, this.surfaceChannel, maxGrid);
-  }
-
-  /** The channel state driving the surface: the chosen band for multichannel (matched by index),
-   *  else the single grayscale channel. */
-  private surfaceState(channels: IChannelState[]): IChannelState | undefined {
-    if (this.surfaceChannel == null) return channels[0];
-    return channels.find((s) => s.index === this.surfaceChannel) ?? channels[0];
-  }
-
-  /**
-   * (Re)build the surface mesh for slice `z` from the pre-loaded plane cache (instant — this is
-   * what the stack slider calls); a slice missing from the cache is fetched on demand. napari-js's
-   * pure `heightField` builds the triangle grid (z = normalized intensity), then `addSurface`
-   * renders it. The slice plane also feeds the intensity histogram (key 0).
-   */
-  private async buildSurface(viewer: Viewer, z: number): Promise<void> {
-    let plane = this.surfacePlanes.get(z);
-    if (!plane) {
-      this.stackLoading$.next(true);
-      try {
-        plane = await this.fetchSurfacePlane(z, this.surfaceMaxGrid);
-        this.surfacePlanes.set(z, plane);
-      } catch (err) {
-        console.error('[napari-js] surface slice fetch failed:', err);
-      } finally {
-        this.stackLoading$.next(false);
-      }
-    }
-    if (!plane || plane.width < 2 || plane.height < 2 || this.viewer !== viewer) return;
-
-    const st = this.surfaceState(this.store.currentChannelStates());
-    const win: [number, number] = [st?.min ?? 0, st?.max ?? 255];
-    this.surfaceWindow = win;
-    // Height AND colour are normalized by the same contrast window, so changing min/max reshapes the
-    // surface (a pixel's height = its intensity within [min,max]). Center it for the axes gizmo. The
-    // plane is already decimated to the grid cap → stride 1.
-    const zScale = SURFACE_Z_ASPECT * Math.max(plane.width, plane.height);
-    const { vertices, faces, values } = heightField(plane.data, plane.width, plane.height, {
-      zScale,
-      zLimits: win,
-      center: true,
-    });
-
-    // A re-slice / window rebuild keeps the orbit camera: the viewer's `fit3d: 'once'` frames only
-    // the scene's first 3D add, so stepping the stack or changing the window keeps the pose.
-    if (this.surfaceLayer) {
-      viewer.layers.remove(this.surfaceLayer);
-      this.surfaceLayer = null;
-    }
-    this.surfaceLayer = viewer.addSurface(vertices, faces, values, {
-      colormap: this.display.volumeColormap(st),
-      contrastLimits: win,
-      gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
-      wireframe: this.settings.surfaceWireframe,
-    });
-
-    this.imageW = plane.width;
-    this.imageH = plane.height;
-    this.volumeDims = { width: plane.width, height: plane.height, depth: Math.max(1, Math.round(zScale)) };
-    // Reuse the volume intensity-histogram path: the slice's scalar plane is the histogram source.
-    this.volumeChannelData.clear();
-    this.volumeChannelData.set(0, plane.data);
-    this.tools.scheduleReadback();
-  }
-
-  /** Subscribe the store colormap / reverse / invert / channel window → the surface, so histogram
-   *  & channel-dialog edits update it live without a re-fetch. **min/max reshapes the surface's
-   *  height** (a pixel's height = its intensity within [min,max]), so a window change rebuilds the
-   *  mesh geometry (from the cached slice); colour-only edits (colormap/LUT, gamma, reverse, invert)
-   *  just update the layer's uniforms. */
-  private subscribeSurfaceDisplayState(): void {
-    this.watchDisplayState((channels, selected) => {
-      const layer = this.surfaceLayer;
-      if (!layer || !this.viewer) return;
-      // Selected channel changed (multichannel): re-fetch THAT band's planes and
-      // rebuild the height-field for the current slice.
-      if (this.surfaceMultichannel && selected !== this.surfaceChannel) {
-        this.surfaceChannel = selected;
-        void (async () => {
-          await this.preloadSurfacePlanes(this.viewer!);
-          if (this.viewer) await this.buildSurface(this.viewer, this.loaded?.z ?? 0);
-        })().catch((err) => console.error('[napari-js] surface channel switch failed:', err));
-        return;
-      }
-      const st = this.surfaceState(channels);
-      const win: [number, number] = [st?.min ?? 0, st?.max ?? 255];
-      const windowChanged =
-        !this.surfaceWindow || win[0] !== this.surfaceWindow[0] || win[1] !== this.surfaceWindow[1];
-      if (windowChanged) {
-        // Height follows the contrast window → rebuild the mesh for the new [min,max] (camera kept).
-        void this.buildSurface(this.viewer, this.loaded?.z ?? 0).catch((err) =>
-          console.error('[napari-js] surface window rebuild failed:', err),
-        );
-        return;
-      }
-      // Colour-only change: update uniforms in place, no geometry rebuild.
-      layer.colormap = this.display.volumeColormap(st);
-      if (st) {
-        layer.contrastLimits = win;
-        layer.gamma = toNapariGamma(st.gamma); // ImageJ γ → napari-js γ
-      }
-      this.viewer.requestRender();
-    });
-  }
-
   private fitCameraSoon(): void {
     const run = (): void => {
       if (this.viewer && this.canvas && this.imageW > 0 && this.imageH > 0) {
@@ -2118,11 +1493,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.setNavigatorChannels(null);
     this.badge.reset();
     this.tools.teardown();
-    this.axesLabels?.destroy();
-    this.axesLabels = null;
-    this.zHandle?.destroy();
-    this.zHandle = null;
-    this.volumeWorldBase = null;
     this.tileClient.startScene(this.lifetime.signal);
     this.tiled = false;
     this.histGen++;
@@ -2133,13 +1503,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.viewer = null;
     if (this.canvas && this.host?.contains(this.canvas)) this.host.removeChild(this.canvas);
     this.canvas = null;
-    this.volumeView = null;
-    this.volumeMultichannel = false;
-    this.surfaceLayer = null;
-    this.surfaceChannel = undefined;
-    this.surfacePreload?.abort();
-    this.surfacePlanes.clear();
-    this.surfaceWindow = null;
     this.scatterRegionSub?.unsubscribe();
     this.scatterRegionSub = null;
     this.spatialSub?.unsubscribe();
@@ -2157,10 +1520,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     // Invalidate any colour fetch still in flight so it can't attach to the next scene.
     this.spatialRebuildToken++;
     this.scatter2dPoints = null;
-    this.scatter3dLayer = null;
-    this.axesLayer = null;
-    this.volumeDims = null;
-    this.volumeChannelData.clear();
   }
 
   relayout(_trueImageSize?: number[]): void {
@@ -2221,23 +1580,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     // has none of them — and both used to fall through to the 2D render below.
     switch (this.mounted) {
       case 'surface':
-        // One slice → one mesh: re-build the height field for the new slice. Not built yet →
-        // nothing to do; the build at the end of the mount reads `loaded.z`.
-        if (this.surfaceLayer) {
-          void this.buildSurface(v, zIndex).catch((err) =>
-            console.error('[napari-js] setZIndex surface failed:', err),
-          );
-        }
-        return;
       case 'volume':
-        // Volume / isosurface: step the volume's z plane in place.
-        v.dims.z = zIndex;
-        this.tools.scheduleReadback();
-        return;
       case 'scatter3d':
       case 'spatial3d':
+        this.scene?.setZ(zIndex);
+        return;
       case null:
-        // The whole stack (or the observations' own z) is already on screen: no plane to step.
         return;
       case 'image2d':
         break;
@@ -2329,8 +1677,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   /** Map a Plotly-style 3D drag mode onto napari-js's camera drag mode. */
   setSurfaceDragMode(mode: string): void {
     if (!this.viewer) return;
-    const m = mode === 'pan' ? 'pan' : mode === 'zoom' ? 'zoom' : 'rotate'; // orbit/turntable → rotate
-    this.viewer.setCameraDragMode(m);
+    this.viewer.setCameraDragMode(cameraDragMode(mode));
   }
 
   /** Re-frame the 3D camera on the scene: napari-js frames the union of every 3D layer's bounds
@@ -2433,56 +1780,19 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     return this.tools.regionOverlay;
   }
   getIsosurfaceControls(): IIsosurfaceControls | null {
-    if (!this.volumeView) return null;
-    return {
-      setIsoRange: (isoMin: number, isoMax: number): void => {
-        // Apply to every channel's volume layer.
-        for (const layer of this.volumeView?.layers ?? []) {
-          layer.contrastLimits = [isoMin, isoMax];
-          layer.rendering = 'iso';
-          layer.isoThreshold = 0.5;
-        }
-        this.viewer?.requestRender();
-      },
-    };
+    return this.scene?.isoControls?.() ?? null;
   }
   getIntensityControls(): IIntensityControls | null {
     return null;
   }
   getSurface3dControls(): ISurface3dControls | null {
-    if (!this.volumeView && !this.surfaceLayer && !this.scatter3dLayer) return null;
-    return {
-      setSurfaceDragMode: (mode: string): void => this.setSurfaceDragMode(mode),
-      resetSurfaceCamera: (): void => this.resetSurfaceCamera(),
-      setAxesVisible: (visible: boolean): void => {
-        this.settings.axesVisible = visible;
-        this.axesLabels?.setVisible(visible);
-        if (this.axesLayer) {
-          this.axesLayer.visible = visible;
-          this.viewer?.requestRender();
-        }
-      },
-      axesVisible: (): boolean => this.settings.axesVisible,
-      // Surface wireframe (napari-js surface only) — a live layer property, no rebuild needed.
-      setWireframe: (on: boolean): void => {
-        this.settings.surfaceWireframe = on;
-        if (this.surfaceLayer) {
-          this.surfaceLayer.wireframe = on;
-          this.viewer?.requestRender();
-        }
-      },
-      wireframe: (): boolean => this.settings.surfaceWireframe,
-    };
+    return this.scene?.surface3dControls?.() ?? null;
   }
   getHistogram(channelIndex: number, bins: number): IHistogram | null {
     const v = this.viewer;
     if (!v) return null;
-    // Volume / isosurface: intensity histogram of the assembled (downsampled) uint8 volume for the
-    // requested channel (multichannel) or the single grayscale volume (key 0).
-    if (this.volumeChannelData.size) {
-      const data = this.volumeChannelData.get(channelIndex) ?? this.volumeChannelData.get(0);
-      return data ? toIHistogram(histogramScalar(data, bins, 0, 255)) : null;
-    }
+    // Volume / isosurface / surface / 3D scatter: their own assembled data.
+    if (this.scene && this.mounted !== 'spatial3d') return this.scene.histogram(channelIndex, bins);
     // Tiled mode has no full in-memory pixels → use the coarse per-channel sample (RGB: readback).
     if (this.tiled) {
       if (this.imageMode === 'rgb') return this.tools.rgbHistogram(channelIndex, bins);

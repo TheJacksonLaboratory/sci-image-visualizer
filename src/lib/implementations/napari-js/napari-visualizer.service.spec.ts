@@ -927,13 +927,12 @@ describe('NapariVisualizerService', () => {
     // in flight. The first one's late planes (the OLD band) landed in the cache the second had
     // just cleared, and whichever finished first hid the progress bar.
     type Plane = { data: Uint8Array; width: number; height: number };
-    type Internals = {
-      viewer: unknown;
-      surfacePlanes: Map<number, Plane>;
-      preloadSurfacePlanes(viewer: unknown): Promise<void>;
-      fetchSurfacePlane(z: number, maxGrid: number): Promise<Plane>;
+    type Scene = {
+      planes: Map<number, Plane>;
+      preloadPlanes(): Promise<void>;
+      fetchPlane(z: number, maxGrid: number): Promise<Plane>;
     };
-    const internals = service as unknown as Internals;
+    const scene = () => (service as unknown as { scene: Scene }).scene;
     const div = document.createElement('div');
     div.id = 'surf-preload-host';
     document.body.appendChild(div);
@@ -941,28 +940,29 @@ describe('NapariVisualizerService', () => {
     await service.plot('surf-preload-host', loaded, imageInfo(), 600, PlotType.NAPARI_SURFACE);
 
     const held: Array<(p: Plane) => void> = [];
-    jest.spyOn(internals, 'fetchSurfacePlane').mockImplementation(
+    const internals = scene();
+    jest.spyOn(internals, 'fetchPlane').mockImplementation(
       () => new Promise<Plane>((resolve) => held.push(resolve)),
     );
     const plane = (v: number): Plane => ({ data: new Uint8Array([v]), width: 1, height: 1 });
     const loading = jest.fn();
     const sub = service.isStackLoading().subscribe(loading);
 
-    const old = internals.preloadSurfacePlanes(internals.viewer);
+    const old = internals.preloadPlanes();
     await Promise.resolve();
     const oldFetches = held.splice(0);
-    const fresh = internals.preloadSurfacePlanes(internals.viewer);
+    const fresh = internals.preloadPlanes();
     await Promise.resolve();
     const freshFetches = held.splice(0);
 
     oldFetches.forEach((r) => r(plane(1)));
     await old;
-    expect([...internals.surfacePlanes.values()].some((p) => p.data[0] === 1)).toBe(false);
+    expect([...internals.planes.values()].some((p) => p.data[0] === 1)).toBe(false);
     expect(loading).toHaveBeenLastCalledWith(true);
 
     freshFetches.forEach((r) => r(plane(2)));
     await fresh;
-    expect([...internals.surfacePlanes.values()].map((p) => p.data[0])).toEqual([2, 2]);
+    expect([...internals.planes.values()].map((p) => p.data[0])).toEqual([2, 2]);
     expect(loading).toHaveBeenLastCalledWith(false);
 
     sub.unsubscribe();
@@ -1252,7 +1252,7 @@ describe('NapariVisualizerService', () => {
 
     await service.plot('z-3d-host', loaded, imageInfo(), 600, PlotType.NAPARI_SURFACE);
     // As during the preload, or after a first build that failed.
-    (service as unknown as { surfaceLayer: unknown }).surfaceLayer = null;
+    (service as unknown as { scene: { layer: unknown } }).scene.layer = null;
     service.setZIndex(0);
     await Promise.resolve();
     expect(render).not.toHaveBeenCalled();
@@ -1574,23 +1574,25 @@ describe('NapariVisualizerService', () => {
     const loaded = await service.load(imageInfo(), 0);
     await service.plot('vol-zscale-host', loaded, imageInfo(), 600, PlotType.NAPARI_VOLUME);
 
-    const svc = service as unknown as {
-      volumeView: { layers: { voxelSize: readonly [number, number, number] }[] };
-      axesLayer: { depth: number };
-      setVolumeZScale: (f: number) => void;
-    };
-    const baseVsZ = svc.volumeView.layers[0].voxelSize[2];
-    const baseDepth = svc.axesLayer.depth;
+    const svc = (service as unknown as {
+      scene: {
+        view: { layers: { voxelSize: readonly [number, number, number] }[] };
+        gizmo: { layer: { depth: number } };
+        setZScale: (f: number) => void;
+      };
+    }).scene;
+    const baseVsZ = svc.view.layers[0].voxelSize[2];
+    const baseDepth = svc.gizmo.layer.depth;
 
-    svc.setVolumeZScale(2); // taller
-    expect(svc.volumeView.layers[0].voxelSize[2]).toBeCloseTo(baseVsZ * 2, 5);
-    expect(svc.axesLayer.depth).toBeCloseTo(baseDepth * 2, 5);
+    svc.setZScale(2); // taller
+    expect(svc.view.layers[0].voxelSize[2]).toBeCloseTo(baseVsZ * 2, 5);
+    expect(svc.gizmo.layer.depth).toBeCloseTo(baseDepth * 2, 5);
     // XY voxel scale is untouched by a Z-height change.
-    expect(svc.volumeView.layers[0].voxelSize[0]).toBeGreaterThan(0);
+    expect(svc.view.layers[0].voxelSize[0]).toBeGreaterThan(0);
 
-    svc.setVolumeZScale(0.5); // flatter (relative to base, not the previous 2×)
-    expect(svc.volumeView.layers[0].voxelSize[2]).toBeCloseTo(baseVsZ * 0.5, 5);
-    expect(svc.axesLayer.depth).toBeCloseTo(baseDepth * 0.5, 5);
+    svc.setZScale(0.5); // flatter (relative to base, not the previous 2×)
+    expect(svc.view.layers[0].voxelSize[2]).toBeCloseTo(baseVsZ * 0.5, 5);
+    expect(svc.gizmo.layer.depth).toBeCloseTo(baseDepth * 0.5, 5);
 
     service.unsubscribe();
     document.body.removeChild(div);
@@ -2901,8 +2903,8 @@ describe('NapariVisualizerService', () => {
       }));
 
       const labels = (service as unknown as {
-        buildAxesLabels: (v: { width: number; height: number; depth: number }) => { text: string }[];
-      }).buildAxesLabels({ width: 1, height: 1, depth: 1 }).map((l) => l.text);
+        scene: { axesLabels: (v: { width: number; height: number; depth: number }) => { text: string }[] };
+      }).scene.axesLabels({ width: 1, height: 1, depth: 1 }).map((l) => l.text);
 
       // 275 x 40 µm = 11 000 µm and 76 x 200 µm = 15 200 µm, formatted in cm at
       // this scale — a mouse brain, not the 44.0 cm the double-scaled label gave.
@@ -2921,8 +2923,8 @@ describe('NapariVisualizerService', () => {
       }));
 
       const labels = (service as unknown as {
-        buildAxesLabels: (v: { width: number; height: number; depth: number }) => { text: string }[];
-      }).buildAxesLabels({ width: 1, height: 1, depth: 1 }).map((l) => l.text);
+        scene: { axesLabels: (v: { width: number; height: number; depth: number }) => { text: string }[] };
+      }).scene.axesLabels({ width: 1, height: 1, depth: 1 }).map((l) => l.text);
 
       expect(labels[0]).toBe('X · 1.1 cm');
       expect(labels[2]).toBe('Z · 8 px'); // unknown thickness — say so, don't invent one

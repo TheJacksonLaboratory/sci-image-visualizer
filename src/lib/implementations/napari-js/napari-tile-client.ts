@@ -85,6 +85,12 @@ export class NapariTileClient {
     private readonly api: string,
   ) {}
 
+  /** Whether `info` is a self-contained stack (`tiled:false`: each slice its own file, no
+   *  server pyramid). */
+  isSimple(info: IImageInfo | undefined): boolean {
+    return this.simpleStack.isSimple(info);
+  }
+
   /** A new scene: forget the scene-scoped state and poll under `signal` from now on. */
   startScene(signal: AbortSignal): void {
     this.scene = signal;
