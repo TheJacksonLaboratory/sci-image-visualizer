@@ -512,6 +512,14 @@ export interface IVisualizer extends IDataRenderer, IRegionStore, IToolControlle
   /** Export the underlying image data as a data-preserving multi-band TIFF
    *  (native bit depth). No-op on backends that can't provide it. */
   exportData(): void;
+  /**
+   * The view is going away (the `<visualizer>` is destroyed): drop what is bound to
+   * it — the on-screen viewer, its render loop and view subscriptions — so nothing
+   * outlives the view. Service-lifetime state (stores, the backends' own store
+   * subscriptions) is untouched, so a later view on the same chain renders normally.
+   */
+  detach(): void;
+  /** @deprecated Use {@link detach}, which this delegates to. */
   unsubscribe(): void;
 }
 

@@ -64,6 +64,7 @@ function mockBackend(): any {
     getRegionOverlay: jest.fn().mockReturnValue({ kind: 'overlay' }),
     getSurface3dControls: jest.fn().mockReturnValue({ kind: '3d' }),
     unsubscribe: jest.fn(),
+    detach: jest.fn(),
     // ── remaining IVisualizer surface (for delegation coverage) ──
     getTrueImageSize: jest.fn().mockReturnValue({ width: 0, height: 0 }),
     getCurrentImage: jest.fn().mockResolvedValue(null),
@@ -519,21 +520,20 @@ describe('RoutingVisualizerService (characterization)', () => {
     expect(napari.setNavigatorVisible).toHaveBeenCalledWith(false);
   });
 
-  it('unsubscribe tears down both backends', () => {
+  it('detach detaches every backend; unsubscribe is its deprecated alias (CORE-1)', () => {
+    router.detach();
+    for (const b of [plotly, osd, napari]) expect(b.detach).toHaveBeenCalledTimes(1);
     router.unsubscribe();
-    expect(plotly.unsubscribe).toHaveBeenCalled();
-    expect(osd.unsubscribe).toHaveBeenCalled();
+    for (const b of [plotly, osd, napari]) expect(b.detach).toHaveBeenCalledTimes(2);
   });
 
-  it('unsubscribe also disposes the napari-js viewer and forgets the backend on screen (CORE-7)', async () => {
+  it('detach also disposes the napari-js viewer and forgets the backend on screen (CORE-7)', async () => {
     await router.load(IMAGE_INFO, 0);
     router.setPlotType(PlotType.NAPARI_VOLUME);
     await router.plot('div', {}, IMAGE_INFO, 600, PlotType.NAPARI_VOLUME);
     expect(napari.plot).toHaveBeenCalled();
-    napari.reset.mockClear();
-
-    router.unsubscribe();
-    expect(napari.reset).toHaveBeenCalled();
+    router.detach();
+    expect(napari.detach).toHaveBeenCalled();
     // Nothing is on screen any more: delegation falls back to the Plotly default.
     router.zoomIn();
     expect(plotly.zoomIn).toHaveBeenCalled();

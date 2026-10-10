@@ -702,7 +702,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.unsub.next();
     this.unsub.complete();
     this.shortcuts?.detach();
-    this.plotService.unsubscribe();
+    this.plotService.detach();
   }
 
   /** What the host gets through `setDiagram` — see {@link VisualizerHandle}. */

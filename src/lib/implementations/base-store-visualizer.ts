@@ -135,6 +135,14 @@ export abstract class BaseStoreVisualizer implements IRegionStore, IDisplayOptio
     else if (this.canvasTools.activeId === id) this.setActiveTool(null);
   }
 
+  // ── View lifetime ─────────────────────────────────────────────────────────
+
+  /** Drop what is bound to the view (each backend's own teardown). */
+  abstract unsubscribe(): void;
+
+  /** The view is going away: release what is bound to it (`IViewerBackend.detach`). */
+  detach(): void { this.unsubscribe(); }
+
   // ── Classification colours → shared VisualizerStore ──────────────────────
   getClassificationColors(): Map<string, string> { return this.store.getClassificationColors(); }
   setClassificationColor(label: string, color: string): void {

@@ -90,7 +90,7 @@ function mockPlotService(): any {
     getRegionOverlay: jest.fn().mockReturnValue(mockOverlay()),
     getIsosurfaceControls: jest.fn().mockReturnValue({ setIsoRange: jest.fn() }),
     // Only reached by ngOnDestroy, which most of this suite deliberately skips.
-    unsubscribe: jest.fn(),
+    detach: jest.fn(),
   };
 }
 

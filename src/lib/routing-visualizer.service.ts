@@ -597,14 +597,19 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.plotly.refreshIntensitySamplingForRoi(x, y, width, height, zIndex);
   }
 
-  /** The visualizer view is going away: drop the backends' view-bound subscriptions and
-   *  dispose the napari-js viewer (its canvas, render loop and GPU buffers would otherwise
-   *  outlive the view — for a component-scoped chain, forever). Nothing is on screen
-   *  afterwards, so the next plot starts from the default backend. */
-  unsubscribe(): void {
-    this.plotly.unsubscribe();
-    this.osd.unsubscribe();
-    this.napari.reset();
+  /** The visualizer view is going away: detach every backend — dropping their view-bound
+   *  subscriptions and disposing the napari-js viewer, whose canvas, render loop and GPU
+   *  buffers would otherwise outlive the view (for a component-scoped chain, forever).
+   *  Nothing is on screen afterwards, so the next plot starts from the default backend. */
+  detach(): void {
+    this.plotly.detach();
+    this.osd.detach();
+    this.napari.detach();
     this.lastRendered = null;
+  }
+
+  /** @deprecated Use {@link detach}. */
+  unsubscribe(): void {
+    this.detach();
   }
 }
