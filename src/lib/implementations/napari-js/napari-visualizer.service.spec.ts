@@ -665,8 +665,7 @@ describe('NapariVisualizerService', () => {
 
   describe('image tiles on the loading badge', () => {
     type Internals = {
-      host: HTMLElement | null;
-      loadingBadge: { text: string } | null;
+      badge: { attach(host: HTMLElement): void; readonly text: string };
       scene: AbortController;
       buildTiledSource(desc: unknown, channel: number | undefined, channels: 1 | 4, scene: AbortSignal): {
         fetchTile(key: { level: number; col: number; row: number; z: number }): Promise<unknown>;
@@ -679,7 +678,7 @@ describe('NapariVisualizerService', () => {
 
     beforeEach(() => {
       internals = service as unknown as Internals;
-      internals.host = document.createElement('div');
+      internals.badge.attach(document.createElement('div'));
       // Hold the tile's response until the test releases it.
       (globalThis.fetch as jest.Mock).mockImplementation(
         () => new Promise((resolve) => {
@@ -691,10 +690,10 @@ describe('NapariVisualizerService', () => {
     it('says the image is reloading while a tile is in flight, and stops once it lands', async () => {
       const tile = internals.buildTiledSource(desc, undefined, 4, internals.scene.signal).fetchTile(key);
       await Promise.resolve();
-      expect(internals.loadingBadge?.text).toBe('Image reloading…');
+      expect(internals.badge.text).toBe('Image reloading…');
       release();
       await tile;
-      expect(internals.loadingBadge?.text).toBe('');
+      expect(internals.badge.text).toBe('');
     });
 
     it('a tile that lands after a reset leaves the new scene\'s count alone', async () => {
@@ -702,32 +701,32 @@ describe('NapariVisualizerService', () => {
       await Promise.resolve();
       const releaseStale = release;
       service.reset();
-      internals.host = document.createElement('div');
+      internals.badge.attach(document.createElement('div'));
       const fresh = internals.buildTiledSource(desc, undefined, 4, internals.scene.signal).fetchTile(key);
       await Promise.resolve();
       releaseStale();
       await stale;
-      expect(internals.loadingBadge?.text).toBe('Image reloading…');
+      expect(internals.badge.text).toBe('Image reloading…');
       release();
       await fresh;
-      expect(internals.loadingBadge?.text).toBe('');
+      expect(internals.badge.text).toBe('');
     });
 
     it('a disposed source\'s request after a reset never counts toward the new scene', async () => {
       const disposed = internals.buildTiledSource(desc, undefined, 4, internals.scene.signal);
       service.reset();
-      internals.host = document.createElement('div');
+      internals.badge.attach(document.createElement('div'));
       const late = disposed.fetchTile(key);
       await Promise.resolve();
-      expect(internals.loadingBadge?.text ?? '').toBe('');
+      expect(internals.badge.text).toBe('');
       release();
       await late;
       const fresh = internals.buildTiledSource(desc, undefined, 4, internals.scene.signal).fetchTile(key);
       await Promise.resolve();
-      expect(internals.loadingBadge?.text).toBe('Image reloading…');
+      expect(internals.badge.text).toBe('Image reloading…');
       release();
       await fresh;
-      expect(internals.loadingBadge?.text).toBe('');
+      expect(internals.badge.text).toBe('');
     });
 
     it('a plot superseded while its descriptor is in flight builds no source for the new scene', async () => {
@@ -760,7 +759,7 @@ describe('NapariVisualizerService', () => {
       releaseInfo();
       await old;
       expect(built.mock.calls.length).toBe(builtByNew);
-      expect(internals.loadingBadge?.text ?? '').toBe('');
+      expect(internals.badge.text).toBe('');
       service.unsubscribe();
       document.body.removeChild(div);
     });

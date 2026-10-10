@@ -58,7 +58,7 @@ import { type HoverSource, hoverText, nearestObservation, PointGridIndex } from 
 import { NapariSpatialTooltip } from './napari-spatial-tooltip';
 import { NapariSpatialTileLayers, TranscriptEstimate } from './napari-spatial-tiles';
 import { NapariNavigator } from './napari-navigator';
-import { NapariLoadingBadge } from './napari-loading-badge';
+import { LoadingBadgeState } from './napari-loading-state';
 import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
 import { NAPARI_WHEEL_ZOOM_SPEED } from './napari-zoom';
 import { ZOOM_BUTTON_STEP } from '../osd/osd-zoom';
@@ -365,11 +365,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
    *  order. Only the newest rebuild is allowed to touch the layer. */
   private spatialRebuildToken = 0;
   /** "x reloading…" at the bottom of the canvas: the tile layers' loads and the observations'. */
-  private loadingBadge: NapariLoadingBadge | null = null;
-  private tileLoading: string[] = [];
-  private observationsLoading = 0;
-  /** Image tiles in flight for the current scene (see {@link scene}). */
-  private imageTilesLoading = 0;
+  private readonly badge = new LoadingBadgeState();
   /**
    * The mounted scene's lifetime: aborted by {@link reset}, so everything a plot starts — its
    * descriptor poll, its tile fetches, its badge counts, its awaits — can tell that a newer plot
@@ -819,6 +815,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     // a superseded plot must not go on to draw (or count image tiles) into the newer scene.
     const scene = this.scene.signal;
     this.host = host;
+    this.badge.attach(host);
     this.plotDivId = plotDiv;
     this.currentPlotType = plotType;
     this.mounted = sceneKindOf(plotType);
@@ -1142,11 +1139,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
           res, col: key.col, row: key.row, z: key.z, tileSize, channel,
         });
         // "Image reloading…" on the loading badge while any tile of the image is in flight.
-        const counted = !scene.aborted;
-        if (counted) {
-          this.imageTilesLoading++;
-          this.showLoading();
-        }
+        const end = scene.aborted ? null : this.badge.begin('Image');
         try {
           const resp = await fetchWithAuth(this.tiles, url);
           if (!resp.ok) {
@@ -1156,10 +1149,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
           if (channels === 4) return { width: bmp.width, height: bmp.height, data: bmp };
           return this.bitmapToLuminance(bmp);
         } finally {
-          if (counted && !scene.aborted) {
-            this.imageTilesLoading--;
-            this.showLoading();
-          }
+          if (!scene.aborted) end?.();
         }
       },
     };
@@ -1333,17 +1323,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     if (this.viewer && this.host && mppX > 0) {
       this.scaleBar = new NapariScaleBar(this.host, this.viewer.camera, mppX);
     }
-  }
-
-  /** "x reloading…" on the loading badge: image tiles, observations and the spatial tile layers. */
-  private showLoading(): void {
-    if (!this.host) return;
-    this.loadingBadge ??= new NapariLoadingBadge(this.host);
-    this.loadingBadge.set([
-      ...(this.imageTilesLoading > 0 ? ['Image'] : []),
-      ...(this.observationsLoading > 0 ? ['Observations'] : []),
-      ...this.tileLoading,
-    ]);
   }
 
   /**
@@ -1849,8 +1828,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       estimateChanged: (e) => this.inZone(() => this.transcriptEstimate$.next(e)),
       geneCountsChanged: (c) => this.inZone(() => this.geneCountsInView$.next(c)),
       loadingChanged: (layers) => {
-        this.tileLoading = layers;
-        this.showLoading();
+        this.badge.setTileLayers(layers);
       },
       densityChanged: (d) => this.inZone(() => this.densityStats$.next(d)),
       polygonsShownChanged: () => {
@@ -2368,8 +2346,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     // Resolve colours BEFORE touching the scene: a gene fetch can fail or be
     // superseded, and dropping the existing layer first would blank the view.
     let faceColor: RGBA[] | RGBA;
-    this.observationsLoading++;
-    this.showLoading();
+    const endLoading = this.badge.begin('Observations');
     try {
       faceColor = dataset
         ? await this.spatialFaceColors(dataset, view, selection)
@@ -2378,8 +2355,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       console.warn('[napari-js] spatial colouring failed — falling back to a flat colour', err);
       faceColor = SPATIAL_NEUTRAL_COLOR;
     } finally {
-      this.observationsLoading--;
-      this.showLoading();
+      endLoading();
     }
     // A newer rebuild (or a teardown) started while the vector was in flight.
     if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
@@ -2816,16 +2792,14 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     // layer first would blank the view.
     let enc: Spatial3dEncoding | null = null;
     if (dataset) {
-      this.observationsLoading++;
-      this.showLoading();
+      const endLoading = this.badge.begin('Observations');
       try {
         enc = await this.spatialScalar3d(view);
       } catch (err) {
         console.warn('[napari-js] spatial 3D colouring failed — falling back to a flat colour', err);
         enc = null;
       } finally {
-        this.observationsLoading--;
-        this.showLoading();
+        endLoading();
       }
     }
     if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
@@ -3842,11 +3816,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.navigator?.destroy();
     this.navigator = null;
     this.setNavigatorChannels(null);
-    this.loadingBadge?.destroy();
-    this.loadingBadge = null;
-    this.tileLoading = [];
-    this.observationsLoading = 0;
-    this.imageTilesLoading = 0;
+    this.badge.reset();
     this.regionOverlay?.destroy();
     this.regionOverlay = null;
     this.axesLabels?.destroy();
