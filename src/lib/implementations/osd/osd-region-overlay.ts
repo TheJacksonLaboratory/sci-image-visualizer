@@ -8,6 +8,7 @@ import { IRegionOverlay, RegionToolMode } from '../../contracts/region-overlay.c
 import { elementToImage, imageToElement } from './osd-coords';
 import { OSD_ZOOM_PER_SCROLL } from './osd-zoom';
 import { parseCssColor } from '../../contracts/color';
+import { translateBounds } from '../../models/polygon-edit';
 import {
   OPEN_PATH_TOL_PX, ToScreen, hitHandle, nearestEdge, regionBBox, regionContains, regionsInRect, ringHandles,
   ringOf, topmostRegionAt,
@@ -34,17 +35,12 @@ const ZONE_CURSOR: Record<EditZone, string> = {
   move: 'move', n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize',
   ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize',
 };
-/** A region's geometry at the start of a move/resize (see `snapshot`). */
+/** A region's geometry at the start of a move/resize (see `snapshot`): a rectangle's
+ *  box for a resize, or the polygon/multi-polygon bounds themselves for a move — the
+ *  store is copy-on-write, so the gesture-start instance never changes under the drag. */
 type EditSnapshot =
   | { kind: 'rect'; x: number; y: number; w: number; h: number }
-  | {
-      kind: 'poly'; xs: number[]; ys: number[]; closed: boolean; bezier: boolean;
-      inOff?: number[][]; outOff?: number[][]; holes?: number[][][];
-    }
-  | {
-      kind: 'multi';
-      polygons: Array<{ xs: number[]; ys: number[]; closed: boolean; holes?: number[][][] }>;
-    };
+  | { kind: 'shape'; bounds: Polygon | MultiPolygon };
 
 /** Screen-pixel tolerance for grabbing an edge/corner handle. */
 const EDIT_TOL = 8;
@@ -751,25 +747,8 @@ export class OsdRegionOverlay implements IRegionOverlay {
   /** Snapshot the selected region's geometry at the start of an edit. */
   private snapshot(region: Region): EditSnapshot {
     const b = region.bounds;
+    if (b instanceof Polygon || b instanceof MultiPolygon) return { kind: 'shape', bounds: b };
     if (b instanceof Rectangle) return { kind: 'rect', x: b.x, y: b.y, w: b.width, h: b.height };
-    if (b instanceof Polygon) {
-      return {
-        kind: 'poly', xs: b.xpoints.slice(), ys: b.ypoints.slice(), closed: b.closed !== false,
-        bezier: b.bezier,
-        inOff: b.handlesIn?.map(o => o.slice()),
-        outOff: b.handlesOut?.map(o => o.slice()),
-        holes: b.holes?.map(ring => ring.map(pt => pt.slice())),
-      };
-    }
-    if (b instanceof MultiPolygon) {
-      return {
-        kind: 'multi',
-        polygons: b.polygons.map((p) => ({
-          xs: p.xpoints.slice(), ys: p.ypoints.slice(), closed: p.closed !== false,
-          holes: p.holes?.map(ring => ring.map(pt => pt.slice())),
-        })),
-      };
-    }
     return { kind: 'rect', x: 0, y: 0, w: 0, h: 0 };
   }
 
@@ -830,45 +809,10 @@ export class OsdRegionOverlay implements IRegionOverlay {
       rect.width = Math.round(Math.abs(x1 - x0));
       rect.height = Math.round(Math.abs(y1 - y0));
       this.store.updateBounds(this.edit.id, rect);
-    } else if (o.kind === 'multi') {
-      // Multi-part region: translate every part (and its holes) by the delta.
-      const mp = new MultiPolygon();
-      mp.polygons = o.polygons.map((pp) => {
-        const xs = pp.xs.map((x: number) => Math.round(x + dx));
-        const ys = pp.ys.map((y: number) => Math.round(y + dy));
-        const poly = new Polygon();
-        poly.npoints = xs.length;
-        poly.xpoints = xs;
-        poly.ypoints = ys;
-        poly.coordinates = xs.map((x: number, i: number) => [x, ys[i]]);
-        poly.closed = pp.closed;
-        if (pp.holes) {
-          poly.holes = pp.holes.map((ring: number[][]) =>
-            ring.map(([x, y]: number[]) => [Math.round(x + dx), Math.round(y + dy)]));
-        }
-        return poly;
-      });
-      this.store.updateBounds(this.edit.id, mp);
     } else {
-      // Polygon: translate every vertex (the only polygon edit zone is 'move').
-      // Bezier flag + handle offsets are relative, so they carry over unchanged.
-      const xs = o.xs.map((x: number) => Math.round(x + dx));
-      const ys = o.ys.map((y: number) => Math.round(y + dy));
-      const poly = new Polygon();
-      poly.npoints = xs.length;
-      poly.xpoints = xs;
-      poly.ypoints = ys;
-      poly.coordinates = xs.map((x: number, i: number) => [x, ys[i]]);
-      poly.closed = o.closed;
-      poly.bezier = o.bezier;
-      if (o.inOff) poly.handlesIn = o.inOff.map((off: number[]) => off.slice());
-      if (o.outOff) poly.handlesOut = o.outOff.map((off: number[]) => off.slice());
-      // Translate interior rings (holes) with the exterior (jit-ui#85).
-      if (o.holes) {
-        poly.holes = o.holes.map((ring: number[][]) =>
-          ring.map(([x, y]: number[]) => [Math.round(x + dx), Math.round(y + dy)]));
-      }
-      this.store.updateBounds(this.edit.id, poly);
+      // Polygon / multi-part region: translate every vertex, hole and part, rounded to
+      // whole pixels. Bezier handle offsets are relative, so they carry over unchanged.
+      this.store.updateBounds(this.edit.id, translateBounds(o.bounds, dx, dy, Math.round));
     }
     this.redraw();
   }
