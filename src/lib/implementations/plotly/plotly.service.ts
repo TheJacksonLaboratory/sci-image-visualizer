@@ -6,7 +6,7 @@ import { HttpClient } from '@angular/common/http';
 
 import { Polygon, Rectangle, Region } from '../../models/region';
 import { Buffer } from 'buffer';
-import { IImageInfo, IImageMetadata } from '../../contracts/image.contract';
+import { IImageInfo } from '../../contracts/image.contract';
 import { TileAccessPort, TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
 import { ImageStatePort, IMAGE_STATE_PORT } from '../../contracts/ports/image-state.port';
 import { BehaviorSubject, EMPTY, Observable, Subject, Subscription, combineLatest, of } from 'rxjs';
@@ -38,6 +38,8 @@ import { ICoordinateTransform } from '../../contracts/coordinate-transform.contr
 import { PlotlyCoordinateTransform } from './plotly-coordinate-transform';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
+import { BaseStoreVisualizer } from '../base-store-visualizer';
+import { ColormapNode } from '../../contracts/display-types';
 import { VIZ_ALERT_TOAST_KEY } from '../../toast-outlets';
 import { firstValueFromAbortable, throwIfAborted } from '../tile-server/transport';
 
@@ -53,7 +55,7 @@ const PLOTLY_STACK_FETCH_CONCURRENCY = 4;
 @Injectable({
   providedIn: 'root'
 })
-export class PlotlyService implements IVisualizer {
+export class PlotlyService extends BaseStoreVisualizer implements IVisualizer {
 
   /**
    * Plotly is the full-featured data backend: it supports every feature,
@@ -72,7 +74,6 @@ export class PlotlyService implements IVisualizer {
   ]);
 
   private shapes: any[] = [];
-  private previousShapes: ShapeSelection[] = [];
   private isRegionSavedOn = true;
   private imageLength!: number;
   private screenHeight!: number;
@@ -209,8 +210,9 @@ export class PlotlyService implements IVisualizer {
               @Optional() @Inject(CELL_SEGMENTER) private cellSegmenter: ICellSegmenter | null,
               private vertexEraserTool: VertexEraserToolService,
               private zoomToBoxTool: ZoomToBoxToolService,
-              private store: VisualizerStore,
-              private regionStore: RegionStore) {
+              store: VisualizerStore,
+              regionStore: RegionStore) {
+    super(regionStore, store);
     // relayout event router
     this.onRelayoutEvent = (event: any) => { this.relayoutEventHandler(event); };
 
@@ -1196,9 +1198,6 @@ export class PlotlyService implements IVisualizer {
       }
       // Mint ids/names in the store, write them back onto the dicts, and emit.
       this.commitShapesToStore();
-      if (this.isRegionSavedOn) {
-        this.previousShapes = this.shapes.slice();
-      }
     }
     // if autoscale
     if (keys.includes('xaxis.autorange') && keys.includes('yaxis.autorange')) {
@@ -1538,20 +1537,6 @@ export class PlotlyService implements IVisualizer {
     this.state.setImageInfo(imgInfo);
   }
 
-  public getShapes() {
-    return this.shapes;
-  }
-
-  /**
-   * Framework-neutral view of the current regions — delegates to the shared
-   * RegionStore (the single source of truth). The canonical accessor on the
-   * `IVisualizer` contract; consumers should prefer this over `getShapes()`
-   * (which exposes Plotly-shaped dicts).
-   */
-  public getRegions(): Region[] {
-    return this.regionStore.getRegions();
-  }
-
   /**
    * Switch the active image. The shared RegionStore owns the per-image region
    * cache (snapshot outgoing / restore incoming / clear selection / emit); we
@@ -1564,16 +1549,6 @@ export class PlotlyService implements IVisualizer {
   public setActiveImage(imageInfo: IImageInfo) {
     this.regionStore.setActiveImage(imageInfo);
     this.syncShapesFromStore();
-    this.previousShapes = this.shapes.slice();
-  }
-
-  /**
-   * Get all the selected regions as polygons. Open polylines (closed === false)
-   * are excluded — they're annotation-only and cannot be used as filled regions
-   * for image processing. Delegates to the shared store.
-   */
-  public getRegionPolygons(): any[] {
-    return this.regionStore.getRegionPolygons();
   }
 
   /**
@@ -1585,9 +1560,9 @@ export class PlotlyService implements IVisualizer {
    * When `isRegionSaveOn` is false the regions are shown transiently — rendered
    * without altering the stored working-set (preserves the prior behaviour).
    */
-  public setRegions(regions: Region[], showRegionLabel?: boolean,
-                    isRegionSaveOn?: boolean, fillColor?: string,
-                    append: boolean = false) {
+  public override setRegions(regions: Region[], showRegionLabel?: boolean,
+                             isRegionSaveOn?: boolean, fillColor?: string,
+                             append: boolean = false) {
     const showLabel = showRegionLabel === undefined ? this.regionStore.getShowShapeLabel() : showRegionLabel;
     const save = isRegionSaveOn === undefined ? this.isRegionSavedOn : isRegionSaveOn;
 
@@ -1632,52 +1607,6 @@ export class PlotlyService implements IVisualizer {
     const gd: any = this.plotDiv ? document.getElementById(this.plotDiv) : null;
     return gd?._fullLayout ? gd : null;
   }
-
-  getShowShapeLabel() {
-    return this.regionStore.getShowShapeLabel();
-  }
-
-  /**
-   * Set previous saved shapes
-   */
-  public plotPreviousShapes() {
-    // convert to dict so that plotly recognises the shapes
-    const dictArray = this.previousShapes.map(s => ({ ...s }));
-    const gd = this.liveGd();
-    if (gd) void Plotly.relayout(gd, { shapes: dictArray });
-  }
-
-  setPreviousShapes(shapes: ShapeSelection[]) {
-    this.previousShapes = shapes;
-  }
-
-  getPreviousShapes() {
-    return this.previousShapes;
-  }
-
-  // Undo (jit-ui#85): region history lives in the shared RegionStore, so the
-  // active backend's overlay re-renders off its regionUpdate$ on restore.
-  public undo(): void { this.regionStore.undo(); }
-  public redo(): void { this.regionStore.redo(); }
-  public canUndo(): boolean { return this.regionStore.canUndo(); }
-  public canRedo(): boolean { return this.regionStore.canRedo(); }
-  public getCanUndo$(): Observable<boolean> { return this.regionStore.getCanUndo$(); }
-  public getCanRedo$(): Observable<boolean> { return this.regionStore.getCanRedo$(); }
-  public resetUndoHistory(): void { this.regionStore.resetUndoHistory(); }
-
-  // ── Per-slice z-stack regions → RegionStore (jit-ui#93) ──────────────────
-  public enterStackMode(slices: Map<number, Region[]>, initialZ?: number,
-                        saveLayout?: 'combined' | 'per-slice-file'): void {
-    this.regionStore.enterStackMode(slices, initialZ, saveLayout);
-  }
-  public exitStackMode(): void { this.regionStore.exitStackMode(); }
-  public isStackMode(): boolean { return this.regionStore.isStackMode(); }
-  public getStackSaveLayout(): 'combined' | 'per-slice-file' {
-    return this.regionStore.getStackSaveLayout();
-  }
-  public setDisplaySlice(z: number): void { this.regionStore.setDisplaySlice(z); }
-  public getSliceRegions(): Region[] { return this.regionStore.getSliceRegions(); }
-  public getStackSaveSlices(): Map<number, Region[]> { return this.regionStore.getStackSaveSlices(); }
 
   private getHeatmapLayout(xRange: number[], yRange: number[]): any {
     return {
@@ -1974,7 +1903,7 @@ export class PlotlyService implements IVisualizer {
    * `_activeShapeIndex` when no multi-selection is active (covers the case
    * where Plotly clicked a shape without going through the table).
    */
-  public deleteActiveShape() {
+  public override deleteActiveShape() {
     // Note: no `plotDiv` guard — when OpenSeadragon is the renderer, Plotly
     // never plotted (plotDiv is unset), but deletion only needs the shape list
     // + the current selection; the Plotly relayout below is guarded.
@@ -2037,37 +1966,20 @@ export class PlotlyService implements IVisualizer {
     return this.stackLoadingProgress$.asObservable();
   }
 
-  // Colormap / reverse-scale / image metadata state lives in the shared
-  // VisualizerStore; these delegate, keeping only the Plotly-specific live
-  // restyle as render glue.
-  getColormapOptions() {
-    return this.store.getColormapOptions();
-  }
-  setColormap(colormap: any) {
-    this.store.setColormap(colormap);
+  // Colormap / reverse-scale state lives in the shared VisualizerStore (the
+  // base class forwards the getters); these setters add the Plotly-specific
+  // live restyle as render glue.
+  override setColormap(colormap: ColormapNode) {
+    super.setColormap(colormap);
     const gd = this.liveGd(); // OSD/napari recolor via their own LUT
-    if (gd) void Plotly.restyle(gd, { 'colorscale': [colormap.data.value] });
-  }
-  getColormap() {
-    return this.store.getColormap();
+    const scale = colormap.data?.value;
+    if (gd && scale != null) void Plotly.restyle(gd, { colorscale: [scale] } as Plotly.Data);
   }
 
-  setReverseScale(reverscale: any) {
-    this.store.setReverseScale(reverscale);
+  override setReverseScale(reverscale: boolean) {
+    super.setReverseScale(reverscale);
     const gd = this.liveGd(); // OSD/napari recolor via their own LUT
     if (gd) void Plotly.restyle(gd, { 'reversescale': reverscale });
-  }
-
-  getReverseScale() {
-    return this.store.getReverseScale();
-  }
-
-  setImageMeta(imageMeta: IImageMetadata[]) {
-    this.store.setImageMeta(imageMeta);
-  }
-
-  getImageMeta() {
-    return this.store.getImageMeta();
   }
 
   setShowStack(showstack: boolean) {
@@ -2083,19 +1995,6 @@ export class PlotlyService implements IVisualizer {
     return this.autoscaleEvent.asObservable();
   }
 
-  getRegionUpdateEvent() {
-    return this.regionStore.getRegionUpdateEvent();
-  }
-
-  /**
-   * Stream of the indices of currently selected regions — owned by the shared
-   * RegionStore so the selection is consistent across backends and the Region
-   * Editor table. Empty = nothing selected.
-   */
-  getSelectedShapeIndices$(): Observable<number[]> {
-    return this.regionStore.getSelectedShapeIndices$();
-  }
-
   /**
    * Programmatically select regions (or clear with []). The shared store owns
    * the selection state (validates/dedupes/emits); here we additionally point
@@ -2103,7 +2002,7 @@ export class PlotlyService implements IVisualizer {
    * handles. No visual change to non-active shapes — Plotly's own active-shape
    * rendering is the only highlight.
    */
-  public setSelectedShapeIndices(indices: number[]) {
+  public override setSelectedShapeIndices(indices: number[]) {
     const valid = (indices || [])
       .filter(i => Number.isFinite(i) && i >= 0 && i < this.shapes.length);
     const seen = new Set<number>();
@@ -2126,7 +2025,7 @@ export class PlotlyService implements IVisualizer {
    * selection by identity and points Plotly's active-shape at the matching
    * rendered shape so its edit handles appear.
    */
-  public selectRegion(region: Region): void {
+  public override selectRegion(region: Region): void {
     this.regionStore.selectRegion(region);
     if (this.plotDiv) {
       const idx = this.shapes.findIndex(s => s.id === region?.id);
@@ -2153,21 +2052,6 @@ export class PlotlyService implements IVisualizer {
   }
   setZIndex(zIndex: number) {
     this.zIndex.next(zIndex);
-  }
-
-  getShapeColor() {
-    return this.regionStore.getShapeColor();
-  }
-  getFillColor() {
-    return this.regionStore.getFillColor();
-  }
-
-  getClassificationColors(): Map<string, string> {
-    return this.store.getClassificationColors();
-  }
-
-  setClassificationColor(label: string, color: string) {
-    this.store.setClassificationColor(label, color);
   }
 
   /**
@@ -2256,17 +2140,10 @@ export class PlotlyService implements IVisualizer {
     console.warn('[plotly] 16-bit data export is not available for the heatmap backend.');
   }
 
-  importRegions(geoJsonStr: string): Region[] {
-    return this.plotUtilities.importROIsFromGeoJson(geoJsonStr);
-  }
-
-  exportRegions(regions: Region[]) {
+  /** As the base class, but the file is named after the image on screen. */
+  override exportRegions(regions: Region[]) {
     const jsonString = this.plotUtilities.exportROIsToGeoJson(regions);
     this.plotUtilities.saveToFile(jsonString, this.fileName);
-  }
-
-  getGeoJsonString(regions: Region[]): string {
-    return this.plotUtilities.exportROIsToGeoJson(regions);
   }
 
   getStackLoadingProgress() {

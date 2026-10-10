@@ -336,8 +336,7 @@ describe('PlotlyService region glue (Plotly-specific)', () => {
     // The drawn shape is now a region in the shared store (and projected to
     // Plotly's working-set), with a minted id.
     expect(service.getRegions().length).toBe(1);
-    expect(service.getShapes().length).toBe(1);
-    expect(service.getShapes()[0].id).toBeDefined();
+    expect(service.getRegions()[0].id).toBeDefined();
   });
 
   it('deleteActiveShape falls back to Plotly\'s _activeShapeIndex when nothing is selected', () => {
@@ -353,7 +352,10 @@ describe('PlotlyService region glue (Plotly-specific)', () => {
     gd._fullLayout = { _activeShapeIndex: 1 };
     service.deleteActiveShape();
 
-    expect(service.getShapes().map((s: any) => s.name)).toEqual(['s0']);
+    expect(service.getRegions().map((r) => r.name)).toEqual(['s0']);
+    // ...and the remaining shape is what Plotly is told to draw.
+    const last = (Plotly.relayout as unknown as jest.Mock).mock.calls.at(-1)[1];
+    expect(last.shapes.map((d: { name?: string }) => d.name)).toEqual(['s0']);
   });
 });
 
@@ -417,7 +419,6 @@ describe('PlotlyService viewport + stack-state methods', () => {
     // No _fullLayout: the div was purged and handed to OSD/napari.
     service.setColormap({ data: { value: 'Viridis' } } as any);
     service.setReverseScale(true);
-    service.plotPreviousShapes();
     expect(relayout).not.toHaveBeenCalled();
     expect(restyle).not.toHaveBeenCalled();
   });

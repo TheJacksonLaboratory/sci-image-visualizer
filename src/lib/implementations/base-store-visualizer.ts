@@ -8,24 +8,25 @@ import { RegionStore } from '../store/region-store.service';
 import { VisualizerStore } from '../store/visualizer-store.service';
 
 /**
- * Shared store-delegation base for the OpenSeadragon and napari-js
+ * Shared store-delegation base for the OpenSeadragon, napari-js and Plotly
  * `IVisualizer` backends. The entire `IRegionStore` and `IDisplayOptions`
  * surfaces (plus the two classification-colour members) are pure forwarders to
- * the shared `RegionStore` / `VisualizerStore` in BOTH backends — so they live
- * here once, as a single source of truth, rather than being copied per backend.
- * (This is the "cross-backend behaviour that isn't rendering belongs in a
- * shared abstraction" convention from CLAUDE.md; the extraction closes
- * SHARED-BACKEND-REFACTOR.md.)
+ * the shared `RegionStore` / `VisualizerStore` — so they live here once, as a
+ * single source of truth, rather than being copied per backend. (This is the
+ * "cross-backend behaviour that isn't rendering belongs in a shared
+ * abstraction" convention from CLAUDE.md; see
+ * docs/history/2026-07-shared-backend-refactor.md.)
  *
  * Backend-specific members — `load`/`plot`/`reset`/zoom/`setZIndex`/readback,
  * the region OVERLAY, tool wiring, histograms, scale bar, tiling, colormap LUT
- * application — deliberately stay in each subclass.
+ * application — deliberately stay in each subclass. Plotly keeps a Plotly-shape
+ * working-set beside the store, so it overrides the handful of members that
+ * must also redraw it (`setRegions`, selection, delete, colormap, reverse
+ * scale, and `exportRegions` for the file name).
  *
  * NOT `@Injectable`: an abstract base doesn't participate in Angular DI. Each
  * subclass stays `@Injectable`, declares its own injected dependencies
- * (including the two stores), and passes them to `super(...)`. Plotly is not
- * a subclass yet: it keeps a Plotly-shape working-set beside the store, which
- * changes about ten of these members; the rest it still forwards by hand.
+ * (including the two stores), and passes them to `super(...)`.
  */
 export abstract class BaseStoreVisualizer implements IRegionStore, IDisplayOptions {
   protected constructor(
@@ -48,9 +49,6 @@ export abstract class BaseStoreVisualizer implements IRegionStore, IDisplayOptio
   getShowShapeLabel(): boolean { return this.regionStore.getShowShapeLabel(); }
   getShapeColor(): string { return this.regionStore.getShapeColor(); }
   getFillColor(): string { return this.regionStore.getFillColor(); }
-  plotPreviousShapes(): void { this.regionStore.plotPreviousShapes(); }
-  setPreviousShapes(shapes: any[]): void { this.regionStore.setPreviousShapes(shapes); }
-  getPreviousShapes(): any[] { return this.regionStore.getPreviousShapes(); }
   undo(): void { this.regionStore.undo(); }
   redo(): void { this.regionStore.redo(); }
   canUndo(): boolean { return this.regionStore.canUndo(); }
@@ -85,7 +83,7 @@ export abstract class BaseStoreVisualizer implements IRegionStore, IDisplayOptio
   setColormap(colormap: ColormapNode): void { this.store.setColormap(colormap); }
   getColormapOptions(): ColormapNode[] { return this.store.getColormapOptions(); }
   getReverseScale(): Observable<boolean> { return this.store.getReverseScale(); }
-  setReverseScale(reverscale: any): void { this.store.setReverseScale(reverscale); }
+  setReverseScale(reverscale: boolean): void { this.store.setReverseScale(reverscale); }
   setImageMeta(imageMeta: IImageMetadata[]): void { this.store.setImageMeta(imageMeta); }
   getImageMeta(): Observable<IImageMetadata[]> { return this.store.getImageMeta(); }
 }

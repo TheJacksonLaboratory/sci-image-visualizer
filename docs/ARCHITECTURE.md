@@ -53,7 +53,7 @@ that reason: `SpatialSelectionMask` is in `spatial-dataset.contract.ts`, not
 | `implementations/plotly/` | Plotly backend: service, region overlay (Plotly shapes), trace builders, omics chart builders (public) |
 | `implementations/napari-js/` | WebGPU backend: service, SVG region overlay, spatial tiles (LOD loop for outlines, transcripts, density), navigator, scale bar, axes, volume z-handle |
 | `implementations/spatial-data-http/` | Optional reference `SpatialDataPort` adapter and wire decoders for the example server's format |
-| `implementations/base-store-visualizer.ts` | Abstract base that forwards the region/display API to the stores; OSD and napari extend it |
+| `implementations/base-store-visualizer.ts` | Abstract base that forwards the region/display API to the stores; OSD, napari and Plotly extend it |
 | `implementations/simple-slice-access.service.ts` | Per-slice URL loading for non-tiled stacks (OSD and napari) |
 | `store/` | `VisualizerStore`, `RegionStore`, `SpatialSelectionStore`, class-colour helpers |
 | `models/` | Neutral data: `region.ts`, `geometry.ts`, `bezier.ts`, `shape.ts`, `class-preset.ts`, and `polygon-factory.ts` (the one place `Polygon`/`Region` are built and cloned) |
@@ -156,8 +156,9 @@ so the descriptor flags and the nullable accessors are the gating that matters.
 - **`SpatialSelectionStore`**: the selected-observation mask for spatial omics.
 
 `BaseStoreVisualizer` forwards the region and display parts of `IVisualizer` to
-these stores for OSD and napari. Plotly delegates to the same `RegionStore`
-without extending the base.
+these stores for all three backends. Plotly overrides the few members that also
+redraw its own shapes or colour scale (`setRegions`, selection, delete,
+`setColormap`, `setReverseScale`, `exportRegions`).
 
 ## Regions and overlays
 

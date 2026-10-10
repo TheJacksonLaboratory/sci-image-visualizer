@@ -102,15 +102,15 @@ describe('PlotlyService region round-trip (characterization)', () => {
 
   it('append mode does not duplicate a region with identical geometry', () => {
     service.setRegions([makeRectRegion(1, 0, 0, 50, 50)], false, true, '#ffffff', false);
-    expect(service.getShapes().length).toBe(1);
+    expect(service.getRegions().length).toBe(1);
 
     // Pressing "find" again hands back the same geometry (different id) — the
     // append path must reject it as a duplicate.
     service.setRegions([makeRectRegion(2, 0, 0, 50, 50)], false, true, '#ffffff', true);
-    expect(service.getShapes().length).toBe(1);
+    expect(service.getRegions().length).toBe(1);
 
     // A genuinely different region does get appended.
     service.setRegions([makeRectRegion(3, 100, 100, 20, 20)], false, true, '#ffffff', true);
-    expect(service.getShapes().length).toBe(2);
+    expect(service.getRegions().length).toBe(2);
   });
 });

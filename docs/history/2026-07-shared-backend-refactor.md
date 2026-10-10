@@ -75,3 +75,7 @@ These forward verbatim to `this.regionStore` / `this.store` in BOTH backends:
 ## Est. impact
 Removes ~30 duplicated method bodies from each of the two services (~60 fewer lines per file,
 single source of truth for store delegation). Plotly left as-is (different region model).
+
+**Follow-up (2026-10, review OSD-PLOTLY-14):** Plotly's region model turned out to change only
+about ten of these members, so `PlotlyService` now extends `BaseStoreVisualizer` too and keeps
+just those as `override`s.
