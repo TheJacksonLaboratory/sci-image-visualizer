@@ -17,6 +17,7 @@ import { cellsAsGroups, heatmapMatrix } from '../../spatial/spatial-heatmap';
 import { geneOptionsFor } from '../../spatial/gene-search';
 import { ComputeProgress, EmbeddingComputeRun } from '../../spatial/embedding-compute';
 import { Supersede } from '../../util/supersede';
+import { ChartKindOption, chartKindOptions, embeddingNote, heatmapNote, kindHelp } from './chart-help';
 import {
   OmicsChartKind, OmicsGrouping, benefitsFromGrouping, buildCountTraces, buildHeatmapTraces,
   countByCategory,
@@ -149,21 +150,6 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    * window shows, not yank it back into the dialog and make them detach it again.
    */
   detached = false;
-  private static readonly CONTINUOUS_KINDS: { label: string; value: OmicsChartKind }[] = [
-    { label: 'Histogram', value: 'histogram' },
-    { label: 'Violin', value: 'violin' },
-    { label: 'Box', value: 'box' },
-  ];
-  private static readonly CATEGORICAL_KINDS: { label: string; value: OmicsChartKind }[] = [
-    { label: 'Counts', value: 'counts' },
-  ];
-
-  /** Available whatever the map is coloured by: the heatmap's subject is a GENE
-   *  LIST crossed with a grouping, not the active colour source. */
-  private static readonly ALWAYS_KINDS: { label: string; value: OmicsChartKind }[] = [
-    { label: 'Heatmap', value: 'heatmap' },
-  ];
-
   /**
    * A t-SNE the dataset does not publish, offered so it can be computed here.
    *
@@ -232,14 +218,6 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   /** Observations in the live dataset, kept for the cost estimate. */
   private observationCount = 0;
 
-  /** Offered only when the dataset publishes an embedding to draw. */
-  // Labelled for what it is rather than for one instance of it: this view draws whatever
-  // embedding the dataset publishes — a UMAP, a PCA, a t-SNE — and calling the tab "UMAP"
-  // while it showed a PCA would be a lie the picker beneath it immediately contradicts.
-  private static readonly EMBEDDING_KINDS: { label: string; value: OmicsChartKind }[] = [
-    { label: 'Embedding', value: 'embedding' },
-  ];
-
   /** The kinds the ACTIVE subject can be drawn as. A category code is a label,
    *  not a magnitude, so a histogram of it would be meaningless — what a
    *  categorical column has is a frequency distribution.
@@ -247,28 +225,19 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    *  Bound to a `p-selectButton`, so the SAME array is returned until what it is built
    *  from changes: a fresh array per change-detection pass makes PrimeNG re-render the
    *  buttons, and a button re-rendered under the pointer swallows the click. */
-  get kindOptions(): { label: string; value: OmicsChartKind }[] {
+  get kindOptions(): ChartKindOption[] {
     const categorical = !!this.categorical;
     const embeddings = this.embeddings.length > 0;
     const hit = this.kindOptionsMemo;
     if (hit && hit.categorical === categorical && hit.embeddings === embeddings) {
       return hit.options;
     }
-    const options = [
-      ...(categorical
-        ? SpatialChartsComponent.CATEGORICAL_KINDS
-        : SpatialChartsComponent.CONTINUOUS_KINDS),
-      ...SpatialChartsComponent.ALWAYS_KINDS,
-      // An embedding is a property of the DATASET, not of the active colour source, so
-      // it is offered whenever one is published and never otherwise — a tab that draws
-      // nothing is worse than an absent one.
-      ...(embeddings ? SpatialChartsComponent.EMBEDDING_KINDS : []),
-    ];
+    const options = chartKindOptions(categorical, embeddings);
     this.kindOptionsMemo = { categorical, embeddings, options };
     return options;
   }
   private kindOptionsMemo: {
-    categorical: boolean; embeddings: boolean; options: { label: string; value: OmicsChartKind }[];
+    categorical: boolean; embeddings: boolean; options: ChartKindOption[];
   } | null = null;
 
   controls: ISpatialControls | null = null;
@@ -555,25 +524,15 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
 
   /** What the heatmap is currently showing, said plainly. */
   get heatmapNote(): string {
-    if (this.heatmapGenes.length === 0) return 'Pick one or more genes for the rows.';
-    const perCell = this.selectionCount > 0
-      && this.selectionCount <= SpatialChartsComponent.HEATMAP_CELL_COLUMNS;
-    if (perCell) {
-      return `One column per selected cell (${this.selectionCount}). `
-        + 'Mean expression per cell, so the columns are cells rather than classes.';
-    }
-    const scope = this.selectionCount > 0 ? 'the selected cells' : 'all cells';
-    const scaled = this.heatmapZScore
-      ? ' Each gene is z-scored across the columns, so the colour is above or below that gene\'s own average.'
-      : ' Raw means, so a highly-expressed gene dominates the scale.';
-    // Saying so matters: without it the panel looks like the whole column.
-    const capped = this.heatmapHidden > 0
-      ? ` Showing the ${SpatialChartsComponent.HEATMAP_MAX_COLUMNS} strongest of `
-        + `${SpatialChartsComponent.HEATMAP_MAX_COLUMNS + this.heatmapHidden}, `
-        + 'ranked by the largest value any picked gene reaches.'
-      : '';
-    return `Mean expression of each gene within each ${this.groupBy ?? 'group'}, over ${scope}.`
-      + `${scaled}${capped}`;
+    return heatmapNote({
+      geneCount: this.heatmapGenes.length,
+      selectionCount: this.selectionCount,
+      zScore: this.heatmapZScore,
+      hidden: this.heatmapHidden,
+      groupBy: this.groupBy,
+      maxColumns: SpatialChartsComponent.HEATMAP_MAX_COLUMNS,
+      cellColumns: SpatialChartsComponent.HEATMAP_CELL_COLUMNS,
+    });
   }
 
   /** Gene rows for the heatmap. */
@@ -1133,100 +1092,14 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     void this.render();
   }
 
-  /**
-   * What the chart on screen actually shows, and what it cannot be read for.
-   *
-   * Shown on hover from a `?` beside the tabs. Each of these plots answers a different
-   * question and two of them are routinely over-read — a UMAP's distances and a heatmap's
-   * unscaled colours — so the caveat is part of the explanation rather than a footnote.
-   *
-   * HTML, because the tooltip renders with `[escape]="false"`: a paragraph and a caveat
-   * read as two thoughts, and a single run-on line is skipped rather than read.
-   */
+  /** What the chart on screen shows, and what it cannot be read for — see {@link kindHelp}. */
   get kindHelp(): string {
-    switch (this.kind) {
-      case 'counts':
-        return '<b>Counts</b> — how many observations fall in each category of the column '
-          + 'the map is coloured by, largest first.<br><br>A category code is a label, not '
-          + 'a magnitude, so a frequency is the only distribution it has: there is no '
-          + 'histogram of a cell type.';
-      case 'histogram':
-        return '<b>Histogram</b> — how the active value is distributed over all '
-          + 'observations.<br><br>With a selection, it is overlaid on the full '
-          + 'distribution rather than replacing it, so you can see where the selected '
-          + 'cells sit within the whole.';
-      case 'violin':
-        return '<b>Violin</b> — the active value\'s distribution within each category of '
-          + 'the grouping column, drawn as a smoothed density.<br><br>Shows shape a box '
-          + 'plot hides: two groups with the same median can be one peak or two.';
-      case 'box':
-        return '<b>Box</b> — median, quartiles and range of the active value within each '
-          + 'category of the grouping column.<br><br>Compact and comparable across many '
-          + 'groups, at the cost of hiding whether a group is bimodal.';
-      case 'heatmap':
-        return '<b>Heatmap</b> — mean expression of each picked gene within each group: '
-          + 'genes down, groups across.<br><br>Each gene is <b>z-scored across the '
-          + 'groups</b> by default, so a colour says "above or below this gene\'s own '
-          + 'average", not "highly expressed". Without that one loud gene saturates the '
-          + 'scale and the rest of the panel reads as blank. Turning it off compares '
-          + 'genes on their raw scale instead.';
-      case 'embedding':
-        return this.embeddingHelp;
-      default:
-        return '';
-    }
-  }
-
-  /**
-   * What the embedding on screen is, and how far its geometry can be trusted.
-   *
-   * Per METHOD, because that is the part people get wrong: a PCA's axes are ordered and
-   * measurable while a UMAP's are neither, and the same picture read the two ways supports
-   * opposite conclusions.
-   */
-  private get embeddingHelp(): string {
-    const shared = '<br><br>Every cell is in all views at once: lasso a group here and '
-      + 'those cells light up on the tissue, because both read the same selection.';
-    const name = (this.embedding?.label ?? this.embedding?.name ?? '').toLowerCase();
-    if (name.includes('pca')) {
-      return '<b>PCA</b> — a <b>linear</b> projection onto the directions of greatest '
-        + 'variance, in order.<br><br>Alone among these, its axes mean something '
-        + 'measurable: each reports the share of total variance it explains, which is why '
-        + 'the labels carry a percentage. Distances are real, and a low percentage tells '
-        + 'you the picture is a thin slice of the variation.' + shared;
-    }
-    if (name.includes('t-sne') || name.includes('tsne')) {
-      return '<b>t-SNE</b> — cells placed so that close neighbours in expression stay '
-        + 'close.<br><br>Stricter about local neighbourhoods than UMAP and less '
-        + 'trustworthy about anything global: it tends to spread clusters into '
-        + 'evenly-sized islands whose sizes and separations mean little. Read which cells '
-        + 'group together, not how far apart the groups are.' + shared;
-    }
-    return '<b>UMAP</b> — cells placed so that close neighbours in expression stay '
-      + 'close.<br><br>The axes are arbitrary: unordered, unitless, and reproducible only '
-      + 'up to a rotation, which is why they carry no percentage. Read which cells group '
-      + 'together and which groups touch; do not read the distance between distant '
-      + 'clusters, or the direction of an axis.' + shared;
+    return kindHelp(this.kind, this.embedding);
   }
 
   /** What the embedding view is showing, said plainly. */
   get embeddingNote(): string {
-    const meta = this.embeddingCoords?.meta ?? this.embedding;
-    if (!meta) return 'This dataset publishes no embedding.';
-    // A derived embedding says so, and says HOW when the parameters are known: a t-SNE or
-    // UMAP at different settings is a different picture of the same cells, so "computed
-    // here" alone leaves a reader unable to reproduce or compare it.
-    const derived = meta.derived
-      ? ` Computed here${meta.params ? ` (${meta.params})` : ''}, `
-        + 'not published with the dataset.'
-      : '';
-    const coloured = this.categorical
-      ? ' Coloured to match the map.'
-      : ' Colour the map by a categorical column to colour these points.';
-    const sel = this.selection.count > 0
-      ? ` ${this.selection.count.toLocaleString()} selected are highlighted.`
-      : '';
-    return `${meta.label ?? meta.name}.${coloured}${sel}${derived}`;
+    return embeddingNote(this.embeddingCoords?.meta ?? this.embedding, !!this.categorical, this.selection.count);
   }
 
   private purgePlot(): void {
