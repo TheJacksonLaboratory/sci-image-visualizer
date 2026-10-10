@@ -10,7 +10,6 @@ import type {
   AxesLayer, ImageLayer, SurfaceLayer, VolumeLayer, PointsLayer, Points3DLayer, TiledSource,
   ChannelView, VolumeChannel, ProjectedPoints,
 } from 'napari-js';
-import { nearestProjectedIndex, ScreenIndex, SCREEN_INDEX_MIN_POINTS } from 'napari-js';
 
 import { IImageInfo } from '../../contracts/image.contract';
 import { IChannelState } from '../../contracts/channel-histogram-api.contract';
@@ -26,20 +25,19 @@ import {
 import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
 import { SpatialObservations } from '../../contracts/spatial-dataset.contract';
 import {
-  SpatialSelectionMask, emptySelection, maskToIndices, mutedFromSelection, sameSelection,
-  selectByCategory,
+  SpatialSelectionMask, emptySelection, maskToIndices, mutedFromSelection,
 } from '../../spatial/spatial-selection';
 import { framePositions } from '../../spatial/spatial-framing';
 import { PIXEL_WORLD_QUANTUM, worldQuantumForExtent } from '../../spatial/world-grid';
 import { observationsInSlice, volumeImageRef } from '../../spatial/spatial-volume-image';
 import { defaultSigma, densityGrid, rasterizeDensity } from '../../spatial/spatial-density';
 import { observationsInSection, sectionsOf } from '../../spatial/spatial-sections';
-import { type HoverSource, hoverText, nearestObservation, PointGridIndex } from '../../spatial/spatial-hover';
-import { NapariSpatialTooltip } from './napari-spatial-tooltip';
+
 import { NapariSpatialTileLayers, TranscriptEstimate } from './napari-spatial-tiles';
 import { NapariNavigator } from './napari-navigator';
 import { LoadingBadgeState } from './napari-loading-state';
 import { NapariToolBridge } from './napari-tool-bridge';
+import { SpatialHover } from './napari-spatial-hover';
 import { NapariDisplayState } from './napari-display-state';
 import { AssembledVolume, NapariTileClient } from './napari-tile-client';
 import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
@@ -239,41 +237,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private geneMapVolumeFieldKey: string | null = null;
   /** Offset applied to observation coordinates to sit them in the volume's box. */
   private spatialOrigin3d: [number, number, number] = [0, 0, 0];
-  /** Cursor tooltip for the spatial views, and everything it needs: what the
-   *  cloud is coloured by, and where each drawn observation is. */
-  private spatialTooltip: NapariSpatialTooltip | null = null;
-  private hoverSource: HoverSource | null = null;
-  private hoverSourceKey: string | null = null;
-  /** Sequences the async resolutions. The KEY is only committed once one lands,
-   *  so a superseded fetch cannot leave the cache claiming to hold a source it
-   *  never stored. */
-  private hoverSourceToken = 0;
-  /** Drawn observations' positions for hit-testing, indexed BY OBSERVATION with
-   *  NaN for anything not drawn. Screen pixels in 3D (the camera moves them, so
-   *  they are rebuilt when it does) and WORLD units in 2D (where the camera only
-   *  scales, so the pointer is converted instead of 374k points). */
-  private hoverPositions: Float32Array | null = null;
-  private hoverPositionsRev = -1;
-
-  /**
-   * Screen-space bucket index over the 3D projection, built on the first hover after the
-   * scene moved rather than when it moves.
-   *
-   * Lazily, and that is the whole design: an orbit drag changes the camera every frame, so
-   * building eagerly would spend tens of milliseconds a frame indexing for picks nobody is
-   * making. Deferred, it is built once when the drag stops and the pointer next moves —
-   * measured upstream at 3.7M points, that turns a 12.6 ms scan per pointermove into
-   * 0.066 ms.
-   */
-  private hoverIndex: ScreenIndex | null = null;
-  /** The 2D counterpart of {@link hoverIndex}: a grid over the world positions. */
-  private hoverGrid2d: PointGridIndex | null = null;
-  /** Bumped whenever the cached positions go stale: a marker rebuild, or — in 3D
-   *  only, where the projection depends on it — a camera move. */
-  private spatialSceneRev = 0;
-  private hoverPointer: { clientX: number; clientY: number } | null = null;
-  private hoverFrame = 0;
-  private hoverOff: (() => void)[] = [];
+  /** Cursor tooltip and click-to-select for the spatial views. */
+  private hover: SpatialHover | null = null;
   /** Observation indices the cached 3D positions belong to, in the same order;
    *  null when every observation is drawn. Without it a projection built from the
    *  positions is indexed by DRAWN order and silently attributes each point to
@@ -868,7 +833,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.navigator = null;
     if (!this.viewer || !this.host || !this.imageW || !this.imageH) return;
     this.navigator = new NapariNavigator(
-      this.host, this.viewer, this.imageW, this.imageH, () => this.spatialTooltip?.hide(),
+      this.host, this.viewer, this.imageW, this.imageH, () => this.hover?.hide(),
     );
     this.navigator.setVisible(this.navigatorVisible);
     void this.refreshNavigatorImage(z);
@@ -1302,283 +1267,25 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     return this.spatialTilesMgr;
   }
 
-  /** Movement, in screen pixels, under which a press-release is a CLICK and not a
-   *  drag. An orbit or a pan starts the same way, so the two have to be told
-   *  apart by how far the pointer travelled. */
-  private static readonly CLICK_SLOP_PX = 4;
-  /** Longest press-release still treated as a click. A long press with the mouse
-   *  held still is more likely an interrupted drag than a selection. */
-  private static readonly CLICK_MAX_MS = 600;
-  /** Pointer distance, in screen pixels, that still counts as "on" a marker.
-   *  Generous relative to a 1.5px disc: the cursor is a blunt instrument, and a
-   *  tooltip you have to hunt for is worse than none. */
-  private static readonly HOVER_RADIUS_PX = 10;
-
-  /**
-   * Cursor tooltip for the spatial views: hover a marker, read its class.
-   *
-   * A 34-entry legend cannot be read back from a dot — several classes get
-   * similar colours, and matching one to a swatch by eye is exactly the task this
-   * removes. It reports whatever the cloud is CURRENTLY coloured by, so it and
-   * the legend can never say different things.
-   *
-   * Listens on the HOST rather than the canvas so it keeps working over the region
-   * overlay (an SVG covering the canvas, which would otherwise swallow every
-   * move), and throttles to one hit-test per animation frame: a pointermove can
-   * fire far more often than that, and each test is a pass over the cloud.
-   */
+  /** The spatial views' tooltip and click-to-select, over the scene just mounted. */
   private installSpatialHover(host: HTMLElement): void {
-    this.removeSpatialHover();
-    this.spatialTooltip = new NapariSpatialTooltip(host);
-
-    const onMove = (e: PointerEvent) => {
-      if (!this.canvas) return;
-      this.hoverPointer = { clientX: e.clientX, clientY: e.clientY };
-      if (this.hoverFrame) return;
-      this.hoverFrame = requestAnimationFrame(() => {
-        this.hoverFrame = 0;
-        this.updateHover(host);
-      });
-    };
-    const onLeave = () => {
-      this.hoverPointer = null;
-      this.spatialTooltip?.hide();
-    };
-
-    // A click on a marker selects its class, exactly as clicking that class in the
-    // panel's legend does — including clicking again to clear, so a click is
-    // always reversible. Tracked as down/up rather than bound to `click` so a DRAG
-    // (an orbit in 3D, a pan in 2D) can be told apart from a click: the gesture
-    // has to move less than a few pixels and be over quickly.
-    let down: { x: number; y: number; t: number } | null = null;
-    const onDown = (e: MouseEvent) => {
-      down = { x: e.clientX, y: e.clientY, t: Date.now() };
-    };
-    const onUp = (e: MouseEvent) => {
-      const start = down;
-      down = null;
-      if (!start) return;
-      const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y);
-      if (moved > NapariVisualizerService.CLICK_SLOP_PX) return;
-      if (Date.now() - start.t > NapariVisualizerService.CLICK_MAX_MS) return;
-      // A region tool owns the pointer while it is active, and placing a polygon
-      // vertex is also a click that does not move.
-      if (this.tools.regionOverlay?.toolActive) return;
-      this.inZone(() => this.selectClassAt(e.clientX, e.clientY));
-    };
-
-    // Outside the zone: a pointermove fires far more often than anything here changes what
-    // Angular renders (the tooltip is plain DOM); a selecting click re-enters it.
-    this.zone.runOutsideAngular(() => {
-      host.addEventListener('pointermove', onMove);
-      host.addEventListener('pointerleave', onLeave);
-      host.addEventListener('pointerdown', onDown);
-      host.addEventListener('pointerup', onUp);
+    this.hover?.dispose();
+    const is3d = isSpatialOmics3d(this.currentPlotType);
+    this.hover = new SpatialHover({
+      is3d,
+      viewer: this.viewer!,
+      canvas: this.canvas!,
+      port: this.spatialData,
+      selection: this.selectionStore,
+      dataset: () => this.spatialLatest?.[0] ?? null,
+      positions: (obs) => (is3d ? this.getSpatialScreenProjection(obs) : this.hoverWorldPositions(obs)),
+      depths: () => this.spatialDepths3d,
+      tiles: () => this.spatialTilesMgr,
+      toolActive: () => !!this.tools.regionOverlay?.toolActive,
+      outsideZone: (fn) => this.zone.runOutsideAngular(fn),
+      inZone: (fn) => this.inZone(fn),
     });
-    this.hoverOff.push(() => host.removeEventListener('pointermove', onMove));
-    this.hoverOff.push(() => host.removeEventListener('pointerleave', onLeave));
-    this.hoverOff.push(() => host.removeEventListener('pointerdown', onDown));
-    this.hoverOff.push(() => host.removeEventListener('pointerup', onUp));
-
-    // In 3D the cached positions are screen pixels, so an orbit invalidates them.
-    const camera = this.viewer?.camera3d;
-    if (camera && isSpatialOmics3d(this.currentPlotType)) {
-      const off = camera.changed.connect(() => {
-        this.spatialSceneRev++;
-      });
-      this.hoverOff.push(off);
-    }
-  }
-
-  private removeSpatialHover(): void {
-    for (const off of this.hoverOff) off();
-    this.hoverOff = [];
-    if (this.hoverFrame) cancelAnimationFrame(this.hoverFrame);
-    this.hoverFrame = 0;
-    this.hoverPointer = null;
-    this.spatialTooltip?.dispose();
-    this.spatialTooltip = null;
-    this.hoverPositions = null;
-    this.hoverPositionsRev = -1;
-    this.hoverIndex = null;
-    this.hoverGrid2d = null;
-  }
-
-  /** Hit-test the last pointer position and show or hide the tooltip. */
-  private updateHover(host: HTMLElement): void {
-    const tip = this.spatialTooltip;
-    const pointer = this.hoverPointer;
-    const dataset = this.spatialLatest?.[0];
-    if (!tip || !pointer || !dataset) return;
-
-    const is3d = isSpatialOmics3d(this.currentPlotType);
-    // Transcript markers sit on top of everything, so they are asked first.
-    if (!is3d && this.spatialTilesMgr && this.viewer) {
-      const world = this.viewer.canvasToWorld(pointer.clientX, pointer.clientY);
-      const zoom = this.viewer.camera.zoom;
-      const radius = NapariVisualizerService.HOVER_RADIUS_PX / (zoom > 0 ? zoom : 1);
-      const lines = world ? this.spatialTilesMgr.hoverAt(world[0], world[1], radius, (details) => {
-        const p = this.hoverPointer;
-        if (!p || !this.spatialTooltip) return;
-        const r = host.getBoundingClientRect();
-        this.spatialTooltip.show(details, p.clientX - r.left, p.clientY - r.top);
-      }) : null;
-      if (lines) {
-        const rect = host.getBoundingClientRect();
-        tip.show(lines, pointer.clientX - rect.left, pointer.clientY - rect.top);
-        return;
-      }
-    }
-
-    const hit = this.hitTest(dataset.observations, pointer.clientX, pointer.clientY);
-    const lines = hoverText(this.hoverSource, hit);
-    if (!lines) {
-      tip.hide();
-      return;
-    }
-    const rect = host.getBoundingClientRect();
-    tip.show(lines, pointer.clientX - rect.left, pointer.clientY - rect.top);
-  }
-
-  /**
-   * Select the class of the marker at a client position — the canvas equivalent of
-   * clicking that class in the panel's legend, and the same selection object, so
-   * the two controls cannot produce different results.
-   *
-   * Clicking a class that is already the whole selection CLEARS it, which is what
-   * the legend does. Compared against the selection itself rather than against a
-   * remembered click, so selecting from the legend and then clicking the same
-   * class on the canvas still toggles.
-   */
-  private selectClassAt(clientX: number, clientY: number): void {
-    const source = this.hoverSource;
-    const store = this.selectionStore;
-    const dataset = this.spatialLatest?.[0];
-    // Only a categorical source has classes to select. A gene is continuous:
-    // there is no set of cells that "is" a value.
-    if (!store || !dataset || source?.kind !== 'categorical') return;
-
-    // The same pick the tooltip makes — depth-aware in 3D — so a click selects the class the
-    // tooltip names, not an occluded marker's.
-    const hit = this.hitTest(dataset.observations, clientX, clientY);
-    if (hit < 0) return;
-    const code = source.codes[hit];
-    // A cell the annotation does not cover has no class to select.
-    if (code === undefined || code === NO_CATEGORY) return;
-
-    const next = selectByCategory(source.codes, code);
-    const current = store.current();
-    if (sameSelection(current, next)) {
-      store.clear();
-      return;
-    }
-    store.set(next);
-  }
-
-  /**
-   * The observation under a client position, or -1: the one hit-test the hover tooltip and the
-   * click-to-select share. 3D compares canvas pixels against the projected cloud; 2D holds world
-   * positions, so the pointer and the radius are converted once instead of projecting the cloud.
-   */
-  private hitTest(obs: SpatialObservations, clientX: number, clientY: number): number {
-    const positions = this.hoverPositionsFor(obs);
-    const canvas = this.canvas;
-    if (!positions || !canvas) return -1;
-    const is3d = isSpatialOmics3d(this.currentPlotType);
-    const zoom = is3d ? 1 : (this.viewer?.camera.zoom ?? 1);
-    const radius = NapariVisualizerService.HOVER_RADIUS_PX / (zoom > 0 ? zoom : 1);
-    if (is3d) {
-      const rect = canvas.getBoundingClientRect();
-      return this.pickObservation(positions, clientX - rect.left, clientY - rect.top, radius, true);
-    }
-    const world = this.viewer?.canvasToWorld(clientX, clientY);
-    if (!world) return -1;
-    return this.pickObservation(positions, world[0], world[1], radius, false);
-  }
-
-  /**
-   * Which observation is under the cursor.
-   *
-   * In 3D this defers to napari-js's {@link nearestProjectedIndex} WITH the depths the
-   * projection produced, so the front-most candidate wins. That matters more than it
-   * sounds: the renderer depth-tests the billboards, and in a 3.7M-point cloud the cursor
-   * covers many of them — picking the one nearest the cursor's centre regularly names a
-   * cell that something else is drawn over, which reads as a wrong tooltip rather than as
-   * a subtlety of picking.
-   *
-   * In 2D the positions are WORLD coordinates on one plane, so there is no depth to break
-   * ties with and the existing nearest-marker rule is the right one.
-   */
-  private pickObservation(
-    positions: Float32Array,
-    x: number,
-    y: number,
-    radius: number,
-    is3d: boolean,
-  ): number {
-    if (!is3d) {
-      return this.hoverGrid2d
-        ? this.hoverGrid2d.nearest(x, y, radius)
-        : nearestObservation(positions, x, y, radius);
-    }
-    // The cloud draws a selected marker LARGER, so the pick has to use the same radius the
-    // renderer used — otherwise the highlighted cells, the ones a reader is most likely to
-    // be pointing at, are the hardest to hover.
-    const scale = SPATIAL_SELECTED_SIZE_SCALE;
-    const mask = this.selectionStore?.current()?.mask;
-    const opts = mask?.length
-      ? { radiusAt: (i: number) => (mask[i] ? radius * scale : radius) }
-      : undefined;
-    // `radius` still bounds which buckets are visited, so it has to be the LARGEST any
-    // point can claim, not the base one.
-    const reach = mask?.length ? radius * scale : radius;
-    if (this.hoverIndex) return this.hoverIndex.pick(x, y, reach, opts);
-    return nearestProjectedIndex(positions, x, y, reach, this.spatialDepths3d, opts);
-  }
-
-  /**
-   * Positions to hit-test against, rebuilt only when the scene or camera moved.
-   *
-   * A pass over 3.7M observations is not something to do per pointermove, and the
-   * cloud does not move between frames unless something says it did.
-   */
-  private hoverPositionsFor(obs: SpatialObservations): Float32Array | null {
-    if (this.hoverPositions && this.hoverPositionsRev === this.spatialSceneRev) {
-      return this.hoverPositions;
-    }
-    const is3d = isSpatialOmics3d(this.currentPlotType);
-    const built = is3d
-      ? this.getSpatialScreenProjection(obs)
-      : this.hoverWorldPositions(obs);
-    this.hoverPositions = built;
-    this.hoverPositionsRev = this.spatialSceneRev;
-    // Built here, in the same lazy slot, so it is paid for on the first hover after the
-    // scene moved and not on every frame of an orbit. Only worth it past the point where
-    // the linear scan stops being free; below that the build costs more than it saves.
-    this.hoverIndex = null;
-    // 2D: the world positions only change with the dataset or section, so a grid built once
-    // replaces a linear scan of every observation per pointermove.
-    this.hoverGrid2d = !is3d && built ? PointGridIndex.build(built) : null;
-    if (is3d && built && this.canvas && built.length / 2 >= SCREEN_INDEX_MIN_POINTS) {
-      const w = this.canvas.clientWidth || this.canvas.width;
-      const h = this.canvas.clientHeight || this.canvas.height;
-      if (w && h) {
-        this.hoverIndex = new ScreenIndex(
-          { screen: built, depth: this.spatialDepths3d ?? new Float32Array(built.length / 2) },
-          w,
-          h,
-          // The largest radius any pick here can claim: the base hover radius, times the
-          // scale a SELECTED marker is drawn at. Stated rather than left to the default,
-          // because it is what decides whether a marker straddling the canvas edge is
-          // found — its centre is off screen while part of it is not.
-          {
-            maxReach: NapariVisualizerService.HOVER_RADIUS_PX
-              * SPATIAL_SELECTED_SIZE_SCALE,
-          },
-        );
-      }
-    }
-    return built;
+    this.hover.install(host);
   }
 
   /**
@@ -1602,74 +1309,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       out[i * 2 + 1] = obs.y[i] * sy + ty;
     }
     return out;
-  }
-
-  /**
-   * What the tooltip says, resolved once per colour source rather than per hover.
-   *
-   * Fetched separately from the colouring on purpose: the reference port caches
-   * columns, but a host's need not, and re-fetching a 3.7M-element vector because
-   * the pointer moved would be indefensible either way.
-   */
-  private async resolveHoverSource(
-    dataset: SpatialDataset | null, view: SpatialViewState,
-  ): Promise<void> {
-    const port = this.spatialData;
-    const colorBy = view.colorBy;
-    const key = dataset && colorBy
-      ? `${dataset.id}|${colorBy.kind}:${colorBy.name}`
-      : null;
-    if (key === this.hoverSourceKey) return;
-    // The key is committed only where a value is actually stored. Setting it up
-    // front would mean a resolution that loses the race leaves the key claiming a
-    // source that was never stored — and since every later emission carries the
-    // same key, it would short-circuit here forever and the tooltip would stay
-    // silent for the rest of the session.
-    const token = ++this.hoverSourceToken;
-    // No colour source means nothing is being said about the cells, so there is no
-    // cluster to name and the tooltip stays silent.
-    if (!key || !dataset || !colorBy || !port) {
-      this.hoverSource = null;
-      this.hoverSourceKey = key;
-      return;
-    }
-    try {
-      if (colorBy.kind === 'column') {
-        const column = await port.getColumn(colorBy.name);
-        if (token !== this.hoverSourceToken) return;
-        this.hoverSource = isCategoricalColumn(column)
-          ? {
-            kind: 'categorical',
-            name: colorBy.name,
-            categories: column.meta.categories,
-            codes: column.codes,
-          }
-          : {
-            kind: 'continuous',
-            name: colorBy.name,
-            values: column.values,
-            ...(column.meta.unit ? { unit: column.meta.unit } : {}),
-          };
-        this.hoverSourceKey = key;
-        return;
-      }
-      const values = await port.getFeatureVector(colorBy.name);
-      if (token !== this.hoverSourceToken) return;
-      this.hoverSource = {
-        kind: 'continuous',
-        name: colorBy.name,
-        values,
-        ...(dataset.features?.unit ? { unit: dataset.features.unit } : {}),
-      };
-      this.hoverSourceKey = key;
-    } catch {
-      if (token !== this.hoverSourceToken) return;
-      // The tooltip is an extra; a failed fetch must not disturb the render. The
-      // key is left unset so a later emission retries rather than inheriting a
-      // permanent silence.
-      this.hoverSource = null;
-      this.hoverSourceKey = null;
-    }
   }
 
   /**
@@ -1735,8 +1374,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       this.spatialLatest = [dataset, view, selection];
       // The markers are about to move or change meaning, so both halves of the
       // tooltip — where the points are, and what they are — are stale.
-      this.spatialSceneRev++;
-      void this.resolveHoverSource(dataset, view);
+      this.hover?.invalidate();
+      void this.hover?.resolveSource(dataset, view);
       void (isSpatialOmics3d(this.currentPlotType)
         ? this.rebuildSpatialPoints3d(dataset, view, selection)
         : this.rebuildSpatialPoints(dataset, view, selection));
@@ -3176,9 +2815,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.scatterRegionSub = null;
     this.spatialSub?.unsubscribe();
     this.spatialSub = null;
-    this.removeSpatialHover();
-    this.hoverSource = null;
-    this.hoverSourceKey = null;
+    this.hover?.dispose();
+    this.hover = null;
     this.spatialPoints = null;
     this.spatialLayerKey = null;
     this.spatialPoints3d = null;
