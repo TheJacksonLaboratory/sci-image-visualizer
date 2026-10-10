@@ -88,6 +88,9 @@ export class SpatialKeyComponent implements OnChanges {
    * The continuous colour scale's colormap. Clearing it goes back to following the
    * image's, which is the default.
    */
+  /** Keeps the legend rows across a refresh of the same categories (one per category). */
+  protected readonly trackByLabel = (_: number, entry: SpatialLegendEntry): string => entry.label;
+
   protected onContinuousColormap(node: ColormapNode | null): void {
     this.selectedColormapNode = node;
     // The value is a ColormapValue, which is a NAME for the built-in scales and an

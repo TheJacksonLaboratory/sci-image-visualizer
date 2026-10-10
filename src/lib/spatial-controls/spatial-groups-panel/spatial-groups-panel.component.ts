@@ -70,6 +70,7 @@ export class SpatialGroupsPanelComponent implements OnChanges {
   ) {}
 
   ngOnChanges(changes: SimpleChanges): void {
+    if (changes['view']) this.hiddenGroups = new Set(this.view.hiddenGroups);
     if (changes['dataset']) {
       this.groupOptions = groupOptions(this.dataset);
       // A same-named grouping of a new dataset is not the old one.
@@ -109,8 +110,11 @@ export class SpatialGroupsPanelComponent implements OnChanges {
     this.controls?.setViewState({ cellTypeColumn: name, hiddenGroups: [] });
   }
 
+  /** {@link SpatialViewState.hiddenGroups} as a set, for the per-row checks. */
+  private hiddenGroups = new Set<string>();
+
   protected isGroupShown(label: string): boolean {
-    return !this.view.hiddenGroups.includes(label);
+    return !this.hiddenGroups.has(label);
   }
 
   protected get allGroupsShown(): boolean {

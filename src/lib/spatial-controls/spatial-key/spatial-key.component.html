@@ -8,7 +8,7 @@
   <!-- Legend rows are buttons: clicking one selects that category, clicking
        it again clears — so a click is always reversible. -->
   <ul class="sc-legend" *ngIf="isCategorical">
-    <li *ngFor="let entry of legend; index as i">
+    <li *ngFor="let entry of legend; index as i; trackBy: trackByLabel">
       <button type="button" class="sc-legend-btn"
               [class.selected]="selectedCategory === i"
               (click)="categoryClicked.emit(i)"
