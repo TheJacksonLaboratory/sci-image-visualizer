@@ -119,12 +119,12 @@ describe('PlotlyService relayout handler', () => {
     (service as any).shapeProjection.shapes = [];
     (service as any).imageInfo = { showStack: false, isGrayscale: true } as IImageInfo;
     (service as any).trueImgSize = [0, 1344, 0, 1024];
-    (service as any).isRealZoom = true;
+    (service as any).zoom.isRealZoom = true;
 
     document.body.innerHTML = '<div id="plot"></div>';
 
     relayoutSpy = jest.spyOn(Plotly, 'relayout').mockResolvedValue({} as any);
-    triggerZoomSpy = jest.spyOn(service as any, 'triggerZoom').mockImplementation(() => undefined);
+    triggerZoomSpy = jest.spyOn((service as any).zoom, 'triggerZoom').mockImplementation(() => undefined);
   });
 
   afterEach(() => {
@@ -198,7 +198,7 @@ describe('PlotlyService relayout handler', () => {
       event, {} as any, service, {} as any
     );
 
-    expect((service as any).zoomCoordinates).toEqual([100, 500, 800, 200]);
+    expect((service as any).zoom.zoomCoordinates).toEqual([100, 500, 800, 200]);
     expect(triggerZoomSpy).not.toHaveBeenCalled();
   });
 
@@ -213,7 +213,7 @@ describe('PlotlyService relayout handler', () => {
       event, {} as any, service, {} as any
     );
 
-    expect((service as any).zoomCoordinates).toEqual([100, 500, 800, 200]);
+    expect((service as any).zoom.zoomCoordinates).toEqual([100, 500, 800, 200]);
     expect(triggerZoomSpy).toHaveBeenCalledWith([100, 500, 800, 200]);
   });
 
@@ -227,7 +227,7 @@ describe('PlotlyService relayout handler', () => {
 
     service.zoomIn();
 
-    const coords = (service as any).zoomCoordinates;
+    const coords = (service as any).zoom.zoomCoordinates;
     expect(coords.length).toBe(4);
     // Zoomed range should be smaller than original
     expect(coords[1] - coords[0]).toBeLessThan(1000);
@@ -244,7 +244,7 @@ describe('PlotlyService relayout handler', () => {
 
     service.zoomOut();
 
-    const coords = (service as any).zoomCoordinates;
+    const coords = (service as any).zoom.zoomCoordinates;
     expect(coords.length).toBe(4);
     // Zoomed-out range should be larger than original
     expect(coords[1] - coords[0]).toBeGreaterThan(600);
@@ -393,9 +393,9 @@ describe('PlotlyService viewport + stack-state methods', () => {
   });
 
   it('autoscale relayouts to autorange and clears the zoom box', () => {
-    (service as any).zoomCoordinates = [1, 2, 3, 4];
+    (service as any).zoom.zoomCoordinates = [1, 2, 3, 4];
     service.autoscale();
-    expect((service as any).zoomCoordinates).toEqual([]);
+    expect((service as any).zoom.zoomCoordinates).toEqual([]);
     expect(relayout).toHaveBeenCalledWith('plot', expect.objectContaining({ 'xaxis.autorange': true }));
   });
 
@@ -593,7 +593,7 @@ describe('PlotlyService async supersession (review OSD-PLOTLY-8)', () => {
     jest.spyOn(Image, 'load').mockResolvedValue(image as never);
     const heatmap = jest.spyOn(s, 'plotHeatmap').mockResolvedValue(undefined);
     const registry = jest.spyOn(s, 'plotViaRegistry').mockResolvedValue(undefined);
-    s.triggerZoom([100, 200, 300, 400]);
+    s.zoom.triggerZoom([100, 200, 300, 400]);
     service.purgePlot(); // same file, user switched to the OSD image view
     zoom$.next(new ArrayBuffer(4));
     await new Promise((r) => setTimeout(r, 0));
@@ -607,7 +607,7 @@ describe('PlotlyService async supersession (review OSD-PLOTLY-8)', () => {
     s.trueImgSize = [0, 1000, 0, 800];
     s.imageInfo = { isGrayscale: true, fileName: 'f.tif' } as IImageInfo;
     const measure = jest.spyOn(PlotUtilities.prototype, 'getDomRectangle');
-    s.triggerZoom([100, 200, 300, 400]);
+    s.zoom.triggerZoom([100, 200, 300, 400]);
     service.refreshIntensitySamplingForRoi(0, 0, 10, 10, 0);
     expect(measure.mock.calls).toEqual([['plot'], ['plot']]);
   });

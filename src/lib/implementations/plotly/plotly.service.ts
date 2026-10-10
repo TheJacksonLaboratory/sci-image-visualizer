@@ -40,6 +40,7 @@ import { IRegionOverlay } from '../../contracts/region-overlay.contract';
 import { PlotlyRegionOverlay } from './plotly-region-overlay';
 import { PlotlyIsosurfaceControls } from './plotly-isosurface-controls';
 import { PlotlyShapeProjection } from './plotly-shape-projection';
+import { PlotlyZoomController } from './plotly-zoom-controller';
 import { renderIntensityInset as renderPlotlyIntensityInset } from './plotly-intensity-inset';
 import { IntensityProfileService } from '../../intensity/intensity-profile.service';
 import { ICoordinateTransform } from '../../contracts/coordinate-transform.contract';
@@ -47,9 +48,7 @@ import { PlotlyCoordinateTransform } from './plotly-coordinate-transform';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
 import { BaseStoreVisualizer } from '../base-store-visualizer';
-import { ZOOM_BUTTON_STEP } from '../osd/osd-zoom';
 import { ColormapNode } from '../../contracts/display-types';
-import { VIZ_ALERT_TOAST_KEY } from '../../toast-outlets';
 import { firstValueFromAbortable, throwIfAborted } from '../tile-server/transport';
 
 // Re-exported so existing consumers can keep importing PlotType from this
@@ -86,13 +85,13 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
    *  the selection ↔ active-shape mapping (see PlotlyShapeProjection). */
   private readonly shapeProjection = new PlotlyShapeProjection(
     { plotDiv: () => this.plotDiv, fileName: () => this.fileName }, this.regionStore);
+  /** Step/box zoom, autoscale and the high-def zoom re-fetch (see PlotlyZoomController). */
+  private readonly zoom: PlotlyZoomController;
   private imageLength!: number;
   private screenHeight!: number;
   private plotDiv!: string;
-  private isRealZoom = true;
   private scaleratio = true;
   private trueImgSize!: number[];
-  private zoomCoordinates: number[] = [];
   private fileName!: string | undefined;
 
   private dragMode!: string;
@@ -175,6 +174,29 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
               regionStore: RegionStore,
               private intensity: IntensityProfileService) {
     super(regionStore, store);
+    this.zoom = new PlotlyZoomController({
+      plotDiv: () => this.plotDiv,
+      trueImgSize: () => this.trueImgSize,
+      imageInfo: () => this.imageInfo,
+      fileName: () => this.fileName,
+      imageCached: () => this.imageCached,
+      zIndex: () => this.zIndex.value,
+      nextRenderGen: () => ++this.renderGen,
+      isCurrentRender: (gen) => gen === this.renderGen,
+      heatmapLayout: (x, y) => this.getHeatmapLayout(x, y),
+      setScreenHeight: (h) => { this.screenHeight = h; },
+      cropSampler: () => {
+        const gen = this.intensity.supersede();
+        return (frames, ratios, origin) => {
+          if (!this.intensity.isCurrent(gen)) return;
+          this.setSamplingFrames(frames, ratios, origin);
+          this.intensity.emitProfiles();
+        };
+      },
+      renderCrop: (frame, ratios, size, imageSize, fileName) =>
+        this.renderZoomCrop(frame, ratios, size, imageSize, fileName),
+      reset: () => this.reset(),
+    }, state, tiles, messageService);
     // relayout event router
     this.onRelayoutEvent = (event: any) => { this.relayoutEventHandler(event); };
 
@@ -189,8 +211,8 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
       getCoordinateTransform: () => this.getCoordinateTransform(),
       getFileName: () => this.fileName,
       getShapeColor: () => this.regionStore.getShapeColor(),
-      pixelToData: (px, py) => this.zoomBoxPixelToData(px, py),
-      applyZoomToBox: (coords) => this.applyZoomToBox(coords),
+      pixelToData: (px, py) => this.zoom.pixelToData(px, py),
+      applyZoomToBox: (coords) => this.zoom.applyZoomToBox(coords),
     };
     this.canvasTools = createCanvasToolManager(this.toolHost, {
       wandService, regionStore, samPoint: samPointTool,
@@ -343,7 +365,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     if (!inPlace) this.canvasTools.resetAll();
     this.renderGen++;
     const trueImageSize: number[] = [];
-    this.zoomCoordinates = [];
+    this.zoom.zoomCoordinates = [];
     // [x0, x1, y0, y1]
     trueImageSize[0] = 0;
     trueImageSize[1] = imageInfo.trueImageSize[0];
@@ -599,55 +621,14 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     this.intensity.refreshIntensitySamplingForRoi(x, y, width, height, zIndex);
   }
 
-  /**
-   * autoscale the plot
-   */
+  /** Autoscale the plot (see PlotlyZoomController). */
   public autoscale() {
-    if (this.plotDiv) {
-      this.zoomCoordinates = [];
-      Plotly.relayout(this.plotDiv, {
-        'xaxis.autorange': true,
-        'yaxis.autorange': false }
-      );
-    }
+    this.zoom.autoscale();
   }
 
-  /**
-   * relayout the plot
-   */
+  /** Re-apply the image layout at the current height, over the zoom box if any. */
   public relayout(trueImageSize?: number[]) {
-    let imgSize;
-    if (trueImageSize) {
-      imgSize = trueImageSize;
-    } else {
-      imgSize = this.trueImgSize;
-    }
-    if (this.plotDiv) {
-      // Refresh height from current DOM so panel resizes are reflected
-      const plotEl = document.getElementById(this.plotDiv);
-      if (plotEl?.offsetHeight) {
-        this.screenHeight = plotEl.offsetHeight;
-      }
-      try {
-        if (this.zoomCoordinates.length > 0) {
-          Plotly.relayout(this.plotDiv, this.getHeatmapLayout(
-            [this.zoomCoordinates[0], this.zoomCoordinates[1]],
-            [this.zoomCoordinates[2], this.zoomCoordinates[3]]));    // reverse the y range
-        } else {
-          // as autorange is set to false, and not reversed we need to set the yrange correcly here
-          Plotly.relayout(this.plotDiv, this.getHeatmapLayout(
-            [imgSize[0], imgSize[1]], [imgSize[3], imgSize[2]]));
-        }
-      } catch (err: any) {
-        const msg = err?.error?.message || err?.message || err?.statusText || String(err);
-        console.error('Error occured', err);
-        this.messageService.add({ key: VIZ_ALERT_TOAST_KEY, sticky: true, severity:'error', summary:'An error occured', detail:`The following
-                                  error occured: ${msg}. Please try to open the image again through the
-                                  file navigator.` });
-        // TODO correctly clear the plot
-        this.reset();
-      }
-    }
+    this.zoom.relayout(trueImageSize);
   }
 
   private setEvents(plotDiv: string, isGrayscale: boolean, screenHeight: number) {
@@ -678,22 +659,8 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     const keys = Object.keys(event);
     // In-place shape edits and natively drawn shapes, mirrored into the store.
     this.shapeProjection.applyRelayout(event);
-    // manage high def zoom (not if we are showing a stack)
-    if (keys.length === 4 && this.isRealZoom) {
-      const coordinates: any[] = [];
-      keys.forEach(key => {
-        if (key.startsWith('xaxis.range[')) {
-          coordinates.push(event[key]);
-        }
-        if (key.startsWith('yaxis.range[')) {
-          coordinates.push(event[key]);
-        }
-      });
-      this.zoomCoordinates = coordinates;
-      if (!this.imageInfo?.showStack) {
-        this.triggerZoom(coordinates);
-      }
-    }
+    // Drag-zoom: remember the box and re-fetch it at high definition.
+    this.zoom.onRelayout(event);
     // if autoscale
     if (keys.includes('xaxis.autorange') && keys.includes('yaxis.autorange')) {
       // trigger an autoscale event to reset the selected image mode dropdown
@@ -734,34 +701,6 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   public setSamModel(id: string): void {
     this.samTool.setModel(id);
     this.samPointTool.setModel(id);
-  }
-
-  /** Overlay-pixel -> Plotly data coords via the axis objects (subtracting the
-   *  plot margin offset). The zoom-to-box tool calls this through its host. */
-  private zoomBoxPixelToData(px: number, py: number): { x: number; y: number } {
-    const gd: any = document.getElementById(this.plotDiv);
-    const xaxis = gd._fullLayout.xaxis;
-    const yaxis = gd._fullLayout.yaxis;
-    return { x: xaxis.p2d(px - xaxis._offset), y: yaxis.p2d(py - yaxis._offset) };
-  }
-
-  /**
-   * Tool-host callback: apply the zoom-to-box selection. Stack mode does a
-   * pure axis-range relayout; non-stack mode goes through the high-def
-   * triggerZoom pipeline so the image is re-fetched at the new resolution.
-   */
-  private applyZoomToBox(coordinates: number[]) {
-    this.zoomCoordinates = coordinates;
-    if (this.imageInfo?.showStack) {
-      Plotly.relayout(this.plotDiv, {
-        'xaxis.range[0]': coordinates[0],
-        'xaxis.range[1]': coordinates[1],
-        'yaxis.range[0]': coordinates[2],
-        'yaxis.range[1]': coordinates[3],
-      } as any);
-    } else {
-      this.triggerZoom(coordinates);
-    }
   }
 
   // ── IViewportHost implementation (for the on-canvas tools) ──────────
@@ -822,90 +761,23 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     }
   }
 
-  private triggerZoom(coordinates: number[]) {
-    if (coordinates.length === 0 || !this.trueImgSize) return;
-    this.zoomCoordinates = coordinates;
-    const rect = this.plotUtilities.getRectangle(coordinates, this.trueImgSize);
-    if (this.plotUtilities.isZoomSameAsImgSize(rect, this.trueImgSize)) {
-      this.autoscale();
-      return;
-    }
-    // A brief "Caching image..." message for uncached files (large files take a
-    // moment to cache); just a spinner otherwise.
-    this.state.setImageLoadingMessage(this.imageCached ? '' : 'Caching image...');
-    // Sized from this viewer's own plot div, not jit-ui's `#diagram` wrapper,
-    // which other hosts (and the pipeline preview) don't have.
-    const screen = this.plotUtilities.getDomRectangle(this.plotDiv);
-    const imageSize: any[] = [];
-    imageSize[0] = rect.x;
-    imageSize[1] = rect.x + rect.width;
-    imageSize[2] = rect.y;
-    imageSize[3] = rect.y + rect.height;
-    // Snapshot the filename so a response that arrives after the user switched
-    // files is dropped (the request carried the file selected at call time).
-    const reqName = this.fileName;
-    // A newer render (another zoom, a new plot, or the div handed to another
-    // backend — even for the same file) supersedes this crop.
-    const gen = ++this.renderGen;
-    const samplingGen = this.intensity.supersede();
-    this.state.setImageLoading(true);
-    this.state.setZoom(true);
-    this.tiles.zoomOnRegion(rect, screen, this.zIndex.value).subscribe({ next: zoomData => {
-      const uint8Array = new Uint8Array(zoomData);
-      const buffer = Buffer.from(uint8Array);
-      Image.load(buffer).then((image: any) => {
-        const xRatio = rect.width / image.width;
-        const yRatio = rect.height / image.height;
-        const gd: any = document.getElementById(this.plotDiv);
-        if (this.fileName === reqName && gen === this.renderGen && gd?._fullLayout) {
-          const isGray = this.imageInfo?.isGrayscale;
-          const frame = isGray
-            ? this.plotUtilities.arrayToMatrix(image.grey().data, image.width)
-            : this.plotUtilities.arrayToMatrix(image.getPixelsArray(), image.width);
-          // Also sample the intensity profiles from this high-def crop so the
-          // inset reflects the zoom-level resolution (origin = crop top-left).
-          if (this.intensity.isCurrent(samplingGen)) {
-            this.setSamplingFrames([frame], [xRatio, yRatio], [imageSize[0], imageSize[2]]);
-            this.intensity.emitProfiles();
-          }
-          // Re-render the high-def crop in the SAME plot type the user is
-          // viewing. Without this the zoom re-fetch always fell back to a
-          // heatmap, so zooming in contour (or any registry type) reverted
-          // to heatmap.
-          const impl = PLOTLY_PLOT_TYPE_IMPLS[this.plotType];
-          const renderPromise = impl
-            ? this.plotViaRegistry(this.plotDiv, impl,
-                this.buildTraceInput(this.imageInfo, {
-                  data: [frame], ratios: [xRatio, yRatio],
-                  sizes: [image.width, image.height], filename: reqName,
-                }, imageSize), this.screenHeight)
-            : (isGray
-                ? this.plotHeatmap(this.plotDiv, this.urls, [frame], imageSize, [xRatio, yRatio],
-                    this.screenHeight)
-                : this.plotRGBHeatmap(this.plotDiv, this.urls, [frame], imageSize, [xRatio, yRatio],
-                    image.width, image.height, this.screenHeight));
-          // plotViaRegistry already applies the type's own layout/range for
-          // non-image layouts (chart/overlay); only re-apply the heatmap
-          // range for the image-aligned paths.
-          const reapplyRange = !impl || impl.layoutKind === '2d-image';
-          renderPromise.then(() => {
-            this.state.setImageCached(true);
-            this.state.setImageLoading(false);
-            image = null;
-            if (reapplyRange) this.relayout(imageSize);
-          });
-        }
-      });
-    }, error: err => {
-      const msg = err?.error?.message || err?.message || err?.statusText || String(err);
-      console.error('Error occured when zooming', err);
-      this.messageService.add({ key: VIZ_ALERT_TOAST_KEY, sticky: true, severity:'error', summary:'An error occured',
-        detail:`The following error occured while zooming: ${msg}.
-                          Please try to open the image again through the file navigator and
-                          zoom on the selected area once more.` });
-      this.state.setLoadingError(true);
-      this.state.setImageLoading(false);
-    } });
+  /** Re-render a high-def zoom crop in the plot type on screen. Without this the
+   *  re-fetch always fell back to a heatmap, so zooming in contour (or any
+   *  registry type) reverted to heatmap. */
+  private renderZoomCrop(frame: any[], ratios: number[], size: [number, number], imageSize: number[],
+                         fileName?: string): { rendered: Promise<unknown>; reapplyRange: boolean } {
+    const impl = PLOTLY_PLOT_TYPE_IMPLS[this.plotType];
+    const rendered = impl
+      ? this.plotViaRegistry(this.plotDiv, impl, this.buildTraceInput(this.imageInfo, {
+          data: [frame], ratios, sizes: size, filename: fileName,
+        }, imageSize), this.screenHeight)
+      : (this.imageInfo?.isGrayscale
+          ? this.plotHeatmap(this.plotDiv, this.urls, [frame], imageSize, ratios, this.screenHeight)
+          : this.plotRGBHeatmap(this.plotDiv, this.urls, [frame], imageSize, ratios,
+              size[0], size[1], this.screenHeight));
+    // plotViaRegistry already applies the type's own layout/range for non-image
+    // layouts (chart/overlay); only the image-aligned paths re-apply the range.
+    return { rendered, reapplyRange: !impl || impl.layoutKind === '2d-image' };
   }
 
   public setPlotType(plotType: PlotType) {
@@ -1119,8 +991,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   }
 
   public resetAxes() {
-    this.zoomCoordinates = [];
-    this.relayout();
+    this.zoom.resetAxes();
   }
 
   public setDragMode(mode: string | false) {
@@ -1150,26 +1021,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   }
 
   public zoomIn() {
-    if (!this.plotDiv) return;
-    const gd: any = document.getElementById(this.plotDiv);
-    if (!gd?._fullLayout) return;
-    const xl = gd._fullLayout.xaxis;
-    const yl = gd._fullLayout.yaxis;
-    // 3D scenes have no 2D xaxis/yaxis (they live under `scene`); the step-zoom
-    // is meaningless there and would throw on `xl.range`. Plotly's scene handles
-    // scroll-zoom natively, so just bail.
-    if (!xl?.range || !yl?.range) return;
-    const xc = (xl.range[0] + xl.range[1]) / 2;
-    const yc = (yl.range[0] + yl.range[1]) / 2;
-    const dx = (xl.range[1] - xl.range[0]) / ZOOM_BUTTON_STEP;
-    const dy = (yl.range[1] - yl.range[0]) / ZOOM_BUTTON_STEP;
-    const x0 = xc - dx / 2, x1 = xc + dx / 2;
-    const y0 = yc - dy / 2, y1 = yc + dy / 2;
-    this.zoomCoordinates = [x0, x1, y0, y1];
-    Plotly.relayout(this.plotDiv, {
-      'xaxis.range[0]': x0, 'xaxis.range[1]': x1,
-      'yaxis.range[0]': y0, 'yaxis.range[1]': y1
-    } as any);
+    this.zoom.zoomIn();
   }
 
   /**
@@ -1182,24 +1034,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   }
 
   public zoomOut() {
-    if (!this.plotDiv) return;
-    const gd: any = document.getElementById(this.plotDiv);
-    if (!gd?._fullLayout) return;
-    const xl = gd._fullLayout.xaxis;
-    const yl = gd._fullLayout.yaxis;
-    // 3D scenes have no 2D xaxis/yaxis — see zoomIn().
-    if (!xl?.range || !yl?.range) return;
-    const xc = (xl.range[0] + xl.range[1]) / 2;
-    const yc = (yl.range[0] + yl.range[1]) / 2;
-    const dx = (xl.range[1] - xl.range[0]) * ZOOM_BUTTON_STEP;
-    const dy = (yl.range[1] - yl.range[0]) * ZOOM_BUTTON_STEP;
-    const x0 = xc - dx / 2, x1 = xc + dx / 2;
-    const y0 = yc - dy / 2, y1 = yc + dy / 2;
-    this.zoomCoordinates = [x0, x1, y0, y1];
-    Plotly.relayout(this.plotDiv, {
-      'xaxis.range[0]': x0, 'xaxis.range[1]': x1,
-      'yaxis.range[0]': y0, 'yaxis.range[1]': y1
-    } as any);
+    this.zoom.zoomOut();
   }
 
   public isStackLoading$(): Observable<boolean> {
